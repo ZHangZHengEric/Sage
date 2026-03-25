@@ -61,8 +61,35 @@ function New-EffectiveTauriConfig {
     return $effectiveConfig
 }
 
-Write-Host "Python: $(python --version)" -ForegroundColor Cyan
-Write-Host "Pip: $(pip --version)" -ForegroundColor Cyan
+function Resolve-PythonExe {
+    if ($env:PYTHON_BIN -and (Test-Path $env:PYTHON_BIN)) {
+        return $env:PYTHON_BIN
+    }
+
+    if ($env:pythonLocation) {
+        $candidate = Join-Path $env:pythonLocation "python.exe"
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    $cmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($cmd) {
+        return (Resolve-Path $cmd.Source).Path
+    }
+
+    return $null
+}
+
+$PythonExe = Resolve-PythonExe
+if (-not $PythonExe) {
+    Write-Host "[ERROR] Python executable not found." -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "Python executable: $PythonExe" -ForegroundColor Cyan
+Write-Host "Python: $(& $PythonExe --version)" -ForegroundColor Cyan
+Write-Host "Pip: $(& $PythonExe -m pip --version)" -ForegroundColor Cyan
 
 function Install-PythonDeps {
     param($RootDirParam, $CacheDirParam, $EnvNameParam)
@@ -81,20 +108,13 @@ function Install-PythonDeps {
     }
 
     Write-Host "Installing Python build toolchain from wheelhouse..." -ForegroundColor Cyan
-    python -m pip install --no-index --find-links $WheelhouseDir -r $BuildReqFile
+    & $PythonExe -m pip install --no-index --find-links $WheelhouseDir -r $BuildReqFile
 
     Write-Host "Installing deps from wheelhouse..." -ForegroundColor Cyan
-    python -m pip install -r $ReqFile --no-index --find-links $WheelhouseDir
-
-    Write-Host "Replacing python-magic with python-magic-bin for Windows..." -ForegroundColor Cyan
-    python -m pip uninstall -y python-magic
-    python -m pip install python-magic-bin --no-index --find-links $WheelhouseDir
-
-    Write-Host "Force reinstalling pure Python chardet (offline)..." -ForegroundColor Cyan
-    python -m pip install --force-reinstall --no-build-isolation --no-binary=chardet,charset-normalizer chardet charset-normalizer --no-index --find-links $WheelhouseDir
+    & $PythonExe -m pip install -r $ReqFile --no-index --find-links $WheelhouseDir
 
     if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) {
-        python -m pip install pyinstaller --no-index --find-links $WheelhouseDir
+        & $PythonExe -m pip install pyinstaller --no-index --find-links $WheelhouseDir
     }
 }
 

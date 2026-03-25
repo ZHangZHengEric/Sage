@@ -37,23 +37,33 @@ calc_hash() {
     fi
 }
 
-get_pip_cmd() {
-    if command -v python >/dev/null 2>&1; then
-        echo "python -m pip"
+resolve_python_bin() {
+    if [ -n "${PYTHON_BIN:-}" ] && [ -x "${PYTHON_BIN}" ]; then
+        echo "${PYTHON_BIN}"
+    elif [ -n "${pythonLocation:-}" ] && [ -x "${pythonLocation}/bin/python3" ]; then
+        echo "${pythonLocation}/bin/python3"
+    elif [ -n "${pythonLocation:-}" ] && [ -x "${pythonLocation}/bin/python" ]; then
+        echo "${pythonLocation}/bin/python"
+    elif command -v python >/dev/null 2>&1; then
+        command -v python
     elif command -v python3 >/dev/null 2>&1; then
-        echo "python3 -m pip"
+        command -v python3
     else
         echo ""
     fi
+}
+
+run_pip() {
+    "${PYTHON_BIN}" -m pip "$@"
 }
 
 echo "Preparing desktop dependencies for $OS_TYPE/$ARCH..."
 
 echo "$(calc_hash "$ROOT_DIR/requirements.txt")" > "$CACHE_DIR/.requirements.hash"
 
-PIP_CMD="$(get_pip_cmd)"
+PYTHON_BIN="$(resolve_python_bin)"
 WHEELHOUSE_DIR="$CACHE_DIR/wheelhouse"
-if [ -n "$PIP_CMD" ]; then
+if [ -n "$PYTHON_BIN" ]; then
     PIP_INDEX_URL="${PIP_INDEX_URL:-https://pypi.org/simple}"
     if [ -d "$WHEELHOUSE_DIR" ] && [ -n "$(find "$WHEELHOUSE_DIR" -type f -print -quit 2>/dev/null || true)" ]; then
         echo "Reusing cached Python wheelhouse at $WHEELHOUSE_DIR..."
@@ -63,16 +73,17 @@ if [ -n "$PIP_CMD" ]; then
         mkdir -p "$WHEELHOUSE_DIR"
 
         # 先在 prepare 环境里安装一套现代构建工具链，避免 pip 解析 pyproject metadata 时走到 runner 自带的旧依赖。
-        eval "$PIP_CMD install --upgrade -r \"$BUILD_REQ_FILE\" --index-url \"$PIP_INDEX_URL\""
+        run_pip install --upgrade -r "$BUILD_REQ_FILE" --index-url "$PIP_INDEX_URL"
 
         # 再把这套构建工具链本身也下载进 wheelhouse，供 build 阶段离线安装和无隔离构建使用。
-        eval "$PIP_CMD download --dest \"$WHEELHOUSE_DIR\" -r \"$BUILD_REQ_FILE\" --index-url \"$PIP_INDEX_URL\""
+        run_pip download --dest "$WHEELHOUSE_DIR" -r "$BUILD_REQ_FILE" --index-url "$PIP_INDEX_URL"
 
-        # 用受控的现代打包工具链准备 wheelhouse，避免系统 Python 自带 pip 的老旧元数据构建逻辑。
-        eval "$PIP_CMD download --dest \"$WHEELHOUSE_DIR\" -r \"$ROOT_DIR/requirements.txt\" --index-url \"$PIP_INDEX_URL\""
+        # 先下载应用依赖，再用我们自己构建的纯 Python wheel 覆盖 chardet/charset-normalizer。
+        run_pip download --dest "$WHEELHOUSE_DIR" -r "$ROOT_DIR/requirements.txt" --index-url "$PIP_INDEX_URL"
+        find "$WHEELHOUSE_DIR" -maxdepth 1 \( -iname 'chardet-*' -o -iname 'charset_normalizer-*' -o -iname 'charset-normalizer-*' \) -delete
 
-        # Build 阶段会强制 no-binary 重新安装这两个包，需要提前缓存源码包。
-        eval "$PIP_CMD download --dest \"$WHEELHOUSE_DIR\" --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url \"$PIP_INDEX_URL\""
+        # 直接在 prepare 阶段构建纯 Python wheel，build 阶段只安装 wheel，不再单独处理这两个包。
+        run_pip wheel --wheel-dir "$WHEELHOUSE_DIR" --no-build-isolation --no-binary=chardet,charset-normalizer chardet charset-normalizer
     fi
 else
     echo "Python is not available in prepare job."
