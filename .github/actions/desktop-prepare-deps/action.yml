@@ -1,0 +1,48 @@
+name: Desktop Prepare Dependencies
+description: Common dependency preparation for desktop release jobs.
+
+inputs:
+  node_arch:
+    description: Node architecture (x64 or arm64)
+    required: true
+  platform:
+    description: Build platform (macos, linux, windows)
+    required: true
+  deps_artifact:
+    description: Name of dependency artifact to upload
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        architecture: ${{ inputs.node_arch }}
+        cache: npm
+        cache-dependency-path: app/desktop/ui/package-lock.json
+
+    - name: Prepare Dependencies (macOS/Linux)
+      if: inputs.platform != 'windows'
+      shell: bash -l {0}
+      run: |
+        chmod +x app/desktop/scripts/github/prepare_deps.sh
+        app/desktop/scripts/github/prepare_deps.sh
+
+    - name: Prepare Dependencies (Windows)
+      if: inputs.platform == 'windows'
+      shell: pwsh
+      run: |
+        ./app/desktop/scripts/github/prepare_deps_windows.ps1
+
+    - name: Upload Dependency Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.deps_artifact }}
+        path: |
+          app/desktop/.build_cache
+          app/desktop/ui/node_modules
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 1
