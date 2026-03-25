@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { agentAPI } from '@/api/agent.js'
 import { isLoggedIn } from '@/utils/auth.js'
+import { normalizeAgentMode } from '@/utils/agentMode.js'
 
 export const useChatAgentConfig = ({
   t,
@@ -39,9 +40,10 @@ export const useChatAgentConfig = ({
 
     selectedAgent.value = agent
     if (agent && (isAgentChange || forceConfigUpdate)) {
+      const agentMode = normalizeAgentMode(agent.agentMode)
       config.value = {
         deepThinking: userConfigOverrides.value.deepThinking !== undefined ? userConfigOverrides.value.deepThinking : agent.deepThinking,
-        agentMode: userConfigOverrides.value.agentMode !== undefined ? userConfigOverrides.value.agentMode : (agent.agentMode || 'simple'),
+        agentMode: userConfigOverrides.value.agentMode !== undefined ? normalizeAgentMode(userConfigOverrides.value.agentMode) : agentMode,
         moreSuggest: userConfigOverrides.value.moreSuggest !== undefined ? userConfigOverrides.value.moreSuggest : (agent.moreSuggest ?? false),
         maxLoopCount: userConfigOverrides.value.maxLoopCount !== undefined ? userConfigOverrides.value.maxLoopCount : (agent.maxLoopCount ?? 10)
       }
@@ -50,9 +52,12 @@ export const useChatAgentConfig = ({
   }
 
   const updateConfig = (newConfig) => {
-    const updatedConfig = { ...config.value, ...newConfig }
+    const normalizedConfig = newConfig.agentMode !== undefined
+      ? { ...newConfig, agentMode: normalizeAgentMode(newConfig.agentMode) }
+      : newConfig
+    const updatedConfig = { ...config.value, ...normalizedConfig }
     config.value = updatedConfig
-    const updatedOverrides = { ...userConfigOverrides.value, ...newConfig }
+    const updatedOverrides = { ...userConfigOverrides.value, ...normalizedConfig }
     userConfigOverrides.value = updatedOverrides
   }
 
