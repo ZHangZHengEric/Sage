@@ -193,6 +193,7 @@ import { skillAPI } from '../api/skill.js'
 import { knowledgeBaseAPI } from '../api/knowledgeBase.js'
 import MarkdownRenderer from '../components/chat/MarkdownRenderer.vue'
 import { useAgentEditStore } from '../stores/agentEdit'
+import { normalizeAgentMode } from '../utils/agentMode.js'
 import { dump } from 'js-yaml'
 
 // UI Components
@@ -651,11 +652,11 @@ const getModelLabel = (providerId) => {
 }
 
 const getAgentModeText = (mode) => {
-  if (!mode || mode === 'auto') return t('agent.modeAuto')
-  if (mode === 'fibre') return t('agent.modeFibre')
-  if (mode === 'simple') return t('agent.modeSimple')
-  if (mode === 'multi') return t('agent.modeMulti')
-  return mode
+  const normalizedMode = normalizeAgentMode(mode, 'auto')
+  if (normalizedMode === 'auto') return t('agent.modeAuto')
+  if (normalizedMode === 'fibre') return t('agent.modeFibre')
+  if (normalizedMode === 'simple') return t('agent.modeSimple')
+  return normalizedMode
 }
 
 const handleSmartConfig = async (description, selectedTools = [], callbacks = {}) => {
