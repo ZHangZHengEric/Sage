@@ -18,6 +18,7 @@ $TauriNodeSidecarDir = Join-Path $TauriSidecarDir "node"
 $TauriBinDir = Join-Path $TauriDir "bin"
 $DistDir = Join-Path $AppDir "dist"
 $CacheDir = Join-Path $AppDir ".build_cache"
+$BuildReqFile = Join-Path $AppDir "scripts/github/requirements-build.txt"
 
 $Mode = if ($args.Count -gt 0) { $args[0] } else { "release" }
 
@@ -69,12 +70,6 @@ function Install-PythonDeps {
     $ReqFile = Join-Path $RootDirParam "requirements.txt"
     $WheelhouseDir = Join-Path $CacheDirParam "wheelhouse"
 
-    Write-Host "Upgrading build tools..." -ForegroundColor Cyan
-    $PipIndexUrl = if ($env:PIP_INDEX_URL) { $env:PIP_INDEX_URL } else { "https://mirrors.aliyun.com/pypi/simple" }
-    Write-Host "Using pip index: $PipIndexUrl" -ForegroundColor Cyan
-
-    pip install --upgrade pip setuptools wheel --index-url $PipIndexUrl
-
     $wheelSample = $null
     if (Test-Path $WheelhouseDir) {
         $wheelSample = Get-ChildItem -Path $WheelhouseDir -File -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -85,18 +80,21 @@ function Install-PythonDeps {
         exit 1
     }
 
+    Write-Host "Installing Python build toolchain from wheelhouse..." -ForegroundColor Cyan
+    python -m pip install --no-index --find-links $WheelhouseDir -r $BuildReqFile
+
     Write-Host "Installing deps from wheelhouse..." -ForegroundColor Cyan
-    pip install -r $ReqFile --no-index --find-links $WheelhouseDir
+    python -m pip install -r $ReqFile --no-index --find-links $WheelhouseDir
 
     Write-Host "Replacing python-magic with python-magic-bin for Windows..." -ForegroundColor Cyan
-    pip uninstall -y python-magic
-    pip install python-magic-bin --no-index --find-links $WheelhouseDir
+    python -m pip uninstall -y python-magic
+    python -m pip install python-magic-bin --no-index --find-links $WheelhouseDir
 
     Write-Host "Force reinstalling pure Python chardet (offline)..." -ForegroundColor Cyan
-    pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --no-index --find-links $WheelhouseDir
+    python -m pip install --force-reinstall --no-build-isolation --no-binary=chardet,charset-normalizer chardet charset-normalizer --no-index --find-links $WheelhouseDir
 
     if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) {
-        pip install pyinstaller --no-index --find-links $WheelhouseDir
+        python -m pip install pyinstaller --no-index --find-links $WheelhouseDir
     }
 }
 

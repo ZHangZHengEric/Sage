@@ -7,6 +7,7 @@ UI_DIR="$APP_DIR/ui"
 TAURI_DIR="$APP_DIR/tauri"
 TAURI_SIDECAR_DIR="$TAURI_DIR/sidecar"
 CACHE_DIR="$APP_DIR/.build_cache"
+BUILD_REQ_FILE="$APP_DIR/scripts/github/requirements-build.txt"
 
 mkdir -p "$CACHE_DIR"
 
@@ -61,7 +62,11 @@ if [ -n "$PIP_CMD" ]; then
         rm -rf "$WHEELHOUSE_DIR"
         mkdir -p "$WHEELHOUSE_DIR"
 
-        eval "$PIP_CMD install --upgrade \"pip>=24.3\" setuptools wheel \"packaging>=24.2\" \"hatchling>=1.27.0\" --index-url \"$PIP_INDEX_URL\""
+        # 先在 prepare 环境里安装一套现代构建工具链，避免 pip 解析 pyproject metadata 时走到 runner 自带的旧依赖。
+        eval "$PIP_CMD install --upgrade -r \"$BUILD_REQ_FILE\" --index-url \"$PIP_INDEX_URL\""
+
+        # 再把这套构建工具链本身也下载进 wheelhouse，供 build 阶段离线安装和无隔离构建使用。
+        eval "$PIP_CMD download --dest \"$WHEELHOUSE_DIR\" -r \"$BUILD_REQ_FILE\" --index-url \"$PIP_INDEX_URL\""
 
         # 用受控的现代打包工具链准备 wheelhouse，避免系统 Python 自带 pip 的老旧元数据构建逻辑。
         eval "$PIP_CMD download --dest \"$WHEELHOUSE_DIR\" -r \"$ROOT_DIR/requirements.txt\" --index-url \"$PIP_INDEX_URL\""

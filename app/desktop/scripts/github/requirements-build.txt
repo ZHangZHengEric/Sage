@@ -1,0 +1,5 @@
+pip>=24.3
+setuptools>=70
+wheel>=0.45
+packaging>=24.2
+hatchling>=1.27.0

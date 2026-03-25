@@ -4,6 +4,7 @@ $RootDir = (Resolve-Path (Join-Path $PSScriptRoot "../../../..")).Path
 $AppDir = Join-Path $RootDir "app/desktop"
 $UiDir = Join-Path $AppDir "ui"
 $CacheDir = Join-Path $AppDir ".build_cache"
+$BuildReqFile = Join-Path $AppDir "scripts/github/requirements-build.txt"
 
 if (-not (Test-Path $CacheDir)) {
     New-Item -ItemType Directory -Force -Path $CacheDir | Out-Null
@@ -33,9 +34,15 @@ if ((Test-Path $WheelhouseDir) -and $null -ne (Get-ChildItem -Path $WheelhouseDi
     New-Item -ItemType Directory -Force -Path $WheelhouseDir | Out-Null
 
     Write-Host "Preparing Python wheelhouse at $WheelhouseDir..." -ForegroundColor Cyan
-    python -m pip install --upgrade "pip>=24.3" setuptools wheel "packaging>=24.2" "hatchling>=1.27.0" --index-url $PipIndexUrl
+    python -m pip install --upgrade -r $BuildReqFile --index-url $PipIndexUrl
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] Failed to upgrade packaging toolchain for wheelhouse preparation." -ForegroundColor Red
+        exit 1
+    }
+
+    python -m pip download --dest $WheelhouseDir -r $BuildReqFile --index-url $PipIndexUrl
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Failed to download build toolchain into wheelhouse." -ForegroundColor Red
         exit 1
     }
 
