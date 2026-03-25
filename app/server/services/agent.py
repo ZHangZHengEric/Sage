@@ -240,7 +240,7 @@ async def get_file_workspace(agent_id: str, user_id: str) -> Dict[str, Any]:
     """获取指定会话的文件工作空间内容"""
     # 尝试从 SessionContext 获取 agent_workspace
     cfg = config.get_startup_config()
-    workspace_path = os.path.join(cfg.agents_dir, user_id, agent_id)
+    workspace_path = os.path.join(cfg.agents_dir, user_id)
     if not workspace_path or not os.path.exists(workspace_path):
         return {
             "agent_id": agent_id,
@@ -300,7 +300,7 @@ async def download_agent_file(agent_id: str, user_id: str, file_path: str) -> Tu
     """
 
     cfg = config.get_startup_config()
-    workspace_path = os.path.join(cfg.agents_dir, user_id, agent_id)
+    workspace_path = os.path.join(cfg.agents_dir, user_id)
 
     full_path = resolve_download_path(workspace_path, file_path)
 
@@ -352,7 +352,7 @@ async def delete_agent_file(agent_id: str, user_id: str, file_path: str) -> bool
     :return: 是否删除成功
     """
     cfg = config.get_startup_config()
-    workspace_path = os.path.join(cfg.agents_dir, user_id, agent_id)
+    workspace_path = os.path.join(cfg.agents_dir, user_id)
 
     # 路径安全校验
     full_path = resolve_download_path(workspace_path, file_path)
