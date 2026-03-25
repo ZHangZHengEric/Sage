@@ -57,6 +57,7 @@ class AgentConfigDTO(BaseModel):
     is_default: Optional[bool] = False
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    im_channels: Optional[Dict[str, Dict[str, Any]]] = None  # IM 渠道配置
 
 
 class AutoGenAgentRequest(BaseModel):
@@ -103,6 +104,7 @@ def convert_config_to_agent(
 
 def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
     """将 AgentConfigResp 对象转换为配置字典"""
+    logger.info(f"[convert_agent_to_config] Input: is_default={agent.is_default}, type={type(agent.is_default)}")
     config = {
         "name": agent.name,
         "systemPrefix": agent.systemPrefix,
@@ -124,7 +126,9 @@ def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
         "llm_provider_id": agent.llm_provider_id,
     }
     # 去除 None 值，保持存储整洁
-    return {k: v for k, v in config.items() if v is not None}
+    result = {k: v for k, v in config.items() if v is not None}
+    logger.info(f"[convert_agent_to_config] Output: is_default={result.get('is_default')}")
+    return result
 
 
 # 创建路由器
@@ -212,7 +216,10 @@ async def create(agent: AgentConfigDTO, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    created_agent = await create_agent(agent.name, convert_agent_to_config(agent))
+    logger.info(f"[Agent Create] Received: id={agent.id}, name={agent.name}, is_default={agent.is_default}")
+    config_dict = convert_agent_to_config(agent)
+    logger.info(f"[Agent Create] Config dict: is_default={config_dict.get('is_default')}")
+    created_agent = await create_agent(agent.name, config_dict)
     return await Response.succ(
         data={"agent_id": created_agent.agent_id}, message=f"Agent '{created_agent.agent_id}' 创建成功"
     )
@@ -246,7 +253,51 @@ async def update(agent_id: str, agent: AgentConfigDTO, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
+    logger.info(f"[Agent Update] Received update for agent={agent_id}, im_channels={agent.im_channels}")
+    
+    # 更新 Agent 基本信息
     await update_agent(agent_id, agent.name, convert_agent_to_config(agent))
+    
+    # 保存 IM 渠道配置（如果存在）
+    if agent.im_channels:
+        logger.info(f"[Agent Update] Saving IM channels: {agent.im_channels}")
+        try:
+            from mcp_servers.im_server.agent_config import get_agent_im_config
+            agent_config = get_agent_im_config(agent_id)
+            
+            for provider, channel_data in agent.im_channels.items():
+                enabled = channel_data.get('enabled', False)
+                config = channel_data.get('config', {})
+                
+                # 验证 iMessage 只能在默认 Agent 上启用
+                if provider == 'imessage' and enabled:
+                    from app.desktop.core.models.agent import AgentConfigDao
+                    dao = AgentConfigDao()
+                    agent_obj = await dao.get_by_id(agent_id)
+                    if agent_obj and not agent_obj.is_default:
+                        logger.warning(f"[Agent Update] iMessage can only be configured on default agent, skipping {agent_id}")
+                        continue
+                
+                # 保存渠道配置
+                success = agent_config.set_provider_config(provider, enabled, config)
+                if success:
+                    logger.info(f"[Agent Update] Saved {provider} config for agent={agent_id}, enabled={enabled}")
+                    
+                    # 如果启用，启动 IM 渠道
+                    if enabled:
+                        try:
+                            from mcp_servers.im_server.service_manager import get_service_manager
+                            service_manager = get_service_manager()
+                            logger.info(f"[Agent Update] Starting {provider} channel for agent={agent_id}")
+                            await service_manager.start_channel(agent_id, provider)
+                        except Exception as e:
+                            logger.error(f"[Agent Update] Failed to start {provider} channel: {e}")
+                else:
+                    logger.error(f"[Agent Update] Failed to save {provider} config for agent={agent_id}")
+        except Exception as e:
+            logger.error(f"[Agent Update] Failed to save IM channels: {e}")
+            # 不阻断主流程，仅记录错误
+    
     return await Response.succ(
         data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 更新成功"
     )
@@ -265,6 +316,34 @@ async def delete(agent_id: str, http_request: Request):
     """
     await delete_agent(agent_id)
     return await Response.succ(data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 删除成功")
+
+
+@agent_router.post("/{agent_id}/set-default")
+async def set_default_agent(agent_id: str, http_request: Request):
+    """
+    设置指定 Agent 为默认 Agent
+
+    Args:
+        agent_id: Agent ID
+
+    Returns:
+        StandardResponse: 包含操作结果的标准响应
+    """
+    from ..models.agent import AgentConfigDao
+    
+    # 先检查 Agent 是否存在
+    agent = await get_agent(agent_id)
+    if not agent:
+        return await Response.error(message=f"Agent '{agent_id}' 不存在")
+    
+    # 设置为默认
+    dao = AgentConfigDao()
+    success = await dao.set_default(agent_id)
+    
+    if success:
+        return await Response.succ(data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 已设为默认")
+    else:
+        return await Response.error(message=f"设置默认 Agent 失败")
 
 
 @agent_router.post("/auto-generate")
