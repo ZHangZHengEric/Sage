@@ -200,6 +200,7 @@
               </Button>
             </div>
             <MessageInput
+              ref="messageInputRef"
               :is-loading="isCurrentSessionLoading"
               :preset-text="abilityPresetInput"
               :selected-agent="selectedAgent"
@@ -218,7 +219,7 @@
           :workspace-files="workspaceFiles"
           :agent-id="selectedAgentId"
           @download-file="downloadFile"
-          @delete-file="deleteFile"
+          @delete-file="handleDeleteFile"
           @quote-path="handleQuotePath"
           @upload-files="handleUploadFiles"
           @close="showWorkspace = false"
@@ -243,6 +244,7 @@
           :messages="filteredMessages"
           :session-id="currentSessionId"
           @close="showWorkbench = false"
+          @quote-path="handleQuotePath"
         />
       </Transition>
 
@@ -257,6 +259,9 @@
         @openSubSession="handleOpenSubSession"
       />
     </div>
+
+    <!-- 确认对话框 -->
+    <AppConfirmDialog ref="confirmDialogRef" />
   </div>
 </template>
 
@@ -274,6 +279,7 @@ import SubSessionPanel from '@/components/chat/SubSessionPanel.vue'
 import WorkbenchPreview from '@/components/chat/WorkbenchPreview.vue'
 import AbilityPanel from '@/components/chat/AbilityPanel.vue'
 import AgentUsageDanmaku from '@/components/chat/AgentUsageDanmaku.vue'
+import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -371,18 +377,32 @@ const handleSendMessageWithAbilityClear = (content, options) => {
   abilityPresetInput.value = ''
 }
 
-// 处理引用路径 - 将路径添加到输入框
+// 确认对话框引用
+const confirmDialogRef = ref(null)
+
+// 消息输入框引用
+const messageInputRef = ref(null)
+
+// 处理删除文件 - 带确认对话框
+const handleDeleteFile = async (item) => {
+  const confirmed = await confirmDialogRef.value?.confirm(
+    t('common.confirmDelete') || '确定要删除此文件吗？',
+    { title: t('common.confirm') || '确认' }
+  )
+  if (!confirmed) return
+
+  // 调用原始的 deleteFile
+  await deleteFile(item)
+}
+
+// 处理引用路径 - 将路径添加到主消息输入框
 const handleQuotePath = (path) => {
-  const currentValue = abilityPresetInput.value || ''
   // 使用 {workspace_root}/ 前缀，让 AI 知道这是工作空间路径
   const pathToInsert = `\`{workspace_root}/${path}\``
 
-  if (currentValue) {
-    // 如果输入框已有内容，在末尾添加（前面加空格）
-    abilityPresetInput.value = currentValue + ' ' + pathToInsert
-  } else {
-    // 如果输入框为空，直接添加
-    abilityPresetInput.value = pathToInsert
+  // 添加到主消息输入框
+  if (messageInputRef.value) {
+    messageInputRef.value.appendInputValue(pathToInsert)
   }
 }
 

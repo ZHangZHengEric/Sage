@@ -101,8 +101,12 @@ export const useChatWorkspace = ({
   }
 
   const deleteFile = async (item) => {
-    if (!confirm(t('common.confirmDelete') || 'Are you sure you want to delete this file?')) return
-    
+    // 验证参数有效性
+    if (!item || !item.path) {
+      toast.error(t('common.invalidFileItem') || '无效的文件项')
+      return
+    }
+
     try {
       const filePath = item.path
       const agentId = selectedAgentId.value
