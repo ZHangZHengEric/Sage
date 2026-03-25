@@ -102,41 +102,9 @@ prepare_tauri_build_config() {
     echo "[Package] 使用 productName=Sage 作为打包命名基准（安装包将以 Sage_ 开头）"
 }
 
-ensure_conda_env() {
-    local env_name="$1"
-
-    if [ "${CONDA_DEFAULT_ENV:-}" = "$env_name" ]; then
-        echo "已在 Conda 环境 '$env_name' 中。"
-        return
-    fi
-
-    if ! command -v conda >/dev/null 2>&1; then
-        echo "错误: CI 中未找到 conda，无法激活环境 '$env_name'。"
-        exit 1
-    fi
-
-    # setup-miniconda 在 CI 中已创建环境，这里只做激活，不做创建。
-    local conda_base
-    conda_base="$(conda info --base)"
-    # shellcheck disable=SC1090
-    source "$conda_base/etc/profile.d/conda.sh"
-    conda activate "$env_name"
-
-    if [ "${CONDA_DEFAULT_ENV:-}" != "$env_name" ]; then
-        echo "错误: 激活 Conda 环境失败: $env_name"
-        exit 1
-    fi
-
-    echo "已激活 Conda 环境 '$env_name'。"
-}
-
 ########################################
-# 1. Python Environment Setup (Conda)
+# 1. Python Environment Setup
 ########################################
-
-ENV_NAME="sage-desktop-env"
-
-ensure_conda_env "$ENV_NAME"
 
 echo "Python 版本: $(python --version)"
 echo "Pip 版本: $(pip --version)"
@@ -156,12 +124,6 @@ install_python_deps() {
     echo "使用 pip 索引 URL: $PIP_INDEX_URL"
 
     pip install --upgrade pip setuptools wheel --index-url "$PIP_INDEX_URL"
-
-    # 解决 x86_64 下 llvmlite 编译报错问题：优先使用 conda 安装预编译包
-    if [ "${CONDA_DEFAULT_ENV:-}" = "$ENV_NAME" ]; then
-        echo "正在通过 Conda 预安装 llvmlite 和 numba (防止 x86 编译错误)..."
-        conda install -y -c conda-forge llvmlite numba
-    fi
 
     if [ ! -d "$WHEELHOUSE_DIR" ] || [ -z "$(find "$WHEELHOUSE_DIR" -type f -print -quit 2>/dev/null || true)" ]; then
         echo "错误: 未找到可用的 wheelhouse: $WHEELHOUSE_DIR"

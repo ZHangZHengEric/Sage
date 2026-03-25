@@ -8,9 +8,6 @@ inputs:
   rust_target:
     description: Rust target triple
     required: true
-  conda_arch:
-    description: Conda architecture (x64 or arm64)
-    required: true
   deps_artifact:
     description: Name of dependency artifact to download
     required: true
@@ -21,6 +18,11 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
@@ -41,22 +43,11 @@ runs:
         cache-all-crates: "true"
         shared-key: "desktop-build"
 
-    - name: Setup Miniconda
-      uses: conda-incubator/setup-miniconda@v3
-      with:
-        auto-update-conda: true
-        python-version: 3.11
-        activate-environment: sage-desktop-env
-        auto-activate-base: false
-        architecture: ${{ inputs.conda_arch }}
-        channels: conda-forge,defaults
-        channel-priority: flexible
-
     - name: Download Dependency Artifact
       uses: actions/download-artifact@v4
       with:
         name: ${{ inputs.deps_artifact }}
-        path: .
+        path: app/desktop
 
     - name: Cache Python Dependencies
       uses: actions/cache@v4
