@@ -338,7 +338,7 @@ const handleFileUpload = async (event, index, field) => {
       }
     }
 
-    filename = `SageAI-${version}-${platform}${ext}`
+    filename = `Sage-${version}-${platform}${ext}`
 
     const path = `bundle/${version}/${filename}`
     const res = await ossAPI.upload(file, path)
