@@ -30,7 +30,7 @@ from sagents.context.session_context import (
     SessionContext,
     SessionStatus,
 )
-from sagents.context.user_memory import MemoryExtractor, UserMemoryManager
+
 from sagents.observability import AgentRuntime, ObservabilityManager, OpenTelemetryTraceHandler, ObservableAsyncOpenAI
 from sagents.skill import SkillManager, SkillProxy
 from sagents.tool import ToolManager, ToolProxy
@@ -77,8 +77,6 @@ class Session:
         self.system_prefix: str = ""
         self.session_space: str = "./sage_sessions"
         self.host_workspace: Optional[str] = None  # 代理工作区的宿主机路径（本地/直通沙箱需要）
-        self.default_memory_type: str = "session"
-        self.user_memory_manager: Optional[UserMemoryManager] = None
         self.observability_manager: Optional[ObservabilityManager] = None
         self._runtime_signature: Optional[tuple] = None
         self._agent_registry: Dict[str, Type[AgentBase]] = {
@@ -136,11 +134,6 @@ class Session:
         # 设置沙箱类型环境变量，供 SessionContext 和其他组件使用
         os.environ["SAGE_SANDBOX_MODE"] = self.sandbox_type
 
-        if self.default_memory_type == "user":
-            self.user_memory_manager = UserMemoryManager(model=self.model, workspace=self.session_root_space)
-        else:
-            self.user_memory_manager = None
-
         self.observability_manager = None
         if self.enable_obs:
             otel_handler = OpenTelemetryTraceHandler(service_name="sagents")
@@ -189,7 +182,6 @@ class Session:
         user_id: Optional[str],
         system_context: Optional[Dict[str, Any]],
         context_budget_config: Optional[Dict[str, Any]],
-        user_memory_manager: Optional[Any],
         tool_manager: Optional[Any],
         skill_manager: Optional[Union[SkillManager, SkillProxy]],
         parent_session_id: Optional[str] = None,
@@ -233,7 +225,6 @@ class Session:
             host_workspace=self.host_workspace,
             context_budget_config=context_budget_config,
             system_context=merged_system_context,
-            user_memory_manager=user_memory_manager,
             tool_manager=tool_manager,
             skill_manager=skill_manager,
             parent_session_id=parent_session_id,
@@ -292,7 +283,6 @@ class Session:
                 user_id=user_id,
                 system_context=merged_system_context,
                 context_budget_config=context_budget_config,
-                user_memory_manager=self.user_memory_manager,
                 tool_manager=tool_manager,
                 skill_manager=skill_manager,
                 parent_session_id=parent_session_id,
@@ -303,13 +293,6 @@ class Session:
             if custom_sub_agents:
                 session_context.custom_sub_agents = custom_sub_agents
                 logger.debug(f"SAgent: 设置了 {len(custom_sub_agents)} 个自定义 Sub Agent")
-            
-            init_memory_start = time.perf_counter()
-            # 初始化用户内存上下文
-            await session_context.init_user_memory_context()
-            init_memory_cost = time.perf_counter() - init_memory_start
-            if init_memory_cost > 0.2:
-                logger.warning(f"SAgent: init_user_memory_context slow, cost={init_memory_cost:.3f}s")
 
             if available_workflows:
                 logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
@@ -347,6 +330,15 @@ class Session:
             logger.info(
                 f"SAgent: 初始消息数量:{merge_before_num} 合并后数量：{len(session_context.message_manager.messages)} 新增消息数量：{add_new_messages_num} 更新消息数量：{update_messages_num}"
             )
+            
+            # 初始化消息历史切分，设置 active_start_index
+            # 在所有消息（包括用户输入）添加完成后调用
+            if session_context.message_manager.messages:
+                try:
+                    session_context.message_manager.prepare_history_split(session_context.agent_config)
+                    logger.debug(f"SAgent: 初始化消息历史切分完成，active_start_index={session_context.message_manager.active_start_index}")
+                except Exception as e:
+                    logger.warning(f"SAgent: 初始化消息历史切分失败: {e}")
     
             load_recent_skill_start = time.perf_counter()
 
@@ -389,11 +381,6 @@ class Session:
                 yield message_chunks
 
             # --- 会话结束处理 (原 run_stream 尾部逻辑) ---
-            if session_context.user_memory_manager and session_context.user_memory_manager.is_enabled():
-                logger.info("SAgent: 启动异步记忆提取任务")
-                extractor = MemoryExtractor(self.model)
-                asyncio.create_task(extractor.extract_and_save(session_context=session_context, session_id=session_id))
-
             if session_context.status != SessionStatus.INTERRUPTED:
                 session_context.set_status(SessionStatus.COMPLETED)
             else:
