@@ -815,4 +815,27 @@ const removeFile = (index) => {
   }
   uploadedFiles.value.splice(index, 1)
 }
+
+// 获取输入值
+const getInputValue = () => inputValue.value
+
+// 设置输入值
+const setInputValue = (value) => {
+  inputValue.value = value
+}
+
+// 追加输入值
+const appendInputValue = (text) => {
+  if (inputValue.value) {
+    inputValue.value += ' ' + text
+  } else {
+    inputValue.value = text
+  }
+}
+
+defineExpose({
+  getInputValue,
+  setInputValue,
+  appendInputValue
+})
 </script>
