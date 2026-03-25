@@ -17,6 +17,7 @@ TAURI_SIDECAR_DIR="$TAURI_DIR/sidecar"
 TAURI_NODE_SIDECAR_DIR="$TAURI_SIDECAR_DIR/node"
 # Build Cache Directory
 CACHE_DIR="$APP_DIR/.build_cache"
+BUILD_REQ_FILE="$APP_DIR/scripts/github/requirements-build.txt"
 
 MODE="${1:-release}"  # release | debug
 
@@ -119,26 +120,23 @@ install_python_deps() {
     local REQ_FILE="$ROOT_DIR/requirements.txt"
     local WHEELHOUSE_DIR="$CACHE_DIR/wheelhouse"
 
-    echo "正在升级构建工具..."
-    PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}"
-    echo "使用 pip 索引 URL: $PIP_INDEX_URL"
-
-    pip install --upgrade pip setuptools wheel --index-url "$PIP_INDEX_URL"
-
     if [ ! -d "$WHEELHOUSE_DIR" ] || [ -z "$(find "$WHEELHOUSE_DIR" -type f -print -quit 2>/dev/null || true)" ]; then
         echo "错误: 未找到可用的 wheelhouse: $WHEELHOUSE_DIR"
         exit 1
     fi
 
+    echo "使用 wheelhouse 离线安装 Python 构建工具链..."
+    python -m pip install --no-index --find-links "$WHEELHOUSE_DIR" -r "$BUILD_REQ_FILE"
+
     echo "使用 wheelhouse 离线安装依赖..."
-    pip install -r "$REQ_FILE" --no-index --find-links "$WHEELHOUSE_DIR"
+    python -m pip install -r "$REQ_FILE" --no-index --find-links "$WHEELHOUSE_DIR"
 
     # 强制重新安装纯 Python 版本以避免 mypyc 隐式导入问题
     echo "正在离线强制安装纯 Python 版 chardet 和 charset-normalizer..."
-    pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --no-index --find-links "$WHEELHOUSE_DIR"
+    python -m pip install --force-reinstall --no-build-isolation --no-binary=chardet,charset-normalizer chardet charset-normalizer --no-index --find-links "$WHEELHOUSE_DIR"
 
     if ! command -v pyinstaller >/dev/null; then
-        pip install pyinstaller --no-index --find-links "$WHEELHOUSE_DIR"
+        python -m pip install pyinstaller --no-index --find-links "$WHEELHOUSE_DIR"
     fi
 }
 
