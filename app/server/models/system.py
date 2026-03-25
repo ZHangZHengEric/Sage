@@ -30,7 +30,7 @@ class VersionArtifact(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: generate_short_id())
     version_id: Mapped[str] = mapped_column(ForeignKey("version.id"))
-    platform: Mapped[str] = mapped_column(String(32)) # e.g., darwin-aarch64, darwin-x86_64, windows-x86_64, linux-x86_64
+    platform: Mapped[str] = mapped_column(String(32)) # e.g., darwin-aarch64, darwin-x86_64, windows-x86_64, linux-x86_64, linux-aarch64
     
     installer_url: Mapped[str] = mapped_column(String(512), nullable=True)
     updater_url: Mapped[str] = mapped_column(String(512), nullable=True)

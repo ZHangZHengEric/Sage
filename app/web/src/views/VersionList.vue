@@ -142,6 +142,7 @@
                       <SelectItem value="darwin-x86_64">{{ t('system.version.platformDarwinX64') }}</SelectItem>
                       <SelectItem value="windows-x86_64">{{ t('system.version.platformWindowsX64') }}</SelectItem>
                       <SelectItem value="linux-x86_64">{{ t('system.version.platformLinuxX64') }}</SelectItem>
+                      <SelectItem value="linux-aarch64">{{ t('system.version.platformLinuxArm64') }}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -444,7 +445,8 @@ const getPlatformName = (platform) => {
     'darwin-aarch64': t('system.version.platformDarwinArm64'),
     'darwin-x86_64': t('system.version.platformDarwinX64'),
     'windows-x86_64': t('system.version.platformWindowsX64'),
-    'linux-x86_64': t('system.version.platformLinuxX64')
+    'linux-x86_64': t('system.version.platformLinuxX64'),
+    'linux-aarch64': t('system.version.platformLinuxArm64')
   }
   return map[platform] || platform
 }
