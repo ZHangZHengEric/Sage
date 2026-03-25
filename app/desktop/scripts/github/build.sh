@@ -80,7 +80,33 @@ echo "目标平台: $TARGET"
 ########################################
 
 calc_hash() {
-    python3 -c "import hashlib; print(hashlib.sha256(open('$1', 'rb').read()).hexdigest())" 2>/dev/null || echo "unknown"
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    elif command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        openssl dgst -sha256 "$1" | awk '{print $NF}'
+    fi
+}
+
+resolve_python_bin() {
+    if [ -n "${PYTHON_BIN:-}" ] && [ -x "${PYTHON_BIN}" ]; then
+        echo "${PYTHON_BIN}"
+    elif [ -n "${pythonLocation:-}" ] && [ -x "${pythonLocation}/bin/python3" ]; then
+        echo "${pythonLocation}/bin/python3"
+    elif [ -n "${pythonLocation:-}" ] && [ -x "${pythonLocation}/bin/python" ]; then
+        echo "${pythonLocation}/bin/python"
+    elif command -v python >/dev/null 2>&1; then
+        command -v python
+    elif command -v python3 >/dev/null 2>&1; then
+        command -v python3
+    else
+        echo ""
+    fi
+}
+
+run_pip() {
+    "${PYTHON_BIN}" -m pip "$@"
 }
 
 prepare_tauri_build_config() {
@@ -107,8 +133,15 @@ prepare_tauri_build_config() {
 # 1. Python Environment Setup
 ########################################
 
-echo "Python 版本: $(python --version)"
-echo "Pip 版本: $(pip --version)"
+PYTHON_BIN="$(resolve_python_bin)"
+if [ -z "$PYTHON_BIN" ]; then
+    echo "错误: 未找到可用的 Python 解释器"
+    exit 1
+fi
+
+echo "Python 路径: $PYTHON_BIN"
+echo "Python 版本: $("$PYTHON_BIN" --version)"
+echo "Pip 版本: $("$PYTHON_BIN" -m pip --version)"
 
 # 1.1 Install Python Dependencies
 install_python_deps() {
@@ -126,17 +159,13 @@ install_python_deps() {
     fi
 
     echo "使用 wheelhouse 离线安装 Python 构建工具链..."
-    python -m pip install --no-index --find-links "$WHEELHOUSE_DIR" -r "$BUILD_REQ_FILE"
+    run_pip install --no-index --find-links "$WHEELHOUSE_DIR" -r "$BUILD_REQ_FILE"
 
     echo "使用 wheelhouse 离线安装依赖..."
-    python -m pip install -r "$REQ_FILE" --no-index --find-links "$WHEELHOUSE_DIR"
-
-    # 强制重新安装纯 Python 版本以避免 mypyc 隐式导入问题
-    echo "正在离线强制安装纯 Python 版 chardet 和 charset-normalizer..."
-    python -m pip install --force-reinstall --no-build-isolation --no-binary=chardet,charset-normalizer chardet charset-normalizer --no-index --find-links "$WHEELHOUSE_DIR"
+    run_pip install -r "$REQ_FILE" --no-index --find-links "$WHEELHOUSE_DIR"
 
     if ! command -v pyinstaller >/dev/null; then
-        python -m pip install pyinstaller --no-index --find-links "$WHEELHOUSE_DIR"
+        run_pip install pyinstaller --no-index --find-links "$WHEELHOUSE_DIR"
     fi
 }
 

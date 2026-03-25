@@ -18,7 +18,34 @@ function Get-FileHash256 {
     return "unknown"
 }
 
+function Resolve-PythonExe {
+    if ($env:PYTHON_BIN -and (Test-Path $env:PYTHON_BIN)) {
+        return $env:PYTHON_BIN
+    }
+
+    if ($env:pythonLocation) {
+        $candidate = Join-Path $env:pythonLocation "python.exe"
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    $cmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($cmd) {
+        return (Resolve-Path $cmd.Source).Path
+    }
+
+    return $null
+}
+
+$PythonExe = Resolve-PythonExe
+if (-not $PythonExe) {
+    Write-Host "[ERROR] Python executable not found." -ForegroundColor Red
+    exit 1
+}
+
 Write-Host "Preparing desktop dependencies for windows/x86_64..." -ForegroundColor Cyan
+Write-Host "Python executable: $PythonExe" -ForegroundColor Cyan
 
 $requirementsHash = Get-FileHash256 -FilePath (Join-Path $RootDir "requirements.txt")
 $requirementsHash | Out-File -FilePath (Join-Path $CacheDir ".requirements.hash") -Encoding UTF8
@@ -34,33 +61,31 @@ if ((Test-Path $WheelhouseDir) -and $null -ne (Get-ChildItem -Path $WheelhouseDi
     New-Item -ItemType Directory -Force -Path $WheelhouseDir | Out-Null
 
     Write-Host "Preparing Python wheelhouse at $WheelhouseDir..." -ForegroundColor Cyan
-    python -m pip install --upgrade -r $BuildReqFile --index-url $PipIndexUrl
+    & $PythonExe -m pip install --upgrade -r $BuildReqFile --index-url $PipIndexUrl
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] Failed to upgrade packaging toolchain for wheelhouse preparation." -ForegroundColor Red
         exit 1
     }
 
-    python -m pip download --dest $WheelhouseDir -r $BuildReqFile --index-url $PipIndexUrl
+    & $PythonExe -m pip download --dest $WheelhouseDir -r $BuildReqFile --index-url $PipIndexUrl
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] Failed to download build toolchain into wheelhouse." -ForegroundColor Red
         exit 1
     }
 
-    python -m pip download --dest $WheelhouseDir -r (Join-Path $RootDir "requirements.txt") --index-url $PipIndexUrl
+    & $PythonExe -m pip download --dest $WheelhouseDir -r (Join-Path $RootDir "requirements.txt") --index-url $PipIndexUrl
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] Failed to download requirements into wheelhouse." -ForegroundColor Red
         exit 1
     }
 
-    python -m pip download --dest $WheelhouseDir python-magic-bin --index-url $PipIndexUrl
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[ERROR] Failed to download python-magic-bin into wheelhouse." -ForegroundColor Red
-        exit 1
-    }
+    Get-ChildItem -Path $WheelhouseDir -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like 'chardet-*' -or $_.Name -like 'charset_normalizer-*' -or $_.Name -like 'charset-normalizer-*' } |
+        Remove-Item -Force -ErrorAction SilentlyContinue
 
-    python -m pip download --dest $WheelhouseDir --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url $PipIndexUrl
+    & $PythonExe -m pip wheel --wheel-dir $WheelhouseDir --no-build-isolation --no-binary=chardet,charset-normalizer chardet charset-normalizer
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "[ERROR] Failed to download pure Python chardet packages into wheelhouse." -ForegroundColor Red
+        Write-Host "[ERROR] Failed to build pure Python chardet/charset-normalizer wheels." -ForegroundColor Red
         exit 1
     }
 }
