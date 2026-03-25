@@ -197,7 +197,14 @@ async def update_agent(
             detail=f"Agent '{agent_id}' 不存在",
             error_detail=f"Agent '{agent_id}' 不存在",
         )
-    orm_obj = models.Agent(agent_id=agent_id, name=agent_name, config=agent_config)
+    # 从配置中提取 is_default，如果没有则保留原有值
+    is_default = agent_config.get('is_default', existing_config.is_default)
+    orm_obj = models.Agent(
+        agent_id=agent_id, 
+        name=agent_name, 
+        config=agent_config,
+        is_default=is_default
+    )
     # 保留原始创建时间
     orm_obj.created_at = existing_config.created_at
     await dao.save(orm_obj)
