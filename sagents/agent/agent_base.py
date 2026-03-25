@@ -1390,18 +1390,25 @@ class AgentBase(ABC):
     def _parse_and_validate_json(self, raw_arguments: str) -> tuple[Any, bool]:
         """
         在线程池中运行的同步JSON解析逻辑
+        使用安全的 ast.literal_eval 替代 eval，避免代码注入风险
         """
+        import ast
+
         try:
             parsed = json.loads(raw_arguments)
             return parsed, True
         except json.JSONDecodeError:
-            # 尝试使用 eval 解析
+            # 尝试使用 ast.literal_eval 安全解析
+            # 仅支持基本数据类型：字符串、数字、元组、列表、字典、集合、布尔值、None
             try:
-                parsed = eval(raw_arguments, {"__builtins__": None}, {'true': True, 'false': False, 'null': None})
+                parsed = ast.literal_eval(raw_arguments)
+                # 验证解析结果是否为字典（工具参数必须是字典）
+                if not isinstance(parsed, dict):
+                    return None, False
                 # 验证解析结果是否可以序列化为JSON
                 json.dumps(parsed)
                 return parsed, True
-            except Exception:
+            except (ValueError, SyntaxError, TypeError):
                 return None, False
 
     def _should_abort_due_to_session(self, session_context: SessionContext,session_id: Optional[str] = None) -> bool:

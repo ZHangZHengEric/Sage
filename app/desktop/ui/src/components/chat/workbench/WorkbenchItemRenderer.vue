@@ -19,6 +19,7 @@
         :file-path="item.data?.filePath"
         :file-name="item.data?.fileName"
         :item="item"
+        @quote-path="$emit('quotePath', $event)"
       />
 
       <!-- 代码/命令输出 -->
@@ -76,4 +77,6 @@ const props = defineProps({
     required: true
   }
 })
+
+defineEmits(['quotePath'])
 </script>
