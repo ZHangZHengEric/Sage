@@ -107,7 +107,10 @@ async def fetch_github_release_info() -> Optional[Dict[str, Any]]:
                          return "darwin-x86_64"
                 
                 # Windows detection
-                if any(k in name_lower for k in ["windows", "win", ".exe", ".msi", ".nsis.zip"]):
+                if any(
+                    k in name_lower
+                    for k in ["windows", "win", ".exe", ".msi", ".nsis.zip", "-setup.zip", ".msi.zip"]
+                ):
                     if any(k in name_lower for k in ["x64", "x86_64"]):
                         return "windows-x86_64"
                 
@@ -119,6 +122,7 @@ async def fetch_github_release_info() -> Optional[Dict[str, Any]]:
 
             for asset in assets:
                 name = asset["name"]
+                name_lower = name.lower()
                 url = asset["browser_download_url"]
                 
                 if name.endswith(".sig"):
@@ -149,14 +153,14 @@ async def fetch_github_release_info() -> Optional[Dict[str, Any]]:
                 # Windows
                 # NSIS: SageAI-x.x.x-x86_64-setup.zip
                 is_updater = False
-                if name.endswith("-setup.zip") or name.endswith(".nsis.zip"):
+                if name_lower.endswith("-setup.zip") or name_lower.endswith(".nsis.zip") or name_lower.endswith(".msi.zip"):
                     is_updater = True
-                elif name.endswith(".AppImage.tar.gz"):
+                elif name_lower.endswith(".appimage.tar.gz"):
                     is_updater = True
-                elif platform.startswith("darwin") and name.endswith(".tar.gz") and not name.endswith(".app.tar.gz"):
+                elif platform.startswith("darwin") and name_lower.endswith(".tar.gz") and not name_lower.endswith(".app.tar.gz"):
                      # It seems for mac it is just .tar.gz in the provided example
                      is_updater = True
-                elif platform.startswith("darwin") and name.endswith(".app.tar.gz"):
+                elif platform.startswith("darwin") and name_lower.endswith(".app.tar.gz"):
                      is_updater = True
 
                 if is_updater:
@@ -168,7 +172,13 @@ async def fetch_github_release_info() -> Optional[Dict[str, Any]]:
                             platform_assets[platform]["sig_url"] = a["browser_download_url"]
                             break
                 # Installer packages
-                elif name.endswith(".dmg") or name.endswith(".exe") or name.endswith(".AppImage") or name.endswith(".deb"):
+                elif (
+                    name_lower.endswith(".dmg")
+                    or name_lower.endswith(".exe")
+                    or name_lower.endswith(".msi")
+                    or name_lower.endswith(".appimage")
+                    or name_lower.endswith(".deb")
+                ):
                     platform_assets[platform]["installer"] = url
 
             # Build artifacts list
