@@ -202,6 +202,8 @@
               :toolCall="toolCall"
               :toolResult="getParsedToolResult(toolCall)"
               :timestamp="message.timestamp"
+              :isCancelled="message.cancelledToolCalls?.includes(toolCall.id)"
+              :cancelledReason="message.cancelledToolCalls?.includes(toolCall.id) ? '已取消' : ''"
               @click="handleToolClick"
             />
            </div>

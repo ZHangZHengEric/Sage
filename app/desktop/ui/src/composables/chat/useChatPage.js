@@ -132,6 +132,9 @@ export const useChatPage = (props) => {
   const currentSessionId = ref(null)
   const activeSubSessionId = ref(null)
   const isHistoryLoading = ref(false)
+  
+  // 追踪 pending 的工具调用（用于处理工具执行未完成的情况）
+  const pendingToolCalls = ref(new Map()) // key: toolCallId, value: { timestamp, messageId }
 
   const filteredMessages = computed(() => {
     if (!messages.value) return []
@@ -192,6 +195,8 @@ export const useChatPage = (props) => {
     }
     isLoading.value = false
     loadingSessionId.value = null
+    // 清理 pending 的工具调用
+    clearPendingToolCalls('会话关闭')
   }
 
   const loadConversationMessages = async (sessionId) => {
@@ -207,6 +212,32 @@ export const useChatPage = (props) => {
       ...msg,
       session_id: msg.session_id || sessionId
     }))
+
+    // 加载历史消息后，检查哪些工具调用没有对应的结果
+    // 这些工具调用应该被标记为未完成（因为历史会话已结束，工具没有执行完）
+    const toolCallIdsWithResults = new Set()
+    normalizedMessages.forEach(msg => {
+      if (msg.role === 'tool' || msg.message_type === 'tool_call_result') {
+        if (msg.tool_call_id) {
+          toolCallIdsWithResults.add(msg.tool_call_id)
+        }
+      }
+    })
+    
+    // 为没有结果的工具调用添加未完成标记
+    normalizedMessages.forEach(msg => {
+      if (msg.tool_calls && msg.tool_calls.length > 0) {
+        msg.tool_calls.forEach(toolCall => {
+          if (toolCall.id && !toolCallIdsWithResults.has(toolCall.id)) {
+            // 工具调用没有对应的结果，标记为未完成
+            if (!msg.cancelledToolCalls) {
+              msg.cancelledToolCalls = []
+            }
+            msg.cancelledToolCalls.push(toolCall.id)
+          }
+        })
+      }
+    })
 
     messages.value = normalizedMessages
     rebuildMessageIdIndexMap()
@@ -236,6 +267,25 @@ export const useChatPage = (props) => {
   const handleMessage = (messageData) => {
     if (messageData.type === 'stream_end') return
     const messageId = messageData.message_id
+    
+    // 处理工具调用消息 - 记录 pending 状态
+    if (messageData.tool_calls && messageData.tool_calls.length > 0) {
+      messageData.tool_calls.forEach(toolCall => {
+        if (toolCall.id) {
+          pendingToolCalls.value.set(toolCall.id, {
+            timestamp: Date.now(),
+            messageId: messageId,
+            toolName: toolCall.function?.name
+          })
+        }
+      })
+    }
+    
+    // 处理工具结果消息 - 移除 pending 状态
+    if ((messageData.role === 'tool' || messageData.message_type === 'tool_call_result') && messageData.tool_call_id) {
+      pendingToolCalls.value.delete(messageData.tool_call_id)
+    }
+    
     if (messageId && messageIdIndexMap.value.has(messageId)) {
       const targetIndex = messageIdIndexMap.value.get(messageId)
       const existing = messages.value[targetIndex]
@@ -288,7 +338,31 @@ export const useChatPage = (props) => {
     }
     messages.value.push(userMessage)
     messageIdIndexMap.value.set(userMessage.message_id, messages.value.length - 1)
+    
+    // 用户发送新消息时，清理所有 pending 的工具调用
+    clearPendingToolCalls('用户发送了新消息')
+    
     return userMessage
+  }
+  
+  // 清理 pending 的工具调用
+  const clearPendingToolCalls = (reason = '会话关闭') => {
+    if (pendingToolCalls.value.size > 0) {
+      // 为每个 pending 的工具调用添加取消标记
+      pendingToolCalls.value.forEach((info, toolCallId) => {
+        // 找到对应的消息并标记为已取消
+        const messageIndex = messages.value.findIndex(m => 
+          m.tool_calls?.some(tc => tc.id === toolCallId)
+        )
+        if (messageIndex !== -1) {
+          const message = messages.value[messageIndex]
+          // 使用 Vue 的响应式方式更新数组
+          const newCancelledList = [...(message.cancelledToolCalls || []), toolCallId]
+          message.cancelledToolCalls = newCancelledList
+        }
+      })
+      pendingToolCalls.value.clear()
+    }
   }
 
   const addErrorMessage = (error) => {
@@ -680,6 +754,9 @@ export const useChatPage = (props) => {
     openAbilityPanel,
     closeAbilityPanel,
     retryAbilityFetch,
-    onAbilityCardClick
+    onAbilityCardClick,
+    // pending 工具调用相关
+    pendingToolCalls,
+    clearPendingToolCalls
   }
 }

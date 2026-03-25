@@ -12,18 +12,23 @@
         <!-- 工具名称（多语言） -->
         <span class="header-text text-xs font-medium text-foreground">{{ getToolLabel(toolName, t) }}</span>
         <!-- 状态图标 -->
-        <span class="status-icon flex items-center justify-center" :class="{ 'text-green-500': isCompleted, 'text-indigo-500': !isCompleted }">
+        <span class="status-icon flex items-center justify-center" :class="statusIconClass">
           <Check v-if="isCompleted" class="w-4 h-4" />
+          <X v-else-if="isCancelled" class="w-4 h-4" />
           <Loader2 v-else class="w-4 h-4 animate-spin" />
         </span>
+        <!-- 取消/超时提示文本 -->
+        <span v-if="isCancelled" class="text-[10px] text-muted-foreground ml-1">
+          {{ cancelledReason }}
+        </span>
         <!-- 跳转箭头 -->
-        <div class="expand-icon text-muted-foreground transition-transform duration-200 group-hover:translate-x-1" >
+        <div v-if="!isCancelled" class="expand-icon text-muted-foreground transition-transform duration-200 group-hover:translate-x-1" >
           <ChevronRight class="w-4 h-4" />
         </div>
         <!-- 时间戳 -->
         <span class="text-[10px] opacity-60 font-normal ml-2" v-if="timestamp">{{ formatTime(timestamp) }}</span>
         <!-- 点击查看详情提示 -->
-        <span class="click-hint text-xs text-muted-foreground ml-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100">{{ t('common.viewDetails') }}</span>
+        <span v-if="!isCancelled" class="click-hint text-xs text-muted-foreground ml-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100">{{ t('common.viewDetails') }}</span>
       </div>
     </div>
   </div>
@@ -33,6 +38,7 @@
 import { computed } from 'vue'
 import {
   Check,
+  X,
   Loader2,
   ChevronRight,
   Zap,
@@ -66,6 +72,14 @@ const props = defineProps({
   timestamp: {
     type: [Number, String],
     default: null
+  },
+  isCancelled: {
+    type: Boolean,
+    default: false
+  },
+  cancelledReason: {
+    type: String,
+    default: '已取消'
   }
 })
 
@@ -74,13 +88,20 @@ const emit = defineEmits(['click'])
 const { t } = useLanguage()
 
 const toolName = computed(() => props.toolCall.function?.name || '')
-const isCompleted = computed(() => !!props.toolResult)
+const isCompleted = computed(() => !!props.toolResult && !props.isCancelled)
 const isError = computed(() => {
-  if (!props.toolResult) return false
+  if (!props.toolResult || props.isCancelled) return false
   if (typeof props.toolResult.content === 'object' && props.toolResult.content?.error === true) {
     return true
   }
   return false
+})
+
+// 状态图标样式
+const statusIconClass = computed(() => {
+  if (isCompleted.value) return 'text-green-500'
+  if (props.isCancelled) return 'text-muted-foreground'
+  return 'text-indigo-500'
 })
 
 // 工具图标映射

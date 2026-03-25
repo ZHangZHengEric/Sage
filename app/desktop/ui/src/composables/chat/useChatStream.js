@@ -202,6 +202,7 @@ export const useChatStream = ({
       await readStreamResponse(
         response,
         (data) => {
+          console.log('[ChatStream] onMessage callback called, data.type:', data.type)
           streamLastIndex += 1
           updateActiveSessionLastIndex(sessionId, streamLastIndex)
           if (streamLastIndex % 20 === 0) updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
@@ -210,7 +211,10 @@ export const useChatStream = ({
             markCompletedAndCleanupCurrentSession(sessionId)
           }
           if (data.type === 'chunk_start' || data.type === 'json_chunk' || data.type === 'chunk_end') return
-          if (onMessage) onMessage(data)
+          if (onMessage) {
+            console.log('[ChatStream] Calling handleMessage')
+            onMessage(data)
+          }
         },
         () => {
           updateActiveSessionLastIndex(sessionId, streamLastIndex, true)

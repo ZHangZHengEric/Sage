@@ -8,7 +8,6 @@ from sagents.context.messages.message import MessageChunk
 from sagents.context.session_context import SessionContext
 from sagents.tool import ToolManager, ToolProxy
 from sagents.agent.fibre.orchestrator import FibreOrchestrator
-from sagents.context.user_memory import UserMemoryManager
 from sagents.observability import ObservabilityManager, OpenTelemetryTraceHandler, ObservableAsyncOpenAI
 from sagents.agent.agent_base import AgentBase
 from sagents.utils.prompt_manager import PromptManager
@@ -32,12 +31,6 @@ class FibreAgent(AgentBase):
         
         super().__init__(model, model_config, system_prefix)
         # self.workspace = workspace
-        
-        # # User Memory (similar to SAgent)
-        # if memory_type == "user":
-        #     self.user_memory_manager = UserMemoryManager(model=self.model, workspace=workspace)
-        # else:
-        #     self.user_memory_manager = None
             
         # Observability
         self.observability_manager = None
