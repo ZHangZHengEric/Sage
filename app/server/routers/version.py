@@ -141,7 +141,7 @@ async def fetch_github_release_info() -> Optional[Dict[str, Any]]:
                          # Ambiguous: could be Mac Intel, Linux, or Windows (unlikely for tar.gz updater)
                          # Let's check if we can differentiate
                          # If no other clues, maybe skip or default?
-                         # The provided asset `SageAI-1.0.0-aarch64.tar.gz` was missed.
+                         # The provided asset `Sage-1.0.0-aarch64.tar.gz` was missed.
                          pass
 
                 if not platform:
@@ -153,7 +153,7 @@ async def fetch_github_release_info() -> Optional[Dict[str, Any]]:
                 # Determine type
                 # Updater packages
                 # Windows
-                # NSIS: SageAI-x.x.x-x86_64-setup.zip
+                # NSIS: Sage-x.x.x-x86_64-setup.zip
                 is_updater = False
                 if name_lower.endswith("-setup.zip") or name_lower.endswith(".nsis.zip") or name_lower.endswith(".msi.zip"):
                     is_updater = True

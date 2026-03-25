@@ -56,6 +56,25 @@ function Find-CondaExe {
     return $null
 }
 
+function New-EffectiveTauriConfig {
+    param($TauriDirParam, $CacheDirParam)
+
+    $sourceConfig = Join-Path $TauriDirParam "tauri.conf.json"
+    $effectiveConfig = Join-Path $CacheDirParam "tauri.conf.effective.json"
+
+    if (-not (Test-Path $sourceConfig)) {
+        Write-Host "[ERROR] Tauri config not found: $sourceConfig" -ForegroundColor Red
+        exit 1
+    }
+
+    $config = Get-Content -Path $sourceConfig -Raw | ConvertFrom-Json
+    $config.productName = "Sage"
+    $config | ConvertTo-Json -Depth 100 | Set-Content -Path $effectiveConfig -Encoding UTF8
+
+    Write-Host "[Package] Using productName=Sage as bundle naming base (installer should start with Sage_)." -ForegroundColor Cyan
+    return $effectiveConfig
+}
+
 $CondaExe = Find-CondaExe
 if (-not $CondaExe) {
     Write-Host "[ERROR] Conda not found. Please install Miniconda or Anaconda." -ForegroundColor Red
@@ -388,6 +407,9 @@ if (Test-Path $LocalTauriCmd) {
     $TauriCmd = "tauri"
     $TauriArgs = if ($Mode -eq "release") { @("build") } else { @("build", "--debug") }
 }
+
+$EffectiveTauriConfig = New-EffectiveTauriConfig -TauriDirParam $TauriDir -CacheDirParam $CacheDir
+$TauriArgs += @("--config", $EffectiveTauriConfig)
 
 Write-Host "Tauri CLI: $TauriCmd" -ForegroundColor Cyan
 $env:CI = "true"
