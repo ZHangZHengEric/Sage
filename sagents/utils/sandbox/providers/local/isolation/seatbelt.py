@@ -61,6 +61,10 @@ class SeatbeltIsolation:
         # 允许网络
         lines.append("(allow network*)")
         
+        # 允许执行任何程序（在沙盒限制内）
+        lines.append("(allow process-exec (literal \"*\"))")
+        lines.append("(allow process-exec (regex \".*\"))")
+        
         profile_content = "\n".join(lines)
         
         # 写入临时文件
