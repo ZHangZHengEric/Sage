@@ -1,3 +1,5 @@
+import { normalizeAgentMode } from '@/utils/agentMode.js'
+
 export const useChatStream = ({
   chatAPI,
   toast,
@@ -177,7 +179,7 @@ export const useChatStream = ({
         messages: [{ role: 'user', content: messageContent }],
         session_id: sessionId,
         deep_thinking: config.deepThinking,
-        agent_mode: config.agentMode,
+        agent_mode: normalizeAgentMode(config.agentMode),
         more_suggest: config.moreSuggest,
         max_loop_count: config.maxLoopCount,
         agent_id: selectedAgent.id
