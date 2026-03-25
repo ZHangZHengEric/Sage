@@ -306,10 +306,9 @@ class SageStreamService:
         self.request = request
         # 4. 路径处理 (提前计算，供后续使用)
         cfg = get_startup_config()
-        # agent工作空间由 agent_dir + user_id + agent_id来。 如果user_id 为空。用 default_user 如果agent_id 为空，用 随机8位英文字母
+        # agent工作空间由 agent_dir + user_id
         user_id = self.request.user_id or "default_user"
-        agent_id = self.request.agent_id or ''.join(random.choices(string.ascii_letters, k=8))
-        self.agent_workspace = os.path.join(cfg.agents_dir, user_id, agent_id)
+        self.agent_workspace = os.path.join(cfg.agents_dir, user_id)
 
         # 创建 workspace 目录并复制 sage-usage-docs
         os.makedirs(self.agent_workspace, exist_ok=True)
