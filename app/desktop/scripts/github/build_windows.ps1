@@ -1,0 +1,416 @@
+# ===========================================
+# build_github_windows.ps1
+# Build Sage Desktop for GitHub Actions (Win)
+# ===========================================
+
+$ErrorActionPreference = "Stop"
+
+# -------------------------------
+# Path Configuration
+# -------------------------------
+$RootDir = (Resolve-Path (Join-Path $PSScriptRoot "../../../..")).Path
+$AppDir = Join-Path $RootDir "app/desktop"
+$CoreDir = Join-Path $AppDir "core"
+$UiDir = Join-Path $AppDir "ui"
+$TauriDir = Join-Path $AppDir "tauri"
+$TauriSidecarDir = Join-Path $TauriDir "sidecar"
+$TauriNodeSidecarDir = Join-Path $TauriSidecarDir "node"
+$TauriBinDir = Join-Path $TauriDir "bin"
+$DistDir = Join-Path $AppDir "dist"
+$CacheDir = Join-Path $AppDir ".build_cache"
+$BuildReqFile = Join-Path $AppDir "scripts/github/requirements-build.txt"
+
+$Mode = if ($args.Count -gt 0) { $args[0] } else { "release" }
+
+Write-Host "======================================"
+Write-Host " Sage Desktop Build ($Mode)"
+Write-Host " Root: $RootDir"
+Write-Host " Output: $DistDir"
+Write-Host " Cache: $CacheDir"
+Write-Host "======================================"
+
+if (-not (Test-Path $CacheDir)) {
+    New-Item -ItemType Directory -Force -Path $CacheDir | Out-Null
+}
+
+function Get-FileHash256 {
+    param([string]$FilePath)
+    if (Test-Path $FilePath) {
+        $hash = Get-FileHash -Path $FilePath -Algorithm SHA256
+        return $hash.Hash
+    }
+    return "unknown"
+}
+
+function New-EffectiveTauriConfig {
+    param($TauriDirParam, $CacheDirParam)
+
+    $sourceConfig = Join-Path $TauriDirParam "tauri.conf.json"
+    $effectiveConfig = Join-Path $CacheDirParam "tauri.conf.effective.json"
+
+    if (-not (Test-Path $sourceConfig)) {
+        Write-Host "[ERROR] Tauri config not found: $sourceConfig" -ForegroundColor Red
+        exit 1
+    }
+
+    $config = Get-Content -Path $sourceConfig -Raw | ConvertFrom-Json
+    $config.productName = "Sage"
+    $config | ConvertTo-Json -Depth 100 | Set-Content -Path $effectiveConfig -Encoding UTF8
+
+    Write-Host "[Package] Using productName=Sage as bundle naming base (installer should start with Sage_)." -ForegroundColor Cyan
+    return $effectiveConfig
+}
+
+function Resolve-PythonExe {
+    if ($env:PYTHON_BIN -and (Test-Path $env:PYTHON_BIN)) {
+        return $env:PYTHON_BIN
+    }
+
+    if ($env:pythonLocation) {
+        $candidate = Join-Path $env:pythonLocation "python.exe"
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    $cmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($cmd) {
+        return (Resolve-Path $cmd.Source).Path
+    }
+
+    return $null
+}
+
+$PythonExe = Resolve-PythonExe
+if (-not $PythonExe) {
+    Write-Host "[ERROR] Python executable not found." -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "Python executable: $PythonExe" -ForegroundColor Cyan
+Write-Host "Python: $(& $PythonExe --version)" -ForegroundColor Cyan
+Write-Host "Pip: $(& $PythonExe -m pip --version)" -ForegroundColor Cyan
+
+function Install-PythonDeps {
+    param($RootDirParam, $CacheDirParam, $EnvNameParam)
+
+    $ReqFile = Join-Path $RootDirParam "requirements.txt"
+    $WheelhouseDir = Join-Path $CacheDirParam "wheelhouse"
+
+    $wheelSample = $null
+    if (Test-Path $WheelhouseDir) {
+        $wheelSample = Get-ChildItem -Path $WheelhouseDir -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    }
+
+    if ($null -eq $wheelSample) {
+        Write-Host "[ERROR] Wheelhouse not found or empty: $WheelhouseDir" -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "Installing Python build toolchain from wheelhouse..." -ForegroundColor Cyan
+    & $PythonExe -m pip install --no-index --find-links $WheelhouseDir -r $BuildReqFile
+
+    Write-Host "Installing deps from wheelhouse..." -ForegroundColor Cyan
+    & $PythonExe -m pip install -r $ReqFile --no-index --find-links $WheelhouseDir
+
+    if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) {
+        & $PythonExe -m pip install pyinstaller --no-index --find-links $WheelhouseDir
+    }
+}
+
+Install-PythonDeps -RootDirParam $RootDir -CacheDirParam $CacheDir -EnvNameParam $EnvName
+
+function Build-PythonSidecar {
+    param($DistDirParam, $TauriSidecarDirParam, $AppDirParam, $RootDirParam, $ModeParam)
+
+    Write-Host "[Sidecar] Building Python Sidecar..." -ForegroundColor Cyan
+
+    if ($ModeParam -eq "release") {
+        if (Test-Path $DistDirParam) {
+            Remove-Item -Recurse -Force $DistDirParam
+        }
+    }
+    if (-not (Test-Path $DistDirParam)) {
+        New-Item -ItemType Directory -Force -Path $DistDirParam | Out-Null
+    }
+
+    $env:PYINSTALLER_CONFIG_DIR = Join-Path $RootDirParam ".pyinstaller"
+    $pyPath = "$RootDirParam;$env:PYTHONPATH"
+    $env:PYTHONPATH = $pyPath
+
+    Set-Location $AppDirParam
+
+    $PyiFlags = @(
+        "--noconfirm",
+        "--onedir",
+        "--log-level=WARN",
+        "--name", "sage-desktop",
+        "--windowed",
+        "--hidden-import=aiosqlite",
+        "--hidden-import=greenlet",
+        "--hidden-import=sqlalchemy.dialects.sqlite.aiosqlite",
+        # Scrapling and its dependencies for web fetching
+        "--hidden-import=scrapling",
+        "--hidden-import=scrapling.fetchers",
+        "--hidden-import=apify_fingerprint_datapoints",
+        "--hidden-import=browserforge",
+        "--collect-all=scrapling",
+        "--collect-all=apify_fingerprint_datapoints",
+        "--collect-all=browserforge",
+        "--exclude-module=tkinter",
+        "--exclude-module=unittest",
+        "--exclude-module=email.test",
+        "--exclude-module=test",
+        "--exclude-module=tests",
+        "--exclude-module=distutils",
+        "--exclude-module=setuptools",
+        "--exclude-module=xmlrpc",
+        "--exclude-module=IPython",
+        "--exclude-module=notebook"
+    )
+
+    if ($ModeParam -eq "release") {
+        $PyiFlags += "--noupx"
+        $PyiFlags += "--clean"
+    }
+
+    $entryPath = Join-Path $AppDirParam "entry.py"
+    $pyinstallerCmd = "pyinstaller"
+    foreach ($flag in $PyiFlags) {
+        $pyinstallerCmd += " $flag"
+    }
+    $pyinstallerCmd += " $entryPath"
+
+    Invoke-Expression $pyinstallerCmd
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] PyInstaller build failed" -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "[Sidecar] Cleaning dist files..." -ForegroundColor Cyan
+    Get-ChildItem -Path $DistDirParam -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path $DistDirParam -Recurse -File -Filter "*.pyc" | Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path $DistDirParam -Recurse -File -Filter ".DS_Store" | Remove-Item -Force -ErrorAction SilentlyContinue
+
+    Write-Host "[Sidecar] Copying mcp_servers to dist..." -ForegroundColor Cyan
+    $targetMcpDir = Join-Path $DistDirParam "sage-desktop"
+    if (Test-Path (Join-Path $DistDirParam "sage-desktop\_internal")) {
+        $targetMcpDir = Join-Path $DistDirParam "sage-desktop\_internal"
+    }
+
+    $mcpServersSrc = Join-Path $RootDirParam "mcp_servers"
+    if (Test-Path $mcpServersSrc) {
+        Copy-Item -Path $mcpServersSrc -Destination $targetMcpDir -Recurse -Force
+        $mcpPath = Join-Path $targetMcpDir "mcp_servers"
+        Get-ChildItem -Path $mcpPath -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path $mcpPath -Recurse -Directory -Filter ".git" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path $mcpPath -Recurse -File -Filter ".DS_Store" | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+
+    Write-Host "[Sidecar] Copying skills to dist..." -ForegroundColor Cyan
+    $skillsSrc = Join-Path $RootDirParam "app/skills"
+    if (Test-Path $skillsSrc) {
+        Copy-Item -Path $skillsSrc -Destination $targetMcpDir -Recurse -Force
+        $skillsPath = Join-Path $targetMcpDir "skills"
+        Get-ChildItem -Path $skillsPath -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path $skillsPath -Recurse -Directory -Filter ".git" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path $skillsPath -Recurse -File -Filter ".DS_Store" | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+
+    Set-Location $RootDirParam
+
+    Write-Host "[Sidecar] Copying to Tauri Sidecar dir..." -ForegroundColor Cyan
+    if (Test-Path $TauriSidecarDirParam) {
+        Remove-Item -Recurse -Force $TauriSidecarDirParam
+    }
+    New-Item -ItemType Directory -Force -Path $TauriSidecarDirParam | Out-Null
+
+    $srcDir = Join-Path $DistDirParam "sage-desktop"
+    if (-not (Test-Path $srcDir)) {
+        Write-Host "ERROR: Sidecar dir not found: $srcDir" -ForegroundColor Red
+        exit 1
+    }
+
+    Copy-Item -Path "$srcDir\*" -Destination $TauriSidecarDirParam -Recurse -Force
+
+    $exePath = Join-Path $TauriSidecarDirParam "sage-desktop.exe"
+    if (Test-Path $exePath) {
+        Write-Host "[Sidecar] Copied to: $TauriSidecarDirParam" -ForegroundColor Green
+    }
+}
+
+function Build-Frontend {
+    param($UiDirParam, $CacheDirParam, $RootDirParam)
+
+    Write-Host "[Frontend] Building frontend..." -ForegroundColor Cyan
+    Set-Location $UiDirParam
+
+    $LockFile = Join-Path $UiDirParam "package-lock.json"
+    $HashFile = Join-Path $CacheDirParam ".package-lock.hash"
+    $NewHash = Get-FileHash256 -FilePath $LockFile
+    if (Test-Path $HashFile) {
+        $OldHash = Get-Content $HashFile
+    } else {
+        $OldHash = ""
+    }
+
+    if ($NewHash -eq $OldHash -and (Test-Path "node_modules")) {
+        Write-Host "[Frontend] Deps unchanged, skipping npm install." -ForegroundColor Green
+    } else {
+        npm install --prefer-offline --no-audit --no-fund
+        $NewHash | Out-File -FilePath $HashFile -Encoding UTF8
+    }
+
+    npm run build
+    Set-Location $RootDirParam
+}
+
+function Prepare-BundledNodeRuntime {
+    param($TauriNodeSidecarDirParam)
+
+    Write-Host "[Node Runtime] Preparing bundled Node runtime..." -ForegroundColor Cyan
+
+    $cachedNodeRuntime = Join-Path $CacheDir "node-runtime\windows-x86_64"
+    if (Test-Path (Join-Path $cachedNodeRuntime "node.exe")) {
+        if (Test-Path $TauriNodeSidecarDirParam) {
+            Remove-Item -Recurse -Force $TauriNodeSidecarDirParam
+        }
+        New-Item -ItemType Directory -Force -Path $TauriNodeSidecarDirParam | Out-Null
+        Copy-Item -Path "$cachedNodeRuntime\*" -Destination $TauriNodeSidecarDirParam -Recurse -Force
+        Write-Host "[Node Runtime] Restored from cache: $cachedNodeRuntime" -ForegroundColor Green
+        return
+    }
+
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        Write-Host "[ERROR] node not found. Cannot prepare sidecar/node." -ForegroundColor Red
+        exit 1
+    }
+
+    if (Test-Path $TauriNodeSidecarDirParam) {
+        Remove-Item -Recurse -Force $TauriNodeSidecarDirParam
+    }
+    New-Item -ItemType Directory -Force -Path $TauriNodeSidecarDirParam | Out-Null
+
+    if ($env:SAGE_BUNDLED_NODE_SOURCE) {
+        $NodeRoot = $env:SAGE_BUNDLED_NODE_SOURCE
+        if (-not (Test-Path $NodeRoot)) {
+            Write-Host "[ERROR] Custom Node runtime directory not found: $NodeRoot" -ForegroundColor Red
+            exit 1
+        }
+
+        Get-ChildItem -Force $NodeRoot |
+            ForEach-Object {
+                Copy-Item -Path $_.FullName -Destination $TauriNodeSidecarDirParam -Recurse -Force
+            }
+
+        Write-Host "[Node Runtime] Using custom source: $NodeRoot" -ForegroundColor Green
+        Write-Host "[Node Runtime] Synced to: $TauriNodeSidecarDirParam" -ForegroundColor Green
+        return
+    }
+
+    $NodeExe = (Resolve-Path ((Get-Command node -ErrorAction Stop).Source)).Path
+    $NodeDir = Split-Path -Parent $NodeExe
+    $NpmPackageDir = Join-Path $NodeDir "node_modules/npm"
+
+    if (-not (Test-Path $NpmPackageDir)) {
+        $NpmCmd = (Get-Command npm -ErrorAction Stop).Source
+        $NpmDir = Split-Path -Parent $NpmCmd
+        $Candidate = Join-Path $NpmDir "node_modules/npm"
+        if (Test-Path $Candidate) {
+            $NpmPackageDir = $Candidate
+        }
+    }
+
+    if (-not (Test-Path $NodeExe)) {
+        Write-Host "[ERROR] Node executable not found: $NodeExe" -ForegroundColor Red
+        exit 1
+    }
+    if (-not (Test-Path $NpmPackageDir)) {
+        Write-Host "[ERROR] npm package directory not found: $NpmPackageDir" -ForegroundColor Red
+        exit 1
+    }
+
+    $TargetNodeModulesDir = Join-Path $TauriNodeSidecarDirParam "node_modules"
+    New-Item -ItemType Directory -Force -Path $TargetNodeModulesDir | Out-Null
+
+    Copy-Item -Path $NodeExe -Destination (Join-Path $TauriNodeSidecarDirParam "node.exe") -Force
+    Copy-Item -Path $NpmPackageDir -Destination (Join-Path $TargetNodeModulesDir "npm") -Recurse -Force
+
+    Write-Host "[Node Runtime] Node executable: $NodeExe" -ForegroundColor Green
+    Write-Host "[Node Runtime] npm package dir: $NpmPackageDir" -ForegroundColor Green
+    Write-Host "[Node Runtime] Synced minimal runtime to: $TauriNodeSidecarDirParam" -ForegroundColor Green
+}
+
+Write-Host ">>> Starting build tasks..." -ForegroundColor Cyan
+
+Build-PythonSidecar -DistDirParam $DistDir -TauriSidecarDirParam $TauriSidecarDir -AppDirParam $AppDir -RootDirParam $RootDir -ModeParam $Mode
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Sidecar build failed!" -ForegroundColor Red
+    exit 1
+}
+
+Build-Frontend -UiDirParam $UiDir -CacheDirParam $CacheDir -RootDirParam $RootDir
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Frontend build failed!" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host ">>> Build completed." -ForegroundColor Green
+
+Set-Location $RootDir
+
+Prepare-BundledNodeRuntime -TauriNodeSidecarDirParam $TauriNodeSidecarDir
+
+Write-Host "Building Tauri Windows executable..." -ForegroundColor Cyan
+Set-Location $TauriDir
+
+$TauriCmd = $null
+$TauriArgs = $null
+$LocalTauri = Join-Path $UiDir "node_modules\.bin\tauri"
+$LocalTauriCmd = Join-Path $UiDir "node_modules\.bin\tauri.cmd"
+if (Test-Path $LocalTauriCmd) {
+    Write-Host "Using local Tauri CLI (.cmd)..." -ForegroundColor Cyan
+    $TauriCmd = $LocalTauriCmd
+    $TauriArgs = if ($Mode -eq "release") { @("build") } else { @("build", "--debug") }
+} elseif (Test-Path $LocalTauri) {
+    Write-Host "Using local Tauri CLI (via npx)..." -ForegroundColor Cyan
+    $TauriCmd = "npx"
+    $TauriArgs = if ($Mode -eq "release") { @("tauri", "build") } else { @("tauri", "build", "--debug") }
+} elseif (Get-Command cargo-tauri -ErrorAction SilentlyContinue) {
+    Write-Host "Using Cargo Tauri CLI..." -ForegroundColor Cyan
+    $TauriCmd = "cargo"
+    $TauriArgs = if ($Mode -eq "release") { @("tauri", "build") } else { @("tauri", "build", "--debug") }
+} else {
+    Write-Host "Installing Tauri CLI (via npm)..." -ForegroundColor Cyan
+    npm install -g @tauri-apps/cli
+    $TauriCmd = "tauri"
+    $TauriArgs = if ($Mode -eq "release") { @("build") } else { @("build", "--debug") }
+}
+
+$EffectiveTauriConfig = New-EffectiveTauriConfig -TauriDirParam $TauriDir -CacheDirParam $CacheDir
+$TauriArgs += @("--config", $EffectiveTauriConfig)
+
+Write-Host "Tauri CLI: $TauriCmd" -ForegroundColor Cyan
+Write-Host "Tauri Args: $($TauriArgs -join ' ')" -ForegroundColor Cyan
+$env:CI = "true"
+$env:CARGO_TERM_COLOR = "never"
+# Skip signature for updater artifacts as keys are not provided
+# $env:TAURI_SKIP_SIGNATURE = "true"
+
+$env:TAURI_SIGNING_PRIVATE_KEY = $env:TAURI_SIGNING_PRIVATE_KEY
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+
+Write-Host "Building Tauri application (this may take a while)..." -ForegroundColor Cyan
+
+Set-Location $TauriDir
+& $TauriCmd @TauriArgs
+$ExitCode = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }
+if ($ExitCode -ne 0) {
+  Write-Host "[ERROR] Tauri build failed" -ForegroundColor Red
+  exit $ExitCode
+}
+ 
+Write-Host "======================================"
+Write-Host " Build completed successfully!"
+Write-Host "======================================"

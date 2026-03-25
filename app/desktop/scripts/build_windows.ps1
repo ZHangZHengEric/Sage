@@ -412,6 +412,8 @@ $EffectiveTauriConfig = New-EffectiveTauriConfig -TauriDirParam $TauriDir -Cache
 $TauriArgs += @("--config", $EffectiveTauriConfig)
 
 Write-Host "Tauri CLI: $TauriCmd" -ForegroundColor Cyan
+Write-Host "Tauri Args: $($TauriArgs -join ' ')" -ForegroundColor Cyan
+
 $env:CI = "true"
 $env:CARGO_TERM_COLOR = "never"
 # Skip signature for updater artifacts as keys are not provided
@@ -422,10 +424,12 @@ $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWOR
 
 Write-Host "Building Tauri application (this may take a while)..." -ForegroundColor Cyan
 
-$Process = Start-Process -FilePath $TauriCmd -ArgumentList $TauriArgs -NoNewWindow -Wait -PassThru -WorkingDirectory $TauriDir
-if ($Process.ExitCode -ne 0) {
+Set-Location $TauriDir
+& $TauriCmd @TauriArgs
+$ExitCode = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }
+if ($ExitCode -ne 0) {
   Write-Host "[ERROR] Tauri build failed" -ForegroundColor Red
-  exit $Process.ExitCode
+  exit $ExitCode
 }
  
 Write-Host "======================================"
