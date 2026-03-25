@@ -455,10 +455,15 @@ fi
 
 echo "Tauri CLI: ${TAURI_CMD[*]}"
 
-TAURI_TARGET_ARGS=()
+TAURI_BUILD_ARGS=(build)
+
 if [ "$OS_TYPE" = "linux" ] && [ "$TARGET" = "aarch64-unknown-linux-gnu" ]; then
   echo "使用显式 Tauri target: $TARGET"
-  TAURI_TARGET_ARGS=(--target "$TARGET")
+  TAURI_BUILD_ARGS+=(--target "$TARGET")
+fi
+
+if [ "$MODE" != "release" ]; then
+  TAURI_BUILD_ARGS+=(--debug)
 fi
 
 # Skip signature for updater artifacts as keys are not provided
@@ -470,12 +475,7 @@ if [ "$OS_TYPE" = "macos" ]; then
     xattr -rc "$TAURI_SIDECAR_DIR" 2>/dev/null || true
 fi
 
-if [ "$MODE" = "release" ]; then
-  # Cargo.toml now has [profile.release] for optimization
-  "${TAURI_CMD[@]}" build "${TAURI_TARGET_ARGS[@]}"
-else
-  "${TAURI_CMD[@]}" build --debug "${TAURI_TARGET_ARGS[@]}"
-fi
+"${TAURI_CMD[@]}" "${TAURI_BUILD_ARGS[@]}"
 
 echo "======================================"
 echo " 构建成功完成"
