@@ -215,7 +215,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF#refs/tags/desktop-v}"
           for file in release-assets/linux/*.deb; do
-            mv "$file" "release-assets/linux/SageAI-${VERSION}-${{ matrix.arch }}.deb"
+            mv "$file" "release-assets/linux/Sage_${VERSION}_${{ matrix.arch }}.deb"
           done
 
       - name: Release (Linux)
