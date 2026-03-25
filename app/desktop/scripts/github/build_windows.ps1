@@ -1,14 +1,14 @@
-# ===============================
-# build_windows.ps1
-# Build Sage Desktop for Windows
-# ===============================
+# ===========================================
+# build_github_windows.ps1
+# Build Sage Desktop for GitHub Actions (Win)
+# ===========================================
 
 $ErrorActionPreference = "Stop"
 
 # -------------------------------
 # Path Configuration
 # -------------------------------
-$RootDir = (Resolve-Path (Join-Path $PSScriptRoot "../../..")).Path
+$RootDir = (Resolve-Path (Join-Path $PSScriptRoot "../../../..")).Path
 $AppDir = Join-Path $RootDir "app/desktop"
 $CoreDir = Join-Path $AppDir "core"
 $UiDir = Join-Path $AppDir "ui"
@@ -42,20 +42,6 @@ function Get-FileHash256 {
     return "unknown"
 }
 
-function Find-CondaExe {
-    $paths = @(
-        $env:CONDA_EXE,
-        "$env:USERPROFILE\miniconda3\Scripts\conda.exe",
-        "$env:USERPROFILE\anaconda3\Scripts\conda.exe",
-        "C:\ProgramData\miniconda3\Scripts\conda.exe",
-        "C:\ProgramData\anaconda3\Scripts\conda.exe"
-    )
-    foreach ($p in $paths) {
-        if ($p -and (Test-Path $p)) { return $p }
-    }
-    return $null
-}
-
 function New-EffectiveTauriConfig {
     param($TauriDirParam, $CacheDirParam)
 
@@ -75,27 +61,31 @@ function New-EffectiveTauriConfig {
     return $effectiveConfig
 }
 
-$CondaExe = Find-CondaExe
-if (-not $CondaExe) {
-    Write-Host "[ERROR] Conda not found. Please install Miniconda or Anaconda." -ForegroundColor Red
-    exit 1
-}
+function Ensure-CondaEnv {
+    param($EnvNameParam)
 
-Write-Host "Found Conda: $CondaExe" -ForegroundColor Green
-& $CondaExe shell.powershell hook | Out-String | Invoke-Expression
+    if ($env:CONDA_DEFAULT_ENV -eq $EnvNameParam) {
+        Write-Host "Already in Conda environment '$EnvNameParam'." -ForegroundColor Green
+        return
+    }
 
-Write-Host "Activating Conda environment '$EnvName'..." -ForegroundColor Cyan
-
-$CurrentEnv = $env:CONDA_DEFAULT_ENV
-if ($CurrentEnv -ne $EnvName) {
-    conda activate $EnvName
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[ERROR] Failed to activate Conda environment" -ForegroundColor Red
+    if (-not (Get-Command conda -ErrorAction SilentlyContinue)) {
+        Write-Host "[ERROR] conda not found in CI environment." -ForegroundColor Red
         exit 1
     }
-} else {
-    Write-Host "Already in Conda environment '$EnvName'. Skipping activation." -ForegroundColor Green
+
+    & conda shell.powershell hook | Out-String | Invoke-Expression
+    conda activate $EnvNameParam
+
+    if ($env:CONDA_DEFAULT_ENV -ne $EnvNameParam) {
+        Write-Host "[ERROR] Failed to activate Conda environment '$EnvNameParam'." -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "Activated Conda environment '$EnvNameParam'." -ForegroundColor Green
 }
+
+Ensure-CondaEnv -EnvNameParam $EnvName
 
 Write-Host "Python: $(python --version)" -ForegroundColor Cyan
 Write-Host "Pip: $(pip --version)" -ForegroundColor Cyan
@@ -289,7 +279,7 @@ function Build-Frontend {
     if ($NewHash -eq $OldHash -and (Test-Path "node_modules")) {
         Write-Host "[Frontend] Deps unchanged, skipping npm install." -ForegroundColor Green
     } else {
-        npm install
+        npm install --prefer-offline --no-audit --no-fund
         $NewHash | Out-File -FilePath $HashFile -Encoding UTF8
     }
 
@@ -301,6 +291,17 @@ function Prepare-BundledNodeRuntime {
     param($TauriNodeSidecarDirParam)
 
     Write-Host "[Node Runtime] Preparing bundled Node runtime..." -ForegroundColor Cyan
+
+    $cachedNodeRuntime = Join-Path $CacheDir "node-runtime\windows-x86_64"
+    if (Test-Path (Join-Path $cachedNodeRuntime "node.exe")) {
+        if (Test-Path $TauriNodeSidecarDirParam) {
+            Remove-Item -Recurse -Force $TauriNodeSidecarDirParam
+        }
+        New-Item -ItemType Directory -Force -Path $TauriNodeSidecarDirParam | Out-Null
+        Copy-Item -Path "$cachedNodeRuntime\*" -Destination $TauriNodeSidecarDirParam -Recurse -Force
+        Write-Host "[Node Runtime] Restored from cache: $cachedNodeRuntime" -ForegroundColor Green
+        return
+    }
 
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
         Write-Host "[ERROR] node not found. Cannot prepare sidecar/node." -ForegroundColor Red
@@ -413,7 +414,6 @@ $TauriArgs += @("--config", $EffectiveTauriConfig)
 
 Write-Host "Tauri CLI: $TauriCmd" -ForegroundColor Cyan
 Write-Host "Tauri Args: $($TauriArgs -join ' ')" -ForegroundColor Cyan
-
 $env:CI = "true"
 $env:CARGO_TERM_COLOR = "never"
 # Skip signature for updater artifacts as keys are not provided

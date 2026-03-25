@@ -1,0 +1,74 @@
+name: Desktop Build Setup
+description: Common setup for desktop build jobs.
+
+inputs:
+  node_arch:
+    description: Node architecture (x64 or arm64)
+    required: true
+  rust_target:
+    description: Rust target triple
+    required: true
+  conda_arch:
+    description: Conda architecture (x64 or arm64)
+    required: true
+  deps_artifact:
+    description: Name of dependency artifact to download
+    required: true
+  pip_cache_path:
+    description: Python pip cache path(s)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        architecture: ${{ inputs.node_arch }}
+        cache: npm
+        cache-dependency-path: app/desktop/ui/package-lock.json
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ inputs.rust_target }}
+
+    - name: Rust Cache
+      uses: swatinem/rust-cache@v2
+      with:
+        workspaces: app/desktop/tauri
+        cache-all-crates: "true"
+        shared-key: "desktop-build"
+
+    - name: Setup Miniconda
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        auto-update-conda: true
+        python-version: 3.11
+        activate-environment: sage-desktop-env
+        auto-activate-base: false
+        architecture: ${{ inputs.conda_arch }}
+        channels: conda-forge,defaults
+        channel-priority: flexible
+
+    - name: Download Dependency Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.deps_artifact }}
+        path: .
+
+    - name: Cache Python Dependencies
+      uses: actions/cache@v4
+      with:
+        path: ${{ inputs.pip_cache_path }}
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Sync Tauri Version From Tag
+      if: startsWith(github.ref, 'refs/tags/desktop-v')
+      shell: bash
+      run: |
+        chmod +x app/desktop/scripts/github/sync_tauri_version.sh
+        app/desktop/scripts/github/sync_tauri_version.sh
