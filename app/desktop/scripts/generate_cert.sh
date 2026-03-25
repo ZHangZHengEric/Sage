@@ -13,7 +13,7 @@ if [ -f "$CERT_DIR/cert.pem" ]; then
     fi
 fi
 
-CERT_NAME="SageAI Self Signed"
+CERT_NAME="Sage Self Signed"
 CERT_PASS="sage-password"
 
 echo "Generating self-signed certificate..."
@@ -28,7 +28,7 @@ prompt = no
 [req_distinguished_name]
 CN = $CERT_NAME
 C = CN
-O = SageAI
+O = Sage
 
 [v3_req]
 keyUsage = critical, digitalSignature, keyEncipherment
