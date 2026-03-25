@@ -424,8 +424,13 @@ class LocalSandboxProvider(ISandboxHandle):
                         execution_time=0,
                     )
             except Exception as e:
-                logger.error(f"Isolation execution failed: {e}, falling back to direct execution")
-                # 隔离层执行失败，回退到直接执行
+                # 隔离层执行失败，永久禁用隔离层并回退到直接执行
+                # 避免每次执行都重复尝试和报错
+                if "Operation not permitted" in str(e) or "Seatbelt execution failed" in str(e):
+                    logger.warning(f"Isolation layer failed permanently (sandbox-exec not permitted), disabling isolation: {e}")
+                    self._isolation = None  # 永久禁用隔离层
+                else:
+                    logger.error(f"Isolation execution failed: {e}, falling back to direct execution")
 
         # 使用异步 subprocess 执行命令，避免阻塞
         import asyncio

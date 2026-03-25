@@ -14,7 +14,6 @@ from sagents.skill import SkillProxy, SkillManager
 from sagents.skill.sandbox_skill_manager import SandboxSkillManager
 from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.workflows import WorkflowManager
-from sagents.context.user_memory.manager import UserMemoryManager
 
 from sagents.utils.logger import logger
 from sagents.utils.lock_manager import lock_manager, UnifiedLock
@@ -49,7 +48,6 @@ class SessionContext:
         host_workspace: Optional[str] = None,
         context_budget_config: Optional[Dict[str, Any]] = None,
         system_context: Optional[Dict[str, Any]] = None,
-        user_memory_manager: Optional[Any] = None,
         tool_manager: Optional[Any] = None,
         skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
         parent_session_id: Optional[str] = None,
@@ -62,7 +60,6 @@ class SessionContext:
         self.session_root_space = session_root_space
         self.host_workspace: Optional[str] = host_workspace  # 代理工作区的宿主机路径
         self.virtual_workspace: str = virtual_workspace  # 代理工作区的虚拟路径
-        self.user_memory_manager = user_memory_manager
         self.tool_manager = tool_manager
         self.skill_manager = skill_manager  # 宿主机技能管理器
         self.sandbox_skill_manager: Optional[SandboxSkillManager] = None  # 沙箱技能管理器
@@ -642,28 +639,7 @@ class SessionContext:
             logger.info(f"SessionContext: Restricted tools for mode '{agent_mode}'. Removed: {tools_to_remove}")
 
 
-    async def init_user_memory_context(self):
-        """初始化用户记忆
-        """
-        # 使用已注入的UserMemoryManager
-        if self.user_memory_manager:
-            try:
-                # 检查是否可用
-                if not self.user_memory_manager.is_enabled():
-                    logger.warning(f"SessionContext: UserMemoryManager不可用，用户ID: {self.user_id}")
-                else:
-                    if self.user_id is None:
-                        logger.warning("SessionContext: 用户ID为空，无法初始化用户记忆")
-                        return
-                    logger.debug(f"SessionContext: UserMemoryManager已启用，用户ID: {self.user_id}")
-                    # user_memory_manager 初始化成功，需要在system context添加对于 记忆使用的说明和要求
-                    self.system_context['user_memory_usage_description'] = self.user_memory_manager.get_user_memory_usage_description()
-                    # 自动查询系统级记忆并注入到system_context
-                    await self._load_system_memories()
 
-            except Exception as e:
-                logger.error(f"SessionContext: 初始化UserMemoryManager失败: {e}")
-                # self.user_memory_manager = None # 不要置空全局实例
 
     def set_agent_config(self, model: Optional[str] = None, model_config: Optional[dict] = None, system_prefix: Optional[str] = None,
                          available_tools: Optional[list] = None, available_skills: Optional[list] = None, system_context: Optional[dict] = None,
@@ -780,61 +756,6 @@ class SessionContext:
         """
         self.parent_session_id = parent_session_id
         logger.debug(f"SessionContext: Set parent session {parent_session_id} for session {self.session_id}")
-
-    async def _load_system_memories(self):
-        """加载系统级记忆并注入到system_context
-
-        Args:
-            tool_manager: 工具管理器实例
-        """
-        if not self.user_id or not self.user_memory_manager:
-            return
-
-        try:
-            # 通过UserMemoryManager获取系统级记忆
-            system_memories = await self.user_memory_manager.get_system_memories(
-                user_id=self.user_id,
-                session_id=self.session_id,
-                tool_manager=self.tool_manager
-            )
-
-            if system_memories:
-                # 格式化记忆内容并注入到system_context
-                formatted_context = self.user_memory_manager.format_system_memories_for_context(system_memories)
-
-                if formatted_context:
-                    self.system_context['用户长期记忆'] = formatted_context
-                    logger.debug(f"成功注入 {len(system_memories)} 种类型的系统级记忆到system_context")
-            else:
-                logger.debug("未找到系统级记忆，跳过注入")
-
-        except Exception as e:
-            logger.error(f"加载系统级记忆失败: {e}")
-
-    async def refresh_system_memories(self):
-        """刷新系统级记忆"""
-        if self.user_memory_manager:
-            await self._load_system_memories()
-            logger.info("系统级记忆已刷新")
-
-    async def get_system_memories_summary(self) -> str:
-        """获取系统级记忆摘要
-
-        Returns:
-            系统级记忆的摘要字符串
-        """
-        if not self.user_memory_manager or not self.user_id:
-            return ""
-
-        try:
-            return await self.user_memory_manager.get_system_memories_summary(
-                user_id=self.user_id,
-                session_id=self.session_id,
-                tool_manager=self.tool_manager
-            )
-        except Exception as e:
-            logger.error(f"获取系统级记忆摘要失败: {e}")
-            return ""
 
     def match_language(self, response_language: str) -> str:
         """根据 response_language 匹配语言"""
