@@ -82,25 +82,6 @@ calc_hash() {
     python3 -c "import hashlib; print(hashlib.sha256(open('$1', 'rb').read()).hexdigest())" 2>/dev/null || echo "unknown"
 }
 
-prepare_tauri_build_config() {
-    local source_config="$TAURI_DIR/tauri.conf.json"
-    EFFECTIVE_TAURI_CONFIG="$CACHE_DIR/tauri.conf.effective.json"
-
-    if [ ! -f "$source_config" ]; then
-        echo "错误: 未找到 Tauri 配置文件: $source_config"
-        exit 1
-    fi
-
-    sed -E 's/"productName"[[:space:]]*:[[:space:]]*"[^"]*"/"productName": "Sage"/' \
-        "$source_config" > "$EFFECTIVE_TAURI_CONFIG"
-
-    if ! grep -q '"productName"[[:space:]]*:[[:space:]]*"Sage"' "$EFFECTIVE_TAURI_CONFIG"; then
-        echo "错误: 无法生成 productName=Sage 的临时配置文件"
-        exit 1
-    fi
-
-    echo "[Package] 使用 productName=Sage 作为打包命名基准（安装包将以 Sage_ 开头）"
-}
 
 ########################################
 # 1. Python Environment Setup (Conda)
@@ -486,8 +467,6 @@ if [ "$MODE" != "release" ]; then
   TAURI_BUILD_ARGS+=(--debug)
 fi
 
-prepare_tauri_build_config
-TAURI_BUILD_ARGS+=(--config "$EFFECTIVE_TAURI_CONFIG")
 
 # Skip signature for updater artifacts as keys are not provided
 # export TAURI_SKIP_SIGNATURE=true
