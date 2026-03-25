@@ -175,7 +175,6 @@
                     <SelectContent>
                       <SelectItem value="fibre">{{ t('agent.modeFibre') }}</SelectItem>
                       <SelectItem value="simple">{{ t('agent.modeSimple') }}</SelectItem>
-                      <SelectItem value="multi">{{ t('agent.modeMulti') }}</SelectItem>
                     </SelectContent>
                   </Select>
                 </FormItem>
