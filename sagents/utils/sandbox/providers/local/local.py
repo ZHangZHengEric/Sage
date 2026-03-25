@@ -127,6 +127,29 @@ class LocalSandboxProvider(ISandboxHandle):
                 return python_path
         return None
 
+    def _ensure_python_executable(self):
+        """确保 venv 中的 Python 解释器有执行权限"""
+        if sys.platform == "win32":
+            # Windows 下不需要设置执行权限
+            return
+
+        venv_bin = os.path.join(self._venv_dir, "bin")
+        python_executables = ["python", "python3"]
+
+        for exe_name in python_executables:
+            python_path = os.path.join(venv_bin, exe_name)
+            if os.path.exists(python_path):
+                try:
+                    # 获取当前权限
+                    current_mode = os.stat(python_path).st_mode
+                    # 添加执行权限 (owner, group, others)
+                    new_mode = current_mode | 0o111
+                    if current_mode != new_mode:
+                        os.chmod(python_path, new_mode)
+                        logger.info(f"[LocalSandboxProvider] 添加执行权限: {python_path}")
+                except Exception as e:
+                    logger.warning(f"[LocalSandboxProvider] 添加执行权限失败 {python_path}: {e}")
+
     def _ensure_python3_link(self):
         """确保 venv 中同时存在 python 和 python3 命令"""
         if sys.platform == "win32":
@@ -178,6 +201,9 @@ class LocalSandboxProvider(ISandboxHandle):
 
             # 确保 venv 中同时存在 python 和 python3 命令
             self._ensure_python3_link()
+
+            # 确保 Python 解释器有执行权限
+            self._ensure_python_executable()
 
     @property
     def sandbox_type(self) -> SandboxType:
