@@ -155,25 +155,63 @@ jobs:
         run: |
           ./app/desktop/scripts/build_windows.ps1 release
 
-      - name: Normalize Updater Artifact Name (macOS)
+      - name: Rename Artifacts (macOS)
         if: matrix.platform == 'macos'
         run: |
           VERSION="${GITHUB_REF#refs/tags/desktop-v}"
-          TARGET_DIR="app/desktop/tauri/target/release/bundle/macos"
-          TARGET_NAME="Sage_${VERSION}_${{ matrix.arch }}.app.tar.gz"
-
-          shopt -s nullglob
-          cd "$TARGET_DIR"
+          
+          # Rename DMG
+          cd app/desktop/tauri/target/release/bundle/dmg/
+          for file in *.dmg; do
+            mv "$file" "Sage-${VERSION}-${{ matrix.arch }}.dmg"
+          done
+          
+          # Rename Updater Bundles (tar.gz & sig) if exist
+          cd ../macos/
           for file in *.tar.gz; do
-            if [ "$file" != "$TARGET_NAME" ]; then
-              mv "$file" "$TARGET_NAME"
-            fi
+            mv "$file" "Sage-${VERSION}-${{ matrix.arch }}.app.tar.gz"
           done
           for file in *.tar.gz.sig; do
-            if [ "$file" != "${TARGET_NAME}.sig" ]; then
-              mv "$file" "${TARGET_NAME}.sig"
-            fi
+            mv "$file" "Sage-${VERSION}-${{ matrix.arch }}.app.tar.gz.sig"
           done
+
+      - name: Rename Artifacts (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $version = "${env:GITHUB_REF}" -replace '^refs/tags/desktop-v', ''
+          $nsisDir = "app/desktop/tauri/target/release/bundle/nsis"
+          $msiDir = "app/desktop/tauri/target/release/bundle/msi"
+          
+          # Rename Installer
+          if (Test-Path $nsisDir) {
+            Get-ChildItem $nsisDir -Filter *.exe | ForEach-Object {
+              Move-Item $_.FullName (Join-Path $nsisDir ("Sage-$version-x86_64-setup.exe")) -Force
+            }
+            
+            # Rename Updater Bundles (zip & sig)
+            Get-ChildItem $nsisDir -Filter *.zip | ForEach-Object {
+              Move-Item $_.FullName (Join-Path $nsisDir ("Sage-$version-x86_64-setup.zip")) -Force
+            }
+            Get-ChildItem $nsisDir -Filter *.zip.sig | ForEach-Object {
+              Move-Item $_.FullName (Join-Path $nsisDir ("Sage-$version-x86_64-setup.zip.sig")) -Force
+            }
+          }
+
+          # Rename Installer (MSI)
+          if (Test-Path $msiDir) {
+            Get-ChildItem $msiDir -Filter *.msi | ForEach-Object {
+              Move-Item $_.FullName (Join-Path $msiDir ("Sage-$version-x86_64-setup.msi")) -Force
+            }
+            
+            # Rename Updater Bundles (zip & sig)
+            Get-ChildItem $msiDir -Filter *.zip | ForEach-Object {
+              Move-Item $_.FullName (Join-Path $msiDir ("Sage-$version-x86_64-setup.msi.zip")) -Force
+            }
+            Get-ChildItem $msiDir -Filter *.zip.sig | ForEach-Object {
+              Move-Item $_.FullName (Join-Path $msiDir ("Sage-$version-x86_64-setup.msi.zip.sig")) -Force
+            }
+          }
 
       - name: Release (macOS)
         uses: softprops/action-gh-release@v1
@@ -215,7 +253,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF#refs/tags/desktop-v}"
           for file in release-assets/linux/*.deb; do
-            mv "$file" "release-assets/linux/Sage_${VERSION}_${{ matrix.arch }}.deb"
+            mv "$file" "release-assets/linux/Sage-${VERSION}-${{ matrix.arch }}.deb"
           done
 
       - name: Release (Linux)
