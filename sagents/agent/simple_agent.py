@@ -177,8 +177,18 @@ class SimpleAgent(AgentBase):
         else:
             messages_for_complete = messages_input
         
-        # 压缩消息，避免token超限
-        messages_for_complete = MessageManager.compress_messages(messages_for_complete,min(session_context.message_manager.context_budget_manager.budget_info.get('active_budget', 3000),3000))
+        # 压缩消息，避免 token 超限。budget_info 可能尚未初始化，需回退到默认预算。
+        active_budget = 3000
+        message_manager = getattr(session_context, "message_manager", None)
+        context_budget_manager = getattr(message_manager, "context_budget_manager", None)
+        budget_info = getattr(context_budget_manager, "budget_info", None)
+        if budget_info:
+            active_budget = min(budget_info.get('active_budget', 3000), 3000)
+
+        messages_for_complete = MessageManager.compress_messages(
+            messages_for_complete,
+            active_budget,
+        )
         
         clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_for_complete)
 
