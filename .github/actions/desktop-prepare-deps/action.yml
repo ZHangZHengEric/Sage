@@ -64,6 +64,7 @@ runs:
         path: |
           app/desktop/.build_cache
           app/desktop/ui/node_modules
+        include-hidden-files: true
         if-no-files-found: error
         compression-level: 0
         retention-days: 1
