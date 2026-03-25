@@ -109,6 +109,26 @@ run_pip() {
     "${PYTHON_BIN}" -m pip "$@"
 }
 
+restore_ui_tool_permissions() {
+    if [ ! -d "$UI_DIR/node_modules" ]; then
+        return
+    fi
+
+    echo "[Frontend] 恢复缓存依赖的可执行权限..."
+
+    if [ -d "$UI_DIR/node_modules/.bin" ]; then
+        find "$UI_DIR/node_modules/.bin" -maxdepth 1 -type f -exec chmod +x {} +
+    fi
+
+    find "$UI_DIR/node_modules" -type f \( \
+        -path "*/vite/bin/*" -o \
+        -path "*/@tauri-apps/cli/*" -o \
+        -path "*/esbuild/bin/*" -o \
+        -path "*/@esbuild/*/bin/*" -o \
+        -path "*/rollup/dist/bin/*" \
+    \) -exec chmod +x {} + 2>/dev/null || true
+}
+
 prepare_tauri_build_config() {
     local source_config="$TAURI_DIR/tauri.conf.json"
     EFFECTIVE_TAURI_CONFIG="$CACHE_DIR/tauri.conf.effective.json"
@@ -372,6 +392,8 @@ build_frontend() {
         echo "$NEW_HASH" > "$HASH_FILE"
     fi
 
+    restore_ui_tool_permissions
+
     # Increase Node.js memory limit for build
     export NODE_OPTIONS="--max-old-space-size=4096"
     npm run build
@@ -429,6 +451,8 @@ if ! command -v cargo >/dev/null; then
   echo "Cargo not found. Install Rust first."
   exit 1
 fi
+
+restore_ui_tool_permissions
 
 # Use tauri CLI from node_modules if available (much faster to install)
 if [ -f "$UI_DIR/node_modules/.bin/tauri" ]; then
