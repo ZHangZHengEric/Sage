@@ -77,6 +77,21 @@ jobs:
           channels: conda-forge,defaults
           channel-priority: flexible
 
+      - name: Sync Tauri Version From Tag
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/desktop-v}"
+          echo "Syncing Tauri version to ${VERSION}"
+          TAURI_VERSION="$VERSION" node - <<'EOF'
+          const fs = require('fs');
+          const configPath = 'app/desktop/tauri/tauri.conf.json';
+          const version = process.env.TAURI_VERSION;
+          const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+          config.version = version;
+          fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+          EOF
+
       - name: Cache Python Dependencies
         uses: actions/cache@v4
         with:
@@ -231,6 +246,15 @@ jobs:
 
           mkdir -p release-assets/linux
           cp "$DEB_DIR"/*.deb release-assets/linux/
+
+      - name: Rename Artifacts (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/desktop-v}"
+          for file in release-assets/linux/*.deb; do
+            mv "$file" "release-assets/linux/SageAI-${VERSION}-${{ matrix.arch }}.deb"
+          done
 
       - name: Release (Linux)
         uses: softprops/action-gh-release@v1
