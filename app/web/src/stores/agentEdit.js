@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
+import { normalizeAgentMode } from '@/utils/agentMode.js'
 
 export const useAgentEditStore = defineStore('agent-edit', () => {
   // Constants
@@ -130,7 +131,11 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     const { preserveStep = false } = options
 
     if (agentData) {
-      formData.value = JSON.parse(JSON.stringify({ ...defaultFormData, ...agentData }))
+      const processedData = {
+        ...agentData,
+        agentMode: normalizeAgentMode(agentData.agentMode)
+      }
+      formData.value = JSON.parse(JSON.stringify({ ...defaultFormData, ...processedData }))
       if (!Array.isArray(formData.value.availableTools)) formData.value.availableTools = []
       if (!Array.isArray(formData.value.availableSkills)) formData.value.availableSkills = []
       if (!Array.isArray(formData.value.availableKnowledgeBases)) formData.value.availableKnowledgeBases = []
