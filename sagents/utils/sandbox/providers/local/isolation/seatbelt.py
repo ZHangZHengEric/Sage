@@ -20,16 +20,17 @@ class SeatbeltIsolation:
         self.allowed_paths = allowed_paths
         self.sandbox_dir = sandbox_dir
         
-    def _generate_profile(self, output_pkl: str, additional_read_paths: list = None, 
+    def _generate_profile(self, output_pkl: str, additional_read_paths: list = None,
                          additional_write_paths: list = None) -> str:
         """生成 seatbelt 配置文件"""
         import tempfile
-        
+
         # 构建允许的路径
         allowed = list(self.allowed_paths)
         allowed.append(self.host_workspace)
         allowed.append(self.sandbox_dir)
-        
+        allowed.append(self.venv_dir)  # 添加 venv 目录到允许路径
+
         if additional_read_paths:
             allowed.extend(additional_read_paths)
         if additional_write_paths:
@@ -45,14 +46,17 @@ class SeatbeltIsolation:
             "(allow process-fork)",
             "(allow process-exec)",
         ]
-        
+
         # 添加路径权限
         for path in allowed:
             if os.path.isdir(path):
                 lines.append(f"(allow file* (literal \"{path}\"))")
                 lines.append(f"(allow file* (subpath \"{path}\"))")
+                # 允许执行该路径下的程序
+                lines.append(f"(allow process-exec (subpath \"{path}\"))")
             elif os.path.isfile(path):
                 lines.append(f"(allow file* (literal \"{path}\"))")
+                lines.append(f"(allow process-exec (literal \"{path}\"))")
         
         # 允许网络
         lines.append("(allow network*)")
