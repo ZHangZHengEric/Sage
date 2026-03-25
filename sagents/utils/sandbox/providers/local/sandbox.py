@@ -4,7 +4,7 @@ Sandbox - 沙箱核心类
 核心功能：
 1. 路径映射：虚拟路径 ↔ 宿主机路径
 2. Python 虚拟环境：隔离 Python 依赖
-3. 执行模式：subprocess（默认，无 FS 隔离）
+3. 执行模式：bwrap/seatbelt（默认优先，缺失时可退回 subprocess）
 """
 import sys
 import os
@@ -56,7 +56,7 @@ class Sandbox:
                  host_workspace: Optional[str] = None, 
                  virtual_workspace: str = "/sage-workspace", 
                  linux_isolation_mode: str = 'auto', 
-                 macos_isolation_mode: str = 'subprocess'):
+                 macos_isolation_mode: str = 'seatbelt'):
         logger.debug(f"初始化沙箱 Sandbox")
         logger.debug(f"  平台: {sys.platform}")
         logger.debug(f"  host_workspace: {host_workspace}")
