@@ -1162,10 +1162,11 @@ const loadIMConfig = async () => {
             }
           }
           
-          // Auto-mark as passed if config exists (has been tested before)
+          // Auto-mark as passed if config has actual values (not just empty strings)
           // This allows users to enable/disable without re-testing
-          const hasConfig = Object.keys(data.config || {}).length > 0
-          if (hasConfig) {
+          const configValues = Object.values(data.config || {})
+          const hasRealConfig = configValues.some(v => v && v.toString().trim() !== '')
+          if (hasRealConfig) {
             imTestStatus.value = {
               ...imTestStatus.value,
               [provider]: { tested: true, passed: true }
@@ -1175,7 +1176,9 @@ const loadIMConfig = async () => {
               ...imFrozenConfig.value,
               [provider]: JSON.parse(JSON.stringify(updatedConfig))
             }
-            console.log(`[AgentEdit] Auto-marked ${provider} as tested (config exists)`)
+            console.log(`[AgentEdit] Auto-marked ${provider} as tested (has real config)`)
+          } else {
+            console.log(`[AgentEdit] Not marking ${provider} as tested (config is empty)`)
           }
         }
       }
