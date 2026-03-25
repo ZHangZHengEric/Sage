@@ -42,7 +42,7 @@ def create_logo():
     draw.polygon(points, fill=shape_color)
 
     # Save
-    output_path = "app/web/public/sage_logo.png"
+    output_path = "app/server/web/public/sage_logo.png"
     img.save(output_path)
     print(f"Logo generated at {output_path}")
 
