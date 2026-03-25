@@ -21,11 +21,85 @@ import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-import streamlit as st
-from openai import AsyncOpenAI
-# 项目路径配置
-project_root = Path(os.path.realpath(__file__)).parent.parent
-sys.path.insert(0, str(project_root))
+from _example_support import (
+    add_project_root,
+    ensure_python_version,
+    exit_for_missing_dependency,
+    maybe_show_help,
+    script_dir,
+)
+
+EXAMPLES_DIR = script_dir(__file__)
+
+
+def build_argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description='Sage Multi-Agent Interactive Chat',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例用法:
+  streamlit run examples/sage_demo.py -- --default_llm_api_key YOUR_API_KEY --default_llm_api_base_url URL --default_llm_model_name gpt-4.1
+        """
+    )
+
+    parser.add_argument('--default_llm_api_key', required=True,
+                        help='默认LLM API Key')
+    parser.add_argument('--default_llm_api_base_url', required=True,
+                        help='默认LLM API Base')
+    parser.add_argument('--default_llm_model_name', required=True,
+                        help='默认LLM API Model')
+    parser.add_argument('--default_llm_max_tokens', default=4096, type=int,
+                        help='默认LLM API Max Tokens')
+    parser.add_argument('--default_llm_temperature', default=0.3, type=float,
+                        help='默认LLM API Temperature')
+    parser.add_argument('--default_llm_max_model_len', default=54000, type=int,
+                        help='默认LLM 最大上下文')
+    parser.add_argument('--default_llm_top_p', default=0.9, type=float,
+                        help='默认LLM Top P')
+    parser.add_argument('--default_llm_presence_penalty', default=0.0, type=float,
+                        help='默认LLM Presence Penalty')
+
+    parser.add_argument("--context_history_ratio", type=float, default=0.2,
+                        help='上下文预算管理器：历史消息的比例（0-1之间）')
+    parser.add_argument("--context_active_ratio", type=float, default=0.3,
+                        help='上下文预算管理器：活跃消息的比例（0-1之间）')
+    parser.add_argument("--context_max_new_message_ratio", type=float, default=0.5,
+                        help='上下文预算管理器：新消息的比例（0-1之间）')
+    parser.add_argument("--context_recent_turns", type=int, default=0,
+                        help='上下文预算管理器：限制最近的对话轮数，0表示不限制')
+
+    parser.add_argument('--host', default='0.0.0.0',
+                        help='Server Host')
+    parser.add_argument('--port', default=8501, type=int,
+                        help='Server Port')
+
+    parser.add_argument('--mcp_config', default=str(EXAMPLES_DIR / 'mcp_setting.json'),
+                        help='MCP配置文件路径')
+    parser.add_argument('--workspace', default='sage_demo_workspace',
+                        help='工作空间目录')
+    parser.add_argument('--logs_dir', default='logs',
+                        help='日志目录')
+    parser.add_argument('--skills_path', default=None,
+                        help='技能文件夹路径')
+    parser.add_argument('--preset_running_config', default=str(EXAMPLES_DIR / 'preset_running_config.json'),
+                        help='预设配置，system_context，以及workflow，与接口中传过来的合并使用')
+    parser.add_argument('--memory_root', default=None,
+                        help='记忆存储根目录（已废弃，请使用 --memory_type）')
+    parser.add_argument('--memory_type', default='session',
+                        help='记忆类型: session | user')
+
+    return parser
+
+
+maybe_show_help(build_argument_parser)
+ensure_python_version(__file__)
+project_root = add_project_root(__file__)
+
+try:
+    import streamlit as st
+    from openai import AsyncOpenAI
+except ModuleNotFoundError as exc:
+    exit_for_missing_dependency(__file__, exc)
 
 from sagents.context.messages.message_manager import MessageManager
 from sagents.sagents import SAgent
@@ -609,7 +683,6 @@ def run_web_demo(api_key: str, model_name: Optional[str] = None, base_url: Optio
         'preset_running_config': preset_running_config,
         'logs_dir': logs_dir,
         'context_history_ratio': context_history_ratio,
-        'context_history_ratio': context_history_ratio,
         'context_active_ratio': context_active_ratio,
         'context_max_new_message_ratio': context_max_new_message_ratio,
         'context_recent_turns': context_recent_turns
@@ -685,63 +758,7 @@ def run_web_demo(api_key: str, model_name: Optional[str] = None, base_url: Optio
 
 def parse_arguments() -> Dict[str, Any]:
     """解析命令行参数"""
-    parser = argparse.ArgumentParser(
-        description='Sage Multi-Agent Interactive Chat',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-示例用法:
-  python sage_demo.py --default_llm_api_key YOUR_API_KEY
-  python sage_demo.py --default_llm_api_key YOUR_API_KEY --default_llm_model_name gpt-4
-        """
-    )
-
-    # 与 sage_server.py 保持一致的参数
-    parser.add_argument('--default_llm_api_key', required=True,
-                        help='默认LLM API Key')
-    parser.add_argument('--default_llm_api_base_url', required=True,
-                        help='默认LLM API Base')
-    parser.add_argument('--default_llm_model_name', required=True,
-                        help='默认LLM API Model')
-    parser.add_argument('--default_llm_max_tokens', default=4096, type=int,
-                        help='默认LLM API Max Tokens')
-    parser.add_argument('--default_llm_temperature', default=0.3, type=float,
-                        help='默认LLM API Temperature')
-    parser.add_argument('--default_llm_max_model_len', default=54000, type=int,
-                        help='默认LLM 最大上下文')
-    parser.add_argument('--default_llm_top_p', default=0.9, type=float,
-                        help='默认LLM Top P')
-    parser.add_argument('--default_llm_presence_penalty', default=0.0, type=float,
-                        help='默认LLM Presence Penalty')
-
-    parser.add_argument("--context_history_ratio", type=float, default=0.2,
-                        help='上下文预算管理器：历史消息的比例（0-1之间）')
-    parser.add_argument("--context_active_ratio", type=float, default=0.3,
-                        help='上下文预算管理器：活跃消息的比例（0-1之间）')
-    parser.add_argument("--context_max_new_message_ratio", type=float, default=0.5,
-                        help='上下文预算管理器：新消息的比例（0-1之间）')
-    parser.add_argument("--context_recent_turns", type=int, default=0,
-                        help='上下文预算管理器：限制最近的对话轮数，0表示不限制')
-
-    parser.add_argument('--host', default='0.0.0.0',
-                        help='Server Host')
-    parser.add_argument('--port', default=8001, type=int,
-                        help='Server Port')
-
-    parser.add_argument('--mcp_config', default='mcp_setting.json',
-                        help='MCP配置文件路径')
-    parser.add_argument('--workspace', default='sage_demo_workspace',
-                        help='工作空间目录')
-    parser.add_argument('--logs_dir', default='logs',
-                        help='日志目录')
-    parser.add_argument('--skills_path', default=None,
-                        help='技能文件夹路径')
-    parser.add_argument('--preset_running_config', default='',
-                        help='预设配置，system_context，以及workflow，与接口中传过来的合并使用')
-    parser.add_argument('--memory_root', default=None,
-                        help='记忆存储根目录（已废弃，请使用 --memory_type）')
-    parser.add_argument('--memory_type', default='session',
-                        help='记忆类型: session | user')
-
+    parser = build_argument_parser()
     args = parser.parse_args()
 
     # 处理workspace路径

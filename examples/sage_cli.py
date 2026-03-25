@@ -10,19 +10,88 @@ import uuid
 from copy import deepcopy
 from typing import Any, Dict, Optional, Union
 
-from openai import AsyncOpenAI
-from rich.console import Console
-from prompt_toolkit import Application
-from prompt_toolkit.layout import Layout, HSplit, VSplit
-from prompt_toolkit.widgets import Frame, TextArea, Label
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.filters import to_filter
+from _example_support import (
+    add_project_root,
+    ensure_python_version,
+    exit_for_missing_dependency,
+    maybe_show_help,
+    script_dir,
+)
 
-sys.path.append((os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-print(f'添加路径：{(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))}')
+EXAMPLES_DIR = script_dir(__file__)
+
+
+def build_argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description='Sage Multi-Agent CLI Tool',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例用法:
+  python3 examples/sage_cli.py --default_llm_api_key YOUR_API_KEY --default_llm_model_name gpt-4.1 --agent_mode fibre
+        """
+    )
+
+    parser.add_argument('--default_llm_api_key', required=True, help='默认LLM API Key')
+    parser.add_argument('--default_llm_api_base_url', required=True, help='默认LLM API Base')
+    parser.add_argument('--default_llm_model_name', required=True, help='默认LLM API Model')
+    parser.add_argument('--default_llm_max_tokens', default=4096, type=int, help='默认LLM API Max Tokens')
+    parser.add_argument('--default_llm_temperature', default=0.2, type=float, help='默认LLM API Temperature')
+    parser.add_argument('--default_llm_max_model_len', default=54000, type=int, help='默认LLM 最大上下文')
+    parser.add_argument('--default_llm_top_p', default=0.9, type=float, help='默认LLM Top P')
+    parser.add_argument('--default_llm_presence_penalty', default=0.0, type=float, help='默认LLM Presence Penalty')
+
+    parser.add_argument("--context_history_ratio", type=float, default=0.2,
+                        help='上下文预算管理器：历史消息的比例（0-1之间）')
+    parser.add_argument("--context_active_ratio", type=float, default=0.3,
+                        help='上下文预算管理器：活跃消息的比例（0-1之间）')
+    parser.add_argument("--context_max_new_message_ratio", type=float, default=0.5,
+                        help='上下文预算管理器：新消息的比例（0-1之间）')
+    parser.add_argument("--context_recent_turns", type=int, default=0,
+                        help='上下文预算管理器：限制最近的对话轮数，0表示不限制')
+
+    parser.add_argument('--user_id', type=str, default=None, help='用户ID')
+    parser.add_argument('--memory_root', type=str, default=None, help='记忆根目录')
+    parser.add_argument('--tools_folders', nargs='+', default=[], help='工具目录路径（多个路径用空格分隔）')
+    parser.add_argument('--skills_path', type=str, default=None, help='技能目录路径')
+    parser.add_argument('--deepthink', action='store_true', default=None, help='开启深度思考')
+    parser.add_argument('--no-deepthink', action='store_true', default=None, help='禁用深度思考')
+    parser.add_argument('--agent_mode', type=str, default=None, choices=['fibre', 'simple', 'multi'], help='智能体模式: fibre, simple, multi')
+    parser.add_argument('--simple_ui', action='store_true', default=False, help='使用简化版 UI（不使用 prompt_toolkit，适用于 fibre 模式）')
+
+    parser.add_argument('--no_terminal_log', action='store_true', default=True, help='停止终端打印log (默认开启)')
+    parser.add_argument('--show_terminal_log', action='store_false', dest='no_terminal_log', help='开启终端打印log')
+    parser.add_argument('--sandbox_type', type=str, default='local', choices=['local', 'passthrough'], help='沙箱类型: local (本地沙箱), passthrough (直通模式)')
+    parser.add_argument('--workspace', type=str, default=os.path.join(os.getcwd(), 'agent_workspace'), help='工作目录（宿主机路径）')
+    parser.add_argument('--virtual_workspace', type=str, default=os.path.join(os.getcwd(), 'agent_workspace'), help='虚拟工作区路径（沙箱内）')
+    parser.add_argument('--session_root', type=str, default=None, help='会话根目录（默认在工作目录下的 agent_sessions 文件夹）')
+    parser.add_argument('--session_id', type=str, default=None, help='指定会话 ID（可选）')
+    parser.add_argument('--agent_id', type=str, default='eric', help='指定 Agent ID（可选，默认使用 session_id）')
+    parser.add_argument('--mcp_setting_path', type=str, default=str(EXAMPLES_DIR / 'mcp_setting.json'),
+                        help='MCP 设置文件路径，文件内容为 JSON 格式')
+    parser.add_argument('--preset_running_agent_config_path', type=str, default=str(EXAMPLES_DIR / 'preset_running_agent_config.json'),
+                        help='预设运行配置文件路径')
+    parser.add_argument('--memory_type', type=str, default='session', help='记忆类型 (session/user)')
+
+    return parser
+
+
+maybe_show_help(build_argument_parser)
+ensure_python_version(__file__)
+PROJECT_ROOT = add_project_root(__file__)
+
+try:
+    from openai import AsyncOpenAI
+    from rich.console import Console
+    from prompt_toolkit import Application
+    from prompt_toolkit.layout import Layout, HSplit, VSplit
+    from prompt_toolkit.widgets import Frame, TextArea, Label
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.filters import to_filter
+except ModuleNotFoundError as exc:
+    exit_for_missing_dependency(__file__, exc)
 
 # 设置 Sage 环境变量
-os.environ.setdefault('SAGE_ROOT', os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.environ.setdefault('SAGE_ROOT', str(PROJECT_ROOT))
 os.environ.setdefault('SAGE_USE_CLAW_MODE', 'true')
 
 from sagents.context.messages.message import MessageChunk, MessageType
@@ -807,57 +876,7 @@ async def chat_fibre(
 
 def parse_arguments() -> Dict[str, Any]:
     """解析命令行参数"""
-    parser = argparse.ArgumentParser(
-        description='Sage Multi-Agent CLI Tool',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-示例用法:
-  python sage_cli.py --default_llm_api_key YOUR_API_KEY --default_llm_model_name gpt-4 --agent_mode fibre
-        """
-    )
-
-    # 与 sage_server.py 保持一致的参数
-    parser.add_argument('--default_llm_api_key', required=True, help='默认LLM API Key')
-    parser.add_argument('--default_llm_api_base_url', required=True, help='默认LLM API Base')
-    parser.add_argument('--default_llm_model_name', required=True, help='默认LLM API Model')
-    parser.add_argument('--default_llm_max_tokens', default=4096, type=int, help='默认LLM API Max Tokens')
-    parser.add_argument('--default_llm_temperature', default=0.2, type=float, help='默认LLM API Temperature')
-    parser.add_argument('--default_llm_max_model_len', default=54000, type=int, help='默认LLM 最大上下文')
-    parser.add_argument('--default_llm_top_p', default=0.9, type=float, help='默认LLM Top P')
-    parser.add_argument('--default_llm_presence_penalty', default=0.0, type=float, help='默认LLM Presence Penalty')
-
-    parser.add_argument("--context_history_ratio", type=float, default=0.2,
-                        help='上下文预算管理器：历史消息的比例（0-1之间）')
-    parser.add_argument("--context_active_ratio", type=float, default=0.3,
-                        help='上下文预算管理器：活跃消息的比例（0-1之间）')
-    parser.add_argument("--context_max_new_message_ratio", type=float, default=0.5,
-                        help='上下文预算管理器：新消息的比例（0-1之间）')
-    parser.add_argument("--context_recent_turns", type=int, default=0,
-                        help='上下文预算管理器：限制最近的对话轮数，0表示不限制')
-
-    parser.add_argument('--user_id', type=str, default=None, help='用户ID')
-    parser.add_argument('--memory_root', type=str, default=None, help='记忆根目录')
-    parser.add_argument('--tools_folders', nargs='+', default=[], help='工具目录路径（多个路径用空格分隔）')
-    parser.add_argument('--skills_path', type=str, default=None, help='技能目录路径')
-    parser.add_argument('--deepthink', action='store_true', default=None, help='开启深度思考')
-    parser.add_argument('--no-deepthink', action='store_true', default=None, help='禁用深度思考')
-    parser.add_argument('--agent_mode', type=str, default=None, choices=['fibre', 'simple', 'multi'], help='智能体模式: fibre, simple, multi')
-    parser.add_argument('--simple_ui', action='store_true', default=False, help='使用简化版 UI（不使用 prompt_toolkit，适用于 fibre 模式）')
-    
-    parser.add_argument('--no_terminal_log', action='store_true', default=True, help='停止终端打印log (默认开启)')
-    parser.add_argument('--show_terminal_log', action='store_false', dest='no_terminal_log', help='开启终端打印log')
-    parser.add_argument('--sandbox_type', type=str, default='local', choices=['local', 'passthrough'], help='沙箱类型: local (本地沙箱), passthrough (直通模式)')
-    parser.add_argument('--workspace', type=str, default=os.path.join(os.getcwd(), 'agent_workspace'), help='工作目录（宿主机路径）')
-    parser.add_argument('--virtual_workspace', type=str, default=os.path.join(os.getcwd(), 'agent_workspace'), help='虚拟工作区路径（沙箱内）')
-    parser.add_argument('--session_root', type=str, default=None, help='会话根目录（默认在工作目录下的 agent_sessions 文件夹）')
-    parser.add_argument('--session_id', type=str, default=None, help='指定会话 ID（可选）')
-    parser.add_argument('--agent_id', type=str, default='eric', help='指定 Agent ID（可选，默认使用 session_id）')
-    parser.add_argument('--mcp_setting_path', type=str, default=os.path.join(os.path.dirname(__file__), 'mcp_setting.json'),
-                        help="""MCP 设置文件路径，文件内容为json格式""")
-    parser.add_argument('--preset_running_agent_config_path', type=str, default=os.path.join(os.path.dirname(__file__), 'preset_running_agent_config.json'),
-                        help="""预设运行配置文件路径""")
-    parser.add_argument('--memory_type', type=str, default='session', help='记忆类型 (session/user)')
-
+    parser = build_argument_parser()
     args = parser.parse_args()
 
     # 读取预设运行配置文件

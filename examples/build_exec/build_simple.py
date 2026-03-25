@@ -4,6 +4,8 @@ Sage Server 构建脚本（仅生成二进制）
 只进行本地二进制构建，不包含任何 Docker 打包或部署逻辑
 """
 
+import argparse
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -13,9 +15,11 @@ from pathlib import Path
 
 class SimpleBuilder:
     def __init__(self):
-        self.project_root = Path(__file__).parent.parent.parent  # 回到 agent_server 目录
+        self.project_root = Path(__file__).resolve().parents[2]
+        self.examples_root = self.project_root / "examples"
+        self.entry_script = self.examples_root / "sage_server.py"
         print("项目根目录:", self.project_root)
-        self.build_dir = Path(__file__).parent / "build"  # 构建目录放在 build_tools 下
+        self.build_dir = Path(__file__).resolve().parent / "build"
 
     def clean_build(self):
         """清理构建目录"""
@@ -28,11 +32,15 @@ class SimpleBuilder:
         self.build_dir.mkdir(exist_ok=True)
         print("✅ 构建目录清理完成")
 
-    def build_binary(self):
+    def build_binary(self, dry_run: bool = False):
         """构建二进制文件（仅 PyInstaller 单文件）"""
         print("🔨 构建二进制文件...")
 
         try:
+            if not self.entry_script.exists():
+                print(f"❌ 未找到入口脚本: {self.entry_script}")
+                return False
+
             # 切换到项目目录
             os.chdir(self.project_root)
 
@@ -46,11 +54,11 @@ class SimpleBuilder:
                 "--name", "sage_stream_service",
 
                 # 添加 prompt 文件和其他资源文件
-                "--add-data", f"{self.project_root.parent / 'Sage' / 'sagents' / 'prompts'}/*{os.pathsep}sagents/prompts/",
-                "--add-data", f"{self.project_root.parent / 'Sage' / 'sagents' / 'utils'}/*{os.pathsep}sagents/utils/",
-                "--add-data", f"{self.project_root.parent / 'Sage' / 'sagents' / 'context'}/*{os.pathsep}sagents/context/",
-                "--add-data", f"{self.project_root.parent / 'Sage' / 'sagents' / 'tool'}/*{os.pathsep}sagents/tool/",
-                "--add-data", f"{self.project_root.parent / 'Sage' / 'sagents' / 'flow'}/*{os.pathsep}sagents/flow/",
+                "--add-data", f"{self.project_root / 'sagents' / 'prompts'}/*{os.pathsep}sagents/prompts/",
+                "--add-data", f"{self.project_root / 'sagents' / 'utils'}/*{os.pathsep}sagents/utils/",
+                "--add-data", f"{self.project_root / 'sagents' / 'context'}/*{os.pathsep}sagents/context/",
+                "--add-data", f"{self.project_root / 'sagents' / 'tool'}/*{os.pathsep}sagents/tool/",
+                "--add-data", f"{self.project_root / 'sagents' / 'flow'}/*{os.pathsep}sagents/flow/",
 
                 "--hidden-import", "fastapi",
                 "--hidden-import", "uvicorn",
@@ -134,7 +142,6 @@ class SimpleBuilder:
                 "--hidden-import", "websockets",
                 "--hidden-import", "python-daemon",
                 "--hidden-import", "daemon.pidfile",
-                "--paths", str(self.project_root.parent / "Sage"),
                 "--paths", str(self.project_root),
                 "--collect-all", "sagents",
                 "--collect-all", "mcp",
@@ -220,10 +227,18 @@ class SimpleBuilder:
                 "--collect-all", "opentelemetry-sdk",
                 "--collect-all", "opentelemetry-exporter-otlp",
                 # 测试相关依赖不需要打包到生产二进制
-                "app/sage_server.py"
+                str(self.entry_script)
             ]
 
             print(f"执行命令: {' '.join(cmd)}")
+            if dry_run:
+                print("📝 dry-run 模式，不执行构建")
+                return True
+
+            if importlib.util.find_spec("PyInstaller") is None:
+                print("❌ 未安装 PyInstaller，请先执行: python3 -m pip install -r requirements.txt")
+                return False
+
             subprocess.run(cmd, check=True, capture_output=True, text=True)
 
             print("✅ 二进制文件构建完成")
@@ -262,14 +277,24 @@ class SimpleBuilder:
 
 def main():
     """主函数"""
+    parser = argparse.ArgumentParser(description="构建 examples/sage_server.py 的单文件二进制")
+    parser.add_argument("--clean", action="store_true", help="仅清理构建目录")
+    parser.add_argument("--dry-run", action="store_true", help="只打印 PyInstaller 命令，不实际执行")
+    args = parser.parse_args()
+
     builder = SimpleBuilder()
 
-    if len(sys.argv) > 1 and sys.argv[1] == "--clean":
+    if args.clean:
         builder.clean_build()
         print("✅ 清理完成")
         return
 
-    success = builder.build()
+    if args.dry_run:
+        builder.clean_build()
+        success = builder.build_binary(dry_run=True)
+    else:
+        success = builder.build()
+
     if success:
         print("✅ 构建成功")
         print(f"📦 输出目录: {builder.build_dir}")
