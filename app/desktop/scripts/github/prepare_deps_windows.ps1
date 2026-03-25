@@ -22,6 +22,18 @@ Write-Host "Preparing desktop dependencies for windows/x86_64..." -ForegroundCol
 $requirementsHash = Get-FileHash256 -FilePath (Join-Path $RootDir "requirements.txt")
 $requirementsHash | Out-File -FilePath (Join-Path $CacheDir ".requirements.hash") -Encoding UTF8
 
+$PipIndexUrl = if ($env:PIP_INDEX_URL) { $env:PIP_INDEX_URL } else { "https://pypi.org/simple" }
+$WheelhouseDir = Join-Path $CacheDir "wheelhouse"
+if (Test-Path $WheelhouseDir) {
+    Remove-Item -Path $WheelhouseDir -Recurse -Force
+}
+New-Item -ItemType Directory -Force -Path $WheelhouseDir | Out-Null
+
+Write-Host "Preparing Python wheelhouse at $WheelhouseDir..." -ForegroundColor Cyan
+pip download --dest $WheelhouseDir -r (Join-Path $RootDir "requirements.txt") --index-url $PipIndexUrl
+pip download --dest $WheelhouseDir python-magic-bin --index-url $PipIndexUrl
+pip download --dest $WheelhouseDir --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url $PipIndexUrl
+
 Set-Location $UiDir
 npm install --prefer-offline --no-audit --no-fund
 $packageLockHash = Get-FileHash256 -FilePath (Join-Path $UiDir "package-lock.json")
