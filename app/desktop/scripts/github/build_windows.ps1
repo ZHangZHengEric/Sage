@@ -1,14 +1,14 @@
-# ===============================
-# build_windows.ps1
-# Build Sage Desktop for Windows
-# ===============================
+# ===========================================
+# build_github_windows.ps1
+# Build Sage Desktop for GitHub Actions (Win)
+# ===========================================
 
 $ErrorActionPreference = "Stop"
 
 # -------------------------------
 # Path Configuration
 # -------------------------------
-$RootDir = (Resolve-Path (Join-Path $PSScriptRoot "../../..")).Path
+$RootDir = (Resolve-Path (Join-Path $PSScriptRoot "../../../..")).Path
 $AppDir = Join-Path $RootDir "app/desktop"
 $CoreDir = Join-Path $AppDir "core"
 $UiDir = Join-Path $AppDir "ui"
@@ -18,7 +18,7 @@ $TauriNodeSidecarDir = Join-Path $TauriSidecarDir "node"
 $TauriBinDir = Join-Path $TauriDir "bin"
 $DistDir = Join-Path $AppDir "dist"
 $CacheDir = Join-Path $AppDir ".build_cache"
-$EnvName = "sage-desktop-env"
+$BuildReqFile = Join-Path $AppDir "scripts/github/requirements-build.txt"
 
 $Mode = if ($args.Count -gt 0) { $args[0] } else { "release" }
 
@@ -42,20 +42,6 @@ function Get-FileHash256 {
     return "unknown"
 }
 
-function Find-CondaExe {
-    $paths = @(
-        $env:CONDA_EXE,
-        "$env:USERPROFILE\miniconda3\Scripts\conda.exe",
-        "$env:USERPROFILE\anaconda3\Scripts\conda.exe",
-        "C:\ProgramData\miniconda3\Scripts\conda.exe",
-        "C:\ProgramData\anaconda3\Scripts\conda.exe"
-    )
-    foreach ($p in $paths) {
-        if ($p -and (Test-Path $p)) { return $p }
-    }
-    return $null
-}
-
 function New-EffectiveTauriConfig {
     param($TauriDirParam, $CacheDirParam)
 
@@ -75,77 +61,60 @@ function New-EffectiveTauriConfig {
     return $effectiveConfig
 }
 
-$CondaExe = Find-CondaExe
-if (-not $CondaExe) {
-    Write-Host "[ERROR] Conda not found. Please install Miniconda or Anaconda." -ForegroundColor Red
+function Resolve-PythonExe {
+    if ($env:PYTHON_BIN -and (Test-Path $env:PYTHON_BIN)) {
+        return $env:PYTHON_BIN
+    }
+
+    if ($env:pythonLocation) {
+        $candidate = Join-Path $env:pythonLocation "python.exe"
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    $cmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($cmd) {
+        return (Resolve-Path $cmd.Source).Path
+    }
+
+    return $null
+}
+
+$PythonExe = Resolve-PythonExe
+if (-not $PythonExe) {
+    Write-Host "[ERROR] Python executable not found." -ForegroundColor Red
     exit 1
 }
 
-Write-Host "Found Conda: $CondaExe" -ForegroundColor Green
-& $CondaExe shell.powershell hook | Out-String | Invoke-Expression
-
-Write-Host "Activating Conda environment '$EnvName'..." -ForegroundColor Cyan
-
-$CurrentEnv = $env:CONDA_DEFAULT_ENV
-if ($CurrentEnv -ne $EnvName) {
-    conda activate $EnvName
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[ERROR] Failed to activate Conda environment" -ForegroundColor Red
-        exit 1
-    }
-} else {
-    Write-Host "Already in Conda environment '$EnvName'. Skipping activation." -ForegroundColor Green
-}
-
-Write-Host "Python: $(python --version)" -ForegroundColor Cyan
-Write-Host "Pip: $(pip --version)" -ForegroundColor Cyan
+Write-Host "Python executable: $PythonExe" -ForegroundColor Cyan
+Write-Host "Python: $(& $PythonExe --version)" -ForegroundColor Cyan
+Write-Host "Pip: $(& $PythonExe -m pip --version)" -ForegroundColor Cyan
 
 function Install-PythonDeps {
     param($RootDirParam, $CacheDirParam, $EnvNameParam)
 
     $ReqFile = Join-Path $RootDirParam "requirements.txt"
-    $HashFile = Join-Path $CacheDirParam ".requirements.hash"
-    $NewHash = Get-FileHash256 -FilePath $ReqFile
-    if (Test-Path $HashFile) {
-        $OldHash = Get-Content $HashFile
-    } else {
-        $OldHash = ""
+    $WheelhouseDir = Join-Path $CacheDirParam "wheelhouse"
+
+    $wheelSample = $null
+    if (Test-Path $WheelhouseDir) {
+        $wheelSample = Get-ChildItem -Path $WheelhouseDir -File -ErrorAction SilentlyContinue | Select-Object -First 1
     }
 
-    $EnvOk = $false
-    $pipList = pip list
-    if ($pipList -match "requests") {
-        $EnvOk = $true
+    if ($null -eq $wheelSample) {
+        Write-Host "[ERROR] Wheelhouse not found or empty: $WheelhouseDir" -ForegroundColor Red
+        exit 1
     }
 
-    if ($NewHash -eq $OldHash -and $EnvOk) {
-        Write-Host "Python deps unchanged, skipping install." -ForegroundColor Green
-    } else {
-        Write-Host "Upgrading build tools..." -ForegroundColor Cyan
-        $PipIndexUrl = if ($env:PIP_INDEX_URL) { $env:PIP_INDEX_URL } else { "https://mirrors.aliyun.com/pypi/simple" }
-        Write-Host "Using pip index: $PipIndexUrl" -ForegroundColor Cyan
+    Write-Host "Installing Python build toolchain from wheelhouse..." -ForegroundColor Cyan
+    & $PythonExe -m pip install --no-index --find-links $WheelhouseDir -r $BuildReqFile
 
-        pip install --upgrade pip setuptools wheel --index-url $PipIndexUrl
+    Write-Host "Installing deps from wheelhouse..." -ForegroundColor Cyan
+    & $PythonExe -m pip install -r $ReqFile --no-index --find-links $WheelhouseDir
 
-        Write-Host "Installing deps..." -ForegroundColor Cyan
-        pip install -r $ReqFile --index-url $PipIndexUrl
-
-        Write-Host "Replacing python-magic with python-magic-bin for Windows..." -ForegroundColor Cyan
-        pip uninstall -y python-magic
-        pip install python-magic-bin --index-url $PipIndexUrl
-
-        Write-Host "Force reinstalling pure Python chardet..." -ForegroundColor Cyan
-        pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url $PipIndexUrl 
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "Falling back to official PyPI for chardet..." -ForegroundColor Yellow
-            pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url https://pypi.org/simple
-        }
-
-        if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) {
-            pip install pyinstaller --index-url $PipIndexUrl
-        }
-
-        $NewHash | Out-File -FilePath $HashFile -Encoding UTF8
+    if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) {
+        & $PythonExe -m pip install pyinstaller --no-index --find-links $WheelhouseDir
     }
 }
 
@@ -289,7 +258,7 @@ function Build-Frontend {
     if ($NewHash -eq $OldHash -and (Test-Path "node_modules")) {
         Write-Host "[Frontend] Deps unchanged, skipping npm install." -ForegroundColor Green
     } else {
-        npm install
+        npm install --prefer-offline --no-audit --no-fund
         $NewHash | Out-File -FilePath $HashFile -Encoding UTF8
     }
 
@@ -301,6 +270,17 @@ function Prepare-BundledNodeRuntime {
     param($TauriNodeSidecarDirParam)
 
     Write-Host "[Node Runtime] Preparing bundled Node runtime..." -ForegroundColor Cyan
+
+    $cachedNodeRuntime = Join-Path $CacheDir "node-runtime\windows-x86_64"
+    if (Test-Path (Join-Path $cachedNodeRuntime "node.exe")) {
+        if (Test-Path $TauriNodeSidecarDirParam) {
+            Remove-Item -Recurse -Force $TauriNodeSidecarDirParam
+        }
+        New-Item -ItemType Directory -Force -Path $TauriNodeSidecarDirParam | Out-Null
+        Copy-Item -Path "$cachedNodeRuntime\*" -Destination $TauriNodeSidecarDirParam -Recurse -Force
+        Write-Host "[Node Runtime] Restored from cache: $cachedNodeRuntime" -ForegroundColor Green
+        return
+    }
 
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
         Write-Host "[ERROR] node not found. Cannot prepare sidecar/node." -ForegroundColor Red
@@ -413,7 +393,6 @@ $TauriArgs += @("--config", $EffectiveTauriConfig)
 
 Write-Host "Tauri CLI: $TauriCmd" -ForegroundColor Cyan
 Write-Host "Tauri Args: $($TauriArgs -join ' ')" -ForegroundColor Cyan
-
 $env:CI = "true"
 $env:CARGO_TERM_COLOR = "never"
 # Skip signature for updater artifacts as keys are not provided
