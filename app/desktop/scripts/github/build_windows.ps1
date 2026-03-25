@@ -18,7 +18,6 @@ $TauriNodeSidecarDir = Join-Path $TauriSidecarDir "node"
 $TauriBinDir = Join-Path $TauriDir "bin"
 $DistDir = Join-Path $AppDir "dist"
 $CacheDir = Join-Path $AppDir ".build_cache"
-$EnvName = "sage-desktop-env"
 
 $Mode = if ($args.Count -gt 0) { $args[0] } else { "release" }
 
@@ -60,32 +59,6 @@ function New-EffectiveTauriConfig {
     Write-Host "[Package] Using productName=Sage as bundle naming base (installer should start with Sage_)." -ForegroundColor Cyan
     return $effectiveConfig
 }
-
-function Ensure-CondaEnv {
-    param($EnvNameParam)
-
-    if ($env:CONDA_DEFAULT_ENV -eq $EnvNameParam) {
-        Write-Host "Already in Conda environment '$EnvNameParam'." -ForegroundColor Green
-        return
-    }
-
-    if (-not (Get-Command conda -ErrorAction SilentlyContinue)) {
-        Write-Host "[ERROR] conda not found in CI environment." -ForegroundColor Red
-        exit 1
-    }
-
-    & conda shell.powershell hook | Out-String | Invoke-Expression
-    conda activate $EnvNameParam
-
-    if ($env:CONDA_DEFAULT_ENV -ne $EnvNameParam) {
-        Write-Host "[ERROR] Failed to activate Conda environment '$EnvNameParam'." -ForegroundColor Red
-        exit 1
-    }
-
-    Write-Host "Activated Conda environment '$EnvNameParam'." -ForegroundColor Green
-}
-
-Ensure-CondaEnv -EnvNameParam $EnvName
 
 Write-Host "Python: $(python --version)" -ForegroundColor Cyan
 Write-Host "Pip: $(pip --version)" -ForegroundColor Cyan
