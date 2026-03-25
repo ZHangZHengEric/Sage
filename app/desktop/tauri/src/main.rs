@@ -919,10 +919,17 @@ fn main() {
             std::env::set_var("SAGE_ROOT", format!("{}/.sage", home_dir));
             println!("Set SAGE_SKILL_WORKSPACE: {}", skill_workspace);
 
-            // Find a free port
-            let port = std::net::TcpListener::bind("127.0.0.1:0")
-                .map(|l| l.local_addr().unwrap().port())
-                .expect("failed to find free port");
+            // Use SAGE_PORT from environment if set, otherwise find a free port
+            let port: u16 = std::env::var("SAGE_PORT")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or_else(|| {
+                    let free_port = std::net::TcpListener::bind("127.0.0.1:0")
+                        .map(|l| l.local_addr().unwrap().port())
+                        .expect("failed to find free port");
+                    println!("No SAGE_PORT set, using free port: {}", free_port);
+                    free_port
+                });
             std::env::set_var("SAGE_PORT", port.to_string());
             println!("Set SAGE_PORT: {}", port);
 
