@@ -837,6 +837,7 @@ export default {
   'system.version.platformDarwinX64': 'macOS (Intel)',
   'system.version.platformWindowsX64': 'Windows (x64)',
   'system.version.platformLinuxX64': 'Linux (x64)',
+  'system.version.platformLinuxArm64': 'Linux (ARM64)',
 
   // Workbench ToolCall
   'workbench.tool.arguments': 'Arguments',
