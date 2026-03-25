@@ -387,11 +387,11 @@ class SessionContext:
                 workspace=self.host_workspace or ".",  # 本地/直通需要宿主机路径
                 virtual_workspace=self.virtual_workspace,
                 # 本地沙箱特定的配置
-                cpu_time_limit=300,
-                memory_limit_mb=4096,
+                cpu_time_limit=int(os.environ.get("SAGE_LOCAL_CPU_TIME_LIMIT", "300")),
+                memory_limit_mb=int(os.environ.get("SAGE_LOCAL_MEMORY_LIMIT_MB", "4096")),
                 allowed_paths=self.external_paths,
-                linux_isolation_mode='subprocess',
-                macos_isolation_mode='subprocess'
+                linux_isolation_mode=os.environ.get("SAGE_LOCAL_LINUX_ISOLATION", "bwrap"),
+                macos_isolation_mode=os.environ.get("SAGE_LOCAL_MACOS_ISOLATION", "seatbelt")
             )
 
         self.sandbox = SandboxProviderFactory.create(config)

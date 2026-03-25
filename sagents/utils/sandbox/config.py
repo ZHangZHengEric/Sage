@@ -42,8 +42,8 @@ class SandboxConfig:
     cpu_time_limit: int = 300
     memory_limit_mb: int = 4096
     allowed_paths: Optional[List[str]] = None
-    linux_isolation_mode: str = "subprocess"
-    macos_isolation_mode: str = "subprocess"
+    linux_isolation_mode: str = "bwrap"
+    macos_isolation_mode: str = "seatbelt"
 
     # ===== 远程沙箱配置 =====
     remote_provider: str = "opensandbox"  # 远程沙箱提供者: opensandbox | kubernetes | firecracker | custom
@@ -98,8 +98,8 @@ class SandboxConfig:
             # 本地配置
             cpu_time_limit=int(os.environ.get("SAGE_LOCAL_CPU_TIME_LIMIT", "300")),
             memory_limit_mb=int(os.environ.get("SAGE_LOCAL_MEMORY_LIMIT_MB", "4096")),
-            linux_isolation_mode=os.environ.get("SAGE_LOCAL_LINUX_ISOLATION", "subprocess"),
-            macos_isolation_mode=os.environ.get("SAGE_LOCAL_MACOS_ISOLATION", "subprocess"),
+            linux_isolation_mode=os.environ.get("SAGE_LOCAL_LINUX_ISOLATION", "bwrap"),
+            macos_isolation_mode=os.environ.get("SAGE_LOCAL_MACOS_ISOLATION", "seatbelt"),
             # 远程配置
             remote_provider=os.environ.get("SAGE_REMOTE_PROVIDER", "opensandbox"),
             remote_server_url=os.environ.get("OPENSANDBOX_URL"),
@@ -139,8 +139,8 @@ class SandboxConfig:
             # 本地配置
             cpu_time_limit=sandbox_config.get('local', {}).get('cpu_time_limit', 300),
             memory_limit_mb=sandbox_config.get('local', {}).get('memory_limit_mb', 4096),
-            linux_isolation_mode=sandbox_config.get('local', {}).get('linux_isolation_mode', 'subprocess'),
-            macos_isolation_mode=sandbox_config.get('local', {}).get('macos_isolation_mode', 'subprocess'),
+            linux_isolation_mode=sandbox_config.get('local', {}).get('linux_isolation_mode', 'bwrap'),
+            macos_isolation_mode=sandbox_config.get('local', {}).get('macos_isolation_mode', 'seatbelt'),
             # 远程配置
             remote_provider=sandbox_config.get('remote', {}).get('provider', 'opensandbox'),
             remote_server_url=sandbox_config.get('remote', {}).get('server_url'),
