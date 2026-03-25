@@ -118,6 +118,8 @@ async def fetch_github_release_info() -> Optional[Dict[str, Any]]:
                 if any(k in name_lower for k in ["linux", "appimage", ".deb"]):
                     if any(k in name_lower for k in ["x86_64", "amd64"]):
                         return "linux-x86_64"
+                    if any(k in name_lower for k in ["aarch64", "arm64"]):
+                        return "linux-aarch64"
                 return None
 
             for asset in assets:
