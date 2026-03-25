@@ -262,8 +262,15 @@ async def update(agent_id: str, agent: AgentConfigDTO, http_request: Request):
     if agent.im_channels:
         logger.info(f"[Agent Update] Saving IM channels: {agent.im_channels}")
         try:
-            from mcp_servers.im_server.agent_config import get_agent_im_config
+            from mcp_servers.im_server.agent_config import get_agent_im_config, find_agent_by_provider_id
             agent_config = get_agent_im_config(agent_id)
+            
+            # ID 字段映射
+            id_field_map = {
+                "wechat_work": "bot_id",
+                "dingtalk": "client_id",
+                "feishu": "app_id"
+            }
             
             for provider, channel_data in agent.im_channels.items():
                 enabled = channel_data.get('enabled', False)
@@ -277,6 +284,18 @@ async def update(agent_id: str, agent: AgentConfigDTO, http_request: Request):
                     if agent_obj and not agent_obj.is_default:
                         logger.warning(f"[Agent Update] iMessage can only be configured on default agent, skipping {agent_id}")
                         continue
+                
+                # 检查重复配置（仅对启用的渠道）
+                if enabled:
+                    id_field = id_field_map.get(provider)
+                    if id_field and config:
+                        id_value = config.get(id_field)
+                        if id_value:
+                            existing_agent = find_agent_by_provider_id(provider, id_value, exclude_agent_id=agent_id)
+                            if existing_agent:
+                                error_msg = f"{provider} 的 {id_field} '{id_value}' 已在 Agent '{existing_agent}' 配置，请勿重复配置"
+                                logger.warning(f"[Agent Update] Duplicate {provider} {id_field} detected: {id_value} between agents {agent_id} and {existing_agent}")
+                                return await Response.error(code=400, message=error_msg)
                 
                 # 保存渠道配置
                 success = agent_config.set_provider_config(provider, enabled, config)
