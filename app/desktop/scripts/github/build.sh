@@ -166,6 +166,10 @@ install_python_deps() {
     if [ "$NEW_HASH" = "$OLD_HASH" ] && [ "$ENV_OK" = "true" ]; then
         echo "Python 依赖未变更且环境正常，跳过安装。"
     else
+        local WHEELHOUSE_DIR="$CACHE_DIR/wheelhouse"
+        local HAS_WHEELHOUSE=false
+        local OFFLINE_INSTALL_OK=false
+
         echo "正在升级构建工具..."
         PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}"
         echo "使用 pip 索引 URL: $PIP_INDEX_URL"
@@ -178,16 +182,35 @@ install_python_deps() {
             conda install -y -c conda-forge llvmlite numba
         fi
 
-        echo "正在安装依赖..."
-        pip install -r "$REQ_FILE" --index-url "$PIP_INDEX_URL"
-        
-        # 强制重新安装 chardet 和 charset-normalizer 为纯 Python 版本 (no-binary)
-        # 这样 PyInstaller 可以正确打包它们，避免 mypyc 编译模块的隐藏导入问题
-        echo "正在强制安装纯 Python 版 chardet 和 charset-normalizer..."
-        pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url "$PIP_INDEX_URL"
+        if [ -d "$WHEELHOUSE_DIR" ] && [ -n "$(find "$WHEELHOUSE_DIR" -type f -print -quit 2>/dev/null || true)" ]; then
+            HAS_WHEELHOUSE=true
+            echo "检测到 wheelhouse，优先尝试离线安装依赖..."
+
+            if pip install -r "$REQ_FILE" --no-index --find-links "$WHEELHOUSE_DIR"; then
+                # 强制重新安装纯 Python 版本以避免 mypyc 隐式导入问题
+                if pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --no-index --find-links "$WHEELHOUSE_DIR"; then
+                    OFFLINE_INSTALL_OK=true
+                    echo "离线安装依赖成功。"
+                fi
+            fi
+        fi
+
+        if [ "$OFFLINE_INSTALL_OK" != "true" ]; then
+            echo "回退到在线安装依赖..."
+            pip install -r "$REQ_FILE" --index-url "$PIP_INDEX_URL"
+
+            # 强制重新安装 chardet 和 charset-normalizer 为纯 Python 版本 (no-binary)
+            # 这样 PyInstaller 可以正确打包它们，避免 mypyc 编译模块的隐藏导入问题
+            echo "正在强制安装纯 Python 版 chardet 和 charset-normalizer..."
+            pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url "$PIP_INDEX_URL"
+        fi
 
         if ! command -v pyinstaller >/dev/null; then
-            pip install pyinstaller --index-url "$PIP_INDEX_URL"
+            if [ "$HAS_WHEELHOUSE" = "true" ]; then
+                pip install pyinstaller --no-index --find-links "$WHEELHOUSE_DIR" || pip install pyinstaller --index-url "$PIP_INDEX_URL"
+            else
+                pip install pyinstaller --index-url "$PIP_INDEX_URL"
+            fi
         fi
         
         # 保存新的 hash

@@ -111,28 +111,67 @@ function Install-PythonDeps {
     if ($NewHash -eq $OldHash -and $EnvOk) {
         Write-Host "Python deps unchanged, skipping install." -ForegroundColor Green
     } else {
+        $WheelhouseDir = Join-Path $CacheDirParam "wheelhouse"
+        $HasWheelhouse = $false
+        $OfflineInstallOk = $false
+
+        if (Test-Path $WheelhouseDir) {
+            $wheelSample = Get-ChildItem -Path $WheelhouseDir -File -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($null -ne $wheelSample) {
+                $HasWheelhouse = $true
+            }
+        }
+
         Write-Host "Upgrading build tools..." -ForegroundColor Cyan
         $PipIndexUrl = if ($env:PIP_INDEX_URL) { $env:PIP_INDEX_URL } else { "https://mirrors.aliyun.com/pypi/simple" }
         Write-Host "Using pip index: $PipIndexUrl" -ForegroundColor Cyan
 
         pip install --upgrade pip setuptools wheel --index-url $PipIndexUrl
 
-        Write-Host "Installing deps..." -ForegroundColor Cyan
-        pip install -r $ReqFile --index-url $PipIndexUrl
+        if ($HasWheelhouse) {
+            Write-Host "Wheelhouse found, trying offline install first..." -ForegroundColor Cyan
+            pip install -r $ReqFile --no-index --find-links $WheelhouseDir
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "Replacing python-magic with python-magic-bin for Windows..." -ForegroundColor Cyan
+                pip uninstall -y python-magic
+                pip install python-magic-bin --no-index --find-links $WheelhouseDir
 
-        Write-Host "Replacing python-magic with python-magic-bin for Windows..." -ForegroundColor Cyan
-        pip uninstall -y python-magic
-        pip install python-magic-bin --index-url $PipIndexUrl
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "Force reinstalling pure Python chardet (offline)..." -ForegroundColor Cyan
+                    pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --no-index --find-links $WheelhouseDir
+                    if ($LASTEXITCODE -eq 0) {
+                        $OfflineInstallOk = $true
+                        Write-Host "Offline dependency install succeeded." -ForegroundColor Green
+                    }
+                }
+            }
+        }
 
-        Write-Host "Force reinstalling pure Python chardet..." -ForegroundColor Cyan
-        pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url $PipIndexUrl 
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "Falling back to official PyPI for chardet..." -ForegroundColor Yellow
-            pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url https://pypi.org/simple
+        if (-not $OfflineInstallOk) {
+            Write-Host "Falling back to online dependency install..." -ForegroundColor Yellow
+            pip install -r $ReqFile --index-url $PipIndexUrl
+
+            Write-Host "Replacing python-magic with python-magic-bin for Windows..." -ForegroundColor Cyan
+            pip uninstall -y python-magic
+            pip install python-magic-bin --index-url $PipIndexUrl
+
+            Write-Host "Force reinstalling pure Python chardet..." -ForegroundColor Cyan
+            pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url $PipIndexUrl 
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "Falling back to official PyPI for chardet..." -ForegroundColor Yellow
+                pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url https://pypi.org/simple
+            }
         }
 
         if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) {
-            pip install pyinstaller --index-url $PipIndexUrl
+            if ($HasWheelhouse) {
+                pip install pyinstaller --no-index --find-links $WheelhouseDir
+                if ($LASTEXITCODE -ne 0) {
+                    pip install pyinstaller --index-url $PipIndexUrl
+                }
+            } else {
+                pip install pyinstaller --index-url $PipIndexUrl
+            }
         }
 
         $NewHash | Out-File -FilePath $HashFile -Encoding UTF8
