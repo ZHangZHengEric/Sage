@@ -32,14 +32,8 @@ def _gen_tokens(user: models.User) -> Tuple[str, str, int]:
     cfg = config.get_startup_config()
     exp_seconds = int(cfg.jwt_expire_hours) * 60 * 60
     now = int(time.time())
-    access_claims = {
-        "userid": user.user_id,
-        "username": user.username,
-        "phonenum": user.phonenum or "",
-        "email": user.email or "",
-        "role": user.role,
-        "exp": now + exp_seconds,
-    }
+    access_claims = build_user_claims(user)
+    access_claims["exp"] = now + exp_seconds
     refresh_claims = {
         "uid": user.user_id,
         "nonce": gen_id()[:8],
@@ -50,6 +44,27 @@ def _gen_tokens(user: models.User) -> Tuple[str, str, int]:
         refresh_claims, cfg.refresh_token_secret, algorithm="HS256"
     )
     return access_token, refresh_token, exp_seconds
+
+
+def hash_password(password: str) -> str:
+    return _hash_password(password)
+
+
+def create_login_tokens(user: models.User) -> Tuple[str, str, int]:
+    return _gen_tokens(user)
+
+
+def build_user_claims(user: models.User) -> Dict[str, str]:
+    return {
+        "userid": user.user_id,
+        "username": user.username,
+        "nickname": user.nickname or user.username,
+        "phonenum": user.phonenum or "",
+        "email": user.email or "",
+        "role": user.role,
+        "avatar": user.avatar_url or "",
+        "avatar_url": user.avatar_url or "",
+    }
 
 
 async def register_user(
@@ -93,6 +108,11 @@ async def register_user(
 
 
 async def login_user(username_or_email: str, password: str) -> Tuple[str, str, int]:
+    user = await authenticate_user(username_or_email, password)
+    return create_login_tokens(user)
+
+
+async def authenticate_user(username_or_email: str, password: str) -> models.User:
     dao = models.UserDao()
     user = await dao.get_by_username(username_or_email)
     if not user and "@" in username_or_email:
@@ -100,7 +120,7 @@ async def login_user(username_or_email: str, password: str) -> Tuple[str, str, i
 
     if not user or not _verify_password(password, user.password_hash):
         raise SageHTTPException(detail="用户名或密码错误", error_detail="invalid credentials")
-    return _gen_tokens(user)
+    return user
 
 
 async def change_password(user_id: str, old_password: str, new_password: str) -> None:
