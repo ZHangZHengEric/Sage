@@ -22,6 +22,7 @@ setup(
         "fastapi>=0.104.0",
         "uvicorn[standard]>=0.24.0",
         "pydantic>=2.5.0",
+        "Authlib>=1.6.0",
         "mcp>=1.9.2",
         "fastmcp>=0.9.0",
         "docstring_parser>=0.16",
