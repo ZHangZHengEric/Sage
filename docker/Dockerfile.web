@@ -4,15 +4,20 @@ WORKDIR /app
 ENV NODE_OPTIONS=--dns-result-order=ipv4first
 RUN npm config set registry https://registry.npmmirror.com && npm config set fetch-retries 5 && npm config set fetch-retry-maxtimeout 600000
 
-# Install dependencies
-COPY ./app/server/web .
+# Copy dependency manifests first so source edits do not invalidate npm install
+COPY app/server/web/package*.json ./
 
 RUN npm install --no-fund --no-audit --registry=https://registry.npmmirror.com --no-progress
 
 ARG VITE_SAGE_API_BASE_URL
 ARG VITE_SAGE_TRACE_WEB_URL
+ARG VITE_SAGE_WEB_BASE_PATH
 ENV VITE_SAGE_API_BASE_URL=${VITE_SAGE_API_BASE_URL}
 ENV VITE_SAGE_TRACE_WEB_URL=${VITE_SAGE_TRACE_WEB_URL}
+ENV VITE_SAGE_WEB_BASE_PATH=${VITE_SAGE_WEB_BASE_PATH}
+
+# Copy the rest of the app after dependencies are installed to maximize cache reuse
+COPY app/server/web .
 
 RUN npm run build
 
@@ -28,4 +33,4 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 EXPOSE 80
 
 # Simple healthcheck to ensure Nginx responds
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -qO- http://localhost/ || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -qO- http://localhost/sage/ || exit 1
