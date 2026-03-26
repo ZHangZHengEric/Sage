@@ -4,13 +4,16 @@ WORKDIR /app
 ENV NODE_OPTIONS=--dns-result-order=ipv4first
 RUN npm config set registry https://registry.npmmirror.com && npm config set fetch-retries 5 && npm config set fetch-retry-maxtimeout 600000
 
-# Install dependencies
-COPY ./app/wiki .
+# Copy dependency manifests first so source edits do not invalidate npm install
+COPY app/wiki/package*.json ./
 
-RUN rm -f package-lock.json && npm install --no-fund --no-audit --registry=https://registry.npmmirror.com --no-progress
+RUN npm install --no-fund --no-audit --registry=https://registry.npmmirror.com --no-progress
 
 ARG VITE_SAGE_API_BASE_URL
 ENV VITE_SAGE_API_BASE_URL=${VITE_SAGE_API_BASE_URL}
+
+# Copy the rest of the app after dependencies are installed to maximize cache reuse
+COPY app/wiki .
 
 RUN npm run build
 
