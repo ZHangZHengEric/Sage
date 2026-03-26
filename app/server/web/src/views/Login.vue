@@ -220,9 +220,14 @@ const safeNextPath = computed(() => {
   return nextPath.startsWith('/') ? nextPath : '/agent/chat'
 })
 const localOnlyMode = computed(() => String(route.query.local_only || '') === '1')
+const shouldUseBrowserNavigation = (targetPath) => (
+  targetPath.startsWith('/jaeger/')
+  || targetPath.startsWith('/api/')
+  || targetPath.startsWith('/oauth2/')
+)
 
 const navigateAfterAuth = async (targetPath) => {
-  if (targetPath.startsWith('/jaeger/')) {
+  if (shouldUseBrowserNavigation(targetPath)) {
     window.location.assign(targetPath)
     return
   }

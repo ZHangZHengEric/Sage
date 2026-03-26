@@ -154,6 +154,10 @@ const router = createRouter({
   routes
 })
 
+const shouldUseBrowserNavigation = (path) => (
+  typeof path === 'string' && (path.startsWith('/jaeger/') || path.startsWith('/api/') || path.startsWith('/oauth2/'))
+)
+
 // 路由守卫 - 设置页面标题
 router.beforeEach(async (to) => {
   if (to.meta?.public) {
@@ -163,7 +167,7 @@ router.beforeEach(async (to) => {
         const nextPath = typeof to.query.next === 'string' && to.query.next.startsWith('/')
           ? to.query.next
           : '/agent/chat'
-        if (nextPath.startsWith('/jaeger/')) {
+        if (shouldUseBrowserNavigation(nextPath)) {
           window.location.replace(nextPath)
           return false
         }
