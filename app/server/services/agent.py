@@ -49,10 +49,10 @@ async def _create_model_client_for_user(user_id: str) -> Tuple[Any, str]:
             error_detail=f"user '{user_id or '<empty>'}' has no llm provider",
         )
 
-    if not provider.api_keys:
+    if not provider.api_key:
         raise SageHTTPException(
             detail="模型提供商未配置 API Key",
-            error_detail=f"provider '{provider.id}' api_keys is empty",
+            error_detail=f"provider '{provider.id}' api_key is empty",
         )
 
     if not provider.model:
@@ -67,7 +67,7 @@ async def _create_model_client_for_user(user_id: str) -> Tuple[Any, str]:
     )
     model_client = create_model_client(
         {
-            "api_key": ",".join(provider.api_keys),
+            "api_key": provider.api_key,
             "base_url": provider.base_url,
             "model": provider.model,
         }

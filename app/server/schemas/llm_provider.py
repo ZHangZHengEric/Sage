@@ -1,6 +1,15 @@
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from datetime import datetime
+
+
+def _validate_single_api_key(api_keys: List[str]) -> List[str]:
+    normalized_keys = [key.strip() for key in api_keys if key and key.strip()]
+    if len(normalized_keys) != 1:
+        raise ValueError("Exactly one API key is required")
+    if any("\n" in key or "\r" in key for key in normalized_keys):
+        raise ValueError("API key must be a single line")
+    return normalized_keys
 
 class LLMProviderBase(BaseModel):
     name: str
@@ -14,6 +23,11 @@ class LLMProviderBase(BaseModel):
     max_model_len: Optional[int] = None
     supports_multimodal: bool = False
     is_default: bool = False
+
+    @field_validator("api_keys")
+    @classmethod
+    def validate_api_keys(cls, value: List[str]) -> List[str]:
+        return _validate_single_api_key(value)
 
 class LLMProviderCreate(LLMProviderBase):
     pass
@@ -30,6 +44,13 @@ class LLMProviderUpdate(BaseModel):
     max_model_len: Optional[int] = None
     supports_multimodal: Optional[bool] = None
     is_default: Optional[bool] = None
+
+    @field_validator("api_keys")
+    @classmethod
+    def validate_api_keys(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return value
+        return _validate_single_api_key(value)
 
 class LLMProviderDTO(LLMProviderBase):
     id: str

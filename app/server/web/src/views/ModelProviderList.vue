@@ -104,7 +104,11 @@
                 <ArrowRight class="ml-1 w-3 h-3" />
               </Button>
             </div>
-            <Textarea v-model="form.api_keys_str" :placeholder="t('modelProvider.apiKeyPlaceholder')" @update:model-value="onKeyConfigChange" />
+            <Input
+              v-model="form.api_keys_str"
+              :placeholder="t('modelProvider.apiKeyPlaceholder')"
+              @update:model-value="handleApiKeyChange"
+            />
           </div>
           <div class="grid gap-2">
              <div class="flex items-center justify-between">
@@ -216,7 +220,6 @@ import { Plus, Edit, Trash2, Bot, ArrowRight, Loader } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -285,6 +288,24 @@ const originalValues = reactive({
 const selectedProvider = ref('')
 const currentProvider = computed(() => MODEL_PROVIDERS.find(p => p.name === selectedProvider.value))
 
+const buildApiKeys = () => {
+  const apiKey = form.api_keys_str.trim()
+  return apiKey ? [apiKey] : []
+}
+
+const buildProviderPayload = () => ({
+  name: form.name,
+  base_url: form.base_url,
+  api_keys: buildApiKeys(),
+  model: form.model,
+  max_tokens: form.maxTokens,
+  temperature: form.temperature,
+  top_p: form.topP,
+  presence_penalty: form.presencePenalty,
+  max_model_len: form.maxModelLen,
+  supports_multimodal: form.supportsMultimodal
+})
+
 // 保存按钮是否可点击
 const canSave = computed(() => {
   if (!isEdit.value) {
@@ -348,6 +369,11 @@ const onKeyConfigChange = () => {
   // 当关键配置变化时，重置验证状态
   verified.value = false
   multimodalVerified.value = false
+}
+
+const handleApiKeyChange = (value) => {
+  form.api_keys_str = `${value ?? ''}`.split(/\r?\n/, 1)[0]
+  onKeyConfigChange()
 }
 
 const openProviderWebsite = () => {
@@ -416,7 +442,7 @@ const handleEdit = (provider) => {
   // Ideally we should mask them.
   // But for editing we need them.
   // The backend router returns full DTO.
-  form.api_keys_str = (provider.api_keys || []).join('\n')
+  form.api_keys_str = `${provider.api_keys?.[0] || ''}`.trim()
   form.model = provider.model
   form.maxTokens = provider.max_tokens ?? 4096
   form.temperature = provider.temperature ?? 0.7
@@ -427,7 +453,7 @@ const handleEdit = (provider) => {
 
   // 保存原始值用于比较
   originalValues.base_url = provider.base_url
-  originalValues.api_keys_str = (provider.api_keys || []).join('\n')
+  originalValues.api_keys_str = `${provider.api_keys?.[0] || ''}`.trim()
   originalValues.model = provider.model
   originalValues.supportsMultimodal = provider.supports_multimodal ?? false
 
@@ -451,17 +477,7 @@ const handleDelete = async (provider) => {
 }
 
 const handleVerify = async () => {
-  const data = {
-    name: form.name,
-    base_url: form.base_url,
-    api_keys: form.api_keys_str.split(/[\n,]+/).map(k => k.trim()).filter(k => k),
-    model: form.model,
-    max_tokens: form.maxTokens,
-    temperature: form.temperature,
-    top_p: form.topP,
-    presence_penalty: form.presencePenalty,
-    max_model_len: form.maxModelLen
-  }
+  const data = buildProviderPayload()
 
   if (!data.name || !data.base_url || !data.api_keys.length || !data.model) {
      toast.error(t('common.fillRequired') || '请填写必填项')
@@ -489,17 +505,7 @@ const handleVerifyMultimodal = async () => {
 
   verifyingMultimodal.value = true
   try {
-    const data = {
-      name: form.name,
-      base_url: form.base_url,
-      api_keys: form.api_keys_str.split(/[\n,]+/).map(k => k.trim()).filter(k => k),
-      model: form.model,
-      max_tokens: form.maxTokens,
-      temperature: form.temperature,
-      top_p: form.topP,
-      presence_penalty: form.presencePenalty,
-      max_model_len: form.maxModelLen
-    }
+    const data = buildProviderPayload()
     const res = await modelProviderAPI.verifyMultimodal(data)
     if (res?.supports_multimodal) {
       multimodalVerified.value = true
@@ -523,18 +529,7 @@ const handleVerifyMultimodal = async () => {
 }
 
 const submitForm = async () => {
-  const data = {
-    name: form.name,
-    base_url: form.base_url,
-    api_keys: form.api_keys_str.split(/[\n,]+/).map(k => k.trim()).filter(k => k),
-    model: form.model,
-    max_tokens: form.maxTokens,
-    temperature: form.temperature,
-    top_p: form.topP,
-    presence_penalty: form.presencePenalty,
-    max_model_len: form.maxModelLen,
-    supports_multimodal: form.supportsMultimodal
-  }
+  const data = buildProviderPayload()
 
   // 如果开启多模态，必须验证多模态；否则必须验证连接（新建时）
   if (!isEdit.value) {
