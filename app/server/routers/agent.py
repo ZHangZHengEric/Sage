@@ -14,15 +14,15 @@ from ..services.agent import (
     auto_generate_agent,
     create_agent,
     delete_agent,
-    delete_workspace_file,
-    download_workspace_file,
-    get_agent_authorized_users,
     get_agent,
-    get_user_workspace,
-    update_agent_authorizations,
     list_agents,
     optimize_system_prompt,
     update_agent,
+    get_agent_authorized_users,
+    update_agent_authorizations,
+    get_file_workspace,
+    download_agent_file,
+    delete_agent_file,
 )
 from sagents.utils.prompt_manager import PromptManager
 from loguru import logger
@@ -126,24 +126,6 @@ def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
 
 # 创建路由器
 agent_router = APIRouter(prefix="/api/agent", tags=["Agent"])
-
-
-async def _resolve_workspace_user_id(request: Request, session_id: Optional[str] = None) -> str:
-    """解析工作空间所属用户。
-
-    普通用户读取自己的共享工作空间；管理员可结合 session_id 读取目标会话所属用户的工作空间。
-    """
-    claims = getattr(request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
-
-    if role == "admin" and session_id:
-        dao = ConversationDao()
-        conversation = await dao.get_by_session_id(session_id)
-        if conversation:
-            return conversation.user_id
-
-    return user_id
 
 
 @agent_router.get("/list")
@@ -346,24 +328,41 @@ async def update_auth(agent_id: str, req: AuthorizationRequest, http_request: Re
     await update_agent_authorizations(agent_id, req.user_ids, user_id, role)
     return await Response.succ(data={}, message="更新授权成功")
 
-@agent_router.post("/workspace/files")
-async def get_workspace(request: Request, session_id: Optional[str] = None):
-    """获取当前用户共享工作空间的文件列表。"""
-    user_id = await _resolve_workspace_user_id(request, session_id)
-    result = await get_user_workspace(user_id)
+@agent_router.post("/{agent_id}/file_workspace")
+async def get_workspace(agent_id: str, request: Request, session_id: Optional[str] = None):
+    """获取指定会话的文件工作空间"""
+    claims = getattr(request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+
+    if role == "admin" and session_id:
+        dao = ConversationDao()
+        conversation = await dao.get_by_session_id(session_id)
+        if conversation:
+            user_id = conversation.user_id
+
+    result = await get_file_workspace(agent_id, user_id)
     files = result.get("files", [])
-    logger.bind(user_id=user_id).info(f"获取共享工作空间文件数量：{len(files)}")
+    logger.bind(agent_id=agent_id).info(f"获取工作空间文件数量：{len(files)}")
     return await Response.succ(message=result.get("message", "获取文件列表成功"), data={**result, "user_id": user_id})
 
-@agent_router.get("/workspace/files/download")
-async def download_file(request: Request, session_id: Optional[str] = None):
-    """下载当前用户共享工作空间中的文件。"""
-    user_id = await _resolve_workspace_user_id(request, session_id)
+@agent_router.get("/{agent_id}/file_workspace/download")
+async def download_file(agent_id: str, request: Request, session_id: Optional[str] = None):
+    """获取指定会话的文件工作空间"""
+    claims = getattr(request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+
+    if role == "admin" and session_id:
+        dao = ConversationDao()
+        conversation = await dao.get_by_session_id(session_id)
+        if conversation:
+            user_id = conversation.user_id
             
     file_path = request.query_params.get("file_path")
     logger.info(f"Download request: file_path={file_path}")
     try:
-        path, filename, media_type = await download_workspace_file(user_id, file_path)
+        path, filename, media_type = await download_agent_file(agent_id, user_id, file_path)
         logger.info(f"Download resolved: path={path}")
         return FileResponse(
             path=path, filename=filename, media_type=media_type
@@ -373,15 +372,23 @@ async def download_file(request: Request, session_id: Optional[str] = None):
         raise
 
 
-@agent_router.delete("/workspace/files/delete")
-async def delete_file(request: Request, session_id: Optional[str] = None):
-    """删除当前用户共享工作空间中的文件。"""
-    user_id = await _resolve_workspace_user_id(request, session_id)
+@agent_router.delete("/{agent_id}/file_workspace/delete")
+async def delete_file(agent_id: str, request: Request, session_id: Optional[str] = None):
+    """删除指定会话的文件"""
+    claims = getattr(request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+    
+    if role == "admin" and session_id:
+        dao = ConversationDao()
+        conversation = await dao.get_by_session_id(session_id)
+        if conversation:
+            user_id = conversation.user_id
             
     file_path = request.query_params.get("file_path")
     logger.info(f"Delete request: file_path={file_path}")
     try:
-        await delete_workspace_file(user_id, file_path)
+        await delete_agent_file(agent_id, user_id, file_path)
         return await Response.succ(message=f"文件 {file_path} 已删除")
     except Exception as e:
         logger.error(f"Delete failed: {e}")

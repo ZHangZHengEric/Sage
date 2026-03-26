@@ -102,23 +102,24 @@ export const agentAPI = {
 
   /**
    * 获取工作空间文件
+   * @param {string} agentId - 会话ID
    * @param {string} sessionId - 会话ID (可选)
    * @returns {Promise<Object>}
    */
-  getWorkspaceFiles: (sessionId) => {
-    const config = sessionId
-      ? { params: { session_id: sessionId } }
-      : {}
-    return request.post('/api/agent/workspace/files', {}, config)
+  getWorkspaceFiles: (agentId, sessionId) => {
+    return request.post(`/api/agent/${agentId}/file_workspace`, {}, {
+      params: { session_id: sessionId }
+    })
   },
 
   /**
    * 下载文件
+   * @param {string} agentId - 会话ID
    * @param {string} filePath - 文件路径
    * @param {string} sessionId - 会话ID (可选)
    * @returns {Promise<Blob>}
    */
-  downloadFile: async (filePath, sessionId) => {
+  downloadFile: async (agentId, filePath, sessionId) => {
     // 如果是 http/https 链接，直接下载
     if (filePath && (filePath.startsWith('http://') || filePath.startsWith('https://'))) {
       const response = await fetch(filePath, {
@@ -138,7 +139,7 @@ export const agentAPI = {
     if (sessionId) {
       params.set('session_id', sessionId)
     }
-    const url = `${apiPrefix}/api/agent/workspace/files/download?${params.toString()}`
+    const url = `${apiPrefix}/api/agent/${agentId}/file_workspace/download?${params.toString()}`
 
     // 准备请求头
     const headers = {
