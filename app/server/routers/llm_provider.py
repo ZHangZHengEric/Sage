@@ -1,9 +1,8 @@
-from typing import List
 import uuid
 
-from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException
 from ..models.llm_provider import LLMProvider, LLMProviderDao
-from ..schemas.llm_provider import LLMProviderDTO, LLMProviderCreate, LLMProviderUpdate
+from ..schemas.llm_provider import LLMProviderCreate, LLMProviderUpdate
 from ..core.render import Response
 from openai import AsyncOpenAI
 from loguru import logger
@@ -16,7 +15,7 @@ async def verify_provider(data: LLMProviderCreate):
     验证模型提供商配置是否有效
     """
     try:
-        api_key = data.api_keys[0] if data.api_keys else None
+        api_key = data.api_keys[0]
         if not api_key:
              return await Response.error(message="API Key is required")
 
@@ -46,7 +45,7 @@ async def verify_multimodal(data: LLMProviderCreate):
     通过发送一张红色图片，验证模型能否正确识别颜色
     """
     try:
-        api_key = data.api_keys[0] if data.api_keys else None
+        api_key = data.api_keys[0]
         if not api_key:
              return await Response.error(message="API Key is required")
 

@@ -55,7 +55,11 @@
               <ArrowRight class="ml-1 w-3 h-3" />
             </Button>
           </div>
-          <Textarea v-model="form.api_keys_str" :placeholder="t('modelProvider.apiKeyPlaceholder')" />
+          <Input
+            v-model="form.api_keys_str"
+            :placeholder="t('modelProvider.apiKeyPlaceholder')"
+            @update:model-value="handleApiKeyInput"
+          />
         </div>
         
         <div class="grid gap-2">
@@ -126,7 +130,6 @@ import { Loader, ArrowRight } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
   SelectContent,
@@ -172,6 +175,23 @@ const form = reactive({
 
 const currentProvider = computed(() => MODEL_PROVIDERS.find(p => p.name === selectedProvider.value))
 
+const buildApiKeys = () => {
+  const apiKey = form.api_keys_str.trim()
+  return apiKey ? [apiKey] : []
+}
+
+const buildProviderPayload = () => ({
+  name: form.name,
+  base_url: form.base_url,
+  api_keys: buildApiKeys(),
+  model: form.model,
+  max_tokens: form.maxTokens,
+  temperature: form.temperature,
+  top_p: form.topP,
+  presence_penalty: form.presencePenalty,
+  max_model_len: form.maxModelLen
+})
+
 const handleProviderChange = (val) => {
   selectedProvider.value = val
   if (val === 'Custom') {
@@ -192,6 +212,10 @@ const openProviderWebsite = () => {
   if (currentProvider.value?.website) {
     window.open(currentProvider.value.website, '_blank')
   }
+}
+
+const handleApiKeyInput = (value) => {
+  form.api_keys_str = `${value ?? ''}`.split(/\r?\n/, 1)[0]
 }
 
 const openProviderModelList = () => {
@@ -244,17 +268,7 @@ const syncCurrentUserStatus = async () => {
 }
 
 const handleVerify = async () => {
-  const data = {
-    name: form.name,
-    base_url: form.base_url,
-    api_keys: form.api_keys_str.split(/[\n,]+/).map(k => k.trim()).filter(k => k),
-    model: form.model,
-    max_tokens: form.maxTokens,
-    temperature: form.temperature,
-    top_p: form.topP,
-    presence_penalty: form.presencePenalty,
-    max_model_len: form.maxModelLen
-  }
+  const data = buildProviderPayload()
   
   if (!data.name || !data.base_url || !data.api_keys.length || !data.model) {
      toast.error(t('common.fillRequired') || '请填写必填项')
@@ -338,16 +352,8 @@ const createDefaultAgent = async (providerId) => {
 
 const handleSubmit = async () => {
   const data = {
-    name: form.name,
-    base_url: form.base_url,
-    api_keys: form.api_keys_str.split(/[\n,]+/).map(k => k.trim()).filter(k => k),
-    model: form.model,
-    max_tokens: form.maxTokens,
-    temperature: form.temperature,
-    top_p: form.topP,
-    presence_penalty: form.presencePenalty,
-    max_model_len: form.maxModelLen,
-    is_default: true 
+    ...buildProviderPayload(),
+    is_default: true
   }
   
   if (!data.name || !data.base_url || !data.api_keys.length || !data.model) {
