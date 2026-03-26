@@ -144,7 +144,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { 
   Globe, 
   ChevronRight, 
@@ -171,6 +171,7 @@ import {
 } from '@/components/ui/dialog'
 
 const router = useRouter()
+const route = useRoute()
 const { toggleLanguage, t, isZhCN } = useLanguage()
 const currentUser = ref(getCurrentUser())
 
@@ -178,10 +179,14 @@ const handleUserUpdated = () => {
   currentUser.value = getCurrentUser()
 }
 
-const handleLogout = () => {
-  logout()
+const handleLogout = async () => {
+  const nextPath = route.fullPath && route.fullPath !== '/login' ? route.fullPath : '/agent/chat'
+  await logout()
   currentUser.value = null
-  router.push({ name: 'Chat' })
+  router.replace({
+    name: 'Login',
+    query: { next: nextPath }
+  })
 }
 
 // Password change logic
@@ -212,7 +217,7 @@ const handleChangePassword = async () => {
     )
     toast.success('密码修改成功，请重新登录')
     showChangePasswordDialog.value = false
-    handleLogout()
+    await handleLogout()
   } catch (error) {
     console.error(error)
     toast.error(error.message || '修改失败')

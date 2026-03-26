@@ -7,6 +7,7 @@ from .chat import chat_router
 from .conversation import conversation_router
 from .kdb import kdb_router
 from .mcp import mcp_router
+from .observability import observability_router
 from .oss import oss_router
 from .skill import skill_router
 from .system import system_router
@@ -34,3 +35,4 @@ def register_routes(app):
     app.include_router(chat_router)
     app.include_router(skill_router)
     app.include_router(llm_provider_router)
+    app.include_router(observability_router)

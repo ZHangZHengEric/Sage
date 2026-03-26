@@ -122,35 +122,23 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
-  ExternalLink,
   Loader2,
   AlertCircle,
   RefreshCw,
   Copy,
   Check,
   File,
-  Globe,
   FileText,
-  Image as ImageIcon,
   Download
 } from 'lucide-vue-next'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
 import { useThemeStore } from '@/stores/theme'
-import ExcalidrawRenderer from './filerender/ExcalidrawRenderer.vue'
 import PdfRenderer from './filerender/PdfRenderer.vue'
 import ImageRenderer from './filerender/ImageRenderer.vue'
-import HtmlRenderer from './filerender/HtmlRenderer.vue'
-import MarkdownRenderer from './filerender/MarkdownRenderer.vue'
-import CodeRenderer from './filerender/CodeRenderer.vue'
 import TextRenderer from './filerender/TextRenderer.vue'
-import DocxRenderer from './filerender/DocxRenderer.vue'
-import XlsxRenderer from './filerender/XlsxRenderer.vue'
-import PptxRenderer from './filerender/PptxRenderer.vue'
 import { agentAPI } from '@/api/agent'
 
 import { 
@@ -162,6 +150,14 @@ import {
   getOfficeFileType,
   getDisplayFileName
 } from '@/utils/fileIcons.js'
+
+const HtmlRenderer = defineAsyncComponent(() => import('./filerender/HtmlRenderer.vue'))
+const MarkdownRenderer = defineAsyncComponent(() => import('./filerender/MarkdownRenderer.vue'))
+const CodeRenderer = defineAsyncComponent(() => import('./filerender/CodeRenderer.vue'))
+const ExcalidrawRenderer = defineAsyncComponent(() => import('./filerender/ExcalidrawRenderer.vue'))
+const DocxRenderer = defineAsyncComponent(() => import('./filerender/DocxRenderer.vue'))
+const XlsxRenderer = defineAsyncComponent(() => import('./filerender/XlsxRenderer.vue'))
+const PptxRenderer = defineAsyncComponent(() => import('./filerender/PptxRenderer.vue'))
 
 const props = defineProps({
   filePath: {

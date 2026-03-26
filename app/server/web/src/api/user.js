@@ -19,6 +19,12 @@ export const userAPI = {
   checkLogin: async () => {
     return await request.get('/api/user/check_login')
   },
+  getAuthProviders: async () => {
+    return await request.get('/api/user/auth-providers')
+  },
+  logout: async () => {
+    return await request.post('/api/user/logout', {})
+  },
   getUserInfo: async () => {
     return await request.get('/api/user/check_login')
   },
