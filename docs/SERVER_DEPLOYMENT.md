@@ -38,9 +38,11 @@ docker-compose up -d
 | **sage-mysql** | 3306 | **30052** | Relational Database |
 | **sage-es** | 9200 | **30053** | Vector Search & Full-text Search |
 | **sage-minio** | 9000/9001 | **30054/30055** | Object Storage Service |
-| **sage-jaeger** | 16686/4317 | **30056/4317** | Distributed Tracing |
+| **sage-jaeger** | 16686/4317/4318 | **4317/4318** | Jaeger 2.16 collector and query service |
 
-> **Note**: After startup, please access the Web interface via `http://localhost:30051`. The backend API documentation is available at `http://localhost:30050/docs`.
+> **Note**: After startup, access the Web interface at `http://localhost:30051`, the backend API docs at `http://localhost:30050/docs`, and the Jaeger Dashboard at `http://localhost:30051/jaeger/`.
+>
+> The Jaeger Dashboard is now served under the `sage-web` domain at `/jaeger/`. `sage-web` checks with Sage whether the current session still belongs to an `admin` user, and if the browser is not authenticated yet it redirects to the Sage-configured OIDC/OAuth login flow before returning to the dashboard.
 
 ---
 
@@ -235,8 +237,19 @@ Sage integrates Jaeger for distributed tracing to facilitate performance bottlen
 
 | Command Line Argument | Environment Variable | Description |
 | :--- | :--- | :--- |
-| `--trace_jaeger_url` | `SAGE_TRACE_JAEGER_URL` | Jaeger OTLP HTTP Endpoint (e.g., `http://localhost:4318/v1/traces`) |
+| `--trace_jaeger_url` | `SAGE_TRACE_JAEGER_URL` | Jaeger OTLP gRPC endpoint (e.g., `http://localhost:4317`) |
+| - | `SAGE_TRACE_JAEGER_PUBLIC_URL` | Public Jaeger Dashboard URL (e.g., `http://localhost:30051/jaeger`) |
+| - | `SAGE_TRACE_JAEGER_UI_URL` | Internal Jaeger Query/UI URL (e.g., `http://sage-jaeger:16686/jaeger`) |
 | `--enable_trace` | `SAGE_ENABLE_TRACE` | Whether to enable tracing (Default: True) |
+
+With the default `docker-compose.yml`, observability works as follows:
+
+1. `sage-server` exports traces to `sage-jaeger:4317` via OTLP
+2. `sage-jaeger` runs Jaeger `v2.16` query/UI
+3. `sage-web` exposes the dashboard at `/jaeger/` and checks with Sage whether the current session still belongs to an administrator
+4. If the browser is not logged in, `sage-web` redirects to the Sage-configured OIDC/OAuth flow and then returns to the Jaeger Dashboard
+
+If you deploy on a remote host, make sure `SAGE_TRACE_JAEGER_PUBLIC_URL` points to the real externally reachable hostname instead of the default `http://127.0.0.1:30051/jaeger`.
 
 ---
 

@@ -47,9 +47,15 @@ class StartupConfig:
     context_recent_turns: int = 0
     
     # auth
+    auth_providers_json: Optional[str] = None
     jwt_key: str = "sage_dev_jwt_secret_key_change_me_in_prod_v1"
     jwt_expire_hours: int = 24
     refresh_token_secret: str = "sage_dev_refresh_secret_key_change_me_in_prod_v1"
+    session_secret: str = "sage_dev_session_secret_key_change_me_in_prod_v1"
+    session_cookie_name: str = "sage_session"
+    session_cookie_secure: bool = False
+    session_cookie_same_site: str = "lax"
+    web_base_path: str = "/sage"
 
     # Embedding
     embed_api_key: Optional[str] = None
@@ -73,6 +79,9 @@ class StartupConfig:
 
     # Trace
     trace_jaeger_endpoint: Optional[str] = None
+    trace_jaeger_ui_url: str = "http://127.0.0.1:30051/jaeger"
+    trace_jaeger_public_url: str = "http://127.0.0.1:30051/jaeger"
+    trace_jaeger_base_path: str = "/api/observability/jaeger"
 
 
 class ENV:
@@ -94,6 +103,10 @@ class ENV:
 
     # Trace
     TRACE_JAEGER_URL = "SAGE_TRACE_JAEGER_URL"
+    TRACE_JAEGER_ENDPOINT = "SAGE_TRACE_JAEGER_ENDPOINT"
+    TRACE_JAEGER_UI_URL = "SAGE_TRACE_JAEGER_UI_URL"
+    TRACE_JAEGER_PUBLIC_URL = "SAGE_TRACE_JAEGER_PUBLIC_URL"
+    TRACE_JAEGER_BASE_PATH = "SAGE_TRACE_JAEGER_BASE_PATH"
 
     # 服务器与运行配置
     PORT = "SAGE_PORT"
@@ -119,10 +132,15 @@ class ENV:
     KB_MCP_URL = "SAGE_KB_MCP_URL"
     KB_MCP_API_KEY = "SAGE_KB_MCP_API_KEY"
 
+    AUTH_PROVIDERS = "SAGE_AUTH_PROVIDERS"
     JWT_KEY = "SAGE_JWT_KEY"
     JWT_EXPIRE_HOURS = "SAGE_JWT_EXPIRE_HOURS"
     REFRESH_TOKEN_SECRET = "SAGE_REFRESH_TOKEN_SECRET"
-
+    SESSION_SECRET = "SAGE_SESSION_SECRET"
+    SESSION_COOKIE_NAME = "SAGE_SESSION_COOKIE_NAME"
+    SESSION_COOKIE_SECURE = "SAGE_SESSION_COOKIE_SECURE"
+    SESSION_COOKIE_SAME_SITE = "SAGE_SESSION_COOKIE_SAME_SITE"
+    WEB_BASE_PATH = "SAGE_WEB_BASE_PATH"
     MYSQL_HOST = "SAGE_MYSQL_HOST"
     MYSQL_PORT = "SAGE_MYSQL_PORT"
     MYSQL_USER = "SAGE_MYSQL_USER"
@@ -242,6 +260,10 @@ def build_startup_config() -> StartupConfig:
             ENV.CONTEXT_RECENT_TURNS,
             StartupConfig.context_recent_turns,
         ),
+        auth_providers_json=env_str(
+            ENV.AUTH_PROVIDERS,
+            StartupConfig.auth_providers_json,
+        ),
         jwt_key=env_str(ENV.JWT_KEY, StartupConfig.jwt_key),
         jwt_expire_hours=env_int(
             ENV.JWT_EXPIRE_HOURS, StartupConfig.jwt_expire_hours
@@ -249,6 +271,26 @@ def build_startup_config() -> StartupConfig:
         refresh_token_secret=env_str(
             ENV.REFRESH_TOKEN_SECRET,
             StartupConfig.refresh_token_secret,
+        ),
+        session_secret=env_str(
+            ENV.SESSION_SECRET,
+            StartupConfig.session_secret,
+        ),
+        session_cookie_name=env_str(
+            ENV.SESSION_COOKIE_NAME,
+            StartupConfig.session_cookie_name,
+        ),
+        session_cookie_secure=env_bool(
+            ENV.SESSION_COOKIE_SECURE,
+            StartupConfig.session_cookie_secure,
+        ),
+        session_cookie_same_site=(env_str(
+            ENV.SESSION_COOKIE_SAME_SITE,
+            StartupConfig.session_cookie_same_site,
+        ) or StartupConfig.session_cookie_same_site).strip().lower(),
+        web_base_path=env_str(
+            ENV.WEB_BASE_PATH,
+            StartupConfig.web_base_path,
         ),
         embed_api_key=env_str(
             ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key
@@ -293,9 +335,38 @@ def build_startup_config() -> StartupConfig:
         ),
         trace_jaeger_endpoint=env_str(
             ENV.TRACE_JAEGER_URL,
-            StartupConfig.trace_jaeger_endpoint,
+            env_str(
+                ENV.TRACE_JAEGER_ENDPOINT,
+                StartupConfig.trace_jaeger_endpoint,
+            ),
+        ),
+        trace_jaeger_ui_url=env_str(
+            ENV.TRACE_JAEGER_UI_URL,
+            StartupConfig.trace_jaeger_ui_url,
+        ),
+        trace_jaeger_public_url=env_str(
+            ENV.TRACE_JAEGER_PUBLIC_URL,
+            StartupConfig.trace_jaeger_public_url,
+        ),
+        trace_jaeger_base_path=env_str(
+            ENV.TRACE_JAEGER_BASE_PATH,
+            StartupConfig.trace_jaeger_base_path,
         ),
     )
+    cfg.session_cookie_same_site = (
+        (cfg.session_cookie_same_site or StartupConfig.session_cookie_same_site)
+        .strip()
+        .lower()
+    )
+    if cfg.session_cookie_same_site not in {"lax", "strict", "none"}:
+        cfg.session_cookie_same_site = StartupConfig.session_cookie_same_site
+    if cfg.web_base_path:
+        cfg.web_base_path = "/" + cfg.web_base_path.strip("/")
+    else:
+        cfg.web_base_path = StartupConfig.web_base_path
+    if cfg.trace_jaeger_base_path:
+        cfg.trace_jaeger_base_path = "/" + cfg.trace_jaeger_base_path.strip("/")
+
     # 规范化路径
     if cfg.session_dir:
         cfg.session_dir = os.path.abspath(cfg.session_dir)
