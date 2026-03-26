@@ -78,6 +78,9 @@ class User(Base):
         self.created_at = created_at or get_local_now()
         self.updated_at = updated_at or get_local_now()
 
+    def get_user_id(self) -> str:
+        return self.user_id
+
 
 class UserExternalIdentity(Base):
     __tablename__ = "user_external_identities"

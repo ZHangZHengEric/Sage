@@ -29,7 +29,7 @@ from ..services.user import (
     change_password,
     get_user_options,
 )
-from ..services.oauth import (
+from ..services.auth.external_oauth import (
     build_oauth_authorize_url,
     clear_auth_session,
     complete_oauth_login,

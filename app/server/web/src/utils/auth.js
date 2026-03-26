@@ -23,10 +23,10 @@ export const buildOAuthLoginUrl = (providerId, nextPath = null) => {
       : '/agent/chat'
   )
   const redirectUri = typeof window !== 'undefined'
-    ? `${window.location.origin}${apiPrefix}/api/user/oauth/callback/${providerId}`
-    : `${apiPrefix}/api/user/oauth/callback/${providerId}`
+    ? `${window.location.origin}${apiPrefix}/api/auth/upstream/callback/${providerId}`
+    : `${apiPrefix}/api/auth/upstream/callback/${providerId}`
 
-  return `${apiPrefix}/api/user/oauth/login/${encodeURIComponent(providerId)}?next=${encodeURIComponent(nextUrl)}&redirect_uri=${encodeURIComponent(redirectUri)}`
+  return `${apiPrefix}/api/auth/upstream/login/${encodeURIComponent(providerId)}?next=${encodeURIComponent(nextUrl)}&redirect_uri=${encodeURIComponent(redirectUri)}`
 }
 
 // 登录 API - 不再检查前端 cookie

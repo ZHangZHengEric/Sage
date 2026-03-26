@@ -6,7 +6,7 @@ from ..core.render import Response
 from ..models import SystemInfoDao
 from ..schemas.base import BaseResponse
 from ..schemas.system import SystemSettingsRequest
-from ..services.oauth import get_auth_public_config
+from ..services.auth.external_oauth import get_auth_public_config
 
 # 创建路由器
 system_router = APIRouter(prefix="/api", tags=["System"])
