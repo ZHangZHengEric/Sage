@@ -8,6 +8,8 @@ from ..schemas.user import (
     LoginResponse,
     RegisterRequest,
     RegisterResponse,
+    RegisterVerificationCodeRequest,
+    RegisterVerificationCodeResponse,
     UserInfoResponse,
     UserListResponse,
     UserDTO,
@@ -23,6 +25,7 @@ from ..services.user import (
     build_user_claims,
     create_login_tokens,
     register_user,
+    send_register_verification_code,
     get_user_list,
     delete_user,
     add_user,
@@ -59,6 +62,21 @@ async def user_options(request: Request):
     return await Response.succ(data=options, message="获取用户列表成功")
 
 
+@user_router.post("/register/send-code", response_model=BaseResponse[RegisterVerificationCodeResponse])
+async def send_register_code(req: RegisterVerificationCodeRequest):
+    if not is_local_auth_enabled():
+        return await Response.error(
+            code=400,
+            message="当前服务未启用本地账号注册",
+            error_detail="local auth disabled",
+        )
+    expires_in, retry_after = await send_register_verification_code(req.email)
+    return await Response.succ(
+        data=RegisterVerificationCodeResponse(expires_in=expires_in, retry_after=retry_after),
+        message="验证码发送成功",
+    )
+
+
 @user_router.post("/register", response_model=BaseResponse[RegisterResponse])
 async def register(req: RegisterRequest):
     if not is_local_auth_enabled():
@@ -67,7 +85,13 @@ async def register(req: RegisterRequest):
             message="当前服务未启用本地账号注册",
             error_detail="local auth disabled",
         )
-    user_id = await register_user(req.username, req.password, req.email, req.phonenum)
+    user_id = await register_user(
+        req.username,
+        req.password,
+        req.email,
+        req.phonenum,
+        req.verification_code,
+    )
     return await Response.succ(data=RegisterResponse(user_id=user_id), message="注册成功")
 
 

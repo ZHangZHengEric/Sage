@@ -8,12 +8,18 @@ export const userAPI = {
       password
     })
   },
-  register: async (username, password, email = '', phonenum = '') => {
+  sendRegisterVerificationCode: async (email) => {
+    return await request.post('/api/auth/register/send-code', {
+      email
+    })
+  },
+  register: async (username, password, email = '', phonenum = '', verificationCode = '') => {
     return await request.post('/api/auth/register', {
       username,
       password,
       email,
-      phonenum
+      phonenum,
+      verification_code: verificationCode
     })
   },
   checkLogin: async () => {

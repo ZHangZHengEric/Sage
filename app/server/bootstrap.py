@@ -12,8 +12,8 @@ from sagents.skill import SkillManager, set_skill_manager
 from sagents.tool.tool_manager import ToolManager, set_tool_manager
 from sagents.session_runtime import initialize_global_session_manager
 
-from .core.client.chat import close_chat_client, init_chat_client
 from .core.client.db import close_db_client, init_db_client
+from .core.client.eml import close_eml_client, init_eml_client
 from .core.client.embed import close_embed_client, init_embed_client
 from .core.client.es import close_es_client, init_es_client
 from .core.client.s3 import close_s3_client, init_s3_client
@@ -32,6 +32,13 @@ async def initialize_db_connection(cfg: StartupConfig):
 
 
 async def initialize_global_clients(cfg: StartupConfig):
+    try:
+        eml_client = await init_eml_client(cfg)
+        if eml_client is not None:
+            logger.info("邮件客户端已初始化")
+    except Exception as e:
+        logger.error(f"邮件客户端初始化失败: {e}")
+
     try:
         s3_client = await init_s3_client(cfg)
         if s3_client is not None:
@@ -246,6 +253,10 @@ async def shutdown_scheduler():
 async def shutdown_clients():
     """关闭所有第三方客户端"""
     # 关闭第三方客户端
+    try:
+        await close_eml_client()
+    finally:
+        logger.info("邮件客户端 已关闭")
     try:
         await close_s3_client()
     finally:

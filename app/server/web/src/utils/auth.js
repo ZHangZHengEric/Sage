@@ -61,9 +61,18 @@ export const loginAPI = async (username, password) => {
   }
 }
 
-export const registerAPI = async (username, password, email = '', phonenum = '') => {
+export const sendRegisterVerificationCodeAPI = async (email) => {
   try {
-    await userAPI.register(username, password, email, phonenum)
+    const res = await userAPI.sendRegisterVerificationCode(email)
+    return { success: true, data: res }
+  } catch (error) {
+    return { success: false, message: error.message || '验证码发送失败，请稍后重试' }
+  }
+}
+
+export const registerAPI = async (username, password, email = '', phonenum = '', verificationCode = '') => {
+  try {
+    await userAPI.register(username, password, email, phonenum, verificationCode)
     const loginRes = await loginAPI(username, password)
     return loginRes
   } catch (error) {
