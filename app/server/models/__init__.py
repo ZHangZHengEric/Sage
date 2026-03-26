@@ -5,7 +5,7 @@ from .file import File, FileDao
 from .kdb import Kdb, KdbDao
 from .kdb_doc import KdbDoc, KdbDocDao, KdbDocStatus
 from .mcp_server import MCPServer, MCPServerDao
-from .user import User, UserDao
+from .user import User, UserDao, UserExternalIdentity, UserExternalIdentityDao
 from .system import SystemInfo, SystemInfoDao, Version, VersionDao, VersionArtifact
 from .llm_provider import LLMProvider, LLMProviderDao
 __all__ = [
@@ -16,6 +16,8 @@ __all__ = [
     "ConversationDao",
     "User",
     "UserDao",
+    "UserExternalIdentity",
+    "UserExternalIdentityDao",
     "Kdb",
     "KdbDao",
     "KdbDoc",
