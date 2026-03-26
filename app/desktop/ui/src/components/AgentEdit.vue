@@ -718,6 +718,96 @@
                       </div>
                     </template>
 
+                    <!-- WeChat Personal (微信个人号) -->
+                    <template v-if="provider.key === 'wechat_personal'">
+                      <div class="space-y-4">
+                        <div class="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                          <p class="text-sm text-green-800 dark:text-green-200">
+                            微信个人号通过 iLink Bot API 接入。首次使用需要扫码登录获取 Bot Token。
+                          </p>
+                        </div>
+                        
+                        <!-- 扫码登录区域 -->
+                        <div class="space-y-3 p-4 border rounded-lg bg-muted/30">
+                          <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                @click="startWeChatPersonalLogin(provider.key)"
+                                :disabled="wechatPersonalLogin.loading"
+                              >
+                                <Loader v-if="wechatPersonalLogin.loading" class="mr-2 h-4 w-4 animate-spin" />
+                                <QrCode v-else class="mr-2 h-4 w-4" />
+                                {{ wechatPersonalLogin.loading ? '获取中...' : '扫码获取 Token' }}
+                              </Button>
+                              <span v-if="wechatPersonalLogin.status === 'scaned'" class="text-sm text-yellow-600">已扫码，等待确认...</span>
+                              <span v-if="wechatPersonalLogin.status === 'confirmed'" class="text-sm text-green-600">登录成功！</span>
+                              <span v-if="wechatPersonalLogin.status === 'expired'" class="text-sm text-red-600">二维码已过期</span>
+                            </div>
+                          </div>
+                          
+                          <!-- 二维码显示 -->
+                          <div v-if="wechatPersonalLogin.qrCodeUrl" class="border rounded-lg p-4 bg-white space-y-3">
+                            <div class="flex justify-center">
+                              <img 
+                                :src="wechatPersonalLogin.qrCodeUrl" 
+                                alt="微信扫码登录" 
+                                class="w-48 h-48 object-contain bg-white border"
+                                style="image-rendering: pixelated; min-height: 192px; min-width: 192px;"
+                              />
+                            </div>
+                            <div class="text-sm space-y-2">
+                              <p class="font-medium text-center">使用步骤：</p>
+                              <ol class="list-decimal list-inside text-xs text-muted-foreground space-y-1">
+                                <li>使用微信扫描上方二维码</li>
+                                <li>手机上会显示 <strong>Bot Token</strong></li>
+                                <li>复制 Token 并粘贴到下方输入框</li>
+                              </ol>
+                            </div>
+                            <!-- 备用链接 -->
+                            <div v-if="wechatPersonalLogin.qrUrl" class="text-center space-y-2 pt-2 border-t">
+                              <p class="text-xs text-gray-500">扫码无效？可复制链接到微信打开：</p>
+                              <div class="flex gap-2 justify-center">
+                                <Button 
+                                  variant="outline" 
+                                  size="sm"
+                                  @click="copyWeChatPersonalUrl"
+                                >
+                                  复制链接
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div class="space-y-2">
+                          <Label>Bot Token <span class="text-red-500">*</span></Label>
+                          <p class="text-xs text-muted-foreground">
+                            通过微信扫码登录获取，或使用已有 Bot Token
+                          </p>
+                          <Textarea
+                            v-model="imConfig.wechat_personal.config.bot_token"
+                            placeholder="输入 Bot Token"
+                            rows="3"
+                            :disabled="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
+                          />
+                        </div>
+                        
+                        <div class="space-y-2">
+                          <Label>Bot ID <span class="text-red-500">*</span></Label>
+                          <p class="text-xs text-muted-foreground">
+                            登录成功后自动获取，或手动输入
+                          </p>
+                          <Input
+                            v-model="imConfig.wechat_personal.config.bot_id"
+                            placeholder="输入 Bot ID"
+                            :disabled="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
+                          />
+                        </div>
+                      </div>
+                    </template>
+
                     <!-- DingTalk -->
                     <template v-if="provider.key === 'dingtalk'">
                       <div class="space-y-2">
@@ -1045,10 +1135,21 @@ const validateMaxLoopCount = () => {
 const activeIMProvider = ref('wechat_work')
 const testingIM = ref({})
 
+// WeChat Personal (iLink) login state
+const wechatPersonalLogin = ref({
+  loading: false,
+  qrCodeUrl: '',      // 二维码图片 data URL
+  qrUrl: '',          // 微信扫码后打开的 URL
+  qrcode: '',         // 二维码字符串（用于状态查询）
+  status: '',         // wait, scaned, confirmed, expired
+  polling: false
+})
+
 const isDefaultAgent = computed(() => store.formData.is_default === true)
 
 const imProviders = [
   { key: 'wechat_work', label: '企业微信' },
+  { key: 'wechat_personal', label: '微信' },
   { key: 'dingtalk', label: '钉钉' },
   { key: 'feishu', label: '飞书' },
   { key: 'imessage', label: 'iMessage' }
@@ -1056,6 +1157,7 @@ const imProviders = [
 
 const imConfig = ref({
   wechat_work: { enabled: false, config: { bot_id: '', secret: '' } },
+  wechat_personal: { enabled: false, config: { bot_token: '', bot_id: '' } },
   dingtalk: { enabled: false, config: { client_id: '', client_secret: '' } },
   feishu: { enabled: false, config: { app_id: '', app_secret: '' } },
   imessage: { enabled: false, config: { allowed_senders_text: '' } }
@@ -1092,6 +1194,7 @@ const imEditMode = ref({
 // Default empty IM config
 const getDefaultIMConfig = () => ({
   wechat_work: { enabled: false, config: { bot_id: '', secret: '' } },
+  wechat_personal: { enabled: false, config: { bot_token: '', bot_id: '' } },
   dingtalk: { enabled: false, config: { client_id: '', client_secret: '' } },
   feishu: { enabled: false, config: { app_id: '', app_secret: '' } },
   imessage: { enabled: false, config: { allowed_senders_text: '' } }
@@ -1279,6 +1382,157 @@ const handleFinishIMEdit = (provider) => {
     [provider]: false
   }
 }
+
+// ============================================================================
+// WeChat Personal (iLink) Login Functions
+// ============================================================================
+
+const startWeChatPersonalLogin = async (provider) => {
+  if (!store.formData.id) return
+  
+  wechatPersonalLogin.value = {
+    loading: true,
+    qrCodeUrl: '',
+    qrUrl: '',
+    qrcode: '',
+    status: '',
+    polling: false
+  }
+  
+  try {
+    // 1. 获取二维码
+    const result = await request.post(`/api/im/agent/${store.formData.id}/im_channels/wechat_personal/qrcode`, {})
+    
+    console.log('[AgentEdit] WeChat Personal QR code response:', result)
+    
+    if (!result.qrcode || !result.qrcode_url) {
+      alert('获取二维码失败：响应数据不完整')
+      return
+    }
+    
+    // 使用 qrcode 库生成二维码图片
+    const qrData = result.qrcode
+    const qrUrl = result.qrcode_url
+    
+    let qrCodeUrl = ''
+    try {
+      // 动态导入 qrcode 库
+      const QRCode = await import('qrcode')
+      qrCodeUrl = await QRCode.toDataURL(qrData, {
+        width: 400,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#ffffff'
+        }
+      })
+    } catch (qrError) {
+      console.error('[AgentEdit] Failed to generate QR code:', qrError)
+      // 如果生成失败，显示原始字符串
+      qrCodeUrl = ''
+    }
+    
+    wechatPersonalLogin.value = {
+      loading: false,
+      qrCodeUrl: qrCodeUrl,
+      qrUrl: qrUrl,
+      qrcode: result.qrcode,
+      status: 'wait',
+      polling: true
+    }
+    
+    // 开始轮询扫码状态
+    pollWeChatPersonalStatus(provider)
+    
+  } catch (e) {
+    console.error('[AgentEdit] Failed to get QR code:', e)
+    alert('获取二维码失败: ' + e.message)
+    wechatPersonalLogin.value.loading = false
+  }
+}
+
+const pollWeChatPersonalStatus = async (provider) => {
+  // 后端使用长轮询（35秒），前端设置40秒超时
+  // 10次尝试 = 最长350秒（约6分钟）
+  const maxAttempts = 10
+  let attempts = 0
+  
+  console.log('[AgentEdit] Starting QR status polling')
+  
+  while (wechatPersonalLogin.value.polling && attempts < maxAttempts) {
+    try {
+      console.log(`[AgentEdit] Polling attempt ${attempts + 1}/${maxAttempts}`)
+      
+      // 使用40秒超时，因为后端长轮询35秒
+      const result = await request.post(
+        `/api/im/agent/${store.formData.id}/im_channels/wechat_personal/qrcode/status`,
+        { qrcode: wechatPersonalLogin.value.qrcode },
+        { timeout: 40000 }  // 40秒超时
+      )
+      
+      console.log('[AgentEdit] QR status response:', result)
+      
+      const status = result.status
+      wechatPersonalLogin.value.status = status
+      
+      if (status === 'confirmed') {
+        // 登录成功，保存 token
+        wechatPersonalLogin.value.polling = false
+        imConfig.value = {
+          ...imConfig.value,
+          wechat_personal: {
+            ...imConfig.value.wechat_personal,
+            config: {
+              ...imConfig.value.wechat_personal.config,
+              bot_token: result.bot_token,
+              bot_id: result.bot_id
+            }
+          }
+        }
+        alert('登录成功！Bot Token 和 Bot ID 已自动填充')
+        return
+      } else if (status === 'expired') {
+        wechatPersonalLogin.value.polling = false
+        alert('二维码已过期，请重新获取')
+        return
+      } else if (status === 'scaned') {
+        console.log('[AgentEdit] QR code scanned, waiting for confirm...')
+      }
+      
+      // 长轮询返回 wait，立即发起下一次请求
+      attempts++
+      
+    } catch (e) {
+      console.error('[AgentEdit] Failed to check QR status:', e)
+      // 出错后等待2秒再试
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      attempts++
+    }
+  }
+  
+  // 超时
+  if (attempts >= maxAttempts) {
+    wechatPersonalLogin.value.polling = false
+    wechatPersonalLogin.value.status = 'expired'
+    alert('扫码超时，请重新获取二维码')
+  }
+}
+
+const copyWeChatPersonalUrl = async () => {
+  try {
+    if (wechatPersonalLogin.value.qrUrl) {
+      await navigator.clipboard.writeText(wechatPersonalLogin.value.qrUrl)
+      alert('链接已复制到剪贴板，请在微信中打开')
+    }
+  } catch (err) {
+    console.error('Failed to copy:', err)
+    alert('复制失败，请手动复制')
+  }
+}
+
+// ============================================================================
+// Test Connection
+// ============================================================================
 
 const testIMConnection = async (provider) => {
   if (!store.formData.id) return
