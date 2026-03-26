@@ -272,6 +272,7 @@ async def ensure_system_init(cfg: StartupConfig):
     """Ensure system tables and default data exist."""
     from . import models
     from .services.user import _hash_password
+    from .services.auth.oauth2_provider import sync_oauth2_clients
     from .utils.id import gen_id
     from .core.client.db import get_global_db, sync_database_schema
 
@@ -306,6 +307,9 @@ async def ensure_system_init(cfg: StartupConfig):
         )
         await user_dao.save(admin_user)
         logger.info(f"初始化默认管理员用户. 用户名: admin, 密码: {admin_password}")
+
+    await sync_oauth2_clients()
+    logger.debug("OAuth2 Clients 配置同步完成")
 
     dao = models.LLMProviderDao()
     default_provider = await dao.get_default()

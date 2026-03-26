@@ -56,6 +56,9 @@ class StartupConfig:
     session_cookie_secure: bool = False
     session_cookie_same_site: str = "lax"
     web_base_path: str = "/sage"
+    oauth2_clients_json: Optional[str] = None
+    oauth2_issuer: Optional[str] = None
+    oauth2_access_token_expires_in: int = 3600
 
     # Embedding
     embed_api_key: Optional[str] = None
@@ -141,6 +144,9 @@ class ENV:
     SESSION_COOKIE_SECURE = "SAGE_SESSION_COOKIE_SECURE"
     SESSION_COOKIE_SAME_SITE = "SAGE_SESSION_COOKIE_SAME_SITE"
     WEB_BASE_PATH = "SAGE_WEB_BASE_PATH"
+    OAUTH2_CLIENTS = "SAGE_OAUTH2_CLIENTS"
+    OAUTH2_ISSUER = "SAGE_OAUTH2_ISSUER"
+    OAUTH2_ACCESS_TOKEN_EXPIRES_IN = "SAGE_OAUTH2_ACCESS_TOKEN_EXPIRES_IN"
     MYSQL_HOST = "SAGE_MYSQL_HOST"
     MYSQL_PORT = "SAGE_MYSQL_PORT"
     MYSQL_USER = "SAGE_MYSQL_USER"
@@ -291,6 +297,18 @@ def build_startup_config() -> StartupConfig:
         web_base_path=env_str(
             ENV.WEB_BASE_PATH,
             StartupConfig.web_base_path,
+        ),
+        oauth2_clients_json=env_str(
+            ENV.OAUTH2_CLIENTS,
+            StartupConfig.oauth2_clients_json,
+        ),
+        oauth2_issuer=env_str(
+            ENV.OAUTH2_ISSUER,
+            StartupConfig.oauth2_issuer,
+        ),
+        oauth2_access_token_expires_in=env_int(
+            ENV.OAUTH2_ACCESS_TOKEN_EXPIRES_IN,
+            StartupConfig.oauth2_access_token_expires_in,
         ),
         embed_api_key=env_str(
             ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key
