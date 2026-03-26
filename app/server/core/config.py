@@ -59,6 +59,15 @@ class StartupConfig:
     oauth2_clients_json: Optional[str] = None
     oauth2_issuer: Optional[str] = None
     oauth2_access_token_expires_in: int = 3600
+    eml_endpoint: str = "dm.aliyuncs.com"
+    eml_access_key_id: Optional[str] = None
+    eml_access_key_secret: Optional[str] = None
+    eml_security_token: Optional[str] = None
+    eml_account_name: Optional[str] = None
+    eml_template_id: Optional[str] = None
+    eml_register_subject: str = ""
+    eml_address_type: int = 1
+    eml_reply_to_address: bool = False
 
     # Embedding
     embed_api_key: Optional[str] = None
@@ -147,6 +156,15 @@ class ENV:
     OAUTH2_CLIENTS = "SAGE_OAUTH2_CLIENTS"
     OAUTH2_ISSUER = "SAGE_OAUTH2_ISSUER"
     OAUTH2_ACCESS_TOKEN_EXPIRES_IN = "SAGE_OAUTH2_ACCESS_TOKEN_EXPIRES_IN"
+    EML_ENDPOINT = "SAGE_EML_ENDPOINT"
+    EML_ACCESS_KEY_ID = "SAGE_EML_ACCESS_KEY_ID"
+    EML_ACCESS_KEY_SECRET = "SAGE_EML_ACCESS_KEY_SECRET"
+    EML_SECURITY_TOKEN = "SAGE_EML_SECURITY_TOKEN"
+    EML_ACCOUNT_NAME = "SAGE_EML_ACCOUNT_NAME"
+    EML_TEMPLATE_ID = "SAGE_EML_TEMPLATE_ID"
+    EML_REGISTER_SUBJECT = "SAGE_EML_REGISTER_SUBJECT"
+    EML_ADDRESS_TYPE = "SAGE_EML_ADDRESS_TYPE"
+    EML_REPLY_TO_ADDRESS = "SAGE_EML_REPLY_TO_ADDRESS"
     MYSQL_HOST = "SAGE_MYSQL_HOST"
     MYSQL_PORT = "SAGE_MYSQL_PORT"
     MYSQL_USER = "SAGE_MYSQL_USER"
@@ -309,6 +327,42 @@ def build_startup_config() -> StartupConfig:
         oauth2_access_token_expires_in=env_int(
             ENV.OAUTH2_ACCESS_TOKEN_EXPIRES_IN,
             StartupConfig.oauth2_access_token_expires_in,
+        ),
+        eml_endpoint=env_str(
+            ENV.EML_ENDPOINT,
+            StartupConfig.eml_endpoint,
+        ) or StartupConfig.eml_endpoint,
+        eml_access_key_id=env_str(
+            ENV.EML_ACCESS_KEY_ID,
+            StartupConfig.eml_access_key_id,
+        ),
+        eml_access_key_secret=env_str(
+            ENV.EML_ACCESS_KEY_SECRET,
+            StartupConfig.eml_access_key_secret,
+        ),
+        eml_security_token=env_str(
+            ENV.EML_SECURITY_TOKEN,
+            StartupConfig.eml_security_token,
+        ),
+        eml_account_name=env_str(
+            ENV.EML_ACCOUNT_NAME,
+            StartupConfig.eml_account_name,
+        ),
+        eml_template_id=env_str(
+            ENV.EML_TEMPLATE_ID,
+            StartupConfig.eml_template_id,
+        ),
+        eml_register_subject=env_str(
+            ENV.EML_REGISTER_SUBJECT,
+            StartupConfig.eml_register_subject,
+        ) or StartupConfig.eml_register_subject,
+        eml_address_type=env_int(
+            ENV.EML_ADDRESS_TYPE,
+            StartupConfig.eml_address_type,
+        ) or StartupConfig.eml_address_type,
+        eml_reply_to_address=env_bool(
+            ENV.EML_REPLY_TO_ADDRESS,
+            StartupConfig.eml_reply_to_address,
         ),
         embed_api_key=env_str(
             ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key

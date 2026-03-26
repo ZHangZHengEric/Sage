@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, JSON
+from sqlalchemy import String, JSON, func
 from sqlalchemy.orm import Mapped, mapped_column
 from typing import Optional, Dict, Any
 
@@ -131,7 +131,12 @@ class UserDao(BaseDao):
 
     async def get_by_email(self, email: str) -> Optional[User]:
         """根据邮箱查询用户"""
-        return await BaseDao.get_first(self, User, where=[User.email == email])
+        normalized_email = (email or "").strip().lower()
+        return await BaseDao.get_first(
+            self,
+            User,
+            where=[func.lower(User.email) == normalized_email],
+        )
 
     async def save(self, user: User) -> bool:
         """保存用户"""

@@ -2,18 +2,18 @@
   <div class="min-h-screen grid lg:grid-cols-2 bg-background">
     <AnimatedCharactersStage :is-typing="isTyping" :password-length="password.length" :show-password="showPassword" />
 
-    <div class="flex items-center justify-center p-8 bg-background">
+    <div :class="panelClass">
       <div class="w-full max-w-[420px]">
-        <div class="lg:hidden flex items-center justify-center gap-2 text-lg font-semibold mb-12">
+        <div :class="mobileLogoClass">
           <div class="size-8 rounded-lg bg-primary/10 flex items-center justify-center p-1">
             <img :src="logoUrl" :alt="t('auth.logoAlt')" class="size-full object-contain" />
           </div>
           <span>Sage</span>
         </div>
 
-        <div class="text-center mb-10">
-          <h1 class="text-3xl font-bold tracking-tight mb-2">{{ headline }}</h1>
-          <p class="text-muted-foreground text-sm">{{ subheadline }}</p>
+        <div :class="headerClass">
+          <h1 :class="headlineClass">{{ headline }}</h1>
+          <p :class="subheadlineClass">{{ subheadline }}</p>
         </div>
 
         <div v-if="errorMessage && !localProvider" class="mb-5 p-3 text-sm text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg">
@@ -21,8 +21,8 @@
         </div>
 
         <div v-if="localProvider">
-          <form class="space-y-5" @submit.prevent="handleLocalSubmit">
-            <div class="space-y-2">
+          <form :class="formClass" @submit.prevent="handleLocalSubmit">
+            <div :class="fieldClass">
               <Label for="account" class="text-sm font-medium">{{ accountLabel }}</Label>
               <Input
                 id="account"
@@ -31,63 +31,133 @@
                 :placeholder="accountPlaceholder"
                 autocomplete="username"
                 required
-                class="h-12 bg-background border-border/60 focus:border-primary"
+                :class="inputClass"
                 @focus="isTyping = true"
                 @blur="isTyping = false"
               />
             </div>
 
-            <div class="space-y-2">
+            <div v-if="localMode === 'login'" :class="fieldClass">
               <Label for="password" class="text-sm font-medium">{{ t('auth.password') }}</Label>
               <div class="relative">
                 <Input
                   id="password"
                   v-model="password"
-                  :type="passwordInputType"
+                  :type="loginPasswordInputType"
                   placeholder="••••••••"
                   :autocomplete="localMode === 'login' ? 'current-password' : 'new-password'"
                   required
-                  class="h-12 pr-10 bg-background border-border/60 focus:border-primary"
+                  :class="passwordInputClass"
                 />
                 <button
                   type="button"
                   class="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none"
-                  :aria-label="passwordToggleLabel"
-                  :aria-pressed="showPassword"
-                  :title="passwordToggleLabel"
+                  :aria-label="loginPasswordToggleLabel"
+                  :aria-pressed="loginPasswordVisible"
+                  :title="loginPasswordToggleLabel"
                   @mousedown.prevent
-                  @click="togglePasswordVisibility"
+                  @click="toggleLoginPasswordVisibility"
                 >
-                  <EyeOff v-if="showPassword" class="size-5" />
+                  <EyeOff v-if="loginPasswordVisible" class="size-5" />
                   <Eye v-else class="size-5" />
                 </button>
               </div>
             </div>
 
-            <div v-if="localMode === 'register'" class="space-y-2">
-              <Label for="confirmPassword" class="text-sm font-medium">{{ t('auth.confirmPassword') }}</Label>
-              <div class="relative">
+            <div v-if="localMode === 'register'" :class="fieldClass">
+              <Label for="registerEmail" class="text-sm font-medium">
+                {{ t('auth.email') }} <span class="text-destructive">*</span>
+              </Label>
+              <Input
+                id="registerEmail"
+                v-model="registerEmail"
+                type="email"
+                :placeholder="t('auth.emailPlaceholder')"
+                autocomplete="email"
+                required
+                :class="inputClass"
+              />
+            </div>
+
+            <div v-if="localMode === 'register'" :class="fieldClass">
+              <Label for="verificationCode" class="text-sm font-medium">{{ t('auth.verificationCode') }}</Label>
+              <div class="flex gap-2">
                 <Input
-                  id="confirmPassword"
-                  v-model="confirmPassword"
-                  :type="passwordInputType"
-                  placeholder="••••••••"
-                  autocomplete="new-password"
+                  id="verificationCode"
+                  v-model="verificationCode"
+                  type="text"
+                  inputmode="numeric"
+                  maxlength="6"
+                  :placeholder="t('auth.verificationCodePlaceholder')"
                   required
-                  class="h-12 pr-10 bg-background border-border/60 focus:border-primary"
+                  :class="inputClass"
                 />
-                <button
+                <Button
                   type="button"
-                  class="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none"
-                  :aria-label="passwordToggleLabel"
-                  :aria-pressed="showPassword"
-                  :title="passwordToggleLabel"
-                  @mousedown.prevent
-                  @click="togglePasswordVisibility"
+                  variant="outline"
+                  :class="sendCodeButtonClass"
+                  :disabled="isLoading || isSendingCode || !registerEmail || sendCodeCountdown > 0"
+                  @click="handleSendVerificationCode"
                 >
-                  <EyeOff v-if="showPassword" class="size-5" />
-                  <Eye v-else class="size-5" />
-                </button>
+                  {{ sendCodeLabel }}
+                </Button>
+              </div>
+              <p class="text-[11px] leading-4 text-muted-foreground">{{ t('auth.codeSentHint') }}</p>
+            </div>
+
+            <div v-if="localMode === 'register'" :class="passwordGroupClass">
+              <div :class="fieldClass">
+                <Label for="password" class="text-sm font-medium">{{ t('auth.password') }}</Label>
+                <div class="relative">
+                  <Input
+                    id="password"
+                    v-model="password"
+                    :type="registerPasswordInputType"
+                    placeholder="••••••••"
+                    :autocomplete="localMode === 'login' ? 'current-password' : 'new-password'"
+                    required
+                    :class="passwordInputClass"
+                  />
+                  <button
+                    type="button"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none"
+                    :aria-label="registerPasswordToggleLabel"
+                    :aria-pressed="registerPasswordVisible"
+                    :title="registerPasswordToggleLabel"
+                    @mousedown.prevent
+                    @click="toggleRegisterPasswordVisibility"
+                  >
+                    <EyeOff v-if="registerPasswordVisible" class="size-5" />
+                    <Eye v-else class="size-5" />
+                  </button>
+                </div>
+              </div>
+
+              <div :class="fieldClass">
+                <Label for="confirmPassword" class="text-sm font-medium">{{ t('auth.confirmPassword') }}</Label>
+                <div class="relative">
+                  <Input
+                    id="confirmPassword"
+                    v-model="confirmPassword"
+                    :type="confirmPasswordInputType"
+                    placeholder="••••••••"
+                    autocomplete="new-password"
+                    required
+                    :class="passwordInputClass"
+                  />
+                  <button
+                    type="button"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none"
+                    :aria-label="confirmPasswordToggleLabel"
+                    :aria-pressed="confirmPasswordVisible"
+                    :title="confirmPasswordToggleLabel"
+                    @mousedown.prevent
+                    @click="toggleConfirmPasswordVisibility"
+                  >
+                    <EyeOff v-if="confirmPasswordVisible" class="size-5" />
+                    <Eye v-else class="size-5" />
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -104,7 +174,7 @@
               {{ errorMessage }}
             </div>
 
-            <Button type="submit" class="w-full h-12 text-base font-medium" size="lg" :disabled="isLoading">
+            <Button type="submit" :class="submitButtonClass" size="lg" :disabled="isLoading">
               {{ isLoading ? loadingLabel : primaryActionLabel }}
             </Button>
           </form>
@@ -139,7 +209,7 @@
           </div>
         </div>
 
-        <div v-if="localProvider" class="text-center text-sm text-muted-foreground mt-8">
+        <div v-if="localProvider" :class="footerSwitchClass">
           <template v-if="localMode === 'login' && allowRegistration">
             {{ t('auth.noAccount') }}
             <button class="text-foreground font-medium hover:underline" @click="switchMode('register')">
@@ -154,13 +224,13 @@
           </template>
         </div>
 
-        <div class="mt-10 flex items-center justify-center gap-3 text-xs text-muted-foreground">
+        <div :class="languageBarClass">
           <button class="rounded-full border border-border/60 px-3 py-1.5 hover:bg-accent transition-colors" @click="toggleLanguage">
             {{ isZhCN ? t('sidebar.langToggleZh') : t('sidebar.langToggleEn') }}
           </button>
         </div>
 
-        <div class="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-muted-foreground lg:hidden">
+        <div :class="mobileLinksClass">
           <a
             href="https://wiki.sage.zavixai.com/"
             target="_blank"
@@ -184,7 +254,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowRight, Building2, Eye, EyeOff, Github, KeyRound, Mail, ShieldCheck } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
@@ -195,7 +265,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { systemAPI } from '@/api/system.js'
-import { buildOAuthLoginUrl, loginAPI, registerAPI } from '@/utils/auth.js'
+import { buildOAuthLoginUrl, loginAPI, registerAPI, sendRegisterVerificationCodeAPI } from '@/utils/auth.js'
 import { cn } from '@/utils/cn'
 import { useLanguage } from '@/utils/i18n.js'
 
@@ -206,14 +276,22 @@ const logoUrl = `${import.meta.env.BASE_URL}sage_logo.svg`
 
 const authProviders = ref([])
 const allowRegistration = ref(true)
-const showPassword = ref(false)
+const loginPasswordVisible = ref(false)
+const registerPasswordVisible = ref(false)
+const confirmPasswordVisible = ref(false)
 const account = ref('')
 const password = ref('')
 const confirmPassword = ref('')
+const registerEmail = ref('')
+const verificationCode = ref('')
 const errorMessage = ref('')
 const isLoading = ref(false)
+const isSendingCode = ref(false)
+const sendCodeCountdown = ref(0)
 const isTyping = ref(false)
 const localMode = ref('login')
+let sendCodeTimer = null
+const isRegisterMode = computed(() => localMode.value === 'register')
 
 const safeNextPath = computed(() => {
   const nextPath = typeof route.query.next === 'string' ? route.query.next : '/agent/chat'
@@ -242,12 +320,67 @@ const externalProviders = computed(() => (
 ))
 const accountLabel = computed(() => (localMode.value === 'login' ? t('auth.account') : t('auth.username')))
 const accountPlaceholder = computed(() => (localMode.value === 'login' ? t('auth.accountPlaceholder') : t('auth.usernamePlaceholder')))
-const passwordInputType = computed(() => (showPassword.value ? 'text' : 'password'))
-const passwordToggleLabel = computed(() => (showPassword.value ? t('auth.hidePassword') : t('auth.showPassword')))
+const showPassword = computed(() => (
+  localMode.value === 'login'
+    ? loginPasswordVisible.value
+    : (registerPasswordVisible.value || confirmPasswordVisible.value)
+))
+const loginPasswordInputType = computed(() => (loginPasswordVisible.value ? 'text' : 'password'))
+const registerPasswordInputType = computed(() => (registerPasswordVisible.value ? 'text' : 'password'))
+const confirmPasswordInputType = computed(() => (confirmPasswordVisible.value ? 'text' : 'password'))
+const loginPasswordToggleLabel = computed(() => (loginPasswordVisible.value ? t('auth.hidePassword') : t('auth.showPassword')))
+const registerPasswordToggleLabel = computed(() => (registerPasswordVisible.value ? t('auth.hidePassword') : t('auth.showPassword')))
+const confirmPasswordToggleLabel = computed(() => (confirmPasswordVisible.value ? t('auth.hidePassword') : t('auth.showPassword')))
+const panelClass = computed(() => cn(
+  'flex justify-center bg-background',
+  isRegisterMode.value
+    ? 'items-start px-8 pt-6 pb-8 lg:px-10 lg:pt-8 lg:pb-10'
+    : 'items-center p-8'
+))
+const mobileLogoClass = computed(() => cn(
+  'lg:hidden flex items-center justify-center gap-2 text-lg font-semibold',
+  isRegisterMode.value ? 'mb-10' : 'mb-12'
+))
+const headerClass = computed(() => cn(
+  'text-center',
+  isRegisterMode.value ? 'mb-8' : 'mb-10'
+))
+const headlineClass = computed(() => cn(
+  'font-bold tracking-tight',
+  isRegisterMode.value ? 'mb-2 text-3xl' : 'mb-2 text-3xl'
+))
+const subheadlineClass = computed(() => cn(
+  'text-muted-foreground',
+  'text-sm'
+))
+const formClass = computed(() => 'space-y-5')
+const fieldClass = computed(() => 'space-y-2')
+const inputClass = computed(() => 'h-12 bg-background border-border/60 focus:border-primary')
+const passwordInputClass = computed(() => 'h-12 pr-10 bg-background border-border/60 focus:border-primary')
+const sendCodeButtonClass = computed(() => 'h-12 shrink-0')
+const passwordGroupClass = computed(() => 'space-y-3')
+const submitButtonClass = computed(() => 'w-full h-12 text-base font-medium')
+const footerSwitchClass = computed(() => cn(
+  'text-center text-sm text-muted-foreground',
+  isRegisterMode.value ? 'mt-8' : 'mt-8'
+))
+const languageBarClass = computed(() => cn(
+  'flex items-center justify-center gap-3 text-xs text-muted-foreground',
+  isRegisterMode.value ? 'mt-10' : 'mt-10'
+))
+const mobileLinksClass = computed(() => cn(
+  'flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-muted-foreground lg:hidden',
+  isRegisterMode.value ? 'mt-6' : 'mt-6'
+))
+const sendCodeLabel = computed(() => {
+  if (isSendingCode.value) return t('auth.sendingCode')
+  if (sendCodeCountdown.value > 0) return t('auth.resendCodeIn', { seconds: sendCodeCountdown.value })
+  return t('auth.sendCode')
+})
 
 const headline = computed(() => {
   if (localProvider.value) {
-    return t('auth.welcomeBack')
+    return localMode.value === 'login' ? t('auth.welcomeBack') : t('auth.registerHeadline')
   }
   if (externalProviders.value.length === 1) {
     return t('auth.continueWith', { provider: externalProviders.value[0].name })
@@ -257,7 +390,7 @@ const headline = computed(() => {
 
 const subheadline = computed(() => {
   if (localProvider.value) {
-    return t('auth.enterDetails')
+    return localMode.value === 'login' ? t('auth.enterDetails') : t('auth.registerSubheadline')
   }
   return t('auth.providerSessionHint')
 })
@@ -276,15 +409,47 @@ const iconMap = {
 const resolveProviderIcon = (iconName) => iconMap[iconName] || Mail
 const getProviderButtonLabel = (provider) => provider.button_text || t('auth.continueWith', { provider: provider.name })
 
-const togglePasswordVisibility = () => {
-  showPassword.value = !showPassword.value
+const toggleLoginPasswordVisibility = () => {
+  loginPasswordVisible.value = !loginPasswordVisible.value
+}
+
+const toggleRegisterPasswordVisibility = () => {
+  registerPasswordVisible.value = !registerPasswordVisible.value
+}
+
+const toggleConfirmPasswordVisibility = () => {
+  confirmPasswordVisible.value = !confirmPasswordVisible.value
 }
 
 const switchMode = (mode) => {
   errorMessage.value = ''
   confirmPassword.value = ''
-  showPassword.value = false
+  registerEmail.value = ''
+  verificationCode.value = ''
+  loginPasswordVisible.value = false
+  registerPasswordVisible.value = false
+  confirmPasswordVisible.value = false
   localMode.value = mode
+}
+
+const clearSendCodeTimer = () => {
+  if (sendCodeTimer) {
+    clearInterval(sendCodeTimer)
+    sendCodeTimer = null
+  }
+}
+
+const startSendCodeCountdown = (seconds = 30) => {
+  clearSendCodeTimer()
+  sendCodeCountdown.value = seconds
+  sendCodeTimer = window.setInterval(() => {
+    if (sendCodeCountdown.value <= 1) {
+      clearSendCodeTimer()
+      sendCodeCountdown.value = 0
+      return
+    }
+    sendCodeCountdown.value -= 1
+  }, 1000)
 }
 
 const loadAuthConfig = async () => {
@@ -318,6 +483,10 @@ const handleLocalSubmit = async () => {
       errorMessage.value = t('auth.registrationDisabled')
       return
     }
+    if (!registerEmail.value || !verificationCode.value) {
+      errorMessage.value = t('auth.requiredFields')
+      return
+    }
     if (password.value !== confirmPassword.value) {
       errorMessage.value = t('auth.passwordsMismatch')
       return
@@ -329,7 +498,7 @@ const handleLocalSubmit = async () => {
   try {
     const result = localMode.value === 'login'
       ? await loginAPI(account.value, password.value)
-      : await registerAPI(account.value, password.value)
+      : await registerAPI(account.value, password.value, registerEmail.value, '', verificationCode.value)
 
     if (!result.success) {
       errorMessage.value = result.message || t('auth.authFailed')
@@ -346,6 +515,34 @@ const handleLocalSubmit = async () => {
   }
 }
 
+const handleSendVerificationCode = async () => {
+  if (!allowRegistration.value) {
+    errorMessage.value = t('auth.registrationDisabled')
+    return
+  }
+  if (!registerEmail.value) {
+    errorMessage.value = t('auth.emailRequiredForRegistration')
+    return
+  }
+
+  isSendingCode.value = true
+  errorMessage.value = ''
+  try {
+    const result = await sendRegisterVerificationCodeAPI(registerEmail.value)
+    if (!result.success) {
+      errorMessage.value = result.message || t('auth.authFailed')
+      return
+    }
+    toast.success(t('auth.codeSent'))
+    startSendCodeCountdown(result.data?.retry_after || 30)
+  } catch (error) {
+    console.error('Failed to send verification code:', error)
+    errorMessage.value = t('auth.authRetry')
+  } finally {
+    isSendingCode.value = false
+  }
+}
+
 const handleProviderLogin = (provider) => {
   errorMessage.value = ''
   window.location.href = buildOAuthLoginUrl(provider.id, safeNextPath.value)
@@ -353,5 +550,9 @@ const handleProviderLogin = (provider) => {
 
 onMounted(() => {
   loadAuthConfig()
+})
+
+onBeforeUnmount(() => {
+  clearSendCodeTimer()
 })
 </script>
