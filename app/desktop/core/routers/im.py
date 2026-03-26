@@ -114,6 +114,13 @@ class IMessageConfig(BaseModel):
     allowed_senders: list = []
 
 
+class WeChatPersonalConfig(BaseModel):
+    """WeChat Personal (iLink) configuration."""
+    enabled: bool = False
+    bot_token: Optional[str] = None  # iLink Bot Token
+    bot_id: Optional[str] = None     # iLink Bot ID
+
+
 class IMServiceStatus(BaseModel):
     """IM service status."""
     running: bool = False
@@ -125,6 +132,7 @@ class IMConfig(BaseModel):
     dingtalk: DingTalkConfig = DingTalkConfig()
     wechat_work: WeChatWorkConfig = WeChatWorkConfig()  # 企业微信配置
     imessage: IMessageConfig = IMessageConfig()
+    wechat_personal: WeChatPersonalConfig = WeChatPersonalConfig()  # 微信个人号(iLink)
     service: IMServiceStatus = IMServiceStatus()
 
 
@@ -1009,6 +1017,48 @@ async def test_agent_im_connection(
                 message="配置检查通过"
             )
         
+        elif provider == "wechat_personal":
+            # Test WeChat Personal (iLink) connection
+            # iLink uses long polling, so we just validate token format and presence
+            
+            bot_token = config.get("bot_token")
+            bot_id = config.get("bot_id")
+            
+            if not bot_token:
+                return await Response.succ(
+                    data=TestConnectionResponse(
+                        success=False,
+                        message="缺少 Bot Token 配置",
+                        details={}
+                    ),
+                    message="配置不完整"
+                )
+            
+            # Validate token format (iLink tokens typically look like: xxx@im.bot:hash)
+            if "@im.bot:" not in bot_token:
+                return await Response.succ(
+                    data=TestConnectionResponse(
+                        success=False,
+                        message="Bot Token 格式不正确，请检查是否复制完整",
+                        details={}
+                    ),
+                    message="配置格式错误"
+                )
+            
+            # Since iLink uses long polling which causes timeout, we consider the config valid
+            # if token format is correct. The actual connection will be tested when channel starts.
+            return await Response.succ(
+                data=TestConnectionResponse(
+                    success=True,
+                    message="微信个人号配置格式正确（Token 已保存，启动后将自动连接）",
+                    details={
+                        "bot_id": bot_id,
+                        "token_preview": bot_token[:20] + "..." if len(bot_token) > 20 else bot_token
+                    }
+                ),
+                message="配置检查通过"
+            )
+        
         else:
             return await Response.error(code=400, message=f"不支持的 Provider: {provider}")
             
@@ -1042,3 +1092,183 @@ async def restart_agent_im_channel(
     except Exception as e:
         logger.error(f"[IM Agent] Failed to restart channel: {e}", exc_info=True)
         return await Response.error(code=500, message=f"重启失败: {str(e)}")
+
+
+# ============================================================================
+# WeChat Personal (iLink) Login APIs
+# ============================================================================
+
+class WeChatPersonalQRCodeResponse(BaseModel):
+    """Response for WeChat Personal QR code generation."""
+    qrcode: str                          # 二维码标识符
+    qrcode_url: str                      # 完整的扫码 URL
+    expires_in: int = 300                # 过期时间（秒）
+
+
+class WeChatPersonalStatusResponse(BaseModel):
+    """Response for WeChat Personal login status check."""
+    status: str                          # wait / scaned / confirmed / expired
+    bot_token: Optional[str] = None      # 登录成功后返回的 token
+    bot_id: Optional[str] = None         # Bot ID
+    baseurl: Optional[str] = None        # API 基础 URL
+
+
+@im_router.post("/agent/{agent_id}/im_channels/wechat_personal/qrcode", response_model=None)
+async def get_wechat_personal_qrcode(
+    agent_id: str = FastApiPath(..., description="Agent ID")
+):
+    """
+    获取微信个人号(iLink)登录二维码。
+    
+    返回二维码 URL，用户可以用微信扫码后获取 Bot Token。
+    """
+    logger.info(f"[IM Agent] Getting WeChat Personal QR code for agent={agent_id}")
+    
+    try:
+        import httpx
+        import base64
+        import secrets
+        
+        BASE_URL = "https://ilinkai.weixin.qq.com"
+        BOT_TYPE = "3"
+        
+        def random_wechat_uin():
+            uint32 = secrets.randbits(32)
+            return base64.b64encode(str(uint32).encode()).decode()
+        
+        # 1. 获取二维码
+        headers = {
+            "X-WECHAT-UIN": random_wechat_uin(),
+        }
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{BASE_URL}/ilink/bot/get_bot_qrcode",
+                params={"bot_type": BOT_TYPE},
+                headers=headers
+            )
+            response.raise_for_status()
+            qr_resp = response.json()
+        
+        logger.info(f"[IM Agent] QR code response: {qr_resp}")
+        
+        if not qr_resp or qr_resp.get("ret") != 0:
+            logger.error(f"[IM Agent] Failed to get QR code: {qr_resp}")
+            return await Response.error(code=500, message="获取二维码失败")
+        
+        qrcode = qr_resp.get("qrcode", "")
+        qrcode_url = qr_resp.get("qrcode_img_content", "")
+        
+        if not qrcode or not qrcode_url:
+            logger.error("[IM Agent] QR response missing required fields")
+            return await Response.error(code=500, message="获取二维码失败：响应数据不完整")
+        
+        return await Response.succ(
+            data=WeChatPersonalQRCodeResponse(
+                qrcode=qrcode,
+                qrcode_url=qrcode_url,
+                expires_in=300
+            ),
+            message="获取二维码成功"
+        )
+        
+    except Exception as e:
+        logger.error(f"[IM Agent] Failed to get QR code: {e}", exc_info=True)
+        return await Response.error(code=500, message=f"获取二维码失败: {str(e)}")
+
+
+@im_router.post("/agent/{agent_id}/im_channels/wechat_personal/qrcode/status", response_model=None)
+async def check_wechat_personal_qrcode_status(
+    request: Dict[str, Any],
+    agent_id: str = FastApiPath(..., description="Agent ID")
+):
+    """
+    检查微信个人号(iLink)二维码扫码状态。
+    
+    请求体：
+        - qrcode: 二维码标识符（从 /qrcode 接口获取）
+    
+    返回：
+        - status: wait/scaned/confirmed/expired
+        - bot_token: 登录成功后的 token
+        - bot_id: Bot ID
+    """
+    qrcode = request.get("qrcode")
+    
+    if not qrcode:
+        return await Response.error(code=400, message="缺少 qrcode 参数")
+    
+    logger.info(f"[IM Agent] Checking WeChat Personal QR status for agent={agent_id}")
+    
+    try:
+        import httpx
+        import base64
+        import secrets
+        from urllib.parse import quote
+        
+        BASE_URL = "https://ilinkai.weixin.qq.com"
+        
+        def random_wechat_uin():
+            uint32 = secrets.randbits(32)
+            return base64.b64encode(str(uint32).encode()).decode()
+        
+        headers = {
+            "X-WECHAT-UIN": random_wechat_uin(),
+        }
+        
+        # 使用长轮询，超时时间设为 35 秒（接近服务器 38 秒超时）
+        async with httpx.AsyncClient(timeout=35.0) as client:
+            try:
+                response = await client.get(
+                    f"{BASE_URL}/ilink/bot/get_qrcode_status",
+                    params={"qrcode": qrcode},
+                    headers=headers
+                )
+                response.raise_for_status()
+                status_resp = response.json()
+            except httpx.ReadTimeout:
+                # 长轮询超时，说明没有状态变化，返回 wait
+                logger.info("[IM Agent] Long polling timeout, returning wait status")
+                return await Response.succ(
+                    data=WeChatPersonalStatusResponse(status="wait"),
+                    message="等待扫码"
+                )
+        
+        logger.info(f"[IM Agent] QR status response: {status_resp}")
+        
+        if not status_resp:
+            return await Response.error(code=500, message="检查状态失败")
+        
+        status_code = status_resp.get("status", "unknown")
+        
+        if status_code == "confirmed":
+            # 登录成功
+            return await Response.succ(
+                data=WeChatPersonalStatusResponse(
+                    status=status_code,
+                    bot_token=status_resp.get("bot_token"),
+                    bot_id=status_resp.get("ilink_bot_id"),
+                    baseurl=status_resp.get("baseurl", BASE_URL)
+                ),
+                message="登录成功"
+            )
+        elif status_code == "expired":
+            return await Response.succ(
+                data=WeChatPersonalStatusResponse(status=status_code),
+                message="二维码已过期"
+            )
+        elif status_code == "scaned":
+            return await Response.succ(
+                data=WeChatPersonalStatusResponse(status=status_code),
+                message="已扫码，等待确认"
+            )
+        else:
+            # wait or other status
+            return await Response.succ(
+                data=WeChatPersonalStatusResponse(status=status_code),
+                message="等待扫码"
+            )
+        
+    except Exception as e:
+        logger.error(f"[IM Agent] Failed to check QR status: {e}", exc_info=True)
+        return await Response.error(code=500, message=f"检查状态失败: {str(e)}")
