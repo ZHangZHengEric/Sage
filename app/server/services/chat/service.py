@@ -14,6 +14,7 @@ from sagents.context.session_context import (
     SessionStatus,
     get_session_run_lock,
 )
+from sagents.runtime_context import RuntimeContext
 from sagents.utils.lock_manager import safe_release
 from sagents.sagents import SAgent
 from sagents.tool import get_tool_manager
@@ -314,7 +315,6 @@ class SageStreamService:
         # 创建 workspace 目录并复制 sage-usage-docs
         os.makedirs(self.agent_workspace, exist_ok=True)
         _copy_sage_usage_docs_to_workspace(self.agent_workspace)
-
         # 2. 工具代理
         tool_proxy = create_tool_proxy(request.available_tools)
         self.tool_manager = tool_proxy
@@ -347,6 +347,19 @@ class SageStreamService:
             messages.append(message_dict)
         await _ensure_conversation(self.request)
         try:
+            sandbox_mode = os.environ.get("SAGE_SANDBOX_MODE", "local").lower()
+            runtime_context = RuntimeContext(
+                deployment_mode="server",
+                sandbox_mode=sandbox_mode,
+                host_workspace=self.agent_workspace,
+                virtual_workspace="/sage-workspace",
+                sandbox_id=f"session:{session_id}" if sandbox_mode == "remote" else None,
+                remote_server_url=os.environ.get("OPENSANDBOX_URL") if sandbox_mode == "remote" else None,
+                remote_provider=os.environ.get("SAGE_REMOTE_PROVIDER", "opensandbox") if sandbox_mode == "remote" else None,
+                remote_api_key=os.environ.get("OPENSANDBOX_API_KEY") if sandbox_mode == "remote" else None,
+                remote_image=os.environ.get("OPENSANDBOX_IMAGE") if sandbox_mode == "remote" else None,
+                remote_timeout=int(os.environ.get("OPENSANDBOX_TIMEOUT", "1800")) if sandbox_mode == "remote" else None,
+            )
             stream_result = self.sage_engine.run_stream(
                 session_id=session_id,
                 input_messages=messages,
@@ -356,7 +369,7 @@ class SageStreamService:
                 model_config=self.request.llm_model_config,
                 system_prefix=self.request.system_prefix,
                 agent_id=self.request.agent_id,
-                host_workspace=self.agent_workspace,
+                runtime_context=runtime_context,
                 default_memory_type=self.request.memory_type,
                 user_id=self.request.user_id,
                 deep_thinking=self.request.deep_thinking,

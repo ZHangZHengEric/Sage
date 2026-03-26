@@ -30,6 +30,7 @@ from sagents.context.session_context import (
     SessionContext,
     SessionStatus,
 )
+from sagents.runtime_context import RuntimeContext
 
 from sagents.observability import AgentRuntime, ObservabilityManager, OpenTelemetryTraceHandler, ObservableAsyncOpenAI
 from sagents.skill import SkillManager, SkillProxy
@@ -76,6 +77,8 @@ class Session:
         self.model_config: Dict[str, Any] = {}
         self.system_prefix: str = ""
         self.session_space: str = "./sage_sessions"
+        self.runtime_context: Optional[RuntimeContext] = None
+        self.deployment_mode: str = "desktop"
         self.host_workspace: Optional[str] = None  # 代理工作区的宿主机路径（本地/直通沙箱需要）
         self.observability_manager: Optional[ObservabilityManager] = None
         self._runtime_signature: Optional[tuple] = None
@@ -104,16 +107,22 @@ class Session:
         session_root_space: str = "./sage_sessions",
         host_workspace: Optional[str] = None,
         virtual_workspace: str = "/sage-workspace",
+        runtime_context: Optional[Union[RuntimeContext, Dict[str, Any]]] = None,
         default_memory_type: str = "session",
         agent_id: Optional[str] = None,
     ):
+        runtime_context_obj = RuntimeContext.from_input(
+            runtime_context,
+            sandbox_mode=self.sandbox_type,
+            host_workspace=host_workspace,
+            virtual_workspace=virtual_workspace,
+        )
         runtime_signature = (
             id(model),
             str(model_config or {}),
             system_prefix,
             str(session_root_space),
-            str(host_workspace or ""),
-            str(virtual_workspace),
+            runtime_context_obj.signature(),
             default_memory_type,
             str(agent_id or ""),
         )
@@ -124,9 +133,12 @@ class Session:
         self.model_config = model_config or {}
         self.system_prefix = system_prefix or ""
         self.session_root_space = str(session_root_space)
-        self.host_workspace = str(host_workspace) if host_workspace else None
+        self.runtime_context = runtime_context_obj
+        self.deployment_mode = runtime_context_obj.deployment_mode
+        self.sandbox_type = runtime_context_obj.sandbox_mode
+        self.host_workspace = str(runtime_context_obj.host_workspace) if runtime_context_obj.host_workspace else None
         logger.info(f"SessionRuntime: configure_runtime 设置 host_workspace={self.host_workspace}")
-        self.virtual_workspace = str(virtual_workspace)
+        self.virtual_workspace = str(runtime_context_obj.virtual_workspace)
         self.default_memory_type = default_memory_type or "session"
         # agent_id 为 None 时生成随机 UUID
         self.agent_id = agent_id or str(uuid.uuid4())
@@ -197,6 +209,10 @@ class Session:
                 logger.debug(f"SAgent: 更新了 system_context 参数 keys: {list(system_context.keys())}")
             if parent_session_id and not self.session_context.parent_session_id:
                 self.session_context.parent_session_id = parent_session_id
+            if self.runtime_context:
+                self.session_context.runtime_context = self.runtime_context
+                self.session_context.host_workspace = self.runtime_context.host_workspace
+                self.session_context.virtual_workspace = self.runtime_context.virtual_workspace
             return self.session_context
 
         saved_system_context = self._load_saved_system_context(session_id)
@@ -213,7 +229,7 @@ class Session:
 
         # 调试：检查 host_workspace 是否有值
         logger.info(f"SessionRuntime: 创建 SessionContext，host_workspace={self.host_workspace}")
-        if not self.host_workspace:
+        if self.runtime_context and self.runtime_context.requires_host_workspace() and not self.host_workspace:
             logger.error("SessionRuntime: host_workspace 为 None，这会导致沙箱 venv 创建在错误的位置！")
         
         self.session_context = SessionContext(
@@ -223,6 +239,7 @@ class Session:
             session_root_space=self.session_root_space,
             virtual_workspace=getattr(self, 'virtual_workspace', "/sage-workspace"),
             host_workspace=self.host_workspace,
+            runtime_context=self.runtime_context,
             context_budget_config=context_budget_config,
             system_context=merged_system_context,
             tool_manager=tool_manager,
@@ -231,7 +248,7 @@ class Session:
         )
         
         # 异步初始化 SessionContext，传递 host_workspace 确保沙箱工作区正确设置
-        await self.session_context.init_more(host_workspace=self.host_workspace)
+        await self.session_context.init_more(runtime_context=self.runtime_context, host_workspace=self.host_workspace)
         
         self._cache_session_workspace(session_id, self.session_context)
         return self.session_context

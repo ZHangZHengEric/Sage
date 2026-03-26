@@ -3,18 +3,24 @@ Agent 业务处理模块
 
 封装 Agent 相关的业务逻辑，供路由层调用。
 """
+import json
 import mimetypes
-import tempfile
-import zipfile
-import shutil
-import uuid
 import os
+import posixpath
+import shutil
+import tempfile
+import uuid
+import zipfile
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
+from sagents.runtime_context import RuntimeContext
+from sagents.session_runtime import get_global_session_manager
 from sagents.tool.tool_manager import get_tool_manager
 from sagents.tool.tool_proxy import ToolProxy
 from sagents.utils.auto_gen_agent import AutoGenAgentFunc
+from sagents.utils.sandbox import SandboxConfig, SandboxProviderFactory, SandboxType
 from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
 
 from .. import models
@@ -76,6 +82,14 @@ async def _create_model_client_for_user(user_id: str) -> Tuple[Any, str]:
 
 
 # ================= 业务函数 =================
+
+
+@dataclass
+class WorkspaceAccess:
+    mode: str
+    runtime_context: RuntimeContext
+    local_workspace_path: str
+    sandbox: Optional[Any] = None
 
 
 async def list_agents(user_id: Optional[str] = None) -> List[models.Agent]:
@@ -278,61 +292,261 @@ async def optimize_system_prompt(
     return result
 
 
-
-async def get_file_workspace(agent_id: str, user_id: str) -> Dict[str, Any]:
-    """获取指定会话的文件工作空间内容"""
-    # 尝试从 SessionContext 获取 agent_workspace
+def _default_workspace_path(agent_id: str, user_id: str) -> str:
     cfg = config.get_startup_config()
-    workspace_path = os.path.join(cfg.agents_dir, user_id, agent_id)
-    if not workspace_path or not os.path.exists(workspace_path):
+    return os.path.join(cfg.agents_dir, user_id, agent_id)
+
+
+def _load_runtime_context_from_session(session_id: Optional[str]) -> Optional[RuntimeContext]:
+    if not session_id:
+        return None
+
+    cfg = config.get_startup_config()
+    try:
+        session_manager = get_global_session_manager(session_root_space=cfg.session_dir)
+    except Exception as e:
+        logger.warning(f"无法获取 SessionManager，回退本地工作区: {e}")
+        return None
+
+    session_workspace = session_manager.get_session_workspace(session_id)
+    if not session_workspace:
+        return None
+
+    context_path = os.path.join(session_workspace, "session_context.json")
+    if not os.path.exists(context_path):
+        return None
+
+    try:
+        with open(context_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        logger.warning(f"读取 session_context.json 失败，session_id={session_id}: {e}")
+        return None
+
+    runtime_context = data.get("runtime_context")
+    host_workspace = data.get("host_workspace")
+    virtual_workspace = data.get("virtual_workspace") or "/sage-workspace"
+    if runtime_context:
+        try:
+            return RuntimeContext.from_input(
+                runtime_context,
+                host_workspace=host_workspace,
+                virtual_workspace=virtual_workspace,
+            )
+        except Exception as e:
+            logger.warning(f"恢复 runtime_context 失败，session_id={session_id}: {e}")
+            return None
+
+    if host_workspace:
+        return RuntimeContext.from_input(
+            None,
+            sandbox_mode="local",
+            host_workspace=host_workspace,
+            virtual_workspace=virtual_workspace,
+        )
+
+    return None
+
+
+async def _get_workspace_access(agent_id: str, user_id: str, session_id: Optional[str] = None) -> WorkspaceAccess:
+    local_workspace_path = _default_workspace_path(agent_id, user_id)
+    runtime_context = _load_runtime_context_from_session(session_id)
+    if runtime_context is None:
+        runtime_context = RuntimeContext(
+            deployment_mode="server",
+            sandbox_mode="local",
+            host_workspace=local_workspace_path,
+            virtual_workspace="/sage-workspace",
+        )
+
+    if runtime_context.is_remote():
+        runtime_context.validate()
+        sandbox_config = SandboxConfig(
+            sandbox_id=runtime_context.sandbox_id,
+            mode=SandboxType.REMOTE,
+            workspace=runtime_context.host_workspace or ".",
+            virtual_workspace=runtime_context.virtual_workspace,
+            remote_provider=runtime_context.remote_provider or os.environ.get("SAGE_REMOTE_PROVIDER", "opensandbox"),
+            remote_server_url=runtime_context.remote_server_url,
+            remote_api_key=runtime_context.remote_api_key or os.environ.get("OPENSANDBOX_API_KEY"),
+            remote_image=runtime_context.remote_image or os.environ.get("OPENSANDBOX_IMAGE", "opensandbox/code-interpreter:v1.0.2"),
+            remote_timeout=int(runtime_context.remote_timeout or os.environ.get("OPENSANDBOX_TIMEOUT", "1800")),
+            remote_persistent=True if runtime_context.remote_persistent is None else bool(runtime_context.remote_persistent),
+            remote_sandbox_ttl=int(runtime_context.remote_sandbox_ttl or 3600),
+        )
+        sandbox = SandboxProviderFactory.create(sandbox_config)
+        await sandbox.initialize()
+        return WorkspaceAccess(
+            mode="remote",
+            runtime_context=runtime_context,
+            local_workspace_path=local_workspace_path,
+            sandbox=sandbox,
+        )
+
+    return WorkspaceAccess(
+        mode="local",
+        runtime_context=runtime_context,
+        local_workspace_path=runtime_context.host_workspace or local_workspace_path,
+        sandbox=None,
+    )
+
+
+def _resolve_virtual_workspace_path(workspace_root: str, file_path: str) -> str:
+    if not workspace_root or not file_path:
+        raise SageHTTPException(
+            detail="缺少必要的路径参数",
+            error_detail="workspace_root or file_path missing",
+        )
+
+    workspace_root = posixpath.normpath(workspace_root)
+    normalized = str(file_path).replace("\\", "/")
+    if normalized == workspace_root or normalized.startswith(f"{workspace_root}/"):
+        candidate = posixpath.normpath(normalized)
+    else:
+        candidate = posixpath.normpath(posixpath.join(workspace_root, normalized.lstrip("/")))
+
+    if candidate != workspace_root and not candidate.startswith(f"{workspace_root}/"):
+        raise SageHTTPException(
+            detail="访问被拒绝：文件路径超出工作空间范围",
+            error_detail="Access denied: file path outside workspace",
+        )
+
+    return candidate
+
+
+async def _list_remote_workspace_files(sandbox: Any, workspace_root: str) -> List[Dict[str, Any]]:
+    files: List[Dict[str, Any]] = []
+
+    async def walk(path: str) -> None:
+        entries = await sandbox.list_directory(path, include_hidden=False)
+        entries.sort(key=lambda entry: (not entry.is_dir, entry.path))
+        for entry in entries:
+            relative_path = posixpath.relpath(posixpath.normpath(entry.path), posixpath.normpath(workspace_root))
+            files.append(
+                {
+                    "name": posixpath.basename(entry.path.rstrip("/")),
+                    "path": relative_path,
+                    "size": entry.size,
+                    "modified_time": entry.modified_time,
+                    "is_directory": entry.is_dir,
+                }
+            )
+            if entry.is_dir:
+                await walk(entry.path)
+
+    await walk(workspace_root)
+    return files
+
+
+async def _get_remote_entry(sandbox: Any, workspace_root: str, file_path: str) -> Dict[str, Any]:
+    virtual_path = _resolve_virtual_workspace_path(workspace_root, file_path)
+    root_norm = posixpath.normpath(workspace_root)
+    if virtual_path == root_norm:
         return {
-            "agent_id": agent_id,
-            "files": [],
-            "message": "工作空间为空",
+            "path": virtual_path,
+            "is_directory": True,
+            "name": posixpath.basename(virtual_path.rstrip("/")) or "workspace",
         }
 
-    files: List[Dict[str, Any]] = []
-    for root, dirs, filenames in os.walk(workspace_path):
-        # 过滤掉隐藏文件和文件夹
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
-        filenames = [f for f in filenames if not f.startswith(".")]
-        for filename in filenames:
-            file_path = os.path.join(root, filename)
-            relative_path = os.path.relpath(file_path, workspace_path)
-            file_stat = os.stat(file_path)
-            files.append(
-                {
-                    "name": filename,
-                    "path": relative_path,
-                    "size": file_stat.st_size,
-                    "modified_time": file_stat.st_mtime,
-                    "is_directory": False,
+    parent_path = posixpath.dirname(virtual_path)
+    for entry in await sandbox.list_directory(parent_path, include_hidden=True):
+        if posixpath.normpath(entry.path) == virtual_path:
+            return {
+                "path": virtual_path,
+                "is_directory": entry.is_dir,
+                "name": posixpath.basename(entry.path.rstrip("/")),
+            }
+
+    raise SageHTTPException(
+        detail=f"文件不存在: {file_path}",
+        error_detail=f"Remote file not found: {file_path}",
+    )
+
+
+async def _download_remote_directory(sandbox: Any, source_dir: str, target_dir: str) -> None:
+    os.makedirs(target_dir, exist_ok=True)
+    for entry in await sandbox.list_directory(source_dir, include_hidden=True):
+        target_path = os.path.join(target_dir, posixpath.basename(entry.path.rstrip("/")))
+        if entry.is_dir:
+            await _download_remote_directory(sandbox, entry.path, target_path)
+        else:
+            await sandbox.download_file(entry.path, target_path)
+
+
+def _zip_directory(source_dir: str, zip_path: str) -> None:
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for root, _, files in os.walk(source_dir):
+            for file_name in files:
+                file_abs_path = os.path.join(root, file_name)
+                rel_path = os.path.relpath(file_abs_path, source_dir)
+                zipf.write(file_abs_path, rel_path)
+
+
+
+async def get_file_workspace(agent_id: str, user_id: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+    """获取指定会话的文件工作空间内容"""
+    access = await _get_workspace_access(agent_id, user_id, session_id=session_id)
+    try:
+        if access.mode == "remote":
+            files = await _list_remote_workspace_files(access.sandbox, access.runtime_context.virtual_workspace)
+        else:
+            workspace_path = access.local_workspace_path
+            if not workspace_path or not os.path.exists(workspace_path):
+                return {
+                    "agent_id": agent_id,
+                    "files": [],
+                    "message": "工作空间为空",
                 }
-            )
 
-        for dirname in dirs:
-            dir_path = os.path.join(root, dirname)
-            relative_path = os.path.relpath(dir_path, workspace_path)
-            files.append(
-                {
-                    "name": dirname,
-                    "path": relative_path,
-                    "size": 0,
-                    "modified_time": os.stat(dir_path).st_mtime,
-                    "is_directory": True,
-                }
-            )
+            files: List[Dict[str, Any]] = []
+            for root, dirs, filenames in os.walk(workspace_path):
+                dirs[:] = [d for d in dirs if not d.startswith(".")]
+                filenames = [f for f in filenames if not f.startswith(".")]
+                for filename in filenames:
+                    full_path = os.path.join(root, filename)
+                    relative_path = os.path.relpath(full_path, workspace_path)
+                    file_stat = os.stat(full_path)
+                    files.append(
+                        {
+                            "name": filename,
+                            "path": relative_path,
+                            "size": file_stat.st_size,
+                            "modified_time": file_stat.st_mtime,
+                            "is_directory": False,
+                        }
+                    )
 
-    logger.info(f"获取工作空间文件数量：{len(files)}")
-    return {
-        "agent_id": agent_id,
-        "files": files,
-        "message": "获取文件列表成功",
-    }
+                for dirname in dirs:
+                    dir_path = os.path.join(root, dirname)
+                    relative_path = os.path.relpath(dir_path, workspace_path)
+                    files.append(
+                        {
+                            "name": dirname,
+                            "path": relative_path,
+                            "size": 0,
+                            "modified_time": os.stat(dir_path).st_mtime,
+                            "is_directory": True,
+                        }
+                    )
+
+        logger.info(f"获取工作空间文件数量：{len(files)}")
+        return {
+            "agent_id": agent_id,
+            "files": files,
+            "message": "获取文件列表成功",
+        }
+    finally:
+        if access.sandbox:
+            await access.sandbox.cleanup()
 
 
 
-async def download_agent_file(agent_id: str, user_id: str, file_path: str) -> Tuple[str, str, str]:
+async def download_agent_file(
+    agent_id: str,
+    user_id: str,
+    file_path: str,
+    session_id: Optional[str] = None,
+) -> Tuple[str, str, str]:
     """
     下载会话文件
 
@@ -342,50 +556,62 @@ async def download_agent_file(agent_id: str, user_id: str, file_path: str) -> Tu
     :return: (file_path, filename, media_type)
     """
 
-    cfg = config.get_startup_config()
-    workspace_path = os.path.join(cfg.agents_dir, user_id, agent_id)
+    access = await _get_workspace_access(agent_id, user_id, session_id=session_id)
+    try:
+        if access.mode == "remote":
+            entry = await _get_remote_entry(access.sandbox, access.runtime_context.virtual_workspace, file_path)
+            temp_dir = tempfile.mkdtemp(prefix="sage-remote-download-")
+            if entry["is_directory"]:
+                dir_name = entry["name"] or "workspace"
+                download_dir = os.path.join(temp_dir, dir_name)
+                await _download_remote_directory(access.sandbox, entry["path"], download_dir)
+                zip_filename = f"{dir_name}.zip"
+                zip_path = os.path.join(temp_dir, zip_filename)
+                _zip_directory(download_dir, zip_path)
+                return zip_path, zip_filename, "application/zip"
 
-    full_path = resolve_download_path(workspace_path, file_path)
+            local_path = os.path.join(temp_dir, entry["name"])
+            await access.sandbox.download_file(entry["path"], local_path)
+            mime_type, _ = mimetypes.guess_type(local_path)
+            if mime_type is None:
+                mime_type = "application/octet-stream"
+            return local_path, entry["name"], mime_type
 
-    # 检查是否为文件或目录
-    if os.path.isdir(full_path):
-        # 如果是目录，创建zip文件并下载
-        try:
-            # 使用临时文件存储zip
-            temp_dir = tempfile.gettempdir()
-            zip_filename = f"{os.path.basename(full_path)}.zip"
-            zip_path = os.path.join(temp_dir, zip_filename)
+        workspace_path = access.local_workspace_path
+        full_path = resolve_download_path(workspace_path, file_path)
+        if os.path.isdir(full_path):
+            try:
+                temp_dir = tempfile.gettempdir()
+                zip_filename = f"{os.path.basename(full_path)}.zip"
+                zip_path = os.path.join(temp_dir, zip_filename)
+                _zip_directory(full_path, zip_path)
+                return zip_path, zip_filename, "application/zip"
+            except Exception as e:
+                raise SageHTTPException(
+                    detail=f"创建压缩文件失败: {str(e)}",
+                    error_detail=f"Failed to create zip file: {str(e)}",
+                )
 
-            # 创建zip文件
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for root, dirs, files in os.walk(full_path):
-                    for file in files:
-                        file_abs_path = os.path.join(root, file)
-                        # 计算在zip中的相对路径
-                        rel_path = os.path.relpath(file_abs_path, full_path)
-                        zipf.write(file_abs_path, rel_path)
-
-            return zip_path, zip_filename, "application/zip"
-        except Exception as e:
+        if not os.path.isfile(full_path):
             raise SageHTTPException(
-                detail=f"创建压缩文件失败: {str(e)}",
-                error_detail=f"Failed to create zip file: {str(e)}",
+                detail=f"路径不是文件: {file_path}",
+                error_detail=f"Path is not a file: {file_path}",
             )
 
-    if not os.path.isfile(full_path):
-        raise SageHTTPException(
-            detail=f"路径不是文件: {file_path}",
-            error_detail=f"Path is not a file: {file_path}",
-        )
+        mime_type, _ = mimetypes.guess_type(full_path)
+        if mime_type is None:
+            mime_type = "application/octet-stream"
+        return full_path, os.path.basename(full_path), mime_type
+    finally:
+        if access.sandbox:
+            await access.sandbox.cleanup()
 
-    # 获取MIME类型
-    mime_type, _ = mimetypes.guess_type(full_path)
-    if mime_type is None:
-        mime_type = "application/octet-stream"
-
-    return full_path, os.path.basename(full_path), mime_type
-
-async def delete_agent_file(agent_id: str, user_id: str, file_path: str) -> bool:
+async def delete_agent_file(
+    agent_id: str,
+    user_id: str,
+    file_path: str,
+    session_id: Optional[str] = None,
+) -> bool:
     """
     删除会话文件或目录
 
@@ -394,13 +620,15 @@ async def delete_agent_file(agent_id: str, user_id: str, file_path: str) -> bool
     :param file_path: 相对文件路径
     :return: 是否删除成功
     """
-    cfg = config.get_startup_config()
-    workspace_path = os.path.join(cfg.agents_dir, user_id, agent_id)
-
-    # 路径安全校验
-    full_path = resolve_download_path(workspace_path, file_path)
-    
+    access = await _get_workspace_access(agent_id, user_id, session_id=session_id)
     try:
+        if access.mode == "remote":
+            entry = await _get_remote_entry(access.sandbox, access.runtime_context.virtual_workspace, file_path)
+            await access.sandbox.delete_file(entry["path"])
+            return True
+
+        workspace_path = access.local_workspace_path
+        full_path = resolve_download_path(workspace_path, file_path)
         if os.path.isfile(full_path):
             os.remove(full_path)
         elif os.path.isdir(full_path):
@@ -417,6 +645,9 @@ async def delete_agent_file(agent_id: str, user_id: str, file_path: str) -> bool
             detail=f"删除文件失败: {str(e)}",
             error_detail=f"Failed to delete file: {str(e)}",
         )
+    finally:
+        if access.sandbox:
+            await access.sandbox.cleanup()
 
 
 def resolve_download_path(workspace_path: str, file_path: str) -> str:

@@ -14,6 +14,7 @@ from sagents.skill import SkillProxy, SkillManager
 from sagents.skill.sandbox_skill_manager import SandboxSkillManager
 from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.workflows import WorkflowManager
+from sagents.runtime_context import RuntimeContext
 
 from sagents.utils.logger import logger
 from sagents.utils.lock_manager import lock_manager, UnifiedLock
@@ -46,6 +47,7 @@ class SessionContext:
         session_root_space: str,
         virtual_workspace: str ,
         host_workspace: Optional[str] = None,
+        runtime_context: Optional[Union[RuntimeContext, Dict[str, Any]]] = None,
         context_budget_config: Optional[Dict[str, Any]] = None,
         system_context: Optional[Dict[str, Any]] = None,
         tool_manager: Optional[Any] = None,
@@ -58,8 +60,14 @@ class SessionContext:
         self.agent_id = agent_id
         self.system_context: Dict[str, Any] = system_context or {}
         self.session_root_space = session_root_space
-        self.host_workspace: Optional[str] = host_workspace  # 代理工作区的宿主机路径
-        self.virtual_workspace: str = virtual_workspace  # 代理工作区的虚拟路径
+        self.runtime_context = RuntimeContext.from_input(
+            runtime_context,
+            sandbox_mode=os.environ.get("SAGE_SANDBOX_MODE", "local"),
+            host_workspace=host_workspace,
+            virtual_workspace=virtual_workspace,
+        )
+        self.host_workspace: Optional[str] = self.runtime_context.host_workspace  # 代理工作区的宿主机路径
+        self.virtual_workspace: str = self.runtime_context.virtual_workspace  # 代理工作区的虚拟路径
         self.tool_manager = tool_manager
         self.skill_manager = skill_manager  # 宿主机技能管理器
         self.sandbox_skill_manager: Optional[SandboxSkillManager] = None  # 沙箱技能管理器
@@ -67,9 +75,15 @@ class SessionContext:
         self._init_runtime_state(context_budget_config=context_budget_config)
         # 注意：init_more 不再在 __init__ 中自动调用，需要调用方显式调用
         self._session_root_space = session_root_space
-        self._host_workspace = host_workspace
+        self._host_workspace = self.host_workspace
+        self._runtime_context = self.runtime_context
 
-    async def init_more(self, session_root_space: Optional[str] = None, host_workspace: Optional[str] = None):
+    async def init_more(
+        self,
+        session_root_space: Optional[str] = None,
+        host_workspace: Optional[str] = None,
+        runtime_context: Optional[Union[RuntimeContext, Dict[str, Any]]] = None,
+    ):
         """
         初始化 SessionContext（异步方法，需要显式调用）
         
@@ -82,9 +96,20 @@ class SessionContext:
             session_root_space = getattr(self, '_session_root_space', None)
         if host_workspace is None:
             host_workspace = getattr(self, '_host_workspace', None)
-            
-        # 从环境变量获取沙箱模式，默认使用本地沙箱
-        sandbox_mode_str = os.environ.get("SAGE_SANDBOX_MODE", "local").lower()
+
+        runtime_context_obj = RuntimeContext.from_input(
+            runtime_context or getattr(self, "_runtime_context", None),
+            sandbox_mode=os.environ.get("SAGE_SANDBOX_MODE", "local"),
+            host_workspace=host_workspace,
+            virtual_workspace=getattr(self, "virtual_workspace", "/sage-workspace"),
+        )
+        self.runtime_context = runtime_context_obj
+        self._runtime_context = runtime_context_obj
+        self.host_workspace = runtime_context_obj.host_workspace
+        self.virtual_workspace = runtime_context_obj.virtual_workspace
+        self.runtime_context.validate()
+
+        sandbox_mode_str = runtime_context_obj.sandbox_mode
         if sandbox_mode_str == "passthrough":
             sandbox_mode = SandboxType.PASSTHROUGH
         elif sandbox_mode_str == "remote":
@@ -353,28 +378,30 @@ class SessionContext:
         Args:
             sandbox_mode: 沙箱模式 (LOCAL, PASSTHROUGH, REMOTE)
         """
-        logger.info(f"SessionContext: 开始初始化沙箱环境，模式: {sandbox_mode.value},宿主机工作区: {self.host_workspace}, 虚拟工作区: {self.virtual_workspace}")
+        logger.info(
+            f"SessionContext: 开始初始化沙箱环境，部署模式: {self.runtime_context.deployment_mode}, "
+            f"沙箱模式: {sandbox_mode.value}, 宿主机工作区: {self.host_workspace}, 虚拟工作区: {self.virtual_workspace}"
+        )
         t0 = time.time()
 
         # 根据沙箱类型创建不同的配置
-        # sandbox_id 使用 user_id，如果为空则使用 session_id 作为回退
-        sandbox_id = self.user_id if self.user_id else self.session_id
+        sandbox_id = self.runtime_context.sandbox_id or (self.user_id if self.user_id else self.session_id)
         
         if sandbox_mode == SandboxType.REMOTE:
             # 远程沙箱配置
             config = SandboxConfig(
                 sandbox_id=sandbox_id,
                 mode=sandbox_mode,
-                workspace=".",  # 远程沙箱不需要本地workspace
+                workspace=self.host_workspace or ".",  # 远程模式下仅作为可选挂载源
                 virtual_workspace=self.virtual_workspace,
                 # 远程沙箱特定的配置
-                remote_provider=os.environ.get("SAGE_REMOTE_PROVIDER", "opensandbox"),
-                remote_server_url=os.environ.get("OPENSANDBOX_URL"),
-                remote_api_key=os.environ.get("OPENSANDBOX_API_KEY"),
-                remote_image=os.environ.get("OPENSANDBOX_IMAGE", "opensandbox/code-interpreter:v1.0.2"),
-                remote_timeout=int(os.environ.get("OPENSANDBOX_TIMEOUT", "1800")),
-                remote_persistent=True,
-                remote_sandbox_ttl=3600,
+                remote_provider=self.runtime_context.remote_provider or os.environ.get("SAGE_REMOTE_PROVIDER", "opensandbox"),
+                remote_server_url=self.runtime_context.remote_server_url or os.environ.get("OPENSANDBOX_URL"),
+                remote_api_key=self.runtime_context.remote_api_key or os.environ.get("OPENSANDBOX_API_KEY"),
+                remote_image=self.runtime_context.remote_image or os.environ.get("OPENSANDBOX_IMAGE", "opensandbox/code-interpreter:v1.0.2"),
+                remote_timeout=int(self.runtime_context.remote_timeout or os.environ.get("OPENSANDBOX_TIMEOUT", "1800")),
+                remote_persistent=True if self.runtime_context.remote_persistent is None else bool(self.runtime_context.remote_persistent),
+                remote_sandbox_ttl=int(self.runtime_context.remote_sandbox_ttl or 3600),
             )
         else:
             # 本地/直通沙箱配置
@@ -457,6 +484,10 @@ class SessionContext:
         """
         # 设置私有工作区
         self.system_context['private_workspace'] = self.virtual_workspace
+        self.system_context['deployment_mode'] = self.runtime_context.deployment_mode
+        self.system_context['sandbox_mode'] = self.runtime_context.sandbox_mode
+        if self.runtime_context.sandbox_id:
+            self.system_context['sandbox_id'] = self.runtime_context.sandbox_id
         # 设置用户ID
         if self.user_id:
             self.system_context['user_id'] = self.user_id
@@ -939,6 +970,7 @@ class SessionContext:
                 "session_workspace": self.session_workspace,
                 "host_workspace": self.host_workspace,
                 "virtual_workspace": self.virtual_workspace,
+                "runtime_context": make_serializable(self.runtime_context.to_dict()),
                 
                 # 关键状态
                 "system_context": make_serializable(self.system_context),

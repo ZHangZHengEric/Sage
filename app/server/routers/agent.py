@@ -347,7 +347,7 @@ async def get_workspace(agent_id: str, request: Request, session_id: Optional[st
         if conversation:
             user_id = conversation.user_id
 
-    result = await get_file_workspace(agent_id, user_id)
+    result = await get_file_workspace(agent_id, user_id, session_id=session_id)
     files = result.get("files", [])
     logger.bind(agent_id=agent_id).info(f"获取工作空间文件数量：{len(files)}")
     return await Response.succ(message=result.get("message", "获取文件列表成功"), data={**result, "user_id": user_id})
@@ -368,7 +368,7 @@ async def download_file(agent_id: str, request: Request, session_id: Optional[st
     file_path = request.query_params.get("file_path")
     logger.info(f"Download request: file_path={file_path}")
     try:
-        path, filename, media_type = await download_agent_file(agent_id, user_id, file_path)
+        path, filename, media_type = await download_agent_file(agent_id, user_id, file_path, session_id=session_id)
         logger.info(f"Download resolved: path={path}")
         return FileResponse(
             path=path, filename=filename, media_type=media_type
@@ -394,7 +394,7 @@ async def delete_file(agent_id: str, request: Request, session_id: Optional[str]
     file_path = request.query_params.get("file_path")
     logger.info(f"Delete request: file_path={file_path}")
     try:
-        await delete_agent_file(agent_id, user_id, file_path)
+        await delete_agent_file(agent_id, user_id, file_path, session_id=session_id)
         return await Response.succ(message=f"文件 {file_path} 已删除")
     except Exception as e:
         logger.error(f"Delete failed: {e}")

@@ -11,6 +11,7 @@ from sagents.context.session_context import (
     SessionStatus,
     get_session_run_lock,
 )
+from sagents.runtime_context import RuntimeContext
 from sagents.session_runtime import get_global_session_manager
 from sagents.sagents import SAgent
 from sagents.tool import ToolManager, get_tool_manager
@@ -378,6 +379,12 @@ class SageStreamService:
         try:
             # 计算 host_workspace 和 virtual_workspace（本地模式下保持一致）
             host_workspace = str(self.agent_workspace_root / self.request.agent_id)
+            runtime_context = RuntimeContext(
+                deployment_mode="desktop",
+                sandbox_mode="local",
+                host_workspace=host_workspace,
+                virtual_workspace="/sage-workspace",
+            )
             stream_result = self.sage_engine.run_stream(
                 session_id=session_id,
                 input_messages=messages,
@@ -386,8 +393,7 @@ class SageStreamService:
                 model=self.model_client,
                 model_config=self.request.llm_model_config,
                 system_prefix=self.request.system_prefix,
-                host_workspace=host_workspace,
-                virtual_workspace=host_workspace,  # 本地模式下与宿主机路径一致
+                runtime_context=runtime_context,
                 default_memory_type=self.request.memory_type,
                 agent_id=self.request.agent_id,
                 user_id="default_user",

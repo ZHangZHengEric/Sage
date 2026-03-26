@@ -5,6 +5,7 @@ import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 
 from sagents.context.messages.message import MessageChunk, MessageType
+from sagents.runtime_context import RuntimeContext
 from sagents.skill import SkillManager, SkillProxy
 from sagents.tool import ToolManager, ToolProxy
 from sagents.utils.logger import logger
@@ -26,14 +27,15 @@ class SAgent:
         model: Any,
         model_config: Dict[str, Any],
         system_prefix: str,
-        host_workspace: str,
-        default_memory_type: str,
+        host_workspace: Optional[str] = None,
+        default_memory_type: str = "session",
         tool_manager: Optional[Union[ToolManager, ToolProxy]] = None,
         skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
         session_id: Optional[str] = None,
         user_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         virtual_workspace: str = "/sage-workspace",
+        runtime_context: Optional[Union[RuntimeContext, Dict[str, Any]]] = None,
         deep_thinking: Optional[Union[bool, str]] = None,
         max_loop_count: int = 50,
         agent_mode: Optional[str] = None,
@@ -49,11 +51,16 @@ class SAgent:
             raise ValueError("run_stream 参数 model 不能为空")
         if not isinstance(model_config, dict) or not model_config:
             raise ValueError("run_stream 参数 model_config 必须是非空字典")
-        if host_workspace is None or str(host_workspace).strip() == "":
-            raise ValueError("run_stream 参数 host_workspace 不能为空")
         if default_memory_type is None or str(default_memory_type).strip() == "":
             raise ValueError("run_stream 参数 default_memory_type 不能为空")
         default_memory_type = "session"
+        runtime_context_obj = RuntimeContext.from_input(
+            runtime_context,
+            sandbox_mode=self.sandbox_type,
+            host_workspace=host_workspace,
+            virtual_workspace=virtual_workspace,
+        )
+        runtime_context_obj.validate()
         logger.info(f"run_stream: system_context: {system_context}")
         start_time = time.time()
         first_show_time = None
@@ -72,14 +79,15 @@ class SAgent:
             elif isinstance(msg, dict) and not msg.get("session_id"):
                 msg["session_id"] = session_id
 
-        session = self.session_manager.get_or_create(session_id, sandbox_type=self.sandbox_type)
+        session = self.session_manager.get_or_create(session_id, sandbox_type=runtime_context_obj.sandbox_mode)
         session.configure_runtime(
             model=model,
             model_config=model_config,
             system_prefix=system_prefix,
             session_root_space=self.session_root_space,
-            host_workspace=str(host_workspace),  # 宿主机工作区路径
-            virtual_workspace=virtual_workspace,  # 虚拟工作区路径（沙箱内）
+            runtime_context=runtime_context_obj,
+            host_workspace=runtime_context_obj.host_workspace,
+            virtual_workspace=runtime_context_obj.virtual_workspace,
             default_memory_type=default_memory_type,
             agent_id=agent_id,
         )
