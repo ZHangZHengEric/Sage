@@ -109,7 +109,7 @@ async def populate_request_from_agent_config(request: StreamRequest, *, require_
     if provider_id: # 有指定则全量替换
         provider = await provider_dao.get_by_id(provider_id)
         request.llm_model_config["base_url"] = provider.base_url
-        request.llm_model_config["api_key"] = ",".join(provider.api_keys)
+        request.llm_model_config["api_key"] = provider.api_key
         request.llm_model_config["model"] = provider.model
         request.llm_model_config["max_tokens"] = provider.max_tokens
         request.llm_model_config["temperature"] = provider.temperature
@@ -121,7 +121,7 @@ async def populate_request_from_agent_config(request: StreamRequest, *, require_
         if request.llm_model_config.get("base_url") is None:
             request.llm_model_config["base_url"] = provider.base_url
         if request.llm_model_config.get("api_key") is None:
-            request.llm_model_config["api_key"] = ",".join(provider.api_keys)
+            request.llm_model_config["api_key"] = provider.api_key
         if request.llm_model_config.get("model") is None:
             request.llm_model_config["model"] = provider.model
         if request.llm_model_config.get("max_tokens") is None:
