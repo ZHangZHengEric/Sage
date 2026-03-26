@@ -57,6 +57,9 @@ DEFAULT_AGENT_ID = "default"
 # iMessage provider identifier
 IMESSAGE_PROVIDER = "imessage"
 
+# WeChat Personal (iLink) provider identifier
+WECHAT_PERSONAL_PROVIDER = "wechat_personal"
+
 
 # Cache for default agent ID
 _default_agent_id_cache: Optional[str] = None

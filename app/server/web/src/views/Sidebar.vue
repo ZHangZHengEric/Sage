@@ -6,7 +6,7 @@
     <!-- Header -->
     <div class="p-4 flex items-center justify-between" :class="{'justify-center': isCollapsed}">
       <div v-if="!isCollapsed" class="flex items-center gap-2 overflow-hidden">
-        <img src="/sage_logo.svg" alt="Sage Logo" class="h-8 w-8 shrink-0" />
+        <img :src="logoUrl" alt="Sage Logo" class="h-8 w-8 shrink-0" />
         <h2 
           class="text-xl font-bold bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent truncate"
         >
@@ -14,7 +14,7 @@
         </h2>
       </div>
       <div v-else class="flex justify-center w-full">
-         <img src="/sage_logo.svg" alt="Sage Logo" class="h-8 w-8 shrink-0" />
+         <img :src="logoUrl" alt="Sage Logo" class="h-8 w-8 shrink-0" />
       </div>
 
       <Button 
@@ -426,6 +426,8 @@ const route = useRoute()
 const { toggleLanguage, t, isZhCN } = useLanguage()
 const themeStore = useThemeStore()
 const emit = defineEmits(['new-chat'])
+const logoUrl = `${import.meta.env.BASE_URL}sage_logo.svg`
+const observabilityProxyUrl = '/jaeger/'
 
 const currentUser = ref(getCurrentUser())
 const isCollapsed = ref(false)
@@ -552,7 +554,7 @@ const predefinedServices = computed(() => {
         { 
           id: 'svc_request_records', 
           nameKey: 'sidebar.requestRecords', 
-          url: import.meta.env.VITE_SAGE_TRACE_WEB_URL || '#', 
+          url: observabilityProxyUrl, 
           isInternal: false 
         }
       ]
@@ -637,9 +639,13 @@ const handleMenuClick = (url, name, isInternal, query = {}) => {
   }
 }
 
-const handleLogout = () => {
-  logout()
+const handleLogout = async () => {
+  const nextPath = route.fullPath && route.fullPath !== '/login' ? route.fullPath : '/agent/chat'
+  await logout()
   currentUser.value = null
-  router.push({ name: 'Chat' })
+  router.replace({
+    name: 'Login',
+    query: { next: nextPath }
+  })
 }
 </script>

@@ -6,6 +6,14 @@ from . import config
 from .exceptions import SageHTTPException
 
 
+def get_session_claims(request) -> Optional[dict]:
+    session = request.scope.get("session")
+    if not isinstance(session, dict):
+        return None
+    claims = session.get("user_claims")
+    return claims if isinstance(claims, dict) else None
+
+
 def parse_access_token(token: str) -> Optional[dict]:
     cfg = config.get_startup_config()
     try:
