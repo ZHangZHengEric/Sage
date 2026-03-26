@@ -1024,6 +1024,12 @@ class IMServiceManager:
                 logger.info(f"[ServiceManager] ====== Message handler START ======")
                 logger.info(f"[ServiceManager] Message from {sage_user_id}:{provider_type}: {message}")
 
+                # Filter out events (only handle actual user messages)
+                msg_type = message.get('type')
+                if msg_type == 'event':
+                    logger.info(f"[ServiceManager] Ignoring event type message: {message.get('event_type')}")
+                    return
+
                 # Extract message details
                 # iMessage uses 'sender', others use 'user_id'
                 user_id = message.get('user_id') or message.get('sender')

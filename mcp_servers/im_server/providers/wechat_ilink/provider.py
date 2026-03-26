@@ -217,7 +217,7 @@ class WeChatPersonalProvider(IMProviderBase):
             
             payload = {
                 "msg": {
-                    "from_user_id": self.bot_id or "",
+                    "from_user_id": "",  # Let system fill this
                     "to_user_id": user_id,
                     "client_id": client_id,
                     "message_type": 2,  # BOT message
@@ -227,28 +227,50 @@ class WeChatPersonalProvider(IMProviderBase):
                         "type": 1,  # Text
                         "text_item": {"text": content}
                     }]
+                },
+                "base_info": {
+                    "channel_version": "1.0.2"
                 }
             }
 
             async with httpx.AsyncClient(timeout=10.0) as client:
+                logger.info(f"[WeChatPersonal] Sending request to {self.base_url}/ilink/bot/sendmessage")
+                logger.info(f"[WeChatPersonal] Headers: {self._build_headers()}")
+                logger.info(f"[WeChatPersonal] Payload: {payload}")
+                
                 response = await client.post(
                     f"{self.base_url}/ilink/bot/sendmessage",
                     headers=self._build_headers(),
                     json=payload
                 )
 
+                logger.info(f"[WeChatPersonal] Response status: {response.status_code}")
+                logger.info(f"[WeChatPersonal] Response body: {response.text}")
+
                 if response.status_code == 200:
-                    data = response.json()
-                    if data.get("ret") == 0:
+                    try:
+                        data = response.json()
+                    except Exception as e:
+                        logger.error(f"[WeChatPersonal] Failed to parse JSON: {e}")
+                        return {"success": False, "error": f"Invalid JSON response: {response.text}"}
+                    
+                    ret = data.get("ret")
+                    if ret == 0 or data == {}:
+                        # ret=0 or empty response both mean success
                         logger.info(f"[WeChatPersonal] Message sent to {user_id}")
                         return {"success": True, "message_id": client_id}
+                    elif ret == 10001:
+                        # Token expired or invalid context
+                        error_msg = "会话已过期，请用户重新发送消息"
+                        logger.error(f"[WeChatPersonal] Context token expired: {data}")
+                        return {"success": False, "error": error_msg}
                     else:
-                        error_msg = data.get("errmsg", f"API error: {data}")
+                        error_msg = data.get("errmsg") or data.get("error") or f"API error (ret={ret}): {data}"
                         logger.error(f"[WeChatPersonal] Send failed: {error_msg}")
                         return {"success": False, "error": error_msg}
                 else:
-                    logger.error(f"[WeChatPersonal] HTTP error: {response.status_code}")
-                    return {"success": False, "error": f"HTTP {response.status_code}"}
+                    logger.error(f"[WeChatPersonal] HTTP error: {response.status_code}, body: {response.text}")
+                    return {"success": False, "error": f"HTTP {response.status_code}: {response.text[:200]}"}
 
         except Exception as e:
             logger.error(f"[WeChatPersonal] Send error: {e}")
