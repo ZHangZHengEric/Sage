@@ -361,8 +361,12 @@ const loadContent = async () => {
       return
     }
 
-    // sessionId 仅用于管理员视角下定位目标用户；普通用户直接读取自己的共享工作空间
+    // 获取 Agent ID
+    const agentId = props.item?.agentId
     const sessionId = props.item?.sessionId
+    if (!agentId) {
+        throw new Error('未找到Agent ID，无法下载文件')
+    }
 
     // Clean path
     let safePath = props.filePath
@@ -374,7 +378,7 @@ const loadContent = async () => {
     }
 
     // 下载文件 Blob
-    const blob = await agentAPI.downloadFile(safePath, sessionId)
+    const blob = await agentAPI.downloadFile(agentId, safePath, sessionId)
 
     // 创建 Blob URL 用于预览（图片、PDF）
     if (blobUrl.value) {
@@ -446,23 +450,26 @@ const openFile = async () => {
   } else {
     // 如果没有加载过，尝试触发下载
     try {
+       const agentId = props.item?.agentId
        const sessionId = props.item?.sessionId
-       let safePath = props.filePath
-       if (safePath.startsWith('/sage-workspace/')) {
-         safePath = safePath.replace('/sage-workspace/', '')
+       if (agentId) {
+           let safePath = props.filePath
+           if (safePath.startsWith('/sage-workspace/')) {
+             safePath = safePath.replace('/sage-workspace/', '')
+           }
+           if (safePath.startsWith('/')) {
+             safePath = safePath.substring(1)
+           }
+           const blob = await agentAPI.downloadFile(agentId, safePath, sessionId)
+           const url = URL.createObjectURL(blob)
+           const a = document.createElement('a')
+           a.href = url
+           a.download = props.fileName || props.filePath.split('/').pop() || 'download'
+           document.body.appendChild(a)
+           a.click()
+           document.body.removeChild(a)
+           setTimeout(() => URL.revokeObjectURL(url), 1000)
        }
-       if (safePath.startsWith('/')) {
-         safePath = safePath.substring(1)
-       }
-       const blob = await agentAPI.downloadFile(safePath, sessionId)
-       const url = URL.createObjectURL(blob)
-       const a = document.createElement('a')
-       a.href = url
-       a.download = props.fileName || props.filePath.split('/').pop() || 'download'
-       document.body.appendChild(a)
-       a.click()
-       document.body.removeChild(a)
-       setTimeout(() => URL.revokeObjectURL(url), 1000)
     } catch (e) {
         console.error('下载失败', e)
     }

@@ -5,6 +5,7 @@ import { usePanelStore } from '@/stores/panel.js'
 export const useChatWorkspace = ({
   t,
   toast,
+  agentId,
   sessionId
 }) => {
   const panelStore = usePanelStore()
@@ -14,29 +15,32 @@ export const useChatWorkspace = ({
   const expandedTasks = ref(new Set())
   const lastMessageId = ref(null)
 
-  const fetchWorkspaceFiles = async () => {
+  const fetchWorkspaceFiles = async (id) => {
+    if (!id) return
     try {
       const sid = typeof sessionId?.value === 'string' ? sessionId.value : sessionId
-      const data = await agentAPI.getWorkspaceFiles(sid)
+      const data = await agentAPI.getWorkspaceFiles(id, sid)
       workspaceFiles.value = data.files || []
     } catch (error) {
       console.error('获取工作空间文件出错:', error)
     }
   }
 
-  const updateTaskAndWorkspace = () => {
-    fetchWorkspaceFiles()
+  const updateTaskAndWorkspace = (id) => {
+    if (id) {
+      fetchWorkspaceFiles(id)
+    }
   }
 
   // Watch for panel open to fetch files
   watch(() => panelStore.showWorkspace, (newVal) => {
     if (newVal) {
-      updateTaskAndWorkspace()
+      updateTaskAndWorkspace(agentId.value)
     }
   })
 
-  const downloadWorkspaceFile = async (itemOrPath) => {
-    if (!itemOrPath) return
+  const downloadWorkspaceFile = async (id, itemOrPath) => {
+    if (!id || !itemOrPath) return
     let filePath = typeof itemOrPath === 'string' ? itemOrPath : itemOrPath.path
     const sid = typeof sessionId?.value === 'string' ? sessionId.value : sessionId
     
@@ -53,7 +57,7 @@ export const useChatWorkspace = ({
     const isDirectory = typeof itemOrPath === 'object' ? itemOrPath.is_directory : false
     if (!filePath) return
     try {
-      const blob = await agentAPI.downloadFile(filePath, sid)
+      const blob = await agentAPI.downloadFile(id, filePath, sid)
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.style.display = 'none'
@@ -75,7 +79,9 @@ export const useChatWorkspace = ({
 
   const downloadFile = async (item) => {
     try {
-      await downloadWorkspaceFile(item)
+      if (agentId.value) {
+        await downloadWorkspaceFile(agentId.value, item)
+      }
     } catch (error) {
       toast.error(t('chat.downloadError'))
     }
