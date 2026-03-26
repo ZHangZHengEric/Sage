@@ -7,6 +7,7 @@ from .providers.base import IMProviderBase
 from .providers.feishu import FeishuProvider
 from .providers.dingtalk import DingTalkProvider
 from .providers.wechat_work import WeChatWorkProvider
+from .providers.wechat_ilink import WeChatPersonalProvider
 
 # iMessage is only available on macOS
 if platform.system() == "Darwin":
@@ -23,6 +24,7 @@ PROVIDER_MAP: Dict[str, type] = {
     "feishu": FeishuProvider,
     "dingtalk": DingTalkProvider,
     "wechat_work": WeChatWorkProvider,
+    "wechat_personal": WeChatPersonalProvider,
 }
 
 # 添加 provider 类型到名称的映射
@@ -30,6 +32,7 @@ PROVIDER_TYPE_MAP: Dict[str, str] = {
     "feishu": "飞书",
     "dingtalk": "钉钉",
     "wechat_work": "企业微信",
+    "wechat_personal": "微信",
 }
 
 

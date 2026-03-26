@@ -14,7 +14,7 @@ app/desktop/tauri/resources/node/bin/node
 __pycache__/
 logs/
 workspace/
-app/agent_sessions/
+agent_sessions
 mcp_servers/search/api_doc
 *.py[cod]
 *$py.class
@@ -219,3 +219,4 @@ app/desktop/scripts/certs
 # Build Cache
 .build_cache/
 
+.sandbox

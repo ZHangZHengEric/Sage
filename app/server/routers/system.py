@@ -6,6 +6,7 @@ from ..core.render import Response
 from ..models import SystemInfoDao
 from ..schemas.base import BaseResponse
 from ..schemas.system import SystemSettingsRequest
+from ..services.auth.external_oauth import get_auth_public_config
 
 # 创建路由器
 system_router = APIRouter(prefix="/api", tags=["System"])
@@ -15,9 +16,11 @@ system_router = APIRouter(prefix="/api", tags=["System"])
 async def get_system_info():
     sys_dao = SystemInfoDao()
     allow_reg = await sys_dao.get_by_key("allow_registration")
+    auth_config = get_auth_public_config()
     return await Response.succ(
         data={
-            "allow_registration": allow_reg != "false"
+            "allow_registration": allow_reg != "false",
+            **auth_config,
         },
         message="获取系统信息成功"
     )
