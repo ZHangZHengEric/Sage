@@ -1,5 +1,11 @@
 <template>
-  <div class="min-h-screen grid lg:grid-cols-2 bg-background">
+  <div class="relative min-h-screen grid lg:grid-cols-2 bg-background">
+    <div class="absolute right-4 top-4 z-30 lg:right-6 lg:top-6">
+      <button class="rounded-full border border-border/60 bg-background/90 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur hover:bg-accent transition-colors" @click="toggleLanguage">
+        {{ isZhCN ? t('sidebar.langToggleZh') : t('sidebar.langToggleEn') }}
+      </button>
+    </div>
+
     <AnimatedCharactersStage :is-typing="isTyping" :password-length="password.length" :show-password="showPassword" />
 
     <div :class="panelClass">
@@ -224,12 +230,6 @@
           </template>
         </div>
 
-        <div :class="languageBarClass">
-          <button class="rounded-full border border-border/60 px-3 py-1.5 hover:bg-accent transition-colors" @click="toggleLanguage">
-            {{ isZhCN ? t('sidebar.langToggleZh') : t('sidebar.langToggleEn') }}
-          </button>
-        </div>
-
         <div :class="mobileLinksClass">
           <a
             href="https://wiki.sage.zavixai.com/"
@@ -353,8 +353,8 @@ const subheadlineClass = computed(() => cn(
   'text-muted-foreground',
   'text-sm'
 ))
-const formClass = computed(() => 'space-y-5')
-const fieldClass = computed(() => 'space-y-2')
+const formClass = computed(() => (isRegisterMode.value ? 'space-y-4' : 'space-y-5'))
+const fieldClass = computed(() => (isRegisterMode.value ? 'space-y-1.5' : 'space-y-2'))
 const inputClass = computed(() => 'h-12 bg-background border-border/60 focus:border-primary')
 const passwordInputClass = computed(() => 'h-12 pr-10 bg-background border-border/60 focus:border-primary')
 const sendCodeButtonClass = computed(() => 'h-12 shrink-0')
@@ -362,11 +362,7 @@ const passwordGroupClass = computed(() => 'space-y-3')
 const submitButtonClass = computed(() => 'w-full h-12 text-base font-medium')
 const footerSwitchClass = computed(() => cn(
   'text-center text-sm text-muted-foreground',
-  isRegisterMode.value ? 'mt-8' : 'mt-8'
-))
-const languageBarClass = computed(() => cn(
-  'flex items-center justify-center gap-3 text-xs text-muted-foreground',
-  isRegisterMode.value ? 'mt-10' : 'mt-10'
+  isRegisterMode.value ? 'mt-7' : 'mt-8'
 ))
 const mobileLinksClass = computed(() => cn(
   'flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-muted-foreground lg:hidden',
