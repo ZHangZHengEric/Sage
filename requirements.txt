@@ -59,6 +59,14 @@ dingtalk-stream
 python-socks>=2.0.0  # Required for Lark WebSocket connections through proxy
 
 ##############################
+# 邮件 / 通知
+##############################
+alibabacloud_dm20151123
+alibabacloud_credentials
+alibabacloud_tea_openapi
+alibabacloud_tea_util
+
+##############################
 # ORM / 数据库
 ##############################
 SQLAlchemy>=2.0.0

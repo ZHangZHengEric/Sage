@@ -101,7 +101,7 @@
         rel="noreferrer"
         class="hover:text-primary-foreground transition-colors"
       >
-        Documentation
+        {{ t('auth.documentation') }}
       </a>
       <a
         href="https://github.com/ZHangZHengEric/Sage/blob/main/LICENSE"
@@ -109,7 +109,7 @@
         rel="noreferrer"
         class="hover:text-primary-foreground transition-colors"
       >
-        MIT License
+        {{ t('auth.mitLicense') }}
       </a>
       <a
         href="https://github.com/ZHangZHengEric/Sage/issues"
@@ -117,7 +117,7 @@
         rel="noreferrer"
         class="hover:text-primary-foreground transition-colors"
       >
-        GitHub Issues
+        {{ t('auth.githubIssues') }}
       </a>
     </div>
 
@@ -131,8 +131,10 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import EyeBall from './EyeBall.vue'
 import Pupil from './Pupil.vue'
+import { useLanguage } from '@/utils/i18n.js'
 
 const logoUrl = `${import.meta.env.BASE_URL}sage_logo.svg`
+const { t } = useLanguage()
 
 const props = defineProps({
   isTyping: {

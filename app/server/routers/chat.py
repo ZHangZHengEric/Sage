@@ -14,7 +14,6 @@ from sqlalchemy.orm import query
 from sagents.context.session_context import delete_session_run_lock
 from sagents.utils.lock_manager import safe_release
 
-from ..core.client.chat import get_chat_client
 from ..core.exceptions import SageHTTPException
 
 # 导入新模型
@@ -104,12 +103,7 @@ async def stream_api_with_disconnect_check(generator, request: Request, lock: as
 
 
 def validate_and_prepare_request(request: ChatRequest | StreamRequest, http_request: Request) -> None:
-    """验证并准备请求参数"""
-    if not get_chat_client():
-        raise SageHTTPException(
-            detail="模型客户端未配置或不可用",
-            error_detail="Model client is not configured or unavailable",
-        )
+
 
     # 验证请求参数
     if not request.messages or len(request.messages) == 0:

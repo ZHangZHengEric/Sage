@@ -19,8 +19,8 @@ from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
 
 from .. import models
 from ..core import config
-from ..core.client.chat import get_chat_client
 from ..core.exceptions import SageHTTPException
+from .chat.utils import create_model_client
 
 # ================= 工具函数 =================
 
@@ -28,6 +28,51 @@ from ..core.exceptions import SageHTTPException
 def generate_agent_id() -> str:
     """生成唯一的 Agent ID"""
     return f"agent_{uuid.uuid4().hex[:8]}"
+
+
+def _select_provider(providers: List[models.LLMProvider]) -> Optional[models.LLMProvider]:
+    """优先选择默认 provider，否则取列表中的第一个。"""
+    if not providers:
+        return None
+    return next((provider for provider in providers if provider.is_default), providers[0])
+
+
+async def _create_model_client_for_user(user_id: str) -> Tuple[Any, str]:
+    """根据登录用户的 provider 创建模型客户端。"""
+    provider_dao = models.LLMProviderDao()
+    providers = await provider_dao.get_list(user_id=user_id)
+    provider = _select_provider(providers)
+
+    if not provider:
+        raise SageHTTPException(
+            detail="当前用户未配置可用的模型提供商",
+            error_detail=f"user '{user_id or '<empty>'}' has no llm provider",
+        )
+
+    if not provider.api_keys:
+        raise SageHTTPException(
+            detail="模型提供商未配置 API Key",
+            error_detail=f"provider '{provider.id}' api_keys is empty",
+        )
+
+    if not provider.model:
+        raise SageHTTPException(
+            detail="模型提供商未配置模型名称",
+            error_detail=f"provider '{provider.id}' model is empty",
+        )
+
+    logger.info(
+        f"为用户 {user_id or '<system>'} 使用模型提供商: "
+        f"{provider.name} ({provider.id}), model={provider.model}"
+    )
+    model_client = create_model_client(
+        {
+            "api_key": ",".join(provider.api_keys),
+            "base_url": provider.base_url,
+            "model": provider.model,
+        }
+    )
+    return model_client, provider.model
 
 
 # ================= 业务函数 =================
@@ -170,12 +215,11 @@ async def delete_agent(agent_id: str, user_id: Optional[str] = None, role: str =
 
 
 async def auto_generate_agent(
-    agent_description: str, available_tools: Optional[List[str]] = None
+    agent_description: str, available_tools: Optional[List[str]] = None, user_id: str = ""
 ) -> Dict[str, Any]:
     """自动生成 Agent 配置"""
     logger.info(f"开始自动生成Agent: {agent_description}")
-    model_client = get_chat_client()
-    server_args = config.get_startup_config()
+    model_client, model_name = await _create_model_client_for_user(user_id)
 
     auto_gen_func = AutoGenAgentFunc()
 
@@ -191,7 +235,7 @@ async def auto_generate_agent(
         agent_description=agent_description,
         tool_manager=tool_manager_or_proxy,
         llm_client=model_client,
-        model=server_args.default_llm_model_name,
+        model=model_name,
     )
     agent_config["id"] = ""
 
@@ -205,18 +249,17 @@ async def auto_generate_agent(
 
 
 async def optimize_system_prompt(
-    original_prompt: str, optimization_goal: Optional[str] = None
+    original_prompt: str, optimization_goal: Optional[str] = None, user_id: str = ""
 ) -> Dict[str, Any]:
     """优化系统提示词"""
     logger.info("开始优化系统提示词")
-    model_client = get_chat_client()
-    server_args = config.get_startup_config()
+    model_client, model_name = await _create_model_client_for_user(user_id)
 
     optimizer = SystemPromptOptimizer()
     optimized_prompt = await optimizer.optimize_system_prompt(
         current_prompt=original_prompt,
         optimization_goal=optimization_goal,
-        model=server_args.default_llm_model_name,
+        model=model_name,
         llm_client=model_client,
     )
 

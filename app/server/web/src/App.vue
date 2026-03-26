@@ -45,7 +45,6 @@ import MobileTabBar from './components/mobile/MobileTabBar.vue'
 import { Toaster } from '@/components/ui/sonner'
 import { getCurrentUser } from './utils/auth.js'
 import SetupModal from './components/SetupModal.vue'
-import { userAPI } from '@/api/user'
 
 const router = useRouter()
 const route = useRoute()
@@ -56,20 +55,14 @@ const hideShell = computed(() => isSharedPage.value || isLoginPage.value)
 
 const showSetupModal = ref(false)
 
-const maybeShowSetupModal = async () => {
-  if (hideShell.value) return
-  try {
-    const user = getCurrentUser()
-    if (!user) return
-    const configRes = await userAPI.getUserConfig()
-    const config = configRes.config || {}
-
-    if (user && user.has_provider === false && !config.is_setup_completed) {
-      showSetupModal.value = true
-    }
-  } catch (e) {
-    console.error('Failed to check user setup status:', e)
+const maybeShowSetupModal = () => {
+  if (hideShell.value) {
+    showSetupModal.value = false
+    return
   }
+
+  const user = getCurrentUser()
+  showSetupModal.value = Boolean(user && user.has_provider === false)
 }
 
 watch(() => [route.path, route.name], () => {
