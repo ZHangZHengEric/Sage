@@ -1,6 +1,12 @@
 <template>
-  <Dialog :open="visible" @update:open="handleClose">
-    <DialogContent class="sm:max-w-[500px] overflow-hidden">
+  <Dialog :open="visible" @update:open="handleDialogOpenChange">
+    <DialogContent
+      class="sm:max-w-[500px] overflow-hidden"
+      :show-close="false"
+      @escape-key-down="preventDialogClose"
+      @pointer-down-outside="preventDialogClose"
+      @interact-outside="preventDialogClose"
+    >
       <DialogHeader>
         <DialogTitle>完善配置信息</DialogTitle>
         <DialogDescription>
@@ -91,10 +97,7 @@
         </div>
       </div>
       
-      <DialogFooter class="flex sm:justify-between items-center w-full">
-        <Button variant="ghost" @click="handleSkip">
-          跳过，不再提醒
-        </Button>
+      <DialogFooter class="flex sm:justify-end items-center w-full">
         <div class="flex gap-2">
           <Button type="button" variant="secondary" @click="handleVerify" :disabled="verifying">
             <Loader v-if="verifying" class="mr-2 h-4 w-4 animate-spin" />
@@ -197,21 +200,47 @@ const openProviderModelList = () => {
   }
 }
 
-const handleClose = (val) => {
-  if (!val) emit('close')
+const preventDialogClose = (event) => {
+  event.preventDefault()
 }
 
-const markAsCompleted = async () => {
-  try {
-    await userAPI.updateUserConfig({ is_setup_completed: true })
-  } catch (e) {
-    console.error('Failed to update user config:', e)
+const handleDialogOpenChange = (open) => {
+  if (!open) {
+    return
   }
 }
 
-const handleSkip = async () => {
-  await markAsCompleted()
-  emit('close')
+const syncCurrentUserStatus = async () => {
+  try {
+    const session = await userAPI.checkLogin()
+    if (!session?.user) {
+      return
+    }
+
+    const userInfo = {
+      ...session.user,
+      has_provider: session.has_provider,
+      has_agent: session.has_agent
+    }
+    localStorage.setItem('userInfo', JSON.stringify(userInfo))
+    localStorage.setItem('isLoggedIn', 'true')
+    localStorage.setItem('loginTime', Date.now().toString())
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('user-updated'))
+    }
+  } catch (error) {
+    console.error('Failed to sync user status after provider setup:', error)
+    try {
+      const currentUser = JSON.parse(localStorage.getItem('userInfo') || '{}')
+      const nextUser = { ...currentUser, has_provider: true }
+      localStorage.setItem('userInfo', JSON.stringify(nextUser))
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('user-updated'))
+      }
+    } catch (storageError) {
+      console.error('Failed to update local user status after provider setup:', storageError)
+    }
+  }
 }
 
 const handleVerify = async () => {
@@ -329,9 +358,9 @@ const handleSubmit = async () => {
   submitting.value = true
   try {
     const res = await modelProviderAPI.createModelProvider(data)
-    await createDefaultAgent(res?.id)
-    await markAsCompleted()
+    await syncCurrentUserStatus()
     emit('close')
+    await createDefaultAgent(res?.id)
   } catch (error) {
     toast.error(error.message)
   } finally {

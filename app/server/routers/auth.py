@@ -5,7 +5,15 @@ from ..core.render import Response
 from ..models.agent import AgentConfigDao
 from ..models.llm_provider import LLMProviderDao
 from ..schemas.base import BaseResponse
-from ..schemas.user import LoginRequest, LoginResponse, RegisterRequest, RegisterResponse, UserInfoResponse
+from ..schemas.user import (
+    LoginRequest,
+    LoginResponse,
+    RegisterRequest,
+    RegisterResponse,
+    RegisterVerificationCodeRequest,
+    RegisterVerificationCodeResponse,
+    UserInfoResponse,
+)
 from ..services.auth.external_oauth import (
     build_oauth_authorize_url,
     clear_auth_session,
@@ -14,9 +22,30 @@ from ..services.auth.external_oauth import (
     get_default_oidc_provider,
     is_local_auth_enabled,
 )
-from ..services.user import authenticate_user, build_user_claims, create_login_tokens, register_user
+from ..services.user import (
+    authenticate_user,
+    build_user_claims,
+    create_login_tokens,
+    register_user,
+    send_register_verification_code,
+)
 
 auth_router = APIRouter(prefix="/api/auth", tags=["Auth"])
+
+
+@auth_router.post("/register/send-code", response_model=BaseResponse[RegisterVerificationCodeResponse])
+async def send_register_code(req: RegisterVerificationCodeRequest):
+    if not is_local_auth_enabled():
+        return await Response.error(
+            code=400,
+            message="当前服务未启用本地账号注册",
+            error_detail="local auth disabled",
+        )
+    expires_in, retry_after = await send_register_verification_code(req.email)
+    return await Response.succ(
+        data=RegisterVerificationCodeResponse(expires_in=expires_in, retry_after=retry_after),
+        message="验证码发送成功",
+    )
 
 
 @auth_router.post("/register", response_model=BaseResponse[RegisterResponse])
@@ -27,7 +56,13 @@ async def register(req: RegisterRequest):
             message="当前服务未启用本地账号注册",
             error_detail="local auth disabled",
         )
-    user_id = await register_user(req.username, req.password, req.email, req.phonenum)
+    user_id = await register_user(
+        req.username,
+        req.password,
+        req.email,
+        req.phonenum,
+        req.verification_code,
+    )
     return await Response.succ(data=RegisterResponse(user_id=user_id), message="注册成功")
 
 

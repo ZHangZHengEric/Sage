@@ -9,6 +9,11 @@ from loguru import logger
 from .. import models
 from ..core import config
 from ..core.exceptions import SageHTTPException
+from .auth.email_verification import (
+    normalize_email,
+    send_register_email_code,
+    verify_register_email_code,
+)
 from ..utils.id import gen_id
 
 ph = PasswordHasher()
@@ -72,6 +77,7 @@ async def register_user(
     password: str,
     email: Optional[str] = None,
     phonenum: Optional[str] = None,
+    verification_code: Optional[str] = None,
 ) -> str:
     # Check if registration is allowed
     sys_dao = models.SystemInfoDao()
@@ -79,6 +85,12 @@ async def register_user(
     if allow_reg == "false":
         raise SageHTTPException(
             status_code=500, detail="系统不允许自注册", error_detail="registration disabled"
+        )
+
+    email = normalize_email(email)
+    if not email:
+        raise SageHTTPException(
+            status_code=400, detail="注册必须填写邮箱", error_detail="email is required"
         )
 
     dao = models.UserDao()
@@ -93,6 +105,9 @@ async def register_user(
             raise SageHTTPException(
                 status_code=500, detail="邮箱已存在", error_detail=email
             )
+
+    await verify_register_email_code(email, verification_code or "")
+
     user_id = gen_id()
     password_hash = _hash_password(password)
     user = models.User(
@@ -105,6 +120,30 @@ async def register_user(
     await dao.save(user)
     logger.info(f"用户注册成功: {username}")
     return user_id
+
+
+async def send_register_verification_code(email: str) -> tuple[int, int]:
+    sys_dao = models.SystemInfoDao()
+    allow_reg = await sys_dao.get_by_key("allow_registration")
+    if allow_reg == "false":
+        raise SageHTTPException(
+            status_code=500, detail="系统不允许自注册", error_detail="registration disabled"
+        )
+
+    normalized_email = normalize_email(email)
+    if not normalized_email:
+        raise SageHTTPException(
+            status_code=400, detail="请输入邮箱地址", error_detail="email is required"
+        )
+
+    dao = models.UserDao()
+    existing_email = await dao.get_by_email(normalized_email)
+    if existing_email:
+        raise SageHTTPException(
+            status_code=500, detail="邮箱已存在", error_detail=normalized_email
+        )
+
+    return await send_register_email_code(normalized_email)
 
 
 async def login_user(username_or_email: str, password: str) -> Tuple[str, str, int]:
@@ -163,6 +202,7 @@ async def add_user(
     email: Optional[str] = None,
     phonenum: Optional[str] = None,
 ) -> str:
+    email = normalize_email(email) or None
     dao = models.UserDao()
     existing = await dao.get_by_username(username)
     if existing:
