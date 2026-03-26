@@ -1,19 +1,20 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import ChatPage from '../views/Chat.vue'
-import AgentConfigPage from '../views/AgentList.vue'
-import ToolsPage from '../views/ToolList.vue'
-import HistoryPage from '../views/ChatHistory.vue'
-import KnowledgeBasePage from '../views/KnowledgeBaseList.vue'
-import SkillLibraryPage from '../views/SkillList.vue'
-import ApiAgentChatPage from '../views/ApiAgentChat.vue'
-import UserListPage from '../views/UserList.vue'
-import SystemSettingsPage from '../views/SystemSettings.vue'
+import { quickLoginCheck } from '../utils/auth.js'
 
 const routes = [
   {
+    path: '/login',
+    name: 'Login',
+    component: () => import('../views/Login.vue'),
+    meta: {
+      title: 'auth.login',
+      public: true
+    }
+  },
+  {
     path: '/agent/chat',
     name: 'Chat',
-    component: ChatPage,
+    component: () => import('../views/Chat.vue'),
     meta: {
       title: 'chat.title'
     }
@@ -21,7 +22,7 @@ const routes = [
   {
     path: '/agent/config',
     name: 'AgentConfig',
-    component: AgentConfigPage,
+    component: () => import('../views/AgentList.vue'),
     meta: {
       title: 'agent.title'
     }
@@ -29,7 +30,7 @@ const routes = [
   {
     path: '/agent/tools',
     name: 'Tools',
-    component: ToolsPage,
+    component: () => import('../views/ToolList.vue'),
     meta: {
       title: 'tools.title'
     }
@@ -46,7 +47,7 @@ const routes = [
   {
     path: '/agent/history',
     name: 'History',
-    component: HistoryPage,
+    component: () => import('../views/ChatHistory.vue'),
     meta: {
       title: 'history.title'
     }
@@ -54,7 +55,7 @@ const routes = [
   {
     path: '/agent/knowledge-base',
     name: 'KnowledgeBase',
-    component: KnowledgeBasePage,
+    component: () => import('../views/KnowledgeBaseList.vue'),
     meta: {
       title: 'knowledgeBase.title'
     }
@@ -70,7 +71,7 @@ const routes = [
   {
     path: '/agent/skills',
     name: 'Skills',
-    component: SkillLibraryPage,
+    component: () => import('../views/SkillList.vue'),
     meta: {
       title: 'skills.title'
     }
@@ -78,7 +79,7 @@ const routes = [
   {
     path: '/agent/api-doc/agent-chat',
     name: 'ApiAgentChat',
-    component: ApiAgentChatPage,
+    component: () => import('../views/ApiAgentChat.vue'),
     meta: {
       title: 'api.agentChatTitle'
     }
@@ -95,7 +96,7 @@ const routes = [
   {
     path: '/system/users',
     name: 'UserList',
-    component: UserListPage,
+    component: () => import('../views/UserList.vue'),
     meta: {
       title: 'sidebar.userList'
     }
@@ -103,7 +104,7 @@ const routes = [
   {
     path: '/system/settings',
     name: 'SystemSettings',
-    component: SystemSettingsPage,
+    component: () => import('../views/SystemSettings.vue'),
     meta: {
       title: 'sidebar.systemSettings'
     }
@@ -154,9 +155,34 @@ const router = createRouter({
 })
 
 // 路由守卫 - 设置页面标题
-router.beforeEach((to, from, next) => {
-  // 这里可以添加认证逻辑
-  next()
+router.beforeEach(async (to) => {
+  if (to.meta?.public) {
+    if (to.name === 'Login') {
+      const loginResult = await quickLoginCheck(true)
+      if (loginResult.isLoggedIn) {
+        const nextPath = typeof to.query.next === 'string' && to.query.next.startsWith('/')
+          ? to.query.next
+          : '/agent/chat'
+        if (nextPath.startsWith('/jaeger/')) {
+          window.location.replace(nextPath)
+          return false
+        }
+        return nextPath
+      }
+    }
+    return true
+  }
+
+  const loginResult = await quickLoginCheck(true)
+  if (!loginResult.isLoggedIn) {
+    return {
+      name: 'Login',
+      query: {
+        next: to.fullPath
+      }
+    }
+  }
+  return true
 })
 
 export default router
