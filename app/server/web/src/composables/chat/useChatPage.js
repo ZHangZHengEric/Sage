@@ -299,7 +299,6 @@ export const useChatPage = (props) => {
   } = useChatWorkspace({
     t,
     toast,
-    agentId: selectedAgentId,
     sessionId: currentSessionId
   })
 

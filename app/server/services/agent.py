@@ -236,14 +236,15 @@ async def optimize_system_prompt(
 
 
 
-async def get_file_workspace(agent_id: str, user_id: str) -> Dict[str, Any]:
-    """获取指定会话的文件工作空间内容"""
-    # 尝试从 SessionContext 获取 agent_workspace
+async def get_user_workspace(user_id: str) -> Dict[str, Any]:
+    """获取用户共享工作空间内容。
+
+    当前工作空间已经是用户粒度，不同 Agent 共享同一个目录：agents/{user_id}
+    """
     cfg = config.get_startup_config()
     workspace_path = os.path.join(cfg.agents_dir, user_id)
     if not workspace_path or not os.path.exists(workspace_path):
         return {
-            "agent_id": agent_id,
             "files": [],
             "message": "工作空间为空",
         }
@@ -282,18 +283,16 @@ async def get_file_workspace(agent_id: str, user_id: str) -> Dict[str, Any]:
 
     logger.info(f"获取工作空间文件数量：{len(files)}")
     return {
-        "agent_id": agent_id,
         "files": files,
         "message": "获取文件列表成功",
     }
 
 
 
-async def download_agent_file(agent_id: str, user_id: str, file_path: str) -> Tuple[str, str, str]:
+async def download_workspace_file(user_id: str, file_path: str) -> Tuple[str, str, str]:
     """
-    下载会话文件
+    下载用户共享工作空间中的文件或目录
 
-    :param agent_id: 会话ID
     :param user_id: 用户ID
     :param file_path: 相对文件路径
     :return: (file_path, filename, media_type)
@@ -342,11 +341,10 @@ async def download_agent_file(agent_id: str, user_id: str, file_path: str) -> Tu
 
     return full_path, os.path.basename(full_path), mime_type
 
-async def delete_agent_file(agent_id: str, user_id: str, file_path: str) -> bool:
+async def delete_workspace_file(user_id: str, file_path: str) -> bool:
     """
-    删除会话文件或目录
+    删除用户共享工作空间中的文件或目录
 
-    :param agent_id: 会话ID
     :param user_id: 用户ID
     :param file_path: 相对文件路径
     :return: 是否删除成功
