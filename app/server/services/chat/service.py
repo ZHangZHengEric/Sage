@@ -493,7 +493,7 @@ async def _check_and_update_agent_skills(request: StreamRequest, original_skills
         agent_id = request.agent_id
 
         # 获取agent工作空间下的实际skills
-        agent_skills_path = os.path.join(cfg.agents_dir, user_id, "skills")
+        agent_skills_path = os.path.join(cfg.agents_dir, user_id, agent_id, "skills")
         
         actual_skills = set()
         if os.path.exists(agent_skills_path) and os.path.isdir(agent_skills_path):
