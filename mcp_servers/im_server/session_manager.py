@@ -120,14 +120,40 @@ class SessionManager:
         """
         Find existing session or create new one.
         
+        For providers where chat_id changes frequently (e.g., wechat_personal's context_token),
+        we only match by provider + user_id to ensure same user shares one session.
+        
         Returns:
             session_id
         """
+        # Providers where chat_id is volatile and should not be used for session matching
+        volatile_chat_id_providers = {'wechat_personal'}
+        
         # Try to find existing session
-        existing_session = self.find_session_by_user(provider, user_id, chat_id)
-        if existing_session:
-            logger.info(f"Found existing session {existing_session} for {provider}:{user_id}")
-            return existing_session
+        # For volatile providers, ignore chat_id to ensure same user shares one session
+        if provider in volatile_chat_id_providers:
+            existing_session = self.find_session_by_user(provider, user_id, None)
+            if existing_session:
+                logger.info(f"Found existing session {existing_session} for {provider}:{user_id}")
+                # Update chat_id if changed (e.g., new context_token)
+                if chat_id:
+                    binding = self.get_binding(existing_session)
+                    if binding and binding.get('chat_id') != chat_id:
+                        logger.info(f"Updating chat_id for session {existing_session}: {binding.get('chat_id')} -> {chat_id}")
+                        self.bind_session(
+                            session_id=existing_session,
+                            provider=provider,
+                            user_id=user_id,
+                            chat_id=chat_id,
+                            user_name=user_name or binding.get('user_name'),
+                            agent_id=agent_id
+                        )
+                return existing_session
+        else:
+            existing_session = self.find_session_by_user(provider, user_id, chat_id)
+            if existing_session:
+                logger.info(f"Found existing session {existing_session} for {provider}:{user_id}")
+                return existing_session
         
         # Create new session
         import uuid
