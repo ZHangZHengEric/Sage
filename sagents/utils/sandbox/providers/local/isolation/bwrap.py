@@ -5,19 +5,19 @@ Bubblewrap isolation strategy (Linux).
 """
 import subprocess
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from sagents.utils.logger import logger
+from sagents.utils.sandbox.config import VolumeMount
 
 
 class BwrapIsolation:
     """Linux bubblewrap 隔离模式"""
     
-    def __init__(self, venv_dir: str, host_workspace: str, limits: Dict[str, Any], 
-                 virtual_workspace: str = "/workspace"):
+    def __init__(self, venv_dir: str, sandbox_agent_workspace: str, volume_mounts: Optional[List[VolumeMount]] = None, limits: Optional[Dict[str, Any]] = None):
         self.venv_dir = venv_dir
-        self.host_workspace = host_workspace
-        self.limits = limits
-        self.virtual_workspace = virtual_workspace
+        self.sandbox_agent_workspace = sandbox_agent_workspace
+        self.volume_mounts = volume_mounts or []
+        self.limits = limits or {}
         
     def execute(self, payload: Dict[str, Any], cwd: Optional[str] = None) -> Any:
         """
@@ -29,7 +29,7 @@ class BwrapIsolation:
         logger.info(f"[BwrapIsolation] 开始执行")
         
         run_id = str(uuid.uuid4())
-        sandbox_dir = os.path.join(self.host_workspace, ".sandbox")
+        sandbox_dir = os.path.join(self.sandbox_agent_workspace, ".sandbox")
         input_pkl = os.path.join(sandbox_dir, f"input_{run_id}.pkl")
         output_pkl = os.path.join(sandbox_dir, f"output_{run_id}.pkl")
         
@@ -43,13 +43,19 @@ class BwrapIsolation:
         # 构建 bwrap 命令
         bwrap_cmd = [
             "bwrap",
-            "--ro-bind", self.host_workspace, self.virtual_workspace,
+            "--ro-bind", self.sandbox_agent_workspace, self.sandbox_agent_workspace,
             "--bind", sandbox_dir, sandbox_dir,
             "--dev", "/dev",
             "--tmpfs", "/tmp",
-            python_bin, launcher_path,
-            input_pkl, output_pkl
         ]
+        
+        # 添加额外的 volume_mounts
+        for mount in self.volume_mounts:
+            # 避免重复添加主工作区
+            if mount.mount_path != self.sandbox_agent_workspace:
+                bwrap_cmd.extend(["--ro-bind", mount.host_path, mount.mount_path])
+        
+        bwrap_cmd.extend([python_bin, launcher_path, input_pkl, output_pkl])
         
         logger.info(f"[BwrapIsolation] 执行命令: {' '.join(bwrap_cmd[:5])}...")
         
@@ -58,7 +64,7 @@ class BwrapIsolation:
                 bwrap_cmd,
                 capture_output=True,
                 text=True,
-                cwd=cwd or self.virtual_workspace,
+                cwd=cwd or self.sandbox_agent_workspace,
                 timeout=300
             )
             
@@ -95,5 +101,5 @@ class BwrapIsolation:
         
         # 使用 subprocess 模式执行
         from .subprocess import SubprocessIsolation
-        subproc = SubprocessIsolation(self.venv_dir, self.host_workspace, self.limits)
+        subproc = SubprocessIsolation(self.venv_dir, self.sandbox_agent_workspace, self.volume_mounts, self.limits)
         return subproc.execute_background(command, cwd)
