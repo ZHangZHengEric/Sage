@@ -422,21 +422,25 @@
                         <Checkbox 
                           :id="`tool-${tool.name}`" 
                           :checked="isRequiredTool(tool.name) || store.formData.availableTools.includes(tool.name)" 
-                          :disabled="isRequiredTool(tool.name)"
-                          @update:checked="() => !isRequiredTool(tool.name) && store.toggleTool(tool.name)" 
+                          :disabled="isRequiredTool(tool.name) || isIMToolDisabled(tool.name)"
+                          @update:checked="() => handleToolToggle(tool.name)" 
                           class="mt-0.5"
                         />
                         <div class="flex-1 min-w-0">
                           <div class="flex items-center gap-2">
-                            <label :for="`tool-${tool.name}`" class="text-sm font-medium cursor-pointer" :class="{ 'opacity-50': isRequiredTool(tool.name) }">
+                            <label :for="`tool-${tool.name}`" class="text-sm font-medium cursor-pointer" :class="{ 'opacity-50': isRequiredTool(tool.name) || isIMToolDisabled(tool.name) }">
                               {{ tool.name }}
                             </label>
                             <Badge v-if="isRequiredTool(tool.name) === 'skill'" variant="secondary" class="text-[10px] h-5 px-1.5">技能必需</Badge>
                             <Badge v-else-if="isRequiredTool(tool.name) === 'im'" variant="secondary" class="text-[10px] h-5 px-1.5 bg-blue-100 text-blue-700">IM频道必须</Badge>
+                            <Badge v-else-if="isIMToolDisabled(tool.name)" variant="secondary" class="text-[10px] h-5 px-1.5 bg-gray-100 text-gray-500">需开启IM频道</Badge>
                             <Badge v-else-if="isRequiredTool(tool.name)" variant="secondary" class="text-[10px] h-5 px-1.5">必需</Badge>
                           </div>
                           <p v-if="tool.description" class="text-xs text-muted-foreground line-clamp-2 mt-1">
                             {{ tool.description }}
+                          </p>
+                          <p v-if="isIMToolDisabled(tool.name)" class="text-xs text-amber-600 mt-1">
+                            请先开启 IM 频道才能使用此工具
                           </p>
                         </div>
                       </div>
@@ -1302,30 +1306,61 @@ const loadIMConfig = async () => {
   }
 }
 
-// 检查并添加 IM 工具
+// IM 工具列表
+const IM_TOOLS = ['send_message_through_im', 'send_file_through_im', 'send_image_through_im']
+
+// 检查是否是 IM 工具
+const isIMTool = (toolName) => {
+  return IM_TOOLS.includes(toolName)
+}
+
+// 检查 IM 工具是否被禁用（没有开启的 IM 频道）
+const isIMToolDisabled = (toolName) => {
+  if (!isIMTool(toolName)) return false
+  const hasEnabledIMChannel = imConfig.value && Object.values(imConfig.value).some(ch => ch.enabled)
+  return !hasEnabledIMChannel
+}
+
+// 处理工具切换
+const handleToolToggle = (toolName) => {
+  // 如果是必需工具，不允许切换
+  if (isRequiredTool(toolName)) {
+    return
+  }
+  
+  // 如果是 IM 工具且没有开启的 IM 频道，提示用户
+  if (isIMToolDisabled(toolName)) {
+    alert('请先开启 IM 频道才能使用此工具')
+    return
+  }
+  
+  // 正常切换
+  store.toggleTool(toolName)
+}
+
+// 检查并添加/移除 IM 工具
 const checkAndAddIMTools = async () => {
-  const imTools = ['send_message_through_im', 'send_file_through_im', 'send_image_through_im']
   const hasEnabledIMChannel = Object.values(imConfig.value).some(ch => ch.enabled)
 
+  // 同步 imConfig 到 store.formData.im_channels
+  const imChannels = {}
+  for (const [provider, data] of Object.entries(imConfig.value)) {
+    imChannels[provider] = {
+      enabled: data.enabled,
+      config: data.config
+    }
+  }
+  store.formData.im_channels = imChannels
+
+  // 确保 availableTools 存在
+  if (!store.formData.availableTools) {
+    store.formData.availableTools = []
+  }
+
   if (hasEnabledIMChannel) {
-    // 同步 imConfig 到 store.formData.im_channels
-    const imChannels = {}
-    for (const [provider, data] of Object.entries(imConfig.value)) {
-      imChannels[provider] = {
-        enabled: data.enabled,
-        config: data.config
-      }
-    }
-    store.formData.im_channels = imChannels
-
-    // 确保 availableTools 存在
-    if (!store.formData.availableTools) {
-      store.formData.availableTools = []
-    }
-
-    // 检查并添加缺失的 IM 工具
+    // 有 IM 频道开启，检查并添加缺失的 IM 工具
     let toolsAdded = false
-    imTools.forEach(toolName => {
+    IM_TOOLS.forEach(toolName => {
       if (!store.formData.availableTools.includes(toolName)) {
         store.formData.availableTools.push(toolName)
         toolsAdded = true
@@ -1333,7 +1368,23 @@ const checkAndAddIMTools = async () => {
     })
 
     if (toolsAdded) {
-      console.log('[AgentEdit] Auto-added IM tools after loading config:', imTools)
+      console.log('[AgentEdit] Auto-added IM tools after loading config:', IM_TOOLS)
+      // 自动保存到后端
+      await autoSaveAgentConfig()
+    }
+  } else {
+    // 没有 IM 频道开启，移除所有 IM 工具
+    let toolsRemoved = false
+    store.formData.availableTools = store.formData.availableTools.filter(toolName => {
+      if (IM_TOOLS.includes(toolName)) {
+        toolsRemoved = true
+        return false
+      }
+      return true
+    })
+
+    if (toolsRemoved) {
+      console.log('[AgentEdit] Auto-removed IM tools after loading config (no IM channels enabled):', IM_TOOLS)
       // 自动保存到后端
       await autoSaveAgentConfig()
     }
@@ -1470,6 +1521,9 @@ const handleEnableSwitch = async (provider, value) => {
       }
     }
   }
+
+  // 检查并更新 IM 工具（添加或移除）
+  await checkAndAddIMTools()
 }
 
 // 处理更新配置（进入编辑模式）

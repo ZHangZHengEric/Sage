@@ -25,6 +25,41 @@ import sys
 import shutil
 import subprocess
 
+# 工具返回结果的最大 token 数限制
+MAX_TOOL_RESULT_TOKENS = 12000
+
+
+def _truncate_result(result: str, max_tokens: int = MAX_TOOL_RESULT_TOKENS) -> str:
+    """截断工具返回结果，限制在最大 token 数内
+    
+    Args:
+        result: 原始结果字符串
+        max_tokens: 最大 token 数，默认 8000
+        
+    Returns:
+        截断后的结果，如果发生截断会添加提示信息
+    """
+    if not result:
+        return result
+    
+    # 使用 MessageManager 的 token 计算方法
+    from sagents.context.messages.message_manager import MessageManager
+    estimated_tokens = MessageManager.calculate_str_token_length(result)
+    
+    if estimated_tokens <= max_tokens:
+        return result
+    
+    # 需要截断，计算截断后的字符数
+    # 使用动态 token 比例计算：字符数 = token 数 / 比例
+    token_ratio = MessageManager.get_dynamic_token_ratio()
+    max_chars = int(max_tokens / token_ratio)
+    truncated = result[:max_chars]
+    
+    # 添加截断提示
+    truncation_notice = f"\n\n[结果已截断] 原始结果约 {estimated_tokens} tokens，超过最大限制 {max_tokens} tokens，仅显示前 {max_tokens} tokens。"
+    
+    return truncated + truncation_notice
+
 
 def _check_command_exists(command: str) -> bool:
     """检查命令是否存在"""
@@ -908,6 +943,9 @@ class ToolManager:
                     tool_name,
                     "INVALID_JSON",
                 )
+
+            # Step 5: Truncate result if too long (max 8000 tokens)
+            final_result = _truncate_result(final_result, MAX_TOOL_RESULT_TOKENS)
 
             return final_result
 
