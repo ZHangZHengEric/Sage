@@ -1132,7 +1132,7 @@ const validateMaxLoopCount = () => {
 // IM Channel Configuration
 // ============================================================================
 
-const activeIMProvider = ref('wechat_work')
+const activeIMProvider = ref('wechat_personal')
 const testingIM = ref({})
 
 // WeChat Personal (iLink) login state
@@ -1148,8 +1148,8 @@ const wechatPersonalLogin = ref({
 const isDefaultAgent = computed(() => store.formData.is_default === true)
 
 const imProviders = [
-  { key: 'wechat_work', label: '企业微信' },
   { key: 'wechat_personal', label: '微信' },
+  { key: 'wechat_work', label: '企业微信' },
   { key: 'dingtalk', label: '钉钉' },
   { key: 'feishu', label: '飞书' },
   { key: 'imessage', label: 'iMessage' }
