@@ -1,5 +1,4 @@
 import os
-import random
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -8,11 +7,6 @@ from openai import AsyncOpenAI
 def create_model_client(client_params: Dict[str, Any]) -> Any:
     api_key = client_params.get("api_key")
     base_url = client_params.get("base_url")
-    if api_key and isinstance(api_key, str) and "," in api_key:
-        keys = [k.strip() for k in api_key.split(",") if k.strip()]
-        if keys:
-            api_key = random.choice(keys)
-            logger.info(f"Using random key from {len(keys)} available keys")
 
     logger.info(f"初始化Chat模型客户端: model={client_params.get('model')}, base_url={base_url}")
     model_client = AsyncOpenAI(

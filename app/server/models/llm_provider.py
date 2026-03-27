@@ -17,7 +17,7 @@ class LLMProvider(Base):
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     base_url: Mapped[str] = mapped_column(String(255), nullable=False)
-    api_keys: Mapped[List[str]] = mapped_column(JSON, nullable=False)  # List of keys
+    api_keys: Mapped[List[str]] = mapped_column(JSON, nullable=False)  # Single key stored as a one-item list
     model: Mapped[str] = mapped_column(String(255), nullable=False)    # Model name
     max_tokens: Mapped[int] = mapped_column(Integer, nullable=True)
     temperature: Mapped[float] = mapped_column(Float, nullable=True)
@@ -51,7 +51,7 @@ class LLMProvider(Base):
         self.id = id
         self.name = name
         self.base_url = base_url
-        self.api_keys = api_keys
+        self.api_keys = self.normalize_api_keys(api_keys)
         self.model = model
         self.max_tokens = max_tokens
         self.temperature = temperature
@@ -63,6 +63,25 @@ class LLMProvider(Base):
         self.user_id = user_id
         self.created_at = created_at or get_local_now()
         self.updated_at = updated_at or get_local_now()
+
+    @staticmethod
+    def normalize_api_keys(api_keys: Optional[List[str]]) -> List[str]:
+        if not api_keys:
+            raise ValueError("Exactly one API key is required")
+
+        normalized_keys = [str(key).strip() for key in api_keys if str(key).strip()]
+        if len(normalized_keys) != 1:
+            raise ValueError("Exactly one API key is required")
+
+        api_key = normalized_keys[0]
+        if "\n" in api_key or "\r" in api_key:
+            raise ValueError("API key must be a single line")
+
+        return [api_key]
+
+    @property
+    def api_key(self) -> Optional[str]:
+        return self.api_keys[0] if self.api_keys else None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -89,6 +108,7 @@ class LLMProviderDao(BaseDao):
     """
 
     async def save(self, provider: "LLMProvider") -> bool:
+        provider.api_keys = LLMProvider.normalize_api_keys(provider.api_keys)
         provider.updated_at = get_local_now()
         return await BaseDao.save(self, provider)
 

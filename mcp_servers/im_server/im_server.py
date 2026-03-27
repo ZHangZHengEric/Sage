@@ -528,6 +528,20 @@ async def send_message_through_im(
     target_user_id = user_id
     target_chat_id = chat_id
 
+    # If chat_id not provided, try to find it from session manager
+    if not target_chat_id and target_user_id:
+        try:
+            session_mgr = get_session_manager()
+            # Try to find session by user
+            session_id = session_mgr.find_session_by_user(provider_name, target_user_id)
+            if session_id:
+                binding = session_mgr.get_binding(session_id)
+                if binding:
+                    target_chat_id = binding.get('chat_id')
+                    logger.info(f"[IM Tool] Found chat_id from session: {target_chat_id}")
+        except Exception as e:
+            logger.warning(f"[IM Tool] Failed to find chat_id from session: {e}")
+
     logger.info(f"[IM Tool] Processing message: agent={agent_id}, provider={provider_name}, "
                 f"user_id={target_user_id}, chat_id={target_chat_id}")
 

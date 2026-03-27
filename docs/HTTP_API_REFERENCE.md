@@ -17,10 +17,13 @@ Standard response format:
 
 ---
 
-## 1. User & Authentication (`/api/user`)
+## 1. Authentication (`/api/auth`)
+
+Canonical auth endpoints now live under `/api/auth`.
+Legacy `/api/user/login`, `/api/user/check_login`, `/api/user/logout`, `/api/user/auth-providers`, and `/api/user/oauth/*` remain available for compatibility.
 
 ### Register
-- **URL**: `/api/user/register`
+- **URL**: `/api/auth/register`
 - **Method**: `POST`
 - **Body**:
   ```json
@@ -33,7 +36,7 @@ Standard response format:
   ```
 
 ### Login
-- **URL**: `/api/user/login`
+- **URL**: `/api/auth/login`
 - **Method**: `POST`
 - **Body**:
   ```json
@@ -45,10 +48,31 @@ Standard response format:
 - **Response**: Returns `access_token`, `refresh_token`, `expires_in`.
 
 ### Check Login Status
-- **URL**: `/api/user/check_login`
+- **URL**: `/api/auth/session`
 - **Method**: `GET`
 - **Headers**: `Authorization: Bearer <token>`
 - **Response**: Returns user claims/info.
+
+### Auth Providers
+- **URL**: `/api/auth/providers`
+- **Method**: `GET`
+- **Response**: Returns local and upstream OAuth/OIDC provider list for the login UI.
+
+### Upstream OAuth Login
+- **Login URL**: `GET /api/auth/upstream/login/{provider_id}`
+- **Default Login URL**: `GET /api/auth/upstream/login`
+- **Callback URL**: `GET /api/auth/upstream/callback/{provider_id}`
+
+### Logout
+- **URL**: `/api/auth/logout`
+- **Method**: `POST`
+
+### OAuth2 Authorization Server
+- **Metadata**: `GET /.well-known/oauth-authorization-server`
+- **Authorize**: `GET /oauth2/authorize`
+- **Token**: `POST /oauth2/token`
+- **UserInfo**: `GET|POST /oauth2/userinfo`
+- **Integration Guide**: See [OAuth2 Lage Integration Guide](OAUTH2_LAGE_INTEGRATION_CN.md)
 
 ### Change Password
 - **URL**: `/api/user/change-password`

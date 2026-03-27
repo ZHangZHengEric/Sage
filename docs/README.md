@@ -23,6 +23,7 @@ Welcome to the comprehensive documentation for Sage Multi-Agent Framework v0.9 -
 | [🚀 Server Deployment Guide](SERVER_DEPLOYMENT.html) | [🚀 Server 部署指南](SERVER_DEPLOYMENT_CN.html) |
 | [📖 Examples Usage Guide](EXAMPLES_USAGE.html) | [📖 示例使用指南](EXAMPLES_USAGE_CN.html) |
 | [📅 Changelog](CHANGELOG.html) | [📅 更新日志](CHANGELOG_CN.html) |
+| - | [🔐 OAuth2 对接指南（Lage）](OAUTH2_LAGE_INTEGRATION_CN.html) |
 
 {: .note }
 > **选择语言 / Choose Language**: 所有文档都提供中英文双语版本。All documentation is available in both Chinese and English.
@@ -32,6 +33,7 @@ Welcome to the comprehensive documentation for Sage Multi-Agent Framework v0.9 -
 - **[Quick Start Guide](QUICK_START.md)** - Get up and running in 5 minutes
 - **[Architecture Overview](ARCHITECTURE.md)** - Deep dive into system design  
 - **[API Reference](API_REFERENCE.md)** - Complete API documentation
+- **[OAuth2 Integration Guide for Lage](OAUTH2_LAGE_INTEGRATION_CN.md)** - Third-party login integration
 - **[Tool Development](TOOL_DEVELOPMENT.md)** - Create custom tools
 - **[Configuration Guide](CONFIGURATION.md)** - Advanced configuration
 - **[Examples](EXAMPLES.md)** - Real-world usage app

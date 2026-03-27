@@ -1,0 +1,15 @@
+{
+  "llmConfig": {
+    "model": "",
+    "maxTokens": 4096,
+    "temperature": 0.2
+  },
+  "agentMode": "simple",
+  "deepThinking": false,
+  "availableTools": [],
+  "availableWorkflows": {},
+  "systemContext": {},
+  "systemPrefix": "You are a helpful AI assistant.",
+  "maxLoopCount": 10,
+  "memoryType": "session"
+}

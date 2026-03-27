@@ -253,6 +253,10 @@ class IMServiceManager:
                 task = asyncio.create_task(
                     self._run_wechat_work_channel(sage_user_id, config_data['config'])
                 )
+            elif provider_type == "wechat_personal":
+                task = asyncio.create_task(
+                    self._run_wechat_personal_channel(sage_user_id, config_data['config'])
+                )
             else:
                 raise ValueError(f"Unknown provider: {provider_type}")
             
@@ -965,6 +969,49 @@ class IMServiceManager:
                     self._connections[key].error_message = str(e)
             raise
     
+    async def _run_wechat_personal_channel(self, sage_user_id: str, config: Dict[str, Any]):
+        """Run WeChat Personal (iLink) channel using HTTP long polling."""
+        key = self._make_key(sage_user_id, "wechat_personal")
+        
+        try:
+            from .providers.wechat_ilink import WeChatPersonalPoller
+            
+            bot_token = config.get('bot_token')
+            if not bot_token:
+                raise ValueError("WeChat Personal bot_token required")
+            
+            # Create message handler for this channel
+            message_handler = self._make_message_handler(sage_user_id, "wechat_personal")
+            
+            # Create and start poller
+            poller = WeChatPersonalPoller(
+                message_handler=message_handler,
+                bot_token=bot_token
+            )
+            poller.start()
+            
+            # Update state to connected
+            with self._lock:
+                if key in self._connections:
+                    self._connections[key].status = ChannelStatus.CONNECTED
+            
+            logger.info(f"[ServiceManager] WeChat Personal channel {key} started polling")
+            
+            # Keep running until cancelled
+            while True:
+                await asyncio.sleep(60)
+                
+        except asyncio.CancelledError:
+            logger.info(f"[ServiceManager] WeChat Personal channel {key} cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"[ServiceManager] WeChat Personal channel {key} error: {e}")
+            with self._lock:
+                if key in self._connections:
+                    self._connections[key].status = ChannelStatus.ERROR
+                    self._connections[key].error_message = str(e)
+            raise
+    
     def _make_message_handler(self, sage_user_id: str, provider_type: str):
         """
         Create message handler for a channel.
@@ -976,6 +1023,12 @@ class IMServiceManager:
             try:
                 logger.info(f"[ServiceManager] ====== Message handler START ======")
                 logger.info(f"[ServiceManager] Message from {sage_user_id}:{provider_type}: {message}")
+
+                # Filter out events (only handle actual user messages)
+                msg_type = message.get('type')
+                if msg_type == 'event':
+                    logger.info(f"[ServiceManager] Ignoring event type message: {message.get('event_type')}")
+                    return
 
                 # Extract message details
                 # iMessage uses 'sender', others use 'user_id'
