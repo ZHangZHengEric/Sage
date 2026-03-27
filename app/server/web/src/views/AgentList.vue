@@ -16,60 +16,94 @@
       <div v-if="loading" class="flex flex-col items-center justify-center py-20">
         <Loader class="h-8 w-8 animate-spin text-primary" />
       </div>
-      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        <Card v-for="agent in agents" :key="agent.id" class="flex flex-col h-full hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
-          <CardHeader class="pb-4">
-            <div class="flex items-start gap-4">
-              <div class="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 text-primary">
-                <Bot class="h-6 w-6" />
-              </div>
-              <div class="space-y-1 overflow-hidden flex-1">
-                <CardTitle class="text-lg leading-tight truncate" :title="agent.name">
-                  {{ agent.name }}
-                </CardTitle>
-                <CardDescription class="line-clamp-2 min-h-[2.5rem]">
-                  {{ agent.description }}
-                </CardDescription>
+      <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+        <Card
+          v-for="agent in agents"
+          :key="agent.id"
+          class="flex flex-col h-full border hover:border-primary/30 transition-colors bg-card cursor-pointer"
+          @click="handleViewAgent(agent)"
+        >
+          <CardHeader class="pb-2 pt-4">
+            <div class="flex items-start gap-3">
+              <img
+                :src="getAgentAvatar(agent.id)"
+                :alt="agent.name"
+                class="h-12 w-12 rounded-xl bg-primary/10 object-cover shrink-0"
+              />
+
+              <div class="flex-1 min-w-0">
+                <div class="flex items-start justify-between gap-2">
+                  <CardTitle class="text-base font-bold leading-tight truncate" :title="agent.name">
+                    {{ agent.name }}
+                  </CardTitle>
+                  <Badge
+                    v-if="agent.is_default"
+                    variant="default"
+                    class="text-xs font-medium px-2 py-0.5 shrink-0 bg-primary text-primary-foreground"
+                  >
+                    <Star class="w-3 h-3 mr-1" />
+                    默认
+                  </Badge>
+                </div>
+
+                <div class="flex items-center gap-1 mt-1">
+                  <button
+                    @click.stop="copyAgentId(agent.id)"
+                    class="text-[10px] font-mono text-muted-foreground/70 bg-muted/40 hover:bg-muted/60 px-1.5 py-0.5 rounded transition-colors cursor-pointer flex items-center gap-1"
+                    title="点击复制完整ID"
+                  >
+                    <span class="truncate max-w-[120px]">{{ agent.id }}</span>
+                    <Copy class="w-3 h-3" />
+                  </button>
+                </div>
               </div>
             </div>
           </CardHeader>
           
-          <CardContent class="flex-1 pb-4">
-             <div class="space-y-3 text-sm">
-                <div class="flex justify-between">
-                   <span class="text-muted-foreground">{{ t('agent.model') }}:</span>
-                   <span class="font-medium truncate max-w-[200px]" :title="getModelLabel(agent.llm_provider_id)">{{ getModelLabel(agent.llm_provider_id) }}</span>
-                </div>
-                <div class="flex justify-between items-center">
-                   <span class="text-muted-foreground">{{ t('agent.deepThinking') }}:</span>
-                   <Badge :variant="getConfigBadgeVariant(agent.deepThinking)">{{ getConfigBadgeText(agent.deepThinking) }}</Badge>
-                </div>
-                <div class="flex justify-between items-center">
-                   <span class="text-muted-foreground">{{ t('agent.agentMode') }}:</span>
-                   <Badge variant="outline">{{ getAgentModeText(agent.agentMode) }}</Badge>
-                </div>
-                <div class="flex justify-between">
-                   <span class="text-muted-foreground">{{ t('agent.availableTools') }}:</span>
-                   <span>{{ agent.availableTools?.length || 0 }} {{ t('agent.toolsCount') }}</span>
-                </div>
-                <div class="flex justify-between">
-                   <span class="text-muted-foreground">{{ t('agent.availableSkills') }}:</span>
-                   <span>{{ agent.availableSkills?.length || 0 }} {{ t('agent.toolsCount') }}</span>
-                </div>
-             </div>
+          <CardContent class="pt-0 pb-3 flex-1 flex flex-col">
+            <p class="text-sm text-muted-foreground line-clamp-3 leading-relaxed flex-1">
+              {{ agent.description || '这个智能体已经准备好协助完成你的任务。' }}
+            </p>
+            
+            <div class="flex items-center gap-3 mt-3 flex-wrap">
+              <Badge variant="outline" class="text-xs font-medium px-2 py-0.5 shrink-0">
+                {{ getAgentModeText(agent.agentMode) }}
+              </Badge>
+              <Badge :variant="getConfigBadgeVariant(agent.deepThinking)" class="text-xs font-medium px-2 py-0.5 shrink-0">
+                {{ getConfigBadgeText(agent.deepThinking) }}
+              </Badge>
+              <span class="text-xs text-muted-foreground truncate" :title="getModelLabel(agent.llm_provider_id)">
+                {{ getModelLabel(agent.llm_provider_id) }}
+              </span>
+            </div>
           </CardContent>
 
-          <CardFooter class="pt-4 border-t bg-muted/20 flex flex-wrap gap-2 justify-end">
-            <Button variant="ghost" size="icon" @click="openUsageModal(agent)" :title="t('agent.usage')">
+          <CardFooter class="pt-0 pb-4 px-4 flex-col items-stretch gap-3">
+            <div class="flex items-center justify-between w-full">
+              <div class="flex items-center gap-3">
+                <div v-if="agent.availableTools?.length" class="flex items-center gap-1 text-muted-foreground">
+                  <Wrench class="w-3.5 h-3.5" />
+                  <span class="text-xs">{{ agent.availableTools.length }}</span>
+                </div>
+                <div v-if="agent.availableSkills?.length" class="flex items-center gap-1 text-muted-foreground">
+                  <Zap class="w-3.5 h-3.5" />
+                  <span class="text-xs">{{ agent.availableSkills.length }}</span>
+                </div>
+              </div>
+              <span class="text-xs text-muted-foreground/50">点击查看详情</span>
+            </div>
+
+            <div class="pt-3 border-t bg-muted/20 -mx-4 px-4 -mb-4 pb-4 flex flex-wrap gap-2 justify-end">
+            <Button variant="ghost" size="icon" @click.stop="openUsageModal(agent)" :title="t('agent.usage')">
               <FileBraces class="h-4 w-4" />
             </Button>
-            <Button v-if="canEdit(agent)" variant="ghost" size="icon" @click="handleEditAgent(agent)" :title="t('agent.edit')">
+            <Button v-if="canEdit(agent)" variant="ghost" size="icon" @click.stop="handleEditAgent(agent)" :title="t('agent.edit')">
               <Edit class="h-4 w-4" />
             </Button>
-            <Button v-if="canEdit(agent)" variant="ghost" size="icon" @click="handleAuthorize(agent)" :title="t('agent.authorize')">
+            <Button v-if="canEdit(agent)" variant="ghost" size="icon" @click.stop="handleAuthorize(agent)" :title="t('agent.authorize')">
               <UserPlus class="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="icon" @click="handleExport(agent)" :title="t('agent.export')">
+            <Button variant="ghost" size="icon" @click.stop="handleExport(agent)" :title="t('agent.export')">
               <Upload class="h-4 w-4" />
             </Button>
             <Button 
@@ -77,11 +111,12 @@
               variant="ghost" 
               size="icon" 
               class="text-destructive hover:text-destructive hover:bg-destructive/10"
-              @click="handleDelete(agent)" 
+              @click.stop="handleDelete(agent)" 
               :title="t('agent.delete')"
             >
               <Trash2 class="h-4 w-4" />
             </Button>
+            </div>
           </CardFooter>
         </Card>
       </div>
@@ -179,7 +214,7 @@
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
 import { toast } from 'vue-sonner'
-import { Plus, Edit, Trash2, Bot, FileBraces, Download, Upload, Copy, Loader, UserPlus } from 'lucide-vue-next'
+import { Plus, Edit, Trash2, Bot, FileBraces, Download, Upload, Copy, Loader, UserPlus, Star, Wrench, Zap } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { useLanguage } from '../utils/i18n.js'
 import { agentAPI } from '../api/agent.js'
@@ -657,6 +692,36 @@ const getAgentModeText = (mode) => {
   if (normalizedMode === 'fibre') return t('agent.modeFibre')
   if (normalizedMode === 'simple') return t('agent.modeSimple')
   return normalizedMode
+}
+
+const getAgentAvatar = (agentId) => {
+  const seed = encodeURIComponent(agentId || 'default')
+  return `https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${seed}`
+}
+
+const copyAgentId = async (agentId) => {
+  if (!agentId) return
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(agentId)
+      toast.success('Agent ID 已复制')
+      return
+    }
+  } catch (_) {}
+
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = agentId
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    document.body.removeChild(textarea)
+    toast.success('Agent ID 已复制')
+  } catch (e) {
+    toast.error('复制失败')
+  }
 }
 
 const handleSmartConfig = async (description, selectedTools = [], callbacks = {}) => {

@@ -1,14 +1,19 @@
 <template>
   <div class="h-full flex flex-col p-6 space-y-6">
     <div class="flex items-center justify-between">
-      <div class="flex-1"></div>
+      <div class="space-y-1">
+        <h2 class="text-lg font-medium">{{ t('modelProvider.title') }}</h2>
+        <p class="text-sm text-muted-foreground">
+          管理模型供应商、鉴权信息和多模态能力验证。
+        </p>
+      </div>
       <Button @click="handleCreate">
         <Plus class="mr-2 h-4 w-4" />
         {{ t('common.create') }}
       </Button>
     </div>
 
-    <div v-if="providers && providers.length > 0" class="border rounded-md">
+    <div v-if="providers && providers.length > 0" class="border rounded-xl bg-card shadow-sm overflow-hidden">
       <Table>
         <TableHeader>
           <TableRow>
@@ -21,18 +26,26 @@
         <TableBody>
           <TableRow v-for="provider in providers" :key="provider.id">
             <TableCell class="font-medium">
-               <div class="flex items-center gap-2">
-                 {{ provider.name }}
+               <div class="flex items-center gap-3">
+                 <div class="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                   <Bot class="h-4 w-4" />
+                 </div>
+                 <div class="min-w-0">
+                   <div class="flex items-center gap-2">
+                     <span class="truncate">{{ provider.name }}</span>
                  <Badge v-if="provider.is_default" variant="secondary">{{ t('common.default') }}</Badge>
+                   </div>
+                   <p class="text-xs text-muted-foreground truncate">{{ provider.model }}</p>
+                 </div>
                </div>
             </TableCell>
-            <TableCell>{{ provider.base_url }}</TableCell>
+            <TableCell class="text-muted-foreground max-w-[260px] truncate" :title="provider.base_url">{{ provider.base_url }}</TableCell>
             <TableCell>
               <Badge variant="outline">{{ provider.model }}</Badge>
             </TableCell>
             <TableCell>
               <div class="flex items-center gap-2">
-                <Button variant="ghost" size="icon" @click="handleEdit(provider)" :disabled="provider.is_default">
+                <Button variant="ghost" size="icon" @click="handleEdit(provider)">
                   <Edit class="h-4 w-4" />
                 </Button>
                 <Button variant="ghost" size="icon" @click="handleDelete(provider)" :disabled="provider.is_default">
@@ -45,7 +58,7 @@
       </Table>
     </div>
     
-    <div v-else class="flex flex-col items-center justify-center py-12 text-center border rounded-md border-dashed">
+    <div v-else class="flex flex-col items-center justify-center py-12 text-center border rounded-xl border-dashed bg-card">
       <div class="p-4 rounded-full bg-muted/50 mb-4">
         <Bot class="w-8 h-8 text-muted-foreground" />
       </div>
@@ -67,7 +80,7 @@
         </DialogHeader>
         <div class="grid gap-4 py-4">
           <div class="grid gap-2">
-            <Label>{{ t('modelProvider.name') }}</Label>
+            <Label>{{ t('modelProvider.name') }} <span class="text-destructive">*</span></Label>
             <div class="space-y-3">
               <Select :model-value="selectedProvider" @update:model-value="handleProviderChange">
                 <SelectTrigger>
@@ -86,13 +99,13 @@
               <Input v-if="selectedProvider === 'Custom'" v-model="form.name" :placeholder="t('modelProvider.customNamePlaceholder')" />
             </div>
           </div>
-            <div class="grid gap-2">
-            <Label>{{ t('modelProvider.baseUrl') }}</Label>
+          <div class="grid gap-2">
+            <Label>{{ t('modelProvider.baseUrl') }} <span class="text-destructive">*</span></Label>
             <Input v-model="form.base_url" placeholder="https://api.openai.com/v1" @update:model-value="onKeyConfigChange" />
           </div>
           <div class="grid gap-2">
             <div class="flex items-center justify-between">
-              <Label>{{ t('modelProvider.apiKey') }}</Label>
+              <Label>{{ t('modelProvider.apiKey') }} <span class="text-destructive">*</span></Label>
               <Button
                 v-if="currentProvider?.website"
                 variant="link"
@@ -112,7 +125,7 @@
           </div>
           <div class="grid gap-2">
              <div class="flex items-center justify-between">
-               <Label>{{ t('modelProvider.model') }}</Label>
+               <Label>{{ t('modelProvider.model') }} <span class="text-destructive">*</span></Label>
                <Button
                  v-if="currentProvider?.model_list_url"
                  variant="link"

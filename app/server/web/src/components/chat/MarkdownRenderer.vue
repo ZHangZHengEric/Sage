@@ -1,5 +1,5 @@
 <template>
-  <div class="prose prose-sm dark:prose-invert max-w-none break-words" v-html="renderedContent"></div>
+  <div class="prose prose-xs dark:prose-invert max-w-none break-words text-sm" v-html="renderedContent"></div>
 </template>
 
 <script setup>
@@ -13,9 +13,6 @@ import rehypePrism from 'rehype-prism-plus'
 import rehypeStringify from 'rehype-stringify'
 import { visit } from 'unist-util-visit'
 import { toast } from 'vue-sonner'
-
-// 常用语言高亮样式
-import 'prismjs/themes/prism-tomorrow.css' 
 
 const props = defineProps({
   content: {
@@ -108,7 +105,7 @@ renderer.table = function(token) {
   }
 
   return `<div class="overflow-x-auto my-4 w-full">
-    <table class="w-full text-sm border-collapse border rounded-md">
+    <table class="w-full text-xs border-collapse border rounded-md">
       <thead class="bg-muted/50">
         ${header}
       </thead>
@@ -123,8 +120,8 @@ renderer.tablecell = function(token) {
   const content = this.parser.parseInline(token.tokens)
   const tag = token.header ? 'th' : 'td'
   let className = token.header
-    ? 'border px-4 py-2 text-left font-medium text-muted-foreground'
-    : 'border px-4 py-2'
+    ? 'border px-3 py-1.5 text-left font-medium text-muted-foreground'
+    : 'border px-3 py-1.5'
     
   if (token.align) {
     className += ` text-${token.align}`
@@ -142,138 +139,58 @@ marked.setOptions({
   renderer
 })
 
-// Rehype 插件：代码块包装（添加语言标签和复制按钮）
+// Rehype 插件：代码块处理（简化样式，直接显示）
 const rehypeCodeBlockWrapper = () => {
   return (tree) => {
     visit(tree, 'element', (node, index, parent) => {
-      // Rehype Prism Plus 可能会修改 pre/code 的结构
-      // 它通常保持 pre > code 的结构，但 code 内部会有 span
-      // 我们需要找到 pre 元素，并且它包含一个 code 元素
       if (node.tagName === 'pre' && node.children && node.children.length > 0) {
         const codeNode = node.children.find(n => n.tagName === 'code')
         if (codeNode) {
-          // 获取语言
           let lang = 'text'
-          
-          // 检查 code 元素上的 class
+
           if (codeNode.properties && codeNode.properties.className) {
-            const classes = Array.isArray(codeNode.properties.className) 
-              ? codeNode.properties.className 
+            const classes = Array.isArray(codeNode.properties.className)
+              ? codeNode.properties.className
               : [codeNode.properties.className]
-            
+
             const langClass = classes.find(c => String(c).startsWith('language-'))
             if (langClass) {
               lang = String(langClass).replace('language-', '')
             }
           }
-          
-          // 如果 code 上没找到，有时 rehype-prism-plus 可能会把 class 移到 pre 上（取决于配置，默认通常在 code 上）
+
           if (lang === 'text' && node.properties && node.properties.className) {
-             const classes = Array.isArray(node.properties.className) 
-              ? node.properties.className 
+            const classes = Array.isArray(node.properties.className)
+              ? node.properties.className
               : [node.properties.className]
-            
+
             const langClass = classes.find(c => String(c).startsWith('language-'))
             if (langClass) {
               lang = String(langClass).replace('language-', '')
             }
           }
 
-          // SVG Icons AST
-          const copyIcon = {
-            type: 'element',
-            tagName: 'svg',
-            properties: {
-              xmlns: "http://www.w3.org/2000/svg",
-              width: "14",
-              height: "14",
-              viewBox: "0 0 24 24",
-              fill: "none",
-              stroke: "currentColor",
-              "stroke-width": "2",
-              "stroke-linecap": "round",
-              "stroke-linejoin": "round",
-              class: "lucide lucide-copy"
-            },
-            children: [
-              { type: 'element', tagName: 'rect', properties: { width: "14", height: "14", x: "8", y: "8", rx: "2", ry: "2" }, children: [] },
-              { type: 'element', tagName: 'path', properties: { d: "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" }, children: [] }
+          node.properties = {
+            ...node.properties,
+            className: [
+              'my-3',
+              'p-3',
+              'rounded-lg',
+              'overflow-auto',
+              'text-xs',
+              'font-mono',
+              'leading-relaxed',
+              'bg-slate-100',
+              'dark:bg-slate-800',
+              'text-slate-800',
+              'dark:text-slate-200',
+              'border',
+              'border-slate-200',
+              'dark:border-slate-700'
             ]
           }
 
-          const checkIcon = {
-             type: 'element',
-             tagName: 'svg',
-             properties: {
-               xmlns: "http://www.w3.org/2000/svg",
-               width: "14",
-               height: "14",
-               viewBox: "0 0 24 24",
-               fill: "none",
-               stroke: "currentColor",
-               "stroke-width": "2",
-               "stroke-linecap": "round",
-               "stroke-linejoin": "round",
-               class: "lucide lucide-check hidden" // 默认隐藏
-             },
-             children: [
-                { type: 'element', tagName: 'polyline', properties: { points: "20 6 9 17 4 12" }, children: [] }
-             ]
-          }
-
-          // 包装结构
-          const wrapper = {
-            type: 'element',
-            tagName: 'div',
-            properties: {
-              className: ['relative', 'group', 'my-4', 'rounded-lg', 'border', 'bg-[#2b2b2b]', 'border-zinc-700']
-            },
-            children: [
-              // 顶部栏
-              {
-                type: 'element',
-                tagName: 'div',
-                properties: {
-                  className: ['flex', 'items-center', 'justify-between', 'px-3', 'py-2', 'bg-[#383838]', 'rounded-t-lg', 'border-b', 'border-zinc-600']
-                },
-                children: [
-                  // 语言标签
-                  {
-                    type: 'element',
-                    tagName: 'span',
-                    properties: {
-                      className: ['text-xs', 'font-medium', 'text-zinc-300', 'uppercase']
-                    },
-                    children: [{ type: 'text', value: lang }]
-                  },
-                  // 复制按钮
-                  {
-                    type: 'element',
-                    tagName: 'button',
-                    properties: {
-                      className: ['copy-btn', 'p-1.5', 'hover:bg-zinc-600', 'rounded-md', 'transition-colors', 'text-zinc-300', 'hover:text-zinc-50', 'flex', 'items-center', 'gap-1'],
-                      title: 'Copy code',
-                      onclick: 'window.copyToClipboard(this)'
-                    },
-                    children: [
-                      copyIcon,
-                      checkIcon
-                    ]
-                  }
-                ]
-              },
-              // 原 pre 元素，修改样式
-              {
-                ...node,
-                properties: {
-                  ...node.properties,
-                  className: [...(node.properties.className || []), '!my-0', '!rounded-t-none', '!border-0', '!bg-transparent']
-                }
-              }
-            ]
-          }
-
-          parent.children[index] = wrapper
+          node.properties['data-language'] = lang
         }
       }
     })
