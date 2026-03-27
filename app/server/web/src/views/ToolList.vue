@@ -106,6 +106,17 @@
             {{ t('tools.edit') || 'Edit' }}
           </Button>
 
+          <Button
+            variant="outline"
+            size="sm"
+            class="h-8"
+            :class="getCurrentGroupDisabled() ? 'text-emerald-600 hover:text-emerald-600 hover:bg-emerald-50' : 'text-amber-600 hover:text-amber-600 hover:bg-amber-50'"
+            @click="handleToggleMcpTool(selectedGroupSource)"
+          >
+            <component :is="getCurrentGroupDisabled() ? Power : PowerOff" class="mr-2 h-3.5 w-3.5" />
+            {{ getCurrentGroupDisabled() ? t('tools.enable') || 'Enable' : t('tools.disable') || 'Disable' }}
+          </Button>
+
           <Button variant="outline" size="sm" class="h-8" @click="handleRefreshMcpTool(selectedGroupSource)">
             <RefreshCw class="mr-2 h-3.5 w-3.5" />
             {{ t('tools.refresh') }}
@@ -263,7 +274,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Wrench, Search, Code, Database, Globe, Cpu, Plus, Trash2, Loader, RefreshCw, LayoutGrid, Server, Edit, Info } from 'lucide-vue-next'
+import { Wrench, Search, Code, Database, Globe, Cpu, Plus, Trash2, Loader, RefreshCw, LayoutGrid, Server, Edit, Info, Power, PowerOff } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { toolAPI } from '../api/tool.js'
 import { getCurrentUser } from '../utils/auth.js'
@@ -528,6 +539,28 @@ const handleDeleteMcpTool = async (sourceName) => {
   } catch (error) {
     console.error('Failed to remove MCP server:', error)
     toast.error(error.message || t('tools.deleteFailed') || 'Failed to remove server')
+  } finally {
+    loading.value = false
+  }
+}
+
+const getCurrentGroupDisabled = () => {
+  const group = groupedTools.value.find(item => item.source === selectedGroupSource.value)
+  return group?.disabled === true
+}
+
+const handleToggleMcpTool = async (sourceName) => {
+  const serverName = sourceName.startsWith('MCP Server: ') ? sourceName.substring('MCP Server: '.length) : sourceName.replace('内置MCP: ', '')
+
+  try {
+    loading.value = true
+    await toolAPI.toggleMcpServer(serverName)
+    toast.success(t('tools.updateSuccess') || 'Server status updated successfully')
+    await loadMcpServers()
+    await loadBasicTools()
+  } catch (error) {
+    console.error('Failed to toggle MCP server:', error)
+    toast.error(error.message || t('tools.updateFailed') || 'Failed to update server status')
   } finally {
     loading.value = false
   }

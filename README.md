@@ -83,6 +83,30 @@ Download the latest release for your platform:
 - **Windows**: `.exe` (NSIS Installer)
 - **Linux**: Build from source
 
+#### Desktop Installation Guide
+
+**macOS**
+
+1. Download the `.dmg` for your CPU architecture and open it.
+2. Drag `Sage.app` into the `Applications` folder.
+3. The current macOS build is not yet signed/notarized by Apple. If you see a warning that the developer cannot be verified or Apple cannot check the app for malicious software, open `Applications`, right-click `Sage.app`, choose `Open`, and then click `Open` again in the dialog.
+4. If macOS still blocks the app, go to `System Settings -> Privacy & Security`, find the Sage warning near the bottom, and click `Open Anyway`.
+5. If macOS says the app is damaged or still refuses to launch, run the following command and try again:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Sage.app
+```
+
+**Windows**
+
+1. Download the `.exe` installer and run it.
+2. Follow the setup wizard to finish installation.
+3. If Windows SmartScreen shows a warning, click `More info` -> `Run anyway`.
+
+**Linux**
+
+Prebuilt packages are not provided yet. Please build from source using the commands below.
+
 ```bash
 # macOS/Linux
 app/desktop/scripts/build.sh release
