@@ -28,6 +28,24 @@ export const useChatLifecycle = ({
   isHistoryLoading
 }) => {
   const doSwitchToNewSession = switchToNewSession || resetChat
+
+  const consumeReloadNewChatQuery = async () => {
+    const reloadToken = route.query.reload_new_chat
+    if (!reloadToken || route.name !== 'Chat' || route.query.session_id) return
+
+    resetChat()
+
+    if (router) {
+      await router.replace({
+        name: 'Chat',
+        query: {
+          ...route.query,
+          reload_new_chat: undefined
+        }
+      })
+    }
+  }
+
   watch(currentSessionId, (newVal) => {
     if (newVal) {
       currentTraceId.value = makeTraceId(newVal)
@@ -97,6 +115,8 @@ export const useChatLifecycle = ({
       console.log('[ChatLifecycle] Reset workbench state and closed panels for new session')
       createSession()
     }
+
+    await consumeReloadNewChatQuery()
   })
 
   onUnmounted(() => {
@@ -152,6 +172,11 @@ export const useChatLifecycle = ({
     } else {
       doSwitchToNewSession()
     }
+  })
+
+  watch(() => route.query.reload_new_chat, async (newVal, oldVal) => {
+    if (!newVal || newVal === oldVal) return
+    await consumeReloadNewChatQuery()
   })
 
   watch(() => route.name, (newName, oldName) => {

@@ -450,6 +450,28 @@ export const useChatPage = (props) => {
 
   const showLoadingBubble = computed(() => !!isLoading.value)
 
+  const invalidateAbilityCacheForAgent = (agentId) => {
+    if (!agentId) return
+    const nextCache = { ...abilityCacheByAgentGlobal.value }
+    delete nextCache[agentId]
+    abilityCacheByAgentGlobal.value = nextCache
+  }
+
+  const refreshAgentDataForNewSession = async () => {
+    const previousAgentId = selectedAgentId.value
+    const latestAgents = await loadAgents()
+    if (latestAgents?.length > 0) {
+      restoreSelectedAgent(latestAgents)
+    }
+    const currentAgentId = selectedAgentId.value || previousAgentId
+    invalidateAbilityCacheForAgent(currentAgentId)
+    abilityItems.value = []
+    abilityError.value = null
+    if (showAbilityPanel.value && currentAgentId) {
+      void openAbilityPanel({ forceRefresh: true })
+    }
+  }
+
   const resetChat = () => {
     clearCurrentStreamViewState()
     clearMessages()
@@ -470,6 +492,7 @@ export const useChatPage = (props) => {
     danmakuClosedByUser.value = false
     danmakuResetTrigger.value += 1
     createSession()
+    void refreshAgentDataForNewSession()
   }
 
   /** 从历史点回新会话：恢复「你能做什么」与弹幕仅当进入历史前未关；已关则保持不显示；并恢复能力面板打开状态（含加载中/已加载结果） */
@@ -487,6 +510,7 @@ export const useChatPage = (props) => {
     // 若进历史前能力面板是打开的（含加载中），回来时重新打开，避免加载动画/结果丢失
     showAbilityPanel.value = abilityPanelOpenBeforeHistory.value
     createSession()
+    void refreshAgentDataForNewSession()
   }
 
   const loadConversationData = async (conversation) => {

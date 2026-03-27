@@ -47,7 +47,11 @@ export const useChatAgentConfig = ({
     if (!agentsList || agentsList.length === 0) return
     if (selectedAgent.value) {
       const currentAgentExists = agentsList.find(agent => agent.id === selectedAgent.value.id)
-      if (currentAgentExists) return
+      if (currentAgentExists) {
+        // 刷新当前选中的 agent 对象，避免列表重拉后继续持有旧数据
+        selectAgent(currentAgentExists)
+        return
+      }
     }
     const savedAgentId = localStorage.getItem('selectedAgentId')
     if (savedAgentId) {
@@ -68,12 +72,23 @@ export const useChatAgentConfig = ({
       return
     }
     try {
-      const response = await agentAPI.getAgents()
-      agents.value = response || []
+      let response = await agentAPI.getAgents()
+      let nextAgents = response || []
+
+      // 首次进入 Chat 时，providers/agent 可能仍在初始化，空列表时补一次重拉
+      if (nextAgents.length === 0) {
+        await new Promise(resolve => setTimeout(resolve, 800))
+        response = await agentAPI.getAgents()
+        nextAgents = response || []
+      }
+
+      agents.value = nextAgents
+      return nextAgents
     } catch (error) {
       if (isLoggedIn()) {
         toast.error(t('chat.loadAgentsError'))
       }
+      return []
     }
   }
 
