@@ -223,13 +223,21 @@ export const useChatPage = (props) => {
         }
       }
     })
-    
+
+    // 检查当前会话是否还在进行中
+    const isSessionRunning = activeSessions.value?.[sessionId]?.status === 'running'
+
     // 为没有结果的工具调用添加未完成标记
+    // 只有当会话不在进行中时，才标记为已取消
     normalizedMessages.forEach(msg => {
       if (msg.tool_calls && msg.tool_calls.length > 0) {
         msg.tool_calls.forEach(toolCall => {
           if (toolCall.id && !toolCallIdsWithResults.has(toolCall.id)) {
-            // 工具调用没有对应的结果，标记为未完成
+            // 如果会话还在进行中，不标记为已取消（可能是等待中）
+            if (isSessionRunning) {
+              return
+            }
+            // 工具调用没有对应的结果，且会话已结束，标记为已取消
             if (!msg.cancelledToolCalls) {
               msg.cancelledToolCalls = []
             }
@@ -350,8 +358,17 @@ export const useChatPage = (props) => {
     if (pendingToolCalls.value.size > 0) {
       // 为每个 pending 的工具调用添加取消标记
       pendingToolCalls.value.forEach((info, toolCallId) => {
+        // 检查该工具调用是否已经有结果
+        const hasResult = messages.value.some(m =>
+          (m.role === 'tool' || m.message_type === 'tool_call_result') &&
+          m.tool_call_id === toolCallId
+        )
+        // 如果已经有结果，不标记为已取消
+        if (hasResult) {
+          return
+        }
         // 找到对应的消息并标记为已取消
-        const messageIndex = messages.value.findIndex(m => 
+        const messageIndex = messages.value.findIndex(m =>
           m.tool_calls?.some(tc => tc.id === toolCallId)
         )
         if (messageIndex !== -1) {
