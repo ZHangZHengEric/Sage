@@ -1105,6 +1105,29 @@ class WeChatPersonalQRCodeResponse(BaseModel):
     expires_in: int = 300                # 过期时间（秒）
 
 
+@im_router.get("/tools/wechat_uin", response_model=None)
+async def get_wechat_uin():
+    """
+    生成随机的 X-WECHAT-UIN。
+    
+    用于 iLink API 调用的请求头验证。
+    """
+    try:
+        import base64
+        import secrets
+        
+        uint32 = secrets.randbits(32)
+        wechat_uin = base64.b64encode(str(uint32).encode()).decode()
+        
+        return await Response.succ(
+            data={"wechat_uin": wechat_uin},
+            message="生成成功"
+        )
+    except Exception as e:
+        logger.error(f"[IM Tools] Failed to generate wechat_uin: {e}")
+        return await Response.error(code=500, message="生成失败")
+
+
 class WeChatPersonalStatusResponse(BaseModel):
     """Response for WeChat Personal login status check."""
     status: str                          # wait / scaned / confirmed / expired
@@ -1158,6 +1181,9 @@ async def get_wechat_personal_qrcode(
         
         qrcode = qr_resp.get("qrcode", "")
         qrcode_url = qr_resp.get("qrcode_img_content", "")
+        
+        logger.info(f"[IM Agent] qrcode: {qrcode[:50]}...")
+        logger.info(f"[IM Agent] qrcode_url: {qrcode_url[:100]}...")
         
         if not qrcode or not qrcode_url:
             logger.error("[IM Agent] QR response missing required fields")
