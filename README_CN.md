@@ -234,15 +234,20 @@ Sage/
 
 <table>
   <tr>
-    <td align="center" width="50%">
+    <td align="center" width="33%">
       <a href="#" target="_blank">
         <img src="assets/sponsors/dudubashi_logo.png" height="50" alt="嘟嘟巴士"/>
       </a>
       <br/>
     </td>
-    <td align="center" width="50%">
+    <td align="center" width="33%">
       <a href="#" target="_blank">
         <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="50" alt="循环智能"/>
+      </a>
+    </td>
+    <td align="center" width="33%">
+      <a href="#" target="_blank">
+        <img src="assets/sponsors/idata_logo.png" height="50" alt="Data"/>
       </a>
     </td>
   </tr>
