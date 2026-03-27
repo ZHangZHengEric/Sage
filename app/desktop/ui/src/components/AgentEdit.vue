@@ -761,8 +761,7 @@
                               <p class="font-medium text-center">使用步骤：</p>
                               <ol class="list-decimal list-inside text-xs text-muted-foreground space-y-1">
                                 <li>使用微信扫描上方二维码</li>
-                                <li>手机上会显示 <strong>Bot Token</strong></li>
-                                <li>复制 Token 并粘贴到下方输入框</li>
+                                <li>微信连接后自动填充Bot token</li>
                               </ol>
                             </div>
                             <!-- 备用链接 -->
@@ -1411,8 +1410,9 @@ const startWeChatPersonalLogin = async (provider) => {
     }
     
     // 使用 qrcode 库生成二维码图片
-    const qrData = result.qrcode
-    const qrUrl = result.qrcode_url
+    // 优先使用 qrcode_url（微信授权页面URL），如果不存在则使用 qrcode（标识符）
+    const qrData = result.qrcode_url || result.qrcode
+    const qrId = result.qrcode
     
     let qrCodeUrl = ''
     try {
@@ -1435,7 +1435,7 @@ const startWeChatPersonalLogin = async (provider) => {
     wechatPersonalLogin.value = {
       loading: false,
       qrCodeUrl: qrCodeUrl,
-      qrUrl: qrUrl,
+      qrUrl: result.qrcode_url,
       qrcode: result.qrcode,
       status: 'wait',
       polling: true
