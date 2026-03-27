@@ -1,17 +1,17 @@
 <template>
-  <div v-if="shouldRenderMessage" class="flex flex-col gap-6 mb-6">
+  <div v-if="shouldRenderMessage" class="flex flex-col gap-1 mb-1">
     <!-- 错误消息 -->
     <div v-if="isErrorMessage" class="flex flex-row gap-4 px-4">
       <div class="flex-none">
         <MessageAvatar messageType="error" role="assistant" :agentId="agentId" />
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
-        <div class="mb-1.5 ml-1 text-xs font-medium text-muted-foreground">
+        <div class="mb-0.5 ml-1 text-xs font-medium text-muted-foreground">
           {{ getLabel({ role: 'assistant', type: 'error' }) }}
         </div>
         <div
-          class="bg-destructive/5 text-destructive border border-destructive/10 rounded-[20px] rounded-tl-[4px] px-6 py-4 shadow-sm overflow-hidden break-words w-full">
-          <div class="opacity-90 text-[15px] leading-7 font-medium">{{ message.content || t('error.unknown') }}</div>
+          class="bg-destructive/5 text-destructive border border-destructive/10 rounded-[20px] rounded-tl-[4px] px-4 py-2.5 shadow-sm overflow-hidden break-words w-full">
+          <div class="opacity-90 text-sm leading-6 font-medium">{{ message.content || t('error.unknown') }}</div>
         </div>
       </div>
     </div>
@@ -22,24 +22,23 @@
     </div>
 
     <!-- 用户消息 -->
-    <div v-else-if="message.role === 'user' && message.type !== 'guide'"
+    <div v-else-if="message.role === 'user' && message.message_type !== 'guide'"
       class="flex flex-row-reverse items-start gap-3 px-4 group">
       <div class="flex-none mt-1">
-        <MessageAvatar :messageType="message.type" role="user" />
+        <MessageAvatar :messageType="message.type || message.message_type" role="user" />
       </div>
       <div class="flex flex-col items-end max-w-[85%] sm:max-w-[75%]">
         <div
-          class="mb-1 mr-1 text-xs font-medium text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity select-none flex items-center gap-2">
+          class="mb-0.5 mr-1 text-xs font-medium text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity select-none flex items-center gap-2">
           <button @click="handleCopy" class="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
             :title="copied ? '已复制' : '复制内容'">
             <Check v-if="copied" class="w-3 h-3 text-green-500" />
             <Copy v-else class="w-3 h-3" />
           </button>
-          {{ getLabel({ role: 'user', type: message.type }) }}
+          {{ getLabel({ role: 'user', type: message.type || message.message_type }) }}
         </div>
-        <div class="flex flex-col gap-2">
-          <!-- 文本内容 -->
-          <div v-if="getTextContent(message.content)" class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-6 py-4 shadow-sm overflow-hidden break-all text-[15px] leading-7 tracking-wide font-sans">
+        <div class="flex flex-col gap-1">
+          <div v-if="getTextContent(message.content)" class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-4 py-2.5 shadow-sm overflow-hidden break-all text-sm leading-6 tracking-wide font-sans">
             <MarkdownRenderer
               :content="formatMessageContent(getTextContent(message.content))"
             />
@@ -64,10 +63,10 @@
     </div>
 
     <!-- 任务分析消息 -->
-    <div v-else-if="message.role === 'assistant' && message.type === 'task_analysis'"
+    <div v-else-if="message.role === 'assistant' && (message.type === 'task_analysis' || message.message_type === 'task_analysis')"
       class="flex flex-row items-start gap-3 px-4">
       <div class="flex-none mt-1">
-        <MessageAvatar :messageType="message.type" role="assistant" :agentId="agentId" />
+        <MessageAvatar :messageType="message.message_type || message.type" role="assistant" :agentId="agentId" />
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="w-full">
@@ -80,11 +79,11 @@
     <div v-else-if="message.role === 'assistant' && !hasToolCalls && (message.content || getImageUrls(message.content).length > 0)"
       class="flex flex-row items-start gap-3 px-4 group">
       <div class="flex-none mt-1">
-        <MessageAvatar :messageType="message.type" role="assistant" :agentId="agentId" />
+        <MessageAvatar :messageType="message.message_type || message.type" role="assistant" :agentId="agentId" />
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
-        <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
-          {{ getLabel({ role: 'assistant', type: message.type }) }}
+        <div class="mb-0.5 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
+          {{ getLabel({ role: 'assistant', type: message.type || message.message_type }) }}
           <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
             {{ formatTime(message.timestamp) }}
           </span>
@@ -95,9 +94,8 @@
             <Copy v-else class="w-3 h-3" />
           </button>
         </div>
-        <div class="flex flex-col gap-2 w-full">
-          <!-- 文本内容 -->
-          <div v-if="getTextContent(message.content)" class="text-foreground/90 overflow-hidden break-words w-full text-[15px] leading-7 font-sans py-1">
+        <div class="flex flex-col gap-1 w-full">
+          <div v-if="getTextContent(message.content)" class="text-foreground/90 overflow-hidden break-words w-full text-sm leading-6 font-sans">
             <MarkdownRendererWithPreview
               :content="formatMessageContent(getTextContent(message.content))"
               :components="markdownComponents"
@@ -123,17 +121,11 @@
     </div>
 
     <!-- 工具渲染 -->
-    <div v-else-if="hasToolCalls" class="flex flex-row items-start gap-3 px-4 mb-2">
+    <div v-else-if="hasToolCalls" class="flex flex-row items-start gap-3 px-4">
       <div class="flex-none mt-1">
-        <MessageAvatar :messageType="message.type" role="assistant" :toolName="getToolName(message)" :agentId="agentId" />
+        <MessageAvatar :messageType="message.message_type || message.type" role="assistant" :toolName="getToolName(message)" :agentId="agentId" />
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
-        <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground">
-          {{ getLabel({ role: 'assistant', type: message.type, toolName: '工具调用 ' + getToolName(message) }) }}
-          <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
-            {{ formatTime(message.timestamp) }}
-          </span>
-        </div>
         <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage }">
           <div v-for="(toolCall, index) in message.tool_calls" :key="toolCall.id || index">
             <!-- Global Error Card -->
@@ -227,11 +219,11 @@ const isStreaming = computed(() => {
 })
 
 const isErrorMessage = computed(() => {
-  return props.message.type === 'error'
+  return props.message.type === 'error' || props.message.message_type === 'error'
 })
 
 const isTokenUsageMessage = computed(() => {
-  return props.message.type === 'token_usage'
+  return props.message.type === 'token_usage' || props.message.message_type === 'token_usage'
 })
 
 const tokenUsageData = computed(() => {
@@ -564,5 +556,12 @@ watch(() => props.message, (newMessage) => {
     })
   }
 }, { deep: true })
+
+watch(() => props.agentId, (newAgentId) => {
+  if (!newAgentId || !props.message) return
+
+  // agent 详情稍后返回时，重新提取一次，补齐已存在 workbench item 的 agentId。
+  workbenchStore.extractFromMessage(props.message, newAgentId)
+})
 
 </script>

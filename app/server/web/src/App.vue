@@ -7,7 +7,10 @@
       @new-chat="handleNewChat" 
     />
     
-    <main class="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background pb-[64px] lg:pb-0">
+    <main
+      class="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background"
+      :class="hideShell ? 'pb-0' : 'pb-[64px] lg:pb-0'"
+    >
       <div class="flex-1 overflow-hidden relative flex flex-col">
         <router-view v-slot="{ Component }">
           <component 

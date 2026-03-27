@@ -78,10 +78,41 @@ pip install -r requirements.txt
 
 **Desktop Application (Recommended)**:
 
-Download the latest release for your platform:
+Download the latest desktop package from [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases):
 - **macOS**: `.dmg` (Intel & Apple Silicon)
-- **Windows**: `.exe` (NSIS Installer)
-- **Linux**: Build from source
+- **Windows**: `.exe` / `.msi`
+- **Linux**: `.deb` (x86_64 / arm64)
+
+#### Desktop Installation Guide
+
+**macOS**
+
+1. Download the `.dmg` for your CPU architecture and open it.
+2. Drag `Sage.app` into the `Applications` folder.
+3. The current macOS build is not yet signed/notarized by Apple. If you see a warning that the developer cannot be verified or Apple cannot check the app for malicious software, open `Applications`, right-click `Sage.app`, choose `Open`, and then click `Open` again in the dialog.
+4. If macOS still blocks the app, go to `System Settings -> Privacy & Security`, find the Sage warning near the bottom, and click `Open Anyway`.
+5. If macOS says the app is damaged or still refuses to launch, run the following command and try again:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Sage.app
+```
+
+**Windows**
+
+1. Download the `.exe` installer and run it.
+2. Follow the setup wizard to finish installation.
+3. If Windows SmartScreen shows a warning, click `More info` -> `Run anyway`.
+
+**Linux**
+
+1. Download the `.deb` package for your architecture from [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases).
+2. On Debian/Ubuntu, you can install it directly by double-clicking it, or by running:
+
+```bash
+sudo apt install ./Sage-<version>-<arch>.deb
+```
+
+If you prefer to build the desktop app from source, use the commands below.
 
 ```bash
 # macOS/Linux
