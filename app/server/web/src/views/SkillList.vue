@@ -1,28 +1,30 @@
 <template>
   <div class="h-full w-full bg-background flex flex-col overflow-hidden">
     <!-- Header Area -->
-    <div class="flex-none bg-background border-b px-6 py-4">
+    <div class="flex-none bg-background border-b">
       <div class="flex items-center justify-between gap-4">
-     <!-- Dimension Filter Tabs -->
-      <div class="mt-4">
-        <Tabs v-model="selectedDimension" class="w-full">
-          <TabsList class="grid w-full max-w-md grid-cols-3">
-            <TabsTrigger value="system" class="gap-2">
+        <div class="p-4 md:px-6 pb-4 flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+          <Tabs v-model="selectedDimension" class="w-full">
+            <TabsList class="grid w-full max-w-md grid-cols-3 bg-transparent h-auto gap-2">
+              <TabsTrigger value="system" class="gap-2 rounded-full border data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:border-primary shadow-none">
               <Shield class="h-4 w-4" />
               <span>{{ t('skills.system') }}</span>
+              <span class="ml-1 text-xs opacity-70 bg-black/10 dark:bg-white/10 px-1.5 rounded-full">{{ counts.system }}</span>
             </TabsTrigger>
-            <TabsTrigger value="user" class="gap-2">
+              <TabsTrigger value="user" class="gap-2 rounded-full border data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:border-primary shadow-none">
               <User class="h-4 w-4" />
               <span>{{ t('skills.mine')  }}</span>
+              <span class="ml-1 text-xs opacity-70 bg-black/10 dark:bg-white/10 px-1.5 rounded-full">{{ counts.user }}</span>
             </TabsTrigger>
-            <TabsTrigger value="agent" class="gap-2">
+              <TabsTrigger value="agent" class="gap-2 rounded-full border data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:border-primary shadow-none">
               <Bot class="h-4 w-4" />
               <span>{{ t('skills.agent') || 'Agent' }}</span>
+              <span class="ml-1 text-xs opacity-70 bg-black/10 dark:bg-white/10 px-1.5 rounded-full">{{ counts.agent }}</span>
             </TabsTrigger>
-          </TabsList>
-        </Tabs>
-      </div>
-        <!-- Actions -->
+            </TabsList>
+          </Tabs>
+        </div>
+
         <div class="flex items-center gap-3">
           <div class="relative w-64">
             <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -73,45 +75,47 @@
                 <Badge variant="secondary" class="text-xs">{{ group.skills?.length || 0 }}</Badge>
               </div>
               <!-- Agent Skills -->
-              <div class="space-y-2">
+              <div class="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
                 <Card v-for="skill in group.skills" :key="skill.name"
-                  class="group hover:shadow-md transition-all duration-200">
-                  <CardContent class="p-4">
-                    <div class="flex items-start gap-4">
-                      <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                        <Box class="h-5 w-5" />
+                  class="group hover:shadow-md transition-all duration-300 border-muted/60 hover:border-primary/50 bg-card">
+                  <CardHeader class="flex flex-row items-start gap-4 space-y-0 pb-3">
+                    <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                      <Box class="h-5 w-5" />
+                    </div>
+                    <div class="space-y-1 overflow-hidden flex-1">
+                      <div class="flex items-center justify-between">
+                        <CardTitle class="text-base truncate" :title="skill.name">
+                          {{ skill.name }}
+                        </CardTitle>
+                        <DropdownMenu v-if="canEdit(skill) || canDelete(skill)">
+                          <DropdownMenuTrigger as-child>
+                            <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+                              <MoreVertical class="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" class="w-40">
+                            <DropdownMenuItem v-if="canEdit(skill)" @click="openEditModal(skill)">
+                              <Edit class="h-4 w-4 mr-2" />
+                              {{ t('skills.edit') || 'Edit' }}
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator v-if="canEdit(skill) && canDelete(skill)" />
+                            <DropdownMenuItem v-if="canDelete(skill)" class="text-destructive focus:text-destructive" @click="confirmDelete(skill, group.agentId)">
+                              <Trash2 class="h-4 w-4 mr-2" />
+                              {{ t('skills.delete') || 'Delete' }}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
-                      <div class="flex-1 min-w-0">
-                        <div class="flex items-start justify-between gap-4">
-                          <div class="min-w-0">
-                            <h3 class="font-medium text-foreground truncate" :title="skill.name">
-                              {{ skill.name }}
-                            </h3>
-                            <p class="text-sm text-muted-foreground line-clamp-3 mt-1">
-                              {{ skill.description || t('skills.noDescription') }}
-                            </p>
-                          </div>
-                          <DropdownMenu v-if="canEdit(skill) || canDelete(skill)">
-                            <DropdownMenuTrigger as-child>
-                              <Button variant="ghost" size="icon" class="h-8 w-8 shrink-0">
-                                <MoreVertical class="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" class="w-40">
-                              <DropdownMenuItem v-if="canEdit(skill)" @click="openEditModal(skill)">
-                                <Edit class="h-4 w-4 mr-2" />
-                                {{ t('skills.edit') || 'Edit' }}
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator v-if="canEdit(skill) && canDelete(skill)" />
-                              <DropdownMenuItem v-if="canDelete(skill)" class="text-destructive focus:text-destructive"
-                                @click="confirmDelete(skill, group.agentId)">
-                                <Trash2 class="h-4 w-4 mr-2" />
-                                {{ t('skills.delete') || 'Delete' }}
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </div>
+                      <CardDescription class="line-clamp-2 text-xs">
+                        {{ skill.description || t('skills.noDescription') }}
+                      </CardDescription>
+                    </div>
+                  </CardHeader>
+                  <CardContent class="pt-0 pb-3">
+                    <div class="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                      <Badge variant="outline" class="text-[10px]">
+                        {{ group.agentName }}
+                      </Badge>
                     </div>
                   </CardContent>
                 </Card>
@@ -119,52 +123,65 @@
             </div>
           </div>
 
-          <!-- Other Dimensions: Flat List -->
-          <div v-else>
+          <!-- Other Dimensions: Grid Cards -->
+          <div v-else class="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 pb-20">
+            <Card
+              class="flex flex-col items-center justify-center border-dashed border-2 cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-all duration-300 min-h-[140px]"
+              @click="openImportModal"
+            >
+              <div class="flex flex-col items-center gap-2 text-muted-foreground hover:text-primary transition-colors">
+                <div class="p-2 rounded-full bg-muted/50">
+                  <Plus class="h-6 w-6" />
+                </div>
+                <span class="font-medium">{{ t('skills.import') || 'Import' }}</span>
+              </div>
+            </Card>
+
             <Card v-for="skill in displayedSkills" :key="skill.name"
-              class="group hover:shadow-md transition-all duration-200">
-              <CardContent class="p-4">
-                <div class="flex items-start gap-4">
-                  <!-- Icon -->
-                  <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                    <Box class="h-5 w-5" />
+              class="group hover:shadow-md transition-all duration-300 border-muted/60 hover:border-primary/50 bg-card">
+              <CardHeader class="flex flex-row items-start gap-4 space-y-0 pb-3">
+                <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                  <Box class="h-5 w-5" />
+                </div>
+
+                <div class="space-y-1 overflow-hidden flex-1">
+                  <div class="flex items-center justify-between">
+                    <CardTitle class="text-base truncate" :title="skill.name">
+                      {{ skill.name }}
+                    </CardTitle>
+                    <DropdownMenu v-if="canEdit(skill) || canDelete(skill)">
+                      <DropdownMenuTrigger as-child>
+                        <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+                          <MoreVertical class="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" class="w-40">
+                        <DropdownMenuItem v-if="canEdit(skill)" @click="openEditModal(skill)">
+                          <Edit class="h-4 w-4 mr-2" />
+                          {{ t('skills.edit') || 'Edit' }}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator v-if="canEdit(skill) && canDelete(skill)" />
+                        <DropdownMenuItem v-if="canDelete(skill)" class="text-destructive focus:text-destructive"
+                          @click="confirmDelete(skill)">
+                          <Trash2 class="h-4 w-4 mr-2" />
+                          {{ t('skills.delete') || 'Delete' }}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
-
-                  <!-- Content -->
-                  <div class="flex-1 min-w-0">
-                    <div class="flex items-start justify-between gap-4">
-                      <div class="min-w-0">
-                        <h3 class="font-medium text-foreground truncate" :title="skill.name">
-                          {{ skill.name }}
-                        </h3>
-                        <p class="text-sm text-muted-foreground line-clamp-3 mt-1">
-                          {{ skill.description || t('skills.noDescription') }}
-                        </p>
-                      </div>
-
-                      <!-- Actions -->
-                      <DropdownMenu v-if="canEdit(skill) || canDelete(skill)">
-                        <DropdownMenuTrigger as-child>
-                          <Button variant="ghost" size="icon" class="h-8 w-8 shrink-0">
-                            <MoreVertical class="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" class="w-40">
-                          <DropdownMenuItem v-if="canEdit(skill)" @click="openEditModal(skill)">
-                            <Edit class="h-4 w-4 mr-2" />
-                            {{ t('skills.edit') || 'Edit' }}
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator v-if="canEdit(skill) && canDelete(skill)" />
-                          <DropdownMenuItem v-if="canDelete(skill)" class="text-destructive focus:text-destructive"
-                            @click="confirmDelete(skill)">
-                            <Trash2 class="h-4 w-4 mr-2" />
-                            {{ t('skills.delete') || 'Delete' }}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-
-                  </div>
+                  <CardDescription class="line-clamp-2 text-xs">
+                    {{ skill.description || t('skills.noDescription') }}
+                  </CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent class="pt-0 pb-3">
+                <div class="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                  <Badge variant="outline" class="text-[10px]">
+                    {{ selectedDimension === 'system' ? (t('skills.system') || 'System') : (t('skills.mine') || 'Mine') }}
+                  </Badge>
+                        <Badge v-if="skill.owner_user_id === currentUser.userid" variant="secondary" class="text-[10px]">
+                    {{ t('skills.mine') || 'My Skill' }}
+                  </Badge>
                 </div>
               </CardContent>
             </Card>

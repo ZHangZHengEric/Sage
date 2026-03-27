@@ -62,9 +62,9 @@ defineEmits(['close'])
 // 获取右侧区域宽度（聊天区域）
 const getRightAreaWidth = () => {
   // 右侧区域是 flex-1，占父容器剩余空间
-  // 父容器是窗口减去左侧 sidebar（约 240px）
+  // 父容器是窗口减去左侧 sidebar（约 170px）
   const windowWidth = window.innerWidth
-  const sidebarWidth = 240 // 左侧 sidebar 宽度
+  const sidebarWidth = 170 // 左侧 sidebar 宽度
   return Math.max(windowWidth - sidebarWidth, windowWidth * 0.7)
 }
 

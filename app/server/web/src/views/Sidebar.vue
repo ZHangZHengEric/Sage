@@ -1,7 +1,7 @@
 <template>
   <div 
     class="group relative flex flex-col h-full bg-muted/40 border-r transition-all duration-300 ease-in-out"
-    :class="[isCollapsed ? 'w-[70px]' : 'w-[240px]']"
+    :class="[isCollapsed ? 'w-[70px]' : 'w-[170px]']"
   >
     <!-- Header -->
     <div class="p-4 flex items-center justify-between" :class="{'justify-center': isCollapsed}">
@@ -426,7 +426,10 @@ const route = useRoute()
 const { toggleLanguage, t, isZhCN } = useLanguage()
 const themeStore = useThemeStore()
 const emit = defineEmits(['new-chat'])
-const logoUrl = `${import.meta.env.BASE_URL}sage_logo.svg`
+const logoUrl = computed(() => {
+  const logoName = themeStore.isDark ? 'sage_logo.svg' : 'sage_logo_white.svg'
+  return `${import.meta.env.BASE_URL}${logoName}`
+})
 const observabilityProxyUrl = '/jaeger/'
 
 const currentUser = ref(getCurrentUser())
