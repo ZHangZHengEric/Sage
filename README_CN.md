@@ -78,10 +78,10 @@ pip install -r requirements.txt
 
 **桌面应用（推荐）**：
 
-下载适合您平台的最新版本：
+桌面版安装包请前往 [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases) 下载最新版本：
 - **macOS**: `.dmg` (Intel & Apple Silicon)
-- **Windows**: `.exe` (NSIS 安装包)
-- **Linux**: 从源码构建
+- **Windows**: `.exe` / `.msi`
+- **Linux**: `.deb` (x86_64 / arm64)
 
 #### 桌面版安装指南
 
@@ -105,7 +105,14 @@ xattr -dr com.apple.quarantine /Applications/Sage.app
 
 **Linux**
 
-暂未提供现成安装包，请按下方命令从源码构建。
+1. 从 [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases) 下载对应架构的 `.deb` 安装包。
+2. 在 Debian / Ubuntu 上可直接双击安装，或执行以下命令安装：
+
+```bash
+sudo apt install ./Sage-<version>-<arch>.deb
+```
+
+如需自行从源码构建桌面版，可使用下面的命令：
 
 ```bash
 # macOS/Linux

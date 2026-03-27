@@ -78,10 +78,10 @@ pip install -r requirements.txt
 
 **Desktop Application (Recommended)**:
 
-Download the latest release for your platform:
+Download the latest desktop package from [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases):
 - **macOS**: `.dmg` (Intel & Apple Silicon)
-- **Windows**: `.exe` (NSIS Installer)
-- **Linux**: Build from source
+- **Windows**: `.exe` / `.msi`
+- **Linux**: `.deb` (x86_64 / arm64)
 
 #### Desktop Installation Guide
 
@@ -105,7 +105,14 @@ xattr -dr com.apple.quarantine /Applications/Sage.app
 
 **Linux**
 
-Prebuilt packages are not provided yet. Please build from source using the commands below.
+1. Download the `.deb` package for your architecture from [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases).
+2. On Debian/Ubuntu, you can install it directly by double-clicking it, or by running:
+
+```bash
+sudo apt install ./Sage-<version>-<arch>.deb
+```
+
+If you prefer to build the desktop app from source, use the commands below.
 
 ```bash
 # macOS/Linux
