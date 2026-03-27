@@ -11,6 +11,7 @@ export const messageTypeLabels = new Map([
   // 消息类型标签
   ['normal', '普通消息'],
   ['task_analysis', '任务分析'],
+  ['reasoning_content', '推理思考'],
   ['task_decomposition', '任务拆解'],
   ['planning', '任务规划'],
   ['execution', '任务执行'],
