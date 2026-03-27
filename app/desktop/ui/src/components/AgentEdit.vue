@@ -431,7 +431,9 @@
                             <label :for="`tool-${tool.name}`" class="text-sm font-medium cursor-pointer" :class="{ 'opacity-50': isRequiredTool(tool.name) }">
                               {{ tool.name }}
                             </label>
-                            <Badge v-if="isRequiredTool(tool.name)" variant="secondary" class="text-[10px] h-5 px-1.5">技能必需</Badge>
+                            <Badge v-if="isRequiredTool(tool.name) === 'skill'" variant="secondary" class="text-[10px] h-5 px-1.5">技能必需</Badge>
+                            <Badge v-else-if="isRequiredTool(tool.name) === 'im'" variant="secondary" class="text-[10px] h-5 px-1.5 bg-blue-100 text-blue-700">IM频道必须</Badge>
+                            <Badge v-else-if="isRequiredTool(tool.name)" variant="secondary" class="text-[10px] h-5 px-1.5">必需</Badge>
                           </div>
                           <p v-if="tool.description" class="text-xs text-muted-foreground line-clamp-2 mt-1">
                             {{ tool.description }}
@@ -1290,10 +1292,78 @@ const loadIMConfig = async () => {
     }
     
     console.log(`[AgentEdit] Final imConfig:`, JSON.parse(JSON.stringify(imConfig.value)))
+
+    // 检查是否有启用的 IM 频道，如果有则强制添加 IM 工具
+    checkAndAddIMTools()
   } catch (e) {
     console.error('[AgentEdit] Failed to load IM config:', e)
     // On error, ensure config is reset to default
     imConfig.value = getDefaultIMConfig()
+  }
+}
+
+// 检查并添加 IM 工具
+const checkAndAddIMTools = async () => {
+  const imTools = ['send_message_through_im', 'send_file_through_im', 'send_image_through_im']
+  const hasEnabledIMChannel = Object.values(imConfig.value).some(ch => ch.enabled)
+
+  if (hasEnabledIMChannel) {
+    // 同步 imConfig 到 store.formData.im_channels
+    const imChannels = {}
+    for (const [provider, data] of Object.entries(imConfig.value)) {
+      imChannels[provider] = {
+        enabled: data.enabled,
+        config: data.config
+      }
+    }
+    store.formData.im_channels = imChannels
+
+    // 确保 availableTools 存在
+    if (!store.formData.availableTools) {
+      store.formData.availableTools = []
+    }
+
+    // 检查并添加缺失的 IM 工具
+    let toolsAdded = false
+    imTools.forEach(toolName => {
+      if (!store.formData.availableTools.includes(toolName)) {
+        store.formData.availableTools.push(toolName)
+        toolsAdded = true
+      }
+    })
+
+    if (toolsAdded) {
+      console.log('[AgentEdit] Auto-added IM tools after loading config:', imTools)
+      // 自动保存到后端
+      await autoSaveAgentConfig()
+    }
+  }
+}
+
+// 自动保存 Agent 配置
+const autoSaveAgentConfig = async () => {
+  try {
+    const agentId = store.formData.id
+    if (!agentId) {
+      console.log('[AgentEdit] No agent ID, skipping auto-save')
+      return
+    }
+
+    // 准备保存的数据
+    store.prepareForSave()
+    const plainData = JSON.parse(JSON.stringify(store.formData))
+
+    console.log('[AgentEdit] Auto-saving agent config with IM tools:', {
+      id: plainData.id,
+      availableTools: plainData.availableTools,
+      im_channels: plainData.im_channels
+    })
+
+    // 调用保存 API
+    await request.put(`/api/agent/${agentId}`, plainData)
+    console.log('[AgentEdit] Auto-save successful')
+  } catch (e) {
+    console.error('[AgentEdit] Auto-save failed:', e)
   }
 }
 
@@ -1686,7 +1756,7 @@ const handleToolsUpdated = async () => {
 
   // 过滤掉已不存在的工具（保留必需的技能工具）
   const filteredTools = currentTools.filter(toolName => {
-    if (isRequiredTool(toolName)) return true
+    if (isRequiredTool(toolName) === 'skill') return true
     return availableToolNames.has(toolName)
   })
 
@@ -1912,9 +1982,10 @@ const handleSave = async (shouldExit = true) => {
     
     // Prepare IM channels config
     const imChannels = {}
+    let hasEnabledIMChannel = false
     for (const [provider, data] of Object.entries(imConfig.value)) {
       let config = { ...data.config }
-      
+
       // Convert allowed_senders_text to array for iMessage
       if (provider === 'imessage' && config.allowed_senders_text) {
         config.allowed_senders = config.allowed_senders_text
@@ -1923,16 +1994,35 @@ const handleSave = async (shouldExit = true) => {
           .filter(s => s)
         delete config.allowed_senders_text
       }
-      
+
       imChannels[provider] = {
         enabled: data.enabled,
         config: config
       }
+
+      // 检查是否有启用的 IM 频道
+      if (data.enabled) {
+        hasEnabledIMChannel = true
+      }
     }
-    
+
     // Add IM channels to formData
     store.formData.im_channels = imChannels
-    
+
+    // 如果有启用的 IM 频道，自动添加 IM 工具到 availableTools
+    if (hasEnabledIMChannel) {
+      const imTools = ['send_message_through_im', 'send_file_through_im', 'send_image_through_im']
+      if (!store.formData.availableTools) {
+        store.formData.availableTools = []
+      }
+      imTools.forEach(toolName => {
+        if (!store.formData.availableTools.includes(toolName)) {
+          store.formData.availableTools.push(toolName)
+        }
+      })
+      console.log('[AgentEdit] Auto-added IM tools:', imTools)
+    }
+
     console.log('[AgentEdit] Saving IM channels:', JSON.parse(JSON.stringify(imChannels)))
     
     // 保存前验证 maxLoopCount
@@ -2085,23 +2175,32 @@ const REQUIRED_TOOLS_FOR_USER_MEMORY = ['search_memory']
 // Fibre 策略必需的工具
 const REQUIRED_TOOLS_FOR_FIBRE = ['sys_spawn_agent', 'sys_delegate_task', 'sys_finish_task']
 
+// IM 频道必需的工具
+const REQUIRED_TOOLS_FOR_IM = ['send_message_through_im', 'send_file_through_im', 'send_image_through_im']
+
 const isRequiredTool = (toolName) => {
   // 检查是否是技能必需的工具
   const hasSkills = store.formData.availableSkills?.length > 0
   if (hasSkills && REQUIRED_TOOLS_FOR_SKILLS.includes(toolName)) {
-    return true
+    return 'skill'
   }
 
   // 检查是否是用户记忆类型必需的工具
   const memoryType = store.formData.memoryType
   if (memoryType === 'user' && REQUIRED_TOOLS_FOR_USER_MEMORY.includes(toolName)) {
-    return true
+    return 'memory'
   }
 
   // 检查是否是 Fibre 策略必需的工具
   const agentMode = store.formData.agentMode
   if (agentMode === 'fibre' && REQUIRED_TOOLS_FOR_FIBRE.includes(toolName)) {
-    return true
+    return 'fibre'
+  }
+
+  // 检查是否是 IM 频道必需的工具（使用 imConfig.value 而不是 store.formData.im_channels）
+  const hasIMChannel = imConfig.value && Object.values(imConfig.value).some(ch => ch.enabled)
+  if (hasIMChannel && REQUIRED_TOOLS_FOR_IM.includes(toolName)) {
+    return 'im'
   }
 
   return false
@@ -2147,7 +2246,9 @@ const selectAllToolsInGroup = () => {
 const deselectAllToolsInGroup = () => {
   const currentTools = displayedTools.value
   currentTools.forEach(tool => {
-    if (!isRequiredTool(tool.name)) {
+    // 只有非必需的工具才能取消选择（包括IM频道必需的工具也不能取消）
+    const requiredType = isRequiredTool(tool.name)
+    if (!requiredType) {
       const index = store.formData.availableTools.indexOf(tool.name)
       if (index > -1) {
         store.formData.availableTools.splice(index, 1)
@@ -2212,7 +2313,7 @@ watch(() => props.tools, (newTools) => {
   // 过滤掉已不存在的工具（保留必需的技能工具）
   const filteredTools = currentTools.filter(toolName => {
     // 如果是必需的技能工具，保留
-    if (isRequiredTool(toolName)) return true
+    if (isRequiredTool(toolName) === 'skill') return true
     // 如果工具仍然存在于可用列表中，保留
     return availableToolNames.has(toolName)
   })
