@@ -10,11 +10,11 @@
       
       <div class="px-6 py-4 overflow-y-auto">
         <div v-if="isOAuthMode" class="grid gap-4">
-          <div class="text-sm text-muted-foreground bg-muted/50 p-4 rounded-md leading-6">
+          <div class="text-sm text-muted-foreground bg-muted/50 p-4 rounded-lg leading-6 border">
             当前实例已启用 {{ oauthProviderName || 'OAuth2' }} 登录。点击下方按钮后会跳转到统一身份认证页面。
           </div>
 
-          <div v-if="errorMessage" class="text-sm font-medium text-destructive bg-destructive/10 p-3 rounded-md">
+          <div v-if="errorMessage" class="text-sm font-medium text-destructive bg-destructive/10 p-3 rounded-lg">
             {{ errorMessage }}
           </div>
 
@@ -48,7 +48,7 @@
             />
           </div>
 
-          <div v-if="errorMessage" class="text-sm font-medium text-destructive bg-destructive/10 p-3 rounded-md">
+          <div v-if="errorMessage" class="text-sm font-medium text-destructive bg-destructive/10 p-3 rounded-lg">
             {{ errorMessage }}
           </div>
 
@@ -136,11 +136,11 @@
             </div>
           </div>
 
-          <div v-if="successMessage" class="text-sm font-medium text-emerald-700 bg-emerald-50 p-3 rounded-md">
+          <div v-if="successMessage" class="text-sm font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/20 p-3 rounded-lg">
             {{ successMessage }}
           </div>
 
-          <div v-if="errorMessage" class="text-sm font-medium text-destructive bg-destructive/10 p-3 rounded-md">
+          <div v-if="errorMessage" class="text-sm font-medium text-destructive bg-destructive/10 p-3 rounded-lg">
             {{ errorMessage }}
           </div>
 

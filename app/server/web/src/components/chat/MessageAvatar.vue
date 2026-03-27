@@ -1,6 +1,6 @@
 <template>
   <Avatar class="h-8 w-8 shadow-sm transition-transform hover:scale-105 bg-muted/50" :class="{ 'border': !avatarUrl }">
-    <AvatarImage v-if="avatarUrl && role === 'assistant'" :src="avatarUrl" :alt="avatarContent.label" />
+    <AvatarImage v-if="avatarUrl" :src="avatarUrl" :alt="avatarContent.label" />
     <AvatarFallback 
       :class="[avatarContent.bgClass, role === 'user' ? 'text-primary-foreground' : 'text-white']"
       class="flex items-center justify-center"
@@ -14,7 +14,8 @@
 <script setup>
 import { computed } from 'vue'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { User, Bot,  Zap, Settings, AlertTriangle, MessageSquare } from 'lucide-vue-next'
+import { User, Bot, Terminal, FileText, Edit3, Save, Zap, Settings, AlertTriangle, MessageSquare, Search, Brain, ClipboardList } from 'lucide-vue-next'
+import { getCurrentUser } from '@/utils/auth.js'
 
 const props = defineProps({
   messageType: {
@@ -36,6 +37,9 @@ const props = defineProps({
 })
 
 const avatarUrl = computed(() => {
+  if (props.role === 'user') {
+    return getCurrentUser()?.avatar || ''
+  }
   if (props.role === 'assistant' && props.agentId) {
     return `https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${encodeURIComponent(props.agentId)}`
   }
@@ -53,13 +57,8 @@ const avatarContent = computed(() => {
   }
   
   if (props.role === 'assistant') {
-    // 根据工具名称显示不同的头像
     if (props.messageType === 'tool_call' || props.messageType === 'tool_execution') {
-       return {
-        icon: Zap,
-        bgClass: 'bg-indigo-500',
-        label: '工具'
-      }
+      return getToolAvatar(props.toolName)
     }
     return {
       icon: Bot,
@@ -73,6 +72,22 @@ const avatarContent = computed(() => {
       icon: AlertTriangle,
       bgClass: 'bg-destructive',
       label: '错误'
+    }
+  }
+
+  if (props.messageType === 'reasoning_content') {
+    return {
+      icon: Brain,
+      bgClass: 'bg-purple-500',
+      label: '推理思考'
+    }
+  }
+
+  if (props.messageType === 'task_analysis') {
+    return {
+      icon: ClipboardList,
+      bgClass: 'bg-blue-500',
+      label: '任务分析'
     }
   }
   
@@ -91,5 +106,41 @@ const avatarContent = computed(() => {
     label: '消息'
   }
 })
+
+const getToolAvatar = (toolName) => {
+  const toolAvatars = {
+    search_codebase: {
+      icon: Search,
+      bgClass: 'bg-violet-500',
+      label: '代码搜索'
+    },
+    view_files: {
+      icon: FileText,
+      bgClass: 'bg-cyan-500',
+      label: '查看文件'
+    },
+    file_update: {
+      icon: Edit3,
+      bgClass: 'bg-emerald-500',
+      label: '编辑文件'
+    },
+    write_to_file: {
+      icon: Save,
+      bgClass: 'bg-pink-500',
+      label: '写入文件'
+    },
+    run_command: {
+      icon: Terminal,
+      bgClass: 'bg-orange-500',
+      label: '运行命令'
+    }
+  }
+
+  return toolAvatars[toolName] || {
+    icon: Zap,
+    bgClass: 'bg-indigo-500',
+    label: '工具'
+  }
+}
 
 </script>

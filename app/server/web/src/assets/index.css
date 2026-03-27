@@ -79,3 +79,254 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Custom Scrollbar Styles - Global */
+/* Use html selector for higher specificity in production builds */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
+html::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+html::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 4px;
+}
+
+html::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* Apply to all scrollable elements */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* Custom scrollbar class for specific elements */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* Driver.js Custom Styles */
+.driver-popover.driver-popover-theme {
+  @apply bg-popover text-popover-foreground rounded-lg shadow-lg border border-border;
+  padding: 20px !important;
+  max-width: 350px !important;
+}
+
+.driver-popover.driver-popover-theme .driver-popover-title {
+  @apply text-lg font-semibold mb-2 text-foreground !important;
+  font-family: inherit !important;
+}
+
+.driver-popover.driver-popover-theme .driver-popover-description {
+  @apply text-sm text-muted-foreground leading-relaxed mb-4 !important;
+  font-family: inherit !important;
+}
+
+.driver-popover.driver-popover-theme .driver-popover-footer {
+  @apply mt-4 flex justify-end gap-2 !important;
+}
+
+.driver-popover.driver-popover-theme .driver-popover-btn {
+  @apply inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 h-9 px-4 py-2 !important;
+  text-shadow: none !important;
+  border: none !important;
+  color: inherit !important;
+}
+
+.driver-popover.driver-popover-theme .driver-popover-next-btn,
+.driver-popover.driver-popover-theme .driver-popover-done-btn {
+  @apply bg-primary text-primary-foreground shadow hover:bg-primary/90 !important;
+}
+
+.driver-popover.driver-popover-theme .driver-popover-prev-btn {
+  @apply bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80 border border-input !important;
+}
+
+.driver-popover.driver-popover-theme .driver-popover-close-btn {
+  @apply text-muted-foreground hover:bg-secondary hover:text-foreground rounded-full p-1 top-2 right-2 !important;
+}
+
+.driver-popover.driver-popover-theme .driver-popover-progress-text {
+  @apply text-xs text-muted-foreground font-medium !important;
+}
+
+.driver-popover.driver-popover-theme .driver-popover-navigation-btns {
+  @apply flex items-center gap-2 !important;
+}
+
+/* Prism Code Highlighting - Light Theme */
+pre[class*="language-"] {
+  @apply bg-slate-100 text-slate-800;
+}
+
+code[class*="language-"] {
+  @apply text-slate-800;
+}
+
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  @apply text-slate-500;
+}
+
+.token.punctuation {
+  @apply text-slate-700;
+}
+
+.token.property,
+.token.tag,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol,
+.token.deleted {
+  @apply text-rose-600;
+}
+
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted {
+  @apply text-emerald-600;
+}
+
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string {
+  @apply text-amber-600;
+}
+
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  @apply text-blue-600;
+}
+
+.token.function,
+.token.class-name {
+  @apply text-purple-600;
+}
+
+.token.regex,
+.token.important,
+.token.variable {
+  @apply text-orange-600;
+}
+
+/* Dark mode overrides */
+.dark pre[class*="language-"] {
+  @apply bg-slate-800 text-slate-200;
+}
+
+.dark code[class*="language-"] {
+  @apply text-slate-200;
+}
+
+.dark .token.comment,
+.dark .token.prolog,
+.dark .token.doctype,
+.dark .token.cdata {
+  @apply text-slate-400;
+}
+
+.dark .token.punctuation {
+  @apply text-slate-300;
+}
+
+/* Enhanced Dark mode syntax highlighting for better contrast */
+.dark .token.property,
+.dark .token.tag,
+.dark .token.boolean,
+.dark .token.number,
+.dark .token.constant,
+.dark .token.symbol,
+.dark .token.deleted {
+  @apply text-rose-400;
+}
+
+.dark .token.selector,
+.dark .token.attr-name,
+.dark .token.string,
+.dark .token.char,
+.dark .token.builtin,
+.dark .token.inserted {
+  @apply text-emerald-400;
+}
+
+.dark .token.operator,
+.dark .token.entity,
+.dark .token.url,
+.dark .language-css .token.string,
+.dark .style .token.string {
+  @apply text-amber-400;
+}
+
+.dark .token.atrule,
+.dark .token.attr-value,
+.dark .token.keyword {
+  @apply text-blue-400;
+}
+
+.dark .token.function,
+.dark .token.class-name {
+  @apply text-purple-400;
+}
+
+.dark .token.regex,
+.dark .token.important,
+.dark .token.variable {
+  @apply text-orange-400;
+}

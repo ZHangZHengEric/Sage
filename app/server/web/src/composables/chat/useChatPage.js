@@ -167,9 +167,19 @@ export const useChatPage = (props) => {
 
     const res = await chatAPI.getConversationMessages(sessionId)
     if (!res) return null
+    const conversationAgentId = res.conversation_info?.agent_id || null
+
+    if (conversationAgentId) {
+      const agent = agents.value.find(a => a.id === conversationAgentId)
+      if (agent) {
+        await selectAgent(agent)
+      }
+    }
+
     const normalizedMessages = (res.messages || []).map(msg => ({
       ...msg,
-      session_id: msg.session_id || sessionId
+      session_id: msg.session_id || sessionId,
+      agent_id: msg.agent_id || conversationAgentId
     }))
     messages.value = normalizedMessages
     rebuildMessageIdIndexMap()
@@ -184,12 +194,6 @@ export const useChatPage = (props) => {
       openWorkbench({ realtime: true })
     }
 
-    if (res.conversation_info?.agent_id) {
-      const agent = agents.value.find(a => a.id === res.conversation_info.agent_id)
-      if (agent) {
-        await selectAgent(agent)
-      }
-    }
     if (res.conversation_info && activeSessions.value[sessionId]?.status === 'running') {
       updateActiveSession(sessionId, true, res.conversation_info.title)
     }
@@ -364,7 +368,10 @@ export const useChatPage = (props) => {
         }
       }
       if (conversation.messages && conversation.messages.length > 0) {
-        messages.value = conversation.messages
+        messages.value = conversation.messages.map(msg => ({
+          ...msg,
+          agent_id: msg.agent_id || conversation.agent_id
+        }))
         rebuildMessageIdIndexMap()
       }
       currentSessionId.value = conversation.session_id || null

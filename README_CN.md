@@ -78,10 +78,41 @@ pip install -r requirements.txt
 
 **桌面应用（推荐）**：
 
-下载适合您平台的最新版本：
+桌面版安装包请前往 [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases) 下载最新版本：
 - **macOS**: `.dmg` (Intel & Apple Silicon)
-- **Windows**: `.exe` (NSIS 安装包)
-- **Linux**: 从源码构建
+- **Windows**: `.exe` / `.msi`
+- **Linux**: `.deb` (x86_64 / arm64)
+
+#### 桌面版安装指南
+
+**macOS**
+
+1. 下载对应架构的 `.dmg` 文件并双击打开。
+2. 将 `Sage.app` 拖动到“应用程序”文件夹。
+3. 当前发布包暂未经过 Apple Developer 签名/公证，首次启动如果看到“无法验证开发者”或“Apple 无法检查其是否包含恶意软件”，请在“应用程序”中找到 `Sage.app`，右键选择“打开”，然后在弹窗中再次点击“打开”。
+4. 如果系统仍然拦截，请前往“系统设置 -> 隐私与安全性”，在底部找到 `Sage` 的安全提示后点击“仍要打开”。
+5. 如果 macOS 提示应用“已损坏”或始终无法启动，可在终端执行以下命令后重试：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Sage.app
+```
+
+**Windows**
+
+1. 下载 `.exe` 安装包并双击运行。
+2. 按照安装向导完成安装。
+3. 如果系统弹出 SmartScreen 警告，可点击“更多信息”->“仍要运行”继续安装。
+
+**Linux**
+
+1. 从 [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases) 下载对应架构的 `.deb` 安装包。
+2. 在 Debian / Ubuntu 上可直接双击安装，或执行以下命令安装：
+
+```bash
+sudo apt install ./Sage-<version>-<arch>.deb
+```
+
+如需自行从源码构建桌面版，可使用下面的命令：
 
 ```bash
 # macOS/Linux
