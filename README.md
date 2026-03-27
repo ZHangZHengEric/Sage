@@ -234,15 +234,20 @@ We are grateful to our sponsors for their support in making Sage better:
 
 <table>
   <tr>
-    <td align="center" width="50%">
+    <td align="center" width="33%">
       <a href="#" target="_blank">
         <img src="assets/sponsors/dudubashi_logo.png" height="50" alt="Dudu Bus"/>
       </a>
       <br/>
     </td>
-    <td align="center" width="50%">
+    <td align="center" width="33%">
       <a href="#" target="_blank">
         <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="50" alt="RcrAI"/>
+      </a>
+    </td>
+    <td align="center" width="33%">
+      <a href="#" target="_blank">
+        <img src="assets/sponsors/idata_logo.png" height="50" alt="Data"/>
       </a>
     </td>
   </tr>
