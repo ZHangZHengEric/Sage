@@ -10,6 +10,7 @@ from sagents.tool import ToolManager, ToolProxy
 from sagents.utils.logger import logger
 from sagents.flow.schema import AgentFlow, SequenceNode, ParallelNode, AgentNode, IfNode, SwitchNode, LoopNode
 from sagents.session_runtime import get_global_session_manager
+from sagents.utils.sandbox.config import VolumeMount
 
 
 class SAgent:
@@ -26,14 +27,18 @@ class SAgent:
         model: Any,
         model_config: Dict[str, Any],
         system_prefix: str,
-        host_workspace: str,
         default_memory_type: str,
+        # 沙箱核心配置
+        sandbox_type: Optional[str] = None,
+        sandbox_agent_workspace: Optional[str] = None,
+        volume_mounts: Optional[List[VolumeMount]] = None,
+        sandbox_id: Optional[str] = None,
+        # 其他参数
         tool_manager: Optional[Union[ToolManager, ToolProxy]] = None,
         skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
         session_id: Optional[str] = None,
         user_id: Optional[str] = None,
         agent_id: Optional[str] = None,
-        virtual_workspace: str = "/sage-workspace",
         deep_thinking: Optional[Union[bool, str]] = None,
         max_loop_count: int = 50,
         agent_mode: Optional[str] = None,
@@ -49,12 +54,40 @@ class SAgent:
             raise ValueError("run_stream 参数 model 不能为空")
         if not isinstance(model_config, dict) or not model_config:
             raise ValueError("run_stream 参数 model_config 必须是非空字典")
-        if host_workspace is None or str(host_workspace).strip() == "":
-            raise ValueError("run_stream 参数 host_workspace 不能为空")
         if default_memory_type is None or str(default_memory_type).strip() == "":
             raise ValueError("run_stream 参数 default_memory_type 不能为空")
         default_memory_type = "session"
-        logger.info(f"run_stream: system_context: {system_context}")
+        
+        # 确定沙箱类型（优先级：参数 > __init__ > 环境变量 > 默认）
+        effective_sandbox_type = (
+            sandbox_type or
+            self.sandbox_type or
+            os.environ.get("SAGE_SANDBOX_MODE", "local")
+        )
+
+        # 确保 volume_mounts 是列表
+        if volume_mounts is None:
+            volume_mounts = []
+
+        # 根据沙箱类型验证参数
+        if effective_sandbox_type == "local":
+            # local 模式必须有 sandbox_agent_workspace
+            if not sandbox_agent_workspace:
+                raise ValueError("local 沙箱模式需要提供 sandbox_agent_workspace 参数")
+
+        elif effective_sandbox_type == "remote":
+            # remote 模式必须有 sandbox_id
+            if not sandbox_id:
+                raise ValueError("remote 沙箱模式需要 sandbox_id 参数")
+
+        elif effective_sandbox_type == "passthrough":
+            # passthrough 模式必须有 sandbox_agent_workspace
+            if not sandbox_agent_workspace:
+                raise ValueError("passthrough 沙箱模式需要提供 sandbox_agent_workspace 参数")
+
+        logger.info(f"run_stream: sandbox_type={effective_sandbox_type}, "
+                   f"sandbox_id={sandbox_id}, "
+                   f"volume_mounts_count={len(volume_mounts)}")
         start_time = time.time()
         first_show_time = None
 
@@ -72,14 +105,15 @@ class SAgent:
             elif isinstance(msg, dict) and not msg.get("session_id"):
                 msg["session_id"] = session_id
 
-        session = self.session_manager.get_or_create(session_id, sandbox_type=self.sandbox_type)
+        session = self.session_manager.get_or_create(session_id, sandbox_type=effective_sandbox_type)
         session.configure_runtime(
             model=model,
             model_config=model_config,
             system_prefix=system_prefix,
             session_root_space=self.session_root_space,
-            host_workspace=str(host_workspace),  # 宿主机工作区路径
-            virtual_workspace=virtual_workspace,  # 虚拟工作区路径（沙箱内）
+            sandbox_agent_workspace=sandbox_agent_workspace,
+            volume_mounts=volume_mounts,
+            sandbox_id=sandbox_id,
             default_memory_type=default_memory_type,
             agent_id=agent_id,
         )

@@ -696,11 +696,11 @@ class FibreOrchestrator:
             if parent_workspace:
                 base_path = os.path.join(parent_workspace, "sub_tasks")
             else:
-                # 回退到 session_context 的 virtual_workspace
-                base_path = os.path.join(session_context.virtual_workspace, "tasks")
+                # 回退到 session_context 的 sandbox_agent_workspace
+                base_path = os.path.join(session_context.sandbox_agent_workspace, "tasks")
         else:
-            # 根任务：直接在 virtual_workspace/tasks 下创建
-            base_path = os.path.join(session_context.virtual_workspace, "tasks")
+            # 根任务：直接在 sandbox_agent_workspace/tasks 下创建
+            base_path = os.path.join(session_context.sandbox_agent_workspace, "tasks")
 
         # 3. 获取任务路径
         task_path = os.path.join(base_path, task_name)
@@ -1183,13 +1183,13 @@ class FibreOrchestrator:
         parent_session = self.session_manager.get(parent_session_id)
         
         # Prepare system_context with shared workspace
-        # Use parent's virtual_workspace if available
-        parent_virtual_workspace = None
+        # Use parent's sandbox_agent_workspace if available
+        parent_sandbox_agent_workspace = None
         tool_manager = None
         skill_manager = None
-        
+
         if parent_session:
-            parent_virtual_workspace = parent_session.session_context.virtual_workspace
+            parent_sandbox_agent_workspace = parent_session.session_context.sandbox_agent_workspace
             parent_tool_manager = parent_session.session_context.tool_manager
             skill_manager = parent_session.session_context.skill_manager
 
@@ -1217,8 +1217,8 @@ class FibreOrchestrator:
 
         else:
              # Handle orphaned sub-sessions (no parent)
-             # For now we leave parent_virtual_workspace as None or we could initialize a new one if needed
-             # parent_virtual_workspace = ...
+             # For now we leave parent_sandbox_agent_workspace as None or we could initialize a new one if needed
+             # parent_sandbox_agent_workspace = ...
              pass
 
         # Create sub-session via global manager
@@ -1230,7 +1230,7 @@ class FibreOrchestrator:
             model_config=self.agent.model_config,
             system_prefix=agent_def.system_prompt or "",
             session_root_space=self.session_manager.session_root_space,
-            host_workspace=parent_virtual_workspace,
+            sandbox_agent_workspace=parent_sandbox_agent_workspace,
             default_memory_type="session"
         )
 

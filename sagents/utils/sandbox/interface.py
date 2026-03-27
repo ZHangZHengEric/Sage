@@ -75,7 +75,16 @@ class ISandboxHandle(ABC):
     @property
     @abstractmethod
     def host_workspace_path(self) -> Optional[str]:
-        """返回宿主机工作区路径（本地沙箱有效，远程返回None）"""
+        """返回宿主机工作区路径（本地沙箱有效，远程返回None）
+        
+        注意：这是 sandbox_agent_workspace 的宿主机路径
+        """
+        pass
+    
+    @property
+    @abstractmethod
+    def volume_mounts(self) -> List[Any]:
+        """返回卷挂载配置列表"""
         pass
     
     # ========== 命令执行 ==========

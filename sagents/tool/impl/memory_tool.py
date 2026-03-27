@@ -49,12 +49,12 @@ class MemoryTool:
             
             session_context = session.session_context
             
-            # Get virtual workspace path
-            if hasattr(session_context, 'virtual_workspace') and session_context.virtual_workspace:
-                return session_context.virtual_workspace
-            
+            # Get sandbox_agent_workspace path
+            if hasattr(session_context, 'sandbox_agent_workspace') and session_context.sandbox_agent_workspace:
+                return session_context.sandbox_agent_workspace
+
             # Fallback to default
-            return "/sage-workspace"
+            return "/workspace"
             
         except Exception as e:
             logger.error(f"MemoryTool: Get workspace failed: {e}")

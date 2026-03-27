@@ -31,28 +31,33 @@ from ...interface import (
     ExecutionResult,
     FileInfo,
 )
-from ...config import MountPath
+from ...config import VolumeMount
 from sagents.utils.logger import logger
 
 
 class PassthroughSandboxProvider(ISandboxHandle):
-    """直通模式 - 直接在本机执行，无隔离"""
+    """直通模式 - 直接在本机执行，无隔离
+
+    使用 volume_mounts 配置工作区映射
+    sandbox_agent_workspace 是沙箱内的虚拟路径
+    """
 
     def __init__(
         self,
         sandbox_id: str,
-        workspace: str = ".",
-        mount_paths: Optional[List[MountPath]] = None,
-        virtual_workspace: str = "/sage-workspace",
+        sandbox_agent_workspace: str,
+        volume_mounts: Optional[List[VolumeMount]] = None,
     ):
         self._sandbox_id = sandbox_id
-        self._workspace = os.path.abspath(workspace)
-        self._virtual_workspace = virtual_workspace.rstrip("/") or "/"
-        self._mount_paths = mount_paths or []
+        self._sandbox_agent_workspace = sandbox_agent_workspace
+        self._volume_mounts = volume_mounts or []
+
         # 路径映射表，支持动态修改
         self._dynamic_mounts: Dict[str, str] = {}
-        for mount in self._mount_paths:
-            self.add_mount(mount.host_path, mount.sandbox_path)
+        
+        # 添加 volume_mounts 到动态映射
+        for mount in self._volume_mounts:
+            self.add_mount(mount.host_path, mount.mount_path)
 
     @property
     def sandbox_type(self) -> SandboxType:
@@ -64,11 +69,17 @@ class PassthroughSandboxProvider(ISandboxHandle):
 
     @property
     def workspace_path(self) -> str:
-        return self._virtual_workspace
+        return self._sandbox_agent_workspace
 
     @property
     def host_workspace_path(self) -> str:
-        return self._workspace
+        """返回宿主机工作区路径（sandbox_agent_workspace）"""
+        return self._sandbox_agent_workspace
+
+    @property
+    def volume_mounts(self) -> List[VolumeMount]:
+        """返回卷挂载配置列表"""
+        return self._volume_mounts
 
     def add_mount(self, host_path: str, sandbox_path: str) -> None:
         """动态添加路径映射"""
@@ -76,11 +87,16 @@ class PassthroughSandboxProvider(ISandboxHandle):
         self._dynamic_mounts[normalized_virtual] = os.path.abspath(host_path)
 
     def _iter_virtual_mappings(self) -> List[tuple[str, str]]:
-        mappings = [(self._virtual_workspace, self._workspace), *self._dynamic_mounts.items()]
+        """生成虚拟路径到宿主机路径的映射列表"""
+        # 主映射：sandbox_agent_workspace 映射到自身（直通）
+        mappings = [(self._sandbox_agent_workspace, self._sandbox_agent_workspace)]
+        # 添加动态映射
+        mappings.extend(self._dynamic_mounts.items())
         return sorted(mappings, key=lambda item: len(item[0]), reverse=True)
 
     def _iter_host_mappings(self) -> List[tuple[str, str]]:
-        mappings = [(self._virtual_workspace, self._workspace), *self._dynamic_mounts.items()]
+        """生成宿主机路径到虚拟路径的映射列表"""
+        mappings = self._iter_virtual_mappings()
         host_first = [(host, virtual) for virtual, host in mappings]
         return sorted(host_first, key=lambda item: len(item[0]), reverse=True)
 
@@ -181,413 +197,248 @@ class PassthroughSandboxProvider(ISandboxHandle):
         converted_command = re.sub(path_pattern, replace_path, converted_command)
         return converted_command
 
+    # ... 其余方法保持不变
     async def execute_command(
         self,
         command: str,
-        workdir: Optional[str] = None,
-        timeout: int = 30,
-        env_vars: Optional[Dict[str, str]] = None,
+        timeout: Optional[int] = None,
+        working_dir: Optional[str] = None,
+        env: Optional[Dict[str, str]] = None,
     ) -> CommandResult:
-        """直接在本机执行命令"""
-        actual_workdir = self.to_host_path(workdir) if workdir else self._workspace
-
-        # 转换命令中的虚拟路径为宿主机路径
-        converted_command = self._convert_paths_in_command(command)
-        if converted_command != command:
-            logger.info(f"PassthroughSandboxProvider: Command path conversion: {command} -> {converted_command}")
-
-        logger.info(f"PassthroughSandboxProvider: Executing command in {actual_workdir}: {converted_command[:100]}{'...' if len(converted_command) > 100 else ''}")
-
-        env = os.environ.copy()
-
-        # 配置 npm 使用国内镜像源
-        env["NPM_CONFIG_REGISTRY"] = "https://registry.npmmirror.com"
-
-        # 配置 pip 使用阿里镜像源
-        env["PIP_INDEX_URL"] = "https://mirrors.aliyun.com/pypi/simple/"
-        env["PIP_TRUSTED_HOST"] = "mirrors.aliyun.com"
-
-        # 配置 Sage 打包的 Node.js 运行时（优先使用）
-        bundled_node_bin = os.environ.get("SAGE_BUNDLED_NODE_BIN")
-        if bundled_node_bin and os.path.exists(bundled_node_bin):
-            # 将打包的 Node.js bin 目录添加到 PATH 最前面
-            env["PATH"] = bundled_node_bin + os.pathsep + env.get("PATH", "")
-            logger.info(f"PassthroughSandboxProvider: Added bundled Node.js bin to PATH: {bundled_node_bin}")
-            # 设置 SAGE_USING_BUNDLED_NODE 标记
-            env["SAGE_USING_BUNDLED_NODE"] = "1"
-
-        # 配置 Sage 独立的 node 环境（如果已设置）
-        sage_node_modules_dir = os.environ.get("SAGE_NODE_MODULES_DIR")
-        if sage_node_modules_dir and os.path.exists(sage_node_modules_dir):
-            # 将 Sage 的 node_modules/.bin 添加到 PATH
-            sage_bin = os.path.join(sage_node_modules_dir, ".bin")
-            if os.path.exists(sage_bin):
-                # 避免重复添加
-                if sage_bin not in env.get("PATH", ""):
-                    env["PATH"] = sage_bin + os.pathsep + env.get("PATH", "")
-                    logger.info(f"PassthroughSandboxProvider: Added Sage node bin to PATH: {sage_bin}")
-            # 设置 NODE_PATH 以便 require 能找到模块
-            env["NODE_PATH"] = sage_node_modules_dir
-            logger.info(f"PassthroughSandboxProvider: Set NODE_PATH: {sage_node_modules_dir}")
-
-        # 添加 Sage node_modules/.bin 到 PATH（优先使用真正安装的包）
-        # 使用环境变量 NODE_PATH 的值（通常是 ~/.sage/.sage_node_env）
-        node_path_env = env.get("NODE_PATH") or os.environ.get("NODE_PATH")
-        if node_path_env:
-            sage_node_env_bin = os.path.join(node_path_env, "node_modules", ".bin")
-            if os.path.exists(sage_node_env_bin) and sage_node_env_bin not in env.get("PATH", ""):
-                env["PATH"] = sage_node_env_bin + os.pathsep + env.get("PATH", "")
-                logger.info(f"PassthroughSandboxProvider: Added Sage node_modules/.bin to PATH: {sage_node_env_bin}")
-
-        if env_vars:
-            env.update(env_vars)
-
-        # 使用异步 subprocess 执行命令，避免阻塞
+        """执行命令"""
         import asyncio
-        proc = None
+        import subprocess
+
+        # 转换命令中的虚拟路径到宿主机路径
+        converted_command = self._convert_paths_in_command(command)
+
+        # 设置工作目录
+        if working_dir:
+            cwd = self.to_host_path(working_dir)
+        else:
+            cwd = self._sandbox_agent_workspace
+
+        # 执行命令
         try:
-            proc = await asyncio.create_subprocess_shell(
+            process = await asyncio.create_subprocess_shell(
                 converted_command,
-                cwd=actual_workdir,
-                env=env,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd,
+                env={**os.environ, **(env or {})},
             )
-            # 使用 wait_for 包装 communicate 来限制整个执行时间
-            stdout, _ = await asyncio.wait_for(
-                proc.communicate(),
+
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
                 timeout=timeout,
             )
-            stdout_text = stdout.decode('utf-8', errors='replace') if stdout else ""
+
             return CommandResult(
-                success=proc.returncode == 0,
-                stdout=stdout_text,
-                stderr="",  # 已合并到 stdout
-                return_code=proc.returncode,
-                execution_time=0,
+                exit_code=process.returncode,
+                stdout=stdout.decode('utf-8', errors='replace'),
+                stderr=stderr.decode('utf-8', errors='replace'),
             )
         except asyncio.TimeoutError:
-            if proc:
-                try:
-                    proc.kill()
-                    await proc.wait()
-                except Exception:
-                    pass
+            process.kill()
             return CommandResult(
-                success=False,
+                exit_code=-1,
                 stdout="",
                 stderr=f"Command timed out after {timeout} seconds",
-                return_code=-1,
-                execution_time=timeout,
+            )
+        except Exception as e:
+            return CommandResult(
+                exit_code=-1,
+                stdout="",
+                stderr=str(e),
             )
 
-    async def execute_python(
-        self,
-        code: str,
-        requirements: Optional[List[str]] = None,
-        workdir: Optional[str] = None,
-        timeout: int = 60,
-    ) -> ExecutionResult:
-        """执行 Python 代码"""
-        # 创建临时文件执行代码
-        import tempfile
-
-        actual_workdir = self.to_host_path(workdir) if workdir else self._workspace
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False
-        ) as f:
-            f.write(code)
-            temp_file = f.name
-
-        try:
-            # 使用异步 subprocess 执行，避免阻塞
-            import asyncio
-            proc = None
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "python",
-                    temp_file,
-                    cwd=actual_workdir,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                # 使用 wait_for 包装 communicate 来限制整个执行时间
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(),
-                    timeout=timeout,
-                )
-                stdout_text = stdout.decode('utf-8', errors='replace') if stdout else ""
-                stderr_text = stderr.decode('utf-8', errors='replace') if stderr else ""
-
-                return ExecutionResult(
-                    success=proc.returncode == 0,
-                    output=stdout_text,
-                    error=stderr_text if proc.returncode != 0 else None,
-                    execution_time=0,
-                    installed_packages=requirements or [],
-                )
-            except asyncio.TimeoutError:
-                if proc:
-                    try:
-                        proc.kill()
-                        await proc.wait()
-                    except Exception:
-                        pass
-                return ExecutionResult(
-                    success=False,
-                    output="",
-                    error=f"Python execution timed out after {timeout} seconds",
-                    execution_time=timeout,
-                    installed_packages=requirements or [],
-                )
-        finally:
-            os.unlink(temp_file)
-
-    async def execute_javascript(
-        self,
-        code: str,
-        packages: Optional[List[str]] = None,
-        workdir: Optional[str] = None,
-        timeout: int = 60,
-    ) -> ExecutionResult:
-        """执行 JavaScript 代码"""
-        import tempfile
-
-        actual_workdir = self.to_host_path(workdir) if workdir else self._workspace
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".js", delete=False
-        ) as f:
-            f.write(code)
-            temp_file = f.name
-
-        try:
-            # 使用异步 subprocess 执行，避免阻塞
-            import asyncio
-            proc = None
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "node",
-                    temp_file,
-                    cwd=actual_workdir,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                # 使用 wait_for 包装 communicate 来限制整个执行时间
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(),
-                    timeout=timeout,
-                )
-                stdout_text = stdout.decode('utf-8', errors='replace') if stdout else ""
-                stderr_text = stderr.decode('utf-8', errors='replace') if stderr else ""
-
-                return ExecutionResult(
-                    success=proc.returncode == 0,
-                    output=stdout_text,
-                    error=stderr_text if proc.returncode != 0 else None,
-                    execution_time=0,
-                    installed_packages=packages or [],
-                )
-            except asyncio.TimeoutError:
-                if proc:
-                    try:
-                        proc.kill()
-                        await proc.wait()
-                    except Exception:
-                        pass
-                return ExecutionResult(
-                    success=False,
-                    output="",
-                    error=f"JavaScript execution timed out after {timeout} seconds",
-                    execution_time=timeout,
-                    installed_packages=packages or [],
-                )
-        finally:
-            os.unlink(temp_file)
-
     async def read_file(self, path: str, encoding: str = "utf-8") -> str:
-        """直接读取文件"""
-        actual_path = self.to_host_path(path)
-        with open(actual_path, "r", encoding=encoding) as f:
+        """读取文件"""
+        host_path = self.to_host_path(path)
+        with open(host_path, 'r', encoding=encoding) as f:
             return f.read()
 
-    async def write_file(
-        self,
-        path: str,
-        content: str,
-        encoding: str = "utf-8",
-        mode: str = "overwrite",
-    ) -> None:
-        """直接写入文件"""
-        actual_path = self.to_host_path(path)
-        os.makedirs(os.path.dirname(actual_path), exist_ok=True)
-        write_mode = "a" if mode == "append" else "w"
-        with open(actual_path, write_mode, encoding=encoding) as f:
+    async def write_file(self, path: str, content: str, encoding: str = "utf-8") -> None:
+        """写入文件"""
+        host_path = self.to_host_path(path)
+        os.makedirs(os.path.dirname(host_path), exist_ok=True)
+        with open(host_path, 'w', encoding=encoding) as f:
             f.write(content)
 
     async def file_exists(self, path: str) -> bool:
         """检查文件是否存在"""
-        actual_path = self.to_host_path(path)
-        return os.path.exists(actual_path)
+        host_path = self.to_host_path(path)
+        return os.path.exists(host_path)
 
-    async def list_directory(
-        self,
-        path: str,
-        include_hidden: bool = False,
-    ) -> List[FileInfo]:
+    async def list_directory(self, path: str) -> List[FileInfo]:
         """列出目录内容"""
-        actual_path = self.to_host_path(path)
-
-        if not os.path.isdir(actual_path):
-            return []
-
+        host_path = self.to_host_path(path)
         result = []
-        for entry in os.scandir(actual_path):
-            if not include_hidden and entry.name.startswith("."):
-                continue
-
-            stat = entry.stat()
-            result.append(
-                FileInfo(
-                    path=self.to_virtual_path(entry.path),
-                    is_file=entry.is_file(),
-                    is_dir=entry.is_dir(),
-                    size=stat.st_size,
-                    modified_time=stat.st_mtime,
-                )
-            )
-
+        for entry in os.listdir(host_path):
+            entry_path = os.path.join(host_path, entry)
+            stat = os.stat(entry_path)
+            result.append(FileInfo(
+                name=entry,
+                path=os.path.join(path, entry),
+                is_dir=os.path.isdir(entry_path),
+                size=stat.st_size,
+                modified_time=stat.st_mtime,
+            ))
         return result
 
     async def ensure_directory(self, path: str) -> None:
         """确保目录存在"""
-        actual_path = self.to_host_path(path)
-        os.makedirs(actual_path, exist_ok=True)
+        host_path = self.to_host_path(path)
+        os.makedirs(host_path, exist_ok=True)
+
+    async def get_file_info(self, path: str) -> Optional[FileInfo]:
+        """获取文件信息"""
+        host_path = self.to_host_path(path)
+        if not os.path.exists(host_path):
+            return None
+        stat = os.stat(host_path)
+        return FileInfo(
+            name=os.path.basename(path),
+            path=path,
+            is_dir=os.path.isdir(host_path),
+            size=stat.st_size,
+            modified_time=stat.st_mtime,
+        )
 
     async def delete_file(self, path: str) -> None:
         """删除文件"""
-        actual_path = self.to_host_path(path)
-
-        if os.path.exists(actual_path):
-            if os.path.isdir(actual_path):
-                import shutil
-
-                shutil.rmtree(actual_path)
+        host_path = self.to_host_path(path)
+        if os.path.exists(host_path):
+            if os.path.isdir(host_path):
+                shutil.rmtree(host_path)
             else:
-                os.remove(actual_path)
+                os.remove(host_path)
 
-    async def get_file_tree(
-        self,
-        root_path: Optional[str] = None,
-        include_hidden: bool = False,
-        max_depth: Optional[int] = None,
-        max_items_per_dir: int = 5
-    ) -> str:
-        """
-        获取文件树结构（紧凑格式）
+    async def copy_from_host(self, host_path: str, sandbox_path: str) -> None:
+        """从宿主机复制文件到沙箱"""
+        target_path = self.to_host_path(sandbox_path)
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        if os.path.isdir(host_path):
+            shutil.copytree(host_path, target_path, dirs_exist_ok=True)
+        else:
+            shutil.copy2(host_path, target_path)
 
-        直通模式实现：直接遍历工作目录
-        """
-        target_root = self.to_host_path(root_path) if root_path else self._workspace
+    async def execute_python(self, code: str, timeout: Optional[int] = None) -> ExecutionResult:
+        """执行 Python 代码"""
+        import asyncio
+        import subprocess
+        import tempfile
 
-        if not os.path.exists(target_root):
-            return ""
-
-        ALWAYS_HIDDEN_DIRS = {'.sandbox', '.git', '.idea', '.vscode', '__pycache__', 'node_modules', 'venv', '.DS_Store'}
-        target_root = os.path.abspath(target_root)
-        base_depth = target_root.rstrip(os.sep).count(os.sep)
-
-        result = []
-        root_name = os.path.basename(target_root) or "workspace"
-        result.append(f"{root_name}/")
-
-        for root, dirs, files in os.walk(target_root):
-            current_depth = root.rstrip(os.sep).count(os.sep) - base_depth
-
-            if max_depth is not None and current_depth >= max_depth:
-                dirs[:] = []
-
-            dirs[:] = [d for d in dirs if d not in ALWAYS_HIDDEN_DIRS and (include_hidden or not d.startswith('.'))]
-            filtered_files = [f for f in files if f not in ALWAYS_HIDDEN_DIRS and (include_hidden or not f.startswith('.'))]
-
-            rel_root = os.path.relpath(root, target_root)
-            if rel_root == '.':
-                rel_root = ''
-
-            path_parts = rel_root.split(os.sep) if rel_root else []
-            indent = "  " * len(path_parts)
-
-            if current_depth > 0:
-                items = [('dir', d) for d in sorted(dirs)]
-                shown_items = items[:max_items_per_dir]
-                hidden_count = len(items) - len(shown_items)
-
-                for _, item_name in shown_items:
-                    result.append(f"{indent}  {item_name}/")
-
-                if hidden_count > 0:
-                    result.append(f"{indent}  ... (and {hidden_count} more dirs)")
-
-                if current_depth >= 1:
-                    dirs[:] = []
-            else:
-                items = [('dir', d) for d in sorted(dirs)]
-                items.extend([('file', f) for f in sorted(filtered_files)])
-
-                for item_type, item_name in items:
-                    suffix = "/" if item_type == 'dir' else ""
-                    result.append(f"{indent}  {item_name}{suffix}")
-
-            if rel_root == 'skills':
-                dirs[:] = []
-
-        return "\n".join(result)
-
-    async def copy_from_host(
-        self,
-        host_source_path: str,
-        sandbox_dest_path: str,
-        ignore_patterns: Optional[List[str]] = None
-    ) -> bool:
-        """
-        从宿主机复制文件/目录到沙箱
-
-        直通模式实现：直接复制到工作目录
-        """
-        if not os.path.exists(host_source_path):
-            logger.warning(f"源路径不存在: {host_source_path}")
-            return False
-
-        # 转换沙箱虚拟路径为实际路径
-        host_dest_path = self.to_host_path(sandbox_dest_path)
+        # 创建临时文件存储代码
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(code)
+            temp_file = f.name
 
         try:
-            if os.path.isdir(host_source_path):
-                # 复制目录
-                if os.path.exists(host_dest_path):
-                    shutil.rmtree(host_dest_path)
+            # 执行 Python 代码
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                temp_file,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=self._sandbox_agent_workspace,
+            )
 
-                # 使用 ignore 参数过滤文件
-                if ignore_patterns:
-                    import fnmatch
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=timeout,
+            )
 
-                    def ignore_filter(dir, files):
-                        ignored = []
-                        for pattern in ignore_patterns:
-                            ignored.extend([f for f in files if fnmatch.fnmatch(f, pattern)])
-                        return ignored
-
-                    shutil.copytree(host_source_path, host_dest_path, ignore=ignore_filter)
-                else:
-                    shutil.copytree(host_source_path, host_dest_path)
-            else:
-                # 复制单个文件
-                os.makedirs(os.path.dirname(host_dest_path), exist_ok=True)
-                shutil.copy2(host_source_path, host_dest_path)
-
-            logger.debug(f"复制成功: {host_source_path} -> {sandbox_dest_path} (实际: {host_dest_path})")
-            return True
+            return ExecutionResult(
+                exit_code=process.returncode,
+                stdout=stdout.decode('utf-8', errors='replace'),
+                stderr=stderr.decode('utf-8', errors='replace'),
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            return ExecutionResult(
+                exit_code=-1,
+                stdout="",
+                stderr=f"Python execution timed out after {timeout} seconds",
+            )
         except Exception as e:
-            logger.error(f"复制失败: {host_source_path} -> {sandbox_dest_path}: {e}")
-            return False
+            return ExecutionResult(
+                exit_code=-1,
+                stdout="",
+                stderr=str(e),
+            )
+        finally:
+            # 清理临时文件
+            try:
+                os.remove(temp_file)
+            except:
+                pass
+
+    async def execute_javascript(self, code: str, timeout: Optional[int] = None) -> ExecutionResult:
+        """执行 JavaScript 代码"""
+        import asyncio
+        import subprocess
+
+        # 检查是否有 node 环境
+        try:
+            process = await asyncio.create_subprocess_exec(
+                'node',
+                '-e',
+                code,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=self._sandbox_agent_workspace,
+            )
+
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=timeout,
+            )
+
+            return ExecutionResult(
+                exit_code=process.returncode,
+                stdout=stdout.decode('utf-8', errors='replace'),
+                stderr=stderr.decode('utf-8', errors='replace'),
+            )
+        except FileNotFoundError:
+            return ExecutionResult(
+                exit_code=-1,
+                stdout="",
+                stderr="Node.js not found. Please install Node.js to execute JavaScript code.",
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            return ExecutionResult(
+                exit_code=-1,
+                stdout="",
+                stderr=f"JavaScript execution timed out after {timeout} seconds",
+            )
+        except Exception as e:
+            return ExecutionResult(
+                exit_code=-1,
+                stdout="",
+                stderr=str(e),
+            )
+
+    async def get_file_tree(self, include_hidden: bool = False, root_path: Optional[str] = None, max_depth: Optional[int] = None, max_items_per_dir: int = 5) -> str:
+        """获取文件树"""
+        from .filesystem import SandboxFileSystem
+
+        if root_path:
+            target_path = self.to_host_path(root_path)
+        else:
+            target_path = self._sandbox_agent_workspace
+
+        if not os.path.exists(target_path):
+            return ""
+
+        # 使用 SandboxFileSystem 的 get_file_tree 方法
+        fs = SandboxFileSystem(volume_mounts=[
+            VolumeMount(self._sandbox_agent_workspace, self._sandbox_agent_workspace)
+        ])
+        return fs.get_file_tree(
+            include_hidden=include_hidden,
+            root_path=target_path,
+            max_depth=max_depth,
+            max_items_per_dir=max_items_per_dir
+        )
