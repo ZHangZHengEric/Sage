@@ -600,7 +600,7 @@ class AgentBase(ABC):
             else:
                 if session_context and session_context.sandbox:
                     # 使用新的沙箱接口读取 IDENTITY.md
-                    identity_path = os.path.join(session_context.virtual_workspace, 'IDENTITY.md')
+                    identity_path = os.path.join(session_context.sandbox_agent_workspace, 'IDENTITY.md')
                     try:
                         if await session_context.sandbox.file_exists(identity_path):
                             role_content = await session_context.sandbox.read_file(identity_path)
@@ -632,7 +632,7 @@ class AgentBase(ABC):
             logger.debug(f"{self.__class__.__name__}: use_claw_mode: {use_claw_mode}")
             if "AGENT.MD" in include_sections and use_claw_mode and session_context.sandbox:
                 # 使用新的沙箱接口读取各种 .md 文件
-                workspace = session_context.virtual_workspace
+                workspace = session_context.sandbox_agent_workspace
                 
                 # 读取 AGENT.md
                 try:

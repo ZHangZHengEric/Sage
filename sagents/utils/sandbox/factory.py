@@ -8,7 +8,6 @@
 - custom: 自定义提供者
 """
 
-import uuid
 from datetime import timedelta
 from typing import Dict, Optional, Type
 
@@ -78,23 +77,28 @@ class SandboxProviderFactory:
         创建沙箱实例
 
         Usage:
-            # 从环境变量创建
-            sandbox = SandboxProviderFactory.create()
-
-            # 指定配置创建
-            config = SandboxConfig(mode=SandboxType.REMOTE)
+            # local 模式 - 需要 volume_mounts 包含 sandbox_agent_workspace
+            config = SandboxConfig(
+                mode=SandboxType.LOCAL,
+                sandbox_id="agent-001",
+                volume_mounts=[
+                    VolumeMount("/tmp/agent_001", "/workspace"),
+                    VolumeMount("/shared/data", "/data"),
+                ]
+            )
             sandbox = SandboxProviderFactory.create(config)
 
-            # 使用特定远程提供者
+            # remote 模式 - 只需要 sandbox_id
             config = SandboxConfig(
                 mode=SandboxType.REMOTE,
-                remote_provider="kubernetes",
-                remote_provider_config={"namespace": "sage-sandbox"}
+                sandbox_id="opensandbox-abc123",
+                remote_provider="opensandbox",
+                remote_server_url="https://...",
             )
             sandbox = SandboxProviderFactory.create(config)
         """
         if config is None:
-            raise ValueError("config is required. Use SandboxConfig.from_env(sandbox_id, workspace, virtual_workspace) or create a SandboxConfig instance explicitly.")
+            raise ValueError("config is required")
 
         # 确保有沙箱ID
         sandbox_id = config.sandbox_id
@@ -104,11 +108,12 @@ class SandboxProviderFactory:
         # 根据模式创建对应实例
         if config.mode == SandboxType.LOCAL:
             provider_class = cls._get_local_provider()
+            if not config.sandbox_agent_workspace:
+                raise ValueError("sandbox_agent_workspace is required for local sandbox")
             return provider_class(
                 sandbox_id=sandbox_id,
-                host_workspace=config.workspace,
-                virtual_workspace=config.virtual_workspace,
-                mount_paths=config.mount_paths,
+                sandbox_agent_workspace=config.sandbox_agent_workspace,
+                volume_mounts=config.volume_mounts,
                 cpu_time_limit=config.cpu_time_limit,
                 memory_limit_mb=config.memory_limit_mb,
                 allowed_paths=config.allowed_paths,
@@ -123,8 +128,7 @@ class SandboxProviderFactory:
             # 构建通用参数
             common_kwargs = {
                 "sandbox_id": sandbox_id,
-                "workspace_mount": config.workspace,
-                "mount_paths": config.mount_paths,
+                "volume_mounts": config.volume_mounts,
                 "timeout": timedelta(seconds=config.remote_timeout),
             }
 
@@ -172,11 +176,12 @@ class SandboxProviderFactory:
 
         else:  # PASSTHROUGH
             provider_class = cls._get_passthrough_provider()
+            if not config.sandbox_agent_workspace:
+                raise ValueError("sandbox_agent_workspace is required for passthrough sandbox")
             return provider_class(
                 sandbox_id=sandbox_id,
-                workspace=config.workspace,
-                mount_paths=config.mount_paths,
-                virtual_workspace=config.virtual_workspace,
+                sandbox_agent_workspace=config.sandbox_agent_workspace,
+                volume_mounts=config.volume_mounts,
             )
 
     @classmethod

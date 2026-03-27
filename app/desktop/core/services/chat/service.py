@@ -376,8 +376,15 @@ class SageStreamService:
 
         await _ensure_conversation(self.request)
         try:
-            # 计算 host_workspace 和 virtual_workspace（本地模式下保持一致）
-            host_workspace = str(self.agent_workspace_root / self.request.agent_id)
+            # 计算 sandbox_agent_workspace（本地模式下直接使用宿主机路径）
+            sandbox_agent_workspace = str(self.agent_workspace_root / self.request.agent_id)
+            
+            # 构建 volume_mounts：将宿主机路径映射到沙箱内的相同路径（本地直通模式）
+            from sagents.utils.sandbox.config import VolumeMount
+            volume_mounts = [
+                VolumeMount(host_path=sandbox_agent_workspace, mount_path=sandbox_agent_workspace)
+            ]
+            
             stream_result = self.sage_engine.run_stream(
                 session_id=session_id,
                 input_messages=messages,
@@ -386,8 +393,8 @@ class SageStreamService:
                 model=self.model_client,
                 model_config=self.request.llm_model_config,
                 system_prefix=self.request.system_prefix,
-                host_workspace=host_workspace,
-                virtual_workspace=host_workspace,  # 本地模式下与宿主机路径一致
+                sandbox_agent_workspace=sandbox_agent_workspace,
+                volume_mounts=volume_mounts,
                 default_memory_type=self.request.memory_type,
                 agent_id=self.request.agent_id,
                 user_id="default_user",

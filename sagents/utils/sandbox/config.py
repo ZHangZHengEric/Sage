@@ -9,11 +9,25 @@ from .interface import SandboxType
 
 
 @dataclass
-class MountPath:
-    """路径映射配置"""
-    host_path: str
-    sandbox_path: str
-    read_only: bool = False
+class VolumeMount:
+    """卷挂载配置（类似 docker -v）
+    
+    Examples:
+        VolumeMount(host_path="/shared/data", mount_path="/data")
+        VolumeMount(host_path="/assets", mount_path="/assets")
+    """
+    host_path: str       # 宿主机源路径
+    mount_path: str      # 沙箱内挂载路径（绝对路径）
+    
+    def __post_init__(self):
+        # 确保路径是绝对路径
+        self.host_path = os.path.abspath(self.host_path)
+        if not self.mount_path.startswith('/'):
+            self.mount_path = '/' + self.mount_path
+
+
+# 向后兼容别名
+MountPath = VolumeMount
 
 
 @dataclass
@@ -29,14 +43,13 @@ class SandboxConfig:
 
     # ===== 核心配置 =====
     mode: SandboxType = SandboxType.LOCAL
-    sandbox_id: Optional[str] = None  # 沙箱ID，用于持久化和识别（user_id/agent_id/session_id）
+    sandbox_id: Optional[str] = None  # 沙箱ID，用于持久化和识别
 
     # ===== 工作区配置 =====
-    workspace: str = "."  # 宿主机工作区根目录
-    virtual_workspace: str = "/sage-workspace"  # 沙箱内虚拟工作区路径
-
-    # ===== 路径映射配置 =====
-    mount_paths: List[MountPath] = field(default_factory=list)  # 额外的路径映射
+    # sandbox_agent_workspace: 沙箱内虚拟工作区路径（所有模式都需要）
+    # volume_mounts: 额外的目录挂载（宿主机路径 -> 沙箱内路径，可选）
+    sandbox_agent_workspace: Optional[str] = None  # 沙箱内虚拟工作区路径
+    volume_mounts: List[VolumeMount] = field(default_factory=list)  # 额外卷挂载
 
     # ===== 本地沙箱配置 =====
     cpu_time_limit: int = 300
@@ -46,55 +59,45 @@ class SandboxConfig:
     macos_isolation_mode: str = "seatbelt"
 
     # ===== 远程沙箱配置 =====
-    remote_provider: str = "opensandbox"  # 远程沙箱提供者: opensandbox | kubernetes | firecracker | custom
+    remote_provider: str = "opensandbox"
     remote_server_url: Optional[str] = None
     remote_api_key: Optional[str] = None
     remote_image: str = "opensandbox/code-interpreter:v1.0.2"
     remote_timeout: int = 1800
-    remote_persistent: bool = True  # 是否持久化沙箱
-    remote_sandbox_ttl: int = 3600  # 沙箱存活时间（秒）
-    remote_provider_config: Dict[str, Any] = field(default_factory=dict)  # 特定提供者的额外配置
+    remote_persistent: bool = True
+    remote_sandbox_ttl: int = 3600
+    remote_provider_config: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_env(cls, sandbox_id: Optional[str] = None, workspace: Optional[str] = None, virtual_workspace: Optional[str] = None) -> "SandboxConfig":
+    def from_env(cls, sandbox_id: Optional[str] = None) -> "SandboxConfig":
         """从环境变量加载配置
-        
+
         Args:
-            sandbox_id: 沙箱ID（必填，不允许从环境变量读取）
-            workspace: 宿主机工作区路径（必填，不允许从环境变量读取）
-            virtual_workspace: 虚拟工作区路径（必填，不允许从环境变量读取）
+            sandbox_id: 沙箱ID（必填）
         """
-        # 必填参数检查
         if not sandbox_id:
             raise ValueError("sandbox_id is required and must be provided explicitly")
-        if not workspace:
-            raise ValueError("workspace is required and must be provided explicitly")
-        if not virtual_workspace:
-            raise ValueError("virtual_workspace is required and must be provided explicitly")
-        
+
         mode_str = os.environ.get("SAGE_SANDBOX_MODE", "local").lower()
         mode = SandboxType(mode_str)
 
         # 解析路径映射环境变量
         # 格式: "/host/path1:/sandbox/path1,/host/path2:/sandbox/path2"
-        mount_paths = []
+        volume_mounts = []
         mount_paths_env = os.environ.get("SAGE_SANDBOX_MOUNT_PATHS", "")
         if mount_paths_env:
             for mapping in mount_paths_env.split(","):
                 if ":" in mapping:
                     host_path, sandbox_path = mapping.split(":", 1)
-                    mount_paths.append(MountPath(
+                    volume_mounts.append(VolumeMount(
                         host_path=host_path.strip(),
-                        sandbox_path=sandbox_path.strip(),
-                        read_only=False
+                        mount_path=sandbox_path.strip()
                     ))
 
         return cls(
             mode=mode,
             sandbox_id=sandbox_id,
-            workspace=workspace,
-            virtual_workspace=virtual_workspace,
-            mount_paths=mount_paths,
+            volume_mounts=volume_mounts,
             # 本地配置
             cpu_time_limit=int(os.environ.get("SAGE_LOCAL_CPU_TIME_LIMIT", "300")),
             memory_limit_mb=int(os.environ.get("SAGE_LOCAL_MEMORY_LIMIT_MB", "4096")),
@@ -122,20 +125,17 @@ class SandboxConfig:
         sandbox_config = config.get('sandbox', {})
 
         # 解析路径映射
-        mount_paths = []
-        for mp in sandbox_config.get('mount_paths', []):
-            mount_paths.append(MountPath(
+        volume_mounts = []
+        for mp in sandbox_config.get('volume_mounts', []):
+            volume_mounts.append(VolumeMount(
                 host_path=mp['host_path'],
-                sandbox_path=mp['sandbox_path'],
-                read_only=mp.get('read_only', False)
+                mount_path=mp['mount_path']
             ))
 
         return cls(
             mode=SandboxType(sandbox_config.get('mode', 'local')),
             sandbox_id=sandbox_config.get('sandbox_id'),
-            workspace=sandbox_config.get('workspace', '.'),
-            virtual_workspace=sandbox_config.get('virtual_workspace', '/sage-workspace'),
-            mount_paths=mount_paths,
+            volume_mounts=volume_mounts,
             # 本地配置
             cpu_time_limit=sandbox_config.get('local', {}).get('cpu_time_limit', 300),
             memory_limit_mb=sandbox_config.get('local', {}).get('memory_limit_mb', 4096),
