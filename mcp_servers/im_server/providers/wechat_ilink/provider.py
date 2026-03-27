@@ -52,12 +52,13 @@ class WeChatPersonalPoller:
     def start(self):
         """Start polling for messages."""
         if self.running:
+            logger.info("[WeChatPersonal] Poller already running")
             return
 
         self.running = True
         self.poller_thread = threading.Thread(target=self._poll_loop, daemon=True)
         self.poller_thread.start()
-        logger.info("[WeChatPersonal] Poller started")
+        logger.info(f"[WeChatPersonal] Poller started with bot_token={'***' if self.bot_token else 'MISSING'}")
 
     def stop(self):
         """Stop polling."""
