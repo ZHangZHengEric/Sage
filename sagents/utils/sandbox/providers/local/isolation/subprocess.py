@@ -8,8 +8,9 @@ import subprocess
 import os
 import sys
 import platform
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from sagents.utils.logger import logger
+from sagents.utils.sandbox.config import VolumeMount
 
 
 # Launcher 脚本
@@ -216,7 +217,7 @@ def main():
                 )
                 result = {
                     "success": True,
-                    "output": f"[后台任务已启动]\n命令: {cmd}\n进程ID: {proc.pid}\n日志文件: {log_file}",
+                    "output": f"[后台任务已启动]\\n命令: {cmd}\\n进程ID: {proc.pid}\\n日志文件: {log_file}",
                     "process_id": f"bg_{proc.pid}",
                     "is_background": True,
                     "log_file": log_file,
@@ -248,10 +249,11 @@ if __name__ == "__main__":
 class SubprocessIsolation:
     """直接执行模式，无文件系统隔离"""
     
-    def __init__(self, venv_dir: str, host_workspace: str, limits: Dict[str, Any]):
+    def __init__(self, venv_dir: str, sandbox_agent_workspace: str, volume_mounts: Optional[List[VolumeMount]] = None, limits: Optional[Dict[str, Any]] = None):
         self.venv_dir = venv_dir
-        self.host_workspace = host_workspace
-        self.limits = limits
+        self.sandbox_agent_workspace = sandbox_agent_workspace
+        self.volume_mounts = volume_mounts or []
+        self.limits = limits or {}
         
     def execute(self, payload: Dict[str, Any], cwd: Optional[str] = None) -> Any:
         """
@@ -273,7 +275,7 @@ class SubprocessIsolation:
         
         # 创建临时文件
         run_id = str(uuid.uuid4())
-        sandbox_dir = os.path.join(self.host_workspace, ".sandbox")
+        sandbox_dir = os.path.join(self.sandbox_agent_workspace, ".sandbox")
         input_pkl = os.path.join(sandbox_dir, f"input_{run_id}.pkl")
         output_pkl = os.path.join(sandbox_dir, f"output_{run_id}.pkl")
         
@@ -305,10 +307,10 @@ class SubprocessIsolation:
         env["PATH"] = f"{venv_bin}{os.pathsep}{current_path}"
         
         # 设置 PYTHONPATH
-        pylibs_dir = os.path.join(self.host_workspace, ".sandbox", ".pylibs")
+        pylibs_dir = os.path.join(self.sandbox_agent_workspace, ".sandbox", ".pylibs")
         env["PIP_TARGET"] = pylibs_dir
         current_pythonpath = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = f"{pylibs_dir}{os.pathsep}{self.host_workspace}{os.pathsep}{current_pythonpath}"
+        env["PYTHONPATH"] = f"{pylibs_dir}{os.pathsep}{self.sandbox_agent_workspace}{os.pathsep}{current_pythonpath}"
         
         # 保留原来的 HOME 目录
         env["HOME"] = os.environ.get("HOME", "")
@@ -320,7 +322,7 @@ class SubprocessIsolation:
                 cmd,
                 capture_output=True,
                 text=True,
-                cwd=cwd or self.host_workspace,
+                cwd=cwd or self.sandbox_agent_workspace,
                 env=env,
                 timeout=300  # 5分钟超时
             )
@@ -369,7 +371,7 @@ class SubprocessIsolation:
         logger.info(f"  command: {command}")
         logger.info(f"  cwd: {cwd}")
         
-        actual_cwd = cwd or self.host_workspace
+        actual_cwd = cwd or self.sandbox_agent_workspace
         
         # 构建环境变量
         env = os.environ.copy()

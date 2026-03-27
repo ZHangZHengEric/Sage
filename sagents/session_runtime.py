@@ -39,6 +39,7 @@ from sagents.utils.lock_manager import lock_manager, safe_release
 from sagents.utils.logger import logger
 from sagents.flow.schema import AgentFlow
 from sagents.flow.executor import FlowExecutor
+from sagents.utils.sandbox.config import VolumeMount
 
 
 _session_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("session_id", default=None)
@@ -76,7 +77,10 @@ class Session:
         self.model_config: Dict[str, Any] = {}
         self.system_prefix: str = ""
         self.session_space: str = "./sage_sessions"
-        self.host_workspace: Optional[str] = None  # 代理工作区的宿主机路径（本地/直通沙箱需要）
+        # workspace 配置
+        self.sandbox_agent_workspace: Optional[str] = None  # Agent 私有工作空间
+        self.volume_mounts: Optional[List[VolumeMount]] = None  # 卷挂载配置
+        self.sandbox_id: Optional[str] = None  # 远程沙箱 ID
         self.observability_manager: Optional[ObservabilityManager] = None
         self._runtime_signature: Optional[tuple] = None
         self._agent_registry: Dict[str, Type[AgentBase]] = {
@@ -102,8 +106,9 @@ class Session:
         model_config: Optional[Dict[str, Any]] = None,
         system_prefix: str = "",
         session_root_space: str = "./sage_sessions",
-        host_workspace: Optional[str] = None,
-        virtual_workspace: str = "/sage-workspace",
+        sandbox_agent_workspace: Optional[str] = None,
+        volume_mounts: Optional[List[VolumeMount]] = None,
+        sandbox_id: Optional[str] = None,
         default_memory_type: str = "session",
         agent_id: Optional[str] = None,
     ):
@@ -112,8 +117,9 @@ class Session:
             str(model_config or {}),
             system_prefix,
             str(session_root_space),
-            str(host_workspace or ""),
-            str(virtual_workspace),
+            str(sandbox_agent_workspace or ""),
+            str(volume_mounts or []),
+            str(sandbox_id or ""),
             default_memory_type,
             str(agent_id or ""),
         )
@@ -124,9 +130,17 @@ class Session:
         self.model_config = model_config or {}
         self.system_prefix = system_prefix or ""
         self.session_root_space = str(session_root_space)
-        self.host_workspace = str(host_workspace) if host_workspace else None
-        logger.info(f"SessionRuntime: configure_runtime 设置 host_workspace={self.host_workspace}")
-        self.virtual_workspace = str(virtual_workspace)
+        
+        # workspace 配置
+        self.sandbox_agent_workspace = sandbox_agent_workspace
+        self.volume_mounts = volume_mounts or []
+        self.sandbox_id = sandbox_id
+        
+        logger.info(f"SessionRuntime: configure_runtime "
+                   f"sandbox_agent_workspace={self.sandbox_agent_workspace}, "
+                   f"volume_mounts_count={len(self.volume_mounts)}, "
+                   f"sandbox_id={self.sandbox_id}")
+        
         self.default_memory_type = default_memory_type or "session"
         # agent_id 为 None 时生成随机 UUID
         self.agent_id = agent_id or str(uuid.uuid4())
@@ -211,27 +225,29 @@ class Session:
                 merged_system_context = saved_system_context
                 logger.info(f"SessionContext: Using saved system_context for session {session_id}")
 
-        # 调试：检查 host_workspace 是否有值
-        logger.info(f"SessionRuntime: 创建 SessionContext，host_workspace={self.host_workspace}")
-        if not self.host_workspace:
-            logger.error("SessionRuntime: host_workspace 为 None，这会导致沙箱 venv 创建在错误的位置！")
-        
+        # 调试：检查 workspace 配置
+        logger.info(f"SessionRuntime: 创建 SessionContext，"
+                   f"sandbox_agent_workspace={self.sandbox_agent_workspace}, "
+                   f"volume_mounts_count={len(self.volume_mounts or [])}, "
+                   f"sandbox_id={self.sandbox_id}")
+
         self.session_context = SessionContext(
             session_id=session_id,
             user_id=user_id,
             agent_id=self.agent_id,
             session_root_space=self.session_root_space,
-            virtual_workspace=getattr(self, 'virtual_workspace', "/sage-workspace"),
-            host_workspace=self.host_workspace,
+            sandbox_agent_workspace=self.sandbox_agent_workspace,
+            volume_mounts=self.volume_mounts,
+            sandbox_id=self.sandbox_id,
             context_budget_config=context_budget_config,
             system_context=merged_system_context,
             tool_manager=tool_manager,
             skill_manager=skill_manager,
             parent_session_id=parent_session_id,
         )
-        
-        # 异步初始化 SessionContext，传递 host_workspace 确保沙箱工作区正确设置
-        await self.session_context.init_more(host_workspace=self.host_workspace)
+
+        # 异步初始化 SessionContext
+        await self.session_context.init_more()
         
         self._cache_session_workspace(session_id, self.session_context)
         return self.session_context

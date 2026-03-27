@@ -5,20 +5,20 @@ Seatbelt isolation strategy (macOS sandbox-exec).
 """
 import subprocess
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from sagents.utils.logger import logger
+from sagents.utils.sandbox.config import VolumeMount
 
 
 class SeatbeltIsolation:
     """macOS sandbox-exec 隔离模式"""
     
-    def __init__(self, venv_dir: str, host_workspace: str, limits: Dict[str, Any], 
-                 allowed_paths: list, sandbox_dir: str):
+    def __init__(self, venv_dir: str, sandbox_agent_workspace: str, volume_mounts: Optional[List[VolumeMount]] = None, limits: Optional[Dict[str, Any]] = None):
         self.venv_dir = venv_dir
-        self.host_workspace = host_workspace
-        self.limits = limits
-        self.allowed_paths = allowed_paths
-        self.sandbox_dir = sandbox_dir
+        self.sandbox_agent_workspace = sandbox_agent_workspace
+        self.volume_mounts = volume_mounts or []
+        self.limits = limits or {}
+        self.sandbox_dir = os.path.join(sandbox_agent_workspace, ".sandbox")
         
     def _generate_profile(self, output_pkl: str, additional_read_paths: list = None,
                          additional_write_paths: list = None) -> str:
@@ -26,10 +26,11 @@ class SeatbeltIsolation:
         import tempfile
 
         # 构建允许的路径
-        allowed = list(self.allowed_paths)
-        allowed.append(self.host_workspace)
-        allowed.append(self.sandbox_dir)
-        allowed.append(self.venv_dir)  # 添加 venv 目录到允许路径
+        allowed = [self.sandbox_agent_workspace, self.sandbox_dir, self.venv_dir]
+        
+        # 添加 volume_mounts 中的路径
+        for mount in self.volume_mounts:
+            allowed.append(mount.host_path)
 
         if additional_read_paths:
             allowed.extend(additional_read_paths)
@@ -155,5 +156,5 @@ class SeatbeltIsolation:
         
         # 使用 subprocess 模式执行
         from .subprocess import SubprocessIsolation
-        subproc = SubprocessIsolation(self.venv_dir, self.host_workspace, self.limits)
+        subproc = SubprocessIsolation(self.venv_dir, self.sandbox_agent_workspace, self.volume_mounts, self.limits)
         return subproc.execute_background(command, cwd)

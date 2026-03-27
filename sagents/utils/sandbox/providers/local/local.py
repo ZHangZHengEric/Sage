@@ -31,19 +31,22 @@ from ...interface import (
     ExecutionResult,
     FileInfo,
 )
-from ...config import MountPath
+from ...config import VolumeMount
 from sagents.utils.logger import logger
 
 
 class LocalSandboxProvider(ISandboxHandle):
-    """本地沙箱实现 - 提供进程级隔离"""
+    """本地沙箱实现 - 提供进程级隔离
+
+    sandbox_agent_workspace 是沙箱内的虚拟工作区路径
+    volume_mounts 用于将宿主机路径映射到沙箱内的其他路径
+    """
 
     def __init__(
         self,
         sandbox_id: str,
-        host_workspace: str,
-        virtual_workspace: str = "/sage-workspace",
-        mount_paths: Optional[List[MountPath]] = None,
+        sandbox_agent_workspace: str,
+        volume_mounts: Optional[List[VolumeMount]] = None,
         cpu_time_limit: int = 300,
         memory_limit_mb: int = 4096,
         allowed_paths: Optional[List[str]] = None,
@@ -51,9 +54,8 @@ class LocalSandboxProvider(ISandboxHandle):
         macos_isolation_mode: str = "seatbelt",
     ):
         self._sandbox_id = sandbox_id
-        self._host_workspace = host_workspace
-        self._virtual_workspace = virtual_workspace
-        self._mount_paths = mount_paths or []
+        self._sandbox_agent_workspace = sandbox_agent_workspace
+        self._volume_mounts = volume_mounts or []
         self._cpu_time_limit = cpu_time_limit
         self._memory_limit_mb = memory_limit_mb
         self._allowed_paths = allowed_paths
@@ -72,20 +74,24 @@ class LocalSandboxProvider(ISandboxHandle):
         if self._file_system is None:
             from .filesystem import SandboxFileSystem
 
-            logger.info(f"LocalSandboxProvider: Initializing with host_workspace={self._host_workspace}, virtual_workspace={self._virtual_workspace}")
+            logger.info(f"LocalSandboxProvider: Initializing with workspace={self._sandbox_agent_workspace}")
 
-            self._file_system = SandboxFileSystem(
-                host_path=self._host_workspace,
-                virtual_path=self._virtual_workspace,
-                enable_path_mapping=True,
-            )
+            # 构建 volume_mounts：sandbox_agent_workspace 映射到自身（直通模式）
+            # 然后添加额外的 volume_mounts
+            volume_mounts = [VolumeMount(
+                host_path=self._sandbox_agent_workspace,
+                mount_path=self._sandbox_agent_workspace
+            )]
+            
+            # 添加额外的 volume_mounts
+            for mount in (self._volume_mounts or []):
+                volume_mounts.append(mount)
+            
+            # 使用 volume_mounts 创建文件系统
+            self._file_system = SandboxFileSystem(volume_mounts=volume_mounts)
 
-            # 添加额外的路径映射
-            for mp in self._mount_paths:
-                self._file_system.add_mapping(mp.sandbox_path, mp.host_path)
-
-            # 设置 venv 目录
-            self._venv_dir = os.path.join(self._host_workspace, ".sandbox", "venv")
+            # 设置 venv 目录（在 sandbox_agent_workspace 下）
+            self._venv_dir = os.path.join(self._sandbox_agent_workspace, ".sandbox", "venv")
 
             # 初始化隔离层（如果需要）
             if self._linux_isolation_mode != "subprocess" or self._macos_isolation_mode != "subprocess":
@@ -102,18 +108,17 @@ class LocalSandboxProvider(ISandboxHandle):
             if self._macos_isolation_mode == "seatbelt":
                 self._isolation = SeatbeltIsolation(
                     venv_dir=self._venv_dir,
-                    host_workspace=self._host_workspace,
+                    sandbox_agent_workspace=self._sandbox_agent_workspace,
+                    volume_mounts=self._volume_mounts,
                     limits={"cpu_time": self._cpu_time_limit, "memory": self._memory_limit_mb * 1024 * 1024},
-                    allowed_paths=self._allowed_paths or [],
-                    sandbox_dir=os.path.join(self._host_workspace, ".sandbox"),
                 )
         else:
             if self._linux_isolation_mode == "bwrap":
                 self._isolation = BwrapIsolation(
                     venv_dir=self._venv_dir,
-                    host_workspace=self._host_workspace,
+                    sandbox_agent_workspace=self._sandbox_agent_workspace,
+                    volume_mounts=self._volume_mounts,
                     limits={"cpu_time": self._cpu_time_limit, "memory": self._memory_limit_mb * 1024 * 1024},
-                    virtual_workspace=self._virtual_workspace,
                 )
 
     def _get_venv_python(self) -> Optional[str]:
@@ -215,11 +220,17 @@ class LocalSandboxProvider(ISandboxHandle):
 
     @property
     def workspace_path(self) -> str:
-        return self._virtual_workspace
+        return self._sandbox_agent_workspace
 
     @property
     def host_workspace_path(self) -> str:
-        return self._host_workspace
+        """返回宿主机工作区路径（sandbox_agent_workspace）"""
+        return self._sandbox_agent_workspace
+
+    @property
+    def volume_mounts(self) -> List[VolumeMount]:
+        """返回卷挂载配置列表"""
+        return self._volume_mounts
 
     def add_mount(self, host_path: str, sandbox_path: str) -> None:
         """动态添加路径映射"""
@@ -337,7 +348,7 @@ class LocalSandboxProvider(ISandboxHandle):
         self._ensure_initialized()
 
         # 转换工作目录
-        actual_workdir = self.to_host_path(workdir) if workdir else self._host_workspace
+        actual_workdir = self.to_host_path(workdir) if workdir else self._sandbox_agent_workspace
 
         # 转换命令中的虚拟路径为宿主机路径
         converted_command = self._convert_paths_in_command(command)
@@ -493,7 +504,7 @@ class LocalSandboxProvider(ISandboxHandle):
         # 创建临时文件执行代码
         import tempfile
 
-        actual_workdir = self.to_host_path(workdir) if workdir else self._host_workspace
+        actual_workdir = self.to_host_path(workdir) if workdir else self._sandbox_agent_workspace
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(code)
@@ -564,7 +575,7 @@ class LocalSandboxProvider(ISandboxHandle):
         # 创建临时文件执行代码
         import tempfile
 
-        actual_workdir = self.to_host_path(workdir) if workdir else self._host_workspace
+        actual_workdir = self.to_host_path(workdir) if workdir else self._sandbox_agent_workspace
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
             f.write(code)
@@ -725,7 +736,7 @@ class LocalSandboxProvider(ISandboxHandle):
         max_items_per_dir: int = 5
     ) -> str:
         """基本的文件树实现（当 filesystem 不可用时）"""
-        target_root = self.to_host_path(root_path) if root_path else self._host_workspace
+        target_root = self.to_host_path(root_path) if root_path else self._sandbox_agent_workspace
         
         if not os.path.exists(target_root):
             return ""

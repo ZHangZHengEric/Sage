@@ -24,6 +24,7 @@ import re
 import datetime
 import pytz
 from sagents.utils.sandbox import SandboxProviderFactory, SandboxConfig, SandboxType
+from sagents.utils.sandbox.config import VolumeMount
 
 _session_context_file_io_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="session-context-io")
 
@@ -44,8 +45,9 @@ class SessionContext:
         user_id: str,
         agent_id: str,
         session_root_space: str,
-        virtual_workspace: str ,
-        host_workspace: Optional[str] = None,
+        sandbox_agent_workspace: Optional[str] = None,
+        volume_mounts: Optional[List[VolumeMount]] = None,
+        sandbox_id: Optional[str] = None,
         context_budget_config: Optional[Dict[str, Any]] = None,
         system_context: Optional[Dict[str, Any]] = None,
         tool_manager: Optional[Any] = None,
@@ -58,30 +60,31 @@ class SessionContext:
         self.agent_id = agent_id
         self.system_context: Dict[str, Any] = system_context or {}
         self.session_root_space = session_root_space
-        self.host_workspace: Optional[str] = host_workspace  # 代理工作区的宿主机路径
-        self.virtual_workspace: str = virtual_workspace  # 代理工作区的虚拟路径
+
+        # workspace 配置
+        self.sandbox_agent_workspace: Optional[str] = sandbox_agent_workspace  # Agent 工作目录（沙箱内路径）
+        self.volume_mounts: List[VolumeMount] = volume_mounts or []  # 额外卷挂载
+        self.sandbox_id: Optional[str] = sandbox_id
+
         self.tool_manager = tool_manager
-        self.skill_manager = skill_manager  # 宿主机技能管理器
-        self.sandbox_skill_manager: Optional[SandboxSkillManager] = None  # 沙箱技能管理器
+        self.skill_manager = skill_manager
+        self.sandbox_skill_manager: Optional[SandboxSkillManager] = None
         self.parent_session_id = parent_session_id
         self._init_runtime_state(context_budget_config=context_budget_config)
         # 注意：init_more 不再在 __init__ 中自动调用，需要调用方显式调用
         self._session_root_space = session_root_space
-        self._host_workspace = host_workspace
+        self._volume_mounts = volume_mounts
 
-    async def init_more(self, session_root_space: Optional[str] = None, host_workspace: Optional[str] = None):
+    async def init_more(self, session_root_space: Optional[str] = None):
         """
         初始化 SessionContext（异步方法，需要显式调用）
         
         Args:
             session_root_space: 会话根空间路径（宿主机），用于存储会话数据
-            host_workspace: 代理工作区的宿主机路径（本地/直通沙箱需要，远程沙箱可为None）
         """
         # 使用构造函数中传入的参数作为默认值
         if session_root_space is None:
             session_root_space = getattr(self, '_session_root_space', None)
-        if host_workspace is None:
-            host_workspace = getattr(self, '_host_workspace', None)
             
         # 从环境变量获取沙箱模式，默认使用本地沙箱
         sandbox_mode_str = os.environ.get("SAGE_SANDBOX_MODE", "local").lower()
@@ -95,9 +98,7 @@ class SessionContext:
         
         # 解析工作空间路径
         # - session_workspace: 会话数据路径（宿主机）
-        # - host_workspace: 代理工作区宿主机路径（本地/直通需要）
-        # - virtual_workspace: 代理工作区虚拟路径（所有沙箱）
-        self._resolve_workspace_paths(session_root_space, host_workspace)
+        self._resolve_workspace_paths(session_root_space)
         
         # 初始化外部路径和上下文
         self._init_external_paths_and_context()
@@ -214,27 +215,26 @@ class SessionContext:
         except Exception as e:
             logger.warning(f"SessionContext: Failed to submit {file_label} creation: {e}")
 
-    def _resolve_workspace_paths(self, session_root_space: str, host_workspace: Optional[str] = None) -> None:
+    def _resolve_workspace_paths(self, session_root_space: str) -> None:
         """
         解析会话空间与工作空间路径。
-        
+
         路径说明：
         - session_workspace: 会话数据存储路径（消息、上下文等），始终在宿主机
-        - host_workspace: 代理工作区的宿主机路径（本地/直通沙箱需要）
-        - virtual_workspace: 代理工作区的沙箱虚拟路径（所有沙箱都有）
-        
+        - volume_mounts: 卷挂载配置
+        - sandbox_agent_workspace: Agent 工作区的沙箱内路径
+
         Args:
             session_root_space: 会话根空间路径（宿主机）
-            host_workspace: 代理工作区的宿主机路径（本地/直通沙箱需要，远程沙箱可为None）
         """
         if not session_root_space or not os.path.exists(session_root_space):
             raise ValueError(f"SessionContext 初始化需要传入有效的 session_root_space: {session_root_space}")
-            
+
         self.session_root_space = os.path.abspath(session_root_space)
-        
+
         # 确定 session_workspace（会话数据，始终在宿主机）
         parent_session_id = self.parent_session_id or self.system_context.get("parent_session_id")
-        
+
         if parent_session_id:
             try:
                 from sagents.session_runtime import get_global_session_manager
@@ -252,13 +252,8 @@ class SessionContext:
                  raise ValueError(f"Failed to resolve parent session workspace for {parent_session_id}: {e}")
         else:
             self.session_workspace = os.path.join(self.session_root_space, self.session_id)
-            
+
         os.makedirs(self.session_workspace, exist_ok=True)
-        
-        # 保存 host_workspace（本地/直通沙箱需要，远程沙箱可为None）
-        self.host_workspace = os.path.abspath(str(host_workspace)) if host_workspace else None
-        
-       
 
     def _prepare_workspace_bootstrap_files(self):
         """
@@ -290,7 +285,7 @@ class SessionContext:
             ]
 
             for filename, content_key in bootstrap_files:
-                file_path = os.path.join(self.virtual_workspace, filename)
+                file_path = os.path.join(self.sandbox_agent_workspace, filename)
                 try:
                     # 检查文件是否已存在
                     exists = await self.sandbox.file_exists(file_path)
@@ -305,7 +300,7 @@ class SessionContext:
 
             # 创建 memory 目录
             try:
-                memory_dir = os.path.join(self.virtual_workspace, "memory")
+                memory_dir = os.path.join(self.sandbox_agent_workspace, "memory")
                 await self.sandbox.ensure_directory(memory_dir)
             except Exception as e:
                 logger.warning(f"创建 memory 目录失败: {e}")
@@ -349,24 +344,21 @@ class SessionContext:
     def _init_sandbox_and_file_system(self, sandbox_mode: SandboxType):
         """
         初始化沙箱环境和文件系统
-        
+
         Args:
             sandbox_mode: 沙箱模式 (LOCAL, PASSTHROUGH, REMOTE)
         """
-        logger.info(f"SessionContext: 开始初始化沙箱环境，模式: {sandbox_mode.value},宿主机工作区: {self.host_workspace}, 虚拟工作区: {self.virtual_workspace}")
+        logger.info(f"SessionContext: 开始初始化沙箱环境，模式: {sandbox_mode.value}, "
+                   f"volume_mounts_count={len(self.volume_mounts)}")
         t0 = time.time()
 
-        # 根据沙箱类型创建不同的配置
-        # sandbox_id 使用 user_id，如果为空则使用 session_id 作为回退
-        sandbox_id = self.user_id if self.user_id else self.session_id
-        
         if sandbox_mode == SandboxType.REMOTE:
             # 远程沙箱配置
             config = SandboxConfig(
-                sandbox_id=sandbox_id,
+                sandbox_id=self.sandbox_id or self.user_id or self.session_id,
                 mode=sandbox_mode,
-                workspace=".",  # 远程沙箱不需要本地workspace
-                virtual_workspace=self.virtual_workspace,
+                sandbox_agent_workspace=self.sandbox_agent_workspace,
+                volume_mounts=self.volume_mounts,  # 远程沙箱可能支持的挂载
                 # 远程沙箱特定的配置
                 remote_provider=os.environ.get("SAGE_REMOTE_PROVIDER", "opensandbox"),
                 remote_server_url=os.environ.get("OPENSANDBOX_URL"),
@@ -378,21 +370,31 @@ class SessionContext:
             )
         else:
             # 本地/直通沙箱配置
+            # 构建 volume_mounts：包含原有的 volume_mounts 和 external_paths
+            volume_mounts = list(self.volume_mounts) if self.volume_mounts else []
+
+            # 将 external_paths 添加到 volume_mounts，映射路径与 host_path 相同
+            for path in (self.external_paths or []):
+                abs_path = os.path.abspath(path)
+                volume_mounts.append(VolumeMount(
+                    host_path=abs_path,
+                    mount_path=abs_path  # 映射路径与 host_path 相同
+                ))
+
             config = SandboxConfig(
-                sandbox_id=sandbox_id,
+                sandbox_id=self.user_id or self.session_id,
                 mode=sandbox_mode,
-                workspace=self.host_workspace or ".",  # 本地/直通需要宿主机路径
-                virtual_workspace=self.virtual_workspace,
+                sandbox_agent_workspace=self.sandbox_agent_workspace,
+                volume_mounts=volume_mounts,  # 传递所有卷挂载配置
                 # 本地沙箱特定的配置
                 cpu_time_limit=int(os.environ.get("SAGE_LOCAL_CPU_TIME_LIMIT", "300")),
                 memory_limit_mb=int(os.environ.get("SAGE_LOCAL_MEMORY_LIMIT_MB", "4096")),
-                allowed_paths=self.external_paths,
                 linux_isolation_mode=os.environ.get("SAGE_LOCAL_LINUX_ISOLATION", "bwrap"),
                 macos_isolation_mode=os.environ.get("SAGE_LOCAL_MACOS_ISOLATION", "seatbelt")
             )
 
         self.sandbox = SandboxProviderFactory.create(config)
-        
+
         logger.info(f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s")
         
 
@@ -435,7 +437,7 @@ class SessionContext:
         import asyncio
         
         # 创建沙箱技能管理器
-        skills_dir = os.path.join(self.virtual_workspace, "skills")
+        skills_dir = os.path.join(self.sandbox_agent_workspace, "skills")
         self.sandbox_skill_manager = SandboxSkillManager(self.sandbox, skills_dir)
         
         # 异步同步技能
@@ -456,7 +458,8 @@ class SessionContext:
         最终化系统上下文，设置私有工作区、用户ID和会话ID
         """
         # 设置私有工作区
-        self.system_context['private_workspace'] = self.virtual_workspace
+        workspace = self.sandbox_agent_workspace
+        self.system_context['private_workspace'] = workspace
         # 设置用户ID
         if self.user_id:
             self.system_context['user_id'] = self.user_id
@@ -468,7 +471,7 @@ class SessionContext:
         if self.external_paths and isinstance(self.external_paths, list):
             permission_paths.extend([str(p) for p in self.external_paths])
         paths_str = ", ".join(permission_paths)
-        sandbox_root = self.virtual_workspace
+        sandbox_root = workspace
         common_dirs = ["data", "outputs", "temp", "logs"]
         for d in common_dirs:
             dir_path = os.path.join(sandbox_root, d)
@@ -493,7 +496,7 @@ class SessionContext:
                     f"无法创建目录: {dir_path}"
                 )
         self.system_context['file_permission'] = (
-            f"only allow read and write files in: {paths_str} (Note: {self.virtual_workspace} is your private sandbox). "
+            f"only allow read and write files in: {paths_str} (Note: {workspace} is your private sandbox). "
             f"Please save files in the pre-created folders: {', '.join(common_dirs)} and use absolute paths; avoid creating extra directories in the root."
         )
         # 设置响应语言
@@ -793,13 +796,13 @@ class SessionContext:
         return []
 
     def _refresh_file_permission(self):
-        private_workspace = self.system_context.get('private_workspace') or getattr(self, 'virtual_workspace', '/workspace')
+        private_workspace = self.system_context.get('private_workspace') or self.sandbox_agent_workspace
         permission_paths = [private_workspace]
         if self.external_paths and isinstance(self.external_paths, list):
             permission_paths.extend([str(p) for p in self.external_paths])
         paths_str = ", ".join(permission_paths)
-        virtual_workspace = getattr(self, 'virtual_workspace', '/workspace')
-        self.system_context['file_permission'] = f"only allow read and write files in: {paths_str} (Note: {virtual_workspace} is your private sandbox), and use absolute path"
+        workspace = self.sandbox_agent_workspace
+        self.system_context['file_permission'] = f"only allow read and write files in: {paths_str} (Note: {workspace} is your private sandbox), and use absolute path"
 
     # 注意：自动记忆提取功能已迁移到sagents层面
     # 现在由sagents直接调用MemoryExtractionAgent来处理记忆提取和更新
@@ -937,14 +940,13 @@ class SessionContext:
                 "updated_at": time.time(),
                 "session_root_space": self.session_root_space,
                 "session_workspace": self.session_workspace,
-                "host_workspace": self.host_workspace,
-                "virtual_workspace": self.virtual_workspace,
-                
+                "sandbox_agent_workspace": self.sandbox_agent_workspace,
+
                 # 关键状态
                 "system_context": make_serializable(self.system_context),
                 "audit_status": make_serializable(self.audit_status),
                 "tokens_usage_info": self.get_tokens_usage_info(),
-                
+
                 # Agent 配置
                 "agent_config": make_serializable(self.agent_config)
             }

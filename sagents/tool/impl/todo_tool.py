@@ -36,8 +36,8 @@ class ToDoTool:
         session_context = self._get_session_context(session_id)
         if session_context:
             try:
-                virtual_workspace = session_context.virtual_workspace
-                return os.path.join(virtual_workspace, filename)
+                sandbox_agent_workspace = session_context.sandbox_agent_workspace
+                return os.path.join(sandbox_agent_workspace, filename)
             except Exception as e:
                 logger.warning(f"通过 session_context 获取路径失败: {e}")
 
@@ -60,9 +60,9 @@ class ToDoTool:
             return
 
         sandbox = getattr(session_context, 'sandbox', None)
-        virtual_workspace = getattr(session_context, 'virtual_workspace', None)
+        sandbox_agent_workspace = getattr(session_context, 'sandbox_agent_workspace', None)
 
-        if not sandbox or not virtual_workspace:
+        if not sandbox or not sandbox_agent_workspace:
             return
 
         try:
@@ -71,7 +71,7 @@ class ToDoTool:
 
             # 使用沙箱接口列出目录
             try:
-                entries = await sandbox.list_directory(virtual_workspace)
+                entries = await sandbox.list_directory(sandbox_agent_workspace)
                 for entry in entries:
                     if not entry.is_file:
                         continue
