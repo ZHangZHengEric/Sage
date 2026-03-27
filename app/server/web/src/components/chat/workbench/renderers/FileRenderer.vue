@@ -122,7 +122,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
+import { ref, computed, onMounted, onUnmounted, defineAsyncComponent, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -361,7 +361,9 @@ const loadContent = async () => {
     const agentId = props.item?.agentId
     const sessionId = props.item?.sessionId
     if (!agentId) {
-        throw new Error('未找到Agent ID，无法下载文件')
+      // 历史消息恢复时 agentId 可能晚于 workbench item 到达，这里先等待回填。
+      loading.value = false
+      return
     }
 
     // Clean path
@@ -488,6 +490,13 @@ const copyContent = async () => {
 // 自动加载
 onMounted(() => {
   loadContent()
+})
+
+watch(() => props.item?.agentId, (agentId, previousAgentId) => {
+  if (!agentId || agentId === previousAgentId) return
+  if (!blobUrl.value && !fileContent.value && !fileArrayBuffer.value) {
+    loadContent()
+  }
 })
 
 // 清理
