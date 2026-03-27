@@ -16,6 +16,11 @@ services:
       - 30050:8080
     env_file:
       - .env
+    environment:
+      SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage}
+      SAGE_TRACE_JAEGER_UI_URL: ${SAGE_TRACE_JAEGER_UI_URL:-http://sage-jaeger:16686/jaeger}
+      SAGE_TRACE_JAEGER_PUBLIC_URL: ${SAGE_TRACE_JAEGER_PUBLIC_URL:-http://127.0.0.1:30051/jaeger}
+      SAGE_TRACE_JAEGER_BASE_PATH: ${SAGE_TRACE_JAEGER_BASE_PATH:-/api/observability/jaeger}
     mem_limit: 16g
     cpus: 4.0
 
@@ -27,6 +32,7 @@ services:
       args:
         VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
         VITE_SAGE_TRACE_WEB_URL: ${SAGE_TRACE_WEB_URL}
+        VITE_SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage/}
     image: sage-web:v1.0
     container_name: sage-web
     ports:
@@ -35,6 +41,7 @@ services:
       TZ: 'Asia/Shanghai'
       VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
       VITE_SAGE_TRACE_WEB_URL: ${SAGE_TRACE_WEB_URL}
+      VITE_SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage/}
     depends_on:
       - sage-server
     mem_limit: 512m
@@ -134,14 +141,19 @@ services:
     mem_limit: 1g
     cpus: 0.5
   sage-jaeger:
-    image:  docker.m.daocloud.io/jaegertracing/all-in-one:1.76.0
+    image: docker.m.daocloud.io/jaegertracing/jaeger:2.16.0
     container_name: sage-jaeger
     restart: always
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
+    command:
+      - --config
+      - /etc/jaeger/config.yaml
+    volumes:
+      - ./docker/jaeger/config.yaml:/etc/jaeger/config.yaml:ro
     ports:
-      - "30056:16686" # UI
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
+    expose:
+      - "16686"
+      - "13133"
     mem_limit: 1g
     cpus: 0.5

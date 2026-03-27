@@ -3,13 +3,13 @@ import request from '../utils/request.js'
 // 用户 API 接口
 export const userAPI = {
   login: async (usernameOrEmail, password) => {
-    return await request.post('/api/user/login', {
+    return await request.post('/api/auth/login', {
       username_or_email: usernameOrEmail,
       password
     })
   },
   register: async (username, password, email = '', phonenum = '') => {
-    return await request.post('/api/user/register', {
+    return await request.post('/api/auth/register', {
       username,
       password,
       email,
@@ -17,10 +17,10 @@ export const userAPI = {
     })
   },
   checkLogin: async () => {
-    return await request.get('/api/user/check_login')
+    return await request.get('/api/auth/session')
   },
   getUserInfo: async () => {
-    return await request.get('/api/user/check_login')
+    return await request.get('/api/auth/session')
   },
   refreshToken: async () => {
     return await request.post('/api/user/refresh-token')
