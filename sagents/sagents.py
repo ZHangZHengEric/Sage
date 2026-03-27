@@ -50,6 +50,86 @@ class SAgent:
         custom_sub_agents: Optional[List[Dict[str, Any]]] = None,
         custom_flow: Optional[AgentFlow] = None,
     ) -> AsyncGenerator[List["MessageChunk"], None]:
+        """执行流式对话会话
+
+        该方法启动一个 Agent 会话，处理输入消息并返回流式响应。
+        支持多种沙箱模式（本地、远程、直通），可配置工具、技能、工作流等。
+
+        Args:
+            input_messages: 输入消息列表，可以是字典列表或 MessageChunk 对象列表
+                示例: [{"role": "user", "content": "你好"}]
+            model: LLM 模型客户端，必须提供
+            model_config: 模型配置字典，必须包含 model、api_key、base_url 等
+            system_prefix: 系统提示词前缀，用于定义 Agent 行为
+            default_memory_type: 默认记忆类型，可选 "session" | "user" | "none"
+
+            # 沙箱核心配置
+            sandbox_type: 沙箱类型，可选 "local" | "remote" | "passthrough"
+                - local: 本地沙箱，使用 venv + 进程隔离（推荐生产环境）
+                - remote: 远程沙箱，使用 OpenSandbox 等远程服务
+                - passthrough: 直通模式，无隔离，直接使用系统环境
+            sandbox_agent_workspace: Agent 工作空间路径（沙箱内路径，所有模式必需）
+                - 沙箱内 Agent 的工作目录，用于文件读写等操作
+                - 示例: "/Users/xxx/.sage/agents/agent_001"
+            volume_mounts: 卷挂载配置列表，用于映射宿主机路径到沙箱内
+                - local/passthrough 模式下用于路径映射
+                - remote 模式下可能不被支持
+                - 示例: [VolumeMount("/host/data", "/sandbox/data")]
+            sandbox_id: 远程沙箱 ID（remote 模式使用已有沙箱时）
+                - 如果提供，连接到已有的远程沙箱
+                - 如果不提供，将创建新的远程沙箱实例
+                - 示例: "opensandbox-abc123"
+
+            # 可选配置
+            tool_manager: 工具管理器，控制 Agent 可调用的工具
+            skill_manager: 技能管理器，控制 Agent 可使用的技能
+            session_id: 会话 ID，用于持久化和恢复会话状态
+            user_id: 用户 ID，用于多租户场景
+            agent_id: Agent ID，用于标识当前 Agent
+            deep_thinking: 是否启用深度思考模式
+            max_loop_count: 最大循环次数，防止无限循环
+            agent_mode: Agent 模式，可选 "simple" | "multi" | "fibre"
+            more_suggest: 是否启用更多建议功能
+            force_summary: 是否强制生成总结
+            system_context: 系统上下文字典，注入额外信息到提示词
+            available_workflows: 可用工作流配置
+            context_budget_config: 上下文预算配置，控制 token 使用
+            custom_sub_agents: 自定义子 Agent 配置列表
+            custom_flow: 自定义执行流程（AgentFlow）
+
+        Returns:
+            异步生成器，产生 MessageChunk 列表
+
+        Raises:
+            ValueError: 当必需参数缺失或无效时
+
+        Examples:
+            # 本地沙箱模式（推荐）
+            async for chunks in agent.run_stream(
+                input_messages=[{"role": "user", "content": "你好"}],
+                model=client,
+                model_config={"model": "gpt-4", "api_key": "xxx"},
+                system_prefix="你是一个助手",
+                default_memory_type="session",
+                sandbox_agent_workspace="/Users/xxx/.sage/agents/agent_001",
+                volume_mounts=[VolumeMount("/host/data", "/sandbox/data")],
+            ):
+                for chunk in chunks:
+                    print(chunk.content)
+
+            # 远程沙箱模式
+            async for chunks in agent.run_stream(
+                input_messages=messages,
+                model=client,
+                model_config=config,
+                system_prefix="你是一个助手",
+                default_memory_type="session",
+                sandbox_type="remote",
+                sandbox_agent_workspace="/workspace",  # 远程沙箱内的工作路径
+                sandbox_id="opensandbox-abc123",  # 可选：连接已有沙箱
+            ):
+                ...
+        """
         if not model:
             raise ValueError("run_stream 参数 model 不能为空")
         if not isinstance(model_config, dict) or not model_config:
