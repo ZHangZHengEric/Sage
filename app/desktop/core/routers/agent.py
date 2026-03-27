@@ -216,7 +216,33 @@ async def create(agent: AgentConfigDTO, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    logger.info(f"[Agent Create] Received: id={agent.id}, name={agent.name}, is_default={agent.is_default}")
+    logger.info(f"[Agent Create] Received: id={agent.id}, name={agent.name}, is_default={agent.is_default}, im_channels={agent.im_channels}")
+
+    # 检查是否有启用的 IM 频道，如果有则自动添加 IM 工具
+    im_tools = ['send_message_through_im', 'send_file_through_im', 'send_image_through_im']
+    has_enabled_im_channel = False
+
+    if agent.im_channels:
+        for provider, channel_data in agent.im_channels.items():
+            if channel_data.get('enabled', False):
+                has_enabled_im_channel = True
+                break
+
+    if has_enabled_im_channel:
+        # 确保 availableTools 存在
+        if agent.availableTools is None:
+            agent.availableTools = []
+
+        # 检查并添加缺失的 IM 工具
+        tools_added = []
+        for tool_name in im_tools:
+            if tool_name not in agent.availableTools:
+                agent.availableTools.append(tool_name)
+                tools_added.append(tool_name)
+
+        if tools_added:
+            logger.info(f"[Agent Create] Auto-added IM tools for agent={agent.id}: {tools_added}")
+
     config_dict = convert_agent_to_config(agent)
     logger.info(f"[Agent Create] Config dict: is_default={config_dict.get('is_default')}")
     created_agent = await create_agent(agent.name, config_dict)
@@ -254,7 +280,32 @@ async def update(agent_id: str, agent: AgentConfigDTO, http_request: Request):
         StandardResponse: 包含操作结果的标准响应
     """
     logger.info(f"[Agent Update] Received update for agent={agent_id}, im_channels={agent.im_channels}")
-    
+
+    # 检查是否有启用的 IM 频道，如果有则自动添加 IM 工具
+    im_tools = ['send_message_through_im', 'send_file_through_im', 'send_image_through_im']
+    has_enabled_im_channel = False
+
+    if agent.im_channels:
+        for provider, channel_data in agent.im_channels.items():
+            if channel_data.get('enabled', False):
+                has_enabled_im_channel = True
+                break
+
+    if has_enabled_im_channel:
+        # 确保 availableTools 存在
+        if agent.availableTools is None:
+            agent.availableTools = []
+
+        # 检查并添加缺失的 IM 工具
+        tools_added = []
+        for tool_name in im_tools:
+            if tool_name not in agent.availableTools:
+                agent.availableTools.append(tool_name)
+                tools_added.append(tool_name)
+
+        if tools_added:
+            logger.info(f"[Agent Update] Auto-added IM tools for agent={agent_id}: {tools_added}")
+
     # 更新 Agent 基本信息
     await update_agent(agent_id, agent.name, convert_agent_to_config(agent))
     
