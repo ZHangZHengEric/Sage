@@ -239,7 +239,12 @@ const checkSystemInitialization = async () => {
        // System IS initialized
        // If user is currently on Setup page, redirect to home
        if (route.name === 'Setup') {
-          router.replace('/')
+          router.replace({
+            name: 'Chat',
+            query: {
+              reload_new_chat: Date.now()
+            }
+          })
           return
        }
     }
