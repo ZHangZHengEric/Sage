@@ -638,22 +638,37 @@
               <!-- IM Provider Config -->
               <div v-for="provider in imProviders" :key="provider.key">
                 <div v-if="activeIMProvider === provider.key" class="space-y-4">
-                  <!-- Enable Switch -->
+                  <!-- Test & Enable Row (for wechat_personal: test first, then enable) -->
                   <div class="flex items-center justify-between p-4 bg-card rounded-lg border">
                     <div class="space-y-1">
                       <Label class="text-base">启用 {{ provider.label }}</Label>
                       <p class="text-sm text-muted-foreground">
                         <span v-if="provider.key === 'imessage' && !isDefaultAgent" class="text-yellow-600">iMessage 只能配置在默认智能体上</span>
+                        <span v-else-if="provider.key === 'wechat_personal'" class="text-yellow-600">⚠️ 先点击测试连接，测试成功后再启动</span>
                         <span v-else-if="imTestStatus[provider.key]?.tested && !imTestStatus[provider.key]?.passed" class="text-red-600">测试失败，请检查配置后重新测试</span>
                         <span v-else-if="!imTestStatus[provider.key]?.passed" class="text-yellow-600">请先填写配置并通过测试连接后才能启用</span>
                         <span v-else>允许Agent通过{{ provider.label }}与用户交互</span>
                       </p>
                     </div>
-                    <Switch 
-                      :checked="imConfig[provider.key]?.enabled"
-                      @update:checked="(val) => handleEnableSwitch(provider.key, val)"
-                      :disabled="provider.key === 'imessage' ? !isDefaultAgent : !imTestStatus[provider.key]?.passed"
-                    />
+                    <div class="flex items-center gap-3">
+                      <!-- Test Button -->
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        @click="testIMConnection(provider.key)"
+                        :disabled="testingIM[provider.key] || (!imEditMode[provider.key] && imTestStatus[provider.key]?.passed)"
+                      >
+                        <Loader v-if="testingIM[provider.key]" class="mr-2 h-4 w-4 animate-spin" />
+                        <Play v-else class="mr-2 h-4 w-4" />
+                        {{ imTestStatus[provider.key]?.passed && !imEditMode[provider.key] ? '已测试' : '测试连接' }}
+                      </Button>
+                      <!-- Enable Switch -->
+                      <Switch 
+                        :checked="imConfig[provider.key]?.enabled"
+                        @update:checked="(val) => handleEnableSwitch(provider.key, val)"
+                        :disabled="provider.key === 'imessage' ? !isDefaultAgent : !imTestStatus[provider.key]?.passed"
+                      />
+                    </div>
                   </div>
 
                   <!-- Config Fields (always visible, editable only in edit mode or when not frozen) -->
@@ -869,20 +884,6 @@
                         </div>
                       </div>
                     </template>
-
-                    <!-- Test Connection Button -->
-                    <div class="flex gap-2 pt-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        @click="testIMConnection(provider.key)"
-                        :disabled="testingIM[provider.key] || (!imEditMode[provider.key] && imTestStatus[provider.key]?.passed)"
-                      >
-                        <Loader v-if="testingIM[provider.key]" class="mr-2 h-4 w-4 animate-spin" />
-                        <Play v-else class="mr-2 h-4 w-4" />
-                        {{ imTestStatus[provider.key]?.passed && !imEditMode[provider.key] ? '已测试' : '测试连接' }}
-                      </Button>
-                    </div>
                   </div>
                 </div>
               </div>
