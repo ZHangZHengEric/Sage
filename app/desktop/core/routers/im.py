@@ -535,18 +535,26 @@ async def save_agent_im_channels(
                         results.append({"provider": provider, "status": "unchanged"})
                         logger.info(f"[IM Agent] {provider} config unchanged for agent={agent_id}")
                     
-                    # Auto-restart enabled channels only if config changed
-                    if config_request.enabled and config_changed:
+                    # Auto-restart/stop channels based on enabled status
+                    if config_changed:
                         try:
                             from mcp_servers.im_server.service_manager import get_service_manager
                             manager = get_service_manager()
-                            # Use agent_id as sage_user_id for channel management
-                            restart_result = await manager.restart_channel(agent_id, provider)
-                            if restart_result:
-                                restarted.append(provider)
-                                logger.info(f"[IM Agent] Auto-restarted {provider} channel for agent={agent_id}")
+                            
+                            if config_request.enabled:
+                                # Start/restart channel
+                                restart_result = await manager.restart_channel(agent_id, provider)
+                                if restart_result:
+                                    restarted.append(provider)
+                                    logger.info(f"[IM Agent] Auto-restarted {provider} channel for agent={agent_id}")
+                            else:
+                                # Stop channel when disabled
+                                stop_result = await manager.stop_channel(agent_id, provider)
+                                if stop_result:
+                                    restarted.append(f"{provider}(stopped)")
+                                    logger.info(f"[IM Agent] Auto-stopped {provider} channel for agent={agent_id}")
                         except Exception as e:
-                            logger.warning(f"[IM Agent] Failed to auto-restart {provider}: {e}")
+                            logger.warning(f"[IM Agent] Failed to auto-manage {provider} channel: {e}")
                 else:
                     results.append({"provider": provider, "status": "failed", "error": "Save failed"})
                     
