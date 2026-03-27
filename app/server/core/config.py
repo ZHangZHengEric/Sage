@@ -47,9 +47,27 @@ class StartupConfig:
     context_recent_turns: int = 0
     
     # auth
+    auth_providers_json: Optional[str] = None
     jwt_key: str = "sage_dev_jwt_secret_key_change_me_in_prod_v1"
     jwt_expire_hours: int = 24
     refresh_token_secret: str = "sage_dev_refresh_secret_key_change_me_in_prod_v1"
+    session_secret: str = "sage_dev_session_secret_key_change_me_in_prod_v1"
+    session_cookie_name: str = "sage_session"
+    session_cookie_secure: bool = False
+    session_cookie_same_site: str = "lax"
+    web_base_path: str = "/sage"
+    oauth2_clients_json: Optional[str] = None
+    oauth2_issuer: Optional[str] = None
+    oauth2_access_token_expires_in: int = 3600
+    eml_endpoint: str = "dm.aliyuncs.com"
+    eml_access_key_id: Optional[str] = None
+    eml_access_key_secret: Optional[str] = None
+    eml_security_token: Optional[str] = None
+    eml_account_name: Optional[str] = None
+    eml_template_id: Optional[str] = None
+    eml_register_subject: str = ""
+    eml_address_type: int = 1
+    eml_reply_to_address: bool = False
 
     # Embedding
     embed_api_key: Optional[str] = None
@@ -73,6 +91,9 @@ class StartupConfig:
 
     # Trace
     trace_jaeger_endpoint: Optional[str] = None
+    trace_jaeger_ui_url: str = "http://127.0.0.1:30051/jaeger"
+    trace_jaeger_public_url: str = "http://127.0.0.1:30051/jaeger"
+    trace_jaeger_base_path: str = "/api/observability/jaeger"
 
 
 class ENV:
@@ -94,6 +115,10 @@ class ENV:
 
     # Trace
     TRACE_JAEGER_URL = "SAGE_TRACE_JAEGER_URL"
+    TRACE_JAEGER_ENDPOINT = "SAGE_TRACE_JAEGER_ENDPOINT"
+    TRACE_JAEGER_UI_URL = "SAGE_TRACE_JAEGER_UI_URL"
+    TRACE_JAEGER_PUBLIC_URL = "SAGE_TRACE_JAEGER_PUBLIC_URL"
+    TRACE_JAEGER_BASE_PATH = "SAGE_TRACE_JAEGER_BASE_PATH"
 
     # 服务器与运行配置
     PORT = "SAGE_PORT"
@@ -119,10 +144,27 @@ class ENV:
     KB_MCP_URL = "SAGE_KB_MCP_URL"
     KB_MCP_API_KEY = "SAGE_KB_MCP_API_KEY"
 
+    AUTH_PROVIDERS = "SAGE_AUTH_PROVIDERS"
     JWT_KEY = "SAGE_JWT_KEY"
     JWT_EXPIRE_HOURS = "SAGE_JWT_EXPIRE_HOURS"
     REFRESH_TOKEN_SECRET = "SAGE_REFRESH_TOKEN_SECRET"
-
+    SESSION_SECRET = "SAGE_SESSION_SECRET"
+    SESSION_COOKIE_NAME = "SAGE_SESSION_COOKIE_NAME"
+    SESSION_COOKIE_SECURE = "SAGE_SESSION_COOKIE_SECURE"
+    SESSION_COOKIE_SAME_SITE = "SAGE_SESSION_COOKIE_SAME_SITE"
+    WEB_BASE_PATH = "SAGE_WEB_BASE_PATH"
+    OAUTH2_CLIENTS = "SAGE_OAUTH2_CLIENTS"
+    OAUTH2_ISSUER = "SAGE_OAUTH2_ISSUER"
+    OAUTH2_ACCESS_TOKEN_EXPIRES_IN = "SAGE_OAUTH2_ACCESS_TOKEN_EXPIRES_IN"
+    EML_ENDPOINT = "SAGE_EML_ENDPOINT"
+    EML_ACCESS_KEY_ID = "SAGE_EML_ACCESS_KEY_ID"
+    EML_ACCESS_KEY_SECRET = "SAGE_EML_ACCESS_KEY_SECRET"
+    EML_SECURITY_TOKEN = "SAGE_EML_SECURITY_TOKEN"
+    EML_ACCOUNT_NAME = "SAGE_EML_ACCOUNT_NAME"
+    EML_TEMPLATE_ID = "SAGE_EML_TEMPLATE_ID"
+    EML_REGISTER_SUBJECT = "SAGE_EML_REGISTER_SUBJECT"
+    EML_ADDRESS_TYPE = "SAGE_EML_ADDRESS_TYPE"
+    EML_REPLY_TO_ADDRESS = "SAGE_EML_REPLY_TO_ADDRESS"
     MYSQL_HOST = "SAGE_MYSQL_HOST"
     MYSQL_PORT = "SAGE_MYSQL_PORT"
     MYSQL_USER = "SAGE_MYSQL_USER"
@@ -242,6 +284,10 @@ def build_startup_config() -> StartupConfig:
             ENV.CONTEXT_RECENT_TURNS,
             StartupConfig.context_recent_turns,
         ),
+        auth_providers_json=env_str(
+            ENV.AUTH_PROVIDERS,
+            StartupConfig.auth_providers_json,
+        ),
         jwt_key=env_str(ENV.JWT_KEY, StartupConfig.jwt_key),
         jwt_expire_hours=env_int(
             ENV.JWT_EXPIRE_HOURS, StartupConfig.jwt_expire_hours
@@ -249,6 +295,74 @@ def build_startup_config() -> StartupConfig:
         refresh_token_secret=env_str(
             ENV.REFRESH_TOKEN_SECRET,
             StartupConfig.refresh_token_secret,
+        ),
+        session_secret=env_str(
+            ENV.SESSION_SECRET,
+            StartupConfig.session_secret,
+        ),
+        session_cookie_name=env_str(
+            ENV.SESSION_COOKIE_NAME,
+            StartupConfig.session_cookie_name,
+        ),
+        session_cookie_secure=env_bool(
+            ENV.SESSION_COOKIE_SECURE,
+            StartupConfig.session_cookie_secure,
+        ),
+        session_cookie_same_site=(env_str(
+            ENV.SESSION_COOKIE_SAME_SITE,
+            StartupConfig.session_cookie_same_site,
+        ) or StartupConfig.session_cookie_same_site).strip().lower(),
+        web_base_path=env_str(
+            ENV.WEB_BASE_PATH,
+            StartupConfig.web_base_path,
+        ),
+        oauth2_clients_json=env_str(
+            ENV.OAUTH2_CLIENTS,
+            StartupConfig.oauth2_clients_json,
+        ),
+        oauth2_issuer=env_str(
+            ENV.OAUTH2_ISSUER,
+            StartupConfig.oauth2_issuer,
+        ),
+        oauth2_access_token_expires_in=env_int(
+            ENV.OAUTH2_ACCESS_TOKEN_EXPIRES_IN,
+            StartupConfig.oauth2_access_token_expires_in,
+        ),
+        eml_endpoint=env_str(
+            ENV.EML_ENDPOINT,
+            StartupConfig.eml_endpoint,
+        ) or StartupConfig.eml_endpoint,
+        eml_access_key_id=env_str(
+            ENV.EML_ACCESS_KEY_ID,
+            StartupConfig.eml_access_key_id,
+        ),
+        eml_access_key_secret=env_str(
+            ENV.EML_ACCESS_KEY_SECRET,
+            StartupConfig.eml_access_key_secret,
+        ),
+        eml_security_token=env_str(
+            ENV.EML_SECURITY_TOKEN,
+            StartupConfig.eml_security_token,
+        ),
+        eml_account_name=env_str(
+            ENV.EML_ACCOUNT_NAME,
+            StartupConfig.eml_account_name,
+        ),
+        eml_template_id=env_str(
+            ENV.EML_TEMPLATE_ID,
+            StartupConfig.eml_template_id,
+        ),
+        eml_register_subject=env_str(
+            ENV.EML_REGISTER_SUBJECT,
+            StartupConfig.eml_register_subject,
+        ) or StartupConfig.eml_register_subject,
+        eml_address_type=env_int(
+            ENV.EML_ADDRESS_TYPE,
+            StartupConfig.eml_address_type,
+        ) or StartupConfig.eml_address_type,
+        eml_reply_to_address=env_bool(
+            ENV.EML_REPLY_TO_ADDRESS,
+            StartupConfig.eml_reply_to_address,
         ),
         embed_api_key=env_str(
             ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key
@@ -293,9 +407,38 @@ def build_startup_config() -> StartupConfig:
         ),
         trace_jaeger_endpoint=env_str(
             ENV.TRACE_JAEGER_URL,
-            StartupConfig.trace_jaeger_endpoint,
+            env_str(
+                ENV.TRACE_JAEGER_ENDPOINT,
+                StartupConfig.trace_jaeger_endpoint,
+            ),
+        ),
+        trace_jaeger_ui_url=env_str(
+            ENV.TRACE_JAEGER_UI_URL,
+            StartupConfig.trace_jaeger_ui_url,
+        ),
+        trace_jaeger_public_url=env_str(
+            ENV.TRACE_JAEGER_PUBLIC_URL,
+            StartupConfig.trace_jaeger_public_url,
+        ),
+        trace_jaeger_base_path=env_str(
+            ENV.TRACE_JAEGER_BASE_PATH,
+            StartupConfig.trace_jaeger_base_path,
         ),
     )
+    cfg.session_cookie_same_site = (
+        (cfg.session_cookie_same_site or StartupConfig.session_cookie_same_site)
+        .strip()
+        .lower()
+    )
+    if cfg.session_cookie_same_site not in {"lax", "strict", "none"}:
+        cfg.session_cookie_same_site = StartupConfig.session_cookie_same_site
+    if cfg.web_base_path:
+        cfg.web_base_path = "/" + cfg.web_base_path.strip("/")
+    else:
+        cfg.web_base_path = StartupConfig.web_base_path
+    if cfg.trace_jaeger_base_path:
+        cfg.trace_jaeger_base_path = "/" + cfg.trace_jaeger_base_path.strip("/")
+
     # 规范化路径
     if cfg.session_dir:
         cfg.session_dir = os.path.abspath(cfg.session_dir)

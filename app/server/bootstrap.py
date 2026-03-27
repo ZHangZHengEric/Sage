@@ -12,8 +12,8 @@ from sagents.skill import SkillManager, set_skill_manager
 from sagents.tool.tool_manager import ToolManager, set_tool_manager
 from sagents.session_runtime import initialize_global_session_manager
 
-from .core.client.chat import close_chat_client, init_chat_client
 from .core.client.db import close_db_client, init_db_client
+from .core.client.eml import close_eml_client, init_eml_client
 from .core.client.embed import close_embed_client, init_embed_client
 from .core.client.es import close_es_client, init_es_client
 from .core.client.s3 import close_s3_client, init_s3_client
@@ -33,31 +33,19 @@ async def initialize_db_connection(cfg: StartupConfig):
 
 async def initialize_global_clients(cfg: StartupConfig):
     try:
+        eml_client = await init_eml_client(cfg)
+        if eml_client is not None:
+            logger.info("邮件客户端已初始化")
+    except Exception as e:
+        logger.error(f"邮件客户端初始化失败: {e}")
+
+    try:
         s3_client = await init_s3_client(cfg)
         if s3_client is not None:
             logger.info("RustFS 客户端已初始化")
     except Exception as e:
         logger.error(f"RustFS 初始化失败: {e}")
-
-    try:
-        # Load default provider settings first
-        from .models.llm_provider import LLMProviderDao
-        llm_dao = LLMProviderDao()
-        default_provider = await llm_dao.get_default()
-
-        api_key = default_provider.api_keys[0] if default_provider.api_keys else None
-        base_url = default_provider.base_url 
-        model_name = default_provider.model
-        chat_client = await init_chat_client(
-            api_key=api_key,
-            base_url=base_url,
-            model_name=model_name,
-        )
-        if chat_client is not None:
-            logger.info("LLM Chat 客户端已初始化")
-    except Exception as e:
-        logger.error(f"LLM Chat 初始化失败: {e}")
-
+        
     try:
         api_key = cfg.embed_api_key or cfg.default_llm_api_key
         base_url = cfg.embed_base_url or cfg.default_llm_api_base_url
@@ -247,6 +235,10 @@ async def shutdown_clients():
     """关闭所有第三方客户端"""
     # 关闭第三方客户端
     try:
+        await close_eml_client()
+    finally:
+        logger.info("邮件客户端 已关闭")
+    try:
         await close_s3_client()
     finally:
         logger.info("RustFS客户端 已关闭")
@@ -272,6 +264,7 @@ async def ensure_system_init(cfg: StartupConfig):
     """Ensure system tables and default data exist."""
     from . import models
     from .services.user import _hash_password
+    from .services.auth.oauth2_provider import sync_oauth2_clients
     from .utils.id import gen_id
     from .core.client.db import get_global_db, sync_database_schema
 
@@ -307,13 +300,18 @@ async def ensure_system_init(cfg: StartupConfig):
         await user_dao.save(admin_user)
         logger.info(f"初始化默认管理员用户. 用户名: admin, 密码: {admin_password}")
 
+    await sync_oauth2_clients()
+    logger.debug("OAuth2 Clients 配置同步完成")
+
     dao = models.LLMProviderDao()
     default_provider = await dao.get_default()
     if not cfg.default_llm_api_key or not cfg.default_llm_api_base_url:
         logger.warning("Environment variables for default LLM provider missing. Skipping default provider creation.")
         return
-    # Split keys if comma separated
-    keys = [k.strip() for k in cfg.default_llm_api_key.split(",") if k.strip()]
+    api_key = cfg.default_llm_api_key.strip()
+    if not api_key:
+        logger.warning("Default LLM API key is empty after trimming. Skipping default provider creation.")
+        return
     # Models
     model = cfg.default_llm_model_name or "gpt-4o"
     base_url = cfg.default_llm_api_base_url or "https://api.openai.com/v1"
@@ -329,7 +327,7 @@ async def ensure_system_init(cfg: StartupConfig):
             id=provider_id, 
             name="Default LLM Provider", 
             base_url=base_url, 
-            api_keys=keys, 
+            api_keys=[api_key], 
             model=model, 
             is_default=True, 
             user_id="",
@@ -344,7 +342,7 @@ async def ensure_system_init(cfg: StartupConfig):
     else:
         logger.debug("Default LLM Provider already exists. need update.")
         default_provider.base_url = base_url
-        default_provider.api_keys = keys
+        default_provider.api_keys = [api_key]
         default_provider.model = model
         default_provider.max_tokens = max_tokens
         default_provider.temperature = temperature

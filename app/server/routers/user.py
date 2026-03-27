@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Path, Query, Request
+from fastapi.responses import RedirectResponse
 
 from ..core.render import Response
 from ..schemas.base import BaseResponse
@@ -7,6 +8,8 @@ from ..schemas.user import (
     LoginResponse,
     RegisterRequest,
     RegisterResponse,
+    RegisterVerificationCodeRequest,
+    RegisterVerificationCodeResponse,
     UserInfoResponse,
     UserListResponse,
     UserDTO,
@@ -18,13 +21,24 @@ from ..schemas.user import (
 )
 from ..models.user import UserConfigDao
 from ..services.user import (
-    login_user,
+    authenticate_user,
+    build_user_claims,
+    create_login_tokens,
     register_user,
+    send_register_verification_code,
     get_user_list,
     delete_user,
     add_user,
     change_password,
     get_user_options,
+)
+from ..services.auth.external_oauth import (
+    build_oauth_authorize_url,
+    clear_auth_session,
+    complete_oauth_login,
+    get_auth_providers,
+    get_default_oidc_provider,
+    is_local_auth_enabled,
 )
 from ..models.llm_provider import LLMProviderDao
 from ..models.agent import AgentConfigDao
@@ -48,17 +62,50 @@ async def user_options(request: Request):
     return await Response.succ(data=options, message="获取用户列表成功")
 
 
+@user_router.post("/register/send-code", response_model=BaseResponse[RegisterVerificationCodeResponse])
+async def send_register_code(req: RegisterVerificationCodeRequest):
+    if not is_local_auth_enabled():
+        return await Response.error(
+            code=400,
+            message="当前服务未启用本地账号注册",
+            error_detail="local auth disabled",
+        )
+    expires_in, retry_after = await send_register_verification_code(req.email)
+    return await Response.succ(
+        data=RegisterVerificationCodeResponse(expires_in=expires_in, retry_after=retry_after),
+        message="验证码发送成功",
+    )
+
+
 @user_router.post("/register", response_model=BaseResponse[RegisterResponse])
 async def register(req: RegisterRequest):
-    user_id = await register_user(req.username, req.password, req.email, req.phonenum)
+    if not is_local_auth_enabled():
+        return await Response.error(
+            code=400,
+            message="当前服务未启用本地账号注册",
+            error_detail="local auth disabled",
+        )
+    user_id = await register_user(
+        req.username,
+        req.password,
+        req.email,
+        req.phonenum,
+        req.verification_code,
+    )
     return await Response.succ(data=RegisterResponse(user_id=user_id), message="注册成功")
 
 
 @user_router.post("/login", response_model=BaseResponse[LoginResponse])
-async def login(req: LoginRequest):
-    access_token, refresh_token, expires_in = await login_user(
-        req.username_or_email, req.password
-    )
+async def login(request: Request, req: LoginRequest):
+    if not is_local_auth_enabled():
+        return await Response.error(
+            code=400,
+            message="当前服务未启用本地账号密码登录",
+            error_detail="local auth disabled",
+        )
+    user = await authenticate_user(req.username_or_email, req.password)
+    access_token, refresh_token, expires_in = create_login_tokens(user)
+    request.session["user_claims"] = build_user_claims(user)
     return await Response.succ(
         data=LoginResponse(
             access_token=access_token,
@@ -67,6 +114,73 @@ async def login(req: LoginRequest):
         ),
         message="登录成功",
     )
+
+
+@user_router.get("/auth-providers", response_model=BaseResponse[list])
+async def auth_providers():
+    return await Response.succ(
+        data=get_auth_providers(include_internal=False),
+        message="获取认证 Providers 成功",
+    )
+
+
+@user_router.get("/oauth/login/{provider_id}")
+async def oauth_login(
+    request: Request,
+    provider_id: str = Path(...),
+    next: str = Query(default="/agent/chat"),
+    redirect_uri: str | None = Query(default=None),
+):
+    authorize_url = await build_oauth_authorize_url(
+        request=request,
+        provider_id=provider_id,
+        next_url=next,
+        redirect_uri=redirect_uri,
+    )
+    return RedirectResponse(url=authorize_url, status_code=302)
+
+
+@user_router.get("/oauth/login")
+async def oauth_login_default(
+    request: Request,
+    next: str = Query(default="/agent/chat"),
+    redirect_uri: str | None = Query(default=None),
+):
+    provider = get_default_oidc_provider()
+    if not provider:
+        return await Response.error(
+            code=404,
+            message="未配置可用的 OAuth Provider",
+            error_detail="no oauth provider configured",
+        )
+    authorize_url = await build_oauth_authorize_url(
+        request=request,
+        provider_id=provider["id"],
+        next_url=next,
+        redirect_uri=redirect_uri,
+    )
+    return RedirectResponse(url=authorize_url, status_code=302)
+
+
+@user_router.get("/oauth/callback/{provider_id}")
+async def oauth_callback(
+    request: Request,
+    provider_id: str = Path(...),
+    code: str = Query(...),
+    state: str = Query(...),
+):
+    try:
+        _, next_url = await complete_oauth_login(request, provider_id, code, state)
+        return RedirectResponse(url=next_url, status_code=302)
+    except Exception:
+        clear_auth_session(request)
+        raise
+
+
+@user_router.post("/logout", response_model=BaseResponse[dict])
+async def logout(request: Request):
+    clear_auth_session(request)
+    return await Response.succ(data={}, message="退出成功")
 
 
 @user_router.get("/check_login", response_model=BaseResponse[UserInfoResponse])
@@ -78,8 +192,6 @@ async def check_login(request: Request):
         )
         
     user_id = claims.get("userid")
-    role = claims.get("role") or "user"
-    
     # Check Provider
     provider_dao = LLMProviderDao()
     providers = await provider_dao.get_list(user_id=user_id)
