@@ -638,22 +638,37 @@
               <!-- IM Provider Config -->
               <div v-for="provider in imProviders" :key="provider.key">
                 <div v-if="activeIMProvider === provider.key" class="space-y-4">
-                  <!-- Enable Switch -->
+                  <!-- Test & Enable Row (for wechat_personal: test first, then enable) -->
                   <div class="flex items-center justify-between p-4 bg-card rounded-lg border">
                     <div class="space-y-1">
                       <Label class="text-base">启用 {{ provider.label }}</Label>
                       <p class="text-sm text-muted-foreground">
                         <span v-if="provider.key === 'imessage' && !isDefaultAgent" class="text-yellow-600">iMessage 只能配置在默认智能体上</span>
+                        <span v-else-if="provider.key === 'wechat_personal'" class="text-yellow-600">先点击测试连接，测试成功后再启动</span>
                         <span v-else-if="imTestStatus[provider.key]?.tested && !imTestStatus[provider.key]?.passed" class="text-red-600">测试失败，请检查配置后重新测试</span>
                         <span v-else-if="!imTestStatus[provider.key]?.passed" class="text-yellow-600">请先填写配置并通过测试连接后才能启用</span>
                         <span v-else>允许Agent通过{{ provider.label }}与用户交互</span>
                       </p>
                     </div>
-                    <Switch 
-                      :checked="imConfig[provider.key]?.enabled"
-                      @update:checked="(val) => handleEnableSwitch(provider.key, val)"
-                      :disabled="provider.key === 'imessage' ? !isDefaultAgent : !imTestStatus[provider.key]?.passed"
-                    />
+                    <div class="flex items-center gap-3">
+                      <!-- Test Button -->
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        @click="testIMConnection(provider.key)"
+                        :disabled="testingIM[provider.key] || (!imEditMode[provider.key] && imTestStatus[provider.key]?.passed)"
+                      >
+                        <Loader v-if="testingIM[provider.key]" class="mr-2 h-4 w-4 animate-spin" />
+                        <Play v-else class="mr-2 h-4 w-4" />
+                        {{ imTestStatus[provider.key]?.passed && !imEditMode[provider.key] ? '已测试' : '测试连接' }}
+                      </Button>
+                      <!-- Enable Switch -->
+                      <Switch 
+                        :checked="imConfig[provider.key]?.enabled"
+                        @update:checked="(val) => handleEnableSwitch(provider.key, val)"
+                        :disabled="provider.key === 'imessage' ? !isDefaultAgent : !imTestStatus[provider.key]?.passed"
+                      />
+                    </div>
                   </div>
 
                   <!-- Config Fields (always visible, editable only in edit mode or when not frozen) -->
@@ -869,20 +884,6 @@
                         </div>
                       </div>
                     </template>
-
-                    <!-- Test Connection Button -->
-                    <div class="flex gap-2 pt-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        @click="testIMConnection(provider.key)"
-                        :disabled="testingIM[provider.key] || (!imEditMode[provider.key] && imTestStatus[provider.key]?.passed)"
-                      >
-                        <Loader v-if="testingIM[provider.key]" class="mr-2 h-4 w-4 animate-spin" />
-                        <Play v-else class="mr-2 h-4 w-4" />
-                        {{ imTestStatus[provider.key]?.passed && !imEditMode[provider.key] ? '已测试' : '测试连接' }}
-                      </Button>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -1321,7 +1322,44 @@ const isConfigFrozen = (provider) => {
 }
 
 // 处理启用开关切换
-const handleEnableSwitch = (provider, value) => {
+// 保存单个 IM Channel 配置到后端
+const saveIMChannelConfig = async (provider) => {
+  const data = imConfig.value[provider]
+  if (!data) return false
+  
+  try {
+    // Prepare IM channels config (only this provider)
+    const imChannels = {}
+    let config = { ...data.config }
+    
+    // Convert allowed_senders_text to array for iMessage
+    if (provider === 'imessage' && config.allowed_senders_text) {
+      config.allowed_senders = config.allowed_senders_text
+        .split('\n')
+        .map(s => s.trim())
+        .filter(s => s)
+      delete config.allowed_senders_text
+    }
+    
+    imChannels[provider] = {
+      enabled: data.enabled,
+      config: config
+    }
+    
+    console.log(`[AgentEdit] Saving ${provider} config:`, imChannels)
+    
+    // Call API to save (注意路由前缀是 /api/im)
+    await request.post(`/api/im/agent/${store.formData.id}/im_channels`, imChannels)
+    console.log(`[AgentEdit] ${provider} config saved successfully`)
+    return true
+  } catch (e) {
+    console.error(`[AgentEdit] Failed to save ${provider} config:`, e)
+    alert(`保存 ${imProviders.find(p => p.key === provider)?.label} 配置失败: ${e.message}`)
+    return false
+  }
+}
+
+const handleEnableSwitch = async (provider, value) => {
   if (value) {
     // 尝试启用，检查测试状态和配置是否被修改
     if (!imTestStatus.value[provider]?.passed) {
@@ -1340,12 +1378,26 @@ const handleEnableSwitch = (provider, value) => {
       return
     }
   }
-  // 关闭开关不需要检查
+  
+  // 更新本地状态
   imConfig.value = {
     ...imConfig.value,
     [provider]: {
       ...imConfig.value[provider],
       enabled: value
+    }
+  }
+  
+  // 自动保存到后端（开或关都保存）
+  const saved = await saveIMChannelConfig(provider)
+  if (!saved && value) {
+    // 如果保存失败且是开启操作，回滚状态
+    imConfig.value = {
+      ...imConfig.value,
+      [provider]: {
+        ...imConfig.value[provider],
+        enabled: false
+      }
     }
   }
 }
