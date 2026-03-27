@@ -268,7 +268,7 @@ async def delete(agent_id: str, http_request: Request):
 
 
 @agent_router.post("/auto-generate")
-async def auto_generate(request: AutoGenAgentRequest):
+async def auto_generate(request: AutoGenAgentRequest, http_request: Request):
     """
     自动生成Agent
 
@@ -276,9 +276,12 @@ async def auto_generate(request: AutoGenAgentRequest):
         request: 自动生成Agent请求
 
     """
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
     agent_config = await auto_generate_agent(
         agent_description=request.agent_description,
         available_tools=request.available_tools,
+        user_id=user_id,
     )
     return await Response.succ(
         data=agent_config, message="Agent自动生成成功"
@@ -286,7 +289,7 @@ async def auto_generate(request: AutoGenAgentRequest):
 
 
 @agent_router.post("/system-prompt/optimize")
-async def optimize(request: SystemPromptOptimizeRequest):
+async def optimize(request: SystemPromptOptimizeRequest, http_request: Request):
     """
     优化系统提示词
 
@@ -296,9 +299,12 @@ async def optimize(request: SystemPromptOptimizeRequest):
     Returns:
         StandardResponse: 包含优化后的系统提示词的标准响应
     """
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
     res = await optimize_system_prompt(
         original_prompt=request.original_prompt,
         optimization_goal=request.optimization_goal,
+        user_id=user_id,
     )
     return await Response.succ(data=res, message="系统提示词优化成功")
 

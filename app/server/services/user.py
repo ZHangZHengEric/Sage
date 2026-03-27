@@ -9,6 +9,11 @@ from loguru import logger
 from .. import models
 from ..core import config
 from ..core.exceptions import SageHTTPException
+from .auth.email_verification import (
+    normalize_email,
+    send_register_email_code,
+    verify_register_email_code,
+)
 from ..utils.id import gen_id
 
 ph = PasswordHasher()
@@ -32,14 +37,8 @@ def _gen_tokens(user: models.User) -> Tuple[str, str, int]:
     cfg = config.get_startup_config()
     exp_seconds = int(cfg.jwt_expire_hours) * 60 * 60
     now = int(time.time())
-    access_claims = {
-        "userid": user.user_id,
-        "username": user.username,
-        "phonenum": user.phonenum or "",
-        "email": user.email or "",
-        "role": user.role,
-        "exp": now + exp_seconds,
-    }
+    access_claims = build_user_claims(user)
+    access_claims["exp"] = now + exp_seconds
     refresh_claims = {
         "uid": user.user_id,
         "nonce": gen_id()[:8],
@@ -52,11 +51,33 @@ def _gen_tokens(user: models.User) -> Tuple[str, str, int]:
     return access_token, refresh_token, exp_seconds
 
 
+def hash_password(password: str) -> str:
+    return _hash_password(password)
+
+
+def create_login_tokens(user: models.User) -> Tuple[str, str, int]:
+    return _gen_tokens(user)
+
+
+def build_user_claims(user: models.User) -> Dict[str, str]:
+    return {
+        "userid": user.user_id,
+        "username": user.username,
+        "nickname": user.nickname or user.username,
+        "phonenum": user.phonenum or "",
+        "email": user.email or "",
+        "role": user.role,
+        "avatar": user.avatar_url or "",
+        "avatar_url": user.avatar_url or "",
+    }
+
+
 async def register_user(
     username: str,
     password: str,
     email: Optional[str] = None,
     phonenum: Optional[str] = None,
+    verification_code: Optional[str] = None,
 ) -> str:
     # Check if registration is allowed
     sys_dao = models.SystemInfoDao()
@@ -64,6 +85,12 @@ async def register_user(
     if allow_reg == "false":
         raise SageHTTPException(
             status_code=500, detail="系统不允许自注册", error_detail="registration disabled"
+        )
+
+    email = normalize_email(email)
+    if not email:
+        raise SageHTTPException(
+            status_code=400, detail="注册必须填写邮箱", error_detail="email is required"
         )
 
     dao = models.UserDao()
@@ -78,6 +105,9 @@ async def register_user(
             raise SageHTTPException(
                 status_code=500, detail="邮箱已存在", error_detail=email
             )
+
+    await verify_register_email_code(email, verification_code or "")
+
     user_id = gen_id()
     password_hash = _hash_password(password)
     user = models.User(
@@ -92,7 +122,36 @@ async def register_user(
     return user_id
 
 
+async def send_register_verification_code(email: str) -> tuple[int, int]:
+    sys_dao = models.SystemInfoDao()
+    allow_reg = await sys_dao.get_by_key("allow_registration")
+    if allow_reg == "false":
+        raise SageHTTPException(
+            status_code=500, detail="系统不允许自注册", error_detail="registration disabled"
+        )
+
+    normalized_email = normalize_email(email)
+    if not normalized_email:
+        raise SageHTTPException(
+            status_code=400, detail="请输入邮箱地址", error_detail="email is required"
+        )
+
+    dao = models.UserDao()
+    existing_email = await dao.get_by_email(normalized_email)
+    if existing_email:
+        raise SageHTTPException(
+            status_code=500, detail="邮箱已存在", error_detail=normalized_email
+        )
+
+    return await send_register_email_code(normalized_email)
+
+
 async def login_user(username_or_email: str, password: str) -> Tuple[str, str, int]:
+    user = await authenticate_user(username_or_email, password)
+    return create_login_tokens(user)
+
+
+async def authenticate_user(username_or_email: str, password: str) -> models.User:
     dao = models.UserDao()
     user = await dao.get_by_username(username_or_email)
     if not user and "@" in username_or_email:
@@ -100,7 +159,7 @@ async def login_user(username_or_email: str, password: str) -> Tuple[str, str, i
 
     if not user or not _verify_password(password, user.password_hash):
         raise SageHTTPException(detail="用户名或密码错误", error_detail="invalid credentials")
-    return _gen_tokens(user)
+    return user
 
 
 async def change_password(user_id: str, old_password: str, new_password: str) -> None:
@@ -143,6 +202,7 @@ async def add_user(
     email: Optional[str] = None,
     phonenum: Optional[str] = None,
 ) -> str:
+    email = normalize_email(email) or None
     dao = models.UserDao()
     existing = await dao.get_by_username(username)
     if existing:

@@ -109,7 +109,7 @@ async def populate_request_from_agent_config(request: StreamRequest, *, require_
     if provider_id: # 有指定则全量替换
         provider = await provider_dao.get_by_id(provider_id)
         request.llm_model_config["base_url"] = provider.base_url
-        request.llm_model_config["api_key"] = ",".join(provider.api_keys)
+        request.llm_model_config["api_key"] = provider.api_key
         request.llm_model_config["model"] = provider.model
         request.llm_model_config["max_tokens"] = provider.max_tokens
         request.llm_model_config["temperature"] = provider.temperature
@@ -121,7 +121,7 @@ async def populate_request_from_agent_config(request: StreamRequest, *, require_
         if request.llm_model_config.get("base_url") is None:
             request.llm_model_config["base_url"] = provider.base_url
         if request.llm_model_config.get("api_key") is None:
-            request.llm_model_config["api_key"] = ",".join(provider.api_keys)
+            request.llm_model_config["api_key"] = provider.api_key
         if request.llm_model_config.get("model") is None:
             request.llm_model_config["model"] = provider.model
         if request.llm_model_config.get("max_tokens") is None:
@@ -306,9 +306,10 @@ class SageStreamService:
         self.request = request
         # 4. 路径处理 (提前计算，供后续使用)
         cfg = get_startup_config()
-        # agent工作空间由 agent_dir + user_id
+        # agent工作空间由 agent_dir + user_id + agent_id来。 如果user_id 为空。用 default_user 如果agent_id 为空，用 随机8位英文字母
         user_id = self.request.user_id or "default_user"
-        self.agent_workspace = os.path.join(cfg.agents_dir, user_id)
+        agent_id = self.request.agent_id or ''.join(random.choices(string.ascii_letters, k=8))
+        self.agent_workspace = os.path.join(cfg.agents_dir, user_id, agent_id)
 
         # 创建 workspace 目录并复制 sage-usage-docs
         os.makedirs(self.agent_workspace, exist_ok=True)
@@ -493,7 +494,7 @@ async def _check_and_update_agent_skills(request: StreamRequest, original_skills
         agent_id = request.agent_id
 
         # 获取agent工作空间下的实际skills
-        agent_skills_path = os.path.join(cfg.agents_dir, user_id, "skills")
+        agent_skills_path = os.path.join(cfg.agents_dir, user_id, agent_id, "skills")
         
         actual_skills = set()
         if os.path.exists(agent_skills_path) and os.path.isdir(agent_skills_path):
