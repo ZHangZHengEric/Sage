@@ -977,6 +977,9 @@ class IMServiceManager:
             from .providers.wechat_ilink import WeChatPersonalPoller
             
             bot_token = config.get('bot_token')
+            bot_id = config.get('bot_id')
+            logger.info(f"[ServiceManager] WeChat Personal config: bot_id={bot_id}, bot_token={'***' if bot_token else 'MISSING'}")
+            
             if not bot_token:
                 raise ValueError("WeChat Personal bot_token required")
             
