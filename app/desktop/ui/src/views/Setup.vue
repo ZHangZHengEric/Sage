@@ -406,6 +406,15 @@ const currentStepDescription = computed(() => {
   return '正在检查系统状态...'
 })
 
+const redirectToFreshChat = () => {
+  router.replace({
+    name: 'Chat',
+    query: {
+      reload_new_chat: Date.now()
+    }
+  })
+}
+
 const fetchSystemInfo = async () => {
   try {
     const res = await systemAPI.getSystemInfo()
@@ -418,7 +427,7 @@ const fetchSystemInfo = async () => {
         step.value = 'welcome'
       }
     } else {
-      router.replace('/')
+      redirectToFreshChat()
     }
   } catch (error) {
     console.error('Failed to fetch system info:', error)
@@ -433,7 +442,7 @@ const handleWelcomeNext = () => {
   } else if (!systemStatus.value.has_agent) {
     createDefaultAgent()
   } else {
-    router.replace('/')
+    redirectToFreshChat()
   }
 }
 
@@ -539,7 +548,7 @@ const createDefaultAgent = async (providerId = null) => {
     }
     
     await agentAPI.createAgent(agentData)
-    router.replace('/')
+    redirectToFreshChat()
   } catch (error) {
     console.error('Failed to create agent:', error)
     toast.error('创建默认 Agent 失败: ' + error.message)
