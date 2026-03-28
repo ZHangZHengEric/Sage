@@ -22,6 +22,7 @@ from ..services.agent import (
     create_agent,
     delete_agent,
     get_agent,
+    import_openclaw_agent,
     list_agents,
     optimize_system_prompt,
     update_agent,
@@ -249,6 +250,20 @@ async def create(agent: AgentConfigDTO, http_request: Request):
     return await Response.succ(
         data={"agent_id": created_agent.agent_id}, message=f"Agent '{created_agent.agent_id}' 创建成功"
     )
+
+
+@agent_router.post("/import-openclaw")
+async def import_openclaw(http_request: Request):
+    """一键导入 OpenClaw 数据并创建对应 Agent。"""
+    result = await import_openclaw_agent()
+
+    skill_count = result.get("linked_skill_count", 0)
+    if skill_count > 0:
+        message = f"已导入 OpenClaw workspace，并关联 {skill_count} 个 skills"
+    else:
+        message = "已导入 OpenClaw workspace，未发现可关联的 skills"
+
+    return await Response.succ(data=result, message=message)
 
 
 @agent_router.get("/{agent_id}")

@@ -54,7 +54,7 @@ class MemoryTool:
                 return session_context.sandbox_agent_workspace
 
             # Fallback to default
-            return "/workspace"
+            return "/sage-workspace"
             
         except Exception as e:
             logger.error(f"MemoryTool: Get workspace failed: {e}")

@@ -353,6 +353,8 @@ class SessionContext:
         t0 = time.time()
 
         if sandbox_mode == SandboxType.REMOTE:
+            if not self.sandbox_agent_workspace:
+                self.sandbox_agent_workspace = "/sage-workspace"
             # 远程沙箱配置
             config = SandboxConfig(
                 sandbox_id=self.sandbox_id or self.user_id or self.session_id,
@@ -394,6 +396,8 @@ class SessionContext:
             )
 
         self.sandbox = SandboxProviderFactory.create(config)
+        if sandbox_mode == SandboxType.REMOTE:
+            self.sandbox_agent_workspace = self.sandbox.workspace_path
 
         logger.info(f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s")
         

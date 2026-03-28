@@ -110,6 +110,26 @@
                 </Select>
             </div>
 
+            <!-- OpenClaw Import -->
+            <div class="flex items-center justify-between py-4 border-b">
+                <div class="space-y-0.5">
+                    <Label class="text-base">{{ t('system.importOpenclaw') || '导入 OpenClaw' }}</Label>
+                    <p class="text-sm text-muted-foreground">
+                        {{ t('system.importOpenclawDesc') || '创建 openclaw的小龙虾，并导入 ~/.openclaw/workspace 与 skills' }}
+                    </p>
+                </div>
+                <Button 
+                    variant="outline" 
+                    size="sm"
+                    @click="handleImportOpenclaw"
+                    :disabled="importingOpenclaw"
+                >
+                    <Loader2 v-if="importingOpenclaw" class="w-4 h-4 mr-2 animate-spin" />
+                    <DownloadCloud v-else class="w-4 h-4 mr-2" />
+                    {{ importingOpenclaw ? (t('system.importingOpenclaw') || '导入中...') : (t('system.importOpenclawAction') || '一键导入') }}
+                </Button>
+            </div>
+
             <!-- Environment Variables Setting -->
             <div class="flex items-center justify-between py-4">
                 <div class="space-y-0.5">
@@ -280,6 +300,7 @@ import { useLanguage } from '../utils/i18n'
 import { useThemeStore } from '../stores/theme'
 import { useUserStore } from '../stores/user'
 import { useUpdaterStore } from '../stores/updater'
+import { agentAPI } from '../api/agent.js'
 import { invoke } from '@tauri-apps/api/core'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { Card } from '@/components/ui/card'
@@ -326,6 +347,7 @@ const showEnvDialog = ref(false)
 const showRestartDialog = ref(false)
 const envVars = ref([])
 const savingEnv = ref(false)
+const importingOpenclaw = ref(false)
 
 // 预设环境变量列表 - 只包含系统实际使用的
 const presetEnvVars = [
@@ -438,6 +460,33 @@ const restartApp = async () => {
 
 const checkForUpdates = () => {
   updaterStore.checkForUpdates()
+}
+
+const handleImportOpenclaw = async () => {
+  importingOpenclaw.value = true
+  try {
+    const result = await agentAPI.importOpenclaw()
+    const agentName = result?.agent_name || 'openclaw的小龙虾'
+    const skillCount = result?.linked_skill_count || 0
+    if (skillCount > 0) {
+      toast.success(
+        t('system.importOpenclawSuccessWithSkills', {
+          agent: agentName,
+          count: skillCount
+        }) || `${agentName} 导入成功，已关联 ${skillCount} 个 skills`
+      )
+    } else {
+      toast.success(
+        t('system.importOpenclawSuccessNoSkills', {
+          agent: agentName
+        }) || `${agentName} 导入成功，已导入 workspace，未发现可关联的 skills`
+      )
+    }
+  } catch (error) {
+    toast.error((t('system.importOpenclawError') || '导入 OpenClaw 失败') + ': ' + (error.message || error))
+  } finally {
+    importingOpenclaw.value = false
+  }
 }
 
 // 用户头像 URL

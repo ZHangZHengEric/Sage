@@ -48,10 +48,17 @@ class OpenSandboxProvider(RemoteSandboxProvider):
         timeout: timedelta = timedelta(minutes=30),
         workspace_mount: Optional[str] = None,
         mount_paths: Optional[List[MountPath]] = None,
+        virtual_workspace: str = "/sage-workspace",
         persistent: bool = True,
         sandbox_ttl: int = 3600,
     ):
-        super().__init__(sandbox_id, workspace_mount, mount_paths, timeout)
+        super().__init__(
+            sandbox_id=sandbox_id,
+            workspace_mount=workspace_mount,
+            mount_paths=mount_paths,
+            virtual_workspace=virtual_workspace,
+            timeout=timeout,
+        )
         self.server_url = server_url
         self.api_key = api_key
         self.image = image
@@ -403,11 +410,11 @@ class OpenSandboxProvider(RemoteSandboxProvider):
 
     async def ensure_directory(self, path: str) -> None:
         """确保目录存在"""
-        await self.execute_command(f"mkdir -p {path}")
+        await self.execute_command(f"mkdir -p {shlex.quote(path)}")
 
     async def delete_file(self, path: str) -> None:
         """删除文件"""
-        await self.execute_command(f"rm -rf {path}")
+        await self.execute_command(f"rm -rf {shlex.quote(path)}")
 
     async def upload_file(self, host_path: str, sandbox_path: str) -> None:
         """上传文件到远程沙箱"""
@@ -438,10 +445,14 @@ class OpenSandboxProvider(RemoteSandboxProvider):
             content = await self._sdk.files.read_file(sandbox_path)
 
         # 确保目录存在
-        os.makedirs(os.path.dirname(host_path), exist_ok=True)
+        host_dir = os.path.dirname(host_path)
+        if host_dir:
+            os.makedirs(host_dir, exist_ok=True)
+
+        data = content.encode("utf-8") if isinstance(content, str) else content
 
         with open(host_path, "wb") as f:
-            f.write(content)
+            f.write(data)
 
         logger.debug(f"OpenSandboxProvider: 下载文件 {sandbox_path} -> {host_path}")
 

@@ -124,11 +124,14 @@ class SandboxProviderFactory:
         elif config.mode == SandboxType.REMOTE:
             # 根据 remote_provider 选择具体的远程沙箱实现
             provider_class = cls._get_remote_provider(config.remote_provider)
+            provider_config = dict(config.remote_provider_config)
 
             # 构建通用参数
             common_kwargs = {
                 "sandbox_id": sandbox_id,
-                "volume_mounts": config.volume_mounts,
+                "workspace_mount": provider_config.pop("workspace_mount", None),
+                "mount_paths": config.volume_mounts,
+                "virtual_workspace": config.sandbox_agent_workspace or "/sage-workspace",
                 "timeout": timedelta(seconds=config.remote_timeout),
             }
 
@@ -143,18 +146,18 @@ class SandboxProviderFactory:
                     image=config.remote_image,
                     persistent=config.remote_persistent,
                     sandbox_ttl=config.remote_sandbox_ttl,
-                    **config.remote_provider_config
+                    **provider_config
                 )
 
             elif config.remote_provider == "kubernetes":
                 return provider_class(
                     **common_kwargs,
-                    namespace=config.remote_provider_config.get("namespace", "default"),
+                    namespace=provider_config.get("namespace", "default"),
                     image=config.remote_image,
-                    resources=config.remote_provider_config.get("resources", {}),
+                    resources=provider_config.get("resources", {}),
                     **{
                         k: v
-                        for k, v in config.remote_provider_config.items()
+                        for k, v in provider_config.items()
                         if k not in ["namespace", "resources"]
                     }
                 )
@@ -162,17 +165,17 @@ class SandboxProviderFactory:
             elif config.remote_provider == "firecracker":
                 return provider_class(
                     **common_kwargs,
-                    microvm_config=config.remote_provider_config.get("microvm_config", {}),
+                    microvm_config=provider_config.get("microvm_config", {}),
                     **{
                         k: v
-                        for k, v in config.remote_provider_config.items()
+                        for k, v in provider_config.items()
                         if k != "microvm_config"
                     }
                 )
 
             else:
                 # 自定义提供者，传递所有配置
-                return provider_class(**common_kwargs, **config.remote_provider_config)
+                return provider_class(**common_kwargs, **provider_config)
 
         else:  # PASSTHROUGH
             provider_class = cls._get_passthrough_provider()

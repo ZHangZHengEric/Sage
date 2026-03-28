@@ -6,7 +6,7 @@ Firecracker 微虚拟机沙箱实现
 
 import logging
 from datetime import timedelta
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .base import RemoteSandboxProvider
 from ...interface import CommandResult, ExecutionResult, FileInfo
@@ -25,8 +25,15 @@ class FirecrackerSandboxProvider(RemoteSandboxProvider):
         timeout: timedelta = timedelta(minutes=30),
         workspace_mount: Optional[str] = None,
         mount_paths: Optional[List[MountPath]] = None,
+        virtual_workspace: str = "/sage-workspace",
     ):
-        super().__init__(sandbox_id, workspace_mount, mount_paths, timeout)
+        super().__init__(
+            sandbox_id=sandbox_id,
+            workspace_mount=workspace_mount,
+            mount_paths=mount_paths,
+            virtual_workspace=virtual_workspace,
+            timeout=timeout,
+        )
         self.microvm_config = microvm_config
         self._vm_id = None
         self._firecracker_client = None

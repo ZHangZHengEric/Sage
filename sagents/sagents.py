@@ -125,7 +125,7 @@ class SAgent:
                 system_prefix="你是一个助手",
                 default_memory_type="session",
                 sandbox_type="remote",
-                sandbox_agent_workspace="/workspace",  # 远程沙箱内的工作路径
+                sandbox_agent_workspace="/sage-workspace",  # 远程沙箱内的工作路径
                 sandbox_id="opensandbox-abc123",  # 可选：连接已有沙箱
             ):
                 ...
@@ -156,9 +156,9 @@ class SAgent:
                 raise ValueError("local 沙箱模式需要提供 sandbox_agent_workspace 参数")
 
         elif effective_sandbox_type == "remote":
-            # remote 模式必须有 sandbox_id
-            if not sandbox_id:
-                raise ValueError("remote 沙箱模式需要 sandbox_id 参数")
+            # remote 模式默认使用远程工作区根目录；sandbox_id 可选，不传时由 SessionContext 回退生成
+            if not sandbox_agent_workspace:
+                sandbox_agent_workspace = "/sage-workspace"
 
         elif effective_sandbox_type == "passthrough":
             # passthrough 模式必须有 sandbox_agent_workspace
