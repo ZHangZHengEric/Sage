@@ -355,7 +355,6 @@ class LocalSandboxProvider(ISandboxHandle):
         if converted_command != command:
             logger.info(f"LocalSandboxProvider: Command path conversion: {command} -> {converted_command}")
 
-        logger.info(f"LocalSandboxProvider: Executing command in {actual_workdir}: {converted_command[:100]}{'...' if len(converted_command) > 100 else ''}")
 
         # 准备环境变量
         env = os.environ.copy()

@@ -283,7 +283,6 @@ class StreamManager:
                 next_index = idx + 1
                 yield chunk
         except asyncio.CancelledError:
-            logger.info(f"Client disconnected from session {session_id}")
             raise
         finally:
             session.subscribers.discard(queue)
