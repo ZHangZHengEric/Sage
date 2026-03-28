@@ -187,13 +187,63 @@ class AgentIMConfig:
         except Exception as e:
             logger.error(f"[AgentIMConfig] Failed to create config dir: {e}")
     
-    def _load_config(self) -> Dict:
+    def _load_config_from_db(self) -> Optional[Dict]:
         """
-        Load configuration from file.
+        Load configuration from database.
         
         Returns:
-            Configuration dict. Returns empty structure if file doesn't exist.
+            Configuration dict if found in database, None otherwise.
         """
+        try:
+            import asyncio
+            from app.desktop.core.models.agent import AgentConfigDao
+            
+            dao = AgentConfigDao()
+            
+            # Run async query in sync context
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(asyncio.run, dao.get_by_id(self.agent_id))
+                        agent = future.result(timeout=5)
+                else:
+                    agent = asyncio.run(dao.get_by_id(self.agent_id))
+            except RuntimeError:
+                agent = asyncio.run(dao.get_by_id(self.agent_id))
+            
+            if agent and hasattr(agent, 'config') and agent.config:
+                import json
+                config = agent.config
+                if isinstance(config, str):
+                    config = json.loads(config)
+                im_channels = config.get('im_channels', {})
+                if im_channels:
+                    logger.debug(f"[AgentIMConfig] Loaded config from database for agent={self.agent_id}")
+                    return {
+                        "agent_id": self.agent_id,
+                        "channels": im_channels,
+                        "updated_at": agent.updated_at.isoformat() if hasattr(agent, 'updated_at') and agent.updated_at else datetime.now().isoformat()
+                    }
+        except Exception as e:
+            logger.warning(f"[AgentIMConfig] Failed to load config from database: {e}")
+        
+        return None
+    
+    def _load_config(self) -> Dict:
+        """
+        Load configuration from database or file (fallback).
+        
+        Returns:
+            Configuration dict. Returns empty structure if not found.
+        """
+        # Try database first (primary source)
+        db_config = self._load_config_from_db()
+        if db_config:
+            return db_config
+        
+        # Fallback to file system (backward compatibility)
         if not self._config_path.exists():
             logger.debug(f"[AgentIMConfig] Config file not found, returning empty config")
             return {
@@ -229,35 +279,34 @@ class AgentIMConfig:
     
     def _reload_if_changed(self) -> None:
         """
-        Check if configuration file has changed and reload if necessary.
+        Check if configuration has changed and reload if necessary.
         
-        This enables hot-reload: configuration changes take effect immediately
-        without restarting the service.
+        For database-backed configs, always reload to get latest state.
+        For file-backed configs, check mtime.
         """
         with self._lock:
-            # If config file doesn't exist, use empty config
-            if not self._config_path.exists():
-                if self._cache is None:
-                    self._cache = {
-                        "agent_id": self.agent_id,
-                        "channels": {},
-                        "updated_at": datetime.now().isoformat()
-                    }
-                return
-            
-            # Check modification time
-            try:
-                current_mtime = self._config_path.stat().st_mtime
-            except Exception as e:
-                logger.warning(f"[AgentIMConfig] Cannot stat config file: {e}")
-                return
-            
-            # Reload if changed
-            if current_mtime != self._mtime or self._cache is None:
-                logger.debug(f"[AgentIMConfig] Config file changed, reloading...")
+            # Always reload from database on first access or periodically
+            if self._cache is None:
+                logger.debug(f"[AgentIMConfig] Loading config for first time...")
                 self._cache = self._load_config()
-                self._mtime = current_mtime
-                logger.info(f"[AgentIMConfig] Configuration reloaded for agent={self.agent_id}")
+                if self._config_path.exists():
+                    try:
+                        self._mtime = self._config_path.stat().st_mtime
+                    except Exception:
+                        pass
+                return
+            
+            # For file-based configs, check mtime
+            if self._config_path.exists():
+                try:
+                    current_mtime = self._config_path.stat().st_mtime
+                    if current_mtime != self._mtime:
+                        logger.debug(f"[AgentIMConfig] Config file changed, reloading...")
+                        self._cache = self._load_config()
+                        self._mtime = current_mtime
+                        logger.info(f"[AgentIMConfig] Configuration reloaded for agent={self.agent_id}")
+                except Exception as e:
+                    logger.warning(f"[AgentIMConfig] Cannot stat config file: {e}")
     
     def get_provider_config(self, provider: str) -> Optional[Dict[str, Any]]:
         """
@@ -504,26 +553,66 @@ def list_all_agents() -> List[str]:
     """
     List all Agents that have IM channel configuration.
     
+    Checks both filesystem and database for agents with IM config.
+    
     Returns:
-        List of agent IDs with IM config files.
+        List of agent IDs with IM config.
     """
-    agents = []
+    agents = set()
+    
+    # 1. Check filesystem
     try:
         agents_dir = Path.home() / ".sage" / "agents"
-        if not agents_dir.exists():
-            return agents
-        
-        for agent_dir in agents_dir.iterdir():
-            if agent_dir.is_dir():
-                config_file = agent_dir / "config" / "im_channels.json"
-                if config_file.exists():
-                    agents.append(agent_dir.name)
-        
-        logger.info(f"[AgentIMConfig] Found {len(agents)} agents with IM config: {agents}")
+        if agents_dir.exists():
+            for agent_dir in agents_dir.iterdir():
+                if agent_dir.is_dir():
+                    config_file = agent_dir / "config" / "im_channels.json"
+                    if config_file.exists():
+                        agents.add(agent_dir.name)
     except Exception as e:
-        logger.warning(f"[AgentIMConfig] Failed to list agents: {e}")
+        logger.warning(f"[AgentIMConfig] Failed to list agents from filesystem: {e}")
     
-    return agents
+    # 2. Check database (primary source)
+    try:
+        import asyncio
+        from app.desktop.core.models.agent import AgentConfigDao
+        
+        dao = AgentConfigDao()
+        
+        # Run async query in sync context
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, dao.get_list())
+                    all_agents = future.result(timeout=5)
+            else:
+                all_agents = asyncio.run(dao.get_list())
+        except RuntimeError:
+            all_agents = asyncio.run(dao.get_list())
+        
+        # Filter agents with IM channels config
+        for agent in all_agents:
+            if agent and agent.agent_id:
+                # Check if this agent has im_channels in config
+                try:
+                    config = agent.config if hasattr(agent, 'config') else {}
+                    if isinstance(config, str):
+                        import json
+                        config = json.loads(config)
+                    im_channels = config.get('im_channels') if config else None
+                    if im_channels and len(im_channels) > 0:
+                        agents.add(agent.agent_id)
+                except Exception:
+                    pass
+        
+    except Exception as e:
+        logger.warning(f"[AgentIMConfig] Failed to list agents from database: {e}")
+    
+    agents_list = list(agents)
+    logger.info(f"[AgentIMConfig] Found {len(agents_list)} agents with IM config: {agents_list}")
+    return agents_list
 
 
 def find_agent_by_provider_id(provider: str, id_value: str, exclude_agent_id: str = None) -> Optional[str]:
