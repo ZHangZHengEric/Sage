@@ -98,6 +98,9 @@ COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 定制化安装 opensandbox 和opensandbox-code-interpreter
+RUN pip install --no-cache-dir opensandbox opensandbox-code-interpreter
+
 # 复制代码
 COPY . .
 
