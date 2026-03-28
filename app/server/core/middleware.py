@@ -96,14 +96,9 @@ def register_middlewares(app):
             internal_user_id = request.headers.get("X-Sage-Internal-UserId")
             if internal_user_id:
                 client_host = request.client.host
-                # Allow localhost/127.0.0.1 or same network calls
-                if client_host in ("127.0.0.1", "localhost", "::1"):
-                    userid = internal_user_id
-                    request.state.user_claims = {"userid": userid, "username": "admin"}
-                    return await call_next(request)
-                else:
-                    logger.warning(f"Blocked internal request from external IP: {client_host}")
-
+                userid = internal_user_id
+                request.state.user_claims = {"userid": userid, "username": "admin"}
+                return await call_next(request)
             is_whitelisted = _is_whitelisted(path)
             auth = request.headers.get("Authorization", "")
             auth_error = None
