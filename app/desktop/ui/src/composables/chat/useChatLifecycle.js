@@ -1,4 +1,4 @@
-import { onMounted, onUnmounted, watch } from 'vue'
+import { onActivated, onMounted, onUnmounted, watch } from 'vue'
 import { useWorkbenchStore } from '@/stores/workbench.js'
 import { usePanelStore } from '@/stores/panel.js'
 
@@ -61,6 +61,7 @@ export const useChatLifecycle = ({
   onMounted(async () => {
     if (typeof window !== 'undefined') {
       window.addEventListener('user-updated', loadAgents)
+      window.addEventListener('agents-updated', loadAgents)
       window.addEventListener('active-sessions-updated', handleActiveSessionsUpdated)
     }
     await loadAgents()
@@ -122,9 +123,14 @@ export const useChatLifecycle = ({
   onUnmounted(() => {
     if (typeof window !== 'undefined') {
       window.removeEventListener('user-updated', loadAgents)
+      window.removeEventListener('agents-updated', loadAgents)
       window.removeEventListener('active-sessions-updated', handleActiveSessionsUpdated)
     }
     clearScrollTimer()
+  })
+
+  onActivated(() => {
+    void loadAgents()
   })
 
   watch(() => agents.value, (newAgents) => {
