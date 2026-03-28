@@ -31,6 +31,14 @@ export const agentAPI = {
   },
 
   /**
+   * 一键导入 OpenClaw 数据并创建 Agent
+   * @returns {Promise<Object>}
+   */
+  importOpenclaw: async () => {
+    return await request.post('/api/agent/import-openclaw', {})
+  },
+
+  /**
    * 更新Agent
    * @param {string} agentId - Agent ID
    * @param {Object} updates - 更新数据

@@ -20,13 +20,15 @@ class RemoteSandboxProvider(ISandboxHandle):
         sandbox_id: str,
         workspace_mount: Optional[str] = None,
         mount_paths: Optional[List[MountPath]] = None,
+        virtual_workspace: str = "/sage-workspace",
         timeout: timedelta = timedelta(minutes=30),
     ):
         self._sandbox_id = sandbox_id
-        self.workspace_mount = workspace_mount
-        self.mount_paths = mount_paths or []
+        self.workspace_mount = os.path.abspath(workspace_mount) if workspace_mount else None
+        self.mount_paths = list(mount_paths or [])
+        self._volume_mounts = list(self.mount_paths)
         self.timeout = timeout
-        self._workspace_path = "/sage-workspace"
+        self._workspace_path = virtual_workspace or "/sage-workspace"
         self._is_initialized = False
         self._allowed_paths: List[str] = []
         if self.workspace_mount:
@@ -48,6 +50,11 @@ class RemoteSandboxProvider(ISandboxHandle):
     @property
     def host_workspace_path(self) -> Optional[str]:
         return self.workspace_mount
+
+    @property
+    def volume_mounts(self) -> List[MountPath]:
+        """返回额外的卷挂载配置列表。"""
+        return self._volume_mounts
 
     @abstractmethod
     async def initialize(self) -> None:
@@ -195,16 +202,35 @@ class RemoteSandboxProvider(ISandboxHandle):
         await walk(root, 0, "")
         return "\n".join(lines)
 
+    def _iter_virtual_mappings(self) -> List[tuple[str, str]]:
+        mappings: List[tuple[str, str]] = []
+        if self.workspace_mount:
+            mappings.append((self._workspace_path.rstrip("/") or "/", self.workspace_mount))
+        for mount in self.mount_paths:
+            mappings.append((mount.mount_path.rstrip("/") or "/", mount.host_path))
+        return sorted(mappings, key=lambda item: len(item[0]), reverse=True)
+
+    def _iter_host_mappings(self) -> List[tuple[str, str]]:
+        host_first = [(host, virtual) for virtual, host in self._iter_virtual_mappings()]
+        return sorted(host_first, key=lambda item: len(item[0]), reverse=True)
+
     def to_host_path(self, virtual_path: str) -> str:
         """虚拟路径转宿主机路径"""
-        if virtual_path.startswith(self._workspace_path):
-            rel_path = virtual_path[len(self._workspace_path):].lstrip("/")
-            return os.path.join(self.workspace_mount, rel_path) if self.workspace_mount else virtual_path
+        for virtual_root, host_root in self._iter_virtual_mappings():
+            if virtual_path == virtual_root:
+                return host_root
+            if virtual_path.startswith(virtual_root + "/"):
+                rel_path = virtual_path[len(virtual_root):].lstrip("/")
+                return os.path.join(host_root, rel_path)
         return virtual_path
 
     def to_virtual_path(self, host_path: str) -> str:
         """宿主机路径转虚拟路径"""
-        if self.workspace_mount and host_path.startswith(self.workspace_mount):
-            rel_path = host_path[len(self.workspace_mount):].lstrip("/")
-            return os.path.join(self._workspace_path, rel_path)
+        normalized_host = os.path.abspath(host_path)
+        for host_root, virtual_root in self._iter_host_mappings():
+            if normalized_host == host_root:
+                return virtual_root
+            if normalized_host.startswith(host_root + os.sep):
+                rel_path = normalized_host[len(host_root):].lstrip("/")
+                return os.path.join(virtual_root, rel_path)
         return host_path

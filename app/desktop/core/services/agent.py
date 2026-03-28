@@ -5,10 +5,12 @@ Agent 业务处理模块
 """
 
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 import shutil
 
 from loguru import logger
+from sagents.skill import get_skill_manager
 from sagents.tool.tool_manager import get_tool_manager
 from sagents.tool.tool_proxy import ToolProxy
 from sagents.utils.auto_gen_agent import AutoGenAgentFunc
@@ -31,9 +33,204 @@ from .skill import list_skills_for_agent
 # ================= 工具函数 =================
 
 
+DEFAULT_OPENCLAW_AGENT_NAME = "openclaw的小龙虾"
+DEFAULT_OPENCLAW_AGENT_DESCRIPTION = "从 OpenClaw 一键导入的智能体"
+DEFAULT_OPENCLAW_AGENT_TOOLS = [
+    "todo_write",
+    "todo_read",
+    "execute_shell_command",
+    "file_read",
+    "file_write",
+    "file_update",
+    "load_skill",
+    "add_task",
+    "delete_task",
+    "complete_task",
+    "enable_task",
+    "get_task_details",
+    "fetch_webpages",
+    "search_web_page",
+    "search_image_from_web",
+]
+
+
 def generate_agent_id() -> str:
     """生成唯一的 Agent ID"""
     return f"agent_{uuid.uuid4().hex[:8]}"
+
+
+def _get_sage_home() -> Path:
+    sage_home = Path.home() / ".sage"
+    sage_home.mkdir(parents=True, exist_ok=True)
+    return sage_home
+
+
+async def _resolve_default_llm_provider_id() -> str:
+    provider_dao = LLMProviderDao()
+    default_provider = await provider_dao.get_default()
+    if default_provider:
+        return default_provider.id
+
+    providers = await provider_dao.get_list()
+    if providers:
+        return providers[0].id
+
+    raise SageHTTPException(
+        status_code=500,
+        detail="未找到可用模型提供商，请先完成模型配置",
+        error_detail="No LLM provider configured",
+    )
+
+
+def _build_openclaw_agent_config(
+    llm_provider_id: str, available_skills: List[str]
+) -> Dict[str, Any]:
+    return {
+        "description": DEFAULT_OPENCLAW_AGENT_DESCRIPTION,
+        "maxLoopCount": 100,
+        "memoryType": "session",
+        "agentMode": "fibre",
+        "availableTools": DEFAULT_OPENCLAW_AGENT_TOOLS.copy(),
+        "availableSkills": list(available_skills),
+        "systemPrefix": "",
+        "llm_provider_id": llm_provider_id,
+    }
+
+
+def _is_valid_skill_dir(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+
+    try:
+        for child in path.iterdir():
+            if child.is_file() and child.name.lower() == "skill.md":
+                return True
+    except Exception as e:
+        logger.warning(f"读取 skill 目录失败 {path}: {e}")
+    return False
+
+
+def _detect_openclaw_skill_dirs(openclaw_home: Path) -> List[Path]:
+    candidates = [
+        openclaw_home / "skills",
+        openclaw_home / "workspace" / "skills",
+        openclaw_home / "users" / "openclaw" / "skills",
+        openclaw_home / "users" / "default" / "skills",
+        openclaw_home / "agents" / "main" / "skills",
+        Path.home() / "skills",
+    ]
+
+    discovered: List[Path] = []
+    seen = set()
+
+    def _register(path: Path) -> None:
+        normalized = str(path.resolve()) if path.exists() else str(path)
+        if normalized in seen:
+            return
+        seen.add(normalized)
+        discovered.append(path)
+
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_dir():
+            _register(candidate)
+
+    try:
+        for path in openclaw_home.rglob("skills"):
+            if path.is_dir():
+                _register(path)
+    except Exception as e:
+        logger.warning(f"扫描 OpenClaw skills 目录失败: {e}")
+
+    return discovered
+
+
+def _collect_openclaw_skill_sources(skill_dirs: List[Path]) -> Dict[str, Path]:
+    skill_sources: Dict[str, Path] = {}
+
+    for skill_dir in skill_dirs:
+        try:
+            for child in skill_dir.iterdir():
+                if _is_valid_skill_dir(child):
+                    skill_sources.setdefault(child.name, child)
+        except Exception as e:
+            logger.warning(f"读取 OpenClaw skills 根目录失败 {skill_dir}: {e}")
+
+    return skill_sources
+
+
+def _copy_directory_contents(
+    source_dir: Path, target_dir: Path, exclude_names: Optional[set[str]] = None
+) -> None:
+    if not source_dir.exists() or not source_dir.is_dir():
+        raise SageHTTPException(
+            status_code=500,
+            detail=f"源目录不存在: {source_dir}",
+            error_detail=str(source_dir),
+        )
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    excluded = exclude_names or set()
+
+    for child in source_dir.iterdir():
+        if child.name in excluded:
+            continue
+
+        target_path = target_dir / child.name
+        if child.is_dir():
+            shutil.copytree(child, target_path, dirs_exist_ok=True)
+        else:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(child, target_path)
+
+
+def _link_openclaw_skills(agent_workspace: Path, skill_sources: Dict[str, Path]) -> List[str]:
+    if not skill_sources:
+        return []
+
+    target_root = agent_workspace / "skills"
+    target_root.mkdir(parents=True, exist_ok=True)
+
+    linked_skills: List[str] = []
+    for skill_name, source_path in skill_sources.items():
+        target_path = target_root / skill_name
+        if target_path.exists() or target_path.is_symlink():
+            linked_skills.append(skill_name)
+            continue
+
+        try:
+            target_path.symlink_to(source_path.resolve())
+        except OSError:
+            shutil.copytree(source_path, target_path, dirs_exist_ok=True)
+        linked_skills.append(skill_name)
+
+    return linked_skills
+
+
+def _sync_agent_skills_to_global(agent_workspace: Path) -> List[str]:
+    agent_skills_dir = agent_workspace / "skills"
+    if not agent_skills_dir.exists() or not agent_skills_dir.is_dir():
+        return []
+
+    sage_skills_dir = _get_sage_home() / "skills"
+    sage_skills_dir.mkdir(parents=True, exist_ok=True)
+
+    synced_skills: List[str] = []
+    for skill_path in agent_skills_dir.iterdir():
+        if not _is_valid_skill_dir(skill_path):
+            continue
+
+        target_path = sage_skills_dir / skill_path.name
+        if target_path.exists() and not target_path.is_dir():
+            target_path.unlink()
+
+        shutil.copytree(skill_path, target_path, dirs_exist_ok=True)
+        synced_skills.append(skill_path.name)
+
+    tm = get_skill_manager()
+    if tm:
+        tm.reload()
+
+    return synced_skills
 
 
 # ================= 业务函数 =================
@@ -273,6 +470,83 @@ async def delete_agent(agent_id: str) -> models.Agent:
     await dao.delete_by_id(agent_id)
     logger.info(f"Agent {agent_id} 删除成功")
     return existing_config
+
+
+async def import_openclaw_agent() -> Dict[str, Any]:
+    """一键导入 OpenClaw workspace 和 skills 并创建对应 Agent。"""
+    openclaw_home = Path.home() / ".openclaw"
+    openclaw_workspace = openclaw_home / "workspace"
+
+    if not openclaw_home.exists():
+        raise SageHTTPException(
+            status_code=500,
+            detail="未找到 OpenClaw 数据目录 ~/.openclaw",
+            error_detail=str(openclaw_home),
+        )
+
+    if not openclaw_workspace.exists() or not openclaw_workspace.is_dir():
+        raise SageHTTPException(
+            status_code=500,
+            detail="未找到 OpenClaw workspace 目录",
+            error_detail=str(openclaw_workspace),
+        )
+
+    llm_provider_id = await _resolve_default_llm_provider_id()
+    skill_dirs = _detect_openclaw_skill_dirs(openclaw_home)
+    skill_sources = _collect_openclaw_skill_sources(skill_dirs)
+    available_skills = sorted(skill_sources.keys())
+
+    agent_config = _build_openclaw_agent_config(
+        llm_provider_id=llm_provider_id,
+        available_skills=available_skills,
+    )
+
+    created_agent: Optional[models.Agent] = None
+    agent_workspace: Optional[Path] = None
+
+    try:
+        created_agent = await create_agent(DEFAULT_OPENCLAW_AGENT_NAME, agent_config)
+
+        agent_workspace = _get_sage_home() / "agents" / created_agent.agent_id
+        exclude_names = {"skills"} if (openclaw_workspace / "skills") in skill_dirs else set()
+        _copy_directory_contents(openclaw_workspace, agent_workspace, exclude_names)
+
+        linked_skills = _link_openclaw_skills(agent_workspace, skill_sources)
+        synced_skills = _sync_agent_skills_to_global(agent_workspace)
+
+        logger.info(
+            f"OpenClaw 导入完成: agent_id={created_agent.agent_id}, "
+            f"workspace={openclaw_workspace}, skills={linked_skills}"
+        )
+
+        return {
+            "agent_id": created_agent.agent_id,
+            "agent_name": created_agent.name,
+            "workspace_source": str(openclaw_workspace),
+            "skill_source_dirs": [str(path) for path in skill_dirs],
+            "linked_skills": linked_skills,
+            "linked_skill_count": len(linked_skills),
+            "synced_skill_count": len(synced_skills),
+        }
+    except Exception as e:
+        if agent_workspace and agent_workspace.exists():
+            shutil.rmtree(agent_workspace, ignore_errors=True)
+
+        if created_agent:
+            try:
+                await models.AgentConfigDao().delete_by_id(created_agent.agent_id)
+            except Exception as cleanup_error:
+                logger.warning(f"清理导入失败的 Agent 记录时出错: {cleanup_error}")
+
+        if isinstance(e, SageHTTPException):
+            raise
+
+        logger.exception("导入 OpenClaw Agent 失败")
+        raise SageHTTPException(
+            status_code=500,
+            detail=f"导入 OpenClaw 失败: {str(e)}",
+            error_detail=str(e),
+        )
 
 
 async def auto_generate_agent(

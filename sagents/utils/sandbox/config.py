@@ -18,12 +18,22 @@ class VolumeMount:
     """
     host_path: str       # 宿主机源路径
     mount_path: str      # 沙箱内挂载路径（绝对路径）
+    read_only: bool = False
     
     def __post_init__(self):
         # 确保路径是绝对路径
         self.host_path = os.path.abspath(self.host_path)
         if not self.mount_path.startswith('/'):
             self.mount_path = '/' + self.mount_path
+
+    @property
+    def sandbox_path(self) -> str:
+        """兼容远程沙箱实现中使用的字段名。"""
+        return self.mount_path
+
+    @sandbox_path.setter
+    def sandbox_path(self, value: str) -> None:
+        self.mount_path = value if value.startswith("/") else f"/{value}"
 
 
 # 向后兼容别名
