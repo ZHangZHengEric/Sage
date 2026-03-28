@@ -20,6 +20,11 @@ from sagents.utils.logger import logger
 class WebFetcherTool:
     """基于 Scrapling 的网页抓取工具，支持网页内容提取和文件下载"""
 
+    # 总返回内容的最大token数限制
+    MAX_TOTAL_TOKENS = 8000
+    # 每个token大约对应的字符数（保守估计）
+    CHARS_PER_TOKEN = 2.5
+
     # 常见文件扩展名映射
     FILE_EXTENSIONS = {
         '.pdf': 'document',
@@ -54,8 +59,8 @@ class WebFetcherTool:
         self,
         urls: List[str],
         max_length_per_url: int = 8000,
-        timeout: int = 60,
-        retries: int = 2,
+        timeout: int = 30,
+        retries: int = 1,
         session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -92,29 +97,48 @@ class WebFetcherTool:
         logger.info(f"WebFetcher: Workspace path: {workspace_path}")
         logger.info(f"WebFetcher: Starting to fetch {len(urls)} URL(s) with Scrapling")
 
-        results = []
-        for url in urls:
+        # 计算每个HTML页面可以返回的最大字符数
+        # 总字符数 = 8000 tokens * 2.5 chars/token = 20000 字符
+        # 分配给每个HTML页面
+        html_url_count = sum(1 for url in urls if self._detect_url_type(url) == 'html')
+        if html_url_count > 0:
+            max_total_chars = int(self.MAX_TOTAL_TOKENS * self.CHARS_PER_TOKEN)
+            chars_per_html = max_total_chars // html_url_count
+            logger.info(f"WebFetcher: {html_url_count} HTML URLs, {chars_per_html} chars per URL")
+        else:
+            chars_per_html = max_length_per_url
+
+        # 定义单个URL的处理函数
+        async def process_single_url(url: str) -> Dict[str, Any]:
+            """处理单个URL的抓取或下载"""
             try:
                 # 检测URL类型
                 url_type = self._detect_url_type(url)
                 
                 if url_type == 'html':
-                    # HTML页面，使用原有抓取逻辑
-                    result = await self._fetch_single_html(url, max_length_per_url, timeout, retries)
+                    # HTML页面，使用新的抓取逻辑（保存完整内容到文件，返回部分内容）
+                    result = await self._fetch_single_html_with_save(
+                        url, chars_per_html, workspace_path, timeout, retries
+                    )
                 else:
                     # 文件，使用下载逻辑
                     result = await self._download_file(url, workspace_path, timeout, retries)
                 
-                results.append(result)
+                return result
             except Exception as e:
                 logger.error(f"Fetch error for {url}: {e}")
-                results.append({
+                return {
                     "url": url,
                     "status": "error",
                     "error": str(e),
                     "content": None,
                     "metadata": None
-                })
+                }
+
+        # 并发处理所有URL
+        logger.info(f"WebFetcher: Concurrently processing {len(urls)} URL(s)")
+        tasks = [process_single_url(url) for url in urls]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
 
         success_count = sum(1 for r in results if r.get("status") == "success")
         error_count = len(results) - success_count
@@ -298,6 +322,148 @@ class WebFetcherTool:
                 return f"{size_bytes:.2f} {unit}"
             size_bytes /= 1024
         return f"{size_bytes:.2f} TB"
+
+    async def _fetch_single_html_with_save(
+        self,
+        url: str,
+        max_return_length: int,
+        save_dir: str,
+        timeout: int,
+        retries: int
+    ) -> Dict[str, Any]:
+        """抓取单个HTML页面，保存完整内容到文件，返回部分内容"""
+        from scrapling.fetchers import AsyncFetcher
+
+        last_error = None
+        for attempt in range(retries + 1):
+            try:
+                # 创建异步 fetcher
+                fetcher = AsyncFetcher()
+
+                # 抓取页面（始终使用隐身模式）
+                page = await asyncio.wait_for(
+                    fetcher.get(
+                        url,
+                        stealthy_headers=True,
+                        timeout=timeout
+                    ),
+                    timeout=timeout + 5
+                )
+
+                # 提取标题
+                title = page.css('title::text').get('')
+                if not title:
+                    title = page.css('h1::text').get('')
+                if not title:
+                    title = page.css('#activity-name::text').get('')
+
+                # 提取正文内容
+                content_selectors = [
+                    '#js_content',
+                    '.rich_media_content',
+                    'article',
+                    'main',
+                    '[role="main"]',
+                    '.content',
+                    '.article-content',
+                    '.post-content',
+                    '.entry-content',
+                    '#content',
+                    '.main-content',
+                    'body'
+                ]
+
+                full_content = ""
+                used_selector = ""
+
+                for selector in content_selectors:
+                    elements = page.css(selector)
+                    if elements:
+                        texts = []
+                        for elem in elements:
+                            text = elem.get_all_text()
+                            if text and len(text.strip()) > 50:
+                                texts.append(text.strip())
+
+                        if texts:
+                            full_content = '\n\n'.join(texts)
+                            used_selector = selector
+                            if len(full_content) > 500:
+                                break
+
+                if not full_content:
+                    full_content = page.get_all_text()
+                    used_selector = "full_page"
+
+                # 清理内容
+                full_content = self._clean_content(full_content)
+
+                # 生成文件名
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                domain = parsed.netloc.replace(':', '_')
+                safe_title = self._sanitize_filename(title[:50] if title else 'untitled')
+                filename = f"{domain}_{safe_title}.txt"
+                
+                # 处理文件名冲突
+                save_path = os.path.join(save_dir, filename)
+                counter = 1
+                original_name = filename
+                while os.path.exists(save_path):
+                    name, ext = os.path.splitext(original_name)
+                    filename = f"{name}_{counter}{ext}"
+                    save_path = os.path.join(save_dir, filename)
+                    counter += 1
+
+                # 保存完整内容到文件
+                with open(save_path, 'w', encoding='utf-8') as f:
+                    f.write(f"URL: {url}\n")
+                    f.write(f"Title: {title}\n")
+                    f.write(f"Selector: {used_selector}\n")
+                    f.write(f"Content Length: {len(full_content)}\n")
+                    f.write("=" * 80 + "\n\n")
+                    f.write(full_content)
+
+                # 准备返回的内容（截断后的）
+                if len(full_content) > max_return_length:
+                    return_content = full_content[:max_return_length] + f"\n\n[内容已截断，完整内容已保存到文件: {save_path}]"
+                else:
+                    return_content = full_content
+
+                return {
+                    "url": url,
+                    "status": "success",
+                    "type": "html",
+                    "content": return_content,
+                    "metadata": {
+                        "title": title,
+                        "selector": used_selector,
+                        "content_length": len(full_content),
+                        "return_length": len(return_content),
+                        "full_content_saved": True,
+                        "save_path": save_path,
+                        "filename": filename
+                    }
+                }
+
+            except asyncio.TimeoutError:
+                last_error = f"请求超时（超过 {timeout} 秒）"
+                logger.warning(f"WebFetcher: {url} 请求超时 (尝试 {attempt + 1}/{retries + 1})")
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(f"WebFetcher: {url} 抓取失败 (尝试 {attempt + 1}/{retries + 1}): {last_error}")
+
+                if attempt < retries:
+                    wait_time = 2 ** attempt
+                    await asyncio.sleep(wait_time)
+
+        return {
+            "url": url,
+            "status": "error",
+            "error": f"重试{retries + 1}次后仍失败: {last_error}",
+            "content": None,
+            "metadata": None
+        }
 
     async def _fetch_single_html(
         self,
