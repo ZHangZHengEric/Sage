@@ -213,7 +213,6 @@ async def get_active_sessions(request: Request):
     """
     manager = StreamManager.get_instance()
     client_host = request.client.host if request.client else "unknown"
-    logger.info(f"SSE Connection request from {client_host}")
 
     async def event_generator():
         try:
@@ -226,7 +225,6 @@ async def get_active_sessions(request: Request):
                 json_str = json.dumps(sessions, default=str, ensure_ascii=False)
                 yield f"data: {json_str}\n\n"
         except asyncio.CancelledError:
-            logger.info(f"SSE task cancelled for {client_host}")
             pass
         except Exception as e:
             logger.error(f"Error in SSE generator for {client_host}: {e}")

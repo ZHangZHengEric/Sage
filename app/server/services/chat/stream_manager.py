@@ -65,7 +65,6 @@ class StreamManager:
                     break
                 yield sessions
         except asyncio.CancelledError:
-            logger.info("Client disconnected from active sessions stream")
             raise
         finally:
             self._active_sessions_subscribers.discard(queue)
@@ -202,7 +201,6 @@ class StreamManager:
                     break
                 yield chunk
         except asyncio.CancelledError:
-            logger.info(f"Client disconnected from session {session_id}")
             raise
         finally:
             session.subscribers.discard(queue)
