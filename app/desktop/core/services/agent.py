@@ -86,6 +86,7 @@ def _build_openclaw_agent_config(
     llm_provider_id: str, available_skills: List[str]
 ) -> Dict[str, Any]:
     return {
+        "name": DEFAULT_OPENCLAW_AGENT_NAME,
         "description": DEFAULT_OPENCLAW_AGENT_DESCRIPTION,
         "maxLoopCount": 100,
         "memoryType": "session",

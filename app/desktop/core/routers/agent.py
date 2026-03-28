@@ -74,13 +74,16 @@ class SystemPromptOptimizeRequest(BaseModel):
 
 
 def convert_config_to_agent(
-    agent_id: str, config: Dict[str, Any], is_default: bool = False
+    agent_id: str,
+    config: Dict[str, Any],
+    is_default: bool = False,
+    agent_name: Optional[str] = None,
 ) -> AgentConfigDTO:
     """将配置字典转换为 AgentConfigResp 对象"""
 
     return AgentConfigDTO(
         id=agent_id,
-        name=config.get("name", f"Agent {agent_id}"),
+        name=agent_name or config.get("name") or f"Agent {agent_id}",
         systemPrefix=config.get("systemPrefix") or config.get("system_prefix"),
         systemContext=config.get("systemContext") or config.get("system_context"),
         availableWorkflows=config.get("availableWorkflows")
@@ -164,7 +167,12 @@ async def list(http_request: Request):
     agents_data: List[Dict[str, Any]] = []
     for agent in all_configs:
         agent_id = agent.agent_id
-        agent_resp = convert_config_to_agent(agent_id, agent.config, agent.is_default)
+        agent_resp = convert_config_to_agent(
+            agent_id,
+            agent.config,
+            agent.is_default,
+            agent_name=agent.name,
+        )
         agents_data.append(agent_resp.model_dump())
     # 根据agent名称排序
     agents_data.sort(key=lambda x: x["name"])
@@ -278,7 +286,12 @@ async def get(agent_id: str, http_request: Request):
         StandardResponse: 包含Agent配置的标准响应
     """
     agent = await get_agent(agent_id)
-    agent_resp = convert_config_to_agent(agent.agent_id, agent.config, agent.is_default)
+    agent_resp = convert_config_to_agent(
+        agent.agent_id,
+        agent.config,
+        agent.is_default,
+        agent_name=agent.name,
+    )
     return await Response.succ(data=agent_resp.model_dump(), message="成功获取Agent配置")
 
 
