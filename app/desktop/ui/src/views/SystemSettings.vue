@@ -466,6 +466,14 @@ const handleImportOpenclaw = async () => {
   importingOpenclaw.value = true
   try {
     const result = await agentAPI.importOpenclaw()
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('agents-updated', {
+        detail: {
+          source: 'import-openclaw',
+          agentId: result?.agent_id || null
+        }
+      }))
+    }
     const agentName = result?.agent_name || 'openclaw的小龙虾'
     const skillCount = result?.linked_skill_count || 0
     if (skillCount > 0) {
