@@ -311,17 +311,14 @@ async def initialize_im_service():
         
         logger.info(f"[IM] 当前用户配置: {all_configs}")
         
-        if not all_configs:
-            logger.info("[IM] 未找到 IM 配置，跳过 IM 服务启动")
-            return
-        
-        # 检查是否有启用的 provider
+        # 检查是否有启用的 provider (legacy 配置)
         enabled_providers = []
-        for provider_type, config in all_configs.items():
-            is_enabled = config.get("enabled", False)
-            logger.info(f"[IM] Provider {provider_type}: enabled={is_enabled}, config={config}")
-            if is_enabled:
-                enabled_providers.append(provider_type)
+        if all_configs:
+            for provider_type, config in all_configs.items():
+                is_enabled = config.get("enabled", False)
+                logger.info(f"[IM] Provider {provider_type}: enabled={is_enabled}, config={config}")
+                if is_enabled:
+                    enabled_providers.append(provider_type)
         
         # Also check Agent-level configs
         has_agent_configs = False
