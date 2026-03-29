@@ -14,6 +14,14 @@ export const MODEL_PROVIDERS = [
     model_list_url: 'https://help.aliyun.com/zh/model-studio/getting-started/models'
   },
   {
+    name: 'Aliyun Coding Plan',
+    base_url: 'https://coding.dashscope.aliyuncs.com/v1',
+    models: ['qwen-coder-plus', 'qwen-coder-turbo', 'deepseek-r1', 'deepseek-v3'],
+    website: 'https://bailian.console.aliyun.com/',
+    model_list_url: 'https://help.aliyun.com/zh/model-studio/coding-plan',
+    description: '阿里云百炼编码专属套餐，支持 Claude Code、Cursor 等编程工具'
+  },
+  {
     name: 'ByteDance',
     base_url: 'https://ark.cn-beijing.volces.com/api/v3',
     models: ['doubao-seed-2-0-lite-260215', 'doubao-seed-2-0-pro-260215', 'doubao-seedance-2-0', 'doubao-seedream-5-0', 'doubao-pro-32k', 'doubao-lite-32k', 'doubao-pro-128k', 'deepseek-r1-250120', 'deepseek-v3-241226'],
@@ -54,6 +62,14 @@ export const MODEL_PROVIDERS = [
     models: ['glm-5', 'glm-4.7', 'glm-4.6', 'glm-4.5', 'glm-4.5-air', 'glm-4-plus', 'glm-4-air', 'glm-4-flash'],
     website: 'https://open.bigmodel.cn',
     model_list_url: 'https://docs.bigmodel.cn/cn/guide/models/text/glm-4.5'
+  },
+  {
+    name: 'Zhipu Code Plan',
+    base_url: 'https://open.bigmodel.cn/api/coding/paas/v4',
+    models: ['glm-5.1', 'glm-4.7', 'glm-5', 'glm-4.6', 'glm-4.5'],
+    website: 'https://www.bigmodel.cn/glm-coding',
+    model_list_url: 'https://docs.bigmodel.cn/cn/coding-plan/quick-start',
+    description: '智谱编码专属套餐，支持 Claude Code、Cline 等编程工具'
   },
   {
     name: 'OpenAI',
