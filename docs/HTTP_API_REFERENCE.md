@@ -3,7 +3,7 @@
 This document provides a comprehensive reference for the Sage backend HTTP API endpoints.
 
 ## Base URL
-All API endpoints are relative to the server base URL (e.g., `http://localhost:8000`).
+All API endpoints are relative to the server base URL (for example `http://localhost:8080` when running `python -m app.server.main` with default settings).
 
 ## Response Format
 Standard response format:
@@ -118,11 +118,6 @@ Legacy `/api/user/login`, `/api/user/check_login`, `/api/user/logout`, `/api/use
 - **URL**: `/api/web-stream`
 - **Method**: `POST`
 - **Description**: Similar to `/api/stream`, optimized for web clients.
-
-### Submit Async Task
-- **URL**: `/api/stream/submit_task`
-- **Method**: `POST`
-- **Response**: Returns `session_id` for polling status.
 
 ---
 
