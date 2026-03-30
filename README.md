@@ -1,8 +1,6 @@
 <div align="center">
 
-# Sage
-
-### The agent runtime for teams shipping real products
+# 🌟 **Experience Sage's Power**
 
 ![cover](assets/cover.png)
 
@@ -14,66 +12,17 @@
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-Learn%20More-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 [![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
-Production-oriented multi-agent runtime and application stack for building, running, and extending Sage agents across CLI, web, and desktop surfaces.
+# 🧠 **Sage Multi-Agent Framework**
+
+### 🎯 **Making Complex Tasks Simple**
+
+> 🌟 **A production-ready, modular, and intelligent multi-agent orchestration framework for complex problem solving.**
 
 </div>
 
-## Why Sage
+---
 
-Sage is not another chat shell around an LLM. It is built for teams that need agents to behave like real software: operable, extensible, observable, and ready to ship across product surfaces.
-
-Instead of rebuilding the stack for every use case, Sage gives teams a shared foundation for agent workflows, tools, skills, MCP integrations, and user-facing applications across CLI, web, and desktop.
-
-## Highlights
-
-- Multi-agent orchestration across sequential, parallel, and declarative workflow patterns
-- Framework-level optimization aimed at improving stability for complex agent tasks
-- Reusable built-in skills that help teams start from working capability blocks
-- Built-in sandbox support for safer agent execution
-- OpenTelemetry-based observability for tracing agent execution paths
-- Modular extension model built around skills, tools, and MCP servers
-- Context budget controls for more deliberate token and session management
-- Shared runtime foundation across CLI, web, and desktop product surfaces
-- Visual workspace patterns for file preview, tool results, and execution feedback
-- MCP protocol support for standardized tool integration
-
-## What Sage Is
-
-Sage is organized as a layered codebase:
-
-- `sagents/`: core runtime, orchestration, tools, skills, sandboxing, and observability
-- `app/server/`: main FastAPI application and Vue web client
-- `app/desktop/`: desktop-local backend and desktop UI
-- `examples/`: lightweight runnable examples
-- `mcp_servers/`: built-in MCP server implementations
-
-The repository includes both product-facing applications and the lower-level runtime they are built on.
-
-## Product Surfaces
-
-### Main server and web UI
-
-Use this when you want the primary multi-user product experience.
-
-- Backend entry: `app/server/main.py`
-- Frontend source: `app/server/web/`
-
-### Desktop app
-
-Use this when you want a packaged local experience for end users or internal teams.
-
-- Bootstrap entry: `app/desktop/entry.py`
-- Desktop backend: `app/desktop/core/main.py`
-
-### Lightweight examples
-
-Use these when you want the shortest path from idea to a working runtime test.
-
-- `examples/sage_cli.py`
-- `examples/sage_demo.py`
-- `examples/sage_server.py`
-
-## Screenshots
+## 📸 **Product Screenshots**
 
 <div align="center">
 
@@ -85,20 +34,39 @@ Use these when you want the shortest path from idea to a working runtime test.
     </td>
     <td align="center" width="33%">
       <img src="assets/screenshots/chat.png" width="100%" alt="Chat"/>
-      <br/><strong>Streaming Chat</strong>
+      <br/><strong>Real-time Collaboration</strong>
     </td>
     <td align="center" width="33%">
       <img src="assets/screenshots/preview.png" width="100%" alt="Preview"/>
-      <br/><strong>File Preview</strong>
+      <br/><strong>Multi-format Support</strong>
     </td>
   </tr>
 </table>
 
 </div>
 
-## Quick Start
+> 📖 **Detailed Documentation**: [https://wiki.sage.zavixai.com/](https://wiki.sage.zavixai.com/)
 
-### 1. Install dependencies
+---
+
+## ✨ **Key Features**
+
+- 🧠 **Multi-Agent Orchestration**: Support for **TaskExecutor** (Sequential), **FibreAgent** (Parallel), and **AgentFlow** (Declarative) orchestration modes.
+- 🎯 **Maximized Model Capability**: Stable execution of complex tasks even on smaller models like **Qwen3.5 35B-A3B**, with framework-level optimizations unlocking model potential.
+- 🧩 **Built-in High-Stability Skills**: Pre-installed production-ready Skills that work out of the box, ensuring reliable execution for critical tasks.
+- 🛡️ **Secure Sandbox**: Isolated execution environment (`sagents.utils.sandbox`) for safe agent code execution.
+- 👁️ **Full Observability**: Integrated **OpenTelemetry** tracing to visualize agent thought processes and execution paths.
+- 🧩 **Modular Components**: Plug-and-play architecture for **Skills**, **Tools**, and **MCP Servers**.
+- 📊 **Context Management**: Advanced **Context Budget** controls for precise token optimization.
+- 💻 **Cross-Platform Desktop**: Native desktop apps for **macOS** (Intel/Apple Silicon), **Windows**, and **Linux**.
+- 🛠️ **Visual Workbench**: Unified workspace for file preview, tool results, and code execution with 15+ format support.
+- 🔌 **MCP Protocol**: Model Context Protocol support for standardized tool integration.
+
+---
+
+## 🚀 **Quick Start**
+
+### Installation
 
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git
@@ -106,143 +74,189 @@ cd Sage
 pip install -r requirements.txt
 ```
 
-### 2. Set minimum environment
+### Running Sage
+
+**Desktop Application (Recommended)**:
+
+Download the latest desktop package from [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases):
+- **macOS**: `.dmg` (Intel & Apple Silicon)
+- **Windows**: `.exe` / `.msi`
+- **Linux**: `.deb` (x86_64 / arm64)
+
+#### Desktop Installation Guide
+
+**macOS**
+
+1. Download the `.dmg` for your CPU architecture and open it.
+2. Drag `Sage.app` into the `Applications` folder.
+3. The current macOS build is not yet signed/notarized by Apple. If you see a warning that the developer cannot be verified or Apple cannot check the app for malicious software, open `Applications`, right-click `Sage.app`, choose `Open`, and then click `Open` again in the dialog.
+4. If macOS still blocks the app, go to `System Settings -> Privacy & Security`, find the Sage warning near the bottom, and click `Open Anyway`.
+5. If macOS says the app is damaged or still refuses to launch, run the following command and try again:
 
 ```bash
-export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
-export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
-export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
+xattr -dr com.apple.quarantine /Applications/Sage.app
 ```
 
-### 3. Choose one entry point
+**Windows**
 
-Example CLI:
+1. Download the `.exe` installer and run it.
+2. Follow the setup wizard to finish installation.
+3. If Windows SmartScreen shows a warning, click `More info` -> `Run anyway`.
 
+**Linux**
+
+1. Download the `.deb` package for your architecture from [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases).
+2. On Debian/Ubuntu, you can install it directly by double-clicking it, or by running:
+
+```bash
+sudo apt install ./Sage-<version>-<arch>.deb
+```
+
+If you prefer to build the desktop app from source, use the commands below.
+
+```bash
+# macOS/Linux
+app/desktop/scripts/build.sh release
+
+# Windows
+./app/desktop/scripts/build_windows.ps1 release
+```
+
+**Command Line Interface (CLI)**:
 ```bash
 python examples/sage_cli.py \
-  --default_llm_api_key "$SAGE_DEFAULT_LLM_API_KEY" \
-  --default_llm_api_base_url "$SAGE_DEFAULT_LLM_API_BASE_URL" \
-  --default_llm_model_name "$SAGE_DEFAULT_LLM_MODEL_NAME"
+  --default_llm_api_key YOUR_API_KEY \
+  --default_llm_api_base_url https://api.deepseek.com/v1 \
+  --default_llm_model_name deepseek-chat
 ```
 
-Main server:
+**Web Application (FastAPI + Vue3)**:
 
 ```bash
+# Start backend
 python -m app.server.main
-```
 
-Health check:
-
-```bash
-curl http://127.0.0.1:8080/api/health
-```
-
-Web UI:
-
-```bash
+# Start frontend (in another terminal)
 cd app/server/web
 npm install
 npm run dev
 ```
 
-Streamlit demo:
+---
 
-```bash
-streamlit run examples/sage_demo.py -- \
-  --default_llm_api_key "$SAGE_DEFAULT_LLM_API_KEY" \
-  --default_llm_api_base_url "$SAGE_DEFAULT_LLM_API_BASE_URL" \
-  --default_llm_model_name "$SAGE_DEFAULT_LLM_MODEL_NAME"
-```
-
-## Learn More
-
-- Technical docs: [`docs/README.md`](docs/README.md)
-- Getting started guide: [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md)
-- Release notes: [`release_notes/`](release_notes/)
-- DeepWiki: https://deepwiki.com/ZHangZHengEric/Sage
-- Slack community: https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA
-
-If you are evaluating Sage as a product platform, start here in the README. If you are implementing, extending, or integrating, continue into `docs/`.
-
-## Architecture
+## 🏗️ **System Architecture**
 
 ```mermaid
-flowchart TD
-    User[User Interfaces] --> Web[Web App]
-    User --> Desktop[Desktop App]
-    User --> Examples[Examples]
-    Web --> Server[app/server]
-    Desktop --> DesktopCore[app/desktop/core]
-    Server --> Runtime[sagents]
-    DesktopCore --> Runtime
-    Examples --> Runtime
-    Runtime --> Tools[Tool System]
-    Runtime --> Skills[Skill System]
-    Runtime --> Sandbox[Sandbox]
-    Runtime --> Obs[Observability]
-    Tools --> MCP[mcp_servers]
+graph TD
+    User[User/Client] --> Desktop[💻 Desktop App]
+    User --> Web[🌐 Web UI]
+    Desktop --> API[Sage Server API]
+    Web --> API
+    
+    subgraph Core[Core Engine]
+        API --> Orch[🧠 Agent Orchestrator]
+        Orch -- "Dispatch" --> Flow[📋 AgentFlow]
+        Flow -- "Execute" --> Agents["🤖 Agents<br/>Fibre / Simple / Multi"]
+        Agents -- "Use" --> RAG[📚 RAG Engine]
+        Agents -- "Use" --> Tools[🛠️ Tools & Skills]
+        Agents -- "Use" --> MCP[🔌 MCP Servers]
+        Agents -- "Run in" --> Box[📦 Security Sandbox]
+    end
+
+    subgraph Infra[Enterprise Infrastructure]
+        RAG <--> ES[(Elasticsearch)]
+        Tools <--> RustFS[(RustFS)]
+        Orch <--> DB[(SQL Database)]
+    end
+    
+    Core -.-> Obs["👁️ Observability<br/>OpenTelemetry"]
+    Core -.-> Workbench["🛠️ Visual Workbench"]
 ```
 
-## Repository Guide
+---
 
-```text
+## 📅 **What's New in v1.0.0**
+
+### 🤖 **SAgents Kernel Updates**
+
+- **Session Management Refactor**: Global `SessionManager` with parent-child session tracking
+- **AgentFlow Engine**: Declarative workflow orchestration with Router → DeepThink → Mode Switch → Suggest flow
+- **Fibre Mode Optimization**: 
+  - Dynamic sub-agent spawning with `sys_spawn_agent`
+  - Parallel task delegation with `sys_delegate_task`
+  - Hour-level long-running task support
+  - 4-level hierarchy depth control
+  - Recursive orchestration capabilities
+- **Lock Management**: Global `LockManager` for session-level isolation
+- **Observability**: OpenTelemetry integration with performance monitoring
+
+### 💻 **App Layer Updates**
+
+- **Visual Workbench**: 
+  - 20+ rendering components
+  - 15+ file format support (PDF, DOCX, PPTX, XLSX, etc.)
+  - List/Single view dual mode
+  - Timeline navigation
+  - Session-isolated state management
+- **Cross-Platform Desktop**: 
+  - macOS (Intel/Apple Silicon) - DMG
+  - Windows - NSIS Installer
+  - Linux - DEB support
+- **Real-time Collaboration**: 
+  - Message stream optimization
+  - File reference extraction
+  - Code block highlighting
+  - Disconnect detection & resume
+- **MCP Support**: Model Context Protocol for external tool integration
+
+### 🔧 **Infrastructure**
+
+- **Tauri 2.0**: Upgraded to stable version with new permission system
+- **Build Optimization**: Rust caching, parallel builds, auto-signing
+- **State Management**: Pinia store with session isolation
+
+**[View Full Release Notes](release_notes/v1.0.0.md)**
+
+---
+
+## 📚 **Documentation**
+
+- 📖 **Full Documentation**: [https://wiki.sage.zavixai.com/](https://wiki.sage.zavixai.com/)
+- 📝 **Release Notes**: [release_notes/](release_notes/)
+- 🏗️ **Architecture**: See `sagents/` directory for core framework
+- 🔧 **Configuration**: Environment variables and config files in `app/desktop/`
+
+---
+
+## 🛠️ **Development**
+
+### Project Structure
+
+```
 Sage/
-├── sagents/          # Core runtime and orchestration
-├── app/server/       # Main backend and web application
-├── app/desktop/      # Desktop backend, UI, and packaging
-├── examples/         # Lightweight runnable examples
-├── mcp_servers/      # Built-in MCP server implementations
-├── docs/             # Technical documentation
-└── release_notes/    # Release-specific notes
+├── sagents/                    # Core Agent Framework
+│   ├── agent/                  # Agent implementations
+│   │   ├── fibre/              # Fibre multi-agent orchestration
+│   │   ├── simple_agent.py     # Simple mode agent
+│   │   └── ...
+│   ├── flow/                   # AgentFlow engine
+│   ├── context/                # Session & message management
+│   ├── tool/                   # Tool system
+│   └── session_runtime.py      # Session manager
+├── app/desktop/                # Desktop Application
+│   ├── core/                   # Python backend (FastAPI)
+│   ├── ui/                     # Vue3 frontend
+│   └── tauri/                  # Tauri 2.0 desktop shell
+└── skills/                     # Built-in skills
 ```
 
-## Documentation
+### Contributing
 
-Start with the technical docs in [`docs/`](docs/):
+We welcome contributions! Please see our [GitHub Issues](https://github.com/ZHangZHengEric/Sage/issues) for tasks and discussions.
 
-- [`docs/README.md`](docs/README.md)
-- [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md)
-- [`docs/CORE_CONCEPTS.md`](docs/CORE_CONCEPTS.md)
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)
-- [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md)
-- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)
-- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
+---
 
-This README is intentionally optimized as a repository landing page. The deeper implementation detail lives in `docs/`.
-
-## Development
-
-Backend:
-
-```bash
-python -m app.server.main
-```
-
-Frontend:
-
-```bash
-cd app/server/web
-npm install
-npm run dev
-```
-
-Desktop build:
-
-```bash
-app/desktop/scripts/build.sh release
-```
-
-## Contributing
-
-Contributions are welcome. When changing runtime behavior, update the matching page under `docs/` in the same change so the product surface and technical guidance stay aligned.
-
-## Community
-
-- Issues: https://github.com/ZHangZHengEric/Sage/issues
-- Slack: https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA
-
-## Sponsors
+## 💖 **Sponsors**
 
 <div align="center">
 
@@ -271,22 +285,26 @@ We are grateful to our sponsors for their support in making Sage better:
 
 </div>
 
-## Join Our Community
+---
+
+## 🦌 **Join Our Community**
 
 <div align="center">
 
-### Slack
+### 💬 Connect with us
 
 [![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack&style=for-the-badge)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
-### WeChat Group
+### 📱 WeChat Group
 
 <img src="assets/WeChatGroup.jpg" width="300" alt="WeChat Group QR Code"/>
 
-*Scan to join our WeChat community*
+*Scan to join our WeChat community 🦌*
 
 </div>
 
-## License
+---
 
-MIT. See [`LICENSE`](LICENSE).
+<div align="center">
+Built with ❤️ by the Sage Team 🦌
+</div>
