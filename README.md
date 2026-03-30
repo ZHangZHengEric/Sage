@@ -18,7 +18,9 @@ Production-oriented multi-agent runtime and application stack for building, runn
 
 ## Why Sage
 
-Sage is designed for teams that need more than a chat wrapper around an LLM. It combines a reusable multi-agent runtime with product-ready application surfaces so you can:
+Sage is designed for teams that need more than a thin chat wrapper around an LLM. It combines a reusable multi-agent runtime with product-ready application surfaces so you can move from experimentation to a usable product surface without splitting your stack apart.
+
+With Sage, teams can:
 
 - run agent workflows through CLI, web, and desktop entry points
 - extend capabilities through tools, skills, and MCP servers
@@ -27,12 +29,12 @@ Sage is designed for teams that need more than a chat wrapper around an LLM. It 
 
 ## Highlights
 
-- Multi-agent execution with `simple`, `multi`, and `fibre` runtime modes
-- Tool, skill, and MCP extension model for custom capabilities
-- Built-in sandboxing for safer runtime execution
-- Streaming chat, session-based workflows, and resumable execution flows
-- Web and desktop application shells on top of the same runtime concepts
-- OpenTelemetry-oriented observability hooks
+- Multi-agent orchestration across `simple`, `multi`, and `fibre` execution modes
+- Product-ready extension model built around tools, skills, and MCP servers
+- Safer runtime execution with built-in sandbox support
+- Streaming conversations, session workflows, and resumable execution paths
+- Shared runtime foundation for CLI, web, and desktop product surfaces
+- Observability hooks that make complex agent behavior easier to inspect and operate
 
 ## What Sage Is
 
@@ -50,21 +52,21 @@ The repository includes both product-facing applications and the lower-level run
 
 ### Main server and web UI
 
-Use this when you want the primary multi-user application stack.
+Use this when you want the primary multi-user product experience.
 
 - Backend entry: `app/server/main.py`
 - Frontend source: `app/server/web/`
 
 ### Desktop app
 
-Use this when you want the packaged local desktop experience.
+Use this when you want a packaged local experience for end users or internal teams.
 
 - Bootstrap entry: `app/desktop/entry.py`
 - Desktop backend: `app/desktop/core/main.py`
 
 ### Lightweight examples
 
-Use these when you want the smallest possible feedback loop.
+Use these when you want the shortest path from idea to a working runtime test.
 
 - `examples/sage_cli.py`
 - `examples/sage_demo.py`
@@ -159,6 +161,8 @@ streamlit run examples/sage_demo.py -- \
 - DeepWiki: https://deepwiki.com/ZHangZHengEric/Sage
 - Slack community: https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA
 
+If you are evaluating Sage as a product platform, start here in the README. If you are implementing, extending, or integrating, continue into `docs/`.
+
 ## Architecture
 
 ```mermaid
@@ -204,7 +208,7 @@ Start with the technical docs in [`docs/`](docs/):
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
 
-For a repository landing page, this README stays intentionally shorter than the docs site. The deeper technical detail lives in `docs/`.
+This README is intentionally optimized as a repository landing page. The deeper implementation detail lives in `docs/`.
 
 ## Development
 
@@ -230,7 +234,7 @@ app/desktop/scripts/build.sh release
 
 ## Contributing
 
-Contributions are welcome. When changing runtime behavior, prefer updating the matching page under `docs/` in the same change.
+Contributions are welcome. When changing runtime behavior, update the matching page under `docs/` in the same change so the product surface and technical guidance stay aligned.
 
 ## Community
 
