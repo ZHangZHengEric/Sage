@@ -25,13 +25,14 @@
           </SelectTrigger>
           <SelectContent class="w-[240px] p-2">
             <div class="grid grid-cols-4 gap-1.5">
-              <SelectItem
+              <RadixSelectItem
                 v-for="agent in (agents || [])"
                 :key="agent.id"
                 :value="agent.id"
-                class="relative p-1.5 cursor-pointer rounded-lg hover:bg-muted/80 focus:bg-muted/80 data-[state=checked]:bg-primary/10 transition-colors"
+                :text-value="agent.name"
+                class="relative flex min-h-[4.25rem] w-full cursor-pointer select-none items-center justify-center rounded-lg p-1.5 outline-none transition-colors data-[highlighted]:bg-muted/80 data-[state=checked]:bg-primary/10 data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
               >
-                <div class="flex flex-col items-center gap-1 w-full">
+                <RadixSelectItemText as="div" class="flex w-full flex-col items-center gap-1">
                   <!-- Agent 头像 -->
                   <div class="relative w-9 h-9 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary/20 to-primary/5">
                     <img
@@ -41,18 +42,18 @@
                     />
                   </div>
                   <!-- Agent 名称 -->
-                  <div class="flex items-center justify-center gap-1 w-full">
-                    <!-- 选中状态指示器 - 绿色圆点 -->
-                    <span
-                      v-if="selectedAgentId === agent.id"
-                      class="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0"
-                    />
-                    <span class="text-[10px] font-medium text-foreground text-center truncate leading-none">
+                  <div class="flex items-center justify-center w-full px-0.5">
+                    <span class="block max-w-full truncate text-[10px] font-medium text-foreground text-center leading-none">
                       {{ agent.name }}
                     </span>
                   </div>
-                </div>
-              </SelectItem>
+                </RadixSelectItemText>
+                <span class="absolute top-1.5 right-1.5 flex h-3 w-3 items-center justify-center">
+                  <RadixSelectItemIndicator>
+                    <span class="h-1.5 w-1.5 rounded-full bg-green-500" />
+                  </RadixSelectItemIndicator>
+                </span>
+              </RadixSelectItem>
             </div>
           </SelectContent>
         </Select>
@@ -284,10 +285,13 @@ import { Button } from '@/components/ui/button'
 import {
   Select,
   SelectContent,
-  SelectItem,
   SelectTrigger,
-  SelectValue,
 } from '@/components/ui/select'
+import {
+  SelectItem as RadixSelectItem,
+  SelectItemIndicator as RadixSelectItemIndicator,
+  SelectItemText as RadixSelectItemText,
+} from 'radix-vue'
 import { useChatPage } from '@/composables/chat/useChatPage.js'
 import { usePanelStore } from '@/stores/panel.js'
 import { storeToRefs } from 'pinia'

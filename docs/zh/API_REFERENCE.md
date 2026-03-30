@@ -3,10 +3,17 @@ layout: default
 title: API 参考
 nav_order: 9
 description: "Sage多智能体框架完整API参考文档"
+lang: zh
+ref: api-reference
 ---
 
+{% include lang_switcher.html %}
+
 {: .note }
-> 需要英文版本？请查看 [API Reference](API_REFERENCE.html)
+> 需要英文版本？请查看 [API Reference](../en/API_REFERENCE.md)
+
+{: .warning }
+> 本页恢复自历史 v0.9 文档，描述的是较早期的运行时 Python API。当前仓库里的服务端 HTTP 接口，请优先查看 [HTTP API 参考](HTTP_API_REFERENCE.md)。
 
 ## 目录
 {: .no_toc .text-delta }
