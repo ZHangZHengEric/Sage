@@ -3,7 +3,11 @@ layout: default
 title: Configuration
 nav_order: 5
 description: "Environment variables and runtime configuration"
+lang: en
+ref: configuration
 ---
+
+{% include lang_switcher.html %}
 
 # Configuration
 
