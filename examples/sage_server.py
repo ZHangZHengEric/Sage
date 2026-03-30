@@ -326,7 +326,6 @@ class SageStreamService:
                 system_prefix=self.preset_system_prefix,
                 host_workspace=self.agent_workspace,
                 virtual_workspace=self.virtual_workspace,
-                default_memory_type=self.memory_type,
                 user_id=user_id,
                 agent_id=self.agent_id,
                 deep_thinking=deep_thinking if deep_thinking is not None else self.preset_deep_thinking,

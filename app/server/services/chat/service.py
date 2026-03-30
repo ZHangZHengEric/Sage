@@ -364,7 +364,6 @@ class SageStreamService:
                 agent_id=self.request.agent_id,
                 sandbox_agent_workspace=self.agent_workspace,
                 volume_mounts=volume_mounts,
-                default_memory_type=self.request.memory_type,
                 user_id=self.request.user_id,
                 deep_thinking=self.request.deep_thinking,
                 max_loop_count=self.request.max_loop_count,
