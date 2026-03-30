@@ -3,7 +3,11 @@ layout: default
 title: Architecture
 nav_order: 4
 description: "Repository and subsystem architecture"
+lang: en
+ref: architecture
 ---
+
+{% include lang_switcher.html %}
 
 # Architecture
 

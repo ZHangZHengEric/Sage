@@ -3,7 +3,11 @@ layout: default
 title: Development
 nav_order: 9
 description: "Contributor workflow and source locations"
+lang: en
+ref: development
 ---
+
+{% include lang_switcher.html %}
 
 # Development
 
@@ -59,6 +63,28 @@ python examples/sage_cli.py \
   --default_llm_api_key "$SAGE_DEFAULT_LLM_API_KEY" \
   --default_llm_api_base_url "$SAGE_DEFAULT_LLM_API_BASE_URL" \
   --default_llm_model_name "$SAGE_DEFAULT_LLM_MODEL_NAME"
+```
+
+### Documentation site
+
+The docs site uses GitHub Pages Jekyll dependencies, so build it with the Ruby version pinned in `docs/.ruby-version`.
+
+With RVM:
+
+```bash
+source ~/.rvm/scripts/rvm
+rvm use 3.2.9
+cd docs
+bundle config set path vendor/bundle
+bundle install
+bundle exec jekyll serve
+```
+
+For a one-off build:
+
+```bash
+source ~/.rvm/scripts/rvm
+rvm use 3.2.9 do bash -lc 'cd docs && bundle exec jekyll build'
 ```
 
 ## Where To Read First
