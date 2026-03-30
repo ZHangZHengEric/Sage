@@ -2,6 +2,8 @@
 
 # Sage
 
+### The agent runtime for teams shipping real products
+
 ![cover](assets/cover.png)
 
 [![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
