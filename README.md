@@ -242,6 +242,51 @@ Contributions are welcome. When changing runtime behavior, update the matching p
 - Issues: https://github.com/ZHangZHengEric/Sage/issues
 - Slack: https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA
 
+## Sponsors
+
+<div align="center">
+
+We are grateful to our sponsors for their support in making Sage better:
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <a href="#" target="_blank">
+        <img src="assets/sponsors/dudubashi_logo.png" height="50" alt="Dudu Bus"/>
+      </a>
+      <br/>
+    </td>
+    <td align="center" width="33%">
+      <a href="#" target="_blank">
+        <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="50" alt="RcrAI"/>
+      </a>
+    </td>
+    <td align="center" width="33%">
+      <a href="#" target="_blank">
+        <img src="assets/sponsors/idata_logo.png" height="50" alt="Data"/>
+      </a>
+    </td>
+  </tr>
+</table>
+
+</div>
+
+## Join Our Community
+
+<div align="center">
+
+### Slack
+
+[![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack&style=for-the-badge)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
+
+### WeChat Group
+
+<img src="assets/WeChatGroup.jpg" width="300" alt="WeChat Group QR Code"/>
+
+*Scan to join our WeChat community*
+
+</div>
+
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
