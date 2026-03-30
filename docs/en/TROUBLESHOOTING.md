@@ -3,7 +3,11 @@ layout: default
 title: Troubleshooting
 nav_order: 10
 description: "Common Sage setup and runtime issues"
+lang: en
+ref: troubleshooting
 ---
+
+{% include lang_switcher.html %}
 
 # Troubleshooting
 

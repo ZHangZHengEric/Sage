@@ -3,7 +3,11 @@ layout: default
 title: MCP Servers
 nav_order: 7
 description: "Built-in MCP servers in the Sage repository"
+lang: en
+ref: mcp-servers
 ---
+
+{% include lang_switcher.html %}
 
 # MCP Servers
 
