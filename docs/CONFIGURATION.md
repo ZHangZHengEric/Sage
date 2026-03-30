@@ -1,84 +1,83 @@
 ---
 layout: default
-title: Configuration Reference
-nav_order: 12
-description: "Configuration reference based on the current Sage codebase"
+title: Configuration
+nav_order: 5
+description: "Environment variables and runtime configuration"
 ---
 
-{: .note }
-> Looking for Chinese? See [配置参考](CONFIGURATION_CN.html).
+# Configuration
 
-# Configuration Reference
+## Source of Truth
 
-This document reflects the active configuration surfaces that exist in the repository today.
+The primary configuration source is `app/server/core/config.py`, which builds a `StartupConfig` from environment variables and defaults.
 
-## 1. Main Sources Of Configuration
+When documentation and behavior disagree, treat `app/server/core/config.py` as authoritative.
 
-Current configuration is spread across three main layers:
+## Minimum Required Settings
 
-1. server startup config in [`app/server/core/config.py`](../app/server/core/config.py)
-2. runtime parameters passed to [`sagents/sagents.py`](../sagents/sagents.py)
-3. CLI arguments in [`examples/sage_cli.py`](../examples/sage_cli.py) and [`examples/sage_server.py`](../examples/sage_server.py)
+These are the settings you normally need first:
 
-## 2. Server Environment Variables
+- `SAGE_DEFAULT_LLM_API_KEY`
+- `SAGE_DEFAULT_LLM_API_BASE_URL`
+- `SAGE_DEFAULT_LLM_MODEL_NAME`
 
-The main server config struct is `StartupConfig` in [`app/server/core/config.py`](../app/server/core/config.py).
+For many local runs, these three variables plus `SAGE_PORT` are enough.
 
-### Core Service
+## Server and Storage
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `SAGE_PORT` | `8080` | FastAPI server port |
-| `SAGE_LOGS_DIR_PATH` | `logs` | Logs directory |
-| `SAGE_SESSION_DIR` | `sessions` | Session storage directory |
-| `SAGE_AGENTS_DIR` | `agents` | Agent storage directory |
-| `SAGE_USER_DIR` | `users` | User data directory |
-| `SAGE_SKILL_WORKSPACE` | `skills` | Host-side skill directory |
+- `SAGE_PORT`
+- `SAGE_SESSION_DIR`
+- `SAGE_LOGS_DIR_PATH`
+- `SAGE_AGENTS_DIR`
+- `SAGE_USER_DIR`
+- `SAGE_SKILL_WORKSPACE`
 
-### Default LLM
+These control where Sage writes runtime state, sessions, agents, and skill workspace data.
 
-| Variable | Default |
-|---|---|
-| `SAGE_DEFAULT_LLM_API_KEY` | `""` |
-| `SAGE_DEFAULT_LLM_API_BASE_URL` | `https://api.deepseek.com/v1` |
-| `SAGE_DEFAULT_LLM_MODEL_NAME` | `deepseek-chat` |
-| `SAGE_DEFAULT_LLM_MAX_TOKENS` | `4096` |
-| `SAGE_DEFAULT_LLM_TEMPERATURE` | `0.2` |
-| `SAGE_DEFAULT_LLM_MAX_MODEL_LEN` | `54000` |
-| `SAGE_DEFAULT_LLM_TOP_P` | `0.9` |
-| `SAGE_DEFAULT_LLM_PRESENCE_PENALTY` | `0.0` |
+## Database
 
-### Context Budget
+- `SAGE_DB_TYPE`
+- `SAGE_MYSQL_HOST`
+- `SAGE_MYSQL_PORT`
+- `SAGE_MYSQL_USER`
+- `SAGE_MYSQL_PASSWORD`
+- `SAGE_MYSQL_DATABASE`
 
-| Variable | Default |
-|---|---|
-| `SAGE_CONTEXT_HISTORY_RATIO` | `0.2` |
-| `SAGE_CONTEXT_ACTIVE_RATIO` | `0.3` |
-| `SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO` | `0.5` |
-| `SAGE_CONTEXT_RECENT_TURNS` | `0` |
+`SAGE_DB_TYPE` supports `file`, `memory`, and `mysql`.
 
-### Database
+## Default Model Configuration
 
-| Variable | Default |
-|---|---|
-| `SAGE_DB_TYPE` | `file` |
-| `SAGE_MYSQL_HOST` | `127.0.0.1` |
-| `SAGE_MYSQL_PORT` | `3306` |
-| `SAGE_MYSQL_USER` | `root` |
-| `SAGE_MYSQL_PASSWORD` | `sage.1234` |
-| `SAGE_MYSQL_DATABASE` | `sage` |
+- `SAGE_DEFAULT_LLM_MAX_TOKENS`
+- `SAGE_DEFAULT_LLM_TEMPERATURE`
+- `SAGE_DEFAULT_LLM_MAX_MODEL_LEN`
+- `SAGE_DEFAULT_LLM_TOP_P`
+- `SAGE_DEFAULT_LLM_PRESENCE_PENALTY`
 
-### Auth
+## Context Budget
 
-| Variable | Default |
-|---|---|
-| `SAGE_JWT_KEY` | built-in dev secret |
-| `SAGE_JWT_EXPIRE_HOURS` | `24` |
-| `SAGE_REFRESH_TOKEN_SECRET` | built-in dev secret |
-| `SAGE_SESSION_SECRET` | built-in dev secret |
-| `SAGE_SESSION_COOKIE_NAME` | `sage_session` |
+- `SAGE_CONTEXT_HISTORY_RATIO`
+- `SAGE_CONTEXT_ACTIVE_RATIO`
+- `SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO`
+- `SAGE_CONTEXT_RECENT_TURNS`
 
-### Embedding / Search / Storage
+## Authentication and Session
+
+- `SAGE_AUTH_PROVIDERS`
+- `SAGE_JWT_KEY`
+- `SAGE_JWT_EXPIRE_HOURS`
+- `SAGE_REFRESH_TOKEN_SECRET`
+- `SAGE_SESSION_SECRET`
+- `SAGE_SESSION_COOKIE_NAME`
+- `SAGE_SESSION_COOKIE_SECURE`
+- `SAGE_SESSION_COOKIE_SAME_SITE`
+- `SAGE_WEB_BASE_PATH`
+- `SAGE_OAUTH2_CLIENTS`
+- `SAGE_OAUTH2_ISSUER`
+- `SAGE_OAUTH2_ACCESS_TOKEN_EXPIRES_IN`
+
+You can ignore this entire section until you enable login, external auth providers, or OAuth2 flows.
+
+## Embeddings, Search, and Object Storage
 
 - `SAGE_EMBEDDING_API_KEY`
 - `SAGE_EMBEDDING_BASE_URL`
@@ -95,108 +94,64 @@ The main server config struct is `StartupConfig` in [`app/server/core/config.py`
 - `SAGE_S3_BUCKET_NAME`
 - `SAGE_S3_PUBLIC_BASE_URL`
 
-### Observability
+You only need these when you enable knowledge-base, search, embedding, or object-storage-backed features.
+
+## Email
+
+- `SAGE_EML_ENDPOINT`
+- `SAGE_EML_ACCESS_KEY_ID`
+- `SAGE_EML_ACCESS_KEY_SECRET`
+- `SAGE_EML_SECURITY_TOKEN`
+- `SAGE_EML_ACCOUNT_NAME`
+- `SAGE_EML_TEMPLATE_ID`
+- `SAGE_EML_REGISTER_SUBJECT`
+- `SAGE_EML_ADDRESS_TYPE`
+- `SAGE_EML_REPLY_TO_ADDRESS`
+
+## Observability
 
 - `SAGE_TRACE_JAEGER_ENDPOINT`
 - `SAGE_TRACE_JAEGER_UI_URL`
 - `SAGE_TRACE_JAEGER_PUBLIC_URL`
 - `SAGE_TRACE_JAEGER_BASE_PATH`
 
-## 3. Example `.env`
+These are optional unless you actively run observability infrastructure.
 
-```bash
-SAGE_DEFAULT_LLM_API_KEY=sk-your-api-key
+## Sandbox and Runtime Safety
+
+These settings are consumed by the runtime outside the main server config object:
+
+- `SAGE_SANDBOX_MODE`
+- `SAGE_REMOTE_PROVIDER`
+- `SAGE_SANDBOX_MOUNT_PATHS`
+- `SAGE_LOCAL_CPU_TIME_LIMIT`
+- `SAGE_LOCAL_MEMORY_LIMIT_MB`
+- `SAGE_LOCAL_LINUX_ISOLATION`
+- `SAGE_LOCAL_MACOS_ISOLATION`
+- `SAGE_USE_CLAW_MODE`
+
+Most local users can start with `SAGE_SANDBOX_MODE=local` and leave the rest at defaults.
+
+## Frontend Environment
+
+The web client also reads frontend-specific Vite variables:
+
+- `VITE_SAGE_API_BASE_URL`
+- `VITE_SAGE_WEB_BASE_PATH`
+
+## Example `.env`
+
+```env
+SAGE_PORT=8080
+SAGE_DEFAULT_LLM_API_KEY=your-api-key
 SAGE_DEFAULT_LLM_API_BASE_URL=https://api.deepseek.com/v1
 SAGE_DEFAULT_LLM_MODEL_NAME=deepseek-chat
-
-SAGE_PORT=8080
 SAGE_DB_TYPE=file
-SAGE_SESSION_DIR=./sessions
-SAGE_LOGS_DIR_PATH=./logs
-
-SAGE_CONTEXT_HISTORY_RATIO=0.2
-SAGE_CONTEXT_ACTIVE_RATIO=0.3
-SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO=0.5
-SAGE_CONTEXT_RECENT_TURNS=6
+SAGE_SESSION_DIR=sessions
+SAGE_AGENTS_DIR=agents
+SAGE_SANDBOX_MODE=local
 ```
 
-## 4. CLI Configuration
+## Recommendation
 
-### `examples/sage_cli.py`
-
-Common flags:
-
-- `--default_llm_api_key`
-- `--default_llm_api_base_url`
-- `--default_llm_model_name`
-- `--agent_mode`
-- `--workspace`
-- `--virtual_workspace`
-- `--sandbox_type`
-- `--tools_folders`
-- `--skills_path`
-- `--memory_type`
-- `--session_root`
-- `--context_history_ratio`
-- `--context_active_ratio`
-- `--context_max_new_message_ratio`
-- `--context_recent_turns`
-
-### `examples/sage_server.py`
-
-Common flags:
-
-- `--default_llm_api_key`
-- `--default_llm_api_base_url`
-- `--default_llm_model_name`
-- `--host`
-- `--port`
-- `--mcp-config`
-- `--workspace`
-- `--skills-path`
-- `--logs-dir`
-- `--preset_running_config`
-- `--memory_type`
-- `--session-root`
-
-## 5. Runtime Configuration In `SAgent`
-
-The most important runtime knobs are passed directly to `SAgent.run_stream()`:
-
-- `agent_mode`
-- `deep_thinking`
-- `max_loop_count`
-- `system_context`
-- `available_workflows`
-- `context_budget_config`
-- `custom_sub_agents`
-- `custom_flow`
-- `sandbox_type`
-- `sandbox_agent_workspace`
-- `volume_mounts`
-
-## 6. Agent Configuration In Server APIs
-
-The server-side agent DTO is defined in [`app/server/routers/agent.py`](../app/server/routers/agent.py).
-
-Common persisted fields:
-
-- `name`
-- `systemPrefix`
-- `systemContext`
-- `availableWorkflows`
-- `availableTools`
-- `availableSubAgentIds`
-- `availableSkills`
-- `availableKnowledgeBases`
-- `memoryType`
-- `maxLoopCount`
-- `deepThinking`
-- `multiAgent`
-- `agentMode`
-- `llm_provider_id`
-
-## 7. Notes
-
-- Do not rely on older docs that describe `config/settings.yaml`, `agents.config`, or `AgentController`-style runtime config. Those are not the primary configuration surfaces in the current repository.
-- For the actual environment variable list that is guaranteed by code, prefer [`app/server/core/config.py`](../app/server/core/config.py) and [`docs/ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md).
+Start with the model variables, `SAGE_PORT`, and local storage directories. Add auth, database, object storage, embedding, or observability settings only when those subsystems are actually in use.
