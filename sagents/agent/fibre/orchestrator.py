@@ -1230,8 +1230,7 @@ class FibreOrchestrator:
             model_config=self.agent.model_config,
             system_prefix=agent_def.system_prompt or "",
             session_root_space=self.session_manager.session_root_space,
-            sandbox_agent_workspace=parent_sandbox_agent_workspace,
-            default_memory_type="session"
+            sandbox_agent_workspace=parent_sandbox_agent_workspace
         )
 
         # Initialize context if needed
