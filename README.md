@@ -18,14 +18,9 @@ Production-oriented multi-agent runtime and application stack for building, runn
 
 ## Why Sage
 
-Sage is designed for teams that need more than a thin chat wrapper around an LLM. It combines a reusable multi-agent runtime with product-ready application surfaces so you can move from experimentation to a usable product surface without splitting your stack apart.
+Sage is not another chat shell around an LLM. It is built for teams that need agents to behave like real software: operable, extensible, observable, and ready to ship across product surfaces.
 
-With Sage, teams can:
-
-- run agent workflows through CLI, web, and desktop entry points
-- extend capabilities through tools, skills, and MCP servers
-- keep execution safer with sandbox support
-- operate sessions with streaming output and observability hooks
+Instead of rebuilding the stack for every use case, Sage gives teams a shared foundation for agent workflows, tools, skills, MCP integrations, and user-facing applications across CLI, web, and desktop.
 
 ## Highlights
 
