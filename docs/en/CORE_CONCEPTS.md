@@ -3,7 +3,11 @@ layout: default
 title: Core Concepts
 nav_order: 3
 description: "The runtime model behind Sage"
+lang: en
+ref: core-concepts
 ---
+
+{% include lang_switcher.html %}
 
 # Core Concepts
 

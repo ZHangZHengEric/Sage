@@ -3,7 +3,11 @@ layout: default
 title: Getting Started
 nav_order: 2
 description: "Install Sage and run the main entry points"
+lang: en
+ref: getting-started
 ---
+
+{% include lang_switcher.html %}
 
 # Getting Started
 
