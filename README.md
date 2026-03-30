@@ -29,12 +29,16 @@ With Sage, teams can:
 
 ## Highlights
 
-- Multi-agent orchestration across `simple`, `multi`, and `fibre` execution modes
-- Product-ready extension model built around tools, skills, and MCP servers
-- Safer runtime execution with built-in sandbox support
-- Streaming conversations, session workflows, and resumable execution paths
-- Shared runtime foundation for CLI, web, and desktop product surfaces
-- Observability hooks that make complex agent behavior easier to inspect and operate
+- Multi-agent orchestration across sequential, parallel, and declarative workflow patterns
+- Framework-level optimization aimed at improving stability for complex agent tasks
+- Reusable built-in skills that help teams start from working capability blocks
+- Built-in sandbox support for safer agent execution
+- OpenTelemetry-based observability for tracing agent execution paths
+- Modular extension model built around skills, tools, and MCP servers
+- Context budget controls for more deliberate token and session management
+- Shared runtime foundation across CLI, web, and desktop product surfaces
+- Visual workspace patterns for file preview, tool results, and execution feedback
+- MCP protocol support for standardized tool integration
 
 ## What Sage Is
 
