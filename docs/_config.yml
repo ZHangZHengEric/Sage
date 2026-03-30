@@ -1,27 +1,22 @@
-title: "Sage Multi-Agent Framework Documentation"
-description: "Comprehensive documentation for the Sage Multi-Agent Framework"
+title: "Sage Documentation"
+description: "Accurate, task-oriented documentation for the current Sage codebase"
 baseurl: "/Sage"
 url: "https://zhangzhengeric.github.io"
 
-# Use a better theme with more features
 remote_theme: just-the-docs/just-the-docs
 
-# Markdown processor
 markdown: kramdown
 highlighter: rouge
 
-# Plugins
 plugins:
   - jekyll-feed
   - jekyll-sitemap
   - jekyll-seo-tag
   - jekyll-remote-theme
 
-# Mermaid support
 mermaid:
   src: 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs'
 
-# Search functionality
 search_enabled: true
 search:
   heading_level: 2
@@ -31,42 +26,31 @@ search:
   tokenizer_separator: /[\s/]+/
   rel_url: true
 
-# Navigation structure
 nav_order_title: "Navigation"
-
-# Color scheme
 color_scheme: light
 
-# Site logo
 logo: "/assets/logo.png"
 
-# Footer content
-footer_content: "Copyright &copy; 2024 Sage Multi-Agent Framework. Distributed by an <a href=\"https://github.com/ZHangZHengEric/Sage\">MIT license.</a>"
+footer_content: "Sage documentation for the current repository layout. Source available under the MIT license."
 
-# Language support
 lang: en
 
-# Enable heading anchors
 heading_anchors: true
 
-# Code copy button
 enable_copy_code_button: true
 
-# Custom CSS
 sass:
   sass_dir: _sass
   style: compressed
 
-# Aux navigation
 aux_links:
   "GitHub Repository":
     - "//github.com/ZHangZHengEric/Sage"
-  "中文文档":
-    - "#chinese-docs"
+  "Root README":
+    - "//github.com/ZHangZHengEric/Sage/blob/main/README.md"
 
 aux_links_new_tab: true
 
-# Collections for better organization
 collections:
   guides:
     permalink: "/:collection/:name/"
@@ -78,7 +62,6 @@ collections:
     permalink: "/:collection/:name/"
     output: true
 
-# Default layouts
 defaults:
   - scope:
       path: ""
@@ -101,7 +84,6 @@ defaults:
     values:
       layout: "default"
 
-# Kramdown settings for better Chinese support
 kramdown:
   input: GFM
   hard_wrap: false
@@ -113,7 +95,6 @@ kramdown:
     block:
       line_numbers: false
 
-# Exclude files
 exclude:
   - Gemfile
   - Gemfile.lock
@@ -123,4 +104,5 @@ exclude:
   - vendor/gems/
   - vendor/ruby/
   - "*.gemspec"
-  - "*.gem" 
+  - "*.gem"
+  - plans/
