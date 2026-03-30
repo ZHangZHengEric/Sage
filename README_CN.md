@@ -9,10 +9,30 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg?logo=python)](https://python.org)
 [![Version](https://img.shields.io/badge/Version-1.0.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
+[![DeepWiki](https://img.shields.io/badge/DeepWiki-查看文档-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
+[![Slack](https://img.shields.io/badge/Slack-加入社区-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
 面向生产场景的多智能体运行时与应用栈，支持在 CLI、Web 和桌面端构建、运行和扩展 Sage 智能体。
 
 </div>
+
+## 为什么是 Sage
+
+Sage 面向的不是“套一层 LLM 的聊天壳”，而是需要可扩展、可运行、可产品化智能体能力的团队。它把可复用的多智能体运行时和应用层入口放在同一个仓库里，帮助你：
+
+- 通过 CLI、Web 和桌面端运行智能体工作流
+- 通过 Tool、Skill 和 MCP Server 扩展能力
+- 用沙箱机制提升执行安全性
+- 用流式会话和可观测性能力支撑真实使用场景
+
+## 核心亮点
+
+- 支持 `simple`、`multi`、`fibre` 三种多智能体执行模式
+- 基于 Tool、Skill 和 MCP 的扩展模型
+- 内置沙箱机制，提升运行时安全性
+- 基于会话的流式执行、恢复与工作流能力
+- 在统一运行时概念之上提供 Web 与桌面应用壳
+- 面向 OpenTelemetry 的可观测性能力
 
 ## Sage 是什么
 
@@ -73,15 +93,6 @@ Sage 采用分层代码结构：
 
 </div>
 
-## 核心能力
-
-- 支持 `simple`、`multi`、`fibre` 三种多智能体执行模式
-- 基于 Tool、Skill 和 MCP 的扩展模型
-- 内置沙箱机制，提升运行时安全性
-- 基于会话的流式执行与对话能力
-- 面向 OpenTelemetry 的可观测性能力
-- 在统一运行时概念之上提供 Web 与桌面应用壳
-
 ## 快速开始
 
 ### 1. 安装依赖
@@ -140,6 +151,14 @@ streamlit run examples/sage_demo.py -- \
   --default_llm_model_name "$SAGE_DEFAULT_LLM_MODEL_NAME"
 ```
 
+## 延伸阅读
+
+- 技术文档：[`docs/README.md`](docs/README.md)
+- 快速上手：[`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md)
+- 发布说明：[`release_notes/`](release_notes/)
+- DeepWiki：https://deepwiki.com/ZHangZHengEric/Sage
+- Slack 社区：https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA
+
 ## 架构概览
 
 ```mermaid
@@ -185,6 +204,8 @@ Sage/
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
 
+作为仓库首页，README 会刻意保持比 `docs/` 更短；更细的技术细节统一收敛在 `docs/` 中。
+
 ## 开发
 
 后端：
@@ -210,6 +231,11 @@ app/desktop/scripts/build.sh release
 ## 参与贡献
 
 欢迎贡献。若你修改了运行时行为，建议在同一个变更中同步更新 `docs/` 中对应的文档页面。
+
+## 社区
+
+- Issues：https://github.com/ZHangZHengEric/Sage/issues
+- Slack：https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA
 
 ## 许可证
 
