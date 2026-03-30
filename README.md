@@ -124,21 +124,20 @@ app/desktop/scripts/build.sh release
 
 **Command Line Interface (CLI)**:
 ```bash
-python app/sage_cli.py \
+python examples/sage_cli.py \
   --default_llm_api_key YOUR_API_KEY \
-  --default_llm_model deepseek-chat \
-  --default_llm_base_url https://api.deepseek.com
+  --default_llm_api_base_url https://api.deepseek.com/v1 \
+  --default_llm_model_name deepseek-chat
 ```
 
 **Web Application (FastAPI + Vue3)**:
 
 ```bash
 # Start backend
-cd app/desktop/core
-python main.py
+python -m app.server.main
 
 # Start frontend (in another terminal)
-cd app/desktop/ui
+cd app/server/web
 npm install
 npm run dev
 ```
