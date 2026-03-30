@@ -2,404 +2,195 @@
 layout: default
 title: Architecture Guide
 nav_order: 5
-description: "Understanding the Sage Multi-Agent Framework architecture and design principles"
+description: "Current Sage architecture overview"
 ---
 
+# Architecture Guide
 
-# 🏗️ Sage System Architecture & Design Principles (v3.0)
-
-This document details the core capabilities, execution flow, and underlying implementation principles of key modules in Sage.
-
-Sage is a highly modular, observable agent system with long-term memory capabilities. Its design core lies in the **separation of Control and State**, as well as **Multi-Mode execution strategies**, enabling it to handle both simple instant Q&A and complex long-process tasks.
-
-## 1. Core Design Philosophy
-
-### Core Entities
-*   **SAgent (Controller)**: The brain and commander of the agent. Responsible for receiving requests, orchestrating agents, routing tasks, and controlling the entire execution flow. It does not store state itself but reads and writes state through SessionContext.
-*   **SessionContext (State Center)**: The memory and state container for the agent. Responsible for maintaining all data within the session lifecycle, including message records, task states, user memory, workflow context, etc.
-
----
-
-## 2. System Overall Architecture
-
-### 2.1 Architecture Layer Diagram
-
-```mermaid
-graph TB
-
-    %% ======================
-    %% 👤 User Interface Layer
-    %% ======================
-    subgraph UI_Layer["👤 User Interface"]
-        User["User (User)<br/>💻 API / Web / CLI"]
-    end
-
-    %% ======================
-    %% 🧠 Control Plane
-    %% ======================
-    subgraph Control_Layer["🧠 Control Plane"]
-        Orchestrator["SAgent (Controller)<br/>🕹️ Global Orchestration & Scheduling"]
-    end
-
-    %% ======================
-    %% 🧩 Execution Runtime
-    %% ======================
-    subgraph Runtime_Layer["🧩 Agent Execution Runtime"]
-        Obs["Observability (Observability)<br/>📡 Runtime Monitoring"]
-        Execution["Agent Runtime (Execution Core)<br/>🤖 Agent Execution"]
-        Obs --> Execution
-    end
-
-    %% ======================
-    %% 📦 State Management Layer
-    %% ======================
-    subgraph State_Layer["📦 State Management"]
-        Context["SessionContext<br/>🗂️ Session State Container"]
-
-        subgraph State_Modules["State Modules"]
-            MsgMgr["MessageManager<br/>Message Mgmt"]
-            TaskMgr["TaskManager<br/>Task Mgmt"]
-            WFMgr["WorkflowManager<br/>Workflow Mgmt"]
-            SysCtx["SystemContext<br/>System Context"]
-        end
-    end
-
-    %% ======================
-    %% 🛠️ Infrastructure Layer
-    %% ======================
-    subgraph Infra_Layer["🛠️ Infrastructure"]
-        ToolMgr["ToolManager<br/>🔌 Tool System"]
-        SkillMgr["SkillManager<br/>📚 Skill System"]
-        MemMgr["UserMemoryManager<br/>💾 Memory System"]
+This page describes the architecture that is visible in the current repository.
 
-        ObsInfra["Observability Infra<br/>📊 Monitoring Infra"]
+## 1. Top-Level Layout
 
-        InnerTool["Built-in Tools"]
-        MCP["MCP Service Tools"]
-        VectorDB["Vector DB"]
-        FileDB["Local Files"]
-    end
-
-    %% ======================
-    %% 🔗 Interactions & Dependencies
-    %% ======================
-
-    %% User to Control
-    User --> Orchestrator
-
-    %% Control to Runtime
-    Orchestrator --> Obs
-
-    %% Runtime dependencies
-    Execution --> ToolMgr
-    Execution --> SkillMgr
-
-    %% State access
-    Orchestrator <--> Context
-    Execution <--> Context
-
-    %% State internals
-    Context --> MsgMgr
-    Context --> TaskMgr
-    Context --> WFMgr
-    Context --> SysCtx
-    Context --> MemMgr
-
-    %% Infra internals
-    ToolMgr --> InnerTool
-    ToolMgr --> MCP
-    MemMgr --> VectorDB
-    MemMgr --> FileDB
-
-    %% Observability export
-    Obs -.-> ObsInfra
-
-    %% ======================
-    %% 🎨 Style Definitions
-    %% ======================
-    classDef actor fill:#ffeb3b,stroke:#fbc02d,stroke-width:2px;
-    classDef control fill:#e3f2fd,stroke:#2196f3,stroke-width:2px;
-    classDef wrapper fill:#ede7f6,stroke:#673ab7,stroke-width:2px,stroke-dasharray:5 5;
-    classDef agent fill:#f3e5f5,stroke:#ab47bc,stroke-width:2px;
-    classDef state fill:#fff3e0,stroke:#ff9800,stroke-width:2px;
-    classDef infra fill:#e8f5e9,stroke:#4caf50,stroke-width:2px;
-
-    class User actor;
-    class Orchestrator control;
-    class Obs wrapper;
-    class Execution agent;
-    class Context,MsgMgr,TaskMgr,WFMgr,SysCtx state;
-    class ToolMgr,SkillMgr,MemMgr,ObsInfra,InnerTool,MCP,VectorDB,FileDB infra;
-
-```
-
----
-
-## 3. Dialogue Execution Flow & Trigger Logic
-
-Sage's execution flow is highly dynamic; the system decides which path to take based on input content, configuration, and intermediate states.
-
-### 3.1 Core Flowchart
+The active codebase is organized around these areas:
 
-```mermaid
-flowchart TD
-    Start["Start run_stream<br/>"]
-        --> Init["Init SessionContext & UserMemory"]
+- `sagents/`: core runtime, flow execution, session state, tools, skills, sandbox, observability
+- `app/server/`: FastAPI backend and Vue web app
+- `app/desktop/`: desktop backend, Vue UI, and Tauri shell
+- `examples/`: standalone CLI, Streamlit demo, and example server
+- `mcp_servers/`: built-in MCP server implementations
 
-    Init --> ContextPrep["Prepare History Context<br/>(Budget Manager + User Memory Extraction)"]
-    ContextPrep --> WFCheck{"Has Workflow?"}
+## 2. Core Runtime Model
 
-    WFCheck -- "> 5" --> WFSelect["WorkflowSelectAgent<br/>(Workflow Agent)<br/>Select Best Matching Workflow"]
-    WFSelect -- "Select 1" --> WFGuide["Inject WorkflowManager"]
+The current runtime entry point is `SAgent` in [`sagents/sagents.py`](../sagents/sagents.py).
 
-    WFCheck -- "<= 5" --> WFGuide
+`SAgent` is intentionally thin:
 
-    WFGuide --> RouterCheck{"Args specify deep_thinking & multi_agent?"}
-    RouterCheck -- "Specified" --> DeepThinkCheck
-    RouterCheck -- "Not Specified" --> Router
+- validates runtime parameters
+- resolves session identity
+- configures a `Session`
+- builds or accepts an `AgentFlow`
+- streams visible `MessageChunk` output back to the caller
 
-    Router["TaskRouterAgent<br/>(Task Router)<br/>Judge deep_thinking & multi_agent"]
-        --> DeepThinkCheck{"deep_thinking?"}
+The runtime state itself lives in `SessionContext`, not in `SAgent`.
 
-    DeepThinkCheck -- "Yes"
-        --> Analyzer["TaskAnalysisAgent<br/>(Task Analysis)<br/>Analyze Intent & Tools/Skills"]
-
-    Analyzer --> ModeCheck{"multi_agent?"}
-    DeepThinkCheck -- "No" --> ModeCheck
-
-    %% Branch 1: Multi-Agent Complex Mode
-    ModeCheck -- "Multi-Agent = True"
-        --> Decompose["TaskDecomposeAgent<br/>(Task Decompose)<br/>Breakdown into Subtasks"]
-
-    Decompose --> LoopStart((Loop Start))
-
-    subgraph ReActLoop ["ReAct Loop<br/>(Plan-Execute-Observe)"]
-        direction TB
-        LoopStart
-            --> Plan["TaskPlanningAgent<br/>(Task Planning)<br/>Generate Next Plan"]
-        Plan
-            --> Exec["TaskExecutorAgent<br/>(Task Execution)<br/>Call Tool or Code"]
-        Exec
-            --> Obs["TaskObservationAgent<br/>(Task Observation)<br/>Observe Results"]
-        Obs
-            --> Judge["TaskCompletionJudgeAgent<br/>(Completion Judge)<br/>Judge Subtask Status"]
-        Judge
-            --> StageSum["TaskStageSummaryAgent<br/>(Stage Summary)<br/>Summarize Progress"]
-        StageSum
-            --> CheckDone{"All Tasks Done?"}
-        CheckDone -- "No" --> LoopStart
-    end
+## 3. Main Architectural Split
 
-    CheckDone -- "Yes"
-        --> TaskSum["TaskSummaryAgent<br/>(Task Summary)<br/>Generate Final Response"]
+Sage is easiest to understand as four layers:
 
-    %% Branch 2: Single Agent Simple Mode
-    ModeCheck -- "Multi-Agent = False"
-        --> SkillCheck{"Has Skills?"}
+1. entry layer
+2. session/state layer
+3. execution/flow layer
+4. capability layer
 
-    subgraph SimpleFlow ["Simple Flow<br/>(Direct / Skill)"]
-        direction TB
+### Entry Layer
 
-        SkillCheck -- "Yes"
-            --> SkillExec["SkillExecutorAgent<br/>(Skill Execution)<br/>1. Intent Recog & Select Skill<br/>2. Sandbox Execute Skill"]
-
-        SkillCheck -- "No" --> SimpleStart
-
-        SkillExec --> SimpleStart((Loop))
-
-        subgraph SimpleAgentLoop ["SimpleAgent Internal Loop"]
-            direction TB
-            SimpleStart
-                --> SimpleGen["SimpleAgent<br/>(Response Gen)<br/>Gen Response or Tool Call"]
-            SimpleGen
-                --> SimpleTool{"Has Tool Call?"}
-            SimpleTool -- "Yes" --> SimpleGen
-            SimpleTool -- "No"
-                --> SimpleJudge{"Task Completed?"}
-            SimpleJudge -- "No" --> SimpleStart
-        end
-
-        SimpleJudge -- "Yes"
-            --> ForceSum{"Force Summary?"}
-    end
-
-    ForceSum -- "Yes" --> TaskSum["TaskSummaryAgent<br/>(Task Summary)<br/>Generate Final Response"]
-    ForceSum -- "No" --> EndNode
-
-    TaskSum --> EndNode
-
-    EndNode((End Flow))
-        --> Suggest{"more_suggest = True?"}
-
-    Suggest -- "Yes"
-        --> QSuggest["QuerySuggestAgent<br/>Generate Follow-up Suggestions"]
-    Suggest -- "No" --> Extract
-
-    QSuggest --> Extract
-
-    Extract["Async: MemoryExtractor<br/>(Extract & Save User Memory)"]
-        --> Finish["Finish & Save State"]
-
-```
-
-### 3.2 Key Trigger Conditions & Flow Logic
-
-1.  **History Context Preparation (History Context Prep)**
-    *   **Trigger**: Start of every session.
-    *   **Logic**: After initializing `SessionContext`, execute `set_history_context()`.
-    *   **Purpose**: Load history messages, execute truncation and BM25 relevance retrieval, and apply Budget Limiter to ensure context fits within the model's Token window.
-
-2.  **Workflow Selection (Workflow Selection)**
-    *   **Trigger**: `available_workflows` count is greater than 5.
-    *   **Logic**: Activate `WorkflowSelectAgent`.
-    *   **Purpose**: When there are too many optional workflows, help the LLM pre-filter the one that best matches the current user intent to reduce subsequent interference.
-
-3.  **Task Routing Judgment (Task Routing)**
-    *   **Trigger**: `deep_thinking` or `multi_agent` parameters are not explicitly specified in the input arguments.
-    *   **Logic**: Activate `TaskRouterAgent`.
-    *   **Purpose**: Intelligently judge user intent and dynamically decide whether to require "Deep Thinking" and whether to adopt "Multi-Agent" mode. If arguments are already specified, this step is skipped and the argument configuration is used directly.
-
-4.  **Deep Thinking (Deep Thinking)**
-    *   **Trigger**: `deep_thinking = True` (from input arguments or router judgment).
-    *   **Logic**: Activate `TaskAnalysisAgent`.
-    *   **Purpose**: Before executing specific tasks, conduct a deep analysis of user intent, required tools, and potential skills, generating a detailed task analysis report to guide subsequent execution.
-
-5.  **Multi-Agent Mode (Multi-Agent Workflow)**
-    *   **Trigger**: `multi_agent = True`.
-    *   **Process**: **Decompose** (`TaskDecomposeAgent`) -> **Loop Execution** (Plan `TaskPlanningAgent` -> Execute `TaskExecutorAgent` -> Observe `TaskObservationAgent` -> Judge `TaskCompletionJudgeAgent`) -> **Summary** (`TaskSummaryAgent`).
-    *   **Applicable Scenarios**: Programming development, complex logical reasoning, multi-step tool calls, and other tasks requiring ReAct loops.
-
-6.  **Single Agent Mode (Simple Workflow)**
-    *   **Trigger**: `multi_agent = False`.
-    *   **Process**: **Skill Matching** (execute `SkillExecutorAgent` if matched) -> **Simple Response** (`SimpleAgent` generates response or calls tool) -> **Force Summary** (Optional).
-    *   **Applicable Scenarios**: Casual chat, simple Q&A, single tool call, low latency requirement scenarios.
-
-7.  **Follow-up Suggestions (Query Suggestion)**
-    *   **Trigger**: `more_suggest = True`.
-    *   **Logic**: Activate `QuerySuggestAgent`.
-    *   **Purpose**: Based on the current conversation content, generate 3 related follow-up question suggestions to guide further user interaction.
-
-8.  **Memory Extraction (Memory Extraction)**
-    *   **Trigger**: `UserMemoryManager` is enabled and the session ends normally.
-    *   **Logic**: Start asynchronous task `MemoryExtractor`.
-    *   **Purpose**: Without blocking user response, analyze this conversation, extract user persona, factual preferences, and store them in the vector database to achieve long-term memory.
-
----
-
-## 4. Key Modules Detail
-
-### 4.1 Tool Module
-
-Tools are the hands of the Agent interacting with the external world. Sage uses a layered architecture to manage tool registration, permission control, and execution, shielding the differences between local functions and remote services.
-
-#### 4.1.1 Core Components & Architecture
-
-```mermaid
-classDiagram
-    class ToolProxy {
-        +run_tool_async()
-        -available_tools: Set
-        -check_tool_available()
-    }
-    
-    class ToolManager {
-        +tools: Dict[str, ToolSpec]
-        +register_tool()
-        +run_tool_async()
-        -discover_tools()
-    }
-    
-    class ToolSpec {
-        +name: str
-        +func: Callable
-    }
-    
-    class McpProxy {
-        +run_mcp_tool()
-        +get_mcp_tools()
-    }
-
-    ToolProxy --> ToolManager : Proxy & Filter
-    ToolManager o-- ToolSpec : Manage
-    ToolManager ..> McpProxy : Call MCP Protocol
-```
-
-*   **ToolManager (`sagents/tool/tool_manager.py`)**: System core singleton.
-    *   **Responsibility**: Responsible for global registration, storage, and execution dispatch of tools.
-    *   **Unified Interface**: Provides `run_tool_async` method as the unified entry point for all tool executions.
-
-*   **ToolProxy (`sagents/tool/tool_proxy.py`)**: Security and scenario isolation layer.
-    *   **Responsibility**: Acts as an access gateway to `ToolManager`. It does not hold tool entities but maintains a whitelist of allowed tools (`available_tools`).
-    *   **Scenario Isolation**: Different Agents (e.g., SalesAgent, CoderAgent) hold different `ToolProxy` instances, thereby only accessing tools within their permission scope.
-
-*   **McpProxy (`sagents/tool/mcp_proxy.py`)**: MCP Protocol Adapter.
-    *   **Responsibility**: Handles Model Context Protocol (MCP) protocol details, supporting multiple transport methods such as Stdio, SSE, Streamable HTTP.
-
-#### 4.1.2 Registration Mechanism (Registration)
-
-Sage supports tool registration from multiple sources and uses a **priority override mechanism** to resolve naming conflicts.
-
-1.  **Auto Discovery**:
-    *   **Local Tools**: Scans Python files under the `sagents` package at startup. Functions marked with the `@tool` decorator will have their metadata parsed (docstring -> description, type hints -> parameters) and registered.
-    *   **Built-in MCP**: Automatically scans modules under the `sagents` directory. Functions marked with the `@sage_mcp_tool` decorator are registered as built-in MCP services.
-
-2.  **MCP Dynamic Loading**:
-    *   Reads `mcp_setting.json` configuration file.
-    *   Connects to remote Server via `McpProxy`, calls `list_tools` to get the tool list, and dynamically encapsulates them as `McpToolSpec`.
-
-3.  **Priority Override**:
-    *   When a tool with the same name appears, high priority overrides low priority:
-    *   `McpToolSpec` (MCP Tool) > `AgentToolSpec` (Agent Tool) > `SageMcpToolSpec` (Built-in MCP) > `ToolSpec` (Local Function).
-
-#### 4.1.3 Invocation Flow (Invocation)
-
-The execution entry point is `ToolProxy.run_tool_async`, and its internal flow is as follows:
-
-1.  **Permission Check**: `ToolProxy` checks if `tool_name` is in the whitelist. If not, raises `ValueError`.
-2.  **Request Forwarding**: After passing the check, forwards the request to `ToolManager.run_tool_async`.
-3.  **Polymorphic Dispatch**: `ToolManager` decides execution strategy based on the tool's `ToolSpec` type:
-    *   **Local Tool (`ToolSpec`)**: Directly reflection calls local Python function (`func(**kwargs)`).
-    *   **MCP Tool (`McpToolSpec`)**: Delegates to `McpProxy`, sending `call_tool` request to remote Server via network protocol (SSE/Stdio).
-4.  **Result Standardization**: Regardless of underlying return format, uniformly encapsulates as JSON format to return to LLM.
-
-### 4.2 Skill Module
-
-Skill is a capability unit higher than a tool, usually containing code files, configuration files, and usage instruction documents.
-
-*   **SkillManager (`sagents/skills/skill_manager.py`)**:
-    *   **Structured Loading**: Loads skills from `skill_workspace` directory. Each skill is a folder, with `SKILL.md` (containing metadata and Prompt instructions) as the core.
-    *   **Resource Preparation**: Before execution, copies scripts and files required by the skill to the current Agent's workspace (Sandbox) to ensure execution environment isolation.
-    *   **Tiered Retrieval**: Provides three-level metadata retrieval: L1 (Name Description), L2 (Detailed Instruction Prompt), L3 (Specific Resource Path).
-
-### 4.3 Memory Module
-
-The memory module gives Sage "personality" and "growth".
-
-*   **UserMemoryManager (`sagents/context/user_memory/manager.py`)**:
-    *   **Driver Mode**: Decouples storage implementation via `IMemoryDriver` interface. Defaults to `ToolMemoryDriver`, extensible to VectorDB (e.g., Milvus, Chroma).
-    *   **CRUD Operations**: Provides `remember` (save), `recall` (retrieve), `forget` (delete) interfaces.
-    *   **System-level Memory**: Automatically maintains memories of key dimensions such as `preference`, `persona`, `requirement`.
-
-*   **MemoryExtractor (`sagents/context/user_memory/extractor.py`)**:
-    *   **Asynchronous Processing**: Memory extraction is performed **asynchronously** after the conversation ends, so as not to increase user wait time.
-    *   **Intelligent Extraction**: Sends the last 10 rounds of conversation to the LLM, using a specialized Prompt to extract new facts or preferences (JSON format).
-    *   **Deduplication Mechanism**:
-        1.  **Internal Deduplication**: Deduplication within the current extraction results.
-        2.  **In-Library Deduplication**: Compares new memories with existing system memories, deleting old conflicting memories to ensure the memory bank is clean.
-
-### 4.4 Base Managers
-
-*   **ObservabilityManager**: Based on OpenTelemetry standards, performs full-link tracing (Tracing) and monitoring of LLM call chains.
-*   **SessionContext**: State container, holding `MessageManager` (message history), `TaskManager` (task status), and `SystemContext` (environment variables), serving as the cornerstone for Agent stateless operation.
-
----
-
-## 5. Session Interruption & Cancellation Logic
-
-To respond to user "cancel" instructions at any time, Sage embeds checkpoints at key nodes in the execution flow.
-
-*   **State Marking**: When a user initiates a cancellation request, the system sets `SessionContext.status` to `SessionStatus.INTERRUPTED`.
-*   **Checkpoint Mechanism**:
-    *   **Agent Level**: In `SAgent._execute_agent_phase`, the state is checked after processing each streaming Chunk.
-    *   **Loop Level**: Before each iteration of the multi-agent `while` loop (Plan-Execute-Observe), `status == INTERRUPTED` is checked.
-*   **Response Behavior**: Once an interruption is detected, the Agent immediately stops the current LLM generation or tool call, saves the current session state (for later recovery or auditing), and returns a "Task Cancelled" response to the user without continuing subsequent task steps.
+- `examples/sage_cli.py`
+- `examples/sage_server.py`
+- `app/server/main.py`
+- `app/desktop/core/main.py`
+
+These are different shells around the same `sagents` runtime.
+
+### Session / State Layer
+
+The important pieces are:
+
+- [`sagents/session_runtime.py`](../sagents/session_runtime.py)
+- [`sagents/context/session_context.py`](../sagents/context/session_context.py)
+- [`sagents/context/messages/`](../sagents/context/messages)
+- [`sagents/context/user_memory/`](../sagents/context/user_memory)
+
+Responsibilities:
+
+- create or resume sessions
+- merge persisted and incoming `system_context`
+- manage workspace and file permissions
+- hold message history, task state, user memory, workflow data, and runtime metadata
+
+### Execution / Flow Layer
+
+The flow system is defined by:
+
+- [`sagents/flow/schema.py`](../sagents/flow/schema.py)
+- [`sagents/flow/executor.py`](../sagents/flow/executor.py)
+- [`sagents/agent/`](../sagents/agent)
+
+`SAgent` builds a default `AgentFlow` when `custom_flow` is not provided.
+
+### Capability Layer
+
+The main capability managers are:
+
+- [`sagents/tool/tool_manager.py`](../sagents/tool/tool_manager.py)
+- [`sagents/skill/skill_manager.py`](../sagents/skill/skill_manager.py)
+- [`sagents/utils/sandbox/`](../sagents/utils/sandbox)
+- [`sagents/observability/`](../sagents/observability)
+
+## 4. Default Execution Flow
+
+The default flow is assembled in [`sagents/sagents.py`](../sagents/sagents.py).
+
+At a high level:
+
+1. `task_router`
+2. optional `task_analysis` when `deep_thinking` is enabled
+3. switch on `agent_mode`
+4. optional follow-up suggestion generation
+
+### `agent_mode = simple`
+
+Default path:
+
+- `tool_suggestion` and `memory_recall` in parallel
+- `simple`
+- optional `task_summary`
+
+### `agent_mode = multi`
+
+Default path:
+
+- `memory_recall`
+- loop of `task_planning` -> `tool_suggestion` -> `task_executor` -> `task_observation` -> `task_completion_judge`
+- `task_summary`
+
+### `agent_mode = fibre`
+
+Default path:
+
+- `tool_suggestion` and `memory_recall` in parallel
+- `fibre`
+
+This is the mode that enables the repository’s parallel / delegated orchestration path.
+
+## 5. Session Lifecycle
+
+The session lifecycle is implemented around `Session` and `SessionManager` in [`sagents/session_runtime.py`](../sagents/session_runtime.py).
+
+High-level sequence:
+
+1. runtime config is attached to the session
+2. saved `system_context` may be loaded from disk
+3. `SessionContext` is created and initialized
+4. flow execution runs against that context
+5. visible chunks are streamed outward
+6. session status can be queried, saved, interrupted, or cleaned up
+
+## 6. Tools, Skills, And MCP
+
+### Tools
+
+`ToolManager`:
+
+- discovers normal Python tools
+- discovers built-in MCP-style tools
+- can initialize external MCP-backed tools
+
+### Skills
+
+`SkillManager` loads host-side `SKILL.md` packages and exposes metadata and instruction bodies to the runtime.
+
+### MCP
+
+The repo contains built-in MCP server implementations under [`mcp_servers/`](../mcp_servers).
+
+## 7. Sandbox And Workspace
+
+Sandboxing is handled under [`sagents/utils/sandbox/`](../sagents/utils/sandbox).
+
+The runtime currently supports these sandbox modes:
+
+- `local`
+- `remote`
+- `passthrough`
+
+For `local` and `passthrough`, `sandbox_agent_workspace` is required by `SAgent.run_stream()`.
+
+## 8. Service Architecture
+
+### Server
+
+[`app/server/main.py`](../app/server/main.py) creates the FastAPI service and registers routers from [`app/server/routers/`](../app/server/routers).
+
+Notable surfaces:
+
+- chat and stream endpoints
+- agent management
+- tools / skills / MCP management
+- knowledge base
+- auth and OAuth2
+- observability proxying
+
+### Desktop
+
+[`app/desktop/core/main.py`](../app/desktop/core/main.py) runs a desktop-local backend. The UI is in [`app/desktop/ui`](../app/desktop/ui), and Tauri packaging is under [`app/desktop/tauri`](../app/desktop/tauri).
+
+## 9. Architectural Notes
+
+- `SAgent` is the orchestration entry, not the long-lived state container.
+- `SessionContext` is the main state boundary.
+- `AgentFlow` is the runtime control graph.
+- `ToolManager`, `SkillManager`, sandbox, and observability are pluggable capability layers around that graph.
+
+## 10. Compatibility Note
+
+Older materials may describe `AgentController`, `agents.*`, or older multi-agent pipeline terminology. The current architecture should be read from `sagents/`, `app/server/`, `app/desktop/`, and `examples/`.

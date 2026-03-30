@@ -2,270 +2,137 @@
 layout: default
 title: Server Deployment Guide
 nav_order: 20
-description: "Sage Server Deployment and Configuration Guide"
+description: "Current deployment guide for Sage server and web app"
 ---
 
-# Sage Server Deployment Guide
+# Server Deployment Guide
 
-Sage Server is a streaming Agent platform backend service based on FastAPI, supporting multiple LLM models, memory management, tool calling, and flexible configuration options.
+This guide reflects the current deployment entry points in the repository.
 
-This document provides detailed instructions for deploying Sage Server using Docker, including environment configuration, startup parameters, and best practices.
+## 1. Docker Compose
 
-## Prerequisites
-
-- Docker is installed and running
-- Ensure you are in the root directory of the Sage project
-
-## Deployment Steps
-
-### 1. Docker Compose Deployment (Recommended)
-
-We highly recommend using **Docker Compose** for one-click deployment, which automatically manages all dependent services (MySQL, Elasticsearch, RustFS, Jaeger, etc.).
-
-#### Start Services
-Execute in the project root directory:
+The recommended deployment path is the root [`docker-compose.yml`](../docker-compose.yml).
 
 ```bash
 docker-compose up -d
 ```
 
-#### Service Port Mapping
+Default exposed services from the bundled stack:
 
-| Service Name | Container Port | Host Port | Description |
-| :--- | :--- | :--- | :--- |
-| **sage-server** | 8080 | **30050** | Backend API Service |
-| **sage-web** | 80 | **30051** | Frontend Web Interface |
-| **sage-mysql** | 3306 | **30052** | Relational Database |
-| **sage-es** | 9200 | **30053** | Vector Search & Full-text Search |
-| **sage-minio** | 9000/9001 | **30054/30055** | Object Storage Service |
-| **sage-jaeger** | 16686/4317/4318 | **4317/4318** | Jaeger 2.16 collector and query service |
+| Service | Host Port | Purpose |
+|---|---:|---|
+| `sage-server` | `30050` | backend API |
+| `sage-web` | `30051` | web UI |
+| `sage-mysql` | `30052` | MySQL |
+| `sage-es` | `30053` | Elasticsearch |
+| `sage-minio` | `30054/30055` | object storage |
 
-> **Note**: After startup, access the Web interface at `http://localhost:30051`, the backend API docs at `http://localhost:30050/docs`, and the Jaeger Dashboard at `http://localhost:30051/jaeger/`.
->
-> The Jaeger Dashboard is now served under the `sage-web` domain at `/jaeger/`. `sage-web` checks with Sage whether the current session still belongs to an `admin` user, and if the browser is not authenticated yet it redirects to the Sage-configured OIDC/OAuth login flow before returning to the dashboard.
+Common access URLs:
 
----
+- Web UI: `http://localhost:30051`
+- API docs: `http://localhost:30050/docs`
+- Jaeger dashboard: `http://localhost:30051/jaeger/`
 
-### 2. Manual Docker Image Build (Alternative)
+## 2. Manual Docker Build
 
-If you only need to run the core server or want to build manually:
+The current server Dockerfile is [`docker/Dockerfile.server`](../docker/Dockerfile.server).
 
 ```bash
-docker build -f app/server/docker/Dockerfile -t sage-server:latest .
+docker build -f docker/Dockerfile.server -t sage-server:latest .
 ```
 
-#### Basic Run Example
+Example:
 
 ```bash
 docker run -d \
   --name sage-server \
   -p 8080:8080 \
-  -v $(pwd)/workspace:/app/agent_workspace \
-  -v $(pwd)/logs:/app/logs \
-  -v $(pwd)/data:/app/data \
   -e SAGE_DEFAULT_LLM_API_KEY="your_api_key" \
-  -e SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat" \
   -e SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1" \
+  -e SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat" \
   sage-server:latest
 ```
 
-#### Complete Configuration Example (Using Command Line Arguments)
+## 3. Local Source Deployment
+
+Install dependencies from the repository root:
 
 ```bash
-docker run -d \
-  --name sage-server \
-  -p 8080:8080 \
-  -v $(pwd)/workspace:/app/agent_workspace \
-  -v $(pwd)/logs:/app/logs \
-  sage-server:latest \
-  --default_llm_api_key "your_api_key" \
-  --default_llm_model_name "qwen-plus" \
-  --default_llm_api_base_url "https://dashscope.aliyuncs.com/compatible-mode/v1/" \
-  --default_llm_max_tokens 8192 \
-  --default_llm_temperature 0.3 \
-  --port 8080 \
-  --workspace agent_workspace \
-  --logs-dir logs \
-  --force_summary
-```
-
----
-
-## Local Source Deployment
-
-If you wish to develop locally or run directly from source, please follow the steps below.
-
-### 1. Environment Preparation
-
-- Python 3.10+
-- Virtual environment recommended
-
-### 2. Install Dependencies
-
-Execute in the project root directory:
-
-```bash
-# Create and activate virtual environment (optional)
 python -m venv venv
-source venv/bin/activate  # Linux/macOS
-# venv\Scripts\activate   # Windows
-
-# Install dependencies
-pip install -r app/server/requirements.txt
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-### 3. Start Service
-
-Start the service using modular way:
+Start the maintained backend entry:
 
 ```bash
-# Basic start (using default configuration)
 python -m app.server.main
-
-# Start with parameters
-python -m app.server.main \
-  --port 8080 \
-  --workspace ./agent_workspace \
-  --default_llm_model_name "deepseek-chat" \
-  --default_llm_api_key "your_api_key"
 ```
 
-## Performance Test Results
+By default it listens on port `8080`.
 
-Here is the evaluation report for `test-load-generator-1`:
+## 4. Frontend Deployment
 
-```text
-Starting load test with 600 total requests...
-Target QPS: 60.0
-Target: http://sage-server:8080/api/stream
-Timeout: 600s
-Waiting for server to be ready...
-Server ready after 5.03s
-Ensuring Mock MCP is registered...
-Add MCP result: 500, trying refresh...
-Refresh Mock MCP status: 200
-Waiting for 'get_weather' tool to be available...
-Tool 'get_weather' is available after 0.01s
-
-=== Load Test Results ===
-Total Requests: 600
-Successful (200 OK): 600
-Failed: 0
-Success Rate: 100.00%
-```
-
-> **Note**: Please ensure you execute commands in the Sage project root directory to correctly resolve module paths.
-
----
-
-## Configuration Details
-
-Sage Server supports configuration via **Command Line Arguments** or **Environment Variables**. Command line arguments take precedence over environment variables.
-
-### 1. Server Basic Configuration
-
-| Command Line Argument | Environment Variable | Default Value | Description |
-| :--- | :--- | :--- | :--- |
-| `--port` | `SAGE_PORT` | `8080` | Server listening port |
-| `--workspace` | `SAGE_SESSION_DIR` | `sessions` | Session directory (storing session records, etc.) |
-| `--logs-dir` | `SAGE_LOGS_DIR_PATH` | `logs` | Log file storage directory |
-| `--force_summary` | `SAGE_FORCE_SUMMARY` | `False` | Whether to force enable summary function |
-| `--preset_mcp_config` | `SAGE_MCP_CONFIG_PATH` | `mcp_setting.json` | MCP configuration file path |
-| `--preset_running_config` | `SAGE_PRESET_RUNNING_CONFIG_PATH` | `agent_setting.json` | Preset running configuration (system_context, workflow, etc.) |
-
-### 2. LLM Model Configuration
-
-| Command Line Argument | Environment Variable | Default Value | Description |
-| :--- | :--- | :--- | :--- |
-| `--default_llm_api_key` | `SAGE_DEFAULT_LLM_API_KEY` | - | Default LLM API Key |
-| `--default_llm_api_base_url` | `SAGE_DEFAULT_LLM_API_BASE_URL` | `https://api.deepseek.com/v1` | Default LLM API Base URL |
-| `--default_llm_model_name` | `SAGE_DEFAULT_LLM_MODEL_NAME` | `deepseek-chat` | Default LLM Model Name |
-| `--default_llm_max_tokens` | `SAGE_DEFAULT_LLM_MAX_TOKENS` | `4096` | Max Generated Tokens |
-| `--default_llm_temperature` | `SAGE_DEFAULT_LLM_TEMPERATURE` | `0.2` | Temperature Parameter (0.0 - 1.0) |
-| `--default_llm_max_model_len` | `SAGE_DEFAULT_LLM_MAX_MODEL_LEN` | `54000` | Max Context Length |
-| `--default_llm_top_p` | `SAGE_DEFAULT_LLM_TOP_P` | `0.9` | Top P Sampling Parameter |
-| `--default_llm_presence_penalty` | `SAGE_DEFAULT_LLM_PRESENCE_PENALTY` | `0.0` | Presence Penalty Parameter |
-
-### 3. Context and Memory Configuration
-
-| Command Line Argument | Environment Variable | Default Value | Description |
-| :--- | :--- | :--- | :--- |
-| `--context_history_ratio` | `SAGE_CONTEXT_HISTORY_RATIO` | `0.2` | Ratio of history messages to total context |
-| `--context_active_ratio` | `SAGE_CONTEXT_ACTIVE_RATIO` | `0.3` | Ratio of active messages to total context |
-| `--context_max_new_message_ratio` | `SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO` | `0.5` | Max ratio of new messages |
-| `--context_recent_turns` | `SAGE_CONTEXT_RECENT_TURNS` | `0` | Include recent N turns of dialogue |
-| `--memory_type` | `SAGE_MEMORY_TYPE` | `session` | Memory Type (session \| user) |
-| - | `MEMORY_ROOT_PATH` | - | Memory storage root directory (only effective when memory_type is user) |
-
-### 4. Database Configuration
-
-| Command Line Argument | Environment Variable | Default Value | Description |
-| :--- | :--- | :--- | :--- |
-| `--db_type` | `SAGE_DB_TYPE` | `memory` | Database Type (`file`, `memory`, `mysql`) |
-
-| `--mysql_host` | `SAGE_MYSQL_HOST` | `127.0.0.1` | MySQL Host Address |
-| `--mysql_port` | `SAGE_MYSQL_PORT` | `3306` | MySQL Port |
-| `--mysql_user` | `SAGE_MYSQL_USER` | `root` | MySQL Username |
-| `--mysql_password` | `SAGE_MYSQL_PASSWORD` | `sage.1234` | MySQL Password |
-| `--mysql_database` | `SAGE_MYSQL_DATABASE` | `sage` | MySQL Database Name |
-
-### 5. Embedding and Search Configuration
-
-| Command Line Argument | Environment Variable | Description |
-| :--- | :--- | :--- |
-| `--embedding_api_key` | `SAGE_EMBEDDING_API_KEY` | Embedding API Key |
-| `--embedding_base_url` | `SAGE_EMBEDDING_BASE_URL` | Embedding Base URL |
-| `--embedding_model` | `SAGE_EMBEDDING_MODEL` | Embedding Model Name (Default: text-embedding-3-large) |
-| `--es_url` | `SAGE_ELASTICSEARCH_URL` | Elasticsearch URL |
-| `--es_api_key` | `SAGE_ELASTICSEARCH_API_KEY` | Elasticsearch API Key |
-| `--es_username` | `SAGE_ELASTICSEARCH_USERNAME` | Elasticsearch Username |
-| `--es_password` | `SAGE_ELASTICSEARCH_PASSWORD` | Elasticsearch Password |
-
-### 6. RustFS Object Storage Configuration
-
-| Command Line Argument | Environment Variable | Description |
-| :--- | :--- | :--- |
-| `--s3_endpoint` | `SAGE_S3_ENDPOINT` | RustFS Service Address |
-| `--s3_access_key` | `SAGE_S3_ACCESS_KEY` | Access Key |
-| `--s3_secret_key` | `SAGE_S3_SECRET_KEY` | Secret Key |
-| `--s3_bucket_name` | `SAGE_S3_BUCKET_NAME` | Bucket Name |
-| `--s3_secure` | `SAGE_S3_SECURE` | Whether to use HTTPS (Default False) |
-
-### 7. Observability (Jaeger) Configuration
-
-Sage integrates Jaeger for distributed tracing to facilitate performance bottleneck and error troubleshooting.
-
-| Command Line Argument | Environment Variable | Description |
-| :--- | :--- | :--- |
-| `--trace_jaeger_url` | `SAGE_TRACE_JAEGER_URL` | Jaeger OTLP gRPC endpoint (e.g., `http://localhost:4317`) |
-| - | `SAGE_TRACE_JAEGER_PUBLIC_URL` | Public Jaeger Dashboard URL (e.g., `http://localhost:30051/jaeger`) |
-| - | `SAGE_TRACE_JAEGER_UI_URL` | Internal Jaeger Query/UI URL (e.g., `http://sage-jaeger:16686/jaeger`) |
-| `--enable_trace` | `SAGE_ENABLE_TRACE` | Whether to enable tracing (Default: True) |
-
-With the default `docker-compose.yml`, observability works as follows:
-
-1. `sage-server` exports traces to `sage-jaeger:4317` via OTLP
-2. `sage-jaeger` runs Jaeger `v2.16` query/UI
-3. `sage-web` exposes the dashboard at `/jaeger/` and checks with Sage whether the current session still belongs to an administrator
-4. If the browser is not logged in, `sage-web` redirects to the Sage-configured OIDC/OAuth flow and then returns to the Jaeger Dashboard
-
-If you deploy on a remote host, make sure `SAGE_TRACE_JAEGER_PUBLIC_URL` points to the real externally reachable hostname instead of the default `http://127.0.0.1:30051/jaeger`.
-
----
-
-### 3. Verify Deployment
-
-Check if the container is running normally:
+The maintained web frontend lives in [`app/server/web`](../app/server/web).
 
 ```bash
-# View container status
-docker ps
-
-# View container logs
-docker logs sage-server
-
-# Test if service is accessible
-curl http://localhost:8080/health
-# or
-curl http://localhost:8080
+cd app/server/web
+npm install
+npm run build
 ```
+
+For local development:
+
+```bash
+cd app/server/web
+npm install
+npm run dev
+```
+
+## 5. Standalone Example Server
+
+If you specifically want the example streaming service instead of the full server stack, use [`examples/sage_server.py`](../examples/sage_server.py).
+
+```bash
+python examples/sage_server.py \
+  --default_llm_api_key "$SAGE_DEFAULT_LLM_API_KEY" \
+  --default_llm_api_base_url "$SAGE_DEFAULT_LLM_API_BASE_URL" \
+  --default_llm_model_name "$SAGE_DEFAULT_LLM_MODEL_NAME"
+```
+
+This script has its own CLI arguments and is separate from `app.server.main`.
+
+## 6. Configuration
+
+The authoritative server startup config is [`app/server/core/config.py`](../app/server/core/config.py).
+
+Common environment variables:
+
+- `SAGE_PORT`
+- `SAGE_DEFAULT_LLM_API_KEY`
+- `SAGE_DEFAULT_LLM_API_BASE_URL`
+- `SAGE_DEFAULT_LLM_MODEL_NAME`
+- `SAGE_DB_TYPE`
+- `SAGE_SESSION_DIR`
+- `SAGE_LOGS_DIR_PATH`
+- `SAGE_AGENTS_DIR`
+- `SAGE_SKILL_WORKSPACE`
+
+## 7. Health Checks
+
+Useful endpoints:
+
+- `GET /active`
+- `GET /health`
+
+Examples:
+
+```bash
+curl http://127.0.0.1:8080/active
+curl http://127.0.0.1:8080/health
+```
+
+## Notes
+
+- Do not use old instructions that reference `app/server/requirements.txt`; the current Python dependencies are installed from the repository root `requirements.txt`.
+- Do not use old instructions that pass CLI flags directly to `python -m app.server.main`; the maintained server entry reads its startup config from code defaults and environment variables.

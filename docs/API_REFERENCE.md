@@ -2,746 +2,228 @@
 layout: default
 title: API Reference
 nav_order: 8
-description: "Complete API reference for the Sage Multi-Agent Framework"
+description: "Current API reference for Sage runtime and server endpoints"
 ---
 
 {: .note }
-> Looking for the Chinese version? Check out [API 参考](API_REFERENCE_CN.html)
+> Looking for Chinese? See [API 参考](API_REFERENCE_CN.html).
 
-## Table of Contents
-{: .no_toc .text-delta }
+# Sage API Reference
 
-1. TOC
-{:toc}
+This page reflects the current public surfaces that are visible in the repository: the Python runtime centered on `SAgent`, and the FastAPI endpoints under `app/server/routers/`.
 
-# 📚 Sage API Reference
+## Python Runtime
 
-Complete API reference for Sage Multi-Agent Framework v0.9.
+### `SAgent`
 
-## 🚀 Core Classes
-
-### AgentController
-
-The main orchestration class for multi-agent workflows.
+Defined in [`sagents/sagents.py`](../sagents/sagents.py).
 
 ```python
-from agents.agent.agent_controller import AgentController
+from sagents.sagents import SAgent
 
-controller = AgentController(model, model_config, system_prefix="")
+agent = SAgent(
+    session_root_space="./agent_sessions",
+    enable_obs=True,
+    sandbox_type="local",
+)
 ```
 
-#### Constructor Parameters
+#### Constructor
 
 | Parameter | Type | Description |
-|-----------|------|-------------|
-| `model` | `Any` | OpenAI-compatible model instance |
-| `model_config` | `Dict[str, Any]` | Model configuration parameters |
-| `system_prefix` | `str` | Optional system prefix for all agents |
+|---|---|---|
+| `session_root_space` | `str` | Root directory used by the global session manager |
+| `enable_obs` | `bool` | Enables observability hooks |
+| `sandbox_type` | `str \| None` | Default sandbox mode, typically `local`, `remote`, or `passthrough` |
 
-#### Methods
+#### `run_stream()`
 
-##### `run()`
-
-Execute a complete multi-agent workflow (non-streaming).
+`SAgent.run_stream()` is the main execution entry point.
 
 ```python
-def run(self, 
-        input_messages: List[Dict[str, Any]], 
-        tool_manager: Optional[Any] = None, 
-        session_id: Optional[str] = None, 
-        deep_thinking: bool = True,
-        summary: bool = True,
-        max_loop_count: int = 10,
-        deep_research: bool = True,
-        system_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+async def run_stream(
+    input_messages,
+    model,
+    model_config,
+    system_prefix,
+    default_memory_type,
+    sandbox_type=None,
+    sandbox_agent_workspace=None,
+    volume_mounts=None,
+    sandbox_id=None,
+    tool_manager=None,
+    skill_manager=None,
+    session_id=None,
+    user_id=None,
+    agent_id=None,
+    deep_thinking=None,
+    max_loop_count=50,
+    agent_mode=None,
+    more_suggest=False,
+    force_summary=False,
+    system_context=None,
+    available_workflows=None,
+    context_budget_config=None,
+    custom_sub_agents=None,
+    custom_flow=None,
+)
 ```
 
-**Parameters:**
+Important parameters:
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `input_messages` | `List[Dict[str, Any]]` | Required | Input conversation messages |
-| `tool_manager` | `ToolManager` | `None` | Tool manager instance |
-| `session_id` | `str` | `None` | Optional session identifier |
-| `deep_thinking` | `bool` | `True` | Enable task analysis phase |
-| `summary` | `bool` | `True` | Generate final summary |
-| `max_loop_count` | `int` | `10` | Maximum planning-execution loops |
-| `deep_research` | `bool` | `True` | Enable full 6-agent pipeline |
-| `system_context` | `Dict[str, Any]` | `None` | **NEW** Unified system context |
+| Parameter | Description |
+|---|---|
+| `input_messages` | Input message list, either plain dicts or `MessageChunk` objects |
+| `model` | OpenAI-compatible async client |
+| `model_config` | Runtime model config, usually including `model` |
+| `system_prefix` | Base system prompt |
+| `default_memory_type` | Memory mode passed into the session |
+| `sandbox_agent_workspace` | Required for `local` and `passthrough` sandbox modes |
+| `tool_manager` | Tool registry and MCP-backed tool access |
+| `skill_manager` | Skill registry used by the runtime |
+| `agent_mode` | `simple`, `multi`, or `fibre` |
+| `deep_thinking` | Enables the analysis stage before execution |
+| `system_context` | Shared per-session context merged into runtime state |
+| `custom_flow` | Replaces the default flow with a custom `AgentFlow` |
 
-**Returns:**
+Notes:
+
+- If `session_id` is omitted, `run_stream()` creates one.
+- In `local` mode, `sandbox_agent_workspace` is mandatory.
+- The runtime yields lists of `MessageChunk`; only chunks with visible content, tool calls, or token usage are emitted outward.
+
+### `ToolManager`
+
+Defined in [`sagents/tool/tool_manager.py`](../sagents/tool/tool_manager.py).
+
 ```python
+from sagents.tool import ToolManager
+
+tool_manager = ToolManager()
+```
+
+Behavior:
+
+- auto-discovers Python tools under `sagents/tool/`
+- auto-discovers built-in MCP tools
+- can later initialize MCP server-backed tools asynchronously
+
+### `SkillManager`
+
+Defined in [`sagents/skill/skill_manager.py`](../sagents/skill/skill_manager.py).
+
+```python
+from sagents.skill import SkillManager
+
+skill_manager = SkillManager(skill_dirs=["app/skills"])
+```
+
+Behavior:
+
+- loads `SKILL.md` based skill packages from configured host directories
+- exposes metadata and instructions for runtime injection
+
+## FastAPI Server
+
+The maintained HTTP service entry point is [`app/server/main.py`](../app/server/main.py).
+
+### Health
+
+#### `GET /active`
+
+Simple liveness endpoint.
+
+### Chat
+
+Defined in [`app/server/routers/chat.py`](../app/server/routers/chat.py).
+
+#### `POST /api/chat`
+
+Starts a streaming chat session using an `agent_id`.
+
+Request body:
+
+```json
 {
-    'all_messages': List[Dict[str, Any]],     # Complete conversation
-    'new_messages': List[Dict[str, Any]],     # New messages from agents
-    'final_output': Dict[str, Any],           # Final result message
-    'session_id': str,                        # Session identifier
-    'token_usage': Dict[str, Any],            # Token usage statistics
-    'execution_time': float                   # Total execution time
+  "messages": [
+    { "role": "user", "content": "Summarize this repo." }
+  ],
+  "agent_id": "my-agent",
+  "session_id": "optional-session-id",
+  "user_id": "optional-user-id",
+  "system_context": {}
 }
 ```
 
-##### `run_stream()`
+#### `POST /api/stream`
 
-Execute a multi-agent workflow with real-time streaming.
+Streaming endpoint without requiring `agent_id` in the request schema.
 
-```python
-def run_stream(self, 
-               input_messages: List[Dict[str, Any]], 
-               tool_manager: Optional[Any] = None, 
-               session_id: Optional[str] = None, 
-               deep_thinking: bool = True, 
-               summary: bool = True,
-               max_loop_count: int = 10,
-               deep_research: bool = True,
-               system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
-```
+Important request fields from [`app/server/schemas/chat.py`](../app/server/schemas/chat.py):
 
-**Parameters:** Same as `run()` method
+- `messages`
+- `session_id`
+- `user_id`
+- `system_context`
+- `agent_mode`
+- `deep_thinking`
+- `max_loop_count`
+- `available_tools`
+- `available_skills`
+- `available_workflows`
+- `custom_sub_agents`
+- `context_budget_config`
+- `extra_mcp_config`
 
-**Yields:**
-```python
-List[Dict[str, Any]]  # Message chunks for real-time processing
-```
+#### `POST /api/web-stream`
 
-Each message chunk contains:
-```python
-{
-    'message_id': str,           # Unique message identifier
-    'role': str,                 # Agent role ('assistant', 'user', etc.)
-    'content': str,              # Message content
-    'type': str,                 # Message type (e.g., 'task_analysis', 'final_answer')
-    'usage': Dict[str, Any]      # Token usage for this message (optional)
-}
-```
+Authenticated streaming endpoint used by the web UI.
 
-## 🔧 System Context API
+#### `GET /api/stream/resume/{session_id}`
 
-### Overview
+Resumes stream subscription for an existing session.
 
-The `system_context` parameter (new in v0.9) provides unified context management across all agents. It allows you to pass runtime information that will be consistently available to all agents in the workflow.
+#### `GET /api/stream/active_sessions`
 
-### Usage
+SSE endpoint that reports currently active streaming sessions.
 
-```python
-system_context = {
-    # Standard fields (automatically added by AgentController)
-    "session_id": "unique_session_id",
-    "current_time": "2024-01-15 Monday 14:30:00", 
-    "file_workspace": "/tmp/sage/session_id",
-    
-    # Custom fields (user-provided)
-    "project_context": "AI research project on neural networks",
-    "constraints": ["time_limit: 2 hours", "budget: $100", "resources: limited"],
-    "preferences": {
-        "output_format": "detailed_report",
-        "language": "english",
-        "technical_level": "expert"
-    },
-    "domain_knowledge": {
-        "field": "machine_learning",
-        "specialization": "deep_learning",
-        "experience_level": "senior"
-    }
-}
+## Agent Configuration DTO
 
-result = controller.run(
-    messages,
-    tool_manager,
-    system_context=system_context
-)
-```
+The server exposes an agent config model in [`app/server/routers/agent.py`](../app/server/routers/agent.py).
 
-### Standard Context Fields
+Important fields:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `session_id` | `str` | Unique session identifier |
-| `current_time` | `str` | Current timestamp in readable format |
-| `file_workspace` | `str` | Working directory for file operations |
+- `name`
+- `systemPrefix`
+- `systemContext`
+- `availableWorkflows`
+- `availableTools`
+- `availableSubAgentIds`
+- `availableSkills`
+- `availableKnowledgeBases`
+- `memoryType`
+- `maxLoopCount`
+- `deepThinking`
+- `multiAgent`
+- `agentMode`
+- `llm_provider_id`
 
-### Custom Context Fields
+## Startup Configuration
 
-You can add any custom fields to provide context-specific information:
+Server startup config is defined in [`app/server/core/config.py`](../app/server/core/config.py).
 
-```python
-system_context = {
-    # Task-specific context
-    "task_priority": "high",
-    "deadline": "2024-01-20",
-    "target_audience": "technical_team",
-    
-    # Project context
-    "project_name": "AI Assistant Development",
-    "project_phase": "research",
-    "stakeholders": ["engineering", "product", "research"],
-    
-    # Resource constraints
-    "computational_budget": "limited",
-    "time_constraints": "strict",
-    "quality_requirements": "high",
-    
-    # User preferences
-    "communication_style": "technical",
-    "detail_level": "comprehensive",
-    "format_preference": "structured"
-}
-```
+Frequently used environment variables:
 
-## 🤖 Agent Classes
+- `SAGE_PORT`
+- `SAGE_DEFAULT_LLM_API_KEY`
+- `SAGE_DEFAULT_LLM_API_BASE_URL`
+- `SAGE_DEFAULT_LLM_MODEL_NAME`
+- `SAGE_SESSION_DIR`
+- `SAGE_LOGS_DIR_PATH`
+- `SAGE_AGENTS_DIR`
+- `SAGE_SKILL_WORKSPACE`
+- `SAGE_DB_TYPE`
 
-### Task Analysis Agent
+## Compatibility Note
 
-Analyzes and understands user requests with deep context awareness.
-
-```python
-from agents.agent.task_analysis_agent import TaskAnalysisAgent
-
-agent = TaskAnalysisAgent(model, model_config, system_prefix="")
-```
-
-**Key Features:**
-- Deep task understanding with context awareness
-- Unified system prompt management via `SYSTEM_PREFIX_DEFAULT`
-- Enhanced reasoning capabilities
-
-### Task Decompose Agent (NEW in v0.9)
-
-Intelligently breaks down complex tasks into manageable subtasks.
-
-```python
-from agents.agent.task_decompose_agent import TaskDecomposeAgent
-
-agent = TaskDecomposeAgent(model, model_config, system_prefix="")
-```
-
-**Key Features:**
-- Intelligent task breakdown
-- Dependency analysis and mapping
-- Parallel execution planning
-- Integration with planning agent
-
-### Planning Agent
-
-Creates strategic execution plans with optimal tool selection.
-
-```python
-from agents.agent.planning_agent import PlanningAgent
-
-agent = PlanningAgent(model, model_config, system_prefix="")
-```
-
-**Key Features:**
-- Strategic decomposition based on task decomposition
-- Dependency management
-- Optimal tool selection
-- Resource allocation planning
-
-### Executor Agent
-
-Executes tasks using available tools and resources.
-
-```python
-from agents.agent.executor_agent import ExecutorAgent
-
-agent = ExecutorAgent(model, model_config, system_prefix="")
-```
-
-**Key Features:**
-- Intelligent tool execution
-- Error recovery and retry mechanisms
-- Parallel processing capabilities
-- Resource optimization
-
-### Observation Agent
-
-Monitors execution progress and assesses completion status.
-
-```python
-from agents.agent.observation_agent import ObservationAgent
-
-agent = ObservationAgent(model, model_config, system_prefix="")
-```
-
-**Key Features:**
-- Advanced progress monitoring
-- Completion detection
-- Quality assessment
-- Feedback generation
-
-### Summary Agent
-
-Synthesizes results into comprehensive summaries.
-
-```python
-from agents.agent.task_summary_agent import TaskSummaryAgent
-
-agent = TaskSummaryAgent(model, model_config, system_prefix="")
-```
-
-**Key Features:**
-- Comprehensive result synthesis
-- Structured output generation
-- Actionable insights
-- Multi-format support
-
-## 🛠️ Tool Management
-
-### ToolManager
-
-Manages tool discovery, registration, and execution.
-
-```python
-from agents.tool.tool_manager import ToolManager
-
-tool_manager = ToolManager(is_auto_discover=True)
-```
-
-#### Methods
-
-##### `register_tool()`
-
-Register a single tool.
-
-```python
-def register_tool(self, tool_spec: Union[ToolSpec, McpToolSpec, AgentToolSpec]) -> bool:
-```
-
-##### `discover_tools_from_path()`
-
-Auto-import modules and register functions decorated with tool().
-
-```python
-def discover_tools_from_path(self, path: Optional[str] = None) -> None:
-```
-
-##### `run_tool()`
-
-Execute a tool by name.
-
-```python
-def run_tool(self, 
-             tool_name: str, 
-             messages: list, 
-             session_id: str, 
-             **kwargs) -> Any:
-```
-
-##### `list_tools()`
-
-Get all available tools with metadata.
-
-```python
-def list_tools(self) -> List[Dict[str, Any]]:
-```
-
-##### `get_openai_tools()`
-
-Get tool specifications in OpenAI-compatible format.
-
-```python
-def get_openai_tools(self) -> List[Dict[str, Any]]:
-```
-
-## 🔧 Tool Development
-
-### Tool Decorator
-
-Function decorator for creating custom tools without inheritance.
-
-```python
-from sagents.tool.tool_base import tool
-
-class CustomTool:
-    @tool()
-    def my_tool(self, param1: str, param2: int = 10) -> Dict[str, Any]:
-        return {"result": f"Processed {param1} with {param2}"}
-```
-
-### Tool Specifications
-
-#### ToolSpec
-
-Standard tool specification for local functions.
-
-```python
-@dataclass
-class ToolSpec:
-    name: str
-    description: str
-    func: Callable
-    parameters: Dict[str, Any]
-    required: List[str]
-```
-
-#### McpToolSpec
-
-MCP (Model Context Protocol) server tool specification.
-
-```python
-@dataclass
-class McpToolSpec:
-    name: str
-    description: str
-    func: None  # Not used for MCP tools
-    parameters: Dict[str, Any]
-    required: List[str]
-    server_name: str
-    server_params: Union[StdioServerParameters, SseServerParameters]
-```
-
-#### AgentToolSpec
-
-Agent-based tool specification for delegating to other agents.
-
-```python
-@dataclass
-class AgentToolSpec:
-    name: str
-    description: str
-    func: Callable
-    parameters: Dict[str, Any]
-    required: List[str]
-```
-
-## 📊 Token Tracking & Analytics
-
-### Get Token Statistics
-
-```python
-# Get comprehensive token statistics
-stats = controller.get_comprehensive_token_stats()
-
-# Example output
-{
-    'total_tokens': 1500,
-    'total_input_tokens': 800,
-    'total_output_tokens': 700,
-    'total_cached_tokens': 200,
-    'total_reasoning_tokens': 300,
-    'estimated_cost': 0.025,
-    'agent_breakdown': {
-        'TaskAnalysisAgent': {'tokens': 300, 'cost': 0.005},
-        'TaskDecomposeAgent': {'tokens': 200, 'cost': 0.003},
-        'PlanningAgent': {'tokens': 250, 'cost': 0.004},
-        # ... other agents
-    },
-    'execution_time': 15.5,
-    'efficiency_score': 0.92
-}
-```
-
-### Print Token Statistics
-
-```python
-# Print detailed token usage report
-controller.print_comprehensive_token_stats()
-```
-
-## 🔄 Execution Modes
-
-### Deep Research Mode
-
-Full 6-agent pipeline with comprehensive analysis:
-
-```python
-result = controller.run(
-    messages,
-    tool_manager,
-    deep_thinking=True,     # Enable task analysis
-    deep_research=True,     # Full pipeline: Analysis → Decompose → Plan → Execute → Observe → Summarize
-    summary=True,           # Generate final summary
-    system_context=context
-)
-```
-
-**Agent Flow:**
-1. Task Analysis Agent
-2. Task Decompose Agent  
-3. Planning Agent
-4. Executor Agent
-5. Observation Agent (with loop back to Planning if needed)
-6. Summary Agent
-
-### Standard Mode
-
-Simplified workflow without task decomposition:
-
-```python
-result = controller.run(
-    messages,
-    tool_manager,
-    deep_thinking=True,     # Enable task analysis
-    deep_research=False,    # Skip decomposition: Analysis → Plan → Execute → Observe → Summarize
-    summary=True,
-    system_context=context
-)
-```
-
-**Agent Flow:**
-1. Task Analysis Agent
-2. Planning Agent
-3. Executor Agent  
-4. Observation Agent (with loop back to Planning if needed)
-5. Summary Agent
-
-### Rapid Mode
-
-Direct execution for maximum speed:
-
-```python
-result = controller.run(
-    messages,
-    tool_manager,
-    deep_thinking=False,    # Skip task analysis
-    deep_research=False,    # Direct execution only
-    system_context=context
-)
-```
-
-**Agent Flow:**
-1. Direct Executor Agent (bypasses full pipeline)
-
-## 🔌 MCP Integration
-
-### Server Parameters
-
-#### StdioServerParameters
-
-For process-based MCP servers:
-
-```python
-from mcp import StdioServerParameters
-
-server_params = StdioServerParameters(
-    command="python",
-    args=["server.py", "--port", "8001"],
-    env={"API_KEY": "your_key"}
-)
-```
-
-#### SseServerParameters
-
-For HTTP-based MCP servers:
-
-```python
-from sagents.tool.tool_schema import SseServerParameters
-
-server_params = SseServerParameters(
-    url="https://your-mcp-server.com/sse"
-)
-```
-
-### Register MCP Server
-
-```python
-# Automatic registration from config
-tool_manager = ToolManager()  # Auto-discovers from mcp_servers/mcp_setting.json
-
-# Manual registration
-await tool_manager.register_mcp_server("weather_server", {
-    "command": "python weather_server.py",
-    "args": ["--api-key", "your_key"],
-    "env": {"DEBUG": "true"}
-})
-```
-
-## 🔍 Error Handling
-
-### Exception Types
-
-```python
-from agents.utils.exceptions import (
-    SageException,           # Base exception
-    ToolExecutionError,      # Tool execution failures
-    AgentTimeoutError,       # Agent timeout errors
-    ValidationError          # Input validation errors
-)
-```
-
-### Retry Mechanisms
-
-```python
-from agents.utils.exceptions import with_retry, exponential_backoff
-
-@with_retry(exponential_backoff(max_attempts=3, base_delay=1.0))
-def robust_execution():
-    return controller.run(messages, tool_manager)
-```
-
-## 🎛️ Configuration
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `SAGE_DEBUG` | Enable debug logging | `False` |
-| `SAGE_MAX_LOOP_COUNT` | Maximum agent loops | `10` |
-| `OPENAI_API_KEY` | OpenAI API key | `None` |
-| `SAGE_TOOL_TIMEOUT` | Tool execution timeout | `30` |
-
-### Runtime Configuration
-
-```python
-from agents.config.settings import get_settings, update_settings
-
-# Update settings at runtime
-update_settings(
-    debug=True,
-    max_loop_count=5,
-    tool_timeout=60
-)
-
-# Get current settings
-settings = get_settings()
-```
-
-## 📈 Performance Monitoring
-
-### Enable Performance Tracking
-
-```python
-# Enable detailed performance monitoring
-controller.enable_performance_monitoring()
-
-# Execute with monitoring
-result = controller.run(messages, tool_manager)
-
-# Get performance statistics
-perf_stats = controller.get_performance_stats()
-```
-
-### Performance Metrics
-
-```python
-{
-    'total_time': 25.5,
-    'agent_times': {
-        'TaskAnalysisAgent': 3.2,
-        'TaskDecomposeAgent': 2.1,
-        'PlanningAgent': 4.5,
-        # ... other agents
-    },
-    'tool_stats': {
-        'calculator': {'count': 3, 'avg_time': 0.1},
-        'web_search': {'count': 1, 'avg_time': 2.5}
-    },
-    'bottlenecks': ['PlanningAgent', 'web_search'],
-    'optimization_suggestions': [
-        'Consider caching web search results',
-        'Optimize planning algorithm'
-    ]
-}
-```
-
-## 🌐 Web Integration
-
-### Streamlit Integration
-
-```python
-import streamlit as st
-from agents.utils.streamlit_helpers import (
-    display_agent_conversation,
-    create_sidebar_controls,
-    format_token_usage
-)
-
-# Display conversation with agent role indicators
-display_agent_conversation(messages)
-
-# Create control sidebar
-controls = create_sidebar_controls()
-
-# Format token usage for display
-usage_display = format_token_usage(token_stats)
-```
-
-### FastAPI Integration
-
-```python
-from fastapi import FastAPI
-from agents.web.fastapi_routes import create_sage_routes
-
-app = FastAPI()
-
-# Add Sage routes
-sage_routes = create_sage_routes(controller, tool_manager)
-app.include_router(sage_routes, prefix="/api/sage")
-```
-
-## 🔐 Security Considerations
-
-### Input Validation
-
-```python
-from agents.utils.validation import (
-    validate_messages,
-    sanitize_system_context,
-    check_permissions
-)
-
-# Validate input messages
-validated_messages = validate_messages(input_messages)
-
-# Sanitize system context
-safe_context = sanitize_system_context(system_context)
-
-# Check user permissions
-if not check_permissions(user_id, action="execute_agent"):
-    raise PermissionError("Insufficient permissions")
-```
-
-### Safe Execution
-
-```python
-# Execute with safety checks
-result = controller.run(
-    messages,
-    tool_manager,
-    system_context={
-        "security_level": "high",
-        "sandboxed": True,
-        "allowed_tools": ["calculator", "text_processor"],
-        "restricted_domains": ["file_system", "network"]
-}
-)
-```
-
-## 📊 Monitoring & Logging
-
-### Enable Logging
-
-```python
-import logging
-from agents.utils.logger import setup_logging
-
-# Setup structured logging
-setup_logging(
-    level=logging.INFO,
-    format="json",
-    output="file",
-    filename="sage.log"
-)
-```
-
-### Custom Monitoring
-
-```python
-from agents.utils.monitoring import SageMonitor
-
-monitor = SageMonitor()
-
-# Track custom metrics
-monitor.track_execution_time("agent_workflow", 25.5)
-monitor.track_token_usage("gpt-4", 1500)
-monitor.track_tool_usage("calculator", success=True)
-
-# Export metrics
-metrics = monitor.export_metrics()
-```
-
----
-
-For more app and advanced usage patterns, see the [Examples Guide](EXAMPLES.md).
-
-**Built with ❤️ by Eric ZZ and the Sage community** 
+Older docs may still mention `AgentController`, `agents.*`, or the deprecated `deep_research` flag. Those names are part of older layouts or compatibility surfaces and are not the main runtime entry point in the current repository.
