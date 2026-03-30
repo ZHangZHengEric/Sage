@@ -3,10 +3,17 @@ layout: default
 title: API Reference
 nav_order: 8
 description: "Complete API reference for the Sage Multi-Agent Framework"
+lang: en
+ref: api-reference
 ---
 
+{% include lang_switcher.html %}
+
 {: .note }
-> Looking for the Chinese version? Check out [API 参考](API_REFERENCE_CN.html)
+> Looking for the Chinese version? Check out [API 参考](../zh/API_REFERENCE.md)
+
+{: .warning }
+> This page was restored from historical v0.9 documentation and describes an older runtime-facing Python API surface. For the current repository's HTTP server endpoints, use [HTTP API Reference](HTTP_API_REFERENCE.md).
 
 ## Table of Contents
 {: .no_toc .text-delta }

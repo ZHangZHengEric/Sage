@@ -79,13 +79,6 @@ async def get_conversation_messages(session_id: str, user_id: Optional[str] = No
             error_detail=f"Conversation '{session_id}' not found",
         )
 
-    if user_role == "admin":
-        pass
-    elif user_id and conversation.user_id != user_id:
-        raise SageHTTPException(
-            detail="无权访问该会话",
-            error_detail=f"User {user_id} does not own session {session_id}",
-        )
 
     messages = []
     session_manager = get_global_session_manager()
@@ -147,11 +140,6 @@ async def delete_conversation(conversation_id: str, user_id: Optional[str] = Non
             error_detail=f"Conversation '{conversation_id}' not found",
         )
 
-    if user_id and conversation.user_id != user_id:
-        raise SageHTTPException(
-            detail="无权删除该会话",
-            error_detail=f"User {user_id} does not own session {conversation_id}",
-        )
 
     success = await dao.delete_conversation(conversation_id)
     if not success:
@@ -167,18 +155,6 @@ async def update_conversation_title(session_id: str, title: str, user_id: Option
     """更新会话标题"""
     dao = models.ConversationDao()
 
-    if user_id:
-        conversation = await dao.get_by_session_id(session_id)
-        if not conversation:
-            raise SageHTTPException(
-                detail=f"会话 {session_id} 不存在",
-                error_detail=f"Conversation '{session_id}' not found",
-            )
-        if conversation.user_id != user_id:
-            raise SageHTTPException(
-                detail="无权修改该会话",
-                error_detail=f"User {user_id} does not own session {session_id}",
-            )
 
     success = await dao.update_title(session_id, title)
     if not success:
