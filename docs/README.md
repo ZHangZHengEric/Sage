@@ -1,86 +1,100 @@
 ---
 layout: default
-title: Home
+title: Overview
 nav_order: 1
-description: "Documentation index for the current Sage codebase"
+description: "Task-oriented documentation for the current Sage repository"
 permalink: /
 ---
 
 # Sage Documentation
 
-This documentation matches the current repository structure built around `sagents/`, `examples/`, `app/server`, and `app/desktop`.
+This site documents the current repository as it exists today. It is organized around the real entry points in `examples/`, `app/server/`, `app/desktop/`, `sagents/`, and `mcp_servers/`.
 
-## Language
+## Who This Is For
 
-| English | 中文 |
-|:--|:--|
-| [Quick Start](QUICK_START.html) | [快速开始](QUICK_START_CN.html) |
-| [Architecture](ARCHITECTURE.html) | [架构](ARCHITECTURE_CN.html) |
-| [API Reference](API_REFERENCE.html) | [API 参考](API_REFERENCE_CN.html) |
-| [Configuration](CONFIGURATION.html) | [配置](CONFIGURATION_CN.html) |
-| [Tool Development](TOOL_DEVELOPMENT.html) | [工具开发](TOOL_DEVELOPMENT_CN.html) |
-| [Examples](EXAMPLES.html) | [示例](EXAMPLES_CN.html) |
-| [Server Deployment](SERVER_DEPLOYMENT.html) | [服务部署](SERVER_DEPLOYMENT_CN.html) |
+- Users who want to run Sage locally
+- Contributors who need to understand the runtime and application layout
+- Integrators extending Sage through tools, skills, APIs, or MCP servers
 
-## What Is In This Repo
+## Start Here
 
-- `sagents/`: core runtime, agent orchestration, session context, tools, skills, sandbox, observability
-- `examples/`: runnable local demos, including the CLI and standalone server examples
-- `app/server/`: FastAPI backend and Vue 3 web client
-- `app/desktop/`: desktop backend, Vue UI, and Tauri shell
-- `mcp_servers/`: built-in MCP server implementations
+1. [Getting Started](GETTING_STARTED.md) for local setup and first run
+2. [Core Concepts](CORE_CONCEPTS.md) for the runtime model
+3. [Architecture](ARCHITECTURE.md) for repository and subsystem boundaries
+4. [Configuration](CONFIGURATION.md) for environment variables and deployment knobs
 
-## Recommended Reading Order
+## Common Reading Paths
 
-1. [Quick Start](QUICK_START.md)
+### I want to run Sage locally
+
+Read:
+
+1. [Getting Started](GETTING_STARTED.md)
+2. [Applications](APPLICATIONS.md)
+3. [Troubleshooting](TROUBLESHOOTING.md)
+
+### I want to extend the runtime
+
+Read:
+
+1. [Core Concepts](CORE_CONCEPTS.md)
 2. [Architecture](ARCHITECTURE.md)
+3. [MCP Servers](MCP_SERVERS.md)
+4. [Development](DEVELOPMENT.md)
+
+### I want to integrate with the server
+
+Read:
+
+1. [Getting Started](GETTING_STARTED.md)
+2. [Configuration](CONFIGURATION.md)
 3. [API Reference](API_REFERENCE.md)
-4. [Configuration](CONFIGURATION.md)
 
-## Current Entry Points
+## Documentation Map
 
-### CLI
+- [Getting Started](GETTING_STARTED.md): install dependencies and run the CLI, server, web UI, or desktop build
+- [Core Concepts](CORE_CONCEPTS.md): sessions, agents, tools, skills, flows, and sandboxing
+- [Architecture](ARCHITECTURE.md): how the codebase is organized
+- [Configuration](CONFIGURATION.md): runtime environment variables and storage settings
+- [Applications](APPLICATIONS.md): which app surface to use for which job
+- [MCP Servers](MCP_SERVERS.md): built-in MCP servers and how they fit into the platform
+- [API Reference](API_REFERENCE.md): main HTTP route groups and streaming endpoints
+- [Development](DEVELOPMENT.md): contributor workflow and source locations
+- [Troubleshooting](TROUBLESHOOTING.md): common startup and environment issues
 
-Use the maintained CLI example in `examples/`:
+## Current Product Surfaces
 
-```bash
-python examples/sage_cli.py \
-  --default_llm_api_key "$SAGE_DEFAULT_LLM_API_KEY" \
-  --default_llm_api_base_url "${SAGE_DEFAULT_LLM_API_BASE_URL:-https://api.deepseek.com/v1}" \
-  --default_llm_model_name "${SAGE_DEFAULT_LLM_MODEL_NAME:-deepseek-chat}"
-```
+### Lightweight examples
 
-### Web Application
+- `examples/sage_cli.py`: terminal chat client
+- `examples/sage_demo.py`: Streamlit demo
+- `examples/sage_server.py`: standalone FastAPI example service
 
-Backend:
+### Main application server
 
-```bash
-python -m app.server.main
-```
+- `app/server/main.py`: primary FastAPI application entry point
+- `app/server/web/`: Vue 3 + Vite web client
 
-Frontend:
+Use this path when you want the full product surface instead of a demo.
 
-```bash
-cd app/server/web
-npm install
-npm run dev
-```
+### Desktop app
 
-### Desktop Source Build
+- `app/desktop/entry.py`: desktop bootstrap entry
+- `app/desktop/core/main.py`: desktop-local FastAPI backend
+- `app/desktop/ui/`: desktop UI
 
-```bash
-app/desktop/scripts/build.sh release
-```
+Use this path when you need the packaged desktop experience rather than the browser-based app.
 
-## Key Runtime Concepts
+### Core runtime
 
-- `SAgent` in `sagents/sagents.py` is the current runtime entry for streaming execution.
-- `ToolManager` auto-discovers built-in tools and MCP-backed tools.
-- `SkillManager` loads host-side skills and makes them available to sessions.
-- `SessionContext` merges runtime `system_context`, workspace permissions, memory, and session metadata.
-- `agent_mode` currently supports `simple`, `multi`, and `fibre`.
+- `sagents/sagents.py`: `SAgent` streaming runtime entry
+- `sagents/agent/`: agent implementations
+- `sagents/tool/`: tool system and MCP proxy support
+- `sagents/skill/`: skill loading and execution
+- `sagents/utils/sandbox/`: sandbox abstractions and providers
 
-## Notes
+## Documentation Principles
 
-{: .note }
-> Older docs and examples may still mention `AgentController`, `agents.*`, or `app/fastapi_react_demo`. Those paths are from older repository layouts and are not the current primary entry points.
+- This documentation prefers current source accuracy over historical completeness.
+- Historical migration notes and duplicate site pages have been removed from the primary doc set.
+- The root repository `README.md` remains the marketing and project overview document; this site is the technical source of truth.
