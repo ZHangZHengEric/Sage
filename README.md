@@ -9,10 +9,30 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg?logo=python)](https://python.org)
 [![Version](https://img.shields.io/badge/Version-1.0.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
+[![DeepWiki](https://img.shields.io/badge/DeepWiki-Learn%20More-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
+[![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
 Production-oriented multi-agent runtime and application stack for building, running, and extending Sage agents across CLI, web, and desktop surfaces.
 
 </div>
+
+## Why Sage
+
+Sage is designed for teams that need more than a chat wrapper around an LLM. It combines a reusable multi-agent runtime with product-ready application surfaces so you can:
+
+- run agent workflows through CLI, web, and desktop entry points
+- extend capabilities through tools, skills, and MCP servers
+- keep execution safer with sandbox support
+- operate sessions with streaming output and observability hooks
+
+## Highlights
+
+- Multi-agent execution with `simple`, `multi`, and `fibre` runtime modes
+- Tool, skill, and MCP extension model for custom capabilities
+- Built-in sandboxing for safer runtime execution
+- Streaming chat, session-based workflows, and resumable execution flows
+- Web and desktop application shells on top of the same runtime concepts
+- OpenTelemetry-oriented observability hooks
 
 ## What Sage Is
 
@@ -73,15 +93,6 @@ Use these when you want the smallest possible feedback loop.
 
 </div>
 
-## Key Capabilities
-
-- Multi-agent execution with `simple`, `multi`, and `fibre` runtime modes
-- Tool and skill extension model with MCP integration support
-- Built-in sandboxing for safer runtime execution
-- Streaming chat and session-based execution
-- OpenTelemetry-oriented observability hooks
-- Web and desktop application shells on top of the same runtime concepts
-
 ## Quick Start
 
 ### 1. Install dependencies
@@ -140,6 +151,14 @@ streamlit run examples/sage_demo.py -- \
   --default_llm_model_name "$SAGE_DEFAULT_LLM_MODEL_NAME"
 ```
 
+## Learn More
+
+- Technical docs: [`docs/README.md`](docs/README.md)
+- Getting started guide: [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md)
+- Release notes: [`release_notes/`](release_notes/)
+- DeepWiki: https://deepwiki.com/ZHangZHengEric/Sage
+- Slack community: https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA
+
 ## Architecture
 
 ```mermaid
@@ -185,6 +204,8 @@ Start with the technical docs in [`docs/`](docs/):
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
 
+For a repository landing page, this README stays intentionally shorter than the docs site. The deeper technical detail lives in `docs/`.
+
 ## Development
 
 Backend:
@@ -210,6 +231,11 @@ app/desktop/scripts/build.sh release
 ## Contributing
 
 Contributions are welcome. When changing runtime behavior, prefer updating the matching page under `docs/` in the same change.
+
+## Community
+
+- Issues: https://github.com/ZHangZHengEric/Sage/issues
+- Slack: https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA
 
 ## License
 
