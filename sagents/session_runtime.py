@@ -112,7 +112,6 @@ class Session:
         sandbox_agent_workspace: Optional[str] = None,
         volume_mounts: Optional[List[VolumeMount]] = None,
         sandbox_id: Optional[str] = None,
-        default_memory_type: str = "session",
         agent_id: Optional[str] = None,
     ):
         runtime_signature = (
@@ -123,7 +122,6 @@ class Session:
             str(sandbox_agent_workspace or ""),
             str(volume_mounts or []),
             str(sandbox_id or ""),
-            default_memory_type,
             str(agent_id or ""),
         )
         if self._runtime_signature != runtime_signature:
@@ -133,18 +131,17 @@ class Session:
         self.model_config = model_config or {}
         self.system_prefix = system_prefix or ""
         self.session_root_space = str(session_root_space)
-        
+
         # workspace 配置
         self.sandbox_agent_workspace = sandbox_agent_workspace
         self.volume_mounts = volume_mounts or []
         self.sandbox_id = sandbox_id
-        
+
         logger.info(f"SessionRuntime: configure_runtime "
                    f"sandbox_agent_workspace={self.sandbox_agent_workspace}, "
                    f"volume_mounts_count={len(self.volume_mounts)}, "
                    f"sandbox_id={self.sandbox_id}")
-        
-        self.default_memory_type = default_memory_type or "session"
+
         # agent_id 为 None 时生成随机 UUID
         self.agent_id = agent_id or str(uuid.uuid4())
 

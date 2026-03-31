@@ -1,0 +1,19 @@
+{% if page.lang and page.ref %}
+  {% assign translations = site.html_pages | where: "ref", page.ref | sort: "lang" %}
+  {% if translations.size > 1 %}
+  <div class="sage-lang-switcher-wrap">
+    <div class="sage-lang-switcher__label">Language</div>
+    <div class="sage-lang-switcher">
+      {% for match in translations %}
+        {% if match.lang %}
+          <a href="{{ match.url | relative_url }}"
+             class="sage-lang-switcher__link"
+             {% if page.lang == match.lang %}aria-current="page"{% endif %}>
+            {% if match.lang == "en" %}English{% elsif match.lang == "zh" %}简体中文{% else %}{{ match.lang }}{% endif %}
+          </a>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+{% endif %}

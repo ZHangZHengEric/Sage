@@ -20,8 +20,8 @@ Edit them in place if you want to enable MCP servers or customize agent behavior
 ```bash
 python3 examples/sage_cli.py \
   --default_llm_api_key YOUR_API_KEY \
-  --default_llm_api_base_url https://api.openai.com/v1 \
-  --default_llm_model_name gpt-4.1
+  --default_llm_api_base_url https://api.deepseek.com/v1 \
+  --default_llm_model_name deepseek-chat
 ```
 
 ## Streamlit Demo
@@ -29,8 +29,8 @@ python3 examples/sage_cli.py \
 ```bash
 streamlit run examples/sage_demo.py -- \
   --default_llm_api_key YOUR_API_KEY \
-  --default_llm_api_base_url https://api.openai.com/v1 \
-  --default_llm_model_name gpt-4.1
+  --default_llm_api_base_url https://api.deepseek.com/v1 \
+  --default_llm_model_name deepseek-chat
 ```
 
 ## HTTP Server
@@ -38,8 +38,8 @@ streamlit run examples/sage_demo.py -- \
 ```bash
 python3 examples/sage_server.py \
   --default_llm_api_key YOUR_API_KEY \
-  --default_llm_api_base_url https://api.openai.com/v1 \
-  --default_llm_model_name gpt-4.1
+  --default_llm_api_base_url https://api.deepseek.com/v1 \
+  --default_llm_model_name deepseek-chat
 ```
 
 ## Build Script
