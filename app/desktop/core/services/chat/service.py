@@ -396,7 +396,6 @@ class SageStreamService:
                 system_prefix=self.request.system_prefix,
                 sandbox_agent_workspace=sandbox_agent_workspace,
                 volume_mounts=volume_mounts,
-                default_memory_type=self.request.memory_type,
                 agent_id=self.request.agent_id,
                 user_id="default_user",
                 deep_thinking=self.request.deep_thinking,

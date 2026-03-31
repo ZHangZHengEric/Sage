@@ -3,7 +3,12 @@ layout: default
 title: OAuth2 对接指南（Lage）
 nav_order: 10
 description: "Sage Server 作为 OAuth2 授权服务器对接 Lage 的接入说明"
+lang: zh
+ref: oauth2-lage-integration
 ---
+
+{% include lang_switcher.html %}
+
 
 {: .note }
 > 本文档以 `lage` 为示例，说明 Sage Server 作为 OAuth2 授权服务器时的对接方式。当前推荐使用授权码模式（Authorization Code）并配合 `refresh_token`。

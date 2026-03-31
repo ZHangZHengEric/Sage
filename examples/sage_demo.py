@@ -427,7 +427,6 @@ class StreamingHandler:
                 system_prefix=self.component_manager.system_prefix,
                 host_workspace=self.component_manager.workspace,
                 virtual_workspace=self.component_manager.virtual_workspace,
-                default_memory_type=self.component_manager.memory_type,
                 user_id="default_user",
                 agent_id=self.component_manager.agent_id,
                 deep_thinking=use_deepthink,

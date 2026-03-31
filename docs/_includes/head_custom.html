@@ -1,6 +1,22 @@
 <!-- Mermaid Support -->
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.0/dist/mermaid.min.js"></script>
 <script>
+  window.SAGE_DOC_TRANSLATIONS = {
+    {% assign translation_refs = site.pages | map: "ref" | compact | uniq | sort %}
+    {% for translation_ref in translation_refs %}
+      {% unless forloop.first %},{% endunless %}
+      {{ translation_ref | jsonify }}: {
+        {% assign siblings = site.pages | where: "ref", translation_ref | sort: "lang" %}
+        {% for sibling in siblings %}
+          {% if sibling.lang %}
+            {% unless forloop.first %},{% endunless %}
+            {{ sibling.lang | jsonify }}: {{ sibling.url | relative_url | jsonify }}
+          {% endif %}
+        {% endfor %}
+      }
+    {% endfor %}
+  };
+
   document.addEventListener('DOMContentLoaded', function() {
     mermaid.initialize({
       startOnLoad: true,
@@ -32,9 +48,10 @@
       // Replace the code block with the mermaid div
       element.parentNode.parentNode.replaceChild(mermaidDiv, element.parentNode);
     });
-    
+
     // Re-initialize mermaid for the new elements
     mermaid.init();
+
   });
 </script>
 
@@ -77,6 +94,68 @@
     
     .mermaid text {
       font-size: 10px !important;
+    }
+  }
+
+  .sage-lang-switcher-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin: 0 0 24px;
+    padding: 14px 16px;
+    background: #f6f8fa;
+    border: 1px solid #d8dee4;
+    border-radius: 10px;
+  }
+
+  .sage-lang-switcher__label {
+    color: #24292f;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  .sage-lang-switcher {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .sage-lang-switcher__link {
+    border: 1px solid #d0d7de;
+    border-radius: 999px;
+    padding: 6px 12px;
+    color: #57606a;
+    background: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.2;
+    text-decoration: none;
+    transition: all 0.15s ease;
+  }
+
+  .sage-lang-switcher__link:hover {
+    border-color: #0969da;
+    color: #0969da;
+  }
+
+  .sage-lang-switcher__link[aria-current="page"] {
+    background: #0969da;
+    border-color: #0969da;
+    color: #fff;
+  }
+
+  @media (max-width: 640px) {
+    .sage-lang-switcher-wrap {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .sage-lang-switcher {
+      justify-content: flex-start;
     }
   }
 </style> 

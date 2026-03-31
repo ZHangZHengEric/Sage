@@ -76,8 +76,8 @@ class FibreTools:
                         },
                         "content": {
                             "type": "string",
-                            "description": "Detailed task description, context, requirements, and expected return format.",
-                            "description_i18n": {"zh": "详细的子任务描述、上下文信息、具体要求以及期望的返回格式。"}
+                            "description": "Detailed task description. Must include: 1) Task background and purpose; 2) Specific objectives; 3) Input resources (file paths, data); 4) Detailed requirements (functional, quality, format); 5) Constraints (time, technical); 6) Expected outputs (deliverables, save paths, acceptance criteria); 7) Notes (risks, dependencies).",
+                            "description_i18n": {"zh": "详细的子任务描述。必须包含以下部分：\n1. **任务背景**：说明这个子任务的上下文和目的\n2. **具体目标**：明确要完成的具体目标\n3. **输入资源**：提供必要的输入文件路径、数据或参考资料\n4. **具体要求**：\n   - 功能要求：需要实现什么功能\n   - 质量要求：代码规范、性能要求等\n   - 格式要求：输出格式、命名规范等\n5. **约束条件**：时间限制、技术限制、不能做的事\n6. **期望输出**：\n   - 产出物清单（文件、代码、报告等）\n   - 验收标准（如何判断任务完成）\n7. **注意事项**：特殊说明、潜在风险、依赖关系"}
                         },
                         "session_id": {
                             "type": "string",

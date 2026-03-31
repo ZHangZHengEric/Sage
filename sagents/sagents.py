@@ -27,7 +27,6 @@ class SAgent:
         model: Any,
         model_config: Dict[str, Any],
         system_prefix: str,
-        default_memory_type: str,
         # 沙箱核心配置
         sandbox_type: Optional[str] = None,
         sandbox_agent_workspace: Optional[str] = None,
@@ -61,7 +60,6 @@ class SAgent:
             model: LLM 模型客户端，必须提供
             model_config: 模型配置字典，必须包含 model、api_key、base_url 等
             system_prefix: 系统提示词前缀，用于定义 Agent 行为
-            default_memory_type: 默认记忆类型，可选 "session" | "user" | "none"
 
             # 沙箱核心配置
             sandbox_type: 沙箱类型，可选 "local" | "remote" | "passthrough"
@@ -110,7 +108,6 @@ class SAgent:
                 model=client,
                 model_config={"model": "gpt-4", "api_key": "xxx"},
                 system_prefix="你是一个助手",
-                default_memory_type="session",
                 sandbox_agent_workspace="/Users/xxx/.sage/agents/agent_001",
                 volume_mounts=[VolumeMount("/host/data", "/sandbox/data")],
             ):
@@ -123,7 +120,6 @@ class SAgent:
                 model=client,
                 model_config=config,
                 system_prefix="你是一个助手",
-                default_memory_type="session",
                 sandbox_type="remote",
                 sandbox_agent_workspace="/sage-workspace",  # 远程沙箱内的工作路径
                 sandbox_id="opensandbox-abc123",  # 可选：连接已有沙箱
@@ -134,10 +130,7 @@ class SAgent:
             raise ValueError("run_stream 参数 model 不能为空")
         if not isinstance(model_config, dict) or not model_config:
             raise ValueError("run_stream 参数 model_config 必须是非空字典")
-        if default_memory_type is None or str(default_memory_type).strip() == "":
-            raise ValueError("run_stream 参数 default_memory_type 不能为空")
-        default_memory_type = "session"
-        
+
         # 确定沙箱类型（优先级：参数 > __init__ > 环境变量 > 默认）
         effective_sandbox_type = (
             sandbox_type or
@@ -194,7 +187,6 @@ class SAgent:
             sandbox_agent_workspace=sandbox_agent_workspace,
             volume_mounts=volume_mounts,
             sandbox_id=sandbox_id,
-            default_memory_type=default_memory_type,
             agent_id=agent_id,
         )
 
