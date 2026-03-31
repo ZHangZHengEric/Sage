@@ -22,9 +22,9 @@
         :key="question.id"
         class="question-item space-y-2"
       >
-        <label class="block text-sm font-medium">
-          {{ question.title }}
-        </label>
+        <div class="question-title">
+          <MarkdownRenderer :content="question.title" class="question-markdown text-sm" />
+        </div>
         <p v-if="question.description" class="text-xs text-muted-foreground">
           {{ question.description }}
         </p>
@@ -99,6 +99,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
+import MarkdownRenderer from '../MarkdownRenderer.vue'
 
 const props = defineProps({
   questionnaireId: {
@@ -217,7 +218,8 @@ async function submit() {
 async function doSubmit(finalAnswers) {
   isSubmitting.value = true
   try {
-    const response = await fetch(`/api/questionnaires/${props.questionnaireId}/submit`, {
+    const encodedSessionId = encodeURIComponent(props.questionnaireId)
+    const response = await fetch(`/api/questionnaires/${encodedSessionId}/submit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -241,3 +243,24 @@ async function doSubmit(finalAnswers) {
   }
 }
 </script>
+
+<style scoped>
+.question-markdown :deep(.prose) {
+  margin: 0;
+  max-width: none;
+}
+
+.question-markdown :deep(.prose p) {
+  margin: 0.25rem 0;
+}
+
+.question-markdown :deep(.prose ul),
+.question-markdown :deep(.prose ol) {
+  margin: 0.35rem 0;
+  padding-left: 1.1rem;
+}
+
+.question-markdown :deep(.prose li) {
+  margin: 0.1rem 0;
+}
+</style>

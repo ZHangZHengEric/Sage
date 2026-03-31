@@ -54,7 +54,9 @@
               :key="question.id"
               class="question-result p-3 rounded-md bg-muted/30"
             >
-              <div class="text-sm font-medium mb-2">{{ question.title }}</div>
+              <div class="mb-2">
+                <MarkdownRenderer :content="question.title" class="question-markdown text-sm" />
+              </div>
               <div class="text-sm text-green-600">
                 <span v-if="question.type === 'multiple_choice'">
                   {{ formatMultipleChoiceAnswer(question, answers[question.id]) }}
@@ -103,7 +105,9 @@
               :key="question.id"
               class="question-item space-y-2 p-3 rounded-md bg-muted/30"
             >
-              <label class="block text-sm font-medium">{{ question.title }}</label>
+              <div class="question-title">
+                <MarkdownRenderer :content="question.title" class="question-markdown text-sm" />
+              </div>
 
               <!-- 单选题 -->
               <RadioGroup 
@@ -209,6 +213,7 @@ import {
 import { toast } from 'vue-sonner'
 import { useLanguage } from '@/utils/i18n'
 import request from '@/utils/request'
+import MarkdownRenderer from '../MarkdownRenderer.vue'
 
 const { t } = useLanguage()
 
@@ -247,12 +252,13 @@ const sessionId = computed(() => {
   const args = props.toolCall.function?.arguments
   if (typeof args === 'string') {
     try {
-      return JSON.parse(args).session_id || ''
+      const parsed = JSON.parse(args)
+      return parsed.questionnaire_id || ''
     } catch {
       return ''
     }
   }
-  return args?.session_id || ''
+  return args?.questionnaire_id || ''
 })
 
 const title = computed(() => {
@@ -492,7 +498,7 @@ async function doSubmit(isAuto = false) {
   isSubmitting.value = true
   try {
     const encodedSessionId = encodeURIComponent(sessionId.value)
-    const response = await request.post(`/api/questionnaires/session/${encodedSessionId}/submit`, {
+    const response = await request.post(`/api/questionnaires/${encodedSessionId}/submit`, {
       answers: answers.value,
       title: title.value,
       questions: questions.value,
@@ -531,6 +537,27 @@ const handleClick = (event) => {
   }
 }
 </script>
+
+<style scoped>
+.question-markdown :deep(.prose) {
+  margin: 0;
+  max-width: none;
+}
+
+.question-markdown :deep(.prose p) {
+  margin: 0.25rem 0;
+}
+
+.question-markdown :deep(.prose ul),
+.question-markdown :deep(.prose ol) {
+  margin: 0.35rem 0;
+  padding-left: 1.1rem;
+}
+
+.question-markdown :deep(.prose li) {
+  margin: 0.1rem 0;
+}
+</style>
 
 <style scoped>
 .questionnaire-card {

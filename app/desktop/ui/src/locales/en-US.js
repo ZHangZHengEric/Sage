@@ -522,6 +522,7 @@ export default {
   'tools.questionnaire.text': 'Text',
   'tools.questionnaire.moreQuestions': '{count} more questions',
   'tools.questionnaire.fillInMessageList': 'Please fill in the message list on the left',
+  'tools.questionnaire.workbenchReadonlyHint': 'The questionnaire in the workbench is preview-only and cannot be submitted there. Please submit it from the questionnaire card in the message list.',
   'tools.questionnaire.autoSubmitted': 'Auto Submitted',
   'tools.questionnaire.manuallySubmitted': 'Manually Submitted',
   'tools.default': 'Tool Execution',

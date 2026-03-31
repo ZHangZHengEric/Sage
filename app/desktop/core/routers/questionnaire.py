@@ -43,7 +43,7 @@ class SubmitAnswersRequest(BaseModel):
 class QuestionnaireResponse(BaseModel):
     """问卷响应"""
 
-    session_id: str
+    questionnaire_id: str
     status: str
     answers: Optional[Dict[str, Any]] = None
     submitted_at: Optional[Any] = None
@@ -58,10 +58,10 @@ class SubmitResponse(BaseModel):
 
 async def _get_or_create_session(
     dao: QuestionnaireDao,
-    session_id: str,
+    questionnaire_id: str,
     data: SubmitAnswersRequest,
 ) -> QuestionnaireSession:
-    session = await dao.get_session(session_id)
+    session = await dao.get_session(questionnaire_id)
     if session:
         return session
 
@@ -69,7 +69,7 @@ async def _get_or_create_session(
         raise HTTPException(status_code=400, detail="会话不存在，需要提供 title 和 questions 来创建会话")
 
     session = QuestionnaireSession(
-        id=session_id,
+        id=questionnaire_id,
         title=data.title,
         questions=data.questions,
         status="pending",
@@ -80,15 +80,15 @@ async def _get_or_create_session(
     return session
 
 
-@questionnaire_router.post("/session/{session_id}/submit", response_model=SubmitResponse)
+@questionnaire_router.post("/{questionnaire_id}/submit", response_model=SubmitResponse)
 async def submit_questionnaire(
-    session_id: str = Path(..., description="会话ID"),
+    questionnaire_id: str = Path(..., description="问卷ID"),
     data: SubmitAnswersRequest = Body(...),
 ):
-    """前端提交问卷答案（如果会话不存在则自动创建）"""
+    """前端提交问卷答案（如果问卷不存在则自动创建）"""
 
     dao = QuestionnaireDao()
-    session = await _get_or_create_session(dao, session_id, data)
+    session = await _get_or_create_session(dao, questionnaire_id, data)
 
     now = get_local_now()
     if session.status == "submitted":
@@ -97,13 +97,13 @@ async def submit_questionnaire(
     if session.status == "expired" or now > session.expires_at:
         await dao.update_where(
             QuestionnaireSession,
-            [QuestionnaireSession.id == session_id],
+            [QuestionnaireSession.id == questionnaire_id],
             {"status": "expired"},
         )
         raise HTTPException(status_code=400, detail="问卷已过期")
 
     success = await dao.submit_answers(
-        session_id=session_id,
+        session_id=questionnaire_id,
         answers=data.answers,
         is_auto_submit=data.is_auto_submit,
     )
@@ -113,27 +113,27 @@ async def submit_questionnaire(
     return SubmitResponse(success=True)
 
 
-@questionnaire_router.get("/session/{session_id}/results", response_model=QuestionnaireResponse)
+@questionnaire_router.get("/{questionnaire_id}/results", response_model=QuestionnaireResponse)
 async def get_questionnaire_results(
-    session_id: str = Path(..., description="会话ID"),
+    questionnaire_id: str = Path(..., description="问卷ID"),
 ):
-    """工具轮询获取问卷结果（通过 session_id）"""
+    """工具轮询获取问卷结果（通过 questionnaire_id）"""
 
     dao = QuestionnaireDao()
-    session = await dao.get_session(session_id)
+    session = await dao.get_session(questionnaire_id)
     if not session:
         raise HTTPException(status_code=404, detail="问卷不存在")
 
     if session.status == "pending" and get_local_now() > session.expires_at:
         await dao.update_where(
             QuestionnaireSession,
-            [QuestionnaireSession.id == session_id],
+            [QuestionnaireSession.id == questionnaire_id],
             {"status": "expired"},
         )
         session.status = "expired"
 
     return QuestionnaireResponse(
-        session_id=session.id,
+        questionnaire_id=session.id,
         status=session.status,
         answers=session.answers,
         submitted_at=session.submitted_at,
