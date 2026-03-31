@@ -20,6 +20,7 @@ class QuestionnaireSession(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=get_local_now)
     submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    is_auto_submit: Mapped[bool] = mapped_column(default=False)
 
 
 class QuestionnaireDao(BaseDao):
@@ -37,7 +38,8 @@ class QuestionnaireDao(BaseDao):
     async def submit_answers(
         self,
         session_id: str,
-        answers: Dict[str, Any]
+        answers: Dict[str, Any],
+        is_auto_submit: bool = False,
     ) -> bool:
         """提交答案"""
         session = await self.get_session(session_id)
@@ -51,12 +53,42 @@ class QuestionnaireDao(BaseDao):
         session.answers = answers
         session.status = "submitted"
         session.submitted_at = get_local_now()
+        session.is_auto_submit = is_auto_submit
         await self.save(session)
         return True
 
     async def delete_session(self, session_id: str) -> bool:
         """删除问卷会话"""
         return await self.delete_by_id(QuestionnaireSession, session_id)
+
+    async def expire_pending_session(self, session_id: str) -> bool:
+        """将 pending 问卷标记为 expired"""
+        session = await self.get_session(session_id)
+        if not session or session.status != "pending":
+            return False
+
+        session.status = "expired"
+        await self.save(session)
+        return True
+
+    async def expire_pending_sessions_by_prefix(self, session_prefix: str) -> int:
+        """将指定前缀下的 pending 问卷统一标记为 expired"""
+        db = await self._get_db()
+        async with db.get_session() as session:
+            stmt = select(QuestionnaireSession).where(
+                QuestionnaireSession.id.like(f"{session_prefix}%"),
+                QuestionnaireSession.status == "pending"
+            )
+            result = await session.execute(stmt)
+            pending_sessions = result.scalars().all()
+
+            count = 0
+            for item in pending_sessions:
+                item.status = "expired"
+                await session.merge(item)
+                count += 1
+
+            return count
 
     async def cleanup_expired(self) -> int:
         """清理过期的问卷会话"""

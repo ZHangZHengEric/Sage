@@ -231,6 +231,7 @@ async def populate_request_from_agent_config(
         # 将 sage-usage-docs 复制到 agent workspace 下的 sage_usage_docs 目录
         # 这样 agent 可以直接访问文档
         await _copy_sage_usage_docs_to_agent_workspace(request.agent_id, agent_workspace)
+
     # 处理可用技能
     available_skills = request.available_skills
     if available_skills:

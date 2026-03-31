@@ -11,6 +11,7 @@ from . import agent_base_prompts
 from . import fibre_agent_prompts
 from . import memory_extraction_prompts
 from . import memory_recall_prompts
+from . import plan_agent_prompts
 from . import query_suggest_prompts
 from . import session_context_prompts
 from . import simple_agent_prompts
