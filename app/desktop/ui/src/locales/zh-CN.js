@@ -526,6 +526,7 @@ export default {
   'tools.questionnaire.text': '文本',
   'tools.questionnaire.moreQuestions': '还有 {count} 个问题',
   'tools.questionnaire.fillInMessageList': '请在左侧消息列表中填写',
+  'tools.questionnaire.workbenchReadonlyHint': '工作台中的问卷仅用于预览，不能直接提交。请回到消息流中的问卷卡片完成提交。',
   'tools.questionnaire.autoSubmitted': '自动提交',
   'tools.questionnaire.manuallySubmitted': '手动提交',
   'tools.default': '工具执行',

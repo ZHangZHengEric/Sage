@@ -29,14 +29,14 @@ class DesktopBackendClient:
 class QuestionnaireTool:
     """问卷工具 - 向用户展示问卷表单并收集答案"""
 
-    def _get_backend_client(self, session_id: Optional[str] = None):
+    def _get_backend_client(self, runtime_session_id: Optional[str] = None):
         """获取后端 API 客户端"""
-        if not session_id:
+        if not runtime_session_id:
             return None
         try:
             from sagents.session_runtime import get_global_session_manager
             session_manager = get_global_session_manager()
-            session = session_manager.get(session_id)
+            session = session_manager.get(runtime_session_id)
             if session and session.session_context:
                 # 检查是否有 backend_client（server 模式）
                 backend_client = getattr(session.session_context, 'backend_client', None)
@@ -66,9 +66,9 @@ class QuestionnaireTool:
                 "zh": "等待用户回答的最大时间(秒)，超时自动提交。默认300秒(5分钟)。",
                 "en": "Maximum time to wait for user response in seconds. Auto-submit on timeout. Default is 300 seconds (5 minutes)."
             },
-            "session_id": {
-                "zh": "会话ID，用于关联问卷结果",
-                "en": "Session ID, used to associate questionnaire results"
+            "questionnaire_id": {
+                "zh": "问卷ID，用于关联问卷结果。推荐使用该字段。",
+                "en": "Questionnaire ID used to associate questionnaire results. Preferred field."
             },
             "questionnaire_kind": {
                 "zh": "问卷类型。planning 阶段建议显式传入，例如 plan_information 或 plan_confirmation。",
@@ -144,9 +144,9 @@ class QuestionnaireTool:
                 "minimum": 0,
                 "maximum": 3600
             },
-            "session_id": {
+            "questionnaire_id": {
                 "type": "string",
-                "description": "会话ID"
+                "description": "问卷ID"
             },
             "questionnaire_kind": {
                 "type": "string",
@@ -160,18 +160,20 @@ class QuestionnaireTool:
         self,
         title: str,
         questions: List[Dict[str, Any]],
-        session_id: str,
+        questionnaire_id: str,
+        session_id: Optional[str] = None,
         wait_time: int = 300,
         questionnaire_kind: str = "general",
     ) -> str:
         """
         向用户展示问卷表单并收集答案。
-        工具直接轮询后端检查 session 是否有问卷结果，前端负责展示问卷。
+        工具直接轮询后端检查问卷是否有结果，前端负责展示问卷。
 
         Args:
             title: 问卷标题
             questions: 问题列表
-            session_id: 会话ID
+            questionnaire_id: 问卷ID
+            session_id: 系统注入的当前运行时会话ID，仅用于获取 backend client
             wait_time: 等待时间(秒)，默认300秒
             questionnaire_kind: 问卷类型
 
@@ -179,7 +181,7 @@ class QuestionnaireTool:
             JSON 格式的用户答案
         """
         logger.info(
-            f"QuestionnaireTool: session_id={session_id}, title={title}, "
+            f"QuestionnaireTool: questionnaire_id={questionnaire_id}, title={title}, "
             f"wait_time={wait_time}, questionnaire_kind={questionnaire_kind}"
         )
 
@@ -191,13 +193,13 @@ class QuestionnaireTool:
         if not backend_client:
             raise ValueError("Backend client not available")
 
-        # 轮询等待用户提交结果（通过 session_id 关联）
-        logger.info(f"QuestionnaireTool: 开始轮询等待用户提交. session_id={session_id}")
-        result = await self._poll_for_result(backend_client, session_id, wait_time)
+        # 轮询等待用户提交结果（通过 questionnaire_id 关联）
+        logger.info(f"QuestionnaireTool: 开始轮询等待用户提交. questionnaire_id={questionnaire_id}")
+        result = await self._poll_for_result(backend_client, questionnaire_id, wait_time)
 
         if result is None:
             # 超时，使用默认值作为答案
-            logger.warning(f"QuestionnaireTool: 问卷超时，使用默认值. session_id={session_id}")
+            logger.warning(f"QuestionnaireTool: 问卷超时，使用默认值. questionnaire_id={questionnaire_id}")
             default_answers = self._get_default_answers(questions)
             return json.dumps({
                 "success": True,
@@ -207,12 +209,13 @@ class QuestionnaireTool:
                 "questionnaire_kind": questionnaire_kind,
             }, ensure_ascii=False, indent=2)
 
-        logger.info(f"QuestionnaireTool: 成功获取问卷答案. session_id={session_id}, is_auto_submit={result.get('is_auto_submit', False)}")
+        logger.info(f"QuestionnaireTool: 成功获取问卷答案. questionnaire_id={questionnaire_id}, is_auto_submit={result.get('is_auto_submit', False)}")
         return json.dumps({
             "success": True,
             "status": "submitted",
             "message": "用户已提交答案",
             "answers": result.get("answers", {}),
+            "questionnaire_id": result.get("questionnaire_id", questionnaire_id),
             "submitted_at": result.get("submitted_at"),
             "is_auto_submit": result.get("is_auto_submit", False),
             "questionnaire_kind": questionnaire_kind,
@@ -264,22 +267,23 @@ class QuestionnaireTool:
     async def _poll_for_result(
         self,
         backend_client,
-        session_id: str,
+        questionnaire_id: str,
         wait_time: int
     ) -> Optional[Dict[str, Any]]:
-        """轮询等待用户提交结果（通过 session_id）"""
+        """轮询等待用户提交结果（通过 questionnaire_id）"""
         poll_interval = 1  # 每秒检查一次
         elapsed = 0
 
         while elapsed < wait_time:
             try:
-                # 通过 session_id 获取问卷结果
-                response = await backend_client.get(f"/api/questionnaires/session/{session_id}/results")
+                # 通过 questionnaire_id 获取问卷结果
+                encoded_questionnaire_id = questionnaire_id
+                response = await backend_client.get(f"/api/questionnaires/{encoded_questionnaire_id}/results")
                 
                 if response.status_code == 200:
                     result = response.json()
                     if result.get("status") == "submitted":
-                        # 获取成功后，后端会自动删除该 session 的问卷结果
+                        # 获取成功后，后端会自动删除该问卷结果
                         return result
                 elif response.status_code == 404:
                     # 还没有结果，继续等待

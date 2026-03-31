@@ -18,7 +18,9 @@
         :key="question.id"
         class="text-sm"
       >
-        <div class="font-medium mb-2 text-foreground">{{ idx + 1 }}. {{ question.title }}</div>
+        <div class="mb-2 text-foreground">
+          <MarkdownRenderer :content="`${idx + 1}. ${question.title}`" class="question-markdown text-sm" />
+        </div>
         
         <!-- 单选题：显示所有选项和选中状态 -->
         <div v-if="question.type === 'single_choice'" class="space-y-1.5 pl-1">
@@ -71,7 +73,9 @@
         class="text-xs text-muted-foreground flex items-start gap-2"
       >
         <span class="flex-shrink-0">{{ idx + 1 }}.</span>
-        <span class="truncate">{{ question.title }}</span>
+        <span class="flex-1 min-w-0">
+          <MarkdownRenderer :content="question.title" class="question-markdown text-xs" />
+        </span>
         <Badge v-if="question.type === 'multiple_choice'" variant="outline" class="text-[10px] h-4 px-1">{{ t('tools.questionnaire.multipleChoice') }}</Badge>
         <Badge v-else-if="question.type === 'single_choice'" variant="outline" class="text-[10px] h-4 px-1">{{ t('tools.questionnaire.singleChoice') }}</Badge>
         <Badge v-else variant="outline" class="text-[10px] h-4 px-1">{{ t('tools.questionnaire.text') }}</Badge>
@@ -82,9 +86,14 @@
     </div>
 
     <!-- 状态提示 -->
-    <div v-if="!hasResult" class="flex items-center gap-2 text-xs pt-2 border-t border-border/50">
-      <Info class="w-3 h-3 text-blue-500" />
-      <span class="text-muted-foreground">{{ t('tools.questionnaire.fillInMessageList') }}</span>
+    <div v-if="!hasResult" class="space-y-2 pt-2 border-t border-border/50">
+      <div class="flex items-center gap-2 text-xs">
+        <Info class="w-3 h-3 text-blue-500" />
+        <span class="text-muted-foreground">{{ t('tools.questionnaire.fillInMessageList') }}</span>
+      </div>
+      <div class="text-xs text-amber-600 bg-amber-50/80 dark:bg-amber-950/20 rounded px-3 py-2">
+        {{ t('tools.questionnaire.workbenchReadonlyHint') }}
+      </div>
     </div>
   </div>
 </template>
@@ -94,6 +103,7 @@ import { computed } from 'vue'
 import { ClipboardList, Info } from 'lucide-vue-next'
 import { Badge } from '@/components/ui/badge'
 import { useLanguage } from '@/utils/i18n'
+import MarkdownRenderer from '@/components/chat/MarkdownRenderer.vue'
 
 const { t } = useLanguage()
 
@@ -191,3 +201,20 @@ function formatAnswer(question, value) {
   return value
 }
 </script>
+
+<style scoped>
+.question-markdown :deep(.prose) {
+  margin: 0;
+  max-width: none;
+}
+
+.question-markdown :deep(.prose p) {
+  margin: 0.2rem 0;
+}
+
+.question-markdown :deep(.prose ul),
+.question-markdown :deep(.prose ol) {
+  margin: 0.3rem 0;
+  padding-left: 1rem;
+}
+</style>

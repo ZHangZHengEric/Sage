@@ -26,9 +26,6 @@ PLAN_READONLY_TOOLS = {
 
 PLAN_CONFIRMATION_QUESTION_IDS = {
     "decision",
-    "goal_check",
-    "steps_check",
-    "deliverables_check",
     "feedback",
 }
 
@@ -394,7 +391,7 @@ class PlanAgent(AgentBase):
         tool_call_id: str,
     ) -> Dict[str, Any]:
         """
-        为每一次 questionnaire 调用分配独立 session_id，避免同一会话内多次问卷互相串结果。
+        为每一次 questionnaire 调用分配独立 questionnaire_id，避免同一会话内多次问卷互相串结果。
         """
         cloned_tool_call = json.loads(json.dumps(tool_call))
         function_payload = cloned_tool_call.get("function", {})
@@ -406,8 +403,8 @@ class PlanAgent(AgentBase):
             logger.warning("PlanAgent: failed to parse questionnaire arguments for unique session id")
             return tool_call
 
-        current_questionnaire_session_id = arguments.get("session_id")
-        if isinstance(current_questionnaire_session_id, str) and "__questionnaire__" in current_questionnaire_session_id:
+        current_questionnaire_id = arguments.get("questionnaire_id")
+        if isinstance(current_questionnaire_id, str) and "__questionnaire__" in current_questionnaire_id:
             if "questionnaire_kind" not in arguments:
                 arguments["questionnaire_kind"] = (
                     PLAN_QUESTIONNAIRE_KIND_PLAN_CONFIRMATION
@@ -418,7 +415,7 @@ class PlanAgent(AgentBase):
                 cloned_tool_call["function"] = function_payload
             return cloned_tool_call
 
-        arguments["session_id"] = f"{session_id}__questionnaire__{tool_call_id}"
+        arguments["questionnaire_id"] = f"{session_id}__questionnaire__{tool_call_id}"
         if "questionnaire_kind" not in arguments:
             arguments["questionnaire_kind"] = (
                 PLAN_QUESTIONNAIRE_KIND_PLAN_CONFIRMATION
@@ -512,11 +509,19 @@ class PlanAgent(AgentBase):
             logger.warning(f"PlanAgent: failed to parse plan confirmation result: {e}")
             return fallback
 
+        # 工具层返回的常见格式是 {"content": "<json string>"}，这里先解包一层。
+        if isinstance(parsed, dict) and "content" in parsed:
+            inner_content = parsed.get("content")
+            if isinstance(inner_content, str) and inner_content.strip():
+                try:
+                    parsed = json.loads(inner_content)
+                except Exception as e:
+                    logger.warning(f"PlanAgent: failed to parse inner plan confirmation content: {e}")
+                    return fallback
+
         answers = parsed.get("answers") if isinstance(parsed.get("answers"), dict) else {}
         decision = answers.get("decision") or "adjust_plan"
-        section_keys = ("goal_check", "steps_check", "deliverables_check")
-        section_confirmed = all(answers.get(key, "confirm") == "confirm" for key in section_keys)
-        plan_status = "start_execution" if decision == "execute_plan" and section_confirmed else "pause"
+        plan_status = "start_execution" if decision == "execute_plan" else "pause"
 
         return {
             "decision": decision,
