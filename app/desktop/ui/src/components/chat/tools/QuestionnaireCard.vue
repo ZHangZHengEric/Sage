@@ -2,7 +2,8 @@
   <div class="questionnaire-card w-full max-w-md">
     <!-- 工具调用卡片 -->
     <div 
-      class="tool-call-card bg-card border rounded-lg overflow-hidden transition-all hover:border-primary/50 border-primary cursor-pointer"
+      class="tool-call-card bg-card border rounded-lg overflow-hidden transition-all border-primary"
+      :class="isFormInteractive ? 'hover:border-primary/30 cursor-default' : 'hover:border-primary/50 cursor-pointer'"
       @click="handleClick"
     >
       <!-- 头部：始终显示 -->
@@ -32,7 +33,7 @@
       <!-- 展开内容：问卷表单或历史结果 -->
       <div class="border-t">
         <!-- 历史记录：显示已完成状态和答案 -->
-        <div v-if="hasToolResult" class="questionnaire-form bg-card p-4 space-y-4">
+        <div v-if="hasToolResult" class="questionnaire-form bg-card p-4 space-y-4" @click.stop>
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2 text-green-600">
               <CheckCircle class="w-5 h-5" />
@@ -70,7 +71,7 @@
         </div>
         
         <!-- 实时问卷：显示表单 -->
-        <div v-else class="questionnaire-form bg-card p-4 space-y-4">
+        <div v-else class="questionnaire-form bg-card p-4 space-y-4" @click.stop>
           <!-- 提示信息 -->
           <div v-if="!isSubmitted && !isExpired" class="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-md p-3 text-sm text-blue-800 dark:text-blue-200 flex items-start gap-2">
             <Info class="w-4 h-4 mt-0.5 flex-shrink-0" />
@@ -115,6 +116,7 @@
                   v-for="option in question.options" 
                   :key="option.value"
                   class="flex items-center space-x-2 p-1.5 rounded hover:bg-muted/50 cursor-pointer"
+                  @click.stop="selectSingleChoice(question.id, option.value)"
                 >
                   <RadioGroupItem :value="option.value" :id="`${question.id}-${option.value}`" />
                   <Label :for="`${question.id}-${option.value}`" class="text-sm cursor-pointer flex-1">
@@ -129,11 +131,12 @@
                   v-for="option in question.options" 
                   :key="option.value"
                   class="flex items-center space-x-2 p-1.5 rounded hover:bg-muted/50 cursor-pointer"
-                  @click="toggleCheck(question.id, option.value)"
+                  @click.stop="toggleCheck(question.id, option.value)"
                 >
                   <Checkbox 
                     :id="`${question.id}-${option.value}`"
                     :checked="isChecked(question.id, option.value)"
+                    :disabled="isSubmitted || isExpired"
                   />
                   <Label :for="`${question.id}-${option.value}`" class="text-sm cursor-pointer flex-1">
                     {{ option.label }}
@@ -237,6 +240,7 @@ const remainingTime = ref(300)
 const isAutoSubmit = ref(false) // 是否为自动提交
 const submittedAt = ref(null) // 提交时间
 let countdownTimer = null
+let interruptionListener = null
 
 // 解析工具参数
 const sessionId = computed(() => {
@@ -307,6 +311,7 @@ const hasToolResult = computed(() => {
 const isPending = computed(() => submitStatus.value === 'pending' && !hasToolResult.value && remainingTime.value > 0)
 const isSubmitted = computed(() => submitStatus.value === 'submitted' || hasToolResult.value)
 const isExpired = computed(() => submitStatus.value === 'expired' || remainingTime.value <= 0)
+const isFormInteractive = computed(() => !hasToolResult.value && !isSubmitted.value && !isExpired.value)
 
 // 计算剩余时间（基于消息时间戳）
 function calculateRemainingTime() {
@@ -390,10 +395,31 @@ onMounted(() => {
   }
   
   startCountdown()
+
+  interruptionListener = (event) => {
+    const interruptedSessionId = event?.detail?.sessionId || ''
+    if (
+      interruptedSessionId !== sessionId.value &&
+      !sessionId.value.startsWith(`${interruptedSessionId}__questionnaire__`)
+    ) {
+      return
+    }
+    if (submitStatus.value === 'submitted') return
+    submitStatus.value = 'expired'
+    if (countdownTimer) {
+      clearInterval(countdownTimer)
+      countdownTimer = null
+    }
+  }
+  window.addEventListener('questionnaire-session-interrupted', interruptionListener)
 })
 
 onUnmounted(() => {
   if (countdownTimer) clearInterval(countdownTimer)
+  if (interruptionListener) {
+    window.removeEventListener('questionnaire-session-interrupted', interruptionListener)
+    interruptionListener = null
+  }
 })
 
 function startCountdown() {
@@ -446,6 +472,11 @@ function toggleCheck(questionId, value) {
   }
 }
 
+function selectSingleChoice(questionId, value) {
+  if (isSubmitted.value || isExpired.value) return
+  answers.value[questionId] = value
+}
+
 async function autoSubmit() {
   if (isSubmitting.value || isSubmitted.value) return
   toast.info(t('tools.questionnaire.autoSubmitToast'))
@@ -480,6 +511,10 @@ async function doSubmit(isAuto = false) {
 
 // 处理点击事件，跳转到工作台
 const handleClick = (event) => {
+  if (isFormInteractive.value) {
+    return
+  }
+
   // 如果点击的是按钮，不触发跳转（让按钮自己处理）
   if (event?.target?.closest('button')) {
     return

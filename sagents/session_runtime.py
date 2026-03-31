@@ -24,6 +24,7 @@ from sagents.agent import (
     WorkflowSelectAgent,
     ToolSuggestionAgent,
     MemoryRecallAgent,
+    PlanAgent,
 )
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import (
@@ -40,6 +41,7 @@ from sagents.utils.logger import logger
 from sagents.flow.schema import AgentFlow
 from sagents.flow.executor import FlowExecutor
 from sagents.utils.sandbox.config import VolumeMount
+from sagents.utils.message_control_flags import extract_control_flags_from_messages
 
 
 _session_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("session_id", default=None)
@@ -98,6 +100,7 @@ class Session:
             "task_router": TaskRouterAgent,
             "fibre": FibreAgent,
             "memory_recall": MemoryRecallAgent,
+            "plan": PlanAgent,
         }
 
     def configure_runtime(
@@ -327,6 +330,7 @@ class Session:
 
             session_context.set_status(SessionStatus.RUNNING)
             initial_messages = self._prepare_initial_messages(input_messages)
+            control_flags = extract_control_flags_from_messages(initial_messages)
 
             merge_before_num = len(session_context.message_manager.messages)
             all_message_ids = [m.message_id for m in session_context.message_manager.messages]
@@ -373,6 +377,7 @@ class Session:
             # 确保一些状态已经设置到 SessionContext 中，供 ConditionRegistry 使用
             if deep_thinking is not None:
                 session_context.audit_status["deep_thinking"] = deep_thinking
+            session_context.audit_status["enable_plan"] = bool(control_flags.get("enable_plan", False))
             if agent_mode is not None:
                 session_context.audit_status["agent_mode"] = agent_mode
             if more_suggest is not None:

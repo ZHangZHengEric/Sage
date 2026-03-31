@@ -282,7 +282,17 @@ class SAgent:
                 AgentNode(agent_key="tool_suggestion"),
                 AgentNode(agent_key="memory_recall"),
             ]),
-            AgentNode(agent_key="fibre"),
+            IfNode(
+                condition="enable_plan",
+                true_body=SequenceNode(steps=[
+                    AgentNode(agent_key="plan"),
+                    IfNode(
+                        condition="plan_should_start_execution",
+                        true_body=AgentNode(agent_key="fibre"),
+                    ),
+                ]),
+                false_body=AgentNode(agent_key="fibre"),
+            ),
         ])
 
         # 如果传入了 agent_mode，我们仍然使用 SwitchNode，因为 agent_mode 可能会在运行时被 Router 修改

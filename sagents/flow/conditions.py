@@ -44,6 +44,16 @@ def check_more_suggest(session_context) -> bool:
     # 如果没有，可能需要在 SessionContext 中维护
     return session_context.audit_status.get("more_suggest", False)
 
+@ConditionRegistry.register("enable_plan")
+def check_enable_plan(session_context) -> bool:
+    """检查是否启用了规划阶段"""
+    return session_context.audit_status.get("enable_plan", False)
+
+@ConditionRegistry.register("plan_should_start_execution")
+def check_plan_should_start_execution(session_context) -> bool:
+    """检查规划阶段是否已经决定进入正式执行"""
+    return session_context.audit_status.get("plan_status") == "start_execution"
+
 @ConditionRegistry.register("need_summary")
 def check_need_summary(session_context) -> bool:
     """检查是否需要总结（例如最后一条消息是工具调用）"""
