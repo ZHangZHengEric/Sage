@@ -48,8 +48,6 @@ class SAgent:
         context_budget_config: Optional[Dict[str, Any]] = None,
         custom_sub_agents: Optional[List[Dict[str, Any]]] = None,
         custom_flow: Optional[AgentFlow] = None,
-        # 已过时参数（保留以兼容旧代码，但不再使用）
-        default_memory_type: Optional[str] = None,
     ) -> AsyncGenerator[List["MessageChunk"], None]:
         """执行流式对话会话
 
@@ -96,7 +94,6 @@ class SAgent:
             context_budget_config: 上下文预算配置，控制 token 使用
             custom_sub_agents: 自定义子 Agent 配置列表
             custom_flow: 自定义执行流程（AgentFlow）
-            default_memory_type: (已过时) 此参数已废弃，保留仅用于兼容旧代码，传入的值会被忽略
 
         Returns:
             异步生成器，产生 MessageChunk 列表
