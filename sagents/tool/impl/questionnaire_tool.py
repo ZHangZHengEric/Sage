@@ -69,6 +69,10 @@ class QuestionnaireTool:
             "session_id": {
                 "zh": "会话ID，用于关联问卷结果",
                 "en": "Session ID, used to associate questionnaire results"
+            },
+            "questionnaire_kind": {
+                "zh": "问卷类型。planning 阶段建议显式传入，例如 plan_information 或 plan_confirmation。",
+                "en": "Questionnaire kind. In planning phase, explicitly pass values such as plan_information or plan_confirmation."
             }
         },
         param_schema={
@@ -143,6 +147,12 @@ class QuestionnaireTool:
             "session_id": {
                 "type": "string",
                 "description": "会话ID"
+            },
+            "questionnaire_kind": {
+                "type": "string",
+                "enum": ["general", "plan_information", "plan_confirmation"],
+                "description": "问卷类型",
+                "default": "general"
             }
         }
     )
@@ -151,7 +161,8 @@ class QuestionnaireTool:
         title: str,
         questions: List[Dict[str, Any]],
         session_id: str,
-        wait_time: int = 300
+        wait_time: int = 300,
+        questionnaire_kind: str = "general",
     ) -> str:
         """
         向用户展示问卷表单并收集答案。
@@ -162,11 +173,15 @@ class QuestionnaireTool:
             questions: 问题列表
             session_id: 会话ID
             wait_time: 等待时间(秒)，默认300秒
+            questionnaire_kind: 问卷类型
 
         Returns:
             JSON 格式的用户答案
         """
-        logger.info(f"QuestionnaireTool: session_id={session_id}, title={title}, wait_time={wait_time}")
+        logger.info(
+            f"QuestionnaireTool: session_id={session_id}, title={title}, "
+            f"wait_time={wait_time}, questionnaire_kind={questionnaire_kind}"
+        )
 
         # 验证问题格式
         self._validate_questions(questions)
@@ -188,7 +203,8 @@ class QuestionnaireTool:
                 "success": True,
                 "status": "timeout",
                 "message": "用户未在指定时间内提交，使用默认值",
-                "answers": default_answers
+                "answers": default_answers,
+                "questionnaire_kind": questionnaire_kind,
             }, ensure_ascii=False, indent=2)
 
         logger.info(f"QuestionnaireTool: 成功获取问卷答案. session_id={session_id}, is_auto_submit={result.get('is_auto_submit', False)}")
@@ -198,7 +214,8 @@ class QuestionnaireTool:
             "message": "用户已提交答案",
             "answers": result.get("answers", {}),
             "submitted_at": result.get("submitted_at"),
-            "is_auto_submit": result.get("is_auto_submit", False)
+            "is_auto_submit": result.get("is_auto_submit", False),
+            "questionnaire_kind": questionnaire_kind,
         }, ensure_ascii=False, indent=2)
 
     def _validate_questions(self, questions: List[Dict[str, Any]]):

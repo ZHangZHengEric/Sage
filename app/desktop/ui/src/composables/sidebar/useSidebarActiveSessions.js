@@ -8,6 +8,7 @@ export const useSidebarActiveSessions = ({
   const { 
     activeSessions, 
     removeSessionFromCache,
+    stripSessionControlTags,
     startSSESync,
     stopSSESync
   } = useChatActiveSessionCache()
@@ -41,7 +42,9 @@ export const useSidebarActiveSessions = ({
           id: sessionId,
           sessionId,
           sessionStatus: meta?.status === 'completed' ? 'completed' : 'running',
-          rawName: (String(userInput).replace(/^<skill>.*?<\/skill>\s*/, '').split('\n')[0].trim()) || String(title) || `会话 ${sessionId.slice(-8)}`,
+          rawName: stripSessionControlTags(String(userInput)).split('\n')[0].trim()
+            || stripSessionControlTags(String(title))
+            || `会话 ${sessionId.slice(-8)}`,
           url: 'Chat',
           isInternal: true,
           query: { session_id: sessionId }

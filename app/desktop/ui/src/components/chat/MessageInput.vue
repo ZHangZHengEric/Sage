@@ -89,24 +89,56 @@
         />
       </div>
 
-      <!-- 底部区域：附件按钮在左下角，发送按钮在右下角 -->
+      <!-- 底部区域：附件按钮和会话开关在左下角，发送按钮在右下角 -->
       <div class="flex items-center justify-between">
-        <!-- 文件上传按钮 - 左下角 -->
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          class="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground hover:bg-background flex-shrink-0"
-          @click="triggerFileInput"
-          :disabled="isLoading"
-          :title="t('messageInput.uploadFile')"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path
-              d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
-              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        </Button>
+        <!-- 左下角操作区：附件上传 + 会话开关 -->
+        <div class="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            class="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground hover:bg-background flex-shrink-0"
+            @click="triggerFileInput"
+            :disabled="isLoading"
+            :title="t('messageInput.uploadFile')"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </Button>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            class="h-8 rounded-full px-3 text-xs font-medium transition-all duration-200 border"
+            :class="planEnabled
+              ? activeToggleClass
+              : inactiveToggleClass"
+            @click="planEnabled = !planEnabled"
+            :disabled="isLoading"
+            :title="t('messageInput.planMode')"
+          >
+            {{ t('messageInput.planModeLabel') || 'Plan' }}
+          </Button>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            class="h-8 rounded-full px-3 text-xs font-medium transition-all duration-200 border"
+            :class="deepThinkingEnabled
+              ? activeToggleClass
+              : inactiveToggleClass"
+            @click="toggleDeepThinking"
+            :disabled="isLoading"
+            :title="t('config.deepThinking')"
+          >
+            {{ t('config.deepThinking') }}
+          </Button>
+        </div>
 
         <!-- 发送按钮 - 右下角 -->
         <Button
@@ -157,10 +189,14 @@ const props = defineProps({
   selectedAgent: {
     type: Object,
     default: null
+  },
+  config: {
+    type: Object,
+    default: () => ({})
   }
 })
 
-const emit = defineEmits(['sendMessage', 'stopGeneration'])
+const emit = defineEmits(['sendMessage', 'stopGeneration', 'configChange'])
 
 const { t } = useLanguage()
 
@@ -233,6 +269,19 @@ const selectSkill = (skill) => {
 const uploadedFiles = ref([])
 const isComposing = ref(false)
 const isDraggingOver = ref(false)
+const planEnabled = ref(false)
+const deepThinkingEnabled = computed(() => props.config?.deepThinking !== false)
+const activeToggleClass = 'border-primary/30 bg-primary/10 text-foreground hover:bg-primary/15 hover:border-primary/40'
+const inactiveToggleClass = 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted/60'
+
+const toggleDeepThinking = () => {
+  emit('configChange', { deepThinking: !deepThinkingEnabled.value })
+}
+
+const applyPlanTag = (messageContent) => {
+  if (!planEnabled.value) return messageContent
+  return `<enable_plan>true</enable_plan>${messageContent ? ` ${messageContent}` : ''}`
+}
 
 // 拖拽事件处理
 const handleDragEnter = (e) => {
@@ -441,6 +490,8 @@ const handleSubmit = (e) => {
         messageContent = `<skill>${currentSkill.value}</skill> ${messageContent}`
       }
 
+      messageContent = applyPlanTag(messageContent)
+
       // 构建多模态内容格式
       const multimodalContent = []
 
@@ -516,6 +567,8 @@ const handleSubmit = (e) => {
     if (currentSkill.value) {
       messageContent = `<skill>${currentSkill.value}</skill> ${messageContent}`
     }
+
+    messageContent = applyPlanTag(messageContent)
 
     // 构建多模态内容格式
     const multimodalContent = []

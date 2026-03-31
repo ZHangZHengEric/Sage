@@ -17,6 +17,7 @@ from sagents.session_runtime import get_global_session_manager
 from pathlib import Path
 from .. import models
 from ..core.exceptions import SageHTTPException
+from ..models.questionnaire import QuestionnaireDao
 from .chat.stream_manager import StreamManager
 from .chat.processor import ContentProcessor
 
@@ -32,6 +33,11 @@ async def interrupt_session(
         return {"session_id": session_id}
 
     session.session_context.set_status(SessionStatus.INTERRUPTED)
+    try:
+        await QuestionnaireDao().expire_pending_session(session_id)
+        await QuestionnaireDao().expire_pending_sessions_by_prefix(f"{session_id}__questionnaire__")
+    except Exception as e:
+        logger.bind(session_id=session_id).warning(f"中断会话时更新问卷状态失败: {e}")
     logger.bind(session_id=session_id).info("会话中断成功")
     return {"session_id": session_id}
 
