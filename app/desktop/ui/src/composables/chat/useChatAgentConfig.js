@@ -22,6 +22,14 @@ export const useChatAgentConfig = ({
 
   const selectAgent = (agent, forceConfigUpdate = false) => {
     const isAgentChange = !selectedAgent.value || selectedAgent.value.id !== agent?.id
+
+    // 切换到其他 agent 时，先清空当前会话里的临时覆盖值。
+    // 这样对话页里的「深度思考」等开关会回到该 agent 自身的默认配置，
+    // 而不是继续沿用上一个 agent / 会话留下来的覆盖状态。
+    if (isAgentChange) {
+      userConfigOverrides.value = {}
+    }
+
     selectedAgent.value = agent
     if (agent && (isAgentChange || forceConfigUpdate)) {
       // 如果后端返回的 agentMode 是 'multi'，自动改为 'simple'

@@ -764,6 +764,8 @@ export default {
   'messageInput.stopAndSendTitle': 'Stop and send new message',
   'messageInput.uploadFile': 'Upload',
   'messageInput.removeFile': 'Remove',
+  'messageInput.planMode': 'Enable planning mode',
+  'messageInput.planModeLabel': 'Plan',
 
   // Config Panel
   'config.title': 'Config',

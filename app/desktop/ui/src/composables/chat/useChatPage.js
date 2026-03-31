@@ -611,9 +611,7 @@ export const useChatPage = (props) => {
         item?.session_id === sessionId && item?.role === 'user' && String(item?.content || '').trim()
       )
       if (firstUserMessage) {
-        const firstUserInput = String(firstUserMessage.content || '')
-          .replace(/^<skill>.*?<\/skill>\s*/, '')
-          .trim()
+        const firstUserInput = deriveSessionTitle(String(firstUserMessage.content || ''))
         if (firstUserInput) {
           updateActiveSession(sessionId, true, deriveSessionTitle(firstUserInput), firstUserInput, false)
         }

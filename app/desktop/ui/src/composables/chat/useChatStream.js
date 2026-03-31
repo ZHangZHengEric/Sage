@@ -1,3 +1,52 @@
+const ENABLE_PLAN_TAG_RE = /^\s*<enable_plan>\s*(true|false)\s*<\/enable_plan>\s*/i
+
+const stripEnablePlanTag = (text) => {
+  if (typeof text !== 'string') return { text, enablePlan: false }
+  let remaining = text
+  let enablePlan = false
+  let matched = false
+
+  while (true) {
+    const match = remaining.match(ENABLE_PLAN_TAG_RE)
+    if (!match) break
+    matched = true
+    enablePlan = match[1].toLowerCase() === 'true'
+    remaining = remaining.slice(match[0].length)
+  }
+
+  return { text: remaining, enablePlan: matched ? enablePlan : false }
+}
+
+const stripEnablePlanFromMultimodal = (multimodalContent) => {
+  if (!Array.isArray(multimodalContent)) return { content: multimodalContent, enablePlan: false }
+  const next = []
+  let parsedText = false
+  let enablePlan = false
+
+  for (const item of multimodalContent) {
+    if (!parsedText && item?.type === 'text' && typeof item.text === 'string') {
+      parsedText = true
+      const result = stripEnablePlanTag(item.text)
+      enablePlan = result.enablePlan
+      if (result.text) {
+        next.push({ ...item, text: result.text })
+      }
+      continue
+    }
+    next.push(item)
+  }
+
+  return { content: next, enablePlan }
+}
+
+const hasVisibleMultimodalContent = (multimodalContent) => {
+  if (!Array.isArray(multimodalContent) || multimodalContent.length === 0) return false
+  return multimodalContent.some(item => {
+    if (item?.type === 'text') return typeof item.text === 'string' && item.text.trim().length > 0
+    return true
+  })
+}
+
 export const useChatStream = ({
   chatAPI,
   toast,
@@ -238,6 +287,14 @@ export const useChatStream = ({
   const handleSendMessage = async (content, options = {}) => {
     const { displayContent, multimodalContent, needInterrupt } = options
     if (!content.trim() || !selectedAgent.value) return
+
+    const contentControl = stripEnablePlanTag(content)
+    const multimodalControl = stripEnablePlanFromMultimodal(multimodalContent)
+    const cleanedContent = contentControl.text
+    const cleanedMultimodal = multimodalControl.content
+    const enablePlan = contentControl.enablePlan || multimodalControl.enablePlan
+    const visibleDisplay = displayContent != null ? stripEnablePlanTag(displayContent).text : null
+    if (!cleanedContent.trim() && !hasVisibleMultimodalContent(cleanedMultimodal) && !enablePlan) return
     
     // 如果需要中断（用户正在生成回复时发送新消息）
     if (needInterrupt && isLoading.value) {
@@ -259,9 +316,12 @@ export const useChatStream = ({
       sessionId = await createSession(selectedAgent.value.id)
     }
     await syncSessionIdToRoute(sessionId)
-    const shownContent = (displayContent ?? content).trim()
-    updateActiveSession(sessionId, true, deriveSessionTitle(shownContent), shownContent, false)
-    addUserMessage(shownContent, sessionId, multimodalContent)
+    const shownContent = (visibleDisplay ?? cleanedContent).trim()
+    const titleSeed = shownContent || (enablePlan ? 'Planning' : shownContent)
+    updateActiveSession(sessionId, true, deriveSessionTitle(titleSeed), shownContent, false)
+    if (shownContent || hasVisibleMultimodalContent(cleanedMultimodal)) {
+      addUserMessage(shownContent, sessionId, cleanedMultimodal)
+    }
     try {
       isLoading.value = true
       loadingSessionId.value = sessionId
@@ -308,6 +368,9 @@ export const useChatStream = ({
     try {
       if (sessionId) {
         await chatAPI.interruptSession(sessionId, '用户请求中断')
+        window.dispatchEvent(new CustomEvent('questionnaire-session-interrupted', {
+          detail: { sessionId }
+        }))
       }
     } catch (error) {
       console.error('Error interrupting session:', error)

@@ -13,6 +13,7 @@ from .task_router_agent import TaskRouterAgent
 from .tool_suggestion_agent import ToolSuggestionAgent
 from .fibre.fibre_agent import FibreAgent
 from .memory_recall_agent import MemoryRecallAgent
+from .plan_agent import PlanAgent
 
 
 
@@ -32,4 +33,5 @@ __all__ = [
     "ToolSuggestionAgent",
     "FibreAgent",
     "MemoryRecallAgent",
+    "PlanAgent",
 ]

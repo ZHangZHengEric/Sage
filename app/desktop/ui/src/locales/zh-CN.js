@@ -770,6 +770,8 @@ export default {
   'messageInput.stopAndSendTitle': '停止生成并发送新消息',
   'messageInput.uploadFile': '上传文件',
   'messageInput.removeFile': '移除文件',
+  'messageInput.planMode': '启用计划模式',
+  'messageInput.planModeLabel': 'Plan',
 
   // 配置面板
   'config.title': '配置设置',

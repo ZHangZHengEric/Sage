@@ -83,16 +83,6 @@
               </TooltipContent>
             </Tooltip>
 
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="togglePanel('settings')">
-                  <Settings class="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{{ t('chat.settings') }}</p>
-              </TooltipContent>
-            </Tooltip>
           </div>
         </TooltipProvider>
       </div>
@@ -204,7 +194,9 @@
               :is-loading="isCurrentSessionLoading"
               :preset-text="abilityPresetInput"
               :selected-agent="selectedAgent"
+              :config="config"
               @send-message="handleSendMessageWithAbilityClear"
+              @config-change="updateConfig"
               @stop-generation="stopGeneration"
             />
           </div>
@@ -223,17 +215,6 @@
           @quote-path="handleQuotePath"
           @upload-files="handleUploadFiles"
           @close="showWorkspace = false"
-        />
-      </Transition>
-
-      <Transition name="panel">
-        <ConfigPanel
-          v-if="showSettings"
-          :agents="agents"
-          :selected-agent="selectedAgent"
-          :config="config"
-          @config-change="updateConfig"
-          @close="showSettings = false"
         />
       </Transition>
 
@@ -268,11 +249,10 @@
 <script setup>
 defineOptions({ name: 'Chat' })
 import { computed, ref } from 'vue'
-import { Bot, Settings, FolderOpen, Monitor, Sparkles } from 'lucide-vue-next'
+import { Bot, FolderOpen, Monitor, Sparkles } from 'lucide-vue-next'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
 import MessageInput from '@/components/chat/MessageInput.vue'
-import ConfigPanel from '@/components/chat/ConfigPanel.vue'
 import WorkspacePanel from '@/components/chat/WorkspacePanel.vue'
 import LoadingBubble from '@/components/chat/LoadingBubble.vue'
 import SubSessionPanel from '@/components/chat/SubSessionPanel.vue'
@@ -309,7 +289,7 @@ const props = defineProps({
 const { t } = useLanguage()
 
 const panelStore = usePanelStore()
-const { showWorkbench, showWorkspace, showSettings } = storeToRefs(panelStore)
+const { showWorkbench, showWorkspace } = storeToRefs(panelStore)
 
 const {
   agents,
@@ -451,7 +431,7 @@ const handleUploadFiles = async (files) => {
 }
 
 // 计算是否有面板打开
-const anyPanelOpen = computed(() => showWorkspace.value || showSettings.value || showWorkbench.value)
+const anyPanelOpen = computed(() => showWorkspace.value || showWorkbench.value)
 
 // 是否进入“覆盖聊天空态”的能力面板模式：
 // 只要：显示能力面板 + 当前会话无消息，即覆盖掉“开始新的对话”空态区域
