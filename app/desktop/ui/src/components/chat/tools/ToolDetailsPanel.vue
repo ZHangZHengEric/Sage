@@ -72,6 +72,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useLanguage } from '@/utils/i18n.js'
+import { getToolLabel } from '@/utils/messageLabels.js'
 import { Copy, Terminal } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -108,20 +109,9 @@ const emit = defineEmits(['update:open'])
 const copiedParams = ref(false)
 const copiedResult = ref(false)
 
-// 工具名称多语言映射
 const displayToolName = computed(() => {
   const toolName = props.toolExecution?.function?.name || ''
-  const nameMap = {
-    'execute_shell_command': t('workbench.tool.shellCommand'),
-    'load_skill': t('workbench.tool.loadSkill'),
-    'file_read': t('workbench.tool.readFile'),
-    'file_write': t('workbench.tool.writeFile'),
-    'execute_python_code': t('workbench.tool.pythonCode'),
-    'execute_javascript_code': t('workbench.tool.jsCode'),
-    'search_web_page': t('workbench.tool.searchWebPage'),
-    'search_image_from_web': t('workbench.tool.searchImageFromWeb')
-  }
-  return nameMap[toolName] || toolName
+  return getToolLabel(toolName, t)
 })
 
 const parsedArguments = computed(() => {
@@ -241,4 +231,3 @@ const formatJsonParams = (params) => {
   background: rgba(255, 255, 255, 0.2);
 }
 </style>
-

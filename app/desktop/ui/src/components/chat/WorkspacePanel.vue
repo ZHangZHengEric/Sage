@@ -26,7 +26,7 @@
         class="flex flex-col items-center justify-center py-8 text-primary"
       >
         <Upload class="w-12 h-12 mb-2" />
-        <p class="text-sm font-medium">{{ t('workspace.dropHere') || '释放以上传文件或文件夹' }}</p>
+        <p class="text-sm font-medium">{{ t('workspace.dropHere') }}</p>
       </div>
       
       <!-- 上传进度 -->
@@ -44,7 +44,11 @@
       </div>
       
       <div class="space-y-1">
-        <div v-if="hasValidFiles" class="flex flex-col gap-1">
+        <div v-if="isLoading && !isDraggingOver && !uploading" class="flex flex-col items-center justify-center py-8 text-muted-foreground">
+          <FolderOpen class="w-12 h-12 mb-2 opacity-50 animate-pulse" />
+          <p class="text-sm">{{ t('workspace.loading') }}</p>
+        </div>
+        <div v-else-if="hasValidFiles" class="flex flex-col gap-1">
           <WorkspaceFileTree
             v-for="node in fileTree"
             :key="node.path"
@@ -52,16 +56,29 @@
             @download="handleDownload"
             @delete="handleDelete"
             @quote="handleQuote"
+            @view="handleView"
           />
         </div>
         <div v-else-if="!isDraggingOver && !uploading" class="flex flex-col items-center justify-center py-8 text-muted-foreground">
           <FolderOpen class="w-12 h-12 mb-2 opacity-50" />
           <p class="text-sm">{{ t('workspace.noFiles') }}</p>
-          <p class="text-xs mt-1 opacity-70">{{ t('workspace.dragHint') || '拖拽文件或文件夹到此处' }}</p>
+          <p class="text-xs mt-1 opacity-70">{{ t('workspace.dragHint') }}</p>
         </div>
       </div>
     </div>
   </ResizablePanel>
+
+  <Dialog v-model:open="previewOpen">
+    <DialogContent :closeable="false" class="max-w-[90vw] h-[85vh] flex flex-col p-0 gap-0 overflow-hidden">
+      <WorkspaceRemoteFilePreview
+        v-if="previewItem"
+        :item="previewItem"
+        :agent-id="agentId"
+        @download-file="emit('downloadFile', $event)"
+        @close="previewOpen = false"
+      />
+    </DialogContent>
+  </Dialog>
 </template>
 
 <script setup>
@@ -71,11 +88,17 @@ import { FolderOpen, Upload } from 'lucide-vue-next'
 import ResizablePanel from './ResizablePanel.vue'
 import WorkspaceFileTree from './WorkspaceFileTree.vue'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import WorkspaceRemoteFilePreview from './WorkspaceRemoteFilePreview.vue'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 
 const props = defineProps({
   workspaceFiles: {
     type: Array,
     default: () => []
+  },
+  isLoading: {
+    type: Boolean,
+    default: false
   },
   agentId: {
     type: String,
@@ -92,6 +115,8 @@ const uploading = ref(false)
 const uploadProgress = ref(0)
 const uploadStatus = ref('')
 const dropZoneRef = ref(null)
+const previewOpen = ref(false)
+const previewItem = ref(null)
 
 // 监听Tauri拖拽事件（桌面端）
 let tauriDropListener = null
@@ -310,6 +335,16 @@ const handleDrop = async (e) => {
   if (files.length > 0) {
     emit('uploadFiles', files)
   }
+}
+
+const handleView = (item) => {
+  if (!item || item.is_directory) return
+  previewItem.value = {
+    ...item,
+    role: 'assistant',
+    timestamp: Date.now()
+  }
+  previewOpen.value = true
 }
 
 // 递归遍历文件夹

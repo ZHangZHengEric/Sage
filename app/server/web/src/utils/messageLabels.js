@@ -28,6 +28,7 @@ export const messageTypeLabels = new Map([
   ['stage_summary', '阶段总结'],
   ['do_subtask', '子任务'],
   ['do_subtask_result', '执行结果'],
+  ['finish_task_content', '任务完成'],
   ['rewrite', '重写'],
   ['query_suggest', '查询建议'],
   ['chunk_start', '数据块开始'],

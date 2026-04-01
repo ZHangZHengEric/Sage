@@ -14,6 +14,17 @@
         <Badge variant="secondary" class="text-xs">{{ fileTypeLabel }}</Badge>
       </div>
       <div class="flex items-center gap-1 flex-shrink-0">
+        <Button
+          v-if="canPreviewInDialog"
+          variant="ghost"
+          size="sm"
+          @click="previewDialogOpen = true"
+          class="h-7 px-2"
+          :title="t('workbench.view')"
+        >
+          <Eye class="w-4 h-4 mr-1" />
+          {{ t('workbench.view') }}
+        </Button>
         <Button 
           v-if="canCopy"
           variant="ghost" 
@@ -119,12 +130,25 @@
       </div>
     </div>
   </div>
+
+  <Dialog v-if="!dialogMode" v-model:open="previewDialogOpen">
+    <DialogContent class="max-w-[90vw] h-[85vh] p-0 overflow-hidden">
+      <FileRenderer
+        :file-path="filePath"
+        :file-name="fileName"
+        :item="item"
+        :dialog-mode="true"
+      />
+    </DialogContent>
+  </Dialog>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, defineAsyncComponent, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { useLanguage } from '@/utils/i18n.js'
 import {
   Loader2,
   AlertCircle,
@@ -133,7 +157,8 @@ import {
   Check,
   File,
   FileText,
-  Download
+  Download,
+  Eye
 } from 'lucide-vue-next'
 import { useThemeStore } from '@/stores/theme'
 import PdfRenderer from './filerender/PdfRenderer.vue'
@@ -171,6 +196,10 @@ const props = defineProps({
   item: {
     type: Object,
     default: null
+  },
+  dialogMode: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -181,6 +210,8 @@ const fileContent = ref('') // 文本内容
 const fileArrayBuffer = ref(null) // 二进制内容
 const blobUrl = ref('') // Blob URL
 const copied = ref(false)
+const previewDialogOpen = ref(false)
+const { t } = useLanguage()
 
 // 主题
 const themeStore = useThemeStore()
@@ -278,6 +309,11 @@ const officeFileType = computed(() => {
 // 是否可以复制
 const canCopy = computed(() => {
   return ['code', 'text', 'markdown'].includes(fileType.value)
+})
+
+const canPreviewInDialog = computed(() => {
+  if (props.dialogMode) return false
+  return ['pdf', 'image', 'html', 'markdown', 'code', 'excalidraw', 'text', 'office'].includes(fileType.value)
 })
 
 // Excalidraw 特定数据
