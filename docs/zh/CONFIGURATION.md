@@ -83,14 +83,14 @@ ref: configuration
 
 Sage 现在把主要 CORS 维度都开放成可配置项，并保留默认值：
 
-- `SAGE_CORS_ALLOWED_ORIGINS`：逗号分隔的来源白名单
-- `SAGE_CORS_ALLOW_CREDENTIALS`：是否允许浏览器携带凭据，默认 `true`
+- `SAGE_CORS_ALLOWED_ORIGINS`：逗号分隔的来源白名单，默认 `*`
+- `SAGE_CORS_ALLOW_CREDENTIALS`：是否允许浏览器携带凭据，默认 `false`
 - `SAGE_CORS_ALLOW_METHODS`：逗号分隔的方法白名单，默认 `*`
 - `SAGE_CORS_ALLOW_HEADERS`：逗号分隔的请求头白名单，默认 `*`
 - `SAGE_CORS_EXPOSE_HEADERS`：逗号分隔的响应头暴露列表，默认空
 - `SAGE_CORS_MAX_AGE`：预检缓存秒数，默认 `600`
 
-当 `SAGE_CORS_ALLOW_CREDENTIALS=true` 时，来源仍然不允许使用通配符 `*`。
+默认形态是公开跨域，也就是 `*` 且不允许浏览器凭据。如果你把 `SAGE_CORS_ALLOW_CREDENTIALS=true` 打开，就不能继续使用通配符 `*`，必须显式配置来源白名单。
 
 `SAGE_BOOTSTRAP_ADMIN_USERNAME` 和 `SAGE_BOOTSTRAP_ADMIN_PASSWORD` 现在是显式启用的一组配置。只有这两个变量都提供时，Sage 才会在首次启动时创建 bootstrap 管理员用户。
 
