@@ -36,14 +36,7 @@ jobs:
 
       - name: Run Core Backend Regression Suite
         run: |
-          python -m pytest \
-            tests/app/server/core/test_auth_modes.py \
-            tests/app/server/core/test_middleware_auth.py \
-            tests/app/server/core/test_bootstrap_admin.py \
-            tests/app/server/core/test_config_security.py \
-            tests/app/server/core/test_lifecycle_runtime.py \
-            tests/app/server/core/test_cors_config.py \
-            -v
+          python -m pytest tests/app/server -v
 
   web-tests:
     name: Web Vitest
