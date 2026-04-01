@@ -104,14 +104,14 @@ Supported deployment modes are intentionally narrowed to three values:
 
 Sage keeps CORS configurable with safe defaults:
 
-- `SAGE_CORS_ALLOWED_ORIGINS`: comma-separated origin allowlist
-- `SAGE_CORS_ALLOW_CREDENTIALS`: whether browser credentials are allowed, default `true`
+- `SAGE_CORS_ALLOWED_ORIGINS`: comma-separated origin allowlist, default `*`
+- `SAGE_CORS_ALLOW_CREDENTIALS`: whether browser credentials are allowed, default `false`
 - `SAGE_CORS_ALLOW_METHODS`: comma-separated method allowlist, default `*`
 - `SAGE_CORS_ALLOW_HEADERS`: comma-separated request-header allowlist, default `*`
 - `SAGE_CORS_EXPOSE_HEADERS`: comma-separated response headers exposed to the browser, default empty
 - `SAGE_CORS_MAX_AGE`: preflight cache TTL in seconds, default `600`
 
-When `SAGE_CORS_ALLOW_CREDENTIALS=true`, wildcard origin `*` is still rejected.
+The default shape is public CORS with `*` and no browser credentials. If you enable `SAGE_CORS_ALLOW_CREDENTIALS=true`, wildcard origin `*` is rejected and you must configure explicit origins.
 
 `SAGE_BOOTSTRAP_ADMIN_USERNAME` and `SAGE_BOOTSTRAP_ADMIN_PASSWORD` are both optional, but they now work as an explicit opt-in pair. If either one is missing, Sage will not create a bootstrap admin user during startup.
 

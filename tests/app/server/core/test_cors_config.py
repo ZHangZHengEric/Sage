@@ -17,15 +17,15 @@ def _build_app() -> FastAPI:
     return app
 
 
-def test_default_cors_configuration_does_not_use_credentialed_wildcard():
+def test_default_cors_configuration_uses_public_wildcard_without_credentials():
     config._GLOBAL_STARTUP_CONFIG = config.StartupConfig()
     app = _build_app()
 
     cors_layers = [layer for layer in app.user_middleware if layer.cls is CORSMiddleware]
 
     assert len(cors_layers) == 1
-    assert cors_layers[0].kwargs["allow_credentials"] is True
-    assert "*" not in cors_layers[0].kwargs["allow_origins"]
+    assert cors_layers[0].kwargs["allow_credentials"] is False
+    assert cors_layers[0].kwargs["allow_origins"] == ["*"]
     assert cors_layers[0].kwargs["allow_methods"] == ["*"]
     assert cors_layers[0].kwargs["allow_headers"] == ["*"]
     assert cors_layers[0].kwargs["expose_headers"] == []

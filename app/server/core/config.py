@@ -60,15 +60,8 @@ class StartupConfig:
     session_cookie_name: str = "sage_session"
     session_cookie_secure: bool = False
     session_cookie_same_site: str = "lax"
-    cors_allowed_origins: list[str] = field(
-        default_factory=lambda: [
-            "http://localhost:3000",
-            "http://127.0.0.1:3000",
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-        ]
-    )
-    cors_allow_credentials: bool = True
+    cors_allowed_origins: list[str] = field(default_factory=lambda: ["*"])
+    cors_allow_credentials: bool = False
     cors_allow_methods: list[str] = field(default_factory=lambda: ["*"])
     cors_allow_headers: list[str] = field(default_factory=lambda: ["*"])
     cors_expose_headers: list[str] = field(default_factory=list)
