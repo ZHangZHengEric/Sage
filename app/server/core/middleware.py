@@ -108,9 +108,11 @@ def register_middlewares(app):
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cfg.cors_allowed_origins or [],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_credentials=cfg.cors_allow_credentials,
+        allow_methods=cfg.cors_allow_methods or ["*"],
+        allow_headers=cfg.cors_allow_headers or ["*"],
+        expose_headers=cfg.cors_expose_headers or [],
+        max_age=int(cfg.cors_max_age or 600),
     )
 
     @app.middleware("http")
