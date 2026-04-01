@@ -63,6 +63,12 @@ ref: configuration
 - `SAGE_SESSION_COOKIE_NAME`
 - `SAGE_SESSION_COOKIE_SECURE`
 - `SAGE_SESSION_COOKIE_SAME_SITE`
+- `SAGE_CORS_ALLOWED_ORIGINS`
+- `SAGE_CORS_ALLOW_CREDENTIALS`
+- `SAGE_CORS_ALLOW_METHODS`
+- `SAGE_CORS_ALLOW_HEADERS`
+- `SAGE_CORS_EXPOSE_HEADERS`
+- `SAGE_CORS_MAX_AGE`
 
 当前支持的部署模式先收敛为三种：
 
@@ -74,6 +80,17 @@ ref: configuration
   使用 Sage 原生的用户名密码认证。这里的 `native` 表示认证方式，不是“本地开发环境”。
 
 `SAGE_TRUSTED_IDENTITY_PROXY_IPS` 支持逗号分隔的 IP 或 CIDR 白名单。只有请求来源命中该白名单时，Sage 才会将该来源视为受信任代理，并接受可选的 `X-Sage-Internal-UserId` 透传。
+
+Sage 现在把主要 CORS 维度都开放成可配置项，并保留默认值：
+
+- `SAGE_CORS_ALLOWED_ORIGINS`：逗号分隔的来源白名单，默认 `*`
+- `SAGE_CORS_ALLOW_CREDENTIALS`：是否允许浏览器携带凭据，默认 `false`
+- `SAGE_CORS_ALLOW_METHODS`：逗号分隔的方法白名单，默认 `*`
+- `SAGE_CORS_ALLOW_HEADERS`：逗号分隔的请求头白名单，默认 `*`
+- `SAGE_CORS_EXPOSE_HEADERS`：逗号分隔的响应头暴露列表，默认空
+- `SAGE_CORS_MAX_AGE`：预检缓存秒数，默认 `600`
+
+默认形态是公开跨域，也就是 `*` 且不允许浏览器凭据。如果你把 `SAGE_CORS_ALLOW_CREDENTIALS=true` 打开，就不能继续使用通配符 `*`，必须显式配置来源白名单。
 
 `SAGE_BOOTSTRAP_ADMIN_USERNAME` 和 `SAGE_BOOTSTRAP_ADMIN_PASSWORD` 现在是显式启用的一组配置。只有这两个变量都提供时，Sage 才会在首次启动时创建 bootstrap 管理员用户。
 
