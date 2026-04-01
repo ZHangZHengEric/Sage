@@ -67,6 +67,8 @@ These control where Sage writes runtime state, sessions, agents, and skill works
 ## Authentication and Session
 
 - `SAGE_AUTH_PROVIDERS`
+- `SAGE_BOOTSTRAP_ADMIN_USERNAME`
+- `SAGE_BOOTSTRAP_ADMIN_PASSWORD`
 - `SAGE_JWT_KEY`
 - `SAGE_JWT_EXPIRE_HOURS`
 - `SAGE_REFRESH_TOKEN_SECRET`
@@ -80,6 +82,8 @@ These control where Sage writes runtime state, sessions, agents, and skill works
 - `SAGE_OAUTH2_ACCESS_TOKEN_EXPIRES_IN`
 
 You can ignore this entire section until you enable login, external auth providers, or OAuth2 flows.
+
+`SAGE_BOOTSTRAP_ADMIN_USERNAME` and `SAGE_BOOTSTRAP_ADMIN_PASSWORD` are both optional, but they now work as an explicit opt-in pair. If either one is missing, Sage will not create a bootstrap admin user during startup.
 
 ## Embeddings, Search, and Object Storage
 
@@ -153,6 +157,8 @@ SAGE_DEFAULT_LLM_MODEL_NAME=deepseek-chat
 SAGE_DB_TYPE=file
 SAGE_SESSION_DIR=sessions
 SAGE_AGENTS_DIR=agents
+SAGE_BOOTSTRAP_ADMIN_USERNAME=admin
+SAGE_BOOTSTRAP_ADMIN_PASSWORD=change-this-before-first-run
 SAGE_SANDBOX_MODE=local
 ```
 

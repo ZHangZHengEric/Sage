@@ -68,6 +68,13 @@ def _is_whitelisted(path: str) -> bool:
     return path in WHITELIST_API_PATHS or any(r.match(path) for r in WHITELIST_API_REGEXES)
 
 
+def _is_loopback_host(host: str | None) -> bool:
+    """Only trust internal bypass headers from loopback callers."""
+    if not host:
+        return False
+    return host in {"127.0.0.1", "::1", "localhost"}
+
+
 async def _unauthorized_response(status_code: int, detail: str, error_detail: str):
     """统一返回未授权响应"""
     return JSONResponse(
@@ -94,8 +101,8 @@ def register_middlewares(app):
         if path.startswith("/api"):
             # Internal request bypass
             internal_user_id = request.headers.get("X-Sage-Internal-UserId")
-            if internal_user_id:
-                client_host = request.client.host
+            client_host = request.client.host if request.client else None
+            if internal_user_id and _is_loopback_host(client_host):
                 userid = internal_user_id
                 request.state.user_claims = {"userid": userid, "username": "admin"}
                 return await call_next(request)

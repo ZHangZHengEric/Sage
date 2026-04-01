@@ -49,6 +49,21 @@ ref: configuration
 
 只有在你使用数据库后端时，才需要完整填写这组变量。
 
+## 认证与启动管理员
+
+- `SAGE_AUTH_PROVIDERS`
+- `SAGE_BOOTSTRAP_ADMIN_USERNAME`
+- `SAGE_BOOTSTRAP_ADMIN_PASSWORD`
+- `SAGE_JWT_KEY`
+- `SAGE_JWT_EXPIRE_HOURS`
+- `SAGE_REFRESH_TOKEN_SECRET`
+- `SAGE_SESSION_SECRET`
+- `SAGE_SESSION_COOKIE_NAME`
+- `SAGE_SESSION_COOKIE_SECURE`
+- `SAGE_SESSION_COOKIE_SAME_SITE`
+
+`SAGE_BOOTSTRAP_ADMIN_USERNAME` 和 `SAGE_BOOTSTRAP_ADMIN_PASSWORD` 现在是显式启用的一组配置。只有这两个变量都提供时，Sage 才会在首次启动时创建 bootstrap 管理员用户。
+
 ## 前端相关变量
 
 如果你运行 `app/server/web/`，最先要检查的通常是：
@@ -60,3 +75,17 @@ ref: configuration
 
 - 优先先跑通最小配置，再逐步加上持久化和扩展能力。
 - 当行为与预期不一致时，先回到 `config.py` 与实际启动日志核对。
+
+## 示例 `.env`
+
+```env
+SAGE_PORT=8080
+SAGE_DEFAULT_LLM_API_KEY=your-api-key
+SAGE_DEFAULT_LLM_API_BASE_URL=https://api.deepseek.com/v1
+SAGE_DEFAULT_LLM_MODEL_NAME=deepseek-chat
+SAGE_DB_TYPE=file
+SAGE_SESSION_DIR=sessions
+SAGE_AGENTS_DIR=agents
+SAGE_BOOTSTRAP_ADMIN_USERNAME=admin
+SAGE_BOOTSTRAP_ADMIN_PASSWORD=change-this-before-first-run
+```
