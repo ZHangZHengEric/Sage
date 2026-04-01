@@ -21,6 +21,7 @@ from ... import models
 from ...core.exceptions import SageHTTPException
 from ...schemas.chat import StreamRequest, CustomSubAgentConfig
 from ...core.config import get_startup_config
+from ..agent_inherit import copy_agent_inherit_to_workspace
 from .processor import (
     ContentProcessor,
 )
@@ -308,8 +309,12 @@ class SageStreamService:
         agent_id = self.request.agent_id or ''.join(random.choices(string.ascii_letters, k=8))
         self.agent_workspace = os.path.join(cfg.agents_dir, user_id, agent_id)
 
-        # 创建 workspace 目录并复制 sage-usage-docs
-        os.makedirs(self.agent_workspace, exist_ok=True)
+        # 首次创建 workspace 时，从 agent inherit 目录初始化内容
+        if not os.path.exists(self.agent_workspace):
+            os.makedirs(self.agent_workspace, exist_ok=True)
+            if self.request.agent_id:
+                copy_agent_inherit_to_workspace(self.request.agent_id, self.agent_workspace)
+                
         _copy_sage_usage_docs_to_workspace(self.agent_workspace)
 
         # 2. 工具代理
