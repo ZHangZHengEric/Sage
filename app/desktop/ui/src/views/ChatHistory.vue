@@ -71,7 +71,7 @@
               <!-- 标题行 -->
               <div class="flex items-start justify-between gap-3 mb-2">
                 <h3 class="text-base font-semibold text-foreground leading-tight line-clamp-2 flex-1">
-                  {{ conversation.title }}
+                  {{ conversation.display_title || conversation.title }}
                 </h3>
                 
                 <!-- 时间 -->
@@ -238,7 +238,7 @@
             </Button>
           </div>
           <div class="mt-4 p-4 bg-muted/50 rounded-lg text-sm space-y-2">
-            <p><strong>{{ t('history.conversationTitle') }}</strong>: {{ shareConversation?.title }}</p>
+            <p><strong>{{ t('history.conversationTitle') }}</strong>: {{ shareConversation?.display_title || shareConversation?.title }}</p>
             <p><strong>{{ t('history.messageCount') }}</strong>: {{ getVisibleMessageCount() }} {{ t('history.visibleMessages') }}</p>
           </div>
         </div>
@@ -269,6 +269,7 @@ import { exportToHTML, exportToMarkdown } from '@/utils/exporter.js'
 import { agentAPI } from '@/api/agent.js'
 import { chatAPI } from '@/api/chat.js'
 import { getCurrentUser } from '@/utils/auth.js'
+import { sanitizeSessionTitle } from '@/utils/sessionTitle'
 
 // UI Components
 import { Input } from '@/components/ui/input'
@@ -352,7 +353,13 @@ const loadConversationsPaginated = async () => {
       sort_by: sortBy.value,
     }
     const response = await chatAPI.getConversationsPaginated(params)
-    paginatedConversations.value = response.list || []
+    paginatedConversations.value = (response.list || []).map((conversation) => {
+      const displayTitle = sanitizeSessionTitle(conversation?.title || '')
+      return {
+        ...conversation,
+        display_title: displayTitle || t('chat.untitledConversation')
+      }
+    })
     totalCount.value = response.total || 0
   } catch (error) {
     toast.error('加载对话列表失败')

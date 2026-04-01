@@ -18,17 +18,11 @@ const readActiveSessionsCache = () => {
 // Initialize activeSessions from local storage once
 activeSessions.value = readActiveSessionsCache()
 
-const CONTROL_TAG_PATTERNS = [
-  /^\s*<enable_plan>\s*(true|false)\s*<\/enable_plan>\s*/i,
-  /^\s*<enable_deep_thinking>\s*(true|false)\s*<\/enable_deep_thinking>\s*/i,
-  /^\s*<skill>.*?<\/skill>\s*/i
-]
-
 const stripSessionControlTags = (text = '') => {
   let normalized = String(text || '')
-  for (const pattern of CONTROL_TAG_PATTERNS) {
-    normalized = normalized.replace(pattern, '')
-  }
+  normalized = normalized.replace(/^\s*<enable_plan>\s*(true|false)\s*<\/enable_plan>\s*/i, '')
+  normalized = normalized.replace(/^\s*<enable_deep_thinking>\s*(true|false)\s*<\/enable_deep_thinking>\s*/i, '')
+  normalized = normalized.replace(/^<skill>.*?<\/skill>\s*/i, '')
   return normalized.trim()
 }
 

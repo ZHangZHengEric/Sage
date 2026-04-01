@@ -69,6 +69,50 @@ echo "操作系统: $OS_TYPE"
 echo "目标平台: $TARGET"
 
 ########################################
+# 0. Cleanup Stale Dev Processes
+########################################
+
+cleanup_stale_dev_processes() {
+  if [ "${SKIP_DEV_CLEANUP:-0}" = "1" ]; then
+    echo "已跳过残留进程清理 (SKIP_DEV_CLEANUP=1)"
+    return
+  fi
+
+  echo "正在清理残留开发进程..."
+
+  # 仅清理本项目相关命令，避免误杀其他工作区进程。
+  local patterns=(
+    "vite.*$ROOT_DIR/app/desktop"
+    "cargo.*tauri.*$ROOT_DIR/app/desktop/tauri"
+    "$ROOT_DIR/app/desktop/scripts/dev.sh"
+  )
+
+  if command -v pgrep >/dev/null 2>&1; then
+    for pattern in "${patterns[@]}"; do
+      if pgrep -f "$pattern" >/dev/null 2>&1; then
+        pkill -f "$pattern" >/dev/null 2>&1 || true
+      fi
+    done
+  fi
+
+  # 兜底释放常见开发端口 (Vite 1420 / app 默认 8080)。
+  if command -v lsof >/dev/null 2>&1; then
+    for port in 1420 8080; do
+      local pids
+      pids="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null || true)"
+      if [ -n "$pids" ]; then
+        echo "释放端口 $port: $pids"
+        for pid in $pids; do
+          kill "$pid" >/dev/null 2>&1 || true
+        done
+      fi
+    done
+  fi
+}
+
+cleanup_stale_dev_processes
+
+########################################
 # 1. Python Environment Setup (Conda)
 ########################################
 
