@@ -66,7 +66,11 @@ These control where Sage writes runtime state, sessions, agents, and skill works
 
 ## Authentication and Session
 
+- `SAGE_AUTH_MODE`
 - `SAGE_AUTH_PROVIDERS`
+- `SAGE_TRUSTED_IDENTITY_PROXY_IPS`
+- `SAGE_BOOTSTRAP_ADMIN_USERNAME`
+- `SAGE_BOOTSTRAP_ADMIN_PASSWORD`
 - `SAGE_JWT_KEY`
 - `SAGE_JWT_EXPIRE_HOURS`
 - `SAGE_REFRESH_TOKEN_SECRET`
@@ -80,6 +84,19 @@ These control where Sage writes runtime state, sessions, agents, and skill works
 - `SAGE_OAUTH2_ACCESS_TOKEN_EXPIRES_IN`
 
 You can ignore this entire section until you enable login, external auth providers, or OAuth2 flows.
+
+Supported deployment modes are intentionally narrowed to three values:
+
+- `SAGE_AUTH_MODE=trusted_proxy`
+  Use an enterprise trusted-proxy mode. Sage treats caller IPs in `SAGE_TRUSTED_IDENTITY_PROXY_IPS` as trusted entry points, skips end-user auth for business requests from those sources, and still allows built-in admin username/password login. If the upstream also injects `X-Sage-Internal-UserId`, Sage uses it as optional end-user context.
+- `SAGE_AUTH_MODE=oauth`
+  Use upstream OAuth/OIDC login for Sage itself. Configure providers through `SAGE_AUTH_PROVIDERS`.
+- `SAGE_AUTH_MODE=native`
+  Use Sage's built-in username/password authentication. This is an auth mode name, not a local-development flag.
+
+`SAGE_TRUSTED_IDENTITY_PROXY_IPS` accepts a comma-separated list of proxy source IPs or CIDR ranges. Sage only treats a request as coming from a trusted proxy when the caller IP matches this allowlist, and only then accepts the optional `X-Sage-Internal-UserId` passthrough header.
+
+`SAGE_BOOTSTRAP_ADMIN_USERNAME` and `SAGE_BOOTSTRAP_ADMIN_PASSWORD` are both optional, but they now work as an explicit opt-in pair. If either one is missing, Sage will not create a bootstrap admin user during startup.
 
 ## Embeddings, Search, and Object Storage
 
@@ -147,13 +164,30 @@ The web client also reads frontend-specific Vite variables:
 
 ```env
 SAGE_PORT=8080
+SAGE_AUTH_MODE=trusted_proxy
 SAGE_DEFAULT_LLM_API_KEY=your-api-key
 SAGE_DEFAULT_LLM_API_BASE_URL=https://api.deepseek.com/v1
 SAGE_DEFAULT_LLM_MODEL_NAME=deepseek-chat
 SAGE_DB_TYPE=file
 SAGE_SESSION_DIR=sessions
 SAGE_AGENTS_DIR=agents
+SAGE_TRUSTED_IDENTITY_PROXY_IPS=10.0.0.0/8,127.0.0.1/32
+SAGE_BOOTSTRAP_ADMIN_USERNAME=admin
+SAGE_BOOTSTRAP_ADMIN_PASSWORD=change-this-before-first-run
 SAGE_SANDBOX_MODE=local
+```
+
+OAuth deployment example:
+
+```env
+SAGE_AUTH_MODE=oauth
+SAGE_AUTH_PROVIDERS=[{"id":"corp-sso","type":"oidc","name":"Corp SSO","discovery_url":"https://sso.example.com/.well-known/openid-configuration","client_id":"sage","client_secret":"secret"}]
+```
+
+Native auth deployment example:
+
+```env
+SAGE_AUTH_MODE=native
 ```
 
 ## Recommendation

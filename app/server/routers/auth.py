@@ -15,6 +15,8 @@ from ..schemas.user import (
     UserInfoResponse,
 )
 from ..services.auth.external_oauth import (
+    is_admin_only_local_login,
+    is_local_registration_enabled,
     build_oauth_authorize_url,
     clear_auth_session,
     complete_oauth_login,
@@ -35,7 +37,7 @@ auth_router = APIRouter(prefix="/api/auth", tags=["Auth"])
 
 @auth_router.post("/register/send-code", response_model=BaseResponse[RegisterVerificationCodeResponse])
 async def send_register_code(req: RegisterVerificationCodeRequest):
-    if not is_local_auth_enabled():
+    if not is_local_registration_enabled():
         return await Response.error(
             code=400,
             message="当前服务未启用本地账号注册",
@@ -50,7 +52,7 @@ async def send_register_code(req: RegisterVerificationCodeRequest):
 
 @auth_router.post("/register", response_model=BaseResponse[RegisterResponse])
 async def register(req: RegisterRequest):
-    if not is_local_auth_enabled():
+    if not is_local_registration_enabled():
         return await Response.error(
             code=400,
             message="当前服务未启用本地账号注册",
@@ -75,6 +77,12 @@ async def login(request: Request, req: LoginRequest):
             error_detail="local auth disabled",
         )
     user = await authenticate_user(req.username_or_email, req.password)
+    if is_admin_only_local_login() and user.role != "admin":
+        return await Response.error(
+            code=403,
+            message="当前服务仅允许管理员通过账号密码登录",
+            error_detail="admin login required in trusted proxy mode",
+        )
     access_token, refresh_token, expires_in = create_login_tokens(user)
     request.session["user_claims"] = build_user_claims(user)
     return await Response.succ(
