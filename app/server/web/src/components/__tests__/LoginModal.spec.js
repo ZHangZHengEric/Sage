@@ -83,4 +83,24 @@ describe('LoginModal', () => {
     expect(wrapper.text()).toContain('使用Corp SSO登录')
     expect(wrapper.text()).not.toContain('企业身份代理模式')
   })
+
+  it('renders native login form when auth mode is native', async () => {
+    getSystemInfo.mockResolvedValue({
+      allow_registration: true,
+      auth_mode: 'native',
+      auth_providers: [
+        { id: 'native', type: 'native', name: '账号密码' },
+      ],
+      oauth_enabled: false,
+      oauth_provider_name: null,
+    })
+
+    const wrapper = await mountComponent()
+
+    expect(wrapper.text()).toContain('用户登录')
+    expect(wrapper.text()).toContain('用户名')
+    expect(wrapper.text()).toContain('密码')
+    expect(wrapper.text()).not.toContain('企业身份代理模式')
+    expect(wrapper.text()).not.toContain('统一登录')
+  })
 })

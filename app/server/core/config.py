@@ -236,8 +236,8 @@ def is_production_like(cfg: StartupConfig) -> bool:
 
 def validate_startup_config(cfg: StartupConfig) -> None:
     auth_mode = (cfg.auth_mode or "").strip().lower()
-    if auth_mode not in {"trusted_proxy", "oauth"}:
-        raise ValueError("Unsupported auth mode. Expected trusted_proxy or oauth.")
+    if auth_mode not in {"trusted_proxy", "oauth", "native"}:
+        raise ValueError("Unsupported auth mode. Expected trusted_proxy, oauth, or native.")
 
     if not is_production_like(cfg):
         return

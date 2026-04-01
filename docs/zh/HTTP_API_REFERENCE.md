@@ -50,7 +50,7 @@ ref: http-api-reference
 
 ### 认证与用户
 
-当前支持的部署模式是 `trusted_proxy` 和 `oauth`。下面列出的本地用户名密码接口目前只为兼容保留，不属于推荐部署路径；除非代码重新启用本地认证，否则会返回未启用错误。
+当前支持的部署模式是 `trusted_proxy`、`oauth` 和 `native`。下面列出的用户名密码接口只有在 `native` 模式下才可用。
 
 | Method | Path | 请求 | 返回 `data` | 用途 |
 | --- | --- | --- | --- | --- |

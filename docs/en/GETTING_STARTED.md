@@ -45,10 +45,11 @@ If you keep a local `.env`, both `app/server/main.py` and `app/desktop/core/main
 
 ## Choose an Auth Deployment Mode
 
-Current enterprise deployments are intentionally narrowed to two modes:
+Current supported authentication deployments are intentionally narrowed to three modes:
 
 - `trusted_proxy`: an internal gateway or reverse proxy injects `X-Sage-Internal-UserId`, and Sage trusts it only from `SAGE_TRUSTED_IDENTITY_PROXY_IPS`
 - `oauth`: Sage redirects users to an upstream OAuth/OIDC provider configured through `SAGE_AUTH_PROVIDERS`
+- `native`: Sage uses its built-in username/password login
 
 Minimal trusted proxy example:
 
@@ -62,6 +63,12 @@ Minimal OAuth example:
 ```bash
 export SAGE_AUTH_MODE="oauth"
 export SAGE_AUTH_PROVIDERS='[{"id":"corp-sso","type":"oidc","name":"Corp SSO","discovery_url":"https://sso.example.com/.well-known/openid-configuration","client_id":"sage","client_secret":"secret"}]'
+```
+
+Minimal native auth example:
+
+```bash
+export SAGE_AUTH_MODE="native"
 ```
 
 For local development, the default `SAGE_ENV` is `development`. If you set `SAGE_ENV=production` or `SAGE_ENV=staging`, you must also provide explicit values for:

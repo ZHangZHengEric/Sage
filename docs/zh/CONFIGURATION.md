@@ -64,12 +64,14 @@ ref: configuration
 - `SAGE_SESSION_COOKIE_SECURE`
 - `SAGE_SESSION_COOKIE_SAME_SITE`
 
-当前支持的部署模式先收敛为两种：
+当前支持的部署模式先收敛为三种：
 
 - `SAGE_AUTH_MODE=trusted_proxy`
   使用企业身份代理透传 `X-Sage-Internal-UserId`。只有请求来源命中 `SAGE_TRUSTED_IDENTITY_PROXY_IPS` 时，Sage 才会信任该 header。
 - `SAGE_AUTH_MODE=oauth`
   Sage 自身走上游 OAuth/OIDC 登录。通过 `SAGE_AUTH_PROVIDERS` 配置 OIDC provider。
+- `SAGE_AUTH_MODE=native`
+  使用 Sage 原生的用户名密码认证。这里的 `native` 表示认证方式，不是“本地开发环境”。
 
 `SAGE_TRUSTED_IDENTITY_PROXY_IPS` 支持逗号分隔的 IP 或 CIDR 白名单。只有请求来源命中该白名单时，Sage 才会信任 `X-Sage-Internal-UserId`。
 
@@ -108,4 +110,10 @@ OAuth 模式示例：
 ```env
 SAGE_AUTH_MODE=oauth
 SAGE_AUTH_PROVIDERS=[{"id":"corp-sso","type":"oidc","name":"Corp SSO","discovery_url":"https://sso.example.com/.well-known/openid-configuration","client_id":"sage","client_secret":"secret"}]
+```
+
+Native 模式示例：
+
+```env
+SAGE_AUTH_MODE=native
 ```

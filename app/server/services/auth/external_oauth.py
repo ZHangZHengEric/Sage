@@ -102,14 +102,26 @@ def _get_auth_mode(cfg: config.StartupConfig) -> str:
     return str(cfg.auth_mode or "trusted_proxy").strip().lower()
 
 
+def _default_native_provider() -> Dict[str, Any]:
+    return {
+        "id": "native",
+        "type": "native",
+        "name": "账号密码",
+        "button_text": "使用账号密码登录",
+        "description": "输入 Sage 内置账号和密码进入工作台",
+        "icon": "key-round",
+        "enabled": True,
+    }
+
+
 def _normalize_provider(raw: Dict[str, Any], seen_ids: set[str]) -> Optional[Dict[str, Any]]:
     provider_type = str(raw.get("type") or "oidc").strip().lower()
-    if provider_type not in {"local", "oidc"}:
+    if provider_type not in {"native", "oidc"}:
         return None
 
-    fallback_id = "local" if provider_type == "local" else f"provider-{len(seen_ids) + 1}"
+    fallback_id = "native" if provider_type == "native" else f"provider-{len(seen_ids) + 1}"
     provider_id = _normalize_provider_id(raw.get("id") or raw.get("name"), fallback_id)
-    if provider_type == "local" and "local" in seen_ids:
+    if provider_type == "native" and "native" in seen_ids:
         return None
     if provider_id in seen_ids:
         provider_id = f"{provider_id}-{len(seen_ids) + 1}"
@@ -176,6 +188,8 @@ def get_auth_providers(include_internal: bool = False) -> list[Dict[str, Any]]:
         return []
 
     raw_providers = _load_json_auth_providers(cfg)
+    if auth_mode == "native":
+        raw_providers = [_default_native_provider()]
 
     seen_ids: set[str] = set()
     providers: list[Dict[str, Any]] = []
@@ -185,7 +199,7 @@ def get_auth_providers(include_internal: bool = False) -> list[Dict[str, Any]]:
             continue
         providers.append(provider)
 
-    providers.sort(key=lambda item: (0 if item["type"] == "local" else 1, item["name"].lower()))
+    providers.sort(key=lambda item: (0 if item["type"] == "native" else 1, item["name"].lower()))
 
     if include_internal:
         return providers
@@ -213,7 +227,7 @@ def get_auth_public_config() -> Dict[str, Any]:
         "auth_mode": _get_auth_mode(cfg),
         "auth_providers": providers,
         "default_auth_provider": providers[0]["id"] if providers else None,
-        "has_local_auth": any(provider["type"] == "local" for provider in providers),
+        "has_local_auth": any(provider["type"] == "native" for provider in providers),
         "has_oauth_auth": any(provider["type"] == "oidc" for provider in providers),
         "oauth_enabled": oidc_provider is not None,
         "oauth_provider_name": oidc_provider["name"] if oidc_provider else None,
@@ -221,7 +235,7 @@ def get_auth_public_config() -> Dict[str, Any]:
 
 
 def is_local_auth_enabled() -> bool:
-    return False
+    return _get_auth_mode(config.get_startup_config()) == "native"
 
 
 def get_oidc_provider(provider_id: str) -> Dict[str, Any]:
