@@ -17,6 +17,7 @@ from .core.client.eml import close_eml_client, init_eml_client
 from .core.client.embed import close_embed_client, init_embed_client
 from .core.client.es import close_es_client, init_es_client
 from .core.client.s3 import close_s3_client, init_s3_client
+from .core.bootstrap_admin import format_bootstrap_admin_log, get_bootstrap_admin_spec
 from .core.config import StartupConfig
 from .scheduler import add_doc_build_jobs, get_scheduler
 
@@ -288,17 +289,20 @@ async def ensure_system_init(cfg: StartupConfig):
     user_dao = models.UserDao()
     users = await user_dao.get_list(limit=1)
     if not users:
-        admin_password = "admin"
-        hashed = _hash_password(admin_password)
-        admin_user = models.User(
-            user_id=gen_id(),
-            username="admin",
-            password_hash=hashed,
-            role="admin",
-            email="admin@example.com"
-        )
-        await user_dao.save(admin_user)
-        logger.info(f"初始化默认管理员用户. 用户名: admin, 密码: {admin_password}")
+        bootstrap_admin = get_bootstrap_admin_spec(cfg)
+        if not bootstrap_admin:
+            logger.warning("未配置 bootstrap admin 凭据，跳过默认管理员初始化")
+        else:
+            hashed = _hash_password(bootstrap_admin.password)
+            admin_user = models.User(
+                user_id=gen_id(),
+                username=bootstrap_admin.username,
+                password_hash=hashed,
+                role="admin",
+                email="admin@example.com"
+            )
+            await user_dao.save(admin_user)
+            logger.info(format_bootstrap_admin_log(bootstrap_admin))
 
     await sync_oauth2_clients()
     logger.debug("OAuth2 Clients 配置同步完成")

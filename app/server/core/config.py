@@ -15,6 +15,7 @@ class StartupConfig:
     """启动参数结构体，优先级：环境变量 > 默认值"""
 
     # Server
+    env: str = "development"
     port: int = 8080
     logs_dir: str = "logs"
     session_dir: str = "sessions"
@@ -48,6 +49,8 @@ class StartupConfig:
     
     # auth
     auth_providers_json: Optional[str] = None
+    bootstrap_admin_username: str = ""
+    bootstrap_admin_password: str = ""
     jwt_key: str = "sage_dev_jwt_secret_key_change_me_in_prod_v1"
     jwt_expire_hours: int = 24
     refresh_token_secret: str = "sage_dev_refresh_secret_key_change_me_in_prod_v1"
@@ -97,6 +100,7 @@ class StartupConfig:
 
 
 class ENV:
+    APP_ENV = "SAGE_ENV"
     # 新版 LLM 相关
     DEFAULT_LLM_API_KEY = "SAGE_DEFAULT_LLM_API_KEY"
     DEFAULT_LLM_API_BASE_URL = "SAGE_DEFAULT_LLM_API_BASE_URL"
@@ -145,6 +149,8 @@ class ENV:
     KB_MCP_API_KEY = "SAGE_KB_MCP_API_KEY"
 
     AUTH_PROVIDERS = "SAGE_AUTH_PROVIDERS"
+    BOOTSTRAP_ADMIN_USERNAME = "SAGE_BOOTSTRAP_ADMIN_USERNAME"
+    BOOTSTRAP_ADMIN_PASSWORD = "SAGE_BOOTSTRAP_ADMIN_PASSWORD"
     JWT_KEY = "SAGE_JWT_KEY"
     JWT_EXPIRE_HOURS = "SAGE_JWT_EXPIRE_HOURS"
     REFRESH_TOKEN_SECRET = "SAGE_REFRESH_TOKEN_SECRET"
@@ -213,10 +219,35 @@ def env_bool(name: str, default: bool = False) -> bool:
     return str(val).strip().lower() in ("true", "1", "yes", "y", "t")
 
 
+def is_production_like(cfg: StartupConfig) -> bool:
+    return (cfg.env or "").strip().lower() in {"production", "staging"}
+
+
+def validate_startup_config(cfg: StartupConfig) -> None:
+    if not is_production_like(cfg):
+        return
+
+    insecure_values = {
+        StartupConfig.jwt_key,
+        StartupConfig.refresh_token_secret,
+        StartupConfig.session_secret,
+        "",
+    }
+    if (
+        cfg.jwt_key in insecure_values
+        or cfg.refresh_token_secret in insecure_values
+        or cfg.session_secret in insecure_values
+    ):
+        raise ValueError(
+            "Production-like environments must use secure secrets for JWT, refresh token, and session signing."
+        )
+
+
 def build_startup_config() -> StartupConfig:
     """解析环境变量与默认值，得到结构化启动配置"""
 
     cfg = StartupConfig(
+        env=env_str(ENV.APP_ENV, StartupConfig.env) or StartupConfig.env,
         port=env_int(ENV.PORT, StartupConfig.port),
         logs_dir=env_str(ENV.LOGS_DIR, StartupConfig.logs_dir),
         session_dir=env_str(ENV.SESSION_DIR, StartupConfig.session_dir),
@@ -288,6 +319,14 @@ def build_startup_config() -> StartupConfig:
             ENV.AUTH_PROVIDERS,
             StartupConfig.auth_providers_json,
         ),
+        bootstrap_admin_username=env_str(
+            ENV.BOOTSTRAP_ADMIN_USERNAME,
+            StartupConfig.bootstrap_admin_username,
+        ) or StartupConfig.bootstrap_admin_username,
+        bootstrap_admin_password=env_str(
+            ENV.BOOTSTRAP_ADMIN_PASSWORD,
+            StartupConfig.bootstrap_admin_password,
+        ) or StartupConfig.bootstrap_admin_password,
         jwt_key=env_str(ENV.JWT_KEY, StartupConfig.jwt_key),
         jwt_expire_hours=env_int(
             ENV.JWT_EXPIRE_HOURS, StartupConfig.jwt_expire_hours
@@ -432,6 +471,8 @@ def build_startup_config() -> StartupConfig:
     )
     if cfg.session_cookie_same_site not in {"lax", "strict", "none"}:
         cfg.session_cookie_same_site = StartupConfig.session_cookie_same_site
+    if is_production_like(cfg):
+        cfg.session_cookie_secure = True
     if cfg.web_base_path:
         cfg.web_base_path = "/" + cfg.web_base_path.strip("/")
     else:
@@ -466,5 +507,6 @@ def get_startup_config() -> StartupConfig:
 def init_startup_config() -> StartupConfig:
     global _GLOBAL_STARTUP_CONFIG
     cfg = build_startup_config()
+    validate_startup_config(cfg)
     _GLOBAL_STARTUP_CONFIG = cfg
     return cfg

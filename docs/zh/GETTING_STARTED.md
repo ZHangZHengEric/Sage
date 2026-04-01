@@ -43,6 +43,14 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 
 如果你使用本地 `.env` 文件，`app/server/main.py` 和 `app/desktop/core/main.py` 都会自动加载它。
 
+本地开发默认使用 `SAGE_ENV=development`。如果你将 `SAGE_ENV` 设为 `production` 或 `staging`，还必须显式提供以下 secret：
+
+- `SAGE_JWT_KEY`
+- `SAGE_REFRESH_TOKEN_SECRET`
+- `SAGE_SESSION_SECRET`
+
+在这类生产环境配置下，Sage 也会强制启用安全的 session cookie。
+
 ## 运行轻量 CLI
 
 ```bash

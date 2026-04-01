@@ -43,6 +43,14 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 
 If you keep a local `.env`, both `app/server/main.py` and `app/desktop/core/main.py` load it automatically.
 
+For local development, the default `SAGE_ENV` is `development`. If you set `SAGE_ENV=production` or `SAGE_ENV=staging`, you must also provide explicit values for:
+
+- `SAGE_JWT_KEY`
+- `SAGE_REFRESH_TOKEN_SECRET`
+- `SAGE_SESSION_SECRET`
+
+Production-like mode also forces secure session cookies.
+
 ## First Successful Run Checklist
 
 You should be able to complete at least one of these checks:
