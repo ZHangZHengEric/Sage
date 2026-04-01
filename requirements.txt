@@ -44,6 +44,7 @@ docstring_parser>=0.16
 # 网络 / 异步客户端
 ##############################
 httpx>=0.24.0
+socksio>=1.0.0  # Required by httpx/httpcore when using SOCKS proxy
 aiohttp>=3.9.0
 websockets
 nest-asyncio
