@@ -1,7 +1,4 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from loguru import logger
-
-from .services.kdb import KdbService
 
 scheduler: AsyncIOScheduler | None = None
 
@@ -16,6 +13,8 @@ def get_scheduler() -> AsyncIOScheduler:
 
 def add_doc_build_jobs():
     """注册文档构建任务"""
+    from .services.kdb import KdbService
+
     sched = get_scheduler()
     svc = KdbService()
 

@@ -3,7 +3,7 @@
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 # ===== 全局启动参数（统一存放于此） =====
@@ -60,6 +60,14 @@ class StartupConfig:
     session_cookie_name: str = "sage_session"
     session_cookie_secure: bool = False
     session_cookie_same_site: str = "lax"
+    cors_allowed_origins: list[str] = field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ]
+    )
     web_base_path: str = "/sage"
     oauth2_clients_json: Optional[str] = None
     oauth2_issuer: Optional[str] = None
@@ -162,6 +170,7 @@ class ENV:
     SESSION_COOKIE_NAME = "SAGE_SESSION_COOKIE_NAME"
     SESSION_COOKIE_SECURE = "SAGE_SESSION_COOKIE_SECURE"
     SESSION_COOKIE_SAME_SITE = "SAGE_SESSION_COOKIE_SAME_SITE"
+    CORS_ALLOWED_ORIGINS = "SAGE_CORS_ALLOWED_ORIGINS"
     WEB_BASE_PATH = "SAGE_WEB_BASE_PATH"
     OAUTH2_CLIENTS = "SAGE_OAUTH2_CLIENTS"
     OAUTH2_ISSUER = "SAGE_OAUTH2_ISSUER"
@@ -223,8 +232,10 @@ def env_bool(name: str, default: bool = False) -> bool:
     return str(val).strip().lower() in ("true", "1", "yes", "y", "t")
 
 
-def env_csv(name: str) -> list[str]:
-    val = os.getenv(name, "")
+def env_csv(name: str, default: Optional[list[str]] = None) -> list[str]:
+    val = os.getenv(name)
+    if val is None:
+        return list(default or [])
     if not val:
         return []
     return [item.strip() for item in val.split(",") if item.strip()]
@@ -240,7 +251,12 @@ def validate_startup_config(cfg: StartupConfig) -> None:
         raise ValueError("Unsupported auth mode. Expected trusted_proxy, oauth, or native.")
 
     if not is_production_like(cfg):
+        if "*" in (cfg.cors_allowed_origins or []):
+            raise ValueError("Credentialed wildcard CORS is not allowed.")
         return
+
+    if "*" in (cfg.cors_allowed_origins or []):
+        raise ValueError("Credentialed wildcard CORS is not allowed.")
 
     insecure_values = {
         StartupConfig.jwt_key,
@@ -368,6 +384,10 @@ def build_startup_config() -> StartupConfig:
             ENV.SESSION_COOKIE_SAME_SITE,
             StartupConfig.session_cookie_same_site,
         ) or StartupConfig.session_cookie_same_site).strip().lower(),
+        cors_allowed_origins=env_csv(
+            ENV.CORS_ALLOWED_ORIGINS,
+            StartupConfig().cors_allowed_origins,
+        ),
         web_base_path=env_str(
             ENV.WEB_BASE_PATH,
             StartupConfig.web_base_path,

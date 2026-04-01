@@ -107,7 +107,7 @@ def register_middlewares(app):
     # CORS
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=cfg.cors_allowed_origins or [],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -117,6 +117,8 @@ def register_middlewares(app):
     async def auth_middleware(request: Request, call_next):
         path = request.url.path
         if path.startswith("/api"):
+            if request.method == "OPTIONS":
+                return await call_next(request)
             client_host = request.client.host if request.client else None
             is_trusted_proxy_client = _is_trusted_identity_proxy(client_host, cfg.trusted_identity_proxy_ips)
             is_whitelisted = _is_whitelisted(path)
