@@ -98,13 +98,21 @@ def _normalize_redirect_uri(
     return str(request.base_url).rstrip("/") + callback_path
 
 
-def _default_local_provider() -> Dict[str, Any]:
+def _get_auth_mode(cfg: config.StartupConfig) -> str:
+    return str(cfg.auth_mode or "trusted_proxy").strip().lower()
+
+
+def _is_native_login_mode(auth_mode: str) -> bool:
+    return auth_mode in {"native", "trusted_proxy"}
+
+
+def _default_native_provider() -> Dict[str, Any]:
     return {
-        "id": "local",
-        "type": "local",
+        "id": "native",
+        "type": "native",
         "name": "账号密码",
         "button_text": "使用账号密码登录",
-        "description": "输入 Sage 本地账号和密码进入工作台",
+        "description": "输入 Sage 内置账号和密码进入工作台",
         "icon": "key-round",
         "enabled": True,
     }
@@ -112,12 +120,12 @@ def _default_local_provider() -> Dict[str, Any]:
 
 def _normalize_provider(raw: Dict[str, Any], seen_ids: set[str]) -> Optional[Dict[str, Any]]:
     provider_type = str(raw.get("type") or "oidc").strip().lower()
-    if provider_type not in {"local", "oidc"}:
+    if provider_type not in {"native", "oidc"}:
         return None
 
-    fallback_id = "local" if provider_type == "local" else f"provider-{len(seen_ids) + 1}"
+    fallback_id = "native" if provider_type == "native" else f"provider-{len(seen_ids) + 1}"
     provider_id = _normalize_provider_id(raw.get("id") or raw.get("name"), fallback_id)
-    if provider_type == "local" and "local" in seen_ids:
+    if provider_type == "native" and "native" in seen_ids:
         return None
     if provider_id in seen_ids:
         provider_id = f"{provider_id}-{len(seen_ids) + 1}"
@@ -179,8 +187,10 @@ def _load_json_auth_providers(cfg: config.StartupConfig) -> list[dict[str, Any]]
 
 def get_auth_providers(include_internal: bool = False) -> list[Dict[str, Any]]:
     cfg = config.get_startup_config()
+    auth_mode = _get_auth_mode(cfg)
     raw_providers = _load_json_auth_providers(cfg)
-    raw_providers = [_default_local_provider(), *raw_providers]
+    if _is_native_login_mode(auth_mode):
+        raw_providers = [_default_native_provider()]
 
     seen_ids: set[str] = set()
     providers: list[Dict[str, Any]] = []
@@ -190,7 +200,7 @@ def get_auth_providers(include_internal: bool = False) -> list[Dict[str, Any]]:
             continue
         providers.append(provider)
 
-    providers.sort(key=lambda item: (0 if item["type"] == "local" else 1, item["name"].lower()))
+    providers.sort(key=lambda item: (0 if item["type"] == "native" else 1, item["name"].lower()))
 
     if include_internal:
         return providers
@@ -211,21 +221,32 @@ def get_auth_providers(include_internal: bool = False) -> list[Dict[str, Any]]:
 
 
 def get_auth_public_config() -> Dict[str, Any]:
+    cfg = config.get_startup_config()
     providers = get_auth_providers(include_internal=False)
     oidc_provider = next((provider for provider in providers if provider["type"] == "oidc"), None)
+    auth_mode = _get_auth_mode(cfg)
     return {
-        "auth_mode": "providers",
+        "auth_mode": auth_mode,
         "auth_providers": providers,
         "default_auth_provider": providers[0]["id"] if providers else None,
-        "has_local_auth": any(provider["type"] == "local" for provider in providers),
+        "has_local_auth": any(provider["type"] == "native" for provider in providers),
         "has_oauth_auth": any(provider["type"] == "oidc" for provider in providers),
         "oauth_enabled": oidc_provider is not None,
         "oauth_provider_name": oidc_provider["name"] if oidc_provider else None,
+        "native_login_admin_only": auth_mode == "trusted_proxy",
     }
 
 
 def is_local_auth_enabled() -> bool:
-    return any(provider["type"] == "local" for provider in get_auth_providers(include_internal=True))
+    return _is_native_login_mode(_get_auth_mode(config.get_startup_config()))
+
+
+def is_local_registration_enabled() -> bool:
+    return _get_auth_mode(config.get_startup_config()) == "native"
+
+
+def is_admin_only_local_login() -> bool:
+    return _get_auth_mode(config.get_startup_config()) == "trusted_proxy"
 
 
 def get_oidc_provider(provider_id: str) -> Dict[str, Any]:

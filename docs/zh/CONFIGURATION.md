@@ -49,6 +49,34 @@ ref: configuration
 
 只有在你使用数据库后端时，才需要完整填写这组变量。
 
+## 认证与启动管理员
+
+- `SAGE_AUTH_MODE`
+- `SAGE_AUTH_PROVIDERS`
+- `SAGE_TRUSTED_IDENTITY_PROXY_IPS`
+- `SAGE_BOOTSTRAP_ADMIN_USERNAME`
+- `SAGE_BOOTSTRAP_ADMIN_PASSWORD`
+- `SAGE_JWT_KEY`
+- `SAGE_JWT_EXPIRE_HOURS`
+- `SAGE_REFRESH_TOKEN_SECRET`
+- `SAGE_SESSION_SECRET`
+- `SAGE_SESSION_COOKIE_NAME`
+- `SAGE_SESSION_COOKIE_SECURE`
+- `SAGE_SESSION_COOKIE_SAME_SITE`
+
+当前支持的部署模式先收敛为三种：
+
+- `SAGE_AUTH_MODE=trusted_proxy`
+  使用企业身份代理模式。只有请求来源命中 `SAGE_TRUSTED_IDENTITY_PROXY_IPS` 时，Sage 才会将该来源视为受信任入口；白名单来源访问业务接口时不再强制用户鉴权，管理员仍可通过 Sage 内置账号密码登录。若上游同时传入 `X-Sage-Internal-UserId`，Sage 会将它作为普通用户上下文使用。
+- `SAGE_AUTH_MODE=oauth`
+  Sage 自身走上游 OAuth/OIDC 登录。通过 `SAGE_AUTH_PROVIDERS` 配置 OIDC provider。
+- `SAGE_AUTH_MODE=native`
+  使用 Sage 原生的用户名密码认证。这里的 `native` 表示认证方式，不是“本地开发环境”。
+
+`SAGE_TRUSTED_IDENTITY_PROXY_IPS` 支持逗号分隔的 IP 或 CIDR 白名单。只有请求来源命中该白名单时，Sage 才会将该来源视为受信任代理，并接受可选的 `X-Sage-Internal-UserId` 透传。
+
+`SAGE_BOOTSTRAP_ADMIN_USERNAME` 和 `SAGE_BOOTSTRAP_ADMIN_PASSWORD` 现在是显式启用的一组配置。只有这两个变量都提供时，Sage 才会在首次启动时创建 bootstrap 管理员用户。
+
 ## 前端相关变量
 
 如果你运行 `app/server/web/`，最先要检查的通常是：
@@ -60,3 +88,32 @@ ref: configuration
 
 - 优先先跑通最小配置，再逐步加上持久化和扩展能力。
 - 当行为与预期不一致时，先回到 `config.py` 与实际启动日志核对。
+
+## 示例 `.env`
+
+```env
+SAGE_PORT=8080
+SAGE_AUTH_MODE=trusted_proxy
+SAGE_DEFAULT_LLM_API_KEY=your-api-key
+SAGE_DEFAULT_LLM_API_BASE_URL=https://api.deepseek.com/v1
+SAGE_DEFAULT_LLM_MODEL_NAME=deepseek-chat
+SAGE_DB_TYPE=file
+SAGE_SESSION_DIR=sessions
+SAGE_AGENTS_DIR=agents
+SAGE_TRUSTED_IDENTITY_PROXY_IPS=10.0.0.0/8,127.0.0.1/32
+SAGE_BOOTSTRAP_ADMIN_USERNAME=admin
+SAGE_BOOTSTRAP_ADMIN_PASSWORD=change-this-before-first-run
+```
+
+OAuth 模式示例：
+
+```env
+SAGE_AUTH_MODE=oauth
+SAGE_AUTH_PROVIDERS=[{"id":"corp-sso","type":"oidc","name":"Corp SSO","discovery_url":"https://sso.example.com/.well-known/openid-configuration","client_id":"sage","client_secret":"secret"}]
+```
+
+Native 模式示例：
+
+```env
+SAGE_AUTH_MODE=native
+```
