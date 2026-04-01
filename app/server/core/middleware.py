@@ -107,16 +107,20 @@ def register_middlewares(app):
     # CORS
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=cfg.cors_allowed_origins or [],
+        allow_credentials=cfg.cors_allow_credentials,
+        allow_methods=cfg.cors_allow_methods or ["*"],
+        allow_headers=cfg.cors_allow_headers or ["*"],
+        expose_headers=cfg.cors_expose_headers or [],
+        max_age=int(cfg.cors_max_age or 600),
     )
 
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next):
         path = request.url.path
         if path.startswith("/api"):
+            if request.method == "OPTIONS":
+                return await call_next(request)
             client_host = request.client.host if request.client else None
             is_trusted_proxy_client = _is_trusted_identity_proxy(client_host, cfg.trusted_identity_proxy_ips)
             is_whitelisted = _is_whitelisted(path)

@@ -2,24 +2,86 @@ import json
 import os
 
 from loguru import logger
-from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import SERVICE_NAME, Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from streamlit import form
-from sagents.skill import SkillManager, set_skill_manager
-from sagents.tool.tool_manager import ToolManager, set_tool_manager
-from sagents.session_runtime import initialize_global_session_manager
 
-from .core.client.db import close_db_client, init_db_client
-from .core.client.eml import close_eml_client, init_eml_client
-from .core.client.embed import close_embed_client, init_embed_client
-from .core.client.es import close_es_client, init_es_client
-from .core.client.s3 import close_s3_client, init_s3_client
 from .core.bootstrap_admin import format_bootstrap_admin_log, get_bootstrap_admin_spec
 from .core.config import StartupConfig
-from .scheduler import add_doc_build_jobs, get_scheduler
+
+
+async def init_db_client(cfg: StartupConfig):
+    from .core.client.db import init_db_client as _init_db_client
+
+    return await _init_db_client(cfg)
+
+
+async def close_db_client():
+    from .core.client.db import close_db_client as _close_db_client
+
+    return await _close_db_client()
+
+
+async def init_eml_client(cfg: StartupConfig):
+    from .core.client.eml import init_eml_client as _init_eml_client
+
+    return await _init_eml_client(cfg)
+
+
+async def close_eml_client():
+    from .core.client.eml import close_eml_client as _close_eml_client
+
+    return await _close_eml_client()
+
+
+async def init_embed_client(*, api_key=None, base_url=None, model_name=None, dims=1024):
+    from .core.client.embed import init_embed_client as _init_embed_client
+
+    return await _init_embed_client(
+        api_key=api_key,
+        base_url=base_url,
+        model_name=model_name,
+        dims=dims,
+    )
+
+
+async def close_embed_client():
+    from .core.client.embed import close_embed_client as _close_embed_client
+
+    return await _close_embed_client()
+
+
+async def init_es_client(cfg: StartupConfig):
+    from .core.client.es import init_es_client as _init_es_client
+
+    return await _init_es_client(cfg)
+
+
+async def close_es_client():
+    from .core.client.es import close_es_client as _close_es_client
+
+    return await _close_es_client()
+
+
+async def init_s3_client(cfg: StartupConfig):
+    from .core.client.s3 import init_s3_client as _init_s3_client
+
+    return await _init_s3_client(cfg)
+
+
+async def close_s3_client():
+    from .core.client.s3 import close_s3_client as _close_s3_client
+
+    return await _close_s3_client()
+
+
+def get_scheduler():
+    from .scheduler import get_scheduler as _get_scheduler
+
+    return _get_scheduler()
+
+
+def add_doc_build_jobs():
+    from .scheduler import add_doc_build_jobs as _add_doc_build_jobs
+
+    return _add_doc_build_jobs()
 
 
 async def initialize_db_connection(cfg: StartupConfig):
@@ -28,8 +90,11 @@ async def initialize_db_connection(cfg: StartupConfig):
         if db_client is not None:
             logger.info(f"数据库客户端已初始化 ({cfg.db_type})")
             await ensure_system_init(cfg)
+            return db_client
+        raise RuntimeError("数据库客户端初始化失败: init_db_client returned None")
     except Exception as e:
         logger.error(f"数据库客户端初始化失败: {e}")
+        raise
 
 
 async def initialize_global_clients(cfg: StartupConfig):
@@ -71,15 +136,19 @@ async def initialize_tool_manager():
     """初始化工具管理器"""
     try:
         from sagents.skill.skill_tool import SkillTool
+        from sagents.tool.tool_manager import ToolManager
+
         tool_manager_instance = ToolManager.get_instance()
         return tool_manager_instance
     except Exception as e:
         logger.error(f"工具管理器初始化失败: {e}")
-        return None
+        raise RuntimeError("tool manager initialization failed") from e
 
 
 async def close_tool_manager():
     """关闭工具管理器"""
+    from sagents.tool.tool_manager import set_tool_manager
+
     set_tool_manager(None)
 
 
@@ -92,6 +161,8 @@ async def initialize_skill_manager(cfg: StartupConfig):
     - agents/{user_id}/{agent_id}/skills/ - Agent 技能
     """
     try:
+        from sagents.skill import SkillManager
+
         skill_manager_instance = SkillManager.get_instance()
 
         # 1. 注册系统技能目录 (skills/)
@@ -105,11 +176,13 @@ async def initialize_skill_manager(cfg: StartupConfig):
         return skill_manager_instance
     except Exception as e:
         logger.error(f"技能管理器初始化失败: {e}")
-        return None
+        raise RuntimeError("skill manager initialization failed") from e
 
 
 async def close_skill_manager():
     """关闭技能管理器"""
+    from sagents.skill import set_skill_manager
+
     set_skill_manager(None)
 
 
@@ -126,7 +199,7 @@ async def initialize_session_manager(cfg: StartupConfig):
         return session_manager
     except Exception as e:
         logger.error(f"全局 SessionManager 初始化失败: {e}")
-        return None
+        raise RuntimeError("session manager initialization failed") from e
 
 
 async def validate_and_disable_mcp_servers():
@@ -137,6 +210,7 @@ async def validate_and_disable_mcp_servers():
     - 若之前有部分注册的工具，尝试从 ToolManager 中移除。
     """
     from . import models
+    from sagents.tool.tool_manager import ToolManager
 
     mcp_dao = models.MCPServerDao()
     servers = await mcp_dao.get_list()
@@ -164,6 +238,15 @@ async def validate_and_disable_mcp_servers():
 
 
 async def initialize_observability(cfg: StartupConfig):
+    try:
+        from opentelemetry import trace
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    except ImportError:
+        logger.warning("OpenTelemetry 未安装，跳过观测链路初始化")
+        return None
 
     # Check if Trace Provider is already initialized to prevent overwriting
     if isinstance(trace.get_tracer_provider(), TracerProvider):
@@ -188,6 +271,13 @@ async def initialize_observability(cfg: StartupConfig):
 
 
 async def close_observability():
+    try:
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+    except ImportError:
+        logger.info("OpenTelemetry 未安装，跳过观测链路关闭")
+        return
+
     # 1. Shutdown Trace Provider (Flush spans)
     provider = trace.get_tracer_provider()
     if isinstance(provider, TracerProvider):
@@ -228,7 +318,7 @@ async def shutdown_scheduler():
     sched = get_scheduler()
     if sched and sched.running:
         try:
-            await sched.shutdown(wait=False)
+            sched.shutdown(wait=False)
         finally:
             logger.info("Scheduler 已关闭")
 
@@ -243,10 +333,6 @@ async def shutdown_clients():
         await close_s3_client()
     finally:
         logger.info("RustFS客户端 已关闭")
-    try:
-        await close_chat_client()
-    finally:
-        logger.info("LLM Chat客户端 已关闭")
     try:
         await close_embed_client()
     finally:

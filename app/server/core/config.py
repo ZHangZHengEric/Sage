@@ -3,7 +3,7 @@
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 # ===== 全局启动参数（统一存放于此） =====
@@ -60,6 +60,12 @@ class StartupConfig:
     session_cookie_name: str = "sage_session"
     session_cookie_secure: bool = False
     session_cookie_same_site: str = "lax"
+    cors_allowed_origins: list[str] = field(default_factory=lambda: ["*"])
+    cors_allow_credentials: bool = False
+    cors_allow_methods: list[str] = field(default_factory=lambda: ["*"])
+    cors_allow_headers: list[str] = field(default_factory=lambda: ["*"])
+    cors_expose_headers: list[str] = field(default_factory=list)
+    cors_max_age: int = 600
     web_base_path: str = "/sage"
     oauth2_clients_json: Optional[str] = None
     oauth2_issuer: Optional[str] = None
@@ -162,6 +168,12 @@ class ENV:
     SESSION_COOKIE_NAME = "SAGE_SESSION_COOKIE_NAME"
     SESSION_COOKIE_SECURE = "SAGE_SESSION_COOKIE_SECURE"
     SESSION_COOKIE_SAME_SITE = "SAGE_SESSION_COOKIE_SAME_SITE"
+    CORS_ALLOWED_ORIGINS = "SAGE_CORS_ALLOWED_ORIGINS"
+    CORS_ALLOW_CREDENTIALS = "SAGE_CORS_ALLOW_CREDENTIALS"
+    CORS_ALLOW_METHODS = "SAGE_CORS_ALLOW_METHODS"
+    CORS_ALLOW_HEADERS = "SAGE_CORS_ALLOW_HEADERS"
+    CORS_EXPOSE_HEADERS = "SAGE_CORS_EXPOSE_HEADERS"
+    CORS_MAX_AGE = "SAGE_CORS_MAX_AGE"
     WEB_BASE_PATH = "SAGE_WEB_BASE_PATH"
     OAUTH2_CLIENTS = "SAGE_OAUTH2_CLIENTS"
     OAUTH2_ISSUER = "SAGE_OAUTH2_ISSUER"
@@ -223,8 +235,10 @@ def env_bool(name: str, default: bool = False) -> bool:
     return str(val).strip().lower() in ("true", "1", "yes", "y", "t")
 
 
-def env_csv(name: str) -> list[str]:
-    val = os.getenv(name, "")
+def env_csv(name: str, default: Optional[list[str]] = None) -> list[str]:
+    val = os.getenv(name)
+    if val is None:
+        return list(default or [])
     if not val:
         return []
     return [item.strip() for item in val.split(",") if item.strip()]
@@ -240,7 +254,12 @@ def validate_startup_config(cfg: StartupConfig) -> None:
         raise ValueError("Unsupported auth mode. Expected trusted_proxy, oauth, or native.")
 
     if not is_production_like(cfg):
+        if cfg.cors_allow_credentials and "*" in (cfg.cors_allowed_origins or []):
+            raise ValueError("Credentialed wildcard CORS is not allowed.")
         return
+
+    if cfg.cors_allow_credentials and "*" in (cfg.cors_allowed_origins or []):
+        raise ValueError("Credentialed wildcard CORS is not allowed.")
 
     insecure_values = {
         StartupConfig.jwt_key,
@@ -368,6 +387,30 @@ def build_startup_config() -> StartupConfig:
             ENV.SESSION_COOKIE_SAME_SITE,
             StartupConfig.session_cookie_same_site,
         ) or StartupConfig.session_cookie_same_site).strip().lower(),
+        cors_allowed_origins=env_csv(
+            ENV.CORS_ALLOWED_ORIGINS,
+            StartupConfig().cors_allowed_origins,
+        ),
+        cors_allow_credentials=env_bool(
+            ENV.CORS_ALLOW_CREDENTIALS,
+            StartupConfig.cors_allow_credentials,
+        ),
+        cors_allow_methods=env_csv(
+            ENV.CORS_ALLOW_METHODS,
+            StartupConfig().cors_allow_methods,
+        ),
+        cors_allow_headers=env_csv(
+            ENV.CORS_ALLOW_HEADERS,
+            StartupConfig().cors_allow_headers,
+        ),
+        cors_expose_headers=env_csv(
+            ENV.CORS_EXPOSE_HEADERS,
+            StartupConfig().cors_expose_headers,
+        ),
+        cors_max_age=env_int(
+            ENV.CORS_MAX_AGE,
+            StartupConfig.cors_max_age,
+        ),
         web_base_path=env_str(
             ENV.WEB_BASE_PATH,
             StartupConfig.web_base_path,

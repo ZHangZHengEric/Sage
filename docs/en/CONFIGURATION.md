@@ -78,6 +78,12 @@ These control where Sage writes runtime state, sessions, agents, and skill works
 - `SAGE_SESSION_COOKIE_NAME`
 - `SAGE_SESSION_COOKIE_SECURE`
 - `SAGE_SESSION_COOKIE_SAME_SITE`
+- `SAGE_CORS_ALLOWED_ORIGINS`
+- `SAGE_CORS_ALLOW_CREDENTIALS`
+- `SAGE_CORS_ALLOW_METHODS`
+- `SAGE_CORS_ALLOW_HEADERS`
+- `SAGE_CORS_EXPOSE_HEADERS`
+- `SAGE_CORS_MAX_AGE`
 - `SAGE_WEB_BASE_PATH`
 - `SAGE_OAUTH2_CLIENTS`
 - `SAGE_OAUTH2_ISSUER`
@@ -95,6 +101,17 @@ Supported deployment modes are intentionally narrowed to three values:
   Use Sage's built-in username/password authentication. This is an auth mode name, not a local-development flag.
 
 `SAGE_TRUSTED_IDENTITY_PROXY_IPS` accepts a comma-separated list of proxy source IPs or CIDR ranges. Sage only treats a request as coming from a trusted proxy when the caller IP matches this allowlist, and only then accepts the optional `X-Sage-Internal-UserId` passthrough header.
+
+Sage keeps CORS configurable with safe defaults:
+
+- `SAGE_CORS_ALLOWED_ORIGINS`: comma-separated origin allowlist, default `*`
+- `SAGE_CORS_ALLOW_CREDENTIALS`: whether browser credentials are allowed, default `false`
+- `SAGE_CORS_ALLOW_METHODS`: comma-separated method allowlist, default `*`
+- `SAGE_CORS_ALLOW_HEADERS`: comma-separated request-header allowlist, default `*`
+- `SAGE_CORS_EXPOSE_HEADERS`: comma-separated response headers exposed to the browser, default empty
+- `SAGE_CORS_MAX_AGE`: preflight cache TTL in seconds, default `600`
+
+The default shape is public CORS with `*` and no browser credentials. If you enable `SAGE_CORS_ALLOW_CREDENTIALS=true`, wildcard origin `*` is rejected and you must configure explicit origins.
 
 `SAGE_BOOTSTRAP_ADMIN_USERNAME` and `SAGE_BOOTSTRAP_ADMIN_PASSWORD` are both optional, but they now work as an explicit opt-in pair. If either one is missing, Sage will not create a bootstrap admin user during startup.
 
