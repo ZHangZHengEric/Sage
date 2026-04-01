@@ -98,16 +98,8 @@ def _normalize_redirect_uri(
     return str(request.base_url).rstrip("/") + callback_path
 
 
-def _default_local_provider() -> Dict[str, Any]:
-    return {
-        "id": "local",
-        "type": "local",
-        "name": "账号密码",
-        "button_text": "使用账号密码登录",
-        "description": "输入 Sage 本地账号和密码进入工作台",
-        "icon": "key-round",
-        "enabled": True,
-    }
+def _get_auth_mode(cfg: config.StartupConfig) -> str:
+    return str(cfg.auth_mode or "trusted_proxy").strip().lower()
 
 
 def _normalize_provider(raw: Dict[str, Any], seen_ids: set[str]) -> Optional[Dict[str, Any]]:
@@ -179,8 +171,11 @@ def _load_json_auth_providers(cfg: config.StartupConfig) -> list[dict[str, Any]]
 
 def get_auth_providers(include_internal: bool = False) -> list[Dict[str, Any]]:
     cfg = config.get_startup_config()
+    auth_mode = _get_auth_mode(cfg)
+    if auth_mode == "trusted_proxy":
+        return []
+
     raw_providers = _load_json_auth_providers(cfg)
-    raw_providers = [_default_local_provider(), *raw_providers]
 
     seen_ids: set[str] = set()
     providers: list[Dict[str, Any]] = []
@@ -211,10 +206,11 @@ def get_auth_providers(include_internal: bool = False) -> list[Dict[str, Any]]:
 
 
 def get_auth_public_config() -> Dict[str, Any]:
+    cfg = config.get_startup_config()
     providers = get_auth_providers(include_internal=False)
     oidc_provider = next((provider for provider in providers if provider["type"] == "oidc"), None)
     return {
-        "auth_mode": "providers",
+        "auth_mode": _get_auth_mode(cfg),
         "auth_providers": providers,
         "default_auth_provider": providers[0]["id"] if providers else None,
         "has_local_auth": any(provider["type"] == "local" for provider in providers),
@@ -225,7 +221,7 @@ def get_auth_public_config() -> Dict[str, Any]:
 
 
 def is_local_auth_enabled() -> bool:
-    return any(provider["type"] == "local" for provider in get_auth_providers(include_internal=True))
+    return False
 
 
 def get_oidc_provider(provider_id: str) -> Dict[str, Any]:

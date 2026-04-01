@@ -16,6 +16,7 @@ class StartupConfig:
 
     # Server
     env: str = "development"
+    auth_mode: str = "trusted_proxy"
     port: int = 8080
     logs_dir: str = "logs"
     session_dir: str = "sessions"
@@ -49,6 +50,7 @@ class StartupConfig:
     
     # auth
     auth_providers_json: Optional[str] = None
+    trusted_identity_proxy_ips: list[str] | None = None
     bootstrap_admin_username: str = ""
     bootstrap_admin_password: str = ""
     jwt_key: str = "sage_dev_jwt_secret_key_change_me_in_prod_v1"
@@ -101,6 +103,7 @@ class StartupConfig:
 
 class ENV:
     APP_ENV = "SAGE_ENV"
+    AUTH_MODE = "SAGE_AUTH_MODE"
     # 新版 LLM 相关
     DEFAULT_LLM_API_KEY = "SAGE_DEFAULT_LLM_API_KEY"
     DEFAULT_LLM_API_BASE_URL = "SAGE_DEFAULT_LLM_API_BASE_URL"
@@ -149,6 +152,7 @@ class ENV:
     KB_MCP_API_KEY = "SAGE_KB_MCP_API_KEY"
 
     AUTH_PROVIDERS = "SAGE_AUTH_PROVIDERS"
+    TRUSTED_IDENTITY_PROXY_IPS = "SAGE_TRUSTED_IDENTITY_PROXY_IPS"
     BOOTSTRAP_ADMIN_USERNAME = "SAGE_BOOTSTRAP_ADMIN_USERNAME"
     BOOTSTRAP_ADMIN_PASSWORD = "SAGE_BOOTSTRAP_ADMIN_PASSWORD"
     JWT_KEY = "SAGE_JWT_KEY"
@@ -219,11 +223,22 @@ def env_bool(name: str, default: bool = False) -> bool:
     return str(val).strip().lower() in ("true", "1", "yes", "y", "t")
 
 
+def env_csv(name: str) -> list[str]:
+    val = os.getenv(name, "")
+    if not val:
+        return []
+    return [item.strip() for item in val.split(",") if item.strip()]
+
+
 def is_production_like(cfg: StartupConfig) -> bool:
     return (cfg.env or "").strip().lower() in {"production", "staging"}
 
 
 def validate_startup_config(cfg: StartupConfig) -> None:
+    auth_mode = (cfg.auth_mode or "").strip().lower()
+    if auth_mode not in {"trusted_proxy", "oauth"}:
+        raise ValueError("Unsupported auth mode. Expected trusted_proxy or oauth.")
+
     if not is_production_like(cfg):
         return
 
@@ -248,6 +263,7 @@ def build_startup_config() -> StartupConfig:
 
     cfg = StartupConfig(
         env=env_str(ENV.APP_ENV, StartupConfig.env) or StartupConfig.env,
+        auth_mode=env_str(ENV.AUTH_MODE, StartupConfig.auth_mode) or StartupConfig.auth_mode,
         port=env_int(ENV.PORT, StartupConfig.port),
         logs_dir=env_str(ENV.LOGS_DIR, StartupConfig.logs_dir),
         session_dir=env_str(ENV.SESSION_DIR, StartupConfig.session_dir),
@@ -319,6 +335,7 @@ def build_startup_config() -> StartupConfig:
             ENV.AUTH_PROVIDERS,
             StartupConfig.auth_providers_json,
         ),
+        trusted_identity_proxy_ips=env_csv(ENV.TRUSTED_IDENTITY_PROXY_IPS),
         bootstrap_admin_username=env_str(
             ENV.BOOTSTRAP_ADMIN_USERNAME,
             StartupConfig.bootstrap_admin_username,

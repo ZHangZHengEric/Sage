@@ -50,6 +50,8 @@ ref: http-api-reference
 
 ### 认证与用户
 
+当前支持的部署模式是 `trusted_proxy` 和 `oauth`。下面列出的本地用户名密码接口目前只为兼容保留，不属于推荐部署路径；除非代码重新启用本地认证，否则会返回未启用错误。
+
 | Method | Path | 请求 | 返回 `data` | 用途 |
 | --- | --- | --- | --- | --- |
 | POST | `/api/auth/register/send-code` | `{"email"}` | `{"expires_in","retry_after"}` | 注册前发邮箱验证码 |

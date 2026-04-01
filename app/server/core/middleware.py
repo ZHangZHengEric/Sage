@@ -2,6 +2,7 @@
 中间件模块
 """
 
+import ipaddress
 import re
 import uuid
 from typing import Tuple
@@ -68,11 +69,28 @@ def _is_whitelisted(path: str) -> bool:
     return path in WHITELIST_API_PATHS or any(r.match(path) for r in WHITELIST_API_REGEXES)
 
 
-def _is_loopback_host(host: str | None) -> bool:
-    """Only trust internal bypass headers from loopback callers."""
+def _is_trusted_identity_proxy(host: str | None, trusted_proxy_ips: list[str] | None) -> bool:
+    """Trust identity passthrough only from configured proxy IPs/CIDRs."""
     if not host:
         return False
-    return host in {"127.0.0.1", "::1", "localhost"}
+    if not trusted_proxy_ips:
+        return False
+
+    try:
+        host_ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+
+    for entry in trusted_proxy_ips:
+        try:
+            if "/" in entry:
+                if host_ip in ipaddress.ip_network(entry, strict=False):
+                    return True
+            elif host_ip == ipaddress.ip_address(entry):
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 async def _unauthorized_response(status_code: int, detail: str, error_detail: str):
@@ -102,7 +120,7 @@ def register_middlewares(app):
             # Internal request bypass
             internal_user_id = request.headers.get("X-Sage-Internal-UserId")
             client_host = request.client.host if request.client else None
-            if internal_user_id and _is_loopback_host(client_host):
+            if internal_user_id and _is_trusted_identity_proxy(client_host, cfg.trusted_identity_proxy_ips):
                 userid = internal_user_id
                 request.state.user_claims = {"userid": userid, "username": "admin"}
                 return await call_next(request)

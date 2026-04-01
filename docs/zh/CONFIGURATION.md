@@ -51,7 +51,9 @@ ref: configuration
 
 ## 认证与启动管理员
 
+- `SAGE_AUTH_MODE`
 - `SAGE_AUTH_PROVIDERS`
+- `SAGE_TRUSTED_IDENTITY_PROXY_IPS`
 - `SAGE_BOOTSTRAP_ADMIN_USERNAME`
 - `SAGE_BOOTSTRAP_ADMIN_PASSWORD`
 - `SAGE_JWT_KEY`
@@ -61,6 +63,15 @@ ref: configuration
 - `SAGE_SESSION_COOKIE_NAME`
 - `SAGE_SESSION_COOKIE_SECURE`
 - `SAGE_SESSION_COOKIE_SAME_SITE`
+
+当前支持的部署模式先收敛为两种：
+
+- `SAGE_AUTH_MODE=trusted_proxy`
+  使用企业身份代理透传 `X-Sage-Internal-UserId`。只有请求来源命中 `SAGE_TRUSTED_IDENTITY_PROXY_IPS` 时，Sage 才会信任该 header。
+- `SAGE_AUTH_MODE=oauth`
+  Sage 自身走上游 OAuth/OIDC 登录。通过 `SAGE_AUTH_PROVIDERS` 配置 OIDC provider。
+
+`SAGE_TRUSTED_IDENTITY_PROXY_IPS` 支持逗号分隔的 IP 或 CIDR 白名单。只有请求来源命中该白名单时，Sage 才会信任 `X-Sage-Internal-UserId`。
 
 `SAGE_BOOTSTRAP_ADMIN_USERNAME` 和 `SAGE_BOOTSTRAP_ADMIN_PASSWORD` 现在是显式启用的一组配置。只有这两个变量都提供时，Sage 才会在首次启动时创建 bootstrap 管理员用户。
 
@@ -80,12 +91,21 @@ ref: configuration
 
 ```env
 SAGE_PORT=8080
+SAGE_AUTH_MODE=trusted_proxy
 SAGE_DEFAULT_LLM_API_KEY=your-api-key
 SAGE_DEFAULT_LLM_API_BASE_URL=https://api.deepseek.com/v1
 SAGE_DEFAULT_LLM_MODEL_NAME=deepseek-chat
 SAGE_DB_TYPE=file
 SAGE_SESSION_DIR=sessions
 SAGE_AGENTS_DIR=agents
+SAGE_TRUSTED_IDENTITY_PROXY_IPS=10.0.0.0/8,127.0.0.1/32
 SAGE_BOOTSTRAP_ADMIN_USERNAME=admin
 SAGE_BOOTSTRAP_ADMIN_PASSWORD=change-this-before-first-run
+```
+
+OAuth 模式示例：
+
+```env
+SAGE_AUTH_MODE=oauth
+SAGE_AUTH_PROVIDERS=[{"id":"corp-sso","type":"oidc","name":"Corp SSO","discovery_url":"https://sso.example.com/.well-known/openid-configuration","client_id":"sage","client_secret":"secret"}]
 ```
