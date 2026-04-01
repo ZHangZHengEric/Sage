@@ -48,7 +48,7 @@ Standard response envelope:
 
 ### Authentication and user
 
-Current supported deployment modes are `trusted_proxy` and `oauth`. The local username/password endpoints below remain in the API for compatibility, but they are not part of the supported deployment modes and return an error unless local auth is re-enabled in code.
+Current supported deployment modes are `trusted_proxy`, `oauth`, and `native`. The username/password endpoints below are active only in `native` mode.
 
 | Method | Path | Request | `data` response | Purpose |
 | --- | --- | --- | --- | --- |

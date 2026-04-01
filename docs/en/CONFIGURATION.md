@@ -85,12 +85,14 @@ These control where Sage writes runtime state, sessions, agents, and skill works
 
 You can ignore this entire section until you enable login, external auth providers, or OAuth2 flows.
 
-Supported deployment modes are intentionally narrowed to two values:
+Supported deployment modes are intentionally narrowed to three values:
 
 - `SAGE_AUTH_MODE=trusted_proxy`
   Use an enterprise identity proxy that injects `X-Sage-Internal-UserId`. Sage only trusts that header when the caller IP matches `SAGE_TRUSTED_IDENTITY_PROXY_IPS`.
 - `SAGE_AUTH_MODE=oauth`
   Use upstream OAuth/OIDC login for Sage itself. Configure providers through `SAGE_AUTH_PROVIDERS`.
+- `SAGE_AUTH_MODE=native`
+  Use Sage's built-in username/password authentication. This is an auth mode name, not a local-development flag.
 
 `SAGE_TRUSTED_IDENTITY_PROXY_IPS` accepts a comma-separated list of proxy source IPs or CIDR ranges. Sage only trusts `X-Sage-Internal-UserId` when the caller IP matches this allowlist.
 
@@ -180,6 +182,12 @@ OAuth deployment example:
 ```env
 SAGE_AUTH_MODE=oauth
 SAGE_AUTH_PROVIDERS=[{"id":"corp-sso","type":"oidc","name":"Corp SSO","discovery_url":"https://sso.example.com/.well-known/openid-configuration","client_id":"sage","client_secret":"secret"}]
+```
+
+Native auth deployment example:
+
+```env
+SAGE_AUTH_MODE=native
 ```
 
 ## Recommendation

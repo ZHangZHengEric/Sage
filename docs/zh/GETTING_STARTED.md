@@ -45,10 +45,11 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 
 ## 选择认证部署模式
 
-当前企业内部部署先收敛为两种模式：
+当前支持的认证部署模式先收敛为三种：
 
 - `trusted_proxy`：企业网关或反向代理注入 `X-Sage-Internal-UserId`，Sage 只会对 `SAGE_TRUSTED_IDENTITY_PROXY_IPS` 白名单内的来源信任该 header
 - `oauth`：Sage 自身跳转到上游 OAuth/OIDC Provider，配置来源是 `SAGE_AUTH_PROVIDERS`
+- `native`：Sage 自身使用原生用户名密码登录
 
 透传模式最小示例：
 
@@ -62,6 +63,12 @@ OAuth 模式最小示例：
 ```bash
 export SAGE_AUTH_MODE="oauth"
 export SAGE_AUTH_PROVIDERS='[{"id":"corp-sso","type":"oidc","name":"Corp SSO","discovery_url":"https://sso.example.com/.well-known/openid-configuration","client_id":"sage","client_secret":"secret"}]'
+```
+
+Native 模式最小示例：
+
+```bash
+export SAGE_AUTH_MODE="native"
 ```
 
 本地开发默认使用 `SAGE_ENV=development`。如果你将 `SAGE_ENV` 设为 `production` 或 `staging`，还必须显式提供以下 secret：
