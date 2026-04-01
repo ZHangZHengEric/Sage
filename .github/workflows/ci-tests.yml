@@ -1,0 +1,71 @@
+name: CI Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server-tests:
+    name: Server Pytest
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Core Backend Regression Suite
+        run: |
+          python -m pytest \
+            tests/app/server/core/test_auth_modes.py \
+            tests/app/server/core/test_middleware_auth.py \
+            tests/app/server/core/test_bootstrap_admin.py \
+            tests/app/server/core/test_config_security.py \
+            tests/app/server/core/test_lifecycle_runtime.py \
+            tests/app/server/core/test_cors_config.py \
+            -v
+
+  web-tests:
+    name: Web Vitest
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: app/server/web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: app/server/web/package-lock.json
+
+      - name: Install Web Dependencies
+        run: npm ci
+
+      - name: Run Vitest
+        run: npm test -- --run
