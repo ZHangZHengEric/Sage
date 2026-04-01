@@ -24,6 +24,55 @@
           </Button>
         </div>
 
+        <div v-else-if="isTrustedProxyMode" class="grid gap-4">
+          <div class="text-sm text-muted-foreground bg-muted/50 p-4 rounded-lg leading-6 border">
+            当前实例使用企业身份代理模式。白名单网段内的业务请求会直接放行；如需管理系统配置，请使用下方管理员账号登录。
+          </div>
+
+          <div v-if="errorMessage" class="text-sm font-medium text-destructive bg-destructive/10 p-3 rounded-lg">
+            {{ errorMessage }}
+          </div>
+
+          <div class="rounded-lg border bg-background p-4 grid gap-4">
+            <div class="grid gap-1">
+              <div class="text-sm font-medium">管理员登录</div>
+              <div class="text-xs text-muted-foreground">
+                仅管理员账号可通过用户名密码登录，普通用户无需在 Sage 内单独认证。
+              </div>
+            </div>
+
+            <form @submit.prevent="handleLogin" class="grid gap-4">
+              <div class="grid gap-2">
+                <Label for="trusted_proxy_username">用户名</Label>
+                <Input
+                  id="trusted_proxy_username"
+                  v-model="loginForm.username"
+                  placeholder="请输入管理员用户名或邮箱"
+                  required
+                  :disabled="isLoading"
+                />
+              </div>
+
+              <div class="grid gap-2">
+                <Label for="trusted_proxy_password">密码</Label>
+                <Input
+                  type="password"
+                  id="trusted_proxy_password"
+                  v-model="loginForm.password"
+                  placeholder="请输入管理员密码"
+                  required
+                  :disabled="isLoading"
+                />
+              </div>
+
+              <Button type="submit" class="w-full" :disabled="isLoading || !loginForm.username || !loginForm.password">
+                <Loader v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
+                {{ isLoading ? '登录中...' : '管理员登录' }}
+              </Button>
+            </form>
+          </div>
+        </div>
+
         <form v-else-if="mode === 'login'" @submit.prevent="handleLogin" class="grid gap-4">
           <div class="grid gap-2">
             <Label for="username">用户名</Label>
@@ -155,7 +204,7 @@
         </form>
       </div>
 
-      <div v-if="!isOAuthMode" class="bg-muted/50 p-4 flex justify-center border-t">
+      <div v-if="!isOAuthMode && !isTrustedProxyMode" class="bg-muted/50 p-4 flex justify-center border-t">
         <div class="text-sm text-muted-foreground">
           <span v-if="mode === 'login'">
             <span v-if="allowRegistration">
@@ -207,20 +256,23 @@ const errorMessage = ref('')
 const successMessage = ref('')
 const mode = ref('login')
 const allowRegistration = ref(true)
-const authMode = ref('password')
+const authMode = ref('trusted_proxy')
 const authProviders = ref([])
 const oauthProviderName = ref('OAuth2')
 const oauthEnabled = ref(false)
 let sendCodeTimer = null
 const defaultOauthProviderId = computed(() => authProviders.value.find((provider) => provider.type === 'oidc')?.id || null)
-const hasLocalProvider = computed(() => authProviders.value.some((provider) => provider.type === 'local'))
-const isOAuthMode = computed(() => !hasLocalProvider.value && oauthEnabled.value)
+const hasNativeProvider = computed(() => authProviders.value.some((provider) => provider.type === 'native'))
+const isTrustedProxyMode = computed(() => authMode.value === 'trusted_proxy')
+const isOAuthMode = computed(() => authMode.value === 'oauth' && oauthEnabled.value)
 const dialogTitle = computed(() => {
   if (isOAuthMode.value) return '统一登录'
-  return mode.value === 'login' ? '用户登录' : '创建账号'
+  if (isTrustedProxyMode.value) return '企业身份接入'
+  return mode.value === 'login' ? (hasNativeProvider.value ? '用户登录' : '登录') : '创建账号'
 })
 const dialogDescription = computed(() => {
   if (isOAuthMode.value) return '跳转到身份提供商完成认证'
+  if (isTrustedProxyMode.value) return '通过受信任代理透传用户身份'
   return mode.value === 'login' ? '登录您的账户以继续' : '填写邮箱验证码并设置密码'
 })
 const sendCodeButtonText = computed(() => {
@@ -233,7 +285,7 @@ onMounted(async () => {
   try {
     const res = await systemAPI.getSystemInfo()
     allowRegistration.value = res.allow_registration
-    authMode.value = res.auth_mode || 'password'
+    authMode.value = res.auth_mode || 'trusted_proxy'
     authProviders.value = Array.isArray(res.auth_providers) ? res.auth_providers : []
     oauthProviderName.value = res.oauth_provider_name || 'OAuth2'
     oauthEnabled.value = res.oauth_enabled === true || authProviders.value.some((provider) => provider.type === 'oidc')
@@ -323,6 +375,11 @@ const handleSendVerificationCode = async () => {
     successMessage.value = ''
     return
   }
+  if (isTrustedProxyMode.value) {
+    errorMessage.value = '企业身份代理模式不开放自助注册'
+    successMessage.value = ''
+    return
+  }
   if (!allowRegistration.value) {
     errorMessage.value = '当前未开放注册'
     successMessage.value = ''
@@ -356,6 +413,11 @@ const handleSendVerificationCode = async () => {
 const handleRegister = async () => {
   if (isOAuthMode.value) {
     errorMessage.value = '当前实例已启用 OAuth2 登录，不支持本地注册'
+    successMessage.value = ''
+    return
+  }
+  if (isTrustedProxyMode.value) {
+    errorMessage.value = '企业身份代理模式不开放自助注册'
     successMessage.value = ''
     return
   }
