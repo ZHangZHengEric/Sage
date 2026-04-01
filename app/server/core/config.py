@@ -68,6 +68,11 @@ class StartupConfig:
             "http://127.0.0.1:5173",
         ]
     )
+    cors_allow_credentials: bool = True
+    cors_allow_methods: list[str] = field(default_factory=lambda: ["*"])
+    cors_allow_headers: list[str] = field(default_factory=lambda: ["*"])
+    cors_expose_headers: list[str] = field(default_factory=list)
+    cors_max_age: int = 600
     web_base_path: str = "/sage"
     oauth2_clients_json: Optional[str] = None
     oauth2_issuer: Optional[str] = None
@@ -171,6 +176,11 @@ class ENV:
     SESSION_COOKIE_SECURE = "SAGE_SESSION_COOKIE_SECURE"
     SESSION_COOKIE_SAME_SITE = "SAGE_SESSION_COOKIE_SAME_SITE"
     CORS_ALLOWED_ORIGINS = "SAGE_CORS_ALLOWED_ORIGINS"
+    CORS_ALLOW_CREDENTIALS = "SAGE_CORS_ALLOW_CREDENTIALS"
+    CORS_ALLOW_METHODS = "SAGE_CORS_ALLOW_METHODS"
+    CORS_ALLOW_HEADERS = "SAGE_CORS_ALLOW_HEADERS"
+    CORS_EXPOSE_HEADERS = "SAGE_CORS_EXPOSE_HEADERS"
+    CORS_MAX_AGE = "SAGE_CORS_MAX_AGE"
     WEB_BASE_PATH = "SAGE_WEB_BASE_PATH"
     OAUTH2_CLIENTS = "SAGE_OAUTH2_CLIENTS"
     OAUTH2_ISSUER = "SAGE_OAUTH2_ISSUER"
@@ -251,11 +261,11 @@ def validate_startup_config(cfg: StartupConfig) -> None:
         raise ValueError("Unsupported auth mode. Expected trusted_proxy, oauth, or native.")
 
     if not is_production_like(cfg):
-        if "*" in (cfg.cors_allowed_origins or []):
+        if cfg.cors_allow_credentials and "*" in (cfg.cors_allowed_origins or []):
             raise ValueError("Credentialed wildcard CORS is not allowed.")
         return
 
-    if "*" in (cfg.cors_allowed_origins or []):
+    if cfg.cors_allow_credentials and "*" in (cfg.cors_allowed_origins or []):
         raise ValueError("Credentialed wildcard CORS is not allowed.")
 
     insecure_values = {
@@ -387,6 +397,26 @@ def build_startup_config() -> StartupConfig:
         cors_allowed_origins=env_csv(
             ENV.CORS_ALLOWED_ORIGINS,
             StartupConfig().cors_allowed_origins,
+        ),
+        cors_allow_credentials=env_bool(
+            ENV.CORS_ALLOW_CREDENTIALS,
+            StartupConfig.cors_allow_credentials,
+        ),
+        cors_allow_methods=env_csv(
+            ENV.CORS_ALLOW_METHODS,
+            StartupConfig().cors_allow_methods,
+        ),
+        cors_allow_headers=env_csv(
+            ENV.CORS_ALLOW_HEADERS,
+            StartupConfig().cors_allow_headers,
+        ),
+        cors_expose_headers=env_csv(
+            ENV.CORS_EXPOSE_HEADERS,
+            StartupConfig().cors_expose_headers,
+        ),
+        cors_max_age=env_int(
+            ENV.CORS_MAX_AGE,
+            StartupConfig.cors_max_age,
         ),
         web_base_path=env_str(
             ENV.WEB_BASE_PATH,
