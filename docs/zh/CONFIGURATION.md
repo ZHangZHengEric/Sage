@@ -67,13 +67,13 @@ ref: configuration
 当前支持的部署模式先收敛为三种：
 
 - `SAGE_AUTH_MODE=trusted_proxy`
-  使用企业身份代理透传 `X-Sage-Internal-UserId`。只有请求来源命中 `SAGE_TRUSTED_IDENTITY_PROXY_IPS` 时，Sage 才会信任该 header。
+  使用企业身份代理模式。只有请求来源命中 `SAGE_TRUSTED_IDENTITY_PROXY_IPS` 时，Sage 才会将该来源视为受信任入口；白名单来源访问业务接口时不再强制用户鉴权，管理员仍可通过 Sage 内置账号密码登录。若上游同时传入 `X-Sage-Internal-UserId`，Sage 会将它作为普通用户上下文使用。
 - `SAGE_AUTH_MODE=oauth`
   Sage 自身走上游 OAuth/OIDC 登录。通过 `SAGE_AUTH_PROVIDERS` 配置 OIDC provider。
 - `SAGE_AUTH_MODE=native`
   使用 Sage 原生的用户名密码认证。这里的 `native` 表示认证方式，不是“本地开发环境”。
 
-`SAGE_TRUSTED_IDENTITY_PROXY_IPS` 支持逗号分隔的 IP 或 CIDR 白名单。只有请求来源命中该白名单时，Sage 才会信任 `X-Sage-Internal-UserId`。
+`SAGE_TRUSTED_IDENTITY_PROXY_IPS` 支持逗号分隔的 IP 或 CIDR 白名单。只有请求来源命中该白名单时，Sage 才会将该来源视为受信任代理，并接受可选的 `X-Sage-Internal-UserId` 透传。
 
 `SAGE_BOOTSTRAP_ADMIN_USERNAME` 和 `SAGE_BOOTSTRAP_ADMIN_PASSWORD` 现在是显式启用的一组配置。只有这两个变量都提供时，Sage 才会在首次启动时创建 bootstrap 管理员用户。
 

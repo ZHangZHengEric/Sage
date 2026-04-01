@@ -102,6 +102,10 @@ def _get_auth_mode(cfg: config.StartupConfig) -> str:
     return str(cfg.auth_mode or "trusted_proxy").strip().lower()
 
 
+def _is_native_login_mode(auth_mode: str) -> bool:
+    return auth_mode in {"native", "trusted_proxy"}
+
+
 def _default_native_provider() -> Dict[str, Any]:
     return {
         "id": "native",
@@ -184,11 +188,8 @@ def _load_json_auth_providers(cfg: config.StartupConfig) -> list[dict[str, Any]]
 def get_auth_providers(include_internal: bool = False) -> list[Dict[str, Any]]:
     cfg = config.get_startup_config()
     auth_mode = _get_auth_mode(cfg)
-    if auth_mode == "trusted_proxy":
-        return []
-
     raw_providers = _load_json_auth_providers(cfg)
-    if auth_mode == "native":
+    if _is_native_login_mode(auth_mode):
         raw_providers = [_default_native_provider()]
 
     seen_ids: set[str] = set()
@@ -223,19 +224,29 @@ def get_auth_public_config() -> Dict[str, Any]:
     cfg = config.get_startup_config()
     providers = get_auth_providers(include_internal=False)
     oidc_provider = next((provider for provider in providers if provider["type"] == "oidc"), None)
+    auth_mode = _get_auth_mode(cfg)
     return {
-        "auth_mode": _get_auth_mode(cfg),
+        "auth_mode": auth_mode,
         "auth_providers": providers,
         "default_auth_provider": providers[0]["id"] if providers else None,
         "has_local_auth": any(provider["type"] == "native" for provider in providers),
         "has_oauth_auth": any(provider["type"] == "oidc" for provider in providers),
         "oauth_enabled": oidc_provider is not None,
         "oauth_provider_name": oidc_provider["name"] if oidc_provider else None,
+        "native_login_admin_only": auth_mode == "trusted_proxy",
     }
 
 
 def is_local_auth_enabled() -> bool:
+    return _is_native_login_mode(_get_auth_mode(config.get_startup_config()))
+
+
+def is_local_registration_enabled() -> bool:
     return _get_auth_mode(config.get_startup_config()) == "native"
+
+
+def is_admin_only_local_login() -> bool:
+    return _get_auth_mode(config.get_startup_config()) == "trusted_proxy"
 
 
 def get_oidc_provider(provider_id: str) -> Dict[str, Any]:

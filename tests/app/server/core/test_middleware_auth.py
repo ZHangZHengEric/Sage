@@ -46,6 +46,20 @@ def test_whitelisted_proxy_request_can_use_internal_user_header():
     assert response.json() == {"ok": True}
 
 
+def test_trusted_proxy_mode_allows_whitelisted_proxy_without_auth():
+    config._GLOBAL_STARTUP_CONFIG = config.StartupConfig(
+        auth_mode="trusted_proxy",
+        trusted_identity_proxy_ips=["10.0.0.0/8"],
+    )
+    app = _build_app()
+
+    with TestClient(app, client=("10.1.2.3", 50000)) as client:
+        response = client.get("/api/protected")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
 def test_non_whitelisted_proxy_request_is_rejected():
     config._GLOBAL_STARTUP_CONFIG = config.StartupConfig(
         trusted_identity_proxy_ips=["10.0.0.0/8"]

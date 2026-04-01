@@ -48,7 +48,7 @@ Standard response envelope:
 
 ### Authentication and user
 
-Current supported deployment modes are `trusted_proxy`, `oauth`, and `native`. The username/password endpoints below are active only in `native` mode.
+Current supported deployment modes are `trusted_proxy`, `oauth`, and `native`. The username/password login endpoint below is active in `native` and `trusted_proxy`; in `trusted_proxy` it is admin-only, while registration remains `native`-only.
 
 | Method | Path | Request | `data` response | Purpose |
 | --- | --- | --- | --- | --- |
