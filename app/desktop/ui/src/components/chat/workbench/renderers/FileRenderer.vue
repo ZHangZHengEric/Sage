@@ -14,6 +14,17 @@
         <Badge variant="secondary" class="text-xs">{{ isDirectory ? '文件夹' : fileTypeLabel }}</Badge>
       </div>
       <div class="flex items-center gap-1 flex-shrink-0">
+        <Button
+          v-if="canPreviewInDialog"
+          variant="ghost"
+          size="sm"
+          @click="previewDialogOpen = true"
+          class="h-7 px-2"
+          :title="t('workbench.view')"
+        >
+          <Eye class="w-4 h-4 mr-1" />
+          {{ t('workbench.view') }}
+        </Button>
         <Button 
           v-if="!isDirectory && canCopy"
           variant="ghost" 
@@ -162,12 +173,28 @@
       </div>
     </div>
   </div>
+
+  <Dialog v-if="!dialogMode" v-model:open="previewDialogOpen">
+    <DialogContent class="max-w-[90vw] h-[85vh] p-0 overflow-hidden">
+      <FileRenderer
+        :file-path="filePath"
+        :file-name="fileName"
+        :item="item"
+        :dialog-mode="true"
+        @download-file="$emit('downloadFile', $event)"
+        @delete-file="$emit('deleteFile', $event)"
+        @quote-path="$emit('quotePath', $event)"
+      />
+    </DialogContent>
+  </Dialog>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { useLanguage } from '@/utils/i18n.js'
 import {
   ExternalLink,
   Loader2,
@@ -180,7 +207,8 @@ import {
   FileText,
   Image as ImageIcon,
   Download,
-  FolderOpen
+  FolderOpen,
+  Eye
 } from 'lucide-vue-next'
 import { open } from '@tauri-apps/plugin-shell'
 import { readTextFile, readFile, exists, readDir } from '@tauri-apps/plugin-fs'
@@ -219,16 +247,22 @@ const props = defineProps({
   item: {
     type: Object,
     default: () => ({})
+  },
+  dialogMode: {
+    type: Boolean,
+    default: false
   }
 })
 
 const emit = defineEmits(['downloadFile', 'deleteFile', 'quotePath'])
+const { t } = useLanguage()
 
 // 状态
 const loading = ref(false)
 const error = ref(null)
 const fileContent = ref('')
 const copied = ref(false)
+const previewDialogOpen = ref(false)
 const htmlDataUrl = ref('')
 const isDirectory = ref(false)
 const directoryTree = ref([])
@@ -431,6 +465,11 @@ const officeFileType = computed(() => {
 // 是否可以复制
 const canCopy = computed(() => {
   return ['code', 'text', 'markdown'].includes(fileType.value)
+})
+
+const canPreviewInDialog = computed(() => {
+  if (props.dialogMode || isDirectory.value) return false
+  return ['pdf', 'image', 'video', 'audio', 'html', 'markdown', 'code', 'excalidraw', 'text', 'office'].includes(fileType.value)
 })
 
 // 检查文件内容是否为二进制（例如 ZIP/PPTX 文件被错误标记为 .md）

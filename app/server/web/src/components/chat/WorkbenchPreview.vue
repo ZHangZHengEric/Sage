@@ -13,7 +13,11 @@
     <div class="h-full flex flex-col">
       <!-- 预览列表 - 占满剩余空间 -->
       <div class="flex-1 overflow-y-auto min-h-0">
-        <div v-if="workbenchStore.totalItems === 0" class="flex flex-col items-center justify-center h-full text-muted-foreground p-8">
+        <div v-if="isLoading && workbenchStore.totalItems === 0" class="flex flex-col items-center justify-center h-full text-muted-foreground p-8">
+          <Monitor class="w-12 h-12 mb-3 opacity-50 animate-pulse" />
+          <p class="text-sm">{{ t('workbench.loading') }}</p>
+        </div>
+        <div v-else-if="workbenchStore.totalItems === 0" class="flex flex-col items-center justify-center h-full text-muted-foreground p-8">
           <Monitor class="w-12 h-12 mb-3 opacity-50" />
           <p class="text-sm">{{ t('workbench.emptyTitle') }}</p>
           <p class="text-xs mt-1">{{ t('workbench.emptyDesc') }}</p>
@@ -77,6 +81,10 @@ const props = defineProps({
   sessionId: {
     type: String,
     default: null
+  },
+  isLoading: {
+    type: Boolean,
+    default: false
   }
 })
 

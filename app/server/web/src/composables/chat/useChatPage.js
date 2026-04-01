@@ -184,6 +184,14 @@ export const useChatPage = (props) => {
     messages.value = normalizedMessages
     rebuildMessageIdIndexMap()
 
+    normalizedMessages.forEach((message) => {
+      workbenchStore.extractFromMessage(message, message.agent_id || conversationAgentId)
+      if ((message.role === 'tool' || message.message_type === 'tool_call_result') && message.tool_call_id) {
+        const plainToolResult = JSON.parse(JSON.stringify(message))
+        workbenchStore.updateToolResult(message.tool_call_id, plainToolResult)
+      }
+    })
+
     const nextStreamIndex = Number(res.next_stream_index)
     if (Number.isFinite(nextStreamIndex) && nextStreamIndex >= 0) {
       updateActiveSessionLastIndex(sessionId, nextStreamIndex)
@@ -253,7 +261,8 @@ export const useChatPage = (props) => {
       content: messageContent,
       message_id: Date.now().toString(),
       type: 'USER',
-      session_id: sessionId
+      session_id: sessionId,
+      timestamp: Date.now()
     }
     messages.value.push(userMessage)
     messageIdIndexMap.value.set(userMessage.message_id, messages.value.length - 1)
@@ -297,6 +306,7 @@ export const useChatPage = (props) => {
   const {
     showWorkspace,
     workspaceFiles,
+    isWorkspaceLoading,
     downloadWorkspaceFile,
     downloadFile,
     clearTaskAndWorkspace
@@ -514,6 +524,7 @@ export const useChatPage = (props) => {
     handleOpenSubSession,
     downloadWorkspaceFile,
     workspaceFiles,
+    isWorkspaceLoading,
     downloadFile,
     updateConfig
   }

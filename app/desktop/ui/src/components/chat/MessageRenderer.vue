@@ -2,9 +2,10 @@
   <div v-if="shouldRenderMessage" class="flex flex-col gap-1 mb-1">
     <!-- 错误消息 -->
     <div v-if="isErrorMessage" class="flex flex-row gap-4 px-4">
-      <div class="flex-none">
+      <div v-if="!hideAssistantAvatar" class="flex-none">
         <MessageAvatar messageType="error" role="assistant" :agentId="agentId" />
       </div>
+      <div v-else class="flex-none w-8" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
         <div class="mb-0.5 ml-1 text-xs font-medium text-muted-foreground">
           {{ getLabel({ role: 'assistant', type: 'error' }) }}
@@ -80,9 +81,10 @@
     <!-- 任务分析消息 -->
     <div
       v-else-if="message.role === 'assistant' && (message.type === 'task_analysis' || message.message_type === 'task_analysis')"       class="flex flex-row items-start gap-3 px-4">
-      <div class="flex-none mt-1">
+      <div v-if="!hideAssistantAvatar" class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type" role="assistant" :agentId="agentId" />
       </div>
+      <div v-else class="flex-none w-8" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="w-full">
            <TaskAnalysisMessage
@@ -98,9 +100,10 @@
     <div
       v-else-if="message.role === 'assistant' && (message.type === 'reasoning_content' || message.message_type === 'reasoning_content')"
       class="flex flex-row items-start gap-3 px-4">
-      <div class="flex-none mt-1">
+      <div v-if="!hideAssistantAvatar" class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type" role="assistant" :agentId="agentId" />
       </div>
+      <div v-else class="flex-none w-8" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="w-full">
            <ReasoningContentMessage
@@ -114,9 +117,10 @@
 
     <!-- 助手消息 -->
     <div v-else-if="message.role === 'assistant' && !hasToolCalls && (message.content || getImageUrls(message.content).length > 0)" class="flex flex-row items-start gap-3 px-4 group" data-message-type="assistant">
-      <div class="flex-none mt-1">
+      <div v-if="!hideAssistantAvatar" class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type" role="assistant" :agentId="agentId" />
       </div>
+      <div v-else class="flex-none w-8" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
         <div class="mb-0.5 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
           {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type }) }}
@@ -174,9 +178,10 @@
 
     <!-- 工具渲染 -->
     <div v-else-if="hasToolCalls" class="flex flex-row items-start gap-3 px-4" data-message-type="tool">
-      <div class="flex-none mt-1">
+      <div v-if="!hideAssistantAvatar" class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type" role="assistant" :toolName="getToolName(message)" :agentId="agentId" />
       </div>
+      <div v-else class="flex-none w-8" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
          <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage }">
            <div v-for="(toolCall, index) in message.tool_calls" :key="toolCall.id || index">
@@ -241,7 +246,6 @@ import TaskAnalysisMessage from './TaskAnalysisMessage.vue'
 import ReasoningContentMessage from './ReasoningContentMessage.vue'
 import AgentCardMessage from './tools/AgentCardMessage.vue'
 import SysDelegateTaskMessage from './tools/SysDelegateTaskMessage.vue'
-import SysFinishTaskMessage from './tools/SysFinishTaskMessage.vue'
 import TodoTaskMessage from './tools/TodoTaskMessage.vue'
 import QuestionnaireCard from './tools/QuestionnaireCard.vue'
 import { useWorkbenchStore } from '../../stores/workbench.js'
@@ -253,7 +257,6 @@ import { FileIcon, ExternalLink } from 'lucide-vue-next'
 const TOOL_COMPONENT_MAP = {
   sys_spawn_agent: AgentCardMessage,
   sys_delegate_task: SysDelegateTaskMessage,
-  sys_finish_task: SysFinishTaskMessage,
   todo_write: TodoTaskMessage,
   questionnaire: QuestionnaireCard,
 }
@@ -283,6 +286,10 @@ const props = defineProps({
     type: String,
     default: ''
   },
+  hideAssistantAvatar: {
+    type: Boolean,
+    default: false
+  },
   openWorkbench: {
     type: Function,
     default: null
@@ -297,6 +304,7 @@ const emit = defineEmits(['downloadFile', 'toolClick', 'sendMessage', 'openSubSe
 
 const { t } = useLanguage()
 const workbenchStore = useWorkbenchStore()
+const hideAssistantAvatar = computed(() => props.hideAssistantAvatar && props.message.role === 'assistant')
 
 // 当前 Agent 名称
 const currentAgentName = computed(() => {
@@ -874,5 +882,3 @@ function extractCodeBlocks(content) {
   background-color: hsl(var(--muted) / 0.3);
 }
 </style>
-
-

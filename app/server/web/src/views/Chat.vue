@@ -58,6 +58,42 @@
           </SelectContent>
         </Select>
 
+        <TooltipProvider>
+          <div class="flex h-9 items-center rounded-full border border-border/80 bg-muted/50 p-1 shadow-inner">
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <button
+                  type="button"
+                  class="flex h-7 w-7 items-center justify-center rounded-full transition-all"
+                  :class="displayMode === CHAT_DISPLAY_MODES.EXECUTION ? 'bg-foreground/10 text-foreground shadow-sm ring-1 ring-border/80 backdrop-blur-sm' : 'text-muted-foreground hover:bg-background/80 hover:text-foreground'"
+                  @click="setDisplayMode(CHAT_DISPLAY_MODES.EXECUTION)"
+                >
+                  <List class="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{{ t('chat.executionFlow') }}</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <button
+                  type="button"
+                  class="flex h-7 w-7 items-center justify-center rounded-full transition-all"
+                  :class="displayMode === CHAT_DISPLAY_MODES.DELIVERY ? 'bg-foreground/10 text-foreground shadow-sm ring-1 ring-border/80 backdrop-blur-sm' : 'text-muted-foreground hover:bg-background/80 hover:text-foreground'"
+                  @click="setDisplayMode(CHAT_DISPLAY_MODES.DELIVERY)"
+                >
+                  <FileText class="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{{ t('chat.deliveryFlow') }}</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </TooltipProvider>
+
         <div class="h-4 w-[1px] bg-border mx-1"></div>
 
         <TooltipProvider>
@@ -134,18 +170,41 @@
           </div>
 
           <div v-else class="pb-8 max-w-4xl mx-auto w-full">
-            <MessageRenderer
-              v-for="(message, index) in filteredMessages"
-              :key="message.id || message.message_id || index"
-              :message="message"
-              :messages="filteredMessages"
-              :message-index="index"
-              :agent-id="selectedAgentId"
-              :is-loading="isLoading && index === filteredMessages.length - 1"
-              @download-file="downloadWorkspaceFile"
-              @sendMessage="handleSendMessage"
-              @openSubSession="handleOpenSubSession"
-            />
+            <template v-for="item in renderDisplayItems" :key="item.id">
+              <MessageRenderer
+                v-if="item.type === 'message'"
+                :message="item.message"
+                :messages="item.renderMessages"
+                :message-index="item.messageIndex"
+                :agent-id="selectedAgentId"
+                :is-loading="isCurrentSessionLoading && item.messageIndex === normalizedMessages.length - 1"
+                :open-workbench="openWorkbench"
+                :hide-assistant-avatar="item.hideAssistantAvatar"
+                @download-file="downloadWorkspaceFile"
+                @sendMessage="handleSendMessage"
+                @openSubSession="handleOpenSubSession"
+              />
+              <div v-else-if="item.type === 'section_marker'" class="px-4 py-2">
+                <div class="flex items-center gap-4 text-[11px] text-muted-foreground/80">
+                  <div class="h-px flex-1 bg-border/70" />
+                  <span>{{ item.label }}</span>
+                  <div class="h-px flex-1 bg-border/70" />
+                </div>
+              </div>
+              <DeliveryCollapsedGroup
+                v-else
+                :group="item"
+                :all-messages="normalizedMessages"
+                :open="isGroupOpen(item.id)"
+                :agent-id="selectedAgentId"
+                :is-loading="isCurrentSessionLoading"
+                :open-workbench="openWorkbench"
+                @toggle="toggleGroup(item)"
+                @download-file="downloadWorkspaceFile"
+                @sendMessage="handleSendMessage"
+                @openSubSession="handleOpenSubSession"
+              />
+            </template>
 
             <div v-if="showLoadingBubble" class="flex justify-start py-6 px-4 animate-in fade-in duration-300">
               <LoadingBubble />
@@ -181,6 +240,9 @@
         <WorkspacePanel
           v-if="panelStore.showWorkspace"
           :workspace-files="workspaceFiles"
+          :is-loading="isWorkspaceLoading"
+          :agent-id="selectedAgentId"
+          :session-id="currentSessionId"
           @download-file="downloadFile"
           @close="panelStore.closeAll()"
         />
@@ -191,6 +253,7 @@
           v-if="panelStore.showWorkbench"
           :messages="filteredMessages"
           :session-id="currentSessionId"
+          :is-loading="isCurrentSessionLoading"
           @close="panelStore.closeAll()"
         />
       </Transition>
@@ -212,10 +275,11 @@
 <script setup>
 defineOptions({ name: 'Chat' })
 
-import { computed, watch } from 'vue'
-import { Bot, Settings, Share2, FolderOpen, Monitor } from 'lucide-vue-next'
+import { computed, onMounted, ref, watch } from 'vue'
+import { Bot, Settings, Share2, FolderOpen, Monitor, List, FileText } from 'lucide-vue-next'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
+import DeliveryCollapsedGroup from '@/components/chat/DeliveryCollapsedGroup.vue'
 import MessageInput from '@/components/chat/MessageInput.vue'
 import ConfigPanel from '@/components/chat/ConfigPanel.vue'
 import WorkspacePanel from '@/components/chat/WorkspacePanel.vue'
@@ -236,6 +300,13 @@ import {
 import { useChatPage } from '@/composables/chat/useChatPage.js'
 import { useWorkbenchStore } from '@/stores/workbench'
 import { usePanelStore } from '@/stores/panel'
+import { getMessageLabel } from '@/utils/messageLabels'
+import {
+  CHAT_DISPLAY_MODES,
+  buildDeliveryDisplayItems,
+  buildExecutionDisplayItems,
+  normalizeChatMessages
+} from '@/utils/chatDisplayItems.js'
 
 const props = defineProps({
   selectedConversation: {
@@ -265,6 +336,7 @@ const {
   handleShare,
   handleScroll,
   handleSendMessage,
+  openWorkbench,
   stopGeneration,
   activeSubSessionId,
   subSessionMessages,
@@ -272,12 +344,135 @@ const {
   handleOpenSubSession,
   downloadWorkspaceFile,
   workspaceFiles,
+  isWorkspaceLoading,
   downloadFile,
   updateConfig
 } = useChatPage(props)
 
 const workbenchStore = useWorkbenchStore()
 const panelStore = usePanelStore()
+const displayMode = ref(CHAT_DISPLAY_MODES.EXECUTION)
+const expandedGroupIds = ref(new Set())
+const DISPLAY_MODE_STORAGE_KEY = 'chatDisplayModePreference'
+
+const normalizedMessages = computed(() => normalizeChatMessages(filteredMessages.value))
+
+const displayItems = computed(() => {
+  if (displayMode.value === CHAT_DISPLAY_MODES.DELIVERY) {
+    return buildDeliveryDisplayItems(normalizedMessages.value, {
+      isLoading: isCurrentSessionLoading.value
+    }).items
+  }
+  return buildExecutionDisplayItems(normalizedMessages.value).items
+})
+
+const renderDisplayItems = computed(() => {
+  if (displayMode.value !== CHAT_DISPLAY_MODES.DELIVERY) {
+    return displayItems.value
+  }
+
+  let hasShownAssistantAvatar = false
+  const rendered = []
+
+  displayItems.value.forEach((item, index) => {
+    const normalizedItem = (() => {
+      if (item.type !== 'message') return item
+      if (item.message?.role !== 'assistant') return item
+      if (!hasShownAssistantAvatar) {
+        hasShownAssistantAvatar = true
+        return { ...item, hideAssistantAvatar: false }
+      }
+      return { ...item, hideAssistantAvatar: true }
+    })()
+
+    rendered.push(normalizedItem)
+
+    if ((item.type !== 'tool_group' && item.type !== 'turn_summary') || !isGroupOpen(item.id)) {
+      return
+    }
+
+    const nextItem = displayItems.value[index + 1]
+    if (nextItem?.type !== 'message') {
+      return
+    }
+
+    const nextRole = nextItem.message?.role
+    const label = item.type === 'turn_summary' && nextRole === 'assistant'
+      ? t('chat.deliveryFinalMessage')
+      : nextRole === 'user'
+        ? t('chat.deliveryNextRequest')
+        : getMessageLabel({
+            role: nextRole,
+            type: nextItem.message?.message_type || nextItem.message?.type,
+            toolName: nextItem.message?.tool_calls?.[0]?.function?.name,
+            t
+          }) || t('chat.deliveryProgressMessage')
+
+    rendered.push({
+      id: `section-marker:${item.id}:${nextItem.id}`,
+      type: 'section_marker',
+      label
+    })
+  })
+
+  return rendered
+})
+
+const syncExpandedGroups = () => {
+  if (displayMode.value !== CHAT_DISPLAY_MODES.DELIVERY) {
+    if (expandedGroupIds.value.size > 0) {
+      expandedGroupIds.value = new Set()
+    }
+    return
+  }
+
+  const nextExpanded = new Set()
+
+  if (isCurrentSessionLoading.value) {
+    const lastDisplayItem = displayItems.value[displayItems.value.length - 1]
+    if (lastDisplayItem?.type === 'tool_group') {
+      nextExpanded.add(lastDisplayItem.id)
+    }
+  } else {
+    displayItems.value.forEach((item) => {
+      if (item.type === 'turn_summary' && expandedGroupIds.value.has(item.id)) {
+        nextExpanded.add(item.id)
+      }
+    })
+  }
+
+  const currentIds = [...expandedGroupIds.value]
+  const nextIds = [...nextExpanded]
+  const changed = currentIds.length !== nextIds.length || currentIds.some((id, index) => id !== nextIds[index])
+  if (changed) {
+    expandedGroupIds.value = nextExpanded
+  }
+}
+
+const setDisplayMode = (mode) => {
+  if (displayMode.value === mode) return
+  displayMode.value = mode
+}
+
+const isGroupOpen = (groupId) => expandedGroupIds.value.has(groupId)
+
+const toggleGroup = (item) => {
+  const nextExpanded = new Set(expandedGroupIds.value)
+  const isOpen = nextExpanded.has(item.id)
+
+  if (item.type === 'tool_group' && isCurrentSessionLoading.value) {
+    nextExpanded.clear()
+    if (!isOpen) {
+      nextExpanded.add(item.id)
+    }
+  } else if (isOpen) {
+    nextExpanded.delete(item.id)
+  } else {
+    nextExpanded.add(item.id)
+  }
+
+  expandedGroupIds.value = nextExpanded
+}
 
 const toggleWorkbench = () => {
   panelStore.toggleWorkbench()
@@ -298,6 +493,33 @@ const anyPanelOpen = computed(() => (
 watch(() => currentSessionId.value, (id) => {
   if (id) workbenchStore.setSessionId(id)
 }, { immediate: true })
+
+onMounted(() => {
+  try {
+    const savedMode = localStorage.getItem(DISPLAY_MODE_STORAGE_KEY)
+    if (savedMode === CHAT_DISPLAY_MODES.EXECUTION || savedMode === CHAT_DISPLAY_MODES.DELIVERY) {
+      displayMode.value = savedMode
+    }
+  } catch (error) {
+    console.warn('Failed to restore chat display mode preference:', error)
+  }
+})
+
+watch(displayMode, (mode) => {
+  try {
+    localStorage.setItem(DISPLAY_MODE_STORAGE_KEY, mode)
+  } catch (error) {
+    console.warn('Failed to persist chat display mode preference:', error)
+  }
+})
+
+watch(
+  () => [displayMode.value, currentSessionId.value, isCurrentSessionLoading.value, displayItems.value.map(item => item.id).join('|')],
+  () => {
+    syncExpandedGroups()
+  },
+  { immediate: true }
+)
 </script>
 
 <style scoped>

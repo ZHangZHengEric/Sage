@@ -11,18 +11,22 @@ export const useChatWorkspace = ({
   const panelStore = usePanelStore()
   // const showWorkspace = ref(false) // Use panelStore instead
   const workspaceFiles = ref([])
+  const isWorkspaceLoading = ref(false)
   const taskStatus = ref(null)
   const expandedTasks = ref(new Set())
   const lastMessageId = ref(null)
 
   const fetchWorkspaceFiles = async (id) => {
     if (!id) return
+    isWorkspaceLoading.value = true
     try {
       const sid = typeof sessionId?.value === 'string' ? sessionId.value : sessionId
       const data = await agentAPI.getWorkspaceFiles(id, sid)
       workspaceFiles.value = data.files || []
     } catch (error) {
       console.error('获取工作空间文件出错:', error)
+    } finally {
+      isWorkspaceLoading.value = false
     }
   }
 
@@ -89,6 +93,7 @@ export const useChatWorkspace = ({
 
   const clearTaskAndWorkspace = () => {
     taskStatus.value = null
+    isWorkspaceLoading.value = false
     workspaceFiles.value = []
     expandedTasks.value = new Set()
     lastMessageId.value = null
@@ -96,6 +101,7 @@ export const useChatWorkspace = ({
 
   return {
     workspaceFiles,
+    isWorkspaceLoading,
     downloadWorkspaceFile,
     downloadFile,
     clearTaskAndWorkspace

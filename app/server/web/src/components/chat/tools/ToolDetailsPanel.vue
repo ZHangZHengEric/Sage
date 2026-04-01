@@ -4,7 +4,7 @@
       <DialogHeader class="px-6 py-4 border-b bg-muted/20">
         <DialogTitle class="flex items-center gap-2">
            <Terminal class="w-5 h-5 text-primary" />
-                       {{ t('chat.toolName') }}： {{ toolExecution.function.name }}
+                       {{ t('chat.toolName') }}： {{ displayToolName }}
         </DialogTitle>
       </DialogHeader>
       
@@ -72,6 +72,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useLanguage } from '@/utils/i18n.js'
+import { getToolLabel } from '@/utils/messageLabels.js'
 import { Copy, Terminal } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -107,6 +108,11 @@ const emit = defineEmits(['update:open'])
 
 const copiedParams = ref(false)
 const copiedResult = ref(false)
+
+const displayToolName = computed(() => {
+  const toolName = props.toolExecution?.function?.name || ''
+  return getToolLabel(toolName, t)
+})
 
 const parsedArguments = computed(() => {
   try {
@@ -225,4 +231,3 @@ const formatJsonParams = (params) => {
   background: rgba(255, 255, 255, 0.2);
 }
 </style>
-

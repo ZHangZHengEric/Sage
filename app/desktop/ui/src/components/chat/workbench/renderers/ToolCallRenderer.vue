@@ -106,36 +106,11 @@
       </template>
 
       <!-- 3. file_read - 根据文件类型渲染 -->
-      <template v-else-if="isFileRead">
-        <div class="h-full flex flex-col">
-          <div class="file-header px-4 py-3 border-b border-border flex items-center gap-2 flex-none">
-            <FileText class="w-4 h-4" />
-            <span class="font-medium text-sm">{{ readFilePath }}</span>
-            <Badge variant="secondary" class="text-xs">{{ readFileType }}</Badge>
-          </div>
-          <div class="file-content flex-1 overflow-auto p-4">
-            <!-- 代码文件 -->
-            <SyntaxHighlighter
-              v-if="isCodeFile(readFileType)"
-              :code="fileContent"
-              :language="readFileType"
-            />
-            <!-- Markdown -->
-            <MarkdownRenderer
-              v-else-if="readFileType === 'markdown'"
-              :content="fileContent"
-            />
-            <!-- 图片 -->
-            <img
-              v-else-if="isImageFile(readFileType)"
-              :src="fileContent"
-              class="max-w-full h-auto"
-            />
-            <!-- 其他文本 -->
-            <pre v-else class="whitespace-pre-wrap text-sm">{{ fileContent }}</pre>
-          </div>
-        </div>
-      </template>
+      <FileReadToolRenderer
+        v-else-if="isFileRead"
+        :tool-args="toolArgs"
+        :tool-result="toolResult"
+      />
 
       <!-- 4. file_write - 根据文件类型渲染 -->
       <template v-else-if="isFileWrite">
@@ -163,7 +138,17 @@
         </div>
       </template>
 
-      <!-- 5. todo_write - 任务列表渲染 -->
+      <!-- 5. file_update - 文件更新摘要 -->
+      <FileUpdateToolRenderer
+        v-else-if="isFileUpdate"
+        :tool-args="toolArgs"
+        :tool-result="toolResult"
+        :formatted-arguments="formattedArguments"
+        :display-tool-name="displayToolName"
+        :has-arguments="hasArguments"
+      />
+
+      <!-- 6. todo_write - 任务列表渲染 -->
       <template v-else-if="isTodoWrite">
         <div class="todo-write-container h-full overflow-auto p-4">
           <!-- 摘要信息 -->
@@ -656,10 +641,13 @@ import {
 import SyntaxHighlighter from '../../SyntaxHighlighter.vue'
 import MarkdownRenderer from '../../MarkdownRenderer.vue'
 import { MemoryToolRenderer } from './toolcall'
+import FileReadToolRenderer from './toolcall/FileReadToolRenderer.vue'
+import FileUpdateToolRenderer from './toolcall/FileUpdateToolRenderer.vue'
 import QuestionnaireReadonly from './toolcall/QuestionnaireReadonly.vue'
 import { skillAPI } from '@/api/skill.js'
 import { agentAPI } from '@/api/agent.js'
 import { useLanguage } from '@/utils/i18n'
+import { getToolLabel } from '@/utils/messageLabels.js'
 
 const { t } = useLanguage()
 
@@ -742,6 +730,7 @@ const isShellCommand = computed(() => toolName.value === 'execute_shell_command'
 const isLoadSkill = computed(() => toolName.value === 'load_skill')
 const isFileRead = computed(() => toolName.value === 'file_read')
 const isFileWrite = computed(() => toolName.value === 'file_write')
+const isFileUpdate = computed(() => toolName.value === 'file_update')
 const isCodeExecution = computed(() =>
   toolName.value === 'execute_python_code' ||
   toolName.value === 'execute_javascript_code'
@@ -758,21 +747,7 @@ const isCompressHistory = computed(() => toolName.value === 'compress_conversati
 
 // 显示名称映射
 const displayToolName = computed(() => {
-  const nameMap = {
-    'execute_shell_command': t('workbench.tool.shellCommand'),
-    'load_skill': t('workbench.tool.loadSkill'),
-    'file_read': t('workbench.tool.readFile'),
-    'file_write': t('workbench.tool.writeFile'),
-    'execute_python_code': t('workbench.tool.pythonCode'),
-    'execute_javascript_code': t('workbench.tool.jsCode'),
-    'search_web_page': t('workbench.tool.searchWebPage'),
-    'search_image_from_web': t('workbench.tool.searchImageFromWeb'),
-    'search_memory': t('workbench.tool.searchMemory'),
-    'questionnaire': t('tools.questionnaire'),
-    'todo_write': t('tools.todoWrite'),
-    'compress_conversation_history': t('tools.compressConversationHistory')
-  }
-  return nameMap[toolName.value] || toolName.value
+  return getToolLabel(toolName.value, t)
 })
 
 // ============ 1. Shell 命令 ============
@@ -924,43 +899,6 @@ watch(() => props.item?.id, (newId, oldId) => {
   }
 })
 
-// ============ 3. File Read ============
-const readFilePath = computed(() => toolArgs.value.file_path || '')
-const readFileType = computed(() => {
-  const path = readFilePath.value
-  const ext = path.split('.').pop()?.toLowerCase()
-  const typeMap = {
-    'py': 'python',
-    'js': 'javascript',
-    'ts': 'typescript',
-    'vue': 'vue',
-    'html': 'html',
-    'css': 'css',
-    'json': 'json',
-    'md': 'markdown',
-    'txt': 'text',
-    'yml': 'yaml',
-    'yaml': 'yaml',
-    'sh': 'bash',
-    'png': 'image',
-    'jpg': 'image',
-    'jpeg': 'image',
-    'gif': 'image',
-    'svg': 'image'
-  }
-  return typeMap[ext] || ext || 'text'
-})
-const fileContent = computed(() => {
-  const content = toolResult.value?.content
-  if (!content) return ''
-  try {
-    const parsed = typeof content === 'string' ? JSON.parse(content) : content
-    return parsed.content || parsed.data || parsed
-  } catch {
-    return content
-  }
-})
-
 // ============ 4. File Write ============
 const writeFilePath = computed(() => toolArgs.value.file_path || '')
 const writeFileType = computed(() => {
@@ -1084,14 +1022,9 @@ const toolIcon = computed(() => {
   return Zap
 })
 
-// 辅助函数
 const isCodeFile = (type) => {
   const codeTypes = ['python', 'javascript', 'typescript', 'vue', 'html', 'css', 'json', 'bash', 'yaml']
   return codeTypes.includes(type)
-}
-
-const isImageFile = (type) => {
-  return type === 'image'
 }
 
 // ItemHeader 相关信息

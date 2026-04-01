@@ -9,17 +9,21 @@ export const useChatWorkspace = ({
 }) => {
   const showWorkspace = ref(false)
   const workspaceFiles = ref([])
+  const isWorkspaceLoading = ref(false)
   const taskStatus = ref(null)
   const expandedTasks = ref(new Set())
   const lastMessageId = ref(null)
 
   const fetchWorkspaceFiles = async (agentId) => {
     if (!agentId) return
+    isWorkspaceLoading.value = true
     try {
       const data = await taskAPI.getWorkspaceFiles(agentId)
       workspaceFiles.value = data.files || []
     } catch (error) {
       console.error('获取工作空间文件出错:', error)
+    } finally {
+      isWorkspaceLoading.value = false
     }
   }
 
@@ -125,6 +129,7 @@ export const useChatWorkspace = ({
 
   const clearTaskAndWorkspace = () => {
     taskStatus.value = null
+    isWorkspaceLoading.value = false
     workspaceFiles.value = []
     expandedTasks.value = new Set()
     lastMessageId.value = null
@@ -139,6 +144,7 @@ export const useChatWorkspace = ({
   return {
     showWorkspace,
     workspaceFiles,
+    isWorkspaceLoading,
     handleWorkspacePanel,
     downloadWorkspaceFile,
     downloadFile,

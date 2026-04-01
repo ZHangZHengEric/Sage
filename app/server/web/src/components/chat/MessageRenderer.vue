@@ -2,9 +2,10 @@
   <div v-if="shouldRenderMessage" class="flex flex-col gap-1 mb-1">
     <!-- 错误消息 -->
     <div v-if="isErrorMessage" class="flex flex-row gap-4 px-4">
-      <div class="flex-none">
+      <div v-if="!hideAssistantAvatar" class="flex-none">
         <MessageAvatar messageType="error" role="assistant" :agentId="agentId" />
       </div>
+      <div v-else class="flex-none w-8" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
         <div class="mb-0.5 ml-1 text-xs font-medium text-muted-foreground">
           {{ getLabel({ role: 'assistant', type: 'error' }) }}
@@ -65,9 +66,10 @@
     <!-- 任务分析消息 -->
     <div v-else-if="message.role === 'assistant' && (message.type === 'task_analysis' || message.message_type === 'task_analysis')"
       class="flex flex-row items-start gap-3 px-4">
-      <div class="flex-none mt-1">
+      <div v-if="!hideAssistantAvatar" class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type || message.type" role="assistant" :agentId="agentId" />
       </div>
+      <div v-else class="flex-none w-8" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="w-full">
           <TaskAnalysisMessage :content="message.content" :isStreaming="isStreaming" :timestamp="message.timestamp" />
@@ -78,9 +80,10 @@
     <!-- 助手消息 -->
     <div v-else-if="message.role === 'assistant' && !hasToolCalls && (message.content || getImageUrls(message.content).length > 0)"
       class="flex flex-row items-start gap-3 px-4 group">
-      <div class="flex-none mt-1">
+      <div v-if="!hideAssistantAvatar" class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type || message.type" role="assistant" :agentId="agentId" />
       </div>
+      <div v-else class="flex-none w-8" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
         <div class="mb-0.5 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
           {{ getLabel({ role: 'assistant', type: message.type || message.message_type }) }}
@@ -122,9 +125,10 @@
 
     <!-- 工具渲染 -->
     <div v-else-if="hasToolCalls" class="flex flex-row items-start gap-3 px-4">
-      <div class="flex-none mt-1">
+      <div v-if="!hideAssistantAvatar" class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type || message.type" role="assistant" :toolName="getToolName(message)" :agentId="agentId" />
       </div>
+      <div v-else class="flex-none w-8" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage }">
           <div v-for="(toolCall, index) in message.tool_calls" :key="toolCall.id || index">
@@ -200,6 +204,18 @@ const props = defineProps({
   agentId: {
     type: String,
     default: ''
+  },
+  hideAssistantAvatar: {
+    type: Boolean,
+    default: false
+  },
+  openWorkbench: {
+    type: Function,
+    default: null
+  },
+  extractWorkbenchItems: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -207,6 +223,7 @@ const emit = defineEmits(['downloadFile', 'toolClick', 'sendMessage', 'openSubSe
 
 const { t } = useLanguage()
 const workbenchStore = useWorkbenchStore()
+const hideAssistantAvatar = computed(() => props.hideAssistantAvatar && props.message.role === 'assistant')
 
 // 计算属性
 const shouldRenderMessage = computed(() => {
@@ -409,6 +426,10 @@ const handleToolClick = (toolCall, result) => {
     return
   }
 
+  if (props.openWorkbench) {
+    props.openWorkbench({ toolCallId: toolCall.id, realtime: false })
+  }
+
   selectedToolExecution.value = toolCall
   toolResult.value = result
   showToolDetails.value = true
@@ -522,6 +543,8 @@ const getToolComponent = (toolName) => {
 
 // 自动提取并推送到工作台
 onMounted(() => {
+  if (!props.extractWorkbenchItems) return
+
   // 1. 处理工具调用结果消息 (role='tool')
   if (props.message.role === 'tool' && props.message.tool_call_id) {
     // 将 Proxy 转换为普通对象
@@ -539,6 +562,7 @@ onMounted(() => {
 // 监听消息变化（用于流式输出）
 watch(() => props.message, (newMessage) => {
   if (!newMessage) return
+  if (!props.extractWorkbenchItems) return
 
   // 1. 实时提取新出现的工具调用、文件引用和代码块
   // 使用 props.agentId 或 message.agent_id 作为 fallback
@@ -559,6 +583,7 @@ watch(() => props.message, (newMessage) => {
 
 watch(() => props.agentId, (newAgentId) => {
   if (!newAgentId || !props.message) return
+  if (!props.extractWorkbenchItems) return
 
   // agent 详情稍后返回时，重新提取一次，补齐已存在 workbench item 的 agentId。
   workbenchStore.extractFromMessage(props.message, newAgentId)
