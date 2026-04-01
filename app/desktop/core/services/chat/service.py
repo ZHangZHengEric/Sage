@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import re
 from pathlib import Path
 import time
 import traceback
@@ -509,17 +510,48 @@ async def create_conversation_title(request: StreamRequest):
     if not request.messages or len(request.messages) == 0:
         return "新会话"
 
-    content = request.messages[0].content
-    # 处理多模态消息格式，提取文本内容
-    if isinstance(content, list):
-        # 从多模态列表中提取文本内容
-        text_parts = []
-        for item in content:
-            if isinstance(item, dict) and item.get("type") == "text":
-                text_parts.append(item.get("text", ""))
-        first_message = " ".join(text_parts) if text_parts else "新会话"
-    else:
-        first_message = content or "新会话"
+    def _extract_text_from_content(content):
+        if isinstance(content, list):
+            text_parts = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    text_parts.append(str(item.get("text", "")))
+            return " ".join(p for p in text_parts if p).strip()
+        return str(content or "").strip()
 
-    conversation_title = (first_message[:50] + "..." if len(first_message) > 50 else first_message)
-    return conversation_title
+    def _sanitize_title_text(text: str) -> str:
+        cleaned = str(text or "")
+        cleaned = re.sub(
+            r"^\s*(?:<enable_plan>\s*(?:true|false)\s*</enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*</enable_deep_thinking>\s*)+",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(r"^\s*<skill>.*?</skill>\s*", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        cleaned = re.sub(
+            r"<(?:skills|active_skills|available_skills)>[\s\S]*?</(?:skills|active_skills|available_skills)>",
+            " ",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned
+
+    title_source = ""
+    for message in request.messages:
+        if getattr(message, "role", "") != "user":
+            continue
+        candidate = _sanitize_title_text(_extract_text_from_content(getattr(message, "content", "")))
+        if candidate:
+            title_source = candidate
+            break
+
+    if not title_source:
+        title_source = _sanitize_title_text(
+            _extract_text_from_content(getattr(request.messages[0], "content", ""))
+        )
+
+    if not title_source:
+        return "新会话"
+
+    return (title_source[:50] + "..." if len(title_source) > 50 else title_source)

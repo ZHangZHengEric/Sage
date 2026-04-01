@@ -16,6 +16,7 @@ from sagents.utils.serialization import make_serializable
 from pathlib import Path
 import json
 import asyncio
+import re
 from mcp import StdioServerParameters
 from mcp import Tool
 import traceback
@@ -854,6 +855,11 @@ class ToolManager:
 
         logger.debug(f"Found tool: {tool_name} (type: {type(tool).__name__})")
 
+        # Normalize arguments by tool parameter schema.
+        # Some models may emit nested JSON objects as escaped strings
+        # (e.g. updates="{\"start_at\":\"...\"}") which breaks MCP validation.
+        kwargs = self._normalize_kwargs_by_schema(tool, tool_name, kwargs)
+
         # Step 2: Execute based on tool type (self-call prevention handled at agent level)
 
         try:
@@ -958,6 +964,107 @@ class ToolManager:
             return self._format_error_response(
                 error_msg, tool_name, "EXECUTION_ERROR", error_detail
             )
+
+    def _normalize_kwargs_by_schema(
+        self,
+        tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec],
+        tool_name: str,
+        kwargs: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Coerce argument values using parameter schema when possible.
+
+        Currently handles object/array parameters passed as JSON strings.
+        """
+        if not kwargs or not isinstance(kwargs, dict):
+            return kwargs
+
+        parameters = getattr(tool, "parameters", None)
+        if not isinstance(parameters, dict):
+            return kwargs
+
+        def _collect_expected_types(schema: Dict[str, Any]) -> set[str]:
+            expected: set[str] = set()
+            direct = schema.get("type")
+            if isinstance(direct, str):
+                expected.add(direct)
+            for key in ("anyOf", "oneOf"):
+                variants = schema.get(key)
+                if isinstance(variants, list):
+                    for item in variants:
+                        if isinstance(item, dict) and isinstance(item.get("type"), str):
+                            expected.add(item["type"])
+            return expected
+
+        normalized = dict(kwargs)
+        for key, value in kwargs.items():
+            schema = parameters.get(key)
+            if not isinstance(schema, dict):
+                continue
+
+            expected_types = _collect_expected_types(schema)
+            if not expected_types:
+                continue
+
+            if "boolean" in expected_types and isinstance(value, str):
+                lowered = value.strip().lower()
+                if lowered in {"true", "false"}:
+                    normalized[key] = lowered == "true"
+                    logger.info(
+                        f"Normalized tool argument '{key}' to boolean for tool '{tool_name}'"
+                    )
+                    continue
+
+            if "integer" in expected_types and isinstance(value, str):
+                raw = value.strip()
+                if re.fullmatch(r"[+-]?\d+", raw):
+                    try:
+                        normalized[key] = int(raw)
+                        logger.info(
+                            f"Normalized tool argument '{key}' to integer for tool '{tool_name}'"
+                        )
+                        continue
+                    except Exception:
+                        pass
+
+            if "number" in expected_types and isinstance(value, str):
+                raw = value.strip()
+                try:
+                    normalized[key] = float(raw)
+                    logger.info(
+                        f"Normalized tool argument '{key}' to number for tool '{tool_name}'"
+                    )
+                    continue
+                except Exception:
+                    pass
+
+            if not isinstance(value, str):
+                continue
+
+            raw = value.strip()
+            if not raw:
+                continue
+
+            # Only parse JSON-like payloads for object/array expectations.
+            if ("object" in expected_types and raw.startswith("{")) or (
+                "array" in expected_types and raw.startswith("[")
+            ):
+                try:
+                    parsed = json.loads(raw)
+                except Exception:
+                    continue
+
+                if "object" in expected_types and isinstance(parsed, dict):
+                    normalized[key] = parsed
+                    logger.info(
+                        f"Normalized tool argument '{key}' to object for tool '{tool_name}'"
+                    )
+                elif "array" in expected_types and isinstance(parsed, list):
+                    normalized[key] = parsed
+                    logger.info(
+                        f"Normalized tool argument '{key}' to array for tool '{tool_name}'"
+                    )
+
+        return normalized
 
     async def _execute_mcp_tool(
         self, tool: McpToolSpec, session_id: str, **kwargs

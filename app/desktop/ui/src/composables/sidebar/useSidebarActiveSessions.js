@@ -1,5 +1,6 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useChatActiveSessionCache } from '@/composables/chat/useChatActiveSessionCache'
+import { sanitizeSessionTitle } from '@/utils/sessionTitle'
 
 export const useSidebarActiveSessions = ({
   route,
@@ -8,7 +9,6 @@ export const useSidebarActiveSessions = ({
   const { 
     activeSessions, 
     removeSessionFromCache,
-    stripSessionControlTags,
     startSSESync,
     stopSSESync
   } = useChatActiveSessionCache()
@@ -38,12 +38,14 @@ export const useSidebarActiveSessions = ({
         if (title && typeof title === 'object') {
           title = title.text || title.content || title.message || JSON.stringify(title)
         }
+        const displayUserInput = sanitizeSessionTitle(String(userInput))
+        const displayTitle = sanitizeSessionTitle(String(title))
         return {
           id: sessionId,
           sessionId,
           sessionStatus: meta?.status === 'completed' ? 'completed' : 'running',
-          rawName: stripSessionControlTags(String(userInput)).split('\n')[0].trim()
-            || stripSessionControlTags(String(title))
+          rawName: displayUserInput.split('\n')[0].trim()
+            || displayTitle
             || `会话 ${sessionId.slice(-8)}`,
           url: 'Chat',
           isInternal: true,
