@@ -7,6 +7,10 @@ ENABLE_PLAN_TAG_RE = re.compile(
     r"^\s*<enable_plan>\s*(true|false)\s*</enable_plan>\s*",
     re.IGNORECASE,
 )
+ENABLE_DEEP_THINKING_TAG_RE = re.compile(
+    r"^\s*<enable_deep_thinking>\s*(true|false)\s*</enable_deep_thinking>\s*",
+    re.IGNORECASE,
+)
 
 
 def _get_role(message: Any) -> str:
@@ -28,7 +32,7 @@ def _set_content(message: Any, content: Any) -> None:
         message.content = content
 
 
-def _extract_enable_plan_from_text(text: str) -> Tuple[str, Dict[str, bool]]:
+def _extract_control_flags_from_text(text: str) -> Tuple[str, Dict[str, bool]]:
     if not isinstance(text, str):
         return text, {}
 
@@ -36,18 +40,29 @@ def _extract_enable_plan_from_text(text: str) -> Tuple[str, Dict[str, bool]]:
     remaining = text
 
     while True:
-        match = ENABLE_PLAN_TAG_RE.match(remaining)
-        if not match:
+        matched = False
+
+        plan_match = ENABLE_PLAN_TAG_RE.match(remaining)
+        if plan_match:
+            flags["enable_plan"] = plan_match.group(1).lower() == "true"
+            remaining = remaining[plan_match.end():]
+            matched = True
+
+        deep_thinking_match = ENABLE_DEEP_THINKING_TAG_RE.match(remaining)
+        if deep_thinking_match:
+            flags["enable_deep_thinking"] = deep_thinking_match.group(1).lower() == "true"
+            remaining = remaining[deep_thinking_match.end():]
+            matched = True
+
+        if not matched:
             break
-        flags["enable_plan"] = match.group(1).lower() == "true"
-        remaining = remaining[match.end():]
 
     return remaining, flags
 
 
-def _extract_enable_plan_from_content(content: Any) -> Tuple[Any, Dict[str, bool]]:
+def _extract_control_flags_from_content(content: Any) -> Tuple[Any, Dict[str, bool]]:
     if isinstance(content, str):
-        return _extract_enable_plan_from_text(content)
+        return _extract_control_flags_from_text(content)
 
     if isinstance(content, list):
         flags: Dict[str, bool] = {}
@@ -62,7 +77,7 @@ def _extract_enable_plan_from_content(content: Any) -> Tuple[Any, Dict[str, bool
                 and isinstance(item.get("text"), str)
             ):
                 parsed_first_text = True
-                new_text, new_flags = _extract_enable_plan_from_text(item["text"])
+                new_text, new_flags = _extract_control_flags_from_text(item["text"])
                 if new_flags:
                     flags.update(new_flags)
                 if new_text:
@@ -88,7 +103,7 @@ def extract_control_flags_from_messages(messages: List[Any]) -> Dict[str, bool]:
             continue
 
         content = _get_content(message)
-        new_content, message_flags = _extract_enable_plan_from_content(content)
+        new_content, message_flags = _extract_control_flags_from_content(content)
         if message_flags:
             flags.update(message_flags)
             _set_content(message, new_content)

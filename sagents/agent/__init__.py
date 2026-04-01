@@ -14,6 +14,7 @@ from .tool_suggestion_agent import ToolSuggestionAgent
 from .fibre.fibre_agent import FibreAgent
 from .memory_recall_agent import MemoryRecallAgent
 from .plan_agent import PlanAgent
+from .self_check_agent import SelfCheckAgent
 
 
 
@@ -34,4 +35,5 @@ __all__ = [
     "FibreAgent",
     "MemoryRecallAgent",
     "PlanAgent",
+    "SelfCheckAgent",
 ]

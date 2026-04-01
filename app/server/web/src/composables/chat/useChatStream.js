@@ -1,35 +1,57 @@
 import { normalizeAgentMode } from '@/utils/agentMode.js'
 
 const ENABLE_PLAN_TAG_RE = /^\s*<enable_plan>\s*(true|false)\s*<\/enable_plan>\s*/i
+const ENABLE_DEEP_THINKING_TAG_RE = /^\s*<enable_deep_thinking>\s*(true|false)\s*<\/enable_deep_thinking>\s*/i
 
-const stripEnablePlanTag = (text) => {
-  if (typeof text !== 'string') return { text, enablePlan: false }
+const stripControlTags = (text) => {
+  if (typeof text !== 'string') return { text, enablePlan: false, enableDeepThinking: false }
   let remaining = text
   let enablePlan = false
-  let matched = false
+  let enableDeepThinking = false
+  let planMatched = false
+  let deepThinkingMatched = false
 
   while (true) {
-    const match = remaining.match(ENABLE_PLAN_TAG_RE)
-    if (!match) break
-    matched = true
-    enablePlan = match[1].toLowerCase() === 'true'
-    remaining = remaining.slice(match[0].length)
+    let matched = false
+    const planMatch = remaining.match(ENABLE_PLAN_TAG_RE)
+    if (planMatch) {
+      matched = true
+      planMatched = true
+      enablePlan = planMatch[1].toLowerCase() === 'true'
+      remaining = remaining.slice(planMatch[0].length)
+    }
+    const deepThinkingMatch = remaining.match(ENABLE_DEEP_THINKING_TAG_RE)
+    if (deepThinkingMatch) {
+      matched = true
+      deepThinkingMatched = true
+      enableDeepThinking = deepThinkingMatch[1].toLowerCase() === 'true'
+      remaining = remaining.slice(deepThinkingMatch[0].length)
+    }
+    if (!matched) break
   }
 
-  return { text: remaining, enablePlan: matched ? enablePlan : false }
+  return {
+    text: remaining,
+    enablePlan: planMatched ? enablePlan : false,
+    enableDeepThinking: deepThinkingMatched ? enableDeepThinking : false
+  }
 }
 
-const stripEnablePlanFromMultimodal = (multimodalContent) => {
-  if (!Array.isArray(multimodalContent)) return { content: multimodalContent, enablePlan: false }
+const stripControlTagsFromMultimodal = (multimodalContent) => {
+  if (!Array.isArray(multimodalContent)) {
+    return { content: multimodalContent, enablePlan: false, enableDeepThinking: false }
+  }
   const next = []
   let parsedText = false
   let enablePlan = false
+  let enableDeepThinking = false
 
   for (const item of multimodalContent) {
     if (!parsedText && item?.type === 'text' && typeof item.text === 'string') {
       parsedText = true
-      const result = stripEnablePlanTag(item.text)
+      const result = stripControlTags(item.text)
       enablePlan = result.enablePlan
+      enableDeepThinking = result.enableDeepThinking
       if (result.text) {
         next.push({ ...item, text: result.text })
       }
@@ -38,7 +60,34 @@ const stripEnablePlanFromMultimodal = (multimodalContent) => {
     next.push(item)
   }
 
-  return { content: next, enablePlan }
+  return { content: next, enablePlan, enableDeepThinking }
+}
+
+const prependControlTags = (text, { enablePlan, enableDeepThinking }) => {
+  if (typeof text !== 'string') return text
+  const tags = []
+  if (typeof enablePlan === 'boolean') {
+    tags.push(`<enable_plan>${enablePlan ? 'true' : 'false'}</enable_plan>`)
+  }
+  if (typeof enableDeepThinking === 'boolean') {
+    tags.push(`<enable_deep_thinking>${enableDeepThinking ? 'true' : 'false'}</enable_deep_thinking>`)
+  }
+  if (tags.length === 0) return text
+  return `${tags.join('')} ${text}`.trim()
+}
+
+const prependControlTagsToMultimodal = (multimodalContent, controlOptions) => {
+  if (!Array.isArray(multimodalContent)) return multimodalContent
+  const next = [...multimodalContent]
+  const controlText = prependControlTags('', controlOptions)
+  if (!controlText) return next
+
+  const textIndex = next.findIndex(item => item?.type === 'text' && typeof item.text === 'string')
+  if (textIndex >= 0) {
+    next[textIndex] = { ...next[textIndex], text: prependControlTags(next[textIndex].text, controlOptions) }
+    return next
+  }
+  return [{ type: 'text', text: controlText }, ...next]
 }
 
 const hasVisibleMultimodalContent = (multimodalContent) => {
@@ -218,16 +267,19 @@ export const useChatStream = ({
       let messageContent
       if (isMultimodalEnabled && multimodalContent && multimodalContent.length > 0) {
         // Use multimodal format when enabled and content is provided
-        messageContent = multimodalContent
+        messageContent = prependControlTagsToMultimodal(multimodalContent, {
+          enableDeepThinking: config.deepThinking
+        })
       } else {
         // Use plain string format otherwise
-        messageContent = message
+        messageContent = prependControlTags(message, {
+          enableDeepThinking: config.deepThinking
+        })
       }
 
       const requestBody = {
         messages: [{ role: 'user', content: messageContent }],
         session_id: sessionId,
-        deep_thinking: config.deepThinking,
         agent_mode: normalizeAgentMode(config.agentMode),
         more_suggest: config.moreSuggest,
         max_loop_count: config.maxLoopCount,
@@ -274,12 +326,12 @@ export const useChatStream = ({
     const { displayContent, multimodalContent } = options
     if (!content.trim() || isLoading.value || !selectedAgent.value) return
 
-    const contentControl = stripEnablePlanTag(content)
-    const multimodalControl = stripEnablePlanFromMultimodal(multimodalContent)
+    const contentControl = stripControlTags(content)
+    const multimodalControl = stripControlTagsFromMultimodal(multimodalContent)
     const cleanedContent = contentControl.text
     const cleanedMultimodal = multimodalControl.content
     const enablePlan = contentControl.enablePlan || multimodalControl.enablePlan
-    const visibleDisplay = displayContent != null ? stripEnablePlanTag(displayContent).text : null
+    const visibleDisplay = displayContent != null ? stripControlTags(displayContent).text : null
 
     if (!cleanedContent.trim() && !hasVisibleMultimodalContent(cleanedMultimodal) && !enablePlan) return
 

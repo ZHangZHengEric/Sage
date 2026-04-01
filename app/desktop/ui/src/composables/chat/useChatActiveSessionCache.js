@@ -20,6 +20,7 @@ activeSessions.value = readActiveSessionsCache()
 
 const CONTROL_TAG_PATTERNS = [
   /^\s*<enable_plan>\s*(true|false)\s*<\/enable_plan>\s*/i,
+  /^\s*<enable_deep_thinking>\s*(true|false)\s*<\/enable_deep_thinking>\s*/i,
   /^\s*<skill>.*?<\/skill>\s*/i
 ]
 

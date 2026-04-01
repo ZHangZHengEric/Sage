@@ -18,6 +18,20 @@ const readActiveSessionsCache = () => {
 // Initialize activeSessions from local storage once
 activeSessions.value = readActiveSessionsCache()
 
+const CONTROL_TAG_PATTERNS = [
+  /^\s*<enable_plan>\s*(true|false)\s*<\/enable_plan>\s*/i,
+  /^\s*<enable_deep_thinking>\s*(true|false)\s*<\/enable_deep_thinking>\s*/i,
+  /^\s*<skill>.*?<\/skill>\s*/i
+]
+
+const stripSessionControlTags = (text = '') => {
+  let normalized = String(text || '')
+  for (const pattern of CONTROL_TAG_PATTERNS) {
+    normalized = normalized.replace(pattern, '')
+  }
+  return normalized.trim()
+}
+
 const deriveSessionTitle = (content = '') => {
   // 处理数组类型（messages 格式）
   if (Array.isArray(content)) {
@@ -42,7 +56,7 @@ const deriveSessionTitle = (content = '') => {
     // 尝试提取对象中的文本字段
     content = content.text || content.content || content.message || JSON.stringify(content)
   }
-  const normalized = String(content || '').trim()
+  const normalized = stripSessionControlTags(String(content || '').trim())
   if (!normalized) return '进行中的会话'
   return normalized.length > 50 ? `${normalized.slice(0, 50)}...` : normalized
 }

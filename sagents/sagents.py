@@ -84,7 +84,7 @@ class SAgent:
             session_id: 会话 ID，用于持久化和恢复会话状态
             user_id: 用户 ID，用于多租户场景
             agent_id: Agent ID，用于标识当前 Agent
-            deep_thinking: 是否启用深度思考模式
+            deep_thinking: 过时参数。请改用消息中的 <enable_deep_thinking>true/false</enable_deep_thinking> 控制
             max_loop_count: 最大循环次数，防止无限循环
             agent_mode: Agent 模式，可选 "simple" | "multi" | "fibre"
             more_suggest: 是否启用更多建议功能
@@ -273,11 +273,21 @@ class SAgent:
                 AgentNode(agent_key="tool_suggestion"),
                 AgentNode(agent_key="memory_recall"),
             ]),
-            AgentNode(agent_key="simple"),
+            IfNode(
+                condition="enable_plan",
+                true_body=SequenceNode(steps=[
+                    AgentNode(agent_key="plan"),
+                    IfNode(
+                        condition="plan_should_start_execution",
+                        true_body=AgentNode(agent_key="simple"),
+                    ),
+                ]),
+                false_body=AgentNode(agent_key="simple"),
+            ),
             IfNode(condition="need_summary", true_body=AgentNode(agent_key="task_summary"))
         ])
 
-        fib_agent_body = SequenceNode(steps=[
+        fib_agent_core = SequenceNode(steps=[
             ParallelNode(branches=[
                 AgentNode(agent_key="tool_suggestion"),
                 AgentNode(agent_key="memory_recall"),
@@ -294,6 +304,15 @@ class SAgent:
                 false_body=AgentNode(agent_key="fibre"),
             ),
         ])
+
+        fib_agent_body = LoopNode(
+            condition="self_check_should_retry",
+            max_loops=3,
+            body=SequenceNode(steps=[
+                fib_agent_core,
+                AgentNode(agent_key="self_check"),
+            ]),
+        )
 
         # 如果传入了 agent_mode，我们仍然使用 SwitchNode，因为 agent_mode 可能会在运行时被 Router 修改
         # 但我们需要确保 agent_mode 的默认值被正确处理
