@@ -63,6 +63,7 @@ ref: configuration
 - `SAGE_SESSION_COOKIE_NAME`
 - `SAGE_SESSION_COOKIE_SECURE`
 - `SAGE_SESSION_COOKIE_SAME_SITE`
+- `SAGE_CORS_ALLOWED_ORIGINS`
 
 当前支持的部署模式先收敛为三种：
 
@@ -74,6 +75,8 @@ ref: configuration
   使用 Sage 原生的用户名密码认证。这里的 `native` 表示认证方式，不是“本地开发环境”。
 
 `SAGE_TRUSTED_IDENTITY_PROXY_IPS` 支持逗号分隔的 IP 或 CIDR 白名单。只有请求来源命中该白名单时，Sage 才会将该来源视为受信任代理，并接受可选的 `X-Sage-Internal-UserId` 透传。
+
+`SAGE_CORS_ALLOWED_ORIGINS` 支持逗号分隔的浏览器来源白名单。由于 Sage 会携带凭据处理会话，CORS 不再允许使用通配符 `*`。
 
 `SAGE_BOOTSTRAP_ADMIN_USERNAME` 和 `SAGE_BOOTSTRAP_ADMIN_PASSWORD` 现在是显式启用的一组配置。只有这两个变量都提供时，Sage 才会在首次启动时创建 bootstrap 管理员用户。
 

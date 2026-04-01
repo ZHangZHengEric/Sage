@@ -19,11 +19,18 @@ from .core.config import StartupConfig
 from .utils.async_utils import create_safe_task
 
 
+async def _require_initialized(name: str, initializer_result):
+    result = await initializer_result
+    if result is None:
+        raise RuntimeError(f"{name} initialization failed")
+    return result
+
+
 async def initialize_system(cfg: StartupConfig):
     logger.info("Sage开始初始化")
 
     # 1. 优先初始化数据库和数据
-    await initialize_db_connection(cfg)
+    await _require_initialized("db connection", initialize_db_connection(cfg))
     
     # 2. 初始化观测链路上报 (Initialize Observability - needs DB)
     await initialize_observability(cfg)
@@ -32,11 +39,11 @@ async def initialize_system(cfg: StartupConfig):
     await initialize_global_clients(cfg)
 
     """初始化工具与技能管理器"""
-    await initialize_tool_manager()
-    await initialize_skill_manager(cfg)
+    await _require_initialized("tool manager", initialize_tool_manager())
+    await _require_initialized("skill manager", initialize_skill_manager(cfg))
 
     """初始化全局 SessionManager"""
-    await initialize_session_manager(cfg)
+    await _require_initialized("session manager", initialize_session_manager(cfg))
 
     """初始化定时任务 Scheduler"""
     await initialize_scheduler(cfg)

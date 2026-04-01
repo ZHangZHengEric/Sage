@@ -78,6 +78,7 @@ These control where Sage writes runtime state, sessions, agents, and skill works
 - `SAGE_SESSION_COOKIE_NAME`
 - `SAGE_SESSION_COOKIE_SECURE`
 - `SAGE_SESSION_COOKIE_SAME_SITE`
+- `SAGE_CORS_ALLOWED_ORIGINS`
 - `SAGE_WEB_BASE_PATH`
 - `SAGE_OAUTH2_CLIENTS`
 - `SAGE_OAUTH2_ISSUER`
@@ -95,6 +96,8 @@ Supported deployment modes are intentionally narrowed to three values:
   Use Sage's built-in username/password authentication. This is an auth mode name, not a local-development flag.
 
 `SAGE_TRUSTED_IDENTITY_PROXY_IPS` accepts a comma-separated list of proxy source IPs or CIDR ranges. Sage only treats a request as coming from a trusted proxy when the caller IP matches this allowlist, and only then accepts the optional `X-Sage-Internal-UserId` passthrough header.
+
+`SAGE_CORS_ALLOWED_ORIGINS` accepts a comma-separated origin allowlist for credentialed browser requests. Sage no longer uses wildcard CORS when credentials are enabled.
 
 `SAGE_BOOTSTRAP_ADMIN_USERNAME` and `SAGE_BOOTSTRAP_ADMIN_PASSWORD` are both optional, but they now work as an explicit opt-in pair. If either one is missing, Sage will not create a bootstrap admin user during startup.
 
