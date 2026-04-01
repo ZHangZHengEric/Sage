@@ -88,13 +88,13 @@ You can ignore this entire section until you enable login, external auth provide
 Supported deployment modes are intentionally narrowed to three values:
 
 - `SAGE_AUTH_MODE=trusted_proxy`
-  Use an enterprise identity proxy that injects `X-Sage-Internal-UserId`. Sage only trusts that header when the caller IP matches `SAGE_TRUSTED_IDENTITY_PROXY_IPS`.
+  Use an enterprise trusted-proxy mode. Sage treats caller IPs in `SAGE_TRUSTED_IDENTITY_PROXY_IPS` as trusted entry points, skips end-user auth for business requests from those sources, and still allows built-in admin username/password login. If the upstream also injects `X-Sage-Internal-UserId`, Sage uses it as optional end-user context.
 - `SAGE_AUTH_MODE=oauth`
   Use upstream OAuth/OIDC login for Sage itself. Configure providers through `SAGE_AUTH_PROVIDERS`.
 - `SAGE_AUTH_MODE=native`
   Use Sage's built-in username/password authentication. This is an auth mode name, not a local-development flag.
 
-`SAGE_TRUSTED_IDENTITY_PROXY_IPS` accepts a comma-separated list of proxy source IPs or CIDR ranges. Sage only trusts `X-Sage-Internal-UserId` when the caller IP matches this allowlist.
+`SAGE_TRUSTED_IDENTITY_PROXY_IPS` accepts a comma-separated list of proxy source IPs or CIDR ranges. Sage only treats a request as coming from a trusted proxy when the caller IP matches this allowlist, and only then accepts the optional `X-Sage-Internal-UserId` passthrough header.
 
 `SAGE_BOOTSTRAP_ADMIN_USERNAME` and `SAGE_BOOTSTRAP_ADMIN_PASSWORD` are both optional, but they now work as an explicit opt-in pair. If either one is missing, Sage will not create a bootstrap admin user during startup.
 

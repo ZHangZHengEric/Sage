@@ -47,7 +47,7 @@ If you keep a local `.env`, both `app/server/main.py` and `app/desktop/core/main
 
 Current supported authentication deployments are intentionally narrowed to three modes:
 
-- `trusted_proxy`: an internal gateway or reverse proxy injects `X-Sage-Internal-UserId`, and Sage trusts it only from `SAGE_TRUSTED_IDENTITY_PROXY_IPS`
+- `trusted_proxy`: business requests coming from `SAGE_TRUSTED_IDENTITY_PROXY_IPS` bypass Sage end-user auth, admins can still log in with built-in credentials, and an upstream proxy may optionally pass `X-Sage-Internal-UserId`
 - `oauth`: Sage redirects users to an upstream OAuth/OIDC provider configured through `SAGE_AUTH_PROVIDERS`
 - `native`: Sage uses its built-in username/password login
 

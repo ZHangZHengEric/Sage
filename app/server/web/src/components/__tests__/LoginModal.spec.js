@@ -49,11 +49,13 @@ describe('LoginModal', () => {
     getSystemInfo.mockReset()
   })
 
-  it('renders trusted proxy guidance when auth mode is trusted_proxy', async () => {
+  it('renders trusted proxy guidance with admin login when auth mode is trusted_proxy', async () => {
     getSystemInfo.mockResolvedValue({
       allow_registration: false,
       auth_mode: 'trusted_proxy',
-      auth_providers: [],
+      auth_providers: [
+        { id: 'native', type: 'native', name: '账号密码' },
+      ],
       oauth_enabled: false,
       oauth_provider_name: null,
     })
@@ -62,8 +64,9 @@ describe('LoginModal', () => {
 
     expect(wrapper.text()).toContain('企业身份接入')
     expect(wrapper.text()).toContain('企业身份代理模式')
-    expect(wrapper.text()).not.toContain('用户名')
-    expect(wrapper.text()).not.toContain('密码')
+    expect(wrapper.text()).toContain('管理员登录')
+    expect(wrapper.text()).toContain('用户名')
+    expect(wrapper.text()).toContain('密码')
   })
 
   it('renders oauth login flow when auth mode is oauth', async () => {
