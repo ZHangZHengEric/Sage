@@ -43,6 +43,27 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 
 如果你使用本地 `.env` 文件，`app/server/main.py` 和 `app/desktop/core/main.py` 都会自动加载它。
 
+## 选择认证部署模式
+
+当前企业内部部署先收敛为两种模式：
+
+- `trusted_proxy`：企业网关或反向代理注入 `X-Sage-Internal-UserId`，Sage 只会对 `SAGE_TRUSTED_IDENTITY_PROXY_IPS` 白名单内的来源信任该 header
+- `oauth`：Sage 自身跳转到上游 OAuth/OIDC Provider，配置来源是 `SAGE_AUTH_PROVIDERS`
+
+透传模式最小示例：
+
+```bash
+export SAGE_AUTH_MODE="trusted_proxy"
+export SAGE_TRUSTED_IDENTITY_PROXY_IPS="10.0.0.0/8,127.0.0.1/32"
+```
+
+OAuth 模式最小示例：
+
+```bash
+export SAGE_AUTH_MODE="oauth"
+export SAGE_AUTH_PROVIDERS='[{"id":"corp-sso","type":"oidc","name":"Corp SSO","discovery_url":"https://sso.example.com/.well-known/openid-configuration","client_id":"sage","client_secret":"secret"}]'
+```
+
 本地开发默认使用 `SAGE_ENV=development`。如果你将 `SAGE_ENV` 设为 `production` 或 `staging`，还必须显式提供以下 secret：
 
 - `SAGE_JWT_KEY`

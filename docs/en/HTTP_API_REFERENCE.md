@@ -48,6 +48,8 @@ Standard response envelope:
 
 ### Authentication and user
 
+Current supported deployment modes are `trusted_proxy` and `oauth`. The local username/password endpoints below remain in the API for compatibility, but they are not part of the supported deployment modes and return an error unless local auth is re-enabled in code.
+
 | Method | Path | Request | `data` response | Purpose |
 | --- | --- | --- | --- | --- |
 | POST | `/api/auth/register/send-code` | `{"email"}` | `{"expires_in","retry_after"}` | Send email verification code before local registration |
