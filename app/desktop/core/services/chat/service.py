@@ -111,8 +111,6 @@ async def populate_request_from_agent_config(
             request.available_skills = agent_config.get("availableSkills")
         if agent_config.get("availableWorkflows") is not None:
             request.available_workflows = agent_config.get("availableWorkflows")
-        if agent_config.get("deepThinking") is not None and request.deep_thinking is None:
-            request.deep_thinking = agent_config.get("deepThinking")
         if agent_config.get("maxLoopCount") is not None and request.max_loop_count is None:
             request.max_loop_count = agent_config.get("maxLoopCount")
         if agent_config.get("agentMode") is not None and request.agent_mode is None:
@@ -183,7 +181,6 @@ async def populate_request_from_agent_config(
     _fill_if_none("available_tools", [])
     _fill_if_none("available_skills", [])
     _merge_dict("available_workflows", {})
-    _fill_if_none("deep_thinking", False)
     _fill_if_none("multi_agent", False)
     _fill_if_none("more_suggest", False)
     _merge_dict("system_context", {})
@@ -398,7 +395,6 @@ class SageStreamService:
                 volume_mounts=volume_mounts,
                 agent_id=self.request.agent_id,
                 user_id="default_user",
-                deep_thinking=self.request.deep_thinking,
                 max_loop_count=self.request.max_loop_count,
                 agent_mode=self.request.agent_mode,
                 more_suggest=self.request.more_suggest,

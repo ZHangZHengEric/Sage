@@ -284,16 +284,20 @@ const adjustTextareaHeight = async () => {
   }
 }
 
+const LEADING_CONTROL_TAG_RE = /^\s*(?:<enable_plan>\s*(?:true|false)\s*<\/enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*<\/enable_deep_thinking>\s*)+/i
+const LEADING_SKILL_TAG_RE = /^<skill>(.*?)<\/skill>\s*/i
+
 watch(inputValue, async (newVal) => {
   if (isComposing.value) {
     adjustTextareaHeight()
     return
   }
 
-  const skillMatch = newVal.match(/^<skill>(.*?)<\/skill>\s*/)
+  const normalizedInput = newVal.replace(LEADING_CONTROL_TAG_RE, '')
+  const skillMatch = normalizedInput.match(LEADING_SKILL_TAG_RE)
   if (skillMatch) {
     currentSkill.value = skillMatch[1]
-    inputValue.value = newVal.replace(skillMatch[0], '')
+    inputValue.value = normalizedInput.replace(skillMatch[0], '')
     return
   }
 

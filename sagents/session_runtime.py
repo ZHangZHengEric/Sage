@@ -25,6 +25,7 @@ from sagents.agent import (
     ToolSuggestionAgent,
     MemoryRecallAgent,
     PlanAgent,
+    SelfCheckAgent,
 )
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import (
@@ -101,6 +102,7 @@ class Session:
             "fibre": FibreAgent,
             "memory_recall": MemoryRecallAgent,
             "plan": PlanAgent,
+            "self_check": SelfCheckAgent,
         }
 
     def configure_runtime(
@@ -314,6 +316,12 @@ class Session:
                 logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
                 session_context.workflow_manager.load_workflows_from_dict(available_workflows)
 
+            initial_messages = self._prepare_initial_messages(input_messages)
+            control_flags = extract_control_flags_from_messages(initial_messages)
+            enable_deep_thinking = bool(control_flags.get("enable_deep_thinking", False))
+            if deep_thinking is not None:
+                logger.warning("SAgent: 参数 deep_thinking 已过时且已忽略，请改用消息控制标签 <enable_deep_thinking>")
+
             session_context.set_agent_config(
                 model=self.model,
                 model_config=self.model_config,
@@ -322,15 +330,13 @@ class Session:
                 available_skills=skill_manager.list_skills() if skill_manager else [],
                 system_context=session_context.system_context,
                 available_workflows=available_workflows,
-                deep_thinking=deep_thinking if isinstance(deep_thinking, bool) else False,
+                deep_thinking=enable_deep_thinking,
                 agent_mode=agent_mode,
                 more_suggest=more_suggest,
                 max_loop_count=max_loop_count,
             )
 
             session_context.set_status(SessionStatus.RUNNING)
-            initial_messages = self._prepare_initial_messages(input_messages)
-            control_flags = extract_control_flags_from_messages(initial_messages)
 
             merge_before_num = len(session_context.message_manager.messages)
             all_message_ids = [m.message_id for m in session_context.message_manager.messages]
@@ -375,8 +381,7 @@ class Session:
             # --- 新的 Flow 执行逻辑 ---
             # 1. 预处理状态 (兼容旧逻辑)
             # 确保一些状态已经设置到 SessionContext 中，供 ConditionRegistry 使用
-            if deep_thinking is not None:
-                session_context.audit_status["deep_thinking"] = deep_thinking
+            session_context.audit_status["deep_thinking"] = enable_deep_thinking
             session_context.audit_status["enable_plan"] = bool(control_flags.get("enable_plan", False))
             if agent_mode is not None:
                 session_context.audit_status["agent_mode"] = agent_mode
@@ -384,6 +389,10 @@ class Session:
                 session_context.audit_status["more_suggest"] = more_suggest
             if force_summary is not None:
                 session_context.audit_status["force_summary"] = force_summary
+            session_context.audit_status.pop("self_check_passed", None)
+            session_context.audit_status.pop("self_check_issues", None)
+            session_context.audit_status.pop("self_check_summary", None)
+            session_context.audit_status.pop("self_check_checked_files", None)
                 
             # 2. 如果没有显式设置 agent_mode，可能需要通过 router 决定，但现在 Flow 逻辑应该包含 router
             # 旧逻辑：先跑 router，然后根据结果设置 mode

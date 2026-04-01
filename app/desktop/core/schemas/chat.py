@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Message(BaseModel):
@@ -40,7 +40,11 @@ class StreamRequest(BaseChatRequest):
     """流式请求，包含所有流式控制参数"""
     agent_id: Optional[str] = None
     agent_name: Optional[str] = None
-    deep_thinking: Optional[bool] = None
+    deep_thinking: Optional[bool] = Field(
+        default=None,
+        deprecated=True,
+        description="已过时。请改用消息中的 <enable_deep_thinking>true/false</enable_deep_thinking> 控制。",
+    )
     max_loop_count: Optional[int] = 50
     multi_agent: Optional[bool] = None
     agent_mode: Optional[str] = None

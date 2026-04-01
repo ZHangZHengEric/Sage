@@ -54,6 +54,15 @@ def check_plan_should_start_execution(session_context) -> bool:
     """检查规划阶段是否已经决定进入正式执行"""
     return session_context.audit_status.get("plan_status") == "start_execution"
 
+@ConditionRegistry.register("self_check_should_retry")
+def check_self_check_should_retry(session_context) -> bool:
+    """检查是否需要继续执行并重新通过自检。"""
+    from sagents.context.session_context import SessionStatus
+
+    if session_context.status == SessionStatus.INTERRUPTED:
+        return False
+    return session_context.audit_status.get("self_check_passed") is not True
+
 @ConditionRegistry.register("need_summary")
 def check_need_summary(session_context) -> bool:
     """检查是否需要总结（例如最后一条消息是工具调用）"""
@@ -76,6 +85,11 @@ def check_task_not_completed(session_context) -> bool:
     # 1. 检查是否被中断
     if session_context.status == SessionStatus.INTERRUPTED:
         return False
+
+    # 如果自检失败，必须继续循环修复，不能被旧的 completion_status 短路。
+    if session_context.audit_status.get("self_check_passed") is False:
+        logger.info("SAgent: 检测到 self_check 失败，继续循环修复")
+        return True
         
     # 2. 检查审计状态中的完成标志
     if session_context.audit_status.get("task_completed", False):
