@@ -21,6 +21,16 @@
       </div>
 
       <div class="flex items-center gap-1 ml-auto">
+        <Button
+          v-if="!item.is_directory"
+          variant="ghost"
+          size="icon"
+          class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+          @click.stop="$emit('view', item)"
+          title="查看文件"
+        >
+          <Eye class="w-3.5 h-3.5" />
+        </Button>
         <!-- Quote Path Button -->
         <Button
           variant="ghost"
@@ -63,6 +73,7 @@
         @download="$emit('download', $event)"
         @delete="$emit('delete', $event)"
         @quote="$emit('quote', $event)"
+        @view="$emit('view', $event)"
       />
     </div>
   </div>
@@ -70,7 +81,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { File, Folder, ChevronRight, ChevronDown, Download, FileJson, FileCode, FileText, Image, Trash2, Quote } from 'lucide-vue-next'
+import { File, Folder, ChevronRight, ChevronDown, Download, Eye, FileJson, FileCode, FileText, Image, Trash2, Quote } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 
 defineOptions({
@@ -88,7 +99,7 @@ const props = defineProps({
   }
 })
 
-defineEmits(['download', 'delete', 'quote'])
+defineEmits(['download', 'delete', 'quote', 'view'])
 
 const isExpanded = ref(false)
 
