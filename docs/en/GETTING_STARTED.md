@@ -43,6 +43,42 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 
 If you keep a local `.env`, both `app/server/main.py` and `app/desktop/core/main.py` load it automatically.
 
+## Choose an Auth Deployment Mode
+
+Current supported authentication deployments are intentionally narrowed to three modes:
+
+- `trusted_proxy`: business requests coming from `SAGE_TRUSTED_IDENTITY_PROXY_IPS` bypass Sage end-user auth, admins can still log in with built-in credentials, and an upstream proxy may optionally pass `X-Sage-Internal-UserId`
+- `oauth`: Sage redirects users to an upstream OAuth/OIDC provider configured through `SAGE_AUTH_PROVIDERS`
+- `native`: Sage uses its built-in username/password login
+
+Minimal trusted proxy example:
+
+```bash
+export SAGE_AUTH_MODE="trusted_proxy"
+export SAGE_TRUSTED_IDENTITY_PROXY_IPS="10.0.0.0/8,127.0.0.1/32"
+```
+
+Minimal OAuth example:
+
+```bash
+export SAGE_AUTH_MODE="oauth"
+export SAGE_AUTH_PROVIDERS='[{"id":"corp-sso","type":"oidc","name":"Corp SSO","discovery_url":"https://sso.example.com/.well-known/openid-configuration","client_id":"sage","client_secret":"secret"}]'
+```
+
+Minimal native auth example:
+
+```bash
+export SAGE_AUTH_MODE="native"
+```
+
+For local development, the default `SAGE_ENV` is `development`. If you set `SAGE_ENV=production` or `SAGE_ENV=staging`, you must also provide explicit values for:
+
+- `SAGE_JWT_KEY`
+- `SAGE_REFRESH_TOKEN_SECRET`
+- `SAGE_SESSION_SECRET`
+
+Production-like mode also forces secure session cookies.
+
 ## First Successful Run Checklist
 
 You should be able to complete at least one of these checks:
