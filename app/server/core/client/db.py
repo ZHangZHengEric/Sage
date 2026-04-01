@@ -129,7 +129,7 @@ class SessionManager:
 
         # 数据库初始化
         if self.db_type == "file":
-            self.db_file = os.path.join("./agent_platform.db")
+            self.db_file = os.path.join("./sage.db")
             logger.debug(f"使用file数据库, 数据地址: {self.db_file}")
         elif self.db_type == "memory":
             self.db_file = ":memory:"

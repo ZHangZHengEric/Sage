@@ -20,6 +20,7 @@ from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
 from .. import models
 from ..core import config
 from ..core.exceptions import SageHTTPException
+from .agent_inherit import ensure_agent_inherit_dir
 from .chat.utils import create_model_client
 
 # ================= 工具函数 =================
@@ -105,6 +106,19 @@ async def create_agent(
     orm_obj = models.Agent(agent_id=agent_id, name=agent_name, config=agent_config)
     orm_obj.user_id = user_id
     await dao.save(orm_obj)
+    try:
+        ensure_agent_inherit_dir(agent_id)
+    except Exception as e:
+        logger.error(f"Agent {agent_id} inherit 目录初始化失败: {e}")
+        try:
+            await dao.delete_by_id(agent_id)
+            logger.info(f"Agent {agent_id} 已回滚删除")
+        except Exception as rollback_error:
+            logger.error(f"Agent {agent_id} 回滚删除失败: {rollback_error}")
+        raise SageHTTPException(
+            detail="Agent 初始化默认 inherit 目录失败",
+            error_detail=str(e),
+        )
     logger.info(f"Agent {agent_id} 创建成功")
     return orm_obj
 
