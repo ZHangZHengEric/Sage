@@ -4,8 +4,8 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Body, HTTPException, Path
 from pydantic import BaseModel, Field
 
-from ..models.base import get_local_now
-from ..models.questionnaire import QuestionnaireDao, QuestionnaireSession
+from common.models.base import get_local_now
+from common.models.questionnaire import QuestionnaireDao, QuestionnaireSession
 
 
 questionnaire_router = APIRouter(prefix="/api/questionnaires", tags=["Questionnaires"])

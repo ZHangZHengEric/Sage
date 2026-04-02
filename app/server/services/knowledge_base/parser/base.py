@@ -5,14 +5,15 @@ from typing import TYPE_CHECKING, Any, Dict, List
 from loguru import logger
 from sagents.utils.file_parser import FileParser
 
-from .... import models
+from common.models.file import File
+from common.models.kdb import KdbDoc
 
 if TYPE_CHECKING:
     from ..knowledge_base import DocumentInput
 
 
 class BaseParser:
-    async def clear_old(self, index_name: str, doc: models.KdbDoc) -> List[str]:
+    async def clear_old(self, index_name: str, doc: KdbDoc) -> List[str]:
         """
         清理旧文档
         Returns:
@@ -21,7 +22,7 @@ class BaseParser:
         logger.info(f"[Parser] clear_old: index_name={index_name}, doc_id={doc.id}")
         return []
 
-    async def process(self, index_name: str, doc: models.KdbDoc, file: models.File | None = None) -> List["DocumentInput"]:
+    async def process(self, index_name: str, doc: KdbDoc, file: File | None = None) -> List["DocumentInput"]:
         """
         处理文档
         Returns:

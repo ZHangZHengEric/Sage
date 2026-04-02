@@ -1,6 +1,6 @@
 import pytest
 
-from app.server.core import config
+from common.core import config
 
 
 def test_production_like_config_rejects_default_secrets(monkeypatch):

@@ -16,9 +16,9 @@ from fastapi import UploadFile
 from loguru import logger
 from sagents.skill.skill_manager import get_skill_manager, SkillManager
 
-from .. import models
-from ..core.exceptions import SageHTTPException
-from ..core.config import get_startup_config
+from common.core.config import get_startup_config
+from common.core.exceptions import SageHTTPException
+from common.models.agent import AgentConfigDao
 
 
 def _set_permissions_recursive(path, dir_mode=0o755, file_mode=0o644):
@@ -90,8 +90,6 @@ def _collect_all_skills() -> List[Any]:
     Returns:
         所有技能的列表
     """
-    from ..core.config import get_startup_config
-
     cfg = get_startup_config()
     skill_dir = cfg.skill_dir if cfg else "skills"
     user_dir = cfg.user_dir if cfg else "users"
@@ -208,13 +206,13 @@ async def list_skills(
 
     allowed_skills = None
     if filter_agent_id:
-        agent_dao = models.AgentConfigDao()
+        agent_dao = AgentConfigDao()
         agent = await agent_dao.get_by_id(filter_agent_id)
         if agent and agent.config:
             allowed_skills = agent.config.get("availableSkills") or agent.config.get("available_skills")
 
     # 预加载所有agent信息用于获取agent名称
-    agent_dao = models.AgentConfigDao()
+    agent_dao = AgentConfigDao()
     all_agents = await agent_dao.get_list()
     agent_name_map = {agent.agent_id: agent.name for agent in all_agents}
     
@@ -273,15 +271,13 @@ async def get_agent_available_skills(
     Returns:
         技能列表，每个技能包含name, description, source_dimension
     """
-    from ..core.config import get_startup_config
-    
     cfg = get_startup_config()
     skill_dir = cfg.skill_dir if cfg else "skills"
     user_dir = cfg.user_dir if cfg else "users"
     agents_dir = cfg.agents_dir if cfg else "agents"
     
     # 获取agent配置中的user_id
-    agent_dao = models.AgentConfigDao()
+    agent_dao = AgentConfigDao()
     agent = await agent_dao.get_by_id(agent_id)
     agent_user_id = agent.user_id if agent and agent.user_id else current_user_id
     
@@ -588,7 +584,6 @@ async def import_skill_by_file(
     is_agent: bool = False,
     agent_id: Optional[str] = None) -> str:
     """通过上传 ZIP 文件导入技能"""
-    from ..core.config import get_startup_config
     cfg = get_startup_config()
 
     if is_system and role != "admin":
@@ -649,7 +644,6 @@ async def import_skill_by_url(
     is_agent: bool = False,
     agent_id: Optional[str] = None) -> str:
     """通过 URL 导入技能"""
-    from ..core.config import get_startup_config
     cfg = get_startup_config()
 
     if is_system and role != "admin":

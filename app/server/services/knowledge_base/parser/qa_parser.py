@@ -9,9 +9,10 @@ import httpx
 from loguru import logger
 import openpyxl
 
-from .... import models
-from ....core import config
-from ....utils.id import gen_id
+from common.core import config
+from common.models.file import File
+from common.models.kdb import KdbDoc
+from common.utils.id import gen_id
 from .base import BaseParser
 
 if TYPE_CHECKING:
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
 
 
 class QAParser(BaseParser):
-    async def process(self, index_name: str, doc: models.KdbDoc, file: models.File) -> List["DocumentInput"]:
+    async def process(self, index_name: str, doc: KdbDoc, file: File) -> List["DocumentInput"]:
         # Lazy import to avoid circular dependency at runtime
         from ..knowledge_base import DocumentInput
 

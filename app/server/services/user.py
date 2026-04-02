@@ -6,15 +6,16 @@ from argon2 import PasswordHasher
 from argon2 import exceptions as argon2_exceptions
 from loguru import logger
 
-from .. import models
-from ..core import config
-from ..core.exceptions import SageHTTPException
+from common.core import config
+from common.core.exceptions import SageHTTPException
+from common.models.system import SystemInfoDao
+from common.models.user import User, UserDao
 from .auth.email_verification import (
     normalize_email,
     send_register_email_code,
     verify_register_email_code,
 )
-from ..utils.id import gen_id
+from common.utils.id import gen_id
 
 ph = PasswordHasher()
 
@@ -33,7 +34,7 @@ def _verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def _gen_tokens(user: models.User) -> Tuple[str, str, int]:
+def _gen_tokens(user: User) -> Tuple[str, str, int]:
     cfg = config.get_startup_config()
     exp_seconds = int(cfg.jwt_expire_hours) * 60 * 60
     now = int(time.time())
@@ -55,11 +56,11 @@ def hash_password(password: str) -> str:
     return _hash_password(password)
 
 
-def create_login_tokens(user: models.User) -> Tuple[str, str, int]:
+def create_login_tokens(user: User) -> Tuple[str, str, int]:
     return _gen_tokens(user)
 
 
-def build_user_claims(user: models.User) -> Dict[str, str]:
+def build_user_claims(user: User) -> Dict[str, str]:
     return {
         "userid": user.user_id,
         "username": user.username,
@@ -80,7 +81,7 @@ async def register_user(
     verification_code: Optional[str] = None,
 ) -> str:
     # Check if registration is allowed
-    sys_dao = models.SystemInfoDao()
+    sys_dao = SystemInfoDao()
     allow_reg = await sys_dao.get_by_key("allow_registration")
     if allow_reg == "false":
         raise SageHTTPException(
@@ -93,7 +94,7 @@ async def register_user(
             status_code=400, detail="注册必须填写邮箱", error_detail="email is required"
         )
 
-    dao = models.UserDao()
+    dao = UserDao()
     existing = await dao.get_by_username(username)
     if existing:
         raise SageHTTPException(
@@ -110,7 +111,7 @@ async def register_user(
 
     user_id = gen_id()
     password_hash = _hash_password(password)
-    user = models.User(
+    user = User(
         user_id=user_id,
         username=username,
         password_hash=password_hash,
@@ -123,7 +124,7 @@ async def register_user(
 
 
 async def send_register_verification_code(email: str) -> tuple[int, int]:
-    sys_dao = models.SystemInfoDao()
+    sys_dao = SystemInfoDao()
     allow_reg = await sys_dao.get_by_key("allow_registration")
     if allow_reg == "false":
         raise SageHTTPException(
@@ -136,7 +137,7 @@ async def send_register_verification_code(email: str) -> tuple[int, int]:
             status_code=400, detail="请输入邮箱地址", error_detail="email is required"
         )
 
-    dao = models.UserDao()
+    dao = UserDao()
     existing_email = await dao.get_by_email(normalized_email)
     if existing_email:
         raise SageHTTPException(
@@ -151,8 +152,8 @@ async def login_user(username_or_email: str, password: str) -> Tuple[str, str, i
     return create_login_tokens(user)
 
 
-async def authenticate_user(username_or_email: str, password: str) -> models.User:
-    dao = models.UserDao()
+async def authenticate_user(username_or_email: str, password: str) -> User:
+    dao = UserDao()
     user = await dao.get_by_username(username_or_email)
     if not user and "@" in username_or_email:
         user = await dao.get_by_email(username_or_email)
@@ -163,7 +164,7 @@ async def authenticate_user(username_or_email: str, password: str) -> models.Use
 
 
 async def change_password(user_id: str, old_password: str, new_password: str) -> None:
-    dao = models.UserDao()
+    dao = UserDao()
     user = await dao.get_by_id(user_id)
     if not user:
         # Check if it's admin (admin user in config cannot change password via this API)
@@ -179,19 +180,19 @@ async def change_password(user_id: str, old_password: str, new_password: str) ->
     logger.info(f"用户修改密码成功: {user.username}")
 
 
-async def get_user_list(page: int = 1, page_size: int = 20) -> Tuple[List[models.User], int]:
-    dao = models.UserDao()
-    return await dao.paginate_list(models.User, order_by=models.User.created_at.desc(), page=page, page_size=page_size)
+async def get_user_list(page: int = 1, page_size: int = 20) -> Tuple[List[User], int]:
+    dao = UserDao()
+    return await dao.paginate_list(User, order_by=User.created_at.desc(), page=page, page_size=page_size)
 
 
 async def delete_user(user_id: str) -> bool:
-    dao = models.UserDao()
+    dao = UserDao()
     user = await dao.get_by_id(user_id)
     if not user:
         raise SageHTTPException(detail="用户不存在", error_detail="user not found")
     if user.role == "admin":
         raise SageHTTPException(detail="无法删除管理员用户", error_detail="cannot delete admin")
-    await dao.delete_by_id(models.User, user_id)
+    await dao.delete_by_id(User, user_id)
     return True
 
 
@@ -203,7 +204,7 @@ async def add_user(
     phonenum: Optional[str] = None,
 ) -> str:
     email = normalize_email(email) or None
-    dao = models.UserDao()
+    dao = UserDao()
     existing = await dao.get_by_username(username)
     if existing:
         raise SageHTTPException(
@@ -218,7 +219,7 @@ async def add_user(
     
     user_id = gen_id()
     password_hash = _hash_password(password)
-    user = models.User(
+    user = User(
         user_id=user_id,
         username=username,
         password_hash=password_hash,
@@ -233,7 +234,7 @@ async def add_user(
 
 async def get_user_options() -> List[dict]:
     """Get simplified user list for selection options"""
-    dao = models.UserDao()
+    dao = UserDao()
     # Fetch up to 1000 users for dropdown
     users = await dao.get_list(limit=1000)
     return [{"label": u.username, "value": u.user_id} for u in users]

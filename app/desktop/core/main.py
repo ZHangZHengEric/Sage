@@ -43,16 +43,17 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 
-from .core.exceptions import register_exception_handlers
-from .core.middleware import register_middlewares
-from .core.config import init_startup_config
+from common.core.config import init_startup_config
+from common.core.context import get_request_id
+from common.core.exceptions import register_exception_handlers
+from common.core.middleware import register_cors_middleware, register_request_logging_middleware
+from common.utils.logging import init_logging_base
 from .lifecycle import (
     cleanup_system,
     initialize_system,
     post_initialize_task,
 )
 from .routers import register_routes as register_chat_routes
-from .utils.log import init_logging
 
 
 @asynccontextmanager
@@ -86,7 +87,8 @@ def create_fastapi_app() -> FastAPI:
     )
 
     # 注册中间件
-    register_middlewares(app)
+    register_cors_middleware(app)
+    register_request_logging_middleware(app)
 
     # 注册异常处理器
     register_exception_handlers(app)
@@ -259,7 +261,7 @@ def main():
         sessions_dir.mkdir(parents=True, exist_ok=True)
         os.environ["SAGE_SESSIONS_PATH"] = str(sessions_dir)
 
-        cfg = init_startup_config()
+        cfg = init_startup_config(mode="desktop")
         
         # Get port from environment variable SAGE_PORT, or find a free one if not set
         port_env = os.environ.get("SAGE_PORT")
@@ -283,7 +285,13 @@ def main():
             print(f"Set SAGE_PORT environment variable to {port}", flush=True)
             
         print(f"Starting Sage Desktop Server on port {port}...", flush=True)
-        init_logging(log_name="sage-desktop", log_level="INFO", log_path=logs_dir)
+        init_logging_base(
+            log_name="sage-desktop",
+            log_level="INFO",
+            log_path=str(logs_dir),
+            get_request_id=get_request_id,
+            use_safe_stdout=False,
+        )
         start_server(port)
         return 0
     except KeyboardInterrupt:

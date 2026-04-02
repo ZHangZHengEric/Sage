@@ -4,22 +4,20 @@ from sagents.skill import SkillManager, set_skill_manager
 from sagents.tool.tool_manager import ToolManager, set_tool_manager
 from sagents.session_runtime import initialize_global_session_manager
 
-from .core.client.chat import close_chat_client, init_chat_client
-from .core.client.db import close_db_client, init_db_client
+from common.core.client.chat import close_chat_client, init_chat_client
+from common.core.client.db import close_db_client, init_db_client
+from common.core.config import get_startup_config
 
 
 async def initialize_db_connection():
     try:
-        db_client = await init_db_client()
+        db_client = await init_db_client(get_startup_config())
         if db_client is not None:
             logger.info("数据库客户端已初始化")
-            from . import models
+            from common.models.base import Base
             async with db_client._engine.begin() as conn:
-                from . import models
-                
-
                 # Create all tables
-                await conn.run_sync(models.Base.metadata.create_all)
+                await conn.run_sync(Base.metadata.create_all)
                 # Check and update schema for existing tables
                 from .db_schema import sync_database_schema
                 await conn.run_sync(sync_database_schema)
@@ -27,7 +25,7 @@ async def initialize_db_connection():
             logger.debug("数据库自动建表完成")
         try:
             # Load default provider settings first
-            from .models.llm_provider import LLMProviderDao
+            from common.models.llm_provider import LLMProviderDao
             llm_dao = LLMProviderDao()
             default_provider = await llm_dao.get_default()
             if default_provider: 
@@ -296,7 +294,7 @@ async def close_skill_manager():
 async def initialize_im_service():
     """初始化 IM 服务 - 从数据库加载配置并启动"""
     try:
-        from .models import IMChannelConfigDao
+        from common.models.im_channel import IMChannelConfigDao
         import asyncio
         
         dao = IMChannelConfigDao()
@@ -377,9 +375,9 @@ async def validate_and_disable_mcp_servers():
     - 若注册抛出异常或失败，则从数据库中删除该服务器；
     - 若之前有部分注册的工具，尝试从 ToolManager 中移除。
     """
-    from . import models
+    from common.models.mcp_server import MCPServerDao
 
-    mcp_dao = models.MCPServerDao()
+    mcp_dao = MCPServerDao()
     servers = await mcp_dao.get_list()
     removed_count = 0
     registered_count = 0
@@ -415,4 +413,3 @@ async def shutdown_clients():
         await close_db_client()
     finally:
         logger.info("数据库客户端 已关闭")
-

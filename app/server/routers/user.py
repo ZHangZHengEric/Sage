@@ -1,25 +1,27 @@
 from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import RedirectResponse
 
-from ..core.render import Response
-from ..schemas.base import BaseResponse
-from ..schemas.user import (
+from common.core.render import Response
+from common.models.agent import AgentConfigDao
+from common.models.llm_provider import LLMProviderDao
+from common.models.user import UserConfigDao
+from common.schemas.base import (
+    BaseResponse,
+    ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
     RegisterRequest,
     RegisterResponse,
     RegisterVerificationCodeRequest,
     RegisterVerificationCodeResponse,
-    UserInfoResponse,
-    UserListResponse,
-    UserDTO,
+    UserAddRequest,
     UserConfigResponse,
     UserConfigUpdateRequest,
+    UserDTO,
     UserDeleteRequest,
-    UserAddRequest,
-    ChangePasswordRequest,
+    UserInfoResponse,
+    UserListResponse,
 )
-from ..models.user import UserConfigDao
 from ..services.user import (
     authenticate_user,
     build_user_claims,
@@ -42,8 +44,6 @@ from ..services.auth.external_oauth import (
     get_default_oidc_provider,
     is_local_auth_enabled,
 )
-from ..models.llm_provider import LLMProviderDao
-from ..models.agent import AgentConfigDao
 
 user_router = APIRouter(prefix="/api/user", tags=["User"])
 

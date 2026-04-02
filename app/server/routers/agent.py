@@ -8,8 +8,8 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from fastapi.responses import FileResponse
 
-from app.server.models.conversation import ConversationDao
-from ..core.render import Response
+from common.core.render import Response
+from common.models.conversation import ConversationDao
 from ..services.agent import (
     auto_generate_agent,
     create_agent,

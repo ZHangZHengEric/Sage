@@ -16,15 +16,16 @@ from typing import Optional, Dict, Any
 from fastapi import APIRouter, Path as FastApiPath
 from pydantic import BaseModel, Field
 
-from ..core.render import Response
-from ..models import IMChannelConfigDao
+from common.core.render import Response
+from common.models.agent import AgentConfigDao
+from common.models.im_channel import IMChannelConfigDao
 
 # Import new Agent IM Config system
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from mcp_servers.im_server.agent_config import (
-    get_agent_im_config, 
+    get_agent_im_config,
     AgentIMConfig,
     IMESSAGE_PROVIDER,
     validate_provider_config
@@ -43,7 +44,6 @@ async def is_agent_default_async(agent_id: str) -> bool:
     Async version for use in FastAPI routes.
     """
     try:
-        from app.desktop.core.models.agent import AgentConfigDao
         dao = AgentConfigDao()
         agent = await dao.get_by_id(agent_id)
         if agent:

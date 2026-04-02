@@ -2,8 +2,8 @@ from typing import Optional
 
 import jwt
 
-from . import config
-from .exceptions import SageHTTPException
+from common.core import config
+from common.core.exceptions import SageHTTPException
 
 
 def get_session_claims(request) -> Optional[dict]:
