@@ -35,7 +35,7 @@ class LLMProviderBase(BaseModel):
 
 
 class LLMProviderCreate(LLMProviderBase):
-    pass
+    name: Optional[str] = None
 
 
 class LLMProviderUpdate(BaseModel):

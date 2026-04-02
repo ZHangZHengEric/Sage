@@ -5,7 +5,6 @@ OpenSandbox 远程沙箱实现
 import ast
 import base64
 import json
-import logging
 import os
 import re
 import shlex
@@ -15,8 +14,7 @@ from typing import Dict, List, Optional
 from .base import RemoteSandboxProvider
 from ...interface import CommandResult, ExecutionResult, FileInfo
 from ...config import MountPath
-
-logger = logging.getLogger(__name__)
+from sagents.utils.logger import logger
 
 
 def _get_max_append_bytes() -> int:

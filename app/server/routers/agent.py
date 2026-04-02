@@ -12,12 +12,14 @@ from common.models.conversation import ConversationDao
 from common.schemas.agent import (
     AgentConfigDTO,
     AutoGenAgentRequest,
+    AsyncTaskResponse,
     AuthorizationRequest,
     SystemPromptOptimizeRequest,
     convert_agent_to_config,
     convert_config_to_agent,
 )
 from common.services import agent_service
+from common.services.async_task_service import get_async_task_service
 from sagents.utils.prompt_manager import PromptManager
 from loguru import logger
 
@@ -196,6 +198,24 @@ async def auto_generate(request: AutoGenAgentRequest, http_request: Request):
     )
 
 
+@agent_router.post("/auto-generate/submit")
+async def auto_generate_submit(request: AutoGenAgentRequest, http_request: Request):
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    task_service = get_async_task_service()
+    task = await task_service.submit(
+        task_type="agent_auto_generate",
+        owner_id=user_id,
+        metadata={"agent_description": request.agent_description[:120]},
+        runner=lambda: agent_service.auto_generate_agent(
+            agent_description=request.agent_description,
+            available_tools=request.available_tools,
+            user_id=user_id,
+        ),
+    )
+    return await Response.succ(data=task, message="Agent自动生成任务已提交")
+
+
 @agent_router.post("/system-prompt/optimize")
 async def optimize(request: SystemPromptOptimizeRequest, http_request: Request):
     """
@@ -215,6 +235,40 @@ async def optimize(request: SystemPromptOptimizeRequest, http_request: Request):
         user_id=user_id,
     )
     return await Response.succ(data=res, message="系统提示词优化成功")
+
+
+@agent_router.post("/system-prompt/optimize/submit")
+async def optimize_submit(request: SystemPromptOptimizeRequest, http_request: Request):
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    task_service = get_async_task_service()
+    task = await task_service.submit(
+        task_type="system_prompt_optimize",
+        owner_id=user_id,
+        metadata={"original_length": len(request.original_prompt or "")},
+        runner=lambda: agent_service.optimize_system_prompt(
+            original_prompt=request.original_prompt,
+            optimization_goal=request.optimization_goal,
+            user_id=user_id,
+        ),
+    )
+    return await Response.succ(data=task, message="系统提示词优化任务已提交")
+
+
+@agent_router.get("/tasks/{task_id}")
+async def get_task(task_id: str, http_request: Request):
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    task = await get_async_task_service().get(task_id, user_id)
+    return await Response.succ(data=task, message="获取任务状态成功")
+
+
+@agent_router.post("/tasks/{task_id}/cancel")
+async def cancel_task(task_id: str, http_request: Request):
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    task = await get_async_task_service().cancel(task_id, user_id)
+    return await Response.succ(data=task, message="任务取消请求已提交")
 
 
 @agent_router.get("/{agent_id}/auth")

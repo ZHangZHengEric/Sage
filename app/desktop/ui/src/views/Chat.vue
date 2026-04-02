@@ -250,10 +250,13 @@
             </div>
             <MessageInput
               ref="messageInputRef"
+              :agent-id="selectedAgentId"
               :is-loading="isCurrentSessionLoading"
               :preset-text="abilityPresetInput"
+              :session-id="currentSessionId"
               :selected-agent="selectedAgent"
               :config="config"
+              :delivery-context-messages="recentDeliveryContextMessages"
               @send-message="handleSendMessageWithAbilityClear"
               @config-change="updateConfig"
               @stop-generation="stopGeneration"
@@ -414,6 +417,57 @@ const {
 } = useChatPage(props)
 
 const normalizedMessages = computed(() => normalizeChatMessages(filteredMessages.value))
+
+const getMessageTextForInputOptimization = (message) => {
+  const content = message?.content
+  if (typeof content === 'string') return content.trim()
+  if (!Array.isArray(content)) return ''
+
+  return content
+    .filter(item => item?.type === 'text' && typeof item.text === 'string')
+    .map(item => item.text.trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim()
+}
+
+const getDeliveryActionLabel = (actionCode) => (
+  t(`chat.deliveryAction.${actionCode}`) || t('chat.deliveryProgressMessage')
+)
+
+const recentDeliveryContextMessages = computed(() => {
+  const userMessageIndices = normalizedMessages.value
+    .map((message, index) => (message?.role === 'user' ? index : -1))
+    .filter(index => index >= 0)
+
+  const startIndex = userMessageIndices.length > 2 ? userMessageIndices[userMessageIndices.length - 2] : 0
+  const recentMessages = normalizedMessages.value.slice(startIndex)
+  const deliveryItems = buildDeliveryDisplayItems(recentMessages, {
+    isLoading: isCurrentSessionLoading.value
+  }).items
+
+  return deliveryItems.flatMap((item) => {
+    if (item.type === 'message') {
+      const message = item.message
+      if (!message || message.type === 'token_usage' || message.message_type === 'token_usage') {
+        return []
+      }
+
+      const content = getMessageTextForInputOptimization(message)
+      if (!content) return []
+      return [{ role: message.role || 'assistant', content }]
+    }
+
+    if (item.type === 'tool_group' || item.type === 'turn_summary') {
+      return [{
+        role: 'assistant',
+        content: getDeliveryActionLabel(item.actionCode)
+      }]
+    }
+
+    return []
+  })
+})
 
 const displayItems = computed(() => {
   if (displayMode.value === CHAT_DISPLAY_MODES.DELIVERY) {

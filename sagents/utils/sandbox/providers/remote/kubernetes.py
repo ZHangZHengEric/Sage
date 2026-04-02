@@ -4,7 +4,6 @@ Kubernetes 远程沙箱实现
 通过创建 K8s Pod 实现沙箱隔离
 """
 
-import logging
 import os
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
@@ -12,8 +11,7 @@ from typing import Any, Dict, List, Optional
 from .base import RemoteSandboxProvider
 from ...interface import CommandResult, ExecutionResult, FileInfo
 from ...config import MountPath
-
-logger = logging.getLogger(__name__)
+from sagents.utils.logger import logger
 
 
 class KubernetesSandboxProvider(RemoteSandboxProvider):

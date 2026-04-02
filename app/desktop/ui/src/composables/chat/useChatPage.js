@@ -543,17 +543,25 @@ export const useChatPage = (props) => {
   const loadConversationData = async (conversation) => {
     try {
       clearMessages()
-      if (conversation.agent_id && agents.value.length > 0) {
-        const agent = agents.value.find(a => a.id === conversation.agent_id)
-        if (agent) {
-          selectAgent(agent)
+      const sessionId = conversation.session_id || null
+
+      if (sessionId) {
+        currentSessionId.value = sessionId
+        await loadConversationMessages(sessionId)
+      } else {
+        if (conversation.agent_id && agents.value.length > 0) {
+          const agent = agents.value.find(a => a.id === conversation.agent_id)
+          if (agent) {
+            selectAgent(agent)
+          }
         }
+        if (conversation.messages && conversation.messages.length > 0) {
+          messages.value = conversation.messages
+          rebuildMessageIdIndexMap()
+        }
+        currentSessionId.value = sessionId
       }
-      if (conversation.messages && conversation.messages.length > 0) {
-        messages.value = conversation.messages
-        rebuildMessageIdIndexMap()
-      }
-      currentSessionId.value = conversation.session_id || null
+
       // 进入历史前保存「你能做什么」与能力面板状态，从历史回新会话时据此恢复
       abilityButtonVisibleBeforeHistory.value = showAbilityButton.value
       abilityPanelOpenBeforeHistory.value = showAbilityPanel.value

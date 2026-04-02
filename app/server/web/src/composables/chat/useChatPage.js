@@ -369,22 +369,30 @@ export const useChatPage = (props) => {
   const loadConversationData = async (conversation) => {
     try {
       clearMessages()
-      if (conversation.agent_id && agents.value.length > 0) {
-        const agent = agents.value.find(a => a.id === conversation.agent_id)
-        if (agent) {
-          await selectAgent(agent)
-        } else {
-          await selectAgent(agents.value[0])
+      const sessionId = conversation.session_id || null
+
+      if (sessionId) {
+        currentSessionId.value = sessionId
+        await loadConversationMessages(sessionId)
+      } else {
+        if (conversation.agent_id && agents.value.length > 0) {
+          const agent = agents.value.find(a => a.id === conversation.agent_id)
+          if (agent) {
+            await selectAgent(agent)
+          } else {
+            await selectAgent(agents.value[0])
+          }
         }
+        if (conversation.messages && conversation.messages.length > 0) {
+          messages.value = conversation.messages.map(msg => ({
+            ...msg,
+            agent_id: msg.agent_id || conversation.agent_id
+          }))
+          rebuildMessageIdIndexMap()
+        }
+        currentSessionId.value = sessionId
       }
-      if (conversation.messages && conversation.messages.length > 0) {
-        messages.value = conversation.messages.map(msg => ({
-          ...msg,
-          agent_id: msg.agent_id || conversation.agent_id
-        }))
-        rebuildMessageIdIndexMap()
-      }
-      currentSessionId.value = conversation.session_id || null
+
       nextTick(() => {
         shouldAutoScroll.value = true
         scrollToBottom(true)

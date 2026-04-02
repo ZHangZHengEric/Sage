@@ -796,6 +796,9 @@ export default {
   'messageInput.stop': '停止',
   'messageInput.sendTitle': '发送消息',
   'messageInput.stopTitle': '停止生成',
+  'messageInput.optimizeTitle': '优化输入',
+  'messageInput.cancelOptimizeTitle': '取消优化',
+  'messageInput.optimizeError': '优化输入失败，请重试',
   'messageInput.uploadFile': '上传文件',
   'messageInput.removeFile': '移除文件',
 

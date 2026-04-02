@@ -4,15 +4,13 @@ Firecracker 微虚拟机沙箱实现
 通过 Firecracker MicroVM 实现轻量级虚拟化隔离
 """
 
-import logging
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 from .base import RemoteSandboxProvider
 from ...interface import CommandResult, ExecutionResult, FileInfo
 from ...config import MountPath
-
-logger = logging.getLogger(__name__)
+from sagents.utils.logger import logger
 
 
 class FirecrackerSandboxProvider(RemoteSandboxProvider):

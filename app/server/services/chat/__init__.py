@@ -1,5 +1,6 @@
 from common.services.chat_service import (
     execute_chat_session,
+    optimize_user_input,
     populate_request_from_agent_config,
     prepare_session,
 )
@@ -7,5 +8,6 @@ from common.services.chat_service import (
 __all__ = [
     "prepare_session",
     "execute_chat_session",
+    "optimize_user_input",
     "populate_request_from_agent_config",
 ]

@@ -30,6 +30,7 @@ def _get_first_api_key(api_key: Any) -> Any:
 def create_model_client(client_params: Dict[str, Any]) -> Any:
     api_key = _get_first_api_key(client_params.get("api_key"))
     base_url = client_params.get("base_url")
+    timeout = client_params.get("timeout", 60 * 30)
 
     logger.info(
         f"初始化Chat模型客户端: model={client_params.get('model')}, base_url={base_url}"
@@ -37,6 +38,7 @@ def create_model_client(client_params: Dict[str, Any]) -> Any:
     model_client = AsyncOpenAI(
         api_key=api_key,
         base_url=base_url,
+        timeout=timeout,
     )
     model_client.model = client_params.get("model")
     return model_client

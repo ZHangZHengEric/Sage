@@ -70,6 +70,17 @@ class SystemPromptOptimizeRequest(BaseModel):
     optimization_goal: Optional[str] = None
 
 
+class AsyncTaskResponse(BaseModel):
+    task_id: str
+    task_type: str
+    status: str
+    result: Optional[Any] = None
+    error: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None
+    created_at: float
+    updated_at: float
+
+
 def convert_config_to_agent(
     agent_id: str,
     config: Dict[str, Any],
@@ -139,6 +150,7 @@ __all__ = [
     "AgentConfigDTO",
     "AutoGenAgentRequest",
     "SystemPromptOptimizeRequest",
+    "AsyncTaskResponse",
     "convert_config_to_agent",
     "convert_agent_to_config",
     "AgentAbilitiesRequest",

@@ -112,6 +112,27 @@ class LLMProviderDao(BaseDao):
     async def get_by_id(self, provider_id: str) -> Optional["LLMProvider"]:
         return await BaseDao.get_by_id(self, LLMProvider, provider_id)
 
+    async def get_by_config(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        user_id: Optional[str] = None,
+    ) -> List["LLMProvider"]:
+        where = [
+            LLMProvider.base_url == base_url,
+            LLMProvider.model == model,
+        ]
+        if user_id is not None:
+            where.append(LLMProvider.user_id == user_id)
+        return await BaseDao.get_list(
+            self,
+            LLMProvider,
+            where=where,
+            order_by=LLMProvider.created_at.desc(),
+            limit=100,
+        )
+
     async def get_list(self, user_id: Optional[str] = None) -> List["LLMProvider"]:
         where = []
         if user_id is not None:
