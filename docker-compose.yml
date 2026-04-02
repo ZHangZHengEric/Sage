@@ -1,11 +1,11 @@
 services:
-  sage-server:
+  sage-server-dev:
     restart: always
     build:
       context: .
       dockerfile: docker/Dockerfile.server
-    image: sage-server:v1.0
-    container_name: sage-server
+    image: sage-server-dev:v1.0
+    container_name: sage-server-dev
     volumes:
       - ${SAGE_ROOT}/sage-server/sessions:/app/sessions
       - ${SAGE_ROOT}/sage-server/agents:/app/agents
@@ -14,18 +14,18 @@ services:
       - ${SAGE_ROOT}/sage-server/skills:/app/skills
       - ${SAGE_ROOT}/sage-server/users:/app/users
     ports:
-      - 30050:8080
+      - 30150:8080
     env_file:
       - .env
     environment:
       SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage}
-      SAGE_TRACE_JAEGER_UI_URL: ${SAGE_TRACE_JAEGER_UI_URL:-http://sage-jaeger:16686/jaeger}
-      SAGE_TRACE_JAEGER_PUBLIC_URL: ${SAGE_TRACE_JAEGER_PUBLIC_URL:-http://127.0.0.1:30051/jaeger}
+      SAGE_TRACE_JAEGER_UI_URL: ${SAGE_TRACE_JAEGER_UI_URL:-http://sage-jaeger-dev:16686/jaeger}
+      SAGE_TRACE_JAEGER_PUBLIC_URL: ${SAGE_TRACE_JAEGER_PUBLIC_URL:-http://127.0.0.1:30151/jaeger}
       SAGE_TRACE_JAEGER_BASE_PATH: ${SAGE_TRACE_JAEGER_BASE_PATH:-/api/observability/jaeger}
     mem_limit: 16g
     cpus: 4.0
 
-  sage-web:
+  sage-web-dev:
     restart: always
     build:
       context: .
@@ -34,45 +34,45 @@ services:
         VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
         VITE_SAGE_TRACE_WEB_URL: ${SAGE_TRACE_WEB_URL}
         VITE_SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage/}
-    image: sage-web:v1.0
-    container_name: sage-web
+    image: sage-web-dev:v1.0
+    container_name: sage-web-dev
     ports:
-      - 30051:80
+      - 30151:80
     environment:
       TZ: 'Asia/Shanghai'
       VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
       VITE_SAGE_TRACE_WEB_URL: ${SAGE_TRACE_WEB_URL}
       VITE_SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage/}
     depends_on:
-      - sage-server
+      - sage-server-dev
     mem_limit: 512m
     cpus: 0.5
 
-  sage-wiki:
+  sage-wiki-dev:
     restart: always
     build:
       context: .
       dockerfile: docker/Dockerfile.wiki
       args:
         VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
-    image: sage-wiki:v1.0
-    container_name: sage-wiki
+    image: sage-wiki-dev:v1.0
+    container_name: sage-wiki-dev
     ports:
-      - 30057:80
+      - 30157:80
     environment:
       TZ: 'Asia/Shanghai'
       VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
     depends_on:
-      - sage-server
+      - sage-server-dev
     mem_limit: 512m
     cpus: 0.5
 
-  sage-mysql:
+  sage-mysql-dev:
     restart: always
     image: docker.m.daocloud.io/mysql:8.4
-    container_name: sage-mysql
+    container_name: sage-mysql-dev
     ports:
-      - 30052:3306
+      - 30152:3306
     environment:
       TZ: 'Asia/Shanghai'
       MYSQL_ROOT_PASSWORD: ${SAGE_MYSQL_PASSWORD}
@@ -86,38 +86,14 @@ services:
       - ${SAGE_ROOT}/mysql/conf:/etc/mysql/conf.d
     mem_limit: 1g
     cpus: 1.0
-  sage-es:
-    restart: always
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.es
-    image: sage-es:v1.0
-    container_name: sage-es
-    ports:
-      - 30053:9200
-    environment:
-      - discovery.type=single-node
-      - bootstrap.memory_lock=true
-      - ELASTIC_PASSWORD=${SAGE_ELASTICSEARCH_PASSWORD}
-      - xpack.security.enabled=false
-      - TAKE_FILE_OWNERSHIP=true
-      - "ES_JAVA_OPTS=-Xms1024m -Xmx1024m"
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-    volumes:
-      - ${SAGE_ROOT}/es/data/node:/usr/share/elasticsearch/data
-    mem_limit: 2g
-    cpus: 1.0
-  sage-rustfs:
+  sage-rustfs-dev:
     image: docker.m.daocloud.io/rustfs/rustfs:latest
     ports:
-      - 30054:9000
-      - 30055:9001
+      - 30154:9000
+      - 30155:9001
     volumes:
       - ${SAGE_ROOT}/rustfs/data:/data
-    container_name: sage-rustfs
+    container_name: sage-rustfs-dev
     restart: always
     environment:
       - RUSTFS_ADDRESS=0.0.0.0:9000
@@ -139,22 +115,5 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    mem_limit: 1g
-    cpus: 0.5
-  sage-jaeger:
-    image: docker.m.daocloud.io/jaegertracing/jaeger:2.16.0
-    container_name: sage-jaeger
-    restart: always
-    command:
-      - --config
-      - /etc/jaeger/config.yaml
-    volumes:
-      - ./docker/jaeger/config.yaml:/etc/jaeger/config.yaml:ro
-    ports:
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
-    expose:
-      - "16686"
-      - "13133"
     mem_limit: 1g
     cpus: 0.5
