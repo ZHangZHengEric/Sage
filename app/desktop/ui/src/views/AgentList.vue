@@ -330,6 +330,7 @@ import { toolAPI } from '../api/tool.js'
 import { skillAPI } from '../api/skill.js'
 import MarkdownRenderer from '../components/chat/MarkdownRenderer.vue'
 import { useAgentEditStore } from '../stores/agentEdit'
+import { buildImportedAgentDraft, parseAgentConfigImport } from '../utils/agentConfigImport.js'
 import { dump } from 'js-yaml'
 import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 
@@ -678,7 +679,7 @@ const confirmExport = async () => {
 
 const processImportContent = (content) => {
   try {
-    const importedConfig = JSON.parse(content)
+    const importedConfig = parseAgentConfigImport(content)
 
     // 验证必要字段
     if (!importedConfig.name) {
@@ -686,30 +687,12 @@ const processImportContent = (content) => {
       return
     }
 
-    // 创建新的Agent配置
-    const newAgent = {
-      name: importedConfig.name + t('agent.importSuffix'),
-      llm_provider_id: importedConfig.llm_provider_id || null,
-      description: importedConfig.description || '',
-      systemPrefix: importedConfig.systemPrefix || '',
-      deepThinking: importedConfig.deepThinking || false,
-      multiAgent: importedConfig.multiAgent || false,
-      maxLoopCount: importedConfig.maxLoopCount || 10,
-      availableTools: importedConfig.availableTools || [],
-      availableSkills: importedConfig.availableSkills || [],
-      systemContext: importedConfig.systemContext || {},
-      availableWorkflows: importedConfig.availableWorkflows || {},
-      llmConfig: importedConfig.llmConfig || {}
-    }
-
-    // 移除可能存在的id，确保是创建新Agent
-    if (newAgent.id) {
-      delete newAgent.id
-    }
+    const newAgent = buildImportedAgentDraft(importedConfig, t('agent.importSuffix'))
 
     // 切换到编辑视图并预填数据
     editingAgent.value = newAgent
     currentView.value = 'edit'
+    toast.success(t('agent.importDataLoaded'))
 
   } catch (error) {
     alert(t('agent.importError'))
@@ -731,8 +714,8 @@ const handleImport = async () => {
         defaultPath: defaultDir,
         multiple: false,
         filters: [{
-          name: 'JSON Config',
-          extensions: ['json']
+          name: 'Agent Config',
+          extensions: ['json', 'yaml', 'yml']
         }]
       })
 
@@ -751,7 +734,7 @@ const handleImport = async () => {
   // Web fallback
   const input = document.createElement('input')
   input.type = 'file'
-  input.accept = '.json'
+  input.accept = '.json,.yaml,.yml,application/json,application/x-yaml,text/yaml,text/x-yaml'
   input.style.display = 'none'
 
   input.onchange = (event) => {
