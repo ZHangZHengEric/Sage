@@ -26,6 +26,13 @@ from common.models.conversation import ConversationDao
 from common.models.im_channel import IMChannelConfigDao
 from common.models.kdb import KdbDao
 from common.models.llm_provider import LLMProviderDao
+from common.services.chat_processor import ContentProcessor
+from common.services.chat_utils import (
+    create_model_client,
+    create_skill_proxy,
+    create_tool_proxy,
+    get_sessions_root,
+)
 from common.schemas.chat import CustomSubAgentConfig, StreamRequest
 
 
@@ -45,15 +52,6 @@ def _chat_exception(detail: str) -> SageHTTPException:
     if _is_desktop_mode():
         kwargs["status_code"] = 500
     return SageHTTPException(**kwargs)
-
-
-def _get_chat_module(module_name: str) -> Any:
-    module_prefix = (
-        "app.desktop.core.services.chat"
-        if _is_desktop_mode()
-        else "app.server.services.chat"
-    )
-    return importlib.import_module(f"{module_prefix}.{module_name}")
 
 
 def _fill_if_none(request: StreamRequest, field: str, value: Any) -> None:
@@ -397,8 +395,6 @@ class SageStreamService:
     def __init__(self, request: StreamRequest):
         self.request = request
         self.cfg = _get_cfg()
-        self.utils_module = _get_chat_module("utils")
-        self.processor_module = _get_chat_module("processor")
 
         self.runtime_user_id = self.request.user_id or "default_user"
         self.runtime_agent_id = self.request.agent_id or "".join(
@@ -406,7 +402,8 @@ class SageStreamService:
         )
 
         if _is_desktop_mode():
-            self.sessions_root = self._get_desktop_sessions_root()
+            self.sessions_root = Path(get_sessions_root())
+            self.sessions_root.mkdir(parents=True, exist_ok=True)
             self.agent_workspace_root = self._get_desktop_agent_workspace_root()
             self.agent_workspace = str(self.agent_workspace_root / self.runtime_agent_id)
         else:
@@ -426,22 +423,13 @@ class SageStreamService:
                     )
             _copy_sage_usage_docs_to_workspace(self.agent_workspace)
 
-        self.tool_manager = self.utils_module.create_tool_proxy(request.available_tools)
-        self.agent_skill_manager = None
-        if _is_desktop_mode():
-            self.skill_manager = self.utils_module.create_skill_proxy(
-                request.available_skills
-            )
-        else:
-            self.skill_manager, self.agent_skill_manager = self.utils_module.create_skill_proxy(
-                request.available_skills,
-                user_id=self.request.user_id,
-                agent_workspace=self.agent_workspace,
-            )
-
-        self.model_client = self.utils_module.create_model_client(
-            request.llm_model_config
+        self.tool_manager = create_tool_proxy(request.available_tools)
+        self.skill_manager, self.agent_skill_manager = create_skill_proxy(
+            request.available_skills,
+            user_id=self.request.user_id,
+            agent_workspace=self.agent_workspace,
         )
+        self.model_client = create_model_client(request.llm_model_config)
         if _is_desktop_mode():
             self.sage_engine = SAgent(
                 session_root_space=str(self.sessions_root),
@@ -453,14 +441,6 @@ class SageStreamService:
                 session_root_space=self.cfg.session_dir,
                 enable_obs=self.cfg.trace_jaeger_endpoint is not None,
             )
-
-    def _get_desktop_sessions_root(self) -> Path:
-        if os.environ.get("SAGE_SESSIONS_PATH"):
-            sessions_root = Path(os.environ.get("SAGE_SESSIONS_PATH"))
-        else:
-            sessions_root = Path.home() / ".sage" / "sessions"
-        sessions_root.mkdir(parents=True, exist_ok=True)
-        return sessions_root
 
     def _get_desktop_agent_workspace_root(self) -> Path:
         if os.environ.get("SAGE_AGENTS_PATH"):
@@ -547,7 +527,7 @@ class SageStreamService:
                     continue
                 for message in chunk:
                     result = message.to_dict()
-                    result = self.processor_module.ContentProcessor.clean_content(result)
+                    result = ContentProcessor.clean_content(result)
                     yield result
         except Exception as e:
             logger.bind(session_id=session_id).error(

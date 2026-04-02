@@ -14,6 +14,7 @@ from sagents.session_runtime import (
 from common.core import config
 from common.core.exceptions import SageHTTPException
 from common.models.conversation import Conversation, ConversationDao
+from common.services.chat_processor import ContentProcessor
 
 
 def _get_cfg() -> config.StartupConfig:
@@ -122,22 +123,17 @@ async def get_conversation_messages(
             )
         )
 
-    if _is_desktop_mode():
-        processor_module = "app.desktop.core.services.chat.processor"
-        stream_manager_module = "app.desktop.core.services.chat.stream_manager"
-    else:
-        processor_module = "app.server.services.chat.processor"
-        stream_manager_module = "app.server.services.chat.stream_manager"
-
-    processor_mod = __import__(processor_module, fromlist=["ContentProcessor"])
-    stream_manager_mod = __import__(stream_manager_module, fromlist=["StreamManager"])
-    content_processor = processor_mod.ContentProcessor
-    stream_manager = stream_manager_mod.StreamManager
+    stream_manager_module = (
+        "app.desktop.core.services.chat.stream_manager"
+        if _is_desktop_mode()
+        else "app.server.services.chat.stream_manager"
+    )
+    stream_manager = __import__(stream_manager_module, fromlist=["StreamManager"]).StreamManager
 
     view = build_conversation_messages_view(session_id)
     messages: List[Dict[str, Any]] = []
     for message in view["messages"]:
-        messages.append(content_processor.clean_content(message))
+        messages.append(ContentProcessor.clean_content(message))
 
     next_stream_index = stream_manager.get_instance().get_history_length(session_id)
     return {

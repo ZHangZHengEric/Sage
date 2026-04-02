@@ -15,8 +15,8 @@ from common.core.render import Response
 from common.models.system import SystemInfoDao
 from common.models.llm_provider import LLMProviderDao
 from common.models.agent import AgentConfigDao
+from common.services.chat_utils import get_sessions_root
 from ..services.agent_usage_stats import analyze_tools_usage
-from ..services.chat.utils import get_sessions_root
 
 # 创建路由器
 system_router = APIRouter(prefix="/api", tags=["System"])
