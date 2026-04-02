@@ -792,6 +792,7 @@ export default {
 
   // 消息输入
   'messageInput.placeholder': '输入您的消息... (Shift+Enter 换行)',
+  'messageInput.placeholderGenerating': 'AI正在生成回复，请稍候...',
   'messageInput.send': '发送',
   'messageInput.stop': '停止',
   'messageInput.sendTitle': '发送消息',
