@@ -314,8 +314,9 @@ async def init_db_client(cfg: Any) -> Optional[SessionManager]:
 
 async def get_global_db() -> SessionManager:
     global DB_MANAGER
-    if _DB_GETTER is not None:
-        return await _DB_GETTER()
+    getter = _DB_GETTER
+    if getter is not None and getter is not get_global_db:
+        return await getter()
     if DB_MANAGER is None:
         raise RuntimeError("全局数据库管理器未设置: 请在项目启动时初始化数据库客户端")
     return DB_MANAGER
@@ -332,7 +333,4 @@ async def close_db_client() -> None:
 
 def register_db_getter(getter) -> None:
     global _DB_GETTER
-    _DB_GETTER = getter
-
-
-register_db_getter(get_global_db)
+    _DB_GETTER = None if getter is get_global_db else getter
