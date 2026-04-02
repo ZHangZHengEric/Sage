@@ -3,7 +3,7 @@
     <!-- Header Area -->
     <div class="flex-none bg-background border-b">
       <!-- Categories / Tabs -->
-      <div class="p-4 md:px-6 pb-4 flex justify-between items-center">
+      <div class="p-4 md:px-6 pb-4 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
         <div class="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
           <button
             v-for="group in groups"
@@ -19,9 +19,33 @@
             <span class="ml-1 text-xs opacity-70 bg-black/10 dark:bg-white/10 px-1.5 rounded-full">{{ group.count }}</span>
           </button>
         </div>
-        <div class="relative flex-1 sm:w-64 sm:flex-none">
-          <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input v-model="searchTerm" :placeholder="t('skills.searchPlaceholder')" class="pl-9 h-9 w-full" />
+        <div class="flex items-center gap-2 w-full sm:w-auto">
+          <div class="inline-flex rounded-md border bg-background p-0.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              class="h-8 px-2"
+              :class="viewMode === 'card' ? 'bg-primary/10 text-primary' : 'text-muted-foreground'"
+              @click="viewMode = 'card'"
+            >
+              <LayoutGrid class="h-4 w-4 mr-1" />
+              {{ t('skills.viewCard') || '卡片' }}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              class="h-8 px-2"
+              :class="viewMode === 'list' ? 'bg-primary/10 text-primary' : 'text-muted-foreground'"
+              @click="viewMode = 'list'"
+            >
+              <List class="h-4 w-4 mr-1" />
+              {{ t('skills.viewList') || '列表' }}
+            </Button>
+          </div>
+          <div class="relative flex-1 sm:w-64 sm:flex-none">
+            <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input v-model="searchTerm" :placeholder="t('skills.searchPlaceholder')" class="pl-9 h-9 w-full" />
+          </div>
         </div>
       </div>
     </div>
@@ -33,78 +57,139 @@
           <Loader class="h-8 w-8 animate-spin text-primary" />
         </div>
 
-        <div v-else-if="displayedSkills.length > 0" class="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 pb-20">
-          <Card 
-            class="flex flex-col items-center justify-center border-dashed border-2 cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-all duration-300 min-h-[140px]"
-            @click="showImportModal = true"
-          >
-            <div class="flex flex-col items-center gap-2 text-muted-foreground hover:text-primary transition-colors">
-              <div class="p-2 rounded-full bg-muted/50">
-                <Plus class="h-6 w-6" />
+        <template v-else-if="displayedSkills.length > 0">
+          <div v-if="viewMode === 'card'" class="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 pb-20">
+            <Card 
+              class="flex flex-col items-center justify-center border-dashed border-2 cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-all duration-300 min-h-[140px]"
+              @click="showImportModal = true"
+            >
+              <div class="flex flex-col items-center gap-2 text-muted-foreground hover:text-primary transition-colors">
+                <div class="p-2 rounded-full bg-muted/50">
+                  <Plus class="h-6 w-6" />
+                </div>
+                <span class="font-medium">{{ t('skills.import') }}</span>
               </div>
-              <span class="font-medium">{{ t('skills.import') }}</span>
-            </div>
-          </Card>
-          <Card 
-            v-for="skill in displayedSkills" 
-            :key="skill.name" 
-            class="group hover:shadow-md transition-all duration-300 border-muted/60 hover:border-primary/50 bg-card"
-          >
-            <CardHeader class="flex flex-row items-start gap-4 space-y-0 pb-3">
-              <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                <Box class="h-5 w-5" />
-              </div>
-              <div class="space-y-1 overflow-hidden flex-1">
-                <div class="flex items-center justify-between">
-                  <CardTitle class="text-base truncate" :title="skill.name">
-                    {{ skill.name }}
-                  </CardTitle>
-                  <div class="flex items-center gap-0 -mr-2 -mt-1">
-                    <Button 
-                      v-if="canEdit(skill)" 
-                      variant="ghost" 
-                      size="icon" 
-                      class="h-7 w-7 text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
-                      @click.stop="openEditModal(skill)"
-                    >
-                      <Edit class="h-4 w-4" />
-                    </Button>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger as-child>
-                          <Button 
-                            v-if="canDelete(skill)" 
-                            variant="ghost" 
-                            size="icon" 
-                            class="h-7 w-7 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                            @click.stop="deleteSkill(skill)"
-                          >
-                            <Trash2 class="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>{{ t('skills.delete') || 'Delete' }}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+            </Card>
+            <Card 
+              v-for="skill in displayedSkills" 
+              :key="skill.name" 
+              class="group hover:shadow-md transition-all duration-300 border-muted/60 hover:border-primary/50 bg-card"
+            >
+              <CardHeader class="flex flex-row items-start gap-4 space-y-0 pb-3">
+                <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                  <Box class="h-5 w-5" />
+                </div>
+                <div class="space-y-1 overflow-hidden flex-1">
+                  <div class="flex items-center justify-between">
+                    <CardTitle class="text-base truncate" :title="skill.name">
+                      {{ skill.name }}
+                    </CardTitle>
+                    <div class="flex items-center gap-0 -mr-2 -mt-1">
+                      <Button 
+                        v-if="canEdit(skill)" 
+                        variant="ghost" 
+                        size="icon" 
+                        class="h-7 w-7 text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
+                        @click.stop="openEditModal(skill)"
+                      >
+                        <Edit class="h-4 w-4" />
+                      </Button>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger as-child>
+                            <Button 
+                              v-if="canDelete(skill)" 
+                              variant="ghost" 
+                              size="icon" 
+                              class="h-7 w-7 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                              @click.stop="deleteSkill(skill)"
+                            >
+                              <Trash2 class="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{{ t('skills.delete') || 'Delete' }}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
+                  </div>
+                  <CardDescription class="line-clamp-2 text-xs">
+                    {{ skill.description || t('skills.noDescription') }}
+                  </CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent class="pt-0 pb-3">
+                <div class="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                  <div v-if="skill.user_id === currentUser.userid" class="flex items-center gap-1 bg-primary/5 px-2 py-1 rounded text-primary/80">
+                    <User class="h-3 w-3" />
+                    <span>{{ t('skills.mine') || 'My Skill' }}</span>
                   </div>
                 </div>
-                <CardDescription class="line-clamp-2 text-xs">
-                  {{ skill.description || t('skills.noDescription') }}
-                </CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent class="pt-0 pb-3">
-              <div class="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-       
-                <div v-if="skill.user_id === currentUser.userid" class="flex items-center gap-1 bg-primary/5 px-2 py-1 rounded text-primary/80">
-                  <User class="h-3 w-3" />
-                  <span>{{ t('skills.mine') || 'My Skill' }}</span>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div v-else class="space-y-2 pb-20">
+            <Card
+              class="border-dashed border-2 cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-all duration-300"
+              @click="showImportModal = true"
+            >
+              <CardContent class="py-3 flex items-center gap-3 text-muted-foreground hover:text-primary transition-colors">
+                <Plus class="h-4 w-4" />
+                <span class="font-medium">{{ t('skills.import') }}</span>
+              </CardContent>
+            </Card>
+
+            <Card
+              v-for="skill in displayedSkills"
+              :key="`list-${skill.name}`"
+              class="group border-muted/60 hover:border-primary/40 transition-all"
+            >
+              <CardContent class="py-3">
+                <div class="flex items-start gap-3">
+                  <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                    <Box class="h-4 w-4" />
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center justify-between gap-2">
+                      <div class="min-w-0">
+                        <div class="font-medium text-sm truncate" :title="skill.name">{{ skill.name }}</div>
+                        <div class="text-xs text-muted-foreground line-clamp-1 mt-0.5">
+                          {{ skill.description || t('skills.noDescription') }}
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-1">
+                        <Button
+                          v-if="canEdit(skill)"
+                          variant="ghost"
+                          size="icon"
+                          class="h-7 w-7 text-muted-foreground hover:text-primary"
+                          @click.stop="openEditModal(skill)"
+                        >
+                          <Edit class="h-4 w-4" />
+                        </Button>
+                        <Button
+                          v-if="canDelete(skill)"
+                          variant="ghost"
+                          size="icon"
+                          class="h-7 w-7 text-muted-foreground hover:text-destructive"
+                          @click.stop="deleteSkill(skill)"
+                        >
+                          <Trash2 class="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                    <div v-if="skill.user_id === currentUser.userid" class="mt-2 inline-flex items-center gap-1 bg-primary/5 px-2 py-1 rounded text-primary/80 text-xs">
+                      <User class="h-3 w-3" />
+                      <span>{{ t('skills.mine') || 'My Skill' }}</span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+              </CardContent>
+            </Card>
+          </div>
+        </template>
 
         <div v-else class="flex flex-col items-center justify-center py-20 text-center">
           <div class="rounded-full bg-muted/50 p-6 mb-4">
@@ -221,7 +306,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Box, Search, Folder, Plus, Upload, Loader, Trash2, Layers, User, Shield, Edit } from 'lucide-vue-next'
+import { Box, Search, Folder, Plus, Upload, Loader, Trash2, Layers, User, Shield, Edit, LayoutGrid, List } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { skillAPI } from '../api/skill.js'
 import { getCurrentUser } from '../utils/auth.js'
@@ -245,6 +330,7 @@ const skills = ref([])
 const loading = ref(false)
 const searchTerm = ref('')
 const selectedGroup = ref('all')
+const viewMode = ref('card')
 const showImportModal = ref(false)
 const importMode = ref('upload') // 'upload' or 'url'
 const selectedFile = ref(null)

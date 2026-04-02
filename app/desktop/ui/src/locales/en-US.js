@@ -606,6 +606,8 @@ export default {
   'skills.systemSkills': 'System Skills',
   'skills.mine': 'Mine',
   'skills.searchPlaceholder': 'Search skills...',
+  'skills.viewCard': 'Card',
+  'skills.viewList': 'List',
   'skills.search': 'Search...',
   'skills.import': 'Import Skill',
   'skills.upload': 'Upload ZIP',

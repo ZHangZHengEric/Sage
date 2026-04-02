@@ -595,6 +595,8 @@ export default {
   'skills.systemSkills': '系统技能',
   'skills.mine': '我的',
   'skills.searchPlaceholder': '搜索技能名称或描述...',
+  'skills.viewCard': '卡片',
+  'skills.viewList': '列表',
   'skills.search': '搜索技能...',
   'skills.import': '导入技能',
   'skills.upload': '上传 ZIP',
