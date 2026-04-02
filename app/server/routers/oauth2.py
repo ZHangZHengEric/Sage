@@ -2,7 +2,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from common.models.user import UserDao
-from ..services.auth.oauth2_provider import (
+from common.services.oauth.provider import (
     OAuth2ProtocolError,
     authenticate_access_token,
     authenticate_token_endpoint_client,

@@ -7,11 +7,11 @@ from pydantic import BaseModel
 from sagents.retrieve_engine.manager import KnowledgeManager
 from sagents.retrieve_engine.schema import Document as SagentsDocument
 
-from ...services.knowledge_base.adapter.es_vector_store import EsVectorStore
-from ...services.knowledge_base.adapter.server_embedding_adapter import (
+from .adapter.es_vector_store import EsVectorStore
+from .adapter.server_embedding_adapter import (
     ServerEmbeddingAdapter,
 )
-from ...services.knowledge_base.parser.base import BaseParser
+from .parser.base import BaseParser
 
 
 class DocumentInput(BaseModel):
@@ -147,4 +147,3 @@ class DocumentService:
             
         logger.info(f"index: {index_name}, question: {question}, search_results: {results}")
         return {"success": True, "index_name": index_name, "search_results": results}
-

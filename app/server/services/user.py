@@ -10,6 +10,10 @@ from common.core import config
 from common.core.exceptions import SageHTTPException
 from common.models.system import SystemInfoDao
 from common.models.user import User, UserDao
+from common.services.oauth.helpers import (
+    build_user_claims as shared_build_user_claims,
+    hash_password as shared_hash_password,
+)
 from .auth.email_verification import (
     normalize_email,
     send_register_email_code,
@@ -21,7 +25,7 @@ ph = PasswordHasher()
 
 
 def _hash_password(password: str) -> str:
-    return ph.hash(password)
+    return shared_hash_password(password)
 
 
 def _verify_password(password: str, password_hash: str) -> bool:
@@ -53,7 +57,7 @@ def _gen_tokens(user: User) -> Tuple[str, str, int]:
 
 
 def hash_password(password: str) -> str:
-    return _hash_password(password)
+    return shared_hash_password(password)
 
 
 def create_login_tokens(user: User) -> Tuple[str, str, int]:
@@ -61,16 +65,7 @@ def create_login_tokens(user: User) -> Tuple[str, str, int]:
 
 
 def build_user_claims(user: User) -> Dict[str, str]:
-    return {
-        "userid": user.user_id,
-        "username": user.username,
-        "nickname": user.nickname or user.username,
-        "phonenum": user.phonenum or "",
-        "email": user.email or "",
-        "role": user.role,
-        "avatar": user.avatar_url or "",
-        "avatar_url": user.avatar_url or "",
-    }
+    return shared_build_user_claims(user)
 
 
 async def register_user(
