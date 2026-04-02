@@ -738,6 +738,7 @@ export default {
 
   // Message Input
   'messageInput.placeholder': 'Type a message... (Shift+Enter for new line)',
+  'messageInput.placeholderGenerating': 'AI is generating a response, please wait...',
   'messageInput.send': 'Send',
   'messageInput.stop': 'Stop',
   'messageInput.sendTitle': 'Send',
