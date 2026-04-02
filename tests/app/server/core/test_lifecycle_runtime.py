@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from app.server.core.config import StartupConfig
+from common.core.config import StartupConfig
 
 
 def _reload_module(name: str):

@@ -15,8 +15,10 @@ from loguru import logger
 from pydantic import BaseModel
 import shutil
 
-from ..core.render import Response
-from ..core.exceptions import SageHTTPException
+from common.core.exceptions import SageHTTPException
+from common.core.render import Response
+from common.models.agent import AgentConfigDao
+from common.schemas.agent import AgentAbilitiesRequest, AgentAbilitiesData
 from ..services.agent import (
     auto_generate_agent,
     create_agent,
@@ -27,10 +29,6 @@ from ..services.agent import (
     optimize_system_prompt,
     update_agent,
     generate_agent_abilities as generate_agent_abilities_service,
-)
-from ..schemas.agent import (
-    AgentAbilitiesRequest,
-    AgentAbilitiesData,
 )
 from sagents.utils.agent_abilities import AgentAbilitiesGenerationError
 from sagents.utils.prompt_manager import PromptManager
@@ -357,7 +355,6 @@ async def update(agent_id: str, agent: AgentConfigDTO, http_request: Request):
                 
                 # 验证 iMessage 只能在默认 Agent 上启用
                 if provider == 'imessage' and enabled:
-                    from app.desktop.core.models.agent import AgentConfigDao
                     dao = AgentConfigDao()
                     agent_obj = await dao.get_by_id(agent_id)
                     if agent_obj and not agent_obj.is_default:
@@ -427,8 +424,6 @@ async def set_default_agent(agent_id: str, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    from ..models.agent import AgentConfigDao
-    
     # 先检查 Agent 是否存在
     agent = await get_agent(agent_id)
     if not agent:

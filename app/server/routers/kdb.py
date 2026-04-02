@@ -4,9 +4,8 @@ from typing import List, Optional
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from sagents.tool.mcp_tool_base import sage_mcp_tool
 
-from ..core.render import Response
-from ..schemas.base import BaseResponse
-from ..schemas.kdb import (
+from common.schemas.base import (
+    BaseResponse,
     KdbAddRequest,
     KdbAddResponse,
     KdbDocAddByFilesResponse,
@@ -24,6 +23,7 @@ from ..schemas.kdb import (
     KdbUpdateRequest,
     SuccessResponse,
 )
+from common.core.render import Response
 from ..services.kdb import KdbService
 from ..services.knowledge_base import DocumentService
 

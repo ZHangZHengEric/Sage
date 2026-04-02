@@ -13,13 +13,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 from sagents.context.session_context import SessionStatus
-from sagents.session_runtime import get_global_session_manager
+from sagents.session_runtime import build_conversation_messages_view, get_global_session_manager
 from pathlib import Path
-from .. import models
-from ..core.exceptions import SageHTTPException
-from ..models.questionnaire import QuestionnaireDao
-from .chat.stream_manager import StreamManager
+from common.core.exceptions import SageHTTPException
+from common.models.conversation import Conversation, ConversationDao
+from common.models.questionnaire import QuestionnaireDao
 from .chat.processor import ContentProcessor
+from .chat.stream_manager import StreamManager
 
 
 async def interrupt_session(
@@ -65,9 +65,9 @@ async def get_conversations_paginated(
     search: Optional[str] = None,
     agent_id: Optional[str] = None,
     sort_by: str = "date",
-) -> Tuple[List[models.Conversation], int]:
+) -> Tuple[List[Conversation], int]:
     """分页获取会话列表并构造响应字典"""
-    dao = models.ConversationDao()
+    dao = ConversationDao()
     conversations, total_count = await dao.get_conversations_paginated(
         page=page,
         page_size=page_size,
@@ -80,7 +80,7 @@ async def get_conversations_paginated(
 
 async def get_conversation_messages(session_id: str) -> Dict[str, Any]:
     """获取指定对话的所有消息并返回响应字典"""
-    dao = models.ConversationDao()
+    dao = ConversationDao()
     conversation = await dao.get_by_session_id(session_id)
     if not conversation:
         raise SageHTTPException(
@@ -89,38 +89,14 @@ async def get_conversation_messages(session_id: str) -> Dict[str, Any]:
             error_detail=f"Conversation '{session_id}' not found",
         )
 
-    messages = []
-    session_manager = get_global_session_manager()
-    for m in session_manager.get_session_messages(session_id):
-        result = m.to_dict()
-        result = ContentProcessor.clean_content(result)
-        messages.append(result)
+    # 从 common 层获取原始消息（包含 sys_delegate_task 的子会话展开）
+    view = build_conversation_messages_view(session_id)
 
-        # 处理 sys_delegate_task，将子任务的对话记录拼接在后面
-        if result.get('role') == 'assistant' and result.get('tool_calls'):
-            for tool_call in result['tool_calls']:
-                if tool_call.get('function', {}).get('name') == 'sys_delegate_task':
-                    try:
-                        arguments = tool_call['function']['arguments']
-                        if isinstance(arguments, str):
-                            args = json.loads(arguments)
-                        else:
-                            args = arguments
-                        
-                        tasks = args.get('tasks', [])
-                        if isinstance(tasks, list):
-                            for task in tasks:
-                                if isinstance(task, dict):
-                                    sub_session_id = task.get('session_id')
-                                    if sub_session_id:
-                                        sub_msgs = session_manager.get_session_messages(sub_session_id)
-                                        for sub_msg in sub_msgs:
-                                            sub_result = sub_msg.to_dict()
-                                            sub_result = ContentProcessor.clean_content(sub_result)
-                                            messages.append(sub_result)
-                    except Exception as e:
-                        logger.warning(f"处理子任务消息失败: {e}")
-                        
+    messages: List[Dict[str, Any]] = []
+    for m in view["messages"]:
+        cleaned = ContentProcessor.clean_content(m)
+        messages.append(cleaned)
+
     next_stream_index = StreamManager.get_instance().get_history_length(session_id)
 
     return {
@@ -141,7 +117,7 @@ async def get_conversation_messages(session_id: str) -> Dict[str, Any]:
 
 async def delete_conversation(session_id: str) -> str:
     """删除指定对话，返回 session_id"""
-    dao = models.ConversationDao()
+    dao = ConversationDao()
     conversation = await dao.get_by_session_id(session_id)
     if not conversation:
         raise SageHTTPException(

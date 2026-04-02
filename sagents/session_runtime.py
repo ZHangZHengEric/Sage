@@ -830,6 +830,51 @@ class SessionManager:
         return messages
 
 
+def build_conversation_messages_view(session_id: str) -> Dict[str, Any]:
+    """从 sagents 会话中构造统一的对话消息视图。"""
+    session_manager = get_global_session_manager()
+    if not session_manager:
+        logger.error("会话管理器未初始化")
+        return {"conversation_id": session_id, "messages": []}
+
+    raw_messages = list(session_manager.get_session_messages(session_id))
+    messages: List[Dict[str, Any]] = []
+
+    for message in raw_messages:
+        result = message.to_dict()
+        messages.append(result)
+
+        if result.get("role") != "assistant" or not result.get("tool_calls"):
+            continue
+
+        for tool_call in result["tool_calls"]:
+            if tool_call.get("function", {}).get("name") != "sys_delegate_task":
+                continue
+
+            try:
+                arguments = tool_call["function"]["arguments"]
+                args = json.loads(arguments) if isinstance(arguments, str) else arguments
+                tasks = args.get("tasks", [])
+                if not isinstance(tasks, list):
+                    continue
+
+                for task in tasks:
+                    if not isinstance(task, dict):
+                        continue
+                    sub_session_id = task.get("session_id")
+                    if not sub_session_id:
+                        continue
+                    for sub_msg in session_manager.get_session_messages(sub_session_id):
+                        messages.append(sub_msg.to_dict())
+            except Exception as e:
+                logger.warning(f"处理子任务消息失败: {e}")
+
+    return {
+        "conversation_id": session_id,
+        "messages": messages,
+    }
+
+
 # 全局 SessionManager 实例
 _global_session_manager: Optional[SessionManager] = None
 

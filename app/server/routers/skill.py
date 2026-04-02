@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from pydantic import BaseModel
 
-from ..core.render import Response
+from common.core.render import Response
 from ..services import skill as skill_service
 from loguru import logger
 # 创建路由器

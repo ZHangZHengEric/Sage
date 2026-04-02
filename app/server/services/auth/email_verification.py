@@ -8,8 +8,8 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from ...core.client.eml import send_register_verification_mail
-from ...core.exceptions import SageHTTPException
+from common.core.client.eml import send_register_verification_mail
+from common.core.exceptions import SageHTTPException
 
 REGISTER_VERIFICATION_CODE_LENGTH = 6
 REGISTER_VERIFICATION_CODE_TTL_SECONDS = 5 * 60

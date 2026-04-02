@@ -12,21 +12,22 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import UploadFile
 from loguru import logger
 
-from .. import models
-from ..core.client.s3 import upload_kdb_file
-from ..core.exceptions import SageHTTPException
+from common.core.exceptions import SageHTTPException
+from common.models.file import File, FileDao
+from common.models.kdb import Kdb, KdbDao, KdbDoc, KdbDocDao, KdbDocStatus
+from common.core.client.s3 import upload_kdb_file
 from ..services.knowledge_base import DocumentService
-from ..utils.id import gen_id
+from common.utils.id import gen_id
 
 DEFAULT_BATCH_SIZE = 5
 
 class KdbService:
     def __init__(self):
-        self.kdb_dao = models.KdbDao()
-        self.kdb_doc_dao = models.KdbDocDao()
-        self.file_dao = models.FileDao()
+        self.kdb_dao = KdbDao()
+        self.kdb_doc_dao = KdbDocDao()
+        self.file_dao = FileDao()
 
-    async def _check_kdb_permission(self, kdb_id: str, user_id: Optional[str]) -> models.Kdb:
+    async def _check_kdb_permission(self, kdb_id: str, user_id: Optional[str]) -> Kdb:
         kdb = await self.kdb_dao.get_by_id(kdb_id)
         if not kdb:
             raise SageHTTPException(detail="KDB not found")
@@ -43,7 +44,7 @@ class KdbService:
         user_id: str = "",
     ) -> str:
         kdb_id = gen_id()
-        obj = models.Kdb(
+        obj = Kdb(
             id=kdb_id,
             name=name,
             intro=intro or "",
@@ -62,7 +63,7 @@ class KdbService:
         intro: str = "",
         kdb_setting: Dict[str, Any] | None = None,
         user_id: Optional[str] = None,
-    ) -> models.Kdb:
+    ) -> Kdb:
         kdb = await self._check_kdb_permission(kdb_id, user_id)
         update_map: Dict[str, Any] = {}
         if name:
@@ -80,7 +81,7 @@ class KdbService:
             logger.info(f"更新KDB: {kdb_id}")
         return kdb
 
-    async def info(self, kdb_id: str, user_id: Optional[str] = None) -> Optional[models.Kdb]:
+    async def info(self, kdb_id: str, user_id: Optional[str] = None) -> Optional[Kdb]:
         try:
             return await self._check_kdb_permission(kdb_id, user_id)
         except SageHTTPException:
@@ -100,7 +101,7 @@ class KdbService:
         page: int = 1,
         page_size: int = 20,
         user_id: Optional[str] = None,
-    ) -> Tuple[List[models.Kdb], int, Dict[str, int]]:
+    ) -> Tuple[List[Kdb], int, Dict[str, int]]:
         items, total = await self.kdb_dao.get_kdbs_paginated(
             kdb_ids=None,
             data_type=type,
@@ -112,13 +113,13 @@ class KdbService:
         counts = await self.kdb_doc_dao.get_counts_by_kdb_ids([k.id for k in items])
         return items, total, counts
 
-    async def delete(self, kdb_id: str, user_id: Optional[str] = None) -> models.Kdb:
+    async def delete(self, kdb_id: str, user_id: Optional[str] = None) -> Kdb:
         kdb = await self._check_kdb_permission(kdb_id, user_id)
         await self.kdb_dao.delete_by_id(kdb_id)
         logger.info(f"删除KDB: {kdb_id}")
         return kdb
 
-    async def clear(self, kdb_id: str, user_id: Optional[str] = None) -> models.Kdb:
+    async def clear(self, kdb_id: str, user_id: Optional[str] = None) -> Kdb:
         kdb = await self._check_kdb_permission(kdb_id, user_id)
         # 清空关联文档
         docs = await self.kdb_doc_dao.get_by_kdb_id(kdb_id)
@@ -126,18 +127,18 @@ class KdbService:
         logger.info(f"清空KDB文档: {kdb_id}")
         return kdb
 
-    async def redo_all(self, kdb_id: str, user_id: Optional[str] = None) -> models.Kdb:
+    async def redo_all(self, kdb_id: str, user_id: Optional[str] = None) -> Kdb:
         kdb = await self._check_kdb_permission(kdb_id, user_id)
         docs = await self.kdb_doc_dao.get_by_kdb_id(kdb_id)
         await self.kdb_doc_dao.batch_update_status(
-            [d.id for d in docs], models.KdbDocStatus.PENDING
+            [d.id for d in docs], KdbDocStatus.PENDING
         )
         logger.info(f"重做KDB所有文档: {kdb_id}")
         return kdb
 
     async def retrieve(
         self, kdb_id: str, query: str, top_k: int = 5, user_id: Optional[str] = None
-    ) -> Tuple[List[Dict[str, Any]], models.Kdb]:
+    ) -> Tuple[List[Dict[str, Any]], Kdb]:
         kdb = await self._check_kdb_permission(kdb_id, user_id)
         result = await DocumentService().doc_search(kdb.get_index_name(), query, top_k)
         return result.get("search_results", []), kdb
@@ -152,7 +153,7 @@ class KdbService:
         page_no: int = 1,
         page_size: int = 20,
         user_id: Optional[str] = None,
-    ) -> Tuple[List[models.KdbDoc], int, models.Kdb]:
+    ) -> Tuple[List[KdbDoc], int, Kdb]:
         kdb = await self._check_kdb_permission(kdb_id, user_id)
         docs, total = await self.kdb_doc_dao.get_kdb_docs_paginated(
             kdb_id,
@@ -164,7 +165,7 @@ class KdbService:
         )
         return docs, total, kdb
 
-    async def doc_info(self, doc_id: str, user_id: Optional[str] = None) -> Tuple[Optional[models.KdbDoc], Optional[models.Kdb]]:
+    async def doc_info(self, doc_id: str, user_id: Optional[str] = None) -> Tuple[Optional[KdbDoc], Optional[Kdb]]:
         d = await self.kdb_doc_dao.get_by_id(doc_id)
         kdb = None
         if d:
@@ -177,7 +178,7 @@ class KdbService:
         files: List[UploadFile],
         override: bool = False,
         user_id: Optional[str] = None,
-    ) -> Tuple[str, models.Kdb]:
+    ) -> Tuple[str, Kdb]:
         kdb = await self._check_kdb_permission(kdb_id, user_id)
 
         # QA类型校验
@@ -235,7 +236,7 @@ class KdbService:
                 finally:
                     await uf.seek(0)
 
-        save_files: List[models.File] = []
+        save_files: List[File] = []
         for uf in files or []:
             if not uf or not uf.filename:
                 continue
@@ -246,32 +247,32 @@ class KdbService:
 
     async def task_process(
         self, kdb_id: str, task_id: str, user_id: Optional[str] = None
-    ) -> Tuple[int, int, int, int, int, int, models.Kdb]:
+    ) -> Tuple[int, int, int, int, int, int, Kdb]:
         kdb = await self._check_kdb_permission(kdb_id, user_id)
         docs = await self.kdb_doc_dao.get_kdb_docs_paginated(
             kdb_id, "", [], task_id, 1, 10000
         )
         doc_list = docs[0]
         total = len(doc_list)
-        success = sum(1 for d in doc_list if d.status == models.KdbDocStatus.SUCCESS)
-        fail = sum(1 for d in doc_list if d.status == models.KdbDocStatus.FAILED)
-        in_progress = sum(1 for d in doc_list if d.status == models.KdbDocStatus.PROCESSING)
-        waiting = sum(1 for d in doc_list if d.status == models.KdbDocStatus.PENDING)
+        success = sum(1 for d in doc_list if d.status == KdbDocStatus.SUCCESS)
+        fail = sum(1 for d in doc_list if d.status == KdbDocStatus.FAILED)
+        in_progress = sum(1 for d in doc_list if d.status == KdbDocStatus.PROCESSING)
+        waiting = sum(1 for d in doc_list if d.status == KdbDocStatus.PENDING)
         task_process = int((success / total) * 100) if total else 0
         return success, fail, in_progress, waiting, total, task_process, kdb
 
-    async def task_redo(self, kdb_id: str, task_id: str, user_id: Optional[str] = None) -> models.Kdb:
+    async def task_redo(self, kdb_id: str, task_id: str, user_id: Optional[str] = None) -> Kdb:
         kdb = await self._check_kdb_permission(kdb_id, user_id)
         docs, _ = await self.kdb_doc_dao.get_kdb_docs_paginated(
             kdb_id, "", [], task_id, 1, 10000
         )
         await self.kdb_doc_dao.batch_update_status(
-            [d.id for d in docs], models.KdbDocStatus.PENDING
+            [d.id for d in docs], KdbDocStatus.PENDING
         )
         logger.info(f"任务重做: {task_id}")
         return kdb
 
-    async def doc_delete(self, doc_id: str, user_id: Optional[str] = None) -> models.Kdb:
+    async def doc_delete(self, doc_id: str, user_id: Optional[str] = None) -> Kdb:
         kdb_doc = await self.kdb_doc_dao.get_by_id(doc_id)
         if not kdb_doc:
             raise SageHTTPException(detail="KDB Doc not found")
@@ -281,7 +282,7 @@ class KdbService:
         logger.info(f"删除doc: {doc_id}")
         return kdb
 
-    async def doc_redo(self, doc_id: str, user_id: Optional[str] = None) -> models.Kdb:
+    async def doc_redo(self, doc_id: str, user_id: Optional[str] = None) -> Kdb:
         kdb_doc = await self.kdb_doc_dao.get_by_id(doc_id)
         kdb = None
         if kdb_doc:
@@ -290,16 +291,16 @@ class KdbService:
              # Should we raise if doc not found? Original code just logged info but check_kdb_permission was inside if.
              # If doc not found, we can't find KDB.
              pass
-        await self.kdb_doc_dao.batch_update_status([doc_id], models.KdbDocStatus.PENDING)
+        await self.kdb_doc_dao.batch_update_status([doc_id], KdbDocStatus.PENDING)
         logger.info(f"文档重做: {doc_id}")
         return kdb
 
 
     async def _add_doc_by_files(
-        self, kdb: models.Kdb, files: List[models.File], attach_map: Dict[str, List[models.File]]
+        self, kdb: Kdb, files: List[File], attach_map: Dict[str, List[File]]
     ) -> str:
         task_id = gen_id()
-        docs: List[models.KdbDoc] = []
+        docs: List[KdbDoc] = []
         for f in files:
             ds = "file"
             if kdb.data_type == "qa":
@@ -311,14 +312,14 @@ class KdbService:
                 attaches = attach_map.get(f.name) or []
                 if attaches:
                     metadata = {"attachments": [a.id for a in attaches]}
-            d = models.KdbDoc(
+            d = KdbDoc(
                 id=gen_id(),
                 kdb_id=kdb.id,
                 task_id=task_id,
                 doc_name=f.name,
                 data_source=ds,
                 source_id=f.id,
-                status=models.KdbDocStatus.PENDING,
+                status=KdbDocStatus.PENDING,
                 meta_data=metadata,
             )
             docs.append(d)
@@ -326,7 +327,7 @@ class KdbService:
         logger.info(f"新增任务: {task_id}, 条数={len(files)}")
         return task_id
 
-    async def _upload_by_upload_file(self, uf: UploadFile, user_id: Optional[str] = None) -> models.File:
+    async def _upload_by_upload_file(self, uf: UploadFile, user_id: Optional[str] = None) -> File:
         import mimetypes
 
         data = await uf.read()
@@ -337,7 +338,7 @@ class KdbService:
         )
         file_id = gen_id()
         path = await upload_kdb_file(uf.filename, data, content_type)
-        f = models.File(
+        f = File(
             id=file_id,
             name=uf.filename,
             path=path,
@@ -347,9 +348,9 @@ class KdbService:
         return f
 
     async def build_waiting_doc(self):
-        docs: List[models.KdbDoc] = (
+        docs: List[KdbDoc] = (
             await self.kdb_doc_dao.get_list_by_status_and_data_source(
-                models.KdbDocStatus.PENDING, ["file", "qa"], DEFAULT_BATCH_SIZE
+                KdbDocStatus.PENDING, ["file", "qa"], DEFAULT_BATCH_SIZE
             )
         )
         if not docs:
@@ -360,7 +361,7 @@ class KdbService:
         logger.info(f"完成 处理等待文档, 文档数量: {len(docs)}")
 
     async def build_failed_doc(self):
-        docs: List[models.KdbDoc] = await self.kdb_doc_dao.get_failed_list(
+        docs: List[KdbDoc] = await self.kdb_doc_dao.get_failed_list(
             ["file", "qa"], DEFAULT_BATCH_SIZE
         )
         if not docs:
@@ -370,14 +371,14 @@ class KdbService:
             await self._process_document(d)
         logger.info(f"完成 重新处理失败文档, 文档数量: {len(docs)}")
 
-    async def _process_document(self, doc: models.KdbDoc):
-        await self.kdb_doc_dao.update_status(doc.id, models.KdbDocStatus.PROCESSING)
+    async def _process_document(self, doc: KdbDoc):
+        await self.kdb_doc_dao.update_status(doc.id, KdbDocStatus.PROCESSING)
         try:
             # 1. 判断知识库是否存在
             kdb = await self.kdb_dao.get_by_id(doc.kdb_id)
             if not kdb:
                 await self.kdb_doc_dao.update_status_and_retry(
-                    doc.id, models.KdbDocStatus.FAILED
+                    doc.id, KdbDocStatus.FAILED
                 )
                 logger.error(f"知识库不存在 - KdbId: {doc.kdb_id}")
                 return
@@ -385,18 +386,18 @@ class KdbService:
             file = await self.file_dao.get_by_id(doc.source_id)
             if not file:
                 await self.kdb_doc_dao.update_status_and_retry(
-                    doc.id, models.KdbDocStatus.FAILED
+                    doc.id, KdbDocStatus.FAILED
                 )
                 logger.error(f"文件不存在 - FileId: {doc.source_id}")
                 return
             # 3. 调用 DocumentService 同步文档（包含清理旧数据和处理新数据）
             await DocumentService().sync_document(kdb.get_index_name(), doc, file, data_source=doc.data_source)
             # 调用知识库入库接口，
-            await self.kdb_doc_dao.update_status(doc.id, models.KdbDocStatus.SUCCESS)
+            await self.kdb_doc_dao.update_status(doc.id, KdbDocStatus.SUCCESS)
             logger.info(f"处理文档成功 - DocId: {doc.id}, docName: {doc.doc_name}")
         except Exception as e:
             await self.kdb_doc_dao.update_status_and_retry(
-                doc.id, models.KdbDocStatus.FAILED
+                doc.id, KdbDocStatus.FAILED
             )
             logger.error(
                 f"处理文档失败 - DocId: {doc.id}, docName: {doc.doc_name}, err={e}, trace={traceback.format_exc()}"

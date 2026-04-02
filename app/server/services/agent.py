@@ -17,11 +17,12 @@ from sagents.tool.tool_proxy import ToolProxy
 from sagents.utils.auto_gen_agent import AutoGenAgentFunc
 from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
 
-from .. import models
-from ..core import config
-from ..core.exceptions import SageHTTPException
+from common.core import config
+from common.core.exceptions import SageHTTPException
+from common.models.agent import Agent, AgentConfigDao
+from common.models.llm_provider import LLMProvider, LLMProviderDao
 from .agent_inherit import ensure_agent_inherit_dir
-from .chat.utils import create_model_client
+from common.services.agent_service import enforce_required_tools, validate_and_filter_tools
 
 # ================= 工具函数 =================
 
@@ -31,7 +32,7 @@ def generate_agent_id() -> str:
     return f"agent_{uuid.uuid4().hex[:8]}"
 
 
-def _select_provider(providers: List[models.LLMProvider]) -> Optional[models.LLMProvider]:
+def _select_provider(providers: List[LLMProvider]) -> Optional[LLMProvider]:
     """优先选择默认 provider，否则取列表中的第一个。"""
     if not providers:
         return None
@@ -40,7 +41,7 @@ def _select_provider(providers: List[models.LLMProvider]) -> Optional[models.LLM
 
 async def _create_model_client_for_user(user_id: str) -> Tuple[Any, str]:
     """根据登录用户的 provider 创建模型客户端。"""
-    provider_dao = models.LLMProviderDao()
+    provider_dao = LLMProviderDao()
     providers = await provider_dao.get_list(user_id=user_id)
     provider = _select_provider(providers)
 
@@ -79,9 +80,9 @@ async def _create_model_client_for_user(user_id: str) -> Tuple[Any, str]:
 # ================= 业务函数 =================
 
 
-async def list_agents(user_id: Optional[str] = None) -> List[models.Agent]:
+async def list_agents(user_id: Optional[str] = None) -> List[Agent]:
     """获取所有 Agent 的配置并转换为响应结构"""
-    dao = models.AgentConfigDao()
+    dao = AgentConfigDao()
     # Admin can see all agents; regular users only see their own OR authorized ones
     all_configs = await dao.get_list_with_auth(user_id)
     return all_configs
@@ -89,21 +90,21 @@ async def list_agents(user_id: Optional[str] = None) -> List[models.Agent]:
 
 async def create_agent(
     agent_name: str, agent_config: Dict[str, Any], user_id: str
-) -> models.Agent:
+) -> Agent:
     """创建新的 Agent，返回创建的 Agent 对象"""
     agent_id = generate_agent_id()
     logger.info(f"开始创建Agent: {agent_id}")
     # 强制添加必要的工具
-    agent_config = _enforce_required_tools(agent_config)
+    agent_config = enforce_required_tools(agent_config)
 
-    dao = models.AgentConfigDao()
+    dao = AgentConfigDao()
     existing_config = await dao.get_by_name_and_user(agent_name, user_id)
     if existing_config:
         raise SageHTTPException(
             detail=f"Agent '{agent_name}' 已存在",
             error_detail=f"Agent '{agent_name}' 已存在",
         )
-    orm_obj = models.Agent(agent_id=agent_id, name=agent_name, config=agent_config)
+    orm_obj = Agent(agent_id=agent_id, name=agent_name, config=agent_config)
     orm_obj.user_id = user_id
     await dao.save(orm_obj)
     try:
@@ -123,10 +124,10 @@ async def create_agent(
     return orm_obj
 
 
-async def get_agent(agent_id: str, user_id: Optional[str] = None) -> models.Agent:
+async def get_agent(agent_id: str, user_id: Optional[str] = None) -> Agent:
     """根据 ID 获取 Agent 配置并转换为响应结构"""
     logger.info(f"获取Agent配置: {agent_id}")
-    dao = models.AgentConfigDao()
+    dao = AgentConfigDao()
     existing = await dao.get_by_id(agent_id)
     if not existing:
         raise SageHTTPException(
@@ -146,7 +147,7 @@ async def get_agent(agent_id: str, user_id: Optional[str] = None) -> models.Agen
 
 async def get_agent_authorized_users(agent_id: str, user_id: str, role: str) -> List[str]:
     """Get list of authorized user IDs for an agent"""
-    dao = models.AgentConfigDao()
+    dao = AgentConfigDao()
     agent = await dao.get_by_id(agent_id)
     if not agent:
         raise SageHTTPException(detail="Agent不存在", error_detail="not found")
@@ -162,7 +163,7 @@ async def update_agent_authorizations(
     agent_id: str, authorized_user_ids: List[str], user_id: str, role: str
 ) -> None:
     """Update authorized users for an agent"""
-    dao = models.AgentConfigDao()
+    dao = AgentConfigDao()
     agent = await dao.get_by_id(agent_id)
     if not agent:
         raise SageHTTPException(detail="Agent不存在", error_detail="not found")
@@ -180,10 +181,10 @@ async def update_agent_authorizations(
 
 async def update_agent(
     agent_id: str, agent_name: str, agent_config: Dict[str, Any], user_id: Optional[str] = None, role: str = "user"
-) -> models.Agent:
+) -> Agent:
     """更新指定 Agent 的配置，返回 Agent 对象"""
     logger.info(f"开始更新Agent: {agent_id}")
-    dao = models.AgentConfigDao()
+    dao = AgentConfigDao()
     existing_config = await dao.get_by_id(agent_id)
     if not existing_config:
         raise SageHTTPException(
@@ -191,7 +192,7 @@ async def update_agent(
             error_detail=f"Agent '{agent_id}' 不存在",
         )
     # 强制添加必要的工具
-    agent_config = _enforce_required_tools(agent_config)
+    agent_config = enforce_required_tools(agent_config)
 
     # Check permission: if user_id is provided, it must match
     if role != "admin" and user_id and existing_config.user_id and existing_config.user_id != user_id:
@@ -199,7 +200,7 @@ async def update_agent(
             detail="无权更新该Agent",
             error_detail="forbidden",
         )
-    orm_obj = models.Agent(agent_id=agent_id, name=agent_name, config=agent_config)
+    orm_obj = Agent(agent_id=agent_id, name=agent_name, config=agent_config)
     # 保留原始创建时间
     orm_obj.created_at = existing_config.created_at
     orm_obj.user_id = existing_config.user_id  # Keep original owner
@@ -208,10 +209,10 @@ async def update_agent(
     return orm_obj
 
 
-async def delete_agent(agent_id: str, user_id: Optional[str] = None, role: str = "user") -> models.Agent:
+async def delete_agent(agent_id: str, user_id: Optional[str] = None, role: str = "user") -> Agent:
     """删除指定 Agent，返回删除的 Agent 对象"""
     logger.info(f"开始删除Agent: {agent_id}")
-    dao = models.AgentConfigDao()
+    dao = AgentConfigDao()
     existing_config = await dao.get_by_id(agent_id)
     if not existing_config:
         raise SageHTTPException(
@@ -454,40 +455,4 @@ def resolve_download_path(workspace_path: str, file_path: str) -> str:
     return full_file_path
 
 def _enforce_required_tools(agent_config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    根据 Agent 配置强制添加必要的工具
-
-    - 如果记忆类型选择了"用户"，强制添加 search_memory 工具
-    - 如果 Agent 策略是 fibre，强制添加 sys_spawn_agent、sys_delegate_task、sys_finish_task 工具
-    """
-    available_tools = agent_config.get("available_tools", []) or agent_config.get("availableTools", [])
-    if not available_tools:
-        available_tools = []
-
-    # 转换为集合便于操作
-    tools_set = set(available_tools)
-    original_tools = tools_set.copy()
-
-    # 检查记忆类型
-    memory_type = agent_config.get("memoryType") or agent_config.get("memory_type")
-    if memory_type == "user":
-        tools_set.add("search_memory")
-        logger.info("Agent 记忆类型为用户，强制添加 search_memory 工具")
-
-    # 检查 Agent 策略/模式
-    agent_mode = agent_config.get("agentMode") or agent_config.get("agent_mode")
-    if agent_mode == "fibre":
-        fibre_tools = {"sys_spawn_agent", "sys_delegate_task", "sys_finish_task"}
-        tools_set.update(fibre_tools)
-        logger.info(f"Agent 策略为 fibre，强制添加 fibre 工具: {fibre_tools}")
-
-    # 如果有变化，更新配置
-    if tools_set != original_tools:
-        new_tools = list(tools_set)
-        if "available_tools" in agent_config:
-            agent_config["available_tools"] = new_tools
-        if "availableTools" in agent_config:
-            agent_config["availableTools"] = new_tools
-        logger.info(f"Agent 工具列表已更新: {original_tools} -> {tools_set}")
-
-    return agent_config
+    return enforce_required_tools(agent_config)

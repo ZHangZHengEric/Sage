@@ -15,8 +15,8 @@ from .bootstrap import (
     shutdown_scheduler,
     validate_and_disable_mcp_servers,
 )
-from .core.config import StartupConfig
-from .utils.async_utils import create_safe_task
+from common.core.config import StartupConfig
+from common.utils.async_utils import create_safe_task
 
 
 async def _require_initialized(name: str, initializer_result):

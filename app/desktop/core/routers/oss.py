@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form
-from ..utils.file import split_file_name
+from common.utils.file import split_file_name
 from PIL import Image
 from loguru import logger
 

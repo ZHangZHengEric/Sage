@@ -14,19 +14,18 @@ from authlib.oauth2.rfc6750 import BearerTokenGenerator, BearerTokenValidator
 from authlib.oauth2.rfc6750.errors import InvalidTokenError
 from fastapi import Request
 
-from ...core import config
-from ...core.exceptions import SageHTTPException
-from ...models import (
+from common.core import config
+from common.core.exceptions import SageHTTPException
+from common.models.oauth2 import (
     OAuth2AuthorizationCode,
     OAuth2AuthorizationCodeDao,
     OAuth2Client,
     OAuth2ClientDao,
     OAuth2Token,
     OAuth2TokenDao,
-    User,
-    UserDao,
 )
-from ...utils.id import gen_id
+from common.models.user import User, UserDao
+from common.utils.id import gen_id
 
 
 class OAuth2ProtocolError(Exception):

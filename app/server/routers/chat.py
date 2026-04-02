@@ -14,10 +14,8 @@ from sqlalchemy.orm import query
 from sagents.context.session_context import delete_session_run_lock
 from sagents.utils.lock_manager import safe_release
 
-from ..core.exceptions import SageHTTPException
-
-# 导入新模型
-from ..schemas.chat import ChatRequest, StreamRequest
+from common.core.exceptions import SageHTTPException
+from common.schemas.chat import ChatRequest, StreamRequest
 
 # 导入辅助函数
 from ..services.chat import (

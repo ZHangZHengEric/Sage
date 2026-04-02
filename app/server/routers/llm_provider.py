@@ -1,9 +1,9 @@
 import uuid
 
 from fastapi import APIRouter, Request, HTTPException
-from ..models.llm_provider import LLMProvider, LLMProviderDao
-from ..schemas.llm_provider import LLMProviderCreate, LLMProviderUpdate
-from ..core.render import Response
+from common.models.llm_provider import LLMProvider, LLMProviderDao
+from common.schemas.base import LLMProviderCreate, LLMProviderUpdate
+from common.core.render import Response
 from openai import AsyncOpenAI
 from loguru import logger
 

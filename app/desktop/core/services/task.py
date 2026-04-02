@@ -1,9 +1,9 @@
 from typing import List, Optional, Tuple
 from datetime import datetime
 from loguru import logger
-from ..models.task import TaskDao, RecurringTask, Task
-from ..schemas.task import RecurringTaskCreate, RecurringTaskUpdate, OneTimeTaskCreate, OneTimeTaskUpdate
-from ..core.exceptions import SageHTTPException
+from common.core.exceptions import SageHTTPException
+from common.models.task import TaskDao, RecurringTask, Task
+from common.schemas.base import RecurringTaskCreate, RecurringTaskUpdate, OneTimeTaskCreate, OneTimeTaskUpdate
 
 class TaskService:
     def __init__(self):

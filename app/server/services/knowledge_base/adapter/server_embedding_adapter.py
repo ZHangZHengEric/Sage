@@ -2,7 +2,7 @@ from typing import List
 
 from sagents.retrieve_engine.interface.embedding import EmbeddingModel
 
-from ....core.client.embed import get_embed_client
+from common.core.client.embed import get_embed_client
 
 
 class ServerEmbeddingAdapter(EmbeddingModel):
@@ -17,4 +17,3 @@ class ServerEmbeddingAdapter(EmbeddingModel):
     async def embed_query(self, text: str) -> List[float]:
         client = get_embed_client()
         return await client.embed_query(text)
-

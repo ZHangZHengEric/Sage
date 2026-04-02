@@ -4,20 +4,17 @@
 
 import ipaddress
 import re
-import uuid
 from typing import Tuple
 
 from fastapi import Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from loguru import logger
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import config
-from .context import set_request_context
+from common.core import config
+from common.core.exceptions import SageHTTPException
+from common.core.middleware import register_cors_middleware, register_request_logging_middleware
+from common.core.render import Response
 from .auth import get_session_claims, parse_access_token
-from .exceptions import SageHTTPException
-from .render import Response
 
 # 白名单 API 路径
 WHITELIST_API_PATHS = frozenset(
@@ -104,16 +101,7 @@ async def _unauthorized_response(status_code: int, detail: str, error_detail: st
 def register_middlewares(app):
     cfg = config.get_startup_config()
 
-    # CORS
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=cfg.cors_allowed_origins or [],
-        allow_credentials=cfg.cors_allow_credentials,
-        allow_methods=cfg.cors_allow_methods or ["*"],
-        allow_headers=cfg.cors_allow_headers or ["*"],
-        expose_headers=cfg.cors_expose_headers or [],
-        max_age=int(cfg.cors_max_age or 600),
-    )
+    register_cors_middleware(app)
 
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next):
@@ -167,26 +155,7 @@ def register_middlewares(app):
 
         return await call_next(request)
 
-    @app.middleware("http")
-    async def request_logging_middleware(request: Request, call_next):
-        """请求日志中间件，记录请求信息和用户名称"""
-        # 生成请求ID
-        request_id = f"{uuid.uuid4().hex[:12]}"
-
-        # 使用bind创建带有上下文的logger实例，避免全局状态污染
-        request_logger = logger.bind(request_id=request_id)
-
-        # 设置请求上下文到ContextVar中，确保线程安全
-        set_request_context(request_id, request_logger)
-
-        # 将request_logger存储到request.state中，供后续使用（兼容性保留）
-        request.state.logger = request_logger
-        request.state.request_id = request_id
-
-        # 处理请求
-        response = await call_next(request)
-
-        return response
+    register_request_logging_middleware(app)
 
     # SessionMiddleware 必须包在鉴权中间件外层，才能在鉴权阶段读取 session claims。
     app.add_middleware(
