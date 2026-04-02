@@ -43,6 +43,13 @@ export const chatAPI = {
     })
   },
 
+  optimizeUserInputStream: async (payload, config = {}) => {
+    return await request.postStream('/api/chat/optimize-input/stream', payload, {
+      timeout: 1000 * 60 * 30,
+      ...config
+    })
+  },
+
   interruptSession: async (sessionId, message = '用户请求中断') => {
     return await request.post(`/api/sessions/${sessionId}/interrupt`, {
       message

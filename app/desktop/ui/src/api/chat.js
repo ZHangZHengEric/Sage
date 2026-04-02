@@ -75,6 +75,13 @@ export const chatAPI = {
     })
   },
 
+  optimizeUserInputStream: async (payload, config = {}) => {
+    return await request.postStream('/api/chat/optimize-input/stream', payload, {
+      timeout: 1000 * 60 * 30,
+      ...config
+    })
+  },
+
   /**
    * 中断会话
    * @param {string} sessionId - 会话ID

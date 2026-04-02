@@ -775,6 +775,33 @@ const cancelOptimizeInput = () => {
   optimizeAbortController.value = null
 }
 
+const readOptimizeInputStream = async (response, handlers = {}) => {
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+
+    for (const line of lines) {
+      const trimmedLine = line.trim()
+      if (!trimmedLine) continue
+      const payload = JSON.parse(trimmedLine)
+      if (payload.type === 'delta' && handlers.onDelta) {
+        handlers.onDelta(payload)
+      } else if (payload.type === 'done' && handlers.onDone) {
+        handlers.onDone(payload)
+      } else if (payload.type === 'error' && handlers.onError) {
+        handlers.onError(payload)
+      }
+    }
+  }
+}
+
 const handleOptimizeInput = async () => {
   if (isOptimizingInput.value) {
     cancelOptimizeInput()
@@ -790,7 +817,8 @@ const handleOptimizeInput = async () => {
   isOptimizingInput.value = true
 
   try {
-    const result = await chatAPI.optimizeUserInput({
+    let streamedInput = ''
+    const response = await chatAPI.optimizeUserInputStream({
       current_input: currentInput,
       history_messages: props.deliveryContextMessages || [],
       session_id: props.sessionId || null,
@@ -799,14 +827,22 @@ const handleOptimizeInput = async () => {
       signal: controller.signal
     })
 
-    const optimizedInput = (result?.optimized_input || '').trim()
-    if (optimizedInput) {
-      inputValue.value = optimizedInput
-      await nextTick()
-      adjustTextareaHeight()
-      const el = textareaRef.value?.$el || textareaRef.value
-      if (el?.focus) el.focus()
-    }
+    await readOptimizeInputStream(response, {
+      onDelta: ({ content }) => {
+        streamedInput += content || ''
+        inputValue.value = streamedInput
+        adjustTextareaHeight()
+      },
+      onDone: async ({ optimized_input: optimizedInput }) => {
+        const nextInput = (optimizedInput || streamedInput || currentInput).trim()
+        if (!nextInput) return
+        inputValue.value = nextInput
+        await nextTick()
+        adjustTextareaHeight()
+        const el = textareaRef.value?.$el || textareaRef.value
+        if (el?.focus) el.focus()
+      }
+    })
   } catch (error) {
     if (controller.signal.aborted || error?.name === 'AbortError') {
       return
