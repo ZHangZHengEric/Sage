@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import JSON, String, Integer, select, or_, delete, Boolean
+from sqlalchemy import JSON, String, Integer, select, or_, delete, Boolean, update
 from sqlalchemy.orm import Mapped, mapped_column
 
 from common.models.base import Base, BaseDao, get_local_now
@@ -62,6 +62,14 @@ class AgentConfigDao(BaseDao):
         where = [Agent.name == name]
         return await BaseDao.get_first(
             self, Agent, where=where, order_by=Agent.created_at
+        )
+
+    async def get_default(self) -> Optional["Agent"]:
+        return await BaseDao.get_first(
+            self,
+            Agent,
+            where=[Agent.is_default == True],  # noqa: E712
+            order_by=Agent.created_at,
         )
 
     async def save(self, config: "Agent") -> bool:
@@ -134,3 +142,16 @@ class AgentConfigDao(BaseDao):
 
     async def delete_by_id(self, agent_id: str) -> bool:
         return await BaseDao.delete_by_id(self, Agent, agent_id)
+
+    async def set_default(self, agent_id: str) -> bool:
+        db = await self._get_db()
+        async with db.get_session() as session:  # type: ignore[attr-defined]
+            target = await session.get(Agent, agent_id)
+            if not target:
+                return False
+
+            await session.execute(update(Agent).values(is_default=False))
+            target.is_default = True
+            target.updated_at = get_local_now()
+            session.add(target)
+            return True

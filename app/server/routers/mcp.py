@@ -11,12 +11,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from common.core.render import Response
-from ..services.mcp import (
-    add_mcp_server,
-    list_mcp_servers,
-    refresh_mcp_server,
-    remove_mcp_server,
-)
+from common.services import mcp_service
 
 # 创建路由器
 mcp_router = APIRouter(prefix="/api/mcp", tags=["MCP"])
@@ -44,7 +39,7 @@ async def add(req: MCPServerRequest, http_request: Request):
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-    server_name = await add_mcp_server(
+    server_name = await mcp_service.add_mcp_server(
         name=req.name,
         protocol=req.protocol,
         streamable_http_url=req.streamable_http_url,
@@ -74,7 +69,7 @@ async def list(http_request: Request):
     
     # Admin sees all (user_id=None), User sees own (user_id=user_id)
     target_user_id = None if role == "admin" else user_id
-    mcp_servers = await list_mcp_servers(user_id=target_user_id)
+    mcp_servers = await mcp_service.list_mcp_servers(user_id=target_user_id)
     
     servers: List[Dict[str, Any]] = []
     for server in mcp_servers:
@@ -111,7 +106,7 @@ async def remove(server_name: str, http_request: Request):
     role = claims.get("role") or "user"
     
     logger.info(f"开始删除MCP server: {server_name}")
-    await remove_mcp_server(server_name, user_id, role)
+    await mcp_service.remove_mcp_server(server_name, user_id, role)
     return await Response.succ(
         data={"server_name": server_name}, message=f"MCP服务器 '{server_name}' 删除成功"
     )
@@ -133,5 +128,5 @@ async def refresh(server_name: str, http_request: Request):
     role = claims.get("role") or "user"
 
 
-    status = await refresh_mcp_server(server_name, user_id, role)
+    status = await mcp_service.refresh_mcp_server(server_name, user_id, role)
     return await Response.succ(data={"server_name": server_name, "status": status})

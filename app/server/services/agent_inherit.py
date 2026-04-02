@@ -5,8 +5,8 @@ from loguru import logger
 
 
 def get_agent_inherit_dir(agent_id: str) -> Path:
-    """返回 agent 默认继承目录 ./inherit/<agent_id>"""
-    return (Path(".") / "inherit" / agent_id).resolve()
+    """返回 agent 默认继承目录 ./data/inherit/<agent_id>"""
+    return (Path(".") / "data" / "inherit" / agent_id).resolve()
 
 
 def ensure_agent_inherit_dir(agent_id: str) -> Path:

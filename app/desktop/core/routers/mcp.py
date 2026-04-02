@@ -11,13 +11,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from common.core.render import Response
-from ..services.mcp import (
-    add_mcp_server,
-    list_mcp_servers,
-    refresh_mcp_server,
-    remove_mcp_server,
-    toggle_mcp_server,
-)
+from common.services import mcp_service
 
 # 创建路由器
 mcp_router = APIRouter(prefix="/api/mcp", tags=["MCP"])
@@ -50,7 +44,7 @@ async def add(req: MCPServerRequest, http_request: Request):
     logger.debug(f"[MCP Router] Request data: {req.dict()}")
 
     try:
-        server_name = await add_mcp_server(
+        server_name = await mcp_service.add_mcp_server(
             name=req.name,
             protocol=req.protocol,
             streamable_http_url=req.streamable_http_url,
@@ -80,7 +74,7 @@ async def list(http_request: Request):
     Returns:
         StandardResponse: 包含MCP服务器列表的标准响应
     """
-    mcp_servers = await list_mcp_servers()
+    mcp_servers = await mcp_service.list_mcp_servers()
     
     servers: List[Dict[str, Any]] = []
     for server in mcp_servers:
@@ -115,7 +109,7 @@ async def remove(server_name: str, http_request: Request):
         StandardResponse: 包含操作结果的标准响应
     """
     logger.info(f"开始删除MCP server: {server_name}")
-    await remove_mcp_server(server_name)
+    await mcp_service.remove_mcp_server(server_name)
     return await Response.succ(
         data={"server_name": server_name}, message=f"MCP服务器 '{server_name}' 删除成功"
     )
@@ -132,7 +126,7 @@ async def refresh(server_name: str, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    status = await refresh_mcp_server(server_name)
+    status = await mcp_service.refresh_mcp_server(server_name)
     return await Response.succ(data={"server_name": server_name, "status": status})
 
 
@@ -147,7 +141,7 @@ async def toggle(server_name: str, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    disabled, status_text = await toggle_mcp_server(server_name)
+    disabled, status_text = await mcp_service.toggle_mcp_server(server_name)
     return await Response.succ(
         data={"server_name": server_name, "disabled": disabled},
         message=f"MCP服务器 '{server_name}' 已{status_text}"

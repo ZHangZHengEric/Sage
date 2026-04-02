@@ -8,7 +8,7 @@ from fastapi import APIRouter, File, Request, UploadFile
 from pydantic import BaseModel
 
 from common.core.render import Response
-from ..services import skill as skill_service
+from common.services import skill_service
 from loguru import logger
 # 创建路由器
 skill_router = APIRouter(prefix="/api/skills")

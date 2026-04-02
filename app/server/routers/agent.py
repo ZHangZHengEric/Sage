@@ -5,123 +5,21 @@ Agent 相关路由
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel
 from fastapi.responses import FileResponse
 
 from common.core.render import Response
 from common.models.conversation import ConversationDao
-from ..services.agent import (
-    auto_generate_agent,
-    create_agent,
-    delete_agent,
-    get_agent,
-    list_agents,
-    optimize_system_prompt,
-    update_agent,
-    get_agent_authorized_users,
-    update_agent_authorizations,
-    get_file_workspace,
-    download_agent_file,
-    delete_agent_file,
+from common.schemas.agent import (
+    AgentConfigDTO,
+    AutoGenAgentRequest,
+    AuthorizationRequest,
+    SystemPromptOptimizeRequest,
+    convert_agent_to_config,
+    convert_config_to_agent,
 )
+from common.services import agent_service
 from sagents.utils.prompt_manager import PromptManager
 from loguru import logger
-# ============= Agent相关模型 =============
-
-class AuthorizationRequest(BaseModel):
-    user_ids: List[str]
-
-
-class AgentConfigDTO(BaseModel):
-    id: Optional[str] = None
-    user_id: Optional[str] = None
-    name: str
-    systemPrefix: Optional[str] = None
-    systemContext: Optional[Dict[str, Any]] = None
-    availableWorkflows: Optional[Dict[str, List[str]]] = None
-    availableTools: Optional[List[str]] = None
-    availableSubAgentIds: Optional[List[str]] = None
-    availableSkills: Optional[List[str]] = None
-    availableKnowledgeBases: Optional[List[str]] = None
-    memoryType: Optional[str] = None
-    maxLoopCount: Optional[int] = 10
-    deepThinking: Optional[bool] = False
-    llm_provider_id: Optional[str] = None
-    enableMultimodal: Optional[bool] = False
-    multiAgent: Optional[bool] = False
-    agentMode: Optional[str] = None
-    description: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-
-
-class AutoGenAgentRequest(BaseModel):
-    agent_description: str  # Agent描述
-    available_tools: Optional[List[str]] = (
-        None  # 可选的工具名称列表，如果提供则只使用这些工具
-    )
-
-
-class SystemPromptOptimizeRequest(BaseModel):
-    original_prompt: str  # 原始系统提示词
-    optimization_goal: Optional[str] = None  # 优化目标（可选）
-
-
-def convert_config_to_agent(
-    agent_id: str, config: Dict[str, Any], user_id: Optional[str] = None
-) -> AgentConfigDTO:
-    """将配置字典转换为 AgentConfigResp 对象"""
-
-    return AgentConfigDTO(
-        id=agent_id,
-        user_id=user_id,
-        name=config.get("name", f"Agent {agent_id}"),
-        systemPrefix=config.get("systemPrefix") or config.get("system_prefix"),
-        systemContext=config.get("systemContext") or config.get("system_context"),
-        availableWorkflows=config.get("availableWorkflows")
-        or config.get("available_workflows"),
-        availableTools=config.get("availableTools") or config.get("available_tools"),
-        availableSubAgentIds=config.get("availableSubAgentIds") or config.get("available_sub_agent_ids"),
-        availableSkills=config.get("availableSkills") or config.get("available_skills"),
-        availableKnowledgeBases=config.get("availableKnowledgeBases")
-        or config.get("available_knowledge_bases"),
-        memoryType=config.get("memoryType") or config.get("memory_type"),
-        maxLoopCount=config.get("maxLoopCount") or config.get("max_loop_count", 10),
-        deepThinking=config.get("deepThinking") or config.get("deep_thinking", False),
-        enableMultimodal=config.get("enableMultimodal") or config.get("enable_multimodal", False),
-        multiAgent=config.get("multiAgent") or config.get("multi_agent", False),
-        agentMode=config.get("agentMode") or config.get("agent_mode"),
-        description=config.get("description"),
-        created_at=config.get("created_at"),
-        updated_at=config.get("updated_at"),
-        llm_provider_id=config.get("llm_provider_id"),
-    )
-
-
-def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
-    """将 AgentConfigResp 对象转换为配置字典"""
-    config = {
-        "name": agent.name,
-        "systemPrefix": agent.systemPrefix,
-        "systemContext": agent.systemContext,
-        "availableWorkflows": agent.availableWorkflows,
-        "availableTools": agent.availableTools,
-        "availableSubAgentIds": agent.availableSubAgentIds,
-        "availableSkills": agent.availableSkills,
-        "availableKnowledgeBases": agent.availableKnowledgeBases,
-        "memoryType": agent.memoryType,
-        "maxLoopCount": agent.maxLoopCount,
-        "deepThinking": agent.deepThinking,
-        "enableMultimodal": agent.enableMultimodal,
-        "multiAgent": agent.multiAgent,
-        "agentMode": agent.agentMode,
-        "description": agent.description,
-        "created_at": agent.created_at,
-        "updated_at": agent.updated_at,
-        "llm_provider_id": agent.llm_provider_id,
-    }
-    # 去除 None 值，保持存储整洁
-    return {k: v for k, v in config.items() if v is not None}
 
 
 # 创建路由器
@@ -142,7 +40,7 @@ async def list(http_request: Request):
     
     # Admin sees all (user_id=None), User sees own (user_id=user_id)
     target_user_id = None if role == "admin" else user_id
-    all_configs = await list_agents(target_user_id)
+    all_configs = await agent_service.list_agents(target_user_id)
     agents_data: List[Dict[str, Any]] = []
     for agent in all_configs:
         agent_id = agent.agent_id
@@ -201,7 +99,11 @@ async def create(agent: AgentConfigDTO, http_request: Request):
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-    created_agent = await create_agent(agent.name, convert_agent_to_config(agent), user_id)
+    created_agent = await agent_service.create_agent(
+        agent.name,
+        convert_agent_to_config(agent),
+        user_id,
+    )
     return await Response.succ(
         data={"agent_id": created_agent.agent_id}, message=f"Agent '{created_agent.agent_id}' 创建成功"
     )
@@ -223,7 +125,7 @@ async def get(agent_id: str, http_request: Request):
     role = claims.get("role") or "user"
     
     target_user_id = None if role == "admin" else user_id
-    agent = await get_agent(agent_id, target_user_id)
+    agent = await agent_service.get_agent(agent_id, target_user_id)
     agent_resp = convert_config_to_agent(agent_id, agent.config, agent.user_id)
     return await Response.succ(
         data=agent_resp.model_dump(), message=f"获取Agent '{agent_id}' 成功"
@@ -243,7 +145,13 @@ async def update(agent_id: str, agent: AgentConfigDTO, http_request: Request):
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
     role = claims.get("role") or "user"
-    await update_agent(agent_id, agent.name, convert_agent_to_config(agent), user_id, role)
+    await agent_service.update_agent(
+        agent_id,
+        agent.name,
+        convert_agent_to_config(agent),
+        user_id,
+        role,
+    )
     return await Response.succ(
         data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 更新成功"
     )
@@ -261,7 +169,7 @@ async def delete(agent_id: str, http_request: Request):
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
     role = claims.get("role") or "user"
-    await delete_agent(agent_id, user_id, role)
+    await agent_service.delete_agent(agent_id, user_id, role)
     return await Response.succ(
         data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 删除成功"
     )
@@ -278,7 +186,7 @@ async def auto_generate(request: AutoGenAgentRequest, http_request: Request):
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-    agent_config = await auto_generate_agent(
+    agent_config = await agent_service.auto_generate_agent(
         agent_description=request.agent_description,
         available_tools=request.available_tools,
         user_id=user_id,
@@ -301,7 +209,7 @@ async def optimize(request: SystemPromptOptimizeRequest, http_request: Request):
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-    res = await optimize_system_prompt(
+    res = await agent_service.optimize_system_prompt(
         original_prompt=request.original_prompt,
         optimization_goal=request.optimization_goal,
         user_id=user_id,
@@ -318,7 +226,7 @@ async def get_auth(agent_id: str, http_request: Request):
     user_id = claims.get("userid") or ""
     role = claims.get("role") or "user"
     
-    users = await get_agent_authorized_users(agent_id, user_id, role)
+    users = await agent_service.get_agent_authorized_users(agent_id, user_id, role)
     return await Response.succ(data=users, message="获取授权用户列表成功")
 
 
@@ -331,7 +239,7 @@ async def update_auth(agent_id: str, req: AuthorizationRequest, http_request: Re
     user_id = claims.get("userid") or ""
     role = claims.get("role") or "user"
     
-    await update_agent_authorizations(agent_id, req.user_ids, user_id, role)
+    await agent_service.update_agent_authorizations(agent_id, req.user_ids, user_id, role)
     return await Response.succ(data={}, message="更新授权成功")
 
 @agent_router.post("/{agent_id}/file_workspace")
@@ -347,7 +255,7 @@ async def get_workspace(agent_id: str, request: Request, session_id: Optional[st
         if conversation:
             user_id = conversation.user_id
 
-    result = await get_file_workspace(agent_id, user_id)
+    result = await agent_service.get_server_file_workspace(agent_id, user_id)
     files = result.get("files", [])
     logger.bind(agent_id=agent_id).info(f"获取工作空间文件数量：{len(files)}")
     return await Response.succ(message=result.get("message", "获取文件列表成功"), data={**result, "user_id": user_id})
@@ -368,7 +276,11 @@ async def download_file(agent_id: str, request: Request, session_id: Optional[st
     file_path = request.query_params.get("file_path")
     logger.info(f"Download request: file_path={file_path}")
     try:
-        path, filename, media_type = await download_agent_file(agent_id, user_id, file_path)
+        path, filename, media_type = await agent_service.download_server_agent_file(
+            agent_id,
+            user_id,
+            file_path,
+        )
         logger.info(f"Download resolved: path={path}")
         return FileResponse(
             path=path, filename=filename, media_type=media_type
@@ -394,7 +306,7 @@ async def delete_file(agent_id: str, request: Request, session_id: Optional[str]
     file_path = request.query_params.get("file_path")
     logger.info(f"Delete request: file_path={file_path}")
     try:
-        await delete_agent_file(agent_id, user_id, file_path)
+        await agent_service.delete_server_agent_file(agent_id, user_id, file_path)
         return await Response.succ(message=f"文件 {file_path} 已删除")
     except Exception as e:
         logger.error(f"Delete failed: {e}")
