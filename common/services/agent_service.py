@@ -849,7 +849,7 @@ async def generate_agent_abilities(
 ) -> List[AgentAbilityItem]:
     from sagents.utils.agent_abilities import generate_agent_abilities_from_config
 
-    from app.desktop.core.services.chat.utils import create_model_client
+    from common.services.chat_utils import create_model_client
     from common.services.skill_service import list_skills_for_agent
 
     logger.info(f"开始为 Desktop Agent 生成能力列表: {agent_id}")
