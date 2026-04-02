@@ -10,7 +10,7 @@ from fastapi import APIRouter, Request
 from loguru import logger
 from pydantic import BaseModel
 
-from ..core.render import Response
+from common.core.render import Response
 from ..services.mcp import (
     add_mcp_server,
     list_mcp_servers,

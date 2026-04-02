@@ -5,9 +5,10 @@ from typing import TYPE_CHECKING, Any, Dict, List
 
 from loguru import logger
 
-from .... import models
-from ....core.client.s3 import upload_kdb_file
-from ....utils.id import gen_id
+from common.models.file import File, FileDao
+from common.models.kdb import KdbDoc, KdbDocDao
+from common.core.client.s3 import upload_kdb_file
+from common.utils.id import gen_id
 from .base import BaseParser
 
 if TYPE_CHECKING:
@@ -31,7 +32,7 @@ ALLOW_ATTACH_FILE_EXTS = {
 
 class EmlParser(BaseParser):
 
-    async def clear_old(self, index_name: str, doc: models.KdbDoc) -> List[str]:
+    async def clear_old(self, index_name: str, doc: KdbDoc) -> List[str]:
         ids: List[str] = [doc.id]
         md = doc.meta_data or {}
         atts = md.get("attachments")
@@ -40,11 +41,11 @@ class EmlParser(BaseParser):
         logger.info(f"[EmlParser] 计划清理旧文档：索引={index_name}，ID数量={len(ids)}")
         return ids
 
-    async def process(self, index_name: str, doc: models.KdbDoc, file: models.File) -> List["DocumentInput"]:
+    async def process(self, index_name: str, doc: KdbDoc, file: File) -> List["DocumentInput"]:
         # Lazy import to avoid circular dependency at runtime
         from ..knowledge_base import DocumentInput
         
-        file_dao = models.FileDao()
+        file_dao = FileDao()
         logger.info(f"[CommonParser] 处理开始：索引={index_name}, 文档ID={doc.id}")
         text, meta = await self.convert_file_to_text(file.path)
         docs: List[DocumentInput] = []
@@ -60,7 +61,7 @@ class EmlParser(BaseParser):
                 metadata=metadata,
             )
         )
-        files_to_save: List[models.File] = []
+        files_to_save: List[File] = []
         attach_meta: Any = meta.get("attachments")
         meta_files: List[Dict[str, Any]] = []
         if isinstance(attach_meta, dict):
@@ -89,7 +90,7 @@ class EmlParser(BaseParser):
                         )
                         continue
                     path = await upload_kdb_file(fname, data_bytes, ctype)
-                    att = models.File(
+                    att = File(
                         id=gen_id(),
                         name=fname,
                         path=path,
@@ -117,7 +118,7 @@ class EmlParser(BaseParser):
             doc.meta_data["attachments"] = [f.id for f in files_to_save]
         else:
             doc.meta_data["attachments"] = []
-        doc_dao = models.KdbDocDao()
+        doc_dao = KdbDocDao()
         await doc_dao.update(doc)
         
         logger.info(f"[EmlParser] 处理完成：索引={index_name}，生成文档数={len(docs)}")

@@ -16,8 +16,7 @@ from fastapi import UploadFile
 from loguru import logger
 from sagents.skill.skill_manager import get_skill_manager
 
-from .. import models
-from ..core.exceptions import SageHTTPException
+from common.core.exceptions import SageHTTPException
 
 
 def _get_skill_info_safe(tm, skill_name: str):

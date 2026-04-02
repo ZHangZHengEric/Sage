@@ -4,7 +4,8 @@ from typing import TYPE_CHECKING, Dict, List
 
 from loguru import logger
 
-from .... import models
+from common.models.file import File, FileDao
+from common.models.kdb import KdbDoc
 from .base import BaseParser
 
 if TYPE_CHECKING:
@@ -14,7 +15,7 @@ from .eml_parser import ALLOW_ATTACH_FILE_EXTS
 
 
 class CommonParser(BaseParser):
-    async def clear_old(self, index_name: str, doc: models.KdbDoc) -> List[str]:
+    async def clear_old(self, index_name: str, doc: KdbDoc) -> List[str]:
         ids: List[str] = [doc.id]
         md = doc.meta_data or {}
         atts = md.get("attachments")
@@ -25,11 +26,11 @@ class CommonParser(BaseParser):
         )
         return ids
 
-    async def process(self, index_name: str, doc: models.KdbDoc, file: models.File) -> List["DocumentInput"]:
+    async def process(self, index_name: str, doc: KdbDoc, file: File) -> List["DocumentInput"]:
         # Lazy import to avoid circular dependency at runtime
         from ..knowledge_base import DocumentInput
         
-        file_dao = models.FileDao()
+        file_dao = FileDao()
         logger.info(f"[CommonParser] 处理开始：索引={index_name}, 文档ID={doc.id}")
         text, _ = await self.convert_file_to_text(file.path)
         docs: List[DocumentInput] = []
@@ -50,7 +51,7 @@ class CommonParser(BaseParser):
             md.get("attachments", []) if isinstance(md.get("attachments"), list) else []
         )
         if attach_ids:
-            attach_map: Dict[str, models.File] = await file_dao.get_by_ids(attach_ids)
+            attach_map: Dict[str, File] = await file_dao.get_by_ids(attach_ids)
             logger.info(f"[CommonParser] 发现附件：数量={len(attach_map)}")
             for att in attach_map.values():
                 if att.extension not in ALLOW_ATTACH_FILE_EXTS:

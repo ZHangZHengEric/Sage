@@ -1,17 +1,17 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, Path, Body
-from ..services.task import task_service
-from ..schemas.task import (
-    RecurringTaskCreate, 
-    RecurringTaskUpdate, 
-    RecurringTaskResponse, 
+from common.schemas.base import (
+    OneTimeTaskCreate,
+    OneTimeTaskListResponse,
+    OneTimeTaskUpdate,
+    RecurringTaskCreate,
+    RecurringTaskResponse,
+    RecurringTaskUpdate,
+    TaskHistoryListResponse,
     TaskListResponse,
     TaskResponse,
-    TaskHistoryListResponse,
-    OneTimeTaskListResponse,
-    OneTimeTaskCreate,
-    OneTimeTaskUpdate
 )
+from ..services.task import task_service
 
 task_router = APIRouter(prefix="/tasks", tags=["Tasks"])
 

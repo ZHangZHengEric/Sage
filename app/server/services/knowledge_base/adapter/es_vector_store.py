@@ -8,7 +8,7 @@ from sagents.retrieve_engine.interface.vector_store import VectorStore
 from sagents.retrieve_engine.post_process import SearchResultPostProcessTool
 from sagents.retrieve_engine.schema import Chunk, Document, SearchResult
 
-from ....core.client.es import (
+from common.core.client.es import (
     dims,
     document_delete,
     document_insert,
@@ -16,7 +16,7 @@ from ....core.client.es import (
     index_create,
     index_exists,
 )
-from ....core.client.es import (
+from common.core.client.es import (
     search as es_search,
 )
 

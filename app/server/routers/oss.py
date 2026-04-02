@@ -1,5 +1,5 @@
 from fastapi import APIRouter, File, UploadFile, Form
-from ..core.render import Response
+from common.core.render import Response
 from ..services.oss import upload_file_to_oss
 
 oss_router = APIRouter(prefix="/api/oss", tags=["OSS"])

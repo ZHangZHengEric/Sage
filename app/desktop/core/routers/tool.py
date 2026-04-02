@@ -9,9 +9,9 @@ from loguru import logger
 from pydantic import BaseModel
 from sagents.tool.tool_manager import get_tool_manager
 
-from ..core.exceptions import SageHTTPException
-from ..core.render import Response
-from ..models import MCPServerDao
+from common.core.exceptions import SageHTTPException
+from common.core.render import Response
+from common.models.mcp_server import MCPServerDao
 
 # 创建路由器
 tool_router = APIRouter(prefix="/api/tools")

@@ -3,36 +3,36 @@ import os
 
 from loguru import logger
 
+from common.core.config import StartupConfig
 from .core.bootstrap_admin import format_bootstrap_admin_log, get_bootstrap_admin_spec
-from .core.config import StartupConfig
 
 
 async def init_db_client(cfg: StartupConfig):
-    from .core.client.db import init_db_client as _init_db_client
+    from common.core.client.db import init_db_client as _init_db_client
 
     return await _init_db_client(cfg)
 
 
 async def close_db_client():
-    from .core.client.db import close_db_client as _close_db_client
+    from common.core.client.db import close_db_client as _close_db_client
 
     return await _close_db_client()
 
 
 async def init_eml_client(cfg: StartupConfig):
-    from .core.client.eml import init_eml_client as _init_eml_client
+    from common.core.client.eml import init_eml_client as _init_eml_client
 
     return await _init_eml_client(cfg)
 
 
 async def close_eml_client():
-    from .core.client.eml import close_eml_client as _close_eml_client
+    from common.core.client.eml import close_eml_client as _close_eml_client
 
     return await _close_eml_client()
 
 
-async def init_embed_client(*, api_key=None, base_url=None, model_name=None, dims=1024):
-    from .core.client.embed import init_embed_client as _init_embed_client
+async def init_embed_client(*, api_key=None, base_url=None, model_name="", dims=1024):
+    from common.core.client.embed import init_embed_client as _init_embed_client
 
     return await _init_embed_client(
         api_key=api_key,
@@ -43,31 +43,31 @@ async def init_embed_client(*, api_key=None, base_url=None, model_name=None, dim
 
 
 async def close_embed_client():
-    from .core.client.embed import close_embed_client as _close_embed_client
+    from common.core.client.embed import close_embed_client as _close_embed_client
 
     return await _close_embed_client()
 
 
 async def init_es_client(cfg: StartupConfig):
-    from .core.client.es import init_es_client as _init_es_client
+    from common.core.client.es import init_es_client as _init_es_client
 
     return await _init_es_client(cfg)
 
 
 async def close_es_client():
-    from .core.client.es import close_es_client as _close_es_client
+    from common.core.client.es import close_es_client as _close_es_client
 
     return await _close_es_client()
 
 
 async def init_s3_client(cfg: StartupConfig):
-    from .core.client.s3 import init_s3_client as _init_s3_client
+    from common.core.client.s3 import init_s3_client as _init_s3_client
 
     return await _init_s3_client(cfg)
 
 
 async def close_s3_client():
-    from .core.client.s3 import close_s3_client as _close_s3_client
+    from common.core.client.s3 import close_s3_client as _close_s3_client
 
     return await _close_s3_client()
 
@@ -209,10 +209,10 @@ async def validate_and_disable_mcp_servers():
     - 若注册抛出异常或失败，则从数据库中删除该服务器；
     - 若之前有部分注册的工具，尝试从 ToolManager 中移除。
     """
-    from . import models
+    from common.models.mcp_server import MCPServerDao
     from sagents.tool.tool_manager import ToolManager
 
-    mcp_dao = models.MCPServerDao()
+    mcp_dao = MCPServerDao()
     servers = await mcp_dao.get_list()
     removed_count = 0
     registered_count = 0
@@ -349,30 +349,31 @@ async def shutdown_clients():
 
 async def ensure_system_init(cfg: StartupConfig):
     """Ensure system tables and default data exist."""
-    from . import models
+    from common.models.base import Base
+    from common.models.llm_provider import LLMProvider, LLMProviderDao
+    from common.models.system import SystemInfoDao
+    from common.models.user import User, UserDao
     from .services.user import _hash_password
     from .services.auth.oauth2_provider import sync_oauth2_clients
-    from .utils.id import gen_id
-    from .core.client.db import get_global_db, sync_database_schema
+    from common.utils.id import gen_id
+    from common.core.client.db import get_global_db, sync_database_schema
 
     db = await get_global_db()
     async with db._engine.begin() as conn:
-        from . import models
-
-        await conn.run_sync(models.Base.metadata.create_all)
+        await conn.run_sync(Base.metadata.create_all)
         # Sync schema: add missing columns to existing tables
-        await conn.run_sync(sync_database_schema, models.Base)
+        await conn.run_sync(sync_database_schema, Base)
     logger.debug("数据库自动建表完成")
 
     # Check System Info
-    sys_dao = models.SystemInfoDao()
+    sys_dao = SystemInfoDao()
     allow_reg = await sys_dao.get_by_key("allow_registration")
     if allow_reg is None:
         await sys_dao.set_value("allow_registration", "false")
         logger.info("初始化系统配置: 允许自注册=false")
 
     # Check Admin
-    user_dao = models.UserDao()
+    user_dao = UserDao()
     users = await user_dao.get_list(limit=1)
     if not users:
         bootstrap_admin = get_bootstrap_admin_spec(cfg)
@@ -380,7 +381,7 @@ async def ensure_system_init(cfg: StartupConfig):
             logger.warning("未配置 bootstrap admin 凭据，跳过默认管理员初始化")
         else:
             hashed = _hash_password(bootstrap_admin.password)
-            admin_user = models.User(
+            admin_user = User(
                 user_id=gen_id(),
                 username=bootstrap_admin.username,
                 password_hash=hashed,
@@ -393,7 +394,7 @@ async def ensure_system_init(cfg: StartupConfig):
     await sync_oauth2_clients()
     logger.debug("OAuth2 Clients 配置同步完成")
 
-    dao = models.LLMProviderDao()
+    dao = LLMProviderDao()
     default_provider = await dao.get_default()
     if not cfg.default_llm_api_key or not cfg.default_llm_api_base_url:
         logger.warning("Environment variables for default LLM provider missing. Skipping default provider creation.")
@@ -413,7 +414,7 @@ async def ensure_system_init(cfg: StartupConfig):
     if not default_provider:
         import uuid
         provider_id = str(uuid.uuid4())
-        provider = models.LLMProvider(
+        provider = LLMProvider(
             id=provider_id, 
             name="Default LLM Provider", 
             base_url=base_url, 

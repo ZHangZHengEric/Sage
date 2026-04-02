@@ -9,11 +9,16 @@ import httpx
 from fastapi import Request
 from loguru import logger
 
-from ...core import config
-from ...core.exceptions import SageHTTPException
-from ...models.user import User, UserDao, UserExternalIdentity, UserExternalIdentityDao
+from common.core import config
+from common.core.exceptions import SageHTTPException
+from common.models.user import (
+    User,
+    UserDao,
+    UserExternalIdentity,
+    UserExternalIdentityDao,
+)
 from ...services.user import build_user_claims, hash_password
-from ...utils.id import gen_id
+from common.utils.id import gen_id
 
 _METADATA_CACHE: dict[str, dict[str, Any]] = {}
 _METADATA_TTL_SECONDS = 3600

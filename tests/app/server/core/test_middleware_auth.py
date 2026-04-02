@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.server.core import config
+from common.core import config
 from app.server.core.middleware import register_middlewares
 
 

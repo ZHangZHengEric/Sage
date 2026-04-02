@@ -1,4 +1,4 @@
-from app.server.core import config
+from common.core import config
 from app.server.core.bootstrap_admin import (
     get_bootstrap_admin_spec,
     format_bootstrap_admin_log,

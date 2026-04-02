@@ -80,7 +80,7 @@ def get_default_agent_id() -> str:
     try:
         # Try to read from database
         import asyncio
-        from app.desktop.core.models.agent import AgentConfigDao
+        from common.models.agent import AgentConfigDao
         
         dao = AgentConfigDao()
         
@@ -196,7 +196,7 @@ class AgentIMConfig:
         """
         try:
             import asyncio
-            from app.desktop.core.models.agent import AgentConfigDao
+            from common.models.agent import AgentConfigDao
             
             dao = AgentConfigDao()
             
@@ -575,7 +575,7 @@ def list_all_agents() -> List[str]:
     # 2. Check database (primary source)
     try:
         import asyncio
-        from app.desktop.core.models.agent import AgentConfigDao
+        from common.models.agent import AgentConfigDao
         
         dao = AgentConfigDao()
         

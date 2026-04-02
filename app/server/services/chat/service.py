@@ -17,10 +17,13 @@ from sagents.context.session_context import (
 from sagents.utils.lock_manager import safe_release
 from sagents.sagents import SAgent
 from sagents.tool import get_tool_manager
-from ... import models
-from ...core.exceptions import SageHTTPException
-from ...schemas.chat import StreamRequest, CustomSubAgentConfig
-from ...core.config import get_startup_config
+from common.core.config import get_startup_config
+from common.core.exceptions import SageHTTPException
+from common.models.agent import AgentConfigDao
+from common.models.conversation import ConversationDao
+from common.models.kdb import KdbDao
+from common.models.llm_provider import LLMProviderDao
+from common.schemas.chat import StreamRequest, CustomSubAgentConfig
 from ..agent_inherit import copy_agent_inherit_to_workspace
 from .processor import (
     ContentProcessor,
@@ -45,7 +48,7 @@ async def populate_request_from_agent_config(request: StreamRequest, *, require_
             # 默认使用request 的信息
             pass
     else:
-        agent_dao = models.AgentConfigDao()
+        agent_dao = AgentConfigDao()
         agent = await agent_dao.get_by_id(request.agent_id)
         if not agent or not agent.config:
             # 如果要求必须有 Agent ID，但 Agent 不存在，则抛出异常
@@ -103,7 +106,7 @@ async def populate_request_from_agent_config(request: StreamRequest, *, require_
     # 注入 llm_config 配置
     if request.llm_model_config is None:
         request.llm_model_config = {}
-    provider_dao = models.LLMProviderDao()
+    provider_dao = LLMProviderDao()
     provider_id = agent_config.get("llm_provider_id") if agent_config else None
     if provider_id: # 有指定则全量替换
         provider = await provider_dao.get_by_id(provider_id)
@@ -153,7 +156,7 @@ async def populate_request_from_agent_config(request: StreamRequest, *, require_
     # 处理可用知识库
     available_knowledge_bases = request.available_knowledge_bases
     if available_knowledge_bases:
-        kdb_dao = models.KdbDao()
+        kdb_dao = KdbDao()
         # 分页获取所有关联的知识库
         kdbs, _ = await kdb_dao.get_kdbs_paginated(
             kdb_ids=available_knowledge_bases,
@@ -195,11 +198,12 @@ async def populate_request_from_agent_config(request: StreamRequest, *, require_
     available_sub_agent_ids = request.available_sub_agent_ids
     if available_sub_agent_ids:
         # 从数据库获取所有子Agent配置
-        sub_agent_dao = models.AgentConfigDao()
+        sub_agent_dao = AgentConfigDao()
         sub_agents = await sub_agent_dao.get_by_ids(available_sub_agent_ids)
         # 转成CustomSubAgentConfig
         custom_sub_agents = [
             CustomSubAgentConfig(
+               agent_id=sub_agent.agent_id,
                name=sub_agent.name,
                description=sub_agent.config.get("description", ""),
                available_workflows=sub_agent.config.get("availableWorkflows", {}),
@@ -212,7 +216,6 @@ async def populate_request_from_agent_config(request: StreamRequest, *, require_
         setattr(request, "custom_sub_agents", custom_sub_agents)
 
     # 从配置获取 context_budget_config
-    from ...core.config import get_startup_config
     server_config = get_startup_config()
 
     # 尝试从 llm_model_config 中获取 max_model_len
@@ -479,7 +482,7 @@ async def _handle_session_end(request: StreamRequest, original_skills: List[str]
     2. 如果入参available_skills有值，异步检查agent工作空间下的skills目录
     """
     # 更新会话时间戳
-    conversation_dao = models.ConversationDao()
+    conversation_dao = ConversationDao()
     await conversation_dao.update_timestamp(request.session_id)
     logger.bind(session_id=request.session_id).info("会话结束，已更新conversation时间戳")
 
@@ -494,8 +497,6 @@ async def _check_and_update_agent_skills(request: StreamRequest, original_skills
     将会话期间新增的skills添加到数据库配置中
     """
     try:
-        from ...core.config import get_startup_config
-
         cfg = get_startup_config()
         user_id = request.user_id
         agent_id = request.agent_id
@@ -521,7 +522,7 @@ async def _check_and_update_agent_skills(request: StreamRequest, original_skills
         
         # 如果有新增的skills，更新到数据库配置
         if added_in_session:
-            agent_dao = models.AgentConfigDao()
+            agent_dao = AgentConfigDao()
             agent = await agent_dao.get_by_id(agent_id)
             if agent and agent.config:
                 # 获取当前配置的skills
@@ -540,7 +541,7 @@ async def _check_and_update_agent_skills(request: StreamRequest, original_skills
         logger.bind(session_id=request.session_id).error(f"检查并更新Agent技能失败: {e}")
 
 async def _ensure_conversation(request: StreamRequest) -> None:
-    conversation_dao = models.ConversationDao()
+    conversation_dao = ConversationDao()
     existing_conversation = await conversation_dao.get_by_session_id(request.session_id)
     if not existing_conversation:
         conversation_title = await create_conversation_title(request)

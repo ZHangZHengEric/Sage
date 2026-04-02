@@ -1,4 +1,3 @@
-from app.server.models import agent
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
 from sagents.utils.prompt_manager import PromptManager
