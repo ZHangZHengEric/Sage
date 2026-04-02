@@ -697,26 +697,12 @@ class SessionManager:
         Returns:
             Session 实例
         """
-        # 判断是否为子会话
-        is_sub_session = self._is_sub_session(session_id)
-
-        # 子会话：总是创建新实例，不保留在 _sessions 中
-        if is_sub_session:
-            session = Session(
-                session_id=session_id,
-                enable_obs=self.enable_obs,
-                sandbox_type=sandbox_type
-            )
-            return session
-
-        # 根会话：保留在内存中
         if session_id not in self._sessions:
             self._sessions[session_id] = Session(
                 session_id=session_id,
                 enable_obs=self.enable_obs,
                 sandbox_type=sandbox_type
             )
-
         else:
             self._sessions[session_id].sandbox_type = sandbox_type
 
@@ -724,7 +710,7 @@ class SessionManager:
 
     def get(self, session_id: str) -> Optional[Session]:
         """
-        获取 Session（根会话从内存获取，子会话返回 None 因为不保留在内存中）
+        获取 Session（运行中的根会话和子会话都优先从内存获取）
         
         Args:
             session_id: 会话 ID
@@ -732,9 +718,6 @@ class SessionManager:
         Returns:
             Session 实例，找不到则返回 None
         """
-        # 子会话不保留在内存中，返回 None
-        if self._is_sub_session(session_id):
-            return None
         return self._sessions.get(session_id)
 
     def register_session_context(self, session_id: str, session_context: SessionContext):
@@ -750,9 +733,6 @@ class SessionManager:
 
     def close_session(self, session_id: str):
         """关闭 Session"""
-        # 子会话不保留在内存中，无需清理
-        if self._is_sub_session(session_id):
-            return
         session = self._sessions.pop(session_id, None)
         if session:
             try:
@@ -769,7 +749,7 @@ class SessionManager:
         return None
 
     def list_active_sessions(self) -> List[Dict[str, Any]]:
-        """列出活跃的根会话（子会话不保留在内存中，不列出）"""
+        """列出活跃的根会话（子会话在运行期保留于内存，但不对外展示）"""
         return [
             {
                 "session_id": sid,
@@ -777,7 +757,7 @@ class SessionManager:
                 "start_time": sess.session_context.start_time if sess.session_context else None,
             }
             for sid, sess in self._sessions.items()
-            if sess.session_context
+            if sess.session_context and not self._is_sub_session(sid)
         ]
 
     def get_session_messages(self, session_id: str) -> List[MessageChunk]:
