@@ -15,15 +15,10 @@ from sagents.context.session_context import delete_session_run_lock
 from sagents.utils.lock_manager import safe_release
 
 from common.core.exceptions import SageHTTPException
+from common.services import chat_service
 from common.services import conversation_service
 from common.schemas.chat import ChatRequest, StreamRequest
 
-# 导入辅助函数
-from ..services.chat import (
-    execute_chat_session,
-    populate_request_from_agent_config,
-    prepare_session,
-)
 from ..services.chat.stream_manager import StreamManager
 
 # 创建路由器
@@ -128,13 +123,16 @@ async def chat(request: ChatRequest, http_request: Request):
         agent_id=request.agent_id,
     )
 
-    await populate_request_from_agent_config(inner_request, require_agent_id=True)
+    await chat_service.populate_request_from_agent_config(
+        inner_request,
+        require_agent_id=True,
+    )
 
-    stream_service, lock = await prepare_session(inner_request)
+    stream_service, lock = await chat_service.prepare_session(inner_request)
     session_id = inner_request.session_id
     return StreamingResponse(
         stream_api_with_disconnect_check(
-            execute_chat_session(
+            chat_service.execute_chat_session(
                 stream_service=stream_service,
             ),
             http_request,
@@ -149,13 +147,16 @@ async def chat(request: ChatRequest, http_request: Request):
 async def stream_chat(request: StreamRequest, http_request: Request):
     """流式聊天接口， 与chat不同的是入参不能够指定agent_id"""
     validate_and_prepare_request(request, http_request)
-    await populate_request_from_agent_config(request, require_agent_id=False)
-    stream_service, lock = await prepare_session(request)
+    await chat_service.populate_request_from_agent_config(
+        request,
+        require_agent_id=False,
+    )
+    stream_service, lock = await chat_service.prepare_session(request)
     session_id = request.session_id
 
     return StreamingResponse(
         stream_api_with_disconnect_check(
-            execute_chat_session(
+            chat_service.execute_chat_session(
                 stream_service=stream_service,
             ),
             http_request,
@@ -177,15 +178,26 @@ async def stream_chat_web(request: StreamRequest, http_request: Request):
     if manager.has_running_session(session_id):
         logger.bind(session_id=session_id).info("同会话重入，先中断旧会话")
         try:
-            await interrupt_session(session_id, "同会话重入，先中断旧会话")
+            await conversation_service.interrupt_session(
+                session_id,
+                "同会话重入，先中断旧会话",
+            )
         finally:
             await manager.stop_session(session_id)
 
-    await populate_request_from_agent_config(request, require_agent_id=False)
-    stream_service, lock = await prepare_session(request)
+    await chat_service.populate_request_from_agent_config(
+        request,
+        require_agent_id=False,
+    )
+    stream_service, lock = await chat_service.prepare_session(request)
     session_id = request.session_id
     query = request.messages[0].content
-    await manager.start_session(session_id, query, execute_chat_session(stream_service=stream_service), lock)
+    await manager.start_session(
+        session_id,
+        query,
+        chat_service.execute_chat_session(stream_service=stream_service),
+        lock,
+    )
 
     return StreamingResponse(
         stream_with_manager(session_id, last_index=0, resume=False),
