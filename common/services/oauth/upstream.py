@@ -17,8 +17,9 @@ from common.models.user import (
     UserExternalIdentity,
     UserExternalIdentityDao,
 )
-from ...services.user import build_user_claims, hash_password
 from common.utils.id import gen_id
+
+from .helpers import build_user_claims, hash_password
 
 _METADATA_CACHE: dict[str, dict[str, Any]] = {}
 _METADATA_TTL_SECONDS = 3600
@@ -228,7 +229,10 @@ def get_auth_providers(include_internal: bool = False) -> list[Dict[str, Any]]:
 def get_auth_public_config() -> Dict[str, Any]:
     cfg = config.get_startup_config()
     providers = get_auth_providers(include_internal=False)
-    oidc_provider = next((provider for provider in providers if provider["type"] == "oidc"), None)
+    oidc_provider = next(
+        (provider for provider in providers if provider["type"] == "oidc"),
+        None,
+    )
     auth_mode = _get_auth_mode(cfg)
     return {
         "auth_mode": auth_mode,
@@ -301,7 +305,11 @@ async def get_oauth_provider_metadata(provider_id: str) -> Dict[str, Any]:
             "userinfo_endpoint": provider.get("userinfo_url"),
         }
 
-    if not metadata.get("authorization_endpoint") or not metadata.get("token_endpoint") or not metadata.get("userinfo_endpoint"):
+    if (
+        not metadata.get("authorization_endpoint")
+        or not metadata.get("token_endpoint")
+        or not metadata.get("userinfo_endpoint")
+    ):
         raise SageHTTPException(
             status_code=500,
             detail="OAuth Provider 元数据不完整",
@@ -366,7 +374,11 @@ def _resolve_oauth_role(
 
     role_claim_value = _extract_claim(userinfo, provider.get("role_claim"))
     if isinstance(role_claim_value, (list, tuple, set)):
-        role_values = {str(item).strip().lower() for item in role_claim_value if str(item).strip()}
+        role_values = {
+            str(item).strip().lower()
+            for item in role_claim_value
+            if str(item).strip()
+        }
         if "admin" in role_values:
             return "admin"
     elif role_claim_value and str(role_claim_value).strip().lower() == "admin":
@@ -375,7 +387,10 @@ def _resolve_oauth_role(
     return provider.get("default_role") or "user"
 
 
-async def _find_or_create_oauth_user(userinfo: Dict[str, Any], provider: Dict[str, Any]) -> User:
+async def _find_or_create_oauth_user(
+    userinfo: Dict[str, Any],
+    provider: Dict[str, Any],
+) -> User:
     dao = UserDao()
     identity_dao = UserExternalIdentityDao()
 
@@ -442,7 +457,11 @@ async def _find_or_create_oauth_user(userinfo: Dict[str, Any], provider: Dict[st
             user.email = email
         if not user.avatar_url and avatar_url:
             user.avatar_url = avatar_url
-        user.role = _resolve_oauth_role(userinfo, provider, current_role=user.role)
+        user.role = _resolve_oauth_role(
+            userinfo,
+            provider,
+            current_role=user.role,
+        )
 
     await dao.save(user)
 
@@ -545,3 +564,18 @@ async def complete_oauth_login(
 def clear_auth_session(request: Request) -> None:
     request.session.pop("oauth_flow", None)
     request.session.pop("user_claims", None)
+
+
+__all__ = [
+    "build_oauth_authorize_url",
+    "clear_auth_session",
+    "complete_oauth_login",
+    "get_auth_providers",
+    "get_auth_public_config",
+    "get_default_oidc_provider",
+    "get_oidc_provider",
+    "get_oauth_provider_metadata",
+    "is_admin_only_local_login",
+    "is_local_auth_enabled",
+    "is_local_registration_enabled",
+]

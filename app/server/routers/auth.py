@@ -4,6 +4,16 @@ from fastapi.responses import RedirectResponse
 from common.models.agent import AgentConfigDao
 from common.models.llm_provider import LLMProviderDao
 from common.core.render import Response
+from common.services.oauth.upstream import (
+    is_admin_only_local_login,
+    is_local_registration_enabled,
+    build_oauth_authorize_url,
+    clear_auth_session,
+    complete_oauth_login,
+    get_auth_providers,
+    get_default_oidc_provider,
+    is_local_auth_enabled,
+)
 from common.schemas.base import (
     BaseResponse,
     LoginRequest,
@@ -13,16 +23,6 @@ from common.schemas.base import (
     RegisterVerificationCodeRequest,
     RegisterVerificationCodeResponse,
     UserInfoResponse,
-)
-from ..services.auth.external_oauth import (
-    is_admin_only_local_login,
-    is_local_registration_enabled,
-    build_oauth_authorize_url,
-    clear_auth_session,
-    complete_oauth_login,
-    get_auth_providers,
-    get_default_oidc_provider,
-    is_local_auth_enabled,
 )
 from ..services.user import (
     authenticate_user,

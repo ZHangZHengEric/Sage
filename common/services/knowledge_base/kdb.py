@@ -16,7 +16,7 @@ from common.core.exceptions import SageHTTPException
 from common.models.file import File, FileDao
 from common.models.kdb import Kdb, KdbDao, KdbDoc, KdbDocDao, KdbDocStatus
 from common.core.client.s3 import upload_kdb_file
-from ..services.knowledge_base import DocumentService
+from .knowledge_base import DocumentService
 from common.utils.id import gen_id
 
 DEFAULT_BATCH_SIZE = 5

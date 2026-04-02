@@ -150,12 +150,17 @@ def get_oauth2_client_configs() -> list[dict[str, Any]]:
 
     for raw in raw_clients:
         fallback_id = f"oauth-client-{len(seen_client_ids) + 1}"
-        client_id = _normalize_client_id(raw.get("client_id") or raw.get("id"), fallback_id)
+        client_id = _normalize_client_id(
+            raw.get("client_id") or raw.get("id"),
+            fallback_id,
+        )
         if client_id in seen_client_ids:
             client_id = f"{client_id}-{len(seen_client_ids) + 1}"
         seen_client_ids.add(client_id)
 
-        redirect_uris = _normalize_redirect_uris(raw.get("redirect_uris") or raw.get("redirect_uri"))
+        redirect_uris = _normalize_redirect_uris(
+            raw.get("redirect_uris") or raw.get("redirect_uri")
+        )
         if not redirect_uris:
             raise SageHTTPException(
                 status_code=500,
@@ -169,7 +174,11 @@ def get_oauth2_client_configs() -> list[dict[str, Any]]:
             or ("client_secret_basic" if client_secret else "none")
         ).strip() or "none"
 
-        if token_endpoint_auth_method not in {"client_secret_basic", "client_secret_post", "none"}:
+        if token_endpoint_auth_method not in {
+            "client_secret_basic",
+            "client_secret_post",
+            "none",
+        }:
             raise SageHTTPException(
                 status_code=500,
                 detail="OAuth2 Client token_endpoint_auth_method 非法",
@@ -190,8 +199,12 @@ def get_oauth2_client_configs() -> list[dict[str, Any]]:
                 "description": str(raw.get("description") or "").strip(),
                 "enabled": _oauth2_bool(raw.get("enabled"), True),
                 "skip_consent": _oauth2_bool(raw.get("skip_consent"), True),
-                "grant_types": _normalize_string_list(raw.get("grant_types") or ["authorization_code", "refresh_token"]),
-                "response_types": _normalize_string_list(raw.get("response_types") or ["code"]),
+                "grant_types": _normalize_string_list(
+                    raw.get("grant_types") or ["authorization_code", "refresh_token"]
+                ),
+                "response_types": _normalize_string_list(
+                    raw.get("response_types") or ["code"]
+                ),
                 "redirect_uris": redirect_uris,
                 "scope": _normalize_scope(raw.get("scope")),
                 "token_endpoint_auth_method": token_endpoint_auth_method,
@@ -275,7 +288,10 @@ async def get_oauth2_client(client_id: str) -> Optional[OAuth2Client]:
 
 
 def _ensure_requested_scope_allowed(client: OAuth2Client, requested_scope: str) -> str:
-    normalized_scope = _normalize_scope(requested_scope or client.scope, default=client.scope or "openid profile email")
+    normalized_scope = _normalize_scope(
+        requested_scope or client.scope,
+        default=client.scope or "openid profile email",
+    )
     allowed_scope = client.get_allowed_scope(normalized_scope)
     requested_set = set(_normalize_string_list(normalized_scope))
     allowed_set = set(_normalize_string_list(allowed_scope))
@@ -293,10 +309,15 @@ def _normalize_code_challenge_method(value: Optional[str]) -> Optional[str]:
     raise OAuth2ProtocolError("invalid_request", "unsupported code_challenge_method")
 
 
-async def build_authorization_context(query_params: Mapping[str, Any]) -> AuthorizationRequestContext:
+async def build_authorization_context(
+    query_params: Mapping[str, Any]
+) -> AuthorizationRequestContext:
     response_type = str(query_params.get("response_type") or "").strip()
     if response_type != "code":
-        raise OAuth2ProtocolError("unsupported_response_type", "only response_type=code is supported")
+        raise OAuth2ProtocolError(
+            "unsupported_response_type",
+            "only response_type=code is supported",
+        )
 
     client_id = str(query_params.get("client_id") or "").strip()
     if not client_id:
@@ -304,17 +325,35 @@ async def build_authorization_context(query_params: Mapping[str, Any]) -> Author
 
     client = await get_oauth2_client(client_id)
     if not client:
-        raise OAuth2ProtocolError("invalid_client", "unknown oauth2 client", status_code=401)
+        raise OAuth2ProtocolError(
+            "invalid_client",
+            "unknown oauth2 client",
+            status_code=401,
+        )
     if not client.check_response_type("code"):
-        raise OAuth2ProtocolError("unauthorized_client", "client does not allow response_type=code", status_code=403)
+        raise OAuth2ProtocolError(
+            "unauthorized_client",
+            "client does not allow response_type=code",
+            status_code=403,
+        )
     if not client.check_grant_type("authorization_code"):
-        raise OAuth2ProtocolError("unauthorized_client", "client does not allow authorization_code", status_code=403)
+        raise OAuth2ProtocolError(
+            "unauthorized_client",
+            "client does not allow authorization_code",
+            status_code=403,
+        )
 
-    redirect_uri = str(query_params.get("redirect_uri") or "").strip() or client.get_default_redirect_uri()
+    redirect_uri = (
+        str(query_params.get("redirect_uri") or "").strip()
+        or client.get_default_redirect_uri()
+    )
     if not redirect_uri or not client.check_redirect_uri(redirect_uri):
         raise OAuth2ProtocolError("invalid_request", "redirect_uri is invalid")
 
-    scope = _ensure_requested_scope_allowed(client, str(query_params.get("scope") or "").strip())
+    scope = _ensure_requested_scope_allowed(
+        client,
+        str(query_params.get("scope") or "").strip(),
+    )
     state = str(query_params.get("state") or "").strip() or None
     nonce = str(query_params.get("nonce") or "").strip() or None
     code_challenge = str(query_params.get("code_challenge") or "").strip() or None
@@ -338,7 +377,10 @@ async def build_authorization_context(query_params: Mapping[str, Any]) -> Author
     )
 
 
-async def create_authorization_code(context: AuthorizationRequestContext, user: User) -> str:
+async def create_authorization_code(
+    context: AuthorizationRequestContext,
+    user: User,
+) -> str:
     code = generate_token(48)
     authorization_code = OAuth2AuthorizationCode(
         code_id=gen_id(),
@@ -356,7 +398,11 @@ async def create_authorization_code(context: AuthorizationRequestContext, user: 
     return code
 
 
-def build_authorization_success_redirect(redirect_uri: str, code: str, state: Optional[str]) -> str:
+def build_authorization_success_redirect(
+    redirect_uri: str,
+    code: str,
+    state: Optional[str],
+) -> str:
     params = [("code", code)]
     if state:
         params.append(("state", state))
@@ -400,14 +446,26 @@ def _parse_form_encoded_body(body: bytes) -> dict[str, str]:
 
 def _parse_client_basic_auth(header_value: str) -> tuple[str, str]:
     if not header_value or not header_value.lower().startswith("basic "):
-        raise OAuth2ProtocolError("invalid_client", "invalid client authentication", status_code=401)
+        raise OAuth2ProtocolError(
+            "invalid_client",
+            "invalid client authentication",
+            status_code=401,
+        )
     encoded = header_value.split(" ", 1)[1].strip()
     try:
         raw = base64.b64decode(encoded).decode("utf-8")
     except (ValueError, UnicodeDecodeError, binascii.Error) as exc:
-        raise OAuth2ProtocolError("invalid_client", "invalid basic authorization", status_code=401) from exc
+        raise OAuth2ProtocolError(
+            "invalid_client",
+            "invalid basic authorization",
+            status_code=401,
+        ) from exc
     if ":" not in raw:
-        raise OAuth2ProtocolError("invalid_client", "invalid basic authorization", status_code=401)
+        raise OAuth2ProtocolError(
+            "invalid_client",
+            "invalid basic authorization",
+            status_code=401,
+        )
     client_id, client_secret = raw.split(":", 1)
     return client_id, client_secret
 
@@ -429,17 +487,33 @@ async def authenticate_token_endpoint_client(
     elif client_id:
         auth_method = "none"
     else:
-        raise OAuth2ProtocolError("invalid_client", "missing client authentication", status_code=401)
+        raise OAuth2ProtocolError(
+            "invalid_client",
+            "missing client authentication",
+            status_code=401,
+        )
 
     client = await get_oauth2_client(client_id)
     if not client:
-        raise OAuth2ProtocolError("invalid_client", "unknown oauth2 client", status_code=401)
+        raise OAuth2ProtocolError(
+            "invalid_client",
+            "unknown oauth2 client",
+            status_code=401,
+        )
 
     if not client.check_endpoint_auth_method(auth_method, "token"):
-        raise OAuth2ProtocolError("invalid_client", "client authentication method mismatch", status_code=401)
+        raise OAuth2ProtocolError(
+            "invalid_client",
+            "client authentication method mismatch",
+            status_code=401,
+        )
 
     if auth_method != "none" and not client.check_client_secret(client_secret):
-        raise OAuth2ProtocolError("invalid_client", "client secret mismatch", status_code=401)
+        raise OAuth2ProtocolError(
+            "invalid_client",
+            "client secret mismatch",
+            status_code=401,
+        )
 
     return client, auth_method
 
@@ -451,7 +525,10 @@ def _pkce_challenge_from_verifier(code_verifier: str, method: str) -> str:
     return base64.urlsafe_b64encode(digest).decode("utf-8").rstrip("=")
 
 
-def _ensure_pkce_valid(authorization_code: OAuth2AuthorizationCode, code_verifier: str) -> None:
+def _ensure_pkce_valid(
+    authorization_code: OAuth2AuthorizationCode,
+    code_verifier: str,
+) -> None:
     if not authorization_code.code_challenge:
         return
     if not code_verifier:
@@ -484,7 +561,11 @@ def _validate_bearer_token(token: OAuth2Token, request: Any = None) -> None:
     try:
         _BEARER_TOKEN_VALIDATOR.validate_token(token, [], request)
     except InvalidTokenError as exc:
-        raise OAuth2ProtocolError("invalid_token", str(exc) or "token is invalid", status_code=401) from exc
+        raise OAuth2ProtocolError(
+            "invalid_token",
+            str(exc) or "token is invalid",
+            status_code=401,
+        ) from exc
 
 
 async def exchange_authorization_code_for_token(
@@ -492,7 +573,11 @@ async def exchange_authorization_code_for_token(
     params: Mapping[str, str],
 ) -> tuple[dict[str, Any], User]:
     if not client.check_grant_type("authorization_code"):
-        raise OAuth2ProtocolError("unauthorized_client", "client does not allow authorization_code", status_code=403)
+        raise OAuth2ProtocolError(
+            "unauthorized_client",
+            "client does not allow authorization_code",
+            status_code=403,
+        )
 
     code = str(params.get("code") or "").strip()
     redirect_uri = str(params.get("redirect_uri") or "").strip()
@@ -563,7 +648,11 @@ async def refresh_oauth2_access_token(
     params: Mapping[str, str],
 ) -> tuple[dict[str, Any], User]:
     if not client.check_grant_type("refresh_token"):
-        raise OAuth2ProtocolError("unauthorized_client", "client does not allow refresh_token", status_code=403)
+        raise OAuth2ProtocolError(
+            "unauthorized_client",
+            "client does not allow refresh_token",
+            status_code=403,
+        )
 
     refresh_token = str(params.get("refresh_token") or "").strip()
     requested_scope = str(params.get("scope") or "").strip()
@@ -587,7 +676,10 @@ async def refresh_oauth2_access_token(
     if requested_scope:
         allowed_scope = client.get_allowed_scope(requested_scope)
         if not allowed_scope or not _is_scope_subset(allowed_scope, scope):
-            raise OAuth2ProtocolError("invalid_scope", "requested scope exceeds original scope")
+            raise OAuth2ProtocolError(
+                "invalid_scope",
+                "requested scope exceeds original scope",
+            )
         scope = allowed_scope
 
     now = int(time.time())
@@ -628,14 +720,24 @@ async def refresh_oauth2_access_token(
 def _extract_bearer_token(authorization_header: str) -> str:
     auth = str(authorization_header or "").strip()
     if not auth.lower().startswith("bearer "):
-        raise OAuth2ProtocolError("invalid_token", "missing bearer access token", status_code=401)
+        raise OAuth2ProtocolError(
+            "invalid_token",
+            "missing bearer access token",
+            status_code=401,
+        )
     token = auth.split(" ", 1)[1].strip()
     if not token:
-        raise OAuth2ProtocolError("invalid_token", "missing bearer access token", status_code=401)
+        raise OAuth2ProtocolError(
+            "invalid_token",
+            "missing bearer access token",
+            status_code=401,
+        )
     return token
 
 
-async def authenticate_access_token(request: Request) -> tuple[OAuth2Token, User, OAuth2Client]:
+async def authenticate_access_token(
+    request: Request,
+) -> tuple[OAuth2Token, User, OAuth2Client]:
     access_token = _extract_bearer_token(request.headers.get("Authorization") or "")
     token = await OAuth2TokenDao().get_by_access_token(access_token)
     if not token:
@@ -644,7 +746,11 @@ async def authenticate_access_token(request: Request) -> tuple[OAuth2Token, User
     client = await get_oauth2_client(token.client_id)
     user = await UserDao().get_by_id(token.user_id)
     if not client or not user:
-        raise OAuth2ProtocolError("invalid_token", "access token subject not found", status_code=401)
+        raise OAuth2ProtocolError(
+            "invalid_token",
+            "access token subject not found",
+            status_code=401,
+        )
 
     token.bind_entities(user=user, client=client)
     _validate_bearer_token(token, request)
@@ -669,12 +775,20 @@ def build_oauth2_metadata(request: Request) -> dict[str, Any]:
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "response_types_supported": ["code"],
         "scopes_supported": ["openid", "profile", "email"],
-        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post", "none"],
+        "token_endpoint_auth_methods_supported": [
+            "client_secret_basic",
+            "client_secret_post",
+            "none",
+        ],
         "code_challenge_methods_supported": ["plain", "S256"],
     }
 
 
-def build_userinfo_payload(request: Request, user: User, token: OAuth2Token) -> dict[str, Any]:
+def build_userinfo_payload(
+    request: Request,
+    user: User,
+    token: OAuth2Token,
+) -> dict[str, Any]:
     scope_set = set(_normalize_string_list(token.scope))
     payload: dict[str, Any] = {
         "sub": user.user_id,
@@ -696,3 +810,26 @@ def build_userinfo_payload(request: Request, user: User, token: OAuth2Token) -> 
 async def parse_token_endpoint_params(request: Request) -> dict[str, str]:
     body = await request.body()
     return _parse_form_encoded_body(body)
+
+
+__all__ = [
+    "AuthorizationRequestContext",
+    "OAuth2ProtocolError",
+    "authenticate_access_token",
+    "authenticate_token_endpoint_client",
+    "build_authorization_context",
+    "build_authorization_error_redirect",
+    "build_authorization_success_redirect",
+    "build_oauth2_error_body",
+    "build_oauth2_metadata",
+    "build_userinfo_payload",
+    "build_web_login_redirect_path",
+    "create_authorization_code",
+    "exchange_authorization_code_for_token",
+    "get_oauth2_client",
+    "get_oauth2_client_configs",
+    "get_oauth2_issuer",
+    "parse_token_endpoint_params",
+    "refresh_oauth2_access_token",
+    "sync_oauth2_clients",
+]

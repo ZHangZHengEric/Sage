@@ -24,8 +24,7 @@ from common.schemas.base import (
     SuccessResponse,
 )
 from common.core.render import Response
-from ..services.kdb import KdbService
-from ..services.knowledge_base import DocumentService
+from common.services.knowledge_base import DocumentService, KdbService
 
 kdb_router = APIRouter(prefix="/api/knowledge-base", tags=["KDB"])
 

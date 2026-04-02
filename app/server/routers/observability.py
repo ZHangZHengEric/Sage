@@ -6,7 +6,7 @@ from fastapi.responses import RedirectResponse, Response
 from common.core import config
 from common.core.exceptions import SageHTTPException
 from common.models.user import User, UserDao
-from ..services.auth.external_oauth import is_local_auth_enabled
+from common.services.oauth.upstream import is_local_auth_enabled
 
 observability_router = APIRouter(prefix="/api/observability", tags=["Observability"])
 

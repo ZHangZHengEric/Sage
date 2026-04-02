@@ -353,8 +353,8 @@ async def ensure_system_init(cfg: StartupConfig):
     from common.models.llm_provider import LLMProvider, LLMProviderDao
     from common.models.system import SystemInfoDao
     from common.models.user import User, UserDao
-    from .services.user import _hash_password
-    from .services.auth.oauth2_provider import sync_oauth2_clients
+    from common.services.oauth.helpers import hash_password
+    from common.services.oauth.provider import sync_oauth2_clients
     from common.utils.id import gen_id
     from common.core.client.db import get_global_db, sync_database_schema
 
@@ -380,7 +380,7 @@ async def ensure_system_init(cfg: StartupConfig):
         if not bootstrap_admin:
             logger.warning("未配置 bootstrap admin 凭据，跳过默认管理员初始化")
         else:
-            hashed = _hash_password(bootstrap_admin.password)
+            hashed = hash_password(bootstrap_admin.password)
             admin_user = User(
                 user_id=gen_id(),
                 username=bootstrap_admin.username,

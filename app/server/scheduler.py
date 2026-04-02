@@ -13,28 +13,7 @@ def get_scheduler() -> AsyncIOScheduler:
 
 def add_doc_build_jobs():
     """注册文档构建任务"""
-    from .services.kdb import KdbService
+    from common.services.knowledge_base import add_doc_build_jobs as _add_doc_build_jobs
 
     sched = get_scheduler()
-    svc = KdbService()
-
-    sched.add_job(
-        svc.build_waiting_doc,
-        trigger="interval",
-        seconds=5,
-        id="build_waiting_doc",
-        replace_existing=True,
-        coalesce=True,
-        max_instances=1,
-        misfire_grace_time=10,
-    )
-    sched.add_job(
-        svc.build_failed_doc,
-        trigger="interval",
-        seconds=5,
-        id="build_failed_doc",
-        replace_existing=True,
-        coalesce=True,
-        max_instances=1,
-        misfire_grace_time=10,
-    )
+    _add_doc_build_jobs(sched)
