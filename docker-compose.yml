@@ -12,6 +12,7 @@ services:
       - ${SAGE_ROOT}/sage-server/logs:/app/logs
       - ${SAGE_ROOT}/sage-server/data:/app/data
       - ${SAGE_ROOT}/sage-server/skills:/app/skills
+      - ${SAGE_ROOT}/sage-server/users:/app/users
     ports:
       - 30050:8080
     env_file:
