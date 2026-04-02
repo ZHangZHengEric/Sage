@@ -8,7 +8,7 @@ import json
 import uuid
 from typing import Optional, Dict, Any, AsyncGenerator, List
 
-from loguru import logger
+from sagents.utils.logger import logger
 
 from sagents.context.messages.message import MessageChunk
 
@@ -18,8 +18,20 @@ class FibreBackendClient:
 
     def __init__(self):
         self.port = self._get_backend_port()
-        self.base_url = f"http://127.0.0.1:{self.port}" if self.port else None
+        self.base_url = f"http://{self.get_base_ip()}:{self.port}" if self.port else None
         self._available = self.port is not None
+
+    def get_base_ip(self) -> Optional[str]:
+        # SAGE_NODE_HOST 环境变量优先
+        host_env = os.environ.get("SAGE_NODE_HOST")
+        if host_env:
+            return host_env.strip()
+        # 其次是 SAGE_HOST
+        host_env = os.environ.get("SAGE_HOST")
+        if host_env:
+            return host_env.strip()
+        # 默认回环地址
+        return "127.0.0.1"
 
     def _get_backend_port(self) -> Optional[int]:
         """从环境变量获取后端端口"""
@@ -253,7 +265,7 @@ class FibreBackendClient:
                             # 后端返回的 data 可能是对象或字符串
                             resp_data = data.get("data")
                             if isinstance(resp_data, dict):
-                                return resp_data.get("provider_id")
+                                return resp_data.get("provider_id") or resp_data.get("id")
                             elif isinstance(resp_data, str):
                                 return resp_data
                     logger.warning(f"Failed to create LLM provider: {resp_text}")

@@ -140,26 +140,40 @@
           </Button>
         </div>
 
-        <!-- 发送按钮 - 右下角 -->
-        <Button
-          type="submit"
-          size="icon"
-          :disabled="!isLoading && !inputValue.trim() && uploadedFiles.length === 0"
-          class="h-7 w-7 rounded-full transition-all duration-200"
-          :class="[
-            !isLoading && !inputValue.trim() && uploadedFiles.length === 0 ? 'opacity-50 cursor-not-allowed' : '',
-            isLoading ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground' : ''
-          ]"
-          :title="isLoading ? (inputValue.trim() || uploadedFiles.length > 0 ? t('messageInput.stopAndSendTitle') || '停止生成并发送' : t('messageInput.stopTitle') || '停止生成') : t('messageInput.sendTitle')"
-        >
-          <svg v-if="!isLoading" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect x="4" y="4" width="16" height="16" rx="4" fill="currentColor"/>
-          </svg>
-        </Button>
+        <div class="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            class="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground hover:bg-background flex-shrink-0"
+            :disabled="props.isLoading || (!isOptimizingInput && !inputValue.trim())"
+            :title="isOptimizingInput ? (t('messageInput.cancelOptimizeTitle') || '取消优化') : (t('messageInput.optimizeTitle') || '优化输入')"
+            @click="handleOptimizeInput"
+          >
+            <Loader2 v-if="isOptimizingInput" class="h-4 w-4 animate-spin" />
+            <Sparkles v-else class="h-4 w-4" />
+          </Button>
+
+          <Button
+            type="submit"
+            size="icon"
+            :disabled="isOptimizingInput || (!isLoading && !inputValue.trim() && uploadedFiles.length === 0)"
+            class="h-7 w-7 rounded-full transition-all duration-200"
+            :class="[
+              !isLoading && !inputValue.trim() && uploadedFiles.length === 0 ? 'opacity-50 cursor-not-allowed' : '',
+              isLoading ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground' : ''
+            ]"
+            :title="isLoading ? (inputValue.trim() || uploadedFiles.length > 0 ? t('messageInput.stopAndSendTitle') || '停止生成并发送' : t('messageInput.stopTitle') || '停止生成') : t('messageInput.sendTitle')"
+          >
+            <svg v-if="!isLoading" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="4" y="4" width="16" height="16" rx="4" fill="currentColor"/>
+            </svg>
+          </Button>
+        </div>
       </div>
 
       <!-- 隐藏的文件输入框 -->
@@ -173,9 +187,12 @@ import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import { ossApi } from '../../api/oss.js'
 import { skillAPI } from '../../api/skill.js'
+import { chatAPI } from '../../api/chat.js'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { listen } from '@tauri-apps/api/event'
+import { Loader2, Sparkles } from 'lucide-vue-next'
+import { toast } from 'vue-sonner'
 
 const props = defineProps({
   isLoading: {
@@ -186,9 +203,21 @@ const props = defineProps({
     type: String,
     default: ''
   },
+  agentId: {
+    type: String,
+    default: ''
+  },
+  sessionId: {
+    type: String,
+    default: ''
+  },
   selectedAgent: {
     type: Object,
     default: null
+  },
+  deliveryContextMessages: {
+    type: Array,
+    default: () => []
   },
   config: {
     type: Object,
@@ -270,6 +299,8 @@ const uploadedFiles = ref([])
 const isComposing = ref(false)
 const isDraggingOver = ref(false)
 const planEnabled = ref(false)
+const isOptimizingInput = ref(false)
+const optimizeAbortController = ref(null)
 const deepThinkingEnabled = computed(() => props.config?.deepThinking !== false)
 const activeToggleClass = 'border-primary/30 bg-primary/10 text-foreground hover:bg-primary/15 hover:border-primary/40'
 const inactiveToggleClass = 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted/60'
@@ -394,6 +425,7 @@ onUnmounted(() => {
   if (tauriEnterListener) tauriEnterListener()
   if (tauriDropListener) tauriDropListener()
   if (tauriLeaveListener) tauriLeaveListener()
+  cancelOptimizeInput()
 })
 
 // 处理 Tauri 拖拽的文件
@@ -479,6 +511,7 @@ watch(inputValue, async (newVal) => {
 // 处理表单提交
 const handleSubmit = (e) => {
   e.preventDefault()
+  cancelOptimizeInput()
   
   // 如果正在生成，处理中断逻辑
   if (props.isLoading) {
@@ -734,6 +767,58 @@ const handlePaste = async (e) => {
 // 处理停止生成
 const handleStop = () => {
   emit('stopGeneration')
+}
+
+const cancelOptimizeInput = () => {
+  if (!optimizeAbortController.value) return
+  optimizeAbortController.value.abort()
+  optimizeAbortController.value = null
+}
+
+const handleOptimizeInput = async () => {
+  if (isOptimizingInput.value) {
+    cancelOptimizeInput()
+    isOptimizingInput.value = false
+    return
+  }
+
+  const currentInput = inputValue.value.trim()
+  if (!currentInput || props.isLoading) return
+
+  const controller = new AbortController()
+  optimizeAbortController.value = controller
+  isOptimizingInput.value = true
+
+  try {
+    const result = await chatAPI.optimizeUserInput({
+      current_input: currentInput,
+      history_messages: props.deliveryContextMessages || [],
+      session_id: props.sessionId || null,
+      agent_id: props.agentId || null
+    }, {
+      signal: controller.signal
+    })
+
+    const optimizedInput = (result?.optimized_input || '').trim()
+    if (optimizedInput) {
+      inputValue.value = optimizedInput
+      await nextTick()
+      adjustTextareaHeight()
+      const el = textareaRef.value?.$el || textareaRef.value
+      if (el?.focus) el.focus()
+    }
+  } catch (error) {
+    if (controller.signal.aborted || error?.name === 'AbortError') {
+      return
+    }
+    console.error('优化用户输入失败:', error)
+    toast.error(t('messageInput.optimizeError') || '优化输入失败，请重试')
+  } finally {
+    if (optimizeAbortController.value === controller) {
+      optimizeAbortController.value = null
+    }
+    isOptimizingInput.value = false
+  }
 }
 
 // 获取文件MIME类型

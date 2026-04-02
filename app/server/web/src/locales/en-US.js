@@ -742,6 +742,9 @@ export default {
   'messageInput.stop': 'Stop',
   'messageInput.sendTitle': 'Send',
   'messageInput.stopTitle': 'Stop',
+  'messageInput.optimizeTitle': 'Refine input',
+  'messageInput.cancelOptimizeTitle': 'Cancel refining',
+  'messageInput.optimizeError': 'Failed to refine input. Please try again.',
   'messageInput.uploadFile': 'Upload',
   'messageInput.removeFile': 'Remove',
 

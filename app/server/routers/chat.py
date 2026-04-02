@@ -17,12 +17,33 @@ from sagents.utils.lock_manager import safe_release
 from common.core.exceptions import SageHTTPException
 from common.services import chat_service
 from common.services import conversation_service
-from common.schemas.chat import ChatRequest, StreamRequest
+from common.schemas.chat import ChatRequest, StreamRequest, UserInputOptimizeRequest
 
 from ..services.chat.stream_manager import StreamManager
 
 # 创建路由器
 chat_router = APIRouter()
+
+
+@chat_router.post("/api/chat/optimize-input")
+async def optimize_chat_input(request: UserInputOptimizeRequest, http_request: Request):
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    if not request.user_id:
+        request.user_id = claims.get("userid") or ""
+
+    result = await chat_service.optimize_user_input(
+        current_input=request.current_input,
+        history_messages=[message.model_dump() for message in request.history_messages],
+        session_id=request.session_id or "",
+        agent_id=request.agent_id or "",
+        user_id=request.user_id or "",
+    )
+
+    return {
+        "code": 200,
+        "message": "用户输入优化成功",
+        "data": result,
+    }
 
 
 async def stream_with_manager(session_id: str, last_index: int = 0, resume: bool = False):

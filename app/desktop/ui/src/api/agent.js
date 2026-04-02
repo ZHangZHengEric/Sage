@@ -4,6 +4,57 @@
 
 import request from '../utils/request.js'
 
+const sleep = (ms, signal) => new Promise((resolve, reject) => {
+  const timeoutId = setTimeout(() => {
+    if (signal) {
+      signal.removeEventListener('abort', onAbort)
+    }
+    resolve()
+  }, ms)
+
+  const onAbort = () => {
+    clearTimeout(timeoutId)
+    reject(new DOMException('Aborted', 'AbortError'))
+  }
+
+  if (signal) {
+    if (signal.aborted) {
+      onAbort()
+      return
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  }
+})
+
+const pollAgentTask = async (taskId, config = {}) => {
+  const pollInterval = config.pollInterval ?? 1200
+
+  while (true) {
+    const task = await request.get(`/api/agent/tasks/${taskId}`, {}, {
+      signal: config.signal,
+      timeout: config.timeout ?? 1000 * 60 * 30
+    })
+
+    if (task.status === 'completed') {
+      return task.result
+    }
+
+    if (task.status === 'failed') {
+      const error = new Error(task.error?.message || '任务执行失败')
+      error.code = task.error?.code || 'TASK_FAILED'
+      throw error
+    }
+
+    if (task.status === 'cancelled') {
+      const error = new DOMException('Aborted', 'AbortError')
+      error.code = 'TASK_CANCELLED'
+      throw error
+    }
+
+    await sleep(pollInterval, config.signal)
+  }
+}
+
 /**
  * @typedef {Object} AbilityItem
  * @property {string} id - 能力项唯一 ID（kebab-case）
@@ -63,20 +114,64 @@ export const agentAPI = {
    * @param {Array} selectedTools - 选中的工具列表
    * @returns {Promise<Object>}
    */
-  generateAgentConfig: async (description, selectedTools) => {
-    return await request.post('/api/agent/auto-generate', {
-      agent_description: description,
-      available_tools: selectedTools
-    })
+  generateAgentConfig: async (description, selectedTools, config = {}) => {
+    let taskId = null
+    try {
+      const task = await request.post('/api/agent/auto-generate/submit', {
+        agent_description: description,
+        available_tools: selectedTools
+      }, {
+        timeout: 1000 * 30,
+        ...config
+      })
+      taskId = task.task_id
+
+      const result = await pollAgentTask(taskId, {
+        signal: config.signal,
+        timeout: config.timeout ?? 1000 * 60 * 30,
+        pollInterval: config.pollInterval
+      })
+      return { agent: result }
+    } catch (error) {
+      if (taskId && (config.signal?.aborted || error?.name === 'AbortError')) {
+        try {
+          await request.post(`/api/agent/tasks/${taskId}/cancel`, {})
+        } catch (_) {}
+      }
+      throw error
+    }
   },
 
+  cancelAsyncTask: async (taskId, config = {}) => {
+    return await request.post(`/api/agent/tasks/${taskId}/cancel`, {}, config)
+  },
   /**
    * 系统调用Agent
    * @param {Object} input - 输入数据
    * @returns {Promise<Object>}
    */
-  systemPromptOptimize: async (input) => {
-    return await request.post(`/api/agent/system-prompt/optimize`, input)
+  systemPromptOptimize: async (input, config = {}) => {
+    let taskId = null
+    try {
+      const task = await request.post(`/api/agent/system-prompt/optimize/submit`, input, {
+        timeout: 1000 * 30,
+        ...config
+      })
+      taskId = task.task_id
+
+      return await pollAgentTask(taskId, {
+        signal: config.signal,
+        timeout: config.timeout ?? 1000 * 60 * 30,
+        pollInterval: config.pollInterval
+      })
+    } catch (error) {
+      if (taskId && (config.signal?.aborted || error?.name === 'AbortError')) {
+        try {
+          await request.post(`/api/agent/tasks/${taskId}/cancel`, {})
+        } catch (_) {}
+      }
+      throw error
+    }
   },
 
   /**

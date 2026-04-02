@@ -10,7 +10,6 @@ New Agent-level endpoints:
 - POST /api/agent/{agent_id}/im_channels/{provider}/test
 """
 
-import logging
 from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, Path as FastApiPath
@@ -19,6 +18,7 @@ from pydantic import BaseModel, Field
 from common.core.render import Response
 from common.models.agent import AgentConfigDao
 from common.models.im_channel import IMChannelConfigDao
+import logging
 
 # Import new Agent IM Config system
 import sys
@@ -31,8 +31,8 @@ from mcp_servers.im_server.agent_config import (
     validate_provider_config
 )
 
+# ============================================================================
 logger = logging.getLogger(__name__)
-
 
 # ============================================================================
 # Async helper functions

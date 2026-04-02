@@ -119,11 +119,33 @@ async def create_provider(data: LLMProviderCreate, request: Request):
     claims = getattr(request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
     dao = LLMProviderDao()
+
+    normalized_base_url = data.base_url.rstrip("/") if data.base_url else data.base_url
+    existing_providers = await dao.get_by_config(
+        base_url=normalized_base_url,
+        model=data.model,
+        user_id=user_id,
+    )
+    logger.info(
+        f"[LLMProvider] Checking existing providers for base_url={normalized_base_url}, model={data.model}, user_id={user_id}, found {len(existing_providers)} candidates"
+    )
+    logger.info(f"[LLMProvider] Request api_keys: {data.api_keys}")
+
+    for provider in existing_providers:
+        logger.info(f"[LLMProvider] Comparing with provider {provider.id}: api_keys={provider.api_keys}")
+        if sorted(provider.api_keys) == sorted(data.api_keys):
+            logger.info(f"[LLMProvider] Found matching provider: {provider.id}")
+            return await Response.succ(data={"provider_id": provider.id})
+
+    provider_name = data.name
+    if not provider_name:
+        provider_name = f"{data.model}@{normalized_base_url.replace('https://', '').replace('http://', '').split('/')[0]}"
+
     provider_id = str(uuid.uuid4())
     provider = LLMProvider(
         id=provider_id,
-        name=data.name,
-        base_url=data.base_url,
+        name=provider_name,
+        base_url=normalized_base_url,
         api_keys=data.api_keys,
         model=data.model,
         max_tokens=data.max_tokens,
@@ -136,7 +158,7 @@ async def create_provider(data: LLMProviderCreate, request: Request):
         user_id=user_id
     )
     await dao.save(provider)
-    return await Response.succ(data=provider.to_dict())
+    return await Response.succ(data={"provider_id": provider_id})
 
 @router.put("/update/{provider_id}")
 async def update_provider(provider_id: str, data: LLMProviderUpdate, request: Request):

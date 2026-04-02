@@ -219,6 +219,9 @@ class Request {
 
     // 基础请求方法
     async request(config) {
+        let timeoutId = null
+        let externalSignal = null
+        let abortFromExternal = null
         try {
             // 处理配置
             const finalConfig = await this.executeRequestInterceptors({
@@ -242,9 +245,18 @@ class Request {
                 : `${finalConfig.baseURL}${finalConfig.url}`
 
 
-            // 创建AbortController用于超时控制
+            // 创建AbortController用于超时控制，并兼容外部取消
             const controller = new AbortController()
-            const timeoutId = setTimeout(() => controller.abort(), finalConfig.timeout)
+            externalSignal = finalConfig.signal
+            abortFromExternal = () => controller.abort()
+            if (externalSignal) {
+                if (externalSignal.aborted) {
+                    controller.abort()
+                } else {
+                    externalSignal.addEventListener('abort', abortFromExternal, { once: true })
+                }
+            }
+            timeoutId = finalConfig.timeout ? setTimeout(() => controller.abort(), finalConfig.timeout) : null
 
             // 构建fetch选项
             const fetchOptions = {
@@ -264,7 +276,6 @@ class Request {
 
             // 发送请求
             const response = await fetch(url, fetchOptions)
-            clearTimeout(timeoutId)
 
             // 检查响应状态
             if (!response.ok) {
@@ -301,6 +312,9 @@ class Request {
         } catch (error) {
             // 执行错误拦截器
             return await this.executeErrorInterceptors(error, config)
+        } finally {
+            if (timeoutId) clearTimeout(timeoutId)
+            if (externalSignal) externalSignal.removeEventListener('abort', abortFromExternal)
         }
     }
 

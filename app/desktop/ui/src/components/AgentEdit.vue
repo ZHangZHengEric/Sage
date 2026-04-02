@@ -1032,7 +1032,7 @@
     </div>
 
     <!-- Optimize Modal -->
-    <Dialog :open="showOptimizeModal" @update:open="v => !v && !isOptimizing && handleOptimizeCancel()">
+    <Dialog :open="showOptimizeModal" @update:open="v => !v && handleOptimizeCancel()">
       <DialogContent class="sm:max-w-[640px]">
         <DialogHeader>
           <DialogTitle>优化系统提示词</DialogTitle>
@@ -1049,7 +1049,7 @@
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" @click="handleOptimizeCancel" :disabled="isOptimizing">取消</Button>
+          <Button variant="outline" @click="handleOptimizeCancel">取消</Button>
           <template v-if="optimizedResult">
             <Button variant="outline" @click="handleResetOptimization">重新优化</Button>
             <Button @click="handleApplyOptimization">应用优化</Button>
@@ -2178,26 +2178,42 @@ const showOptimizeModal = ref(false)
 const isOptimizing = ref(false)
 const optimizationGoal = ref('')
 const optimizedResult = ref('')
+const optimizeAbortController = ref(null)
 
 const handleOptimizeStart = async () => {
   if (isOptimizing.value) return
   isOptimizing.value = true
+  const controller = new AbortController()
+  optimizeAbortController.value = controller
   try {
     const result = await agentAPI.systemPromptOptimize({
       original_prompt: store.formData.systemPrefix,
       optimization_goal: optimizationGoal.value
+    }, {
+      signal: controller.signal
     })
     if (result?.optimized_prompt) {
       optimizedResult.value = result.optimized_prompt
     }
   } catch (e) {
+    if (controller.signal.aborted || e?.name === 'AbortError') {
+      return
+    }
     console.error('Optimization failed:', e)
   } finally {
+    if (optimizeAbortController.value === controller) {
+      optimizeAbortController.value = null
+    }
     isOptimizing.value = false
   }
 }
 
 const handleOptimizeCancel = () => {
+  if (optimizeAbortController.value) {
+    optimizeAbortController.value.abort()
+    optimizeAbortController.value = null
+  }
+  isOptimizing.value = false
   showOptimizeModal.value = false
   optimizationGoal.value = ''
   optimizedResult.value = ''
@@ -2213,6 +2229,13 @@ const handleApplyOptimization = () => {
     handleOptimizeCancel()
   }
 }
+
+onBeforeUnmount(() => {
+  if (optimizeAbortController.value) {
+    optimizeAbortController.value.abort()
+    optimizeAbortController.value = null
+  }
+})
 
 // Tools logic
 const searchQueries = reactive({ tools: '', skills: '' })

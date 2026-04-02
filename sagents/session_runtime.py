@@ -839,10 +839,27 @@ def build_conversation_messages_view(session_id: str) -> Dict[str, Any]:
 
     raw_messages = list(session_manager.get_session_messages(session_id))
     messages: List[Dict[str, Any]] = []
+    seen_message_keys = set()
+
+    def append_message(message_dict: Dict[str, Any]):
+        message_key = (
+            message_dict.get("message_id")
+            or (
+                message_dict.get("role"),
+                message_dict.get("tool_call_id"),
+                json.dumps(message_dict.get("tool_calls", []), ensure_ascii=False, sort_keys=True),
+                json.dumps(message_dict.get("content"), ensure_ascii=False, sort_keys=True),
+                message_dict.get("timestamp"),
+            )
+        )
+        if message_key in seen_message_keys:
+            return
+        seen_message_keys.add(message_key)
+        messages.append(message_dict)
 
     for message in raw_messages:
         result = message.to_dict()
-        messages.append(result)
+        append_message(result)
 
         if result.get("role") != "assistant" or not result.get("tool_calls"):
             continue
@@ -864,8 +881,13 @@ def build_conversation_messages_view(session_id: str) -> Dict[str, Any]:
                     sub_session_id = task.get("session_id")
                     if not sub_session_id:
                         continue
+                    if sub_session_id == session_id:
+                        logger.warning(
+                            f"build_conversation_messages_view: 跳过与当前会话相同的子会话引用 session_id={session_id}"
+                        )
+                        continue
                     for sub_msg in session_manager.get_session_messages(sub_session_id):
-                        messages.append(sub_msg.to_dict())
+                        append_message(sub_msg.to_dict())
             except Exception as e:
                 logger.warning(f"处理子任务消息失败: {e}")
 

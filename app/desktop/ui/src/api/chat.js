@@ -68,6 +68,13 @@ export const chatAPI = {
     })
   },
 
+  optimizeUserInput: async (payload, config = {}) => {
+    return await request.post('/api/chat/optimize-input', payload, {
+      timeout: 1000 * 60 * 30,
+      ...config
+    })
+  },
+
   /**
    * 中断会话
    * @param {string} sessionId - 会话ID

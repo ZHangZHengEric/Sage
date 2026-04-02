@@ -79,3 +79,16 @@ class ChatRequest(BaseChatRequest):
     """普通聊天请求，主要用于从 AgentID 初始化"""
 
     agent_id: str
+
+
+class DisplayContextMessage(BaseModel):
+    role: str
+    content: str
+
+
+class UserInputOptimizeRequest(BaseModel):
+    current_input: str
+    history_messages: List[DisplayContextMessage] = Field(default_factory=list)
+    session_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    user_id: Optional[str] = None

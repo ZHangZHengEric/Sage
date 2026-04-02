@@ -49,9 +49,9 @@ class FibreTools:
         return f"Agent spawned successfully. ID: {new_agent_id}. Ready to receive messages."
 
     @tool(
-        description_i18n={"zh": "给子agent 分配具体任务并执行，tasks 列表中的任务是并发执行的。可以给同一个 agent 委派两个并行的任务，它们会同时执行（需要使用不同的 session_id）。如果有前后顺序依赖的任务，应该分两次调用本工具，先执行前置任务，再执行后置任务。具体任务细节（如'写贪吃蛇'）应在这里通过 content 指定。"},
+        description_i18n={"zh": "给子agent 分配具体任务并执行，tasks 列表中的任务是并发执行的。可以给同一个 agent 委派两个并行的任务，它们会同时执行（需要使用不同的 session_id）。如果有前后顺序依赖的任务，应该分两次调用本工具，先执行前置任务，再执行后置任务。具体任务细节（如'写贪吃蛇'）应在这里通过 content 指定。注意：**不要把当前正在运行的父会话 session_id 直接传给子任务**，否则会因为该会话已在执行中而校验失败。新委派任务时，建议将任务里的 `session_id` 留空，由系统自动分配新的会话；只有在明确要继续某个子智能体已有子会话时，才填写那个子会话的 session_id。"},
         param_description_i18n={
-            "tasks": {"zh": "任务列表，每个任务包含 'agent_id', 'content' 等字段。'content' 必须包含详细的具体任务描述、上下文信息、具体要求以及期望的返回格式。'session_id' 为可选项，仅在需要继续之前的会话时才填写。注意：列表中的任务是并发执行的，可以给同一个 agent 分配多个并行任务（需使用不同的 session_id），如果有依赖关系请分多次调用。"}
+            "tasks": {"zh": "任务列表，每个任务包含 'agent_id', 'content' 等字段。'content' 必须包含详细的具体任务描述、上下文信息、具体要求以及期望的返回格式。任务里的 'session_id' 为可选项，仅在需要继续某个子智能体已有子会话时才填写；**不要填写当前父会话的 session_id**，因为当前会话正在执行中，会导致校验失败。对于新任务，建议留空，由系统自动分配新的 session_id。注意：列表中的任务是并发执行的，可以给同一个 agent 分配多个并行任务（需使用不同的 session_id，或都留空自动分配），如果有依赖关系请分多次调用。"}
         },
         param_schema={
             "tasks": {
@@ -81,8 +81,8 @@ class FibreTools:
                         },
                         "session_id": {
                             "type": "string",
-                            "description": "Optional: Session ID to continue an existing conversation. Leave empty to create a new session.",
-                            "description_i18n": {"zh": "可选：如需继续之前的会话，请填写已有的 Session ID；如为新任务，请留空，系统会自动创建新会话。"}
+                            "description": "Optional: Session ID of an existing child-agent conversation to continue. Do not pass the current parent session ID. Leave empty for new tasks and the system will create a new session automatically.",
+                            "description_i18n": {"zh": "可选：如需继续某个子智能体已有的子会话，请填写那个已有的 Session ID；**不要传入当前父会话的 session_id**。如为新任务，请留空，系统会自动创建新的子会话。"}
                         }
                     },
                     "required": ["agent_id", "task_name", "original_task", "content"]
@@ -96,7 +96,8 @@ class FibreTools:
 
         Args:
             tasks: A list of tasks, where each task is a dictionary containing 'agent_id', 'content', and optionally 'session_id'.
-                   'session_id' is optional and only needed when continuing an existing conversation.
+                   'session_id' is optional and only needed when continuing an existing child-agent conversation.
+                   Never pass the current caller session ID for a new delegated task; leave it empty to auto-create a fresh child session.
                    'content' should be detailed and specify exactly what information needs to be returned via sys_finish_task.
             session_id: The current session ID (auto-injected)
         """

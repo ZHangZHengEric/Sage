@@ -18,6 +18,7 @@ from sagents.sagents import SAgent
 from sagents.session_runtime import get_global_session_manager
 from sagents.tool import get_tool_manager
 from sagents.utils.lock_manager import safe_release
+from sagents.utils.user_input_optimizer import UserInputOptimizer
 
 from common.core import config
 from common.core.exceptions import SageHTTPException
@@ -74,6 +75,82 @@ def _get_provider_api_key(provider: Any) -> Optional[str]:
         api_keys = getattr(provider, "api_keys", None) or []
         return ",".join(api_keys) if api_keys else None
     return getattr(provider, "api_key", None)
+
+
+async def optimize_user_input(
+    current_input: str,
+    history_messages: List[Dict[str, str]],
+    session_id: str = "",
+    agent_id: str = "",
+    user_id: str = "",
+) -> Dict[str, Any]:
+    from common.services.agent_service import _resolve_model_client, _create_model_client
+
+    logger.info("开始优化用户输入")
+    optimizer = UserInputOptimizer()
+    max_attempts = 3 if _is_desktop_mode() else 1
+    result: Dict[str, Any] = {}
+
+    resolved_agent_id = agent_id or ""
+    if not resolved_agent_id and session_id:
+        conversation = await ConversationDao().get_by_session_id(session_id)
+        if conversation and conversation.agent_id:
+            resolved_agent_id = conversation.agent_id
+
+    async def _resolve_client_for_input_optimization() -> Tuple[Any, str]:
+        if resolved_agent_id:
+            agent = await AgentConfigDao().get_by_id(resolved_agent_id)
+            agent_config = agent.config if agent and agent.config else {}
+            provider_id = agent_config.get("llm_provider_id") if isinstance(agent_config, dict) else None
+            if provider_id:
+                provider = await LLMProviderDao().get_by_id(provider_id)
+                if provider:
+                    logger.info(
+                        f"用户输入优化使用 Agent 模型配置: agent_id={resolved_agent_id}, provider_id={provider_id}, model={provider.model}"
+                    )
+                    return _create_model_client(
+                        {
+                            "api_key": _get_provider_api_key(provider),
+                            "base_url": provider.base_url,
+                            "model": provider.model,
+                        }
+                    ), provider.model
+
+        return await _resolve_model_client(user_id)
+
+    for attempt in range(max_attempts):
+        model_client, model_name = await _resolve_client_for_input_optimization()
+        result = await optimizer.optimize_user_input(
+            current_input=current_input,
+            history_messages=history_messages,
+            llm_client=model_client,
+            model=model_name,
+        )
+
+        if result.get("success") is True and result.get("status") != "fallback":
+            logger.info(f"用户输入优化成功，attempt={attempt + 1}")
+            return result
+
+        error_message = (result or {}).get("error_message", "") or ""
+        is_invalid_api_key = "INVALID_API_KEY" in error_message or "AuthenticationError" == (result or {}).get("error_type")
+        if not (_is_desktop_mode() and is_invalid_api_key and attempt < max_attempts - 1):
+            break
+
+        logger.warning(
+            f"用户输入优化命中无效 API Key，准备重试下一组客户端，attempt={attempt + 1}/{max_attempts}"
+        )
+
+    optimized_input = (result or {}).get("optimized_input", "").strip()
+    if not optimized_input:
+        raise SageHTTPException(detail="用户输入优化失败", error_detail="优化结果为空")
+
+    if result.get("status") == "fallback":
+        logger.warning(
+            f"用户输入优化降级为原文返回: error_type={result.get('error_type')}, error_message={result.get('error_message')}"
+        )
+    else:
+        logger.info("用户输入优化成功")
+    return result
 
 
 def _build_context_budget_config(request: StreamRequest) -> Dict[str, Any]:

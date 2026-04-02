@@ -9,6 +9,58 @@ from datetime import datetime, timedelta
 from logging.handlers import TimedRotatingFileHandler
 from typing import Dict, Optional
 
+
+class BoundLogger:
+    def __init__(self, base_logger: "Logger", context: Optional[Dict[str, object]] = None):
+        self.base_logger = base_logger
+        self.context = context or {}
+
+    def bind(self, **kwargs):
+        merged = {**self.context, **kwargs}
+        return BoundLogger(self.base_logger, merged)
+
+    def _format_message(self, message: str):
+        if not self.context:
+            return message, None
+
+        explicit_session_id = self.context.get("session_id")
+        extra_pairs = []
+        for key, value in self.context.items():
+            if key == "session_id":
+                continue
+            extra_pairs.append(f"{key}={value}")
+
+        prefix = f"[{' '.join(extra_pairs)}] " if extra_pairs else ""
+        return f"{prefix}{message}", explicit_session_id
+
+    def debug(self, message, **kwargs):
+        final_message, session_id = self._format_message(message)
+        self.base_logger.debug(final_message, session_id=session_id, **kwargs)
+
+    def info(self, message, **kwargs):
+        final_message, session_id = self._format_message(message)
+        self.base_logger.info(final_message, session_id=session_id, **kwargs)
+
+    def warning(self, message, **kwargs):
+        final_message, session_id = self._format_message(message)
+        self.base_logger.warning(final_message, session_id=session_id, **kwargs)
+
+    def error(self, message, **kwargs):
+        final_message, session_id = self._format_message(message)
+        self.base_logger.error(final_message, session_id=session_id, **kwargs)
+
+    def critical(self, message, **kwargs):
+        final_message, session_id = self._format_message(message)
+        self.base_logger.critical(final_message, session_id=session_id, **kwargs)
+
+    def exception(self, message, **kwargs):
+        final_message, session_id = self._format_message(message)
+        self.base_logger.error(final_message, session_id=session_id, **kwargs)
+
+    def success(self, message, **kwargs):
+        final_message, session_id = self._format_message(message)
+        self.base_logger.info(final_message, session_id=session_id, **kwargs)
+
 class Logger:
     _instance = None
     _initialized = False
@@ -337,6 +389,9 @@ class Logger:
     def warning(self, message, session_id: Optional[str] = None, **kwargs):
         self._log('warning', message, session_id, **kwargs)
 
+    def bind(self, **kwargs):
+        return BoundLogger(self, kwargs)
+
     def error(self, message, session_id: Optional[str] = None, **kwargs):
         # 在错误日志中自动添加traceback
         try:
@@ -351,6 +406,12 @@ class Logger:
             pass
 
         self._log('error', message, session_id, **kwargs)
+
+    def exception(self, message, session_id: Optional[str] = None, **kwargs):
+        self.error(message, session_id=session_id, **kwargs)
+
+    def success(self, message, session_id: Optional[str] = None, **kwargs):
+        self.info(message, session_id=session_id, **kwargs)
 
     def critical(self, message, session_id: Optional[str] = None, **kwargs):
         # 在严重错误日志中自动添加traceback

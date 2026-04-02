@@ -117,6 +117,7 @@ def _get_cfg() -> config.StartupConfig:
 def _create_model_client(client_params: Dict[str, Any], *, randomize_keys: bool = False) -> Any:
     api_key = client_params.get("api_key")
     base_url = client_params.get("base_url")
+    timeout = client_params.get("timeout", 60 * 30)
 
     if randomize_keys and api_key and isinstance(api_key, str) and "," in api_key:
         keys = [k.strip() for k in api_key.split(",") if k.strip()]
@@ -130,6 +131,7 @@ def _create_model_client(client_params: Dict[str, Any], *, randomize_keys: bool 
     model_client = AsyncOpenAI(
         api_key=api_key,
         base_url=base_url,
+        timeout=timeout,
     )
     model_client.model = client_params.get("model")
     return model_client
