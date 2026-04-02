@@ -10,14 +10,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from common.core.render import Response
-from ..services.conversation import (
-    delete_conversation,
-    get_conversation_messages,
-    get_conversations_paginated,
-    get_session_status,
-    interrupt_session,
-    update_conversation_title,
-)
+from common.services import conversation_service
 
 # ============= 会话相关模型 =============
 
@@ -52,7 +45,7 @@ async def interrupt(session_id: str, request: Request, body: InterruptRequest = 
     user_id = claims.get("userid") or ""
 
     message = body.message if body else "用户请求中断"
-    data = await interrupt_session(session_id, message)
+    data = await conversation_service.interrupt_session(session_id, message)
     return await Response.succ(message=f"会话 {session_id} 已中断", data={**data, "user_id": user_id})
 
 
@@ -65,7 +58,11 @@ async def update_title(session_id: str, request: Request, body: UpdateTitleReque
     """更新会话标题"""
     claims = getattr(request.state, "user_claims", {}) or {}
     user_id = claims.get("userid")
-    data = await update_conversation_title(session_id, body.title, user_id=user_id)
+    data = await conversation_service.update_server_conversation_title(
+        session_id,
+        body.title,
+        user_id=user_id,
+    )
     return await Response.succ(message=f"会话 {session_id} 标题已更新", data=data)
 
 
@@ -75,7 +72,7 @@ async def get_status(session_id: str, request: Request):
     claims = getattr(request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
 
-    result = await get_session_status(session_id)
+    result = await conversation_service.get_session_status(session_id)
     tasks = result.get("tasks_status", {}).get("tasks", [])
     logger.bind(session_id=session_id).info(f"获取任务数量：{len(tasks)}")
     return await Response.succ(message=f"会话 {session_id} 状态获取成功", data={**result, "user_id": user_id})
@@ -99,7 +96,7 @@ async def list_conversations(
         current_user_id = None
     elif role == "user" and not current_user_id:
         return await Response.succ(data={"list": [], "total": 0}, message="获取会话列表成功")
-    conversations, total_count = await get_conversations_paginated(
+    conversations, total_count = await conversation_service.get_conversations_paginated(
         page=page,
         page_size=page_size,
         user_id=current_user_id,
@@ -149,14 +146,14 @@ async def get_messages(session_id: str, request: Request):
     claims = getattr(request.state, "user_claims", {}) or {}
     user_id = claims.get("userid")
     user_role = claims.get("role") or "user"
-    data = await get_conversation_messages(session_id, user_id=user_id, user_role=user_role)
+    data = await conversation_service.get_conversation_messages(session_id)
     return await Response.succ(data=data, message="获取消息成功")
 
 
 @conversation_router.get("/api/share/conversations/{session_id}/messages")
 async def get_shared_messages(session_id: str):
     """获取分享对话的消息（无权限校验）"""
-    data = await get_conversation_messages(session_id)
+    data = await conversation_service.get_conversation_messages(session_id)
     return await Response.succ(data=data, message="获取分享消息成功")
 
 
@@ -165,7 +162,10 @@ async def delete(session_id: str, request: Request):
     """删除指定对话"""
     claims = getattr(request.state, "user_claims", {}) or {}
     user_id = claims.get("userid")
-    session_id_res = await delete_conversation(session_id, user_id=user_id)
+    session_id_res = await conversation_service.delete_conversation(
+        session_id,
+        user_id=user_id,
+    )
     logger.bind(session_id=session_id).info("会话删除成功")
     return await Response.succ(
         message=f"会话 {session_id} 已删除",

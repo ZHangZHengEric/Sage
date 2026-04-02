@@ -312,11 +312,13 @@ const navigateAfterAuth = async (targetPath) => {
   await router.replace(targetPath)
 }
 
-const localProvider = computed(() => authProviders.value.find((provider) => provider.type === 'local') || null)
+const isLocalAuthProvider = (provider) => provider?.type === 'native'
+
+const localProvider = computed(() => authProviders.value.find((provider) => isLocalAuthProvider(provider)) || null)
 const externalProviders = computed(() => (
   localOnlyMode.value
     ? []
-    : authProviders.value.filter((provider) => provider.type !== 'local')
+    : authProviders.value.filter((provider) => !isLocalAuthProvider(provider))
 ))
 const accountLabel = computed(() => (localMode.value === 'login' ? t('auth.account') : t('auth.username')))
 const accountPlaceholder = computed(() => (localMode.value === 'login' ? t('auth.accountPlaceholder') : t('auth.usernamePlaceholder')))
@@ -454,7 +456,7 @@ const loadAuthConfig = async () => {
     allowRegistration.value = info.allow_registration !== false
     authProviders.value = Array.isArray(info.auth_providers) ? info.auth_providers : []
 
-    if (localOnlyMode.value && !authProviders.value.some((provider) => provider.type === 'local')) {
+    if (localOnlyMode.value && !authProviders.value.some((provider) => isLocalAuthProvider(provider))) {
       errorMessage.value = t('auth.noProviderConfigured')
       return
     }

@@ -886,7 +886,7 @@ def initialize_global_session_manager(session_root_space: str, enable_obs: bool 
     return _global_session_manager
 
 
-def get_global_session_manager(session_root_space: Optional[str] = None, enable_obs: bool = True) -> Optional[SessionManager]:
+def get_global_session_manager(session_root_space: Optional[str] = None, enable_obs: bool = True) -> SessionManager:
     """
     获取全局 SessionManager 实例
     

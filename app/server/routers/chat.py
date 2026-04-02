@@ -15,6 +15,7 @@ from sagents.context.session_context import delete_session_run_lock
 from sagents.utils.lock_manager import safe_release
 
 from common.core.exceptions import SageHTTPException
+from common.services import conversation_service
 from common.schemas.chat import ChatRequest, StreamRequest
 
 # 导入辅助函数
@@ -24,7 +25,6 @@ from ..services.chat import (
     prepare_session,
 )
 from ..services.chat.stream_manager import StreamManager
-from ..services.conversation import interrupt_session, get_conversation_messages
 
 # 创建路由器
 chat_router = APIRouter()
@@ -42,7 +42,7 @@ async def stream_with_manager(session_id: str, last_index: int = 0, resume: bool
     if has_stream_data:
         return
     try:
-        await get_conversation_messages(session_id, user_id=None, user_role="admin")
+        await conversation_service.get_conversation_messages(session_id)
     except Exception:
         return
     yield json.dumps(
@@ -71,7 +71,7 @@ async def stream_api_with_disconnect_check(generator, request: Request, lock: as
     except (asyncio.CancelledError, GeneratorExit) as e:
         # 标记会话中断，让内部逻辑有机会感知并处理
         try:
-            await interrupt_session(session_id, "客户端断开连接")
+            await conversation_service.interrupt_session(session_id, "客户端断开连接")
         except Exception as ex:
             logger.bind(session_id=session_id).error(f"Error interrupting session: {ex}")
 
