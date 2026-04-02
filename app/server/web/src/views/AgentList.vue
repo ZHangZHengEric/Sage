@@ -229,6 +229,7 @@ import { knowledgeBaseAPI } from '../api/knowledgeBase.js'
 import MarkdownRenderer from '../components/chat/MarkdownRenderer.vue'
 import { useAgentEditStore } from '../stores/agentEdit'
 import { normalizeAgentMode } from '../utils/agentMode.js'
+import { buildImportedAgentDraft, parseAgentConfigImport } from '../utils/agentConfigImport.js'
 import { dump } from 'js-yaml'
 
 // UI Components
@@ -501,7 +502,7 @@ const handleImport = () => {
   // 创建文件输入元素
   const input = document.createElement('input')
   input.type = 'file'
-  input.accept = '.json'
+  input.accept = '.json,.yaml,.yml,application/json,application/x-yaml,text/yaml,text/x-yaml'
   input.style.display = 'none'
 
   input.onchange = (event) => {
@@ -511,7 +512,7 @@ const handleImport = () => {
     const reader = new FileReader()
     reader.onload = async (e) => {
       try {
-        const importedConfig = JSON.parse(e.target.result)
+        const importedConfig = parseAgentConfigImport(e.target.result)
 
         // 验证必要字段
         if (!importedConfig.name) {
@@ -519,25 +520,12 @@ const handleImport = () => {
           return
         }
 
-        // 创建新的Agent配置
-        const newAgent = {
-          name: importedConfig.name + t('agent.importSuffix'),
-          llm_provider_id: importedConfig.llm_provider_id || null,
-          description: importedConfig.description || '',
-          systemPrefix: importedConfig.systemPrefix || '',
-          deepThinking: importedConfig.deepThinking || false,
-          multiAgent: importedConfig.multiAgent || false,
-          maxLoopCount: importedConfig.maxLoopCount || 10,
-          availableTools: importedConfig.availableTools || [],
-          availableSkills: importedConfig.availableSkills || [],
-          availableKnowledgeBases: importedConfig.availableKnowledgeBases || [],
-          systemContext: importedConfig.systemContext || {},
-          availableWorkflows: importedConfig.availableWorkflows || {}
-        }
+        const newAgent = buildImportedAgentDraft(importedConfig, t('agent.importSuffix'))
 
         // 切换到编辑视图并预填数据
         editingAgent.value = newAgent
         currentView.value = 'edit'
+        toast.success(t('agent.importDataLoaded'))
 
       } catch (error) {
         alert(t('agent.importError'))
