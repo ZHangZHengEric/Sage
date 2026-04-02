@@ -122,6 +122,13 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     })
 
     if (existingItem) {
+      // 文件类型在同一消息内重复出现时，可能是“同一路径文件已更新后再次触发渲染”。
+      // 这里递增刷新版本，通知前端重新读取文件内容，避免展示旧缓存。
+      if (item.type === 'file') {
+        existingItem.timestamp = Date.now()
+        existingItem.refreshVersion = (existingItem.refreshVersion || 0) + 1
+      }
+
       // 如果处于实时模式且是当前会话的项，尝试跳转到该项（针对流式输出时已存在但需要聚焦的情况）
       if (isRealtime.value && existingItem.sessionId === currentSessionId.value) {
         const index = filteredItems.value.indexOf(existingItem)

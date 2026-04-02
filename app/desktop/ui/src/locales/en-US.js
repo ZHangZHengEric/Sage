@@ -1059,6 +1059,7 @@ export default {
   'workbench.tool.fileUpdate.operations': 'ops',
   'workbench.tool.fileUpdate.replacements': 'Replacements',
   'workbench.tool.fileUpdate.range': 'Line Range',
+  'workbench.tool.fileUpdate.boundary': 'both start_line and end_line are inclusive',
   'workbench.tool.fileUpdate.mode.searchReplace': 'Search Replace',
   'workbench.tool.fileUpdate.mode.lineRange': 'Line Replace',
   'workbench.tool.fileUpdate.mode.batch': 'Batch Update',

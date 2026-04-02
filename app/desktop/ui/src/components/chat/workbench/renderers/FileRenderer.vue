@@ -180,6 +180,7 @@
         :file-path="filePath"
         :file-name="fileName"
         :item="item"
+        :refresh-version="refreshVersion"
         :dialog-mode="true"
         @download-file="$emit('downloadFile', $event)"
         @delete-file="$emit('deleteFile', $event)"
@@ -247,6 +248,10 @@ const props = defineProps({
   item: {
     type: Object,
     default: () => ({})
+  },
+  refreshVersion: {
+    type: Number,
+    default: 0
   },
   dialogMode: {
     type: Boolean,
@@ -1141,6 +1146,17 @@ watch(() => props.filePath, (newPath, oldPath) => {
     console.log('[FileRenderer] File path changed from', oldPath, 'to', newPath)
     loadContent()
     // 如果是 Office 文件，额外加载 Office 内容
+    if (fileType.value === 'office') {
+      loadOfficeContent()
+    }
+  }
+})
+
+// 监听刷新版本：同一路径文件内容更新时强制重新加载
+watch(() => props.refreshVersion, (newVersion, oldVersion) => {
+  if (newVersion !== oldVersion && props.filePath) {
+    console.log('[FileRenderer] Refresh version changed from', oldVersion, 'to', newVersion)
+    loadContent()
     if (fileType.value === 'office') {
       loadOfficeContent()
     }

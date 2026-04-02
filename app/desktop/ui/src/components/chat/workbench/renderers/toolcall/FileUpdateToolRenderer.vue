@@ -115,15 +115,15 @@ const fileUpdateOperationModeLabel = (operation) => {
 const fileUpdateOperationTitle = (operation, index) => {
   if (operation?.update_mode === 'line_range' || operation?.start_line !== undefined || operation?.end_line !== undefined) {
     const start = typeof operation?.start_line === 'number' ? operation.start_line + 1 : '?'
-    const end = typeof operation?.end_line === 'number' ? operation.end_line : '?'
-    return `${t('workbench.tool.fileUpdate.range')} L${start}-L${end}`
+    const end = typeof operation?.end_line === 'number' ? operation.end_line + 1 : '?'
+    return `${t('workbench.tool.fileUpdate.range')} [L${start}, L${end}]`
   }
   return `${t('workbench.tool.fileUpdate.operations')} ${index + 1}`
 }
 const fileUpdateOperationDetail = (operation) => {
   if (operation?.update_mode === 'line_range' || operation?.start_line !== undefined || operation?.end_line !== undefined) {
     const linesReplaced = operation?.lines_replaced ?? '-'
-    return `${t('workbench.tool.fileUpdate.replacements')}: ${linesReplaced}`
+    return `${t('workbench.tool.fileUpdate.replacements')}: ${linesReplaced} · ${t('workbench.tool.fileUpdate.boundary')}`
   }
   return operation?.search_pattern || ''
 }
