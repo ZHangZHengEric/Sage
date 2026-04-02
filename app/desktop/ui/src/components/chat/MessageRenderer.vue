@@ -756,6 +756,24 @@ watch(() => props.message, (newMessage, oldMessage) => {
   // 1. 处理工具调用结果
   if (newMessage?.tool_calls && newMessage.tool_calls.length > 0) {
     newMessage.tool_calls.forEach((toolCall) => {
+      // 流式场景下，tool_calls 可能在消息已挂载后才到达：
+      // 先确保工作台存在对应 tool_call 卡片，再尝试更新结果。
+      const existingToolItem = workbenchStore.items.find(item =>
+        item.type === 'tool_call' && item.data?.id === toolCall.id
+      )
+      if (!existingToolItem) {
+        workbenchStore.addItem({
+          type: 'tool_call',
+          role: 'assistant',
+          timestamp: timestamp,
+          sessionId: sessionId,
+          messageId: messageId,
+          agent_id: props.agentId,
+          agent_name: currentAgentName.value,
+          data: toolCall
+        })
+      }
+
       const toolResult = getParsedToolResult(toolCall)
       console.log('[MessageRenderer] toolCall.id:', toolCall.id, 'toolResult:', toolResult)
       if (toolResult) {

@@ -16,11 +16,11 @@ class FileSystemTool:
         start_line: Optional[int] = None,
         end_line: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """对文本内容执行按行区间替换。行号为 0-based，end_line 为开区间。"""
+        """对文本内容执行按行区间替换。行号为 0-based，start/end 都是包含边界。"""
         lines = content.splitlines(keepends=True)
         total_lines = len(lines)
         normalized_start = 0 if start_line is None else max(0, start_line)
-        normalized_end = total_lines if end_line is None else min(total_lines, end_line)
+        normalized_end = (total_lines - 1) if end_line is None else min(total_lines - 1, end_line)
 
         if normalized_start > normalized_end:
             return {
@@ -28,14 +28,22 @@ class FileSystemTool:
                 "message": "开始行号不能大于结束行号",
             }
 
-        original_segment = "".join(lines[normalized_start:normalized_end])
+        if total_lines == 0:
+            return {
+                "status": "error",
+                "message": "文件为空，无法执行按行替换",
+            }
+
+        normalized_end_exclusive = normalized_end + 1
+
+        original_segment = "".join(lines[normalized_start:normalized_end_exclusive])
         replacement_segment = replacement
-        has_suffix = normalized_end < total_lines
+        has_suffix = normalized_end_exclusive < total_lines
 
         if has_suffix and replacement_segment and not replacement_segment.endswith(("\n", "\r")):
             replacement_segment += "\n"
 
-        new_content = "".join(lines[:normalized_start]) + replacement_segment + "".join(lines[normalized_end:])
+        new_content = "".join(lines[:normalized_start]) + replacement_segment + "".join(lines[normalized_end_exclusive:])
         replace_count = 1 if original_segment != replacement_segment else 0
 
         if normalized_start == normalized_end and not replacement_segment:
@@ -47,7 +55,7 @@ class FileSystemTool:
             "replacements": replace_count,
             "start_line": normalized_start,
             "end_line": normalized_end,
-            "lines_replaced": max(0, normalized_end - normalized_start),
+            "lines_replaced": max(0, normalized_end_exclusive - normalized_start),
         }
 
     @staticmethod
@@ -107,14 +115,14 @@ class FileSystemTool:
             "file_path": {"zh": "文件虚拟路径", "en": "File virtual path"},
             "start_line": {"zh": "开始行号，默认0", "en": "Start line number, default 0"},
             "end_line": {"zh": "结束行号（不包含），默认400，None表示读取到文件末尾", "en": "End line number (exclusive), default 400, None means read to end"},
-            "include_line_numbers": {"zh": "是否在返回内容中附带行号，默认false", "en": "Whether to include line numbers in returned content, default false"},
+            "include_line_numbers": {"zh": "是否在返回内容中附带行号，默认true", "en": "Whether to include line numbers in returned content, default true"},
             "session_id": {"zh": "会话ID（必填，自动注入）", "en": "Session ID (Required, Auto-injected)"},
         },
         param_schema={
             "file_path": {"type": "string", "description": "File virtual path"},
             "start_line": {"type": "integer", "default": 0},
             "end_line": {"type": "integer", "default": 400},
-            "include_line_numbers": {"type": "boolean", "default": False},
+            "include_line_numbers": {"type": "boolean", "default": True},
             "session_id": {"type": "string", "description": "Session ID"},
         }
     )
@@ -123,7 +131,7 @@ class FileSystemTool:
         file_path: str,
         start_line: int = 0,
         end_line: Optional[int] = 400,
-        include_line_numbers: bool = False,
+        include_line_numbers: bool = True,
         session_id: str = None,
     ) -> Dict[str, Any]:
         """读取文本文件指定行范围内容
@@ -249,8 +257,8 @@ class FileSystemTool:
         param_description_i18n={
             "file_path": {"zh": "文件虚拟路径", "en": "File virtual path"},
             "operations": {
-                "zh": "替换操作列表。每项要么提供 search_pattern 和 replacement，要么提供 start_line、end_line 和 replacement。search_pattern 可以写普通文本，也可以写正则表达式；执行时会先按普通文本匹配，未命中再按正则处理",
-                "en": "Replacement operations. Each item must provide either search_pattern and replacement, or start_line, end_line and replacement. search_pattern can be plain text or a regex; execution first tries plain-text matching, then falls back to regex if not found",
+                "zh": "替换操作列表。每项要么提供 search_pattern 和 replacement，要么提供 start_line、end_line 和 replacement。按行替换时：start_line 和 end_line 都是包含边界（0-based）。search_pattern 可以写普通文本，也可以写正则表达式；执行时会先按普通文本匹配，未命中再按正则处理",
+                "en": "Replacement operations. Each item must provide either search_pattern and replacement, or start_line, end_line and replacement. For line-range mode: both start_line and end_line are inclusive (0-based). search_pattern can be plain text or a regex; execution first tries plain-text matching, then falls back to regex if not found",
             },
             "session_id": {"zh": "会话ID（必填，自动注入）", "en": "Session ID (Required, Auto-injected)"},
         },
@@ -276,7 +284,7 @@ class FileSystemTool:
                         },
                         "end_line": {
                             "type": "integer",
-                            "description": "End line number (exclusive, 0-based) for line-range replacement"
+                            "description": "End line number (inclusive, 0-based) for line-range replacement"
                         },
                     },
                 },
@@ -296,7 +304,7 @@ class FileSystemTool:
             file_path: 文件虚拟路径
             operations: 同一文件的替换操作列表。每项支持两种形式：
                 1. {"search_pattern": "...", "replacement": "..."}，其中 search_pattern 可以是普通文本，也可以是正则表达式；会优先按普通文本匹配，未命中再按正则处理
-                2. {"start_line": 10, "end_line": 12, "replacement": "..."}
+                2. {"start_line": 10, "end_line": 12, "replacement": "..."}，其中 start_line 和 end_line 都是包含边界（0-based）
             session_id: 会话ID（必填）
 
         Returns:
@@ -369,6 +377,24 @@ class FileSystemTool:
                         "file_path": file_path,
                         "failed_operation_index": index,
                     }
+
+                requested_start = op.get("start_line")
+                requested_end = op.get("end_line")
+                if (
+                    isinstance(requested_start, int)
+                    and isinstance(requested_end, int)
+                    and requested_end >= requested_start
+                    and step_result.get("lines_replaced", 0) == 0
+                ):
+                    return {
+                        "status": "error",
+                        "message": (
+                            f"第 {index + 1} 个操作未替换任何行（start_line={requested_start}, end_line={requested_end}）。"
+                            "当前工具使用 0-based 且 start_line/end_line 都是包含边界；请检查行号是否有效。"
+                        ),
+                        "file_path": file_path,
+                        "failed_operation_index": index,
+                    }
                 current_content = step_result["content"]
                 total_replacements += step_result["replacements"]
                 op_summary.update({
@@ -402,12 +428,25 @@ class FileSystemTool:
                 })
                 operation_summaries.append(op_summary)
 
-            if total_replacements == 0:
+            if total_replacements == 0 and not line_range_ops:
                 return {
                     "status": "error",
                     "message": "未找到匹配项，未进行任何替换",
                     "replacements": 0,
                     "file_path": file_path,
+                }
+
+            if total_replacements == 0 and line_range_ops:
+                return {
+                    "status": "success",
+                    "message": "已执行按行替换，但目标区间与替换内容一致，文件无变化",
+                    "replacements": 0,
+                    "operations_applied": len(operation_summaries),
+                    "operations": sorted(operation_summaries, key=lambda item: item["index"]),
+                    "original_length": len(content),
+                    "new_length": len(current_content),
+                    "file_path": file_path,
+                    "update_mode": "batch" if len(operation_summaries) > 1 else operation_summaries[0]["update_mode"],
                 }
 
             await sandbox.write_file(file_path, current_content, mode="overwrite")

@@ -19,6 +19,7 @@
         :file-path="item.data?.filePath"
         :file-name="item.data?.fileName"
         :item="item"
+        :refresh-version="item.refreshVersion || 0"
         @quote-path="$emit('quotePath', $event)"
       />
 

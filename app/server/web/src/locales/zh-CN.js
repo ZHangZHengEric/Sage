@@ -927,6 +927,7 @@ export default {
   'workbench.tool.fileUpdate.operations': '个操作',
   'workbench.tool.fileUpdate.replacements': '替换数量',
   'workbench.tool.fileUpdate.range': '行区间',
+  'workbench.tool.fileUpdate.boundary': 'start_line 和 end_line 都包含',
   'workbench.tool.fileUpdate.mode.searchReplace': '搜索替换',
   'workbench.tool.fileUpdate.mode.lineRange': '按行替换',
   'workbench.tool.fileUpdate.mode.batch': '批量更新',
