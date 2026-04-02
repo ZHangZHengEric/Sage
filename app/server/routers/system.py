@@ -2,10 +2,9 @@ import time
 
 from fastapi import APIRouter, Request
 
-from ..core.render import Response
-from ..models import SystemInfoDao
-from ..schemas.base import BaseResponse
-from ..schemas.system import SystemSettingsRequest
+from common.core.render import Response
+from common.schemas.base import BaseResponse, SystemSettingsRequest
+from common.models.system import SystemInfoDao
 from ..services.auth.external_oauth import get_auth_public_config
 
 # 创建路由器

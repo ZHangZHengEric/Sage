@@ -21,14 +21,14 @@ from sagents.utils.agent_abilities import (
 )
 
 
-from .. import models
-from ..core import config
-from ..core.client.chat import get_chat_client
-from ..core.exceptions import SageHTTPException
-from ..schemas.agent import AgentAbilityItem
-from ..models.llm_provider import LLMProviderDao
+from common.models.agent import Agent, AgentConfigDao
+from common.models.llm_provider import LLMProviderDao
+from common.core import config
+from common.core.exceptions import SageHTTPException
+from common.schemas.agent import AgentAbilityItem
+from common.core.client.chat import get_chat_client
 
-from .chat.utils import create_model_client
+from common.services.agent_service import enforce_required_tools, validate_and_filter_tools
 from .skill import list_skills_for_agent
 # ================= 工具函数 =================
 
@@ -237,9 +237,9 @@ def _sync_agent_skills_to_global(agent_workspace: Path) -> List[str]:
 # ================= 业务函数 =================
 
 
-async def list_agents() -> List[models.Agent]:
+async def list_agents() -> List[Agent]:
     """获取所有 Agent 的配置并转换为响应结构"""
-    dao = models.AgentConfigDao()
+    dao = AgentConfigDao()
     all_configs = await dao.get_list()
     return all_configs
 
@@ -315,7 +315,7 @@ def _validate_and_filter_tools(agent_config: Dict[str, Any]) -> Dict[str, Any]:
 
 async def create_agent(
     agent_name: str, agent_config: Dict[str, Any]
-) -> models.Agent:
+) -> Agent:
     """创建新的 Agent，返回创建的 Agent 对象"""
     # 如果配置中包含 id，使用指定的 id，否则生成随机 id
     agent_id = agent_config.pop("id", None) or generate_agent_id()
@@ -325,12 +325,12 @@ async def create_agent(
     logger.info(f"agent_config keys after pop: {list(agent_config.keys())}")
 
     # 强制添加必要的工具
-    agent_config = _enforce_required_tools(agent_config)
+    agent_config = enforce_required_tools(agent_config)
 
     # 验证并过滤工具
-    agent_config = _validate_and_filter_tools(agent_config)
+    agent_config = validate_and_filter_tools(agent_config)
 
-    dao = models.AgentConfigDao()
+    dao = AgentConfigDao()
     existing_config = await dao.get_by_name(agent_name)
     if existing_config:
         raise SageHTTPException(
@@ -350,7 +350,7 @@ async def create_agent(
         logger.info("没有默认 Agent，自动将新 Agent 设为默认")
         is_default = True
 
-    orm_obj = models.Agent(
+    orm_obj = Agent(
         agent_id=agent_id,
         name=agent_name,
         config=agent_config,
@@ -361,10 +361,10 @@ async def create_agent(
     return orm_obj
 
 
-async def get_agent(agent_id: str) -> models.Agent:
+async def get_agent(agent_id: str) -> Agent:
     """根据 ID 获取 Agent 配置并转换为响应结构"""
     logger.info(f"获取Agent配置: {agent_id}")
-    dao = models.AgentConfigDao()
+    dao = AgentConfigDao()
     existing = await dao.get_by_id(agent_id)
     if not existing:
         raise SageHTTPException(
@@ -377,17 +377,17 @@ async def get_agent(agent_id: str) -> models.Agent:
 
 async def update_agent(
     agent_id: str, agent_name: str, agent_config: Dict[str, Any]
-) -> models.Agent:
+) -> Agent:
     """更新指定 Agent 的配置，返回 Agent 对象"""
     logger.info(f"开始更新Agent: {agent_id}")
 
     # 强制添加必要的工具
-    agent_config = _enforce_required_tools(agent_config)
+    agent_config = enforce_required_tools(agent_config)
 
     # 验证并过滤工具
-    agent_config = _validate_and_filter_tools(agent_config)
+    agent_config = validate_and_filter_tools(agent_config)
     
-    dao = models.AgentConfigDao()
+    dao = AgentConfigDao()
     existing_config = await dao.get_by_id(agent_id)
     if not existing_config:
         raise SageHTTPException(
@@ -397,7 +397,7 @@ async def update_agent(
         )
     # 从配置中提取 is_default，如果没有则保留原有值
     is_default = agent_config.get('is_default', existing_config.is_default)
-    orm_obj = models.Agent(
+    orm_obj = Agent(
         agent_id=agent_id, 
         name=agent_name, 
         config=agent_config,
@@ -457,10 +457,10 @@ async def _cleanup_agent_workspace_skills(agent_id: str, agent_config: Dict[str,
         logger.bind(agent_id=agent_id).warning(f"清理agent工作空间skills失败: {e}")
 
 
-async def delete_agent(agent_id: str) -> models.Agent:
+async def delete_agent(agent_id: str) -> Agent:
     """删除指定 Agent，返回删除的 Agent 对象"""
     logger.info(f"开始删除Agent: {agent_id}")
-    dao = models.AgentConfigDao()
+    dao = AgentConfigDao()
     existing_config = await dao.get_by_id(agent_id)
     if not existing_config:
         raise SageHTTPException(
@@ -502,7 +502,7 @@ async def import_openclaw_agent() -> Dict[str, Any]:
         available_skills=available_skills,
     )
 
-    created_agent: Optional[models.Agent] = None
+    created_agent: Optional[Agent] = None
     agent_workspace: Optional[Path] = None
 
     try:
@@ -535,7 +535,7 @@ async def import_openclaw_agent() -> Dict[str, Any]:
 
         if created_agent:
             try:
-                await models.AgentConfigDao().delete_by_id(created_agent.agent_id)
+                await AgentConfigDao().delete_by_id(created_agent.agent_id)
             except Exception as cleanup_error:
                 logger.warning(f"清理导入失败的 Agent 记录时出错: {cleanup_error}")
 

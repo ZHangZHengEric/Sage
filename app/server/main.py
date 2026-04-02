@@ -18,9 +18,11 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 
-from .core import config
-from .core.config import get_startup_config
-from .core.exceptions import register_exception_handlers
+from common.core import config
+from common.core.config import get_startup_config
+from common.core.context import get_request_id
+from common.core.exceptions import register_exception_handlers
+from common.utils.logging import init_logging_base
 from .core.middleware import register_middlewares
 from .lifecycle import (
     cleanup_system,
@@ -28,7 +30,6 @@ from .lifecycle import (
     post_initialize_task,
 )
 from .routers import register_routes as register_chat_routes
-from .utils.log import init_logging
 
 
 @asynccontextmanager
@@ -98,7 +99,13 @@ def start_server(cfg: config.StartupConfig):
 def main():
     try:
         cfg = config.init_startup_config()
-        init_logging(log_name="sage-server", log_level=getattr(cfg, "log_level", "INFO"))
+        init_logging_base(
+            log_name="sage-server",
+            log_level=getattr(cfg, "log_level", "INFO"),
+            log_path="./logs",
+            get_request_id=get_request_id,
+            use_safe_stdout=True,
+        )
         start_server(cfg)
         return 0
     except KeyboardInterrupt:

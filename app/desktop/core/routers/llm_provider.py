@@ -2,10 +2,10 @@ from typing import List
 import uuid
 
 from fastapi import APIRouter, Depends, Request, HTTPException
-from ..models.llm_provider import LLMProvider, LLMProviderDao
-from ..schemas.llm_provider import LLMProviderDTO, LLMProviderCreate, LLMProviderUpdate
-from ..core.render import Response
-from ..core.client.chat import init_chat_client
+from common.core.render import Response
+from common.models.llm_provider import LLMProvider, LLMProviderDao
+from common.schemas.base import LLMProviderCreate, LLMProviderUpdate
+from common.core.client.chat import init_chat_client
 from loguru import logger
 from openai import AsyncOpenAI
 

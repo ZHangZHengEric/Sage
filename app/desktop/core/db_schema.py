@@ -6,7 +6,7 @@ import logging
 from typing import Dict, List, Set
 
 from sqlalchemy import inspect, text, String, Integer, Boolean, DateTime, Float
-from .models import Base
+from common.models.base import Base
 
 logger = logging.getLogger(__name__)
 

@@ -15,11 +15,12 @@ from sagents.context.session_context import (
 from sagents.session_runtime import get_global_session_manager
 from sagents.sagents import SAgent
 from sagents.tool import ToolManager, get_tool_manager
-from ... import models
-from ...core.exceptions import SageHTTPException
-from ...models import IMChannelConfigDao
-from ...schemas.chat import StreamRequest, CustomSubAgentConfig
-from sagents.session_runtime import get_global_session_manager
+from common.core.exceptions import SageHTTPException
+from common.models.agent import AgentConfigDao
+from common.models.conversation import ConversationDao
+from common.models.im_channel import IMChannelConfigDao
+from common.models.llm_provider import LLMProviderDao
+from common.schemas.chat import StreamRequest, CustomSubAgentConfig
 from .processor import (
     ContentProcessor,
 )
@@ -88,7 +89,7 @@ async def populate_request_from_agent_config(
             # 默认使用request 的信息
             pass
     else:
-        agent_dao = models.AgentConfigDao()
+        agent_dao = AgentConfigDao()
         agent = await agent_dao.get_by_id(request.agent_id)
         if not agent or not agent.config:
             # 如果要求必须有 Agent ID，但 Agent 不存在，则抛出异常
@@ -146,7 +147,7 @@ async def populate_request_from_agent_config(
     # 注入 llm_config 配置
     if request.llm_model_config is None:
         request.llm_model_config = {}
-    provider_dao = models.LLMProviderDao()
+    provider_dao = LLMProviderDao()
     provider_id = agent_config.get("llm_provider_id") if agent_config else None
     if provider_id: # 有指定则全量替换
         provider = await provider_dao.get_by_id(provider_id)
@@ -247,7 +248,7 @@ async def populate_request_from_agent_config(
     available_sub_agent_ids = request.available_sub_agent_ids
     if available_sub_agent_ids:
         # 从数据库获取所有子Agent配置
-        sub_agent_dao = models.AgentConfigDao()
+        sub_agent_dao = AgentConfigDao()
         sub_agents = await sub_agent_dao.get_by_ids(available_sub_agent_ids)
         # 转成CustomSubAgentConfig
         custom_sub_agents = [
@@ -265,7 +266,7 @@ async def populate_request_from_agent_config(
         setattr(request, "custom_sub_agents", custom_sub_agents)
 
     # 从配置获取 context_budget_config
-    from ...core.config import get_startup_config
+    from common.core.config import get_startup_config
     server_config = get_startup_config()
 
     # 尝试从 llm_model_config 中获取 max_model_len
@@ -493,11 +494,12 @@ async def execute_chat_session(
     yield json.dumps(end_data, ensure_ascii=False) + "\n"
 
 async def _ensure_conversation(request: StreamRequest) -> None:
-    conversation_dao = models.ConversationDao()
+    conversation_dao = ConversationDao()
     existing_conversation = await conversation_dao.get_by_session_id(request.session_id)
     if not existing_conversation:
         conversation_title = await create_conversation_title(request)
         await conversation_dao.save_conversation(
+            user_id=request.user_id or "default_user",
             session_id=request.session_id,
             agent_id=request.agent_id or "default_agent",
             agent_name=request.agent_name or "Sage Assistant",

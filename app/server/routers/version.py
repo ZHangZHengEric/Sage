@@ -6,9 +6,9 @@ import httpx
 import asyncio
 import logging
 
-from app.server.models.system import VersionDao, Version
-from app.server.core.render import Response
-from app.server.schemas.base import BaseResponse
+from common.core.render import Response
+from common.models.system import VersionDao, Version
+from common.schemas.base import BaseResponse
 
 logger = logging.getLogger(__name__)
 

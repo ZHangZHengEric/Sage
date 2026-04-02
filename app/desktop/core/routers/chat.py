@@ -12,11 +12,10 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 from sqlalchemy.orm import query
 
-from ..core.client.chat import get_chat_client
-from ..core.exceptions import SageHTTPException
+from common.core.exceptions import SageHTTPException
+from common.schemas.chat import ChatRequest, StreamRequest
+from common.core.client.chat import get_chat_client
 
-# 导入新模型
-from ..schemas.chat import ChatRequest, StreamRequest
 from sagents.context.session_context import delete_session_run_lock
 from sagents.utils.lock_manager import safe_release
 
@@ -234,5 +233,3 @@ async def get_active_sessions(request: Request):
             raise
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
-
-

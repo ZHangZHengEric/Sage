@@ -3,9 +3,9 @@ from urllib.parse import quote, urlparse
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, Response
 
-from ..core import config
-from ..core.exceptions import SageHTTPException
-from ..models.user import User, UserDao
+from common.core import config
+from common.core.exceptions import SageHTTPException
+from common.models.user import User, UserDao
 from ..services.auth.external_oauth import is_local_auth_enabled
 
 observability_router = APIRouter(prefix="/api/observability", tags=["Observability"])

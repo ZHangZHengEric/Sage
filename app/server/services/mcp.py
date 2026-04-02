@@ -9,8 +9,8 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 from sagents.tool.tool_manager import get_tool_manager
 
-from .. import models
-from ..core.exceptions import SageHTTPException
+from common.core.exceptions import SageHTTPException
+from common.models.mcp_server import MCPServer, MCPServerDao
 
 
 def _build_server_config(
@@ -46,7 +46,7 @@ async def add_mcp_server(
 ) -> str:
     """添加 MCP 服务器并保存到数据库，返回响应数据字典"""
 
-    dao = models.MCPServerDao()
+    dao = MCPServerDao()
     # 检查服务器名称是否已存在
     existing_server = await dao.get_by_name(name)
     if existing_server:
@@ -70,9 +70,9 @@ async def add_mcp_server(
     return name
 
 
-async def list_mcp_servers(user_id: Optional[str] = None) -> List[models.MCPServer]:
+async def list_mcp_servers(user_id: Optional[str] = None) -> List[MCPServer]:
     """获取所有 MCP 服务器并转换为简化响应结构"""
-    dao = models.MCPServerDao()
+    dao = MCPServerDao()
     mcp_servers = await dao.get_list(user_id)
     return mcp_servers
 
@@ -81,7 +81,7 @@ async def remove_mcp_server(server_name: str, user_id: str, role: str) -> str:
     """删除 MCP 服务器，返回 server_name"""
     tm = get_tool_manager()
 
-    dao = models.MCPServerDao()
+    dao = MCPServerDao()
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
         raise SageHTTPException(
@@ -112,7 +112,7 @@ async def toggle_mcp_server(server_name: str) -> (bool, str):
     """切换 MCP 服务器启用/禁用状态，返回 (disabled, status_text)"""
     tm = get_tool_manager()
 
-    dao = models.MCPServerDao()
+    dao = MCPServerDao()
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
         raise SageHTTPException(
@@ -143,7 +143,7 @@ async def toggle_mcp_server(server_name: str) -> (bool, str):
 async def refresh_mcp_server(server_name: str, user_id: str, role: str) -> str:
     """刷新 MCP 服务器连接，返回是否成功"""
     tm = get_tool_manager()
-    dao = models.MCPServerDao()
+    dao = MCPServerDao()
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
         raise SageHTTPException(

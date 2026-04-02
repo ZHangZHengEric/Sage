@@ -46,7 +46,7 @@ def create_skill_proxy(
     """
     from sagents.skill.skill_manager import SkillManager, get_skill_manager
     from sagents.skill.skill_proxy import SkillProxy
-    from app.server.core.config import get_startup_config
+    from common.core.config import get_startup_config
 
     if not available_skills:
         return SkillProxy(get_skill_manager(), []), None
