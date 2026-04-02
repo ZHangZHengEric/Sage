@@ -10,7 +10,7 @@ import time
 import traceback
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from loguru import logger
 from sagents.context.session_context import SessionStatus, get_session_run_lock
@@ -77,19 +77,12 @@ def _get_provider_api_key(provider: Any) -> Optional[str]:
     return getattr(provider, "api_key", None)
 
 
-async def optimize_user_input(
-    current_input: str,
-    history_messages: List[Dict[str, str]],
+async def _resolve_input_optimization_model_client(
     session_id: str = "",
     agent_id: str = "",
     user_id: str = "",
-) -> Dict[str, Any]:
+) -> Tuple[Any, str]:
     from common.services.agent_service import _resolve_model_client, _create_model_client
-
-    logger.info("开始优化用户输入")
-    optimizer = UserInputOptimizer()
-    max_attempts = 3 if _is_desktop_mode() else 1
-    result: Dict[str, Any] = {}
 
     resolved_agent_id = agent_id or ""
     if not resolved_agent_id and session_id:
@@ -97,29 +90,45 @@ async def optimize_user_input(
         if conversation and conversation.agent_id:
             resolved_agent_id = conversation.agent_id
 
-    async def _resolve_client_for_input_optimization() -> Tuple[Any, str]:
-        if resolved_agent_id:
-            agent = await AgentConfigDao().get_by_id(resolved_agent_id)
-            agent_config = agent.config if agent and agent.config else {}
-            provider_id = agent_config.get("llm_provider_id") if isinstance(agent_config, dict) else None
-            if provider_id:
-                provider = await LLMProviderDao().get_by_id(provider_id)
-                if provider:
-                    logger.info(
-                        f"用户输入优化使用 Agent 模型配置: agent_id={resolved_agent_id}, provider_id={provider_id}, model={provider.model}"
-                    )
-                    return _create_model_client(
-                        {
-                            "api_key": _get_provider_api_key(provider),
-                            "base_url": provider.base_url,
-                            "model": provider.model,
-                        }
-                    ), provider.model
+    if resolved_agent_id:
+        agent = await AgentConfigDao().get_by_id(resolved_agent_id)
+        agent_config = agent.config if agent and agent.config else {}
+        provider_id = agent_config.get("llm_provider_id") if isinstance(agent_config, dict) else None
+        if provider_id:
+            provider = await LLMProviderDao().get_by_id(provider_id)
+            if provider:
+                logger.info(
+                    f"用户输入优化使用 Agent 模型配置: agent_id={resolved_agent_id}, provider_id={provider_id}, model={provider.model}"
+                )
+                return _create_model_client(
+                    {
+                        "api_key": _get_provider_api_key(provider),
+                        "base_url": provider.base_url,
+                        "model": provider.model,
+                    }
+                ), provider.model
 
-        return await _resolve_model_client(user_id)
+    return await _resolve_model_client(user_id)
+
+
+async def optimize_user_input(
+    current_input: str,
+    history_messages: List[Dict[str, str]],
+    session_id: str = "",
+    agent_id: str = "",
+    user_id: str = "",
+) -> Dict[str, Any]:
+    logger.info("开始优化用户输入")
+    optimizer = UserInputOptimizer()
+    max_attempts = 3 if _is_desktop_mode() else 1
+    result: Dict[str, Any] = {}
 
     for attempt in range(max_attempts):
-        model_client, model_name = await _resolve_client_for_input_optimization()
+        model_client, model_name = await _resolve_input_optimization_model_client(
+            session_id=session_id,
+            agent_id=agent_id,
+            user_id=user_id,
+        )
         result = await optimizer.optimize_user_input(
             current_input=current_input,
             history_messages=history_messages,
@@ -151,6 +160,92 @@ async def optimize_user_input(
     else:
         logger.info("用户输入优化成功")
     return result
+
+
+async def optimize_user_input_stream(
+    current_input: str,
+    history_messages: List[Dict[str, str]],
+    session_id: str = "",
+    agent_id: str = "",
+    user_id: str = "",
+) -> AsyncGenerator[Dict[str, Any], None]:
+    logger.info("开始流式优化用户输入")
+    optimizer = UserInputOptimizer()
+    max_attempts = 3 if _is_desktop_mode() else 1
+    fallback_result: Dict[str, Any] | None = None
+    overall_start = time.perf_counter()
+
+    yield {
+        "type": "start",
+        "timestamp": time.time(),
+    }
+
+    for attempt in range(max_attempts):
+        resolve_start = time.perf_counter()
+        model_client, model_name = await _resolve_input_optimization_model_client(
+            session_id=session_id,
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+        resolve_cost = time.perf_counter() - resolve_start
+        logger.info(
+            f"流式优化用户输入模型客户端准备完成: attempt={attempt + 1}, model={model_name}, resolve_cost={resolve_cost:.3f}s"
+        )
+
+        optimized_chunks: List[str] = []
+        try:
+            async for delta in optimizer.optimize_user_input_stream(
+                current_input=current_input,
+                history_messages=history_messages,
+                llm_client=model_client,
+                model=model_name,
+            ):
+                optimized_chunks.append(delta)
+                yield {
+                    "type": "delta",
+                    "content": delta,
+                    "timestamp": time.time(),
+                }
+
+            optimized_input = "".join(optimized_chunks).strip()
+            if optimized_input:
+                yield {
+                    "type": "done",
+                    "success": True,
+                    "optimized_input": optimized_input,
+                    "timestamp": time.time(),
+                }
+                total_cost = time.perf_counter() - overall_start
+                logger.info(f"流式优化用户输入成功，attempt={attempt + 1}, total_cost={total_cost:.3f}s")
+                return
+
+            fallback_result = optimizer._fallback_result(current_input)
+            break
+        except Exception as exc:
+            error_message = str(exc)
+            error_type = type(exc).__name__
+            is_invalid_api_key = "INVALID_API_KEY" in error_message or error_type == "AuthenticationError"
+            if _is_desktop_mode() and is_invalid_api_key and attempt < max_attempts - 1:
+                logger.warning(
+                    f"流式优化用户输入命中无效 API Key，准备重试下一组客户端，attempt={attempt + 1}/{max_attempts}"
+                )
+                continue
+
+            logger.error(f"流式优化用户输入失败: {exc}")
+            logger.error(traceback.format_exc())
+            fallback_result = optimizer._fallback_result(
+                current_input,
+                error_message=error_message,
+                error_type=error_type,
+            )
+            break
+
+    final_result = fallback_result or optimizer._fallback_result(current_input)
+    yield {
+        "type": "done",
+        **final_result,
+        "timestamp": time.time(),
+    }
 
 
 def _build_context_budget_config(request: StreamRequest) -> Dict[str, Any]:

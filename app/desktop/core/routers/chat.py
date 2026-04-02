@@ -44,6 +44,21 @@ async def optimize_chat_input(request: UserInputOptimizeRequest, http_request: R
     }
 
 
+@chat_router.post("/api/chat/optimize-input/stream")
+async def optimize_chat_input_stream(request: UserInputOptimizeRequest, http_request: Request):
+    async def event_generator():
+        async for chunk in chat_service.optimize_user_input_stream(
+            current_input=request.current_input,
+            history_messages=[message.model_dump() for message in request.history_messages],
+            session_id=request.session_id or "",
+            agent_id=request.agent_id or "",
+            user_id=request.user_id or "",
+        ):
+            yield json.dumps(chunk, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(event_generator(), media_type="text/plain")
+
+
 async def stream_with_manager(session_id: str, last_index: int = 0, resume: bool = False):
     """
     通过 StreamManager 订阅会话流
