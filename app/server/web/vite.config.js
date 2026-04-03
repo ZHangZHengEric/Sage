@@ -11,6 +11,7 @@ const normalizeBasePath = (value) => {
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, '')
+  const backendApiBaseUrl = (env.VITE_SAGE_API_BASE_URL || 'http://127.0.0.1:8080').trim()
 
   return {
     base: normalizeBasePath(env.VITE_SAGE_WEB_BASE_PATH),
@@ -23,7 +24,7 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: {
         '/dev-api': {
-          target: 'http://localhost:30050',
+          target: backendApiBaseUrl,
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/dev-api/, '')
         }
