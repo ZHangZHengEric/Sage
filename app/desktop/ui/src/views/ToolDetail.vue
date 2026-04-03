@@ -5,7 +5,7 @@
     </div>
     <div v-else-if="error" class="flex-1 flex flex-col items-center justify-center text-center">
        <p class="text-destructive mb-4">{{ error }}</p>
-       <Button @click="goBack">返回列表</Button>
+       <Button @click="goBack">{{ t('tools.backToList') }}</Button>
     </div>
     <ToolDetail v-else-if="tool" :tool="tool" @back="goBack" class="flex-1 overflow-hidden" />
   </div>

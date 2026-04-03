@@ -1,27 +1,24 @@
-import { ref, watch } from 'vue'
-import { agentAPI } from '@/api/agent.js'
-import { usePanelStore } from '@/stores/panel.js'
+import { ref } from 'vue'
+import { taskAPI } from '@/api/task.js'
 
 export const useChatWorkspace = ({
   t,
   toast,
-  agentId,
-  sessionId
+  currentSessionId,
+  selectedAgentId
 }) => {
-  const panelStore = usePanelStore()
-  // const showWorkspace = ref(false) // Use panelStore instead
+  const showWorkspace = ref(false)
   const workspaceFiles = ref([])
   const isWorkspaceLoading = ref(false)
   const taskStatus = ref(null)
   const expandedTasks = ref(new Set())
   const lastMessageId = ref(null)
 
-  const fetchWorkspaceFiles = async (id) => {
-    if (!id) return
+  const fetchWorkspaceFiles = async (agentId) => {
+    if (!agentId) return
     isWorkspaceLoading.value = true
     try {
-      const sid = typeof sessionId?.value === 'string' ? sessionId.value : sessionId
-      const data = await agentAPI.getWorkspaceFiles(id, sid)
+      const data = await taskAPI.getWorkspaceFiles(agentId)
       workspaceFiles.value = data.files || []
     } catch (error) {
       console.error('获取工作空间文件出错:', error)
@@ -30,43 +27,32 @@ export const useChatWorkspace = ({
     }
   }
 
-  const updateTaskAndWorkspace = (id) => {
-    if (id) {
-      fetchWorkspaceFiles(id)
+  const updateTaskAndWorkspace = () => {
+    if (selectedAgentId.value) {
+      fetchWorkspaceFiles(selectedAgentId.value)
     }
   }
 
-  // Watch for panel open to fetch files
-  watch(() => panelStore.showWorkspace, (newVal) => {
-    if (newVal) {
-      updateTaskAndWorkspace(agentId.value)
+  const handleWorkspacePanel = () => {
+    showWorkspace.value = !showWorkspace.value
+    if (showWorkspace.value) {
+      updateTaskAndWorkspace(currentSessionId.value)
     }
-  })
+  }
 
-  const downloadWorkspaceFile = async (id, itemOrPath) => {
-    if (!id || !itemOrPath) return
-    let filePath = typeof itemOrPath === 'string' ? itemOrPath : itemOrPath.path
-    const sid = typeof sessionId?.value === 'string' ? sessionId.value : sessionId
-    
-    // Clean path: remove /sage-workspace/ prefix and leading slash
-    if (filePath) {
-      if (filePath.startsWith('/sage-workspace/')) {
-        filePath = filePath.replace('/sage-workspace/', '')
-      }
-      if (filePath.startsWith('/')) {
-        filePath = filePath.substring(1)
-      }
-    }
-
+  const downloadWorkspaceFile = async (_sessionId, itemOrPath) => {
+    const agentId = selectedAgentId.value
+    if (!agentId || !itemOrPath) return
+    const filePath = typeof itemOrPath === 'string' ? itemOrPath : itemOrPath.path
     const isDirectory = typeof itemOrPath === 'object' ? itemOrPath.is_directory : false
     if (!filePath) return
     try {
-      const blob = await agentAPI.downloadFile(id, filePath, sid)
+      const blob = await taskAPI.downloadFile(agentId, filePath)
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.style.display = 'none'
       a.href = url
-      let filename = filePath.split('/').pop()
+      let filename = filePath.split(/[/\\]/).pop()
       if (isDirectory && !filename.endsWith('.zip')) {
         filename += '.zip'
       }
@@ -83,11 +69,30 @@ export const useChatWorkspace = ({
 
   const downloadFile = async (item) => {
     try {
-      if (agentId.value) {
-        await downloadWorkspaceFile(agentId.value, item)
+      if (selectedAgentId.value) {
+        await downloadWorkspaceFile(selectedAgentId.value, item)
       }
     } catch (error) {
       toast.error(t('chat.downloadError'))
+    }
+  }
+
+  const deleteFile = async (item) => {
+    if (!item || !item.path) {
+      toast.error(t('common.invalidFileItem') || '无效的文件项')
+      return
+    }
+    try {
+      const filePath = item.path
+      const agentId = selectedAgentId.value
+      if (agentId) {
+        await taskAPI.deleteWorkspaceFile(agentId, null, filePath)
+        toast.success(t('common.deleteSuccess') || 'Delete successful')
+        updateTaskAndWorkspace()
+      }
+    } catch (error) {
+      console.error('删除文件出错:', error)
+      toast.error(t('common.deleteError') || 'Delete failed')
     }
   }
 
@@ -99,11 +104,21 @@ export const useChatWorkspace = ({
     lastMessageId.value = null
   }
 
+  const refreshWorkspace = () => {
+    if (selectedAgentId.value) {
+      fetchWorkspaceFiles(selectedAgentId.value)
+    }
+  }
+
   return {
+    showWorkspace,
     workspaceFiles,
     isWorkspaceLoading,
+    handleWorkspacePanel,
     downloadWorkspaceFile,
     downloadFile,
-    clearTaskAndWorkspace
+    deleteFile,
+    clearTaskAndWorkspace,
+    refreshWorkspace
   }
 }

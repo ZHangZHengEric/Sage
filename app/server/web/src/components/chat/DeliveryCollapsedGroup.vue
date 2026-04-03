@@ -14,7 +14,7 @@
       <div class="h-px flex-1 bg-border/70 transition-colors group-hover:bg-border" />
     </button>
 
-    <div v-if="open" class="mt-4 space-y-1">
+    <div v-if="open" class="mt-2 space-y-0.5">
       <MessageRenderer
         v-for="(message, index) in group.messages"
         :key="message.id || message.message_id || `${group.id}-${index}`"

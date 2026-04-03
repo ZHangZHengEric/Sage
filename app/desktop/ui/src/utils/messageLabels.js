@@ -82,6 +82,9 @@ export const toolLabelKeys = {
   'update_task': 'tools.updateTask',
   // IM服务工具
   'send_message_through_im': 'tools.sendMessageThroughIm',
+  'send_file_through_im': 'tools.sendFileThroughIm',
+  'send_image_through_im': 'tools.sendImageThroughIm',
+  'memory_search': 'tools.searchMemory',
   // 已有工具
   'search_codebase': 'tools.searchCodebase',
   'view_files': 'tools.viewFiles',
@@ -155,6 +158,9 @@ export const toolLabels = {
   'update_task': '更新任务',
   // IM服务工具
   'send_message_through_im': '发送IM消息',
+  'send_file_through_im': '发送文件',
+  'send_image_through_im': '发送图片',
+  'memory_search': '搜索记忆',
   // 已有工具
   'search_codebase': '代码搜索',
   'view_files': '查看文件',

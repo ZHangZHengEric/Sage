@@ -19,11 +19,8 @@
               </span>
             </div>
           </SelectTrigger>
-          <SelectContent class="w-[350px] p-2">
-            <div
-  class="grid grid-cols-4 gap-1.5
-         max-h-[17rem] overflow-y-auto"
->
+          <SelectContent class="w-[240px] p-2">
+            <div class="grid grid-cols-4 gap-1.5">
               <RadixSelectItem
                 v-for="agent in (agents || [])"
                 :key="agent.id"
@@ -40,11 +37,8 @@
                     />
                   </div>
                   <div class="flex items-center justify-center w-full px-0.5">
-<span
-  class="block w-full text-[10px] font-medium text-foreground text-center leading-tight
-         max-h-[3.2rem] overflow-y-auto line-clamp-4 break-words"
->                      {{ agent.name }}
-
+                    <span class="block max-w-full truncate text-[10px] font-medium text-foreground text-center leading-none">
+                      {{ agent.name }}
                     </span>
                   </div>
                 </RadixSelectItemText>
@@ -120,27 +114,6 @@
               </TooltipContent>
             </Tooltip>
 
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="handleShare">
-                  <Share2 class="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{{ t('chat.share') }}</p>
-              </TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="toggleSettings">
-                  <Settings class="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{{ t('chat.settings') }}</p>
-              </TooltipContent>
-            </Tooltip>
           </div>
         </TooltipProvider>
       </div>
@@ -151,77 +124,126 @@
         class="flex-1 flex flex-col min-w-0 bg-muted/5 relative transition-all duration-200"
         :class="{ 'mr-0': !anyPanelOpen }"
       >
+        <div v-if="!showAbilityPanel && filteredMessages.length === 0" class="absolute top-5 left-0 right-0 h-[25%] min-h-[100px] max-h-[180px] overflow-hidden pointer-events-none z-10">
+          <AgentUsageDanmaku :hide-for-history="isViewingHistorySession" :closed-by-user="danmakuClosedByUser" :reset-trigger="danmakuResetTrigger" @close="onDanmakuClose" />
+        </div>
         <div ref="messagesListRef" class="flex-1 overflow-y-auto p-4 sm:p-6 scroll-smooth" @scroll="handleScroll">
           <div
-            v-if="!filteredMessages || filteredMessages.length === 0"
-            class="flex flex-col items-center justify-center text-center p-8 h-full text-muted-foreground animate-in fade-in zoom-in duration-500"
+            v-if="overlayAbilityPanel"
+            class="flex flex-col items-start text-left p-4 sm:p-6 text-muted-foreground animate-in fade-in zoom-in duration-500"
           >
-            <div class="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-6 shadow-sm overflow-hidden">
-              <img
-                v-if="selectedAgent"
-                :src="`https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,square01,square02&seed=${encodeURIComponent(selectedAgent.id)}`"
-                :alt="selectedAgent.name"
-                class="w-full h-full object-cover"
-              />
-              <Bot v-else :size="32" class="opacity-80 text-primary" />
-            </div>
-            <h3 class="mb-3 text-xl font-semibold text-foreground">{{ t('chat.emptyTitle') }}</h3>
-            <p class="mb-8 text-sm max-w-md mx-auto leading-relaxed text-muted-foreground/80">{{ t('chat.emptyDesc') }}</p>
+            <AbilityPanel
+              :items="abilityItems"
+              :loading="abilityLoading"
+              :error="abilityError"
+              @close="closeAbilityPanel"
+              @retry="retryAbilityFetch"
+              @refresh="retryAbilityFetch"
+              @select="onAbilityCardClick"
+            />
           </div>
 
-          <div v-else class="pb-8 max-w-4xl mx-auto w-full">
-            <template v-for="item in renderDisplayItems" :key="item.id">
-              <MessageRenderer
-                v-if="item.type === 'message'"
-                :message="item.message"
-                :messages="item.renderMessages"
-                :message-index="item.messageIndex"
-                :agent-id="selectedAgentId"
-                :is-loading="isCurrentSessionLoading && item.messageIndex === normalizedMessages.length - 1"
-                :open-workbench="openWorkbench"
-                :hide-assistant-avatar="item.hideAssistantAvatar"
-                @download-file="downloadWorkspaceFile"
-                @sendMessage="handleSendMessage"
-                @openSubSession="handleOpenSubSession"
-              />
-              <div v-else-if="item.type === 'section_marker'" class="px-4 py-2">
-                <div class="flex items-center gap-4 text-[11px] text-muted-foreground/80">
-                  <div class="h-px flex-1 bg-border/70" />
-                  <span>{{ item.label }}</span>
-                  <div class="h-px flex-1 bg-border/70" />
-                </div>
+          <template v-else>
+            <AbilityPanel
+              v-if="showAbilityPanel"
+              :items="abilityItems"
+              :loading="abilityLoading"
+              :error="abilityError"
+              @close="closeAbilityPanel"
+              @retry="retryAbilityFetch"
+              @refresh="retryAbilityFetch"
+              @select="onAbilityCardClick"
+            />
+
+            <div
+              v-if="!filteredMessages || filteredMessages.length === 0"
+              class="flex flex-col items-center justify-center text-center p-8 h-full text-muted-foreground animate-in fade-in zoom-in duration-500"
+            >
+              <div class="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-6 shadow-sm overflow-hidden">
+                <img
+                  v-if="selectedAgent"
+                  :src="`https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,square01,square02&seed=${encodeURIComponent(selectedAgent.id)}`"
+                  :alt="selectedAgent.name"
+                  class="w-full h-full object-cover"
+                />
+                <Bot v-else :size="32" class="opacity-80 text-primary" />
               </div>
-              <DeliveryCollapsedGroup
-                v-else
-                :group="item"
-                :all-messages="normalizedMessages"
-                :open="isGroupOpen(item.id)"
-                :agent-id="selectedAgentId"
-                :is-loading="isCurrentSessionLoading"
-                :open-workbench="openWorkbench"
-                @toggle="toggleGroup(item)"
-                @download-file="downloadWorkspaceFile"
-                @sendMessage="handleSendMessage"
-                @openSubSession="handleOpenSubSession"
-              />
-            </template>
-
-            <div v-if="showLoadingBubble" class="flex justify-start py-6 px-4 animate-in fade-in duration-300">
-              <LoadingBubble />
+              <h3 class="mb-3 text-xl font-semibold text-foreground">{{ t('chat.emptyTitle') }}</h3>
+              <p class="mb-8 text-sm max-w-md mx-auto leading-relaxed text-muted-foreground/80">{{ t('chat.emptyDesc') }}</p>
             </div>
-          </div>
+
+            <div v-else class="pb-8 max-w-4xl mx-auto w-full">
+              <template v-for="item in renderDisplayItems" :key="item.id">
+                <MessageRenderer
+                  v-if="item.type === 'message'"
+                  :message="item.message"
+                  :messages="item.renderMessages"
+                  :message-index="item.messageIndex"
+                  :agent-id="selectedAgentId"
+                  :is-loading="isCurrentSessionLoading && item.messageIndex === normalizedMessages.length - 1"
+                  :open-workbench="openWorkbench"
+                  :hide-assistant-avatar="item.hideAssistantAvatar"
+                  @download-file="downloadWorkspaceFile"
+                  @sendMessage="handleSendMessage"
+                  @openSubSession="handleOpenSubSession"
+                />
+                <div v-else-if="item.type === 'section_marker'" class="px-4 py-2">
+                  <div class="flex items-center gap-4 text-[11px] text-muted-foreground/80">
+                    <div class="h-px flex-1 bg-border/70" />
+                    <span>{{ item.label }}</span>
+                    <div class="h-px flex-1 bg-border/70" />
+                  </div>
+                </div>
+                <DeliveryCollapsedGroup
+                  v-else
+                  :group="item"
+                  :all-messages="normalizedMessages"
+                  :open="isGroupOpen(item.id)"
+                  :agent-id="selectedAgentId"
+                  :is-loading="isCurrentSessionLoading"
+                  :open-workbench="openWorkbench"
+                  @toggle="toggleGroup(item)"
+                  @download-file="downloadWorkspaceFile"
+                  @sendMessage="handleSendMessage"
+                  @openSubSession="handleOpenSubSession"
+                />
+              </template>
+
+              <div v-if="showLoadingBubble" class="flex justify-start py-6 px-4 animate-in fade-in duration-300">
+                <LoadingBubble />
+              </div>
+            </div>
+          </template>
           <div ref="messagesEndRef" />
         </div>
 
         <div class="flex-none p-4 bg-background" v-if="selectedAgent">
           <div class="w-full max-w-[800px] mx-auto">
+            <div class="flex justify-start items-start pb-2 pr-1">
+              <Button
+                v-if="showAbilityButton"
+                variant="ghost"
+                size="sm"
+                class="h-8 px-3 gap-2 text-primary hover:bg-primary/10"
+                :disabled="isCurrentSessionLoading || abilityLoading"
+                :title="t('quickHelp.tooltip')"
+                @click="handleClickAbilityButton"
+              >
+                <Sparkles class="h-4 w-4" />
+                {{ t('quickHelp.cta') }}
+              </Button>
+            </div>
             <MessageInput
+              ref="messageInputRef"
               :agent-id="selectedAgentId"
               :is-loading="isCurrentSessionLoading"
+              :preset-text="abilityPresetInput"
               :session-id="currentSessionId"
               :selected-agent="selectedAgent"
+              :config="config"
               :delivery-context-messages="recentDeliveryContextMessages"
-              @send-message="handleSendMessage"
+              @send-message="handleSendMessageWithAbilityClear"
+              @config-change="updateConfig"
               @stop-generation="stopGeneration"
             />
           </div>
@@ -233,6 +255,7 @@
         :session-id="activeSubSessionId"
         :messages="subSessionMessages"
         :is-loading="isLoading"
+        :agent-id="selectedAgentId"
         @close="handleCloseSubSession"
         @download-file="downloadWorkspaceFile"
         @openSubSession="handleOpenSubSession"
@@ -241,36 +264,33 @@
       <Transition name="panel">
         <WorkspacePanel
           v-if="panelStore.showWorkspace"
+          ref="workspacePanelRef"
           :workspace-files="workspaceFiles"
           :is-loading="isWorkspaceLoading"
           :agent-id="selectedAgentId"
           :session-id="currentSessionId"
           @download-file="downloadFile"
+          @delete-file="handleDeleteFile"
+          @quote-path="handleQuotePath"
+          @upload-files="handleUploadFiles"
           @close="panelStore.closeAll()"
         />
       </Transition>
 
       <Transition name="panel">
         <WorkbenchPreview
-          v-if="panelStore.showWorkbench"
+          v-if="panelStore.showWorkbench && currentSessionId"
+          :key="`workbench-${currentSessionId}`"
           :messages="filteredMessages"
           :session-id="currentSessionId"
           :is-loading="isCurrentSessionLoading"
           @close="panelStore.closeAll()"
+          @quote-path="handleQuotePath"
         />
       </Transition>
 
-      <Transition name="panel">
-        <ConfigPanel
-          v-if="panelStore.showSettings"
-          :agents="agents"
-          :selected-agent="selectedAgent"
-          :config="config"
-          @config-change="updateConfig"
-          @close="panelStore.closeAll()"
-        />
-      </Transition>
     </div>
+    <AppConfirmDialog ref="confirmDialogRef" />
   </div>
 </template>
 
@@ -278,16 +298,18 @@
 defineOptions({ name: 'Chat' })
 
 import { computed, onMounted, ref, watch } from 'vue'
-import { Bot, Settings, Share2, FolderOpen, Monitor, List, FileText } from 'lucide-vue-next'
+import { Bot, FolderOpen, Monitor, List, FileText, Sparkles } from 'lucide-vue-next'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
 import DeliveryCollapsedGroup from '@/components/chat/DeliveryCollapsedGroup.vue'
 import MessageInput from '@/components/chat/MessageInput.vue'
-import ConfigPanel from '@/components/chat/ConfigPanel.vue'
 import WorkspacePanel from '@/components/chat/WorkspacePanel.vue'
 import WorkbenchPreview from '@/components/chat/WorkbenchPreview.vue'
 import LoadingBubble from '@/components/chat/LoadingBubble.vue'
 import SubSessionPanel from '@/components/chat/SubSessionPanel.vue'
+import AbilityPanel from '@/components/chat/AbilityPanel.vue'
+import AgentUsageDanmaku from '@/components/chat/AgentUsageDanmaku.vue'
+import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -303,6 +325,8 @@ import { useChatPage } from '@/composables/chat/useChatPage.js'
 import { useWorkbenchStore } from '@/stores/workbench'
 import { usePanelStore } from '@/stores/panel'
 import { getMessageLabel } from '@/utils/messageLabels'
+import { taskAPI } from '@/api/task.js'
+import { toast } from 'vue-sonner'
 import {
   CHAT_DISPLAY_MODES,
   buildDeliveryDisplayItems,
@@ -335,9 +359,9 @@ const {
   messagesListRef,
   messagesEndRef,
   handleAgentChange,
-  handleShare,
   handleScroll,
   handleSendMessage,
+  togglePanel,
   openWorkbench,
   stopGeneration,
   activeSubSessionId,
@@ -348,7 +372,23 @@ const {
   workspaceFiles,
   isWorkspaceLoading,
   downloadFile,
-  updateConfig
+  deleteFile,
+  refreshWorkspace,
+  updateConfig,
+  abilityItems,
+  abilityLoading,
+  abilityError,
+  showAbilityPanel,
+  abilityPresetInput,
+  showAbilityButton,
+  hasUsedAbilityEntryInSession,
+  danmakuResetTrigger,
+  isViewingHistorySession,
+  danmakuClosedByUser,
+  openAbilityPanel,
+  closeAbilityPanel,
+  retryAbilityFetch,
+  onAbilityCardClick
 } = useChatPage(props)
 
 const workbenchStore = useWorkbenchStore()
@@ -356,6 +396,9 @@ const panelStore = usePanelStore()
 const displayMode = ref(CHAT_DISPLAY_MODES.EXECUTION)
 const expandedGroupIds = ref(new Set())
 const DISPLAY_MODE_STORAGE_KEY = 'chatDisplayModePreference'
+const messageInputRef = ref(null)
+const workspacePanelRef = ref(null)
+const confirmDialogRef = ref(null)
 
 const normalizedMessages = computed(() => normalizeChatMessages(filteredMessages.value))
 
@@ -528,20 +571,88 @@ const toggleGroup = (item) => {
 }
 
 const toggleWorkbench = () => {
-  panelStore.toggleWorkbench()
+  togglePanel('workbench')
 }
 
 const toggleWorkspace = () => {
-  panelStore.toggleWorkspace()
-}
-
-const toggleSettings = () => {
-  panelStore.toggleSettings()
+  togglePanel('workspace')
 }
 
 const anyPanelOpen = computed(() => (
-  panelStore.showWorkspace || panelStore.showSettings || panelStore.showWorkbench
+  panelStore.showWorkspace || panelStore.showWorkbench
 ))
+
+const onDanmakuClose = () => {
+  danmakuClosedByUser.value = true
+}
+
+const handleClickAbilityButton = () => {
+  if (!showAbilityPanel.value) {
+    openAbilityPanel()
+  }
+  showAbilityButton.value = false
+  hasUsedAbilityEntryInSession.value = true
+}
+
+const handleSendMessageWithAbilityClear = (content, options) => {
+  handleSendMessage(content, options)
+  abilityPresetInput.value = ''
+}
+
+const handleDeleteFile = async (item) => {
+  const confirmed = await confirmDialogRef.value?.confirm(
+    t('common.confirmDelete') || '确定要删除此文件吗？',
+    { title: t('common.confirm') || '确认' }
+  )
+  if (!confirmed) return
+  await deleteFile(item)
+}
+
+const handleQuotePath = (path) => {
+  const pathToInsert = `\`{workspace_root}/${path}\``
+  if (messageInputRef.value) {
+    messageInputRef.value.appendInputValue(pathToInsert)
+  }
+}
+
+const handleUploadFiles = async (files) => {
+  if (!selectedAgentId.value || !Array.isArray(files) || files.length === 0) return
+
+  try {
+    workspacePanelRef.value?.setUploadStatus('准备上传...', 0)
+    let uploadedCount = 0
+    const totalFiles = files.length
+
+    for (const fileInfo of files) {
+      const { file, relativePath } = fileInfo
+      workspacePanelRef.value?.setUploadStatus(
+        `上传 ${relativePath}...`,
+        Math.round((uploadedCount / totalFiles) * 100)
+      )
+      const targetPath = relativePath.includes('/')
+        ? relativePath.substring(0, relativePath.lastIndexOf('/'))
+        : ''
+      await taskAPI.uploadWorkspaceFile(selectedAgentId.value, file, targetPath)
+      uploadedCount += 1
+    }
+
+    workspacePanelRef.value?.setUploadStatus('上传完成', 100)
+    toast.success(`成功上传 ${uploadedCount} 个文件`)
+    setTimeout(() => {
+      workspacePanelRef.value?.setUploadStatus('')
+      refreshWorkspace()
+    }, 1000)
+  } catch (error) {
+    console.error('上传文件出错:', error)
+    workspacePanelRef.value?.setUploadStatus('')
+    toast.error(`上传失败: ${error.message}`)
+  }
+}
+
+const overlayAbilityPanel = computed(() => {
+  const noMessages = !filteredMessages.value || filteredMessages.value.length === 0
+  return showAbilityPanel.value && noMessages
+})
 
 watch(() => currentSessionId.value, (id) => {
   if (id) workbenchStore.setSessionId(id)

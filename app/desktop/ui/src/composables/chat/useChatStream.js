@@ -293,6 +293,7 @@ export const useChatStream = ({
         agent_mode: config.agentMode,
         more_suggest: config.moreSuggest,
         max_loop_count: config.maxLoopCount,
+        available_sub_agent_ids: Array.isArray(config.availableSubAgentIds) ? config.availableSubAgentIds : [],
         agent_id: selectedAgent.id
       }
 

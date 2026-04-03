@@ -2,7 +2,7 @@
   <div v-if="shouldRenderMessage" class="flex flex-col gap-1 mb-1">
     <!-- 错误消息 -->
     <div v-if="isErrorMessage" class="flex flex-row gap-4 px-4">
-      <div v-if="!hideAssistantAvatar" class="flex-none">
+      <div v-if="showAssistantAvatar" class="flex-none">
         <MessageAvatar messageType="error" role="assistant" :agentId="agentId" />
       </div>
       <div v-else class="flex-none w-8" />
@@ -27,17 +27,6 @@
         <MessageAvatar :messageType="message.type || message.message_type" role="user" />
       </div>
       <div class="flex flex-col items-end max-w-[85%] sm:max-w-[75%]">
-        <div class="mb-0.5 mr-1 text-xs font-medium text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity select-none flex items-center gap-2">
-          <button
-            @click="handleCopy"
-            class="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-            :title="copied ? '已复制' : '复制内容'"
-          >
-            <Check v-if="copied" class="w-3 h-3 text-green-500" />
-            <Copy v-else class="w-3 h-3" />
-          </button>
-          {{ getLabel({ role: 'user', type: message.type, messageType: message.message_type }) }}
-        </div>
         <div class="flex flex-col gap-1">
           <!-- 文本内容 -->
           <div v-if="getTextContent(message.content)" class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-4 py-2.5 shadow-sm overflow-hidden break-all text-sm leading-6 tracking-wide font-sans">
@@ -75,16 +64,31 @@
             </div>
           </div>
         </div>
+        <div class="mt-1 mr-1 text-xs font-normal text-muted-foreground/60 flex items-center gap-2 justify-end">
+          <span v-if="message.timestamp" class="text-[10px] opacity-70 font-normal">
+            {{ formatTime(message.timestamp) }}
+          </span>
+          <button
+            @click="handleCopy"
+            class="opacity-0 group-hover:opacity-70 transition-opacity p-1 hover:bg-muted/60 rounded text-muted-foreground/70 hover:text-muted-foreground"
+            :title="copied ? '已复制' : '复制内容'"
+          >
+            <Check v-if="copied" class="w-3 h-3 text-green-500" />
+            <Copy v-else class="w-3 h-3" />
+          </button>
+        </div>
       </div>
     </div>
     
     <!-- 任务分析消息 -->
     <div
-      v-else-if="message.role === 'assistant' && (message.type === 'task_analysis' || message.message_type === 'task_analysis')"       class="flex flex-row items-start gap-3 px-4">
-      <div v-if="!hideAssistantAvatar" class="flex-none mt-1">
+      v-else-if="message.role === 'assistant' && (message.type === 'task_analysis' || message.message_type === 'task_analysis')"
+      class="flex flex-row items-start px-4"
+      :class="hideAssistantAvatar ? 'gap-1' : 'gap-3'">
+      <div v-if="showAssistantAvatar" class="flex-none">
         <MessageAvatar :messageType="message.message_type" role="assistant" :agentId="agentId" />
       </div>
-      <div v-else class="flex-none w-8" />
+      <div v-else class="flex-none" :class="hideAssistantAvatar ? 'w-0' : 'w-8'" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="w-full">
            <TaskAnalysisMessage
@@ -99,11 +103,12 @@
     <!-- 推理思考消息 -->
     <div
       v-else-if="message.role === 'assistant' && (message.type === 'reasoning_content' || message.message_type === 'reasoning_content')"
-      class="flex flex-row items-start gap-3 px-4">
-      <div v-if="!hideAssistantAvatar" class="flex-none mt-1">
+      class="flex flex-row items-start px-4"
+      :class="hideAssistantAvatar ? 'gap-1' : 'gap-3'">
+      <div v-if="showAssistantAvatar" class="flex-none">
         <MessageAvatar :messageType="message.message_type" role="assistant" :agentId="agentId" />
       </div>
-      <div v-else class="flex-none w-8" />
+      <div v-else class="flex-none" :class="hideAssistantAvatar ? 'w-0' : 'w-8'" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="w-full">
            <ReasoningContentMessage
@@ -116,29 +121,21 @@
     </div>
 
     <!-- 助手消息 -->
-    <div v-else-if="message.role === 'assistant' && !hasToolCalls && (message.content || getImageUrls(message.content).length > 0)" class="flex flex-row items-start gap-3 px-4 group" data-message-type="assistant">
-      <div v-if="!hideAssistantAvatar" class="flex-none mt-1">
+    <div
+      v-else-if="message.role === 'assistant' && !hasToolCalls && (message.content || getImageUrls(message.content).length > 0)"
+      class="flex flex-row items-start px-4 group"
+      :class="hideAssistantAvatar ? 'gap-1' : 'gap-3'"
+      data-message-type="assistant">
+      <div v-if="showAssistantAvatar" class="flex-none">
         <MessageAvatar :messageType="message.message_type" role="assistant" :agentId="agentId" />
       </div>
-      <div v-else class="flex-none w-8" />
-      <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
-        <div class="mb-0.5 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
-          {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type }) }}
-          <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
-            {{ formatTime(message.timestamp) }}
-          </span>
-          <button
-            @click="handleCopy"
-            class="opacity-0 group-hover:opacity-100 transition-opacity ml-2 p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-            :title="copied ? '已复制' : '复制内容'"
-          >
-            <Check v-if="copied" class="w-3 h-3 text-green-500" />
-            <Copy v-else class="w-3 h-3" />
-          </button>
-        </div>
+      <div v-else class="flex-none" :class="hideAssistantAvatar ? 'w-0' : 'w-8'" />
+      <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="flex flex-col gap-1 w-full">
           <!-- 文本内容 -->
-          <div v-if="getTextContent(message.content)" class="text-foreground/90 overflow-hidden break-words w-full text-sm leading-6 font-sans">
+          <div
+            v-if="getTextContent(message.content)"
+            class="text-foreground/90 overflow-hidden break-words w-full font-sans text-sm leading-6">
             <MarkdownRendererWithPreview
               :content="formatMessageContent(getTextContent(message.content))"
             />
@@ -173,15 +170,32 @@
             </div>
           </div>
         </div>
+        <div v-if="!hideAssistantAvatar" class="mt-1 ml-1 text-xs font-normal text-muted-foreground/60 flex items-center gap-2">
+          <span v-if="message.timestamp" class="text-[10px] opacity-70 font-normal">
+            {{ formatTime(message.timestamp) }}
+          </span>
+          <button
+            @click="handleCopy"
+            class="opacity-0 group-hover:opacity-70 transition-opacity ml-2 p-1 hover:bg-muted/60 rounded text-muted-foreground/70 hover:text-muted-foreground"
+            :title="copied ? '已复制' : '复制内容'"
+          >
+            <Check v-if="copied" class="w-3 h-3 text-green-500" />
+            <Copy v-else class="w-3 h-3" />
+          </button>
+        </div>
       </div>
     </div>
 
     <!-- 工具渲染 -->
-    <div v-else-if="hasToolCalls" class="flex flex-row items-start gap-3 px-4" data-message-type="tool">
-      <div v-if="!hideAssistantAvatar" class="flex-none mt-1">
+    <div
+      v-else-if="hasToolCalls"
+      class="flex flex-row items-start px-4"
+      :class="hideAssistantAvatar ? 'gap-1' : 'gap-3'"
+      data-message-type="tool">
+      <div v-if="showAssistantAvatar" class="flex-none">
         <MessageAvatar :messageType="message.message_type" role="assistant" :toolName="getToolName(message)" :agentId="agentId" />
       </div>
-      <div v-else class="flex-none w-8" />
+      <div v-else class="flex-none" :class="hideAssistantAvatar ? 'w-0' : 'w-8'" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
          <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage }">
            <div v-for="(toolCall, index) in message.tool_calls" :key="toolCall.id || index">
@@ -288,7 +302,7 @@ const props = defineProps({
   },
   hideAssistantAvatar: {
     type: Boolean,
-    default: false
+    default: null
   },
   openWorkbench: {
     type: Function,
@@ -304,7 +318,25 @@ const emit = defineEmits(['downloadFile', 'toolClick', 'sendMessage', 'openSubSe
 
 const { t } = useLanguage()
 const workbenchStore = useWorkbenchStore()
-const hideAssistantAvatar = computed(() => props.hideAssistantAvatar && props.message.role === 'assistant')
+const hideAssistantAvatar = computed(() => (
+  props.hideAssistantAvatar === true && props.message.role === 'assistant'
+))
+
+const showAssistantAvatar = computed(() => {
+  if (props.message.role !== 'assistant') return false
+  if (props.hideAssistantAvatar === true) return false
+  if (props.hideAssistantAvatar === false) return true
+  if (hideAssistantAvatar.value) return false
+
+  for (let i = props.messageIndex - 1; i >= 0; i -= 1) {
+    const prev = props.messages?.[i]
+    if (!prev) continue
+    if (prev.role === 'tool') continue
+    if (prev.type === 'token_usage' || prev.message_type === 'token_usage') continue
+    return prev.role !== 'assistant'
+  }
+  return true
+})
 
 // 当前 Agent 名称
 const currentAgentName = computed(() => {

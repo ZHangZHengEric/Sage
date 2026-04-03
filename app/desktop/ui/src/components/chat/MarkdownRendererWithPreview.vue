@@ -3,6 +3,7 @@
     <div ref="markdownRef">
       <MarkdownRenderer
         :content="content"
+        :compact="compact"
       />
     </div>
     <!-- 文件图标区域 - 显示检测到的文件链接为图标 -->
@@ -28,6 +29,10 @@ const props = defineProps({
   content: {
     type: String,
     default: ''
+  },
+  compact: {
+    type: Boolean,
+    default: false
   }
 })
 

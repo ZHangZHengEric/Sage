@@ -5,11 +5,11 @@
         <TabsList class="bg-muted/50">
           <TabsTrigger value="recurring" class="gap-2">
             <Repeat class="w-4 h-4" />
-            {{ t('scheduledTask.title') || '循环任务' }}
+            {{ t('scheduledTask.title') }}
           </TabsTrigger>
           <TabsTrigger value="one-time" class="gap-2">
             <Clock class="w-4 h-4" />
-            {{ t('scheduledTask.oneTimeTitle') || '一次性任务' }}
+            {{ t('scheduledTask.oneTimeTitle') }}
           </TabsTrigger>
         </TabsList>
         <div class="flex items-center justify-end">
@@ -65,12 +65,12 @@
             <!-- Ticket Body - 可滚动区域 -->
             <div class="px-4 py-3 flex-1 overflow-hidden">
               <p class="text-xs text-muted-foreground line-clamp-3 leading-relaxed mb-3">
-                {{ task.description || '暂无描述' }}
+                {{ task.description || t('scheduledTask.noDescription') }}
               </p>
 
               <!-- Agent assignment line -->
               <div class="flex items-center gap-2 text-xs border-t border-dashed pt-3">
-                <span class="text-muted-foreground">执行者:</span>
+                <span class="text-muted-foreground">{{ t('scheduledTask.executor') }}:</span>
                 <div class="flex items-center gap-1.5">
                   <Avatar class="h-5 w-5">
                     <AvatarImage :src="getAgentAvatar(task.agent_id)" />
@@ -104,9 +104,9 @@
             <!-- Last execution timestamp - 始终显示 -->
             <div class="px-4 py-1.5 bg-muted/50 text-[10px] text-muted-foreground border-t flex-shrink-0">
               <span v-if="task.last_executed_at">
-                上次执行: {{ formatDateShort(task.last_executed_at) }}
+                {{ t('scheduledTask.lastExecuted') }}: {{ formatDateShort(task.last_executed_at) }}
               </span>
-              <span v-else>从未执行</span>
+              <span v-else>{{ t('scheduledTask.neverExecuted') }}</span>
             </div>
           </div>
 
@@ -115,8 +115,8 @@
             <div class="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
               <Repeat class="w-8 h-8 opacity-50" />
             </div>
-            <p class="text-lg font-medium">暂无循环任务</p>
-            <p class="text-sm mt-1">点击右上角创建按钮添加任务</p>
+            <p class="text-lg font-medium">{{ t('scheduledTask.noRecurringTasks') }}</p>
+            <p class="text-sm mt-1">{{ t('scheduledTask.createHint') }}</p>
           </div>
         </div>
       </TabsContent>
@@ -178,12 +178,12 @@
             <!-- Ticket Body - 可滚动区域 -->
             <div class="px-4 py-3 flex-1 overflow-hidden">
               <p class="text-xs text-muted-foreground line-clamp-3 leading-relaxed mb-3">
-                {{ task.description || '暂无描述' }}
+                {{ task.description || t('scheduledTask.noDescription') }}
               </p>
 
               <!-- Agent assignment line -->
               <div class="flex items-center gap-2 text-xs border-t border-dashed pt-3">
-                <span class="text-muted-foreground">执行者:</span>
+                <span class="text-muted-foreground">{{ t('scheduledTask.executor') }}:</span>
                 <div class="flex items-center gap-1.5">
                   <Avatar class="h-5 w-5">
                     <AvatarImage :src="getAgentAvatar(task.agent_id)" />
@@ -223,11 +223,11 @@
             <!-- Completion timestamp - 始终显示 -->
             <div class="px-4 py-1.5 bg-muted/50 text-[10px] text-muted-foreground border-t flex-shrink-0">
               <span v-if="task.completed_at">
-                完成时间: {{ formatDateShort(task.completed_at) }}
+                {{ t('scheduledTask.completedAt') }}: {{ formatDateShort(task.completed_at) }}
               </span>
-              <span v-else-if="task.status === 'pending'">等待执行</span>
-              <span v-else-if="task.status === 'processing'">执行中...</span>
-              <span v-else-if="task.status === 'failed'">执行失败</span>
+              <span v-else-if="task.status === 'pending'">{{ t('scheduledTask.statusPending') }}</span>
+              <span v-else-if="task.status === 'processing'">{{ t('scheduledTask.statusProcessing') }}</span>
+              <span v-else-if="task.status === 'failed'">{{ t('scheduledTask.statusFailed') }}</span>
             </div>
           </div>
 
@@ -236,8 +236,8 @@
             <div class="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
               <Clock class="w-8 h-8 opacity-50" />
             </div>
-            <p class="text-lg font-medium">暂无一次性任务</p>
-            <p class="text-sm mt-1">点击右上角创建按钮添加任务</p>
+            <p class="text-lg font-medium">{{ t('scheduledTask.noOneTimeTasks') }}</p>
+            <p class="text-sm mt-1">{{ t('scheduledTask.createHint') }}</p>
           </div>
         </div>
       </TabsContent>
@@ -252,7 +252,7 @@
         <div class="grid grid-cols-2 gap-6 py-4 overflow-y-auto max-h-[calc(90vh-180px)]">
           <!-- Left Column - Basic Info -->
           <div class="space-y-4">
-            <div class="text-sm font-medium text-muted-foreground mb-2">基本信息</div>
+            <div class="text-sm font-medium text-muted-foreground mb-2">{{ t('scheduledTask.basicInfo') }}</div>
             
             <div class="space-y-2">
               <Label>{{ t('scheduledTask.name') }} <span class="text-destructive">*</span></Label>
@@ -289,7 +289,7 @@
 
           <!-- Right Column - Schedule -->
           <div class="space-y-4">
-            <div class="text-sm font-medium text-muted-foreground mb-2">执行计划</div>
+            <div class="text-sm font-medium text-muted-foreground mb-2">{{ t('scheduledTask.executionPlan') }}</div>
             
             <div class="space-y-2">
               <Label>{{ t('scheduledTask.cron') }} <span class="text-destructive">*</span></Label>
@@ -298,7 +298,7 @@
             
             <!-- Preview -->
             <div class="bg-muted/50 rounded-lg p-4 space-y-2">
-              <div class="text-xs text-muted-foreground">执行时间预览</div>
+              <div class="text-xs text-muted-foreground">{{ t('scheduledTask.executionPreview') }}</div>
               <div class="text-sm font-medium">{{ formatCron(form.cron_expression) }}</div>
               <div class="text-xs font-mono text-muted-foreground">{{ form.cron_expression }}</div>
             </div>
@@ -315,12 +315,12 @@
     <Dialog :open="oneTimeDialogOpen" @update:open="oneTimeDialogOpen = $event">
       <DialogContent class="sm:max-w-[700px] max-h-[90vh] overflow-hidden">
         <DialogHeader>
-          <DialogTitle>{{ oneTimeIsEdit ? (t('scheduledTask.editTitle') || '编辑一次性任务') : (t('scheduledTask.createOneTime') || '创建一次性任务') }}</DialogTitle>
+          <DialogTitle>{{ oneTimeIsEdit ? t('scheduledTask.editTitle') : t('scheduledTask.createOneTime') }}</DialogTitle>
         </DialogHeader>
         <div class="grid grid-cols-2 gap-6 py-4 overflow-y-auto max-h-[calc(90vh-180px)]">
           <!-- Left Column - Basic Info -->
           <div class="space-y-4">
-            <div class="text-sm font-medium text-muted-foreground mb-2">基本信息</div>
+            <div class="text-sm font-medium text-muted-foreground mb-2">{{ t('scheduledTask.basicInfo') }}</div>
             
             <div class="space-y-2">
               <Label>{{ t('scheduledTask.name') }} <span class="text-destructive">*</span></Label>
@@ -352,7 +352,7 @@
 
           <!-- Right Column - Schedule -->
           <div class="space-y-4">
-            <div class="text-sm font-medium text-muted-foreground mb-2">执行时间</div>
+            <div class="text-sm font-medium text-muted-foreground mb-2">{{ t('scheduledTask.executionTime') }}</div>
             
             <div class="space-y-2">
               <Label>{{ t('scheduledTask.executeAt') }} <span class="text-destructive">*</span></Label>
@@ -361,8 +361,8 @@
             
             <!-- Preview -->
             <div class="bg-muted/50 rounded-lg p-4 space-y-2">
-              <div class="text-xs text-muted-foreground">计划执行时间</div>
-              <div class="text-sm font-medium">{{ oneTimeForm.execute_at ? formatDate(oneTimeForm.execute_at) : '请选择时间' }}</div>
+              <div class="text-xs text-muted-foreground">{{ t('scheduledTask.plannedExecutionTime') }}</div>
+              <div class="text-sm font-medium">{{ oneTimeForm.execute_at ? formatDate(oneTimeForm.execute_at) : t('scheduledTask.selectTime') }}</div>
             </div>
           </div>
         </div>
@@ -387,7 +387,7 @@
                    <Badge :variant="getStatusVariant(item.status)">{{ item.status }}</Badge>
                    <span class="text-sm">{{ formatDate(item.execute_at) }}</span>
                    <span v-if="item.retry_count > 0" class="text-xs text-muted-foreground">
-                     重试 {{ item.retry_count }} 次
+                     {{ t('scheduledTask.retryTimes').replace('{count}', item.retry_count) }}
                    </span>
                  </div>
                  <Button 
@@ -398,15 +398,15 @@
                    class="gap-2"
                  >
                    <MessageSquare class="h-4 w-4" />
-                   查看会话
+                   {{ t('scheduledTask.viewSession') }}
                  </Button>
                </div>
                <div v-if="item.completed_at" class="text-xs text-muted-foreground mt-2">
-                 完成时间: {{ formatDate(item.completed_at) }}
+                 {{ t('scheduledTask.completedAt') }}: {{ formatDate(item.completed_at) }}
                </div>
              </Card>
              <div v-if="historyList.length === 0" class="text-center py-8 text-muted-foreground">
-               暂无执行记录
+               {{ t('scheduledTask.noHistory') }}
              </div>
            </div>
         </div>
@@ -535,7 +535,7 @@ const fetchTasks = async () => {
     tasks.value = res.items || []
   } catch (error) {
     console.error('Failed to fetch tasks:', error)
-    toast.error('Failed to fetch tasks')
+    toast.error(t('scheduledTask.fetchTasksFailed'))
   }
 }
 
@@ -545,7 +545,7 @@ const fetchOneTimeTasks = async () => {
     oneTimeTasks.value = res.items || []
   } catch (error) {
     console.error('Failed to fetch one-time tasks:', error)
-    toast.error('Failed to fetch one-time tasks')
+    toast.error(t('scheduledTask.fetchOneTimeTasksFailed'))
   }
 }
 
@@ -582,7 +582,7 @@ const submitOneTimeForm = async () => {
 
   const selectedDate = new Date(oneTimeForm.execute_at)
   if (!oneTimeIsEdit.value && selectedDate <= new Date()) {
-    toast.error(t('scheduledTask.futureTimeRequired') || '执行时间必须是未来时间')
+    toast.error(t('scheduledTask.futureTimeRequired'))
     return
   }
 
@@ -666,7 +666,7 @@ const handleHistory = async (task) => {
     historyList.value = res.items || []
     historyOpen.value = true
   } catch (error) {
-    toast.error('Failed to fetch history')
+    toast.error(t('scheduledTask.fetchHistoryFailed'))
   }
 }
 
@@ -709,10 +709,10 @@ const getStatusVariant = (status) => {
 
 const getStatusLabel = (status) => {
   const labels = {
-    'completed': '已完成',
-    'failed': '失败',
-    'processing': '执行中',
-    'pending': '待执行'
+    'completed': t('scheduledTask.statusCompleted'),
+    'failed': t('scheduledTask.statusFailed'),
+    'processing': t('scheduledTask.statusProcessing'),
+    'pending': t('scheduledTask.statusPending')
   }
   return labels[status] || status
 }
@@ -738,10 +738,10 @@ const formatDateShort = (dateStr) => {
     const diffHours = Math.floor(diffMs / 3600000)
     const diffDays = Math.floor(diffMs / 86400000)
     
-    if (diffMins < 1) return '刚刚'
-    if (diffMins < 60) return `${diffMins}分钟前`
-    if (diffHours < 24) return `${diffHours}小时前`
-    if (diffDays < 7) return `${diffDays}天前`
+    if (diffMins < 1) return t('scheduledTask.justNow')
+    if (diffMins < 60) return t('scheduledTask.minutesAgo').replace('{count}', diffMins)
+    if (diffHours < 24) return t('scheduledTask.hoursAgo').replace('{count}', diffHours)
+    if (diffDays < 7) return t('scheduledTask.daysAgo').replace('{count}', diffDays)
     
     return date.toLocaleDateString()
   } catch (e) {
