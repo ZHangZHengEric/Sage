@@ -25,7 +25,7 @@ echo ""
 # 1. Check Python version
 echo "🔍 Checking Python version..."
 if ! command -v python3 &> /dev/null; then
-    echo -e "${RED}❌ Python3 not found, please install (requires >= 3.11)${NC}"
+    echo -e "${RED}❌ Python3 not found, please install (requires >= 3.10)${NC}"
     exit 1
 fi
 
@@ -33,8 +33,8 @@ PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
 PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
 PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
 
-if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 11 ]); then
-    echo -e "${RED}❌ Python version must be >= 3.11, current: $PYTHON_VERSION${NC}"
+if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 10 ]); then
+    echo -e "${RED}❌ Python version must be >= 3.10, current: $PYTHON_VERSION${NC}"
     exit 1
 fi
 echo -e "${GREEN}✅ Python version: $PYTHON_VERSION${NC}"
