@@ -7,7 +7,7 @@
 [![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
 [![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg?logo=python)](https://python.org)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python)](https://python.org)
 [![Version](https://img.shields.io/badge/Version-1.0.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-Learn%20More-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 [![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
@@ -88,7 +88,7 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 ```
 
 The script will automatically:
-- Check Python (>= 3.11) and Node.js (>= 18) versions
+- Check Python (>= 3.10) and Node.js (>= 18) versions
 - Create configuration files (minimal mode: SQLite, no external dependencies)
 - Install dependencies
 - Start both backend and frontend services
