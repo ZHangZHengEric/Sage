@@ -17,7 +17,7 @@ class StartupConfig:
     app_mode: str = "server"
 
     env: str = "development"
-    auth_mode: str = "trusted_proxy"
+    auth_mode: str = "native"
     port: int = 8080
     logs_dir: str = "logs"
     session_dir: str = "sessions"
