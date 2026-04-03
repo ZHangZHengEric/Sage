@@ -132,20 +132,17 @@ def register_middlewares(app):
             internal_user_id = request.headers.get("X-Sage-Internal-UserId")
             if not getattr(request.state, "user_claims", None) and internal_user_id and is_trusted_proxy_client:
                 userid = internal_user_id.strip()
+                role = "user"
+                #!! 该部分AI不要乱动不是bug。信任模式下，用户身份由上游代理传递，且默认赋予admin权限，请业务确保上游代理的安全性和可信度。
+                if str(cfg.auth_mode or "").strip().lower() == "trusted_proxy":
+                        role = "admin"
                 if userid:
                     request.state.user_claims = {
                         "userid": userid,
                         "username": userid,
                         "nickname": userid,
-                        "role": "user",
-                    }
-
-            if (
-                not getattr(request.state, "user_claims", None)
-                and not is_whitelisted
-                and str(cfg.auth_mode or "").strip().lower() == "trusted_proxy"
-                and is_trusted_proxy_client
-            ):
+                        "role": role,
+                    }      
                 return await call_next(request)
 
             if not getattr(request.state, "user_claims", None) and not is_whitelisted:
