@@ -7,8 +7,11 @@
       <Badge v-if="fileReadRangeLabel" variant="outline" class="text-xs">{{ fileReadRangeLabel }}</Badge>
     </div>
     <div class="file-content flex-1 overflow-auto p-4">
+      <div v-if="fileReadErrorMessage" class="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+        {{ fileReadErrorMessage }}
+      </div>
       <div
-        v-if="fileReadHasLineNumbers"
+        v-else-if="fileReadHasLineNumbers"
         class="overflow-auto rounded-lg border border-border/50 bg-muted/10 font-mono text-sm"
       >
         <div
@@ -93,11 +96,31 @@ const fileReadResult = computed(() => {
     return null
   }
 })
+const fileReadErrorMessage = computed(() => {
+  if (props.toolResult?.is_error) {
+    const content = props.toolResult?.content
+    if (typeof content === 'string') return content
+    return content?.message || content?.error || JSON.stringify(content)
+  }
+
+  const result = fileReadResult.value
+  if (!result) return ''
+  if (result.status === 'error') {
+    return result.message || result.error || result.detail || 'Failed to read file'
+  }
+  if (result.error && !result.raw_content && !result.content && !result.data) {
+    return typeof result.error === 'string' ? result.error : JSON.stringify(result.error)
+  }
+  return ''
+})
 const fileContent = computed(() => {
   const content = props.toolResult?.content
   if (!content) return ''
   try {
     const parsed = typeof content === 'string' ? JSON.parse(content) : content
+    if (parsed?.status === 'error') {
+      return ''
+    }
     return parsed.raw_content || parsed.content || parsed.data || parsed
   } catch {
     return content

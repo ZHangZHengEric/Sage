@@ -25,10 +25,11 @@
 import { ref, computed } from 'vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import FileIcon from './FileIcon.vue'
+import { normalizeFilePath } from '@/utils/fileIcons.js'
 
 const props = defineProps({
   content: {
-    type: String,
+    type: [String, Number, Boolean, Object, Array],
     default: ''
   },
   components: {
@@ -45,40 +46,37 @@ const props = defineProps({
 const fileIcons = computed(() => {
   if (!props.content) return []
 
+  let content = props.content
+  if (typeof content !== 'string') {
+    if (Array.isArray(content)) {
+      content = content
+        .map(item => {
+          if (typeof item === 'string') return item
+          if (item?.text) return item.text
+          if (item?.content) return item.content
+          return ''
+        })
+        .filter(Boolean)
+        .join('\n')
+    } else if (typeof content === 'object') {
+      content = content.text || content.content || content.message || ''
+    } else {
+      content = String(content)
+    }
+  }
+
   const files = []
   const seenPaths = new Set()
-
-  // 辅助函数：规范化路径
-  const normalizePath = (path) => {
-    let normalizedPath = path
-    // 去除两边的反引号
-    if (normalizedPath.startsWith('`') && normalizedPath.endsWith('`')) {
-      normalizedPath = normalizedPath.slice(1, -1)
-    }
-    // 去除 /sage-workspace/ 前缀，但保留根路径 /
-    if (normalizedPath.startsWith('/sage-workspace/')) {
-      normalizedPath = normalizedPath.replace('/sage-workspace/', '/')
-    }
-
-    // 支持 file:// 协议的路径
-    if (normalizedPath.startsWith('file://')) {
-      normalizedPath = normalizedPath.replace(/^file:\/\/\/?/i, '/')
-    }
-    try {
-      normalizedPath = decodeURIComponent(normalizedPath)
-    } catch (e) {}
-    return normalizedPath
-  }
 
   // 匹配 Markdown 格式的本地文件链接 [text](path)
   const markdownRegex = /\[([^\]]+)\]\(([^)]+)\)/g
   let match
   let counter = 0
 
-  while ((match = markdownRegex.exec(props.content)) !== null) {
+  while ((match = markdownRegex.exec(content)) !== null) {
     let path = match[2]
     const name = match[1]
-    path = normalizePath(path)
+    path = normalizeFilePath(path)
 
     // 检查是否是本地绝对路径，且不是文件夹
     if (path.startsWith('/') && !seenPaths.has(path) && !path.endsWith('/')) {

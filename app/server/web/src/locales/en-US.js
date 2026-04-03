@@ -999,6 +999,8 @@ export default {
   // Workspace
   'workspace.title': 'Workspace',
   'workspace.noFiles': 'No files',
+  'workspace.dropHere': 'Drop files or folders to upload',
+  'workspace.dragHint': 'Drag files or folders here',
   'workspace.path': 'Path:',
   'workspace.download': 'Download',
 
@@ -1007,6 +1009,8 @@ export default {
   'error.unknown': 'Unknown error',
 
   'skills.allSkills': 'All Skills',
+  'skills.viewCard': 'Card',
+  'skills.viewList': 'List',
   'skills.mySkills': 'My Skills',
   'skills.systemSkills': 'System Skills',
   'skills.searchPlaceholder': 'Search skills...',

@@ -658,6 +658,15 @@ watch(() => currentSessionId.value, (id) => {
   if (id) workbenchStore.setSessionId(id)
 }, { immediate: true })
 
+watch(
+  () => [panelStore.showWorkspace, selectedAgentId.value, currentSessionId.value],
+  ([showWorkspace]) => {
+    if (!showWorkspace) return
+    refreshWorkspace()
+  },
+  { immediate: true }
+)
+
 onMounted(() => {
   try {
     const savedMode = localStorage.getItem(DISPLAY_MODE_STORAGE_KEY)

@@ -499,6 +499,8 @@ const handleToolClick = (toolCall, result) => {
 
   if (props.openWorkbench) {
     props.openWorkbench({ toolCallId: toolCall.id, realtime: false })
+    emit('toolClick', toolCall, result)
+    return
   }
 
   selectedToolExecution.value = toolCall

@@ -4,6 +4,11 @@ export function normalizeFilePath(path) {
   
   // 去掉两端空白
   path = path.trim()
+
+  // 去除成对反引号
+  if (path.startsWith('`') && path.endsWith('`')) {
+    path = path.slice(1, -1).trim()
+  }
   
   // decode URL
   try {
@@ -11,6 +16,8 @@ export function normalizeFilePath(path) {
   } catch (e) { }
 
   path = path
+    .replace(/^\{workspace_root\}\//i, '/')
+    .replace(/^\$\{workspace_root\}\//i, '/')
     .replace(/^file:\/\/\/?/i, '/')
     .replace(/^\/sage-workspace\//, '/')
 

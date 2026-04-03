@@ -26,6 +26,28 @@
         </div>
 
         <div class="flex items-center gap-3">
+          <div class="inline-flex rounded-md border bg-background p-0.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              class="h-8 px-2"
+              :class="viewMode === 'card' ? 'bg-primary/10 text-primary' : 'text-muted-foreground'"
+              @click="viewMode = 'card'"
+            >
+              <LayoutGrid class="h-4 w-4 mr-1" />
+              {{ t('skills.viewCard') || '卡片' }}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              class="h-8 px-2"
+              :class="viewMode === 'list' ? 'bg-primary/10 text-primary' : 'text-muted-foreground'"
+              @click="viewMode = 'list'"
+            >
+              <List class="h-4 w-4 mr-1" />
+              {{ t('skills.viewList') || '列表' }}
+            </Button>
+          </div>
           <div class="relative w-64">
             <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input v-model="searchTerm" :placeholder="t('skills.searchPlaceholder') || 'Search skills...'"
@@ -66,7 +88,7 @@
       <ScrollArea v-else class="h-full">
         <div class="space-y-2 pr-4">
           <!-- Agent Dimension: Group by Agent -->
-          <div v-if="selectedDimension === 'agent'">
+          <div v-if="selectedDimension === 'agent' && viewMode === 'card'">
             <div v-for="group in groupedAgentSkills" :key="group.agentId" class="mb-6">
               <!-- Agent Group Header -->
               <div class="flex items-center gap-2 mb-3 px-2">
@@ -124,7 +146,75 @@
           </div>
 
           <!-- Other Dimensions: Grid Cards -->
-          <div v-else class="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 pb-20">
+          <div v-else-if="selectedDimension === 'agent'" class="space-y-4 pb-20">
+            <Card
+              class="border-dashed border-2 cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-all duration-300"
+              @click="openImportModal"
+            >
+              <CardContent class="py-3 flex items-center gap-3 text-muted-foreground hover:text-primary transition-colors">
+                <Plus class="h-4 w-4" />
+                <span class="font-medium">{{ t('skills.import') || 'Import' }}</span>
+              </CardContent>
+            </Card>
+
+            <div v-for="group in groupedAgentSkills" :key="`list-${group.agentId}`" class="space-y-2">
+              <div class="flex items-center gap-2 px-2">
+                <Bot class="h-4 w-4 text-muted-foreground" />
+                <span class="text-sm font-medium text-muted-foreground">{{ group.agentName }}</span>
+                <Badge variant="secondary" class="text-xs">{{ group.skills?.length || 0 }}</Badge>
+              </div>
+
+              <Card
+                v-for="skill in group.skills"
+                :key="`list-${group.agentId}-${skill.name}`"
+                class="group border-muted/60 hover:border-primary/40 transition-all"
+              >
+                <CardContent class="py-3">
+                  <div class="flex items-start gap-3">
+                    <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                      <Box class="h-4 w-4" />
+                    </div>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center justify-between gap-2">
+                        <div class="min-w-0">
+                          <div class="font-medium text-sm truncate" :title="skill.name">{{ skill.name }}</div>
+                          <div class="text-xs text-muted-foreground line-clamp-1 mt-0.5">
+                            {{ skill.description || t('skills.noDescription') }}
+                          </div>
+                        </div>
+                        <div class="flex items-center gap-1">
+                          <Button
+                            v-if="canEdit(skill)"
+                            variant="ghost"
+                            size="icon"
+                            class="h-7 w-7 text-muted-foreground hover:text-primary"
+                            @click.stop="openEditModal(skill)"
+                          >
+                            <Edit class="h-4 w-4" />
+                          </Button>
+                          <Button
+                            v-if="canDelete(skill)"
+                            variant="ghost"
+                            size="icon"
+                            class="h-7 w-7 text-muted-foreground hover:text-destructive"
+                            @click.stop="confirmDelete(skill, group.agentId)"
+                          >
+                            <Trash2 class="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div class="mt-2 inline-flex items-center gap-1 bg-primary/5 px-2 py-1 rounded text-primary/80 text-xs">
+                        <Bot class="h-3 w-3" />
+                        <span>{{ group.agentName }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+
+          <div v-else-if="viewMode === 'card'" class="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 pb-20">
             <Card
               class="flex flex-col items-center justify-center border-dashed border-2 cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-all duration-300 min-h-[140px]"
               @click="openImportModal"
@@ -182,6 +272,66 @@
                         <Badge v-if="skill.owner_user_id === currentUser.userid" variant="secondary" class="text-[10px]">
                     {{ t('skills.mine') || 'My Skill' }}
                   </Badge>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div v-else class="space-y-2 pb-20">
+            <Card
+              class="border-dashed border-2 cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-all duration-300"
+              @click="openImportModal"
+            >
+              <CardContent class="py-3 flex items-center gap-3 text-muted-foreground hover:text-primary transition-colors">
+                <Plus class="h-4 w-4" />
+                <span class="font-medium">{{ t('skills.import') || 'Import' }}</span>
+              </CardContent>
+            </Card>
+
+            <Card
+              v-for="skill in displayedSkills"
+              :key="`list-${skill.name}`"
+              class="group border-muted/60 hover:border-primary/40 transition-all"
+            >
+              <CardContent class="py-3">
+                <div class="flex items-start gap-3">
+                  <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                    <Box class="h-4 w-4" />
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center justify-between gap-2">
+                      <div class="min-w-0">
+                        <div class="font-medium text-sm truncate" :title="skill.name">{{ skill.name }}</div>
+                        <div class="text-xs text-muted-foreground line-clamp-1 mt-0.5">
+                          {{ skill.description || t('skills.noDescription') }}
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-1">
+                        <Button
+                          v-if="canEdit(skill)"
+                          variant="ghost"
+                          size="icon"
+                          class="h-7 w-7 text-muted-foreground hover:text-primary"
+                          @click.stop="openEditModal(skill)"
+                        >
+                          <Edit class="h-4 w-4" />
+                        </Button>
+                        <Button
+                          v-if="canDelete(skill)"
+                          variant="ghost"
+                          size="icon"
+                          class="h-7 w-7 text-muted-foreground hover:text-destructive"
+                          @click.stop="confirmDelete(skill)"
+                        >
+                          <Trash2 class="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                    <div class="mt-2 inline-flex items-center gap-1 bg-primary/5 px-2 py-1 rounded text-primary/80 text-xs">
+                      <component :is="selectedDimension === 'system' ? Shield : User" class="h-3 w-3" />
+                      <span>{{ selectedDimension === 'system' ? (t('skills.system') || 'System') : (t('skills.mine') || 'Mine') }}</span>
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -342,6 +492,7 @@
 </template>
 
 <script setup>
+import { ref } from 'vue'
 import {
   Box,
   Search,
@@ -353,6 +504,8 @@ import {
   Shield,
   Bot,
   Edit,
+  LayoutGrid,
+  List,
   MoreVertical,
   AlertCircle
 } from 'lucide-vue-next'
@@ -394,12 +547,14 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 
 // Composables
 const { t } = useLanguage()
+const viewMode = ref('card')
 
 // Use the skill list composable
 const {
   // State
   searchTerm,
   selectedDimension,
+  currentUser,
   loading,
   showImportModal,
   importMode,
