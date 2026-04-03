@@ -4,10 +4,14 @@ import ast
 import json
 import re
 import shlex
-import tomllib
 import uuid
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set
+
+try:
+    import tomllib  # Python 3.11+
+except ImportError:
+    import tomli as tomllib  # Python 3.10 compatibility
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import SessionContext

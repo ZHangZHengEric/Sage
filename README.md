@@ -7,7 +7,7 @@
 [![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
 [![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg?logo=python)](https://python.org)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python)](https://python.org)
 [![Version](https://img.shields.io/badge/Version-1.0.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-Learn%20More-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 [![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
@@ -71,12 +71,35 @@
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
-pip install -r requirements.txt
 ```
 
 ### Running Sage
 
-**Desktop Application (Recommended)**:
+**Option 1: One-Command Startup (Recommended for Development)**
+
+```bash
+# 1. Set your LLM API Key
+export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
+export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
+export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
+
+# 2. Run the startup script
+./scripts/dev-up.sh
+```
+
+The script will automatically:
+- Check Python (>= 3.10) and Node.js (>= 18) versions
+- Create configuration files (minimal mode: SQLite, no external dependencies)
+- Install dependencies
+- Start both backend and frontend services
+
+**First time?** The script will prompt you to choose between:
+- **Minimal mode**: SQLite, no external dependencies (recommended for quick start)
+- **Full mode**: MySQL + Elasticsearch + RustFS (for production-like environment)
+
+After starting, open: http://localhost:5173
+
+**Option 2: Desktop Application (Recommended for Users)**
 
 Download the latest desktop package from [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases):
 - **macOS**: `.dmg` (Intel & Apple Silicon)
