@@ -133,6 +133,7 @@
 import { computed } from 'vue'
 import { ArrowLeft, Database, Code, Wrench, Globe, Cpu } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
+import { getMcpServerLabel } from '../utils/mcpLabels.js'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -175,15 +176,21 @@ const getToolTypeLabel = (type) => {
 }
 
 const getToolSourceLabel = (source) => {
-  // 直接映射中文source到翻译key
+  let displaySource = source
+  if (source.startsWith('MCP Server: ')) {
+    displaySource = getMcpServerLabel(source.replace('MCP Server: ', ''), t)
+  } else if (source.startsWith('内置MCP: ')) {
+    displaySource = getMcpServerLabel(source.replace('内置MCP: ', ''), t)
+  }
+
   const sourceMapping = {
     '基础工具': 'tools.source.basic',
     '内置工具': 'tools.source.builtin',
     '系统工具': 'tools.source.system'
   }
 
-  const translationKey = sourceMapping[source]
-  return translationKey ? t(translationKey) : source
+  const translationKey = sourceMapping[displaySource]
+  return translationKey ? t(translationKey) : displaySource
 }
 
 const getToolIcon = (type) => {

@@ -156,7 +156,7 @@
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
                 <Checkbox id="multimodal" v-model:checked="form.supportsMultimodal" />
-                <Label for="multimodal" class="cursor-pointer">多模态（图像输入）</Label>
+                <Label for="multimodal" class="cursor-pointer">{{ t('modelProvider.multimodalLabel') }}</Label>
               </div>
               <Button
                 v-if="form.supportsMultimodal"
@@ -167,11 +167,11 @@
                 :disabled="verifyingMultimodal || !form.model"
               >
                 <Loader v-if="verifyingMultimodal" class="mr-2 h-4 w-4 animate-spin" />
-                {{ multimodalVerified ? '已验证' : '验证多模态' }}
+                {{ multimodalVerified ? t('modelProvider.multimodalVerified') : t('modelProvider.multimodalVerify') }}
               </Button>
             </div>
             <p v-if="form.supportsMultimodal && !multimodalVerified" class="text-xs text-amber-600">
-              请验证多模态支持以确保功能正常
+              {{ t('modelProvider.multimodalVerifyHint') }}
             </p>
    
           </div>
@@ -179,7 +179,7 @@
         <DialogFooter class="flex sm:justify-between items-center w-full">
           <Button type="button" variant="secondary" @click="handleVerify" :disabled="verifying">
             <Loader v-if="verifying" class="mr-2 h-4 w-4 animate-spin" />
-            {{ t('common.verify') || '验证' }}
+            {{ t('common.verify') }}
           </Button>
           <div class="flex gap-2">
             <Button variant="outline" @click="dialogOpen = false">{{ t('common.cancel') }}</Button>
@@ -483,7 +483,7 @@ const handleVerify = async () => {
   }
 
   if (!data.name || !data.base_url || !data.api_keys.length || !data.model) {
-     toast.error(t('common.fillRequired') || '请填写必填项')
+     toast.error(t('common.fillRequired'))
      return
   }
 
@@ -491,10 +491,10 @@ const handleVerify = async () => {
   try {
     await modelProviderAPI.verifyModelProvider(data)
     verified.value = true
-    toast.success(t('common.verifySuccess') || '验证成功')
+    toast.success(t('common.verifySuccess'))
   } catch (error) {
     verified.value = false
-    toast.error(error.message || '验证失败')
+    toast.error(error.message || t('modelProvider.verifyFailed'))
   } finally {
     verifying.value = false
   }
@@ -502,7 +502,7 @@ const handleVerify = async () => {
 
 const handleVerifyMultimodal = async () => {
   if (!form.model) {
-    toast.error('请先填写模型名称')
+    toast.error(t('modelProvider.fillModelNameFirst'))
     return
   }
 
@@ -523,19 +523,19 @@ const handleVerifyMultimodal = async () => {
     if (res?.supports_multimodal) {
       multimodalVerified.value = true
       if (res?.recognized) {
-        toast.success('多模态验证成功，模型正确识别了图片内容')
+        toast.success(t('modelProvider.multimodalRecognized'))
       } else {
-        toast.success('多模态验证成功，但模型未能正确识别图片内容')
+        toast.success(t('modelProvider.multimodalNotRecognized'))
       }
     } else {
       multimodalVerified.value = false
-      toast.warning('该模型不支持多模态')
+      toast.warning(t('modelProvider.multimodalNotSupported'))
       form.supportsMultimodal = false
     }
   } catch (error) {
     console.error('Failed to verify multimodal:', error)
     multimodalVerified.value = false
-    toast.error(error.message || '多模态验证失败')
+    toast.error(error.message || t('modelProvider.multimodalVerifyFailed'))
   } finally {
     verifyingMultimodal.value = false
   }
@@ -559,12 +559,12 @@ const submitForm = async () => {
   if (!isEdit.value) {
     if (form.supportsMultimodal) {
       if (!multimodalVerified.value) {
-        toast.error('请先验证多模态支持')
+        toast.error(t('modelProvider.verifyMultimodalFirst'))
         return
       }
     } else {
       if (!verified.value) {
-        toast.error('请先验证连接')
+        toast.error(t('modelProvider.verifyConnectionFirst'))
         return
       }
     }

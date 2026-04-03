@@ -195,7 +195,7 @@
           <div v-else class="flex items-center justify-center h-32 text-muted-foreground">
             <div class="text-center">
               <ListTodo class="w-8 h-8 mx-auto mb-2 opacity-50" />
-              <p class="text-sm">暂无任务</p>
+              <p class="text-sm">{{ t('workbench.tool.noTasks') }}</p>
             </div>
           </div>
         </div>
@@ -598,7 +598,7 @@ const questionnaireId = computed(() => {
 })
 
 const questionnaireTitle = computed(() => {
-  return toolArgs.value.title || '问卷'
+  return toolArgs.value.title || t('workbench.tool.questionnaire')
 })
 
 const questionnaireQuestions = computed(() => {

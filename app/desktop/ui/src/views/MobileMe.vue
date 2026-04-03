@@ -16,7 +16,7 @@
 
     <!-- Settings Group -->
     <div class="space-y-2">
-      <h3 class="text-sm font-medium text-muted-foreground px-1">通用设置</h3>
+      <h3 class="text-sm font-medium text-muted-foreground px-1">{{ t('profile.generalSettings') }}</h3>
       <div class="bg-card rounded-xl border overflow-hidden">
         <div 
           class="flex items-center justify-between p-4 active:bg-muted/50 transition-colors cursor-pointer border-b last:border-0"
@@ -39,7 +39,7 @@
             <div class="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-lg text-orange-600 dark:text-orange-400">
               <KeyRound class="w-5 h-5" />
             </div>
-            <span>修改密码</span>
+            <span>{{ t('profile.changePassword') }}</span>
           </div>
           <ChevronRight class="w-5 h-5 text-muted-foreground" />
         </div>
@@ -48,7 +48,7 @@
 
     <!-- System Management (Admin Only) -->
     <div v-if="currentUser?.role === 'admin'" class="space-y-2">
-      <h3 class="text-sm font-medium text-muted-foreground px-1">系统管理</h3>
+      <h3 class="text-sm font-medium text-muted-foreground px-1">{{ t('profile.systemManagement') }}</h3>
       <div class="bg-card rounded-xl border overflow-hidden">
         <div 
           class="flex items-center justify-between p-4 active:bg-muted/50 transition-colors cursor-pointer border-b last:border-0"
@@ -90,15 +90,15 @@
     <Dialog v-model:open="showChangePasswordDialog">
       <DialogContent class="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>修改密码</DialogTitle>
+          <DialogTitle>{{ t('profile.changePasswordTitle') }}</DialogTitle>
           <DialogDescription>
-            请输入当前密码和新密码以修改您的登录密码。
+            {{ t('profile.changePasswordDesc') }}
           </DialogDescription>
         </DialogHeader>
         <div class="grid gap-4 py-4">
           <div class="grid grid-cols-4 items-center gap-4">
             <Label for="old-password" class="text-right">
-              旧密码
+              {{ t('profile.currentPassword') }}
             </Label>
             <Input
               id="old-password"
@@ -109,7 +109,7 @@
           </div>
           <div class="grid grid-cols-4 items-center gap-4">
             <Label for="new-password" class="text-right">
-              新密码
+              {{ t('profile.newPassword') }}
             </Label>
             <Input
               id="new-password"
@@ -120,7 +120,7 @@
           </div>
           <div class="grid grid-cols-4 items-center gap-4">
             <Label for="confirm-password" class="text-right">
-              确认新密码
+              {{ t('profile.confirmNewPassword') }}
             </Label>
             <Input
               id="confirm-password"
@@ -131,10 +131,10 @@
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" @click="showChangePasswordDialog = false">取消</Button>
+          <Button variant="outline" @click="showChangePasswordDialog = false">{{ t('common.cancel') }}</Button>
           <Button type="submit" @click="handleChangePassword" :disabled="changingPassword">
-            <span v-if="changingPassword">修改中...</span>
-            <span v-else>确认修改</span>
+            <span v-if="changingPassword">{{ t('profile.changingPassword') }}</span>
+            <span v-else>{{ t('profile.confirmChangePassword') }}</span>
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -195,12 +195,12 @@ const changingPassword = ref(false)
 
 const handleChangePassword = async () => {
   if (!changePasswordForm.value.oldPassword || !changePasswordForm.value.newPassword) {
-    toast.error('请输入密码')
+    toast.error(t('profile.passwordRequired'))
     return
   }
   
   if (changePasswordForm.value.newPassword !== changePasswordForm.value.confirmPassword) {
-    toast.error('两次输入的密码不一致')
+    toast.error(t('auth.passwordsMismatch'))
     return
   }
   
@@ -210,12 +210,12 @@ const handleChangePassword = async () => {
       changePasswordForm.value.oldPassword, 
       changePasswordForm.value.newPassword
     )
-    toast.success('密码修改成功，请重新登录')
+    toast.success(t('profile.passwordChangedRelogin'))
     showChangePasswordDialog.value = false
     handleLogout()
   } catch (error) {
     console.error(error)
-    toast.error(error.message || '修改失败')
+    toast.error(error.message || t('profile.passwordChangeFailed'))
   } finally {
     changingPassword.value = false
   }

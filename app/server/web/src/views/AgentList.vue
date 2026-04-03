@@ -42,7 +42,7 @@
                     class="text-xs font-medium px-2 py-0.5 shrink-0 bg-primary text-primary-foreground"
                   >
                     <Star class="w-3 h-3 mr-1" />
-                    默认
+                    {{ t('agent.defaultModel') }}
                   </Badge>
                 </div>
 
@@ -50,7 +50,7 @@
                   <button
                     @click.stop="copyAgentId(agent.id)"
                     class="text-[10px] font-mono text-muted-foreground/70 bg-muted/40 hover:bg-muted/60 px-1.5 py-0.5 rounded transition-colors cursor-pointer flex items-center gap-1"
-                    title="点击复制完整ID"
+                    :title="t('agent.copyFullId')"
                   >
                     <span class="truncate max-w-[120px]">{{ agent.id }}</span>
                     <Copy class="w-3 h-3" />
@@ -62,7 +62,7 @@
           
           <CardContent class="pt-0 pb-3 flex-1 flex flex-col">
             <p class="text-sm text-muted-foreground line-clamp-3 leading-relaxed flex-1">
-              {{ agent.description || '这个智能体已经准备好协助完成你的任务。' }}
+              {{ agent.description || t('agent.placeholderDescription').replace('{name}', agent.name) }}
             </p>
             
             <div class="flex items-center gap-3 mt-3 flex-wrap">
@@ -90,7 +90,7 @@
                   <span class="text-xs">{{ agent.availableSkills.length }}</span>
                 </div>
               </div>
-              <span class="text-xs text-muted-foreground/50">点击查看详情</span>
+              <span class="text-xs text-muted-foreground/50">{{ t('chat.clickToViewDetails') }}</span>
             </div>
 
             <div class="pt-3 border-t bg-muted/20 -mx-4 px-4 -mb-4 pb-4 flex flex-wrap gap-2 justify-end">
@@ -170,10 +170,10 @@
       <DialogContent class="sm:max-w-[80vw] overflow-hidden">
         <DialogHeader>
           <DialogTitle>
-            {{ usageAgent?.name ? `调用示例 - ${usageAgent.name}` : '调用示例' }}
+            {{ usageAgent?.name ? t('agent.usageExampleTitleWithName').replace('{name}', usageAgent.name) : t('agent.usageExample') }}
           </DialogTitle>
           <DialogDescription>
-            不同的会话要替换 session_id 为不同值。system_context 根据真实值替换
+            {{ t('agent.usageExampleDescription') }}
           </DialogDescription>
         </DialogHeader>
 
@@ -268,7 +268,7 @@ const showAuthModal = ref(false)
 const authAgentId = ref('')
 
 // Composables
-const { t } = useLanguage()
+const { t, isZhCN } = useLanguage()
 const route = useRoute()
 const currentUser = ref(getCurrentUser())
 const agentEditStore = useAgentEditStore()
@@ -371,8 +371,8 @@ const loadAgents = async () => {
     // 后端返回格式: [...]
     agents.value = response || []
   } catch (err) {
-    console.error('加载agents失败:', err)
-    error.value = err.message || '加载失败'
+    console.error('Failed to load agents:', err)
+    error.value = err.message || t('common.error')
   } finally {
     loading.value = false
   }
@@ -392,7 +392,7 @@ const saveAgent = async (agentData) => {
     await loadAgents()
     return result
   } catch (err) {
-    console.error('保存agent失败:', err)
+    console.error('Failed to save agent:', err)
     throw err
   }
 }
@@ -403,7 +403,7 @@ const removeAgent = async (agentId) => {
     // 重新加载列表
     await loadAgents()
   } catch (err) {
-    console.error('删除agent失败:', err)
+    console.error('Failed to delete agent:', err)
     throw err
   }
 }
@@ -430,7 +430,7 @@ const handleDelete = async (agent) => {
     await removeAgent(agent.id)
     toast.success(t('agent.deleteSuccess').replace('{name}', agent.name))
   } catch (error) {
-    console.error('删除agent失败:', error)
+    console.error('Failed to delete agent:', error)
     toast.error(t('agent.deleteError'))
   }
 }
@@ -551,8 +551,7 @@ const handleBlankConfig = async (selectedTools = []) => {
   
   let systemPrefix = ''
   try {
-    // 强制使用中文模板
-    const response = await agentAPI.getDefaultSystemPrompt('zh')
+    const response = await agentAPI.getDefaultSystemPrompt(isZhCN.value ? 'zh' : 'en')
     if (response && response.data && response.data.content) {
       systemPrefix = response.data.content
     } else if (response && response.content) {
@@ -584,8 +583,8 @@ const handleEditAgent = async (agent) => {
     }
     currentView.value = 'edit'
   } catch (error) {
-    console.error('获取Agent详情失败:', error)
-    toast.error('获取Agent详情失败')
+    console.error('Failed to fetch agent detail:', error)
+    toast.error(t('agent.loadDetailError'))
     // 失败时使用列表数据
     editingAgent.value = agent
     currentView.value = 'edit'
@@ -650,7 +649,7 @@ const handleSaveAgent = async (agentData, shouldExit = true, doneCallback = null
       toast.success(t('agent.createSuccess').replace('{name}', agentData.name))
     }
   } catch (error) {
-    console.error('保存agent失败:', error)
+    console.error('Failed to save agent:', error)
     toast.error(t('agent.saveError'))
   } finally {
     if (doneCallback) doneCallback()
@@ -692,7 +691,7 @@ const copyAgentId = async (agentId) => {
   try {
     if (navigator?.clipboard?.writeText) {
       await navigator.clipboard.writeText(agentId)
-      toast.success('Agent ID 已复制')
+      toast.success(t('agent.copyIdSuccess'))
       return
     }
   } catch (_) {}
@@ -706,9 +705,9 @@ const copyAgentId = async (agentId) => {
     textarea.select()
     document.execCommand('copy')
     document.body.removeChild(textarea)
-    toast.success('Agent ID 已复制')
+    toast.success(t('agent.copyIdSuccess'))
   } catch (e) {
-    toast.error('复制失败')
+    toast.error(t('agent.copyIdFailed'))
   }
 }
 
@@ -752,12 +751,12 @@ const handleSmartConfig = async (description, selectedTools = [], callbacks = {}
 
     // 处理超时错误
     if (error.name === 'AbortError') {
-      throw new Error(`请求超时（耗时${Math.round(duration / 1000)}秒），Agent配置生成需要较长时间，请稍后重试`)
+      throw new Error(t('agent.smartConfigTimeout').replace('{seconds}', String(Math.round(duration / 1000))))
     }
 
     // 处理网络错误
     if (error.name === 'TypeError' && error.message.includes('fetch')) {
-      throw new Error(`网络连接错误（耗时${Math.round(duration / 1000)}秒），请检查网络连接后重试`)
+      throw new Error(t('agent.smartConfigNetworkError').replace('{seconds}', String(Math.round(duration / 1000))))
     }
 
     callbacks.onError && callbacks.onError(error)
@@ -773,8 +772,8 @@ const openUsageModal = async (agent) => {
     usageActiveTab.value = 'curl'
     showUsageModal.value = true
   } catch (e) {
-    console.error('生成调用示例失败:', e)
-    toast.error('生成调用示例失败')
+    console.error('Failed to generate usage example:', e)
+    toast.error(t('agent.usageExampleGenerateError'))
   }
 }
 
@@ -785,7 +784,7 @@ const backendEndpoint = (
 const generateUsageCodes = (agent) => {
   const body = {
     messages: [
-      { role: 'user', content: '你好，请帮我处理一个任务' }
+      { role: 'user', content: t('agent.usageExamplePrompt') }
     ],
     session_id: 'demo-session',
     agent_id: agent.id,

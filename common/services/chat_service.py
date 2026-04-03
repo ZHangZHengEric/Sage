@@ -459,7 +459,7 @@ async def populate_request_from_agent_config(
             request.memory_type = agent_config.get("memoryType")
         if agent_config.get("availableKnowledgeBases") is not None:
             request.available_knowledge_bases = agent_config.get("availableKnowledgeBases")
-        if agent_config.get("availableSubAgentIds") is not None:
+        if agent_config.get("availableSubAgentIds") is not None and request.available_sub_agent_ids is None:
             request.available_sub_agent_ids = agent_config.get("availableSubAgentIds")
 
     if request.agent_name is None:

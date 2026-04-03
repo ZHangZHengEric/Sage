@@ -34,6 +34,7 @@
               v-if="item"
               :item="item"
               class="h-full"
+              @quote-path="$emit('quotePath', $event)"
             />
           </div>
         </div>
@@ -44,6 +45,7 @@
             v-if="currentItemData"
             :item="currentItemData"
             class="h-full"
+            @quote-path="$emit('quotePath', $event)"
           />
           <div v-else class="h-full flex items-center justify-center text-muted-foreground">
             <p class="text-sm">{{ t('workbench.noSelection') }}</p>
@@ -88,7 +90,7 @@ const props = defineProps({
   }
 })
 
-defineEmits(['close'])
+defineEmits(['close', 'quotePath'])
 
 const { t } = useLanguage()
 const workbenchStore = useWorkbenchStore()
