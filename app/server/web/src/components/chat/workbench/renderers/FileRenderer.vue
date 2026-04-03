@@ -1,5 +1,5 @@
 <template>
-  <div class="file-renderer h-full flex flex-col overflow-hidden">
+  <div class="file-renderer h-full min-h-0 flex flex-col overflow-hidden">
     <!-- 整合后的头部：包含 ItemHeader 信息和文件操作 -->
     <div class="flex items-center justify-between px-3 py-2.5 bg-muted/30 border-b border-border flex-none h-12">
       <div class="flex items-center gap-2 min-w-0">
@@ -50,7 +50,7 @@
     </div>
 
     <!-- 内容区域 -->
-    <div class="flex-1 overflow-auto">
+    <div class="flex-1 min-h-0 overflow-auto">
       <!-- 加载中 -->
       <div v-if="loading" class="flex items-center justify-center h-full">
         <Loader2 class="w-6 h-6 animate-spin text-primary" />
@@ -132,7 +132,7 @@
   </div>
 
   <Dialog v-if="!dialogMode" v-model:open="previewDialogOpen">
-    <DialogContent class="max-w-[90vw] h-[85vh] p-0 overflow-hidden">
+    <DialogContent class="max-w-[90vw] h-[85vh] p-0 overflow-hidden flex flex-col">
       <FileRenderer
         :file-path="filePath"
         :file-name="fileName"
@@ -404,10 +404,7 @@ const loadContent = async () => {
     }
 
     // Clean path
-    let safePath = normalizeFilePath(props.filePath)
-    if (safePath.startsWith('/')) {
-      safePath = safePath.substring(1)
-    }
+    const safePath = normalizeFilePath(props.filePath)
 
     // 下载文件 Blob
     const blob = await agentAPI.downloadFile(agentId, safePath, sessionId)
@@ -485,10 +482,7 @@ const openFile = async () => {
        const agentId = props.item?.agentId
        const sessionId = props.item?.sessionId
        if (agentId) {
-           let safePath = normalizeFilePath(props.filePath)
-           if (safePath.startsWith('/')) {
-             safePath = safePath.substring(1)
-           }
+           const safePath = normalizeFilePath(props.filePath)
            const blob = await agentAPI.downloadFile(agentId, safePath, sessionId)
            const url = URL.createObjectURL(blob)
            const a = document.createElement('a')
