@@ -44,10 +44,10 @@
             <h4 class="font-medium">{{ t('agentCreation.smartConfig') }}</h4>
           </div>
           
-          <p class="text-sm text-muted-foreground">请描述您希望创建的Agent功能，我们将自动生成配置</p>
+          <p class="text-sm text-muted-foreground">{{ t('agentCreation.smartHint') }}</p>
           
           <div class="space-y-2">
-            <Label>Agent描述</Label>
+            <Label>{{ t('agentCreation.agentDescriptionLabel') }}</Label>
             <Textarea
               v-model="description"
               :placeholder="t('agentCreation.descriptionPlaceholder')"
@@ -80,7 +80,7 @@
                   </label>
                 </div>
                 <div v-if="props.tools.length === 0" class="text-sm text-muted-foreground text-center py-4">
-                  {{ t('tools.noTools') || '暂无可用工具' }}
+                  {{ t('tools.noTools') }}
                 </div>
               </div>
             </ScrollArea>
@@ -90,7 +90,7 @@
 
       <DialogFooter v-if="selectedType === 'smart'">
         <Button variant="ghost" @click="selectedType = ''" :disabled="isGenerating">
-          返回
+          {{ t('common.return') }}
         </Button>
         <Button 
           @click="handleCreateSmart" 
@@ -183,4 +183,3 @@ const handleCreateSmart = async () => {
 
 
 </script>
-

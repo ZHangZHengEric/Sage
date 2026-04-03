@@ -4,6 +4,7 @@
       <MarkdownRenderer
         :content="content"
         :components="components"
+        :compact="compact"
       />
     </div>
     <!-- 文件图标区域 - 显示检测到的文件链接为图标 -->
@@ -33,6 +34,10 @@ const props = defineProps({
   components: {
     type: Object,
     default: () => ({})
+  },
+  compact: {
+    type: Boolean,
+    default: false
   }
 })
 

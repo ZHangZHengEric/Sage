@@ -79,13 +79,13 @@
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p class="text-xs">设置Agent的名称、描述和系统提示词，这些是Agent的基本配置。</p>
+                      <p class="text-xs">{{ t('agentEdit.basicInfoTooltip') }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
               <div class="ml-2">
-                <p class="text-xs text-muted-foreground">配置Agent的基本信息和系统提示词</p>
+                <p class="text-xs text-muted-foreground">{{ t('agentEdit.basicInfoDesc') }}</p>
               </div>
             </div>
             <div class="space-y-5 pl-10">
@@ -118,7 +118,7 @@
                     :disabled="isOptimizing"
                   >
                     <Sparkles class="h-3.5 w-3.5 text-yellow-400" />
-                    <span class="text-xs">AI优化</span>
+                    <span class="text-xs">{{ t('agentEdit.aiOptimize') }}</span>
                   </Button>
                 </div>
                 <Textarea
@@ -147,7 +147,7 @@
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p class="text-xs">配置Agent的运行策略，包括记忆类型、工作模式、深度思考等行为设置。</p>
+                      <p class="text-xs">{{ t('agentEdit.strategyTooltip') }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -182,7 +182,7 @@
                 </FormItem>
 
                 <!-- Enable Multimodal -->
-                <FormItem label="开启多模态">
+                <FormItem :label="t('agentEdit.enableMultimodal')">
                   <div class="flex items-center h-10 gap-3 border rounded-md px-3 bg-background">
                     <Switch 
                       :checked="store.formData.enableMultimodal" 
@@ -193,7 +193,7 @@
                       :disabled="!selectedProviderSupportsMultimodal"
                     />
                     <span class="text-sm text-muted-foreground">
-                      {{ store.formData.enableMultimodal ? '已开启' : '已关闭' }}
+                      {{ store.formData.enableMultimodal ? t('agentEdit.multimodalEnabled') : t('agentEdit.multimodalDisabled') }}
                     </span>
                   </div>
                 </FormItem>
@@ -250,7 +250,7 @@
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p class="text-xs">选择Agent使用的语言模型提供商，不同的模型具有不同的能力和特性。</p>
+                      <p class="text-xs">{{ t('agentEdit.modelTooltip') }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -287,7 +287,7 @@
                 <Bot class="h-4 w-4 text-primary" />
               </div>
               <div class="flex items-center gap-2">
-                <h2 class="text-base font-semibold">子智能体</h2>
+                <h2 class="text-base font-semibold">{{ t('agentEdit.subAgents') }}</h2>
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger as-child>
@@ -296,17 +296,17 @@
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p class="text-xs">选择当前Agent可以调用的子智能体，仅在Fibre模式下有效。</p>
+                      <p class="text-xs">{{ t('agentEdit.subAgentsTooltip') }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
             </div>
             <div class="pl-10">
-              <FormItem label="子智能体">
+              <FormItem :label="t('agentEdit.subAgents')">
                 <div class="border rounded-lg overflow-hidden bg-background">
                   <div class="px-3 py-2 border-b bg-muted/30 flex items-center justify-between">
-                    <span class="text-xs font-medium text-muted-foreground">可选子智能体 ({{ filteredAgents.length }})</span>
+                    <span class="text-xs font-medium text-muted-foreground">{{ t('agentEdit.availableSubAgents') }} ({{ filteredAgents.length }})</span>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -314,7 +314,7 @@
                       @click="selectAllSubAgents"
                       :disabled="filteredAgents.length === 0"
                     >
-                      全选
+                      {{ t('agentEdit.selectAll') }}
                     </Button>
                   </div>
                   <ScrollArea class="h-[200px]">
@@ -360,13 +360,13 @@
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p class="text-xs">选择Agent可以使用的工具，这些工具将增强Agent的能力。</p>
+                      <p class="text-xs">{{ t('agentEdit.toolsTooltip') }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
               <div class="ml-2">
-                <p class="text-xs text-muted-foreground">选择Agent可以使用的工具</p>
+                <p class="text-xs text-muted-foreground">{{ t('agentEdit.toolsDesc') }}</p>
               </div>
             </div>
             <div class="pl-10 space-y-4">
@@ -393,7 +393,7 @@
                   <div class="p-3 border-b flex items-center justify-between gap-3">
                     <div class="relative flex-1">
                       <Search class="absolute left-2 top-2 h-4 w-4 text-muted-foreground/70" />
-                      <Input v-model="searchQueries.tools" placeholder="搜索工具..." class="pl-8 h-9" />
+                      <Input v-model="searchQueries.tools" :placeholder="t('agentEdit.searchTools')" class="pl-8 h-9" />
                     </div>
                     <div class="flex items-center gap-2">
                       <Button
@@ -403,7 +403,7 @@
                         @click="selectAllToolsInGroup"
                         :disabled="displayedTools.length === 0"
                       >
-                        全选
+                        {{ t('agentEdit.selectAll') }}
                       </Button>
                       <Button
                         variant="ghost"
@@ -412,7 +412,7 @@
                         @click="deselectAllToolsInGroup"
                         :disabled="displayedTools.length === 0"
                       >
-                        取消
+                        {{ t('agentEdit.deselectAll') }}
                       </Button>
                     </div>
                   </div>
@@ -431,16 +431,16 @@
                             <label :for="`tool-${tool.name}`" class="text-sm font-medium cursor-pointer" :class="{ 'opacity-50': isRequiredTool(tool.name) || isIMToolDisabled(tool.name) }">
                               {{ tool.name }}
                             </label>
-                            <Badge v-if="isRequiredTool(tool.name) === 'skill'" variant="secondary" class="text-[10px] h-5 px-1.5">技能必需</Badge>
-                            <Badge v-else-if="isRequiredTool(tool.name) === 'im'" variant="secondary" class="text-[10px] h-5 px-1.5 bg-blue-100 text-blue-700">IM频道必须</Badge>
-                            <Badge v-else-if="isIMToolDisabled(tool.name)" variant="secondary" class="text-[10px] h-5 px-1.5 bg-gray-100 text-gray-500">需开启IM频道</Badge>
-                            <Badge v-else-if="isRequiredTool(tool.name)" variant="secondary" class="text-[10px] h-5 px-1.5">必需</Badge>
+                            <Badge v-if="isRequiredTool(tool.name) === 'skill'" variant="secondary" class="text-[10px] h-5 px-1.5">{{ t('agentEdit.badge.skillRequired') }}</Badge>
+                            <Badge v-else-if="isRequiredTool(tool.name) === 'im'" variant="secondary" class="text-[10px] h-5 px-1.5 bg-blue-100 text-blue-700">{{ t('agentEdit.badge.imRequired') }}</Badge>
+                            <Badge v-else-if="isIMToolDisabled(tool.name)" variant="secondary" class="text-[10px] h-5 px-1.5 bg-gray-100 text-gray-500">{{ t('agentEdit.badge.imNeeded') }}</Badge>
+                            <Badge v-else-if="isRequiredTool(tool.name)" variant="secondary" class="text-[10px] h-5 px-1.5">{{ t('agentEdit.badge.required') }}</Badge>
                           </div>
                           <p v-if="tool.description" class="text-xs text-muted-foreground line-clamp-2 mt-1">
                             {{ tool.description }}
                           </p>
                           <p v-if="isIMToolDisabled(tool.name)" class="text-xs text-amber-600 mt-1">
-                            请先开启 IM 频道才能使用此工具
+                            {{ t('agentEdit.imEnableToolHint') }}
                           </p>
                         </div>
                       </div>
@@ -467,7 +467,7 @@
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p class="text-xs">选择Agent可以使用的技能，技能是预定义的能力模块。</p>
+                      <p class="text-xs">{{ t('agentEdit.skillsTooltip') }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -496,7 +496,7 @@
                 <div class="p-3 border-b flex items-center justify-between gap-3">
                   <div class="relative flex-1">
                     <Search class="absolute left-2 top-2 h-4 w-4 text-muted-foreground/70" />
-                    <Input v-model="searchQueries.skills" placeholder="搜索技能..." class="pl-8 h-9" />
+                    <Input v-model="searchQueries.skills" :placeholder="t('agentEdit.searchSkills')" class="pl-8 h-9" />
                   </div>
                   <div class="flex items-center gap-2">
                     <Button
@@ -506,7 +506,7 @@
                       @click="selectAllSkills"
                       :disabled="filteredSkills.length === 0"
                     >
-                      全选
+                      {{ t('agentEdit.selectAll') }}
                     </Button>
                     <Button
                       variant="ghost"
@@ -515,7 +515,7 @@
                       @click="deselectAllSkills"
                       :disabled="store.formData.availableSkills?.length === 0"
                     >
-                      取消
+                      {{ t('agentEdit.deselectAll') }}
                     </Button>
                   </div>
                 </div>
@@ -551,7 +551,7 @@
                 <FolderOpen class="h-4 w-4 text-primary" />
               </div>
               <div class="flex items-center gap-2">
-                <h2 class="text-base font-semibold">可访问文件夹</h2>
+                <h2 class="text-base font-semibold">{{ t('agentEdit.externalPaths') }}</h2>
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger as-child>
@@ -560,7 +560,7 @@
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p class="text-xs">设置Agent可以访问的文件夹路径，Agent将能够读取和处理这些文件夹中的文件。</p>
+                      <p class="text-xs">{{ t('agentEdit.externalPathsTooltip') }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -573,9 +573,9 @@
               <div class="flex items-center gap-3">
                 <Button variant="outline" size="sm" class="h-9 px-4" @click="selectExternalPath">
                   <Plus class="h-3.5 w-3.5 mr-2" />
-                  添加文件夹
+                  {{ t('agentEdit.addFolder') }}
                 </Button>
-                <span class="text-sm text-muted-foreground">允许 Agent 访问这些文件夹中的文件</span>
+                <span class="text-sm text-muted-foreground">{{ t('agentEdit.externalPathsHint') }}</span>
               </div>
               <div v-if="store.formData.externalPaths?.length > 0" class="space-y-2">
                 <div v-for="(path, index) in store.formData.externalPaths" :key="index" class="flex items-center justify-between p-3 rounded-lg border border-muted/50 bg-muted/5 hover:bg-muted/10 transition-colors">
@@ -595,7 +595,7 @@
                 <MessageSquare class="h-4 w-4 text-primary" />
               </div>
               <div class="flex items-center gap-2">
-                <h2 class="text-base font-semibold">IM 频道</h2>
+                <h2 class="text-base font-semibold">{{ t('agentEdit.imChannels') }}</h2>
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger as-child>
@@ -604,7 +604,7 @@
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p class="text-xs">配置Agent的即时通讯频道，支持企业微信、钉钉、飞书等平台。配置后Agent可以通过这些渠道与用户交互。</p>
+                      <p class="text-xs">{{ t('agentEdit.imTooltip') }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -647,13 +647,13 @@
                   <!-- Test & Enable Row (for wechat_personal: test first, then enable) -->
                   <div class="flex items-center justify-between p-4 bg-card rounded-lg border">
                     <div class="space-y-1">
-                      <Label class="text-base">启用 {{ provider.label }}</Label>
+                      <Label class="text-base">{{ t('agentEdit.enableProvider') }} {{ provider.label }}</Label>
                       <p class="text-sm text-muted-foreground">
-                        <span v-if="provider.key === 'imessage' && !isDefaultAgent" class="text-yellow-600">iMessage 只能配置在默认智能体上</span>
-                        <span v-else-if="provider.key === 'wechat_personal'" class="text-yellow-600">先点击测试连接，测试成功后再启动</span>
-                        <span v-else-if="imTestStatus[provider.key]?.tested && !imTestStatus[provider.key]?.passed" class="text-red-600">测试失败，请检查配置后重新测试</span>
-                        <span v-else-if="!imTestStatus[provider.key]?.passed" class="text-yellow-600">请先填写配置并通过测试连接后才能启用</span>
-                        <span v-else>允许Agent通过{{ provider.label }}与用户交互</span>
+                        <span v-if="provider.key === 'imessage' && !isDefaultAgent" class="text-yellow-600">{{ t('agentEdit.imessageDefaultOnly') }}</span>
+                        <span v-else-if="provider.key === 'wechat_personal'" class="text-yellow-600">{{ t('agentEdit.wechatPersonalTestFirst') }}</span>
+                        <span v-else-if="imTestStatus[provider.key]?.tested && !imTestStatus[provider.key]?.passed" class="text-red-600">{{ t('agentEdit.testFailedRetry') }}</span>
+                        <span v-else-if="!imTestStatus[provider.key]?.passed" class="text-yellow-600">{{ t('agentEdit.fillAndTestFirst') }}</span>
+                        <span v-else>{{ t('agentEdit.allowInteractionVia') }} {{ provider.label }} {{ t('agentEdit.withUser') }}</span>
                       </p>
                     </div>
                     <div class="flex items-center gap-3">
@@ -666,7 +666,7 @@
                       >
                         <Loader v-if="testingIM[provider.key]" class="mr-2 h-4 w-4 animate-spin" />
                         <Play v-else class="mr-2 h-4 w-4" />
-                        {{ imTestStatus[provider.key]?.passed && !imEditMode[provider.key] ? '已测试' : '测试连接' }}
+                        {{ imTestStatus[provider.key]?.passed && !imEditMode[provider.key] ? t('agentEdit.tested') : t('agentEdit.testConnection') }}
                       </Button>
                       <!-- Enable Switch -->
                       <Switch 
@@ -692,10 +692,10 @@
                           }"
                         />
                         <span class="text-sm">
-                          <span v-if="imTestStatus[provider.key]?.passed && !imEditMode[provider.key]" class="text-green-600">配置已冻结（测试通过）</span>
-                          <span v-else-if="imEditMode[provider.key]" class="text-yellow-600">编辑模式 - 请修改配置并测试</span>
-                          <span v-else-if="imTestStatus[provider.key]?.tested && !imTestStatus[provider.key]?.passed" class="text-red-600">测试失败 - 请检查配置后重试</span>
-                          <span v-else>未测试 - 请填写配置并测试</span>
+                          <span v-if="imTestStatus[provider.key]?.passed && !imEditMode[provider.key]" class="text-green-600">{{ t('agentEdit.imStatus.frozen') }}</span>
+                          <span v-else-if="imEditMode[provider.key]" class="text-yellow-600">{{ t('agentEdit.imStatus.editing') }}</span>
+                          <span v-else-if="imTestStatus[provider.key]?.tested && !imTestStatus[provider.key]?.passed" class="text-red-600">{{ t('agentEdit.imStatus.testFailed') }}</span>
+                          <span v-else>{{ t('agentEdit.imStatus.untested') }}</span>
                         </span>
                       </div>
                       <Button
@@ -705,7 +705,7 @@
                         @click="handleUpdateIMConfig(provider.key)"
                       >
                         <Edit class="mr-2 h-3.5 w-3.5" />
-                        更新配置
+                        {{ t('agentEdit.updateConfig') }}
                       </Button>
                       <Button
                         v-else-if="imEditMode[provider.key]"
@@ -714,7 +714,7 @@
                         @click="handleFinishIMEdit(provider.key)"
                       >
                         <Check class="mr-2 h-3.5 w-3.5" />
-                        完成编辑
+                        {{ t('agentEdit.finishEditing') }}
                       </Button>
                     </div>
 
@@ -724,7 +724,7 @@
                         <Label>Bot ID <span class="text-red-500">*</span></Label>
                         <Input
                           v-model="imConfig.wechat_work.config.bot_id"
-                          placeholder="输入企业微信 Bot ID"
+                          :placeholder="t('agentEdit.imPlaceholder.wechatWorkBotId')"
                           :disabled="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
                         />
                       </div>
@@ -733,7 +733,7 @@
                         <Input
                           v-model="imConfig.wechat_work.config.secret"
                           type="password"
-                          placeholder="输入 Secret"
+                          :placeholder="t('agentEdit.imPlaceholder.secret')"
                           :disabled="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
                         />
                       </div>
@@ -744,7 +744,7 @@
                       <div class="space-y-4">
                         <div class="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
                           <p class="text-sm text-green-800 dark:text-green-200">
-                            微信个人号通过 iLink Bot API 接入。首次使用需要扫码登录获取 Bot Token。
+                            {{ t('agentEdit.wechatPersonalIntro') }}
                           </p>
                         </div>
                         
@@ -760,11 +760,11 @@
                               >
                                 <Loader v-if="wechatPersonalLogin.loading" class="mr-2 h-4 w-4 animate-spin" />
                                 <QrCode v-else class="mr-2 h-4 w-4" />
-                                {{ wechatPersonalLogin.loading ? '获取中...' : '扫码获取 Token' }}
+                                {{ wechatPersonalLogin.loading ? t('agentEdit.wechatPersonalLoading') : t('agentEdit.wechatPersonalScanToken') }}
                               </Button>
-                              <span v-if="wechatPersonalLogin.status === 'scaned'" class="text-sm text-yellow-600">已扫码，等待确认...</span>
-                              <span v-if="wechatPersonalLogin.status === 'confirmed'" class="text-sm text-green-600">登录成功！</span>
-                              <span v-if="wechatPersonalLogin.status === 'expired'" class="text-sm text-red-600">二维码已过期</span>
+                              <span v-if="wechatPersonalLogin.status === 'scaned'" class="text-sm text-yellow-600">{{ t('agentEdit.wechatPersonalScanned') }}</span>
+                              <span v-if="wechatPersonalLogin.status === 'confirmed'" class="text-sm text-green-600">{{ t('agentEdit.wechatPersonalConfirmed') }}</span>
+                              <span v-if="wechatPersonalLogin.status === 'expired'" class="text-sm text-red-600">{{ t('agentEdit.wechatPersonalExpired') }}</span>
                             </div>
                           </div>
                           
@@ -773,28 +773,28 @@
                             <div class="flex justify-center">
                               <img 
                                 :src="wechatPersonalLogin.qrCodeUrl" 
-                                alt="微信扫码登录" 
+                                :alt="t('agentEdit.wechatPersonalScanToken')" 
                                 class="w-48 h-48 object-contain bg-white border"
                                 style="image-rendering: pixelated; min-height: 192px; min-width: 192px;"
                               />
                             </div>
                             <div class="text-sm space-y-2">
-                              <p class="font-medium text-center">使用步骤：</p>
+                              <p class="font-medium text-center">{{ t('agentEdit.wechatPersonalStepsTitle') }}</p>
                               <ol class="list-decimal list-inside text-xs text-muted-foreground space-y-1">
-                                <li>使用微信扫描上方二维码</li>
-                                <li>微信连接后自动填充Bot token</li>
+                                <li>{{ t('agentEdit.wechatPersonalStep1') }}</li>
+                                <li>{{ t('agentEdit.wechatPersonalStep2') }}</li>
                               </ol>
                             </div>
                             <!-- 备用链接 -->
                             <div v-if="wechatPersonalLogin.qrUrl" class="text-center space-y-2 pt-2 border-t">
-                              <p class="text-xs text-gray-500">扫码无效？可复制链接到微信打开：</p>
+                              <p class="text-xs text-gray-500">{{ t('agentEdit.wechatPersonalAltHint') }}</p>
                               <div class="flex gap-2 justify-center">
                                 <Button 
                                   variant="outline" 
                                   size="sm"
                                   @click="copyWeChatPersonalUrl"
                                 >
-                                  复制链接
+                                  {{ t('agentEdit.wechatPersonalCopyLink') }}
                                 </Button>
                               </div>
                             </div>
@@ -804,11 +804,11 @@
                         <div class="space-y-2">
                           <Label>Bot Token <span class="text-red-500">*</span></Label>
                           <p class="text-xs text-muted-foreground">
-                            通过微信扫码登录获取，或使用已有 Bot Token
+                            {{ t('agentEdit.wechatPersonalBotTokenHint') }}
                           </p>
                           <Textarea
                             v-model="imConfig.wechat_personal.config.bot_token"
-                            placeholder="输入 Bot Token"
+                            :placeholder="t('agentEdit.imPlaceholder.botToken')"
                             rows="3"
                             :disabled="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
                           />
@@ -817,11 +817,11 @@
                         <div class="space-y-2">
                           <Label>Bot ID <span class="text-red-500">*</span></Label>
                           <p class="text-xs text-muted-foreground">
-                            登录成功后自动获取，或手动输入
+                            {{ t('agentEdit.wechatPersonalBotIdHint') }}
                           </p>
                           <Input
                             v-model="imConfig.wechat_personal.config.bot_id"
-                            placeholder="输入 Bot ID"
+                            :placeholder="t('agentEdit.imPlaceholder.botId')"
                             :disabled="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
                           />
                         </div>
@@ -834,7 +834,7 @@
                         <Label>Client ID <span class="text-red-500">*</span></Label>
                         <Input
                           v-model="imConfig.dingtalk.config.client_id"
-                          placeholder="输入钉钉 Client ID"
+                          :placeholder="t('agentEdit.imPlaceholder.dingtalkClientId')"
                           :disabled="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
                         />
                       </div>
@@ -843,7 +843,7 @@
                         <Input
                           v-model="imConfig.dingtalk.config.client_secret"
                           type="password"
-                          placeholder="输入 Client Secret"
+                          :placeholder="t('agentEdit.imPlaceholder.clientSecret')"
                           :disabled="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
                         />
                       </div>
@@ -855,7 +855,7 @@
                         <Label>App ID <span class="text-red-500">*</span></Label>
                         <Input
                           v-model="imConfig.feishu.config.app_id"
-                          placeholder="输入飞书 App ID"
+                          :placeholder="t('agentEdit.imPlaceholder.feishuAppId')"
                           :disabled="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
                         />
                       </div>
@@ -864,7 +864,7 @@
                         <Input
                           v-model="imConfig.feishu.config.app_secret"
                           type="password"
-                          placeholder="输入 App Secret"
+                          :placeholder="t('agentEdit.imPlaceholder.appSecret')"
                           :disabled="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
                         />
                       </div>
@@ -875,12 +875,12 @@
                       <div class="space-y-4">
                         <div class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                           <p class="text-sm text-blue-800 dark:bg-blue-200">
-                            iMessage 使用本地数据库轮询模式。需要授予完全磁盘访问权限才能读取 Messages 数据库。
+                            {{ t('agentEdit.imessageIntro') }}
                           </p>
                         </div>
                         <div class="space-y-2">
-                          <Label>监听发送者 <span class="text-red-500">*</span></Label>
-                          <p class="text-xs text-muted-foreground">每行输入一个手机号（+86 开头或纯号码），只有这些发送者的消息会被处理</p>
+                          <Label>{{ t('agentEdit.imessageAllowedSenders') }} <span class="text-red-500">*</span></Label>
+                          <p class="text-xs text-muted-foreground">{{ t('agentEdit.imessageAllowedSendersHint') }}</p>
                           <Textarea
                             v-model="imConfig.imessage.config.allowed_senders_text"
                             placeholder="+86138xxxxxxxx&#10;+86139xxxxxxxx"
@@ -912,7 +912,7 @@
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p class="text-xs">为Agent提供预设的静态知识或上下文信息，帮助Agent更好地理解任务和环境。</p>
+                      <p class="text-xs">{{ t('agentEdit.systemContextTooltip') }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -967,13 +967,13 @@
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p class="text-xs">定义结构化的任务流程，让Agent按步骤执行复杂任务，提高任务完成的一致性和可靠性。</p>
+                      <p class="text-xs">{{ t('agentEdit.workflowsTooltip') }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
               <div class="ml-2">
-                <p class="text-xs text-muted-foreground">定义结构化的任务流程，让Agent按步骤执行复杂任务</p>
+                <p class="text-xs text-muted-foreground">{{ t('agentEdit.workflowsDesc') }}</p>
                 <span class="text-xs text-muted-foreground">({{ store.workflowPairs.filter(w => w.key).length }})</span>
               </div>
             </div>
@@ -1035,29 +1035,29 @@
     <Dialog :open="showOptimizeModal" @update:open="v => !v && handleOptimizeCancel()">
       <DialogContent class="sm:max-w-[640px]">
         <DialogHeader>
-          <DialogTitle>优化系统提示词</DialogTitle>
-          <DialogDescription>使用 AI 自动优化您的系统提示词，提高 Agent 的表现。</DialogDescription>
+          <DialogTitle>{{ t('agentEdit.optimizeTitle') }}</DialogTitle>
+          <DialogDescription>{{ t('agentEdit.optimizeDesc') }}</DialogDescription>
         </DialogHeader>
         <div class="space-y-4 py-4">
           <div class="space-y-2">
-            <Label>优化目标 <span class="text-xs text-muted-foreground">(可选)</span></Label>
-            <Textarea v-model="optimizationGoal" :rows="3" placeholder="例如：提高专业性和准确性，增强工具使用能力..." :disabled="isOptimizing || !!optimizedResult" />
+            <Label>{{ t('agentEdit.optimizeGoal') }} <span class="text-xs text-muted-foreground">({{ t('agentEdit.optional') }})</span></Label>
+            <Textarea v-model="optimizationGoal" :rows="3" :placeholder="t('agentEdit.optimizeGoalPlaceholder')" :disabled="isOptimizing || !!optimizedResult" />
           </div>
           <div v-if="optimizedResult" class="space-y-2">
-            <Label>优化结果预览 <span class="text-xs text-muted-foreground">（可编辑）</span></Label>
-            <Textarea v-model="optimizedResult" :rows="8" placeholder="优化结果将显示在这里..." />
+            <Label>{{ t('agentEdit.optimizePreview') }} <span class="text-xs text-muted-foreground">（{{ t('agentEdit.editable') }}）</span></Label>
+            <Textarea v-model="optimizedResult" :rows="8" :placeholder="t('agentEdit.optimizePreviewPlaceholder')" />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" @click="handleOptimizeCancel">取消</Button>
+          <Button variant="outline" @click="handleOptimizeCancel">{{ t('common.cancel') }}</Button>
           <template v-if="optimizedResult">
-            <Button variant="outline" @click="handleResetOptimization">重新优化</Button>
-            <Button @click="handleApplyOptimization">应用优化</Button>
+            <Button variant="outline" @click="handleResetOptimization">{{ t('agentEdit.reOptimize') }}</Button>
+            <Button @click="handleApplyOptimization">{{ t('agentEdit.applyOptimization') }}</Button>
           </template>
           <template v-else>
             <Button @click="handleOptimizeStart" :disabled="isOptimizing">
               <Loader v-if="isOptimizing" class="mr-2 h-4 w-4 animate-spin" />
-              开始优化
+              {{ t('agentEdit.startOptimization') }}
             </Button>
           </template>
         </DialogFooter>
@@ -1070,6 +1070,7 @@
 import { ref, reactive, onMounted, computed, watch, onBeforeUnmount, nextTick } from 'vue'
 import { useAgentEditStore } from '../stores/agentEdit'
 import { useLanguage } from '../utils/i18n.js'
+import { getMcpServerLabel } from '../utils/mcpLabels.js'
 import { agentAPI } from '../api/agent.js'
 import { modelProviderAPI } from '@/api/modelProvider'
 import request from '@/utils/request.js'
@@ -1125,10 +1126,10 @@ const validateMaxLoopCount = () => {
   const value = store.formData.maxLoopCount
   if (value > 100) {
     store.formData.maxLoopCount = 100
-    maxLoopCountError.value = '最大循环次数不能超过 100'
+    maxLoopCountError.value = t('agentEdit.maxLoopTooLarge')
   } else if (value < 1) {
     store.formData.maxLoopCount = 1
-    maxLoopCountError.value = '最大循环次数不能小于 1'
+    maxLoopCountError.value = t('agentEdit.maxLoopTooSmall')
   } else {
     maxLoopCountError.value = ''
   }
@@ -1153,13 +1154,13 @@ const wechatPersonalLogin = ref({
 
 const isDefaultAgent = computed(() => store.formData.is_default === true)
 
-const imProviders = [
-  { key: 'wechat_personal', label: '微信' },
-  { key: 'wechat_work', label: '企业微信' },
-  { key: 'dingtalk', label: '钉钉' },
-  { key: 'feishu', label: '飞书' },
-  { key: 'imessage', label: 'iMessage' }
-]
+const imProviders = computed(() => [
+  { key: 'wechat_personal', label: t('agentEdit.imProvider.wechatPersonal') },
+  { key: 'wechat_work', label: t('agentEdit.imProvider.wechatWork') },
+  { key: 'dingtalk', label: t('agentEdit.imProvider.dingtalk') },
+  { key: 'feishu', label: t('agentEdit.imProvider.feishu') },
+  { key: 'imessage', label: t('agentEdit.imProvider.imessage') }
+])
 
 const imConfig = ref({
   wechat_work: { enabled: false, config: { bot_id: '', secret: '' } },
@@ -1330,7 +1331,7 @@ const handleToolToggle = (toolName) => {
   
   // 如果是 IM 工具且没有开启的 IM 频道，提示用户
   if (isIMToolDisabled(toolName)) {
-    alert('请先开启 IM 频道才能使用此工具')
+    alert(t('agentEdit.imEnableToolHint'))
     return
   }
   
@@ -1475,7 +1476,7 @@ const saveIMChannelConfig = async (provider) => {
     return true
   } catch (e) {
     console.error(`[AgentEdit] Failed to save ${provider} config:`, e)
-    alert(`保存 ${imProviders.find(p => p.key === provider)?.label} 配置失败: ${e.message}`)
+    alert(`${t('agentEdit.saveConfigFailed')} ${imProviders.value.find(p => p.key === provider)?.label}: ${e.message}`)
     return false
   }
 }
@@ -1484,13 +1485,13 @@ const handleEnableSwitch = async (provider, value) => {
   if (value) {
     // 尝试启用，检查测试状态和配置是否被修改
     if (!imTestStatus.value[provider]?.passed) {
-      alert('请先通过测试连接后再启用')
+      alert(t('agentEdit.enableAfterTest'))
       return
     }
     
     // 检查配置是否被修改过（与冻结配置不一致）
     if (!isConfigFrozen(provider)) {
-      alert('配置已修改，请重新测试连接后再启用')
+      alert(t('agentEdit.retestAfterChange'))
       // 重置测试状态
       imTestStatus.value = {
         ...imTestStatus.value,
@@ -1581,7 +1582,7 @@ const startWeChatPersonalLogin = async (provider) => {
     console.log('[AgentEdit] WeChat Personal QR code response:', result)
     
     if (!result.qrcode || !result.qrcode_url) {
-      alert('获取二维码失败：响应数据不完整')
+      alert(t('agentEdit.qrResponseInvalid'))
       return
     }
     
@@ -1622,7 +1623,7 @@ const startWeChatPersonalLogin = async (provider) => {
     
   } catch (e) {
     console.error('[AgentEdit] Failed to get QR code:', e)
-    alert('获取二维码失败: ' + e.message)
+    alert(`${t('agentEdit.qrFetchFailed')}: ${e.message}`)
     wechatPersonalLogin.value.loading = false
   }
 }
@@ -1665,11 +1666,11 @@ const pollWeChatPersonalStatus = async (provider) => {
             }
           }
         }
-        alert('登录成功！Bot Token 和 Bot ID 已自动填充')
+        alert(t('agentEdit.loginSuccessAutoFill'))
         return
       } else if (status === 'expired') {
         wechatPersonalLogin.value.polling = false
-        alert('二维码已过期，请重新获取')
+        alert(t('agentEdit.qrExpiredRetry'))
         return
       } else if (status === 'scaned') {
         console.log('[AgentEdit] QR code scanned, waiting for confirm...')
@@ -1690,7 +1691,7 @@ const pollWeChatPersonalStatus = async (provider) => {
   if (attempts >= maxAttempts) {
     wechatPersonalLogin.value.polling = false
     wechatPersonalLogin.value.status = 'expired'
-    alert('扫码超时，请重新获取二维码')
+    alert(t('agentEdit.qrTimeoutRetry'))
   }
 }
 
@@ -1698,11 +1699,11 @@ const copyWeChatPersonalUrl = async () => {
   try {
     if (wechatPersonalLogin.value.qrUrl) {
       await navigator.clipboard.writeText(wechatPersonalLogin.value.qrUrl)
-      alert('链接已复制到剪贴板，请在微信中打开')
+      alert(t('agentEdit.linkCopied'))
     }
   } catch (err) {
     console.error('Failed to copy:', err)
-    alert('复制失败，请手动复制')
+    alert(t('agentEdit.copyFailed'))
   }
 }
 
@@ -1727,7 +1728,7 @@ const testIMConnection = async (provider) => {
       const senders = sendersText.split('\n').map(s => s.trim()).filter(s => s)
       
       if (senders.length === 0) {
-        throw new Error('请至少输入一个监听手机号')
+        throw new Error(t('agentEdit.imessageMissingSender'))
       }
       
       // 验证手机号格式：+86 开头或纯 11 位号码
@@ -1735,7 +1736,7 @@ const testIMConnection = async (provider) => {
       const invalidPhones = senders.filter(phone => !phoneRegex.test(phone))
       
       if (invalidPhones.length > 0) {
-        throw new Error(`手机号格式错误: ${invalidPhones.join(', ')}\n请输入 +86 开头或 11 位纯号码`)
+        throw new Error(`${t('agentEdit.phoneFormatError')}: ${invalidPhones.join(', ')}\n${t('agentEdit.phoneFormatHint')}`)
       }
     }
     
@@ -1760,7 +1761,7 @@ const testIMConnection = async (provider) => {
         ...imEditMode.value,
         [provider]: false
       }
-      alert(result.data?.message || '连接测试成功，现在可以启用该渠道')
+      alert(result.data?.message || t('agentEdit.testSuccess'))
     } else {
       // 更新测试状态为失败
       imTestStatus.value = {
@@ -1768,7 +1769,7 @@ const testIMConnection = async (provider) => {
         [provider]: { tested: true, passed: false }
       }
       console.log(`[AgentEdit] Test failed, imTestStatus:`, imTestStatus.value)
-      alert('连接测试失败: ' + result.message)
+      alert(`${t('agentEdit.testFailed')}: ${result.message}`)
     }
   } catch (e) {
     console.error('[AgentEdit] Failed to test IM connection:', e)
@@ -1778,7 +1779,7 @@ const testIMConnection = async (provider) => {
       [provider]: { tested: true, passed: false }
     }
     console.log(`[AgentEdit] Test exception, imTestStatus:`, imTestStatus.value)
-    alert('测试失败: ' + e.message)
+    alert(`${t('agentEdit.testFailed')}: ${e.message}`)
   } finally {
     testingIM.value = {
       ...testingIM.value,
@@ -1828,15 +1829,15 @@ const sections = computed(() => {
     { id: 'model', label: t('agent.modelProvider'), icon: Server },
     { id: 'tools', label: t('agent.availableTools'), icon: Wrench },
     { id: 'skills', label: t('agent.availableSkills'), icon: Bot },
-    { id: 'paths', label: '可访问文件夹', icon: FolderOpen },
-    { id: 'im', label: 'IM 频道', icon: MessageSquare },
+    { id: 'paths', label: t('agentEdit.externalPaths'), icon: FolderOpen },
+    { id: 'im', label: t('agentEdit.imChannels'), icon: MessageSquare },
     { id: 'context', label: t('agent.systemContext'), icon: Database },
     { id: 'workflows', label: t('agent.workflows'), icon: Workflow },
   ]
   
   // 仅在Fibre模式下显示子智能体导航
   if (store.formData.agentMode === 'fibre') {
-    const subAgentSection = { id: 'subAgents', label: '子智能体', icon: Bot }
+    const subAgentSection = { id: 'subAgents', label: t('agentEdit.subAgents'), icon: Bot }
     // 在model之后插入subAgents
     const modelIndex = baseSections.findIndex(s => s.id === 'model')
     baseSections.splice(modelIndex + 1, 0, subAgentSection)
@@ -2019,14 +2020,14 @@ const handleSave = async (shouldExit = true) => {
           const sendersText = data.config?.allowed_senders_text || ''
           const senders = sendersText.split('\n').map(s => s.trim()).filter(s => s)
           if (senders.length === 0) {
-            alert('iMessage 必须配置至少一个监听发送者')
+            alert(t('agentEdit.imessageNeedSender'))
             saving.value = false
             return
           }
         } else {
           // Other channels must pass test before saving
           if (!imTestStatus.value[provider]?.passed) {
-            alert(`${imProviders.find(p => p.key === provider)?.label} 未通过测试连接，请先测试通过后再保存`)
+            alert(`${imProviders.value.find(p => p.key === provider)?.label} ${t('agentEdit.needTestBeforeSave')}`)
             saving.value = false
             return
           }
@@ -2295,7 +2296,7 @@ const filteredTools = computed(() => {
 const groupedTools = computed(() => {
   const groups = {}
   filteredTools.value.forEach(tool => {
-    const source = tool.source || '未知来源'
+    const source = tool.source || t('agentEdit.unknownSource')
     if (!groups[source]) {
       groups[source] = { source, tools: [] }
     }
@@ -2405,14 +2406,19 @@ watch(() => props.tools, (newTools) => {
 const getToolSourceLabel = (source) => {
   let displaySource = source
   if (source.startsWith('MCP Server: ')) {
-    displaySource = source.replace('MCP Server: ', '')
+    displaySource = getMcpServerLabel(source.replace('MCP Server: ', ''), t)
+  } else if (source.startsWith('Built-in MCP: ')) {
+    displaySource = getMcpServerLabel(source.replace('Built-in MCP: ', ''), t)
   } else if (source.startsWith('内置MCP: ')) {
-    displaySource = source.replace('内置MCP: ', '')
+    displaySource = getMcpServerLabel(source.replace('内置MCP: ', ''), t)
   }
   const sourceMapping = {
     '基础工具': 'tools.source.basic',
+    'Basic Tools': 'tools.source.basic',
     '内置工具': 'tools.source.builtin',
-    '系统工具': 'tools.source.system'
+    'Built-in Tools': 'tools.source.builtin',
+    '系统工具': 'tools.source.system',
+    'System Tools': 'tools.source.system'
   }
   const translationKey = sourceMapping[displaySource]
   return translationKey ? t(translationKey) : displaySource
@@ -2420,7 +2426,7 @@ const getToolSourceLabel = (source) => {
 
 const getGroupIcon = (source) => {
   if (source.includes('MCP')) return Server
-  if (['基础工具', '内置工具', '系统工具'].includes(source)) return Code
+  if (['基础工具', '内置工具', '系统工具', 'Basic Tools', 'Built-in Tools', 'System Tools'].includes(source)) return Code
   return Wrench
 }
 
@@ -2468,14 +2474,14 @@ const selectExternalPath = async () => {
     const selected = await open({
       directory: true,
       multiple: false,
-      title: '选择可访问文件夹'
+      title: t('agentEdit.selectFolderTitle')
     })
     if (selected) {
       store.addExternalPath(selected)
     }
   } catch (error) {
-    console.error('选择文件夹失败:', error)
-    const path = prompt('请输入文件夹路径:')
+    console.error('select folder failed:', error)
+    const path = prompt(t('agentEdit.enterFolderPath'))
     if (path) {
       store.addExternalPath(path)
     }

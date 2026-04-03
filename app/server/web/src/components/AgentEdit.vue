@@ -78,13 +78,13 @@
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p class="text-xs">设置Agent的名称、描述和系统提示词，这些是Agent的基本配置。</p>
+                      <p class="text-xs">{{ t('agentEdit.basicInfoTooltip') }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
               <div class="ml-2">
-                <p class="text-xs text-muted-foreground">配置Agent的基本信息和系统提示词</p>
+                <p class="text-xs text-muted-foreground">{{ t('agentEdit.basicInfoDesc') }}</p>
               </div>
             </div>
             <div class="space-y-5 pl-10">
@@ -117,7 +117,7 @@
                     :disabled="isOptimizing"
                   >
                     <Sparkles class="h-3.5 w-3.5 text-yellow-400" />
-                    <span class="text-xs">AI优化</span>
+                    <span class="text-xs">{{ t('agentEdit.aiOptimize') }}</span>
                   </Button>
                 </div>
                 <Textarea
@@ -146,7 +146,7 @@
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p class="text-xs">配置Agent的运行策略，包括记忆类型、工作模式、深度思考等行为设置。</p>
+                      <p class="text-xs">{{ t('agentEdit.strategyTooltip') }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -227,7 +227,7 @@
               </FormItem>
 
               <!-- Row 3.5: Enable Multimodal -->
-              <FormItem label="开启多模态">
+              <FormItem :label="t('agentEdit.enableMultimodal')">
                 <div class="flex items-center h-10 gap-3 border rounded-md px-3 bg-background">
                   <Switch 
                     :checked="store.formData.enableMultimodal" 
@@ -235,17 +235,17 @@
                     :disabled="!selectedProviderSupportsMultimodal"
                   />
                   <span class="text-sm text-muted-foreground">
-                    {{ store.formData.enableMultimodal ? '已开启' : '已关闭' }}
-                    <span v-if="!selectedProviderSupportsMultimodal" class="text-xs text-destructive ml-2">(当前模型源不支持多模态)</span>
+                    {{ store.formData.enableMultimodal ? t('agentEdit.multimodalEnabled') : t('agentEdit.multimodalDisabled') }}
+                    <span v-if="!selectedProviderSupportsMultimodal" class="text-xs text-destructive ml-2">({{ t('agentEdit.multimodalUnsupported') }})</span>
                   </span>
                 </div>
               </FormItem>
 
               <!-- Row 4: Sub Agent Selection (Only for Fibre Mode) -->
-              <FormItem v-if="store.formData.agentMode === 'fibre'" label="子智能体" class="pt-4 border-t">
+              <FormItem v-if="store.formData.agentMode === 'fibre'" :label="t('agentEdit.subAgents')" class="pt-4 border-t">
                 <div class="border rounded-lg overflow-hidden bg-background">
                   <div class="px-3 py-2 border-b bg-muted/30 flex items-center justify-between">
-                    <span class="text-xs font-medium text-muted-foreground">可选子智能体 ({{ filteredAgents.length }})</span>
+                    <span class="text-xs font-medium text-muted-foreground">{{ t('agentEdit.availableSubAgents') }} ({{ filteredAgents.length }})</span>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -253,7 +253,7 @@
                       @click="selectAllSubAgents"
                       :disabled="filteredAgents.length === 0"
                     >
-                      全选
+                      {{ t('agentEdit.selectAll') }}
                     </Button>
                   </div>
                   <ScrollArea class="h-[200px]">
@@ -299,13 +299,13 @@
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p class="text-xs">选择Agent可以使用的工具，这些工具将增强Agent的能力。</p>
+                      <p class="text-xs">{{ t('agentEdit.toolsTooltip') }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
               <div class="ml-2">
-                <p class="text-xs text-muted-foreground">选择Agent可以使用的工具</p>
+                <p class="text-xs text-muted-foreground">{{ t('agentEdit.toolsDesc') }}</p>
               </div>
             </div>
             <div class="pl-10 space-y-4">
@@ -332,7 +332,7 @@
                   <div class="p-3 border-b flex items-center justify-between gap-3">
                     <div class="relative flex-1">
                       <Search class="absolute left-2 top-2 h-4 w-4 text-muted-foreground/70" />
-                      <Input v-model="searchQueries.tools" placeholder="搜索工具..." class="pl-8 h-9" />
+                      <Input v-model="searchQueries.tools" :placeholder="t('agentEdit.searchTools')" class="pl-8 h-9" />
                     </div>
                     <div class="flex items-center gap-2">
                       <Button
@@ -342,7 +342,7 @@
                         @click="selectAllToolsInGroup"
                         :disabled="displayedTools.length === 0"
                       >
-                        全选
+                        {{ t('agentEdit.selectAll') }}
                       </Button>
                       <Button
                         variant="ghost"
@@ -351,7 +351,7 @@
                         @click="deselectAllToolsInGroup"
                         :disabled="displayedTools.length === 0"
                       >
-                        取消
+                        {{ t('agentEdit.deselectAll') }}
                       </Button>
                     </div>
                   </div>
@@ -370,7 +370,7 @@
                             <label :for="`tool-${tool.name}`" class="text-sm font-medium cursor-pointer" :class="{ 'opacity-50': isRequiredTool(tool.name) }">
                               {{ tool.name }}
                             </label>
-                            <Badge v-if="isRequiredTool(tool.name)" variant="secondary" class="text-[10px] h-5 px-1.5">技能必需</Badge>
+                            <Badge v-if="isRequiredTool(tool.name)" variant="secondary" class="text-[10px] h-5 px-1.5">{{ t('agentEdit.badge.skillRequired') }}</Badge>
                           </div>
                           <p v-if="tool.description" class="text-xs text-muted-foreground line-clamp-2 mt-1">
                             {{ tool.description }}
@@ -400,7 +400,7 @@
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p class="text-xs">选择Agent可以使用的技能，技能是预定义的能力模块。</p>
+                      <p class="text-xs">{{ t('agentEdit.skillsTooltip') }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -429,7 +429,7 @@
                 <div class="p-3 border-b flex items-center justify-between gap-3">
                   <div class="relative flex-1">
                     <Search class="absolute left-2 top-2 h-4 w-4 text-muted-foreground/70" />
-                    <Input v-model="searchQueries.skills" placeholder="搜索技能..." class="pl-8 h-9" />
+                    <Input v-model="searchQueries.skills" :placeholder="t('agentEdit.searchSkills')" class="pl-8 h-9" />
                   </div>
                   <div class="flex items-center gap-2">
                     <Button
@@ -439,7 +439,7 @@
                       @click="selectAllSkills"
                       :disabled="filteredSkills.length === 0"
                     >
-                      全选
+                      {{ t('agentEdit.selectAll') }}
                     </Button>
                     <Button
                       variant="ghost"
@@ -448,7 +448,7 @@
                       @click="deselectAllSkills"
                       :disabled="store.formData.availableSkills?.length === 0"
                     >
-                      取消
+                      {{ t('agentEdit.deselectAll') }}
                     </Button>
                   </div>
                 </div>
@@ -493,7 +493,7 @@
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p class="text-xs">选择Agent可以访问的知识库，知识库提供额外的领域知识。</p>
+                      <p class="text-xs">{{ t('agentEdit.knowledgeTooltip') }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -507,7 +507,7 @@
                 <div class="p-3 border-b flex items-center justify-between gap-3">
                   <div class="relative flex-1">
                     <Search class="absolute left-2 top-2 h-4 w-4 text-muted-foreground/70" />
-                    <Input v-model="searchQueries.knowledgeBases" placeholder="搜索知识库..." class="pl-8 h-9" />
+                    <Input v-model="searchQueries.knowledgeBases" :placeholder="t('agentEdit.searchKnowledgeBases')" class="pl-8 h-9" />
                   </div>
                   <div class="flex items-center gap-2">
                     <Button
@@ -517,7 +517,7 @@
                       @click="selectAllKnowledgeBases"
                       :disabled="filteredKnowledgeBases.length === 0"
                     >
-                      全选
+                      {{ t('agentEdit.selectAll') }}
                     </Button>
                     <Button
                       variant="ghost"
@@ -526,7 +526,7 @@
                       @click="deselectAllKnowledgeBases"
                       :disabled="store.formData.availableKnowledgeBases?.length === 0"
                     >
-                      取消
+                      {{ t('agentEdit.deselectAll') }}
                     </Button>
                   </div>
                 </div>
@@ -571,7 +571,7 @@
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p class="text-xs">为Agent提供预设的静态知识或上下文信息，帮助Agent更好地理解任务和环境。</p>
+                      <p class="text-xs">{{ t('agentEdit.systemContextTooltip') }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -626,13 +626,13 @@
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p class="text-xs">定义结构化的任务流程，让Agent按步骤执行复杂任务，提高任务完成的一致性和可靠性。</p>
+                      <p class="text-xs">{{ t('agentEdit.workflowsTooltip') }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
               <div class="ml-2">
-                <p class="text-xs text-muted-foreground">定义结构化的任务流程，让Agent按步骤执行复杂任务</p>
+                <p class="text-xs text-muted-foreground">{{ t('agentEdit.workflowsDesc') }}</p>
                 <span class="text-xs text-muted-foreground">({{ store.workflowPairs.filter(w => w.key).length }})</span>
               </div>
             </div>
@@ -694,29 +694,29 @@
     <Dialog :open="showOptimizeModal" @update:open="v => !v && handleOptimizeCancel()">
       <DialogContent class="sm:max-w-[640px]">
         <DialogHeader>
-          <DialogTitle>优化系统提示词</DialogTitle>
-          <DialogDescription>使用 AI 自动优化您的系统提示词，提高 Agent 的表现。</DialogDescription>
+          <DialogTitle>{{ t('agentEdit.optimizeTitle') }}</DialogTitle>
+          <DialogDescription>{{ t('agentEdit.optimizeDesc') }}</DialogDescription>
         </DialogHeader>
         <div class="space-y-4 py-4">
           <div class="space-y-2">
-            <Label>优化目标 <span class="text-xs text-muted-foreground">(可选)</span></Label>
-            <Textarea v-model="optimizationGoal" :rows="3" placeholder="例如：提高专业性和准确性，增强工具使用能力..." :disabled="isOptimizing || !!optimizedResult" />
+            <Label>{{ t('agentEdit.optimizeGoal') }} <span class="text-xs text-muted-foreground">({{ t('agentEdit.optional') }})</span></Label>
+            <Textarea v-model="optimizationGoal" :rows="3" :placeholder="t('agentEdit.optimizeGoalPlaceholder')" :disabled="isOptimizing || !!optimizedResult" />
           </div>
           <div v-if="optimizedResult" class="space-y-2">
-            <Label>优化结果预览 <span class="text-xs text-muted-foreground">（可编辑）</span></Label>
-            <Textarea v-model="optimizedResult" :rows="8" placeholder="优化结果将显示在这里..." />
+            <Label>{{ t('agentEdit.optimizePreview') }} <span class="text-xs text-muted-foreground">（{{ t('agentEdit.editable') }}）</span></Label>
+            <Textarea v-model="optimizedResult" :rows="8" :placeholder="t('agentEdit.optimizePreviewPlaceholder')" />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" @click="handleOptimizeCancel">取消</Button>
+          <Button variant="outline" @click="handleOptimizeCancel">{{ t('common.cancel') }}</Button>
           <template v-if="optimizedResult">
-            <Button variant="outline" @click="handleResetOptimization">重新优化</Button>
-            <Button @click="handleApplyOptimization">应用优化</Button>
+            <Button variant="outline" @click="handleResetOptimization">{{ t('agentEdit.reOptimize') }}</Button>
+            <Button @click="handleApplyOptimization">{{ t('agentEdit.applyOptimization') }}</Button>
           </template>
           <template v-else>
             <Button @click="handleOptimizeStart" :disabled="isOptimizing">
               <Loader v-if="isOptimizing" class="mr-2 h-4 w-4 animate-spin" />
-              开始优化
+              {{ t('agentEdit.startOptimization') }}
             </Button>
           </template>
         </DialogFooter>
@@ -729,6 +729,7 @@
 import { ref, reactive, onMounted, computed, watch, onBeforeUnmount, nextTick } from 'vue'
 import { useAgentEditStore } from '../stores/agentEdit'
 import { useLanguage } from '../utils/i18n.js'
+import { getMcpServerLabel } from '../utils/mcpLabels.js'
 import { agentAPI } from '../api/agent.js'
 import { modelProviderAPI } from '@/api/modelProvider'
 import { skillAPI } from '../api/skill.js'
@@ -1084,7 +1085,7 @@ const filteredTools = computed(() => {
 const groupedTools = computed(() => {
   const groups = {}
   filteredTools.value.forEach(tool => {
-    const source = tool.source || '未知来源'
+    const source = tool.source || t('agentEdit.unknownSource')
     if (!groups[source]) {
       groups[source] = { source, tools: [] }
     }
@@ -1144,14 +1145,19 @@ watch(() => store.formData.availableSkills, (newSkills) => {
 const getToolSourceLabel = (source) => {
   let displaySource = source
   if (source.startsWith('MCP Server: ')) {
-    displaySource = source.replace('MCP Server: ', '')
+    displaySource = getMcpServerLabel(source.replace('MCP Server: ', ''), t)
+  } else if (source.startsWith('Built-in MCP: ')) {
+    displaySource = getMcpServerLabel(source.replace('Built-in MCP: ', ''), t)
   } else if (source.startsWith('内置MCP: ')) {
-    displaySource = source.replace('内置MCP: ', '')
+    displaySource = getMcpServerLabel(source.replace('内置MCP: ', ''), t)
   }
   const sourceMapping = {
     '基础工具': 'tools.source.basic',
+    'Basic Tools': 'tools.source.basic',
     '内置工具': 'tools.source.builtin',
-    '系统工具': 'tools.source.system'
+    'Built-in Tools': 'tools.source.builtin',
+    '系统工具': 'tools.source.system',
+    'System Tools': 'tools.source.system'
   }
   const translationKey = sourceMapping[displaySource]
   return translationKey ? t(translationKey) : displaySource
@@ -1159,7 +1165,7 @@ const getToolSourceLabel = (source) => {
 
 const getGroupIcon = (source) => {
   if (source.includes('MCP')) return Server
-  if (['基础工具', '内置工具', '系统工具'].includes(source)) return Code
+  if (['基础工具', '内置工具', '系统工具', 'Basic Tools', 'Built-in Tools', 'System Tools'].includes(source)) return Code
   return Wrench
 }
 

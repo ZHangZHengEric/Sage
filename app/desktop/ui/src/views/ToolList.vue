@@ -277,6 +277,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Wrench, Search, Code, Database, Globe, Cpu, Plus, Trash2, Loader, RefreshCw, LayoutGrid, Server, Edit, Info, Power, PowerOff } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
+import { getMcpServerLabel } from '../utils/mcpLabels.js'
 import { toolAPI } from '../api/tool.js'
 import { getCurrentUser } from '../utils/auth.js'
 import McpServerAdd from '../components/McpServerAdd.vue'
@@ -569,9 +570,9 @@ const handleRefreshMcpTool = async (sourceName) => {
 const getToolSourceLabel = (source) => {
   let displaySource = source
   if (source.startsWith('MCP Server: ')) {
-    displaySource = source.replace('MCP Server: ', '')
+    displaySource = getMcpServerLabel(source.replace('MCP Server: ', ''), t)
   } else if (source.startsWith('内置MCP: ')) {
-    displaySource = source.replace('内置MCP: ', '')
+    displaySource = getMcpServerLabel(source.replace('内置MCP: ', ''), t)
   }
 
   const sourceMapping = {

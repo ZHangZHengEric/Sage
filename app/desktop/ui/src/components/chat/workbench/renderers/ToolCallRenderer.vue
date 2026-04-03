@@ -195,7 +195,7 @@
           <div v-else class="flex items-center justify-center h-32 text-muted-foreground">
             <div class="text-center">
               <ListTodo class="w-8 h-8 mx-auto mb-2 opacity-50" />
-              <p class="text-sm">暂无任务</p>
+              <p class="text-sm">{{ t('workbench.tool.noTasks') }}</p>
             </div>
           </div>
         </div>
@@ -207,13 +207,13 @@
           <!-- 加载中状态 -->
           <div v-if="!toolResult" class="flex items-center justify-center h-full text-muted-foreground p-4">
             <Loader2 class="w-5 h-5 animate-spin mr-2" />
-            <span>正在创建智能体...</span>
+            <span>{{ t('workbench.tool.creatingAgent') }}</span>
           </div>
           <!-- 错误状态 -->
           <div v-else-if="toolResult?.is_error" class="flex items-start gap-3 p-4 text-destructive">
             <XCircle class="w-5 h-5 flex-shrink-0 mt-0.5" />
             <div>
-              <p class="font-medium">创建失败</p>
+              <p class="font-medium">{{ t('workbench.tool.createFailed') }}</p>
               <p class="text-sm opacity-80 mt-1">{{ spawnAgentError }}</p>
             </div>
           </div>
@@ -223,12 +223,12 @@
             <div class="flex items-start gap-3 p-4 pb-3 border-b border-border/30">
               <img :src="spawnAgentAvatarUrl" :alt="spawnAgentName" class="w-10 h-10 rounded-lg bg-muted object-cover flex-shrink-0" />
               <div class="flex-1 min-w-0">
-                <h4 class="font-medium text-sm text-foreground">{{ spawnAgentName || '未命名智能体' }}</h4>
-                <p class="text-xs text-muted-foreground mt-0.5">{{ spawnAgentDescription || '暂无描述' }}</p>
+                <h4 class="font-medium text-sm text-foreground">{{ spawnAgentName || t('workbench.tool.untitledAgent') }}</h4>
+                <p class="text-xs text-muted-foreground mt-0.5">{{ spawnAgentDescription || t('workbench.tool.noDescription') }}</p>
               </div>
               <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openSpawnedAgentChat">
                 <MessageSquare class="w-3.5 h-3.5 mr-1" />
-                开始对话
+                {{ t('workbench.tool.startChat') }}
               </Button>
             </div>
             <!-- 系统提示词 - 使用 Markdown 渲染，占满剩余空间 -->
@@ -962,7 +962,7 @@ const compressHistoryError = computed(() => {
   if (typeof content === 'string') return content
   try {
     const parsed = JSON.parse(content)
-    return parsed.message || parsed.error || '未知错误'
+    return parsed.message || parsed.error || t('workbench.tool.unknownError')
   } catch {
     return String(content)
   }

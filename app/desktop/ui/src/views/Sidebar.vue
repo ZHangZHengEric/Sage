@@ -23,15 +23,15 @@
     <Dialog v-model:open="showChangePasswordDialog">
       <DialogContent class="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>修改密码</DialogTitle>
+          <DialogTitle>{{ t('profile.changePasswordTitle') }}</DialogTitle>
           <DialogDescription>
-            请输入当前密码和新密码以修改您的登录密码。
+            {{ t('profile.changePasswordDesc') }}
           </DialogDescription>
         </DialogHeader>
         <div class="grid gap-4 py-4">
           <div class="grid grid-cols-4 items-center gap-4">
             <Label for="old-password" class="text-right">
-              旧密码
+              {{ t('profile.currentPassword') }}
             </Label>
             <Input
               id="old-password"
@@ -42,7 +42,7 @@
           </div>
           <div class="grid grid-cols-4 items-center gap-4">
             <Label for="new-password" class="text-right">
-              新密码
+              {{ t('profile.newPassword') }}
             </Label>
             <Input
               id="new-password"
@@ -53,7 +53,7 @@
           </div>
           <div class="grid grid-cols-4 items-center gap-4">
             <Label for="confirm-password" class="text-right">
-              确认新密码
+              {{ t('profile.confirmNewPassword') }}
             </Label>
             <Input
               id="confirm-password"
@@ -64,10 +64,10 @@
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" @click="showChangePasswordDialog = false">取消</Button>
+          <Button variant="outline" @click="showChangePasswordDialog = false">{{ t('common.cancel') }}</Button>
           <Button type="submit" @click="handleChangePassword" :disabled="changingPassword">
-            <span v-if="changingPassword">修改中...</span>
-            <span v-else>确认修改</span>
+            <span v-if="changingPassword">{{ t('profile.changingPassword') }}</span>
+            <span v-else>{{ t('profile.confirmChangePassword') }}</span>
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -78,7 +78,7 @@
       <div class="space-y-4">
         <div v-if="activeSessionItems.length > 0" class="space-y-2">
           <div v-if="!isCollapsed" class="px-2 text-[11px] font-medium tracking-wide text-muted-foreground/80">
-            进行中的会话
+            {{ t('sidebar.activeSessions') }}
           </div>
           <div v-if="!isCollapsed" class="space-y-1">
             <Button
@@ -233,7 +233,7 @@
         size="icon"
         class="h-8 w-8 text-muted-foreground hover:text-foreground transition-all duration-200"
         @click="isCollapsed = !isCollapsed"
-        :title="isCollapsed ? '展开' : '收起'"
+        :title="isCollapsed ? t('common.expand') : t('common.collapse')"
       >
         <ChevronLeft v-if="!isCollapsed" class="h-4 w-4" />
         <ChevronRight v-else class="h-4 w-4" />
@@ -359,12 +359,12 @@ const changingPassword = ref(false)
 
 const handleChangePassword = async () => {
   if (!changePasswordForm.value.oldPassword || !changePasswordForm.value.newPassword) {
-    toast.error('请输入密码')
+    toast.error(t('profile.passwordRequired'))
     return
   }
   
   if (changePasswordForm.value.newPassword !== changePasswordForm.value.confirmPassword) {
-    toast.error('两次输入的密码不一致')
+    toast.error(t('auth.passwordsMismatch'))
     return
   }
   
@@ -374,12 +374,12 @@ const handleChangePassword = async () => {
       changePasswordForm.value.oldPassword, 
       changePasswordForm.value.newPassword
     )
-    toast.success('密码修改成功，请重新登录')
+    toast.success(t('profile.passwordChangedRelogin'))
     showChangePasswordDialog.value = false
     handleLogout()
   } catch (error) {
     console.error(error)
-    toast.error(error.message || '修改失败')
+    toast.error(error.message || t('profile.passwordChangeFailed'))
   } finally {
     changingPassword.value = false
   }

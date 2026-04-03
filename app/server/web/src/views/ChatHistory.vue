@@ -100,7 +100,7 @@
                           @click.stop="copySessionId(conversation)"
                         >
                           <Copy class="w-3 h-3 mr-1" />
-                          点击复制
+                          {{ t('history.copySessionId') }}
                         </Button>
                       </div>
                     </TooltipContent>
@@ -115,7 +115,7 @@
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      <p>最后更新: {{ formatDateTime(conversation.updated_at) }}</p>
+                      <p>{{ t('history.lastUpdated') }}: {{ formatDateTime(conversation.updated_at) }}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -136,7 +136,7 @@
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="left">
-                    <p>{{ t('history.export') || '导出' }}</p>
+                    <p>{{ t('history.share') }}</p>
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
@@ -179,10 +179,10 @@
           :disabled="currentPage <= 1" 
           @click="handlePageChange(currentPage - 1)"
         >
-          上一页
+          {{ t('common.previous') }}
         </Button>
         <span class="text-sm text-muted-foreground">
-          Page {{ currentPage }} of {{ Math.ceil(totalCount / pageSize) }}
+          {{ t('common.page') }} {{ currentPage }} / {{ Math.ceil(totalCount / pageSize) }}
         </span>
         <Button 
           variant="outline" 
@@ -190,7 +190,7 @@
           :disabled="currentPage * pageSize >= totalCount" 
           @click="handlePageChange(currentPage + 1)"
         >
-          下一页
+          {{ t('common.next') }}
         </Button>
       </div>
     </div>
@@ -199,7 +199,7 @@
     <Dialog :open="showShareModal" @update:open="showShareModal = $event">
       <DialogContent class="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>{{ t('history.exportTitle') || '导出对话' }}</DialogTitle>
+          <DialogTitle>{{ t('history.shareTitle') }}</DialogTitle>
           <DialogDescription>{{ t('history.exportFormat') }}</DialogDescription>
         </DialogHeader>
         <div class="py-4">
@@ -313,7 +313,7 @@ const loadConversationsPaginated = async () => {
     paginatedConversations.value = response.list || []
     totalCount.value = response.total || 0
   } catch (error) {
-    toast.error('加载对话列表失败')
+    toast.error(t('history.loadListFailed'))
     paginatedConversations.value = []
     totalCount.value = 0
   } finally {
@@ -381,7 +381,7 @@ const formatDateTime = (timestamp) => {
 
 const getAgentName = (agentId) => {
   const agent = agents.value.find(a => a.id === agentId)
-  return agent ? agent.name : '未知Agent'
+  return agent ? agent.name : t('chat.unknownAgent')
 }
 
 const getAgentAvatar = (agentId) => {
@@ -398,10 +398,10 @@ const formatRelativeTime = (timestamp) => {
   const diffHours = Math.floor(diffMs / 3600000)
   const diffDays = Math.floor(diffMs / 86400000)
 
-  if (diffMinutes < 1) return '刚刚'
-  if (diffMinutes < 60) return `${diffMinutes} 分钟前`
-  if (diffHours < 24) return `${diffHours} 小时前`
-  if (diffDays < 7) return `${diffDays} 天前`
+  if (diffMinutes < 1) return t('history.justNow')
+  if (diffMinutes < 60) return t('history.minutesAgo', { minutes: diffMinutes })
+  if (diffHours < 24) return t('history.hoursAgo', { hours: diffHours })
+  if (diffDays < 7) return t('history.daysAgo', { days: diffDays })
   return formatDateTime(timestamp)
 }
 
@@ -419,7 +419,7 @@ const copySessionId = async (conversation) => {
   try {
     if (navigator?.clipboard?.writeText) {
       await navigator.clipboard.writeText(text)
-      toast.success('session_id已复制')
+      toast.success(t('history.sessionIdCopied'))
       return
     }
   } catch (_) {}
@@ -432,9 +432,9 @@ const copySessionId = async (conversation) => {
     textarea.select()
     document.execCommand('copy')
     document.body.removeChild(textarea)
-    toast.success('session_id已复制')
+    toast.success(t('history.sessionIdCopied'))
   } catch (e) {
-    toast.error('复制失败')
+    toast.error(t('history.copyFailed'))
   }
 }
 
@@ -485,7 +485,7 @@ const handleExportToMarkdown = () => {
   const visibleMessages = formatMessageForExport(shareConversation.value.messages)
   exportToMarkdown(shareConversation.value, getAgentName(shareConversation.value.agent_id), visibleMessages)
   showShareModal.value = false
-  toast.success('Markdown文件已导出')
+  toast.success(t('history.markdownExported'))
 }
 
 const handleExportToHTML = () => {
@@ -497,7 +497,7 @@ const handleExportToHTML = () => {
   const visibleMessages = formatMessageForExport(shareConversation.value.messages)
   exportToHTML(shareConversation.value, visibleMessages)
   showShareModal.value = false
-  toast.success('HTML文件已导出')
+  toast.success(t('history.htmlExported'))
 }
 
 // 更新 URL 参数

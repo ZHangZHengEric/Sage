@@ -283,6 +283,7 @@ export const useChatStream = ({
         agent_mode: normalizeAgentMode(config.agentMode),
         more_suggest: config.moreSuggest,
         max_loop_count: config.maxLoopCount,
+        available_sub_agent_ids: Array.isArray(config.availableSubAgentIds) ? config.availableSubAgentIds : [],
         agent_id: selectedAgent.id
       }
       const response = await chatAPI.streamChat(requestBody, abortControllerRef?.value)
@@ -323,8 +324,8 @@ export const useChatStream = ({
   }
 
   const handleSendMessage = async (content, options = {}) => {
-    const { displayContent, multimodalContent } = options
-    if (!content.trim() || isLoading.value || !selectedAgent.value) return
+    const { displayContent, multimodalContent, needInterrupt } = options
+    if (!content.trim() || !selectedAgent.value) return
 
     const contentControl = stripControlTags(content)
     const multimodalControl = stripControlTagsFromMultimodal(multimodalContent)
@@ -334,6 +335,16 @@ export const useChatStream = ({
     const visibleDisplay = displayContent != null ? stripControlTags(displayContent).text : null
 
     if (!cleanedContent.trim() && !hasVisibleMultimodalContent(cleanedMultimodal) && !enablePlan) return
+
+    if (needInterrupt && isLoading.value) {
+      await stopGeneration()
+      await new Promise(resolve => setTimeout(resolve, 300))
+    }
+
+    if (isLoading.value) {
+      toast.error(t('chat.interruptFailed') || '中断当前会话失败，请稍后重试')
+      return
+    }
 
     let sessionId = currentSessionId.value
     if (!sessionId) {
