@@ -257,6 +257,21 @@ def validate_startup_config(cfg: StartupConfig) -> None:
             raise ValueError("Credentialed wildcard CORS is not allowed.")
         return
 
+    default_secrets = {
+        "jwt_key": StartupConfig.jwt_key,
+        "refresh_token_secret": StartupConfig.refresh_token_secret,
+        "session_secret": StartupConfig.session_secret,
+    }
+    insecure = [name for name, default in default_secrets.items() if getattr(cfg, name) == default]
+    if insecure:
+        raise ValueError("Production-like environments must use secure secrets.")
+
+    if not cfg.session_cookie_secure:
+        raise ValueError("Production-like environments must enable secure session cookies.")
+
+    if cfg.cors_allow_credentials and "*" in (cfg.cors_allowed_origins or []):
+        raise ValueError("Credentialed wildcard CORS is not allowed.")
+
 
 def _normalize_paths(cfg: StartupConfig) -> StartupConfig:
     if cfg.session_dir:
@@ -403,13 +418,14 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
     same_site = (cfg.session_cookie_same_site or StartupConfig.session_cookie_same_site).strip().lower()
     if same_site not in {"lax", "strict", "none"}:
         cfg.session_cookie_same_site = StartupConfig.session_cookie_same_site
+    if is_production_like(cfg):
+        cfg.session_cookie_secure = True
     if cfg.web_base_path:
         cfg.web_base_path = "/" + cfg.web_base_path.strip("/")
     else:
         cfg.web_base_path = StartupConfig.web_base_path
 
     cfg = _normalize_paths(cfg)
-    validate_startup_config(cfg)
     return cfg
 
 
@@ -420,5 +436,6 @@ def get_startup_config() -> StartupConfig:
 def init_startup_config(mode: str = "server") -> StartupConfig:
     global _GLOBAL_STARTUP_CONFIG
     cfg = build_startup_config(mode)
+    validate_startup_config(cfg)
     _GLOBAL_STARTUP_CONFIG = cfg
     return cfg
