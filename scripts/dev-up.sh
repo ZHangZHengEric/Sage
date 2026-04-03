@@ -132,8 +132,8 @@ echo ""
 # 5. Check Python dependencies
 echo "🔍 Checking Python dependencies..."
 if ! python3 -c "import fastapi" 2>/dev/null; then
-    echo "📦 Installing Python dependencies..."
-    pip install -r requirements.txt
+    echo "📦 Installing Python dependencies (using Aliyun mirror for faster download)..."
+    pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
     echo -e "${GREEN}✅ Python dependencies installed${NC}"
 else
     echo -e "${GREEN}✅ Python dependencies already installed${NC}"
