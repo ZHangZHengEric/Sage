@@ -173,7 +173,8 @@ import {
   getFileIcon, 
   getFileLanguage, 
   getOfficeFileType,
-  getDisplayFileName
+  getDisplayFileName,
+  normalizeFilePath
 } from '@/utils/fileIcons.js'
 
 const HtmlRenderer = defineAsyncComponent(() => import('./filerender/HtmlRenderer.vue'))
@@ -403,10 +404,7 @@ const loadContent = async () => {
     }
 
     // Clean path
-    let safePath = props.filePath
-    if (safePath.startsWith('/sage-workspace/')) {
-      safePath = safePath.replace('/sage-workspace/', '')
-    }
+    let safePath = normalizeFilePath(props.filePath)
     if (safePath.startsWith('/')) {
       safePath = safePath.substring(1)
     }
@@ -487,10 +485,7 @@ const openFile = async () => {
        const agentId = props.item?.agentId
        const sessionId = props.item?.sessionId
        if (agentId) {
-           let safePath = props.filePath
-           if (safePath.startsWith('/sage-workspace/')) {
-             safePath = safePath.replace('/sage-workspace/', '')
-           }
+           let safePath = normalizeFilePath(props.filePath)
            if (safePath.startsWith('/')) {
              safePath = safePath.substring(1)
            }

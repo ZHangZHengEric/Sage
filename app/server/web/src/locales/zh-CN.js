@@ -1053,6 +1053,8 @@ export default {
   // 工作空间
   'workspace.title': '工作空间',
   'workspace.noFiles': '暂无文件',
+  'workspace.dropHere': '释放以上传文件或文件夹',
+  'workspace.dragHint': '拖拽文件或文件夹到此处',
   'workspace.path': '路径:',
   'workspace.download': '下载文件',
 
@@ -1061,6 +1063,8 @@ export default {
   'error.unknown': '未知错误',
 
   'skills.allSkills': '全部技能',
+  'skills.viewCard': '卡片',
+  'skills.viewList': '列表',
   'skills.mySkills': '我的技能',
   'skills.systemSkills': '系统技能',
   'skills.searchPlaceholder': '搜索技能...',

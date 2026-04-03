@@ -20,7 +20,7 @@ import { toast } from 'vue-sonner'
 
 const props = defineProps({
   content: {
-    type: String,
+    type: [String, Number, Boolean, Object, Array],
     default: ''
   },
   remarkPlugins: {
@@ -37,7 +37,44 @@ const props = defineProps({
   }
 })
 
+const normalizedContent = computed(() => {
+  const content = props.content
+  if (content == null) return ''
+  if (typeof content === 'string') return content
+  if (typeof content === 'number' || typeof content === 'boolean') return String(content)
+  if (Array.isArray(content)) {
+    return content
+      .map(item => {
+        if (typeof item === 'string') return item
+        if (item?.text) return item.text
+        if (item?.content) return item.content
+        if (item?.message) return item.message
+        try {
+          return JSON.stringify(item)
+        } catch (e) {
+          return String(item)
+        }
+      })
+      .filter(Boolean)
+      .join('\n')
+  }
+
+  if (typeof content === 'object') {
+    if (typeof content.text === 'string') return content.text
+    if (typeof content.content === 'string') return content.content
+    if (typeof content.message === 'string') return content.message
+    try {
+      return JSON.stringify(content, null, 2)
+    } catch (e) {
+      return String(content)
+    }
+  }
+
+  return String(content)
+})
+
 const escapeHtml = (text) => {
+  text = typeof text === 'string' ? text : String(text ?? '')
   const map = {
     '&': '&amp;',
     '<': '&lt;',
@@ -49,6 +86,7 @@ const escapeHtml = (text) => {
 }
 
 const jsToJson = (jsStr) => {
+  jsStr = typeof jsStr === 'string' ? jsStr : String(jsStr ?? '')
   // 移除注释
   jsStr = jsStr.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
 
@@ -302,6 +340,7 @@ const convertVideoLinks = (html) => {
 
 const preprocessContent = (content) => {
   if (!content) return ''
+  content = typeof content === 'string' ? content : String(content ?? '')
   return content.replace(
     /(https?:\/\/[^\n\r"<>)]+?\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar|7z|tar|gz|bz2|txt|csv|json|xml|md|jpg|jpeg|png|gif|svg|webp|mp4|webm|mp3|wav))/gi,
     (match) => match.replace(/\s/g, '%20')
@@ -309,11 +348,11 @@ const preprocessContent = (content) => {
 }
 
 const renderedContent = computed(() => {
-  if (!props.content) return ''
+  if (!normalizedContent.value) return ''
 
   try {
     chartList.length = 0
-    const preprocessed = preprocessContent(props.content)
+    const preprocessed = preprocessContent(normalizedContent.value)
     let html = marked(preprocessed)
 
     // Unified Pipeline: Parse -> Highlight -> Stringify
@@ -353,7 +392,7 @@ const renderedContent = computed(() => {
     })
   } catch (error) {
     console.error('Markdown渲染错误:', error)
-    return props.content
+    return escapeHtml(normalizedContent.value)
   }
 })
 

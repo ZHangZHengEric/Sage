@@ -16,16 +16,17 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   // Getters
   // 按当前会话过滤的 items
   const filteredItems = computed(() => {
+    const validItems = items.value.filter(item => item && item.type)
     if (!currentSessionId.value) {
-        console.log('[Workbench] filteredItems: no session id, returning all', items.value.length)
-        return items.value
+        console.log('[Workbench] filteredItems: no session id, returning all', validItems.length)
+        return validItems
     }
-    const filtered = items.value.filter(item => item.sessionId === currentSessionId.value)
+    const filtered = validItems.filter(item => item.sessionId === currentSessionId.value)
     console.log('[Workbench] filteredItems:', {
         currentSessionId: currentSessionId.value,
-        total: items.value.length,
+        total: validItems.length,
         filtered: filtered.length,
-        firstItemSessionId: items.value[0]?.sessionId
+        firstItemSessionId: validItems[0]?.sessionId
     })
     return filtered
   })
@@ -74,18 +75,28 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   }
 
   const addItem = (item) => {
+    if (item.type === 'file' && (item.data?.filePath || item.data?.path)) {
+      const normalizedPath = normalizeFilePath(item.data.filePath || item.data.path)
+      if (item.data.filePath) item.data.filePath = normalizedPath
+      if (item.data.path) item.data.path = normalizedPath
+    }
+
     // 检查是否已存在相同的项（根据 type 和唯一标识）
     const existingItem = items.value.find(i => {
       if (i.type !== item.type) return false
-      // 文件类型：根据 filePath 或 path 去重
+      // 文件类型：根据 messageId + filePath 去重
       if (item.type === 'file') {
         const itemPath = item.data?.filePath || item.data?.path || ''
         const existingPath = i.data?.filePath || i.data?.path || ''
-        return itemPath && existingPath && itemPath === existingPath
+        const samePath = itemPath && existingPath && itemPath === existingPath
+        const sameMessage = item.messageId && i.messageId && item.messageId === i.messageId
+        return samePath && sameMessage
       }
       // 代码块类型：根据 code 内容去重
       if (item.type === 'code' && item.data?.code) {
-        return i.data?.code === item.data.code
+        const sameCode = i.data?.code === item.data.code
+        const sameMessage = item.messageId && i.messageId && item.messageId === i.messageId
+        return sameCode && sameMessage
       }
       // 工具调用类型：根据 toolCall id 去重
       if (item.type === 'tool_call' && item.data?.id) {
@@ -95,6 +106,11 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     })
 
     if (existingItem) {
+      if (item.type === 'file') {
+        existingItem.timestamp = Date.now()
+        existingItem.refreshVersion = (existingItem.refreshVersion || 0) + 1
+      }
+
       // 如果存在但没有 agentId，更新它
       if (!existingItem.agentId && item.agentId) {
         console.log('[Workbench] Updating missing agentId for existing item:', item.agentId)
@@ -253,6 +269,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     // 处理工具调用
     if (message.tool_calls && message.tool_calls.length > 0) {
       message.tool_calls.forEach((toolCall, idx) => {
+        if (!toolCall || !toolCall.function) {
+          console.warn('[Workbench] Skipping invalid toolCall:', idx, toolCall)
+          return
+        }
         console.log('[Workbench] Adding tool_call:', idx, toolCall.function?.name)
         addItem({
           type: 'tool_call',
@@ -355,6 +375,24 @@ export const useWorkbenchStore = defineStore('workbench', () => {
 export function extractFileReferences(content) {
   if (!content) return []
 
+  if (typeof content !== 'string') {
+    if (Array.isArray(content)) {
+      content = content
+        .map(item => {
+          if (typeof item === 'string') return item
+          if (item?.text) return item.text
+          if (item?.content) return item.content
+          return ''
+        })
+        .filter(Boolean)
+        .join('\n')
+    } else if (typeof content === 'object') {
+      content = content.text || content.content || content.message || ''
+    } else {
+      content = String(content)
+    }
+  }
+
   const files = []
   const seen = new Set()
 
@@ -368,6 +406,8 @@ export function extractFileReferences(content) {
     let path = match[2] || ''
 
     path = normalizeFilePath(path)
+
+    if (!path || path.endsWith('/')) continue
 
     // 清理 fileName
     fileName = fileName.trim().replace(/^`|`$/g, '')
@@ -392,6 +432,7 @@ export function extractFileReferences(content) {
 
 function extractCodeBlocks(content) {
   if (!content) return []
+  if (typeof content !== 'string') return []
   const codeBlocks = []
   const codeRegex = /```(\w+)?\n([\s\S]*?)```/g
   let match

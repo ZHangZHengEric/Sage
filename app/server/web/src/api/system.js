@@ -10,6 +10,9 @@ export const systemAPI = {
   getLatestVersion: () => {
     return request.get('/api/system/version/latest')
   },
+  getAgentUsageStats: (days) => {
+    return request.post('/api/system/agent/usage-stats', { days })
+  },
   getVersions: () => {
     return request.get('/api/system/version')
   },

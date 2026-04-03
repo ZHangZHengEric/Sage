@@ -17,7 +17,7 @@ import { ExternalLink } from 'lucide-vue-next'
 import { useWorkbenchStore } from '../../stores/workbench.js'
 import { usePanelStore } from '../../stores/panel.js'
 
-import { getFileExtension, isImageFile, getFileIcon, getDisplayFileName } from '../../utils/fileIcons.js'
+import { getFileExtension, isImageFile, getFileIcon, getDisplayFileName, normalizeFilePath } from '../../utils/fileIcons.js'
 
 const props = defineProps({
   filePath: {
@@ -70,6 +70,8 @@ const iconSrc = computed(() => {
 })
 
 const handleClick = () => {
+  const normalizedPath = normalizeFilePath(props.filePath)
+
   // 先打开工作台
   panelStore.openWorkbench()
   
@@ -85,7 +87,7 @@ const handleClick = () => {
   
   // 否则查找对应的文件项
   const index = workbenchStore.items.findIndex(item => 
-    item.type === 'file' && item.data.filePath === props.filePath
+    item.type === 'file' && normalizeFilePath(item.data.filePath) === normalizedPath
   )
   
   if (index !== -1) {
@@ -98,7 +100,7 @@ const handleClick = () => {
       role: 'assistant',
       timestamp: Date.now(),
       data: {
-        filePath: props.filePath,
+        filePath: normalizedPath,
         fileName: displayFileName.value
       }
     })
