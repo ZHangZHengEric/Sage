@@ -1,25 +1,46 @@
 <template>
-  <div class="rounded-lg border bg-muted/40 overflow-hidden my-4">
-    <div v-if="showHeader" class="flex items-center justify-between px-4 py-2 bg-muted/50 border-b text-xs text-muted-foreground">
+  <div class="h-full flex flex-col rounded-lg border overflow-hidden bg-slate-50 dark:bg-slate-900">
+    <div v-if="showHeader" class="flex items-center justify-between px-4 py-2 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-400 flex-none">
       <span class="font-medium uppercase tracking-wider text-[10px]">{{ language || 'text' }}</span>
-      <button 
+      <button
         v-if="showCopyButton"
         @click="copyCode"
-        class="flex items-center gap-1 hover:text-foreground transition-colors focus:outline-none"
+        class="flex items-center gap-1 hover:text-slate-800 dark:hover:text-slate-200 transition-colors focus:outline-none"
         :title="copyButtonText"
       >
         <span v-if="!copied" class="text-xs">📋</span>
         <span v-else class="text-xs">✅</span>
       </button>
     </div>
-    <pre class="m-0 p-4 overflow-x-auto text-sm font-mono leading-relaxed bg-background/50"><code :class="['hljs', codeClass]" v-html="highlightedCode"></code></pre>
+    <div class="flex-1 min-h-0 overflow-auto bg-slate-50 dark:bg-slate-900">
+      <pre class="m-0 p-4 text-sm font-mono leading-relaxed min-w-full min-h-full text-slate-800 dark:text-slate-200"><code :class="['hljs', codeClass]" v-html="highlightedCode"></code></pre>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import hljs from 'highlight.js'
-import 'highlight.js/styles/atom-one-dark.css'
+
+const loadTheme = async (isDark) => {
+  if (isDark) {
+    await import('highlight.js/styles/atom-one-dark.css')
+  } else {
+    await import('highlight.js/styles/atom-one-light.css')
+  }
+}
+
+const isDarkMode = () => {
+  return document.documentElement.classList.contains('dark')
+}
+
+onMounted(() => {
+  loadTheme(isDarkMode())
+})
+
+watch(() => document.documentElement.classList.contains('dark'), (isDark) => {
+  loadTheme(isDark)
+})
 
 const props = defineProps({
   code: {
@@ -48,6 +69,9 @@ const codeClass = computed(() => {
 })
 
 const escapeHtml = (text) => {
+  if (typeof text !== 'string') {
+    text = String(text ?? '')
+  }
   const map = {
     '&': '&amp;',
     '<': '&lt;',
@@ -59,19 +83,18 @@ const escapeHtml = (text) => {
 }
 
 const highlightedCode = computed(() => {
-  if (!props.code) return ''
+  const code = typeof props.code === 'string' ? props.code : String(props.code ?? '')
+  if (!code) return ''
   
   try {
-    // 检查语言是否支持
     if (props.language && props.language !== 'text' && hljs.getLanguage(props.language)) {
-      return hljs.highlight(props.code, { language: props.language }).value
+      return hljs.highlight(code, { language: props.language }).value
     } else {
-      // 如果不支持该语言，返回原始代码（HTML转义）
-      return escapeHtml(props.code)
+      return escapeHtml(code)
     }
   } catch (error) {
     console.error('代码高亮失败:', error)
-    return escapeHtml(props.code)
+    return escapeHtml(code)
   }
 })
 

@@ -1,11 +1,11 @@
 <template>
-  <div class="code-preview h-full">
+  <div class="code-preview h-full min-h-0 overflow-hidden p-4">
     <SyntaxHighlighter
       :code="content"
       :language="language"
       :show-header="true"
       :show-copy-button="true"
-      class="h-full"
+      class="h-full min-h-0"
     />
   </div>
 </template>
