@@ -218,7 +218,6 @@ import SysDelegateTaskMessage from './tools/SysDelegateTaskMessage.vue'
 import SysFinishTaskMessage from './tools/SysFinishTaskMessage.vue'
 import TodoTaskMessage from './tools/TodoTaskMessage.vue'
 import QuestionnaireCard from './tools/QuestionnaireCard.vue'
-import MemorySearchCard from './tools/MemorySearchCard.vue'
 import { useWorkbenchStore } from '@/stores/workbench.js'
 
 // Custom Tools
@@ -228,7 +227,6 @@ const TOOL_COMPONENT_MAP = {
   sys_finish_task: SysFinishTaskMessage,
   todo_write: TodoTaskMessage,
   questionnaire: QuestionnaireCard,
-  memory_search: MemorySearchCard,
 }
 
 const props = defineProps({
