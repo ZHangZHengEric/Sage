@@ -297,7 +297,7 @@ We are grateful to our sponsors for their support in making Sage better:
 
 ### 📱 WeChat Group
 
-<img src="assets/WeChatGroup.jpg" width="300" alt="WeChat Group QR Code"/>
+<img src="assets/0260403184943_150_9.jpg" width="300" alt="WeChat Group QR Code"/>
 
 *Scan to join our WeChat community 🦌*
 
