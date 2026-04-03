@@ -11,13 +11,71 @@ ref: getting-started
 
 # 快速开始
 
-## 先选一条起步路径
+## 一键启动（推荐）
 
-- 如果你想最快完成一次本地冒烟验证，使用示例 CLI。
-- 如果你需要主应用栈，使用 `app/server/main.py` 加 Web UI。
-- 只有在你明确需要打包桌面版时，才使用桌面构建链路。
+**适用场景：** 本地开发、快速体验
 
-## 前置条件
+```bash
+# 1. 克隆仓库
+git clone https://github.com/ZHangZHengEric/Sage.git
+cd Sage
+
+# 2. 配置 LLM API Key
+export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
+export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
+export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
+
+# 3. 运行启动脚本
+./scripts/dev-up.sh
+```
+
+**首次运行时，脚本会提示你选择配置模式：**
+
+- **精简模式**（推荐新手）：使用 SQLite，无需外部依赖
+  - 模板文件：`.env.example.minimal`
+  - 适合：本地快速开发
+- **完整模式**：使用 MySQL + ES + RustFS
+  - 模板文件：`.env.example`
+  - 适合：生产环境模拟
+
+**启动成功后：**
+- 前端访问：http://localhost:5173
+- 后端 API：http://localhost:8080
+- 健康检查：http://localhost:8080/api/health
+
+## 配置文件说明
+
+启动脚本会自动创建以下配置文件：
+
+### 后端配置
+
+- **位置：** 根目录 `.env`
+- **模板：**
+  - `.env.example.minimal` - 精简配置（SQLite，无外部依赖）
+  - `.env.example` - 完整配置（MySQL + ES + RustFS）
+- **用途：** Python 后端服务配置
+- **关键配置项：**
+  - `SAGE_DB_TYPE` - 数据库类型（sqlite/mysql）
+  - `SAGE_AUTH_MODE` - 认证模式（native/trusted_proxy/oauth）
+  - `SAGE_DEFAULT_LLM_API_KEY` - LLM API 密钥（必填）
+  - `SAGE_PORT` - 后端端口（默认 8080）
+
+### 前端配置
+
+- **位置：** `app/server/web/.env.development`
+- **模板：** `app/server/web/.env.example`
+- **用途：** Vite 前端构建配置
+- **关键配置项：**
+  - `VITE_SAGE_API_BASE_URL` - 后端 API 地址
+  - `VITE_SAGE_WEB_BASE_PATH` - Web 基础路径
+
+---
+
+## 手动启动（进阶）
+
+如果你需要手动控制启动流程，可以参考以下步骤。
+
+### 前置条件
 
 - Python 3.11 或更高版本
 - 运行 Web 客户端和部分桌面流程所需的 Node.js
@@ -79,7 +137,9 @@ export SAGE_AUTH_MODE="native"
 
 在这类生产环境配置下，Sage 也会强制启用安全的 session cookie。
 
-## 运行轻量 CLI
+## 运行示例 CLI
+
+如果你想最快完成一次本地冒烟验证，可以运行示例 CLI：
 
 ```bash
 python examples/sage_cli.py \
@@ -90,7 +150,9 @@ python examples/sage_cli.py \
 
 这是验证模型配置和基本运行时链路是否正常的最快方式。
 
-## 运行主服务端和 Web UI
+## 手动启动 Web 服务
+
+### 启动后端
 
 启动后端：
 
@@ -98,7 +160,9 @@ python examples/sage_cli.py \
 python -m app.server.main
 ```
 
-另开一个终端启动前端：
+### 启动前端
+
+在另一个终端：
 
 ```bash
 cd app/server/web
@@ -106,7 +170,9 @@ npm install
 npm run dev
 ```
 
-## 构建桌面版
+---
+
+## 桌面版构建
 
 从源码构建桌面应用时，可使用：
 

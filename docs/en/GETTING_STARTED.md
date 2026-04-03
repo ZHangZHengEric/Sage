@@ -11,13 +11,71 @@ ref: getting-started
 
 # Getting Started
 
-## Choose a Starting Path
+## One-Command Startup (Recommended)
 
-- Use the example CLI if you want the fastest possible runtime smoke test.
-- Use `app/server/main.py` plus the web UI if you want the main application stack.
-- Use the desktop build only if you specifically need the packaged desktop app.
+**Best for:** Local development, quick testing
 
-## Prerequisites
+```bash
+# 1. Clone the repository
+git clone https://github.com/ZHangZHengEric/Sage.git
+cd Sage
+
+# 2. Configure LLM API Key
+export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
+export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
+export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
+
+# 3. Run the startup script
+./scripts/dev-up.sh
+```
+
+**First run?** The script will prompt you to choose a configuration mode:
+
+- **Minimal mode** (recommended for beginners): SQLite, no external dependencies
+  - Template: `.env.example.minimal`
+  - Best for: Quick local development
+- **Full mode**: MySQL + Elasticsearch + RustFS
+  - Template: `.env.example`
+  - Best for: Production-like environment
+
+**After successful startup:**
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:8080
+- Health check: http://localhost:8080/api/health
+
+## Configuration Files
+
+The startup script will automatically create these configuration files:
+
+### Backend Configuration
+
+- **Location:** Root directory `.env`
+- **Templates:**
+  - `.env.example.minimal` - Minimal config (SQLite, no external dependencies)
+  - `.env.example` - Full config (MySQL + ES + RustFS)
+- **Purpose:** Python backend service configuration
+- **Key settings:**
+  - `SAGE_DB_TYPE` - Database type (sqlite/mysql)
+  - `SAGE_AUTH_MODE` - Authentication mode (native/trusted_proxy/oauth)
+  - `SAGE_DEFAULT_LLM_API_KEY` - LLM API key (required)
+  - `SAGE_PORT` - Backend port (default 8080)
+
+### Frontend Configuration
+
+- **Location:** `app/server/web/.env.development`
+- **Template:** `app/server/web/.env.example`
+- **Purpose:** Vite frontend build configuration
+- **Key settings:**
+  - `VITE_SAGE_API_BASE_URL` - Backend API URL
+  - `VITE_SAGE_WEB_BASE_PATH` - Web base path
+
+---
+
+## Manual Startup (Advanced)
+
+If you need manual control over the startup process, follow these steps.
+
+### Prerequisites
 
 - Python 3.11 or newer
 - Node.js for the web client and some desktop workflows
@@ -79,7 +137,9 @@ For local development, the default `SAGE_ENV` is `development`. If you set `SAGE
 
 Production-like mode also forces secure session cookies.
 
-## First Successful Run Checklist
+## Run the Example CLI
+
+For the fastest runtime smoke test:
 
 You should be able to complete at least one of these checks:
 
@@ -99,7 +159,9 @@ python examples/sage_cli.py \
   --default_llm_model_name "$SAGE_DEFAULT_LLM_MODEL_NAME"
 ```
 
-## Run the Main Server
+## Manually Start Web Services
+
+### Start Backend
 
 Start the primary FastAPI service:
 
@@ -115,7 +177,7 @@ Health check:
 curl http://127.0.0.1:8080/api/health
 ```
 
-## Run the Web Client
+### Start Frontend
 
 In a second terminal:
 
@@ -130,7 +192,9 @@ For the web UI, the commonly relevant frontend variables are:
 - `VITE_SAGE_API_BASE_URL`
 - `VITE_SAGE_WEB_BASE_PATH`
 
-## Run the Streamlit Demo
+---
+
+## Other Demos & Tools
 
 ```bash
 streamlit run examples/sage_demo.py -- \
@@ -156,7 +220,18 @@ The example configs that ship with `examples/` are:
 - `examples/preset_running_agent_config.json`
 - `examples/preset_running_config.json`
 
-## Build the Desktop App from Source
+### Streamlit Demo
+
+```bash
+streamlit run examples/sage_demo.py -- \
+  --default_llm_api_key "$SAGE_DEFAULT_LLM_API_KEY" \
+  --default_llm_api_base_url "$SAGE_DEFAULT_LLM_API_BASE_URL" \
+  --default_llm_model_name "$SAGE_DEFAULT_LLM_MODEL_NAME"
+```
+
+---
+
+## Build Desktop App from Source
 
 ```bash
 app/desktop/scripts/build.sh release
