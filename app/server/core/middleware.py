@@ -138,14 +138,7 @@ def register_middlewares(app):
                         "username": userid,
                         "nickname": userid,
                         "role": "user",
-                    }
-
-            if (
-                not getattr(request.state, "user_claims", None)
-                and not is_whitelisted
-                and str(cfg.auth_mode or "").strip().lower() == "trusted_proxy"
-                and is_trusted_proxy_client
-            ):
+                    }      
                 return await call_next(request)
 
             if not getattr(request.state, "user_claims", None) and not is_whitelisted:
