@@ -77,7 +77,7 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 
 ### 前置条件
 
-- Python 3.11 或更高版本
+- Python 3.10 或更高版本
 - 运行 Web 客户端和部分桌面流程所需的 Node.js
 - 你计划使用的模型供应商对应的有效 LLM API Key
 

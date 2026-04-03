@@ -77,7 +77,7 @@ If you need manual control over the startup process, follow these steps.
 
 ### Prerequisites
 
-- Python 3.11 or newer
+- Python 3.10 or newer
 - Node.js for the web client and some desktop workflows
 - A valid LLM API key for the model provider you plan to use
 
