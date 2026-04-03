@@ -37,6 +37,45 @@
         </p>
       </div>
 
+      <div v-if="(config.agentMode || 'auto') === 'fibre'" class="space-y-2">
+        <Label>子智能体</Label>
+        <p class="text-xs text-muted-foreground">
+          仅在 Fibre 模式生效，用于临时覆盖当前会话可调用的子智能体。
+        </p>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="text-xs text-primary hover:underline"
+            @click="selectAllSubAgents"
+          >
+            全选
+          </button>
+          <button
+            type="button"
+            class="text-xs text-muted-foreground hover:underline"
+            @click="clearSubAgents"
+          >
+            清空
+          </button>
+        </div>
+        <div class="max-h-40 overflow-y-auto rounded-md border border-border bg-background/40 p-2 space-y-1">
+          <label
+            v-for="agent in selectableSubAgents"
+            :key="agent.id"
+            class="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-muted/50 cursor-pointer"
+          >
+            <Checkbox
+              :checked="selectedSubAgentIds.includes(agent.id)"
+              @update:checked="(checked) => toggleSubAgent(agent.id, checked === true)"
+            />
+            <span class="text-sm truncate">{{ agent.name }}</span>
+          </label>
+          <p v-if="selectableSubAgents.length === 0" class="text-xs text-muted-foreground px-2 py-1">
+            当前没有可选子智能体
+          </p>
+        </div>
+      </div>
+
       <!-- 更多建议 -->
       <div class="flex flex-col gap-2">
         <div class="flex items-center space-x-2">
@@ -75,6 +114,7 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import { Settings } from 'lucide-vue-next'
 import ResizablePanel from './ResizablePanel.vue'
@@ -109,6 +149,31 @@ const { t } = useLanguage()
 // Methods
 const handleConfigChange = (changes) => {
   emit('configChange', changes)
+}
+
+const selectableSubAgents = computed(() => {
+  const currentId = props.selectedAgent?.id
+  return (props.agents || []).filter(agent => agent?.id && agent.id !== currentId)
+})
+
+const selectedSubAgentIds = computed(() => (
+  Array.isArray(props.config?.availableSubAgentIds) ? props.config.availableSubAgentIds : []
+))
+
+const toggleSubAgent = (agentId, checked) => {
+  const current = [...selectedSubAgentIds.value]
+  const next = checked
+    ? [...new Set([...current, agentId])]
+    : current.filter(id => id !== agentId)
+  handleConfigChange({ availableSubAgentIds: next })
+}
+
+const selectAllSubAgents = () => {
+  handleConfigChange({ availableSubAgentIds: selectableSubAgents.value.map(agent => agent.id) })
+}
+
+const clearSubAgents = () => {
+  handleConfigChange({ availableSubAgentIds: [] })
 }
 
 const handleConfigToggle = (key) => {

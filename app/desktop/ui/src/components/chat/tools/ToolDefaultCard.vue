@@ -1,20 +1,20 @@
 <template>
-  <div class="tool-call-item text-foreground/90 w-fit mb-2 flex items-center group cursor-pointer" 
+  <div class="tool-call-item text-foreground/90 w-fit mb-1 flex items-center group cursor-pointer" 
     :class="[imageUrl ? 'max-w-[530px]' : 'max-w-[320px]']"
     @click="handleClick">
-    <div class="relative flex items-center justify-between py-2 px-3 rounded-xl bg-muted/30 hover:bg-muted/50 transition-all border border-transparent hover:border-border/40">
+    <div class="relative flex items-center justify-between py-1.5 px-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-all border border-transparent hover:border-border/40">
       
-      <div class="flex items-center gap-3 flex-1 min-w-0">
+      <div class="flex items-center gap-2 flex-1 min-w-0">
         <!-- Status Icon -->
-        <div class="flex-none flex items-center justify-center w-6 h-6 rounded-full" 
+        <div class="flex-none flex items-center justify-center w-5 h-5 rounded-full" 
           :class="[
             isError ? 'bg-red-500/10 text-red-500' : 
             isCompleted ? 'bg-green-500/10 text-green-500' : 
             'bg-blue-500/10 text-blue-500'
           ]">
-           <AlertCircle v-if="isError" class="w-3.5 h-3.5" />
-           <Check v-else-if="isCompleted" class="w-3.5 h-3.5" />
-           <Loader2 v-else class="w-3.5 h-3.5 animate-spin" />
+           <AlertCircle v-if="isError" class="w-3 h-3" />
+           <Check v-else-if="isCompleted" class="w-3 h-3" />
+           <Loader2 v-else class="w-3 h-3 animate-spin" />
         </div>
 
         <div class="flex flex-col min-w-0 gap-0.5 justify-center">
@@ -24,12 +24,12 @@
         </div>
       </div>
 
-      <div class="flex items-center gap-2 pl-4">
-         <ChevronRight class="h-4 w-4 text-muted-foreground/70 group-hover:text-foreground transition-colors" />
+      <div class="flex items-center gap-1.5 pl-2.5">
+         <ChevronRight class="h-3.5 w-3.5 text-muted-foreground/70 group-hover:text-foreground transition-colors" />
       </div>
     </div>
     
-    <span class="text-[10px] text-muted-foreground ml-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100 whitespace-nowrap">
+    <span class="text-sm text-muted-foreground ml-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100 whitespace-nowrap">
       {{ t('common.viewDetails') }}
     </span>
 

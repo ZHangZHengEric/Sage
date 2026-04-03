@@ -1,5 +1,10 @@
 <template>
-  <div class="prose prose-xs dark:prose-invert max-w-none break-words text-sm" v-html="renderedContent" @click="handleMarkdownClick"></div>
+  <div
+    class="prose prose-xs dark:prose-invert max-w-none break-words"
+    :class="props.compact ? 'text-[11px] leading-5' : 'text-sm'"
+    v-html="renderedContent"
+    @click="handleMarkdownClick"
+  ></div>
 </template>
 
 <script setup>
@@ -38,6 +43,10 @@ const props = defineProps({
   components: {
     type: Object,
     default: () => ({})
+  },
+  compact: {
+    type: Boolean,
+    default: false
   }
 })
 

@@ -3,7 +3,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import SparkMD5 from 'spark-md5'
 import { useLanguage } from '@/utils/i18n.js'
+import { useLanguageStore } from '@/utils/i18n.js'
 import { chatAPI } from '@/api/chat.js'
+import { agentAPI } from '@/api/agent.js'
 import { useChatActiveSessionCache } from '@/composables/chat/useChatActiveSessionCache.js'
 import { useChatScroll } from '@/composables/chat/useChatScroll.js'
 import { useChatStream } from '@/composables/chat/useChatStream.js'
@@ -12,9 +14,14 @@ import { useChatAgentConfig } from '@/composables/chat/useChatAgentConfig.js'
 import { useChatWorkspace } from '@/composables/chat/useChatWorkspace.js'
 import { usePanelStore } from '@/stores/panel.js'
 import { useWorkbenchStore } from '@/stores/workbench.js'
+import { storeToRefs } from 'pinia'
+
+const abilityCacheByAgentGlobal = ref({})
 
 export const useChatPage = (props) => {
   const { t } = useLanguage()
+  const languageStore = useLanguageStore()
+  const { language } = storeToRefs(languageStore)
   const panelStore = usePanelStore()
   const workbenchStore = useWorkbenchStore()
   const route = useRoute()
@@ -42,6 +49,16 @@ export const useChatPage = (props) => {
   } = useChatScroll()
   // const showSettings = ref(false) // Use panelStore instead
   const currentTraceId = ref(null)
+  const abilityItems = ref([])
+  const abilityLoading = ref(false)
+  const abilityError = ref(null)
+  const showAbilityPanel = ref(false)
+  const abilityPresetInput = ref('')
+  const showAbilityButton = ref(true)
+  const hasUsedAbilityEntryInSession = ref(false)
+  const danmakuResetTrigger = ref(0)
+  const isViewingHistorySession = ref(false)
+  const danmakuClosedByUser = ref(false)
 
 
   // 打开工作台（统一方法）
@@ -74,18 +91,21 @@ export const useChatPage = (props) => {
     if (panel === 'workbench') {
       // 使用统一方法打开工作台
       openWorkbench()
+      showAbilityPanel.value = false
     } else if (panel === 'workspace') {
       if (panelStore.activePanel === 'workspace') {
         panelStore.closeAll()
       } else {
         panelStore.openWorkspace()
       }
+      showAbilityPanel.value = false
     } else if (panel === 'settings') {
       if (panelStore.activePanel === 'settings') {
         panelStore.closeAll()
       } else {
         panelStore.openSettings()
       }
+      showAbilityPanel.value = false
     }
   }
 
@@ -309,12 +329,14 @@ export const useChatPage = (props) => {
     isWorkspaceLoading,
     downloadWorkspaceFile,
     downloadFile,
+    deleteFile,
+    refreshWorkspace,
     clearTaskAndWorkspace
   } = useChatWorkspace({
     t,
     toast,
-    agentId: selectedAgentId,
-    sessionId: currentSessionId
+    currentSessionId,
+    selectedAgentId
   })
 
   const {
@@ -363,6 +385,14 @@ export const useChatPage = (props) => {
     // 关闭工作台 panel
     panelStore.closeAll()
     console.log('[ChatPage] Closed panel for new session')
+    showAbilityPanel.value = false
+    abilityPresetInput.value = ''
+    abilityError.value = null
+    hasUsedAbilityEntryInSession.value = false
+    showAbilityButton.value = true
+    isViewingHistorySession.value = false
+    danmakuClosedByUser.value = false
+    danmakuResetTrigger.value += 1
     createSession()
   }
 
@@ -374,6 +404,10 @@ export const useChatPage = (props) => {
       if (sessionId) {
         currentSessionId.value = sessionId
         await loadConversationMessages(sessionId)
+        showAbilityPanel.value = false
+        showAbilityButton.value = false
+        hasUsedAbilityEntryInSession.value = true
+        isViewingHistorySession.value = true
       } else {
         if (conversation.agent_id && agents.value.length > 0) {
           const agent = agents.value.find(a => a.id === conversation.agent_id)
@@ -391,6 +425,8 @@ export const useChatPage = (props) => {
           rebuildMessageIdIndexMap()
         }
         currentSessionId.value = sessionId
+        isViewingHistorySession.value = false
+        showAbilityButton.value = true
       }
 
       nextTick(() => {
@@ -445,6 +481,54 @@ export const useChatPage = (props) => {
     }
     // 注意：进行中的会话状态现在由服务端通过 SSE 同步
     // 前端不再主动管理 activeSessions 状态
+  }
+
+  const openAbilityPanel = async ({ forceRefresh = false } = {}) => {
+    if (!selectedAgent.value) return
+    const agentId = selectedAgent.value.id
+    const sessionId = currentSessionId.value
+
+    showAbilityPanel.value = true
+    abilityError.value = null
+
+    const cache = abilityCacheByAgentGlobal.value[agentId]
+    if (!forceRefresh && cache && Array.isArray(cache)) {
+      abilityItems.value = cache
+      return
+    }
+
+    abilityLoading.value = true
+    try {
+      const items = await agentAPI.getAgentAbilities({
+        agentId,
+        sessionId,
+        context: {},
+        language: language?.value
+      })
+      abilityItems.value = items || []
+      abilityCacheByAgentGlobal.value = {
+        ...abilityCacheByAgentGlobal.value,
+        [agentId]: abilityItems.value
+      }
+    } catch (err) {
+      console.error('加载 Agent 能力失败:', err)
+      abilityError.value = err?.message || t('chat.abilities.error') || '获取能力列表失败'
+    } finally {
+      abilityLoading.value = false
+    }
+  }
+
+  const closeAbilityPanel = () => {
+    showAbilityPanel.value = false
+  }
+
+  const retryAbilityFetch = () => {
+    openAbilityPanel({ forceRefresh: true })
+  }
+
+  const onAbilityCardClick = (item) => {
+    if (!item || !item.promptText) return
+    abilityPresetInput.value = item.promptText
   }
 
   useChatLifecycle({
@@ -504,6 +588,10 @@ export const useChatPage = (props) => {
     }
   })
 
+  watch(() => selectedAgentId.value, () => {
+    showAbilityPanel.value = false
+  })
+
 
   return {
     t,
@@ -534,6 +622,22 @@ export const useChatPage = (props) => {
     workspaceFiles,
     isWorkspaceLoading,
     downloadFile,
-    updateConfig
+    deleteFile,
+    refreshWorkspace,
+    updateConfig,
+    abilityItems,
+    abilityLoading,
+    abilityError,
+    showAbilityPanel,
+    abilityPresetInput,
+    showAbilityButton,
+    hasUsedAbilityEntryInSession,
+    danmakuResetTrigger,
+    isViewingHistorySession,
+    danmakuClosedByUser,
+    openAbilityPanel,
+    closeAbilityPanel,
+    retryAbilityFetch,
+    onAbilityCardClick
   }
 }

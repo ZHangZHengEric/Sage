@@ -85,7 +85,7 @@
         </div>
         <div class="flex items-center gap-2">
           <Button 
-            v-if="getGroupCategoryLabel(selectedGroupSource) === '外部MCP'"
+            v-if="getGroupCategoryLabel(selectedGroupSource) === t('tools.externalMCP')"
             variant="outline" 
             size="sm" 
             class="h-8" 
@@ -278,6 +278,7 @@ import { Wrench, Search, Code, Database, Globe, Cpu, Plus, Trash2, Loader, Refre
 import { useLanguage } from '../utils/i18n.js'
 import { toolAPI } from '../api/tool.js'
 import { getCurrentUser } from '../utils/auth.js'
+import { getMcpServerLabel } from '../utils/mcpLabels.js'
 import McpServerAdd from '../components/McpServerAdd.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -587,9 +588,9 @@ const handleRefreshMcpTool = async (sourceName) => {
 const getToolSourceLabel = (source) => {
   let displaySource = source
   if (source.startsWith('MCP Server: ')) {
-    displaySource = source.replace('MCP Server: ', '')
+    displaySource = getMcpServerLabel(source.replace('MCP Server: ', ''), t)
   } else if (source.startsWith('内置MCP: ')) {
-    displaySource = source.replace('内置MCP: ', '')
+    displaySource = getMcpServerLabel(source.replace('内置MCP: ', ''), t)
   }
 
   const sourceMapping = {
@@ -663,9 +664,9 @@ const isMcpGroup = (source) => {
 }
 
 const getGroupCategoryLabel = (source) => {
-  if (source.startsWith('内置MCP:')) return '内置MCP'
-  if (source.startsWith('MCP Server:')) return '外部MCP'
-  return '基础工具'
+  if (source.startsWith('内置MCP:')) return t('tools.builtinMCP')
+  if (source.startsWith('MCP Server:')) return t('tools.externalMCP')
+  return t('tools.basicTools')
 }
 
 // 生命周期

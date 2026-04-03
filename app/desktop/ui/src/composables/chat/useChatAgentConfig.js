@@ -14,7 +14,8 @@ export const useChatAgentConfig = ({
     deepThinking: true,
     agentMode: 'simple',
     moreSuggest: false,
-    maxLoopCount: 50
+    maxLoopCount: 50,
+    availableSubAgentIds: []
   })
   const userConfigOverrides = ref({})
 
@@ -38,7 +39,10 @@ export const useChatAgentConfig = ({
         deepThinking: userConfigOverrides.value.deepThinking !== undefined ? userConfigOverrides.value.deepThinking : agent.deepThinking,
         agentMode: userConfigOverrides.value.agentMode !== undefined ? userConfigOverrides.value.agentMode : agentMode,
         moreSuggest: userConfigOverrides.value.moreSuggest !== undefined ? userConfigOverrides.value.moreSuggest : (agent.moreSuggest ?? false),
-        maxLoopCount: userConfigOverrides.value.maxLoopCount !== undefined ? userConfigOverrides.value.maxLoopCount : (agent.maxLoopCount ?? 50)
+        maxLoopCount: userConfigOverrides.value.maxLoopCount !== undefined ? userConfigOverrides.value.maxLoopCount : (agent.maxLoopCount ?? 50),
+        availableSubAgentIds: userConfigOverrides.value.availableSubAgentIds !== undefined
+          ? userConfigOverrides.value.availableSubAgentIds
+          : (agent.availableSubAgentIds ?? [])
       }
       localStorage.setItem('selectedAgentId', agent.id)
     }

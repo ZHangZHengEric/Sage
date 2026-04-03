@@ -78,33 +78,60 @@
           @compositionstart="handleCompositionStart"
           @compositionend="handleCompositionEnd"
           @paste="handlePaste"
-          :placeholder="isLoading ? (t('messageInput.placeholderGenerating') || 'AI正在生成回复，请稍候...') : t('messageInput.placeholder')"
+          :placeholder="isLoading ? (t('messageInput.placeholderGenerating') || 'AI正在生成回复，可直接输入新消息...') : t('messageInput.placeholder')"
           class="flex-1 min-h-[44px] max-h-[200px] py-1.5 px-1 bg-transparent border-0 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:outline-none resize-none shadow-none text-sm leading-relaxed outline-none !ring-0 !ring-offset-0 !border-0"
           rows="2"
-          :disabled="isLoading"
         />
       </div>
 
       <div class="flex items-center justify-between">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          class="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground hover:bg-background flex-shrink-0"
-          @click="triggerFileInput"
-          :disabled="isLoading"
-          :title="t('messageInput.uploadFile')"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path
-              d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </Button>
+        <div class="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            class="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground hover:bg-background flex-shrink-0"
+            @click="triggerFileInput"
+            :disabled="isLoading"
+            :title="t('messageInput.uploadFile')"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </Button>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            class="h-8 rounded-full px-3 text-xs font-medium transition-all duration-200 border"
+            :class="planEnabled ? activeToggleClass : inactiveToggleClass"
+            @click="planEnabled = !planEnabled"
+            :disabled="isLoading"
+            :title="t('messageInput.planMode')"
+          >
+            {{ t('messageInput.planModeLabel') || 'Plan' }}
+          </Button>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            class="h-8 rounded-full px-3 text-xs font-medium transition-all duration-200 border"
+            :class="deepThinkingEnabled ? activeToggleClass : inactiveToggleClass"
+            @click="toggleDeepThinking"
+            :disabled="isLoading"
+            :title="t('config.deepThinking')"
+          >
+            {{ t('config.deepThinking') }}
+          </Button>
+        </div>
 
         <div class="flex items-center gap-2">
           <Button
@@ -121,7 +148,7 @@
           </Button>
 
           <Button
-            :type="isLoading ? 'button' : 'submit'"
+            type="submit"
             size="icon"
             :disabled="isOptimizingInput || (!isLoading && !inputValue.trim() && uploadedFiles.length === 0)"
             class="h-7 w-7 rounded-full transition-all duration-200"
@@ -129,8 +156,7 @@
               !isLoading && !inputValue.trim() && uploadedFiles.length === 0 ? 'opacity-50 cursor-not-allowed' : '',
               isLoading ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground' : ''
             ]"
-            :title="isLoading ? (t('messageInput.stopTitle') || '停止生成') : t('messageInput.sendTitle')"
-            @click="isLoading ? handleStop() : undefined"
+            :title="isLoading ? (inputValue.trim() || uploadedFiles.length > 0 ? t('messageInput.stopAndSendTitle') || '停止生成并发送' : t('messageInput.stopTitle') || '停止生成') : t('messageInput.sendTitle')"
           >
             <svg v-if="!isLoading" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -164,6 +190,10 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  presetText: {
+    type: String,
+    default: ''
+  },
   sessionId: {
     type: String,
     default: ''
@@ -179,10 +209,14 @@ const props = defineProps({
   selectedAgent: {
     type: Object,
     default: null
+  },
+  config: {
+    type: Object,
+    default: () => ({})
   }
 })
 
-const emit = defineEmits(['sendMessage', 'stopGeneration'])
+const emit = defineEmits(['sendMessage', 'stopGeneration', 'configChange'])
 
 const { t } = useLanguage()
 
@@ -199,13 +233,44 @@ const currentSkill = ref(null)
 const uploadedFiles = ref([])
 const isComposing = ref(false)
 const isDraggingOver = ref(false)
+const planEnabled = ref(false)
 const isOptimizingInput = ref(false)
 const optimizeAbortController = ref(null)
+const deepThinkingEnabled = computed(() => props.config?.deepThinking !== false)
+const activeToggleClass = 'border-primary/30 bg-primary/10 text-foreground hover:bg-primary/15 hover:border-primary/40'
+const inactiveToggleClass = 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted/60'
+
+watch(() => props.presetText, async (newVal) => {
+  if (typeof newVal !== 'string' || !newVal) return
+  if (newVal === inputValue.value) return
+  inputValue.value = newVal
+  await nextTick()
+  const el = textareaRef.value?.$el || textareaRef.value
+  if (el && el.focus) {
+    el.focus()
+    const length = el.value?.length ?? 0
+    try {
+      el.setSelectionRange(length, length)
+    } catch {
+      // ignore
+    }
+  }
+  adjustTextareaHeight()
+})
 
 watch(() => props.agentId, () => {
   skills.value = []
   currentSkill.value = null
 })
+
+const toggleDeepThinking = () => {
+  emit('configChange', { deepThinking: !deepThinkingEnabled.value })
+}
+
+const applyPlanTag = (messageContent) => {
+  if (!planEnabled.value) return messageContent
+  return `<enable_plan>true</enable_plan>${messageContent ? ` ${messageContent}` : ''}`
+}
 
 const filteredSkills = computed(() => {
   const agentAvailableSkills = props.selectedAgent?.availableSkills || []
@@ -359,21 +424,85 @@ watch(inputValue, async (newVal) => {
 const handleSubmit = (e) => {
   e.preventDefault()
   cancelOptimizeInput()
-  if ((inputValue.value.trim() || uploadedFiles.value.length > 0 || currentSkill.value) && !props.isLoading) {
+  if (props.isLoading) {
+    if ((inputValue.value.trim() || uploadedFiles.value.length > 0 || currentSkill.value)) {
+      let messageContent = inputValue.value.trim()
+
+      if (currentSkill.value) {
+        messageContent = `<skill>${currentSkill.value}</skill> ${messageContent}`
+      }
+      messageContent = applyPlanTag(messageContent)
+
+      const multimodalContent = []
+
+      if (messageContent) {
+        multimodalContent.push({ type: 'text', text: messageContent })
+      }
+
+      const isMultimodalEnabled = props.selectedAgent?.enableMultimodal === true
+
+      if (isMultimodalEnabled) {
+        const imageFiles = uploadedFiles.value.filter(f => f.url && f.type === 'image')
+        for (const img of imageFiles) {
+          multimodalContent.push({
+            type: 'image_url',
+            image_url: { url: img.url }
+          })
+        }
+      }
+
+      const allFiles = uploadedFiles.value.filter(f => f.url)
+      if (allFiles.length > 0) {
+        const fileInfos = allFiles.map(f => {
+          let cleanName = f.name || '文件'
+          cleanName = cleanName.replace(/_\d{14}\.([^.]+)$/, '.$1')
+          cleanName = cleanName.replace(/_\d{14}_/, '_')
+          return { url: f.url, name: cleanName }
+        })
+
+        if (messageContent && fileInfos.length > 0) {
+          messageContent += '\n\n'
+        }
+        const markdownLinks = fileInfos.map(f => `[${f.name}](${f.url})`)
+        messageContent += markdownLinks.join('\n')
+
+        if (multimodalContent.length > 0 && multimodalContent[0].type === 'text') {
+          multimodalContent[0].text = messageContent
+        }
+      }
+
+      if (messageContent || multimodalContent.length > 0) {
+        const pendingMessage = messageContent
+        const pendingMultimodal = multimodalContent.length > 0 ? multimodalContent : null
+        inputValue.value = ''
+        uploadedFiles.value = []
+        currentSkill.value = null
+
+        emit('sendMessage', pendingMessage, {
+          multimodalContent: pendingMultimodal,
+          needInterrupt: true
+        })
+      }
+    } else {
+      emit('stopGeneration')
+    }
+    return
+  }
+
+  if (inputValue.value.trim() || uploadedFiles.value.length > 0 || currentSkill.value) {
     let messageContent = inputValue.value.trim()
 
     if (currentSkill.value) {
       messageContent = `<skill>${currentSkill.value}</skill> ${messageContent}`
     }
+    messageContent = applyPlanTag(messageContent)
 
     const multimodalContent = []
-
     if (messageContent) {
       multimodalContent.push({ type: 'text', text: messageContent })
     }
 
     const isMultimodalEnabled = props.selectedAgent?.enableMultimodal === true
-
     if (isMultimodalEnabled) {
       const imageFiles = uploadedFiles.value.filter(f => f.url && f.type === 'image')
       for (const img of imageFiles) {
@@ -384,9 +513,9 @@ const handleSubmit = (e) => {
       }
     }
 
-    const nonImageFiles = uploadedFiles.value.filter(f => f.url && (isMultimodalEnabled ? f.type !== 'image' : true))
-    if (nonImageFiles.length > 0) {
-      const fileInfos = nonImageFiles.map(f => {
+    const allFiles = uploadedFiles.value.filter(f => f.url)
+    if (allFiles.length > 0) {
+      const fileInfos = allFiles.map(f => {
         let cleanName = f.name || '文件'
         cleanName = cleanName.replace(/_\d{14}\.([^.]+)$/, '.$1')
         cleanName = cleanName.replace(/_\d{14}_/, '_')
@@ -405,12 +534,15 @@ const handleSubmit = (e) => {
     }
 
     if (messageContent || multimodalContent.length > 0) {
-      emit('sendMessage', messageContent, {
-        multimodalContent: multimodalContent.length > 0 ? multimodalContent : null
-      })
+      const pendingMessage = messageContent
+      const pendingMultimodal = multimodalContent.length > 0 ? multimodalContent : null
       inputValue.value = ''
       uploadedFiles.value = []
       currentSkill.value = null
+      emit('sendMessage', pendingMessage, {
+        multimodalContent: pendingMultimodal,
+        needInterrupt: false
+      })
     }
   }
 }
@@ -496,10 +628,6 @@ const handlePaste = async (e) => {
   if (!hasFiles) {
     return
   }
-}
-
-const handleStop = () => {
-  emit('stopGeneration')
 }
 
 const cancelOptimizeInput = () => {
@@ -654,6 +782,26 @@ const removeFile = (index) => {
   }
   uploadedFiles.value.splice(index, 1)
 }
+
+const getInputValue = () => inputValue.value
+
+const setInputValue = (value) => {
+  inputValue.value = value
+}
+
+const appendInputValue = (text) => {
+  if (inputValue.value) {
+    inputValue.value += ` ${text}`
+  } else {
+    inputValue.value = text
+  }
+}
+
+defineExpose({
+  getInputValue,
+  setInputValue,
+  appendInputValue
+})
 
 onUnmounted(() => {
   cancelOptimizeInput()

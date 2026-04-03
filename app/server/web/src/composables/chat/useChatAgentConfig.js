@@ -15,7 +15,8 @@ export const useChatAgentConfig = ({
     deepThinking: true,
     agentMode: 'simple',
     moreSuggest: false,
-    maxLoopCount: 10
+    maxLoopCount: 10,
+    availableSubAgentIds: []
   })
   const userConfigOverrides = ref({})
 
@@ -23,6 +24,10 @@ export const useChatAgentConfig = ({
 
   const selectAgent = async (agent, forceConfigUpdate = false) => {
     const isAgentChange = !selectedAgent.value || selectedAgent.value.id !== agent?.id
+
+    if (isAgentChange) {
+      userConfigOverrides.value = {}
+    }
 
     // 如果有agent且是切换或强制更新，获取完整详情
     if (agent && (isAgentChange || forceConfigUpdate)) {
@@ -45,7 +50,10 @@ export const useChatAgentConfig = ({
         deepThinking: userConfigOverrides.value.deepThinking !== undefined ? userConfigOverrides.value.deepThinking : agent.deepThinking,
         agentMode: userConfigOverrides.value.agentMode !== undefined ? normalizeAgentMode(userConfigOverrides.value.agentMode) : agentMode,
         moreSuggest: userConfigOverrides.value.moreSuggest !== undefined ? userConfigOverrides.value.moreSuggest : (agent.moreSuggest ?? false),
-        maxLoopCount: userConfigOverrides.value.maxLoopCount !== undefined ? userConfigOverrides.value.maxLoopCount : (agent.maxLoopCount ?? 10)
+        maxLoopCount: userConfigOverrides.value.maxLoopCount !== undefined ? userConfigOverrides.value.maxLoopCount : (agent.maxLoopCount ?? 10),
+        availableSubAgentIds: userConfigOverrides.value.availableSubAgentIds !== undefined
+          ? userConfigOverrides.value.availableSubAgentIds
+          : (agent.availableSubAgentIds ?? [])
       }
       localStorage.setItem('selectedAgentId', agent.id)
     }

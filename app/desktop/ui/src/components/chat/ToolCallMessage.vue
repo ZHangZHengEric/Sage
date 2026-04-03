@@ -1,34 +1,34 @@
 <template>
   <div
-    class="tool-call-message mb-2 cursor-pointer group"
+    class="tool-call-message mb-1 cursor-pointer group"
     @click="handleClick"
   >
-    <div class="flex items-center justify-start p-3 select-none transition-all hover:bg-muted/30 rounded-lg">
-      <div class="header-content flex items-center gap-2 flex-1">
+    <div class="flex items-center justify-start px-2 py-1.5 select-none transition-all hover:bg-muted/30 rounded-md">
+      <div class="header-content flex items-center gap-1.5 flex-1">
         <!-- 工具类型图标 -->
         <span class="type-icon flex items-center justify-center text-indigo-500">
-          <component :is="getToolIcon(toolName)" class="w-4 h-4" />
+          <component :is="getToolIcon(toolName)" class="w-3.5 h-3.5" />
         </span>
         <!-- 工具名称（多语言） -->
-        <span class="header-text text-xs font-medium text-foreground">{{ getToolLabel(toolName, t) }}</span>
+        <span class="header-text text-sm font-medium text-foreground">{{ getToolLabel(toolName, t) }}</span>
         <!-- 状态图标 -->
         <span class="status-icon flex items-center justify-center" :class="statusIconClass">
-          <Check v-if="isCompleted" class="w-4 h-4" />
-          <X v-else-if="isCancelled" class="w-4 h-4" />
-          <Loader2 v-else class="w-4 h-4 animate-spin" />
+          <Check v-if="isCompleted" class="w-3.5 h-3.5" />
+          <X v-else-if="isCancelled" class="w-3.5 h-3.5" />
+          <Loader2 v-else class="w-3.5 h-3.5 animate-spin" />
         </span>
         <!-- 取消/超时提示文本 -->
-        <span v-if="isCancelled" class="text-[10px] text-muted-foreground ml-1">
+        <span v-if="isCancelled" class="text-sm text-muted-foreground ml-1">
           {{ cancelledReason }}
         </span>
         <!-- 跳转箭头 -->
         <div v-if="!isCancelled" class="expand-icon text-muted-foreground transition-transform duration-200 group-hover:translate-x-1" >
-          <ChevronRight class="w-4 h-4" />
+          <ChevronRight class="w-3.5 h-3.5" />
         </div>
         <!-- 时间戳 -->
-        <span class="text-[10px] opacity-60 font-normal ml-2" v-if="timestamp">{{ formatTime(timestamp) }}</span>
+        <span class="text-[10px] opacity-70 font-normal text-muted-foreground/60 ml-1.5" v-if="timestamp">{{ formatTime(timestamp) }}</span>
         <!-- 点击查看详情提示 -->
-        <span v-if="!isCancelled" class="click-hint text-xs text-muted-foreground ml-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100">{{ t('common.viewDetails') }}</span>
+        <span v-if="!isCancelled" class="click-hint text-sm text-muted-foreground ml-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100">{{ t('common.viewDetails') }}</span>
       </div>
     </div>
   </div>

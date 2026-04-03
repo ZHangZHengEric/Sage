@@ -35,7 +35,7 @@
               <button 
                 class="absolute top-3 right-3 z-20 p-1.5 rounded-full bg-muted/50 hover:bg-muted transition-colors"
                 @click.stop="toggleFlip(agent.id)"
-                :title="'查看操作'"
+                :title="t('agent.viewActions')"
               >
                 <MoreHorizontal class="w-4 h-4 text-muted-foreground" />
               </button>
@@ -58,7 +58,7 @@
                       <button
                         @click.stop="copyAgentId(agent.id)"
                         class="text-[10px] font-mono text-muted-foreground/70 bg-muted/40 hover:bg-muted/60 px-1.5 py-0.5 rounded transition-colors cursor-pointer flex items-center gap-1"
-                        title="点击复制完整ID"
+                        :title="t('agent.copyFullId')"
                       >
                         <span class="truncate max-w-[120px]">{{ agent.id }}</span>
                         <Copy class="w-3 h-3" />
@@ -83,7 +83,7 @@
                     class="text-xs font-medium px-2 py-0.5 shrink-0 bg-primary text-primary-foreground"
                   >
                     <Star class="w-3 h-3 mr-1" />
-                    默认
+                    {{ t('agent.defaultModel') }}
                   </Badge>
                   
                   <!-- Mode badge -->
@@ -118,7 +118,7 @@
                   </div>
                   
                   <!-- Click hint -->
-                  <span class="text-xs text-muted-foreground/50">点击查看详情</span>
+                  <span class="text-xs text-muted-foreground/50">{{ t('chat.clickToViewDetails') }}</span>
                 </div>
               </CardFooter>
             </Card>
@@ -134,7 +134,7 @@
               </button>
               
               <CardHeader class="pb-2 pt-4 shrink-0">
-                <CardTitle class="text-sm font-medium text-center">操作</CardTitle>
+                <CardTitle class="text-sm font-medium text-center">{{ t('agent.actions') }}</CardTitle>
               </CardHeader>
 
               <CardContent class="flex-1 flex items-center justify-center py-2 px-3">
@@ -146,7 +146,7 @@
                     @click.stop="handleSetDefault(agent); toggleFlip(agent.id)"
                   >
                     <Star class="w-3.5 h-3.5" />
-                    <span class="truncate">设为默认</span>
+                    <span class="truncate">{{ t('agent.setDefault') }}</span>
                   </Button>
                   
                   <Button 
@@ -155,7 +155,7 @@
                     @click.stop="openUsageModal(agent); toggleFlip(agent.id)"
                   >
                     <FileBraces class="w-3.5 h-3.5" />
-                    <span class="truncate">调用示例</span>
+                    <span class="truncate">{{ t('agent.usageExample') }}</span>
                   </Button>
                   
                   <Button 
@@ -165,7 +165,7 @@
                     @click.stop="handleEditAgent(agent); toggleFlip(agent.id)"
                   >
                     <Edit class="w-3.5 h-3.5" />
-                    <span class="truncate">编辑</span>
+                    <span class="truncate">{{ t('agent.edit') }}</span>
                   </Button>
                   
                   <Button 
@@ -174,7 +174,7 @@
                     @click.stop="handleExport(agent); toggleFlip(agent.id)"
                   >
                     <Upload class="w-3.5 h-3.5" />
-                    <span class="truncate">导出</span>
+                    <span class="truncate">{{ t('agent.export') }}</span>
                   </Button>
                   
                   <Button 
@@ -184,7 +184,7 @@
                     @click.stop="handleDelete(agent); toggleFlip(agent.id)"
                   >
                     <Trash2 class="w-3.5 h-3.5" />
-                    <span class="truncate">删除</span>
+                    <span class="truncate">{{ t('agent.delete') }}</span>
                   </Button>
                 </div>
               </CardContent>
@@ -237,10 +237,10 @@
       <DialogContent class="sm:max-w-[80vw] overflow-hidden">
         <DialogHeader>
           <DialogTitle>
-            {{ usageAgent?.name ? `调用示例 - ${usageAgent.name}` : '调用示例' }}
+            {{ usageAgent?.name ? t('agent.usageExampleTitleWithName').replace('{name}', usageAgent.name) : t('agent.usageExample') }}
           </DialogTitle>
           <DialogDescription>
-            不同的会话要替换 session_id 为不同值。system_context 根据真实值替换
+            {{ t('agent.usageExampleDescription') }}
           </DialogDescription>
         </DialogHeader>
 
@@ -378,7 +378,7 @@ const showAuthModal = ref(false)
 const authAgentId = ref('')
 
 // Composables
-const { t } = useLanguage()
+const { t, isZhCN } = useLanguage()
 const route = useRoute()
 const currentUser = ref(getCurrentUser())
 const agentEditStore = useAgentEditStore()
@@ -484,8 +484,8 @@ const loadAgents = async () => {
       agents.value = []
     }
   } catch (err) {
-    console.error('加载agents失败:', err)
-    error.value = err.message || '加载失败'
+    console.error('Failed to load agents:', err)
+    error.value = err.message || t('common.error')
   } finally {
     loading.value = false
   }
@@ -505,7 +505,7 @@ const saveAgent = async (agentData) => {
     await loadAgents()
     return result
   } catch (err) {
-    console.error('保存agent失败:', err)
+    console.error('Failed to save agent:', err)
     throw err
   }
 }
@@ -516,7 +516,7 @@ const removeAgent = async (agentId) => {
     // 重新加载列表
     await loadAgents()
   } catch (err) {
-    console.error('删除agent失败:', err)
+    console.error('Failed to delete agent:', err)
     throw err
   }
 }
@@ -524,18 +524,18 @@ const removeAgent = async (agentId) => {
 const handleSetDefault = async (agent) => {
   try {
     await agentAPI.setDefaultAgent(agent.id)
-    toast.success(`Agent '${agent.name}' 已设为默认`)
+    toast.success(t('agent.setDefaultSuccess').replace('{name}', agent.name))
     // 重新加载列表以更新状态
     await loadAgents()
   } catch (err) {
-    console.error('设置默认 Agent 失败:', err)
-    toast.error('设置默认 Agent 失败: ' + (err.message || '未知错误'))
+    console.error('Failed to set default agent:', err)
+    toast.error(t('agent.setDefaultError') + (err.message ? `: ${err.message}` : ''))
   }
 }
 
 const handleDelete = async (agent) => {
   if (agent.is_default) {
-    alert('默认 Agent 不能删除')
+    alert(t('agent.defaultCannotDelete'))
     return
   }
 
@@ -561,7 +561,7 @@ const confirmDelete = async () => {
     deleteConfirmName.value = ''
     deleteConfirmNameError.value = false
   } catch (error) {
-    console.error('删除agent失败:', error)
+    console.error('Failed to delete agent:', error)
     toast.error(t('agent.deleteError'))
   }
 }
@@ -638,7 +638,7 @@ const confirmExport = async () => {
           targetPath = await join(filePath, exportFileName)
         }
         await writeTextFile(targetPath, dataStr)
-        toast.success(t('agent.exportSuccess') || '导出成功')
+        toast.success(t('agent.exportSuccess'))
         showExportDialog.value = false
         agentToExport.value = null
       }
@@ -653,7 +653,7 @@ const confirmExport = async () => {
       } else {
         errorMsg = JSON.stringify(e)
       }
-      toast.error((t('agent.saveError') || '保存失败') + (errorMsg ? `: ${errorMsg}` : ''))
+      toast.error(t('agent.saveError') + (errorMsg ? `: ${errorMsg}` : ''))
       return
     }
   }
@@ -764,8 +764,7 @@ const handleBlankConfig = async (selectedTools = []) => {
 
   let systemPrefix = ''
   try {
-    // 强制使用中文模板
-    const response = await agentAPI.getDefaultSystemPrompt('zh')
+    const response = await agentAPI.getDefaultSystemPrompt(isZhCN.value ? 'zh' : 'en')
     if (response && response.data && response.data.content) {
       systemPrefix = response.data.content
     } else if (response && response.content) {
@@ -893,12 +892,12 @@ const getAgentModeIcon = (mode) => {
 // 获取Agent模式提示文字
 const getAgentModeTooltip = (mode) => {
   const tooltipMap = {
-    'fibre': 'Fibre 模式 - 复杂任务规划',
-    'simple': '简单模式 - 直接响应',
-    'multi': '多智能体模式',
-    'auto': '自动模式'
+    'fibre': t('agent.modeFibre'),
+    'simple': t('agent.modeSimple'),
+    'multi': t('agent.modeMulti'),
+    'auto': t('agent.modeAuto')
   }
-  return tooltipMap[mode] || '自动模式'
+  return tooltipMap[mode] || t('agent.modeAuto')
 }
 
 // 获取Agent模式标签文字
@@ -937,9 +936,9 @@ const copyAgentId = async (agentId) => {
   try {
     // 使用 Web Clipboard API（Tauri 也支持）
     await navigator.clipboard.writeText(agentId)
-    toast.success('Agent ID 已复制到剪贴板')
+    toast.success(t('agent.copyIdSuccess'))
   } catch (error) {
-    console.error('复制失败:', error)
+    console.error('Failed to copy agent id:', error)
     // 降级方案：使用传统方法
     const textarea = document.createElement('textarea')
     textarea.value = agentId
@@ -949,31 +948,16 @@ const copyAgentId = async (agentId) => {
     textarea.select()
     try {
       document.execCommand('copy')
-      toast.success('Agent ID 已复制到剪贴板')
+      toast.success(t('agent.copyIdSuccess'))
     } catch (e) {
-      toast.error('复制失败，请手动复制')
+      toast.error(t('agent.copyIdFailed'))
     }
     document.body.removeChild(textarea)
   }
 }
 
-// 有趣的默认占位介绍
 const getRandomPlaceholder = (agentName) => {
-  const placeholders = [
-    `我是${agentName}，一个神秘的AI助手，正在等待被赋予使命...`,
-    `${agentName}已就绪，随时准备为你效劳。不过我还需要一些配置才能发挥全力！`,
-    `你好，我是${agentName}。我的创造者似乎忘了给我写介绍，但我依然很乐意帮助你。`,
-    `${agentName}在这里！虽然我的简介是空白的，但我的能力可不是。`,
-    `一个尚未被完全定义的Agent——${agentName}，正在等待它的故事被书写。`,
-    `我是${agentName}，就像一张白纸，等待被涂上色彩。你想让我成为什么样的助手？`,
-    `${agentName}：简介加载中... 实际上并没有，但我依然很能干！`,
-    `这里应该有一段关于${agentName}的精彩介绍，但显然创作者太懒了。`,
-    `${agentName}，一个低调但有实力的AI助手。（简介待补充）`,
-    `我是${agentName}，我的简介去度假了，但我还在这里为你工作！`
-  ]
-  // 使用 agentName 的字符编码来选择一个固定的占位符
-  const index = agentName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % placeholders.length
-  return placeholders[index]
+  return t('agent.placeholderDescription').replace('{name}', agentName)
 }
 
 const handleSmartConfig = async (description, selectedTools = [], callbacks = {}) => {
@@ -1016,12 +1000,12 @@ const handleSmartConfig = async (description, selectedTools = [], callbacks = {}
 
     // 处理超时错误
     if (error.name === 'AbortError') {
-      throw new Error(`请求超时（耗时${Math.round(duration / 1000)}秒），Agent配置生成需要较长时间，请稍后重试`)
+      throw new Error(t('agent.smartConfigTimeout').replace('{seconds}', String(Math.round(duration / 1000))))
     }
 
     // 处理网络错误
     if (error.name === 'TypeError' && error.message.includes('fetch')) {
-      throw new Error(`网络连接错误（耗时${Math.round(duration / 1000)}秒），请检查网络连接后重试`)
+      throw new Error(t('agent.smartConfigNetworkError').replace('{seconds}', String(Math.round(duration / 1000))))
     }
 
     callbacks.onError && callbacks.onError(error)
@@ -1037,8 +1021,8 @@ const openUsageModal = async (agent) => {
     usageActiveTab.value = 'curl'
     showUsageModal.value = true
   } catch (e) {
-    console.error('生成调用示例失败:', e)
-    toast.error('生成调用示例失败')
+    console.error('Failed to generate usage example:', e)
+    toast.error(t('agent.usageExampleGenerateError'))
   }
 }
 
@@ -1049,7 +1033,7 @@ const backendEndpoint = (
 const generateUsageCodes = (agent) => {
   const body = {
     messages: [
-      { role: 'user', content: '你好，请帮我处理一个任务' }
+      { role: 'user', content: t('agent.usageExamplePrompt') }
     ],
     session_id: 'demo-session',
     agent_id: agent.id,
