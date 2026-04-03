@@ -907,8 +907,20 @@ def resolve_workspace_file_path(workspace_path: str | Path, file_path: str) -> s
         )
 
     workspace_str = os.fspath(workspace_path)
-    full_file_path = os.path.join(workspace_str, file_path)
     workspace_abs = os.path.normcase(os.path.abspath(workspace_str))
+    normalized_file_path = os.fspath(file_path).strip()
+
+    # 兼容聊天中引用的“沙箱内绝对路径”。
+    # 工作空间面板传的是相对路径；消息里引用的文件有时会是绝对路径。
+    # 如果这里一律 os.path.join(workspace, file_path)，绝对路径在被前端去掉首个 `/`
+    # 后会变成类似 `app/agents/...`，最终被重复拼接成：
+    #   <workspace>/app/agents/.../agent_xxx/file
+    # 从而触发“文件不存在”。
+    if os.path.isabs(normalized_file_path):
+        full_file_path = normalized_file_path
+    else:
+        full_file_path = os.path.join(workspace_str, normalized_file_path)
+
     full_file_abs = os.path.normcase(os.path.abspath(full_file_path))
 
     try:
@@ -924,8 +936,8 @@ def resolve_workspace_file_path(workspace_path: str | Path, file_path: str) -> s
 
     if not os.path.exists(full_file_abs):
         raise SageHTTPException(
-            detail=f"文件不存在: {file_path}",
-            error_detail=f"File not found: {file_path}",
+            detail=f"文件不存在: {normalized_file_path}",
+            error_detail=f"File not found: {normalized_file_path}",
         )
 
     return full_file_abs
