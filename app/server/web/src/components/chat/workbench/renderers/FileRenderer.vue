@@ -34,17 +34,17 @@
         >
           <Copy v-if="!copied" class="w-4 h-4 mr-1" />
           <Check v-else class="w-4 h-4 mr-1 text-green-500" />
-          {{ copied ? '已复制' : '复制' }}
+          {{ copied ? (t('common.copied') || '已复制') : t('common.copy') }}
         </Button>
         <Button 
           variant="ghost" 
           size="sm"
           @click="openFile"
           class="h-7 px-2"
-          title="下载文件"
+          :title="t('workspace.download')"
         >
           <Download class="w-4 h-4 mr-1" />
-          下载
+          {{ t('workspace.download') }}
         </Button>
       </div>
     </div>
@@ -54,7 +54,7 @@
       <!-- 加载中 -->
       <div v-if="loading" class="flex items-center justify-center h-full">
         <Loader2 class="w-6 h-6 animate-spin text-primary" />
-        <span class="ml-2 text-sm text-muted-foreground">加载中...</span>
+        <span class="ml-2 text-sm text-muted-foreground">{{ t('common.loading') }}</span>
       </div>
 
       <!-- 错误 -->
@@ -68,7 +68,7 @@
           class="mt-3"
         >
           <RefreshCw class="w-4 h-4 mr-1" />
-          重试
+          {{ t('common.retry') || '重试' }}
         </Button>
       </div>
 
@@ -220,12 +220,12 @@ const isDark = computed(() => themeStore.isDark)
 // ItemHeader 相关信息
 const roleLabel = computed(() => {
   const roleMap = {
-    'assistant': 'AI',
-    'user': '用户',
-    'system': '系统',
-    'tool': '工具'
+    'assistant': t('workbench.tool.role.ai'),
+    'user': t('workbench.tool.role.user'),
+    'system': t('workbench.tool.role.system'),
+    'tool': t('workbench.tool.role.tool')
   }
-  return roleMap[props.item?.role] || 'AI'
+  return roleMap[props.item?.role] || t('workbench.tool.role.ai')
 })
 
 const roleColor = computed(() => {
