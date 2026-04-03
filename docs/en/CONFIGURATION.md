@@ -94,13 +94,13 @@ You can ignore this entire section until you enable login, external auth provide
 Supported deployment modes are intentionally narrowed to three values:
 
 - `SAGE_AUTH_MODE=trusted_proxy`
-  Use a trusted identity proxy mode. Sage still exposes built-in local username/password login, but only for administrators. If a trusted proxy passes `X-Sage-Internal-UserId`, Sage writes that passthrough user into request context with the `admin` role by default. This mode therefore assumes the upstream proxy is secure and fully trusted.
+  Use a trusted identity proxy mode. Sage still exposes built-in local username/password login, but only for administrators. Regular business-user identity is expected to come from an upstream system and be passed through Sage by a trusted proxy.
 - `SAGE_AUTH_MODE=oauth`
   Use upstream OAuth/OIDC login for Sage itself. Configure providers through `SAGE_AUTH_PROVIDERS`.
 - `SAGE_AUTH_MODE=native`
   Use Sage's built-in username/password authentication for local password login. This is an auth mode name, not a local-development flag.
 
-`SAGE_TRUSTED_IDENTITY_PROXY_IPS` accepts a comma-separated list of proxy source IPs or CIDR ranges. Its only job is to decide whether a request source can be treated as a trusted identity proxy. Sage accepts the optional `X-Sage-Internal-UserId` passthrough header only when the caller IP matches this allowlist, and then uses it as request user context: the default role is `admin` in `trusted_proxy` mode and `user` in other modes. 
+`SAGE_TRUSTED_IDENTITY_PROXY_IPS` accepts a comma-separated list of proxy source IPs or CIDR ranges. Its only job is to decide whether a request source can be treated as a trusted identity proxy. Sage accepts the optional `X-Sage-Internal-UserId` passthrough header only when the caller IP matches this allowlist, and then uses it as request user context with the default role `user`.
 
 Sage keeps CORS configurable with safe defaults:
 

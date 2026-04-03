@@ -73,13 +73,13 @@ ref: configuration
 当前支持的部署模式先收敛为三种：
 
 - `SAGE_AUTH_MODE=trusted_proxy`
-  使用受信任代理接入模式。Sage 仍保留本地用户名密码登录，但只允许管理员登录；如果请求来自受信任代理并透传了 `X-Sage-Internal-UserId`，该用户会默认以 `admin` 角色写入请求上下文。因此这一模式要求业务侧确保上游代理的安全性和可信度。
+  使用受信任代理接入模式。Sage 仍保留本地用户名密码登录，但只允许管理员登录；普通业务用户通常由上游系统完成认证，再通过受信任代理把身份透传给 Sage。
 - `SAGE_AUTH_MODE=oauth`
   Sage 自身走上游 OAuth/OIDC 登录。通过 `SAGE_AUTH_PROVIDERS` 配置 OIDC provider。
 - `SAGE_AUTH_MODE=native`
   使用 Sage 原生的用户名密码认证，支持本地密码登录。这里的 `native` 表示认证方式，不是“本地开发环境”。
 
-`SAGE_TRUSTED_IDENTITY_PROXY_IPS` 支持逗号分隔的 IP 或 CIDR 白名单。它的作用是校验请求来源是否可以被视为受信任身份代理。只有来源命中该白名单时，Sage 才会接受可选的 `X-Sage-Internal-UserId` 并写入请求上下文：在 `trusted_proxy` 模式下默认角色是 `admin`，其他模式下默认角色是 `user`。
+`SAGE_TRUSTED_IDENTITY_PROXY_IPS` 支持逗号分隔的 IP 或 CIDR 白名单。它的作用是校验请求来源是否可以被视为受信任身份代理。只有来源命中该白名单时，Sage 才会接受可选的 `X-Sage-Internal-UserId` 并写入请求上下文，默认角色是 `user`。
 
 Sage 现在把主要 CORS 维度都开放成可配置项，并保留默认值：
 
