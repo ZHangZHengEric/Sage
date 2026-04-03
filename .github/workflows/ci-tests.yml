@@ -60,5 +60,8 @@ jobs:
       - name: Install Web Dependencies
         run: npm ci
 
+      - name: Check Frontend I18n Literals
+        run: npm run check:i18n
+
       - name: Run Vitest
         run: npm test -- --run
