@@ -2,6 +2,8 @@
 Conversation shared service-layer entry points for server and desktop routers.
 """
 
+from collections import Counter
+from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
@@ -13,6 +15,7 @@ from sagents.session_runtime import (
 
 from common.core import config
 from common.core.exceptions import SageHTTPException
+from common.models.base import get_local_now
 from common.models.conversation import Conversation, ConversationDao
 from common.services.chat_processor import ContentProcessor
 
@@ -191,3 +194,43 @@ async def update_server_conversation_title(
             error_detail=f"Conversation '{session_id}' not found",
         )
     return {"session_id": session_id, "title": title}
+
+
+async def get_agent_usage_stats(
+    *,
+    days: int,
+    user_id: Optional[str] = None,
+) -> Dict[str, int]:
+    safe_days = max(1, min(int(days or 1), 365))
+    updated_after = get_local_now() - timedelta(days=safe_days)
+    conversations = await ConversationDao().get_recent_conversations(
+        user_id=user_id,
+        updated_after=updated_after,
+    )
+
+    usage_counter: Counter[str] = Counter()
+    for conversation in conversations:
+        messages = conversation.messages or []
+        if isinstance(messages, str):
+            try:
+                import json
+                messages = json.loads(messages)
+            except Exception:
+                messages = []
+
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            tool_calls = message.get("tool_calls") or []
+            if not isinstance(tool_calls, list):
+                continue
+
+            for tool_call in tool_calls:
+                if not isinstance(tool_call, dict):
+                    continue
+                function = tool_call.get("function") or {}
+                tool_name = function.get("name")
+                if tool_name:
+                    usage_counter[str(tool_name)] += 1
+
+    return dict(usage_counter)

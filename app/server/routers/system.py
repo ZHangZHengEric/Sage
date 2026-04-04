@@ -3,8 +3,13 @@ import time
 from fastapi import APIRouter, Request
 
 from common.core.render import Response
+from common.services import conversation_service
 from common.services.oauth.upstream import get_auth_public_config
-from common.schemas.base import BaseResponse, SystemSettingsRequest
+from common.schemas.base import (
+    AgentUsageStatsRequest,
+    BaseResponse,
+    SystemSettingsRequest,
+)
 from common.models.system import SystemInfoDao
 
 # 创建路由器
@@ -45,4 +50,18 @@ async def health_check():
             "timestamp": time.time(),
             "service": "SagePlatform",
         },
+    )
+
+
+@system_router.post("/system/agent/usage-stats")
+async def get_agent_usage_stats(request: Request, req: AgentUsageStatsRequest):
+    claims = getattr(request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    usage = await conversation_service.get_agent_usage_stats(
+        days=req.days,
+        user_id=user_id,
+    )
+    return await Response.succ(
+        data={"usage": usage},
+        message="获取 Agent 使用统计成功",
     )

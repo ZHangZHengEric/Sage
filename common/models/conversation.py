@@ -108,6 +108,26 @@ class ConversationDao(BaseDao):
     async def get_by_session_id(self, session_id: str) -> Optional[Conversation]:
         return await BaseDao.get_by_id(self, Conversation, session_id)
 
+    async def get_recent_conversations(
+        self,
+        *,
+        user_id: Optional[str] = None,
+        updated_after: Optional[datetime] = None,
+        agent_id: Optional[str] = None,
+    ) -> List[Conversation]:
+        db = await self._get_db()
+        async with db.get_session() as session:  # type: ignore[attr-defined]
+            stmt = select(Conversation)
+            if user_id:
+                stmt = stmt.where(Conversation.user_id == user_id)
+            if updated_after:
+                stmt = stmt.where(Conversation.updated_at >= updated_after)
+            if agent_id:
+                stmt = stmt.where(Conversation.agent_id == agent_id)
+            stmt = stmt.order_by(Conversation.updated_at.desc())
+            res = await session.execute(stmt)
+            return list(res.scalars().all())
+
     async def get_conversations_paginated(
         self,
         page: int = 1,
@@ -215,5 +235,4 @@ class ConversationDao(BaseDao):
             agent_id=agent_id,
             sort_by=sort_by,
         )
-
 

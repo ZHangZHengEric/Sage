@@ -204,7 +204,32 @@
                 </FormItem>
               </div>
 
-              <!-- Row 3: Model Provider -->
+            </div>
+          </section>
+
+          <!-- Model Provider Section -->
+          <section id="model" class="scroll-mt-6">
+            <div class="flex items-center gap-2 mb-5">
+              <div class="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Server class="h-4 w-4 text-primary" />
+              </div>
+              <div class="flex items-center gap-2">
+                <h2 class="text-base font-semibold">{{ t('agent.modelProvider') }}</h2>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <button class="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-xs hover:bg-muted/80 transition-colors">
+                        ?
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p class="text-xs">{{ t('agentEdit.modelTooltip') }}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+            </div>
+            <div class="pl-10 space-y-6">
               <FormItem :label="t('agent.modelProvider')">
                 <Select v-model="llmProviderSelectValue">
                   <SelectTrigger class="h-10">
@@ -215,9 +240,7 @@
                       <div class="flex items-center gap-2">
                         <span>{{ provider.name }} ({{ provider.model }})</span>
                         <div class="flex items-center gap-1 ml-2">
-                          <!-- 文本输入图标 (默认) -->
                           <span class="inline-flex items-center justify-center w-4 h-4 text-[10px] font-medium bg-primary/10 text-primary rounded">T</span>
-                          <!-- 多模态图像图标 -->
                           <ImageIcon v-if="provider.supports_multimodal" class="w-4 h-4 text-primary" />
                         </div>
                       </div>
@@ -226,11 +249,10 @@
                 </Select>
               </FormItem>
 
-              <!-- Row 3.5: Enable Multimodal -->
               <FormItem :label="t('agentEdit.enableMultimodal')">
                 <div class="flex items-center h-10 gap-3 border rounded-md px-3 bg-background">
-                  <Switch 
-                    :checked="store.formData.enableMultimodal" 
+                  <Switch
+                    :checked="store.formData.enableMultimodal"
                     @update:checked="(v) => store.formData.enableMultimodal = v"
                     :disabled="!selectedProviderSupportsMultimodal"
                   />
@@ -240,9 +262,21 @@
                   </span>
                 </div>
               </FormItem>
+            </div>
+          </section>
 
-              <!-- Row 4: Sub Agent Selection (Only for Fibre Mode) -->
-              <FormItem v-if="store.formData.agentMode === 'fibre'" :label="t('agentEdit.subAgents')" class="pt-4 border-t">
+          <!-- Sub Agent Section -->
+          <section id="subAgents" class="scroll-mt-6" v-if="store.formData.agentMode === 'fibre'">
+            <div class="flex items-center gap-2 mb-5">
+              <div class="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Bot class="h-4 w-4 text-primary" />
+              </div>
+              <div class="flex items-center gap-2">
+                <h2 class="text-base font-semibold">{{ t('agentEdit.subAgents') }}</h2>
+              </div>
+            </div>
+            <div class="pl-10">
+              <FormItem :label="t('agentEdit.subAgents')">
                 <div class="border rounded-lg overflow-hidden bg-background">
                   <div class="px-3 py-2 border-b bg-muted/30 flex items-center justify-between">
                     <span class="text-xs font-medium text-muted-foreground">{{ t('agentEdit.availableSubAgents') }} ({{ filteredAgents.length }})</span>
@@ -264,12 +298,12 @@
                           :key="agent.id"
                           type="button"
                           class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm transition-all duration-200 border"
-                          :class="isSubAgentSelected(agent.id) 
-                            ? 'bg-primary/10 border-primary/40 text-primary hover:bg-primary/20' 
+                          :class="isSubAgentSelected(agent.id)
+                            ? 'bg-primary/10 border-primary/40 text-primary hover:bg-primary/20'
                             : 'bg-muted/30 border-muted hover:bg-muted/50 hover:border-muted-foreground/30'"
                           @click="toggleSubAgent(agent.id, !isSubAgentSelected(agent.id))"
                         >
-                          <span 
+                          <span
                             class="w-2 h-2 rounded-full"
                             :class="isSubAgentSelected(agent.id) ? 'bg-green-500' : 'bg-gray-400'"
                           ></span>
@@ -774,15 +808,24 @@ const agentSkills = ref([])
 const loadingAgentSkills = ref(false)
 
 // Navigation sections
-const sections = [
-  { id: 'basic', label: t('agent.basicInfo'), icon: User },
-  { id: 'strategy', label: t('agent.strategy'), icon: Cpu },
-  { id: 'tools', label: t('agent.availableTools'), icon: Wrench },
-  { id: 'skills', label: t('agent.availableSkills'), icon: Bot },
-  { id: 'knowledgeBases', label: t('agent.availableKnowledgeBases'), icon: Database },
-  { id: 'context', label: t('agent.systemContext'), icon: FileText },
-  { id: 'workflows', label: t('agent.workflows'), icon: Workflow },
-]
+const sections = computed(() => {
+  const items = [
+    { id: 'basic', label: t('agent.basicInfo'), icon: User },
+    { id: 'strategy', label: t('agent.strategy'), icon: Cpu },
+    { id: 'model', label: t('agent.modelProvider'), icon: Server },
+    { id: 'tools', label: t('agent.availableTools'), icon: Wrench },
+    { id: 'skills', label: t('agent.availableSkills'), icon: Bot },
+    { id: 'knowledgeBases', label: t('agent.availableKnowledgeBases'), icon: Database },
+    { id: 'context', label: t('agent.systemContext'), icon: FileText },
+    { id: 'workflows', label: t('agent.workflows'), icon: Workflow },
+  ]
+
+  if (store.formData.agentMode === 'fibre') {
+    items.splice(3, 0, { id: 'subAgents', label: t('agentEdit.subAgents'), icon: Bot })
+  }
+
+  return items
+})
 
 const isEditMode = computed(() => !!store.formData.id)
 
@@ -804,7 +847,7 @@ const handleScroll = () => {
   if (!contentRef.value) return
   
   const scrollTop = contentRef.value.scrollTop
-  const sectionElements = sections.map(s => ({
+  const sectionElements = sections.value.map(s => ({
     id: s.id,
     element: document.getElementById(s.id)
   })).filter(s => s.element)
