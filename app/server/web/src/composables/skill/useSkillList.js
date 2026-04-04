@@ -1,4 +1,4 @@
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { skillAPI } from '../../api/skill.js'
 import { agentAPI } from '../../api/agent.js'
 import { getCurrentUser } from '../../utils/auth.js'
@@ -60,6 +60,12 @@ export function useSkillList(t) {
     const groups = {}
     skills.value
       .filter(s => s.dimension === 'agent')
+      .filter(skill => {
+        if (!searchTerm.value.trim()) return true
+        const query = searchTerm.value.toLowerCase()
+        return skill.name.toLowerCase().includes(query) ||
+          (skill.description && skill.description.toLowerCase().includes(query))
+      })
       .forEach(skill => {
         const agentId = skill.agent_id || 'unknown'
         // 优先使用agent列表中的名称，其次使用skill中的agent_name，最后使用agentId
@@ -76,9 +82,13 @@ export function useSkillList(t) {
     return Object.values(groups)
   })
 
-  // Displayed skills with search filtering only (dimension filtering is done by backend)
+  // Displayed skills filtered by current dimension and search term.
   const displayedSkills = computed(() => {
     let result = skills.value
+
+    if (selectedDimension.value && selectedDimension.value !== 'all') {
+      result = result.filter(skill => skill.dimension === selectedDimension.value)
+    }
 
     // Search filtering (client-side)
     if (searchTerm.value.trim()) {
@@ -161,15 +171,10 @@ export function useSkillList(t) {
   const loadSkills = async () => {
     try {
       loading.value = true
-      // 同时加载skills和agents
-      const params = {}
-      if (selectedDimension.value && selectedDimension.value !== 'all') {
-        params.dimension = selectedDimension.value
-      }
 
       // 并行请求skills和agents
       const [skillsResponse, agentsResponse] = await Promise.all([
-        skillAPI.getSkills(params),
+        skillAPI.getSkills(),
         agentAPI.getAgents().catch(() => []) // 如果获取agents失败，返回空数组
       ])
 
@@ -327,11 +332,6 @@ export function useSkillList(t) {
       deleting.value = false
     }
   }
-
-  // Watch for dimension changes and reload skills
-  watch(selectedDimension, () => {
-    loadSkills()
-  })
 
   onMounted(async () => {
     const user = await getCurrentUser()

@@ -508,11 +508,6 @@ const excalidrawHeight = ref(600)
 const excalidrawSvg = ref('')
 const excalidrawData = ref(null)
 
-// Excalidraw 背景色 - 根据主题动态变化
-const excalidrawBgColor = computed(() => {
-  return isDark.value ? '#1e1e1e' : '#ffffff'
-})
-
 // 生成 Excalidraw SVG
 const generateExcalidrawSvg = (data) => {
   if (!data.elements || !Array.isArray(data.elements)) return ''
@@ -717,8 +712,7 @@ const loadContent = async () => {
           elements: data.elements || [],
           appState: {
             ...data.appState,
-            viewBackgroundColor: isDark.value ? '#1e1e1e' : (data.appState?.viewBackgroundColor || '#ffffff'),
-            theme: isDark.value ? 'dark' : 'light',
+            viewBackgroundColor: data.appState?.viewBackgroundColor || '#ffffff',
             // 限制画布尺寸
             width: Math.min(contentWidth, maxCanvasSize),
             height: Math.min(contentHeight, maxCanvasSize),
