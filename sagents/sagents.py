@@ -227,7 +227,11 @@ class SAgent:
                             logger.info(f"SAgent: 会话首个可显示内容耗时 {delta_ms} ms")
                     except Exception as e:
                         logger.error(f"SAgent: 统计首个content耗时出错: {e}\n{traceback.format_exc()}")
-                if message_chunk.content or message_chunk.tool_calls or message_chunk.type == MessageType.TOKEN_USAGE.value:
+                if (
+                    message_chunk.content
+                    or message_chunk.tool_calls
+                    or message_chunk.matches_message_types([MessageType.TOKEN_USAGE.value])
+                ):
                     yield [message_chunk]
 
         total_ms = int((time.time() - start_time) * 1000)

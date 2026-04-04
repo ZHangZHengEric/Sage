@@ -115,7 +115,7 @@ class ContextBudgetManager:
         """按对话轮次分组（私有辅助方法）"""
         chat_list = []
         for msg in messages:
-            if msg.role == MessageRole.USER.value and msg.type == MessageType.NORMAL.value:
+            if msg.is_user_input_message():
                 chat_list.append([msg])
             elif msg.role != MessageRole.USER.value:
                 if chat_list:
@@ -231,4 +231,3 @@ class ContextBudgetManager:
             'history_tokens': history_tokens,
             'active_tokens': active_tokens
         }
-

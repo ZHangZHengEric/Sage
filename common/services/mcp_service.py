@@ -94,7 +94,23 @@ async def add_mcp_server(
 
 async def list_mcp_servers(user_id: Optional[str] = None) -> List[MCPServer]:
     dao = MCPServerDao()
-    return await dao.get_list(user_id if _get_cfg().app_mode == "server" else None)
+    return await dao.get_list(user_id)
+
+
+def serialize_mcp_server(server: MCPServer) -> Dict[str, Any]:
+    config = server.config or {}
+    return {
+        "name": server.name,
+        "protocol": config.get("protocol"),
+        "disabled": config.get("disabled", False),
+        "streamable_http_url": config.get("streamable_http_url"),
+        "sse_url": config.get("sse_url"),
+        "api_key": config.get("api_key"),
+        "command": config.get("command"),
+        "args": config.get("args"),
+        "env": config.get("env"),
+        "user_id": server.user_id,
+    }
 
 
 async def remove_mcp_server(
@@ -153,7 +169,7 @@ async def reload_all_mcp_tools() -> None:
             logger.error(f"[MCP Reload] 注册 MCP Server 异常: {server.name}, {e}")
 
 
-async def toggle_mcp_server(server_name: str) -> tuple[bool, str]:
+async def toggle_mcp_server(server_name: str, user_id: Optional[str] = None) -> tuple[bool, str]:
     dao = MCPServerDao()
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
@@ -167,7 +183,7 @@ async def toggle_mcp_server(server_name: str) -> tuple[bool, str]:
     server_config = existing_server.config
     new_disabled = not server_config.get("disabled", False)
     server_config["disabled"] = new_disabled
-    await dao.save_mcp_server(server_name, server_config)
+    await dao.save_mcp_server(server_name, server_config, user_id=user_id)
 
     if _get_cfg().app_mode == "desktop":
         await reload_all_mcp_tools()

@@ -333,6 +333,7 @@ import {
   buildExecutionDisplayItems,
   normalizeChatMessages
 } from '@/utils/chatDisplayItems.js'
+import { isTokenUsageMessage } from '@/utils/messageLabels.js'
 
 const props = defineProps({
   selectedConversation: {
@@ -433,7 +434,7 @@ const recentDeliveryContextMessages = computed(() => {
   return deliveryItems.flatMap((item) => {
     if (item.type === 'message') {
       const message = item.message
-      if (!message || message.type === 'token_usage' || message.message_type === 'token_usage') {
+      if (!message || isTokenUsageMessage(message)) {
         return []
       }
 
@@ -467,15 +468,19 @@ const renderDisplayItems = computed(() => {
     return displayItems.value
   }
 
-  let hasShownAssistantAvatar = false
+  let shouldShowAssistantAvatarForNextAssistant = true
   const rendered = []
 
   displayItems.value.forEach((item, index) => {
     const normalizedItem = (() => {
       if (item.type !== 'message') return item
+      if (item.message?.role === 'user') {
+        shouldShowAssistantAvatarForNextAssistant = true
+        return item
+      }
       if (item.message?.role !== 'assistant') return item
-      if (!hasShownAssistantAvatar) {
-        hasShownAssistantAvatar = true
+      if (shouldShowAssistantAvatarForNextAssistant) {
+        shouldShowAssistantAvatarForNextAssistant = false
         return { ...item, hideAssistantAvatar: false }
       }
       return { ...item, hideAssistantAvatar: true }

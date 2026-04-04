@@ -179,7 +179,7 @@ const params = [
   { name: 'messages', type: 'Array<Object>', required: true, desc: '历史消息数组，至少包含一条用户消息', children: [
     { name: 'role', type: 'string', required: true, desc: '用户消息填写为 "user"' },
     { name: 'content', type: 'string', required: true, desc: '消息文本内容' },
-    { name: 'message_type', type: 'string', required: false, desc: '可选类型标识' }
+    { name: 'message_type', type: 'string', required: false, desc: '可选消息类型。用户普通输入建议使用 user_input；省略时系统会按 role 自动归一化' }
   ] },
   { name: 'session_id', type: 'string', required: true, desc: '会话唯一标识，需为不同对话设置不同值' },
   { name: 'agent_id', type: 'string', required: true, desc: 'Agent唯一标识' },
@@ -194,8 +194,8 @@ const exampleBody = {
 }
 
 const responseParams = [
-  { name: 'type', type: 'enum', required: true, desc: '消息类型，如 do_subtask_result、token_usage、stream_end ，具体枚举类型请参考消息类型 type 含义' },
-  { name: 'message_type', type: 'string', required: false, desc: '消息类型，通常与 type 相同. 兼容字段' },
+  { name: 'type', type: 'enum', required: true, desc: '消息类型，例如 user_input、assistant_text、do_subtask_result、token_usage、stream_end' },
+  { name: 'message_type', type: 'string', required: false, desc: '兼容字段，通常与 type 相同；历史数据可能仍出现旧类型值' },
   { name: 'role', type: '"user" | "assistant" | "tool"', required: false, desc: '角色标识，流式事件如 stream_end 不携带' },
   { name: 'message_id', type: 'string', required: false, desc: '消息唯一ID' },
   { name: 'timestamp', type: 'number', required: true, desc: '时间戳（秒）' },
@@ -253,5 +253,4 @@ const scrollTo = (id) => {
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 </script>
-
 

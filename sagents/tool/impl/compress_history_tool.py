@@ -208,8 +208,7 @@ class CompressHistoryTool:
         user_indices = [
             i for i, msg in enumerate(messages)
             if i >= system_end and
-            msg.role == MessageRole.USER.value and
-            msg.type == MessageType.NORMAL.value
+            msg.is_user_input_message()
         ]
 
         if len(user_indices) == 0:

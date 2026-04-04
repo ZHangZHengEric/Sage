@@ -48,6 +48,7 @@ from common.core.context import get_request_id
 from common.core.exceptions import register_exception_handlers
 from common.core.middleware import register_cors_middleware, register_request_logging_middleware
 from common.utils.logging import init_logging_base
+from .user_context import get_desktop_user_claims
 from .lifecycle import (
     cleanup_system,
     initialize_system,
@@ -89,6 +90,11 @@ def create_fastapi_app() -> FastAPI:
     # 注册中间件
     register_cors_middleware(app)
     register_request_logging_middleware(app)
+
+    @app.middleware("http")
+    async def inject_desktop_user_context(request, call_next):
+        request.state.user_claims = get_desktop_user_claims()
+        return await call_next(request)
 
     # 注册异常处理器
     register_exception_handlers(app)

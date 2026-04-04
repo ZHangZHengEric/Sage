@@ -258,7 +258,7 @@ class PlanAgent(AgentBase):
             recent_turns=6,
             last_turn_user_only=False,
             allowed_message_types=[
-                MessageType.NORMAL.value,
+                MessageType.ASSISTANT_TEXT.value,
                 MessageType.FINAL_ANSWER.value,
                 MessageType.TOOL_CALL.value,
                 MessageType.TOOL_CALL_RESULT.value,
@@ -272,7 +272,7 @@ class PlanAgent(AgentBase):
                 continue
 
             if msg.role == MessageRole.ASSISTANT.value:
-                if msg.message_type in {MessageType.NORMAL.value, MessageType.FINAL_ANSWER.value}:
+                if msg.is_assistant_text_message():
                     filtered_messages.append(msg)
                 continue
 
@@ -562,7 +562,7 @@ class PlanAgent(AgentBase):
         """
         last_user_index = None
         for i, message in enumerate(working_messages):
-            if message.role == MessageRole.USER.value and message.type == MessageType.NORMAL.value:
+            if message.is_user_input_message():
                 last_user_index = i
 
         if last_user_index is not None:

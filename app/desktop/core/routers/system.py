@@ -1,9 +1,8 @@
-import time
-
 from fastapi import APIRouter, Request
 
 import os
 import httpx
+from common.core.render import Response
 from common.schemas.base import (
     AgentUsageStatsRequest,
     AgentUsageStatsResponse,
@@ -11,11 +10,8 @@ from common.schemas.base import (
     SystemSettingsRequest,
     TauriUpdateResponse,
 )
-from common.core.render import Response
-from common.models.system import SystemInfoDao
-from common.models.llm_provider import LLMProviderDao
-from common.models.agent import AgentConfigDao
-from common.services import conversation_service
+from common.services import system_service
+from ..user_context import get_desktop_user_id
 
 # 创建路由器
 system_router = APIRouter(prefix="/api", tags=["System"])
@@ -72,26 +68,15 @@ async def check_version():
 
 
 @system_router.get("/system/info")
-async def get_system_info():
-    sys_dao = SystemInfoDao()
-    # allow_reg = await sys_dao.get_by_key("allow_registration")
-    
-    # Check for model providers
-    llm_dao = LLMProviderDao()
-    providers = await llm_dao.get_list()
-    has_model_provider = len(providers) > 0
-    
-    # Check for agents
-    agent_dao = AgentConfigDao()
-    agents = await agent_dao.get_list()
-    has_agent = len(agents) > 0
-
+async def get_system_info(request: Request):
+    user_id = get_desktop_user_id(request)
+    data = await system_service.get_system_info_data(
+        user_id=user_id,
+        include_desktop_flags=True,
+    )
+    data["allow_registration"] = False
     return await Response.succ(
-        data={
-            "allow_registration": False, # Disabled as per requirement
-            "has_model_provider": has_model_provider,
-            "has_agent": has_agent
-        },
+        data=data,
         message="获取系统信息成功"
     )
 
@@ -102,8 +87,7 @@ async def update_system_settings(request: Request, req: SystemSettingsRequest):
     if role != "admin":
         return await Response.error(code=403, message="权限不足", error_detail="permission denied")
 
-    sys_dao = SystemInfoDao()
-    await sys_dao.set_value("allow_registration", "true" if req.allow_registration else "false")
+    await system_service.update_allow_registration(req.allow_registration)
     return await Response.succ(data={}, message="系统设置更新成功")
 
 
@@ -111,11 +95,7 @@ async def update_system_settings(request: Request, req: SystemSettingsRequest):
 async def health_check():
     return await Response.succ(
         message="服务运行正常",
-        data={
-            "status": "healthy",
-            "timestamp": time.time(),
-            "service": "SagePlatform",
-        },
+        data=system_service.get_health_data(),
     )
 
 
@@ -123,12 +103,13 @@ async def health_check():
     "/system/agent/usage-stats",
     response_model=BaseResponse[AgentUsageStatsResponse],
 )
-async def get_agent_usage_stats(req: AgentUsageStatsRequest):
+async def get_agent_usage_stats(req: AgentUsageStatsRequest, request: Request):
     """
     获取最近 N 天的 Agent 工具使用统计。
     """
-    stats = await conversation_service.get_agent_usage_stats(
+    stats = await system_service.get_agent_usage_stats_data(
         days=req.days,
+        user_id=get_desktop_user_id(request),
         agent_id=req.agent_id,
     )
     return await Response.succ(

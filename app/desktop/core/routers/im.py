@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from common.core.render import Response
 from common.models.agent import AgentConfigDao
-from common.models.im_channel import IMChannelConfigDao
+from common.models.im_channel import IMChannelConfigDao, DEFAULT_SAGE_USER_ID
 import logging
 
 # Import new Agent IM Config system
@@ -77,10 +77,6 @@ async def validate_provider_config_async(agent_id: str, provider: str, config: D
                 "iMessage must have at least one allowed sender configured. "
                 "Please add phone numbers to the '监听发送者' field."
             )
-
-# Default Sage user ID for desktop app (backward compatibility)
-DEFAULT_SAGE_USER_ID = "desktop_default_user"
-
 
 # ============================================================================
 # Pydantic Models

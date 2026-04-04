@@ -13,6 +13,7 @@ import { useChatAgentConfig } from '@/composables/chat/useChatAgentConfig.js'
 import { useChatWorkspace } from '@/composables/chat/useChatWorkspace.js'
 import { useWorkbenchStore } from '@/stores/workbench.js'
 import { usePanelStore } from '@/stores/panel.js'
+import { isToolResultMessage } from '@/utils/messageLabels.js'
 
 // 全局按 Agent 缓存能力结果，在整个应用生命周期内共享
 const abilityCacheByAgentGlobal = ref({})
@@ -217,7 +218,7 @@ export const useChatPage = (props) => {
     // 这些工具调用应该被标记为未完成（因为历史会话已结束，工具没有执行完）
     const toolCallIdsWithResults = new Set()
     normalizedMessages.forEach(msg => {
-      if (msg.role === 'tool' || msg.message_type === 'tool_call_result') {
+      if (isToolResultMessage(msg)) {
         if (msg.tool_call_id) {
           toolCallIdsWithResults.add(msg.tool_call_id)
         }
@@ -252,7 +253,7 @@ export const useChatPage = (props) => {
 
     normalizedMessages.forEach((message) => {
       workbenchStore.extractFromMessage(message, message.agent_id || res.conversation_info?.agent_id || null)
-      if ((message.role === 'tool' || message.message_type === 'tool_call_result') && message.tool_call_id) {
+      if (isToolResultMessage(message) && message.tool_call_id) {
         const plainToolResult = JSON.parse(JSON.stringify(message))
         workbenchStore.updateToolResult(message.tool_call_id, plainToolResult)
       }
@@ -298,7 +299,7 @@ export const useChatPage = (props) => {
     }
     
     // 处理工具结果消息 - 移除 pending 状态
-    if ((messageData.role === 'tool' || messageData.message_type === 'tool_call_result') && messageData.tool_call_id) {
+    if (isToolResultMessage(messageData) && messageData.tool_call_id) {
       pendingToolCalls.value.delete(messageData.tool_call_id)
     }
     
@@ -310,7 +311,7 @@ export const useChatPage = (props) => {
         return
       }
       let nextMessage
-      if (messageData.role === 'tool' || messageData.message_type === 'tool_call_result') {
+      if (isToolResultMessage(messageData)) {
         nextMessage = {
           ...messageData,
           timestamp: messageData.timestamp || Date.now()
@@ -349,7 +350,8 @@ export const useChatPage = (props) => {
       role: 'user',
       content: messageContent,
       message_id: Date.now().toString(),
-      type: 'USER',
+      type: 'user_input',
+      message_type: 'user_input',
       session_id: sessionId,
       timestamp: Date.now()
     }
@@ -369,7 +371,7 @@ export const useChatPage = (props) => {
       pendingToolCalls.value.forEach((info, toolCallId) => {
         // 检查该工具调用是否已经有结果
         const hasResult = messages.value.some(m =>
-          (m.role === 'tool' || m.message_type === 'tool_call_result') &&
+          isToolResultMessage(m) &&
           m.tool_call_id === toolCallId
         )
         // 如果已经有结果，不标记为已取消

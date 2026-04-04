@@ -3,13 +3,16 @@
  * 提供消息类型和工具名称的标签映射功能
  */
 
+export const LEGACY_NORMAL_MESSAGE_TYPE = 'normal'
+
 // 消息类型标签映射 - 基础映射（用于非i18n场景）
 export const messageTypeLabels = new Map([
   // 角色标签
   ['user', '用户'],
   ['system', '系统'],
   // 消息类型标签
-  ['normal', '普通消息'],
+  ['user_input', '用户输入'],
+  ['assistant_text', '助手文本'],
   ['task_analysis', '任务分析'],
   ['reasoning_content', '推理思考'],
   ['task_decomposition', '任务拆解'],
@@ -35,6 +38,27 @@ export const messageTypeLabels = new Map([
   ['json_chunk', '数据块'],
   ['chunk_end', '数据块结束']
 ])
+
+export const normalizeMessageType = ({ role, type }) => {
+  if (role === 'user') return 'user_input'
+  if (role === 'assistant' && type === LEGACY_NORMAL_MESSAGE_TYPE) return 'assistant_text'
+  return type
+}
+
+export const getNormalizedMessageType = (message = {}) => (
+  normalizeMessageType({
+    role: message?.role,
+    type: message?.message_type ?? message?.type
+  })
+)
+
+export const isToolResultMessage = (message = {}) => (
+  message?.role === 'tool' || getNormalizedMessageType(message) === 'tool_call_result'
+)
+
+export const isTokenUsageMessage = (message = {}) => (
+  getNormalizedMessageType(message) === 'token_usage'
+)
 
 // 工具名称到 i18n key 的映射
 export const toolLabelKeys = {
@@ -224,6 +248,8 @@ export const getToolLabel = (toolName, t = null) => {
  * @returns {string} 标签文本
  */
 export const getMessageLabel = ({ role, type, toolName, t = null }) => {
+  const normalizedType = normalizeMessageType({ role, type })
+
   // 根据角色优先处理
   if (role === 'user') {
     return t ? t('roles.user') : messageTypeLabels.get('user')
@@ -234,19 +260,19 @@ export const getMessageLabel = ({ role, type, toolName, t = null }) => {
     if (toolName) {
       return getToolLabel(toolName, t)
     }
-    if (type === 'tool_call' || type === 'tool_execution') {
+    if (normalizedType === 'tool_call' || normalizedType === 'tool_execution') {
       return getToolLabel(toolName, t)
     }
-    const label = messageTypeLabels.get(type)
+    const label = messageTypeLabels.get(normalizedType)
     if (label) return label
     return t ? t('roles.assistant') : 'AI助手'
   }
 
   // 根据消息类型处理
-  if (messageTypeLabels.has(type)) {
-    return messageTypeLabels.get(type)
+  if (messageTypeLabels.has(normalizedType)) {
+    return messageTypeLabels.get(normalizedType)
   }
 
   // 返回原始类型或默认值
-  return type || (t ? t('common.message') : '消息')
+  return normalizedType || (t ? t('common.message') : '消息')
 }

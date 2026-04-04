@@ -4,7 +4,7 @@ MCP (Model Context Protocol) 相关路由
 提供MCP服务器的管理接口，包括添加、删除、配置等功能
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Request
 from loguru import logger
@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from common.core.render import Response
 from common.services import mcp_service
+from ..user_context import get_desktop_user_id
 
 # 创建路由器
 mcp_router = APIRouter(prefix="/api/mcp", tags=["MCP"])
@@ -54,6 +55,7 @@ async def add(req: MCPServerRequest, http_request: Request):
             args=req.args,
             env=req.env,
             disabled=False,
+            user_id=get_desktop_user_id(http_request),
         )
         logger.info(f"[MCP Router] Successfully added server: {server_name}")
         return await Response.succ(
@@ -74,24 +76,8 @@ async def list(http_request: Request):
     Returns:
         StandardResponse: 包含MCP服务器列表的标准响应
     """
-    mcp_servers = await mcp_service.list_mcp_servers()
-    
-    servers: List[Dict[str, Any]] = []
-    for server in mcp_servers:
-        config = server.config
-        servers.append(
-            {
-                "name": server.name,
-                "protocol": config.get("protocol"),
-                "disabled": config.get("disabled", False),
-                "streamable_http_url": config.get("streamable_http_url"),
-                "sse_url": config.get("sse_url"),
-                "api_key": config.get("api_key"),
-                "command": config.get("command"),
-                "args": config.get("args"),
-                "env": config.get("env"),
-            }
-        )
+    mcp_servers = await mcp_service.list_mcp_servers(get_desktop_user_id(http_request))
+    servers = [mcp_service.serialize_mcp_server(server) for server in mcp_servers]
     return await Response.succ(
         data={"servers": servers}, message="获取MCP服务器列表成功"
     )
@@ -109,7 +95,7 @@ async def remove(server_name: str, http_request: Request):
         StandardResponse: 包含操作结果的标准响应
     """
     logger.info(f"开始删除MCP server: {server_name}")
-    await mcp_service.remove_mcp_server(server_name)
+    await mcp_service.remove_mcp_server(server_name, user_id=get_desktop_user_id(http_request))
     return await Response.succ(
         data={"server_name": server_name}, message=f"MCP服务器 '{server_name}' 删除成功"
     )
@@ -126,7 +112,7 @@ async def refresh(server_name: str, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    status = await mcp_service.refresh_mcp_server(server_name)
+    status = await mcp_service.refresh_mcp_server(server_name, user_id=get_desktop_user_id(http_request))
     return await Response.succ(data={"server_name": server_name, "status": status})
 
 
@@ -141,7 +127,7 @@ async def toggle(server_name: str, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    disabled, status_text = await mcp_service.toggle_mcp_server(server_name)
+    disabled, status_text = await mcp_service.toggle_mcp_server(server_name, user_id=get_desktop_user_id(http_request))
     return await Response.succ(
         data={"server_name": server_name, "disabled": disabled},
         message=f"MCP服务器 '{server_name}' 已{status_text}"

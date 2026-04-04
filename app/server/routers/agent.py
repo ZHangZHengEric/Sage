@@ -7,21 +7,23 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse
 
+from common.core.request_identity import (
+    get_request_role,
+    get_request_user_id,
+    get_target_user_id_for_role,
+)
 from common.core.render import Response
 from common.models.conversation import ConversationDao
 from common.schemas.agent import (
     AgentAbilitiesRequest,
     AgentConfigDTO,
     AutoGenAgentRequest,
-    AsyncTaskResponse,
     AuthorizationRequest,
     SystemPromptOptimizeRequest,
     convert_agent_to_config,
-    convert_config_to_agent,
 )
-from common.services import agent_service
-from common.services.async_task_service import get_async_task_service
-from sagents.utils.prompt_manager import PromptManager
+from common.services import agent_router_service, agent_service
+from common.services.agent_view_service import serialize_agent, serialize_agents
 from loguru import logger
 
 
@@ -37,20 +39,9 @@ async def list(http_request: Request):
     Returns:
         StandardResponse: 包含所有Agent简要信息的标准响应
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
-    
-    # Admin sees all (user_id=None), User sees own (user_id=user_id)
-    target_user_id = None if role == "admin" else user_id
+    target_user_id = get_target_user_id_for_role(http_request)
     all_configs = await agent_service.list_agents(target_user_id)
-    agents_data: List[Dict[str, Any]] = []
-    for agent in all_configs:
-        agent_id = agent.agent_id
-        agent_resp = convert_config_to_agent(agent_id, agent.config, agent.user_id)
-        agents_data.append(agent_resp.model_dump())
-    # 根据agent名称排序
-    agents_data.sort(key=lambda x: x["name"])
+    agents_data = serialize_agents(all_configs)
     return await Response.succ(
         data=agents_data, message=f"成功获取 {len(agents_data)} 个Agent"
     )
@@ -68,21 +59,10 @@ async def get_default_system_prompt(language: str = "zh"):
         StandardResponse: 包含默认System Prompt的内容
     """
     try:
-        content = PromptManager().get_prompt(
-            'agent_intro_template',
-            agent='common',
+        result = await agent_router_service.build_default_system_prompt_response(
             language=language,
-            default=""
         )
-        # 如果是模板格式（包含{agent_name}），可以预填一个默认值或者保留占位符
-        # 这里为了作为草稿，我们预填 Sage
-        if "{agent_name}" in content:
-            content = content.format(agent_name="Sage")
-            
-        return await Response.succ(
-            data={"content": content},
-            message="成功获取默认System Prompt模板"
-        )
+        return await Response.succ(data=result["data"], message=result["message"])
     except Exception as e:
         return await Response.error(
             message=f"获取默认System Prompt模板失败: {str(e)}"
@@ -100,8 +80,7 @@ async def create(agent: AgentConfigDTO, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
+    user_id = get_request_user_id(http_request)
     created_agent = await agent_service.create_agent(
         agent.name,
         convert_agent_to_config(agent),
@@ -123,15 +102,10 @@ async def get(agent_id: str, http_request: Request):
     Returns:
         StandardResponse: 包含Agent配置的标准响应
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
-    
-    target_user_id = None if role == "admin" else user_id
+    target_user_id = get_target_user_id_for_role(http_request)
     agent = await agent_service.get_agent(agent_id, target_user_id)
-    agent_resp = convert_config_to_agent(agent_id, agent.config, agent.user_id)
     return await Response.succ(
-        data=agent_resp.model_dump(), message=f"获取Agent '{agent_id}' 成功"
+        data=serialize_agent(agent), message=f"获取Agent '{agent_id}' 成功"
     )
 
 
@@ -145,9 +119,8 @@ async def update(agent_id: str, agent: AgentConfigDTO, http_request: Request):
         agent: 更新的Agent配置
 
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
+    user_id = get_request_user_id(http_request)
+    role = get_request_role(http_request)
     await agent_service.update_agent(
         agent_id,
         agent.name,
@@ -169,9 +142,8 @@ async def delete(agent_id: str, http_request: Request):
         agent_id: Agent ID
 
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
+    user_id = get_request_user_id(http_request)
+    role = get_request_role(http_request)
     await agent_service.delete_agent(agent_id, user_id, role)
     return await Response.succ(
         data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 删除成功"
@@ -187,34 +159,24 @@ async def auto_generate(request: AutoGenAgentRequest, http_request: Request):
         request: 自动生成Agent请求
 
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    agent_config = await agent_service.auto_generate_agent(
+    user_id = get_request_user_id(http_request)
+    result = await agent_router_service.build_auto_generate_response(
         agent_description=request.agent_description,
         available_tools=request.available_tools,
         user_id=user_id,
     )
-    return await Response.succ(
-        data=agent_config, message="Agent自动生成成功"
-    )
+    return await Response.succ(data=result["data"], message=result["message"])
 
 
 @agent_router.post("/auto-generate/submit")
 async def auto_generate_submit(request: AutoGenAgentRequest, http_request: Request):
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    task_service = get_async_task_service()
-    task = await task_service.submit(
-        task_type="agent_auto_generate",
-        owner_id=user_id,
-        metadata={"agent_description": request.agent_description[:120]},
-        runner=lambda: agent_service.auto_generate_agent(
-            agent_description=request.agent_description,
-            available_tools=request.available_tools,
-            user_id=user_id,
-        ),
+    user_id = get_request_user_id(http_request)
+    result = await agent_router_service.submit_auto_generate_task(
+        agent_description=request.agent_description,
+        available_tools=request.available_tools,
+        user_id=user_id,
     )
-    return await Response.succ(data=task, message="Agent自动生成任务已提交")
+    return await Response.succ(data=result["data"], message=result["message"])
 
 
 @agent_router.post("/system-prompt/optimize")
@@ -228,63 +190,53 @@ async def optimize(request: SystemPromptOptimizeRequest, http_request: Request):
     Returns:
         StandardResponse: 包含优化后的系统提示词的标准响应
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    res = await agent_service.optimize_system_prompt(
+    user_id = get_request_user_id(http_request)
+    result = await agent_router_service.build_system_prompt_optimize_response(
         original_prompt=request.original_prompt,
         optimization_goal=request.optimization_goal,
         user_id=user_id,
     )
-    return await Response.succ(data=res, message="系统提示词优化成功")
+    return await Response.succ(data=result["data"], message=result["message"])
 
 
 @agent_router.post("/system-prompt/optimize/submit")
 async def optimize_submit(request: SystemPromptOptimizeRequest, http_request: Request):
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    task_service = get_async_task_service()
-    task = await task_service.submit(
-        task_type="system_prompt_optimize",
-        owner_id=user_id,
-        metadata={"original_length": len(request.original_prompt or "")},
-        runner=lambda: agent_service.optimize_system_prompt(
-            original_prompt=request.original_prompt,
-            optimization_goal=request.optimization_goal,
-            user_id=user_id,
-        ),
+    user_id = get_request_user_id(http_request)
+    result = await agent_router_service.submit_system_prompt_optimize_task(
+        original_prompt=request.original_prompt,
+        optimization_goal=request.optimization_goal,
+        user_id=user_id,
     )
-    return await Response.succ(data=task, message="系统提示词优化任务已提交")
+    return await Response.succ(data=result["data"], message=result["message"])
 
 
 @agent_router.post("/abilities")
 async def get_agent_abilities(req: AgentAbilitiesRequest, http_request: Request):
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    items = await agent_service.generate_agent_abilities(
+    user_id = get_request_user_id(http_request)
+    result = await agent_router_service.build_agent_abilities_response(
         agent_id=req.agent_id,
         session_id=req.session_id,
         context=req.context,
         language=req.language or "zh",
         user_id=user_id,
     )
-    return await Response.succ(
-        data={"items": [item.model_dump() for item in items]},
-        message="获取 Agent 能力列表成功",
-    )
+    return await Response.succ(data=result["data"], message=result["message"])
 
 
 @agent_router.get("/tasks/{task_id}")
 async def get_task(task_id: str, http_request: Request):
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
+    user_id = get_request_user_id(http_request)
+    from common.services.async_task_service import get_async_task_service
+
     task = await get_async_task_service().get(task_id, user_id)
     return await Response.succ(data=task, message="获取任务状态成功")
 
 
 @agent_router.post("/tasks/{task_id}/cancel")
 async def cancel_task(task_id: str, http_request: Request):
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
+    user_id = get_request_user_id(http_request)
+    from common.services.async_task_service import get_async_task_service
+
     task = await get_async_task_service().cancel(task_id, user_id)
     return await Response.succ(data=task, message="任务取消请求已提交")
 
@@ -294,9 +246,8 @@ async def get_auth(agent_id: str, http_request: Request):
     """
     获取Agent的授权用户列表
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
+    user_id = get_request_user_id(http_request)
+    role = get_request_role(http_request)
     
     users = await agent_service.get_agent_authorized_users(agent_id, user_id, role)
     return await Response.succ(data=users, message="获取授权用户列表成功")
@@ -307,9 +258,8 @@ async def update_auth(agent_id: str, req: AuthorizationRequest, http_request: Re
     """
     更新Agent的授权用户列表
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
+    user_id = get_request_user_id(http_request)
+    role = get_request_role(http_request)
     
     await agent_service.update_agent_authorizations(agent_id, req.user_ids, user_id, role)
     return await Response.succ(data={}, message="更新授权成功")
@@ -317,9 +267,8 @@ async def update_auth(agent_id: str, req: AuthorizationRequest, http_request: Re
 @agent_router.post("/{agent_id}/file_workspace")
 async def get_workspace(agent_id: str, request: Request, session_id: Optional[str] = None):
     """获取指定会话的文件工作空间"""
-    claims = getattr(request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
+    user_id = get_request_user_id(request)
+    role = get_request_role(request)
 
     if role == "admin" and session_id:
         dao = ConversationDao()
@@ -327,17 +276,20 @@ async def get_workspace(agent_id: str, request: Request, session_id: Optional[st
         if conversation:
             user_id = conversation.user_id
 
-    result = await agent_service.get_server_file_workspace(agent_id, user_id)
-    files = result.get("files", [])
+    result = await agent_router_service.build_workspace_listing_response(
+        agent_id=agent_id,
+        user_id=user_id,
+        fetcher=lambda: agent_service.get_server_file_workspace(agent_id, user_id),
+    )
+    files = result["data"].get("files", [])
     logger.bind(agent_id=agent_id).info(f"获取工作空间文件数量：{len(files)}")
-    return await Response.succ(message=result.get("message", "获取文件列表成功"), data={**result, "user_id": user_id})
+    return await Response.succ(message=result["message"], data=result["data"])
 
 @agent_router.get("/{agent_id}/file_workspace/download")
 async def download_file(agent_id: str, request: Request, session_id: Optional[str] = None):
     """获取指定会话的文件工作空间"""
-    claims = getattr(request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
+    user_id = get_request_user_id(request)
+    role = get_request_role(request)
 
     if role == "admin" and session_id:
         dao = ConversationDao()
@@ -365,9 +317,8 @@ async def download_file(agent_id: str, request: Request, session_id: Optional[st
 @agent_router.delete("/{agent_id}/file_workspace/delete")
 async def delete_file(agent_id: str, request: Request, session_id: Optional[str] = None):
     """删除指定会话的文件"""
-    claims = getattr(request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
+    user_id = get_request_user_id(request)
+    role = get_request_role(request)
     
     if role == "admin" and session_id:
         dao = ConversationDao()
@@ -378,8 +329,11 @@ async def delete_file(agent_id: str, request: Request, session_id: Optional[str]
     file_path = request.query_params.get("file_path")
     logger.info(f"Delete request: file_path={file_path}")
     try:
-        await agent_service.delete_server_agent_file(agent_id, user_id, file_path)
-        return await Response.succ(message=f"文件 {file_path} 已删除")
+        result = await agent_router_service.build_workspace_delete_response(
+            file_path=file_path,
+            deleter=lambda: agent_service.delete_server_agent_file(agent_id, user_id, file_path),
+        )
+        return await Response.succ(message=result["message"], data=result["data"])
     except Exception as e:
         logger.error(f"Delete failed: {e}")
         raise

@@ -22,6 +22,11 @@ export const useChatAgentConfig = ({
 
   const selectedAgentId = computed(() => selectedAgent.value?.id)
 
+  const getDefaultAgent = (agentsList) => {
+    if (!Array.isArray(agentsList) || agentsList.length === 0) return null
+    return agentsList.find(agent => agent.is_default) || agentsList[0]
+  }
+
   const selectAgent = async (agent, forceConfigUpdate = false) => {
     const isAgentChange = !selectedAgent.value || selectedAgent.value.id !== agent?.id
 
@@ -83,8 +88,9 @@ export const useChatAgentConfig = ({
         return
       }
     }
-    if (agentsList[0]) {
-      await selectAgent(agentsList[0])
+    const defaultAgent = getDefaultAgent(agentsList)
+    if (defaultAgent) {
+      await selectAgent(defaultAgent)
     }
   }
 

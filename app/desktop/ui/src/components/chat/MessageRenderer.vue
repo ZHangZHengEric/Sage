@@ -84,11 +84,11 @@
     <div
       v-else-if="message.role === 'assistant' && (message.type === 'task_analysis' || message.message_type === 'task_analysis')"
       class="flex flex-row items-start px-4"
-      :class="hideAssistantAvatar ? 'gap-1' : 'gap-3'">
+      :class="assistantRowGapClass">
       <div v-if="showAssistantAvatar" class="flex-none">
         <MessageAvatar :messageType="message.message_type" role="assistant" :agentId="agentId" />
       </div>
-      <div v-else class="flex-none" :class="hideAssistantAvatar ? 'w-0' : 'w-8'" />
+      <div v-else class="flex-none" :class="assistantAvatarSpacerClass" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="w-full">
            <TaskAnalysisMessage
@@ -104,11 +104,11 @@
     <div
       v-else-if="message.role === 'assistant' && (message.type === 'reasoning_content' || message.message_type === 'reasoning_content')"
       class="flex flex-row items-start px-4"
-      :class="hideAssistantAvatar ? 'gap-1' : 'gap-3'">
+      :class="assistantRowGapClass">
       <div v-if="showAssistantAvatar" class="flex-none">
         <MessageAvatar :messageType="message.message_type" role="assistant" :agentId="agentId" />
       </div>
-      <div v-else class="flex-none" :class="hideAssistantAvatar ? 'w-0' : 'w-8'" />
+      <div v-else class="flex-none" :class="assistantAvatarSpacerClass" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="w-full">
            <ReasoningContentMessage
@@ -124,12 +124,12 @@
     <div
       v-else-if="message.role === 'assistant' && !hasToolCalls && (message.content || getImageUrls(message.content).length > 0)"
       class="flex flex-row items-start px-4 group"
-      :class="hideAssistantAvatar ? 'gap-1' : 'gap-3'"
+      :class="assistantRowGapClass"
       data-message-type="assistant">
       <div v-if="showAssistantAvatar" class="flex-none">
         <MessageAvatar :messageType="message.message_type" role="assistant" :agentId="agentId" />
       </div>
-      <div v-else class="flex-none" :class="hideAssistantAvatar ? 'w-0' : 'w-8'" />
+      <div v-else class="flex-none" :class="assistantAvatarSpacerClass" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="flex flex-col gap-1 w-full">
           <!-- 文本内容 -->
@@ -190,12 +190,12 @@
     <div
       v-else-if="hasToolCalls"
       class="flex flex-row items-start px-4"
-      :class="hideAssistantAvatar ? 'gap-1' : 'gap-3'"
+      :class="assistantRowGapClass"
       data-message-type="tool">
       <div v-if="showAssistantAvatar" class="flex-none">
         <MessageAvatar :messageType="message.message_type" role="assistant" :toolName="getToolName(message)" :agentId="agentId" />
       </div>
-      <div v-else class="flex-none" :class="hideAssistantAvatar ? 'w-0' : 'w-8'" />
+      <div v-else class="flex-none" :class="assistantAvatarSpacerClass" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
          <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage }">
            <div v-for="(toolCall, index) in message.tool_calls" :key="toolCall.id || index">
@@ -251,7 +251,7 @@ import EChartsRenderer from './EChartsRenderer.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
 import { Terminal, FileText, Search, Zap, Copy, Check, Image } from 'lucide-vue-next'
-import { getMessageLabel } from '@/utils/messageLabels'
+import { getMessageLabel, isTokenUsageMessage as isTokenUsageMessageValue } from '@/utils/messageLabels'
 import ToolErrorCard from './tools/ToolErrorCard.vue'
 import ToolDefaultCard from './tools/ToolDefaultCard.vue'
 import ToolCallMessage from './ToolCallMessage.vue'
@@ -321,6 +321,12 @@ const workbenchStore = useWorkbenchStore()
 const hideAssistantAvatar = computed(() => (
   props.hideAssistantAvatar === true && props.message.role === 'assistant'
 ))
+const assistantRowGapClass = computed(() => (
+  props.message.role === 'assistant' ? 'gap-3' : (hideAssistantAvatar.value ? 'gap-1' : 'gap-3')
+))
+const assistantAvatarSpacerClass = computed(() => (
+  props.message.role === 'assistant' ? 'w-8' : (hideAssistantAvatar.value ? 'w-0' : 'w-8')
+))
 
 const showAssistantAvatar = computed(() => {
   if (props.message.role !== 'assistant') return false
@@ -332,7 +338,7 @@ const showAssistantAvatar = computed(() => {
     const prev = props.messages?.[i]
     if (!prev) continue
     if (prev.role === 'tool') continue
-    if (prev.type === 'token_usage' || prev.message_type === 'token_usage') continue
+    if (isTokenUsageMessageValue(prev)) continue
     return prev.role !== 'assistant'
   }
   return true
@@ -359,7 +365,7 @@ const isErrorMessage = computed(() => {
 })
 
 const isTokenUsageMessage = computed(() => {
-  return props.message.type === 'token_usage' || props.message.message_type === 'token_usage'
+  return isTokenUsageMessageValue(props.message)
 })
 
 const tokenUsageData = computed(() => {
@@ -712,16 +718,6 @@ onMounted(() => {
   // 只处理助手消息和工具调用
   if (props.message.role !== 'assistant') return
 
-  // 检查该消息的工作台项是否已经添加过
-  const existingItems = workbenchStore.items.filter(item =>
-    item.messageId === messageId && item.sessionId === sessionId
-  )
-
-  if (existingItems.length > 0) {
-    console.log('[MessageRenderer] Workbench items already exist for message:', messageId)
-    return
-  }
-
   const timestamp = props.message.timestamp || Date.now()
 
   // 发送工具调用事件
@@ -729,6 +725,12 @@ onMounted(() => {
     console.log('[MessageRenderer] Adding tool_calls to workbench:', props.message.tool_calls.length)
     props.message.tool_calls.forEach((toolCall, index) => {
       console.log(`[MessageRenderer] Adding tool_call ${index}:`, toolCall.id)
+      const existingToolItem = workbenchStore.items.find(item =>
+        item.type === 'tool_call' && item.data?.id === toolCall.id
+      )
+      if (existingToolItem) {
+        return
+      }
       // 注意：不在 onMounted 中传递 toolResult，因为实时流中工具结果还没到达
       // toolResult 会在后续更新
       workbenchStore.addItem({
@@ -748,6 +750,14 @@ onMounted(() => {
   // 发送文件引用事件
   const fileMatches = extractFileReferences(props.message.content)
   fileMatches.forEach((file) => {
+    const existingFileItem = workbenchStore.items.find(item =>
+      item.messageId === messageId &&
+      item.type === (file.isImage ? 'image' : 'file') &&
+      (item.data?.filePath === file.filePath || item.data?.src === file.filePath)
+    )
+    if (existingFileItem) {
+      return
+    }
     // 图片文件使用 type: 'image'，其他文件使用 type: 'file'
     workbenchStore.addItem({
       type: file.isImage ? 'image' : 'file',
@@ -766,6 +776,14 @@ onMounted(() => {
   // 发送代码块事件
   const codeBlocks = extractCodeBlocks(props.message.content)
   codeBlocks.forEach((code) => {
+    const existingCodeItem = workbenchStore.items.find(item =>
+      item.messageId === messageId &&
+      item.type === 'code' &&
+      item.data?.code === code.code
+    )
+    if (existingCodeItem) {
+      return
+    }
     workbenchStore.addItem({
       type: 'code',
       role: 'assistant',

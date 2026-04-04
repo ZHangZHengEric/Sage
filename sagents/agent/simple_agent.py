@@ -10,6 +10,7 @@ from sagents.utils.content_saver import save_agent_response_content
 import json
 import uuid
 from copy import deepcopy
+import re
 
 
 def _get_system_prefix(tool_manager: Optional[ToolManager], language: str) -> str:
@@ -149,6 +150,46 @@ class SimpleAgent(AgentBase):
 
         return tools_json
 
+    def _has_explicit_followup_intent(self, content: str) -> bool:
+        text = (content or "").strip().lower()
+        if not text:
+            return False
+
+        conditional_markers = [
+            "如果你需要",
+            "如需",
+            "如果需要",
+            "if you need",
+            "if needed",
+            "if you want",
+        ]
+        if any(marker in text for marker in conditional_markers):
+            return False
+
+        patterns = [
+            r"接下来",
+            r"下一步",
+            r"现在让我",
+            r"让我继续",
+            r"我将继续",
+            r"我会继续",
+            r"接着",
+            r"随后",
+            r"然后我",
+            r"我将(生成|整理|总结|分析|执行|补充|创建|处理)",
+            r"我会(生成|整理|总结|分析|执行|补充|创建|处理)",
+            r"继续(生成|整理|总结|分析|执行|处理)",
+            r"请稍等",
+            r"等待(工具调用|生成|处理)",
+            r"\bnext\b",
+            r"\bnext,? i('| wi)ll\b",
+            r"\bi('| wi)ll now\b",
+            r"\blet me\b",
+            r"\bplease wait\b",
+            r"\bcontinue (with|to|processing|analyzing|generating)\b",
+        ]
+        return any(re.search(pattern, text) for pattern in patterns)
+
     async def _is_task_complete(self,
                                 messages_input: List[MessageChunk],
                                 session_id: str,
@@ -161,16 +202,23 @@ class SimpleAgent(AgentBase):
 
         # 如果最后一条消息是工具调用参数解析错误（DO_SUBTASK_RESULT），说明工具调用出错，不能停止任务
         last_message = messages_input[-1]
-        if last_message.type == MessageType.DO_SUBTASK_RESULT.value:
+        if last_message.matches_message_types([MessageType.DO_SUBTASK_RESULT.value]):
             # 检查内容是否包含参数解析失败的提示
             if last_message.content and '参数解析失败' in last_message.content:
                 logger.debug("最后一条消息是工具调用参数解析错误，不是任务完成")
                 return False
 
+        if (
+            last_message.role == MessageRole.ASSISTANT.value
+            and self._has_explicit_followup_intent(last_message.content or "")
+        ):
+            logger.debug("最后一条 assistant 消息明确表示还有后续动作，不是任务完成")
+            return False
+
         # 只提取最后一个user以及之后的messages
         last_user_index = None
         for i, message in enumerate(messages_input):
-            if message.role == 'user' and message.type == MessageType.NORMAL.value:
+            if message.is_user_input_message():
                 last_user_index = i
         if last_user_index is not None:
             messages_for_complete = messages_input[last_user_index:]
@@ -199,7 +247,8 @@ class SimpleAgent(AgentBase):
         response = self._call_llm_streaming(
             messages=cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input),
             session_id=session_id,
-            step_name="task_complete_judge"
+            step_name="task_complete_judge",
+            enable_thinking=False,
         )
         # 收集流式响应内容
         all_content = ""
@@ -211,6 +260,12 @@ class SimpleAgent(AgentBase):
         try:
             result_clean = MessageChunk.extract_json_from_markdown(all_content)
             result = json.loads(result_clean)
+            if (
+                last_message.role == MessageRole.ASSISTANT.value
+                and self._has_explicit_followup_intent(last_message.content or "")
+            ):
+                logger.debug("任务完成判断被后续动作兜底规则覆盖为未完成")
+                return False
             return result.get('task_interrupted', False)
         except json.JSONDecodeError:
             logger.warning("SimpleAgent: 解析任务完成判断响应时JSON解码错误")
@@ -252,7 +307,7 @@ class SimpleAgent(AgentBase):
 
             if loop_count > max_loop_count:
                 logger.warning(f"SimpleAgent: 循环次数超过 {max_loop_count}，终止循环")
-                yield [MessageChunk(role=MessageRole.ASSISTANT.value, content=f"Agent执行次数超过最大循环次数：{max_loop_count}, 任务暂停，是否需要继续执行？", type=MessageType.NORMAL.value)]
+                yield [MessageChunk(role=MessageRole.ASSISTANT.value, content=f"Agent执行次数超过最大循环次数：{max_loop_count}, 任务暂停，是否需要继续执行？", type=MessageType.ASSISTANT_TEXT.value)]
                 break
 
             # 合并消息

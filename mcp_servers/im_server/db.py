@@ -2,7 +2,7 @@
 IM Server Database Module
 
 Persistent storage for IM session bindings.
-Reference: /mcp_servers/task_scheduler/db.py
+Reference: local sqlite helper pattern used by IM server only.
 """
 
 import sqlite3

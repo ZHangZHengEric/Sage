@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Dict, List, Optional, Union
 from sagents.observability.manager import ObservabilityManager
 from sagents.tool import tool_manager
@@ -161,6 +162,7 @@ class AgentRuntime:
 
         # Extract input info for logging
         log_input = input_messages
+        agent_end_status: Dict[str, Any] = {"status": "finished"}
         
         self.observability_manager.on_agent_start(session_id, agent_name, input=log_input)
         
@@ -173,9 +175,12 @@ class AgentRuntime:
             # 4. Execute Agent
             async for chunk in self.agent.run_stream(session_context):
                 yield chunk
-                
+        except (GeneratorExit, asyncio.CancelledError):
+            agent_end_status = {"status": "cancelled"}
+            raise
         except Exception as e:
+            agent_end_status = {"status": "error", "error": str(e)}
             self.observability_manager.on_agent_error(e, session_id=session_id)
             raise e
         finally:
-            self.observability_manager.on_agent_end({"status": "finished"}, session_id=session_id)
+            self.observability_manager.on_agent_end(agent_end_status, session_id=session_id)

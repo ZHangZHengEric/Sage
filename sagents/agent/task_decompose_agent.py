@@ -38,7 +38,7 @@ class TaskDecomposeAgent(AgentBase):
             recent_message_str = MessageManager.convert_messages_to_str([MessageChunk(
                 role=MessageRole.USER.value,
                 content = session_context.audit_status['task_rewrite'],
-                message_type=MessageType.NORMAL.value
+                message_type=MessageType.USER_INPUT.value
             )])
         else:
             history_messages = message_manager.extract_all_context_messages(recent_turns=5)

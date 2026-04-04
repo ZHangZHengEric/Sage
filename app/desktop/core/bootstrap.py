@@ -7,6 +7,8 @@ from sagents.session_runtime import initialize_global_session_manager
 from common.core.client.chat import close_chat_client, init_chat_client
 from common.core.client.db import close_db_client, init_db_client
 from common.core.config import get_startup_config
+from .migrations import migrate_desktop_default_user_id
+from .user_context import DEFAULT_DESKTOP_USER_ID
 
 
 async def initialize_db_connection():
@@ -21,13 +23,18 @@ async def initialize_db_connection():
                 # Check and update schema for existing tables
                 from .db_schema import sync_database_schema
                 await conn.run_sync(sync_database_schema)
+
+            await migrate_desktop_default_user_id()
                 
             logger.debug("数据库自动建表完成")
         try:
             # Load default provider settings first
             from common.models.llm_provider import LLMProviderDao
             llm_dao = LLMProviderDao()
-            default_provider = await llm_dao.get_default()
+            default_provider = await llm_dao.get_default(user_id=DEFAULT_DESKTOP_USER_ID)
+            if not default_provider:
+                providers = await llm_dao.get_list(user_id=DEFAULT_DESKTOP_USER_ID)
+                default_provider = providers[0] if providers else None
             if default_provider: 
                 api_key = default_provider.api_keys[0] if default_provider.api_keys else None
                 base_url = default_provider.base_url 

@@ -1,9 +1,10 @@
+import { isToolResultMessage, isTokenUsageMessage } from '@/utils/messageLabels.js'
+
 export const CHAT_DISPLAY_MODES = {
   EXECUTION: 'execution',
   DELIVERY: 'delivery'
 }
 
-const TOOL_RESULT_MESSAGE_TYPES = new Set(['tool_call_result'])
 const RETAINED_ASSISTANT_EXCLUDED_TYPES = new Set(['token_usage', 'reasoning_content', 'task_analysis'])
 const TOOL_ACTION_CODES = {
   inspect_info: 'inspect_info',
@@ -25,14 +26,6 @@ const toTimestampMs = (value) => {
 }
 
 const hasToolCalls = (message) => Array.isArray(message?.tool_calls) && message.tool_calls.length > 0
-
-const isToolResultMessage = (message) => (
-  message?.role === 'tool' || TOOL_RESULT_MESSAGE_TYPES.has(message?.message_type) || TOOL_RESULT_MESSAGE_TYPES.has(message?.type)
-)
-
-const isTokenUsageMessage = (message) => (
-  message?.type === 'token_usage' || message?.message_type === 'token_usage'
-)
 
 const isToolRelatedMessage = (message) => hasToolCalls(message) || isToolResultMessage(message)
 

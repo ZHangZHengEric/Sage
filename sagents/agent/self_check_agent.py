@@ -5,6 +5,8 @@ import json
 import re
 import shlex
 import uuid
+import os
+from urllib.parse import unquote
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 
@@ -68,12 +70,14 @@ class SelfCheckAgent(AgentBase):
         issues: List[str] = []
         checked_files: List[str] = []
 
-        for file_path in sorted(candidate_files):
+        for original_file_path in sorted(candidate_files):
+            file_path = await self._resolve_file_path(session_context, original_file_path)
             checked_files.append(file_path)
             file_issues = await self._validate_file(
                 session_context,
                 file_path,
-                require_exists=file_path in referenced_files,
+                require_exists=original_file_path in referenced_files,
+                original_file_path=original_file_path,
             )
             issues.extend(file_issues)
 
@@ -124,7 +128,7 @@ class SelfCheckAgent(AgentBase):
 
         last_user_index = 0
         for i, message in enumerate(messages):
-            if message.role == MessageRole.USER.value and message.type == MessageType.NORMAL.value:
+            if message.is_user_input_message():
                 last_user_index = i
 
         relevant_messages = messages[last_user_index:]
@@ -162,12 +166,11 @@ class SelfCheckAgent(AgentBase):
 
         last_user_index = 0
         for i, message in enumerate(messages):
-            if message.role == MessageRole.USER.value and message.type == MessageType.NORMAL.value:
+            if message.is_user_input_message():
                 last_user_index = i
 
         referenced_files: Set[str] = set()
-        markdown_link_pattern = re.compile(r"\[[^\]]+\]\((/[^)\s]+)\)")
-        bare_path_pattern = re.compile(r"(?<![A-Za-z0-9_])(/[^ \n\t`\"')]+)")
+        markdown_link_pattern = re.compile(r"\[[^\]]+\]\(([^)\s]+)\)")
 
         for message in messages[last_user_index:]:
             if message.role != MessageRole.ASSISTANT.value:
@@ -175,28 +178,95 @@ class SelfCheckAgent(AgentBase):
             if not isinstance(message.content, str) or not message.content.strip():
                 continue
 
-            for path in markdown_link_pattern.findall(message.content):
-                if self._looks_like_file_path(path):
-                    referenced_files.add(path)
-
-            for path in bare_path_pattern.findall(message.content):
-                if self._looks_like_file_path(path):
-                    referenced_files.add(path)
+            for raw_path in markdown_link_pattern.findall(message.content):
+                normalized_path = self._normalize_raw_file_reference(raw_path)
+                if self._looks_like_file_path(normalized_path):
+                    referenced_files.add(normalized_path)
 
         return referenced_files
 
     def _looks_like_file_path(self, path: str) -> bool:
-        if not path.startswith("/") or path.startswith("//"):
+        if not path or path.startswith("#"):
             return False
-        if path.startswith("/api/") or path.startswith("/http"):
+        if path.startswith("//"):
             return False
-        return "." in Path(path).name
+        lowered = path.lower()
+        if lowered.startswith(("http://", "https://", "file://", "data:", "javascript:")):
+            return False
+        if path.startswith("/api/"):
+            return False
+        name = Path(path).name
+        if "." not in name:
+            return False
+        return True
+
+    def _normalize_raw_file_reference(self, raw_path: str) -> str:
+        path = str(raw_path or "").strip().strip("`").strip("'\"")
+        if not path:
+            return path
+        if path.startswith("file://"):
+            path = re.sub(r"^file:///?", "/", path)
+        path = unquote(path)
+        return path
+
+    async def _resolve_file_path(self, session_context: SessionContext, file_path: str) -> str:
+        sandbox = session_context.sandbox
+        if sandbox is None:
+            return file_path
+
+        normalized_path = self._normalize_raw_file_reference(file_path)
+        if not normalized_path:
+            return file_path
+
+        for candidate in self._build_file_candidates(session_context, normalized_path):
+            try:
+                if await sandbox.file_exists(candidate):
+                    return candidate
+            except Exception:
+                continue
+
+        return self._build_file_candidates(session_context, normalized_path)[0]
+
+    def _build_file_candidates(self, session_context: SessionContext, file_path: str) -> List[str]:
+        workspace_roots: List[str] = []
+        for candidate_root in [
+            session_context.system_context.get("task_workspace"),
+            session_context.system_context.get("private_workspace"),
+            session_context.sandbox_agent_workspace,
+        ]:
+            if isinstance(candidate_root, str) and candidate_root.strip():
+                root = candidate_root.rstrip("/")
+                if root and root not in workspace_roots:
+                    workspace_roots.append(root)
+
+        candidates: List[str] = []
+
+        def add_candidate(candidate: str) -> None:
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+
+        if os.path.isabs(file_path):
+            add_candidate(file_path)
+            relative_path = file_path.lstrip("/")
+            for root in workspace_roots:
+                add_candidate(os.path.join(root, relative_path))
+                basename = os.path.basename(file_path)
+                if basename:
+                    add_candidate(os.path.join(root, basename))
+        else:
+            relative_path = file_path.lstrip("./")
+            for root in workspace_roots:
+                add_candidate(os.path.join(root, relative_path))
+            add_candidate(file_path)
+
+        return candidates or [file_path]
 
     async def _validate_file(
         self,
         session_context: SessionContext,
         file_path: str,
         require_exists: bool,
+        original_file_path: Optional[str] = None,
     ) -> List[str]:
         sandbox = session_context.sandbox
         if sandbox is None:
@@ -206,7 +276,8 @@ class SelfCheckAgent(AgentBase):
         exists = await sandbox.file_exists(file_path)
         if not exists:
             if require_exists:
-                return [f"文件不存在: {file_path}"]
+                missing_path = original_file_path or file_path
+                return [f"文件不存在: {missing_path}"]
             logger.info(f"SelfCheckAgent: skip missing transient file {file_path}")
             return issues
 

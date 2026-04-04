@@ -360,6 +360,7 @@ class RecurringTaskUpdate(BaseModel):
 
 class RecurringTaskResponse(RecurringTaskBase):
     id: int
+    user_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     last_executed_at: Optional[datetime] = None
@@ -370,6 +371,7 @@ class RecurringTaskResponse(RecurringTaskBase):
 
 class TaskResponse(BaseModel):
     id: int
+    user_id: Optional[str] = None
     name: str
     description: Optional[str] = None
     agent_id: str
