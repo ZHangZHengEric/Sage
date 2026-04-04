@@ -1,36 +1,13 @@
 <template>
-  <div class="excalidraw-container" :class="{ 'dark-theme': theme === 'dark' }" :style="containerStyle" ref="containerRef">
-    <!-- 悬浮工具栏 - 右上角 -->
-    <div class="floating-toolbar">
-      <button @click="zoomOut" class="tool-btn" title="缩小">−</button>
-      <span class="zoom-text">{{ Math.round(scale * 100) }}%</span>
-      <button @click="zoomIn" class="tool-btn" title="放大">+</button>
-      <button @click="resetView" class="tool-btn" title="重置">⟲</button>
-    </div>
-
-    <!-- SVG 画布 -->
-    <div
-      class="canvas-wrapper"
-      @mousedown="startDrag"
-      @mousemove="onDrag"
-      @mouseup="endDrag"
-      @mouseleave="endDrag"
-      @wheel="onWheel"
-    >
-      <div
-        v-if="svgContent"
-        class="svg-content"
-        v-html="svgContent"
-        :style="transformStyle"
-      ></div>
-      <div v-else class="loading">加载中...</div>
-    </div>
-  </div>
+  <div class="excalidraw-viewer" ref="containerRef"></div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
-import { exportToSvg } from '@excalidraw/excalidraw'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import { Excalidraw } from '@excalidraw/excalidraw'
+import '@excalidraw/excalidraw/index.css'
 
 const props = defineProps({
   data: {
@@ -44,280 +21,237 @@ const props = defineProps({
 })
 
 const containerRef = ref(null)
-const svgContent = ref('')
-const scale = ref(1)
-const translateX = ref(0)
-const translateY = ref(0)
-const isDragging = ref(false)
-const lastX = ref(0)
-const lastY = ref(0)
-const resizeObserver = ref(null)
-const fittedScale = ref(1)
+let reactRoot = null
 
-const transformStyle = computed(() => ({
-  transform: `translate(${translateX.value}px, ${translateY.value}px) scale(${scale.value})`,
-  transformOrigin: 'center center'
-}))
+const SHAPE_TYPES_WITH_INLINE_TEXT = new Set(['rectangle', 'diamond', 'ellipse'])
+const GENERATED_TEXT_SUFFIX = '__generated_text'
 
-const containerStyle = computed(() => ({
-  '--excalidraw-preview-bg': props.data?.appState?.viewBackgroundColor || '#ffffff'
-}))
+const getBackgroundTheme = (backgroundColor) => {
+  const color = (backgroundColor || '').trim().toLowerCase()
+  if (!color.startsWith('#')) return props.theme
 
-const getSvgElement = () => containerRef.value?.querySelector('.svg-content svg')
+  let hex = color.slice(1)
+  if (hex.length === 3) {
+    hex = hex.split('').map((char) => char + char).join('')
+  }
+  if (hex.length !== 6) return props.theme
 
-const fitToView = async () => {
-  await nextTick()
-
-  const container = containerRef.value?.querySelector('.canvas-wrapper')
-  const svg = getSvgElement()
-  if (!container || !svg) return
-
-  const containerWidth = container.clientWidth
-  const containerHeight = container.clientHeight
-  if (!containerWidth || !containerHeight) return
-
-  const toolbarOffset = 72
-  const padding = 48
-  const availableWidth = Math.max(160, containerWidth - padding * 2)
-  const availableHeight = Math.max(160, containerHeight - toolbarOffset - padding)
-
-  const viewBox = svg.viewBox?.baseVal
-  const rawWidth = Number(props.data?.appState?.width) || viewBox?.width || svg.getBBox?.().width || svg.clientWidth
-  const rawHeight = Number(props.data?.appState?.height) || viewBox?.height || svg.getBBox?.().height || svg.clientHeight
-
-  if (!rawWidth || !rawHeight) return
-
-  const fitScale = Math.min(1, availableWidth / rawWidth, availableHeight / rawHeight)
-  fittedScale.value = Math.max(0.15, fitScale)
-  scale.value = fittedScale.value
-  translateX.value = 0
-  translateY.value = 0
+  const red = parseInt(hex.slice(0, 2), 16)
+  const green = parseInt(hex.slice(2, 4), 16)
+  const blue = parseInt(hex.slice(4, 6), 16)
+  const brightness = (red * 299 + green * 587 + blue * 114) / 1000
+  return brightness >= 160 ? 'light' : 'dark'
 }
 
-const renderSvg = async () => {
-  if (!props.data || !props.data.elements) {
-    svgContent.value = ''
-    return
+const estimateTextBoxHeight = (text, fontSize, lineHeight) => {
+  const lines = String(text || '').split('\n').length
+  return Math.max(fontSize, lines * fontSize * lineHeight)
+}
+
+const findInnerTextElements = (element, sourceElements) => {
+  const left = element.x
+  const top = element.y
+  const right = element.x + element.width
+  const bottom = element.y + element.height
+
+  return sourceElements.filter((candidate) => {
+    if (candidate?.type !== 'text' || candidate?.isDeleted) return false
+    if (!String(candidate?.text || '').trim()) return false
+    if ((candidate?.id || '').endsWith(GENERATED_TEXT_SUFFIX)) return false
+    const candidateRight = Number(candidate.x || 0) + Number(candidate.width || 0)
+    const candidateBottom = Number(candidate.y || 0) + Number(candidate.height || 0)
+    return (
+      Number(candidate.x || 0) >= left &&
+      Number(candidate.y || 0) >= top &&
+      candidateRight <= right &&
+      candidateBottom <= bottom
+    )
+  })
+}
+
+const createGeneratedTextElement = (element, sourceElements, index) => {
+  const text = String(element.text || '').trim()
+  if (!text) return null
+
+  const fontSize = Number(element.fontSize) || 16
+  const lineHeight = Number(element.lineHeight) || 1.2
+  const textBoxHeight = estimateTextBoxHeight(text, fontSize, lineHeight)
+  const horizontalPadding = Math.min(20, Math.max(12, element.width * 0.08))
+  const contentWidth = Math.max(32, element.width - horizontalPadding * 2)
+  const innerTextElements = findInnerTextElements(element, sourceElements)
+  const hasBodyText = innerTextElements.length > 0
+
+  let x = element.x + horizontalPadding
+  let width = contentWidth
+  let textAlign = element.textAlign || 'center'
+
+  let y = element.y + horizontalPadding
+  if (hasBodyText) {
+    const titleBandTop = element.y + Math.max(10, element.height * 0.10)
+    const titleBandHorizontalPadding = Math.min(24, Math.max(16, element.width * 0.1))
+    width = Math.max(40, element.width - titleBandHorizontalPadding * 2)
+    x = element.x + (element.width - width) / 2
+    y = titleBandTop
+    textAlign = 'center'
+  } else if (element.verticalAlign === 'middle') {
+    y = element.y + (element.height - textBoxHeight) / 2
+  } else if (element.verticalAlign === 'bottom') {
+    y = element.y + element.height - textBoxHeight - horizontalPadding
   }
 
-  try {
-    const elements = props.data.elements || []
-    const appState = props.data.appState || {}
-    const bgColor = appState.viewBackgroundColor || '#ffffff'
-
-    const svg = await exportToSvg({
-      elements: elements,
-      appState: {
-        ...appState,
-        viewBackgroundColor: bgColor,
-        exportBackground: true,
-        exportScale: 1
-      },
-      files: props.data.files || {}
-    })
-
-    // 获取 SVG 字符串并注入背景色
-    let svgString = svg.outerHTML
-
-    // 确保 SVG 有正确的背景色
-    if (svgString.includes('<svg')) {
-      svgString = svgString.replace(
-        /<svg([^>]*)>/,
-        `<svg$1 style="background-color: ${bgColor};">`
-      )
-    }
-
-    svgContent.value = svgString
-
-    await fitToView()
-
-    console.log('[ExcalidrawRenderer] SVG exported, length:', svgString.length)
-  } catch (error) {
-    console.error('[ExcalidrawRenderer] Export failed:', error)
-    svgContent.value = ''
+  return {
+    type: 'text',
+    id: `${element.id}${GENERATED_TEXT_SUFFIX}`,
+    version: (element.version || 1) + 1,
+    versionNonce: (element.versionNonce || 1) + index + 1,
+    isDeleted: false,
+    groupIds: element.groupIds || [],
+    x,
+    y,
+    width,
+    height: textBoxHeight,
+    angle: element.angle || 0,
+    strokeColor: element.strokeColor || '#2e2e2e',
+    backgroundColor: 'transparent',
+    fillStyle: 'hachure',
+    strokeWidth: 1,
+    strokeStyle: 'solid',
+    roughness: element.roughness ?? 1,
+    opacity: element.opacity ?? 100,
+    text,
+    fontSize,
+    fontFamily: element.fontFamily || 5,
+    textAlign,
+    verticalAlign: hasBodyText ? 'top' : (element.verticalAlign || 'middle'),
+    lineHeight,
+    baseline: fontSize
   }
 }
 
-// 缩放功能
-const zoomIn = () => {
-  scale.value = Math.min(scale.value * 1.2, 5)
+const normalizeElements = (elements) => {
+  const sourceElements = Array.isArray(elements) ? elements : []
+  const normalized = [...sourceElements]
+  const existingGeneratedIds = new Set(sourceElements.map((element) => element.id))
+  const existingContainerTextIds = new Set(
+    sourceElements
+      .filter((element) => element?.type === 'text' && element?.containerId)
+      .map((element) => element.containerId)
+  )
+
+  sourceElements.forEach((element, index) => {
+    if (!SHAPE_TYPES_WITH_INLINE_TEXT.has(element?.type)) return
+    if (!String(element?.text || '').trim()) return
+    if (existingContainerTextIds.has(element.id)) return
+
+    const generatedId = `${element.id}${GENERATED_TEXT_SUFFIX}`
+    if (existingGeneratedIds.has(generatedId)) return
+
+    const generatedText = createGeneratedTextElement(element, sourceElements, index)
+    if (!generatedText) return
+
+    existingGeneratedIds.add(generatedId)
+    normalized.push(generatedText)
+  })
+
+  return normalized
 }
 
-const zoomOut = () => {
-  scale.value = Math.max(scale.value / 1.2, 0.1)
+const buildInitialData = () => {
+  const appState = props.data?.appState || {}
+  const sceneTheme = appState.theme || getBackgroundTheme(appState.viewBackgroundColor)
+  return {
+    elements: normalizeElements(props.data?.elements),
+    files: props.data?.files || {},
+    appState: {
+      ...appState,
+      theme: sceneTheme,
+      viewModeEnabled: true,
+      zenModeEnabled: true,
+      gridSize: null
+    },
+    scrollToContent: true
+  }
 }
 
-const resetView = () => {
-  scale.value = fittedScale.value || 1
-  translateX.value = 0
-  translateY.value = 0
-}
+const renderReactApp = () => {
+  if (!containerRef.value) return
+  const initialData = buildInitialData()
 
-// 鼠标滚轮缩放
-const onWheel = (e) => {
-  e.preventDefault()
-  const delta = e.deltaY > 0 ? 0.9 : 1.1
-  scale.value = Math.max(0.1, Math.min(5, scale.value * delta))
-}
+  if (!reactRoot) {
+    reactRoot = createRoot(containerRef.value)
+  }
 
-// 拖动功能
-const startDrag = (e) => {
-  isDragging.value = true
-  lastX.value = e.clientX
-  lastY.value = e.clientY
-}
-
-const onDrag = (e) => {
-  if (!isDragging.value) return
-  const dx = e.clientX - lastX.value
-  const dy = e.clientY - lastY.value
-  translateX.value += dx
-  translateY.value += dy
-  lastX.value = e.clientX
-  lastY.value = e.clientY
-}
-
-const endDrag = () => {
-  isDragging.value = false
+  reactRoot.render(
+    React.createElement(
+      'div',
+      { className: 'official-excalidraw-host' },
+      React.createElement(Excalidraw, {
+        theme: initialData.appState.theme || 'light',
+        initialData,
+        viewModeEnabled: true,
+        zenModeEnabled: true,
+        gridModeEnabled: false,
+        handleKeyboardGlobally: false,
+        autoFocus: false,
+        name: 'Sage Excalidraw Preview',
+        UIOptions: {
+          canvasActions: {
+            export: false,
+            loadScene: false,
+            saveToActiveFile: false,
+            toggleTheme: false,
+            changeViewBackgroundColor: false,
+            clearCanvas: false
+          }
+        },
+        renderTopRightUI: () => null
+      })
+    )
+  )
 }
 
 onMounted(() => {
-  renderSvg()
-
-  if (typeof ResizeObserver !== 'undefined' && containerRef.value) {
-    resizeObserver.value = new ResizeObserver(() => {
-      fitToView()
-    })
-    resizeObserver.value.observe(containerRef.value)
-  }
+  renderReactApp()
 })
 
-watch(() => props.data, () => {
-  renderSvg()
-}, { deep: true })
-
-watch(() => props.theme, () => {
-  renderSvg()
-})
+watch(
+  () => [props.data, props.theme],
+  () => {
+    renderReactApp()
+  },
+  { deep: true }
+)
 
 onUnmounted(() => {
-  resizeObserver.value?.disconnect?.()
+  reactRoot?.unmount?.()
+  reactRoot = null
 })
 </script>
 
 <style scoped>
-.excalidraw-container {
+.excalidraw-viewer {
   width: 100%;
   height: 100%;
-  position: relative;
-  background: var(--excalidraw-preview-bg, #ffffff);
-}
-
-.excalidraw-container.dark-theme {
-  background: var(--excalidraw-preview-bg, #ffffff);
-}
-
-/* 悬浮工具栏 - 右上角 */
-.floating-toolbar {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  left: auto;
-  transform: none;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid #e0e0e0;
-  border-radius: 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  z-index: 100;
-}
-
-.dark-theme .floating-toolbar {
-  background: rgba(45, 45, 45, 0.95);
-  border-color: #555;
-}
-
-.tool-btn {
-  width: 28px;
-  height: 28px;
-  border: none;
-  background: transparent;
-  color: #333;
-  border-radius: 14px;
-  cursor: pointer;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-}
-
-.dark-theme .tool-btn {
-  color: #fff;
-}
-
-.tool-btn:hover {
-  background: rgba(0, 0, 0, 0.1);
-}
-
-.dark-theme .tool-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.zoom-text {
-  font-size: 12px;
-  color: #666;
-  min-width: 40px;
-  text-align: center;
-  user-select: none;
-}
-
-.dark-theme .zoom-text {
-  color: #ccc;
-}
-
-.canvas-wrapper {
-  width: 100%;
-  height: 100%;
+  min-height: 420px;
   overflow: hidden;
-  position: relative;
-  cursor: grab;
+  background: transparent;
 }
 
-.canvas-wrapper:active {
-  cursor: grabbing;
-}
-
-.svg-content {
+:deep(.official-excalidraw-host) {
   width: 100%;
   height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.1s ease-out;
 }
 
-.svg-content :deep(svg) {
-  max-width: none;
-  max-height: none;
-  width: auto;
-  height: auto;
-  flex-shrink: 0;
+:deep(.official-excalidraw-host .excalidraw) {
+  height: 100%;
 }
 
-.loading {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: #666;
-  font-size: 14px;
-}
-
-.dark-theme .loading {
-  color: #999;
+:deep(.official-excalidraw-host .layer-ui__wrapper__top-right),
+:deep(.official-excalidraw-host .layer-ui__wrapper__footer-left),
+:deep(.official-excalidraw-host .layer-ui__wrapper__footer-right),
+:deep(.official-excalidraw-host .help-icon),
+:deep(.official-excalidraw-host .Island.App-menu__left),
+:deep(.official-excalidraw-host .Island.App-menu__right) {
+  display: none !important;
 }
 </style>
