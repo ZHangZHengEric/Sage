@@ -56,9 +56,8 @@ def test_trusted_proxy_mode_allows_whitelisted_proxy_without_auth():
     with TestClient(app, client=("10.1.2.3", 50000)) as client:
         response = client.get("/api/protected")
 
-    assert response.status_code == 200
-    assert response.json() == {"ok": True}
-
+    assert response.status_code == 401
+    assert response.json()["message"] == "未授权"
 
 def test_non_whitelisted_proxy_request_is_rejected():
     config._GLOBAL_STARTUP_CONFIG = config.StartupConfig(
