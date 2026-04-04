@@ -93,7 +93,16 @@ def create_fastapi_app() -> FastAPI:
 
     @app.middleware("http")
     async def inject_desktop_user_context(request, call_next):
-        request.state.user_claims = get_desktop_user_claims()
+        internal_user_id = str(request.headers.get("X-Sage-Internal-UserId") or "").strip()
+        if internal_user_id:
+            request.state.user_claims = {
+                "userid": internal_user_id,
+                "username": internal_user_id,
+                "nickname": internal_user_id,
+                "role": "user",
+            }
+        else:
+            request.state.user_claims = get_desktop_user_claims()
         return await call_next(request)
 
     # 注册异常处理器

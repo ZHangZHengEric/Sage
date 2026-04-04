@@ -71,8 +71,8 @@ def _get_api_base_url() -> str:
     return f"http://localhost:{port}"
 
 
-def _internal_headers() -> Dict[str, str]:
-    return {"X-Sage-Internal-UserId": SCHEDULER_USER_ID}
+def _internal_headers(user_id: Optional[str] = None) -> Dict[str, str]:
+    return {"X-Sage-Internal-UserId": (user_id or SCHEDULER_USER_ID)}
 
 
 def _request_json(
@@ -81,10 +81,11 @@ def _request_json(
     *,
     json_body: Optional[Dict[str, Any]] = None,
     params: Optional[Dict[str, Any]] = None,
+    user_id: Optional[str] = None,
     timeout: float = 60.0,
 ) -> Any:
     url = f"{_get_api_base_url()}{path}"
-    with httpx.Client(timeout=timeout, headers=_internal_headers()) as client:
+    with httpx.Client(timeout=timeout, headers=_internal_headers(user_id)) as client:
         response = client.request(method, url, json=json_body, params=params)
         response.raise_for_status()
         if not response.content:
@@ -205,6 +206,7 @@ def _execute_task_sync(task: Dict[str, Any]) -> None:
     agent_id = task['agent_id']
     name = task['name']
     description = task['description']
+    task_user_id = str(task.get('user_id') or SCHEDULER_USER_ID)
 
     logger.info(f"[TASK EXECUTION] Starting task {task_id} for agent {agent_id} with task name: {name} and description: {description}")
     logger.debug(f"[TASK EXECUTION] Task name: {name}")
@@ -219,7 +221,7 @@ def _execute_task_sync(task: Dict[str, Any]) -> None:
             "agent_id": agent_id,
             "messages": [{"role": "user", "content": content}],
             "force_summary": True,
-            "user_id": SCHEDULER_USER_ID
+            "user_id": task_user_id
         }
 
         api_base_url = _get_api_base_url()
@@ -232,7 +234,7 @@ def _execute_task_sync(task: Dict[str, Any]) -> None:
         # Use synchronous client inside the thread
         with httpx.Client(timeout=300.0) as client:
             logger.debug(f"[TASK EXECUTION] HTTP client created, sending POST request...")
-            with client.stream("POST", f"{api_base_url}/api/chat", json=payload, headers=_internal_headers()) as response:
+            with client.stream("POST", f"{api_base_url}/api/chat", json=payload, headers=_internal_headers(task_user_id)) as response:
                 logger.debug(f"[TASK EXECUTION] Response received, status: {response.status_code}")
                 response.raise_for_status()
                 full_response_text = _parse_stream_response(response)
@@ -244,6 +246,7 @@ def _execute_task_sync(task: Dict[str, Any]) -> None:
             "POST",
             f"/tasks/internal/one-time/{task_id}/complete",
             json_body={"response": full_response_text},
+            user_id=task_user_id,
         )
 
     except Exception as e:
@@ -254,6 +257,7 @@ def _execute_task_sync(task: Dict[str, Any]) -> None:
             "POST",
             f"/tasks/internal/one-time/{task_id}/fail",
             json_body={"error_message": error_msg},
+            user_id=task_user_id,
         )
 
         retry_count = int(task.get('retry_count', 0)) + 1
@@ -270,11 +274,12 @@ def _execute_task(task: Dict[str, Any]) -> None:
     Tasks are executed concurrently (no session-level locking needed since backend auto-generates session_id).
     """
     task_id = int(task['id'])
+    task_user_id = str(task.get('user_id') or SCHEDULER_USER_ID)
     
     logger.debug(f"[TASK EXECUTION] Attempting to claim task {task_id}")
     
     # Try to claim the task first (atomic operation)
-    claim_result = _request_json("POST", f"/tasks/internal/one-time/{task_id}/claim")
+    claim_result = _request_json("POST", f"/tasks/internal/one-time/{task_id}/claim", user_id=task_user_id)
     if not claim_result or not claim_result.get("claimed"):
         logger.info(f"[TASK EXECUTION] Task {task_id} already being processed or not pending. Skipping.")
         return
@@ -297,6 +302,7 @@ def _check_and_spawn_recurring_tasks():
     try:
         result = _request_json("POST", "/tasks/internal/spawn-due")
         spawned_count = len((result or {}).get("items") or [])
+        logger.info(f"[SCHEDULER] spawn-due returned {spawned_count} tasks")
         if spawned_count > 0:
             logger.info(f"Spawned {spawned_count} tasks from recurring tasks")
     except Exception as e:
@@ -329,6 +335,7 @@ def scheduler_loop():
             logger.debug("[SCHEDULER] Getting pending tasks...")
             due_result = _request_json("GET", "/tasks/internal/due", params={"limit": 200})
             pending_tasks = (due_result or {}).get("items") or []
+            logger.info(f"[SCHEDULER] due returned {len(pending_tasks)} pending tasks")
             
             if pending_tasks:
                 logger.info(f"[SCHEDULER] Found {len(pending_tasks)} pending tasks to execute")
