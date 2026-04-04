@@ -69,11 +69,11 @@
     <div
       v-else-if="message.role === 'assistant' && (message.type === 'task_analysis' || message.message_type === 'task_analysis')"
       class="flex flex-row items-start px-4"
-      :class="hideAssistantAvatar ? 'gap-1' : 'gap-3'">
+      :class="assistantRowGapClass">
       <div v-if="showAssistantAvatar" class="flex-none">
         <MessageAvatar :messageType="message.message_type || message.type" role="assistant" :agentId="agentId" />
       </div>
-      <div v-else class="flex-none" :class="hideAssistantAvatar ? 'w-0' : 'w-8'" />
+      <div v-else class="flex-none" :class="assistantAvatarSpacerClass" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="w-full">
           <TaskAnalysisMessage :content="message.content" :isStreaming="isStreaming" :timestamp="message.timestamp" />
@@ -84,11 +84,11 @@
     <div
       v-else-if="message.role === 'assistant' && (message.type === 'reasoning_content' || message.message_type === 'reasoning_content')"
       class="flex flex-row items-start px-4"
-      :class="hideAssistantAvatar ? 'gap-1' : 'gap-3'">
+      :class="assistantRowGapClass">
       <div v-if="showAssistantAvatar" class="flex-none">
         <MessageAvatar :messageType="message.message_type || message.type" role="assistant" :agentId="agentId" />
       </div>
-      <div v-else class="flex-none" :class="hideAssistantAvatar ? 'w-0' : 'w-8'" />
+      <div v-else class="flex-none" :class="assistantAvatarSpacerClass" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="w-full">
           <ReasoningContentMessage :content="message.content" :isStreaming="isStreaming" :timestamp="message.timestamp" />
@@ -100,11 +100,11 @@
     <div
       v-else-if="message.role === 'assistant' && !hasToolCalls && (message.content || getImageUrls(message.content).length > 0)"
       class="flex flex-row items-start px-4 group"
-      :class="hideAssistantAvatar ? 'gap-1' : 'gap-3'">
+      :class="assistantRowGapClass">
       <div v-if="showAssistantAvatar" class="flex-none">
         <MessageAvatar :messageType="message.message_type || message.type" role="assistant" :agentId="agentId" />
       </div>
-      <div v-else class="flex-none" :class="hideAssistantAvatar ? 'w-0' : 'w-8'" />
+      <div v-else class="flex-none" :class="assistantAvatarSpacerClass" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="flex flex-col gap-1 w-full">
           <div
@@ -149,11 +149,11 @@
     <div
       v-else-if="hasToolCalls"
       class="flex flex-row items-start px-4"
-      :class="hideAssistantAvatar ? 'gap-1' : 'gap-3'">
+      :class="assistantRowGapClass">
       <div v-if="showAssistantAvatar" class="flex-none">
         <MessageAvatar :messageType="message.message_type || message.type" role="assistant" :toolName="getToolName(message)" :agentId="agentId" />
       </div>
-      <div v-else class="flex-none" :class="hideAssistantAvatar ? 'w-0' : 'w-8'" />
+      <div v-else class="flex-none" :class="assistantAvatarSpacerClass" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage }">
           <div v-for="(toolCall, index) in message.tool_calls" :key="toolCall.id || index">
@@ -206,7 +206,7 @@ import EChartsRenderer from './EChartsRenderer.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
 import { Terminal, FileText, Search, Zap, Copy, Check, Image } from 'lucide-vue-next'
-import { getMessageLabel } from '@/utils/messageLabels'
+import { getMessageLabel, isTokenUsageMessage as isTokenUsageMessageValue } from '@/utils/messageLabels'
 import ToolErrorCard from './tools/ToolErrorCard.vue'
 import ToolDefaultCard from './tools/ToolDefaultCard.vue'
 import ToolCallMessage from './ToolCallMessage.vue'
@@ -275,6 +275,12 @@ const workbenchStore = useWorkbenchStore()
 const hideAssistantAvatar = computed(() => (
   props.hideAssistantAvatar === true && props.message.role === 'assistant'
 ))
+const assistantRowGapClass = computed(() => (
+  props.message.role === 'assistant' ? 'gap-3' : (hideAssistantAvatar.value ? 'gap-1' : 'gap-3')
+))
+const assistantAvatarSpacerClass = computed(() => (
+  props.message.role === 'assistant' ? 'w-8' : (hideAssistantAvatar.value ? 'w-0' : 'w-8')
+))
 
 const showAssistantAvatar = computed(() => {
   if (props.message.role !== 'assistant') return false
@@ -286,7 +292,7 @@ const showAssistantAvatar = computed(() => {
     const prev = props.messages?.[i]
     if (!prev) continue
     if (prev.role === 'tool') continue
-    if (prev.type === 'token_usage' || prev.message_type === 'token_usage') continue
+    if (isTokenUsageMessageValue(prev)) continue
     return prev.role !== 'assistant'
   }
   return true
@@ -311,7 +317,7 @@ const isErrorMessage = computed(() => {
 })
 
 const isTokenUsageMessage = computed(() => {
-  return props.message.type === 'token_usage' || props.message.message_type === 'token_usage'
+  return isTokenUsageMessageValue(props.message)
 })
 
 const tokenUsageData = computed(() => {

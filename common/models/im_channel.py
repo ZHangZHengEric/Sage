@@ -1,5 +1,6 @@
 """Desktop IM channel config (shared models, desktop-only usage)."""
 
+import os
 from datetime import datetime
 from typing import Any, Dict, Optional, List
 
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from common.models.base import Base, BaseDao
 
 # Default Sage user ID for desktop app
-DEFAULT_SAGE_USER_ID = "desktop_default_user"
+DEFAULT_SAGE_USER_ID = os.environ.get("SAGE_DESKTOP_USER_ID", "default_user")
 
 
 class IMChannelConfig(Base):

@@ -16,16 +16,15 @@ from common.core.render import Response
 from common.models.agent import AgentConfigDao
 from common.schemas.agent import (
     AgentAbilitiesRequest,
-    AgentAbilitiesData,
     AgentConfigDTO,
     AutoGenAgentRequest,
     SystemPromptOptimizeRequest,
     convert_agent_to_config,
-    convert_config_to_agent,
 )
-from common.services import agent_service
+from common.services import agent_router_service, agent_service
+from common.services.agent_view_service import serialize_agent, serialize_agents
 from sagents.utils.agent_abilities import AgentAbilitiesGenerationError
-from sagents.utils.prompt_manager import PromptManager
+from ..user_context import get_desktop_user_id
 
 # 创建路由器
 agent_router = APIRouter(prefix="/api/agent", tags=["Agent"])
@@ -38,19 +37,9 @@ async def list(http_request: Request):
     Returns:
         StandardResponse: 包含所有Agent配置的标准响应
     """
-    all_configs = await agent_service.list_agents()
-    agents_data: List[Dict[str, Any]] = []
-    for agent in all_configs:
-        agent_id = agent.agent_id
-        agent_resp = convert_config_to_agent(
-            agent_id,
-            agent.config,
-            is_default=agent.is_default,
-            agent_name=agent.name,
-        )
-        agents_data.append(agent_resp.model_dump())
-    # 根据agent名称排序
-    agents_data.sort(key=lambda x: x["name"])
+    user_id = get_desktop_user_id(http_request)
+    all_configs = await agent_service.list_agents(user_id=user_id)
+    agents_data = serialize_agents(all_configs)
     return await Response.succ(
         data=agents_data, message=f"成功获取 {len(agents_data)} 个Agent配置"
     )
@@ -68,21 +57,11 @@ async def get_default_system_prompt(language: str = "zh"):
         StandardResponse: 包含默认System Prompt的内容
     """
     try:
-        content = PromptManager().get_prompt(
-            'agent_intro_template',
-            agent='common',
+        result = await agent_router_service.build_default_system_prompt_response(
             language=language,
-            default=""
+            blank_draft=True,
         )
-        # 如果是模板格式（包含{agent_name}），可以预填一个默认值或者保留占位符
-        # 这里为了作为草稿，我们预填 Sage
-        if "{agent_name}" in content:
-            content = content.format(agent_name="Sage")
-        content = ""
-        return await Response.succ(
-            data={"content": content},
-            message="成功获取默认System Prompt模板"
-        )
+        return await Response.succ(data=result["data"], message=result["message"])
     except Exception as e:
         return await Response.error(
             message=f"获取默认System Prompt模板失败: {str(e)}"
@@ -129,7 +108,11 @@ async def create(agent: AgentConfigDTO, http_request: Request):
 
     config_dict = convert_agent_to_config(agent)
     logger.info(f"[Agent Create] Config dict: is_default={config_dict.get('is_default')}")
-    created_agent = await agent_service.create_agent(agent.name, config_dict)
+    created_agent = await agent_service.create_agent(
+        agent.name,
+        config_dict,
+        user_id=get_desktop_user_id(http_request),
+    )
     return await Response.succ(
         data={"agent_id": created_agent.agent_id}, message=f"Agent '{created_agent.agent_id}' 创建成功"
     )
@@ -138,7 +121,9 @@ async def create(agent: AgentConfigDTO, http_request: Request):
 @agent_router.post("/import-openclaw")
 async def import_openclaw(http_request: Request):
     """一键导入 OpenClaw 数据并创建对应 Agent。"""
-    result = await agent_service.import_openclaw_agent()
+    result = await agent_service.import_openclaw_agent(
+        user_id=get_desktop_user_id(http_request)
+    )
 
     skill_count = result.get("linked_skill_count", 0)
     if skill_count > 0:
@@ -160,14 +145,8 @@ async def get(agent_id: str, http_request: Request):
     Returns:
         StandardResponse: 包含Agent配置的标准响应
     """
-    agent = await agent_service.get_agent(agent_id)
-    agent_resp = convert_config_to_agent(
-        agent.agent_id,
-        agent.config,
-        is_default=agent.is_default,
-        agent_name=agent.name,
-    )
-    return await Response.succ(data=agent_resp.model_dump(), message="成功获取Agent配置")
+    agent = await agent_service.get_agent(agent_id, user_id=get_desktop_user_id(http_request))
+    return await Response.succ(data=serialize_agent(agent), message="成功获取Agent配置")
 
 
 @agent_router.put("/{agent_id}")
@@ -210,7 +189,12 @@ async def update(agent_id: str, agent: AgentConfigDTO, http_request: Request):
             logger.info(f"[Agent Update] Auto-added IM tools for agent={agent_id}: {tools_added}")
 
     # 更新 Agent 基本信息
-    await agent_service.update_agent(agent_id, agent.name, convert_agent_to_config(agent))
+    await agent_service.update_agent(
+        agent_id,
+        agent.name,
+        convert_agent_to_config(agent),
+        user_id=get_desktop_user_id(http_request),
+    )
     
     # 保存 IM 渠道配置（如果存在）
     if agent.im_channels:
@@ -286,7 +270,7 @@ async def delete(agent_id: str, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    await agent_service.delete_agent(agent_id)
+    await agent_service.delete_agent(agent_id, user_id=get_desktop_user_id(http_request))
     return await Response.succ(data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 删除成功")
 
 
@@ -302,7 +286,7 @@ async def set_default_agent(agent_id: str, http_request: Request):
         StandardResponse: 包含操作结果的标准响应
     """
     # 先检查 Agent 是否存在
-    agent = await agent_service.get_agent(agent_id)
+    agent = await agent_service.get_agent(agent_id, user_id=get_desktop_user_id(http_request))
     if not agent:
         return await Response.error(message=f"Agent '{agent_id}' 不存在")
     
@@ -317,7 +301,7 @@ async def set_default_agent(agent_id: str, http_request: Request):
 
 
 @agent_router.post("/auto-generate")
-async def auto_generate(request: AutoGenAgentRequest):
+async def auto_generate(request: AutoGenAgentRequest, http_request: Request):
     """
     自动生成Agent
 
@@ -325,29 +309,30 @@ async def auto_generate(request: AutoGenAgentRequest):
         request: 自动生成Agent请求
 
     """
-    agent_config = await agent_service.auto_generate_agent(
+    result = await agent_router_service.build_auto_generate_response(
         agent_description=request.agent_description,
         available_tools=request.available_tools,
+        user_id=get_desktop_user_id(http_request),
+        wrap_key="agent",
     )
-    return await Response.succ(
-        data={"agent": agent_config}, message="Agent自动生成成功"
-    )
+    return await Response.succ(data=result["data"], message=result["message"])
 
 
 @agent_router.post("/abilities")
-async def get_agent_abilities(payload: AgentAbilitiesRequest):
+async def get_agent_abilities(payload: AgentAbilitiesRequest, http_request: Request):
     """Desktop 端：生成指定 Agent 的能力卡片列表"""
     try:
         logger.info(f"生成 Agent 语言: {payload.language}")
-        items = await agent_service.generate_agent_abilities(
+        result = await agent_router_service.build_agent_abilities_response(
             agent_id=payload.agent_id,
             session_id=payload.session_id,
             context=payload.context,
             language=payload.language or "zh",
+            user_id=get_desktop_user_id(http_request),
+            wrap_data_model=True,
         )
-        data = AgentAbilitiesData(items=items)
         return await Response.succ(
-            data=data.model_dump(),
+            data=result["data"],
             message="成功获取Agent能力列表",
         )
     except AgentAbilitiesGenerationError as e:
@@ -359,7 +344,7 @@ async def get_agent_abilities(payload: AgentAbilitiesRequest):
 
 
 @agent_router.post("/system-prompt/optimize")
-async def optimize(request: SystemPromptOptimizeRequest):
+async def optimize(request: SystemPromptOptimizeRequest, http_request: Request):
     """
     优化系统提示词
 
@@ -369,11 +354,12 @@ async def optimize(request: SystemPromptOptimizeRequest):
     Returns:
         StandardResponse: 包含优化后的系统提示词的标准响应
     """
-    res = await agent_service.optimize_system_prompt(
+    result = await agent_router_service.build_system_prompt_optimize_response(
         original_prompt=request.original_prompt,
         optimization_goal=request.optimization_goal,
+        user_id=get_desktop_user_id(http_request),
     )
-    return await Response.succ(data=res, message="系统提示词优化成功")
+    return await Response.succ(data=result["data"], message=result["message"])
 
 
 @agent_router.post("/{agent_id}/file_workspace")
@@ -383,8 +369,11 @@ async def get_workspace(agent_id: str, request: Request):
     sage_home = user_home / ".sage"
     workspace_path = sage_home / "agents" / agent_id
     logger.info(f"获取Agent {agent_id} 的工作空间路径：{workspace_path}")
-    result = await agent_service.get_desktop_file_workspace(agent_id)
-    return await Response.succ(message=result.get("message", "获取文件列表成功"), data={**result})
+    result = await agent_router_service.build_workspace_listing_response(
+        agent_id=agent_id,
+        fetcher=lambda: agent_service.get_desktop_file_workspace(agent_id),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
 
 
 @agent_router.get("/{agent_id}/file_workspace/download")
@@ -418,8 +407,11 @@ async def delete_file(agent_id: str, request: Request):
     workspace_path = sage_home / "agents" / agent_id
 
     try:
-        await agent_service.delete_desktop_agent_file(agent_id, file_path)
-        return await Response.succ(message=f"文件 {file_path} 已删除")
+        result = await agent_router_service.build_workspace_delete_response(
+            file_path=file_path,
+            deleter=lambda: agent_service.delete_desktop_agent_file(agent_id, file_path),
+        )
+        return await Response.succ(message=result["message"], data=result["data"])
     except Exception as e:
         logger.bind(agent_id=agent_id).error(f"Delete failed: {e}")
         raise

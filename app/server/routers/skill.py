@@ -7,8 +7,9 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from pydantic import BaseModel
 
+from common.core.request_identity import get_request_role, get_request_user_id
 from common.core.render import Response
-from common.services import skill_service
+from common.services import skill_router_service
 from loguru import logger
 # 创建路由器
 skill_router = APIRouter(prefix="/api/skills")
@@ -39,14 +40,13 @@ async def get_skills(
         agent_id: 可选，过滤特定Agent的技能
         dimension: 可选，按维度过滤 (system, user, agent)
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
-
-    skills = await skill_service.list_skills(user_id, role, agent_id, dimension)
-    return await Response.succ(
-        message="获取技能列表成功", data={"skills": skills}
+    result = await skill_router_service.build_skills_response(
+        user_id=get_request_user_id(http_request),
+        role=get_request_role(http_request),
+        agent_id=agent_id,
+        dimension=dimension,
     )
+    return await Response.succ(message=result["message"], data=result["data"])
 
 
 @skill_router.get("/agent-available")
@@ -63,14 +63,12 @@ async def get_agent_available_skills(
     Args:
         agent_id: Agent ID（必填）
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
-
-    skills = await skill_service.get_agent_available_skills(agent_id, user_id, role)
-    return await Response.succ(
-        message="获取Agent可用技能列表成功", data={"skills": skills}
+    result = await skill_router_service.build_agent_available_skills_response(
+        agent_id=agent_id,
+        user_id=get_request_user_id(http_request),
+        role=get_request_role(http_request),
     )
+    return await Response.succ(message=result["message"], data=result["data"])
 
 
 @skill_router.post("/upload")
@@ -84,14 +82,16 @@ async def upload_skill(
     """
     通过上传 ZIP 文件导入技能
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
-
-    message = await skill_service.import_skill_by_file(
-        file, user_id, role, is_system, is_agent, agent_id
+    result = await skill_router_service.build_upload_skill_response(
+        file=file,
+        user_id=get_request_user_id(http_request),
+        role=get_request_role(http_request),
+        is_system=is_system,
+        is_agent=is_agent,
+        agent_id=agent_id,
+        include_user_id=True,
     )
-    return await Response.succ(message=message, data={"user_id": user_id})
+    return await Response.succ(message=result["message"], data=result["data"])
 
 
 @skill_router.post("/import-url")
@@ -99,14 +99,16 @@ async def import_skill_from_url(request: UrlImportRequest, http_request: Request
     """
     通过 URL 导入技能 (ZIP)
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
-
-    message = await skill_service.import_skill_by_url(
-        request.url, user_id, role, request.is_system, request.is_agent, request.agent_id
+    result = await skill_router_service.build_import_skill_url_response(
+        url=request.url,
+        user_id=get_request_user_id(http_request),
+        role=get_request_role(http_request),
+        is_system=request.is_system,
+        is_agent=request.is_agent,
+        agent_id=request.agent_id,
+        include_user_id=True,
     )
-    return await Response.succ(message=message, data={"user_id": user_id})
+    return await Response.succ(message=result["message"], data=result["data"])
 
 
 @skill_router.delete("")
@@ -122,12 +124,14 @@ async def delete_skill(
         name: 技能名称
         agent_id: 可选，如果提供则删除指定Agent工作空间下的skill
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
     # name is query param
-    await skill_service.delete_skill(name, user_id, role, agent_id)
-    return await Response.succ(message=f"技能 '{name}' 删除成功")
+    result = await skill_router_service.build_delete_skill_response(
+        name=name,
+        user_id=get_request_user_id(http_request),
+        role=get_request_role(http_request),
+        agent_id=agent_id,
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
 
 
 @skill_router.get("/content")
@@ -135,15 +139,16 @@ async def get_skill_content(name: str, http_request: Request):
     """
     获取技能内容 (SKILL.md)
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
     # name is query param, usually automatically decoded by FastAPI/Starlette, 
     # but let's ensure it's handled if passed as part of query string.
     # Actually FastAPI decodes query params automatically.
     logger.info(f"get_skill_content name: {name}")
-    content = await skill_service.get_skill_content(name, user_id, role)
-    return await Response.succ(data={"content": content})
+    result = await skill_router_service.build_skill_content_response(
+        name=name,
+        user_id=get_request_user_id(http_request),
+        role=get_request_role(http_request),
+    )
+    return await Response.succ(data=result["data"])
 
 
 @skill_router.put("/content")
@@ -151,9 +156,10 @@ async def update_skill_content(request: SkillUpdateRequest, http_request: Reques
     """
     更新技能内容 (SKILL.md)
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
-
-    message = await skill_service.update_skill_content(request.name, request.content , user_id, role)
-    return await Response.succ(message=message)
+    result = await skill_router_service.build_update_skill_content_response(
+        name=request.name,
+        content=request.content,
+        user_id=get_request_user_id(http_request),
+        role=get_request_role(http_request),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])

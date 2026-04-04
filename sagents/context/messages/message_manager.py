@@ -696,7 +696,7 @@ class MessageManager:
         # 过滤掉 REASONING_CONTENT 类型的消息
         filtered_messages = [
             msg for msg in messages
-            if msg.type != MessageType.REASONING_CONTENT.value
+            if not msg.matches_message_types([MessageType.REASONING_CONTENT.value])
         ]
 
         # 从后往前查找最新的压缩工具调用
@@ -709,8 +709,7 @@ class MessageManager:
                 compression_tool_index = i
                 # 找到该工具调用对应的 User 消息（往前找）
                 for j in range(i - 1, -1, -1):
-                    if (filtered_messages[j].role == MessageRole.USER.value and
-                        filtered_messages[j].type == MessageType.NORMAL.value):
+                    if filtered_messages[j].is_user_input_message():
                         compression_tool_user_index = j
                         break
                 break
@@ -788,8 +787,7 @@ class MessageManager:
                 compression_tool_index = i
                 # 找到该工具调用对应的 User 消息（往前找）
                 for j in range(i - 1, -1, -1):
-                    if (active_messages[j].role == MessageRole.USER.value and
-                        active_messages[j].type == MessageType.NORMAL.value):
+                    if active_messages[j].is_user_input_message():
                         compression_tool_user_index = j
                         break
                 break
@@ -813,7 +811,7 @@ class MessageManager:
         # --- 检测结束 ---
             
         for msg in active_messages:
-            if msg.role == MessageRole.USER.value and msg.type == MessageType.NORMAL.value:
+            if msg.is_user_input_message():
                 chat_list.append([msg])
             elif msg.role != MessageRole.USER.value:
                 if len(chat_list) > 0:
@@ -834,7 +832,7 @@ class MessageManager:
             merged_messages.append(chat[0])
             
             for msg in chat[1:]:
-                if msg.type in allowed_message_types:
+                if msg.matches_message_types(allowed_message_types):
                     merged_messages.append(msg)
             
             all_context_messages.extend(merged_messages[::-1])
@@ -1134,7 +1132,7 @@ class MessageManager:
         new_messages = []
         for msg in messages:
             # 去掉empty消息
-            if msg.type == MessageType.EMPTY.value:
+            if msg.matches_message_types([MessageType.EMPTY.value]):
                 logger.debug(f"DirectExecutorAgent: 过滤空消息: {msg}")
                 continue
             

@@ -27,12 +27,33 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         self._detached_token_ids: set[int] = set()
         # No longer using self.span_stacks for concurrency safety
 
-    def _safe_detach(self, token: Any):
+    def _is_ignorable_detach_error(self, error: Exception) -> bool:
+        message = str(error)
+        return isinstance(error, ValueError) and "different Context" in message
+
+    def _normalize_run_status(self, output: Any) -> tuple[str, str]:
+        if isinstance(output, dict):
+            status = str(output.get("status") or "finished").lower()
+            description = str(output.get("error") or output.get("description") or "")
+            return status, description
+        if isinstance(output, str):
+            return output.lower(), ""
+        return "finished", ""
+
+    def _safe_detach(self, token: Any) -> bool:
         token_id = id(token)
         if token_id in self._detached_token_ids:
-            return
-        self._detached_token_ids.add(token_id)
-        context.detach(token)
+            return True
+        try:
+            context.detach(token)
+            self._detached_token_ids.add(token_id)
+            return True
+        except Exception as e:
+            if self._is_ignorable_detach_error(e):
+                self._detached_token_ids.add(token_id)
+                logger.debug(f"OpenTelemetry: Ignore cross-context detach during cleanup: {e}")
+                return False
+            raise
 
     def _push_span(self, span: trace.Span):
         """Helper to activate span and push to stack"""
@@ -215,7 +236,17 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         span = self._get_current_span()
         if not span:
             return
-        span.set_status(Status(StatusCode.OK))
+
+        status, description = self._normalize_run_status(output)
+        span.set_attribute("agent.run_status", status)
+
+        if status == "finished":
+            span.set_status(Status(StatusCode.OK))
+        elif status == "cancelled":
+            span.set_attribute("agent.cancelled", True)
+        elif status == "error":
+            span.set_status(Status(StatusCode.ERROR, description or "Agent execution failed"))
+
         self._pop_span()
 
     def on_agent_error(self, error: Exception, **kwargs: Any) -> Any:

@@ -209,7 +209,7 @@ async def list_agents(user_id: Optional[str] = None) -> List[Agent]:
     cfg = _get_cfg()
     if cfg.app_mode == "server":
         return await dao.get_list_with_auth(user_id)
-    return await dao.get_list()
+    return await dao.get_list(user_id)
 
 
 async def get_agent(agent_id: str, user_id: Optional[str] = None) -> Agent:
@@ -253,7 +253,7 @@ async def create_agent(
         normalized_config = enforce_required_tools(normalized_config)
         normalized_config = validate_and_filter_tools(normalized_config)
 
-        existing_config = await dao.get_by_name(agent_name)
+        existing_config = await dao.get_by_name_and_user(agent_name, user_id)
         if existing_config:
             raise SageHTTPException(
                 status_code=500,
@@ -275,6 +275,7 @@ async def create_agent(
             agent_id=agent_id,
             name=agent_name,
             config=normalized_config,
+            user_id=user_id,
             is_default=is_default,
         )
         await dao.save(orm_obj)
@@ -339,6 +340,11 @@ async def update_agent(
     normalized_config = dict(agent_config)
 
     if cfg.app_mode == "desktop":
+        if user_id and existing_config.user_id and existing_config.user_id != user_id:
+            raise SageHTTPException(
+                detail="无权更新该Agent",
+                error_detail="forbidden",
+            )
         normalized_config = enforce_required_tools(normalized_config)
         normalized_config = validate_and_filter_tools(normalized_config)
         is_default = normalized_config.get("is_default", existing_config.is_default)
@@ -396,7 +402,7 @@ async def delete_agent(
         )
 
     if (
-        cfg.app_mode == "server"
+        cfg.app_mode in {"server", "desktop"}
         and role != "admin"
         and user_id
         and existing_config.user_id
@@ -483,13 +489,13 @@ def _get_sage_home() -> Path:
     return sage_home
 
 
-async def _resolve_default_llm_provider_id() -> str:
+async def _resolve_default_llm_provider_id(user_id: str = "") -> str:
     provider_dao = LLMProviderDao()
-    default_provider = await provider_dao.get_default()
+    default_provider = await provider_dao.get_default(user_id=user_id or None)
     if default_provider:
         return default_provider.id
 
-    providers = await provider_dao.get_list()
+    providers = await provider_dao.get_list(user_id=user_id or None)
     if providers:
         return providers[0].id
 
@@ -695,7 +701,7 @@ async def _cleanup_desktop_agent_workspace_skills(
         logger.bind(agent_id=agent_id).warning(f"清理agent工作空间skills失败: {e}")
 
 
-async def import_openclaw_agent() -> Dict[str, Any]:
+async def import_openclaw_agent(user_id: str = "") -> Dict[str, Any]:
     openclaw_home = Path.home() / ".openclaw"
     openclaw_workspace = openclaw_home / "workspace"
 
@@ -713,7 +719,7 @@ async def import_openclaw_agent() -> Dict[str, Any]:
             error_detail=str(openclaw_workspace),
         )
 
-    llm_provider_id = await _resolve_default_llm_provider_id()
+    llm_provider_id = await _resolve_default_llm_provider_id(user_id=user_id)
     skill_dirs = _detect_openclaw_skill_dirs(openclaw_home)
     skill_sources = _collect_openclaw_skill_sources(skill_dirs)
     available_skills = sorted(skill_sources.keys())
@@ -727,7 +733,7 @@ async def import_openclaw_agent() -> Dict[str, Any]:
     agent_workspace: Optional[Path] = None
 
     try:
-        created_agent = await create_agent(DEFAULT_OPENCLAW_AGENT_NAME, agent_config)
+        created_agent = await create_agent(DEFAULT_OPENCLAW_AGENT_NAME, agent_config, user_id=user_id)
 
         agent_workspace = _get_sage_home() / "agents" / created_agent.agent_id
         exclude_names = {"skills"} if (openclaw_workspace / "skills") in skill_dirs else set()

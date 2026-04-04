@@ -270,6 +270,7 @@ import { agentAPI } from '@/api/agent.js'
 import { chatAPI } from '@/api/chat.js'
 import { getCurrentUser } from '@/utils/auth.js'
 import { sanitizeSessionTitle } from '@/utils/sessionTitle'
+import { isTokenUsageMessage } from '@/utils/messageLabels.js'
 
 // UI Components
 import { Input } from '@/components/ui/input'
@@ -517,7 +518,7 @@ const formatMessageForExport = (messages) => {
 const getVisibleMessageCount = () => {
   if (!shareConversation.value?.messages) return 0
   return shareConversation.value.messages.filter(msg => 
-    msg.role === 'user' || (msg.role === 'assistant' && msg.message_type !== 'token_usage' && msg.content && msg.content !== '' && msg.content !== false)
+    msg.role === 'user' || (msg.role === 'assistant' && !isTokenUsageMessage(msg) && msg.content && msg.content !== '' && msg.content !== false)
   ).length
 }
 

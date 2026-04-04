@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 
 from .logger import logger
@@ -19,6 +20,24 @@ from .logger import logger
 
 class AgentAbilitiesGenerationError(Exception):
     """在生成 Agent 能力列表时出现的受控异常."""
+
+
+def _build_no_thinking_extra_body(model: str) -> Dict[str, Any]:
+    model_name = (model or "").lower()
+    is_openai_reasoning_model = (
+        model_name.startswith("o1")
+        or model_name.startswith("o3")
+        or model_name.startswith("gpt-5")
+    )
+    if is_openai_reasoning_model:
+        return {
+            "reasoning_effort": "low",
+        }
+    return {
+        "chat_template_kwargs": {"enable_thinking": False},
+        "enable_thinking": False,
+        "thinking": {"type": "disabled"},
+    }
 
 
 def _normalize_id(raw: str) -> str:
@@ -65,6 +84,27 @@ def _build_context_summary(context: Optional[Dict[str, Any]]) -> str:
     if not parts:
         return "当前没有额外上下文。"
     return "\n".join(parts)
+
+
+def _build_system_context_message(language: str) -> str:
+    now = datetime.now().astimezone()
+    timezone_name = now.tzname() or "local"
+    current_time = now.strftime("%Y-%m-%d %H:%M:%S")
+    if str(language).lower().startswith("en"):
+        return (
+            "You are generating deterministic prompt suggestions for the current agent.\n"
+            "Use the current runtime context as background facts when helpful.\n"
+            f"Current local time: {current_time}\n"
+            f"Current timezone: {timezone_name}\n"
+            "Do not mention these system facts explicitly unless they materially help produce better prompts."
+        )
+    return (
+        "你正在为当前 Agent 生成可直接使用的能力模板。\n"
+        "如有必要，可以把当前运行环境基础信息当作背景事实使用。\n"
+        f"当前本地时间：{current_time}\n"
+        f"当前时区：{timezone_name}\n"
+        "除非确实有助于生成更好的模板，否则不要在结果中直接复述这些系统信息。"
+    )
 
 
 async def generate_agent_abilities_from_config(
@@ -211,11 +251,13 @@ async def generate_agent_abilities_from_config(
         response = await client.chat.completions.create(
             model=model,
             messages=[
+                {"role": "system", "content": _build_system_context_message(language)},
                 {"role": "user", "content": user_prompt},
             ],
             response_format={"type": "json_object"},
             # temperature=0.7,
             max_tokens=1500,
+            extra_body=_build_no_thinking_extra_body(model),
         )
     except Exception as e:  # pragma: no cover - 具体异常类型由底层 SDK 决定
         logger.error(f"生成 Agent 能力列表时调用模型失败: {e}")

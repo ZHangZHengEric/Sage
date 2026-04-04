@@ -22,6 +22,7 @@ from sagents.context.session_context import delete_session_run_lock
 from sagents.utils.lock_manager import safe_release
 
 from ..services.chat.stream_manager import StreamManager
+from ..user_context import get_desktop_user_id
 
 # 创建路由器
 chat_router = APIRouter()
@@ -29,6 +30,8 @@ chat_router = APIRouter()
 
 @chat_router.post("/api/chat/optimize-input")
 async def optimize_chat_input(request: UserInputOptimizeRequest, http_request: Request):
+    if not request.user_id:
+        request.user_id = get_desktop_user_id(http_request)
     result = await chat_service.optimize_user_input(
         current_input=request.current_input,
         history_messages=[message.model_dump() for message in request.history_messages],
@@ -46,6 +49,8 @@ async def optimize_chat_input(request: UserInputOptimizeRequest, http_request: R
 
 @chat_router.post("/api/chat/optimize-input/stream")
 async def optimize_chat_input_stream(request: UserInputOptimizeRequest, http_request: Request):
+    if not request.user_id:
+        request.user_id = get_desktop_user_id(http_request)
     async def event_generator():
         async for chunk in chat_service.optimize_user_input_stream(
             current_input=request.current_input,
@@ -153,6 +158,7 @@ async def chat(request: ChatRequest, http_request: Request):
         session_id=request.session_id,
         system_context=request.system_context,
         agent_id=request.agent_id,
+        user_id=request.user_id or get_desktop_user_id(http_request),
     )
 
     await chat_service.populate_request_from_agent_config(
@@ -204,6 +210,8 @@ def validate_and_prepare_request(request: ChatRequest | StreamRequest, http_requ
 async def stream_chat_web(request: StreamRequest, http_request: Request):
     """这个接口有用户鉴权"""
     validate_and_prepare_request(request, http_request)
+    if not request.user_id:
+        request.user_id = get_desktop_user_id(http_request)
 
     session_id = request.session_id
     manager = StreamManager.get_instance()

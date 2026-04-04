@@ -1,9 +1,9 @@
-"""Task / RecurringTask ORM + DAO (desktop-only usage)."""
+"""Task / RecurringTask ORM + DAO shared by desktop and server."""
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import JSON, String, Integer, Boolean, DateTime, ForeignKey, Text, select, desc
+from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Text, desc, select, update
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from common.models.base import Base, BaseDao, get_local_now
@@ -13,6 +13,7 @@ class RecurringTask(Base):
     __tablename__ = "recurring_tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(128), default="")
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     session_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -36,6 +37,7 @@ class Task(Base):
     __tablename__ = "tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(128), default="")
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     agent_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -84,10 +86,13 @@ class TaskDao(BaseDao):
         page: int = 1,
         page_size: int = 20,
         agent_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> tuple[List[RecurringTask], int]:
         where = []
         if agent_id:
             where.append(RecurringTask.agent_id == agent_id)
+        if user_id:
+            where.append(RecurringTask.user_id == user_id)
 
         return await self.paginate_list(
             RecurringTask,
@@ -100,11 +105,38 @@ class TaskDao(BaseDao):
     async def get_recurring_task(self, task_id: int) -> Optional[RecurringTask]:
         return await self.get_by_id(RecurringTask, task_id)
 
+    async def get_enabled_recurring_tasks(
+        self,
+        *,
+        user_id: Optional[str] = None,
+    ) -> List[RecurringTask]:
+        where = [RecurringTask.enabled == True]  # noqa: E712
+        if user_id:
+            where.append(RecurringTask.user_id == user_id)
+        return await self.get_list(
+            RecurringTask,
+            where=where,
+            order_by=desc(RecurringTask.created_at),
+        )
+
     async def create_recurring_task(self, task: RecurringTask) -> RecurringTask:
         await self.insert(task)
         return task
 
     async def update_recurring_task(self, task: RecurringTask) -> RecurringTask:
+        task.updated_at = get_local_now()
+        await self.save(task)
+        return task
+
+    async def update_recurring_task_last_executed(
+        self,
+        task_id: int,
+        executed_at: Optional[datetime] = None,
+    ) -> Optional[RecurringTask]:
+        task = await self.get_recurring_task(task_id)
+        if not task:
+            return None
+        task.last_executed_at = executed_at or get_local_now()
         task.updated_at = get_local_now()
         await self.save(task)
         return task
@@ -117,8 +149,11 @@ class TaskDao(BaseDao):
         recurring_task_id: int,
         page: int = 1,
         page_size: int = 20,
+        user_id: Optional[str] = None,
     ) -> tuple[List[Task], int]:
         where = [Task.recurring_task_id == recurring_task_id]
+        if user_id:
+            where.append(Task.user_id == user_id)
 
         return await self.paginate_list(
             Task,
@@ -133,11 +168,14 @@ class TaskDao(BaseDao):
         page: int = 1,
         page_size: int = 20,
         agent_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> tuple[List[Task], int]:
         """获取一次性任务列表（recurring_task_id=0）"""
         where = [Task.recurring_task_id == 0]
         if agent_id:
             where.append(Task.agent_id == agent_id)
+        if user_id:
+            where.append(Task.user_id == user_id)
 
         return await self.paginate_list(
             Task,
@@ -154,10 +192,105 @@ class TaskDao(BaseDao):
     async def get_one_time_task(self, task_id: int) -> Optional[Task]:
         return await self.get_by_id(Task, task_id)
 
+    async def get_due_pending_tasks(
+        self,
+        *,
+        user_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Task]:
+        where = [Task.status == "pending", Task.execute_at <= get_local_now()]
+        if user_id:
+            where.append(Task.user_id == user_id)
+        return await self.get_list(
+            Task,
+            where=where,
+            order_by=Task.execute_at,
+            limit=limit,
+        )
+
+    async def claim_one_time_task(
+        self,
+        task_id: int,
+        *,
+        user_id: Optional[str] = None,
+    ) -> bool:
+        db = await self._get_db()
+        async with db.get_session() as session:  # type: ignore[attr-defined]
+            stmt = update(Task).where(Task.id == task_id, Task.status == "pending")
+            if user_id:
+                stmt = stmt.where(Task.user_id == user_id)
+            stmt = stmt.values(status="processing", updated_at=get_local_now())
+            result = await session.execute(stmt)
+            return bool(result.rowcount)
+
     async def update_one_time_task(self, task: Task) -> Task:
         task.updated_at = get_local_now()
         await self.save(task)
         return task
+
+    async def complete_one_time_task(
+        self,
+        task_id: int,
+        *,
+        user_id: Optional[str] = None,
+    ) -> Optional[Task]:
+        task = await self.get_one_time_task(task_id)
+        if not task or (user_id and task.user_id and task.user_id != user_id):
+            return None
+        now = get_local_now()
+        task.status = "completed"
+        task.completed_at = now
+        task.updated_at = now
+        await self.save(task)
+        return task
+
+    async def fail_one_time_task(
+        self,
+        task_id: int,
+        *,
+        user_id: Optional[str] = None,
+        retry: bool = True,
+    ) -> Optional[Task]:
+        task = await self.get_one_time_task(task_id)
+        if not task or (user_id and task.user_id and task.user_id != user_id):
+            return None
+        now = get_local_now()
+        task.retry_count = int(task.retry_count or 0) + 1
+        max_retries = int(task.max_retries or 0)
+        task.status = "pending" if retry and task.retry_count <= max_retries else "failed"
+        task.updated_at = now
+        await self.save(task)
+        return task
+
+    async def add_task_history(
+        self,
+        task_id: int,
+        *,
+        status: str,
+        response: Optional[str] = None,
+        error_message: Optional[str] = None,
+    ) -> TaskHistory:
+        history = TaskHistory(
+            task_id=task_id,
+            status=status,
+            response=response,
+            error_message=error_message,
+        )
+        await self.insert(history)
+        return history
+
+    async def get_one_time_task_history(
+        self,
+        task_id: int,
+        *,
+        limit: int = 20,
+    ) -> List[TaskHistory]:
+        return await self.get_list(
+            TaskHistory,
+            where=[TaskHistory.task_id == task_id],
+            order_by=desc(TaskHistory.executed_at),
+            limit=limit,
+        )
 
     async def delete_one_time_task(self, task_id: int) -> bool:
         return await self.delete_by_id(Task, task_id)

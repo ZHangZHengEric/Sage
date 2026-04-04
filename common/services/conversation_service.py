@@ -19,6 +19,7 @@ from common.core import config
 from common.core.exceptions import SageHTTPException
 from common.models.base import get_local_now
 from common.models.conversation import Conversation, ConversationDao
+from common.schemas.conversation import ConversationInfo
 from common.services.chat_processor import ContentProcessor
 from common.services.chat_utils import get_sessions_root
 
@@ -116,6 +117,48 @@ async def get_conversations_paginated(
     )
 
 
+def build_conversation_list_result(
+    *,
+    conversations: List[Conversation],
+    total_count: int,
+    page: int,
+    page_size: int,
+    include_user_id: bool = False,
+    context_user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    conversation_items: List[ConversationInfo] = []
+    for conv in conversations:
+        message_count = conv.get_message_count()
+        conversation_items.append(
+            ConversationInfo(
+                session_id=conv.session_id,
+                user_id=conv.user_id if include_user_id else None,
+                agent_id=conv.agent_id,
+                agent_name=conv.agent_name,
+                title=conv.title,
+                message_count=message_count.get("user_count", 0) + message_count.get("agent_count", 0),
+                user_count=message_count.get("user_count", 0),
+                agent_count=message_count.get("agent_count", 0),
+                created_at=conv.created_at.isoformat() if conv.created_at else "",
+                updated_at=conv.updated_at.isoformat() if conv.updated_at else "",
+            )
+        )
+
+    total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 0
+    result: Dict[str, Any] = {
+        "list": [item.model_dump(exclude_none=True) for item in conversation_items],
+        "total": total_count,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "has_next": page < total_pages,
+        "has_prev": page > 1,
+    }
+    if context_user_id is not None:
+        result["user_id"] = context_user_id
+    return result
+
+
 async def get_conversation_messages(
     session_id: str,
 ) -> Dict[str, Any]:
@@ -169,6 +212,14 @@ async def delete_conversation(
             **_conversation_error_kwargs(
                 detail=f"会话 {conversation_id} 不存在",
                 error_detail=f"Conversation '{conversation_id}' not found",
+            )
+        )
+
+    if user_id and conversation.user_id and conversation.user_id != user_id:
+        raise SageHTTPException(
+            **_conversation_error_kwargs(
+                detail="无权删除该会话",
+                error_detail="forbidden",
             )
         )
 

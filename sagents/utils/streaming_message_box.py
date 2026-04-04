@@ -3,8 +3,16 @@ from typing import Tuple, List
 import os
 from rich.console import Console
 from rich.text import Text
+from sagents.context.messages.message import LEGACY_NORMAL_MESSAGE_TYPE
 
 console = Console()
+
+
+def normalize_message_type_for_display(message_type: str) -> str:
+    """兼容历史消息类型，仅用于终端展示。"""
+    if message_type == LEGACY_NORMAL_MESSAGE_TYPE:
+        return 'assistant_text'
+    return message_type
 
 
 def get_message_type_style(message_type: str) -> Tuple[str, str]:
@@ -16,8 +24,10 @@ def get_message_type_style(message_type: str) -> Tuple[str, str]:
     Returns:
         tuple: (颜色, 标签)
     """
+    normalized_message_type = normalize_message_type_for_display(message_type)
     type_styles = {
-        'normal': ('blue', '💬 普通消息'),
+        'user_input': ('blue', '💬 用户输入'),
+        'assistant_text': ('blue', '💬 文本消息'),
         'task_analysis': ('cyan', '🔍 任务分析'),
         'task_decomposition': ('yellow', '📋 任务拆解'),
         'planning': ('magenta', '📝 规划'),
@@ -40,7 +50,7 @@ def get_message_type_style(message_type: str) -> Tuple[str, str]:
         'chunk': ('white', '📦 数据块')
     }
     
-    return type_styles.get(message_type, ('white', f'📄 {message_type}'))
+    return type_styles.get(normalized_message_type, ('white', f'📄 {normalized_message_type}'))
 
 
 class StreamingMessageBox:

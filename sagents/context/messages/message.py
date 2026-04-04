@@ -15,10 +15,28 @@ class MessageRole(Enum):
     TOOL = "tool"
 
 
+LEGACY_NORMAL_MESSAGE_TYPE = "normal"
+
+
+def normalize_legacy_message_type(role: Optional[str], message_type: Optional[str]) -> Optional[str]:
+    """兼容历史消息类型。
+
+    仅用于读取旧数据：
+    - user 的普通消息统一视为 `user_input`
+    - assistant 的历史 `normal` 统一视为 `assistant_text`
+    """
+    if role == MessageRole.USER.value:
+        return MessageType.USER_INPUT.value
+    if role == MessageRole.ASSISTANT.value and message_type == LEGACY_NORMAL_MESSAGE_TYPE:
+        return MessageType.ASSISTANT_TEXT.value
+    return message_type
+
+
 class MessageType(Enum):
     """消息类型枚举 - 与项目实际使用保持一致"""
     # 基础类型
-    NORMAL = "normal"
+    USER_INPUT = "user_input"
+    ASSISTANT_TEXT = "assistant_text"
     REWRITE = "rewrite"
     TASK_ANALYSIS = "task_analysis"
     TASK_DECOMPOSITION = "task_decomposition"
@@ -117,15 +135,20 @@ class MessageChunk:
         if len(self.message_id) == 0:
             self.message_id = str(uuid.uuid4())
 
-
-        # 如果role 是user 类型，type 必须是normal
-        if self.role == MessageRole.USER.value:
-            self.type = MessageType.NORMAL.value
-
         # 统一type字段
         if self.type is None and self.message_type is not None:
             self.type = self.message_type
         elif self.message_type is None and self.type is not None:
+            self.message_type = self.type
+
+        role = self.role.value if isinstance(self.role, MessageRole) else self.role
+
+        # 统一基础文本消息语义，兼容历史 normal。
+        if role == MessageRole.USER.value:
+            self.type = MessageType.USER_INPUT.value
+            self.message_type = self.type
+        elif role == MessageRole.ASSISTANT.value and self.normalized_message_type() in {None, MessageType.ASSISTANT_TEXT.value}:
+            self.type = MessageType.ASSISTANT_TEXT.value
             self.message_type = self.type
         
         # 验证必需字段
@@ -239,6 +262,48 @@ class MessageChunk:
             Optional[str]: 消息内容
         """
         return self.content
+
+    def normalized_message_type(self) -> Optional[str]:
+        """返回规范化后的消息类型。
+
+        规则：
+        - user 普通输入统一视为 `user_input`
+        - assistant 的历史 `normal` 统一视为 `assistant_text`
+        - 已有明确业务语义的 assistant type 保持原样
+        """
+        role = self.role.value if isinstance(self.role, MessageRole) else self.role
+        message_type = self.message_type or self.type
+
+        return normalize_legacy_message_type(role, message_type)
+
+    def matches_message_types(self, allowed_types: List[str]) -> bool:
+        """判断消息是否匹配给定类型集合。
+
+        会优先用规范化后的 type 匹配，并兼容历史 `normal` 数据。
+        """
+        message_type = self.message_type or self.type
+        normalized_type = self.normalized_message_type()
+        return normalized_type in allowed_types or message_type in allowed_types
+
+    def is_user_input_message(self) -> bool:
+        """是否为用户输入消息。
+
+        新数据统一使用 `user_input`。历史数据通过 role 兼容识别。
+        """
+        role = self.role.value if isinstance(self.role, MessageRole) else self.role
+        return role == MessageRole.USER.value
+
+    def is_assistant_text_message(self) -> bool:
+        """是否为助手文本消息。
+
+        新数据统一使用 `assistant_text`，同时兼容历史 `normal`。
+        """
+        role = self.role.value if isinstance(self.role, MessageRole) else self.role
+        message_type = self.normalized_message_type()
+        return role == MessageRole.ASSISTANT.value and message_type in {
+            MessageType.ASSISTANT_TEXT.value,
+            MessageType.FINAL_ANSWER.value,
+        }
 
     @classmethod
     def extract_json_from_markdown(cls, content: str) -> str:

@@ -1,6 +1,7 @@
 # Task Scheduler MCP Server
-# Provides task scheduling and management capabilities for agents
+# Runtime behavior is implemented in task_scheduler_server and persists tasks
+# through the backend /tasks APIs rather than a local sqlite wrapper.
 
-from .db import TaskSchedulerDB, TaskStatus, TaskType
+from .task_scheduler_server import mcp
 
-__all__ = ["TaskSchedulerDB", "TaskStatus", "TaskType"]
+__all__ = ["mcp"]

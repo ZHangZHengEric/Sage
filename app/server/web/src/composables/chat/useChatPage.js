@@ -14,6 +14,7 @@ import { useChatAgentConfig } from '@/composables/chat/useChatAgentConfig.js'
 import { useChatWorkspace } from '@/composables/chat/useChatWorkspace.js'
 import { usePanelStore } from '@/stores/panel.js'
 import { useWorkbenchStore } from '@/stores/workbench.js'
+import { isToolResultMessage } from '@/utils/messageLabels.js'
 import { storeToRefs } from 'pinia'
 
 const abilityCacheByAgentGlobal = ref({})
@@ -206,7 +207,7 @@ export const useChatPage = (props) => {
 
     normalizedMessages.forEach((message) => {
       workbenchStore.extractFromMessage(message, message.agent_id || conversationAgentId)
-      if ((message.role === 'tool' || message.message_type === 'tool_call_result') && message.tool_call_id) {
+      if (isToolResultMessage(message) && message.tool_call_id) {
         const plainToolResult = JSON.parse(JSON.stringify(message))
         workbenchStore.updateToolResult(message.tool_call_id, plainToolResult)
       }
@@ -236,7 +237,7 @@ export const useChatPage = (props) => {
       const effectiveAgentId = message.agent_id || selectedAgent.value?.id || selectedAgentId.value || null
       workbenchStore.extractFromMessage(message, effectiveAgentId)
 
-      if ((message.role === 'tool' || message.message_type === 'tool_call_result') && message.tool_call_id) {
+      if (isToolResultMessage(message) && message.tool_call_id) {
         const plainToolResult = JSON.parse(JSON.stringify(message))
         workbenchStore.updateToolResult(message.tool_call_id, plainToolResult)
         return
@@ -261,7 +262,7 @@ export const useChatPage = (props) => {
         return
       }
       let nextMessage
-      if (messageData.role === 'tool' || messageData.message_type === 'tool_call_result') {
+      if (isToolResultMessage(messageData)) {
         nextMessage = {
           ...messageData,
           timestamp: messageData.timestamp || Date.now()
@@ -304,7 +305,8 @@ export const useChatPage = (props) => {
       role: 'user',
       content: messageContent,
       message_id: Date.now().toString(),
-      type: 'USER',
+      type: 'user_input',
+      message_type: 'user_input',
       session_id: sessionId,
       timestamp: Date.now()
     }
