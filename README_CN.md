@@ -297,7 +297,7 @@ Sage/
 
 ### 📱 微信群
 
-<img src="assets/0260403184943_150_9.jpg" width="300" alt="微信群二维码"/>
+<img src="assets/WeChatGroup.jpg" width="300" alt="微信群二维码"/>
 
 *扫码加入我们的微信社区 🦌*
 
