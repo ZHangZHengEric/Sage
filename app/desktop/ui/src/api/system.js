@@ -8,8 +8,8 @@ export const systemAPI = {
     return request.post('/api/system/update_settings', settings)
   },
   /** 获取最近 N 天的 Agent 工具使用统计 */
-  getAgentUsageStats: (days) => {
-    return request.post('/api/system/agent/usage-stats', { days })
+  getAgentUsageStats: (days, agentId = null) => {
+    return request.post('/api/system/agent/usage-stats', { days, agent_id: agentId })
   }
 }
 

@@ -2,8 +2,10 @@
 Conversation shared service-layer entry points for server and desktop routers.
 """
 
+import json
 from collections import Counter
 from datetime import timedelta
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
@@ -18,6 +20,7 @@ from common.core.exceptions import SageHTTPException
 from common.models.base import get_local_now
 from common.models.conversation import Conversation, ConversationDao
 from common.services.chat_processor import ContentProcessor
+from common.services.chat_utils import get_sessions_root
 
 
 def _get_cfg() -> config.StartupConfig:
@@ -200,37 +203,39 @@ async def get_agent_usage_stats(
     *,
     days: int,
     user_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
 ) -> Dict[str, int]:
     safe_days = max(1, min(int(days or 1), 365))
     updated_after = get_local_now() - timedelta(days=safe_days)
     conversations = await ConversationDao().get_recent_conversations(
         user_id=user_id,
         updated_after=updated_after,
+        agent_id=agent_id,
     )
 
     usage_counter: Counter[str] = Counter()
+    sessions_root = Path(get_sessions_root())
+
     for conversation in conversations:
-        messages = conversation.messages or []
-        if isinstance(messages, str):
-            try:
-                import json
-                messages = json.loads(messages)
-            except Exception:
-                messages = []
+        session_id = str(conversation.session_id or "").strip()
+        if not session_id:
+            continue
 
-        for message in messages:
-            if not isinstance(message, dict):
-                continue
-            tool_calls = message.get("tool_calls") or []
-            if not isinstance(tool_calls, list):
-                continue
+        tools_usage_path = sessions_root / session_id / "tools_usage.json"
+        if not tools_usage_path.is_file():
+            continue
 
-            for tool_call in tool_calls:
-                if not isinstance(tool_call, dict):
-                    continue
-                function = tool_call.get("function") or {}
-                tool_name = function.get("name")
+        try:
+            with tools_usage_path.open("r", encoding="utf-8") as f:
+                tools_usage = json.load(f)
+            if not isinstance(tools_usage, dict):
+                continue
+            for tool_name, count in tools_usage.items():
                 if tool_name:
-                    usage_counter[str(tool_name)] += 1
+                    usage_counter[str(tool_name)] += int(count or 0)
+        except Exception as e:
+            logger.warning(
+                f"读取 tools_usage.json 失败，跳过该会话统计: session_id={session_id}, error={e}"
+            )
 
     return dict(usage_counter)

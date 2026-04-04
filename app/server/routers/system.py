@@ -60,6 +60,7 @@ async def get_agent_usage_stats(request: Request, req: AgentUsageStatsRequest):
     usage = await conversation_service.get_agent_usage_stats(
         days=req.days,
         user_id=user_id,
+        agent_id=req.agent_id,
     )
     return await Response.succ(
         data={"usage": usage},

@@ -132,7 +132,7 @@
       >
         <!-- 弹幕叠在聊天区域上方；能力面板打开或用户已发送消息时不渲染弹幕 -->
         <div v-if="!showAbilityPanel && filteredMessages.length === 0" class="absolute top-5 left-0 right-0 h-[25%] min-h-[100px] max-h-[180px] overflow-hidden pointer-events-none z-10">
-          <AgentUsageDanmaku :hide-for-history="isViewingHistorySession" :closed-by-user="danmakuClosedByUser" :reset-trigger="danmakuResetTrigger" @close="onDanmakuClose" />
+          <AgentUsageDanmaku :agent-id="selectedAgentId" :hide-for-history="isViewingHistorySession" :closed-by-user="danmakuClosedByUser" :reset-trigger="danmakuResetTrigger" @close="onDanmakuClose" />
         </div>
         <div ref="messagesListRef" class="flex-1 overflow-y-auto p-4 sm:p-6 scroll-smooth" @scroll="handleScroll">
           <!-- 覆盖模式：当无消息且能力结果已加载好时，用能力面板直接占据原聊天空态区域 -->
