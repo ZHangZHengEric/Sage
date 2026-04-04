@@ -71,10 +71,45 @@
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
-pip install -r requirements.txt
 ```
 
 ### 运行 Sage
+
+**一键启动脚本（推荐本地开发）**：
+
+```bash
+# 1. 可选：先激活你的环境
+# conda activate your-env
+
+# 2. 设置 LLM Key
+export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
+export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
+export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
+
+# 3. 运行启动脚本
+./scripts/dev-up.sh
+```
+
+启动脚本会自动：
+- 检查 Python（>= 3.10）和 Node.js（>= 18）
+- 自动创建配置文件（最小模式默认使用 SQLite）
+- 自动安装依赖并启动后端、前端
+- 自动创建 `logs/server.log`
+- 优先使用 `.env` 中的 `SAGE_PORT`
+
+可选覆盖方式：
+
+```bash
+# 显式指定 Python
+PYTHON_BIN=/path/to/python ./scripts/dev-up.sh
+
+# 显式使用 uv
+USE_UV=1 ./scripts/dev-up.sh
+```
+
+首次运行时，脚本会提示你选择：
+- **最小模式**：SQLite、无外部依赖，适合快速开始
+- **完整模式**：MySQL + Elasticsearch + RustFS，适合更接近生产的环境
 
 **桌面应用（推荐）**：
 

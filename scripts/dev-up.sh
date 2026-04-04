@@ -16,6 +16,33 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
+mkdir -p logs
+
+PYTHON_SOURCE=""
+USE_UV="${USE_UV:-0}"
+USE_UV=$(printf '%s' "$USE_UV" | tr '[:upper:]' '[:lower:]')
+
+if [ -n "${PYTHON_BIN:-}" ]; then
+    PYTHON_CMD="$PYTHON_BIN"
+    PYTHON_SOURCE="PYTHON_BIN"
+elif [ -n "${CONDA_PREFIX:-}" ] && command -v python &> /dev/null; then
+    PYTHON_CMD="python"
+    PYTHON_SOURCE="active conda env"
+elif [ -n "${VIRTUAL_ENV:-}" ] && command -v python &> /dev/null; then
+    PYTHON_CMD="python"
+    PYTHON_SOURCE="active virtualenv"
+elif command -v python &> /dev/null; then
+    PYTHON_CMD="python"
+    PYTHON_SOURCE="python on PATH"
+elif command -v python3 &> /dev/null; then
+    PYTHON_CMD="python3"
+    PYTHON_SOURCE="python3 on PATH"
+else
+    PYTHON_CMD=""
+fi
+
+BACKEND_PORT="${SAGE_PORT:-$(grep -E '^SAGE_PORT=' .env 2>/dev/null | tail -n 1 | cut -d'=' -f2)}"
+BACKEND_PORT="${BACKEND_PORT:-8080}"
 
 echo "================================"
 echo "  Sage Dev Environment Startup"
@@ -24,12 +51,12 @@ echo ""
 
 # 1. Check Python version
 echo "🔍 Checking Python version..."
-if ! command -v python3 &> /dev/null; then
-    echo -e "${RED}❌ Python3 not found, please install (requires >= 3.10)${NC}"
+if ! command -v "$PYTHON_CMD" &> /dev/null; then
+    echo -e "${RED}❌ Python not found. Set PYTHON_BIN or activate your conda/venv environment (requires >= 3.10)${NC}"
     exit 1
 fi
 
-PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
+PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | awk '{print $2}')
 PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
 PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
 
@@ -38,6 +65,16 @@ if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" 
     exit 1
 fi
 echo -e "${GREEN}✅ Python version: $PYTHON_VERSION${NC}"
+echo -e "${GREEN}✅ Python executable: $(command -v $PYTHON_CMD)${NC}"
+echo -e "${GREEN}✅ Python source: ${PYTHON_SOURCE}${NC}"
+
+if [ "$USE_UV" = "1" ] || [ "$USE_UV" = "true" ] || [ "$USE_UV" = "yes" ]; then
+    if ! command -v uv &> /dev/null; then
+        echo -e "${RED}❌ USE_UV is enabled but uv is not installed or not on PATH${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✅ uv enabled: $(command -v uv)${NC}"
+fi
 echo ""
 
 # 2. Check Node.js version
@@ -110,7 +147,7 @@ if [ ! -f "$FRONTEND_ENV" ]; then
 NODE_ENV=development
 
 # Backend API URL
-VITE_SAGE_API_BASE_URL=http://127.0.0.1:8080
+VITE_SAGE_API_BASE_URL=http://127.0.0.1:${BACKEND_PORT}
 
 # Web base path
 VITE_SAGE_WEB_BASE_PATH=/
@@ -131,9 +168,19 @@ echo ""
 
 # 5. Check Python dependencies
 echo "🔍 Checking Python dependencies..."
-if ! python3 -c "import fastapi" 2>/dev/null; then
+if [ "$USE_UV" = "1" ] || [ "$USE_UV" = "true" ] || [ "$USE_UV" = "yes" ]; then
+    FASTAPI_CHECK_CMD=(uv run --python "$PYTHON_CMD" python -c "import fastapi")
+    INSTALL_CMD=(uv pip install --python "$PYTHON_CMD" -r requirements.txt --index-url https://mirrors.aliyun.com/pypi/simple/)
+    SERVER_CMD=(uv run --python "$PYTHON_CMD" python -m app.server.main)
+else
+    FASTAPI_CHECK_CMD=("$PYTHON_CMD" -c "import fastapi")
+    INSTALL_CMD=("$PYTHON_CMD" -m pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com)
+    SERVER_CMD=("$PYTHON_CMD" -m app.server.main)
+fi
+
+if ! "${FASTAPI_CHECK_CMD[@]}" 2>/dev/null; then
     echo "📦 Installing Python dependencies (using Aliyun mirror for faster download)..."
-    pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
+    "${INSTALL_CMD[@]}"
     echo -e "${GREEN}✅ Python dependencies installed${NC}"
 else
     echo -e "${GREEN}✅ Python dependencies already installed${NC}"
@@ -155,7 +202,7 @@ echo ""
 
 # 7. Start backend service (background)
 echo "🚀 Starting backend service..."
-python3 -m app.server.main > logs/server.log 2>&1 &
+"${SERVER_CMD[@]}" > logs/server.log 2>&1 &
 SERVER_PID=$!
 
 # Wait for backend process to start
@@ -175,7 +222,7 @@ MAX_WAIT=30
 WAIT_COUNT=0
 
 while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
-    if curl -s http://127.0.0.1:8080/api/health > /dev/null 2>&1; then
+    if curl -s http://127.0.0.1:${BACKEND_PORT}/api/health > /dev/null 2>&1; then
         echo -e "${GREEN}✅ Backend is ready${NC}"
         break
     fi
@@ -199,7 +246,7 @@ echo "  🎉 Services Started Successfully!"
 echo "================================"
 echo ""
 echo "Backend service:"
-echo "  - URL: http://127.0.0.1:8080"
+echo "  - URL: http://127.0.0.1:${BACKEND_PORT}"
 echo "  - Logs: logs/server.log"
 echo "  - PID: $SERVER_PID"
 echo ""
