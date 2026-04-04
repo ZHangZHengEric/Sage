@@ -91,11 +91,9 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 ```
 
 The script will automatically:
-- Detect Python in this order: `PYTHON_BIN` -> active conda env -> active virtualenv -> `python` -> `python3`
 - Check Python (>= 3.10) and Node.js (>= 18) versions
 - Create configuration files (minimal mode: SQLite, no external dependencies)
-- Install Python dependencies with the selected interpreter
-- Start both backend and frontend services
+- Install dependencies and start both backend and frontend services
 - Create `logs/server.log` automatically
 - Honor `SAGE_PORT` from `.env` for backend startup and health checks
 
