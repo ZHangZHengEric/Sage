@@ -848,6 +848,7 @@ async def generate_agent_abilities(
     session_id: Optional[str] = None,
     context: Optional[Dict[str, Any]] = None,
     language: str = "zh",
+    user_id: Optional[str] = None,
 ) -> List[AgentAbilityItem]:
     from sagents.utils.agent_abilities import generate_agent_abilities_from_config
 
@@ -856,7 +857,7 @@ async def generate_agent_abilities(
 
     logger.info(f"开始为 Desktop Agent 生成能力列表: {agent_id}")
 
-    agent = await get_agent(agent_id)
+    agent = await get_agent(agent_id, user_id)
     agent_config: Dict[str, Any] = agent.config or {}
 
     startup_cfg = config.get_startup_config()

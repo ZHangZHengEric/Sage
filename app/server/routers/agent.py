@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from common.core.render import Response
 from common.models.conversation import ConversationDao
 from common.schemas.agent import (
+    AgentAbilitiesRequest,
     AgentConfigDTO,
     AutoGenAgentRequest,
     AsyncTaskResponse,
@@ -253,6 +254,23 @@ async def optimize_submit(request: SystemPromptOptimizeRequest, http_request: Re
         ),
     )
     return await Response.succ(data=task, message="系统提示词优化任务已提交")
+
+
+@agent_router.post("/abilities")
+async def get_agent_abilities(req: AgentAbilitiesRequest, http_request: Request):
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    items = await agent_service.generate_agent_abilities(
+        agent_id=req.agent_id,
+        session_id=req.session_id,
+        context=req.context,
+        language=req.language or "zh",
+        user_id=user_id,
+    )
+    return await Response.succ(
+        data={"items": [item.model_dump() for item in items]},
+        message="获取 Agent 能力列表成功",
+    )
 
 
 @agent_router.get("/tasks/{task_id}")

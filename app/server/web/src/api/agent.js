@@ -191,6 +191,18 @@ export const agentAPI = {
     return await request.post(`/api/agent/${agentId}/auth`, { user_ids: userIds })
   },
 
+  getAgentAbilities: async ({ agentId, sessionId, context = {}, language }) => {
+    const savedLanguage = language || (typeof localStorage !== 'undefined' ? localStorage.getItem('language') : null)
+    const normalizedLanguage = ['enUS', 'en', 'en-US'].includes(savedLanguage) ? 'en' : 'zh'
+    const data = await request.post('/api/agent/abilities', {
+      agent_id: agentId,
+      session_id: sessionId,
+      context,
+      language: normalizedLanguage
+    })
+    return data?.items || []
+  },
+
   /**
    * 获取工作空间文件
    * @param {string} agentId - 会话ID
