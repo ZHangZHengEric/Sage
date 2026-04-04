@@ -1,5 +1,5 @@
 <template>
-  <div class="excalidraw-container" :class="{ 'dark-theme': theme === 'dark' }" ref="containerRef">
+  <div class="excalidraw-container" :class="{ 'dark-theme': theme === 'dark' }" :style="containerStyle" ref="containerRef">
     <!-- 悬浮工具栏 - 右上角 -->
     <div class="floating-toolbar">
       <button @click="zoomOut" class="tool-btn" title="缩小">−</button>
@@ -29,7 +29,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
 import { exportToSvg } from '@excalidraw/excalidraw'
 
 const props = defineProps({
@@ -51,11 +51,48 @@ const translateY = ref(0)
 const isDragging = ref(false)
 const lastX = ref(0)
 const lastY = ref(0)
+const resizeObserver = ref(null)
+const fittedScale = ref(1)
 
 const transformStyle = computed(() => ({
   transform: `translate(${translateX.value}px, ${translateY.value}px) scale(${scale.value})`,
   transformOrigin: 'center center'
 }))
+
+const containerStyle = computed(() => ({
+  '--excalidraw-preview-bg': props.data?.appState?.viewBackgroundColor || '#ffffff'
+}))
+
+const getSvgElement = () => containerRef.value?.querySelector('.svg-content svg')
+
+const fitToView = async () => {
+  await nextTick()
+
+  const container = containerRef.value?.querySelector('.canvas-wrapper')
+  const svg = getSvgElement()
+  if (!container || !svg) return
+
+  const containerWidth = container.clientWidth
+  const containerHeight = container.clientHeight
+  if (!containerWidth || !containerHeight) return
+
+  const toolbarOffset = 72
+  const padding = 48
+  const availableWidth = Math.max(160, containerWidth - padding * 2)
+  const availableHeight = Math.max(160, containerHeight - toolbarOffset - padding)
+
+  const viewBox = svg.viewBox?.baseVal
+  const rawWidth = Number(props.data?.appState?.width) || viewBox?.width || svg.getBBox?.().width || svg.clientWidth
+  const rawHeight = Number(props.data?.appState?.height) || viewBox?.height || svg.getBBox?.().height || svg.clientHeight
+
+  if (!rawWidth || !rawHeight) return
+
+  const fitScale = Math.min(1, availableWidth / rawWidth, availableHeight / rawHeight)
+  fittedScale.value = Math.max(0.15, fitScale)
+  scale.value = fittedScale.value
+  translateX.value = 0
+  translateY.value = 0
+}
 
 const renderSvg = async () => {
   if (!props.data || !props.data.elements) {
@@ -65,18 +102,15 @@ const renderSvg = async () => {
 
   try {
     const elements = props.data.elements || []
-
-    // 根据主题设置背景色
-    const isDark = props.theme === 'dark'
-    const bgColor = isDark ? '#1e1e1e' : '#ffffff'
+    const appState = props.data.appState || {}
+    const bgColor = appState.viewBackgroundColor || '#ffffff'
 
     const svg = await exportToSvg({
       elements: elements,
       appState: {
-        theme: props.theme,
+        ...appState,
         viewBackgroundColor: bgColor,
         exportBackground: true,
-        exportWithDarkMode: isDark,
         exportScale: 1
       },
       files: props.data.files || {}
@@ -95,8 +129,7 @@ const renderSvg = async () => {
 
     svgContent.value = svgString
 
-    // 重置视图
-    resetView()
+    await fitToView()
 
     console.log('[ExcalidrawRenderer] SVG exported, length:', svgString.length)
   } catch (error) {
@@ -115,7 +148,7 @@ const zoomOut = () => {
 }
 
 const resetView = () => {
-  scale.value = 1
+  scale.value = fittedScale.value || 1
   translateX.value = 0
   translateY.value = 0
 }
@@ -150,6 +183,13 @@ const endDrag = () => {
 
 onMounted(() => {
   renderSvg()
+
+  if (typeof ResizeObserver !== 'undefined' && containerRef.value) {
+    resizeObserver.value = new ResizeObserver(() => {
+      fitToView()
+    })
+    resizeObserver.value.observe(containerRef.value)
+  }
 })
 
 watch(() => props.data, () => {
@@ -159,6 +199,10 @@ watch(() => props.data, () => {
 watch(() => props.theme, () => {
   renderSvg()
 })
+
+onUnmounted(() => {
+  resizeObserver.value?.disconnect?.()
+})
 </script>
 
 <style scoped>
@@ -166,11 +210,11 @@ watch(() => props.theme, () => {
   width: 100%;
   height: 100%;
   position: relative;
-  background: #ffffff;
+  background: var(--excalidraw-preview-bg, #ffffff);
 }
 
 .excalidraw-container.dark-theme {
-  background: #1e1e1e;
+  background: var(--excalidraw-preview-bg, #ffffff);
 }
 
 /* 悬浮工具栏 - 右上角 */
@@ -257,10 +301,11 @@ watch(() => props.theme, () => {
 }
 
 .svg-content :deep(svg) {
-  max-width: 95%;
-  max-height: 95%;
+  max-width: none;
+  max-height: none;
   width: auto;
   height: auto;
+  flex-shrink: 0;
 }
 
 .loading {
