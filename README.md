@@ -78,20 +78,34 @@ cd Sage
 **Option 1: One-Command Startup (Recommended for Development)**
 
 ```bash
-# 1. Set your LLM API Key
+# 1. Optional: activate your environment first
+# conda activate your-env
+
+# 2. Set your LLM API Key
 export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
 export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
 export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 
-# 2. Run the startup script
+# 3. Run the startup script
 ./scripts/dev-up.sh
 ```
 
 The script will automatically:
 - Check Python (>= 3.10) and Node.js (>= 18) versions
 - Create configuration files (minimal mode: SQLite, no external dependencies)
-- Install dependencies
-- Start both backend and frontend services
+- Install dependencies and start both backend and frontend services
+- Create `logs/server.log` automatically
+- Honor `SAGE_PORT` from `.env` for backend startup and health checks
+
+Optional overrides:
+
+```bash
+# Explicitly choose a Python executable
+PYTHON_BIN=/path/to/python ./scripts/dev-up.sh
+
+# Use uv instead of python -m pip / python -m ...
+USE_UV=1 ./scripts/dev-up.sh
+```
 
 **First time?** The script will prompt you to choose between:
 - **Minimal mode**: SQLite, no external dependencies (recommended for quick start)
