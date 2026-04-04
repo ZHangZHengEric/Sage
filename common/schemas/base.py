@@ -381,9 +381,14 @@ class TaskResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: Optional[datetime] = None
-    retry_count: int
-    max_retries: int
+    retry_count: int = 0
+    max_retries: int = 3
     recurring_task_id: Optional[int] = None
+
+    @field_validator("retry_count", "max_retries", mode="before")
+    @classmethod
+    def normalize_optional_retry_fields(cls, value):
+        return 0 if value is None else value
 
     class Config:
         from_attributes = True

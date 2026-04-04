@@ -302,7 +302,6 @@ def _check_and_spawn_recurring_tasks():
     try:
         result = _request_json("POST", "/tasks/internal/spawn-due")
         spawned_count = len((result or {}).get("items") or [])
-        logger.info(f"[SCHEDULER] spawn-due returned {spawned_count} tasks")
         if spawned_count > 0:
             logger.info(f"Spawned {spawned_count} tasks from recurring tasks")
     except Exception as e:
@@ -335,9 +334,9 @@ def scheduler_loop():
             logger.debug("[SCHEDULER] Getting pending tasks...")
             due_result = _request_json("GET", "/tasks/internal/due", params={"limit": 200})
             pending_tasks = (due_result or {}).get("items") or []
-            logger.info(f"[SCHEDULER] due returned {len(pending_tasks)} pending tasks")
             
             if pending_tasks:
+                logger.info(f"[SCHEDULER] due returned {len(pending_tasks)} pending tasks")
                 logger.info(f"[SCHEDULER] Found {len(pending_tasks)} pending tasks to execute")
                 
                 # Process all pending tasks concurrently
