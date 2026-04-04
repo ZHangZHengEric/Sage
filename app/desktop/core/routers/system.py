@@ -15,8 +15,7 @@ from common.core.render import Response
 from common.models.system import SystemInfoDao
 from common.models.llm_provider import LLMProviderDao
 from common.models.agent import AgentConfigDao
-from common.services.chat_utils import get_sessions_root
-from ..services.agent_usage_stats import analyze_tools_usage
+from common.services import conversation_service
 
 # 创建路由器
 system_router = APIRouter(prefix="/api", tags=["System"])
@@ -128,8 +127,10 @@ async def get_agent_usage_stats(req: AgentUsageStatsRequest):
     """
     获取最近 N 天的 Agent 工具使用统计。
     """
-    sessions_root = get_sessions_root()
-    stats = analyze_tools_usage(sessions_root, days=req.days)
+    stats = await conversation_service.get_agent_usage_stats(
+        days=req.days,
+        agent_id=req.agent_id,
+    )
     return await Response.succ(
         message="获取 Agent 工具使用统计成功",
         data=AgentUsageStatsResponse(usage=stats).model_dump(),

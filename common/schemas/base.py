@@ -96,6 +96,7 @@ class TauriUpdateResponse(BaseModel):
 
 class AgentUsageStatsRequest(BaseModel):
     days: int
+    agent_id: Optional[str] = None
 
 
 class AgentUsageStatsResponse(BaseModel):

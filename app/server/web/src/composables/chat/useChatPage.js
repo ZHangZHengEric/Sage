@@ -231,6 +231,28 @@ export const useChatPage = (props) => {
   const handleMessage = (messageData) => {
     if (messageData.type === 'stream_end') return
     const messageId = messageData.message_id
+    const extractWorkbenchFromMessage = (message) => {
+      if (!message) return
+      const effectiveAgentId = message.agent_id || selectedAgent.value?.id || selectedAgentId.value || null
+      workbenchStore.extractFromMessage(message, effectiveAgentId)
+
+      if ((message.role === 'tool' || message.message_type === 'tool_call_result') && message.tool_call_id) {
+        const plainToolResult = JSON.parse(JSON.stringify(message))
+        workbenchStore.updateToolResult(message.tool_call_id, plainToolResult)
+        return
+      }
+
+      if (message.tool_calls && message.tool_calls.length > 0) {
+        message.tool_calls.forEach((toolCall) => {
+          const toolResult = toolCall?.function?.result
+          if (toolCall?.id && toolResult) {
+            const plainToolResult = JSON.parse(JSON.stringify(toolResult))
+            workbenchStore.updateToolResult(toolCall.id, plainToolResult)
+          }
+        })
+      }
+    }
+
     if (messageId && messageIdIndexMap.value.has(messageId)) {
       const targetIndex = messageIdIndexMap.value.get(messageId)
       const existing = messages.value[targetIndex]
@@ -253,6 +275,7 @@ export const useChatPage = (props) => {
         }
       }
       messages.value.splice(targetIndex, 1, nextMessage)
+      extractWorkbenchFromMessage(nextMessage)
       return
     }
     const appended = {
@@ -263,6 +286,7 @@ export const useChatPage = (props) => {
     if (appended.message_id) {
       messageIdIndexMap.value.set(appended.message_id, messages.value.length - 1)
     }
+    extractWorkbenchFromMessage(appended)
     shouldAutoScroll.value = true
     nextTick(() => scrollToBottom(true))
   }
@@ -575,16 +599,19 @@ export const useChatPage = (props) => {
   })
 
   // 监听 session id 变化，当 session id 变化或变为 null 时重置工作台
-  watch(() => currentSessionId.value, (newSessionId, oldSessionId) => {
-    console.log('[ChatPage] Session ID changed:', oldSessionId, '->', newSessionId)
-    if (newSessionId !== oldSessionId) {
-      // Session ID 变化，重置工作台
-      workbenchStore.resetState()
-      // 如果 session id 为 null，关闭工作台弹窗
-      if (!newSessionId) {
-        panelStore.closeAll()
-        console.log('[ChatPage] Session ID is null, closed workbench')
-      }
+watch(() => currentSessionId.value, (newSessionId, oldSessionId) => {
+  console.log('[ChatPage] Session ID changed:', oldSessionId, '->', newSessionId)
+  if (newSessionId !== oldSessionId) {
+    // Session ID 变化，重置工作台
+    workbenchStore.resetState()
+    if (newSessionId) {
+      workbenchStore.setSessionId(newSessionId)
+    }
+    // 如果 session id 为 null，关闭工作台弹窗
+    if (!newSessionId) {
+      panelStore.closeAll()
+      console.log('[ChatPage] Session ID is null, closed workbench')
+    }
     }
   })
 

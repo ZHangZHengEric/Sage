@@ -27,6 +27,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { X } from 'lucide-vue-next'
 
 const props = defineProps({
+  agentId: { type: String, default: '' },
   /** 能力面板打开时为 true，弹幕会自动关闭避免与面板交叉 */
   abilityPanelOpen: { type: Boolean, default: false },
   /** 当前为历史会话时为 true，弹幕不展示（与「你能做什么」逻辑一致） */
@@ -72,7 +73,7 @@ function formatCount (n) {
 }
 
 async function fetchAllUsage () {
-  const promises = DAYS.map(d => systemAPI.getAgentUsageStats(d))
+  const promises = DAYS.map(d => systemAPI.getAgentUsageStats(d, props.agentId || null))
   const results = await Promise.allSettled(promises)
   const out = []
   results.forEach((res, i) => {
