@@ -27,7 +27,31 @@
         <MessageAvatar :messageType="message.type || message.message_type" role="user" />
       </div>
       <div class="flex flex-col items-end max-w-[85%] sm:max-w-[75%]">
-        <div class="flex flex-col gap-1">
+        <div v-if="isEditingThisUserMessage" class="w-full rounded-[20px] rounded-tr-[4px] border border-border/70 bg-secondary/80 px-4 py-3 shadow-sm">
+          <textarea
+            v-model="editingContent"
+            rows="3"
+            class="w-full resize-none bg-transparent text-sm leading-6 text-secondary-foreground outline-none"
+          />
+          <div class="mt-3 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              class="rounded-full border border-border/70 px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/50"
+              @click="handleCancelEditUserMessage"
+            >
+              {{ t('common.cancel') || '取消' }}
+            </button>
+            <button
+              type="button"
+              class="rounded-full bg-primary px-3 py-1.5 text-xs text-primary-foreground disabled:opacity-50"
+              :disabled="!editingContent.trim()"
+              @click="handleSubmitEditUserMessage"
+            >
+              {{ t('common.send') || '发送' }}
+            </button>
+          </div>
+        </div>
+        <div v-else class="flex flex-col gap-1">
           <!-- 文本内容 -->
           <div v-if="getTextContent(message.content)" class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-4 py-2.5 shadow-sm overflow-hidden break-all text-sm leading-6 tracking-wide font-sans">
             <MarkdownRenderer
@@ -75,6 +99,15 @@
           >
             <Check v-if="copied" class="w-3 h-3 text-green-500" />
             <Copy v-else class="w-3 h-3" />
+          </button>
+          <button
+            v-if="isEditableUserMessage && !isEditingThisUserMessage"
+            type="button"
+            class="opacity-0 group-hover:opacity-70 transition-opacity p-1 hover:bg-muted/60 rounded text-muted-foreground/70 hover:text-muted-foreground"
+            :title="t('chat.editLastUserMessage') || '编辑并重试'"
+            @click="handleStartEditUserMessage"
+          >
+            <SquarePen class="w-3 h-3" />
           </button>
         </div>
       </div>
@@ -250,7 +283,7 @@ import MarkdownRendererWithPreview from './MarkdownRendererWithPreview.vue'
 import EChartsRenderer from './EChartsRenderer.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
-import { Terminal, FileText, Search, Zap, Copy, Check, Image } from 'lucide-vue-next'
+import { Terminal, FileText, Search, Zap, Copy, Check, Image, SquarePen } from 'lucide-vue-next'
 import { getMessageLabel, isTokenUsageMessage as isTokenUsageMessageValue } from '@/utils/messageLabels'
 import ToolErrorCard from './tools/ToolErrorCard.vue'
 import ToolDefaultCard from './tools/ToolDefaultCard.vue'
@@ -311,13 +344,40 @@ const props = defineProps({
   extractWorkbenchItems: {
     type: Boolean,
     default: true  // 默认提取工作台项目
+  },
+  editableUserMessageId: {
+    type: String,
+    default: null
+  },
+  editingUserMessageId: {
+    type: String,
+    default: null
   }
 })
 
-const emit = defineEmits(['downloadFile', 'toolClick', 'sendMessage', 'openSubSession'])
+const emit = defineEmits([
+  'downloadFile',
+  'toolClick',
+  'sendMessage',
+  'openSubSession',
+  'startEditUserMessage',
+  'cancelEditUserMessage',
+  'submitEditUserMessage'
+])
 
 const { t } = useLanguage()
 const workbenchStore = useWorkbenchStore()
+const editingContent = ref('')
+const currentMessageId = computed(() => props.message.message_id || props.message.id || null)
+const isEditableUserMessage = computed(() => (
+  props.message.role === 'user' &&
+  currentMessageId.value &&
+  currentMessageId.value === props.editableUserMessageId
+))
+const isEditingThisUserMessage = computed(() => (
+  isEditableUserMessage.value &&
+  currentMessageId.value === props.editingUserMessageId
+))
 const hideAssistantAvatar = computed(() => (
   props.hideAssistantAvatar === true && props.message.role === 'assistant'
 ))
@@ -611,6 +671,23 @@ const handleSendMessage = (text) => {
   emit('sendMessage', text)
 }
 
+const handleStartEditUserMessage = () => {
+  if (!isEditableUserMessage.value) return
+  editingContent.value = getTextContent(props.message.content)
+  emit('startEditUserMessage', props.message)
+}
+
+const handleCancelEditUserMessage = () => {
+  editingContent.value = getTextContent(props.message.content)
+  emit('cancelEditUserMessage')
+}
+
+const handleSubmitEditUserMessage = () => {
+  const content = editingContent.value.trim()
+  if (!content) return
+  emit('submitEditUserMessage', content)
+}
+
 const getParsedToolResult = (toolCall) => {
   const result = getToolResult(toolCall)
   if (!result) return null
@@ -862,8 +939,14 @@ watch(() => props.message, (newMessage, oldMessage) => {
           alt: file.fileName,
           name: file.fileName
         } : file
-      })
-    })
+  })
+})
+
+watch(isEditingThisUserMessage, (isEditing) => {
+  if (isEditing) {
+    editingContent.value = getTextContent(props.message.content)
+  }
+})
   }
 
   // 3. 处理代码块（实时流中代码块可能在消息更新时出现）

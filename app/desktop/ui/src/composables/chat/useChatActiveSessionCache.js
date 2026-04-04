@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { chatAPI } from '@/api/chat'
+import { sanitizeSessionTitle } from '@/utils/sessionTitle'
 
 // Module-level singletons
 let activeSessions = ref({})
@@ -17,14 +18,6 @@ const readActiveSessionsCache = () => {
 
 // Initialize activeSessions from local storage once
 activeSessions.value = readActiveSessionsCache()
-
-const stripSessionControlTags = (text = '') => {
-  let normalized = String(text || '')
-  normalized = normalized.replace(/^\s*<enable_plan>\s*(true|false)\s*<\/enable_plan>\s*/i, '')
-  normalized = normalized.replace(/^\s*<enable_deep_thinking>\s*(true|false)\s*<\/enable_deep_thinking>\s*/i, '')
-  normalized = normalized.replace(/^<skill>.*?<\/skill>\s*/i, '')
-  return normalized.trim()
-}
 
 const deriveSessionTitle = (content = '') => {
   // 处理数组类型（messages 格式）
@@ -50,7 +43,7 @@ const deriveSessionTitle = (content = '') => {
     // 尝试提取对象中的文本字段
     content = content.text || content.content || content.message || JSON.stringify(content)
   }
-  const normalized = stripSessionControlTags(String(content || '').trim())
+  const normalized = sanitizeSessionTitle(String(content || '').trim())
   if (!normalized) return '进行中的会话'
   return normalized
 }
@@ -254,7 +247,6 @@ export const useChatActiveSessionCache = () => {
     updateActiveSession,
     removeSessionFromCache,
     deriveSessionTitle,
-    stripSessionControlTags,
     startSSESync,
     stopSSESync
   }

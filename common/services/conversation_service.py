@@ -3,6 +3,7 @@ Conversation shared service-layer entry points for server and desktop routers.
 """
 
 import json
+import os
 from collections import Counter
 from datetime import timedelta
 from pathlib import Path
@@ -58,10 +59,15 @@ async def interrupt_session(
         logger.bind(session_id=session_id).info("会话不存在或者已完成")
         return {"session_id": session_id}
 
+    session_context = getattr(session, "session_context", None)
+    if session_context is None:
+        logger.bind(session_id=session_id).warning("会话存在但缺少 session_context，跳过中断状态写入")
+        return {"session_id": session_id}
+
     if _is_desktop_mode():
         from common.models.questionnaire import QuestionnaireDao
 
-        session.session_context.set_status(SessionStatus.INTERRUPTED)
+        session_context.set_status(SessionStatus.INTERRUPTED)
         try:
             await QuestionnaireDao().expire_pending_session(session_id)
             await QuestionnaireDao().expire_pending_sessions_by_prefix(
@@ -70,7 +76,7 @@ async def interrupt_session(
         except Exception as e:
             logger.bind(session_id=session_id).warning(f"中断会话时更新问卷状态失败: {e}")
     else:
-        session.session_context.status = SessionStatus.INTERRUPTED
+        session_context.status = SessionStatus.INTERRUPTED
 
     logger.bind(session_id=session_id).info("会话中断成功")
     return {"session_id": session_id}
@@ -248,6 +254,259 @@ async def update_server_conversation_title(
             error_detail=f"Conversation '{session_id}' not found",
         )
     return {"session_id": session_id, "title": title}
+
+
+def _get_stream_manager():
+    stream_manager_module = (
+        "app.desktop.core.services.chat.stream_manager"
+        if _is_desktop_mode()
+        else "app.server.services.chat.stream_manager"
+    )
+    return __import__(stream_manager_module, fromlist=["StreamManager"]).StreamManager.get_instance()
+
+
+def _load_session_raw_messages(session_id: str) -> List[Dict[str, Any]]:
+    session_manager = get_global_session_manager()
+    if session_manager:
+        try:
+            raw_messages = session_manager.get_session_messages(session_id)
+            if raw_messages:
+                return [message.to_dict() for message in raw_messages]
+        except Exception as exc:
+            logger.bind(session_id=session_id).warning(f"读取 session 原始消息失败，回退数据库: {exc}")
+    return []
+
+
+def _find_last_user_message_index(messages: List[Dict[str, Any]]) -> int:
+    for index in range(len(messages) - 1, -1, -1):
+        if (messages[index] or {}).get("role") == "user":
+            return index
+    return -1
+
+
+def _replace_message_text_content(existing_content: Any, new_text: str) -> Any:
+    text = str(new_text or "").strip()
+    if isinstance(existing_content, list):
+        updated_items: List[Dict[str, Any]] = []
+        text_replaced = False
+        for item in existing_content:
+            if isinstance(item, dict) and item.get("type") == "text" and not text_replaced:
+                updated_items.append({**item, "text": text})
+                text_replaced = True
+                continue
+            updated_items.append(item)
+        if not text_replaced:
+            updated_items.insert(0, {"type": "text", "text": text})
+        return updated_items
+    return text
+
+
+def _extract_text_from_message_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        text_parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                text_parts.append(str(item.get("text", "")).strip())
+        return "\n".join(part for part in text_parts if part).strip()
+    return str(content or "").strip()
+
+
+def _truncate_messages_after_last_user(
+    messages: List[Dict[str, Any]],
+    edited_content: str,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    last_user_index = _find_last_user_message_index(messages)
+    if last_user_index < 0:
+        raise SageHTTPException(
+            **_conversation_error_kwargs(
+                detail="会话中不存在可编辑的用户消息",
+                error_detail="No editable user message found",
+            )
+        )
+
+    truncated_messages = [dict(message or {}) for message in messages[: last_user_index + 1]]
+    last_user_message = dict(truncated_messages[last_user_index] or {})
+    last_user_message["content"] = _replace_message_text_content(
+        last_user_message.get("content"),
+        edited_content,
+    )
+    truncated_messages[last_user_index] = last_user_message
+    return truncated_messages, last_user_message
+
+
+def _session_workspace_file_paths(session_id: str) -> Tuple[Optional[Path], Path, Path, Path]:
+    sessions_root = Path(get_sessions_root())
+    manager = get_global_session_manager()
+    workspace_path: Optional[Path] = None
+    if manager:
+        found = manager.get_session_workspace(session_id)
+        if found:
+            workspace_path = Path(found)
+    if workspace_path is None:
+        workspace_path = sessions_root / session_id
+
+    messages_path = workspace_path / "messages.json"
+    context_path = workspace_path / "session_context.json"
+    tools_usage_path = workspace_path / "tools_usage.json"
+    return workspace_path, messages_path, context_path, tools_usage_path
+
+
+def _write_session_files(session_id: str, messages: List[Dict[str, Any]]) -> None:
+    workspace_path, messages_path, context_path, tools_usage_path = _session_workspace_file_paths(session_id)
+    if not workspace_path:
+        return
+
+    workspace_path.mkdir(parents=True, exist_ok=True)
+
+    with open(messages_path, "w", encoding="utf-8") as f:
+        json.dump(messages, f, ensure_ascii=False, indent=4)
+
+    if context_path.exists():
+        try:
+            with open(context_path, "r", encoding="utf-8") as f:
+                context_data = json.load(f)
+        except Exception as exc:
+            logger.bind(session_id=session_id).warning(f"读取 session_context.json 失败，跳过状态重置: {exc}")
+            context_data = None
+
+        if isinstance(context_data, dict):
+            context_data["status"] = "idle"
+            context_data["updated_at"] = get_local_now().timestamp()
+            context_data["child_session_ids"] = []
+            context_data["audit_status"] = {}
+            context_data["tokens_usage_info"] = {"total_info": {}, "per_step_info": []}
+            system_context = context_data.get("system_context")
+            if isinstance(system_context, dict):
+                system_context.pop("current_time", None)
+                system_context.pop("available_sub_agents", None)
+                system_context.pop("custom_sub_agents", None)
+            with open(context_path, "w", encoding="utf-8") as f:
+                json.dump(context_data, f, ensure_ascii=False, indent=4)
+
+    tools_usage: Dict[str, int] = {}
+    for message in messages:
+        for tool_call in (message or {}).get("tool_calls", []) or []:
+            tool_name = (tool_call or {}).get("function", {}).get("name")
+            if tool_name:
+                tools_usage[tool_name] = tools_usage.get(tool_name, 0) + 1
+
+    with open(tools_usage_path, "w", encoding="utf-8") as f:
+        json.dump(tools_usage, f, ensure_ascii=False, indent=4)
+
+
+async def edit_last_user_message(
+    *,
+    session_id: str,
+    content: str,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    dao = ConversationDao()
+    conversation = await dao.get_by_session_id(session_id)
+    if not conversation:
+        raise SageHTTPException(
+            **_conversation_error_kwargs(
+                detail=f"会话 {session_id} 不存在",
+                error_detail=f"Conversation '{session_id}' not found",
+            )
+        )
+
+    if user_id and conversation.user_id and conversation.user_id != user_id:
+        raise SageHTTPException(
+            **_conversation_error_kwargs(
+                detail="无权编辑该会话",
+                error_detail="forbidden",
+            )
+        )
+
+    cleaned_content = str(content or "").strip()
+    if not cleaned_content:
+        raise SageHTTPException(
+            **_conversation_error_kwargs(
+                detail="编辑后的消息不能为空",
+                error_detail="Edited message cannot be empty",
+            )
+        )
+
+    await interrupt_session(session_id, "编辑最后一条用户消息")
+    await _get_stream_manager().stop_session(session_id)
+
+    source_messages = _load_session_raw_messages(session_id) or list(conversation.messages or [])
+    truncated_messages, last_user_message = _truncate_messages_after_last_user(
+        source_messages,
+        cleaned_content,
+    )
+
+    from common.services.chat_service import _sanitize_title_text
+
+    title_source = _sanitize_title_text(
+        _extract_text_from_message_content(last_user_message.get("content"))
+    ) or conversation.title or "新会话"
+
+    await dao.update_conversation_messages(session_id, truncated_messages)
+    await dao.update_title(session_id, title_source[:50] + "..." if len(title_source) > 50 else title_source)
+    _write_session_files(session_id, truncated_messages)
+
+    manager = get_global_session_manager()
+    if manager:
+        try:
+            manager.close_session(session_id)
+        except Exception:
+            manager.remove_session_context(session_id)
+
+    logger.bind(session_id=session_id).info(
+        f"最后一条用户消息已编辑并截断后续消息，新消息数={len(truncated_messages)}"
+    )
+    return {
+        "session_id": session_id,
+        "title": title_source[:50] + "..." if len(title_source) > 50 else title_source,
+        "message_count": len(truncated_messages),
+        "last_user_message": last_user_message,
+    }
+
+
+async def get_rerun_conversation_payload(
+    *,
+    session_id: str,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    dao = ConversationDao()
+    conversation = await dao.get_by_session_id(session_id)
+    if not conversation:
+        raise SageHTTPException(
+            **_conversation_error_kwargs(
+                detail=f"会话 {session_id} 不存在",
+                error_detail=f"Conversation '{session_id}' not found",
+            )
+        )
+
+    if user_id and conversation.user_id and conversation.user_id != user_id:
+        raise SageHTTPException(
+            **_conversation_error_kwargs(
+                detail="无权重跑该会话",
+                error_detail="forbidden",
+            )
+        )
+
+    source_messages = _load_session_raw_messages(session_id) or list(conversation.messages or [])
+    last_user_index = _find_last_user_message_index(source_messages)
+    if last_user_index < 0:
+        raise SageHTTPException(
+            **_conversation_error_kwargs(
+                detail="会话中不存在可重跑的用户消息",
+                error_detail="No rerunnable user message found",
+            )
+        )
+
+    last_user_message = source_messages[last_user_index]
+    return {
+        "session_id": session_id,
+        "user_id": conversation.user_id,
+        "agent_id": conversation.agent_id,
+        "agent_name": conversation.agent_name,
+        "query": _extract_text_from_message_content(last_user_message.get("content")),
+    }
 
 
 async def get_agent_usage_stats(

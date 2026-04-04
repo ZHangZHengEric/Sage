@@ -342,13 +342,20 @@ class PlanAgent(AgentBase):
         )
         if custom_sub_agents:
             lines = []
+            seen_agent_keys = set()
             for agent_cfg in custom_sub_agents:
                 if isinstance(agent_cfg, dict):
-                    name = agent_cfg.get("name") or agent_cfg.get("agent_id")
+                    agent_id = agent_cfg.get("agent_id")
+                    name = agent_cfg.get("name") or agent_id
                     description = agent_cfg.get("description", "")
                 else:
-                    name = getattr(agent_cfg, "name", None) or getattr(agent_cfg, "agent_id", None)
+                    agent_id = getattr(agent_cfg, "agent_id", None)
+                    name = getattr(agent_cfg, "name", None) or agent_id
                     description = getattr(agent_cfg, "description", "")
+                dedupe_key = agent_id or name
+                if not dedupe_key or dedupe_key in seen_agent_keys:
+                    continue
+                seen_agent_keys.add(dedupe_key)
                 if name:
                     lines.append(f"- {name}: {description}")
             if lines:

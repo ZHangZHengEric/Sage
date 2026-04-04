@@ -183,8 +183,13 @@
                   :is-loading="isCurrentSessionLoading && item.messageIndex === normalizedMessages.length - 1"
                   :open-workbench="openWorkbench"
                   :hide-assistant-avatar="item.hideAssistantAvatar"
+                  :editable-user-message-id="editableUserMessageId"
+                  :editing-user-message-id="editingUserMessageId"
                   @download-file="downloadWorkspaceFile"
                   @sendMessage="handleSendMessage"
+                  @startEditUserMessage="startEditUserMessage"
+                  @cancelEditUserMessage="cancelEditUserMessage"
+                  @submitEditUserMessage="submitEditUserMessage"
                   @openSubSession="handleOpenSubSession"
                 />
                 <div v-else-if="item.type === 'section_marker'" class="px-4 py-2">
@@ -389,7 +394,8 @@ const {
   openAbilityPanel,
   closeAbilityPanel,
   retryAbilityFetch,
-  onAbilityCardClick
+  onAbilityCardClick,
+  submitEditedLastUserMessage
 } = useChatPage(props)
 
 const workbenchStore = useWorkbenchStore()
@@ -400,8 +406,18 @@ const DISPLAY_MODE_STORAGE_KEY = 'chatDisplayModePreference'
 const messageInputRef = ref(null)
 const workspacePanelRef = ref(null)
 const confirmDialogRef = ref(null)
+const editingUserMessageId = ref(null)
 
 const normalizedMessages = computed(() => normalizeChatMessages(filteredMessages.value))
+const editableUserMessageId = computed(() => {
+  for (let index = normalizedMessages.value.length - 1; index >= 0; index -= 1) {
+    const message = normalizedMessages.value[index]
+    if (message?.role === 'user' && (message.message_id || message.id)) {
+      return message.message_id || message.id
+    }
+  }
+  return null
+})
 
 const getMessageTextForInputOptimization = (message) => {
   const content = message?.content
@@ -518,6 +534,26 @@ const renderDisplayItems = computed(() => {
 
   return rendered
 })
+
+const startEditUserMessage = (message) => {
+  const messageId = message?.message_id || message?.id
+  if (!messageId || messageId !== editableUserMessageId.value) return
+  editingUserMessageId.value = messageId
+}
+
+const cancelEditUserMessage = () => {
+  editingUserMessageId.value = null
+}
+
+const submitEditUserMessage = async (content) => {
+  const previousEditingMessageId = editingUserMessageId.value
+  editingUserMessageId.value = null
+  const success = await submitEditedLastUserMessage(content)
+  if (success) {
+    return
+  }
+  editingUserMessageId.value = previousEditingMessageId
+}
 
 const syncExpandedGroups = () => {
   if (displayMode.value !== CHAT_DISPLAY_MODES.DELIVERY) {

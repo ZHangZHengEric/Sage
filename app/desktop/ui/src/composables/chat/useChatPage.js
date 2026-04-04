@@ -447,7 +447,8 @@ export const useChatPage = (props) => {
   const {
     handleSessionLoad,
     handleSendMessage,
-    stopGeneration
+    stopGeneration,
+    rerunSession
   } = useChatStream({
     chatAPI,
     toast,
@@ -476,6 +477,65 @@ export const useChatPage = (props) => {
     isHistoryLoading,
     removeSessionFromCache
   })
+
+  const submitEditedLastUserMessage = async (content) => {
+    const sessionId = currentSessionId.value
+    if (!sessionId || !selectedAgent.value) return false
+
+    const cleanedContent = String(content || '').trim()
+    if (!cleanedContent) return false
+
+    if (isLoading.value) {
+      await stopGeneration()
+      await new Promise(resolve => setTimeout(resolve, 300))
+    }
+
+    try {
+      isLoading.value = true
+      loadingSessionId.value = sessionId
+      shouldAutoScroll.value = true
+
+      await chatAPI.editLastUserMessage(sessionId, { content: cleanedContent })
+      await loadConversationMessages(sessionId)
+
+      updateActiveSession(
+        sessionId,
+        true,
+        deriveSessionTitle(cleanedContent),
+        cleanedContent,
+        false
+      )
+
+      await rerunSession({
+        sessionId,
+        selectedAgent: selectedAgent.value,
+        config: config.value,
+        onMessage: (data) => {
+          if (data.type === 'trace_info') {
+            currentTraceId.value = data.trace_id
+            return
+          }
+          handleMessage(data)
+        },
+        onComplete: () => {
+          scrollToBottom()
+          isLoading.value = false
+          loadingSessionId.value = null
+        },
+        onError: (error) => {
+          addErrorMessage(error)
+          isLoading.value = false
+          loadingSessionId.value = null
+        }
+      })
+      return true
+    } catch (error) {
+      toast.error(t('chat.sendError'))
+      isLoading.value = false
+      loadingSessionId.value = null
+      return false
+    }
+  }
 
   const showLoadingBubble = computed(() => !!isLoading.value)
 
@@ -815,6 +875,7 @@ export const useChatPage = (props) => {
     closeAbilityPanel,
     retryAbilityFetch,
     onAbilityCardClick,
+    submitEditedLastUserMessage,
     // pending 工具调用相关
     pendingToolCalls,
     clearPendingToolCalls
