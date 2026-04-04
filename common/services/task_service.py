@@ -93,12 +93,11 @@ class TaskService:
             task.execute_at = execute_at
 
         logger.info(
-            "TaskService: updating one-time task id=%s user_id=%s agent_id=%s execute_at=%s status=%s",
-            task.id,
-            user_id or task.user_id or "",
-            task.agent_id,
-            task.execute_at,
-            task.status,
+            f"TaskService: updating one-time task id={task.id} "
+            f"user_id={user_id or task.user_id or ''} "
+            f"agent_id={task.agent_id} "
+            f"execute_at={task.execute_at} "
+            f"status={task.status}"
         )
 
         return await self.dao.update_one_time_task(task)
@@ -192,12 +191,11 @@ class TaskService:
         limit: int = 100,
     ) -> List[Task]:
         items = await self.dao.get_due_pending_tasks(user_id=user_id or None, limit=limit)
-        logger.info(
-            "TaskService: fetched due pending tasks count=%s user_id=%s limit=%s",
-            len(items),
-            user_id or "",
-            limit,
-        )
+        if items:
+            logger.info(
+                f"TaskService: fetched due pending tasks count={len(items)} "
+                f"user_id={user_id or ''} limit={limit}"
+            )
         return items
 
     async def claim_one_time_task(self, task_id: int, *, user_id: str = "") -> bool:
@@ -259,12 +257,11 @@ class TaskService:
         now = get_local_now()
         spawned: List[Task] = []
         recurring_tasks = await self.dao.get_enabled_recurring_tasks(user_id=user_id or None)
-        logger.info(
-            "TaskService: checking recurring tasks count=%s user_id=%s now=%s",
-            len(recurring_tasks),
-            user_id or "",
-            now,
-        )
+        if recurring_tasks:
+            logger.info(
+                f"TaskService: checking recurring tasks count={len(recurring_tasks)} "
+                f"user_id={user_id or ''} now={now}"
+            )
 
         for recurring_task in recurring_tasks:
             try:
@@ -287,11 +284,11 @@ class TaskService:
                     await self.dao.update_recurring_task_last_executed(recurring_task.id, executed_at=now)
                     spawned.append(task)
                     logger.info(
-                        "TaskService: spawned initial one-time task recurring_task_id=%s task_id=%s user_id=%s execute_at=%s",
-                        recurring_task.id,
-                        task.id,
-                        recurring_task.user_id,
-                        task.execute_at,
+                        f"TaskService: spawned initial one-time task "
+                        f"recurring_task_id={recurring_task.id} "
+                        f"task_id={task.id} "
+                        f"user_id={recurring_task.user_id} "
+                        f"execute_at={task.execute_at}"
                     )
                     continue
 
@@ -327,12 +324,12 @@ class TaskService:
                 await self.dao.create_one_time_task(task)
                 spawned.append(task)
                 logger.info(
-                    "TaskService: spawned recurring one-time task recurring_task_id=%s task_id=%s user_id=%s execute_at=%s next_run=%s",
-                    recurring_task.id,
-                    task.id,
-                    recurring_task.user_id,
-                    task.execute_at,
-                    next_run,
+                    f"TaskService: spawned recurring one-time task "
+                    f"recurring_task_id={recurring_task.id} "
+                    f"task_id={task.id} "
+                    f"user_id={recurring_task.user_id} "
+                    f"execute_at={task.execute_at} "
+                    f"next_run={next_run}"
                 )
             except Exception:
                 continue
