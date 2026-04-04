@@ -3,6 +3,7 @@
 File-based memory index using BM25 algorithm - Sandbox version
 Supports incremental updates and fast search through sandbox interface
 """
+import asyncio
 import os
 import pickle
 import time
@@ -73,6 +74,7 @@ class MemoryIndex:
         '.c', '.cpp', '.h', '.hpp',
         '.rb', '.php', '.pl',
     ]
+    DEFAULT_FILE_PROCESS_CONCURRENCY = 8
 
     def __init__(self, sandbox, workspace_path: str, index_path: str, blacklist: Optional[Set[str]] = None):
         """
@@ -99,6 +101,7 @@ class MemoryIndex:
 
         # Directory mtime cache for incremental updates
         self._dir_mtime_cache: Dict[str, float] = {}
+        self._file_process_semaphore = asyncio.Semaphore(self.DEFAULT_FILE_PROCESS_CONCURRENCY)
 
         # Blacklist
         self.blacklist = self.DEFAULT_BLACKLIST.copy()
@@ -187,21 +190,6 @@ class MemoryIndex:
         except Exception as e:
             logger.warning(f"MemoryIndex: Error getting mtime for {dir_path}: {e}")
         return 0
-
-    async def _compute_file_hash(self, filepath: str) -> str:
-        """Compute file content hash through sandbox using md5sum command"""
-        try:
-            result = await self.sandbox.execute_command(
-                command=f"md5sum {filepath}",
-                timeout=10
-            )
-            if result.success:
-                # md5sum output format: "hash  filename"
-                hash_value = result.stdout.strip().split()[0]
-                return hash_value
-            return ""
-        except Exception:
-            return ""
 
     async def _read_file_content(self, filepath: str, max_size: int = 10 * 1024 * 1024) -> str:
         """Read file content with size limit through sandbox"""
@@ -346,6 +334,7 @@ class MemoryIndex:
             entries = await self.sandbox.list_directory(dir_path)
             
             ext_set = set(ext.lower() for ext in file_extensions)
+            file_tasks = []
 
             for entry in entries:
                 if entry.is_dir:
@@ -366,70 +355,65 @@ class MemoryIndex:
                     current_files.add(entry.path)
 
                     # Process file
-                    await self._process_file(entry, stats)
+                    file_tasks.append(asyncio.create_task(self._process_file(entry, stats)))
+
+            if file_tasks:
+                await asyncio.gather(*file_tasks)
 
         except Exception as e:
             logger.warning(f"MemoryIndex: Error scanning directory {dir_path}: {e}", exc_info=True)
 
     async def _process_file(self, entry, stats: Dict[str, Any]) -> None:
         """Process a single file - add, update, or skip"""
-        filepath = entry.path
-        mtime = entry.modified_time or 0
-        size = entry.size or 0
+        async with self._file_process_semaphore:
+            filepath = entry.path
+            mtime = entry.modified_time or 0
+            size = entry.size or 0
 
-        try:
-            if filepath in self.path_to_id:
-                # File exists in index, check if modified
-                doc_id = self.path_to_id[filepath]
-                old_doc = self.documents[doc_id]
+            try:
+                if filepath in self.path_to_id:
+                    # File exists in index, check if modified
+                    doc_id = self.path_to_id[filepath]
+                    old_doc = self.documents[doc_id]
 
-                # Quick check: compare mtime and size
-                if old_doc.mtime == mtime and old_doc.size == size:
-                    stats["unchanged"] += 1
-                    return
+                    # Quick check: compare mtime and size
+                    if old_doc.mtime == mtime and old_doc.size == size:
+                        stats["unchanged"] += 1
+                        return
 
-                # mtime or size changed, verify with hash
-                file_hash = await self._compute_file_hash(filepath)
-
-                if old_doc.hash != file_hash:
-                    # File content changed, update
+                    # mtime or size changed, treat as content changed and refresh directly.
                     content = await self._read_file_content(filepath)
                     self.documents[doc_id] = FileDocument(
                         path=filepath,
                         content=content,
                         mtime=mtime,
                         size=size,
-                        hash=file_hash,
+                        hash="",
                         doc_id=doc_id
                     )
                     stats["updated"] += 1
                     logger.debug(f"MemoryIndex: Updated file {filepath}")
                 else:
-                    # Only mtime changed, update mtime only
-                    old_doc.mtime = mtime
-                    stats["unchanged"] += 1
-            else:
-                # New file, add to index
-                file_hash = await self._compute_file_hash(filepath)
-                content = await self._read_file_content(filepath)
-                doc_id = self._next_doc_id
-                self._next_doc_id += 1
+                    # New file, add to index
+                    content = await self._read_file_content(filepath)
+                    doc_id = self._next_doc_id
+                    self._next_doc_id += 1
 
-                self.documents[doc_id] = FileDocument(
-                    path=filepath,
-                    content=content,
-                    mtime=mtime,
-                    size=size,
-                    hash=file_hash,
-                    doc_id=doc_id
-                )
-                self.path_to_id[filepath] = doc_id
-                stats["added"] += 1
-                logger.debug(f"MemoryIndex: Added file {filepath}")
+                    self.documents[doc_id] = FileDocument(
+                        path=filepath,
+                        content=content,
+                        mtime=mtime,
+                        size=size,
+                        hash="",
+                        doc_id=doc_id
+                    )
+                    self.path_to_id[filepath] = doc_id
+                    stats["added"] += 1
+                    logger.debug(f"MemoryIndex: Added file {filepath}")
 
-        except Exception as e:
-            logger.warning(f"MemoryIndex: Failed to process file {filepath}: {e}")
-            stats["errors"] += 1
+            except Exception as e:
+                logger.warning(f"MemoryIndex: Failed to process file {filepath}: {e}")
+                stats["errors"] += 1
 
     async def update_index(self, file_extensions: Optional[List[str]] = None, force: bool = False) -> Dict[str, Any]:
         """

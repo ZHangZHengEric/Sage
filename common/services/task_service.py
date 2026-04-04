@@ -10,6 +10,7 @@ from common.schemas.base import (
     RecurringTaskCreate,
     RecurringTaskUpdate,
 )
+from sagents.utils.logger import logger
 
 try:
     from croniter import croniter
@@ -90,6 +91,15 @@ class TaskService:
             if execute_at.tzinfo is None:
                 execute_at = execute_at.astimezone()
             task.execute_at = execute_at
+
+        logger.info(
+            "TaskService: updating one-time task id=%s user_id=%s agent_id=%s execute_at=%s status=%s",
+            task.id,
+            user_id or task.user_id or "",
+            task.agent_id,
+            task.execute_at,
+            task.status,
+        )
 
         return await self.dao.update_one_time_task(task)
 
@@ -181,7 +191,14 @@ class TaskService:
         user_id: str = "",
         limit: int = 100,
     ) -> List[Task]:
-        return await self.dao.get_due_pending_tasks(user_id=user_id or None, limit=limit)
+        items = await self.dao.get_due_pending_tasks(user_id=user_id or None, limit=limit)
+        logger.info(
+            "TaskService: fetched due pending tasks count=%s user_id=%s limit=%s",
+            len(items),
+            user_id or "",
+            limit,
+        )
+        return items
 
     async def claim_one_time_task(self, task_id: int, *, user_id: str = "") -> bool:
         return await self.dao.claim_one_time_task(task_id, user_id=user_id or None)
@@ -242,6 +259,12 @@ class TaskService:
         now = get_local_now()
         spawned: List[Task] = []
         recurring_tasks = await self.dao.get_enabled_recurring_tasks(user_id=user_id or None)
+        logger.info(
+            "TaskService: checking recurring tasks count=%s user_id=%s now=%s",
+            len(recurring_tasks),
+            user_id or "",
+            now,
+        )
 
         for recurring_task in recurring_tasks:
             try:
@@ -263,6 +286,13 @@ class TaskService:
                     await self.dao.create_one_time_task(task)
                     await self.dao.update_recurring_task_last_executed(recurring_task.id, executed_at=now)
                     spawned.append(task)
+                    logger.info(
+                        "TaskService: spawned initial one-time task recurring_task_id=%s task_id=%s user_id=%s execute_at=%s",
+                        recurring_task.id,
+                        task.id,
+                        recurring_task.user_id,
+                        task.execute_at,
+                    )
                     continue
 
                 itr = croniter(recurring_task.cron_expression, last_executed)
@@ -296,6 +326,14 @@ class TaskService:
                 )
                 await self.dao.create_one_time_task(task)
                 spawned.append(task)
+                logger.info(
+                    "TaskService: spawned recurring one-time task recurring_task_id=%s task_id=%s user_id=%s execute_at=%s next_run=%s",
+                    recurring_task.id,
+                    task.id,
+                    recurring_task.user_id,
+                    task.execute_at,
+                    next_run,
+                )
             except Exception:
                 continue
         return spawned
