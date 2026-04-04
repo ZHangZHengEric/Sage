@@ -91,12 +91,11 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 ```
 
 启动脚本会自动：
-- 按顺序检测 Python：`PYTHON_BIN` -> 当前 conda 环境 -> 当前 virtualenv -> `python` -> `python3`
 - 检查 Python（>= 3.10）和 Node.js（>= 18）
 - 自动创建配置文件（最小模式默认使用 SQLite）
-- 使用选中的 Python 安装依赖
+- 自动安装依赖并启动后端、前端
 - 自动创建 `logs/server.log`
-- 启动后端和前端，并优先使用 `.env` 中的 `SAGE_PORT`
+- 优先使用 `.env` 中的 `SAGE_PORT`
 
 可选覆盖方式：
 
