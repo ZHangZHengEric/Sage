@@ -1,15 +1,28 @@
+import importlib
 import json
 import logging
 import os
+import pkgutil
 import sys
-from importlib.util import find_spec
 from contextlib import asynccontextmanager
+from importlib.util import find_spec
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from dotenv import load_dotenv
 
 from common.core import config
 from common.schemas.chat import Message, StreamRequest
+
+
+DEFAULT_CLI_USER_ID = (
+    os.environ.get("SAGE_CLI_USER_ID")
+    or os.environ.get("SAGE_DESKTOP_USER_ID")
+    or "default_user"
+)
+
+
+def get_default_cli_user_id() -> str:
+    return DEFAULT_CLI_USER_ID
 
 
 def _dependency_status() -> Dict[str, bool]:
@@ -109,19 +122,53 @@ def configure_cli_logging(*, verbose: bool) -> config.StartupConfig:
     return cfg
 
 
+def _import_shared_model_modules() -> None:
+    import common.models
+
+    for module_info in pkgutil.iter_modules(common.models.__path__):
+        name = module_info.name
+        if name.startswith("_") or name == "base":
+            continue
+        importlib.import_module(f"common.models.{name}")
+
+
 @asynccontextmanager
 async def cli_runtime(*, verbose: bool = False) -> AsyncGenerator[config.StartupConfig, None]:
-    from common.services.runtime_service import (
-        cleanup_cli_runtime,
-        initialize_cli_runtime,
+    from app.server.bootstrap import (
+        close_db_client,
+        close_skill_manager,
+        close_tool_manager,
+        initialize_db_connection,
+        initialize_session_manager,
+        initialize_skill_manager,
+        initialize_tool_manager,
     )
+    from sagents.tool.tool_manager import ToolManager
 
     cfg = configure_cli_logging(verbose=verbose)
-    await initialize_cli_runtime(cfg)
+    _import_shared_model_modules()
+
+    original_discover_builtin = ToolManager.discover_builtin_mcp_tools_from_path
+
+    def _skip_builtin_mcp_discovery(_self):
+        return None
+
+    ToolManager.discover_builtin_mcp_tools_from_path = _skip_builtin_mcp_discovery
+    await initialize_db_connection(cfg)
     try:
+        await initialize_tool_manager()
+        await initialize_skill_manager(cfg)
+        await initialize_session_manager(cfg)
         yield cfg
     finally:
-        await cleanup_cli_runtime()
+        ToolManager.discover_builtin_mcp_tools_from_path = original_discover_builtin
+        try:
+            await close_skill_manager()
+        finally:
+            try:
+                await close_tool_manager()
+            finally:
+                await close_db_client()
 
 
 def build_run_request(
@@ -135,7 +182,7 @@ def build_run_request(
     return StreamRequest(
         messages=[Message(role="user", content=task)],
         session_id=session_id,
-        user_id=user_id or "cli-user",
+        user_id=user_id or get_default_cli_user_id(),
         agent_id=agent_id,
         agent_mode=agent_mode,
     )
@@ -179,6 +226,7 @@ def collect_doctor_info() -> Dict[str, Any]:
         "auth_mode": cfg.auth_mode,
         "port": cfg.port,
         "db_type": cfg.db_type,
+        "default_cli_user_id": get_default_cli_user_id(),
         "default_llm_model_name": cfg.default_llm_model_name,
         "agents_dir": cfg.agents_dir,
         "session_dir": cfg.session_dir,

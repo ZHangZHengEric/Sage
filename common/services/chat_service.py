@@ -28,7 +28,6 @@ from common.models.im_channel import IMChannelConfigDao
 from common.models.kdb import KdbDao
 from common.models.llm_provider import LLMProviderDao
 from common.services.chat_processor import ContentProcessor
-from common.services.agent_inherit_service import copy_agent_inherit_to_workspace
 from common.services.chat_utils import (
     create_model_client,
     create_skill_proxy,
@@ -612,7 +611,9 @@ class SageStreamService:
             if not os.path.exists(self.agent_workspace):
                 os.makedirs(self.agent_workspace, exist_ok=True)
                 if self.request.agent_id:
-                    copy_agent_inherit_to_workspace(
+                    importlib.import_module(
+                        "app.server.services.agent_inherit"
+                    ).copy_agent_inherit_to_workspace(
                         self.request.agent_id,
                         self.agent_workspace,
                     )

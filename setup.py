@@ -11,13 +11,13 @@ setup(
     url="https://github.com/ZHangZHengEric/Sage",
     license="MIT",
     packages=find_packages(
-        include=["sagents*", "common*"],
-        exclude=["tests*", "app*", "docs*", "assets*", "logs*"],
+        include=["sagents*", "common*", "app*"],
+        exclude=["tests*", "app.desktop*", "app.skills*", "app.wiki*", "docs*", "assets*", "logs*"],
     ),
     include_package_data=True,
     entry_points={
         "console_scripts": [
-            "sage=sagents.cli.main:main",
+            "sage=app.cli.main:main",
         ]
     },
     install_requires=[

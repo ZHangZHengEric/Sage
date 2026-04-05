@@ -30,13 +30,6 @@ import subprocess
 MAX_TOOL_RESULT_TOKENS = 12000
 
 
-def _env_flag_enabled(name: str) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return False
-    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
 def _truncate_result(result: str, max_tokens: int = MAX_TOOL_RESULT_TOKENS) -> str:
     """截断工具返回结果，限制在最大 token 数内
     
@@ -258,8 +251,7 @@ class ToolManager:
 
         if is_auto_discover:
             self.discover_tools_from_path()
-            if not _env_flag_enabled("SAGE_DISABLE_BUILTIN_MCP_AUTO_DISCOVERY"):
-                self.discover_builtin_mcp_tools_from_path()
+            self.discover_builtin_mcp_tools_from_path()
             # self._mcp_setting_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'mcp_servers', 'mcp_setting.json')
             # # 在测试环境中，我们不希望自动发现MCP工具
             # if not os.environ.get('TESTING'):

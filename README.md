@@ -186,14 +186,16 @@ sage chat
 sage resume your-session-id
 ```
 
+By default, the CLI uses a stable local user id. You can override it with `--user-id`, `SAGE_CLI_USER_ID`, or `SAGE_DESKTOP_USER_ID`.
+
 If you prefer not to install an editable package yet, you can run the module directly:
 
 ```bash
-python -m sagents.cli.main doctor
-python -m sagents.cli.main run "Help me analyze the current repository"
-python -m sagents.cli.main run --stats "Help me analyze the current repository"
-python -m sagents.cli.main chat
-python -m sagents.cli.main resume your-session-id
+python -m app.cli.main doctor
+python -m app.cli.main run "Help me analyze the current repository"
+python -m app.cli.main run --stats "Help me analyze the current repository"
+python -m app.cli.main chat
+python -m app.cli.main resume your-session-id
 ```
 
 The current CLI MVP still uses the existing Sage runtime config system, so `.env` and shell environment variables remain the primary configuration mechanism.
