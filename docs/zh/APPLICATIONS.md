@@ -13,9 +13,9 @@ ref: applications
 
 ## 该选哪个入口
 
-### 示例 CLI
+### CLI
 
-当你需要最小化运行时闭环、用于本地测试和提示词迭代时，使用 `examples/sage_cli.py`。
+当你需要最快的开发测试入口、提示词迭代或运行时诊断时，使用 `sage run`、`sage chat` 和 `sage doctor`。
 
 ### Streamlit 演示
 

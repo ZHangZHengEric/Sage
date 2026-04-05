@@ -137,7 +137,7 @@ For local development, the default `SAGE_ENV` is `development`. If you set `SAGE
 
 Production-like mode also forces secure session cookies.
 
-## Run the Example CLI
+## Run the CLI
 
 For the fastest runtime smoke test:
 
@@ -148,15 +148,13 @@ You should be able to complete at least one of these checks:
 - `curl http://127.0.0.1:8080/api/health` returns a healthy response
 - the web UI loads after `npm run dev`
 
-## Run the Example CLI
-
-The fastest way to validate the runtime is the example CLI:
+The fastest way to validate the runtime is the CLI:
 
 ```bash
-python examples/sage_cli.py \
-  --default_llm_api_key "$SAGE_DEFAULT_LLM_API_KEY" \
-  --default_llm_api_base_url "$SAGE_DEFAULT_LLM_API_BASE_URL" \
-  --default_llm_model_name "$SAGE_DEFAULT_LLM_MODEL_NAME"
+pip install -e .
+sage doctor
+sage run "Help me analyze the current repository"
+sage chat
 ```
 
 ## Manually Start Web Services

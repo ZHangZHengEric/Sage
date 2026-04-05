@@ -59,10 +59,9 @@ Development scripts also exist under `app/desktop/scripts/`.
 If you want the smallest possible feedback loop, start from:
 
 ```bash
-python examples/sage_cli.py \
-  --default_llm_api_key "$SAGE_DEFAULT_LLM_API_KEY" \
-  --default_llm_api_base_url "$SAGE_DEFAULT_LLM_API_BASE_URL" \
-  --default_llm_model_name "$SAGE_DEFAULT_LLM_MODEL_NAME"
+pip install -e .
+sage doctor
+sage run "Help me analyze the current repository"
 ```
 
 ### Documentation site
@@ -112,8 +111,13 @@ rvm use 3.2.9 do bash -lc 'cd docs && bundle exec jekyll build'
 ### Example behavior
 
 - `examples/README.md`
-- `examples/sage_cli.py`
 - `examples/sage_server.py`
+
+### CLI behavior
+
+- `sagents/cli/main.py`
+- `common/services/cli_service.py`
+- `common/services/runtime_service.py`
 
 ## Documentation Standards for This Repository
 
