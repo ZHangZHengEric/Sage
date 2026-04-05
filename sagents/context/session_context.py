@@ -337,7 +337,8 @@ class SessionContext:
         if len(self.external_paths) > 0:
             self.external_paths = [os.path.abspath(path) for path in self.external_paths]
             self.system_context['external_paths'] = self.external_paths
-        current_time_str = datetime.datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S')
+        now = datetime.datetime.now().astimezone()
+        current_time_str = now.strftime('%a, %d %b %Y %H:%M:%S %z')
         if self.system_context.get('current_time') is None:
             self.system_context['current_time'] = current_time_str
 

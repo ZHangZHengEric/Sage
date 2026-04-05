@@ -8,6 +8,7 @@ import os
 from typing import Dict, Any, Optional, List
 from sagents.utils.logger import logger
 from sagents.utils.sandbox.config import VolumeMount
+from .subprocess import LAUNCHER_SCRIPT
 
 
 class BwrapIsolation:
@@ -35,17 +36,26 @@ class BwrapIsolation:
         
         with open(input_pkl, "wb") as f:
             pickle.dump(payload, f)
-        
+
         # 使用沙箱的 venv Python
         python_bin = os.path.join(self.venv_dir, "bin", "python")
         launcher_path = os.path.join(sandbox_dir, "launcher.py")
-        
+        if not os.path.exists(launcher_path):
+            with open(launcher_path, "w") as f:
+                f.write(LAUNCHER_SCRIPT)
+
         # 构建 bwrap 命令
         bwrap_cmd = [
             "bwrap",
             "--ro-bind", self.sandbox_agent_workspace, self.sandbox_agent_workspace,
             "--bind", sandbox_dir, sandbox_dir,
+            "--ro-bind", "/usr", "/usr",
+            "--ro-bind", "/bin", "/bin",
+            "--ro-bind", "/lib", "/lib",
+            "--ro-bind", "/lib64", "/lib64",
+            "--ro-bind", "/etc", "/etc",
             "--dev", "/dev",
+            "--proc", "/proc",
             "--tmpfs", "/tmp",
         ]
         

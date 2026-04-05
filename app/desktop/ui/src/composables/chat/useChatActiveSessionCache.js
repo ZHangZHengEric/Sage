@@ -1,11 +1,23 @@
 import { ref } from 'vue'
 import { chatAPI } from '@/api/chat'
+import { sanitizeSessionTitle } from '@/utils/sessionTitle'
+import { setDebugCounter, setDebugValue } from '@/utils/memoryDebug'
 
 // Module-level singletons
 let activeSessions = ref({})
 let sessionStreamOffsets = ref({})
 let sseSource = null
 let subscriberCount = 0
+let reconnectTimeoutId = null
+let connectInFlight = false
+
+const syncDebugCounters = () => {
+  setDebugCounter('activeSession.sseSubscribers', subscriberCount)
+  setDebugCounter('activeSession.hasReconnectTimer', reconnectTimeoutId ? 1 : 0)
+  setDebugCounter('activeSession.connectInFlight', connectInFlight ? 1 : 0)
+  setDebugCounter('activeSession.cachedSessions', Object.keys(activeSessions.value || {}).length)
+  setDebugValue('activeSession.readyState', sseSource?.readyState ?? null)
+}
 
 const readActiveSessionsCache = () => {
   try {
@@ -17,14 +29,7 @@ const readActiveSessionsCache = () => {
 
 // Initialize activeSessions from local storage once
 activeSessions.value = readActiveSessionsCache()
-
-const stripSessionControlTags = (text = '') => {
-  let normalized = String(text || '')
-  normalized = normalized.replace(/^\s*<enable_plan>\s*(true|false)\s*<\/enable_plan>\s*/i, '')
-  normalized = normalized.replace(/^\s*<enable_deep_thinking>\s*(true|false)\s*<\/enable_deep_thinking>\s*/i, '')
-  normalized = normalized.replace(/^<skill>.*?<\/skill>\s*/i, '')
-  return normalized.trim()
-}
+syncDebugCounters()
 
 const deriveSessionTitle = (content = '') => {
   // 处理数组类型（messages 格式）
@@ -50,7 +55,7 @@ const deriveSessionTitle = (content = '') => {
     // 尝试提取对象中的文本字段
     content = content.text || content.content || content.message || JSON.stringify(content)
   }
-  const normalized = stripSessionControlTags(String(content || '').trim())
+  const normalized = sanitizeSessionTitle(String(content || '').trim())
   if (!normalized) return '进行中的会话'
   return normalized
 }
@@ -102,10 +107,33 @@ const updateLocalCacheFromRemote = (remoteSessions) => {
   activeSessions.value = localCache
   syncSessionOffsetsFromActiveSessions()
   window.dispatchEvent(new Event('active-sessions-updated'))
+  syncDebugCounters()
+}
+
+const clearReconnectTimer = () => {
+  if (reconnectTimeoutId !== null) {
+    clearTimeout(reconnectTimeoutId)
+    reconnectTimeoutId = null
+  }
+  syncDebugCounters()
+}
+
+const scheduleReconnect = () => {
+  if (subscriberCount <= 0 || reconnectTimeoutId !== null || sseSource) return
+  reconnectTimeoutId = setTimeout(() => {
+    reconnectTimeoutId = null
+    syncDebugCounters()
+    if (subscriberCount > 0 && !sseSource) {
+      connectSSE()
+    }
+  }, 5000)
+  syncDebugCounters()
 }
 
 const connectSSE = async () => {
-  if (sseSource) return
+  if (sseSource || connectInFlight || subscriberCount <= 0) return
+  connectInFlight = true
+  syncDebugCounters()
 
   try {
     const source = await chatAPI.subscribeActiveSessions()
@@ -121,6 +149,8 @@ const connectSSE = async () => {
     }
 
     sseSource = source
+    clearReconnectTimer()
+    syncDebugCounters()
     
     sseSource.onmessage = (event) => {
       try {
@@ -135,28 +165,20 @@ const connectSSE = async () => {
 
     sseSource.onerror = (err) => {
       console.error('[ActiveSessionCache] SSE connection error:', err)
-      if (sseSource) {
+      const readyState = sseSource?.readyState
+      if (readyState === EventSource.CLOSED && sseSource) {
         sseSource.close()
         sseSource = null
+        scheduleReconnect()
       }
-      if (subscriberCount > 0) {
-         setTimeout(() => {
-           if (subscriberCount > 0 && !sseSource) {
-              connectSSE()
-           }
-         }, 5000)
-      }
+      syncDebugCounters()
     }
   } catch (e) {
     console.error('[ActiveSessionCache] Failed to start SSE sync:', e)
-    // 连接失败不减少 subscriberCount，而是尝试重连
-    if (subscriberCount > 0) {
-         setTimeout(() => {
-           if (subscriberCount > 0 && !sseSource) {
-              connectSSE()
-           }
-         }, 5000)
-    }
+    scheduleReconnect()
+  } finally {
+    connectInFlight = false
+    syncDebugCounters()
   }
 }
 
@@ -166,23 +188,28 @@ const startSSESync = async () => {
   }
 
   subscriberCount++
+  syncDebugCounters()
   
   if (sseSource) {
     return 
   }
 
+  clearReconnectTimer()
   connectSSE()
 }
 
 const stopSSESync = () => {
   subscriberCount--
+  syncDebugCounters()
   
   if (subscriberCount <= 0) {
     subscriberCount = 0
+    clearReconnectTimer()
     if (sseSource) {
       sseSource.close()
       sseSource = null
     }
+    syncDebugCounters()
   }
 }
 
@@ -190,6 +217,7 @@ export const useChatActiveSessionCache = () => {
   const handleActiveSessionsUpdated = () => {
     activeSessions.value = readActiveSessionsCache()
     syncSessionOffsetsFromActiveSessions()
+    syncDebugCounters()
   }
 
   const getSessionLastIndex = (sessionId) => {
@@ -244,6 +272,7 @@ export const useChatActiveSessionCache = () => {
     activeSessions.value = cacheSnapshot
     syncSessionOffsetsFromActiveSessions()
     window.dispatchEvent(new Event('active-sessions-updated'))
+    syncDebugCounters()
   }
 
   return {
@@ -254,7 +283,6 @@ export const useChatActiveSessionCache = () => {
     updateActiveSession,
     removeSessionFromCache,
     deriveSessionTitle,
-    stripSessionControlTags,
     startSSESync,
     stopSSESync
   }

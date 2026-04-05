@@ -393,12 +393,35 @@ def _inject_skill_tools(request: StreamRequest) -> None:
     request.available_tools = current_tools
 
 
+def _strip_skill_tools_when_unavailable(request: StreamRequest) -> None:
+    if request.available_skills:
+        return
+
+    current_tools = list(request.available_tools or [])
+    filtered_tools = [tool for tool in current_tools if tool != "load_skill"]
+    if len(filtered_tools) != len(current_tools):
+        logger.info("当前会话无可用技能，已移除 load_skill 工具")
+    request.available_tools = filtered_tools
+
+
 async def _populate_custom_sub_agents(request: StreamRequest) -> None:
     if not request.available_sub_agent_ids:
         return
 
+    deduped_ids: List[str] = []
+    seen_ids = set()
+    for agent_id in request.available_sub_agent_ids:
+        normalized_agent_id = str(agent_id or "").strip()
+        if not normalized_agent_id or normalized_agent_id in seen_ids:
+            continue
+        seen_ids.add(normalized_agent_id)
+        deduped_ids.append(normalized_agent_id)
+
+    if not deduped_ids:
+        return
+
     sub_agent_dao = AgentConfigDao()
-    sub_agents = await sub_agent_dao.get_by_ids(request.available_sub_agent_ids)
+    sub_agents = await sub_agent_dao.get_by_ids(deduped_ids)
     request.custom_sub_agents = [
         CustomSubAgentConfig(
             agent_id=sub_agent.agent_id,
@@ -559,6 +582,7 @@ async def populate_request_from_agent_config(
                 request.available_tools.append("retrieve_on_zavixai_db")
 
     _inject_skill_tools(request)
+    _strip_skill_tools_when_unavailable(request)
     await _populate_custom_sub_agents(request)
     request.context_budget_config = _build_context_budget_config(request)
     await _register_extra_mcp_tools(request)
@@ -885,7 +909,7 @@ def _sanitize_title_text(text: str) -> str:
         flags=re.IGNORECASE,
     )
     cleaned = re.sub(
-        r"^\s*<skill>.*?</skill>\s*",
+        r"^\s*(?:<skill>.*?</skill>\s*)+",
         "",
         cleaned,
         flags=re.IGNORECASE | re.DOTALL,
@@ -896,6 +920,7 @@ def _sanitize_title_text(text: str) -> str:
         cleaned,
         flags=re.IGNORECASE,
     )
+    cleaned = re.sub(r"</?[\w:-]+(?:\s[^>]*)?>", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
 
@@ -921,7 +946,9 @@ async def create_conversation_title(request: StreamRequest) -> str:
                 _extract_text_from_content(getattr(request.messages[0], "content", ""))
             )
     else:
-        title_source = _extract_text_from_content(request.messages[0].content) or "新会话"
+        title_source = _sanitize_title_text(
+            _extract_text_from_content(request.messages[0].content)
+        ) or "新会话"
 
     if not title_source:
         return "新会话"

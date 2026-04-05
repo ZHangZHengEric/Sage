@@ -18,6 +18,16 @@ export const chatAPI = {
     return await request.delete(`/api/conversations/${conversationId}`)
   },
 
+  editLastUserMessage: async (conversationId, payload) => {
+    return await request.post(`/api/conversations/${conversationId}/edit-last-user-message`, payload)
+  },
+
+  rerunConversationStream: async (conversationId, payload = {}, abortController = null) => {
+    return await request.postStream(`/api/conversations/${conversationId}/rerun-stream`, payload, {
+      signal: abortController
+    })
+  },
+
   getConversationsPaginated: async (params = {}) => {
     const queryParams = new URLSearchParams()
     if (params.page) queryParams.append('page', params.page)

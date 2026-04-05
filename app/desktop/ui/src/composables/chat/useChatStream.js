@@ -337,6 +337,62 @@ export const useChatStream = ({
     }
   }
 
+  const rerunSession = async ({
+    sessionId,
+    selectedAgent,
+    config,
+    onMessage,
+    onError,
+    onComplete
+  }) => {
+    try {
+      if (abortControllerRef) {
+        abortControllerRef.value = new AbortController()
+      }
+
+      const requestBody = {
+        agent_mode: config?.agentMode,
+        more_suggest: config?.moreSuggest,
+        max_loop_count: config?.maxLoopCount,
+        available_sub_agent_ids: Array.isArray(config?.availableSubAgentIds) ? config.availableSubAgentIds : [],
+        agent_id: selectedAgent?.id
+      }
+
+      const response = await chatAPI.rerunConversationStream(sessionId, requestBody, abortControllerRef?.value)
+      updateActiveSession(sessionId, true)
+      let streamLastIndex = 0
+      await readStreamResponse(
+        response,
+        (data) => {
+          streamLastIndex += 1
+          updateActiveSessionLastIndex(sessionId, streamLastIndex)
+          if (streamLastIndex % 20 === 0) updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
+          if (data.type === 'stream_end') {
+            updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
+            markCompletedAndCleanupCurrentSession(sessionId)
+          }
+          if (data.type === 'chunk_start' || data.type === 'json_chunk' || data.type === 'chunk_end') return
+          if (onMessage) onMessage(data)
+        },
+        () => {
+          updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
+          if (onComplete) onComplete()
+        },
+        (err) => {
+          updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
+          if (err.name === 'AbortError') {
+            return
+          }
+          if (onError) onError(err)
+        }
+      )
+    } catch (error) {
+      if (error.name !== 'AbortError' && onError) {
+        onError(error)
+      }
+    }
+  }
+
   const handleSendMessage = async (content, options = {}) => {
     const { displayContent, multimodalContent, needInterrupt } = options
     if (!content.trim() || !selectedAgent.value) return
@@ -436,6 +492,7 @@ export const useChatStream = ({
   return {
     handleSessionLoad,
     handleSendMessage,
-    stopGeneration
+    stopGeneration,
+    rerunSession
   }
 }

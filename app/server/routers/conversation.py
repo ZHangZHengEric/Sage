@@ -34,6 +34,10 @@ class UpdateTitleRequest(BaseModel):
     title: str
 
 
+class EditLastUserMessageRequest(BaseModel):
+    content: str
+
+
 @conversation_router.post("/api/conversations/{session_id}/title")
 async def update_title(session_id: str, request: Request, body: UpdateTitleRequest):
     """更新会话标题"""
@@ -43,6 +47,16 @@ async def update_title(session_id: str, request: Request, body: UpdateTitleReque
         user_id=get_request_user_id(request),
     )
     return await Response.succ(message=f"会话 {session_id} 标题已更新", data=data)
+
+
+@conversation_router.post("/api/conversations/{session_id}/edit-last-user-message")
+async def edit_last_user_message(session_id: str, request: Request, body: EditLastUserMessageRequest):
+    data = await conversation_service.edit_last_user_message(
+        session_id=session_id,
+        content=body.content,
+        user_id=get_request_user_id(request),
+    )
+    return await Response.succ(message="最后一条用户消息已更新", data=data)
 
 
 @conversation_router.post("/api/sessions/{session_id}/tasks_status")
