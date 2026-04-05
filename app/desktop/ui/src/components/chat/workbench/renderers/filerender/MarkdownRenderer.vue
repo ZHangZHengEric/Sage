@@ -165,6 +165,7 @@ const openFile = () => {
 watch(() => props.content, async (newContent, oldContent) => {
   // 只在内容真正变化时重新渲染，避免重复渲染
   if (newContent !== oldContent) {
+    renderedMermaidIds.value = new Set()
     await renderMermaid()
   }
 }, { immediate: true })

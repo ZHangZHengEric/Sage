@@ -8,6 +8,7 @@ import router from './router'
 import { createPinia } from 'pinia'
 import { useLanguageStore } from './utils/i18n.js'
 import { useThemeStore } from './stores/theme.js'
+import { startMemoryDebugReporter } from './utils/memoryDebug.js'
 
 const pinia = createPinia()
 
@@ -34,3 +35,4 @@ const initializeApp = async () => {
 // 挂载应用并初始化
 app.mount('#app')
 initializeApp()
+startMemoryDebugReporter()

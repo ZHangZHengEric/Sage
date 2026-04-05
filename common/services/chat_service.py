@@ -392,6 +392,17 @@ def _inject_skill_tools(request: StreamRequest) -> None:
     request.available_tools = current_tools
 
 
+def _strip_skill_tools_when_unavailable(request: StreamRequest) -> None:
+    if request.available_skills:
+        return
+
+    current_tools = list(request.available_tools or [])
+    filtered_tools = [tool for tool in current_tools if tool != "load_skill"]
+    if len(filtered_tools) != len(current_tools):
+        logger.info("当前会话无可用技能，已移除 load_skill 工具")
+    request.available_tools = filtered_tools
+
+
 async def _populate_custom_sub_agents(request: StreamRequest) -> None:
     if not request.available_sub_agent_ids:
         return
@@ -570,6 +581,7 @@ async def populate_request_from_agent_config(
                 request.available_tools.append("retrieve_on_zavixai_db")
 
     _inject_skill_tools(request)
+    _strip_skill_tools_when_unavailable(request)
     await _populate_custom_sub_agents(request)
     request.context_budget_config = _build_context_budget_config(request)
     await _register_extra_mcp_tools(request)
