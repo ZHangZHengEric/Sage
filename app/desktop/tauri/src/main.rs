@@ -724,6 +724,46 @@ fn show_window(app: &tauri::AppHandle) {
     }
 }
 
+fn log_host_memory_snapshot() {
+    let current_pid = Pid::from_u32(std::process::id());
+    let mut sys = System::new_all();
+    sys.refresh_all();
+
+    let host_memory_mb = sys
+        .process(current_pid)
+        .map(|process| process.memory() / 1024 / 1024)
+        .unwrap_or(0);
+
+    let child_summaries: Vec<String> = sys
+        .processes()
+        .iter()
+        .filter_map(|(pid, process)| {
+            let parent_pid = process.parent()?;
+            if parent_pid != current_pid {
+                return None;
+            }
+            Some(format!(
+                "{}:{}:{}MB",
+                pid,
+                process.name().to_string(),
+                process.memory() / 1024 / 1024
+            ))
+        })
+        .collect();
+
+    println!(
+        "[SageMemory][host] pid={} host_mb={} child_count={} children={}",
+        std::process::id(),
+        host_memory_mb,
+        child_summaries.len(),
+        if child_summaries.is_empty() {
+            "[]".to_string()
+        } else {
+            format!("[{}]", child_summaries.join(", "))
+        }
+    );
+}
+
 fn main() {
     // Load .sage_env file first before setting other environment variables
     load_sage_env_file();
@@ -904,6 +944,13 @@ fn main() {
             }
 
             let app_handle = app.handle().clone();
+
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(600)).await;
+                    log_host_memory_snapshot();
+                }
+            });
 
             // Set default environment variables
             std::env::set_var("SAGE_USE_SANDBOX", "False");

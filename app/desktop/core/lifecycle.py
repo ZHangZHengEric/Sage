@@ -1,4 +1,7 @@
 import os
+import asyncio
+import subprocess
+import threading
 from pathlib import Path
 
 from loguru import logger
@@ -17,6 +20,8 @@ from .bootstrap import (
 )
 from common.utils.async_utils import create_safe_task
 from .services.chat.stream_manager import StreamManager
+
+_memory_reporter_task = None
 
 
 def _setup_memory_root_path():
@@ -41,6 +46,7 @@ async def initialize_system():
     StreamManager.get_instance()
     logger.info("sage-desktop：StreamManager 已预初始化")
     logger.info("sage-desktop：初始化完成")
+    _start_memory_reporter()
 
 
 def post_initialize_task():
@@ -48,11 +54,90 @@ def post_initialize_task():
     服务启动完成后执行一次的后置任务
     """
     logger.info("sage-desktop：启动的后置任务...")
-    return create_safe_task(validate_and_disable_mcp_servers(), name="post_initialize")
+    return create_safe_task(_post_initialize(), name="post_initialize")
+
+
+async def _post_initialize():
+    await validate_and_disable_mcp_servers()
+    await _start_task_scheduler()
+
+
+async def _start_task_scheduler():
+    try:
+        await asyncio.sleep(5)
+        from mcp_servers.task_scheduler.task_scheduler_server import ensure_scheduler_started
+
+        started = ensure_scheduler_started()
+        logger.info(f"sage-desktop：TaskScheduler {'已启动' if started else '已存在'}")
+    except Exception as exc:
+        logger.warning(f"sage-desktop：TaskScheduler 启动失败: {exc}")
+
+
+def _get_process_rss_mb() -> float | None:
+    try:
+      result = subprocess.run(
+          ["ps", "-o", "rss=", "-p", str(os.getpid())],
+          capture_output=True,
+          text=True,
+          timeout=2,
+          check=False,
+      )
+      if result.returncode != 0:
+          return None
+      rss_kb = int(result.stdout.strip() or "0")
+      return round(rss_kb / 1024, 1)
+    except Exception:
+      return None
+
+
+async def _memory_reporter_loop():
+    from mcp_servers.im_server.service_manager import get_service_manager
+
+    while True:
+        try:
+            await asyncio.sleep(600)
+            rss_mb = _get_process_rss_mb()
+            thread_count = threading.active_count()
+            task_count = len(asyncio.all_tasks())
+
+            service_manager = get_service_manager()
+            channels = service_manager.list_all_channels()
+            connected = sum(1 for item in channels if item.get("status") == "connected")
+            errored = sum(1 for item in channels if item.get("status") == "error")
+
+            logger.info(
+                "[SageMemory][sidecar] rss_mb={} threads={} asyncio_tasks={} im_channels={} im_connected={} im_error={}",
+                rss_mb,
+                thread_count,
+                task_count,
+                len(channels),
+                connected,
+                errored,
+            )
+        except asyncio.CancelledError:
+            logger.info("[SageMemory][sidecar] reporter stopped")
+            raise
+        except Exception as exc:
+            logger.warning(f"[SageMemory][sidecar] reporter error: {exc}")
+
+
+def _start_memory_reporter():
+    global _memory_reporter_task
+    if _memory_reporter_task and not _memory_reporter_task.done():
+        return
+    _memory_reporter_task = create_safe_task(_memory_reporter_loop(), name="sidecar_memory_reporter")
 
 
 async def cleanup_system():
     logger.info("sage-desktop：正在清理资源...")
+    global _memory_reporter_task
+    if _memory_reporter_task:
+        _memory_reporter_task.cancel()
+        try:
+            await _memory_reporter_task
+        except asyncio.CancelledError:
+            pass
+        _memory_reporter_task = None
     # 关闭第三方客户端
     await shutdown_clients()
     try:
