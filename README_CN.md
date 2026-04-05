@@ -184,14 +184,16 @@ sage chat
 sage resume your-session-id
 ```
 
+CLI 默认会使用一个稳定的本地用户 ID。你可以通过 `--user-id`、`SAGE_CLI_USER_ID` 或 `SAGE_DESKTOP_USER_ID` 覆盖它。
+
 如果你暂时不想安装可编辑包，也可以直接运行模块：
 
 ```bash
-python -m sagents.cli.main doctor
-python -m sagents.cli.main run "帮我分析当前仓库"
-python -m sagents.cli.main run --stats "帮我分析当前仓库"
-python -m sagents.cli.main chat
-python -m sagents.cli.main resume your-session-id
+python -m app.cli.main doctor
+python -m app.cli.main run "帮我分析当前仓库"
+python -m app.cli.main run --stats "帮我分析当前仓库"
+python -m app.cli.main chat
+python -m app.cli.main resume your-session-id
 ```
 
 当前这版 CLI MVP 仍然复用 Sage 现有的运行时配置体系，所以 `.env` 和 shell 环境变量仍然是主要配置方式。

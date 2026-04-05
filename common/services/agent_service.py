@@ -301,7 +301,7 @@ async def create_agent(
     )
     await dao.save(orm_obj)
     try:
-        from common.services.agent_inherit_service import ensure_agent_inherit_dir
+        from app.server.services.agent_inherit import ensure_agent_inherit_dir
 
         ensure_agent_inherit_dir(agent_id)
     except Exception as e:
