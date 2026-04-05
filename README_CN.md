@@ -184,6 +184,10 @@ sage chat
 sage resume your-session-id
 ```
 
+在 `sage chat` 和 `sage resume` 中，可以使用：
+- `/session` 查看当前会话 ID
+- `/exit` 或 `/quit` 退出会话
+
 CLI 默认会使用一个稳定的本地用户 ID。你可以通过 `--user-id`、`SAGE_CLI_USER_ID` 或 `SAGE_DESKTOP_USER_ID` 覆盖它。
 
 如果你暂时不想安装可编辑包，也可以直接运行模块：
