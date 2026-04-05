@@ -7,7 +7,7 @@
 </template>
 
 <script setup>
-import {computed, nextTick, onMounted, watch} from 'vue'
+import {computed, nextTick, onMounted, onUnmounted, ref, watch} from 'vue'
 import {marked} from 'marked'
 import DOMPurify from 'dompurify'
 import * as echarts from 'echarts'
@@ -17,6 +17,7 @@ import rehypePrism from 'rehype-prism-plus'
 import rehypeStringify from 'rehype-stringify'
 import { visit } from 'unist-util-visit'
 import { toast } from 'vue-sonner'
+import { setDebugCounter } from '@/utils/memoryDebug'
 
 const props = defineProps({
   content: {
@@ -100,6 +101,7 @@ const jsToJson = (jsStr) => {
 }
 
 const chartList = [] // 存放所有图表容器与配置项
+const chartInstances = ref([])
 const renderer = new marked.Renderer()
 
 // 修改 renderer.code，不再使用 Prism，只返回基础 HTML
@@ -397,16 +399,36 @@ const renderedContent = computed(() => {
 })
 
 // 渲染 ECharts
+const disposeCharts = () => {
+  chartInstances.value.forEach((instance) => {
+    try {
+      instance.dispose()
+    } catch (err) {
+      console.warn('释放 ECharts 实例失败:', err)
+    }
+  })
+  chartInstances.value = []
+  setDebugCounter('chatMarkdown.chartInstances', 0)
+}
+
 const renderCharts = async () => {
   await nextTick()
   await new Promise(resolve => setTimeout(resolve, 200))
+
+  disposeCharts()
 
   chartList.forEach(({id, option}) => {
     const el = document.getElementById(id)
     if (el && el.clientWidth > 0 && el.clientHeight > 0) {
       try {
+        const existing = echarts.getInstanceByDom(el)
+        if (existing) {
+          existing.dispose()
+        }
         const chart = echarts.init(el)
         chart.setOption(option)
+        chartInstances.value.push(chart)
+        setDebugCounter('chatMarkdown.chartInstances', chartInstances.value.length)
       } catch (err) {
         console.error(`✗ 图表 ${id} 初始化失败:`, err)
       }
@@ -507,4 +529,8 @@ onMounted(() => {
 watch(() => props.content, async () => {
   await renderCharts()
 }, {flush: 'post'})
+
+onUnmounted(() => {
+  disposeCharts()
+})
 </script>

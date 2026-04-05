@@ -1,3 +1,4 @@
+import asyncio
 import os
 import importlib
 import pkgutil
@@ -491,9 +492,27 @@ def post_initialize_server_runtime_task():
     from common.utils.async_utils import create_safe_task
 
     return create_safe_task(
-        validate_and_disable_mcp_servers(),
+        _post_initialize_server_runtime(),
         name="post_initialize",
     )
+
+
+async def _post_initialize_server_runtime():
+    await validate_and_disable_mcp_servers()
+    await _start_task_scheduler()
+
+
+async def _start_task_scheduler():
+    from loguru import logger
+
+    try:
+        await asyncio.sleep(5)
+        from mcp_servers.task_scheduler.task_scheduler_server import ensure_scheduler_started
+
+        started = ensure_scheduler_started()
+        logger.info(f"Sage：TaskScheduler {'已启动' if started else '已存在'}")
+    except Exception as exc:
+        logger.warning(f"Sage：TaskScheduler 启动失败: {exc}")
 
 
 async def cleanup_server_runtime():

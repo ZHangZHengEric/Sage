@@ -46,6 +46,16 @@ const loading = ref(false)
 const error = ref('')
 let pptxApp = null
 
+const cleanupPreview = () => {
+  if (pptxApp && typeof pptxApp.destroy === 'function') {
+    pptxApp.destroy()
+  }
+  pptxApp = null
+  if (containerRef.value) {
+    containerRef.value.innerHTML = ''
+  }
+}
+
 const loadPptx = async () => {
   if (!props.fileData || !containerRef.value) {
     // 如果还没有数据，保持 loading 或空状态
@@ -68,17 +78,17 @@ const loadPptx = async () => {
     const containerHeight = containerRef.value?.clientHeight || 600
 
     // 清空容器
-    containerRef.value.innerHTML = ''
+    cleanupPreview()
 
     // 初始化 pptx-preview
-    const pptxPreviewer = initPptxPreview(containerRef.value, {
+    pptxApp = initPptxPreview(containerRef.value, {
       width: Math.floor(containerWidth),
       height: Math.floor(containerHeight),
       mode: 'list'
     })
 
     // 调用预览方法
-    await pptxPreviewer.preview(props.fileData)
+    await pptxApp.preview(props.fileData)
 
   } catch (err) {
     console.error('[PptxRenderer] Failed to render PPTX:', err)
@@ -99,10 +109,7 @@ watch(() => props.fileData, () => {
 }, { immediate: true })
 
 onUnmounted(() => {
-  if (pptxApp) {
-    // pptx-preview 似乎没有 destroy 方法，这里只是清理引用
-    pptxApp = null
-  }
+  cleanupPreview()
 })
 </script>
 

@@ -19,6 +19,10 @@ class InterruptRequest(BaseModel):
     message: str = "用户请求中断"
 
 
+class EditLastUserMessageRequest(BaseModel):
+    content: str
+
+
 @conversation_router.post("/api/sessions/{session_id}/interrupt")
 async def interrupt(session_id: str, request: Request, body: InterruptRequest = None):
     """中断指定会话"""
@@ -62,6 +66,16 @@ async def get_messages(session_id: str, request: Request):
     """获取指定对话的所有消息"""
     data = await conversation_service.get_conversation_messages(session_id)
     return await Response.succ(data=data, message="获取消息成功")
+
+
+@conversation_router.post("/api/conversations/{session_id}/edit-last-user-message")
+async def edit_last_user_message(session_id: str, request: Request, body: EditLastUserMessageRequest):
+    data = await conversation_service.edit_last_user_message(
+        session_id=session_id,
+        content=body.content,
+        user_id=get_desktop_user_id(request),
+    )
+    return await Response.succ(message="最后一条用户消息已更新", data=data)
 
 
 @conversation_router.get("/api/share/conversations/{session_id}/messages")

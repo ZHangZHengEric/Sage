@@ -33,6 +33,16 @@ export const chatAPI = {
     return await request.delete(`/api/conversations/${conversationId}`)
   },
 
+  editLastUserMessage: async (conversationId, payload) => {
+    return await request.post(`/api/conversations/${conversationId}/edit-last-user-message`, payload)
+  },
+
+  rerunConversationStream: async (conversationId, payload = {}, abortController = null) => {
+    return await request.postStream(`/api/conversations/${conversationId}/rerun-stream`, payload, {
+      signal: abortController
+    })
+  },
+
   /**
    * 分页获取对话列表
    * @param {Object} params - 查询参数

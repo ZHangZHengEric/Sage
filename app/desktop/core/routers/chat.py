@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
@@ -17,6 +18,7 @@ from common.services import chat_service
 from common.services import conversation_service
 from common.schemas.chat import ChatRequest, StreamRequest, UserInputOptimizeRequest
 from common.core.client.chat import get_chat_client
+from pydantic import BaseModel
 
 from sagents.context.session_context import delete_session_run_lock
 from sagents.utils.lock_manager import safe_release
@@ -26,6 +28,60 @@ from ..user_context import get_desktop_user_id
 
 # 创建路由器
 chat_router = APIRouter()
+
+
+class RerunStreamRequest(BaseModel):
+    agent_id: str | None = None
+    agent_mode: str | None = None
+    more_suggest: bool | None = None
+    max_loop_count: int | None = None
+    available_sub_agent_ids: list[str] | None = None
+
+
+def _build_current_time_with_weekday() -> str:
+    now = datetime.now().astimezone()
+    return now.strftime("%a, %d %b %Y %H:%M:%S %z")
+
+
+async def _start_web_stream_session(
+    request: StreamRequest,
+    *,
+    manager: StreamManager,
+    interrupt_message: str,
+    query: str,
+):
+    session_id = request.session_id
+
+    if manager.has_running_session(session_id):
+        logger.bind(session_id=session_id).info(interrupt_message)
+        try:
+            await conversation_service.interrupt_session(
+                session_id,
+                interrupt_message,
+            )
+        finally:
+            await manager.stop_session(session_id)
+
+    await chat_service.populate_request_from_agent_config(
+        request,
+        require_agent_id=False,
+    )
+    stream_service, lock = await chat_service.prepare_session(request)
+    session_id = request.session_id
+    await manager.start_session(
+        session_id,
+        query,
+        chat_service.execute_chat_session(
+            mode="web-stream",
+            stream_service=stream_service,
+        ),
+        lock,
+    )
+
+    return StreamingResponse(
+        stream_with_manager(session_id, last_index=0, resume=False),
+        media_type="text/plain",
+    )
 
 
 @chat_router.post("/api/chat/optimize-input")
@@ -215,37 +271,12 @@ async def stream_chat_web(request: StreamRequest, http_request: Request):
 
     session_id = request.session_id
     manager = StreamManager.get_instance()
-
-    if manager.has_running_session(session_id):
-        logger.bind(session_id=session_id).info("同会话重入，先中断旧会话")
-        try:
-            await conversation_service.interrupt_session(
-                session_id,
-                "同会话重入，先中断旧会话",
-            )
-        finally:
-            await manager.stop_session(session_id)
-
-    await chat_service.populate_request_from_agent_config(
-        request,
-        require_agent_id=False,
-    )
-    stream_service, lock = await chat_service.prepare_session(request)
-    session_id = request.session_id
     query = request.messages[0].content
-    await manager.start_session(
-        session_id,
-        query,
-        chat_service.execute_chat_session(
-            mode="web-stream",
-            stream_service=stream_service,
-        ),
-        lock,
-    )
-
-    return StreamingResponse(
-        stream_with_manager(session_id, last_index=0, resume=False),
-        media_type="text/plain",
+    return await _start_web_stream_session(
+        request,
+        manager=manager,
+        interrupt_message="同会话重入，先中断旧会话",
+        query=query,
     )
 
 
@@ -285,3 +316,39 @@ async def get_active_sessions(request: Request):
             raise
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@chat_router.post("/api/conversations/{session_id}/rerun-stream")
+async def rerun_conversation_stream(
+    session_id: str,
+    rerun_request: RerunStreamRequest,
+    http_request: Request,
+):
+    user_id = get_desktop_user_id(http_request)
+    payload = await conversation_service.get_rerun_conversation_payload(
+        session_id=session_id,
+        user_id=user_id,
+    )
+
+    request = StreamRequest(
+        messages=[],
+        session_id=session_id,
+        user_id=payload["user_id"] or user_id,
+        system_context={
+            "current_time": _build_current_time_with_weekday(),
+            "rerun_from_edit_last_user_message": True,
+        },
+        agent_id=rerun_request.agent_id or payload["agent_id"],
+        agent_mode=rerun_request.agent_mode,
+        more_suggest=rerun_request.more_suggest,
+        max_loop_count=rerun_request.max_loop_count,
+        available_sub_agent_ids=rerun_request.available_sub_agent_ids,
+    )
+
+    manager = StreamManager.get_instance()
+    return await _start_web_stream_session(
+        request,
+        manager=manager,
+        interrupt_message="重新执行最后一条用户消息，先中断旧会话",
+        query=payload["query"] or "",
+    )

@@ -8,7 +8,7 @@
 </template>
 
 <script setup>
-import {computed, nextTick, onMounted, watch} from 'vue'
+import {computed, nextTick, onMounted, onUnmounted, ref, watch} from 'vue'
 import {marked} from 'marked'
 import DOMPurify from 'dompurify'
 import * as echarts from 'echarts'
@@ -21,6 +21,7 @@ import rehypePrism from 'rehype-prism-plus'
 import rehypeStringify from 'rehype-stringify'
 import { visit } from 'unist-util-visit'
 import { toast } from 'vue-sonner'
+import { setDebugCounter } from '@/utils/memoryDebug'
 
 // 不使用 prism 默认主题，使用自定义样式
 
@@ -77,6 +78,8 @@ const jsToJson = (jsStr) => {
 const chartList = [] // 存放所有图表容器与配置项
 const mermaidList = [] // 存放所有 mermaid 图表
 const excalidrawList = [] // 存放所有 excalidraw 图表
+const chartInstances = ref([])
+const localImageObjectUrls = ref([])
 const renderer = new marked.Renderer()
 
 // 修改 renderer.code，不再使用 Prism，只返回基础 HTML
@@ -675,16 +678,48 @@ const renderedContent = computed(() => {
 })
 
 // 渲染 ECharts
+const disposeCharts = () => {
+  chartInstances.value.forEach((instance) => {
+    try {
+      instance.dispose()
+    } catch (err) {
+      console.warn('释放 ECharts 实例失败:', err)
+    }
+  })
+  chartInstances.value = []
+  setDebugCounter('chatMarkdown.chartInstances', 0)
+}
+
+const revokeLocalImageObjectUrls = () => {
+  localImageObjectUrls.value.forEach((url) => {
+    try {
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.warn('释放本地图片 URL 失败:', err)
+    }
+  })
+  localImageObjectUrls.value = []
+  setDebugCounter('chatMarkdown.localImageObjectUrls', 0)
+}
+
 const renderCharts = async () => {
   await nextTick()
   await new Promise(resolve => setTimeout(resolve, 200))
+
+  disposeCharts()
 
   chartList.forEach(({id, option}) => {
     const el = document.getElementById(id)
     if (el && el.clientWidth > 0 && el.clientHeight > 0) {
       try {
+        const existing = echarts.getInstanceByDom(el)
+        if (existing) {
+          existing.dispose()
+        }
         const chart = echarts.init(el)
         chart.setOption(option)
+        chartInstances.value.push(chart)
+        setDebugCounter('chatMarkdown.chartInstances', chartInstances.value.length)
       } catch (err) {
         console.error(`✗ 图表 ${id} 初始化失败:`, err)
       }
@@ -717,6 +752,8 @@ const renderMermaid = async () => {
 const loadLocalImages = async () => {
   await nextTick()
   await new Promise(resolve => setTimeout(resolve, 100))
+
+  revokeLocalImageObjectUrls()
 
   // 查找所有带有 data-local-image 属性的 img 标签
   const images = document.querySelectorAll('img[data-local-image]')
@@ -762,6 +799,8 @@ const loadLocalImages = async () => {
       // 创建 Object URL
       const objectUrl = URL.createObjectURL(blob)
       console.log('[MarkdownRenderer] Created object URL:', objectUrl)
+      localImageObjectUrls.value.push(objectUrl)
+      setDebugCounter('chatMarkdown.localImageObjectUrls', localImageObjectUrls.value.length)
 
       // 设置 img 的 src
       img.src = objectUrl
@@ -959,4 +998,9 @@ watch(() => props.content, async () => {
   await renderMermaid()
   await loadLocalImages()
 }, {flush: 'post'})
+
+onUnmounted(() => {
+  disposeCharts()
+  revokeLocalImageObjectUrls()
+})
 </script>
