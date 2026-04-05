@@ -58,6 +58,8 @@ mcp = FastMCP("Task Scheduler Service")
 ONCE_TASK_PREFIX = "once_"
 RECURRING_TASK_PREFIX = "rec_"
 SCHEDULER_USER_ID = os.getenv("SAGE_TASK_SCHEDULER_USER_ID", "task_scheduler")
+_scheduler_thread: Optional[threading.Thread] = None
+_scheduler_lock = threading.Lock()
 
 
 def _get_api_base_url() -> str:
@@ -91,6 +93,32 @@ def _request_json(
         if not response.content:
             return None
         return response.json()
+
+
+def _is_api_ready(timeout: float = 5.0) -> bool:
+    url = f"{_get_api_base_url()}/active"
+    try:
+        with httpx.Client(timeout=timeout, headers=_internal_headers()) as client:
+            response = client.get(url)
+            return response.is_success
+    except Exception:
+        return False
+
+
+def _wait_for_api_ready(max_wait_seconds: float = 60.0, poll_interval: float = 2.0) -> bool:
+    deadline = time.time() + max_wait_seconds
+    announced_wait = False
+
+    while time.time() < deadline:
+        if _is_api_ready():
+            return True
+        if not announced_wait:
+            logger.info("[SCHEDULER] Waiting for backend API to become ready before polling tasks")
+            announced_wait = True
+        time.sleep(poll_interval)
+
+    logger.warning("[SCHEDULER] Backend API not ready after waiting; scheduler will still start polling")
+    return False
 
 
 def _parse_schedule_to_local_str(schedule: str) -> str:
@@ -304,8 +332,10 @@ def _check_and_spawn_recurring_tasks():
         spawned_count = len((result or {}).get("items") or [])
         if spawned_count > 0:
             logger.info(f"Spawned {spawned_count} tasks from recurring tasks")
+        return spawned_count
     except Exception as e:
         logger.error(f"Error spawning recurring tasks: {e}")
+        return 0
 
 
 def scheduler_loop():
@@ -318,17 +348,19 @@ def scheduler_loop():
     """
     logger.info("[SCHEDULER] Task scheduler started.")
     logger.info(f"[SCHEDULER] API Base URL: {_get_api_base_url()}")
+    _wait_for_api_ready()
     
     loop_count = 0
     
     while True:
         loop_count += 1
+        sleep_seconds = 5
         try:
             logger.debug(f"[SCHEDULER] === Loop iteration {loop_count} ===")
             
             # Step 1: Check recurring tasks and spawn instances
             logger.debug("[SCHEDULER] Checking recurring tasks...")
-            _check_and_spawn_recurring_tasks()
+            spawned_count = _check_and_spawn_recurring_tasks()
             
             # Step 2: Get all pending tasks that are due
             logger.debug("[SCHEDULER] Getting pending tasks...")
@@ -359,17 +391,34 @@ def scheduler_loop():
                         logger.error(f"[SCHEDULER] Failed to start task {task['id']}: {e}", exc_info=True)
             else:
                 logger.debug("[SCHEDULER] No pending tasks found")
+                if spawned_count == 0:
+                    sleep_seconds = 30
                             
         except Exception as e:
             logger.error(f"[SCHEDULER] Scheduler error in loop {loop_count}: {e}", exc_info=True)
 
-        logger.debug(f"[SCHEDULER] Sleeping for 5 seconds...")
-        time.sleep(5)  # Check every 5 seconds
+        logger.debug(f"[SCHEDULER] Sleeping for {sleep_seconds} seconds...")
+        time.sleep(sleep_seconds)
 
 
-# Start scheduler in a daemon thread
-scheduler_thread = threading.Thread(target=scheduler_loop, daemon=True)
-scheduler_thread.start()
+def ensure_scheduler_started() -> bool:
+    global _scheduler_thread
+
+    if _scheduler_thread and _scheduler_thread.is_alive():
+        return False
+
+    with _scheduler_lock:
+        if _scheduler_thread and _scheduler_thread.is_alive():
+            return False
+
+        _scheduler_thread = threading.Thread(
+            target=scheduler_loop,
+            daemon=True,
+            name="TaskSchedulerLoop",
+        )
+        _scheduler_thread.start()
+        logger.info("[SCHEDULER] Scheduler thread started explicitly")
+        return True
 
 
 # --- MCP Tools ---

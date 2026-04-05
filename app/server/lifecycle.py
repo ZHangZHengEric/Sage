@@ -1,3 +1,5 @@
+import asyncio
+
 from loguru import logger
 
 from .bootstrap import (
@@ -55,7 +57,23 @@ def post_initialize_task():
     """
     服务启动完成后执行一次的后置任务
     """
-    return create_safe_task(validate_and_disable_mcp_servers(), name="post_initialize")
+    return create_safe_task(_post_initialize(), name="post_initialize")
+
+
+async def _post_initialize():
+    await validate_and_disable_mcp_servers()
+    await _start_task_scheduler()
+
+
+async def _start_task_scheduler():
+    try:
+        await asyncio.sleep(5)
+        from mcp_servers.task_scheduler.task_scheduler_server import ensure_scheduler_started
+
+        started = ensure_scheduler_started()
+        logger.info(f"Sage：TaskScheduler {'已启动' if started else '已存在'}")
+    except Exception as exc:
+        logger.warning(f"Sage：TaskScheduler 启动失败: {exc}")
 
 
 async def cleanup_system():
