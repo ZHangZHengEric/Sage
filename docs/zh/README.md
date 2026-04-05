@@ -74,7 +74,7 @@ ref: home
 
 ### 轻量示例
 
-- `examples/sage_cli.py`：终端聊天客户端
+- `sage run` / `sage chat` / `sage doctor`：开发向 CLI 入口
 - `examples/sage_demo.py`：Streamlit 演示
 - `examples/sage_server.py`：独立 FastAPI 示例服务
 
