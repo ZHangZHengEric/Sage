@@ -161,11 +161,42 @@ app/desktop/scripts/build.sh release
 
 **Command Line Interface (CLI)**:
 ```bash
-python examples/sage_cli.py \
-  --default_llm_api_key YOUR_API_KEY \
-  --default_llm_api_base_url https://api.deepseek.com/v1 \
-  --default_llm_model_name deepseek-chat
+# Install editable package once
+pip install -e .
+
+# Configure the minimum runtime variables
+export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
+export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
+export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
+export SAGE_DB_TYPE="file"
+
+# Diagnose local runtime config
+sage doctor
+
+# Run a single task
+sage run "Help me analyze the current repository"
+
+# Run a task and print execution stats
+sage run --stats "Help me analyze the current repository"
+
+# Start an interactive chat session
+sage chat
+
+# Resume an existing session
+sage resume your-session-id
 ```
+
+If you prefer not to install an editable package yet, you can run the module directly:
+
+```bash
+python -m sagents.cli.main doctor
+python -m sagents.cli.main run "Help me analyze the current repository"
+python -m sagents.cli.main run --stats "Help me analyze the current repository"
+python -m sagents.cli.main chat
+python -m sagents.cli.main resume your-session-id
+```
+
+The current CLI MVP still uses the existing Sage runtime config system, so `.env` and shell environment variables remain the primary configuration mechanism.
 
 **Web Application (FastAPI + Vue3)**:
 

@@ -1,0 +1,203 @@
+import json
+import logging
+import os
+import sys
+from importlib.util import find_spec
+from contextlib import asynccontextmanager
+from typing import Any, AsyncGenerator, Dict, List, Optional
+
+from dotenv import load_dotenv
+
+from common.core import config
+from common.schemas.chat import Message, StreamRequest
+
+
+def _dependency_status() -> Dict[str, bool]:
+    return {
+        "dotenv": find_spec("dotenv") is not None,
+        "loguru": find_spec("loguru") is not None,
+        "fastapi": find_spec("fastapi") is not None,
+        "uvicorn": find_spec("uvicorn") is not None,
+    }
+
+
+def _collect_runtime_issues(cfg: config.StartupConfig) -> Dict[str, List[str]]:
+    errors: List[str] = []
+    warnings: List[str] = []
+    next_steps: List[str] = []
+
+    deps = _dependency_status()
+    missing_deps = [name for name, present in deps.items() if not present]
+    if missing_deps:
+        errors.append(f"Missing Python dependencies: {', '.join(missing_deps)}")
+        next_steps.append("Install project dependencies first, for example: pip install -e .")
+
+    if not (cfg.default_llm_api_key or "").strip():
+        errors.append("Missing SAGE_DEFAULT_LLM_API_KEY")
+        next_steps.append("Set SAGE_DEFAULT_LLM_API_KEY in your shell or .env before using run/chat.")
+
+    if not (cfg.default_llm_api_base_url or "").strip():
+        errors.append("Missing SAGE_DEFAULT_LLM_API_BASE_URL")
+        next_steps.append("Set SAGE_DEFAULT_LLM_API_BASE_URL in your shell or .env.")
+
+    if not (cfg.default_llm_model_name or "").strip():
+        errors.append("Missing SAGE_DEFAULT_LLM_MODEL_NAME")
+        next_steps.append("Set SAGE_DEFAULT_LLM_MODEL_NAME in your shell or .env.")
+
+    if cfg.db_type == "mysql":
+        warnings.append("CLI is using MySQL. For local development, file DB is usually simpler.")
+        next_steps.append("If you only need local development, consider setting SAGE_DB_TYPE=file.")
+
+    if cfg.auth_mode != "native":
+        warnings.append(f"Current auth mode is {cfg.auth_mode}. CLI currently works best with native/local setups.")
+
+    return {
+        "errors": errors,
+        "warnings": warnings,
+        "next_steps": next_steps,
+    }
+
+
+def init_cli_config(*, init_logging: bool = True) -> config.StartupConfig:
+    load_dotenv(".env")
+    cfg = config.init_startup_config(mode="server")
+    if init_logging:
+        from common.utils.logging import init_logging_base
+
+        init_logging_base(
+            log_name="sage-cli",
+            log_level=getattr(cfg, "log_level", "INFO"),
+            log_path="./logs",
+            use_safe_stdout=True,
+        )
+    return cfg
+
+
+def configure_cli_logging(*, verbose: bool) -> config.StartupConfig:
+    cfg = init_cli_config(init_logging=True)
+    if verbose:
+        return cfg
+
+    quiet_level = logging.ERROR
+    logging.getLogger().setLevel(quiet_level)
+    logging.getLogger("TaskScheduler").setLevel(quiet_level)
+
+    try:
+        task_logger = logging.getLogger("TaskScheduler")
+        for handler in task_logger.handlers:
+            handler.setLevel(quiet_level)
+    except Exception:
+        pass
+
+    try:
+        from loguru import logger as loguru_logger
+
+        loguru_logger.remove()
+        loguru_logger.add(sys.stderr, level="ERROR", format="{message}")
+    except Exception:
+        pass
+
+    try:
+        from sagents.utils.logger import logger as sage_logger
+
+        for handler in sage_logger.logger.handlers:
+            if isinstance(handler, logging.StreamHandler):
+                handler.setLevel(quiet_level)
+    except Exception:
+        pass
+
+    return cfg
+
+
+@asynccontextmanager
+async def cli_runtime(*, verbose: bool = False) -> AsyncGenerator[config.StartupConfig, None]:
+    from common.services.runtime_service import (
+        cleanup_cli_runtime,
+        initialize_cli_runtime,
+    )
+
+    cfg = configure_cli_logging(verbose=verbose)
+    await initialize_cli_runtime(cfg)
+    try:
+        yield cfg
+    finally:
+        await cleanup_cli_runtime()
+
+
+def build_run_request(
+    *,
+    task: str,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    agent_mode: Optional[str] = None,
+) -> StreamRequest:
+    return StreamRequest(
+        messages=[Message(role="user", content=task)],
+        session_id=session_id,
+        user_id=user_id or "cli-user",
+        agent_id=agent_id,
+        agent_mode=agent_mode,
+    )
+
+
+async def run_request_stream(
+    request: StreamRequest,
+) -> AsyncGenerator[Dict[str, Any], None]:
+    from common.services.chat_service import (
+        execute_chat_session,
+        populate_request_from_agent_config,
+        prepare_session,
+    )
+
+    await populate_request_from_agent_config(request, require_agent_id=False)
+    stream_service, _lock = await prepare_session(request)
+    async for line in execute_chat_session(stream_service):
+        if not line:
+            continue
+        try:
+            yield json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+
+def collect_doctor_info() -> Dict[str, Any]:
+    cfg = init_cli_config(init_logging=False)
+    dependency_status = _dependency_status()
+    issues = _collect_runtime_issues(cfg)
+    status = "ok"
+    if issues["errors"]:
+        status = "error"
+    elif issues["warnings"]:
+        status = "warning"
+
+    return {
+        "status": status,
+        "python": os.environ.get("PYTHON_BIN") or os.environ.get("CONDA_PYTHON_EXE") or "python",
+        "env_file": os.path.abspath(".env"),
+        "app_mode": cfg.app_mode,
+        "auth_mode": cfg.auth_mode,
+        "port": cfg.port,
+        "db_type": cfg.db_type,
+        "default_llm_model_name": cfg.default_llm_model_name,
+        "agents_dir": cfg.agents_dir,
+        "session_dir": cfg.session_dir,
+        "logs_dir": cfg.logs_dir,
+        "dependencies": dependency_status,
+        **issues,
+    }
+
+
+def validate_cli_runtime_requirements() -> config.StartupConfig:
+    cfg = init_cli_config(init_logging=False)
+    issues = _collect_runtime_issues(cfg)
+    if issues["errors"]:
+        detail = "\n".join(f"- {item}" for item in issues["errors"])
+        next_steps = "\n".join(f"- {item}" for item in issues["next_steps"])
+        raise RuntimeError(
+            "CLI runtime is not ready:\n"
+            f"{detail}\n"
+            "Suggested next steps:\n"
+            f"{next_steps}"
+        )
+    return cfg

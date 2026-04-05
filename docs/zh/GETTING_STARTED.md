@@ -137,15 +137,15 @@ export SAGE_AUTH_MODE="native"
 
 在这类生产环境配置下，Sage 也会强制启用安全的 session cookie。
 
-## 运行示例 CLI
+## 运行 CLI
 
-如果你想最快完成一次本地冒烟验证，可以运行示例 CLI：
+如果你想最快完成一次本地冒烟验证，可以运行 CLI：
 
 ```bash
-python examples/sage_cli.py \
-  --default_llm_api_key YOUR_API_KEY \
-  --default_llm_api_base_url https://api.deepseek.com/v1 \
-  --default_llm_model_name deepseek-chat
+pip install -e .
+sage doctor
+sage run "帮我分析当前仓库"
+sage chat
 ```
 
 这是验证模型配置和基本运行时链路是否正常的最快方式。

@@ -159,11 +159,42 @@ app/desktop/scripts/build.sh release
 
 **命令行工具 (CLI)**：
 ```bash
-python examples/sage_cli.py \
-  --default_llm_api_key YOUR_API_KEY \
-  --default_llm_api_base_url https://api.deepseek.com/v1 \
-  --default_llm_model_name deepseek-chat
+# 先安装为可编辑包
+pip install -e .
+
+# 配置最小运行环境变量
+export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
+export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
+export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
+export SAGE_DB_TYPE="file"
+
+# 检查本地运行环境
+sage doctor
+
+# 执行单次任务
+sage run "帮我分析当前仓库"
+
+# 执行任务并输出运行统计
+sage run --stats "帮我分析当前仓库"
+
+# 进入交互式对话
+sage chat
+
+# 恢复已有会话
+sage resume your-session-id
 ```
+
+如果你暂时不想安装可编辑包，也可以直接运行模块：
+
+```bash
+python -m sagents.cli.main doctor
+python -m sagents.cli.main run "帮我分析当前仓库"
+python -m sagents.cli.main run --stats "帮我分析当前仓库"
+python -m sagents.cli.main chat
+python -m sagents.cli.main resume your-session-id
+```
+
+当前这版 CLI MVP 仍然复用 Sage 现有的运行时配置体系，所以 `.env` 和 shell 环境变量仍然是主要配置方式。
 
 **Web 应用 (FastAPI + Vue3)**：
 
