@@ -186,6 +186,10 @@ sage chat
 sage resume your-session-id
 ```
 
+In `sage chat` and `sage resume`, you can use:
+- `/session` to print the current session id
+- `/exit` or `/quit` to leave the session
+
 By default, the CLI uses a stable local user id. You can override it with `--user-id`, `SAGE_CLI_USER_ID`, or `SAGE_DESKTOP_USER_ID`.
 
 If you prefer not to install an editable package yet, you can run the module directly:
