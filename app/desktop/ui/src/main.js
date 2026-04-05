@@ -8,6 +8,7 @@ import router from './router'
 import { createPinia } from 'pinia'
 import { useLanguageStore } from './utils/i18n.js'
 import { useThemeStore } from './stores/theme.js'
+import { startMemoryDebugReporter } from './utils/memoryDebug.js'
 
 // 导入Tauri API
 import { listen } from '@tauri-apps/api/event'
@@ -71,3 +72,4 @@ if (window.__TAURI__) {
 // 挂载应用并初始化
 app.mount('#app')
 initializeApp()
+startMemoryDebugReporter()

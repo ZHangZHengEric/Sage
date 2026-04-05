@@ -55,6 +55,16 @@ const loading = ref(false)
 const error = ref('')
 let pptxApp = null
 
+const cleanupPreview = () => {
+  if (pptxApp && typeof pptxApp.destroy === 'function') {
+    pptxApp.destroy()
+  }
+  pptxApp = null
+  if (containerRef.value) {
+    containerRef.value.innerHTML = ''
+  }
+}
+
 const loadPptx = async () => {
   if (!props.filePath || !containerRef.value) {
     error.value = '文件路径无效'
@@ -83,21 +93,21 @@ const loadPptx = async () => {
     console.log('[PptxRenderer] Container dimensions:', { containerWidth, containerHeight })
 
     // 清空容器
-    containerRef.value.innerHTML = ''
+    cleanupPreview()
 
     // 初始化 pptx-preview
     console.log('[PptxRenderer] Initializing pptx-preview...')
-    const pptxPreviewer = initPptxPreview(containerRef.value, {
+    pptxApp = initPptxPreview(containerRef.value, {
       width: Math.floor(containerWidth),
       height: Math.floor(containerHeight),
       mode: 'list' // 使用 list 模式，支持上下滚动
     })
 
-    console.log('[PptxRenderer] Previewer initialized:', pptxPreviewer)
+    console.log('[PptxRenderer] Previewer initialized:', pptxApp)
 
     // 调用预览方法
     console.log('[PptxRenderer] Calling preview method...')
-    await pptxPreviewer.preview(arrayBuffer)
+    await pptxApp.preview(arrayBuffer)
 
     console.log('[PptxRenderer] PPTX rendered successfully')
   } catch (err) {
@@ -122,10 +132,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (pptxApp) {
-    pptxApp.destroy()
-    pptxApp = null
-  }
+  cleanupPreview()
 })
 </script>
 
