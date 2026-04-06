@@ -237,7 +237,10 @@ def collect_doctor_info() -> Dict[str, Any]:
     return {
         "status": status,
         "python": os.environ.get("PYTHON_BIN") or os.environ.get("CONDA_PYTHON_EXE") or "python",
+        "cwd": os.getcwd(),
+        "cwd_writable": os.access(os.getcwd(), os.W_OK),
         "env_file": os.path.abspath(".env"),
+        "env_file_exists": os.path.exists(os.path.abspath(".env")),
         "app_mode": cfg.app_mode,
         "auth_mode": cfg.auth_mode,
         "port": cfg.port,
@@ -245,8 +248,11 @@ def collect_doctor_info() -> Dict[str, Any]:
         "default_cli_user_id": get_default_cli_user_id(),
         "default_llm_model_name": cfg.default_llm_model_name,
         "agents_dir": cfg.agents_dir,
+        "agents_dir_exists": os.path.exists(cfg.agents_dir),
         "session_dir": cfg.session_dir,
+        "session_dir_exists": os.path.exists(cfg.session_dir),
         "logs_dir": cfg.logs_dir,
+        "logs_dir_exists": os.path.exists(cfg.logs_dir),
         "dependencies": dependency_status,
         **issues,
     }
@@ -388,6 +394,36 @@ async def list_sessions(
         "limit": limit,
         "total": total_count,
         "list": items,
+    }
+
+
+async def get_session_summary(
+    *,
+    session_id: str,
+    user_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    from common.models.conversation import ConversationDao
+
+    dao = ConversationDao()
+    conversation = await dao.get_by_session_id(session_id)
+    if not conversation:
+        return None
+
+    if user_id and conversation.user_id and conversation.user_id != user_id:
+        return None
+
+    counts = conversation.get_message_count()
+    return {
+        "session_id": conversation.session_id,
+        "user_id": conversation.user_id,
+        "agent_id": conversation.agent_id,
+        "agent_name": conversation.agent_name,
+        "title": conversation.title,
+        "message_count": counts.get("user_count", 0) + counts.get("agent_count", 0),
+        "user_count": counts.get("user_count", 0),
+        "agent_count": counts.get("agent_count", 0),
+        "created_at": conversation.created_at.isoformat() if conversation.created_at else "",
+        "updated_at": conversation.updated_at.isoformat() if conversation.updated_at else "",
     }
 
 

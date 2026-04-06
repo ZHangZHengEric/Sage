@@ -16,6 +16,21 @@ CHAT_COMMAND_HELP = (
 )
 
 
+def _truncate(value: Optional[str], max_len: int) -> str:
+    text = (value or "").strip()
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 3] + "..."
+
+
+def _print_session_summary(summary: Dict[str, Any], *, prefix: str = "session") -> None:
+    print(f"{prefix}_id: {summary.get('session_id')}")
+    print(f"title: {_truncate(summary.get('title') or '(untitled)', 80)}")
+    print(f"agent_name: {summary.get('agent_name')}")
+    print(f"updated_at: {summary.get('updated_at')}")
+    print(f"message_count: {summary.get('message_count')}")
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     from app.cli.service import get_default_cli_user_id
 
@@ -251,10 +266,17 @@ async def _run_command(args: argparse.Namespace) -> int:
 
 
 async def _chat_command(args: argparse.Namespace) -> int:
-    from app.cli.service import cli_runtime, validate_cli_runtime_requirements
+    from app.cli.service import cli_db_runtime, cli_runtime, get_session_summary, validate_cli_runtime_requirements
 
     if not args.session_id:
         args.session_id = str(uuid.uuid4())
+    else:
+        summary = None
+        async with cli_db_runtime(verbose=args.verbose):
+            summary = await get_session_summary(session_id=args.session_id, user_id=args.user_id)
+        if summary and not args.json:
+            _print_session_summary(summary, prefix="resume")
+            print()
 
     if not args.json:
         sys.stderr.write(
@@ -346,11 +368,15 @@ async def _sessions_command(args: argparse.Namespace) -> int:
 
     print("sessions:")
     for item in sessions:
-        print(f"  - session_id: {item.get('session_id')}")
-        print(f"    title: {item.get('title')}")
-        print(f"    agent_name: {item.get('agent_name')}")
-        print(f"    updated_at: {item.get('updated_at')}")
-        print(f"    message_count: {item.get('message_count')}")
+        session_id = item.get("session_id")
+        title = _truncate(item.get("title") or "(untitled)", 56)
+        updated_at = item.get("updated_at")
+        agent_name = item.get("agent_name")
+        message_count = item.get("message_count")
+        print(
+            f"  - {session_id} | {title} | "
+            f"{agent_name} | updated={updated_at} | messages={message_count}"
+        )
     return 0
 
 
