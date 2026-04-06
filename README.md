@@ -161,11 +161,48 @@ app/desktop/scripts/build.sh release
 
 **Command Line Interface (CLI)**:
 ```bash
-python examples/sage_cli.py \
-  --default_llm_api_key YOUR_API_KEY \
-  --default_llm_api_base_url https://api.deepseek.com/v1 \
-  --default_llm_model_name deepseek-chat
+# Install editable package once
+pip install -e .
+
+# Configure the minimum runtime variables
+export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
+export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
+export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
+export SAGE_DB_TYPE="file"
+
+# Diagnose local runtime config
+sage doctor
+
+# Run a single task
+sage run "Help me analyze the current repository"
+
+# Run a task and print execution stats
+sage run --stats "Help me analyze the current repository"
+
+# Start an interactive chat session
+sage chat
+
+# Resume an existing session
+sage resume your-session-id
 ```
+
+In `sage chat` and `sage resume`, you can use:
+- `/session` to print the current session id
+- `/exit` or `/quit` to leave the session
+
+By default, the CLI uses a stable local user id. You can override it with `--user-id`, `SAGE_CLI_USER_ID`, or `SAGE_DESKTOP_USER_ID`.
+
+If you prefer not to install an editable package yet, you can run the module directly:
+
+```bash
+python -m app.cli.main doctor
+python -m app.cli.main run "Help me analyze the current repository"
+python -m app.cli.main run --stats "Help me analyze the current repository"
+python -m app.cli.main chat
+python -m app.cli.main resume your-session-id
+```
+
+The current CLI MVP still uses the existing Sage runtime config system, so `.env` and shell environment variables remain the primary configuration mechanism.
 
 **Web Application (FastAPI + Vue3)**:
 
