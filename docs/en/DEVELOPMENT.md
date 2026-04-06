@@ -112,7 +112,7 @@ rvm use 3.2.9 do bash -lc 'cd docs && bundle exec jekyll build'
 ### Example behavior
 
 - `examples/README.md`
-- `examples/sage_cli.py`
+- `app/cli/main.py`
 - `examples/sage_server.py`
 
 ## Documentation Standards for This Repository

@@ -10,8 +10,16 @@ setup(
     author_email="",
     url="https://github.com/ZHangZHengEric/Sage",
     license="MIT",
-    packages=find_packages(include=["sagents*"], exclude=["tests*", "app*", "docs*", "assets*", "logs*"]),
+    packages=find_packages(
+        include=["sagents*", "common*", "app*"],
+        exclude=["tests*", "app.desktop*", "app.skills*", "app.wiki*", "docs*", "assets*", "logs*"],
+    ),
     include_package_data=True,
+    entry_points={
+        "console_scripts": [
+            "sage=app.cli.main:main",
+        ]
+    },
     install_requires=[
         "gradio>=4.0.0",
         "openai>=1.0.0",

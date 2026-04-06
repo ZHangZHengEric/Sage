@@ -73,7 +73,7 @@ Read:
 
 ### Lightweight examples
 
-- `examples/sage_cli.py`: terminal chat client
+- `sage run` / `sage chat` / `sage doctor`: development CLI entry points
 - `examples/sage_demo.py`: Streamlit demo
 - `examples/sage_server.py`: standalone FastAPI example service
 

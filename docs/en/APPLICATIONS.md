@@ -13,9 +13,9 @@ ref: applications
 
 ## Which Surface Should You Use
 
-### Example CLI
+### CLI
 
-Use `examples/sage_cli.py` when you need the smallest possible runtime loop for local testing and prompt iteration.
+Use `sage run`, `sage chat`, and `sage doctor` when you need the fastest development-oriented entry point for local testing, prompt iteration, and runtime diagnostics.
 
 ### Streamlit demo
 
