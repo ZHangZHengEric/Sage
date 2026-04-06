@@ -176,6 +176,9 @@ sage doctor
 # Show effective CLI config
 sage config show
 
+# Create a minimal local CLI config
+sage config init
+
 # List recent sessions for the current CLI user
 sage sessions
 
@@ -184,6 +187,9 @@ sage run "Help me analyze the current repository"
 
 # Run a task and print execution stats
 sage run --stats "Help me analyze the current repository"
+
+# Run against a specific local workspace
+sage run --workspace /path/to/project --stats "Say hello briefly."
 
 # Start an interactive chat session
 sage chat
@@ -204,8 +210,10 @@ If you prefer not to install an editable package yet, you can run the module dir
 ```bash
 python -m app.cli.main doctor
 python -m app.cli.main config show
+python -m app.cli.main config init
 python -m app.cli.main sessions
 python -m app.cli.main run "Help me analyze the current repository"
+python -m app.cli.main run --workspace /path/to/project "Help me analyze the current repository"
 python -m app.cli.main run --stats "Help me analyze the current repository"
 python -m app.cli.main chat
 python -m app.cli.main resume your-session-id
