@@ -7,6 +7,15 @@ import uuid
 from typing import Any, Dict, Iterable, Optional
 
 
+CHAT_COMMAND_HELP = (
+    "built-in commands:\n"
+    "  /help     show this help\n"
+    "  /session  print the current session id\n"
+    "  /exit     leave the session\n"
+    "  /quit     leave the session"
+)
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     from app.cli.service import get_default_cli_user_id
 
@@ -59,6 +68,19 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
     doctor_parser = subparsers.add_parser("doctor", help="Show local CLI/runtime configuration")
     doctor_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
+
+    sessions_parser = subparsers.add_parser("sessions", help="List recent CLI sessions")
+    sessions_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
+    sessions_parser.add_argument("--limit", type=int, default=20, help="Maximum number of sessions to show")
+    sessions_parser.add_argument("--search", help="Filter sessions by title")
+    sessions_parser.add_argument("--agent-id", dest="agent_id")
+    sessions_parser.add_argument("--json", action="store_true", help="Print sessions as JSON")
+    sessions_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
+
+    config_parser = subparsers.add_parser("config", help="Inspect CLI configuration")
+    config_subparsers = config_parser.add_subparsers(dest="config_command", required=True)
+    config_show_parser = config_subparsers.add_parser("show", help="Show effective CLI config")
+    config_show_parser.add_argument("--json", action="store_true", help="Print config as JSON")
     return parser
 
 
@@ -231,7 +253,7 @@ async def _chat_command(args: argparse.Namespace) -> int:
     if not args.json:
         sys.stderr.write(
             f"session_id: {args.session_id}\n"
-            "type /exit or /quit to leave, /session to print the current session id\n"
+            "type /help for built-in commands\n"
         )
         sys.stderr.flush()
 
@@ -255,6 +277,9 @@ async def _chat_command(args: argparse.Namespace) -> int:
                 continue
             if prompt in {"/exit", "/quit"}:
                 break
+            if prompt == "/help":
+                print(CHAT_COMMAND_HELP)
+                continue
             if prompt == "/session":
                 print(args.session_id)
                 continue
@@ -290,6 +315,57 @@ def _doctor_command() -> int:
     return 0
 
 
+async def _sessions_command(args: argparse.Namespace) -> int:
+    from app.cli.service import cli_db_runtime, list_sessions
+
+    async with cli_db_runtime(verbose=args.verbose):
+        result = await list_sessions(
+            user_id=args.user_id,
+            limit=args.limit,
+            search=args.search,
+            agent_id=args.agent_id,
+        )
+
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    print(f"user_id: {result['user_id']}")
+    print(f"total: {result['total']}")
+    print(f"limit: {result['limit']}")
+    sessions = result.get("list") or []
+    if not sessions:
+        print("sessions:\n  (none)")
+        return 0
+
+    print("sessions:")
+    for item in sessions:
+        print(f"  - session_id: {item.get('session_id')}")
+        print(f"    title: {item.get('title')}")
+        print(f"    agent_name: {item.get('agent_name')}")
+        print(f"    updated_at: {item.get('updated_at')}")
+        print(f"    message_count: {item.get('message_count')}")
+    return 0
+
+
+def _config_show_command(args: argparse.Namespace) -> int:
+    from app.cli.service import collect_config_info
+
+    info = collect_config_info()
+    if args.json:
+        print(json.dumps(info, ensure_ascii=False, indent=2))
+        return 0
+
+    for key, value in info.items():
+        if isinstance(value, dict):
+            print(f"{key}:")
+            for sub_key, sub_value in value.items():
+                print(f"  {sub_key}: {sub_value}")
+            continue
+        print(f"{key}: {value}")
+    return 0
+
+
 async def _main_async(args: argparse.Namespace) -> int:
     try:
         if args.command == "run":
@@ -300,6 +376,10 @@ async def _main_async(args: argparse.Namespace) -> int:
             return await _resume_command(args)
         if args.command == "doctor":
             return _doctor_command()
+        if args.command == "sessions":
+            return await _sessions_command(args)
+        if args.command == "config" and args.config_command == "show":
+            return _config_show_command(args)
         raise ValueError(f"Unsupported command: {args.command}")
     except ModuleNotFoundError as exc:
         sys.stderr.write(

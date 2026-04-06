@@ -173,6 +173,12 @@ export SAGE_DB_TYPE="file"
 # Diagnose local runtime config
 sage doctor
 
+# Show effective CLI config
+sage config show
+
+# List recent sessions for the current CLI user
+sage sessions
+
 # Run a single task
 sage run "Help me analyze the current repository"
 
@@ -187,6 +193,7 @@ sage resume your-session-id
 ```
 
 In `sage chat` and `sage resume`, you can use:
+- `/help` to show built-in chat commands
 - `/session` to print the current session id
 - `/exit` or `/quit` to leave the session
 
@@ -196,6 +203,8 @@ If you prefer not to install an editable package yet, you can run the module dir
 
 ```bash
 python -m app.cli.main doctor
+python -m app.cli.main config show
+python -m app.cli.main sessions
 python -m app.cli.main run "Help me analyze the current repository"
 python -m app.cli.main run --stats "Help me analyze the current repository"
 python -m app.cli.main chat

@@ -236,6 +236,91 @@ def collect_doctor_info() -> Dict[str, Any]:
     }
 
 
+def collect_config_info() -> Dict[str, Any]:
+    cfg = init_cli_config(init_logging=False)
+    return {
+        "env_file": os.path.abspath(".env"),
+        "default_cli_user_id": get_default_cli_user_id(),
+        "app_mode": cfg.app_mode,
+        "auth_mode": cfg.auth_mode,
+        "port": cfg.port,
+        "db_type": cfg.db_type,
+        "default_llm_api_base_url": cfg.default_llm_api_base_url,
+        "default_llm_model_name": cfg.default_llm_model_name,
+        "agents_dir": cfg.agents_dir,
+        "session_dir": cfg.session_dir,
+        "logs_dir": cfg.logs_dir,
+        "env_sources": {
+            "SAGE_CLI_USER_ID": os.environ.get("SAGE_CLI_USER_ID"),
+            "SAGE_DESKTOP_USER_ID": os.environ.get("SAGE_DESKTOP_USER_ID"),
+            "SAGE_DEFAULT_LLM_API_KEY": "(set)" if os.environ.get("SAGE_DEFAULT_LLM_API_KEY") else None,
+            "SAGE_DEFAULT_LLM_API_BASE_URL": os.environ.get("SAGE_DEFAULT_LLM_API_BASE_URL"),
+            "SAGE_DEFAULT_LLM_MODEL_NAME": os.environ.get("SAGE_DEFAULT_LLM_MODEL_NAME"),
+            "SAGE_DB_TYPE": os.environ.get("SAGE_DB_TYPE"),
+        },
+    }
+
+
+@asynccontextmanager
+async def cli_db_runtime(*, verbose: bool = False) -> AsyncGenerator[config.StartupConfig, None]:
+    from app.server.bootstrap import close_db_client, initialize_db_connection
+
+    cfg = configure_cli_logging(verbose=verbose)
+    _import_shared_model_modules()
+    await initialize_db_connection(cfg)
+    try:
+        yield cfg
+    finally:
+        await close_db_client()
+
+
+async def list_sessions(
+    *,
+    user_id: Optional[str] = None,
+    limit: int = 20,
+    search: Optional[str] = None,
+    agent_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    from common.models.conversation import ConversationDao
+    from common.schemas.conversation import ConversationInfo
+
+    resolved_user_id = user_id or get_default_cli_user_id()
+    dao = ConversationDao()
+    conversations, total_count = await dao.get_conversations_paginated(
+        page=1,
+        page_size=limit,
+        user_id=resolved_user_id,
+        search=search,
+        agent_id=agent_id,
+        sort_by="date",
+    )
+
+    items: List[Dict[str, Any]] = []
+    for conv in conversations:
+        message_count = conv.get_message_count()
+        items.append(
+            ConversationInfo(
+                session_id=conv.session_id,
+                user_id=conv.user_id,
+                agent_id=conv.agent_id,
+                agent_name=conv.agent_name,
+                title=conv.title,
+                message_count=message_count.get("user_count", 0) + message_count.get("agent_count", 0),
+                user_count=message_count.get("user_count", 0),
+                agent_count=message_count.get("agent_count", 0),
+                created_at=conv.created_at.isoformat() if conv.created_at else "",
+                updated_at=conv.updated_at.isoformat() if conv.updated_at else "",
+            ).model_dump()
+        )
+
+    return {
+        "user_id": resolved_user_id,
+        "limit": limit,
+        "total": total_count,
+        "list": items,
+    }
+
+
 def validate_cli_runtime_requirements() -> config.StartupConfig:
     cfg = init_cli_config(init_logging=False)
     issues = _collect_runtime_issues(cfg)
