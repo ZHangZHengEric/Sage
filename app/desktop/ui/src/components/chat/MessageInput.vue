@@ -28,7 +28,7 @@
     </div>
 
     <div
-      class="relative flex flex-col gap-2 p-3 bg-muted/30 border border-input rounded-2xl focus-within:ring-2 focus-within:ring-ring focus-within:border-primary transition-all shadow-sm message-input-drop-zone"
+      class="relative flex flex-col gap-2 bg-muted/30 border border-input rounded-2xl px-3 pt-3 pb-4 focus-within:ring-2 focus-within:ring-ring focus-within:border-primary transition-all shadow-sm message-input-drop-zone"
       :class="{ 'bg-primary/5 border-primary/50': isDraggingOver }"
       @dragenter="handleDragEnter"
       @dragover="handleDragOver"

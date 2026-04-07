@@ -1,21 +1,21 @@
 <template>
   <div class="file-tree-item select-none">
     <div 
-      class="flex items-center justify-between py-1 px-2 rounded-md hover:bg-accent/50 text-accent-foreground/80 hover:text-accent-foreground transition-colors group cursor-pointer"
-      :style="{ paddingLeft: `${level * 16 + 8}px` }"
+      class="group flex cursor-pointer items-center justify-between rounded-lg px-2 py-1.5 text-accent-foreground/80 transition-colors hover:bg-accent/35 hover:text-accent-foreground"
+      :style="{ paddingLeft: `${level * 14 + 8}px` }"
       @click="toggleExpand"
     >
       <div class="flex items-center gap-2 min-w-0 overflow-hidden">
         <span class="text-muted-foreground shrink-0">
            <!-- Icons -->
-           <ChevronRight v-if="item.is_directory && !isExpanded" class="w-4 h-4" />
-           <ChevronDown v-else-if="item.is_directory && isExpanded" class="w-4 h-4" />
-           <component :is="getFileIcon(item)" v-else class="w-4 h-4 text-muted-foreground/70" />
+           <ChevronRight v-if="item.is_directory && !isExpanded" class="w-3.5 h-3.5" />
+           <ChevronDown v-else-if="item.is_directory && isExpanded" class="w-3.5 h-3.5" />
+           <component :is="getFileIcon(item)" v-else class="w-3.5 h-3.5 text-muted-foreground/70" />
         </span>
-        <span class="text-sm truncate">
+        <span class="truncate text-[13px]">
           {{ item.name }}
         </span>
-        <span v-if="!item.is_directory" class="text-[10px] text-muted-foreground/50 ml-2 shrink-0">
+        <span v-if="!item.is_directory" class="ml-2 shrink-0 text-[10px] text-muted-foreground/50">
           {{ formatFileSize(item.size) }}
         </span>
       </div>
@@ -25,7 +25,7 @@
           v-if="!item.is_directory"
           variant="ghost"
           size="icon"
-          class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+          class="h-6 w-6 rounded-full opacity-0 transition-opacity group-hover:opacity-100"
           @click.stop="$emit('view', item)"
           title="查看文件"
         >
@@ -35,7 +35,7 @@
         <Button
           variant="ghost"
           size="icon"
-          class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+          class="h-6 w-6 rounded-full opacity-0 transition-opacity group-hover:opacity-100"
           @click.stop="$emit('quote', item)"
           :title="item.is_directory ? '引用文件夹路径' : '引用文件路径'"
         >
@@ -45,7 +45,7 @@
         <Button
           variant="ghost"
           size="icon"
-          class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+          class="h-6 w-6 rounded-full opacity-0 transition-opacity group-hover:opacity-100"
           @click.stop="$emit('download', item)"
           :title="item.is_directory ? 'Download Folder' : 'Download File'"
         >
@@ -55,7 +55,7 @@
         <Button
           variant="ghost"
           size="icon"
-          class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
+          class="h-6 w-6 rounded-full opacity-0 transition-opacity group-hover:opacity-100 text-destructive hover:text-destructive hover:bg-destructive/10"
           @click.stop="$emit('delete', item)"
           :title="item.is_directory ? 'Delete Folder' : 'Delete File'"
         >

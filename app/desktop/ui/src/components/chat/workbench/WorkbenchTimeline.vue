@@ -1,12 +1,11 @@
 <template>
-  <div class="timeline-container flex-none px-4 py-3 bg-muted/30 border-t border-border rounded-b-2xl">
-    <!-- 按钮行 -->
-    <div class="flex items-center gap-2 mb-2">
+  <div class="timeline-container flex-none border-t border-border/60 bg-background/45 px-3 py-2">
+    <div class="flex items-center gap-2">
       <!-- 列表/单例显示切换按钮 -->
       <Button
         variant="ghost"
         size="icon"
-        class="h-8 w-8"
+        class="h-7 w-7 rounded-full text-muted-foreground hover:bg-muted/35 hover:text-foreground"
         :class="{ 'bg-primary/10 text-primary': !isListView }"
         @click="toggleViewMode"
         :title="isListView ? t('workbench.singleView') : t('workbench.listView')"
@@ -15,60 +14,69 @@
         <PanelTop class="w-4 h-4" v-else />
       </Button>
 
-      <div class="w-px h-4 bg-border mx-1"></div>
+      <div class="h-4 w-px bg-border/70"></div>
 
       <!-- 后退按钮 -->
       <Button
         variant="ghost"
         size="icon"
-        class="h-8 w-8"
+        class="h-7 w-7 rounded-full text-muted-foreground hover:bg-muted/35 hover:text-foreground"
         @click="handleStepBackward"
         :title="t('workbench.stepBackward')"
       >
         <SkipBack class="w-4 h-4" />
       </Button>
 
-      <!-- 进度条 -->
-      <div class="flex-1 px-2">
-        <Slider
-          :model-value="[currentIndex]"
-          :max="maxIndex"
-          :min="0"
-          :step="1"
-          @update:model-value="handleSliderChange"
-          class="w-full"
-        />
+      <!-- 进度条与时间信息 -->
+      <div class="flex min-w-0 flex-1 items-center gap-2">
+        <span class="hidden w-12 shrink-0 text-[10px] text-muted-foreground/80 sm:block">
+          {{ formatTime(startTime) }}
+        </span>
+
+        <div class="relative min-w-0 flex-1">
+          <Slider
+            :model-value="[currentIndex]"
+            :max="maxIndex"
+            :min="0"
+            :step="1"
+            @update:model-value="handleSliderChange"
+            class="w-full"
+          />
+        </div>
+
+        <span class="hidden w-12 shrink-0 text-right text-[10px] text-muted-foreground/80 sm:block">
+          {{ formatTime(endTime) }}
+        </span>
       </div>
 
       <!-- 前进按钮 -->
       <Button
         variant="ghost"
         size="icon"
-        class="h-8 w-8"
+        class="h-7 w-7 rounded-full text-muted-foreground hover:bg-muted/35 hover:text-foreground"
         @click="handleStepForward"
         :title="t('workbench.stepForward')"
       >
         <SkipForward class="w-4 h-4" />
       </Button>
 
+      <div class="h-4 w-px bg-border/70"></div>
+
+      <div class="rounded-full bg-muted/24 px-2 py-1 text-[10px] font-medium text-foreground">
+        {{ formatTime(currentTime) }}
+      </div>
+
       <!-- 实时按钮 - 只有选中/不选中两种状态 -->
       <Button
         variant="outline"
         size="sm"
-        class="h-8 px-2 text-xs transition-colors duration-200"
+        class="h-7 rounded-full px-2.5 text-[10px] transition-colors duration-200"
         :class="isRealtime ? 'bg-green-500/10 text-green-600 border-green-500/30 hover:bg-green-500/20 hover:text-green-700' : 'text-muted-foreground hover:text-foreground'"
         @click="toggleRealtime"
       >
         <Radio :class="isRealtime ? 'w-3 h-3 mr-1 animate-pulse text-green-600' : 'w-3 h-3 mr-1'" />
         {{ t('workbench.realtime') }}
       </Button>
-    </div>
-
-    <!-- 时间戳行 -->
-    <div class="flex justify-between text-[11px] text-muted-foreground px-1">
-      <span class="w-16">{{ formatTime(startTime) }}</span>
-      <span class="font-medium text-foreground flex-1 text-center">{{ formatTime(currentTime) }}</span>
-      <span class="w-16 text-right">{{ formatTime(endTime) }}</span>
     </div>
   </div>
 </template>

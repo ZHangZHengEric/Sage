@@ -6,14 +6,14 @@
     @close="$emit('close')"
   >
     <template #icon>
-      <FolderOpen class="w-4 h-4 text-muted-foreground" />
+      <FolderOpen class="h-4 w-4 text-muted-foreground" />
     </template>
     
     <div 
       ref="dropZoneRef"
-      class="h-full overflow-y-auto p-4 space-y-4 workspace-drop-zone"
+      class="workspace-drop-zone h-full overflow-y-auto p-3"
       :class="{ 
-        'bg-primary/5 border-2 border-dashed border-primary/50 rounded-lg': isDraggingOver 
+        'rounded-xl border border-dashed border-primary/40 bg-primary/5': isDraggingOver 
       }"
       @dragenter="handleDragEnter"
       @dragover="handleDragOver"
@@ -23,19 +23,19 @@
       <!-- 拖拽提示 -->
       <div 
         v-if="isDraggingOver" 
-        class="flex flex-col items-center justify-center py-8 text-primary"
+        class="flex flex-col items-center justify-center py-6 text-primary"
       >
-        <Upload class="w-12 h-12 mb-2" />
+        <Upload class="mb-2 h-9 w-9" />
         <p class="text-sm font-medium">{{ t('workspace.dropHere') }}</p>
       </div>
       
       <!-- 上传进度 -->
-      <div v-if="uploading" class="space-y-2">
+      <div v-if="uploading" class="space-y-2 rounded-xl border border-border/60 bg-muted/15 p-3">
         <div class="flex items-center justify-between text-sm">
           <span class="text-muted-foreground">{{ uploadStatus }}</span>
           <span class="text-primary">{{ uploadProgress }}%</span>
         </div>
-        <div class="h-2 bg-muted rounded-full overflow-hidden">
+        <div class="h-1.5 overflow-hidden rounded-full bg-muted">
           <div 
             class="h-full bg-primary transition-all duration-300"
             :style="{ width: `${uploadProgress}%` }"
@@ -43,12 +43,12 @@
         </div>
       </div>
       
-      <div class="space-y-1">
+      <div class="space-y-1.5">
         <div v-if="isLoading && !isDraggingOver && !uploading" class="flex flex-col items-center justify-center py-8 text-muted-foreground">
-          <FolderOpen class="w-12 h-12 mb-2 opacity-50 animate-pulse" />
+          <FolderOpen class="mb-2 h-10 w-10 animate-pulse opacity-45" />
           <p class="text-sm">{{ t('workspace.loading') }}</p>
         </div>
-        <div v-else-if="hasValidFiles" class="flex flex-col gap-1">
+        <div v-else-if="hasValidFiles" class="overflow-hidden">
           <WorkspaceFileTree
             v-for="node in fileTree"
             :key="node.path"
@@ -60,7 +60,7 @@
           />
         </div>
         <div v-else-if="!isDraggingOver && !uploading" class="flex flex-col items-center justify-center py-8 text-muted-foreground">
-          <FolderOpen class="w-12 h-12 mb-2 opacity-50" />
+          <FolderOpen class="mb-2 h-10 w-10 opacity-45" />
           <p class="text-sm">{{ t('workspace.noFiles') }}</p>
           <p class="text-xs mt-1 opacity-70">{{ t('workspace.dragHint') }}</p>
         </div>
@@ -87,7 +87,6 @@ import { useLanguage } from '../../utils/i18n.js'
 import { FolderOpen, Upload } from 'lucide-vue-next'
 import ResizablePanel from './ResizablePanel.vue'
 import WorkspaceFileTree from './WorkspaceFileTree.vue'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import WorkspaceRemoteFilePreview from './WorkspaceRemoteFilePreview.vue'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 

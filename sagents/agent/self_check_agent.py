@@ -31,9 +31,8 @@ class SelfCheckAgent(AgentBase):
     """
     执行后的确定性自检 Agent。
 
-    当前聚焦两类高价值检查：
-    1. 最终输出里引用到的结果文件是否真实存在
-    2. 最近一轮涉及的常见代码/数据文件是否满足基础语法约束
+    当前聚焦最终输出里引用到的结果文件是否真实存在，
+    并要求最终消息中的 Markdown 文件链接必须使用绝对路径。
     """
 
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
@@ -54,29 +53,35 @@ class SelfCheckAgent(AgentBase):
             self._mark_passed(session_context, summary="skip: no sandbox")
             return
 
-        modified_files = self._collect_recent_modified_files(session_context)
         referenced_files = self._collect_recent_referenced_files(session_context)
-        candidate_files = modified_files | referenced_files
         logger.info(
             "SelfCheckAgent: collected "
-            f"{len(candidate_files)} candidate files for validation "
-            f"(modified={len(modified_files)}, referenced={len(referenced_files)})"
+            f"{len(referenced_files)} referenced files for validation"
         )
 
-        if not candidate_files:
+        if not referenced_files:
             self._mark_passed(session_context, summary="skip: no candidate files detected")
             return
 
         issues: List[str] = []
         checked_files: List[str] = []
 
-        for original_file_path in sorted(candidate_files):
-            file_path = await self._resolve_file_path(session_context, original_file_path)
+        for original_file_path in sorted(referenced_files):
+            normalized_path = self._normalize_raw_file_reference(original_file_path)
+            if not self._is_absolute_file_reference(normalized_path):
+                issues.append(
+                    "最终回复中的文件链接必须使用绝对路径 Markdown 链接，"
+                    f"请将 `{original_file_path}` 改为类似 "
+                    "`[filename](file:///absolute/path/to/file)` 的格式。"
+                )
+                continue
+
+            file_path = normalized_path
             checked_files.append(file_path)
             file_issues = await self._validate_file(
                 session_context,
                 file_path,
-                require_exists=original_file_path in referenced_files,
+                require_exists=True,
                 original_file_path=original_file_path,
             )
             issues.extend(file_issues)
@@ -121,44 +126,6 @@ class SelfCheckAgent(AgentBase):
         if checked_files is not None:
             session_context.audit_status["self_check_checked_files"] = checked_files
 
-    def _collect_recent_modified_files(self, session_context: SessionContext) -> Set[str]:
-        messages = session_context.message_manager.messages
-        if not messages:
-            return set()
-
-        last_user_index = 0
-        for i, message in enumerate(messages):
-            if message.is_user_input_message():
-                last_user_index = i
-
-        relevant_messages = messages[last_user_index:]
-        changed_files: Set[str] = set()
-
-        for message in relevant_messages:
-            if message.role != MessageRole.ASSISTANT.value or not message.tool_calls:
-                continue
-
-            for tool_call in message.tool_calls:
-                if not isinstance(tool_call, dict):
-                    continue
-                function_info = tool_call.get("function", {})
-                tool_name = function_info.get("name")
-                if tool_name not in {"file_write", "file_update"}:
-                    continue
-
-                raw_args = function_info.get("arguments") or "{}"
-                try:
-                    args = json.loads(raw_args)
-                except Exception:
-                    logger.warning(f"SelfCheckAgent: failed to parse tool args for {tool_name}")
-                    continue
-
-                file_path = args.get("file_path")
-                if isinstance(file_path, str) and file_path.strip():
-                    changed_files.add(file_path.strip())
-
-        return changed_files
-
     def _collect_recent_referenced_files(self, session_context: SessionContext) -> Set[str]:
         messages = session_context.message_manager.messages
         if not messages:
@@ -172,18 +139,20 @@ class SelfCheckAgent(AgentBase):
         referenced_files: Set[str] = set()
         markdown_link_pattern = re.compile(r"\[[^\]]+\]\(([^)\s]+)\)")
 
+        latest_assistant_message = None
         for message in messages[last_user_index:]:
-            if message.role != MessageRole.ASSISTANT.value:
-                continue
-            if not isinstance(message.content, str) or not message.content.strip():
-                continue
+            if message.role == MessageRole.ASSISTANT.value and isinstance(message.content, str) and message.content.strip():
+                latest_assistant_message = message
 
-            for raw_path in markdown_link_pattern.findall(message.content):
-                normalized_path = self._normalize_raw_file_reference(raw_path)
-                if self._looks_like_file_path(normalized_path):
-                    referenced_files.add(normalized_path)
+        if latest_assistant_message is None:
+            return referenced_files
 
-        return referenced_files
+        for raw_path in markdown_link_pattern.findall(latest_assistant_message.content):
+            normalized_path = self._normalize_raw_file_reference(raw_path)
+            if self._looks_like_file_path(normalized_path):
+                referenced_files.add(normalized_path)
+
+        return self._dedupe_referenced_files(referenced_files)
 
     def _looks_like_file_path(self, path: str) -> bool:
         if not path or path.startswith("#"):
@@ -209,57 +178,40 @@ class SelfCheckAgent(AgentBase):
         path = unquote(path)
         return path
 
-    async def _resolve_file_path(self, session_context: SessionContext, file_path: str) -> str:
-        sandbox = session_context.sandbox
-        if sandbox is None:
-            return file_path
+    def _is_absolute_file_reference(self, file_path: str) -> bool:
+        return os.path.isabs(file_path)
 
-        normalized_path = self._normalize_raw_file_reference(file_path)
-        if not normalized_path:
-            return file_path
+    def _dedupe_referenced_files(self, referenced_files: Set[str]) -> Set[str]:
+        if len(referenced_files) < 2:
+            return referenced_files
 
-        for candidate in self._build_file_candidates(session_context, normalized_path):
-            try:
-                if await sandbox.file_exists(candidate):
-                    return candidate
-            except Exception:
+        deduped_files = set(referenced_files)
+        basename_to_paths: Dict[str, List[str]] = {}
+        for path in referenced_files:
+            basename = Path(path).name
+            if basename:
+                basename_to_paths.setdefault(basename, []).append(path)
+
+        for paths in basename_to_paths.values():
+            concrete_absolute_paths = [
+                path for path in paths if self._is_concrete_absolute_file_reference(path)
+            ]
+            if not concrete_absolute_paths:
                 continue
 
-        return self._build_file_candidates(session_context, normalized_path)[0]
+            for path in paths:
+                if path in concrete_absolute_paths:
+                    continue
+                if self._is_ambiguous_root_file_reference(path) or not os.path.isabs(path):
+                    deduped_files.discard(path)
 
-    def _build_file_candidates(self, session_context: SessionContext, file_path: str) -> List[str]:
-        workspace_roots: List[str] = []
-        for candidate_root in [
-            session_context.system_context.get("task_workspace"),
-            session_context.system_context.get("private_workspace"),
-            session_context.sandbox_agent_workspace,
-        ]:
-            if isinstance(candidate_root, str) and candidate_root.strip():
-                root = candidate_root.rstrip("/")
-                if root and root not in workspace_roots:
-                    workspace_roots.append(root)
+        return deduped_files
 
-        candidates: List[str] = []
+    def _is_ambiguous_root_file_reference(self, file_path: str) -> bool:
+        return os.path.isabs(file_path) and len(Path(file_path).parts) == 2
 
-        def add_candidate(candidate: str) -> None:
-            if candidate and candidate not in candidates:
-                candidates.append(candidate)
-
-        if os.path.isabs(file_path):
-            add_candidate(file_path)
-            relative_path = file_path.lstrip("/")
-            for root in workspace_roots:
-                add_candidate(os.path.join(root, relative_path))
-                basename = os.path.basename(file_path)
-                if basename:
-                    add_candidate(os.path.join(root, basename))
-        else:
-            relative_path = file_path.lstrip("./")
-            for root in workspace_roots:
-                add_candidate(os.path.join(root, relative_path))
-            add_candidate(file_path)
-
-        return candidates or [file_path]
+    def _is_concrete_absolute_file_reference(self, file_path: str) -> bool:
+        return os.path.isabs(file_path) and not self._is_ambiguous_root_file_reference(file_path)
 
     async def _validate_file(
         self,
