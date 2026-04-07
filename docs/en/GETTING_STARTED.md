@@ -157,6 +157,8 @@ sage run "Help me analyze the current repository"
 sage chat
 ```
 
+For a dedicated command-line usage guide, see [CLI Guide](CLI.md).
+
 ## Manually Start Web Services
 
 ### Start Backend

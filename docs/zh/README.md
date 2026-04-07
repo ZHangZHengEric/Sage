@@ -23,6 +23,7 @@ ref: home
 ## 建议先读
 
 1. [快速开始](GETTING_STARTED.md)：本地安装与首次运行
+2. [CLI 使用指南](CLI.md)：命令行工作流与本地验证
 2. [核心概念](CORE_CONCEPTS.md)：运行时模型
 3. [架构](ARCHITECTURE.md)：仓库与子系统边界
 4. [配置](CONFIGURATION.md)：环境变量与部署参数
@@ -34,6 +35,7 @@ ref: home
 建议阅读：
 
 1. [快速开始](GETTING_STARTED.md)
+2. [CLI 使用指南](CLI.md)
 2. [应用形态](APPLICATIONS.md)
 3. [故障排查](TROUBLESHOOTING.md)
 
@@ -59,6 +61,7 @@ ref: home
 ## 文档地图
 
 - [快速开始](GETTING_STARTED.md)：安装依赖并运行 CLI、服务端、Web UI 或桌面版
+- [CLI 使用指南](CLI.md)：命令行工作流、会话、技能、工作目录与结构化输出
 - [核心概念](CORE_CONCEPTS.md)：会话、智能体、工具、技能、流程和沙箱
 - [架构](ARCHITECTURE.md)：代码库整体组织方式
 - [配置](CONFIGURATION.md)：运行时环境变量与存储设置
