@@ -3,6 +3,7 @@
 Provides unified interface to communicate with Sage Agent via API.
 """
 
+import asyncio
 import os
 import json
 import logging
@@ -462,6 +463,88 @@ class AgentClient:
         
         return messages
     
+    async def _send_progress_message(
+        self,
+        message: str,
+        provider: str,
+        agent_id: str,
+        user_id: Optional[str],
+        chat_id: Optional[str]
+    ) -> None:
+        """
+        Send a progress message to IM user during agent processing.
+        
+        Args:
+            message: Progress message content
+            provider: IM provider name
+            agent_id: Agent ID
+            user_id: User ID
+            chat_id: Chat ID (optional)
+        """
+        try:
+            from mcp_servers.im_server.im_server import send_message_through_im
+            
+            logger.info(f"[AgentClient] Sending progress message: {message}")
+            
+            result = await send_message_through_im(
+                message,
+                provider,
+                agent_id,
+                user_id,
+                chat_id
+            )
+            
+            # Small delay to ensure message order
+            await asyncio.sleep(0.5)
+            
+            logger.debug(f"[AgentClient] Progress message result: {result}")
+            
+        except Exception as e:
+            logger.warning(f"[AgentClient] Failed to send progress message: {e}")
+    
+    def _extract_tool_info(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Extract tool call information from stream data."""
+        # Check for delta format (OpenAI streaming)
+        delta = data.get("delta")
+        if delta and isinstance(delta, dict):
+            tool_calls = delta.get("tool_calls")
+            if tool_calls:
+                data = delta
+        
+        # Check for tool_calls in various formats
+        tool_calls = data.get("tool_calls")
+        
+        # Also check for tool_call field (singular)
+        if not tool_calls:
+            tool_call = data.get("tool_call")
+            if tool_call:
+                tool_calls = [tool_call]
+        
+        # Check for function_call (older format)
+        if not tool_calls:
+            function_call = data.get("function_call")
+            if function_call:
+                return {
+                    "name": function_call.get("name"),
+                    "arguments": function_call.get("arguments", "{}")
+                }
+        
+        if not tool_calls:
+            return None
+        
+        if isinstance(tool_calls, list) and len(tool_calls) > 0:
+            tool_call = tool_calls[0]
+            if isinstance(tool_call, dict):
+                function = tool_call.get("function", {})
+                name = function.get("name") or tool_call.get("name")
+                arguments = function.get("arguments") or tool_call.get("arguments", "{}")
+                if name:
+                    return {
+                        "name": name,
+                        "arguments": arguments
+                    }
+        return None
+    
     async def send_message(
         self,
         session_id: str,
@@ -475,7 +558,7 @@ class AgentClient:
         file_info: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Async version of send_message.
+        Async version of send_message with real-time progress updates.
 
         Args:
             session_id: Sage session ID
@@ -522,12 +605,10 @@ class AgentClient:
             else:
                 full_content = platform_info + content
             
-            file_write_path = ""
             # 统一添加工具使用提示
             full_content += f"\n\n【可用工具】"
             full_content += f"\n- 发送文本: send_message_through_im(provider='{provider}', agent_id='{agent_id}', user_id='{user_id or ''}', chat_id='{chat_id or ''}', content='消息内容')"
             full_content += f"\n- 发送文件: send_file_through_im(provider='{provider}', agent_id='{agent_id}', user_id='{user_id or ''}', chat_id='{chat_id or ''}', file_path='文件的绝对路径')"
-            # full_content += f"\n\n【提示】创建文件请保存到 /sage-workspace/outputs/ 目录，发送文件时使用相同的绝对路径。"
             
             payload = {
                 "agent_id": agent_id,
@@ -538,6 +619,18 @@ class AgentClient:
             
             logger.info(f"Sending async message to agent {agent_id}...")
             
+            # Send initial "processing" message immediately
+            await self._send_progress_message(
+                "🤖 已收到消息，正在处理...",
+                provider, agent_id, user_id, chat_id
+            )
+            
+            # Track state for progress messages
+            reported_tools = set()  # Track which tools we've reported
+            progress_sent = True    # Already sent initial progress
+            
+            chunks = []
+            
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 async with client.stream(
                     "POST",
@@ -547,11 +640,69 @@ class AgentClient:
                 ) as response:
                     response.raise_for_status()
                     
-                    # Collect all chunks
-                    chunks = []
+                    # Process stream in real-time
                     async for line in response.aiter_lines():
-                        if line:
-                            chunks.append(line)
+                        if not line:
+                            continue
+                        
+                        chunks.append(line)
+                        
+                        try:
+                            data = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        
+                        # Debug: log all data to understand format
+                        logger.debug(f"[AgentClient] Stream data: {data}")
+                        
+                        # Skip control messages
+                        msg_type = data.get("type")
+                        if msg_type in ("chunk_start", "chunk_end", "json_chunk"):
+                            continue
+                        
+                        # Check for tool calls
+                        tool_info = self._extract_tool_info(data)
+                        if tool_info:
+                            tool_name = tool_info.get("name", "")
+                            logger.info(f"[AgentClient] Detected tool call: {tool_name}")
+                            
+                            # Report each unique tool only once
+                            if tool_name and tool_name not in reported_tools:
+                                reported_tools.add(tool_name)
+                                
+                                # Tool-specific progress messages
+                                tool_messages = {
+                                    "file_write": "📝 正在创建文件...",
+                                    "file_update": "📝 正在更新文件...",
+                                    "file_read": "📖 正在读取文件...",
+                                    "execute_shell_command": "⚡ 正在执行命令...",
+                                    "execute_python_code": "🐍 正在执行 Python 代码...",
+                                    "search_web_page": "🔍 正在搜索网页...",
+                                    "fetch_webpages": "🌐 正在获取网页内容...",
+                                    "todo_write": "✅ 正在更新任务列表...",
+                                    "sys_spawn_agent": "👤 正在创建子智能体...",
+                                    "sys_delegate_task": "📋 正在分配任务...",
+                                    "load_skill": "🛠️ 正在加载技能...",
+                                }
+                                
+                                progress_msg = tool_messages.get(tool_name, f"🔧 正在调用: {tool_name}...")
+                                await self._send_progress_message(
+                                    progress_msg,
+                                    provider, agent_id, user_id, chat_id
+                                )
+                                
+                                # Special handling for file_write - send completion
+                                if tool_name == "file_write":
+                                    try:
+                                        args = json.loads(tool_info.get("arguments", "{}"))
+                                        file_path = args.get("file_path", "unknown")
+                                        file_name = file_path.split("/")[-1] if "/" in file_path else file_path
+                                        await self._send_progress_message(
+                                            f"📄 文件已创建: {file_name}",
+                                            provider, agent_id, user_id, chat_id
+                                        )
+                                    except Exception:
+                                        pass
             
             # Stream ended - create mock response and parse
             class MockResponse:
@@ -573,6 +724,9 @@ class AgentClient:
             response_text = self._extract_last_assistant_response(messages, has_im_tool)
             
             logger.debug(f"[AgentClient] Analysis result: has_im_tool={has_im_tool}, response_length={len(response_text)}")
+            
+            # Wait a bit to ensure progress messages arrive before final response
+            await asyncio.sleep(1)
             
             if has_im_tool:
                 logger.info("[AgentClient] Agent called send_message_through_im tool, no text response needed")
