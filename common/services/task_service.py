@@ -297,17 +297,17 @@ class TaskService:
                 if next_run > now + timedelta(minutes=1):
                     continue
 
-                pending_tasks, _ = await self.dao.get_one_time_tasks(
-                    page=1,
-                    page_size=200,
-                    agent_id=recurring_task.agent_id,
-                    user_id=recurring_task.user_id,
+                # Skip historical backlog after downtime. If we missed one or more
+                # schedule windows, spawn at most one catch-up task "now" and move
+                # the recurring cursor forward to the current time.
+                has_pending_instance = await self.dao.has_pending_task_instance(
+                    recurring_task.id,
+                    user_id=recurring_task.user_id or None,
                 )
-                has_pending_instance = any(
-                    int(task.recurring_task_id or 0) == recurring_task.id and task.status == "pending"
-                    for task in pending_tasks
+                await self.dao.update_recurring_task_last_executed(
+                    recurring_task.id,
+                    executed_at=now,
                 )
-                await self.dao.update_recurring_task_last_executed(recurring_task.id, executed_at=next_run)
                 if has_pending_instance:
                     continue
 
@@ -329,7 +329,7 @@ class TaskService:
                     f"task_id={task.id} "
                     f"user_id={recurring_task.user_id} "
                     f"execute_at={task.execute_at} "
-                    f"next_run={next_run}"
+                    f"missed_run={next_run}"
                 )
             except Exception:
                 continue

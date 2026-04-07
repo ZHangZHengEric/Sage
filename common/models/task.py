@@ -185,6 +185,26 @@ class TaskDao(BaseDao):
             page_size=page_size,
         )
 
+    async def has_pending_task_instance(
+        self,
+        recurring_task_id: int,
+        *,
+        user_id: Optional[str] = None,
+    ) -> bool:
+        where = [
+            Task.recurring_task_id == recurring_task_id,
+            Task.status == "pending",
+        ]
+        if user_id:
+            where.append(Task.user_id == user_id)
+
+        items = await self.get_list(
+            Task,
+            where=where,
+            limit=1,
+        )
+        return bool(items)
+
     async def create_one_time_task(self, task: Task) -> Task:
         await self.insert(task)
         return task

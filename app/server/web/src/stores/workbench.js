@@ -84,13 +84,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     // 检查是否已存在相同的项（根据 type 和唯一标识）
     const existingItem = items.value.find(i => {
       if (i.type !== item.type) return false
-      // 文件类型：根据 messageId + filePath 去重
+      // 文件类型：同一路径的不同版本也要保留，因此不在这里去重
       if (item.type === 'file') {
-        const itemPath = item.data?.filePath || item.data?.path || ''
-        const existingPath = i.data?.filePath || i.data?.path || ''
-        const samePath = itemPath && existingPath && itemPath === existingPath
-        const sameMessage = item.messageId && i.messageId && item.messageId === i.messageId
-        return samePath && sameMessage
+        return false
       }
       // 代码块类型：根据 code 内容去重
       if (item.type === 'code' && item.data?.code) {
@@ -394,7 +390,6 @@ export function extractFileReferences(content) {
   }
 
   const files = []
-  const seen = new Set()
 
   // 匹配 [text](path)
   const markdownRegex = /\[([^\]]*?)\]\s*\(([^)]+?)\)/g
@@ -416,10 +411,6 @@ export function extractFileReferences(content) {
     if (!fileName) {
       fileName = path.split('/').pop()
     }
-
-    // 去重
-    if (seen.has(path)) continue
-    seen.add(path)
 
     files.push({
       filePath: path,

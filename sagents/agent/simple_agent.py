@@ -190,32 +190,79 @@ class SimpleAgent(AgentBase):
         ]
         return any(re.search(pattern, text) for pattern in patterns)
 
+    async def _must_continue_by_rules(self, messages_input: List[MessageChunk]) -> bool:
+        """通过确定性规则判断是否必须继续执行
+
+        返回 True 表示必须继续执行（task_interrupted = False）
+        返回 False 表示未命中确定性规则，需要进入 LLM 判断
+
+        这些规则基于客观事实，尽量保证误判率接近 0。
+        """
+        if not messages_input:
+            return False
+
+        last_message = messages_input[-1]
+
+        # 规则1：最后一条消息是 tool 调用结果
+        if last_message.role == 'tool':
+            logger.debug("[SimpleAgent] must_continue 规则1命中：最后一条消息是 tool 结果，必须继续")
+            return True
+
+        # 规则2：最后一条消息是工具调用错误结果（如参数解析失败等）
+        if last_message.matches_message_types([MessageType.DO_SUBTASK_RESULT.value]):
+            content = last_message.content or ""
+            if any(mark in content for mark in ["参数解析失败", "工具调用失败"]):
+                logger.debug("[SimpleAgent] must_continue 规则2命中：工具调用失败，必须继续")
+                return True
+
+        # 规则3：最后一条 assistant 消息包含明确的处理中表达
+        if last_message.role == MessageRole.ASSISTANT.value and (last_message.content or "").strip():
+            content = last_message.content
+            processing_keywords = [
+                "等待工具调用",
+                "等待生成",
+                "请稍等",
+                "正在处理",
+                "正在调用",
+                "正在执行",
+                "处理中",
+                "执行中",
+            ]
+            if any(keyword in content for keyword in processing_keywords):
+                logger.debug("[SimpleAgent] must_continue 规则3命中：assistant 文本包含处理中关键词，必须继续")
+                return True
+
+            # 规则4：最后一个字符是表示还有后续内容的标点
+            stripped = content.strip()
+            if stripped:
+                last_char = stripped[-1]
+                continue_punctuations = [":", "："]
+                # 省略号可以是单个字符，也可以是三个点
+                if last_char in continue_punctuations or stripped.endswith("..."):
+                    logger.debug("[SimpleAgent] must_continue 规则4命中：assistant 文本以继续标点结尾，必须继续")
+                    return True
+
+        return False
+
     async def _is_task_complete(self,
                                 messages_input: List[MessageChunk],
                                 session_id: str,
                                 tool_manager: Optional[ToolManager],
                                 session_context: SessionContext) -> bool:
-        # 如果最后一个messages role 是tool，说明是工具调用的结果，不是用户的请求，所以不是任务完成
-        if messages_input[-1].role == 'tool':
-            logger.debug("messages_input[-1].role是 tool 调用结果，不是任务完成")
+        """判断任务是否应该中断（完成/等待用户）
+
+        两层策略：
+        1. 先用确定性规则判断是否必须继续执行；
+        2. 如果没有命中规则，再调用 LLM 进行综合判断。
+        """
+        # 第一层：确定性规则
+        if await self._must_continue_by_rules(messages_input):
             return False
 
-        # 如果最后一条消息是工具调用参数解析错误（DO_SUBTASK_RESULT），说明工具调用出错，不能停止任务
+        # 第二层：LLM 综合判断
         last_message = messages_input[-1]
-        if last_message.matches_message_types([MessageType.DO_SUBTASK_RESULT.value]):
-            # 检查内容是否包含参数解析失败的提示
-            if last_message.content and '参数解析失败' in last_message.content:
-                logger.debug("最后一条消息是工具调用参数解析错误，不是任务完成")
-                return False
 
-        if (
-            last_message.role == MessageRole.ASSISTANT.value
-            and self._has_explicit_followup_intent(last_message.content or "")
-        ):
-            logger.debug("最后一条 assistant 消息明确表示还有后续动作，不是任务完成")
-            return False
-
-        # 只提取最后一个user以及之后的messages
+        # 只提取最后一个 user 以及之后的 messages
         last_user_index = None
         for i, message in enumerate(messages_input):
             if message.is_user_input_message():
@@ -224,51 +271,48 @@ class SimpleAgent(AgentBase):
             messages_for_complete = messages_input[last_user_index:]
         else:
             messages_for_complete = messages_input
-        
-        # 压缩消息，避免token超限
-        messages_for_complete = MessageManager.compress_messages(messages_for_complete,min(session_context.message_manager.context_budget_manager.budget_info.get('active_budget', 3000),3000))
-        
+
+        # 压缩消息，避免 token 超限
+        budget = min(session_context.message_manager.context_budget_manager.budget_info.get('active_budget', 3000), 3000)
+        messages_for_complete = MessageManager.compress_messages(messages_for_complete, budget)
+
         clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_for_complete)
 
         task_complete_template = PromptManager().get_agent_prompt_auto('task_complete_template', language=session_context.get_language())
         system_msg = await self.prepare_unified_system_message(
             session_id,
             custom_prefix=PromptManager().get_agent_prompt_auto(
-                                            _get_system_prefix(tool_manager, session_context.get_language()), language=session_context.get_language()
-                                        ),
+                _get_system_prefix(tool_manager, session_context.get_language()), language=session_context.get_language()
+            ),
             language=session_context.get_language(),
         )
         prompt = task_complete_template.format(
-                system_prompt=system_msg,
-                messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
-            )
-        messages_input = [{'role': 'user', 'content': prompt}]
-        # 使用基类的流式调用方法，自动处理LLM request日志
+            system_prompt=system_msg,
+            messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
+        )
+        llm_input_messages: List[Dict[str, Any]] = [{'role': 'user', 'content': prompt}]
+
         response = self._call_llm_streaming(
-            messages=cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input),
+            messages=cast(List[Union[MessageChunk, Dict[str, Any]]], llm_input_messages),
             session_id=session_id,
             step_name="task_complete_judge",
             enable_thinking=False,
         )
-        # 收集流式响应内容
+
         all_content = ""
         async for chunk in response:
             if len(chunk.choices) == 0:
                 continue
             if chunk.choices[0].delta.content:
                 all_content += chunk.choices[0].delta.content
+
         try:
             result_clean = MessageChunk.extract_json_from_markdown(all_content)
             result = json.loads(result_clean)
-            if (
-                last_message.role == MessageRole.ASSISTANT.value
-                and self._has_explicit_followup_intent(last_message.content or "")
-            ):
-                logger.debug("任务完成判断被后续动作兜底规则覆盖为未完成")
-                return False
+            logger.info(f"SimpleAgent: 任务完成 LLM 判断结果: {result}")
             return result.get('task_interrupted', False)
         except json.JSONDecodeError:
-            logger.warning("SimpleAgent: 解析任务完成判断响应时JSON解码错误")
+            logger.warning("SimpleAgent: 解析任务完成判断响应时JSON解码错误，默认继续执行")
             return False
 
 
