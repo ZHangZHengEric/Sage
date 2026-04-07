@@ -44,12 +44,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
     run_parser.add_argument("--agent-id", dest="agent_id")
     run_parser.add_argument("--workspace", dest="workspace", help="Use a specific local workspace directory")
+    run_parser.add_argument("--skill", dest="skills", action="append", default=[], help="Enable a skill by name (repeatable)")
     run_parser.add_argument(
         "--agent-mode",
         dest="agent_mode",
         choices=["simple", "multi", "fibre"],
         default="simple",
     )
+    run_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=50)
     run_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     run_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     run_parser.add_argument("--stats", action="store_true", help="Print execution summary after completion")
@@ -59,12 +61,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
     chat_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
     chat_parser.add_argument("--agent-id", dest="agent_id")
     chat_parser.add_argument("--workspace", dest="workspace", help="Use a specific local workspace directory")
+    chat_parser.add_argument("--skill", dest="skills", action="append", default=[], help="Enable a skill by name (repeatable)")
     chat_parser.add_argument(
         "--agent-mode",
         dest="agent_mode",
         choices=["simple", "multi", "fibre"],
         default="simple",
     )
+    chat_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=50)
     chat_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     chat_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     chat_parser.add_argument("--stats", action="store_true", help="Print execution summary for each turn")
@@ -74,12 +78,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
     resume_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
     resume_parser.add_argument("--agent-id", dest="agent_id")
     resume_parser.add_argument("--workspace", dest="workspace", help="Use a specific local workspace directory")
+    resume_parser.add_argument("--skill", dest="skills", action="append", default=[], help="Enable a skill by name (repeatable)")
     resume_parser.add_argument(
         "--agent-mode",
         dest="agent_mode",
         choices=["simple", "multi", "fibre"],
         default="simple",
     )
+    resume_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=50)
     resume_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     resume_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     resume_parser.add_argument("--stats", action="store_true", help="Print execution summary for each turn")
@@ -94,6 +100,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
     sessions_parser.add_argument("--agent-id", dest="agent_id")
     sessions_parser.add_argument("--json", action="store_true", help="Print sessions as JSON")
     sessions_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
+
+    skills_parser = subparsers.add_parser("skills", help="List available CLI skills")
+    skills_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
+    skills_parser.add_argument("--workspace", dest="workspace", help="Include skills from a specific workspace directory")
+    skills_parser.add_argument("--json", action="store_true", help="Print skills as JSON")
 
     config_parser = subparsers.add_parser("config", help="Inspect CLI configuration")
     config_subparsers = config_parser.add_subparsers(dest="config_command", required=True)
@@ -138,9 +149,15 @@ def _print_plain_event(event: Dict[str, Any]) -> None:
         sys.stderr.flush()
 
 
-def _empty_stats() -> Dict[str, Any]:
+def _empty_stats(*, request, workspace: Optional[str]) -> Dict[str, Any]:
     return {
-        "session_id": None,
+        "session_id": getattr(request, "session_id", None),
+        "user_id": getattr(request, "user_id", None),
+        "agent_id": getattr(request, "agent_id", None),
+        "agent_mode": getattr(request, "agent_mode", None),
+        "workspace": workspace,
+        "requested_skills": list(getattr(request, "available_skills", None) or []),
+        "max_loop_count": getattr(request, "max_loop_count", None),
         "elapsed_seconds": 0.0,
         "first_output_seconds": None,
         "tools": [],
@@ -187,15 +204,52 @@ def _record_stats_event(stats: Dict[str, Any], event: Dict[str, Any], start_time
 
 
 def _print_stats(stats: Dict[str, Any], *, json_output: bool) -> None:
+    if json_output:
+        print(
+            json.dumps(
+                {
+                    "type": "cli_stats",
+                    "session_id": stats.get("session_id"),
+                    "user_id": stats.get("user_id"),
+                    "agent_id": stats.get("agent_id"),
+                    "agent_mode": stats.get("agent_mode"),
+                    "workspace": stats.get("workspace"),
+                    "requested_skills": stats.get("requested_skills") or [],
+                    "max_loop_count": stats.get("max_loop_count"),
+                    "elapsed_seconds": stats.get("elapsed_seconds"),
+                    "first_output_seconds": stats.get("first_output_seconds"),
+                    "tools": stats.get("tools") or [],
+                    "prompt_tokens": stats.get("prompt_tokens"),
+                    "completion_tokens": stats.get("completion_tokens"),
+                    "total_tokens": stats.get("total_tokens"),
+                    "per_step_info": stats.get("per_step_info") or [],
+                },
+                ensure_ascii=False,
+            )
+        )
+        return
+
     output_lines = [
         "",
         "[stats]",
         f"session_id: {stats.get('session_id') or '(unknown)'}",
+        f"user_id: {stats.get('user_id') or '(unknown)'}",
+        f"agent_mode: {stats.get('agent_mode') or '(unknown)'}",
         f"elapsed_seconds: {stats.get('elapsed_seconds'):.3f}",
     ]
+    if stats.get("agent_id"):
+        output_lines.append(f"agent_id: {stats.get('agent_id')}")
+    if stats.get("workspace"):
+        output_lines.append(f"workspace: {stats.get('workspace')}")
     first_output = stats.get("first_output_seconds")
     if first_output is not None:
         output_lines.append(f"first_output_seconds: {first_output:.3f}")
+    requested_skills = stats.get("requested_skills") or []
+    output_lines.append(
+        f"requested_skills: {', '.join(requested_skills) if requested_skills else '(none)'}"
+    )
+    if stats.get("max_loop_count") is not None:
+        output_lines.append(f"max_loop_count: {stats.get('max_loop_count')}")
 
     tools = stats.get("tools") or []
     output_lines.append(f"tools: {', '.join(tools) if tools else '(none)'}")
@@ -221,16 +275,15 @@ def _print_stats(stats: Dict[str, Any], *, json_output: bool) -> None:
                 f"total={usage.get('total_tokens')}"
             )
 
-    stream = sys.stderr if json_output else sys.stdout
-    stream.write("\n".join(output_lines) + "\n")
-    stream.flush()
+    sys.stdout.write("\n".join(output_lines) + "\n")
+    sys.stdout.flush()
 
 
 async def _stream_request(request, json_output: bool, stats_output: bool, workspace: Optional[str] = None) -> int:
     from app.cli.service import run_request_stream
 
     start_time = time.monotonic()
-    stats = _empty_stats()
+    stats = _empty_stats(request=request, workspace=workspace)
     async for event in run_request_stream(request, workspace=workspace):
         _record_stats_event(stats, event, start_time)
         if json_output:
@@ -244,7 +297,13 @@ async def _stream_request(request, json_output: bool, stats_output: bool, worksp
 
 
 def _build_request(args: argparse.Namespace, task: str):
-    from app.cli.service import build_run_request
+    from app.cli.service import build_run_request, validate_requested_skills
+
+    skills = validate_requested_skills(
+        requested_skills=args.skills,
+        user_id=args.user_id,
+        workspace=args.workspace,
+    )
 
     return build_run_request(
         task=task,
@@ -252,14 +311,16 @@ def _build_request(args: argparse.Namespace, task: str):
         user_id=args.user_id,
         agent_id=args.agent_id,
         agent_mode=args.agent_mode,
+        available_skills=skills or None,
+        max_loop_count=args.max_loop_count,
     )
 
 
 async def _run_command(args: argparse.Namespace) -> int:
     from app.cli.service import cli_runtime, validate_cli_runtime_requirements
 
-    validate_cli_runtime_requirements()
     request = _build_request(args, args.task)
+    validate_cli_runtime_requirements()
     async with cli_runtime(verbose=args.verbose):
         await _stream_request(request, args.json, args.stats, workspace=args.workspace)
     return 0
@@ -285,7 +346,6 @@ async def _chat_command(args: argparse.Namespace) -> int:
         )
         sys.stderr.flush()
 
-    validate_cli_runtime_requirements()
     async with cli_runtime(verbose=args.verbose):
         while True:
             try:
@@ -313,6 +373,7 @@ async def _chat_command(args: argparse.Namespace) -> int:
                 continue
 
             request = _build_request(args, prompt)
+            validate_cli_runtime_requirements()
             await _stream_request(request, args.json, args.stats, workspace=args.workspace)
     return 0
 
@@ -380,6 +441,46 @@ async def _sessions_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _skills_command(args: argparse.Namespace) -> int:
+    from app.cli.service import list_available_skills
+
+    result = list_available_skills(user_id=args.user_id, workspace=args.workspace)
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    print(f"user_id: {result['user_id']}")
+    if result.get("workspace"):
+        print(f"workspace: {result['workspace']}")
+    print(f"total: {result.get('total', 0)}")
+    sources = result.get("sources") or []
+    print("sources:")
+    if not sources:
+        print("  (none)")
+    else:
+        source_counts = result.get("source_counts") or {}
+        for source in sources:
+            source_name = source["source"]
+            count = source_counts.get(source_name, 0)
+            print(f"  - {source_name}: {source['path']} ({count})")
+
+    skills = result.get("list") or []
+    print("skills:")
+    if not skills:
+        print("  (none)")
+    else:
+        for item in skills:
+            print(f"  - {item['name']} [{item['source']}]")
+            print(f"    description: {_truncate(item.get('description') or '', 120)}")
+
+    errors = result.get("errors") or []
+    if errors:
+        print("errors:")
+        for item in errors:
+            print(f"  - {item['source']}: {item['description']}")
+    return 0
+
+
 def _config_show_command(args: argparse.Namespace) -> int:
     from app.cli.service import collect_config_info
 
@@ -423,6 +524,8 @@ async def _main_async(args: argparse.Namespace) -> int:
             return _doctor_command()
         if args.command == "sessions":
             return await _sessions_command(args)
+        if args.command == "skills":
+            return _skills_command(args)
         if args.command == "config" and args.config_command == "show":
             return _config_show_command(args)
         if args.command == "config" and args.config_command == "init":
