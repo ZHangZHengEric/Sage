@@ -14,6 +14,7 @@ Architecture:
 5. Multi-tenant: Each Sage user can have their own IM configurations
 """
 
+import asyncio
 import os
 import logging
 from typing import Optional, Dict, Any
@@ -30,6 +31,17 @@ from .agent_config import get_agent_im_config, AgentIMConfig, get_default_agent_
 
 # Constants
 logger = logging.getLogger("IMServer")
+
+# Message ordering locks - ensures messages are sent in sequence per session
+_message_locks: Dict[str, asyncio.Lock] = {}
+_message_locks_lock = asyncio.Lock()
+
+async def _get_session_lock(session_key: str) -> asyncio.Lock:
+    """Get or create a lock for a specific session to ensure message ordering."""
+    async with _message_locks_lock:
+        if session_key not in _message_locks:
+            _message_locks[session_key] = asyncio.Lock()
+        return _message_locks[session_key]
 
 # ============================================================================
 # Automatic Configuration Migration
@@ -479,6 +491,8 @@ async def send_message_through_im(
     **重要**: agent_id 是必填参数，必须使用当前对话关联的 Agent ID。
     系统提示中已提供正确的 agent_id，请直接使用，不要省略或使用其他值。
 
+    **注意**: 多条消息会自动按顺序发送，不需要手动添加延迟。
+
     Args:
         content: Message content / 消息内容
         provider: Platform name - feishu, dingtalk, wechat_work, imessage / 
@@ -502,6 +516,44 @@ async def send_message_through_im(
         ... )
         "Message sent via dingtalk to user userid_xxx"
     """
+    # Create consistent session key for ordering
+    # First try to get chat_id from session if not provided
+    target_chat_id = chat_id
+    target_user_id = user_id
+    
+    if not target_chat_id and target_user_id:
+        try:
+            session_mgr = get_session_manager()
+            session_id = session_mgr.find_session_by_user(provider, target_user_id)
+            if session_id:
+                binding = session_mgr.get_binding(session_id)
+                if binding:
+                    target_chat_id = binding.get('chat_id')
+        except Exception:
+            pass
+    
+    # Use chat_id if available, otherwise user_id
+    session_key = f"{provider}:{target_chat_id or target_user_id or 'unknown'}"
+    lock = await _get_session_lock(session_key)
+    
+    # Acquire lock to ensure message ordering
+    async with lock:
+        return await _send_message_through_im_impl(
+            content=content,
+            provider=provider,
+            agent_id=agent_id,
+            user_id=user_id,
+            chat_id=chat_id
+        )
+
+async def _send_message_through_im_impl(
+    content: str,
+    provider: str,
+    agent_id: str,
+    user_id: Optional[str] = None,
+    chat_id: Optional[str] = None,
+) -> str:
+    """Internal implementation of send_message_through_im (without lock)."""
     # Validate agent_id is provided
     if not agent_id:
         logger.error("[IM Tool] send_message_through_im: agent_id is required but not provided")
@@ -555,15 +607,24 @@ async def send_message_through_im(
 
     # Get provider config and instance
     try:
-        config = get_provider_config(provider_name, agent_id)
-        logger.info(f"[IM Tool] Got provider config for agent={agent_id}: {config}")
-        if not config:
-            logger.error(f"[IM Tool] No configuration found for provider '{provider_name}' and agent '{agent_id}'")
-            return f"Error: No configuration found for provider '{provider_name}'"
+        # First, try to get running provider from service_manager (reuse existing connection)
+        from .service_manager import get_service_manager
+        service_manager = get_service_manager()
+        provider_instance = service_manager.get_provider(agent_id, provider_name)
+        
+        if provider_instance:
+            logger.info(f"[IM Tool] Reusing existing provider connection for {provider_name}")
+        else:
+            # No running provider, create new instance
+            config = get_provider_config(provider_name, agent_id)
+            logger.info(f"[IM Tool] Got provider config for agent={agent_id}: {config}")
+            if not config:
+                logger.error(f"[IM Tool] No configuration found for provider '{provider_name}' and agent '{agent_id}'")
+                return f"Error: No configuration found for provider '{provider_name}'"
 
-        logger.info(f"[IM Tool] Creating provider instance for {provider_name}...")
-        provider_instance = get_im_provider(provider_name, config)
-        logger.info("[IM Tool] Provider instance created, sending message...")
+            logger.info(f"[IM Tool] Creating new provider instance for {provider_name}...")
+            provider_instance = get_im_provider(provider_name, config)
+            logger.info("[IM Tool] Provider instance created, sending message...")
 
         # WeChat Work aibot_send_msg only supports markdown, others support text
         msg_type = "markdown" if provider_name == "wechat_work" else "text"

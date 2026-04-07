@@ -3,6 +3,7 @@
 Provides unified interface to communicate with Sage Agent via API.
 """
 
+import asyncio
 import os
 import json
 import logging
@@ -462,6 +463,136 @@ class AgentClient:
         
         return messages
     
+    async def _send_progress_message(
+        self,
+        message: str,
+        provider: str,
+        agent_id: str,
+        user_id: Optional[str],
+        chat_id: Optional[str]
+    ) -> None:
+        """
+        Send a progress message to IM user during agent processing.
+        
+        Args:
+            message: Progress message content
+            provider: IM provider name
+            agent_id: Agent ID
+            user_id: User ID
+            chat_id: Chat ID (optional)
+        """
+        try:
+            from mcp_servers.im_server.im_server import send_message_through_im
+            
+            logger.info(f"[AgentClient] Sending progress message: {message}")
+            
+            result = await send_message_through_im(
+                message,
+                provider,
+                agent_id,
+                user_id,
+                chat_id
+            )
+            
+            # Small delay to ensure message order
+            await asyncio.sleep(0.5)
+            
+            logger.debug(f"[AgentClient] Progress message result: {result}")
+            
+        except Exception as e:
+            logger.warning(f"[AgentClient] Failed to send progress message: {e}")
+    
+    def _generate_step_description(self, tool_name: str, arguments: str, step_num: int) -> str:
+        """
+        Generate human-readable description for a tool execution step.
+        
+        Args:
+            tool_name: Name of the tool being called
+            arguments: JSON string of tool arguments
+            step_num: Step number in execution sequence
+            
+        Returns:
+            Human-readable description of what the step does
+        """
+        try:
+            args = json.loads(arguments) if arguments else {}
+        except json.JSONDecodeError:
+            args = {}
+        
+        # Dynamic descriptions based on tool and arguments
+        descriptions = {
+            "file_write": lambda: f"创建文件 `{args.get('file_path', '未知文件')}`",
+            "file_update": lambda: f"更新文件 `{args.get('file_path', '未知文件')}`",
+            "file_read": lambda: f"读取文件 `{args.get('file_path', '未知文件')}`",
+            "execute_shell_command": lambda: f"执行命令 `{args.get('command', '未知命令')[:30]}...`" if len(args.get('command', '')) > 30 else f"执行命令 `{args.get('command', '未知命令')}`",
+            "execute_python_code": lambda: f"执行 Python 代码 ({len(args.get('code', ''))} 字符)",
+            "search_web_page": lambda: f"搜索: {args.get('keyword', '未知关键词')}",
+            "fetch_webpages": lambda: f"获取网页: {args.get('url', '未知URL')[:40]}..." if len(args.get('url', '')) > 40 else f"获取网页: {args.get('url', '未知URL')}",
+            "todo_write": lambda: f"更新任务列表",
+            "todo_read": lambda: f"查看任务列表",
+            "list_tasks": lambda: f"列出所有任务",
+            "add_task": lambda: f"添加任务: {args.get('title', '未命名')}",
+            "sys_spawn_agent": lambda: f"创建子智能体: {args.get('name', '未命名')}",
+            "sys_delegate_task": lambda: f"分配任务给子智能体",
+            "sys_finish_task": lambda: f"完成任务",
+            "load_skill": lambda: f"加载技能: {args.get('skill_name', '未知技能')}",
+            "search_memory": lambda: f"搜索记忆: {args.get('query', '未知查询')}",
+            "generate_image": lambda: f"生成图片: {args.get('prompt', '未指定')[:30]}..." if len(args.get('prompt', '')) > 30 else f"生成图片: {args.get('prompt', '未指定')}",
+            "send_message_through_im": lambda: f"发送 IM 消息",
+            "send_file_through_im": lambda: f"发送文件",
+        }
+        
+        # Get dynamic description or use default
+        if tool_name in descriptions:
+            return descriptions[tool_name]()
+        else:
+            # For unknown tools, show name with underscores replaced
+            readable_name = tool_name.replace('_', ' ')
+            return f"执行 {readable_name}"
+    
+    def _extract_tool_info(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Extract tool call information from stream data."""
+        # Check for delta format (OpenAI streaming)
+        delta = data.get("delta")
+        if delta and isinstance(delta, dict):
+            tool_calls = delta.get("tool_calls")
+            if tool_calls:
+                data = delta
+        
+        # Check for tool_calls in various formats
+        tool_calls = data.get("tool_calls")
+        
+        # Also check for tool_call field (singular)
+        if not tool_calls:
+            tool_call = data.get("tool_call")
+            if tool_call:
+                tool_calls = [tool_call]
+        
+        # Check for function_call (older format)
+        if not tool_calls:
+            function_call = data.get("function_call")
+            if function_call:
+                return {
+                    "name": function_call.get("name"),
+                    "arguments": function_call.get("arguments", "{}")
+                }
+        
+        if not tool_calls:
+            return None
+        
+        if isinstance(tool_calls, list) and len(tool_calls) > 0:
+            tool_call = tool_calls[0]
+            if isinstance(tool_call, dict):
+                function = tool_call.get("function", {})
+                name = function.get("name") or tool_call.get("name")
+                arguments = function.get("arguments") or tool_call.get("arguments", "{}")
+                if name:
+                    return {
+                        "name": name,
+                        "arguments": arguments
+                    }
+        return None
+    
     async def send_message(
         self,
         session_id: str,
@@ -475,7 +606,7 @@ class AgentClient:
         file_info: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Async version of send_message.
+        Async version of send_message with real-time progress updates.
 
         Args:
             session_id: Sage session ID
@@ -522,12 +653,10 @@ class AgentClient:
             else:
                 full_content = platform_info + content
             
-            file_write_path = ""
             # 统一添加工具使用提示
             full_content += f"\n\n【可用工具】"
             full_content += f"\n- 发送文本: send_message_through_im(provider='{provider}', agent_id='{agent_id}', user_id='{user_id or ''}', chat_id='{chat_id or ''}', content='消息内容')"
             full_content += f"\n- 发送文件: send_file_through_im(provider='{provider}', agent_id='{agent_id}', user_id='{user_id or ''}', chat_id='{chat_id or ''}', file_path='文件的绝对路径')"
-            # full_content += f"\n\n【提示】创建文件请保存到 /sage-workspace/outputs/ 目录，发送文件时使用相同的绝对路径。"
             
             payload = {
                 "agent_id": agent_id,
@@ -538,6 +667,18 @@ class AgentClient:
             
             logger.info(f"Sending async message to agent {agent_id}...")
             
+            # Track execution state for dynamic progress
+            execution_steps = []  # List of executed tools
+            reported_indices = set()  # Track which steps we've reported
+            
+            # Send initial message
+            await self._send_progress_message(
+                "🤖 已收到消息，正在分析需求...",
+                provider, agent_id, user_id, chat_id
+            )
+            
+            chunks = []
+            
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 async with client.stream(
                     "POST",
@@ -547,11 +688,51 @@ class AgentClient:
                 ) as response:
                     response.raise_for_status()
                     
-                    # Collect all chunks
-                    chunks = []
+                    # Process stream in real-time
                     async for line in response.aiter_lines():
-                        if line:
-                            chunks.append(line)
+                        if not line:
+                            continue
+                        
+                        chunks.append(line)
+                        
+                        try:
+                            data = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        
+                        # Debug: log all data to understand format
+                        logger.debug(f"[AgentClient] Stream data: {data}")
+                        
+                        # Skip control messages
+                        msg_type = data.get("type")
+                        if msg_type in ("chunk_start", "chunk_end", "json_chunk"):
+                            continue
+                        
+                        # Check for tool calls
+                        tool_info = self._extract_tool_info(data)
+                        if tool_info:
+                            tool_name = tool_info.get("name", "")
+                            logger.info(f"[AgentClient] Detected tool call: {tool_name}")
+                            
+                            # Generate dynamic description based on tool and arguments
+                            step_desc = self._generate_step_description(
+                                tool_name, 
+                                tool_info.get("arguments", "{}"),
+                                len(execution_steps) + 1
+                            )
+                            execution_steps.append({
+                                "tool": tool_name,
+                                "description": step_desc,
+                                "reported": False
+                            })
+                            
+                            # Report this step
+                            step_num = len(execution_steps)
+                            progress_msg = f"步骤 {step_num}: {step_desc}"
+                            await self._send_progress_message(
+                                progress_msg,
+                                provider, agent_id, user_id, chat_id
+                            )
             
             # Stream ended - create mock response and parse
             class MockResponse:
@@ -573,6 +754,9 @@ class AgentClient:
             response_text = self._extract_last_assistant_response(messages, has_im_tool)
             
             logger.debug(f"[AgentClient] Analysis result: has_im_tool={has_im_tool}, response_length={len(response_text)}")
+            
+            # Wait a bit to ensure progress messages arrive before final response
+            await asyncio.sleep(1)
             
             if has_im_tool:
                 logger.info("[AgentClient] Agent called send_message_through_im tool, no text response needed")
