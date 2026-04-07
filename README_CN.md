@@ -180,14 +180,26 @@ sage config init
 # 查看当前 CLI 用户的最近会话
 sage sessions
 
+# 查看可用技能
+sage skills
+
 # 执行单次任务
 sage run "帮我分析当前仓库"
 
 # 执行任务并输出运行统计
 sage run --stats "帮我分析当前仓库"
 
+# 输出结构化流事件，并在结束时附带 cli_stats 摘要事件
+sage run --json "帮我分析当前仓库"
+
 # 指定本地工作目录执行
 sage run --workspace /path/to/project --stats "用一句话介绍你自己"
+
+# 指定技能执行
+sage run --skill my_skill --stats "用一句话介绍你自己"
+
+# 查看某个工作目录下可见的技能
+sage skills --workspace /path/to/project
 
 # 进入交互式对话
 sage chat
@@ -210,6 +222,7 @@ python -m app.cli.main doctor
 python -m app.cli.main config show
 python -m app.cli.main config init
 python -m app.cli.main sessions
+python -m app.cli.main skills
 python -m app.cli.main run "帮我分析当前仓库"
 python -m app.cli.main run --workspace /path/to/project "帮我分析当前仓库"
 python -m app.cli.main run --stats "帮我分析当前仓库"
@@ -218,6 +231,7 @@ python -m app.cli.main resume your-session-id
 ```
 
 当前这版 CLI MVP 仍然复用 Sage 现有的运行时配置体系，所以 `.env` 和 shell 环境变量仍然是主要配置方式。
+启用 `--json` 时，CLI 会输出流式事件，并在结束时附加一个最终的 `cli_stats` 结构化摘要事件。
 
 **Web 应用 (FastAPI + Vue3)**：
 
