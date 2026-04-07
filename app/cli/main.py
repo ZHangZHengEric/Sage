@@ -7,6 +7,30 @@ import uuid
 from typing import Any, Dict, Iterable, Optional
 
 
+CHAT_COMMAND_HELP = (
+    "built-in commands:\n"
+    "  /help     show this help\n"
+    "  /session  print the current session id\n"
+    "  /exit     leave the session\n"
+    "  /quit     leave the session"
+)
+
+
+def _truncate(value: Optional[str], max_len: int) -> str:
+    text = (value or "").strip()
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 3] + "..."
+
+
+def _print_session_summary(summary: Dict[str, Any], *, prefix: str = "session") -> None:
+    print(f"{prefix}_id: {summary.get('session_id')}")
+    print(f"title: {_truncate(summary.get('title') or '(untitled)', 80)}")
+    print(f"agent_name: {summary.get('agent_name')}")
+    print(f"updated_at: {summary.get('updated_at')}")
+    print(f"message_count: {summary.get('message_count')}")
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     from app.cli.service import get_default_cli_user_id
 
@@ -19,6 +43,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--session-id", dest="session_id")
     run_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
     run_parser.add_argument("--agent-id", dest="agent_id")
+    run_parser.add_argument("--workspace", dest="workspace", help="Use a specific local workspace directory")
     run_parser.add_argument(
         "--agent-mode",
         dest="agent_mode",
@@ -33,6 +58,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     chat_parser.add_argument("--session-id", dest="session_id")
     chat_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
     chat_parser.add_argument("--agent-id", dest="agent_id")
+    chat_parser.add_argument("--workspace", dest="workspace", help="Use a specific local workspace directory")
     chat_parser.add_argument(
         "--agent-mode",
         dest="agent_mode",
@@ -47,6 +73,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     resume_parser.add_argument("session_id", help="Session id to resume")
     resume_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
     resume_parser.add_argument("--agent-id", dest="agent_id")
+    resume_parser.add_argument("--workspace", dest="workspace", help="Use a specific local workspace directory")
     resume_parser.add_argument(
         "--agent-mode",
         dest="agent_mode",
@@ -59,6 +86,22 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
     doctor_parser = subparsers.add_parser("doctor", help="Show local CLI/runtime configuration")
     doctor_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
+
+    sessions_parser = subparsers.add_parser("sessions", help="List recent CLI sessions")
+    sessions_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
+    sessions_parser.add_argument("--limit", type=int, default=20, help="Maximum number of sessions to show")
+    sessions_parser.add_argument("--search", help="Filter sessions by title")
+    sessions_parser.add_argument("--agent-id", dest="agent_id")
+    sessions_parser.add_argument("--json", action="store_true", help="Print sessions as JSON")
+    sessions_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
+
+    config_parser = subparsers.add_parser("config", help="Inspect CLI configuration")
+    config_subparsers = config_parser.add_subparsers(dest="config_command", required=True)
+    config_show_parser = config_subparsers.add_parser("show", help="Show effective CLI config")
+    config_show_parser.add_argument("--json", action="store_true", help="Print config as JSON")
+    config_init_parser = config_subparsers.add_parser("init", help="Create a minimal local CLI config")
+    config_init_parser.add_argument("--path", default=".env", help="Path to write the config file")
+    config_init_parser.add_argument("--force", action="store_true", help="Overwrite an existing config file")
     return parser
 
 
@@ -183,12 +226,12 @@ def _print_stats(stats: Dict[str, Any], *, json_output: bool) -> None:
     stream.flush()
 
 
-async def _stream_request(request, json_output: bool, stats_output: bool) -> int:
+async def _stream_request(request, json_output: bool, stats_output: bool, workspace: Optional[str] = None) -> int:
     from app.cli.service import run_request_stream
 
     start_time = time.monotonic()
     stats = _empty_stats()
-    async for event in run_request_stream(request):
+    async for event in run_request_stream(request, workspace=workspace):
         _record_stats_event(stats, event, start_time)
         if json_output:
             print(json.dumps(event, ensure_ascii=False))
@@ -218,20 +261,27 @@ async def _run_command(args: argparse.Namespace) -> int:
     validate_cli_runtime_requirements()
     request = _build_request(args, args.task)
     async with cli_runtime(verbose=args.verbose):
-        await _stream_request(request, args.json, args.stats)
+        await _stream_request(request, args.json, args.stats, workspace=args.workspace)
     return 0
 
 
 async def _chat_command(args: argparse.Namespace) -> int:
-    from app.cli.service import cli_runtime, validate_cli_runtime_requirements
+    from app.cli.service import cli_db_runtime, cli_runtime, get_session_summary, validate_cli_runtime_requirements
 
     if not args.session_id:
         args.session_id = str(uuid.uuid4())
+    else:
+        summary = None
+        async with cli_db_runtime(verbose=args.verbose):
+            summary = await get_session_summary(session_id=args.session_id, user_id=args.user_id)
+        if summary and not args.json:
+            _print_session_summary(summary, prefix="resume")
+            print()
 
     if not args.json:
         sys.stderr.write(
             f"session_id: {args.session_id}\n"
-            "type /exit or /quit to leave, /session to print the current session id\n"
+            "type /help for built-in commands\n"
         )
         sys.stderr.flush()
 
@@ -255,12 +305,15 @@ async def _chat_command(args: argparse.Namespace) -> int:
                 continue
             if prompt in {"/exit", "/quit"}:
                 break
+            if prompt == "/help":
+                print(CHAT_COMMAND_HELP)
+                continue
             if prompt == "/session":
                 print(args.session_id)
                 continue
 
             request = _build_request(args, prompt)
-            await _stream_request(request, args.json, args.stats)
+            await _stream_request(request, args.json, args.stats, workspace=args.workspace)
     return 0
 
 
@@ -290,6 +343,74 @@ def _doctor_command() -> int:
     return 0
 
 
+async def _sessions_command(args: argparse.Namespace) -> int:
+    from app.cli.service import cli_db_runtime, list_sessions
+
+    async with cli_db_runtime(verbose=args.verbose):
+        result = await list_sessions(
+            user_id=args.user_id,
+            limit=args.limit,
+            search=args.search,
+            agent_id=args.agent_id,
+        )
+
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    print(f"user_id: {result['user_id']}")
+    print(f"total: {result['total']}")
+    print(f"limit: {result['limit']}")
+    sessions = result.get("list") or []
+    if not sessions:
+        print("sessions:\n  (none)")
+        return 0
+
+    print("sessions:")
+    for item in sessions:
+        session_id = item.get("session_id")
+        title = _truncate(item.get("title") or "(untitled)", 56)
+        updated_at = item.get("updated_at")
+        agent_name = item.get("agent_name")
+        message_count = item.get("message_count")
+        print(
+            f"  - {session_id} | {title} | "
+            f"{agent_name} | updated={updated_at} | messages={message_count}"
+        )
+    return 0
+
+
+def _config_show_command(args: argparse.Namespace) -> int:
+    from app.cli.service import collect_config_info
+
+    info = collect_config_info()
+    if args.json:
+        print(json.dumps(info, ensure_ascii=False, indent=2))
+        return 0
+
+    for key, value in info.items():
+        if isinstance(value, dict):
+            print(f"{key}:")
+            for sub_key, sub_value in value.items():
+                print(f"  {sub_key}: {sub_value}")
+            continue
+        print(f"{key}: {value}")
+    return 0
+
+
+def _config_init_command(args: argparse.Namespace) -> int:
+    from app.cli.service import write_cli_config_file
+
+    result = write_cli_config_file(path=args.path, force=args.force)
+    print(f"config_file: {result['path']}")
+    print(f"template: {result['template']}")
+    print(f"overwritten: {result['overwritten']}")
+    print("next_steps:")
+    for item in result["next_steps"]:
+        print(f"  - {item}")
+    return 0
+
+
 async def _main_async(args: argparse.Namespace) -> int:
     try:
         if args.command == "run":
@@ -300,6 +421,12 @@ async def _main_async(args: argparse.Namespace) -> int:
             return await _resume_command(args)
         if args.command == "doctor":
             return _doctor_command()
+        if args.command == "sessions":
+            return await _sessions_command(args)
+        if args.command == "config" and args.config_command == "show":
+            return _config_show_command(args)
+        if args.command == "config" and args.config_command == "init":
+            return _config_init_command(args)
         raise ValueError(f"Unsupported command: {args.command}")
     except ModuleNotFoundError as exc:
         sys.stderr.write(
