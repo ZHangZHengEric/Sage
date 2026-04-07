@@ -1,23 +1,27 @@
 <template>
-  <div 
-    class="group relative flex flex-col h-full bg-muted/40 border-r transition-all duration-300 ease-in-out"
-    :class="[isCollapsed ? 'w-[70px]' : 'w-[170px]']"
+  <div
+    class="sidebar-shell group relative flex h-full flex-col overflow-hidden border-r border-white/10 transition-all duration-300 ease-in-out dark:border-white/10"
+    :class="[isCollapsed ? 'w-[78px]' : 'w-[246px]']"
+    data-tauri-drag-region
+    @mousedown="handleSidebarMouseDown"
+    :style="sidebarShellStyle"
   >
-    <!-- Header -->
-    <div class="p-4 flex items-center justify-between" :class="{'justify-center': isCollapsed}">
-      <div v-if="!isCollapsed" class="flex items-center gap-2 overflow-hidden">
-        <img :src="themeStore.isDark ? '/sage_logo.svg' : '/sage_logo_white.svg'" alt="Sage Logo" class="h-8 w-8 shrink-0" />
-        <h2 
-          class="text-xl font-bold bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent truncate"
-        >
-          Sage
-        </h2>
-      </div>
-      <div v-else class="flex justify-center w-full">
-         <img :src="themeStore.isDark ? '/sage_logo.svg' : '/sage_logo_white.svg'" alt="Sage Logo" class="h-8 w-8 shrink-0" />
-      </div>
-
+    <div class="pointer-events-none absolute inset-0 opacity-30">
+      <div
+        class="absolute inset-x-0 top-[-12%] h-40"
+        :style="sidebarTopGlowStyle"
+      />
+      <div
+        class="absolute inset-x-0 bottom-[-10%] h-48"
+        :style="sidebarBottomGlowStyle"
+      />
     </div>
+
+    <div
+      class="relative shrink-0"
+      :class="isMacOS ? 'h-[34px]' : 'h-4'"
+      data-tauri-drag-region
+    />
 
     <!-- Change Password Dialog -->
     <Dialog v-model:open="showChangePasswordDialog">
@@ -74,10 +78,10 @@
     </Dialog>
 
     <!-- Navigation -->
-    <ScrollArea class="flex-1 px-3">
-      <div class="space-y-4">
+    <ScrollArea class="relative z-10 flex-1 px-2.5 pb-3">
+      <div class="space-y-3 pt-0.5">
         <div v-if="activeSessionItems.length > 0" class="space-y-2">
-          <div v-if="!isCollapsed" class="px-2 text-[11px] font-medium tracking-wide text-muted-foreground/80">
+          <div v-if="!isCollapsed" class="px-2.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-foreground/40">
             {{ t('sidebar.activeSessions') }}
           </div>
           <div v-if="!isCollapsed" class="space-y-1">
@@ -85,9 +89,9 @@
               v-for="session in activeSessionItems"
               :key="session.id"
               variant="ghost"
-              class="w-full justify-start h-9 px-2 text-sm font-normal text-muted-foreground border border-transparent hover:border-border hover:bg-background hover:text-foreground"
+              class="h-9 w-full justify-start rounded-[16px] border border-transparent px-2.5 text-[14px] font-medium text-muted-foreground transition-all duration-200 hover:border-white/10 hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]"
               :class="cn(
-                isActiveSessionCurrent(session) && 'bg-background text-primary border-border shadow-sm font-medium'
+                isActiveSessionCurrent(session) && 'border-white/10 bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_8px_20px_rgba(15,23,42,0.08)] dark:bg-[rgba(255,255,255,0.07)]'
               )"
               @click="handleActiveSessionClick(session)"
             >
@@ -106,8 +110,8 @@
               variant="ghost"
               size="icon"
               :title="session.rawName"
-              class="transition-all duration-200 text-muted-foreground hover:text-foreground"
-              :class="isActiveSessionCurrent(session) ? 'bg-background shadow text-primary' : ''"
+              class="h-9 w-9 rounded-[14px] text-muted-foreground transition-all duration-200 hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]"
+              :class="isActiveSessionCurrent(session) ? 'bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_6px_16px_rgba(15,23,42,0.10)] dark:bg-[rgba(255,255,255,0.07)]' : ''"
               @click="handleActiveSessionClick(session)"
             >
               <component
@@ -121,17 +125,17 @@
         <template v-for="item in predefinedServices" :key="item.id">
           
           <!-- Collapsed Mode -->
-          <div v-if="isCollapsed" class="flex justify-center group/item relative">
+          <div v-if="isCollapsed" class="group/item relative flex justify-center">
             <!-- Item with children (Category) -->
             <DropdownMenu v-if="item.children">
                <DropdownMenuTrigger as-child>
                   <Button 
                     :id="item.tourId"
-                    variant="ghost" 
+                    variant="ghost"
                     size="icon" 
                     :class="[
-                      'transition-all duration-200',
-                      isCategoryActive(item) ? 'bg-background shadow text-primary' : 'text-muted-foreground hover:text-foreground'
+                      'h-9 w-9 rounded-[14px] transition-all duration-200',
+                      isCategoryActive(item) ? 'bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_6px_16px_rgba(15,23,42,0.10)] dark:bg-[rgba(255,255,255,0.07)]' : 'text-muted-foreground hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]'
                     ]"
                   >
                      <component :is="getCategoryIcon(item.key)" class="h-4 w-4" />
@@ -159,8 +163,8 @@
                size="icon"
                :title="t(item.nameKey)"
                :class="[
-                 'transition-all duration-200',
-                 isCurrentService(item.url, item.isInternal) ? 'bg-background shadow text-primary' : 'text-muted-foreground hover:text-foreground'
+                 'h-9 w-9 rounded-[14px] transition-all duration-200',
+                 isCurrentService(item.url, item.isInternal) ? 'bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_6px_16px_rgba(15,23,42,0.10)] dark:bg-[rgba(255,255,255,0.07)]' : 'text-muted-foreground hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]'
                ]"
                @click="handleMenuClick(item.url, t(item.nameKey), item.isInternal, item.query)"
             >
@@ -177,11 +181,11 @@
               v-model:open="expandedCategories[item.key]"
               class="space-y-1"
             >
-              <CollapsibleTrigger class="flex items-center w-full px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-colors group">
+              <CollapsibleTrigger class="group flex w-full items-center rounded-[16px] px-2.5 py-2 text-[14px] font-medium text-muted-foreground transition-all duration-200 hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]">
                 <component :is="getCategoryIcon(item.key)" class="mr-2 h-4 w-4" />
                 <span class="flex-1 text-left truncate">{{ t(item.nameKey) }}</span>
                 <ChevronDown
-                  class="h-4 w-4 transition-transform duration-200 text-muted-foreground/50 group-hover:text-muted-foreground"
+                  class="h-4 w-4 text-muted-foreground/50 transition-transform duration-200 group-hover:text-foreground/60"
                   :class="{ '-rotate-90': !expandedCategories[item.key] }"
                 />
               </CollapsibleTrigger>
@@ -193,10 +197,10 @@
                 >
                   <Button
                     variant="ghost"
-                    class="w-full justify-start h-9 pl-9 mb-0.5 text-sm font-normal text-muted-foreground"
+                    class="mb-0.5 h-8.5 w-full justify-start rounded-[14px] pl-8 text-[13px] font-medium text-muted-foreground"
                     :class="cn(
-                      'hover:bg-background hover:shadow-sm hover:text-primary transition-all duration-200',
-                      isCurrentService(service.url, service.isInternal) && 'bg-background shadow text-primary font-semibold'
+                      'transition-all duration-200 hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]',
+                      isCurrentService(service.url, service.isInternal) && 'bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_6px_16px_rgba(15,23,42,0.08)] dark:bg-[rgba(255,255,255,0.07)]'
                     )"
                     @click="handleMenuClick(service.url, t(service.nameKey), service.isInternal, service.query)"
                   >
@@ -211,10 +215,10 @@
               v-else
               :id="item.tourId"
               variant="ghost"
-            class="w-full justify-start h-10 px-3 font-medium text-muted-foreground hover:text-foreground hover:bg-background hover:shadow-sm transition-all duration-200 mb-1"
-            :class="cn(
-              isCurrentService(item.url, item.isInternal) && 'bg-background shadow text-primary font-bold'
-            )"
+              class="mb-0.5 h-9.5 w-full justify-start rounded-[16px] px-2.5 font-medium text-muted-foreground transition-all duration-200 hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]"
+              :class="cn(
+                isCurrentService(item.url, item.isInternal) && 'bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_6px_16px_rgba(15,23,42,0.08)] dark:bg-[rgba(255,255,255,0.07)]'
+              )"
               @click="handleMenuClick(item.url, t(item.nameKey), item.isInternal, item.query)"
             >
               <component :is="getCategoryIcon(item.key)" class="mr-2 h-4 w-4" />
@@ -226,18 +230,28 @@
       </div>
     </ScrollArea>
 
-    <!-- Collapse Toggle Button -->
-    <div class="p-2 border-t flex justify-center">
-      <Button
-        variant="ghost"
-        size="icon"
-        class="h-8 w-8 text-muted-foreground hover:text-foreground transition-all duration-200"
-        @click="isCollapsed = !isCollapsed"
-        :title="isCollapsed ? t('common.expand') : t('common.collapse')"
+    <div class="relative z-10 border-t border-white/10 px-3 pb-3 pt-2.5 dark:border-white/10">
+      <div
+        class="flex items-center gap-2.5"
+        :class="isCollapsed ? 'justify-center' : ''"
       >
-        <ChevronLeft v-if="!isCollapsed" class="h-4 w-4" />
-        <ChevronRight v-else class="h-4 w-4" />
-      </Button>
+        <div class="flex items-center gap-3 overflow-hidden">
+          <img :src="themeStore.isDark ? '/sage_logo.svg' : '/sage_logo_white.svg'" alt="Sage Logo" class="h-9 w-9 shrink-0 rounded-xl" />
+          <div v-if="!isCollapsed" class="min-w-0">
+            <p class="truncate text-[14px] font-semibold tracking-[0.01em] text-foreground">Sage</p>
+          </div>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="ml-auto h-7.5 w-7.5 shrink-0 rounded-[12px] text-muted-foreground transition-all duration-200 hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]"
+          @click="isCollapsed = !isCollapsed"
+          :title="isCollapsed ? t('common.expand') : t('common.collapse')"
+        >
+          <ChevronLeft v-if="!isCollapsed" class="h-4 w-4" />
+          <ChevronRight v-else class="h-4 w-4" />
+        </Button>
+      </div>
     </div>
 
   </div>
@@ -271,7 +285,6 @@ import {
   Settings,
   LayoutGrid,
   Users,
-  KeyRound,
   LoaderCircle,
   CircleCheckBig,
   ChevronLeft,
@@ -316,6 +329,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { cn } from '@/utils/cn'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
 import { useTour } from '../utils/tour'
 
@@ -326,6 +340,7 @@ const route = useRoute()
 const { t } = useLanguage()
 const { startSidebarTour } = useTour()
 const emit = defineEmits(['new-chat'])
+const isMacOS = computed(() => typeof navigator !== 'undefined' && /mac/i.test(navigator.platform || ''))
 
 const currentUser = ref(getCurrentUser())
 const isCollapsed = ref(false)
@@ -528,4 +543,53 @@ const handleLoginSuccess = () => {
   showLoginModal.value = false
   currentUser.value = getCurrentUser()
 }
+
+const sidebarShellStyle = computed(() => ({
+  backgroundColor: themeStore.isDark ? 'rgba(20, 24, 31, 0.85)' : 'rgba(255, 255, 255, 0.85)',
+  backgroundImage: themeStore.isDark
+    ? 'linear-gradient(180deg, rgba(148, 163, 184, 0.08), rgba(15, 23, 42, 0.02))'
+    : 'linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.03))',
+  boxShadow: themeStore.isDark
+    ? 'inset -1px 0 0 rgba(255, 255, 255, 0.08)'
+    : 'inset -1px 0 0 rgba(255, 255, 255, 0.35)'
+}))
+
+const sidebarTopGlowStyle = computed(() => ({
+  background: themeStore.isDark
+    ? 'radial-gradient(circle at top left, rgba(59,130,246,0.06), transparent 60%)'
+    : 'radial-gradient(circle at top left, rgba(96,165,250,0.08), transparent 60%)'
+}))
+
+const sidebarBottomGlowStyle = computed(() => ({
+  background: themeStore.isDark
+    ? 'radial-gradient(circle at bottom, rgba(20,184,166,0.04), transparent 60%)'
+    : 'radial-gradient(circle at bottom, rgba(45,212,191,0.04), transparent 60%)'
+}))
+
+const interactiveSelector = [
+  'button',
+  'a',
+  'input',
+  'textarea',
+  'select',
+  '[role="button"]',
+  '[data-no-drag]'
+].join(', ')
+
+const handleSidebarMouseDown = async (event) => {
+  if (!window.__TAURI__ || event.button !== 0) return
+  if (event.target instanceof Element && event.target.closest(interactiveSelector)) return
+
+  try {
+    await getCurrentWindow().startDragging()
+  } catch (error) {
+    console.error('Failed to start dragging window from sidebar:', error)
+  }
+}
 </script>
+
+<style scoped>
+.sidebar-shell {
+  backdrop-filter: none;
+}
+</style>

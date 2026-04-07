@@ -10,6 +10,7 @@
     "frontendDist": "../ui/dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "withGlobalTauri": true,
     "windows": [
       {
@@ -21,8 +22,10 @@
         "minWidth": 1024,
         "minHeight": 768,
         "dragDropEnabled": true,
-        "transparent": false,
+        "transparent": true,
         "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
         "alwaysOnTop": false,
         "visible": true
       }

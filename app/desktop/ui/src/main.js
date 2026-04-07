@@ -9,6 +9,7 @@ import { createPinia } from 'pinia'
 import { useLanguageStore } from './utils/i18n.js'
 import { useThemeStore } from './stores/theme.js'
 import { startMemoryDebugReporter } from './utils/memoryDebug.js'
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 
 // 导入Tauri API
 import { listen } from '@tauri-apps/api/event'
@@ -29,6 +30,14 @@ const initializeApp = async () => {
     // 初始化应用设置
     appStore.initialize()
     themeStore.initTheme()
+
+    if (window.__TAURI__) {
+      document.documentElement.style.background = 'transparent'
+      document.body.style.background = 'transparent'
+      const currentWindow = getCurrentWebviewWindow()
+      await currentWindow.setBackgroundColor([0, 0, 0, 0])
+    }
+
     console.log('Application initialized successfully')
   } catch (error) {
     console.error('Failed to initialize application:', error)
