@@ -502,6 +502,54 @@ class AgentClient:
         except Exception as e:
             logger.warning(f"[AgentClient] Failed to send progress message: {e}")
     
+    def _generate_step_description(self, tool_name: str, arguments: str, step_num: int) -> str:
+        """
+        Generate human-readable description for a tool execution step.
+        
+        Args:
+            tool_name: Name of the tool being called
+            arguments: JSON string of tool arguments
+            step_num: Step number in execution sequence
+            
+        Returns:
+            Human-readable description of what the step does
+        """
+        try:
+            args = json.loads(arguments) if arguments else {}
+        except json.JSONDecodeError:
+            args = {}
+        
+        # Dynamic descriptions based on tool and arguments
+        descriptions = {
+            "file_write": lambda: f"创建文件 `{args.get('file_path', '未知文件')}`",
+            "file_update": lambda: f"更新文件 `{args.get('file_path', '未知文件')}`",
+            "file_read": lambda: f"读取文件 `{args.get('file_path', '未知文件')}`",
+            "execute_shell_command": lambda: f"执行命令 `{args.get('command', '未知命令')[:30]}...`" if len(args.get('command', '')) > 30 else f"执行命令 `{args.get('command', '未知命令')}`",
+            "execute_python_code": lambda: f"执行 Python 代码 ({len(args.get('code', ''))} 字符)",
+            "search_web_page": lambda: f"搜索: {args.get('keyword', '未知关键词')}",
+            "fetch_webpages": lambda: f"获取网页: {args.get('url', '未知URL')[:40]}..." if len(args.get('url', '')) > 40 else f"获取网页: {args.get('url', '未知URL')}",
+            "todo_write": lambda: f"更新任务列表",
+            "todo_read": lambda: f"查看任务列表",
+            "list_tasks": lambda: f"列出所有任务",
+            "add_task": lambda: f"添加任务: {args.get('title', '未命名')}",
+            "sys_spawn_agent": lambda: f"创建子智能体: {args.get('name', '未命名')}",
+            "sys_delegate_task": lambda: f"分配任务给子智能体",
+            "sys_finish_task": lambda: f"完成任务",
+            "load_skill": lambda: f"加载技能: {args.get('skill_name', '未知技能')}",
+            "search_memory": lambda: f"搜索记忆: {args.get('query', '未知查询')}",
+            "generate_image": lambda: f"生成图片: {args.get('prompt', '未指定')[:30]}..." if len(args.get('prompt', '')) > 30 else f"生成图片: {args.get('prompt', '未指定')}",
+            "send_message_through_im": lambda: f"发送 IM 消息",
+            "send_file_through_im": lambda: f"发送文件",
+        }
+        
+        # Get dynamic description or use default
+        if tool_name in descriptions:
+            return descriptions[tool_name]()
+        else:
+            # For unknown tools, show name with underscores replaced
+            readable_name = tool_name.replace('_', ' ')
+            return f"执行 {readable_name}"
+    
     def _extract_tool_info(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Extract tool call information from stream data."""
         # Check for delta format (OpenAI streaming)
@@ -619,15 +667,15 @@ class AgentClient:
             
             logger.info(f"Sending async message to agent {agent_id}...")
             
-            # Send initial "processing" message immediately
+            # Track execution state for dynamic progress
+            execution_steps = []  # List of executed tools
+            reported_indices = set()  # Track which steps we've reported
+            
+            # Send initial message
             await self._send_progress_message(
-                "🤖 已收到消息，正在处理...",
+                "🤖 已收到消息，正在分析需求...",
                 provider, agent_id, user_id, chat_id
             )
-            
-            # Track state for progress messages
-            reported_tools = set()  # Track which tools we've reported
-            progress_sent = True    # Already sent initial progress
             
             chunks = []
             
@@ -666,43 +714,25 @@ class AgentClient:
                             tool_name = tool_info.get("name", "")
                             logger.info(f"[AgentClient] Detected tool call: {tool_name}")
                             
-                            # Report each unique tool only once
-                            if tool_name and tool_name not in reported_tools:
-                                reported_tools.add(tool_name)
-                                
-                                # Tool-specific progress messages
-                                tool_messages = {
-                                    "file_write": "📝 正在创建文件...",
-                                    "file_update": "📝 正在更新文件...",
-                                    "file_read": "📖 正在读取文件...",
-                                    "execute_shell_command": "⚡ 正在执行命令...",
-                                    "execute_python_code": "🐍 正在执行 Python 代码...",
-                                    "search_web_page": "🔍 正在搜索网页...",
-                                    "fetch_webpages": "🌐 正在获取网页内容...",
-                                    "todo_write": "✅ 正在更新任务列表...",
-                                    "sys_spawn_agent": "👤 正在创建子智能体...",
-                                    "sys_delegate_task": "📋 正在分配任务...",
-                                    "load_skill": "🛠️ 正在加载技能...",
-                                }
-                                
-                                progress_msg = tool_messages.get(tool_name, f"🔧 正在调用: {tool_name}...")
-                                await self._send_progress_message(
-                                    progress_msg,
-                                    provider, agent_id, user_id, chat_id
-                                )
-                                
-                                # Special handling for file_write - send completion
-                                if tool_name == "file_write":
-                                    try:
-                                        args = json.loads(tool_info.get("arguments", "{}"))
-                                        file_path = args.get("file_path", "unknown")
-                                        file_name = file_path.split("/")[-1] if "/" in file_path else file_path
-                                        await self._send_progress_message(
-                                            f"📄 文件已创建: {file_name}",
-                                            provider, agent_id, user_id, chat_id
-                                        )
-                                    except Exception:
-                                        pass
+                            # Generate dynamic description based on tool and arguments
+                            step_desc = self._generate_step_description(
+                                tool_name, 
+                                tool_info.get("arguments", "{}"),
+                                len(execution_steps) + 1
+                            )
+                            execution_steps.append({
+                                "tool": tool_name,
+                                "description": step_desc,
+                                "reported": False
+                            })
+                            
+                            # Report this step
+                            step_num = len(execution_steps)
+                            progress_msg = f"步骤 {step_num}: {step_desc}"
+                            await self._send_progress_message(
+                                progress_msg,
+                                provider, agent_id, user_id, chat_id
+                            )
             
             # Stream ended - create mock response and parse
             class MockResponse:
