@@ -23,6 +23,7 @@ This site documents the current repository as it exists today. It is organized a
 ## Start Here
 
 1. [Getting Started](GETTING_STARTED.md) for local setup and first run
+2. [CLI Guide](CLI.md) for command-line workflows and local validation
 2. [Core Concepts](CORE_CONCEPTS.md) for the runtime model
 3. [Architecture](ARCHITECTURE.md) for repository and subsystem boundaries
 4. [Configuration](CONFIGURATION.md) for environment variables and deployment knobs
@@ -34,6 +35,7 @@ This site documents the current repository as it exists today. It is organized a
 Read:
 
 1. [Getting Started](GETTING_STARTED.md)
+2. [CLI Guide](CLI.md)
 2. [Applications](APPLICATIONS.md)
 3. [Troubleshooting](TROUBLESHOOTING.md)
 
@@ -58,6 +60,7 @@ Read:
 ## Documentation Map
 
 - [Getting Started](GETTING_STARTED.md): install dependencies and run the CLI, server, web UI, or desktop build
+- [CLI Guide](CLI.md): command-line workflows, sessions, skills, workspaces, and structured output
 - [Core Concepts](CORE_CONCEPTS.md): sessions, agents, tools, skills, flows, and sandboxing
 - [Architecture](ARCHITECTURE.md): how the codebase is organized
 - [Configuration](CONFIGURATION.md): runtime environment variables and storage settings
