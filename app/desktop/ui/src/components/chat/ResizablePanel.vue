@@ -1,29 +1,30 @@
 <template>
   <div 
-    class="resizable-panel h-full bg-background border border-border flex flex-col relative rounded-2xl overflow-hidden shadow-xl m-2 mb-4"
+    class="resizable-panel relative m-2 flex flex-col self-start overflow-hidden rounded-[22px] border border-border/55 bg-background/90 shadow-[0_1px_0_rgba(255,255,255,0.06),0_14px_40px_rgba(0,0,0,0.18)] backdrop-blur-sm"
     :style="{ 
       width: panelWidth + 'px',
-      minWidth: panelWidth + 'px'
+      minWidth: panelWidth + 'px',
+      height: 'calc(100% - 8px)'
     }"
   >
     <!-- 调整大小的拖拽条 -->
     <div 
-      class="resize-handle absolute left-0 top-0 w-2 h-full cursor-ew-resize hover:bg-primary/50 transition-colors z-50 rounded-l-2xl"
+      class="resize-handle absolute left-0 top-0 z-50 h-full w-1.5 cursor-ew-resize rounded-l-[22px] transition-colors hover:bg-border/60"
       @mousedown="startResize"
     ></div>
     
     <!-- 头部 -->
-    <div class="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/50 flex-none">
-      <div class="flex items-center gap-2">
+    <div class="flex flex-none items-center justify-between border-b border-border/60 px-4 py-2.5">
+      <div class="flex items-center gap-2.5">
         <slot name="icon"></slot>
-        <h3 class="font-semibold text-sm">{{ title }}</h3>
-        <span v-if="badge" class="text-xs text-muted-foreground">({{ badge }})</span>
+        <h3 class="text-sm font-semibold tracking-tight text-foreground">{{ title }}</h3>
+        <span v-if="badge" class="rounded-full bg-muted/35 px-1.5 py-0.5 text-[11px] text-muted-foreground">{{ badge }}</span>
       </div>
       <Button 
         variant="ghost" 
         size="sm"
         @click="$emit('close')"
-        class="h-8 w-8 p-0"
+        class="h-7.5 w-7.5 rounded-full p-0 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
       >
         <X class="w-4 h-4" />
       </Button>
@@ -37,7 +38,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import { Button } from '@/components/ui/button'
 import { X } from 'lucide-vue-next'
 

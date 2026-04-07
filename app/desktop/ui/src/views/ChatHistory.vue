@@ -1,20 +1,69 @@
 <template>
-  <div class="h-full flex flex-col p-6 bg-background">
-    <div class="bg-background rounded-lg flex-1 flex flex-col min-h-0">
+  <div class="h-full flex flex-col bg-background px-4 py-3">
+    <div class="flex-1 flex min-h-0 flex-col">
+      <div class="mb-3 flex items-center justify-between gap-3 border-b border-border/55 pb-3">
+        <div class="flex min-w-0 items-center gap-3">
+          <div class="min-w-0">
+            <h1 class="text-[15px] font-semibold tracking-tight text-foreground">{{ t('history.title') }}</h1>
+            <p class="text-[11px] text-muted-foreground">{{ totalCount }} {{ t('history.totalConversations') }}</p>
+          </div>
+
+          <div class="hidden h-5 w-px bg-border/60 lg:block" />
+
+          <div class="hidden items-center gap-2 lg:flex">
+            <div class="relative w-[240px]">
+              <Input 
+                v-model="searchTerm" 
+                :placeholder="t('history.search')" 
+                class="h-8 rounded-xl border-border/50 bg-background/60 pl-8 text-[12px] shadow-none dark:bg-background/20"
+              />
+              <Search class="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground/75" />
+            </div>
+
+            <Select v-model="filterAgent">
+              <SelectTrigger class="h-8 w-[118px] rounded-xl border-border/50 bg-background/60 text-[12px] shadow-none dark:bg-background/20">
+                <SelectValue :placeholder="t('history.all')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{{ t('history.all') }}</SelectItem>
+                <SelectItem v-for="agent in agents" :key="agent.id" :value="agent.id">
+                  {{ agent.name }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select v-model="sortBy">
+              <SelectTrigger class="h-8 w-[92px] rounded-xl border-border/50 bg-background/60 text-[12px] shadow-none dark:bg-background/20">
+                <SelectValue :placeholder="t('history.sortByDate')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="date">{{ t('history.sortByDate') }}</SelectItem>
+                <SelectItem value="title">{{ t('history.sortByTitle') }}</SelectItem>
+                <SelectItem value="messages">{{ t('history.sortByMessages') }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div class="hidden items-center rounded-full border border-border/60 bg-background/60 px-2.5 py-1 text-[11px] text-muted-foreground md:flex dark:bg-background/20">
+          {{ t('common.page') }} {{ currentPage }} / {{ Math.ceil(totalCount / pageSize) || 1 }}
+        </div>
+      </div>
+
       <!-- 搜索和筛选区域 -->
-      <div class="flex gap-4 items-center mb-6">
-        <div class="relative w-full max-w-sm flex-1">
+      <div class="mb-3 flex items-center gap-2 lg:hidden">
+        <div class="relative w-full max-w-md flex-1">
           <Input 
             v-model="searchTerm" 
             :placeholder="t('history.search')" 
-            class="pl-9"
+            class="h-8.5 rounded-xl border-border/50 bg-background/60 pl-8 text-[12px] shadow-none dark:bg-background/20"
           />
-          <Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Search class="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground/75" />
         </div>
         
-        <div class="flex gap-3 items-center">
+        <div class="flex gap-2 items-center">
           <Select v-model="filterAgent">
-            <SelectTrigger class="w-[180px]">
+            <SelectTrigger class="h-8.5 w-[118px] rounded-xl border-border/50 bg-background/60 text-[12px] shadow-none dark:bg-background/20">
               <SelectValue :placeholder="t('history.all')" />
             </SelectTrigger>
             <SelectContent>
@@ -26,7 +75,7 @@
           </Select>
           
           <Select v-model="sortBy">
-            <SelectTrigger class="w-[100px]">
+            <SelectTrigger class="h-8.5 w-[92px] rounded-xl border-border/50 bg-background/60 text-[12px] shadow-none dark:bg-background/20">
               <SelectValue :placeholder="t('history.sortByDate')" />
             </SelectTrigger>
             <SelectContent>
@@ -39,67 +88,97 @@
       </div>
       
       <!-- 会话列表 -->
-      <div class="flex-1 overflow-y-auto pr-2 space-y-3">
+      <div class="flex-1 overflow-y-auto pr-1">
         <!-- 加载状态 -->
         <div v-if="isLoading" class="flex flex-col gap-4 p-4 items-center justify-center py-20">
           <Loader class="h-8 w-8 animate-spin text-primary" />
         </div>
         
         <!-- 会话卡片 -->
-        <div
-          v-else-if="paginatedConversations.length > 0"
-          v-for="conversation in paginatedConversations"
-          :key="conversation.id"
-          :class="[
-            'group relative border rounded-xl p-4 transition-all duration-200 hover:shadow-lg hover:border-primary/30 bg-card',
-            { 'border-primary ring-1 ring-primary/20': selectedConversations.has(conversation.id) }
-          ]"
-        >
-          <div class="flex items-start gap-4">
-            <!-- Agent 头像 -->
+        <div v-else-if="paginatedConversations.length > 0" class="overflow-hidden rounded-[18px] border border-border/50 bg-background/30 dark:bg-background/10">
+          <div
+            v-for="(conversation, index) in paginatedConversations"
+            :key="conversation.id"
+            :class="[
+              'group relative grid cursor-pointer grid-cols-[auto,minmax(0,1fr),auto] items-center gap-3 px-3 py-2 transition-all duration-200 hover:bg-foreground/[0.025] dark:hover:bg-white/[0.025]',
+              { 'bg-primary/[0.045]': selectedConversations.has(conversation.id) },
+              { 'border-t border-border/60': index > 0 }
+            ]"
+            @click="handleSelectConversation(conversation)"
+          >
             <div class="flex-shrink-0">
               <img
                 :src="getAgentAvatar(conversation.agent_id)"
                 :alt="getAgentName(conversation.agent_id)"
-                class="w-12 h-12 rounded-xl object-cover bg-muted ring-2 ring-border/50"
+                class="h-8 w-8 rounded-lg object-cover bg-muted ring-1 ring-border/30"
                 @error="$event.target.src = 'https://api.dicebear.com/9.x/bottts/svg?seed=default'"
               />
             </div>
-            
-            <!-- 主要内容区域 -->
-            <div class="flex-1 min-w-0 cursor-pointer" @click="handleSelectConversation(conversation)">
-              <!-- 标题行 -->
-              <div class="flex items-start justify-between gap-3 mb-2">
-                <h3 class="text-base font-semibold text-foreground leading-tight line-clamp-2 flex-1">
+
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <h3 class="min-w-0 flex-1 truncate text-[14px] font-semibold tracking-tight text-foreground">
                   {{ conversation.display_title || conversation.title }}
                 </h3>
-                
-                <!-- 时间 -->
-                <div class="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0 bg-muted/50 px-2 py-1 rounded-full">
-                  <Clock class="w-3 h-3" />
-                  <span>{{ formatRelativeTime(conversation.updated_at) }}</span>
+                <div class="hidden shrink-0 items-center gap-2 overflow-hidden text-[11px] text-muted-foreground lg:flex">
+                  <div class="flex min-w-0 items-center gap-1.5 rounded-full bg-muted/18 px-1.5 py-0.5 ring-1 ring-border/20">
+                    <Bot class="h-3 w-3 text-primary/80" />
+                    <span class="truncate font-medium text-foreground/85">{{ getAgentName(conversation.agent_id) }}</span>
+                  </div>
+
+                  <span class="text-border/80">·</span>
+
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <button
+                          class="inline-flex shrink-0 items-center gap-1 rounded-full px-1 py-0.5 text-muted-foreground transition-colors hover:bg-muted/18 hover:text-primary"
+                          @click.stop
+                        >
+                          <Info class="h-3 w-3" />
+                          <span>ID</span>
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" class="max-w-xs p-3">
+                        <div class="space-y-2">
+                          <p class="font-medium text-sm">Session ID</p>
+                          <p class="font-mono text-xs break-all bg-muted/50 p-2 rounded">{{ conversation.session_id }}</p>
+                          <Button 
+                            size="sm" 
+                            variant="secondary" 
+                            class="w-full text-xs"
+                            @click.stop="copySessionId(conversation)"
+                          >
+                            <Copy class="w-3 h-3 mr-1" />
+                            {{ t('history.copySessionId') }}
+                          </Button>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+
+                  <span class="text-border/80">·</span>
+
+                  <span class="truncate text-muted-foreground/80">{{ formatDateTime(conversation.updated_at) }}</span>
                 </div>
               </div>
-              
-              <!-- 元信息行 -->
-              <div class="flex items-center gap-3 flex-wrap">
-                <!-- Agent 名称 -->
-                <div class="flex items-center gap-1.5 text-sm">
-                  <Bot class="w-3.5 h-3.5 text-primary" />
-                  <span class="font-medium text-foreground">{{ getAgentName(conversation.agent_id) }}</span>
+
+              <div class="mt-0.5 flex items-center gap-2 overflow-hidden text-[11px] text-muted-foreground lg:hidden">
+                <div class="flex min-w-0 items-center gap-1.5 rounded-full bg-muted/18 px-1.5 py-0.5 ring-1 ring-border/20">
+                  <Bot class="h-3 w-3 text-primary/80" />
+                  <span class="truncate font-medium text-foreground/85">{{ getAgentName(conversation.agent_id) }}</span>
                 </div>
-                
-                <!-- 分隔符 -->
-                <span class="text-muted-foreground/50">·</span>
-                
-                <!-- Session ID - 信息图标悬停显示 -->
+
+                <span class="text-border/80">·</span>
+
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger as-child>
                       <button
-                        class="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors bg-muted/30 hover:bg-muted/50 px-2 py-0.5 rounded-full cursor-pointer"
+                        class="inline-flex shrink-0 items-center gap-1 rounded-full px-1 py-0.5 text-muted-foreground transition-colors hover:bg-muted/18 hover:text-primary"
+                        @click.stop
                       >
-                        <Info class="w-3 h-3" />
+                        <Info class="h-3 w-3" />
                         <span>ID</span>
                       </button>
                     </TooltipTrigger>
@@ -120,35 +199,27 @@
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
-                
-                <!-- 完整时间 -->
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger as-child>
-                      <span class="text-xs text-muted-foreground/70 hover:text-muted-foreground transition-colors">
-                        {{ formatDateTime(conversation.updated_at) }}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      <p>{{ t('history.lastUpdated') }}: {{ formatDateTime(conversation.updated_at) }}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+
+                <span class="truncate text-muted-foreground/80">{{ formatDateTime(conversation.updated_at) }}</span>
               </div>
             </div>
-            
-            <!-- 操作按钮 -->
-            <div class="flex flex-col gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+
+            <div class="flex items-center gap-0.5 self-stretch">
+              <div class="flex items-center gap-1 rounded-full bg-muted/18 px-2 py-0.5 text-[10px] text-muted-foreground ring-1 ring-border/20">
+                <Clock class="h-3 w-3" />
+                <span>{{ formatRelativeTime(conversation.updated_at) }}</span>
+              </div>
+
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger as-child>
                     <Button
                       variant="ghost"
                       size="icon"
-                      class="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                      class="h-7.5 w-7.5 rounded-full text-muted-foreground/75 opacity-0 transition-all hover:bg-primary/10 hover:text-primary group-hover:opacity-100"
                       @click.stop="handleShareConversation(conversation)"
                     >
-                      <Download class="h-4 w-4" />
+                      <Download class="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="left">
@@ -156,17 +227,17 @@
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-              
+
               <TooltipProvider v-if="canDelete(conversation)">
                 <Tooltip>
                   <TooltipTrigger as-child>
                     <Button
                       variant="ghost"
                       size="icon"
-                      class="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      class="h-7.5 w-7.5 rounded-full text-muted-foreground/75 opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
                       @click.stop="handleDeleteConversation(conversation)"
                     >
-                      <Trash2 class="h-4 w-4" />
+                      <Trash2 class="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="left">
@@ -189,10 +260,11 @@
       </div>
           
       <!-- 分页组件 -->
-      <div v-if="totalCount > 0" class="flex items-center justify-center gap-4 py-6 border-t mt-2">
+      <div v-if="totalCount > 0" class="mt-2 flex items-center justify-center gap-4 border-t border-border/55 py-3">
         <Button 
           variant="outline" 
           size="sm" 
+          class="h-8 rounded-full border-border/50 bg-background/40 px-4 text-[12px] shadow-none dark:bg-background/15"
           :disabled="currentPage <= 1" 
           @click="handlePageChange(currentPage - 1)"
         >
@@ -204,6 +276,7 @@
         <Button 
           variant="outline" 
           size="sm" 
+          class="h-8 rounded-full border-border/50 bg-background/40 px-4 text-[12px] shadow-none dark:bg-background/15"
           :disabled="currentPage * pageSize >= totalCount" 
           @click="handlePageChange(currentPage + 1)"
         >
@@ -318,7 +391,7 @@ const currentUser = ref(null)
 
 // 分页相关状态
 const currentPage = ref(parseInt(route.query.page) || 1)
-const pageSize = ref(10)
+const pageSize = ref(18)
 const totalCount = ref(0)
 const paginatedConversations = ref([])
 const isLoading = ref(true)
@@ -583,11 +656,4 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* 多行文本截断 */
-.line-clamp-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
 </style>

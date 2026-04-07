@@ -6,19 +6,19 @@
     @close="$emit('close')"
   >
     <template #icon>
-      <Monitor class="w-5 h-5 text-primary" />
+      <Monitor class="h-4.5 w-4.5 text-muted-foreground" />
     </template>
 
     <!-- 工作台内容区域 -->
     <div class="h-full flex flex-col">
       <!-- 预览列表 - 占满剩余空间 -->
       <div class="flex-1 overflow-y-auto min-h-0">
-        <div v-if="isLoading && workbenchStore.totalItems === 0" class="flex flex-col items-center justify-center h-full text-muted-foreground p-8">
-          <Monitor class="w-12 h-12 mb-3 opacity-50 animate-pulse" />
+        <div v-if="isLoading && workbenchStore.totalItems === 0" class="flex h-full flex-col items-center justify-center p-6 text-muted-foreground">
+          <Monitor class="mb-2 h-10 w-10 animate-pulse opacity-45" />
           <p class="text-sm">{{ t('workbench.loading') }}</p>
         </div>
-        <div v-else-if="workbenchStore.totalItems === 0" class="flex flex-col items-center justify-center h-full text-muted-foreground p-8">
-          <Monitor class="w-12 h-12 mb-3 opacity-50" />
+        <div v-else-if="workbenchStore.totalItems === 0" class="flex h-full flex-col items-center justify-center p-6 text-muted-foreground">
+          <Monitor class="mb-2 h-10 w-10 opacity-45" />
           <p class="text-sm">{{ t('workbench.emptyTitle') }}</p>
           <p class="text-xs mt-1">{{ t('workbench.emptyDesc') }}</p>
         </div>
@@ -28,7 +28,7 @@
           <div
             v-for="(item, index) in filteredItemsList"
             :key="item?.id || index"
-            class="workbench-item-wrapper border-b border-border last:border-b-0"
+            class="workbench-item-wrapper border-b border-border/60 last:border-b-0"
           >
             <WorkbenchItemRenderer
               v-if="item"
@@ -141,7 +141,7 @@ const onStep = (index) => {
 }
 
 .workbench-item-wrapper {
-  min-height: 200px;
+  min-height: 160px;
   height: 100%;
 }
 
