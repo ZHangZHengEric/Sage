@@ -75,8 +75,40 @@
     overscroll-behavior: none;
   }
 
+  html {
+    background: transparent;
+  }
+
   body {
-    @apply bg-background text-foreground;
+    @apply text-foreground;
+    background: transparent;
+  }
+
+  #app {
+    min-height: 100vh;
+    background: transparent;
+  }
+
+  [data-tauri-drag-region] {
+    app-region: drag;
+    -webkit-app-region: drag;
+    user-select: none;
+  }
+
+  button,
+  input,
+  textarea,
+  select,
+  a,
+  [role="button"],
+  [data-tauri-drag-region] button,
+  [data-tauri-drag-region] input,
+  [data-tauri-drag-region] textarea,
+  [data-tauri-drag-region] select,
+  [data-tauri-drag-region] a,
+  [data-tauri-drag-region] [role="button"] {
+    app-region: no-drag;
+    -webkit-app-region: no-drag;
   }
 }
 
@@ -282,6 +314,11 @@ code[class*="language-"] {
 .dark .token.doctype,
 .dark .token.cdata {
   @apply text-slate-400;
+}
+
+.app-shell,
+.dark .app-shell {
+  background: transparent;
 }
 
 .dark .token.punctuation {

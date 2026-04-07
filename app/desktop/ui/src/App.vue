@@ -17,7 +17,7 @@
       </div>
     </template>
   </div>
-  <div v-else class="app flex h-screen overflow-hidden bg-background text-foreground">
+  <div v-else class="app app-shell flex h-screen overflow-hidden bg-background text-foreground">
     <!-- NPX Install Progress Dialog -->
     <Dialog :open="showNpxInstallDialog" @update:open="showNpxInstallDialog = $event">
       <DialogContent class="sm:max-w-[420px] p-6" :closeable="false">
