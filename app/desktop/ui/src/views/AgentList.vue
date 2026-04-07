@@ -1,194 +1,236 @@
 <template>
   <div class="h-full w-full overflow-hidden flex flex-col">
     <!-- List View -->
-    <div v-if="currentView === 'list'"
-      class="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6 animate-in fade-in duration-500">
-      <div class="flex justify-end gap-3">
-        <Button variant="outline" @click="handleImport">
-          <Download class="mr-2 h-4 w-4" />
-          {{ t('agent.import') }}
-        </Button>
-        <Button @click="handleCreateAgent">
-          <Plus class="mr-2 h-4 w-4" />
-          {{ t('agent.create') }}
-        </Button>
-      </div>
+    <div v-if="currentView === 'list'" class="flex-1 overflow-y-auto px-5 py-4 animate-in fade-in duration-500">
+      <div class="mx-auto flex w-full max-w-7xl flex-col gap-4">
+        <div class="flex items-center justify-between gap-4 border-b border-border/55 pb-3">
+          <div class="min-w-0">
+            <h1 class="text-[15px] font-semibold tracking-tight text-foreground">{{ t('agent.title') }}</h1>
+            <p class="text-[11px] text-muted-foreground">{{ agents.length }} {{ t('chat.agents') }}</p>
+          </div>
 
-      <div v-if="loading" class="flex flex-col items-center justify-center py-20">
-        <Loader class="h-8 w-8 animate-spin text-primary" />
-      </div>
-      <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-        <!-- Flip Card Container -->
-        <div 
-          v-for="agent in agents" 
-          :key="agent.id"
-          class="flip-card h-[240px]"
-          :class="{ 'flipped': flippedCard === agent.id }"
-        >
-          <div class="flip-card-inner">
-            <!-- Front Side -->
-            <Card 
-              class="flip-card-front h-full cursor-pointer border hover:border-primary/30 transition-colors flex flex-col"
-              @click="handleViewAgent(agent)"
-            >
-              <!-- Flip button - top right corner -->
-              <button 
-                class="absolute top-3 right-3 z-20 p-1.5 rounded-full bg-muted/50 hover:bg-muted transition-colors"
-                @click.stop="toggleFlip(agent.id)"
-                :title="t('agent.viewActions')"
+          <div class="flex items-center gap-2">
+            <div class="flex items-center rounded-xl border border-border/60 bg-background/70 p-1">
+              <button
+                type="button"
+                class="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium transition-colors"
+                :class="agentDisplayMode === 'cards' ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+                @click="agentDisplayMode = 'cards'"
               >
-                <MoreHorizontal class="w-4 h-4 text-muted-foreground" />
+                <LayoutGrid class="h-3.5 w-3.5" />
+                {{ t('agent.cardView') }}
               </button>
-              
-              <CardHeader class="pb-2 pt-4 pr-10">
-                <div class="flex items-start gap-3">
-                  <!-- Avatar -->
-                  <img
-                    :src="`https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${encodeURIComponent(agent.id)}`"
-                    :alt="agent.name"
-                    class="h-12 w-12 rounded-xl bg-primary/10 object-cover shrink-0"
-                  />
-                  
-                  <!-- Name and ID -->
-                  <div class="flex-1 min-w-0">
-                    <CardTitle class="text-base font-bold leading-tight truncate" :title="agent.name">
-                      {{ agent.name }}
-                    </CardTitle>
-                    <div class="flex items-center gap-1 mt-0.5">
+              <button
+                type="button"
+                class="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium transition-colors"
+                :class="agentDisplayMode === 'rows' ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+                @click="agentDisplayMode = 'rows'"
+              >
+                <List class="h-3.5 w-3.5" />
+                {{ t('agent.listView') }}
+              </button>
+            </div>
+
+            <Button variant="outline" class="h-9 rounded-xl border-border/60 bg-background/70 px-3.5 shadow-none" @click="handleImport">
+              <Download class="mr-2 h-4 w-4" />
+              {{ t('agent.import') }}
+            </Button>
+            <Button class="h-9 rounded-xl px-3.5" @click="handleCreateAgent">
+              <Plus class="mr-2 h-4 w-4" />
+              {{ t('agent.create') }}
+            </Button>
+          </div>
+        </div>
+
+        <div v-if="loading" class="flex flex-col items-center justify-center py-20">
+          <Loader class="h-8 w-8 animate-spin text-primary" />
+        </div>
+
+        <div v-else-if="agentDisplayMode === 'cards'" class="grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          <div 
+            v-for="agent in agents" 
+            :key="agent.id"
+            class="flip-card h-[212px]"
+            :class="{ 'flipped': flippedCard === agent.id }"
+          >
+            <div class="flip-card-inner">
+              <Card 
+                class="flip-card-front relative flex h-full cursor-pointer flex-col overflow-hidden rounded-[24px] border border-border/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(249,250,251,0.98))] shadow-[0_1px_0_rgba(255,255,255,0.9),0_20px_48px_rgba(15,23,42,0.05)] transition-all hover:-translate-y-0.5 hover:border-primary/18 hover:shadow-[0_1px_0_rgba(255,255,255,0.94),0_24px_56px_rgba(15,23,42,0.08)] dark:bg-[linear-gradient(180deg,rgba(17,24,39,0.97),rgba(7,11,20,0.99))] dark:shadow-[0_1px_0_rgba(255,255,255,0.04),0_20px_48px_rgba(0,0,0,0.28)]"
+                @click="handleViewAgent(agent)"
+              >
+                <div class="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_62%)] dark:bg-[radial-gradient(circle_at_top_left,rgba(96,165,250,0.18),transparent_58%)]" />
+                <div class="absolute inset-x-0 top-[74px] h-px bg-gradient-to-r from-transparent via-border/55 to-transparent" />
+                <div class="absolute inset-x-0 bottom-0 h-14 bg-[linear-gradient(180deg,transparent,rgba(15,23,42,0.035))] dark:bg-[linear-gradient(180deg,transparent,rgba(255,255,255,0.024))]" />
+
+                <button 
+                  class="absolute right-3 top-3 z-20 rounded-full border border-border/55 bg-background/70 p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:bg-white/5"
+                  @click.stop="toggleFlip(agent.id)"
+                  :title="t('agent.viewActions')"
+                >
+                  <MoreHorizontal class="w-4 h-4" />
+                </button>
+                <CardContent class="relative flex h-full flex-col px-5 pb-4 pt-4">
+                  <div class="flex items-start justify-between gap-3 pr-8">
+                    <div class="flex min-w-0 items-center gap-2.5">
+                      <img
+                        :src="`https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${encodeURIComponent(agent.id)}`"
+                        :alt="agent.name"
+                        class="h-11 w-11 rounded-[17px] bg-primary/10 object-cover shrink-0 ring-1 ring-border/40"
+                      />
+                      <div class="min-w-0">
+                        <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                          <component :is="getAgentModeIcon(agent.agentMode)" class="h-3.5 w-3.5" />
+                          <span>{{ getAgentModeLabel(agent.agentMode) }}</span>
+                        </div>
+                        <CardTitle class="mt-1 truncate text-[18px] font-semibold leading-tight tracking-[-0.03em]" :title="agent.name">
+                          {{ agent.name }}
+                        </CardTitle>
+                      </div>
+                    </div>
+
+                    <span v-if="agent.is_default" class="inline-flex shrink-0 items-center rounded-full border border-primary/18 bg-primary/[0.08] px-1.5 py-0.5 text-[9px] font-medium tracking-[0.08em] text-primary">
+                      <Star class="mr-1 h-3 w-3" />
+                      {{ t('agent.defaultModel') }}
+                    </span>
+                  </div>
+
+                  <p class="mt-5 line-clamp-3 text-[13px] leading-[1.45rem] text-foreground/80">
+                    {{ agent.description || getRandomPlaceholder(agent.name) }}
+                  </p>
+
+                  <div class="mt-auto flex items-end justify-between gap-3 border-t border-border/55 pt-3.5">
+                    <div class="min-w-0">
+                      <div class="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                        {{ getModelShortName(agent.llm_provider_id) }}
+                      </div>
                       <button
                         @click.stop="copyAgentId(agent.id)"
-                        class="text-[10px] font-mono text-muted-foreground/70 bg-muted/40 hover:bg-muted/60 px-1.5 py-0.5 rounded transition-colors cursor-pointer flex items-center gap-1"
+                        class="mt-1 inline-flex max-w-full items-center gap-1 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
                         :title="t('agent.copyFullId')"
                       >
-                        <span class="truncate max-w-[120px]">{{ agent.id }}</span>
-                        <Copy class="w-3 h-3" />
+                        <span class="max-w-[112px] truncate font-mono">{{ agent.id }}</span>
+                        <Copy class="h-3 w-3" />
                       </button>
                     </div>
-                  </div>
-                </div>
-              </CardHeader>
 
-              <!-- Description - more space -->
-              <CardContent class="pt-0 pb-3 flex-1 flex flex-col">
-                <p class="text-sm text-muted-foreground line-clamp-3 leading-relaxed flex-1">
-                  {{ agent.description || getRandomPlaceholder(agent.name) }}
-                </p>
+                    <div class="flex items-center gap-3 text-[10px] text-muted-foreground">
+                      <div class="flex items-center gap-1.5 rounded-full bg-muted/24 px-2 py-1">
+                        <Wrench class="h-3.5 w-3.5" />
+                        <span>{{ agent.availableTools?.length || 0 }}</span>
+                      </div>
+                      <div class="flex items-center gap-1.5 rounded-full bg-muted/24 px-2 py-1">
+                        <Zap class="h-3.5 w-3.5" />
+                        <span>{{ agent.availableSkills?.length || 0 }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card class="flip-card-back flex h-full flex-col rounded-[22px] border-border/60 bg-card/98">
+                <button 
+                  class="absolute right-3 top-3 z-20 rounded-full border border-border/55 bg-background/70 p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  @click.stop="toggleFlip(agent.id)"
+                >
+                  <X class="w-4 h-4 text-muted-foreground" />
+                </button>
                 
-                <!-- Info row -->
-                <div class="flex items-center gap-3 mt-3 flex-wrap">
-                  <!-- Default badge -->
-                  <Badge 
-                    v-if="agent.is_default"
-                    variant="default"
-                    class="text-xs font-medium px-2 py-0.5 shrink-0 bg-primary text-primary-foreground"
-                  >
-                    <Star class="w-3 h-3 mr-1" />
-                    {{ t('agent.defaultModel') }}
-                  </Badge>
-                  
-                  <!-- Mode badge -->
-                  <Badge 
-                    :variant="getModeBadgeVariant(agent.agentMode)"
-                    class="text-xs font-medium px-2 py-0.5 shrink-0"
-                  >
-                    <component :is="getAgentModeIcon(agent.agentMode)" class="w-3 h-3 mr-1" />
-                    {{ getAgentModeLabel(agent.agentMode) }}
-                  </Badge>
-                  
-                  <!-- Model -->
-                  <span class="text-xs text-muted-foreground truncate">
-                    {{ getModelShortName(agent.llm_provider_id) }}
-                  </span>
-                </div>
-              </CardContent>
+                <CardHeader class="pb-1 pt-4 shrink-0">
+                  <CardTitle class="text-sm font-medium text-center">{{ t('agent.actions') }}</CardTitle>
+                </CardHeader>
 
-              <!-- Bottom row with icons -->
-              <CardFooter class="pt-0 pb-4 px-4">
-                <div class="flex items-center justify-between w-full">
-                  <!-- Tools & Skills icons -->
-                  <div class="flex items-center gap-3">
-                    <div v-if="agent.availableTools?.length" class="flex items-center gap-1 text-muted-foreground">
-                      <Wrench class="w-3.5 h-3.5" />
-                      <span class="text-xs">{{ agent.availableTools.length }}</span>
-                    </div>
-                    <div v-if="agent.availableSkills?.length" class="flex items-center gap-1 text-muted-foreground">
-                      <Zap class="w-3.5 h-3.5" />
-                      <span class="text-xs">{{ agent.availableSkills.length }}</span>
-                    </div>
+                <CardContent class="flex flex-1 items-center justify-center px-3 pb-3 pt-1">
+                  <div class="grid w-full grid-cols-2 gap-1.5">
+                    <Button v-if="!agent.is_default" variant="outline" class="h-8 w-full justify-center gap-1 rounded-xl px-2 text-[11px] text-primary hover:bg-primary/10 hover:text-primary" @click.stop="handleSetDefault(agent); toggleFlip(agent.id)">
+                      <Star class="w-3.5 h-3.5" />
+                      <span class="truncate">{{ t('agent.setDefault') }}</span>
+                    </Button>
+                    <Button variant="outline" class="h-8 w-full justify-center gap-1 rounded-xl px-2 text-[11px]" @click.stop="openUsageModal(agent); toggleFlip(agent.id)">
+                      <FileBraces class="w-3.5 h-3.5" />
+                      <span class="truncate">{{ t('agent.usageExample') }}</span>
+                    </Button>
+                    <Button v-if="canEdit(agent)" variant="outline" class="h-8 w-full justify-center gap-1 rounded-xl px-2 text-[11px]" @click.stop="handleEditAgent(agent); toggleFlip(agent.id)">
+                      <Edit class="w-3.5 h-3.5" />
+                      <span class="truncate">{{ t('agent.edit') }}</span>
+                    </Button>
+                    <Button variant="outline" class="h-8 w-full justify-center gap-1 rounded-xl px-2 text-[11px]" @click.stop="handleExport(agent); toggleFlip(agent.id)">
+                      <Upload class="w-3.5 h-3.5" />
+                      <span class="truncate">{{ t('agent.export') }}</span>
+                    </Button>
+                    <Button v-if="canDelete(agent)" variant="outline" class="col-span-2 h-8 w-full justify-center gap-1 rounded-xl px-2 text-[11px] text-destructive hover:bg-destructive/10 hover:text-destructive" @click.stop="handleDelete(agent); toggleFlip(agent.id)">
+                      <Trash2 class="w-3.5 h-3.5" />
+                      <span class="truncate">{{ t('agent.delete') }}</span>
+                    </Button>
                   </div>
-                  
-                  <!-- Click hint -->
-                  <span class="text-xs text-muted-foreground/50">{{ t('chat.clickToViewDetails') }}</span>
-                </div>
-              </CardFooter>
-            </Card>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </div>
 
-            <!-- Back Side - Actions -->
-            <Card class="flip-card-back h-full border bg-card flex flex-col">
-              <!-- Close button -->
-              <button 
-                class="absolute top-3 right-3 z-20 p-1.5 rounded-full bg-muted/50 hover:bg-muted transition-colors"
-                @click.stop="toggleFlip(agent.id)"
-              >
-                <X class="w-4 h-4 text-muted-foreground" />
-              </button>
-              
-              <CardHeader class="pb-2 pt-4 shrink-0">
-                <CardTitle class="text-sm font-medium text-center">{{ t('agent.actions') }}</CardTitle>
-              </CardHeader>
+        <div v-else class="overflow-hidden rounded-[22px] border border-border/60 bg-background/40">
+          <div
+            v-for="(agent, index) in agents"
+            :key="agent.id"
+            :class="[
+              'group grid grid-cols-[auto,minmax(0,1fr),148px,164px] items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/20',
+              { 'border-t border-border/60': index > 0 }
+            ]"
+          >
+            <img
+              :src="`https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${encodeURIComponent(agent.id)}`"
+              :alt="agent.name"
+              class="h-10 w-10 rounded-2xl bg-primary/10 object-cover ring-1 ring-border/40"
+            />
 
-              <CardContent class="flex-1 flex items-center justify-center py-2 px-3">
-                <div class="grid grid-cols-2 gap-2 w-full">
-                  <Button 
-                    v-if="!agent.is_default"
-                    variant="outline" 
-                    class="w-full justify-center gap-1.5 text-primary hover:text-primary hover:bg-primary/10 text-xs py-2 h-auto"
-                    @click.stop="handleSetDefault(agent); toggleFlip(agent.id)"
-                  >
-                    <Star class="w-3.5 h-3.5" />
-                    <span class="truncate">{{ t('agent.setDefault') }}</span>
-                  </Button>
-                  
-                  <Button 
-                    variant="outline" 
-                    class="w-full justify-center gap-1.5 text-xs py-2 h-auto"
-                    @click.stop="openUsageModal(agent); toggleFlip(agent.id)"
-                  >
-                    <FileBraces class="w-3.5 h-3.5" />
-                    <span class="truncate">{{ t('agent.usageExample') }}</span>
-                  </Button>
-                  
-                  <Button 
-                    v-if="canEdit(agent)"
-                    variant="outline" 
-                    class="w-full justify-center gap-1.5 text-xs py-2 h-auto"
-                    @click.stop="handleEditAgent(agent); toggleFlip(agent.id)"
-                  >
-                    <Edit class="w-3.5 h-3.5" />
-                    <span class="truncate">{{ t('agent.edit') }}</span>
-                  </Button>
-                  
-                  <Button 
-                    variant="outline" 
-                    class="w-full justify-center gap-1.5 text-xs py-2 h-auto"
-                    @click.stop="handleExport(agent); toggleFlip(agent.id)"
-                  >
-                    <Upload class="w-3.5 h-3.5" />
-                    <span class="truncate">{{ t('agent.export') }}</span>
-                  </Button>
-                  
-                  <Button 
-                    v-if="canDelete(agent)"
-                    variant="outline" 
-                    class="w-full justify-center gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10 text-xs py-2 h-auto"
-                    @click.stop="handleDelete(agent); toggleFlip(agent.id)"
-                  >
-                    <Trash2 class="w-3.5 h-3.5" />
-                    <span class="truncate">{{ t('agent.delete') }}</span>
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+            <div class="min-w-0 cursor-pointer" @click="handleViewAgent(agent)">
+              <div class="flex items-center gap-2">
+                <h3 class="min-w-0 flex-1 truncate text-[14px] font-semibold tracking-tight text-foreground">
+                  {{ agent.name }}
+                </h3>
+              </div>
+              <div class="mt-1 flex items-center gap-2 overflow-hidden text-[11px] text-muted-foreground">
+                <span class="truncate">{{ agent.description || getRandomPlaceholder(agent.name) }}</span>
+                <span class="text-border/80">·</span>
+                <span class="truncate">{{ getModelShortName(agent.llm_provider_id) }}</span>
+                <span class="text-border/80">·</span>
+                <button @click.stop="copyAgentId(agent.id)" class="inline-flex items-center gap-1 rounded-full px-1 py-0.5 transition-colors hover:bg-muted/30">
+                  <span class="max-w-[110px] truncate font-mono">{{ agent.id }}</span>
+                  <Copy class="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-end gap-1.5">
+              <span class="flex w-[58px] justify-end">
+                <Badge v-if="agent.is_default" variant="default" class="h-5 rounded-full px-2 text-[10px]">
+                  {{ t('agent.defaultModel') }}
+                </Badge>
+              </span>
+              <span class="flex w-[82px] justify-end">
+                <Badge :variant="getModeBadgeVariant(agent.agentMode)" class="h-5 rounded-full px-2 text-[10px]">
+                  {{ getAgentModeLabel(agent.agentMode) }}
+                </Badge>
+              </span>
+            </div>
+
+            <div class="flex min-w-[164px] items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+              <Button v-if="!agent.is_default" variant="ghost" size="icon" class="h-8 w-8 rounded-full" @click.stop="handleSetDefault(agent)">
+                <Star class="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" class="h-8 w-8 rounded-full" @click.stop="openUsageModal(agent)">
+                <FileBraces class="h-4 w-4" />
+              </Button>
+              <Button v-if="canEdit(agent)" variant="ghost" size="icon" class="h-8 w-8 rounded-full" @click.stop="handleEditAgent(agent)">
+                <Edit class="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" class="h-8 w-8 rounded-full" @click.stop="handleExport(agent)">
+                <Upload class="h-4 w-4" />
+              </Button>
+              <Button v-if="canDelete(agent)" variant="ghost" size="icon" class="h-8 w-8 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive" @click.stop="handleDelete(agent)">
+                <Trash2 class="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -315,8 +357,8 @@
 import { ref, onMounted, onUnmounted, computed, watch, Teleport } from 'vue'
 import { toast } from 'vue-sonner'
 import { 
-  Plus, Edit, Trash2, Bot, FileBraces, Download, Upload, Copy, Loader, 
-  Sparkles, Wrench, Zap, GitBranch, Cpu, Brain, MoreHorizontal, X, Star
+  Plus, Edit, Trash2, FileBraces, Download, Upload, Copy, Loader, 
+  Sparkles, Wrench, Zap, GitBranch, Cpu, Brain, MoreHorizontal, X, Star, LayoutGrid, List
 } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { useLanguage } from '../utils/i18n.js'
@@ -361,6 +403,7 @@ const usageCodeMap = ref({ curl: '', python: '', go: '' })
 const usageCodeRawMap = ref({ curl: '', python: '', go: '' })
 const confirmDialogRef = ref(null)
 const flippedCard = ref(null) // Track which card is flipped
+const agentDisplayMode = ref('cards')
 
 // Delete Confirmation Dialog State
 const showDeleteConfirmDialog = ref(false)

@@ -1,74 +1,94 @@
 <template>
-  <div class="h-full flex flex-col p-6 space-y-6">
-    <div class="flex items-center justify-between">
-      <div class="flex-1"></div>
-      <Button @click="handleCreate">
-        <Plus class="mr-2 h-4 w-4" />
-        {{ t('common.create') }}
-      </Button>
-    </div>
+  <div class="h-full overflow-y-auto bg-background">
+    <div class="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-6">
+      <div class="flex items-center justify-between gap-4 border-b border-border/55 pb-3">
+        <div class="min-w-0">
+          <h1 class="text-[15px] font-semibold tracking-tight text-foreground">{{ t('modelProvider.title') }}</h1>
+          <p class="text-[11px] text-muted-foreground">
+            {{ providers.length }} {{ t('modelProvider.count') }} · {{ t('modelProvider.description') }}
+          </p>
+        </div>
 
-    <div v-if="providers && providers.length > 0" class="border rounded-md">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{{ t('modelProvider.name') }}</TableHead>
-            <TableHead>{{ t('modelProvider.baseUrl') }}</TableHead>
-            <TableHead>{{ t('modelProvider.model') }}</TableHead>
-            <TableHead class="w-[100px]">{{ t('common.actions') }}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          <TableRow v-for="provider in providers" :key="provider.id">
-            <TableCell class="font-medium">
-               <div class="flex items-center gap-2">
-                 {{ provider.name }}
-                 <Badge v-if="provider.is_default" variant="secondary">{{ t('common.default') }}</Badge>
-               </div>
-            </TableCell>
-            <TableCell>{{ provider.base_url }}</TableCell>
-            <TableCell>
-              <Badge variant="outline">{{ provider.model }}</Badge>
-            </TableCell>
-            <TableCell>
-              <div class="flex items-center gap-2">
-                <Button variant="ghost" size="icon" @click="handleEdit(provider)">
-                  <Edit class="h-4 w-4" />
-                </Button>
-                <Button variant="ghost" size="icon" @click="handleDelete(provider)" :disabled="provider.is_default">
-                  <Trash2 class="h-4 w-4 text-destructive" />
-                </Button>
-              </div>
-            </TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
-    </div>
-    
-    <div v-else class="flex flex-col items-center justify-center py-12 text-center border rounded-md border-dashed">
-      <div class="p-4 rounded-full bg-muted/50 mb-4">
-        <Bot class="w-8 h-8 text-muted-foreground" />
+        <Button class="h-9 rounded-xl px-3.5" @click="handleCreate">
+          <Plus class="mr-2 h-4 w-4" />
+          {{ t('modelProvider.createTitle') }}
+        </Button>
       </div>
-      <h3 class="text-lg font-semibold">{{ t('modelProvider.noProviders') || 'No Providers' }}</h3>
-      <p class="text-sm text-muted-foreground mt-2 max-w-sm">
-        {{ t('modelProvider.noProvidersDesc') || 'Get started by creating your first model provider.' }}
-      </p>
-      <Button class="mt-6" @click="handleCreate">
-        <Plus class="mr-2 h-4 w-4" />
-        {{ t('modelProvider.createTitle') }}
-      </Button>
+
+      <div v-if="providers && providers.length > 0" class="overflow-hidden rounded-[22px] border border-border/60 bg-background/40">
+        <div
+          v-for="(provider, index) in providers"
+          :key="provider.id"
+          :class="[
+            'group grid grid-cols-[minmax(0,1.25fr),minmax(0,1fr),auto] items-center gap-4 px-5 py-4 transition-colors hover:bg-muted/20',
+            { 'border-t border-border/60': index > 0 }
+          ]"
+        >
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <h3 class="truncate text-[14px] font-semibold tracking-tight text-foreground">{{ provider.name }}</h3>
+              <Badge v-if="provider.is_default" variant="secondary" class="h-5 rounded-full px-2 text-[10px]">
+                {{ t('common.default') }}
+              </Badge>
+              <Badge v-if="provider.supports_multimodal" variant="outline" class="h-5 rounded-full px-2 text-[10px]">
+                {{ t('modelProvider.multimodalLabel') }}
+              </Badge>
+            </div>
+            <div class="mt-1 flex items-center gap-2 overflow-hidden text-[11px] text-muted-foreground">
+              <span class="truncate">{{ provider.base_url }}</span>
+            </div>
+          </div>
+
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 overflow-hidden">
+              <Badge variant="outline" class="h-6 max-w-full rounded-full px-2.5 text-[10px] font-medium">
+                <span class="truncate">{{ provider.model }}</span>
+              </Badge>
+            </div>
+            <div class="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span>max {{ provider.max_tokens ?? 4096 }}</span>
+              <span class="text-border/80">·</span>
+              <span>T {{ provider.temperature ?? 0.7 }}</span>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+            <Button variant="ghost" size="icon" class="h-8 w-8 rounded-full" @click="handleEdit(provider)">
+              <Edit class="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" class="h-8 w-8 rounded-full" @click="handleDelete(provider)" :disabled="provider.is_default">
+              <Trash2 class="h-4 w-4 text-destructive" />
+            </Button>
+          </div>
+        </div>
+      </div>
+    
+      <div v-else class="flex flex-col items-center justify-center rounded-[22px] border border-dashed border-border/60 bg-background/30 py-16 text-center">
+        <div class="mb-4 rounded-2xl border border-border/60 bg-muted/30 p-3">
+          <Bot class="h-7 w-7 text-muted-foreground" />
+        </div>
+        <h3 class="text-[15px] font-semibold tracking-tight">{{ t('modelProvider.noProviders') || 'No Providers' }}</h3>
+        <p class="mt-2 max-w-sm text-[12px] leading-5 text-muted-foreground">
+          {{ t('modelProvider.noProvidersDesc') || 'Get started by creating your first model provider.' }}
+        </p>
+        <Button class="mt-6 h-9 rounded-xl px-3.5" @click="handleCreate">
+          <Plus class="mr-2 h-4 w-4" />
+          {{ t('modelProvider.createTitle') }}
+        </Button>
+      </div>
     </div>
 
     <!-- Dialog -->
     <Dialog :open="dialogOpen" @update:open="dialogOpen = $event">
-      <DialogContent class="sm:max-w-[500px]">
+      <DialogContent class="sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>{{ isEdit ? t('modelProvider.editTitle') : t('modelProvider.createTitle') }}</DialogTitle>
         </DialogHeader>
-        <div class="grid gap-4 py-4">
-          <div class="grid gap-2">
-            <Label>{{ t('modelProvider.name') }} <span class="text-destructive">*</span></Label>
-            <div class="space-y-3">
+        <div class="grid gap-5 py-4">
+          <div class="grid gap-3 rounded-2xl border border-border/60 bg-muted/[0.18] p-4">
+            <div class="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{{ t('modelProvider.providerLabel') }}</div>
+            <div class="grid gap-3">
+              <Label>{{ t('modelProvider.name') }} <span class="text-destructive">*</span></Label>
               <Select :model-value="selectedProvider" @update:model-value="handleProviderChange">
                 <SelectTrigger>
                   <SelectValue :placeholder="t('modelProvider.selectProviderPlaceholder')" />
@@ -85,30 +105,28 @@
               
               <Input v-if="selectedProvider === 'Custom'" v-model="form.name" :placeholder="t('modelProvider.customNamePlaceholder')" />
             </div>
-          </div>
-          <div class="grid gap-2">
-            <Label>{{ t('modelProvider.baseUrl') }} <span class="text-destructive">*</span></Label>
-            <Input v-model="form.base_url" placeholder="https://api.openai.com/v1" @update:model-value="onKeyConfigChange" />
-          </div>
-          <div class="grid gap-2">
-            <div class="flex items-center justify-between">
-              <Label>{{ t('modelProvider.apiKey') }} <span class="text-destructive">*</span></Label>
-              <Button
-                v-if="currentProvider?.website"
-                variant="link"
-                size="sm"
-                class="h-auto p-0 text-primary"
-                @click="openProviderWebsite"
-              >
-                Get API Key
-                <ArrowRight class="ml-1 w-3 h-3" />
-              </Button>
+            <div class="grid gap-2">
+              <Label>{{ t('modelProvider.baseUrl') }} <span class="text-destructive">*</span></Label>
+              <Input v-model="form.base_url" placeholder="https://api.openai.com/v1" @update:model-value="onKeyConfigChange" />
             </div>
-            <Input v-model="form.api_keys_str" :placeholder="t('modelProvider.apiKeyPlaceholder')" @update:model-value="onKeyConfigChange" />
-          </div>
-          <div class="grid gap-2">
-             <Label>{{ t('modelProvider.model') }} <span class="text-destructive">*</span></Label>
-             <div class="space-y-3">
+            <div class="grid gap-2">
+              <div class="flex items-center justify-between">
+                <Label>{{ t('modelProvider.apiKey') }} <span class="text-destructive">*</span></Label>
+                <Button
+                  v-if="currentProvider?.website"
+                  variant="link"
+                  size="sm"
+                  class="h-auto p-0 text-primary"
+                  @click="openProviderWebsite"
+                >
+                  Get API Key
+                  <ArrowRight class="ml-1 h-3 w-3" />
+                </Button>
+              </div>
+              <Input v-model="form.api_keys_str" :placeholder="t('modelProvider.apiKeyPlaceholder')" @update:model-value="onKeyConfigChange" />
+            </div>
+            <div class="grid gap-2">
+              <Label>{{ t('modelProvider.model') }} <span class="text-destructive">*</span></Label>
                <Select :model-value="selectedModel" @update:model-value="handleModelChange">
                  <SelectTrigger>
                    <SelectValue :placeholder="t('modelProvider.modelPlaceholder')" />
@@ -123,36 +141,39 @@
                  </SelectContent>
                </Select>
                <Input v-if="selectedModel === 'Custom'" v-model="form.model" :placeholder="t('modelProvider.modelPlaceholder')" @update:model-value="onKeyConfigChange" />
-             </div>
+            </div>
           </div>
           
-          <div class="grid grid-cols-2 gap-4">
-            <div class="grid gap-2">
-              <Label>{{ t('agent.maxTokens') }}</Label>
-              <Input type="number" v-model.number="form.maxTokens" placeholder="4096" />
+          <div class="grid gap-3 rounded-2xl border border-border/60 bg-background/60 p-4">
+            <div class="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{{ t('modelProvider.parameters') }}</div>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="grid gap-2">
+                <Label>{{ t('agent.maxTokens') }}</Label>
+                <Input type="number" v-model.number="form.maxTokens" placeholder="4096" />
+              </div>
+              <div class="grid gap-2">
+                <Label>{{ t('agent.temperature') }}</Label>
+                <Input type="number" v-model.number="form.temperature" step="0.1" placeholder="0.7" />
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="grid gap-2">
+                <Label>{{ t('agent.topP') }}</Label>
+                <Input type="number" v-model.number="form.topP" step="0.1" placeholder="0.9" />
+              </div>
+              <div class="grid gap-2">
+                <Label>{{ t('agent.presencePenalty') }}</Label>
+                <Input type="number" v-model.number="form.presencePenalty" step="0.1" placeholder="0.0" />
+              </div>
             </div>
             <div class="grid gap-2">
-              <Label>{{ t('agent.temperature') }}</Label>
-              <Input type="number" v-model.number="form.temperature" step="0.1" placeholder="0.7" />
+                <Label>{{ t('agent.maxModelLen') }}</Label>
+                <Input type="number" v-model.number="form.maxModelLen" placeholder="32000" />
             </div>
-          </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div class="grid gap-2">
-              <Label>{{ t('agent.topP') }}</Label>
-              <Input type="number" v-model.number="form.topP" step="0.1" placeholder="0.9" />
-            </div>
-            <div class="grid gap-2">
-              <Label>{{ t('agent.presencePenalty') }}</Label>
-              <Input type="number" v-model.number="form.presencePenalty" step="0.1" placeholder="0.0" />
-            </div>
-          </div>
-          <div class="grid gap-2">
-              <Label>{{ t('agent.maxModelLen') }}</Label>
-              <Input type="number" v-model.number="form.maxModelLen" placeholder="32000" />
           </div>
 
           <!-- 多模态支持 -->
-          <div class="grid gap-3">
+          <div class="grid gap-3 rounded-2xl border border-border/60 bg-background/60 p-4">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
                 <Checkbox id="multimodal" v-model:checked="form.supportsMultimodal" />
@@ -207,18 +228,9 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import {
   Dialog,
   DialogContent,
