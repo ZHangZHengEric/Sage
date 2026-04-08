@@ -1,12 +1,12 @@
 <template>
   <div class="flex h-full flex-col bg-background">
-    <div class="sticky top-0 z-10 flex h-[60px] flex-none items-center border-b border-border/40 bg-background/80 px-4 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
-      <div class="h-full flex-1" />
+    <div class="sticky top-0 z-10 flex min-h-[60px] flex-none flex-wrap items-center gap-2 border-b border-border/40 bg-background/80 px-3 py-2 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60 sm:px-4">
+      <div class="hidden h-full min-w-0 flex-1 md:block" />
 
-      <div class="flex items-center gap-2">
+      <div class="flex w-full items-center justify-between gap-2 md:w-auto md:justify-end">
         <!-- Agent 选择器 - 紧凑网格布局 -->
         <Select :model-value="selectedAgentId" @update:model-value="handleAgentChange">
-          <SelectTrigger class="h-9 w-[172px] rounded-full border border-border/80 bg-background/88 px-3 shadow-[0_10px_30px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.22)] transition-all hover:border-border hover:bg-background focus:ring-2 focus:ring-primary/20 dark:border-white/12 dark:bg-[rgba(20,24,31,0.82)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.06)] dark:hover:border-white/18 dark:hover:bg-[rgba(24,29,37,0.9)]">
+          <SelectTrigger class="h-9 w-[148px] min-w-0 rounded-full border border-border/80 bg-background/88 px-3 shadow-[0_10px_30px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.22)] transition-all hover:border-border hover:bg-background focus:ring-2 focus:ring-primary/20 sm:w-[172px] dark:border-white/12 dark:bg-[rgba(20,24,31,0.82)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.06)] dark:hover:border-white/18 dark:hover:bg-[rgba(24,29,37,0.9)]">
             <div class="flex items-center gap-2 w-full">
               <!-- Agent 头像 -->
               <div class="w-5 h-5 rounded-full overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/15">
@@ -95,7 +95,7 @@
           </div>
         </TooltipProvider>
 
-        <div class="mx-0.5 h-5 w-px bg-border/80 dark:bg-white/10"></div>
+        <div class="mx-0.5 hidden h-5 w-px bg-border/80 dark:bg-white/10 sm:block"></div>
 
         <TooltipProvider>
           <div class="flex items-center gap-1.5">
@@ -238,7 +238,7 @@
           <div ref="messagesEndRef" />
         </div>
 
-        <div class="flex-none px-4 pt-4 pb-0 bg-background" v-if="selectedAgent">
+      <div class="flex-none px-4 pt-4 pb-0 bg-background" v-if="selectedAgent">
           <div class="w-full max-w-[800px] mx-auto">
             <div class="flex justify-start items-start pb-2 pr-1">
               <Button
@@ -769,5 +769,12 @@ watch(
 .panel-leave-to {
   opacity: 0;
   transform: translateX(100%);
+}
+
+@media (max-width: 640px) {
+  .panel-enter-from,
+  .panel-leave-to {
+    transform: translateY(12px);
+  }
 }
 </style>

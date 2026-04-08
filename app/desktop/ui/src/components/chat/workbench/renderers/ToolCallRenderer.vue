@@ -1,12 +1,12 @@
 <template>
   <div class="tool-call-renderer h-full flex flex-col overflow-hidden">
     <!-- 整合头部 -->
-    <div class="flex items-center justify-between px-3 py-2.5 bg-muted/30 border-b border-border flex-none h-12">
-      <div class="flex items-center gap-2 min-w-0">
+    <div class="workbench-header flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border bg-muted/30 px-3 py-2.5 flex-none">
+      <div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
         <span class="font-medium text-sm" :class="roleColor">{{ roleLabel }}</span>
-        <span class="text-muted-foreground/50">|</span>
+        <span class="header-divider text-muted-foreground/50">|</span>
         <span class="text-sm text-muted-foreground">{{ formatTime(item?.timestamp) }}</span>
-        <span class="text-muted-foreground/50">|</span>
+        <span class="header-divider text-muted-foreground/50">|</span>
         <component :is="toolIcon" class="w-4 h-4 text-primary flex-shrink-0" />
         <span class="text-sm font-medium truncate">{{ displayToolName }}</span>
         <Badge v-if="toolResultStatus" :variant="toolResultStatus.variant" class="text-xs flex-shrink-0">
@@ -17,11 +17,11 @@
       <Button
         variant="ghost"
         size="sm"
-        class="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+        class="workbench-action-button h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
         @click="showRawDataDialog = true"
       >
-        <Code class="w-3 h-3 mr-1" />
-        {{ t('workbench.tool.rawData') }}
+        <Code class="w-3 h-3 sm:mr-1" />
+        <span class="workbench-action-label">{{ t('workbench.tool.rawData') }}</span>
       </Button>
     </div>
 
@@ -1373,6 +1373,18 @@ onMounted(() => {
 <style scoped>
 .shell-container {
   font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+}
+
+@media (max-width: 520px) {
+  .workbench-action-label,
+  .header-divider {
+    display: none;
+  }
+
+  .workbench-action-button {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
 }
 
 .shell-header {

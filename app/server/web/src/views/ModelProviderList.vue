@@ -72,152 +72,301 @@
 
     <!-- Dialog -->
     <Dialog :open="dialogOpen" @update:open="dialogOpen = $event">
-      <DialogContent class="sm:max-w-[500px]">
-        <DialogHeader>
-          <DialogTitle>{{ isEdit ? t('modelProvider.editTitle') : t('modelProvider.createTitle') }}</DialogTitle>
+      <DialogContent class="flex h-[760px] max-h-[86vh] flex-col overflow-hidden border-border/60 bg-background p-0 sm:max-w-[760px]">
+        <DialogHeader class="border-b border-border/60 px-6 py-5 text-left">
+          <DialogTitle class="text-[16px] font-semibold tracking-tight">
+            {{ isEdit ? t('modelProvider.editTitle') : t('modelProvider.createTitle') }}
+          </DialogTitle>
         </DialogHeader>
-        <div class="grid gap-4 py-4">
-          <div class="grid gap-2">
-            <Label>{{ t('modelProvider.name') }} <span class="text-destructive">*</span></Label>
-            <div class="space-y-3">
-              <Select :model-value="selectedProvider" @update:model-value="handleProviderChange">
-                <SelectTrigger>
-                  <SelectValue :placeholder="t('modelProvider.selectProviderPlaceholder')" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem v-for="provider in MODEL_PROVIDERS" :key="provider.name" :value="provider.name">
-                      {{ provider.name }}
-                    </SelectItem>
-                    <SelectItem value="Custom">{{ t('modelProvider.custom') }}</SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              
-              <Input v-if="selectedProvider === 'Custom'" v-model="form.name" :placeholder="t('modelProvider.customNamePlaceholder')" />
-            </div>
-          </div>
-          <div class="grid gap-2">
-            <Label>{{ t('modelProvider.baseUrl') }} <span class="text-destructive">*</span></Label>
-            <Input v-model="form.base_url" placeholder="https://api.openai.com/v1" @update:model-value="onKeyConfigChange" />
-          </div>
-          <div class="grid gap-2">
-            <div class="flex items-center justify-between">
-              <Label>{{ t('modelProvider.apiKey') }} <span class="text-destructive">*</span></Label>
-              <Button
-                v-if="currentProvider?.website"
-                variant="link"
-                size="sm"
-                class="h-auto p-0 text-primary"
-                @click="openProviderWebsite"
-              >
-                Get API Key
-                <ArrowRight class="ml-1 w-3 h-3" />
-              </Button>
-            </div>
-            <Input
-              v-model="form.api_keys_str"
-              :placeholder="t('modelProvider.apiKeyPlaceholder')"
-              @update:model-value="handleApiKeyChange"
-            />
-          </div>
-          <div class="grid gap-2">
-             <div class="flex items-center justify-between">
-               <Label>{{ t('modelProvider.model') }} <span class="text-destructive">*</span></Label>
-               <Button
-                 v-if="currentProvider?.model_list_url"
-                 variant="link"
-                 size="sm"
-                 class="h-auto p-0 text-primary"
-                 @click="openProviderModelList"
-               >
-                 {{ t('modelProvider.viewModelList') }}
-                 <ArrowRight class="ml-1 w-3 h-3" />
-               </Button>
-             </div>
-             <div v-if="currentProvider?.models?.length" class="flex gap-2">
-               <div class="flex-1 relative">
-                  <Input
-                     v-model="form.model"
-                     :placeholder="t('modelProvider.modelPlaceholder')"
-                     class="pr-10"
-                     @update:model-value="onKeyConfigChange"
-                  />
-                  <div class="absolute right-0 top-0 h-full">
-                     <Select :model-value="''" @update:model-value="(val) => { form.model = val; onKeyConfigChange(); }">
-                        <SelectTrigger class="h-full w-8 px-0 border-l-0 rounded-l-none focus:ring-0">
-                          <span class="sr-only">Select model</span>
-                        </SelectTrigger>
-                        <SelectContent align="end" class="min-w-[200px]">
-                          <SelectItem v-for="m in currentProvider.models" :key="m" :value="m">
-                            {{ m }}
-                          </SelectItem>
-                        </SelectContent>
-                     </Select>
-                  </div>
-               </div>
-             </div>
-             <Input v-else v-model="form.model" :placeholder="t('modelProvider.modelPlaceholder')" @update:model-value="onKeyConfigChange" />
-             <p class="text-xs text-muted-foreground">{{ t('modelProvider.modelHint') }}</p>
-          </div>
-          
-          <div class="grid grid-cols-2 gap-4">
-            <div class="grid gap-2">
-              <Label>{{ t('agent.maxTokens') }}</Label>
-              <Input type="number" v-model.number="form.maxTokens" placeholder="4096" />
-            </div>
-            <div class="grid gap-2">
-              <Label>{{ t('agent.temperature') }}</Label>
-              <Input type="number" v-model.number="form.temperature" step="0.1" placeholder="0.7" />
-            </div>
-          </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div class="grid gap-2">
-              <Label>{{ t('agent.topP') }}</Label>
-              <Input type="number" v-model.number="form.topP" step="0.1" placeholder="0.9" />
-            </div>
-            <div class="grid gap-2">
-              <Label>{{ t('agent.presencePenalty') }}</Label>
-              <Input type="number" v-model.number="form.presencePenalty" step="0.1" placeholder="0.0" />
-            </div>
-          </div>
-          <div class="grid gap-2">
-              <Label>{{ t('agent.maxModelLen') }}</Label>
-              <Input type="number" v-model.number="form.maxModelLen" placeholder="32000" />
-          </div>
 
-          <!-- 多模态支持 -->
-          <div class="grid gap-3">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <Checkbox id="multimodal" v-model:checked="form.supportsMultimodal" />
-                <Label for="multimodal" class="cursor-pointer">{{ t('modelProvider.multimodalLabel') }}</Label>
+        <div class="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          <div class="grid gap-4 lg:grid-cols-[260px,minmax(0,1fr)] lg:items-start">
+            <div class="grid gap-4 lg:sticky lg:top-0">
+              <div class="rounded-2xl border border-border/60 bg-muted/[0.14] p-4">
+                <div class="flex items-start gap-3">
+                  <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-background ring-1 ring-border/60">
+                    <Link2 class="h-4 w-4 text-foreground/80" />
+                  </div>
+                  <div class="min-w-0">
+                    <div class="text-[14px] font-semibold tracking-tight text-foreground">
+                      {{ form.name || selectedProvider || t('modelProvider.newSource') }}
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mt-4 flex flex-wrap items-center gap-2">
+                  <Badge :variant="verificationBadgeVariant" class="h-6 rounded-full px-2.5 text-[10px]">
+                    {{ verificationBadgeLabel }}
+                  </Badge>
+                  <Badge variant="outline" class="h-6 rounded-full px-2.5 text-[10px] font-medium">
+                    {{ selectedProvider && selectedProvider !== 'Custom' ? selectedProvider : t('modelProvider.customProviderBadge') }}
+                  </Badge>
+                  <Badge variant="outline" class="h-6 rounded-full px-2.5 text-[10px] font-medium">
+                    {{ apiKeyCount > 0 ? t('modelProvider.apiKeyCount', { count: apiKeyCount }) : t('modelProvider.apiKeyEmpty') }}
+                  </Badge>
+                  <Badge variant="outline" class="h-6 max-w-full rounded-full px-2.5 text-[10px] font-medium">
+                    <span class="truncate">{{ form.model || t('modelProvider.modelUnselected') }}</span>
+                  </Badge>
+                </div>
               </div>
-              <Button
-                v-if="form.supportsMultimodal"
-                type="button"
-                variant="outline"
-                size="sm"
-                @click="handleVerifyMultimodal"
-                :disabled="verifyingMultimodal || !form.model"
-              >
-                <Loader v-if="verifyingMultimodal" class="mr-2 h-4 w-4 animate-spin" />
-                {{ multimodalVerified ? t('modelProvider.multimodalVerified') : t('modelProvider.multimodalVerify') }}
-              </Button>
+
+              <div class="rounded-2xl border border-border/60 bg-background/70 p-4">
+                <div class="flex items-center justify-between gap-3">
+                  <div class="flex items-center gap-2">
+                    <h3 class="text-[13px] font-semibold tracking-tight text-foreground">{{ t('modelProvider.verificationSection') }}</h3>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger as-child>
+                          <button class="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground">
+                            <CircleHelp class="h-3.5 w-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="right" class="max-w-[220px] text-[12px] leading-5">
+                          {{ t('modelProvider.verifyCapabilitiesHint') }}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                </div>
+
+                <div class="mt-3 flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" class="h-6 rounded-full px-2.5 text-[10px] font-medium">
+                    {{ capabilityBadgeLabel }}
+                  </Badge>
+                  <Badge variant="outline" class="h-6 rounded-full px-2.5 text-[10px] font-medium">
+                    {{ capabilityDetailLabel }}
+                  </Badge>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <button class="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground">
+                          <CircleHelp class="h-3.5 w-3.5" />
+                        </button>
+                        </TooltipTrigger>
+                      <TooltipContent side="right" class="max-w-[220px] text-[12px] leading-5">
+                        {{ verificationHint }}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+
+                <div class="mt-3">
+                  <Button type="button" variant="secondary" class="h-9 w-full rounded-xl" @click="handleVerify" :disabled="verifying">
+                    <Loader v-if="verifying" class="mr-2 h-4 w-4 animate-spin" />
+                    {{ verifyButtonLabel }}
+                  </Button>
+                </div>
+              </div>
             </div>
-            <p v-if="form.supportsMultimodal && !multimodalVerified" class="text-xs text-amber-600">
-              {{ t('modelProvider.multimodalVerifyHint') }}
-            </p>
+
+            <div class="grid gap-4">
+              <div class="rounded-2xl border border-border/60 bg-background/70 p-4">
+                <div class="flex items-start justify-between gap-4">
+                  <div class="flex items-center gap-2">
+                    <h3 class="text-[13px] font-semibold tracking-tight text-foreground">{{ t('modelProvider.connectionSection') }}</h3>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger as-child>
+                          <button class="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground">
+                            <CircleHelp class="h-3.5 w-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" class="max-w-[220px] text-[12px] leading-5">
+                          {{ t('modelProvider.connectionSectionHint') }}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <Button
+                      v-if="currentProvider?.website"
+                      variant="ghost"
+                      size="sm"
+                      class="h-8 rounded-lg px-2.5 text-[12px]"
+                      @click="openProviderWebsite"
+                    >
+                      Get API Key
+                      <ArrowRight class="ml-1 h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      v-if="currentProvider?.model_list_url"
+                      variant="ghost"
+                      size="sm"
+                      class="h-8 rounded-lg px-2.5 text-[12px]"
+                      @click="openProviderModelList"
+                    >
+                      {{ t('modelProvider.viewModels') }}
+                      <ArrowRight class="ml-1 h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div class="mt-4 grid gap-4 md:grid-cols-2">
+                  <div class="grid gap-2">
+                    <Label>{{ t('modelProvider.providerType') }} <span class="text-destructive">*</span></Label>
+                    <Select :model-value="selectedProvider" @update:model-value="handleProviderChange">
+                      <SelectTrigger class="h-10 rounded-xl">
+                        <SelectValue :placeholder="t('modelProvider.selectProviderPlaceholder')" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem v-for="provider in MODEL_PROVIDERS" :key="provider.name" :value="provider.name">
+                            {{ provider.name }}
+                          </SelectItem>
+                          <SelectItem value="Custom">{{ t('modelProvider.custom') }}</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div class="grid gap-2">
+                    <Label>{{ t('modelProvider.baseUrl') }} <span class="text-destructive">*</span></Label>
+                    <Input
+                      v-model="form.base_url"
+                      class="h-10 rounded-xl"
+                      placeholder="https://api.openai.com/v1"
+                      @update:model-value="onKeyConfigChange"
+                    />
+                  </div>
+
+                  <div v-if="selectedProvider === 'Custom'" class="grid gap-2">
+                    <Label>{{ t('modelProvider.name') }} <span class="text-destructive">*</span></Label>
+                    <Input
+                      v-model="form.name"
+                      class="h-10 rounded-xl"
+                      :placeholder="t('modelProvider.customNamePlaceholder')"
+                      @update:model-value="onKeyConfigChange"
+                    />
+                  </div>
+
+                  <div class="grid gap-2 md:col-span-2">
+                    <Label>{{ t('modelProvider.apiKey') }} <span class="text-destructive">*</span></Label>
+                    <div class="relative">
+                      <Input
+                        v-model="form.api_keys_str"
+                        class="h-10 rounded-xl pr-11"
+                        :type="showApiKey ? 'text' : 'password'"
+                        :placeholder="t('modelProvider.apiKeyPlaceholder')"
+                        @update:model-value="handleApiKeyChange"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        class="absolute right-1 top-1 h-8 w-8 rounded-lg text-muted-foreground"
+                        @click="showApiKey = !showApiKey"
+                      >
+                        <Eye v-if="showApiKey" class="h-4 w-4" />
+                        <EyeOff v-else class="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div :class="selectedProvider === 'Custom' ? 'grid gap-2' : 'grid gap-2 md:col-span-2'">
+                    <div class="flex items-center gap-2">
+                      <Label>{{ t('modelProvider.model') }} <span class="text-destructive">*</span></Label>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger as-child>
+                            <button class="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground">
+                              <CircleHelp class="h-3.5 w-3.5" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" class="max-w-[220px] text-[12px] leading-5">
+                            {{ t('modelProvider.modelPickerHint') }}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
+                    <div class="relative">
+                      <Input
+                        v-model="form.model"
+                        class="h-10 rounded-xl pr-11"
+                        :placeholder="t('modelProvider.modelPlaceholder')"
+                        @update:model-value="onKeyConfigChange"
+                      />
+                      <div v-if="hasRecommendedModels" class="absolute right-1 top-1">
+                        <Select :model-value="''" @update:model-value="handleModelQuickPick">
+                          <SelectTrigger class="h-8 w-8 rounded-lg border-border/60 px-0">
+                            <span class="sr-only">Select model</span>
+                            <ChevronsUpDown class="h-3.5 w-3.5" />
+                          </SelectTrigger>
+                          <SelectContent align="end" class="min-w-[220px]">
+                            <SelectItem v-for="model in currentProvider.models" :key="model" :value="model">
+                              {{ model }}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <Collapsible v-model:open="advancedOpen" class="rounded-2xl border border-border/60 bg-background/70 p-4">
+                <div class="flex items-center justify-between gap-4">
+                  <div class="flex items-center gap-2">
+                    <h3 class="text-[13px] font-semibold tracking-tight text-foreground">{{ t('modelProvider.advancedSection') }}</h3>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger as-child>
+                          <button class="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground">
+                            <CircleHelp class="h-3.5 w-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" class="max-w-[220px] text-[12px] leading-5">
+                          {{ t('modelProvider.advancedHint') }}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                  <CollapsibleTrigger as-child>
+                    <Button type="button" variant="ghost" size="sm" class="h-8 rounded-lg px-2.5 text-[12px]">
+                      {{ advancedOpen ? t('common.collapse') : t('common.expand') }}
+                      <ChevronDown class="ml-1 h-3.5 w-3.5 transition-transform" :class="{ 'rotate-180': advancedOpen }" />
+                    </Button>
+                  </CollapsibleTrigger>
+                </div>
+
+                <CollapsibleContent class="pt-4">
+                  <Separator class="bg-border/60" />
+                  <div class="max-h-56 overflow-y-auto pt-4">
+                    <div class="grid gap-4 md:grid-cols-2">
+                      <div class="grid gap-2">
+                        <Label>{{ t('agent.maxTokens') }}</Label>
+                        <Input type="number" v-model.number="form.maxTokens" class="h-10 rounded-xl" placeholder="4096" />
+                      </div>
+                      <div class="grid gap-2">
+                        <Label>{{ t('agent.temperature') }}</Label>
+                        <Input type="number" v-model.number="form.temperature" class="h-10 rounded-xl" step="0.1" placeholder="0.7" />
+                      </div>
+                      <div class="grid gap-2">
+                        <Label>{{ t('agent.topP') }}</Label>
+                        <Input type="number" v-model.number="form.topP" class="h-10 rounded-xl" step="0.1" placeholder="0.9" />
+                      </div>
+                      <div class="grid gap-2">
+                        <Label>{{ t('agent.presencePenalty') }}</Label>
+                        <Input type="number" v-model.number="form.presencePenalty" class="h-10 rounded-xl" step="0.1" placeholder="0.0" />
+                      </div>
+                      <div class="grid gap-2 md:col-span-2">
+                        <Label>{{ t('agent.maxModelLen') }}</Label>
+                        <Input type="number" v-model.number="form.maxModelLen" class="h-10 rounded-xl" placeholder="32000" />
+                      </div>
+                    </div>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            </div>
           </div>
         </div>
-        <DialogFooter class="flex sm:justify-between items-center w-full">
-          <Button type="button" variant="secondary" @click="handleVerify" :disabled="verifying">
-            <Loader v-if="verifying" class="mr-2 h-4 w-4 animate-spin" />
-            {{ t('common.verify') }}
-          </Button>
+
+        <DialogFooter class="flex w-full items-center border-t border-border/60 px-6 py-4 sm:justify-between">
+          <p class="text-[11px] leading-5 text-muted-foreground">
+            {{ footerStatusHint }}
+          </p>
           <div class="flex gap-2">
-            <Button variant="outline" @click="dialogOpen = false">{{ t('common.cancel') }}</Button>
-            <Button @click="submitForm" :disabled="!canSave">{{ t('common.save') }}</Button>
+            <Button variant="outline" class="h-9 rounded-xl px-3.5" @click="dialogOpen = false">{{ t('common.cancel') }}</Button>
+            <Button class="h-9 rounded-xl px-3.5" @click="submitForm" :disabled="!canSave">{{ t('common.save') }}</Button>
           </div>
         </DialogFooter>
       </DialogContent>
@@ -227,21 +376,31 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
-import { Plus, Edit, Trash2, Bot, ArrowRight, Loader } from 'lucide-vue-next'
+import { Plus, Edit, Trash2, Bot, ArrowRight, Loader, Eye, EyeOff, ChevronDown, ChevronsUpDown, Link2, CircleHelp } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { Checkbox } from '@/components/ui/checkbox'
+import { Separator } from '@/components/ui/separator'
 import {
   Select,
   SelectContent,
   SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import {
   Table,
   TableBody,
@@ -271,8 +430,9 @@ const isEdit = ref(false)
 const currentId = ref(null)
 const verifying = ref(false)
 const verified = ref(false)
-const verifyingMultimodal = ref(false)
-const multimodalVerified = ref(false)
+const capabilityChecked = ref(false)
+const showApiKey = ref(false)
+const advancedOpen = ref(false)
 
 // Basic form state
 const form = reactive({
@@ -292,16 +452,85 @@ const form = reactive({
 const originalValues = reactive({
   base_url: '',
   api_keys_str: '',
-  model: '',
-  supportsMultimodal: false
+  model: ''
 })
 
 const selectedProvider = ref('')
 const currentProvider = computed(() => MODEL_PROVIDERS.find(p => p.name === selectedProvider.value))
+const hasRecommendedModels = computed(() => Array.isArray(currentProvider.value?.models) && currentProvider.value.models.length > 0)
+const apiKeyCount = computed(() => buildApiKeys().length)
+const hasRequiredFields = computed(() =>
+  Boolean(form.name.trim() && form.base_url.trim() && buildApiKeys().length > 0 && form.model.trim())
+)
+const configChanged = computed(() =>
+  form.base_url !== originalValues.base_url ||
+  form.api_keys_str !== originalValues.api_keys_str ||
+  form.model !== originalValues.model
+)
+const needsCapabilityVerification = computed(() => {
+  if (!hasRequiredFields.value) return false
+  if (!isEdit.value) return !capabilityChecked.value
+  return configChanged.value && !capabilityChecked.value
+})
+const verificationBadgeLabel = computed(() => {
+  if (verifying.value) return t('modelProvider.verifying')
+  if (!hasRequiredFields.value) return t('modelProvider.pendingConfig')
+  if (needsCapabilityVerification.value) return t('modelProvider.pendingVerification')
+  if (capabilityChecked.value || isEdit.value) return t('modelProvider.readyToSave')
+  return t('modelProvider.pendingConfig')
+})
+const verificationBadgeVariant = computed(() => {
+  if (verifying.value) return 'secondary'
+  if (needsCapabilityVerification.value || !hasRequiredFields.value) return 'outline'
+  return 'secondary'
+})
+const verificationHint = computed(() => {
+  if (verifying.value) {
+    return t('modelProvider.verificationCheckingHint')
+  }
+  if (!hasRequiredFields.value) {
+    return t('modelProvider.verificationConfigHint')
+  }
+  if (needsCapabilityVerification.value) {
+    return t('modelProvider.verificationChangedHint')
+  }
+  if (form.supportsMultimodal) {
+    return t('modelProvider.verificationMultimodalHint')
+  }
+  if (capabilityChecked.value || isEdit.value) {
+    return t('modelProvider.verificationTextHint')
+  }
+  return t('modelProvider.verificationReadyHint')
+})
+const capabilityBadgeLabel = computed(() => {
+  if (verifying.value) return t('modelProvider.capabilityChecking')
+  if (!capabilityChecked.value) return t('modelProvider.capabilityUnknown')
+  return form.supportsMultimodal ? t('modelProvider.capabilityMultimodal') : t('modelProvider.capabilityTextOnly')
+})
+const capabilityDetailLabel = computed(() => {
+  if (verifying.value) return t('modelProvider.capabilityRecognizing')
+  if (!capabilityChecked.value) return t('modelProvider.capabilityUnverified')
+  return form.supportsMultimodal ? t('modelProvider.imageInputAvailable') : t('modelProvider.imageInputUnavailable')
+})
+const footerStatusHint = computed(() => {
+  if (verifying.value) return t('modelProvider.footerVerifyingHint')
+  if (!hasRequiredFields.value) return t('modelProvider.footerFillRequiredHint')
+  if (needsCapabilityVerification.value) return t('modelProvider.footerNeedVerificationHint')
+  if (isEdit.value && !configChanged.value) return t('modelProvider.footerUnchangedHint')
+  if (form.supportsMultimodal) return t('modelProvider.footerMultimodalReadyHint')
+  return t('modelProvider.footerReadyHint')
+})
+const verifyButtonLabel = computed(() => {
+  if (verifying.value) return t('modelProvider.verifying')
+  return capabilityChecked.value ? t('modelProvider.reverifyCapabilities') : t('modelProvider.verifyCapabilities')
+})
 
 const buildApiKeys = () => {
-  const apiKey = form.api_keys_str.trim()
-  return apiKey ? [apiKey] : []
+  return form.api_keys_str
+    .trim()
+    .split(/[\n,]+/)
+    .map((key) => key.trim())
+    .filter(Boolean)
 }
 
 const buildProviderPayload = () => ({
@@ -316,42 +545,17 @@ const buildProviderPayload = () => ({
   max_model_len: form.maxModelLen,
   supports_multimodal: form.supportsMultimodal
 })
+const resetCapabilityState = () => {
+  verified.value = false
+  capabilityChecked.value = false
+  form.supportsMultimodal = false
+}
 
 // 保存按钮是否可点击
 const canSave = computed(() => {
-  if (!isEdit.value) {
-    // 新建模式：根据多模态开关决定需要哪种验证
-    if (form.supportsMultimodal) {
-      return multimodalVerified.value
-    } else {
-      return verified.value
-    }
-  }
-
-  // 编辑模式
-  // 检查关键配置是否发生变化
-  const configChanged =
-    form.base_url !== originalValues.base_url ||
-    form.api_keys_str !== originalValues.api_keys_str ||
-    form.model !== originalValues.model
-
-  // 检查多模态是否从关闭变为开启
-  const multimodalNewlyEnabled = form.supportsMultimodal && !originalValues.supportsMultimodal
-
-  if (multimodalNewlyEnabled) {
-    // 新开启多模态，必须验证多模态
-    return multimodalVerified.value
-  } else if (configChanged) {
-    // 关键配置变化，根据当前多模态状态决定验证类型
-    if (form.supportsMultimodal) {
-      return multimodalVerified.value
-    } else {
-      return verified.value
-    }
-  }
-
-  // 没有变化，可以保存
-  return true
+  if (!hasRequiredFields.value) return false
+  if (verifying.value) return false
+  return !needsCapabilityVerification.value
 })
 
 const handleProviderChange = (val) => {
@@ -360,30 +564,29 @@ const handleProviderChange = (val) => {
     form.name = ''
     form.base_url = ''
     form.model = ''
-    verified.value = false
-    multimodalVerified.value = false
-    form.supportsMultimodal = false
+    resetCapabilityState()
     return
   }
   const provider = MODEL_PROVIDERS.find(p => p.name === val)
   if (provider) {
     form.name = provider.name
     form.base_url = provider.base_url
-    // form.model = provider.models[0] || ''
+    form.model = provider.models?.[0] || ''
   }
-  verified.value = false
-  multimodalVerified.value = false
-  form.supportsMultimodal = false
+  resetCapabilityState()
 }
 
 const onKeyConfigChange = () => {
-  // 当关键配置变化时，重置验证状态
-  verified.value = false
-  multimodalVerified.value = false
+  resetCapabilityState()
 }
 
 const handleApiKeyChange = (value) => {
   form.api_keys_str = `${value ?? ''}`.split(/\r?\n/, 1)[0]
+  onKeyConfigChange()
+}
+
+const handleModelQuickPick = (val) => {
+  form.model = val
   onKeyConfigChange()
 }
 
@@ -429,12 +632,13 @@ const handleCreate = () => {
   form.maxModelLen = 64000
   form.supportsMultimodal = false
   verified.value = false
-  multimodalVerified.value = false
+  capabilityChecked.value = false
+  showApiKey.value = false
+  advancedOpen.value = false
   // 清空原始值
   originalValues.base_url = ''
   originalValues.api_keys_str = ''
   originalValues.model = ''
-  originalValues.supportsMultimodal = false
   dialogOpen.value = true
 }
 
@@ -453,7 +657,11 @@ const handleEdit = (provider) => {
   // Ideally we should mask them.
   // But for editing we need them.
   // The backend router returns full DTO.
-  form.api_keys_str = `${provider.api_keys?.[0] || ''}`.trim()
+  let keys = provider.api_keys
+  if (!Array.isArray(keys)) {
+    keys = (typeof keys === 'string' && keys) ? [keys] : []
+  }
+  form.api_keys_str = keys.join(',')
   form.model = provider.model
   form.maxTokens = provider.max_tokens ?? 4096
   form.temperature = provider.temperature ?? 0.7
@@ -464,13 +672,14 @@ const handleEdit = (provider) => {
 
   // 保存原始值用于比较
   originalValues.base_url = provider.base_url
-  originalValues.api_keys_str = `${provider.api_keys?.[0] || ''}`.trim()
+  originalValues.api_keys_str = keys.join(',')
   originalValues.model = provider.model
-  originalValues.supportsMultimodal = provider.supports_multimodal ?? false
 
   // 编辑模式初始状态设为已验证（如果没有变化）
   verified.value = true
-  multimodalVerified.value = form.supportsMultimodal
+  capabilityChecked.value = true
+  showApiKey.value = false
+  advancedOpen.value = false
 
   dialogOpen.value = true
 }
@@ -499,62 +708,41 @@ const handleVerify = async () => {
   try {
     await modelProviderAPI.verifyModelProvider(data)
     verified.value = true
-    toast.success(t('common.verifySuccess'))
+    form.supportsMultimodal = false
+
+    try {
+      const res = await modelProviderAPI.verifyMultimodal(data)
+      form.supportsMultimodal = Boolean(res?.supports_multimodal)
+      if (form.supportsMultimodal) {
+        toast.success(res?.recognized ? t('modelProvider.multimodalRecognized') : t('modelProvider.connectionVerifiedMultimodal'))
+      } else {
+        toast.success(t('modelProvider.connectionVerifiedTextOnly'))
+      }
+    } catch (error) {
+      console.warn('Multimodal capability probe failed:', error)
+      form.supportsMultimodal = false
+      toast.success(t('modelProvider.connectionVerifiedCapabilityUnknown'))
+    }
+
+    capabilityChecked.value = true
   } catch (error) {
-    verified.value = false
+    resetCapabilityState()
     toast.error(error.message || t('modelProvider.verifyFailed'))
   } finally {
     verifying.value = false
   }
 }
 
-const handleVerifyMultimodal = async () => {
-  if (!form.model) {
-    toast.error(t('modelProvider.fillModelNameFirst'))
-    return
-  }
-
-  verifyingMultimodal.value = true
-  try {
-    const data = buildProviderPayload()
-    const res = await modelProviderAPI.verifyMultimodal(data)
-    if (res?.supports_multimodal) {
-      multimodalVerified.value = true
-      if (res?.recognized) {
-        toast.success(t('modelProvider.multimodalRecognized'))
-      } else {
-        toast.success(t('modelProvider.multimodalNotRecognized'))
-      }
-    } else {
-      multimodalVerified.value = false
-      toast.warning(t('modelProvider.multimodalNotSupported'))
-      form.supportsMultimodal = false
-    }
-  } catch (error) {
-    console.error('Failed to verify multimodal:', error)
-    multimodalVerified.value = false
-    toast.error(error.message || t('modelProvider.multimodalVerifyFailed'))
-  } finally {
-    verifyingMultimodal.value = false
-  }
-}
-
 const submitForm = async () => {
   const data = buildProviderPayload()
 
-  // 如果开启多模态，必须验证多模态；否则必须验证连接（新建时）
-  if (!isEdit.value) {
-    if (form.supportsMultimodal) {
-      if (!multimodalVerified.value) {
-        toast.error(t('modelProvider.verifyMultimodalFirst'))
-        return
-      }
-    } else {
-      if (!verified.value) {
-        toast.error(t('modelProvider.verifyConnectionFirst'))
-        return
-      }
-    }
+  if (!hasRequiredFields.value) {
+    toast.error(t('common.fillRequired'))
+    return
+  }
+  if (needsCapabilityVerification.value) {
+    toast.error(t('modelProvider.verifyCapabilitiesFirst'))
+    return
   }
 
   try {

@@ -25,7 +25,7 @@ def register_cors_middleware(app: Any) -> None:
     if cfg.app_mode == "desktop":
         app.add_middleware(
             CORSMiddleware,
-            allow_origin_regex="https?://.*|tauri://.*",
+            allow_origin_regex="https?://.*|tauri://.*|chrome-extension://.*",
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],

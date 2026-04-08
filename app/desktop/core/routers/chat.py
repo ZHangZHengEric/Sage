@@ -7,6 +7,7 @@ import json
 import time
 import uuid
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
@@ -29,6 +30,16 @@ from ..user_context import get_desktop_user_id
 # 创建路由器
 chat_router = APIRouter()
 
+PLUGIN_SOURCE_CHANNELS = {
+    "browser_sidepanel",
+    "browser_assistant",  # backward compatibility for older extension builds
+}
+REQUIRED_PLUGIN_TOOLS = [
+    "browser_get_context",
+    "browser_navigate",
+    "browser_dom_action",
+]
+
 
 class RerunStreamRequest(BaseModel):
     agent_id: str | None = None
@@ -41,6 +52,20 @@ class RerunStreamRequest(BaseModel):
 def _build_current_time_with_weekday() -> str:
     now = datetime.now().astimezone()
     return now.strftime("%a, %d %b %Y %H:%M:%S %z")
+
+
+def _is_plugin_request(request: StreamRequest) -> bool:
+    context: dict[str, Any] = request.system_context or {}
+    source_channel = str(context.get("source_channel") or "").strip().lower()
+    return source_channel in PLUGIN_SOURCE_CHANNELS
+
+
+def _ensure_plugin_tools(request: StreamRequest) -> None:
+    current_tools = list(request.available_tools or [])
+    for tool_name in REQUIRED_PLUGIN_TOOLS:
+        if tool_name not in current_tools:
+            current_tools.append(tool_name)
+    request.available_tools = current_tools
 
 
 async def _start_web_stream_session(
@@ -66,6 +91,8 @@ async def _start_web_stream_session(
         request,
         require_agent_id=False,
     )
+    if _is_plugin_request(request):
+        _ensure_plugin_tools(request)
     stream_service, lock = await chat_service.prepare_session(request)
     session_id = request.session_id
     await manager.start_session(

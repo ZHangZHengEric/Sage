@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sage Browser Bridge</title>
+    <link rel="stylesheet" href="./sidepanel.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <section id="offlineView" class="offline-view">
+        <img src="./sage_logo.png" alt="Sage" class="offline-logo" />
+        <h1>Sage 浏览器助手</h1>
+        <p id="offlineStatusText">正在检测本地 Sage Desktop 服务...</p>
+        <p id="offlineProbeLine" class="offline-probe">准备检测...</p>
+        <button id="redetectBtn" class="primary" type="button">重新检测</button>
+      </section>
+
+      <section id="chatView" class="chat-view hidden">
+        <div class="top-left-actions">
+          <button id="historyToggleBtn" class="icon-btn history-toggle-btn" type="button" title="更多会话" aria-label="更多会话">
+            <span class="history-icon" aria-hidden="true"></span>
+          </button>
+          <button id="debugToggleBtn" class="icon-btn debug-toggle-btn" type="button" title="调试上下文" aria-label="调试上下文">
+            <span class="debug-icon" aria-hidden="true"></span>
+          </button>
+        </div>
+        <aside id="debugPanel" class="debug-panel hidden">
+          <div class="debug-header">
+            <span>请求调试信息</span>
+          </div>
+          <pre id="debugContent" class="debug-content"></pre>
+        </aside>
+        <aside id="historyPanel" class="history-panel hidden">
+          <div class="history-header">
+            <span>历史会话</span>
+            <button id="historyRefreshBtn" class="history-refresh-btn" type="button">刷新</button>
+          </div>
+          <div id="historyList" class="history-list"></div>
+        </aside>
+        <div id="messages" class="messages"></div>
+
+        <form id="chatForm" class="composer">
+          <div class="agent-anchor">
+            <select id="agentSelect" class="agent-select"></select>
+          </div>
+          <div class="input-shell">
+            <textarea id="input" rows="3" placeholder="发送消息，输入 @ 或 / 选择技能"></textarea>
+            <div class="input-footer">
+              <div class="footer-left">
+                <button id="planToggleBtn" class="chip-btn" type="button">Plan</button>
+                <button id="deepThinkToggleBtn" class="chip-btn" type="button">深度思考</button>
+                <button id="screenshotBtn" class="icon-btn screenshot-btn" type="button" title="截屏" aria-label="截屏">
+                  <span class="screenshot-icon" aria-hidden="true"></span>
+                </button>
+                <button id="sendBtn" class="send-btn" type="submit">↑</button>
+              </div>
+            </div>
+          </div>
+        </form>
+      </section>
+    </main>
+    <script type="module" src="./sidepanel.js"></script>
+  </body>
+</html>

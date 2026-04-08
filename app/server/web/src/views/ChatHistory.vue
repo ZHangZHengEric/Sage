@@ -1,19 +1,68 @@
 <template>
-  <div class="h-full flex flex-col p-6 bg-background">
-    <div class="bg-background rounded-lg flex-1 flex flex-col min-h-0">
-      <div class="flex gap-4 items-center mb-6">
-        <div class="relative w-full max-w-sm flex-1">
-          <Input 
-            v-model="searchTerm" 
-            :placeholder="t('history.search')" 
-            class="pl-9"
-          />
-          <Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+  <div class="h-full flex flex-col bg-background px-4 py-3">
+    <div class="flex-1 flex min-h-0 flex-col">
+      <div class="mb-3 flex items-center justify-between gap-3 border-b border-border/55 pb-3">
+        <div class="flex min-w-0 items-center gap-3">
+          <div class="min-w-0">
+            <h1 class="text-[15px] font-semibold tracking-tight text-foreground">{{ t('history.title') }}</h1>
+            <p class="text-[11px] text-muted-foreground">{{ totalCount }} {{ t('history.totalConversations') }}</p>
+          </div>
+
+          <div class="hidden h-5 w-px bg-border/60 lg:block" />
+
+          <div class="hidden items-center gap-2 lg:flex">
+            <div class="relative w-[240px]">
+              <Input
+                v-model="searchTerm"
+                :placeholder="t('history.search')"
+                class="h-8 rounded-xl border-border/50 bg-background/60 pl-8 text-[12px] shadow-none dark:bg-background/20"
+              />
+              <Search class="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground/75" />
+            </div>
+
+            <Select v-model="filterAgent">
+              <SelectTrigger class="h-8 w-[118px] rounded-xl border-border/50 bg-background/60 text-[12px] shadow-none dark:bg-background/20">
+                <SelectValue :placeholder="t('history.all')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{{ t('history.all') }}</SelectItem>
+                <SelectItem v-for="agent in agents" :key="agent.id" :value="agent.id">
+                  {{ agent.name }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select v-model="sortBy">
+              <SelectTrigger class="h-8 w-[92px] rounded-xl border-border/50 bg-background/60 text-[12px] shadow-none dark:bg-background/20">
+                <SelectValue :placeholder="t('history.sortByDate')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="date">{{ t('history.sortByDate') }}</SelectItem>
+                <SelectItem value="title">{{ t('history.sortByTitle') }}</SelectItem>
+                <SelectItem value="messages">{{ t('history.sortByMessages') }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-        
-        <div class="flex gap-3 items-center">
+
+        <div class="hidden items-center rounded-full border border-border/60 bg-background/60 px-2.5 py-1 text-[11px] text-muted-foreground md:flex dark:bg-background/20">
+          {{ t('common.page') }} {{ currentPage }} / {{ Math.ceil(totalCount / pageSize) || 1 }}
+        </div>
+      </div>
+
+      <div class="mb-3 flex items-center gap-2 lg:hidden">
+        <div class="relative w-full max-w-md flex-1">
+          <Input
+            v-model="searchTerm"
+            :placeholder="t('history.search')"
+            class="h-8.5 rounded-xl border-border/50 bg-background/60 pl-8 text-[12px] shadow-none dark:bg-background/20"
+          />
+          <Search class="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground/75" />
+        </div>
+
+        <div class="flex gap-2 items-center">
           <Select v-model="filterAgent">
-            <SelectTrigger class="w-[180px]">
+            <SelectTrigger class="h-8.5 w-[118px] rounded-xl border-border/50 bg-background/60 text-[12px] shadow-none dark:bg-background/20">
               <SelectValue :placeholder="t('history.all')" />
             </SelectTrigger>
             <SelectContent>
@@ -23,9 +72,9 @@
               </SelectItem>
             </SelectContent>
           </Select>
-          
+
           <Select v-model="sortBy">
-            <SelectTrigger class="w-[100px]">
+            <SelectTrigger class="h-8.5 w-[92px] rounded-xl border-border/50 bg-background/60 text-[12px] shadow-none dark:bg-background/20">
               <SelectValue :placeholder="t('history.sortByDate')" />
             </SelectTrigger>
             <SelectContent>
@@ -36,57 +85,97 @@
           </Select>
         </div>
       </div>
-      
-      <div class="flex-1 overflow-y-auto pr-2 space-y-3">
+
+      <div class="flex-1 overflow-y-auto pr-1">
         <div v-if="isLoading" class="flex flex-col gap-4 p-4 items-center justify-center py-20">
           <Loader class="h-8 w-8 animate-spin text-primary" />
         </div>
-        
-        <div
-          v-else-if="paginatedConversations.length > 0"
-          v-for="conversation in paginatedConversations"
-          :key="conversation.id"
-          :class="[
-            'group relative border rounded-xl p-4 transition-all duration-200 hover:shadow-lg hover:border-primary/30 bg-card',
-            { 'border-primary ring-1 ring-primary/20': selectedConversations.has(conversation.id) }
-          ]"
-        >
-          <div class="flex items-start gap-4">
+
+        <div v-else-if="paginatedConversations.length > 0" class="overflow-hidden rounded-[18px] border border-border/50 bg-background/30 dark:bg-background/10">
+          <div
+            v-for="(conversation, index) in paginatedConversations"
+            :key="conversation.id"
+            :class="[
+              'group relative grid cursor-pointer grid-cols-[auto,minmax(0,1fr),auto] items-center gap-3 px-3 py-2 transition-all duration-200 hover:bg-foreground/[0.025] dark:hover:bg-white/[0.025]',
+              { 'bg-primary/[0.045]': selectedConversations.has(conversation.id) },
+              { 'border-t border-border/60': index > 0 }
+            ]"
+            @click="handleSelectConversation(conversation)"
+          >
             <div class="flex-shrink-0">
               <img
                 :src="getAgentAvatar(conversation.agent_id)"
                 :alt="getAgentName(conversation.agent_id)"
-                class="w-12 h-12 rounded-xl object-cover bg-muted ring-2 ring-border/50"
+                class="h-8 w-8 rounded-lg object-cover bg-muted ring-1 ring-border/30"
                 @error="$event.target.src = 'https://api.dicebear.com/9.x/bottts/svg?seed=default'"
               />
             </div>
 
-            <div class="flex-1 min-w-0 cursor-pointer" @click="handleSelectConversation(conversation)">
-              <div class="flex items-start justify-between gap-3 mb-2">
-                <h3 class="text-base font-semibold text-foreground leading-tight line-clamp-2 flex-1">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <h3 class="min-w-0 flex-1 truncate text-[14px] font-semibold tracking-tight text-foreground">
                   {{ conversation.display_title || conversation.title }}
                 </h3>
+                <div class="hidden shrink-0 items-center gap-2 overflow-hidden text-[11px] text-muted-foreground lg:flex">
+                  <div class="flex min-w-0 items-center gap-1.5 rounded-full bg-muted/18 px-1.5 py-0.5 ring-1 ring-border/20">
+                    <Bot class="h-3 w-3 text-primary/80" />
+                    <span class="truncate font-medium text-foreground/85">{{ getAgentName(conversation.agent_id) }}</span>
+                  </div>
 
-                <div class="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0 bg-muted/50 px-2 py-1 rounded-full">
-                  <Clock class="w-3 h-3" />
-                  <span>{{ formatRelativeTime(conversation.updated_at) }}</span>
+                  <span class="text-border/80">·</span>
+
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <button
+                          class="inline-flex shrink-0 items-center gap-1 rounded-full px-1 py-0.5 text-muted-foreground transition-colors hover:bg-muted/18 hover:text-primary"
+                          @click.stop
+                        >
+                          <Info class="h-3 w-3" />
+                          <span>ID</span>
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" class="max-w-xs p-3">
+                        <div class="space-y-2">
+                          <p class="font-medium text-sm">Session ID</p>
+                          <p class="font-mono text-xs break-all bg-muted/50 p-2 rounded">{{ conversation.session_id }}</p>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            class="w-full text-xs"
+                            @click.stop="copySessionId(conversation)"
+                          >
+                            <Copy class="w-3 h-3 mr-1" />
+                            {{ t('history.copySessionId') }}
+                          </Button>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+
+                  <span class="text-border/80">·</span>
+
+                  <span class="truncate text-muted-foreground/80">{{ formatDateTime(conversation.updated_at) }}</span>
                 </div>
               </div>
 
-              <div class="flex items-center gap-3 flex-wrap">
-                <div class="flex items-center gap-1.5 text-sm">
-                  <Bot class="w-3.5 h-3.5 text-primary" />
-                  <span class="font-medium text-foreground">{{ getAgentName(conversation.agent_id) }}</span>
+              <div class="mt-0.5 flex items-center gap-2 overflow-hidden text-[11px] text-muted-foreground lg:hidden">
+                <div class="flex min-w-0 items-center gap-1.5 rounded-full bg-muted/18 px-1.5 py-0.5 ring-1 ring-border/20">
+                  <Bot class="h-3 w-3 text-primary/80" />
+                  <span class="truncate font-medium text-foreground/85">{{ getAgentName(conversation.agent_id) }}</span>
                 </div>
 
-                <span class="text-muted-foreground/50">·</span>
+                <span class="text-border/80">·</span>
 
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger as-child>
-                      <button class="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors bg-muted/30 hover:bg-muted/50 px-2 py-0.5 rounded-full cursor-pointer max-w-[220px]">
-                        <Info class="w-3 h-3 shrink-0" />
-                        <span class="font-mono truncate">{{ conversation.session_id }}</span>
+                      <button
+                        class="inline-flex shrink-0 items-center gap-1 rounded-full px-1 py-0.5 text-muted-foreground transition-colors hover:bg-muted/18 hover:text-primary"
+                        @click.stop
+                      >
+                        <Info class="h-3 w-3" />
+                        <span>ID</span>
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top" class="max-w-xs p-3">
@@ -107,32 +196,26 @@
                   </Tooltip>
                 </TooltipProvider>
 
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger as-child>
-                      <span class="text-xs text-muted-foreground/70 hover:text-muted-foreground transition-colors">
-                        {{ formatDateTime(conversation.updated_at) }}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      <p>{{ t('history.lastUpdated') }}: {{ formatDateTime(conversation.updated_at) }}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <span class="truncate text-muted-foreground/80">{{ formatDateTime(conversation.updated_at) }}</span>
               </div>
             </div>
-            
-            <div class="flex flex-col gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+
+            <div class="flex items-center gap-0.5 self-stretch">
+              <div class="flex items-center gap-1 rounded-full bg-muted/18 px-2 py-0.5 text-[10px] text-muted-foreground ring-1 ring-border/20">
+                <Clock class="h-3 w-3" />
+                <span>{{ formatRelativeTime(conversation.updated_at) }}</span>
+              </div>
+
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger as-child>
                     <Button
                       variant="ghost"
                       size="icon"
-                      class="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                      class="h-7.5 w-7.5 rounded-full text-muted-foreground/75 opacity-0 transition-all hover:bg-primary/10 hover:text-primary group-hover:opacity-100"
                       @click.stop="handleShareConversation(conversation)"
                     >
-                      <Download class="h-4 w-4" />
+                      <Download class="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="left">
@@ -147,10 +230,10 @@
                     <Button
                       variant="ghost"
                       size="icon"
-                      class="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      class="h-7.5 w-7.5 rounded-full text-muted-foreground/75 opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
                       @click.stop="handleDeleteConversation(conversation)"
                     >
-                      <Trash2 class="h-4 w-4" />
+                      <Trash2 class="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="left">
@@ -161,7 +244,7 @@
             </div>
           </div>
         </div>
-        
+
         <div v-if="!isLoading && totalCount === 0" class="flex flex-col items-center justify-center h-full text-muted-foreground min-h-[300px]">
           <div class="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center mb-4">
             <MessageCircle class="w-10 h-10 opacity-50" />
@@ -170,13 +253,13 @@
           <p class="text-sm">{{ t('history.noConversationsDesc') }}</p>
         </div>
       </div>
-          
-      <!-- 分页组件 -->
-      <div v-if="totalCount > 0" class="flex items-center justify-center gap-4 py-6 border-t mt-2">
-        <Button 
-          variant="outline" 
-          size="sm" 
-          :disabled="currentPage <= 1" 
+
+      <div v-if="totalCount > 0" class="mt-2 flex items-center justify-center gap-4 border-t border-border/55 py-3">
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-8 rounded-full border-border/50 bg-background/40 px-4 text-[12px] shadow-none dark:bg-background/15"
+          :disabled="currentPage <= 1"
           @click="handlePageChange(currentPage - 1)"
         >
           {{ t('common.previous') }}
@@ -184,18 +267,18 @@
         <span class="text-sm text-muted-foreground">
           {{ t('common.page') }} {{ currentPage }} / {{ Math.ceil(totalCount / pageSize) }}
         </span>
-        <Button 
-          variant="outline" 
-          size="sm" 
-          :disabled="currentPage * pageSize >= totalCount" 
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-8 rounded-full border-border/50 bg-background/40 px-4 text-[12px] shadow-none dark:bg-background/15"
+          :disabled="currentPage * pageSize >= totalCount"
           @click="handlePageChange(currentPage + 1)"
         >
           {{ t('common.next') }}
         </Button>
       </div>
     </div>
-    
-    <!-- 分享模态框 -->
+
     <Dialog :open="showShareModal" @update:open="showShareModal = $event">
       <DialogContent class="sm:max-w-[500px]">
         <DialogHeader>
@@ -204,18 +287,11 @@
         </DialogHeader>
         <div class="py-4">
           <div class="flex gap-4">
-            <Button
-              class="flex-1"
-              @click="handleExportToMarkdown"
-            >
+            <Button class="flex-1" @click="handleExportToMarkdown">
               <FileText class="w-4 h-4 mr-2" />
               {{ t('history.exportMarkdown') }}
             </Button>
-            <Button
-              class="flex-1"
-              variant="outline"
-              @click="handleExportToHTML"
-            >
+            <Button class="flex-1" variant="outline" @click="handleExportToHTML">
               <FileCode class="w-4 h-4 mr-2" />
               {{ t('history.exportHTML') }}
             </Button>
@@ -233,7 +309,7 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { MessageCircle, Search, Bot, Clock, Copy, Loader, Trash2, Info, Download, FileText, FileCode } from 'lucide-vue-next'
+import { MessageCircle, Search, Clock, Bot, Loader, Trash2, Download, Info, Copy, FileText, FileCode } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { useLanguage } from '@/utils/i18n.js'
 import { exportToHTML, exportToMarkdown } from '@/utils/exporter.js'
@@ -242,38 +318,18 @@ import { chatAPI } from '@/api/chat.js'
 import { getCurrentUser } from '@/utils/auth.js'
 import { sanitizeSessionTitle } from '@/utils/sessionTitle'
 import { isTokenUsageMessage } from '@/utils/messageLabels.js'
-
-// UI Components
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
-// Define emits
-const emit = defineEmits(['select-conversation'])
+defineEmits(['select-conversation'])
 
 const router = useRouter()
 const route = useRoute()
-
-// Get data from stores with null checks
 const agents = ref([])
-// Composables
-const { t, language } = useLanguage()
-
-// State
+const { t } = useLanguage()
 const searchTerm = ref(route.query.search || '')
 const filterAgent = ref(route.query.agent_id || 'all')
 const sortBy = ref(route.query.sort_by || 'date')
@@ -281,26 +337,29 @@ const selectedConversations = ref(new Set())
 const showShareModal = ref(false)
 const shareConversation = ref(null)
 const currentUser = ref(null)
-
-// 分页相关状态
 const currentPage = ref(parseInt(route.query.page) || 1)
-const pageSize = ref(10)
+const pageSize = ref(18)
 const totalCount = ref(0)
 const paginatedConversations = ref([])
 const isLoading = ref(true)
 
-// 加载agents
 const loadAgents = async () => {
   try {
-    const response = await agentAPI.getAgents()
-    // 后端返回格式: [...]
-    agents.value = response || []
-  } catch (error) {
+    const agentList = await agentAPI.getAgents()
+    agents.value = agentList || []
+  } catch {
     agents.value = []
   }
 }
 
-// 分页加载对话列表
+const getAgentAvatar = (agentId) => {
+  const agent = agents.value.find(a => a.id === agentId)
+  if (agent) {
+    return `https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${encodeURIComponent(agent.id)}`
+  }
+  return 'https://api.dicebear.com/9.x/bottts/svg?seed=default'
+}
+
 const loadConversationsPaginated = async () => {
   try {
     isLoading.value = true
@@ -320,7 +379,7 @@ const loadConversationsPaginated = async () => {
       }
     })
     totalCount.value = response.total || 0
-  } catch (error) {
+  } catch {
     toast.error(t('history.loadListFailed'))
     paginatedConversations.value = []
     totalCount.value = 0
@@ -329,22 +388,10 @@ const loadConversationsPaginated = async () => {
   }
 }
 
-// 处理页码变化
 const handlePageChange = (page) => {
   currentPage.value = page
 }
 
-// 处理每页大小变化
-const handlePageSizeChange = (size) => {
-  pageSize.value = size
-  if (currentPage.value !== 1) {
-    currentPage.value = 1 // 会触发 watch(currentPage)
-  } else {
-    loadConversationsPaginated()
-  }
-}
-
-// Methods
 const canDelete = (conversation) => {
   if (!currentUser.value) return false
   if (currentUser.value.role === 'admin') return true
@@ -353,11 +400,10 @@ const canDelete = (conversation) => {
 
 const handleDeleteConversation = async (conversation) => {
   if (!confirm(t('history.deleteConfirm'))) return
-  
+
   try {
     await chatAPI.deleteConversation(conversation.session_id)
     toast.success(t('history.deleteSuccess'))
-    // 重新加载列表
     loadConversationsPaginated()
   } catch (error) {
     console.error('Failed to delete conversation:', error)
@@ -374,6 +420,23 @@ const handleSelectConversation = (conversation) => {
   })
 }
 
+const formatRelativeTime = (timestamp) => {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  const now = new Date()
+  const diffMs = now - date
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+
+  if (diffMins < 1) return t('history.justNow')
+  if (diffMins < 60) return t('history.minutesAgo', { minutes: diffMins })
+  if (diffHours < 24) return t('history.hoursAgo', { hours: diffHours })
+  if (diffDays < 7) return t('history.daysAgo', { days: diffDays })
+
+  return formatDateTime(timestamp)
+}
+
 const formatDateTime = (timestamp) => {
   if (!timestamp) return ''
   const date = new Date(timestamp)
@@ -382,39 +445,15 @@ const formatDateTime = (timestamp) => {
   const day = String(date.getDate()).padStart(2, '0')
   const hours = String(date.getHours()).padStart(2, '0')
   const minutes = String(date.getMinutes()).padStart(2, '0')
-  const seconds = String(date.getSeconds()).padStart(2, '0')
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+  return `${year}-${month}-${day} ${hours}:${minutes}`
 }
-
 
 const getAgentName = (agentId) => {
   const agent = agents.value.find(a => a.id === agentId)
   return agent ? agent.name : t('chat.unknownAgent')
 }
 
-const getAgentAvatar = (agentId) => {
-  const seed = encodeURIComponent(agentId || 'default')
-  return `https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,square01,square02&seed=${seed}`
-}
-
-const formatRelativeTime = (timestamp) => {
-  if (!timestamp) return ''
-  const date = new Date(timestamp)
-  const now = new Date()
-  const diffMs = now - date
-  const diffMinutes = Math.floor(diffMs / 60000)
-  const diffHours = Math.floor(diffMs / 3600000)
-  const diffDays = Math.floor(diffMs / 86400000)
-
-  if (diffMinutes < 1) return t('history.justNow')
-  if (diffMinutes < 60) return t('history.minutesAgo', { minutes: diffMinutes })
-  if (diffHours < 24) return t('history.hoursAgo', { hours: diffHours })
-  if (diffDays < 7) return t('history.daysAgo', { days: diffDays })
-  return formatDateTime(timestamp)
-}
-
 const handleShareConversation = async (conversation) => {
-  // 调用后端接口获取conversation的messages
   const response = await chatAPI.getConversationMessages(conversation.session_id)
   conversation.messages = response.messages || []
   shareConversation.value = conversation
@@ -441,31 +480,22 @@ const copySessionId = async (conversation) => {
     document.execCommand('copy')
     document.body.removeChild(textarea)
     toast.success(t('history.sessionIdCopied'))
-  } catch (e) {
+  } catch {
     toast.error(t('history.copyFailed'))
   }
 }
 
 const formatMessageForExport = (messages) => {
   if (!messages || !Array.isArray(messages)) return []
-  
+
   return messages.map(message => {
     if (message.role === 'user') {
-      return {
-        role: 'user',
-        content: message.content
-      }
+      return { role: 'user', content: message.content }
     } else if (message.role === 'assistant') {
       if (message.tool_calls && message.tool_calls.length > 0) {
-        return {
-          role: 'assistant',
-          tool_calls: message.tool_calls
-        }
+        return { role: 'assistant', tool_calls: message.tool_calls }
       } else if (message.content && message.content !== '' && message.content !== false) {
-        return {
-          role: 'assistant',
-          content: message.content
-        }
+        return { role: 'assistant', content: message.content }
       }
     } else if (message.role === 'tool') {
       return {
@@ -480,16 +510,13 @@ const formatMessageForExport = (messages) => {
 
 const getVisibleMessageCount = () => {
   if (!shareConversation.value?.messages) return 0
-  return shareConversation.value.messages.filter(msg => 
+  return shareConversation.value.messages.filter(msg =>
     msg.role === 'user' || (msg.role === 'assistant' && !isTokenUsageMessage(msg) && msg.content && msg.content !== '' && msg.content !== false)
   ).length
 }
 
 const handleExportToMarkdown = () => {
-  if (!shareConversation.value) {
-    console.log('❌ shareConversation 为空，退出函数')
-    return
-  }
+  if (!shareConversation.value) return
   const visibleMessages = formatMessageForExport(shareConversation.value.messages)
   exportToMarkdown(shareConversation.value, getAgentName(shareConversation.value.agent_id), visibleMessages)
   showShareModal.value = false
@@ -497,18 +524,13 @@ const handleExportToMarkdown = () => {
 }
 
 const handleExportToHTML = () => {
-  if (!shareConversation.value) {
-    console.log('❌ shareConversation 为空，退出函数')
-    return
-  }
-  
+  if (!shareConversation.value) return
   const visibleMessages = formatMessageForExport(shareConversation.value.messages)
   exportToHTML(shareConversation.value, visibleMessages)
   showShareModal.value = false
   toast.success(t('history.htmlExported'))
 }
 
-// 更新 URL 参数
 const updateUrlParams = () => {
   router.replace({
     query: {
@@ -521,26 +543,26 @@ const updateUrlParams = () => {
   })
 }
 
-// 监听搜索、过滤和排序条件的变化
 watch([searchTerm, filterAgent, sortBy], () => {
   if (currentPage.value !== 1) {
-    currentPage.value = 1 // 会触发 watch(currentPage)
+    currentPage.value = 1
   } else {
     updateUrlParams()
     loadConversationsPaginated()
   }
 }, { deep: true })
 
-// 监听页码变化
 watch(currentPage, () => {
   updateUrlParams()
   loadConversationsPaginated()
 })
 
-// 生命周期钩子
 onMounted(async () => {
   currentUser.value = getCurrentUser()
   await loadAgents()
   await loadConversationsPaginated()
 })
 </script>
+
+<style scoped>
+</style>

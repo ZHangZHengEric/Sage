@@ -789,45 +789,79 @@ async def execute_chat_session(
 
     stream_counter = 0
     last_activity_time = time.time()
-    async for result in stream_service.process_stream():
-        stream_counter += 1
-        current_time = time.time()
-        time_since_last = current_time - last_activity_time
-        last_activity_time = current_time
-        if stream_counter % 100 == 0:
-            logger.bind(session_id=session_id).info(
-                f"📊 流处理状态 - 计数: {stream_counter}, 间隔: {time_since_last:.3f}s"
-            )
+    try:
+        async for result in stream_service.process_stream():
+            stream_counter += 1
+            current_time = time.time()
+            time_since_last = current_time - last_activity_time
+            last_activity_time = current_time
+            if stream_counter % 100 == 0:
+                logger.bind(session_id=session_id).info(
+                    f"📊 流处理状态 - 计数: {stream_counter}, 间隔: {time_since_last:.3f}s"
+                )
 
-        yield_result = result.copy()
-        yield_result.pop("message_type", None)
-        yield_result.pop("is_final", None)
-        yield_result.pop("is_chunk", None)
-        yield_result.pop("chunk_id", None)
-        yield json.dumps(yield_result, ensure_ascii=False) + "\n"
+            yield_result = result.copy()
+            yield_result.pop("message_type", None)
+            yield_result.pop("is_final", None)
+            yield_result.pop("is_chunk", None)
+            yield_result.pop("chunk_id", None)
+            yield json.dumps(yield_result, ensure_ascii=False) + "\n"
 
-    yield json.dumps(
-        {
-            "type": "stream_end",
-            "session_id": session_id,
-            "timestamp": time.time(),
-            "total_stream_count": stream_counter,
-        },
-        ensure_ascii=False,
-    ) + "\n"
+        yield json.dumps(
+            {
+                "type": "stream_end",
+                "session_id": session_id,
+                "timestamp": time.time(),
+                "total_stream_count": stream_counter,
+            },
+            ensure_ascii=False,
+        ) + "\n"
+    finally:
+        await _finalize_session_end(request, original_skills)
 
-    if not _is_desktop_mode():
-        await _handle_server_session_end(request, original_skills)
+
+def _get_serialized_session_messages(session_id: str) -> List[Dict[str, Any]]:
+    session_manager = get_global_session_manager()
+    if not session_manager:
+        return []
+
+    try:
+        raw_messages = session_manager.get_session_messages(session_id)
+    except Exception as exc:
+        logger.bind(session_id=session_id).warning(f"读取 session 最新消息失败: {exc}")
+        return []
+
+    serialized_messages: List[Dict[str, Any]] = []
+    for message in raw_messages or []:
+        if hasattr(message, "to_dict"):
+            serialized_messages.append(message.to_dict())
+        elif isinstance(message, dict):
+            serialized_messages.append(dict(message))
+    return serialized_messages
 
 
-async def _handle_server_session_end(
+async def _sync_conversation_state(session_id: str) -> None:
+    messages = _get_serialized_session_messages(session_id)
+    dao = ConversationDao()
+    if messages:
+        await dao.update_conversation_messages(session_id, messages)
+        logger.bind(session_id=session_id).info(
+            f"会话结束，已同步最新消息到 conversations 表，message_count={len(messages)}"
+        )
+        return
+
+    updated = await dao.update_timestamp(session_id)
+    if updated:
+        logger.bind(session_id=session_id).info("会话结束，已刷新 conversation 时间戳")
+
+
+async def _finalize_session_end(
     request: StreamRequest,
     original_skills: List[str],
 ) -> None:
-    await ConversationDao().update_timestamp(request.session_id)
-    logger.bind(session_id=request.session_id).info("会话结束，已更新conversation时间戳")
+    await _sync_conversation_state(request.session_id)
 
-    if request.available_skills and request.agent_id:
+    if not _is_desktop_mode() and request.available_skills and request.agent_id:
         asyncio.create_task(_check_and_update_agent_skills(request, original_skills))
 
 

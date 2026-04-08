@@ -249,6 +249,67 @@
             </div>
           </div>
         </section>
+
+        <section class="space-y-2">
+          <div class="flex items-center gap-2.5">
+            <Globe class="h-3.5 w-3.5 text-muted-foreground" />
+            <h2 class="text-[12px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">浏览器集成</h2>
+          </div>
+
+          <div class="overflow-hidden rounded-[18px] border border-border/60 bg-transparent">
+            <div class="flex flex-col gap-2.5 px-4 py-3 md:flex-row md:items-center md:justify-between">
+              <div class="space-y-1">
+                <p class="text-sm font-medium text-foreground">安装 Sage Chrome 插件</p>
+                <p class="text-[12px] leading-5 text-muted-foreground">
+                  点击后会打开 Chrome 扩展页。请在扩展页开启开发者模式，并“加载已解压的扩展程序”指向本地插件目录。
+                </p>
+              </div>
+              <div class="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="h-8.5 rounded-full border-border/70 bg-background/90 px-3.5 text-[13px] shadow-none hover:bg-muted/30"
+                  @click="openChromeExtensionsPage"
+                >
+                  打开扩展页
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="h-8.5 rounded-full border-border/70 bg-background/90 px-3.5 text-[13px] shadow-none hover:bg-muted/30"
+                  @click="openExtensionDirectory"
+                >
+                  打开插件目录
+                </Button>
+              </div>
+            </div>
+
+            <div class="h-px bg-border/60" />
+
+            <div class="flex flex-col gap-2.5 px-4 py-3 md:flex-row md:items-center md:justify-between">
+              <div class="space-y-1">
+                <p class="text-sm font-medium text-foreground">连接状态</p>
+                <p class="text-[12px] leading-5 text-muted-foreground">
+                  {{ browserBridgeStatusText }}
+                </p>
+                <p v-if="browserBridgeLastSeenText" class="text-[11px] text-muted-foreground/80">
+                  最近心跳：{{ browserBridgeLastSeenText }}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-8.5 rounded-full border-border/70 bg-background/90 px-3.5 text-[13px] shadow-none hover:bg-muted/30"
+                :disabled="checkingBrowserBridge"
+                @click="checkBrowserBridgeStatus"
+              >
+                <Loader2 v-if="checkingBrowserBridge" class="mr-2 h-4 w-4 animate-spin" />
+                <RefreshCw v-else class="mr-2 h-4 w-4" />
+                重新检测
+              </Button>
+            </div>
+          </div>
+        </section>
       </div>
 
             <!-- Environment Variables Editor Dialog -->
@@ -403,14 +464,16 @@ import { useThemeStore } from '../stores/theme'
 import { useUserStore } from '../stores/user'
 import { useUpdaterStore } from '../stores/updater'
 import { agentAPI } from '../api/agent.js'
+import request from '../utils/request.js'
 import { invoke } from '@tauri-apps/api/core'
 import { relaunch } from '@tauri-apps/plugin-process'
+import { open } from '@tauri-apps/plugin-shell'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Input } from '@/components/ui/input'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
-import { RefreshCw, Loader2, DownloadCloud, Settings, Plus, Trash2, Eye, EyeOff, AlertCircle, RotateCcw, CircleHelp } from 'lucide-vue-next'
+import { RefreshCw, Loader2, DownloadCloud, Settings, Plus, Trash2, Eye, EyeOff, AlertCircle, RotateCcw, CircleHelp, Globe } from 'lucide-vue-next'
 import {
   Select,
   SelectContent,
@@ -455,6 +518,9 @@ const showRestartDialog = ref(false)
 const envVars = ref([])
 const savingEnv = ref(false)
 const importingOpenclaw = ref(false)
+const checkingBrowserBridge = ref(false)
+const browserBridgeStatus = ref(null)
+const browserBridgeLastSeenAt = ref(null)
 
 // 预设环境变量列表 - 只包含系统实际使用的
 const presetEnvVars = [
@@ -616,9 +682,60 @@ const envVarsSummary = computed(() => {
   return `${envVars.value.length} ${t('system.envVariables') || '项已配置'}`
 })
 
+const browserBridgeStatusText = computed(() => {
+  if (!browserBridgeStatus.value) return '尚未检测浏览器插件状态'
+  const connected = !!browserBridgeStatus.value.connected
+  if (!connected) return '未连接：请先在 Chrome 安装并打开 Sage 插件侧边栏'
+  const extensionId = browserBridgeStatus.value.extension_id || 'unknown'
+  return `已连接（扩展 ID: ${extensionId}）`
+})
+
+const browserBridgeLastSeenText = computed(() => {
+  if (!browserBridgeLastSeenAt.value) return ''
+  const date = new Date(Number(browserBridgeLastSeenAt.value) * 1000)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString()
+})
+
 const loadEnvVarsPreview = async () => {
   const content = await invoke('get_sage_env_content')
   envVars.value = parseEnvContent(content || '')
+}
+
+const checkBrowserBridgeStatus = async () => {
+  checkingBrowserBridge.value = true
+  try {
+    const data = await request.get('/api/browser-extension/status')
+    browserBridgeStatus.value = data || null
+    browserBridgeLastSeenAt.value = data?.last_seen_at || null
+  } catch (error) {
+    browserBridgeStatus.value = null
+    browserBridgeLastSeenAt.value = null
+    toast.error('检测浏览器插件状态失败: ' + (error.message || error))
+  } finally {
+    checkingBrowserBridge.value = false
+  }
+}
+
+const openChromeExtensionsPage = async () => {
+  try {
+    await invoke('open_chrome_extensions_page')
+  } catch (error) {
+    toast.error('打开 Chrome 扩展页失败: ' + (error.message || error))
+  }
+}
+
+const openExtensionDirectory = async () => {
+  try {
+    const extensionDir = await invoke('get_chrome_extension_dir')
+    if (!extensionDir) {
+      throw new Error('插件目录未找到')
+    }
+    await open(extensionDir)
+    toast.success(`已打开插件目录：${extensionDir}`)
+  } catch (error) {
+    toast.error('打开插件目录失败: ' + (error.message || error))
+  }
 }
 
 // 随机生成头像
@@ -640,5 +757,6 @@ onMounted(async () => {
   if (!userStore.avatarSeed) {
     randomizeAvatar()
   }
+  await checkBrowserBridgeStatus()
 })
 </script>

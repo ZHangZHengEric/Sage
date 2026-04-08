@@ -1,9 +1,9 @@
 <template>
   <div class="flex flex-col h-full bg-background">
-    <div class="flex-none h-16 flex items-center px-6 justify-end bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/60 z-10 sticky top-0">
-      <div class="flex items-center gap-2">
+    <div class="sticky top-0 z-10 flex min-h-[60px] flex-none flex-wrap items-center gap-2 bg-background/80 px-3 py-2 backdrop-blur-md supports-[backdrop-filter]:bg-background/60 sm:px-4 md:justify-end">
+      <div class="flex w-full items-center justify-between gap-2 md:w-auto md:justify-end">
         <Select :model-value="selectedAgentId" @update:model-value="handleAgentChange">
-          <SelectTrigger class="w-[160px] h-9 px-2.5 border-muted-foreground/20 bg-muted/50 hover:bg-muted/80 transition-colors focus:ring-1 focus:ring-primary/20 rounded-full">
+          <SelectTrigger class="h-9 w-[148px] min-w-0 rounded-full border-muted-foreground/20 bg-muted/50 px-2.5 transition-colors hover:bg-muted/80 focus:ring-1 focus:ring-primary/20 sm:w-[172px]">
             <div class="flex items-center gap-2 w-full">
               <div class="w-5 h-5 rounded-full overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/10">
                 <img
@@ -88,7 +88,7 @@
           </div>
         </TooltipProvider>
 
-        <div class="h-4 w-[1px] bg-border mx-1"></div>
+        <div class="mx-1 hidden h-4 w-[1px] bg-border sm:block"></div>
 
         <TooltipProvider>
           <div class="flex items-center gap-2">
@@ -746,5 +746,12 @@ watch(
 .panel-leave-to {
   opacity: 0;
   transform: translateX(100%);
+}
+
+@media (max-width: 640px) {
+  .panel-enter-from,
+  .panel-leave-to {
+    transform: translateY(12px);
+  }
 }
 </style>

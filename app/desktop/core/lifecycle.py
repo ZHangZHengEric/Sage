@@ -20,8 +20,11 @@ from .bootstrap import (
 )
 from common.utils.async_utils import create_safe_task
 from .services.chat.stream_manager import StreamManager
+from .services.browser_capability import get_browser_capability_coordinator
 
 _memory_reporter_task = None
+_host_watchdog_task = None
+_browser_capability_coordinator = None
 
 
 def _setup_memory_root_path():
@@ -37,8 +40,12 @@ def _setup_memory_root_path():
 async def initialize_system():
     logger.info("sage-desktop：开始初始化")
     _setup_memory_root_path()
+    _start_host_watchdog()
     await initialize_db_connection()
     await initialize_tool_manager()
+    global _browser_capability_coordinator
+    _browser_capability_coordinator = get_browser_capability_coordinator()
+    _browser_capability_coordinator.start()
     await initialize_skill_manager()
     await copy_wiki_docs()  # 复制 wiki 文档到用户目录
     await initialize_session_manager()
@@ -71,6 +78,66 @@ async def _start_task_scheduler():
         logger.info(f"sage-desktop：TaskScheduler {'已启动' if started else '已存在'}")
     except Exception as exc:
         logger.warning(f"sage-desktop：TaskScheduler 启动失败: {exc}")
+
+
+def _host_process_is_alive(host_pid: int) -> bool:
+    if host_pid <= 0 or host_pid == os.getpid():
+        return True
+
+    try:
+        os.kill(host_pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Treat permission errors as "still alive" to avoid false positives.
+        return True
+    except OSError:
+        return False
+
+
+async def _host_watchdog_loop(host_pid: int):
+    logger.info(f"[SageHostWatchdog] watching host pid={host_pid}")
+    while True:
+        try:
+            await asyncio.sleep(15)
+            if _host_process_is_alive(host_pid):
+                continue
+
+            logger.warning(
+                f"[SageHostWatchdog] host pid={host_pid} is gone; exiting orphaned desktop backend pid={os.getpid()}"
+            )
+            os._exit(0)
+        except asyncio.CancelledError:
+            logger.info("[SageHostWatchdog] stopped")
+            raise
+        except Exception as exc:
+            logger.warning(f"[SageHostWatchdog] error: {exc}")
+
+
+def _start_host_watchdog():
+    global _host_watchdog_task
+
+    if _host_watchdog_task and not _host_watchdog_task.done():
+        return
+
+    raw_host_pid = str(os.environ.get("SAGE_HOST_PID") or "").strip()
+    if not raw_host_pid:
+        return
+
+    try:
+        host_pid = int(raw_host_pid)
+    except ValueError:
+        logger.warning(f"[SageHostWatchdog] invalid SAGE_HOST_PID={raw_host_pid!r}")
+        return
+
+    if host_pid <= 0 or host_pid == os.getpid():
+        return
+
+    _host_watchdog_task = create_safe_task(
+        _host_watchdog_loop(host_pid),
+        name="sidecar_host_watchdog",
+    )
 
 
 def _get_process_rss_mb() -> float | None:
@@ -130,7 +197,14 @@ def _start_memory_reporter():
 
 async def cleanup_system():
     logger.info("sage-desktop：正在清理资源...")
-    global _memory_reporter_task
+    global _memory_reporter_task, _host_watchdog_task, _browser_capability_coordinator
+    if _host_watchdog_task:
+        _host_watchdog_task.cancel()
+        try:
+            await _host_watchdog_task
+        except asyncio.CancelledError:
+            pass
+        _host_watchdog_task = None
     if _memory_reporter_task:
         _memory_reporter_task.cancel()
         try:
@@ -138,6 +212,9 @@ async def cleanup_system():
         except asyncio.CancelledError:
             pass
         _memory_reporter_task = None
+    if _browser_capability_coordinator:
+        await _browser_capability_coordinator.stop()
+        _browser_capability_coordinator = None
     # 关闭第三方客户端
     await shutdown_clients()
     try:

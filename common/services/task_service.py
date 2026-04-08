@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Optional, Tuple
 
 from common.core.exceptions import SageHTTPException
@@ -270,6 +270,19 @@ class TaskService:
 
                 last_executed = recurring_task.last_executed_at
                 if last_executed is None:
+                    claimed = await self.dao.advance_recurring_task_cursor(
+                        recurring_task.id,
+                        expected_last_executed=None,
+                        executed_at=now,
+                        user_id=recurring_task.user_id or None,
+                    )
+                    if not claimed:
+                        logger.info(
+                            f"TaskService: recurring task already claimed by another scheduler "
+                            f"recurring_task_id={recurring_task.id}"
+                        )
+                        continue
+
                     task = Task(
                         user_id=recurring_task.user_id,
                         name=recurring_task.name,
@@ -281,7 +294,6 @@ class TaskService:
                         status="pending",
                     )
                     await self.dao.create_one_time_task(task)
-                    await self.dao.update_recurring_task_last_executed(recurring_task.id, executed_at=now)
                     spawned.append(task)
                     logger.info(
                         f"TaskService: spawned initial one-time task "
@@ -294,21 +306,34 @@ class TaskService:
 
                 itr = croniter(recurring_task.cron_expression, last_executed)
                 next_run = itr.get_next(datetime)
-                if next_run > now + timedelta(minutes=1):
+                if next_run > now:
                     continue
 
                 # Skip historical backlog after downtime. If we missed one or more
                 # schedule windows, spawn at most one catch-up task "now" and move
                 # the recurring cursor forward to the current time.
-                has_pending_instance = await self.dao.has_pending_task_instance(
+                claimed = await self.dao.advance_recurring_task_cursor(
+                    recurring_task.id,
+                    expected_last_executed=last_executed,
+                    executed_at=now,
+                    user_id=recurring_task.user_id or None,
+                )
+                if not claimed:
+                    logger.info(
+                        f"TaskService: recurring task already claimed by another scheduler "
+                        f"recurring_task_id={recurring_task.id}"
+                    )
+                    continue
+
+                has_active_instance = await self.dao.has_active_task_instance(
                     recurring_task.id,
                     user_id=recurring_task.user_id or None,
                 )
-                await self.dao.update_recurring_task_last_executed(
-                    recurring_task.id,
-                    executed_at=now,
-                )
-                if has_pending_instance:
+                if has_active_instance:
+                    logger.info(
+                        f"TaskService: skip spawning recurring task because active instance exists "
+                        f"recurring_task_id={recurring_task.id}"
+                    )
                     continue
 
                 task = Task(

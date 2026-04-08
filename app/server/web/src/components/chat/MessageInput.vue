@@ -84,8 +84,8 @@
         />
       </div>
 
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="flex min-w-0 flex-wrap items-center gap-2">
           <Button
             type="button"
             variant="ghost"
@@ -133,7 +133,7 @@
           </Button>
         </div>
 
-        <div class="flex items-center gap-2">
+        <div class="ml-auto flex items-center gap-2">
           <Button
             type="button"
             variant="ghost"
