@@ -19,10 +19,8 @@ ENV VITE_SAGE_WEB_BASE_PATH=${VITE_SAGE_WEB_BASE_PATH}
 # Copy the rest of the app after dependencies are installed to maximize cache reuse
 COPY app/server/web .
 
-# 修改后（限制 Node.js 内存 + 限制 Vite 线程池大小）
-ENV NODE_OPTIONS="--max-old-space-size=2048" \
-    UV_THREADPOOL_SIZE=2
-RUN NODE_OPTIONS="--max-old-space-size=2048" npm run build
+
+RUN npm run build
 
 # --- Runtime stage: serve static files with Nginx ---
 FROM docker.m.daocloud.io/nginx:1.27-alpine
