@@ -1,0 +1,320 @@
+---
+layout: default
+title: CLI 使用指南
+nav_order: 3
+description: "使用 Sage CLI 进行本地开发、验证和会话操作"
+lang: zh
+ref: cli-guide
+---
+
+{% include lang_switcher.html %}
+
+# Sage CLI 使用指南
+
+Sage CLI 是本地验证运行时改动最快的入口，不需要先经过 Web 或桌面端。
+
+本指南聚焦当前 app 层 CLI 入口：
+
+- `sage run`
+- `sage chat`
+- `sage resume`
+- `sage doctor`
+- `sage config`
+- `sage sessions`
+- `sage skills`
+
+## 什么时候用 CLI
+
+适合这些场景：
+
+- 验证本地模型和运行时配置
+- 快速执行单次任务
+- 继续之前的会话
+- 针对指定工作目录测试
+- 显式启用某个 skill
+- 在开发过程中查看最近会话
+
+## 安装
+
+在仓库根目录执行：
+
+```bash
+pip install -e .
+```
+
+如果你暂时不想安装可编辑包，也可以直接执行：
+
+```bash
+python -m app.cli.main --help
+```
+
+## 最小配置
+
+CLI 仍然沿用 Sage 现有的运行时配置方式。最小可用配置通常是：
+
+```bash
+export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
+export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
+export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
+export SAGE_DB_TYPE="file"
+```
+
+也可以直接生成一份最小本地配置：
+
+```bash
+sage config init
+```
+
+然后查看 CLI 当前实际读取到的配置：
+
+```bash
+sage doctor
+sage config show
+sage config show --json
+```
+
+## 用户解析顺序
+
+CLI 保留了用户概念，以便和其它 Sage 应用入口保持一致。
+
+解析顺序为：
+
+1. `--user-id`
+2. `SAGE_CLI_USER_ID`
+3. `SAGE_DESKTOP_USER_ID`
+4. `default_user`
+
+示例：
+
+```bash
+sage doctor
+sage run --user-id alice --stats "用一句话介绍你自己。"
+```
+
+## 核心命令
+
+### `sage doctor`
+
+当 CLI 表现异常时，优先执行这个命令。
+
+它会输出：
+
+- Python 路径
+- 当前工作目录
+- `.env` 路径和是否存在
+- auth mode 和 db type
+- `agents_dir`、`session_dir`、`logs_dir` 等关键目录
+- 依赖是否可用
+- 运行时错误、警告和建议下一步
+
+示例：
+
+```bash
+sage doctor
+```
+
+### `sage config`
+
+用于查看或生成 CLI 配置。
+
+示例：
+
+```bash
+sage config show
+sage config show --json
+sage config init
+sage config init --path ./my-sage.env
+sage config init --force
+```
+
+### `sage run`
+
+执行一次单轮请求并输出最终结果。
+
+示例：
+
+```bash
+sage run "用一句话介绍你自己。"
+sage run --stats "用一句话介绍你自己。"
+sage run --json --stats "用一句话介绍你自己。"
+sage run --workspace /path/to/project --stats "简单分析一下这个仓库。"
+```
+
+常用参数：
+
+- `--user-id`
+- `--agent-id`
+- `--agent-mode`
+- `--workspace`
+- `--skill`（可重复）
+- `--max-loop-count`
+- `--json`
+- `--stats`
+- `--verbose`
+
+### `sage chat`
+
+启动一个本地交互式会话。
+
+示例：
+
+```bash
+sage chat
+sage chat --stats
+sage chat --workspace /path/to/project
+sage chat --skill my_skill
+```
+
+内置命令：
+
+- `/help`：查看内置命令帮助
+- `/session`：输出当前 session id
+- `/exit`：退出会话
+- `/quit`：退出会话的兼容别名
+
+### `sage resume`
+
+通过 session id 恢复一个已有会话。
+
+示例：
+
+```bash
+sage resume <session_id>
+sage resume --stats <session_id>
+sage resume --workspace /path/to/project <session_id>
+```
+
+如果当前数据库里有该会话的元信息，CLI 会在进入会话前先打印一段简短摘要。
+
+### `sage sessions`
+
+查看当前 CLI 用户最近的会话。
+
+示例：
+
+```bash
+sage sessions
+sage sessions --json
+sage sessions --limit 10
+sage sessions --search debug
+sage sessions --agent-id my-agent
+```
+
+### `sage skills`
+
+查看 CLI 当前可见的 skills。
+
+示例：
+
+```bash
+sage skills
+sage skills --json
+sage skills --workspace /path/to/project
+```
+
+输出会包含：
+
+- 当前用户 id
+- 可选的 workspace
+- 当前可见 skill 总数
+- 每个 source 下的数量
+- skill 名称和描述
+- source 层面的错误信息（如果有）
+
+## CLI 中的 Skill
+
+CLI 现在支持在这些命令上显式传入 skill：
+
+- `run`
+- `chat`
+- `resume`
+
+示例：
+
+```bash
+sage run --skill my_skill --stats "用一句话介绍你自己。"
+sage run --skill my_skill --skill another_skill --max-loop-count 5 --stats "用一句话介绍你自己。"
+sage chat --skill my_skill
+```
+
+如果传入的 skill 当前不可见，CLI 会在进入运行时之前直接失败，并提示你先执行 `sage skills` 查看当前可见 skill。
+
+## 结构化输出
+
+对开发和调试来说，有两种很有用的输出模式：
+
+### `--stats`
+
+命令执行完成后，追加一段面向人的执行摘要。
+
+当前摘要包含：
+
+- `session_id`
+- `user_id`
+- `agent_id`
+- `agent_mode`
+- `workspace`
+- `requested_skills`
+- `max_loop_count`
+- 总耗时
+- 首次输出耗时
+- 使用到的工具
+- token 使用情况
+- 如果可用，还会输出每个 step 的 usage
+
+### `--json`
+
+以结构化流事件的方式输出，而不是仅输出纯文本。
+
+当和 `--stats` 一起使用时，CLI 会在结尾追加一个 `cli_stats` JSON 事件：
+
+```bash
+sage run --json --stats "用一句话介绍你自己。"
+```
+
+这适合：
+
+- shell 脚本处理
+- 对比不同运行结果
+- 抽取 token usage
+- 判断 tool/skill 是否真的生效
+
+## Workspace 用法
+
+使用 `--workspace` 可以让 CLI 针对指定本地目录工作：
+
+```bash
+sage run --workspace /path/to/project --stats "简单分析一下这个仓库。"
+sage chat --workspace /path/to/project
+sage resume --workspace /path/to/project <session_id>
+sage skills --workspace /path/to/project
+```
+
+这对文件型任务和 workspace 下 `skills/` 目录的发现尤其有用。
+
+## 推荐冒烟测试
+
+想快速验证本地 CLI 是否可用，可以执行：
+
+```bash
+sage doctor
+sage config show
+sage skills
+sage run --stats "用一句话介绍你自己。"
+sage run --json --stats "用一句话介绍你自己。"
+```
+
+重点检查：
+
+- doctor 是否显示运行时健康
+- config 是否和你的预期一致
+- skills 是否反映当前本地可见 skill
+- stats 是否带上了正确的 user/workspace/skill 上下文
+- JSON 模式最后是否有 `cli_stats` 事件
+
+## 相关文档
+
+- [快速开始](GETTING_STARTED.md)
+- [配置](CONFIGURATION.md)
+- [应用形态](APPLICATIONS.md)
+- [故障排查](TROUBLESHOOTING.md)

@@ -182,14 +182,26 @@ sage config init
 # List recent sessions for the current CLI user
 sage sessions
 
+# List available skills
+sage skills
+
 # Run a single task
 sage run "Help me analyze the current repository"
 
 # Run a task and print execution stats
 sage run --stats "Help me analyze the current repository"
 
+# Run a task and emit structured stream events plus a final cli_stats event
+sage run --json "Help me analyze the current repository"
+
 # Run against a specific local workspace
 sage run --workspace /path/to/project --stats "Say hello briefly."
+
+# Run with a specific skill enabled
+sage run --skill my_skill --stats "Say hello briefly."
+
+# Inspect skills from a specific workspace
+sage skills --workspace /path/to/project
 
 # Start an interactive chat session
 sage chat
@@ -212,6 +224,7 @@ python -m app.cli.main doctor
 python -m app.cli.main config show
 python -m app.cli.main config init
 python -m app.cli.main sessions
+python -m app.cli.main skills
 python -m app.cli.main run "Help me analyze the current repository"
 python -m app.cli.main run --workspace /path/to/project "Help me analyze the current repository"
 python -m app.cli.main run --stats "Help me analyze the current repository"
@@ -220,6 +233,7 @@ python -m app.cli.main resume your-session-id
 ```
 
 The current CLI MVP still uses the existing Sage runtime config system, so `.env` and shell environment variables remain the primary configuration mechanism.
+When `--json` is enabled, the CLI emits stream events and appends a final `cli_stats` event for structured post-run inspection.
 
 **Web Application (FastAPI + Vue3)**:
 

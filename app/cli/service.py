@@ -178,6 +178,8 @@ def build_run_request(
     user_id: Optional[str] = None,
     agent_id: Optional[str] = None,
     agent_mode: Optional[str] = None,
+    available_skills: Optional[List[str]] = None,
+    max_loop_count: Optional[int] = None,
 ) -> StreamRequest:
     return StreamRequest(
         messages=[Message(role="user", content=task)],
@@ -185,6 +187,8 @@ def build_run_request(
         user_id=user_id or get_default_cli_user_id(),
         agent_id=agent_id,
         agent_mode=agent_mode,
+        available_skills=available_skills,
+        max_loop_count=max_loop_count,
     )
 
 
@@ -395,6 +399,105 @@ async def list_sessions(
         "total": total_count,
         "list": items,
     }
+
+
+def list_available_skills(
+    *,
+    user_id: Optional[str] = None,
+    workspace: Optional[str] = None,
+) -> Dict[str, Any]:
+    from sagents.skill.skill_manager import SkillManager
+
+    cfg = init_cli_config(init_logging=False)
+    resolved_user_id = user_id or get_default_cli_user_id()
+    skill_sources: List[Dict[str, Any]] = []
+    skills_map: Dict[str, Dict[str, Any]] = {}
+
+    source_defs: List[tuple[str, Optional[str]]] = [
+        ("system", cfg.skill_dir if os.path.isdir(cfg.skill_dir) else None),
+        (
+            "user",
+            os.path.join(cfg.user_dir, resolved_user_id, "skills")
+            if os.path.isdir(os.path.join(cfg.user_dir, resolved_user_id, "skills"))
+            else None,
+        ),
+        (
+            "workspace",
+            os.path.join(os.path.abspath(workspace), "skills")
+            if workspace and os.path.isdir(os.path.join(os.path.abspath(workspace), "skills"))
+            else None,
+        ),
+    ]
+
+    for source_name, source_path in source_defs:
+        if not source_path:
+            continue
+        skill_sources.append({"source": source_name, "path": source_path})
+        try:
+            tm = SkillManager(skill_dirs=[source_path], isolated=True)
+            for skill in tm.list_skill_info():
+                skills_map[skill.name] = {
+                    "name": skill.name,
+                    "description": skill.description,
+                    "source": source_name,
+                    "path": skill.path,
+                }
+        except Exception as exc:
+            skills_map[f"__error__:{source_name}"] = {
+                "name": f"[error:{source_name}]",
+                "description": str(exc),
+                "source": source_name,
+                "path": source_path,
+            }
+
+    skills = [value for key, value in skills_map.items() if not key.startswith("__error__:")]
+    skills.sort(key=lambda item: item["name"])
+
+    errors = [value for key, value in skills_map.items() if key.startswith("__error__:")]
+    source_counts: Dict[str, int] = {}
+    for item in skills:
+        source_name = item["source"]
+        source_counts[source_name] = source_counts.get(source_name, 0) + 1
+
+    return {
+        "user_id": resolved_user_id,
+        "workspace": os.path.abspath(workspace) if workspace else None,
+        "sources": skill_sources,
+        "total": len(skills),
+        "source_counts": source_counts,
+        "list": skills,
+        "errors": errors,
+    }
+
+
+def validate_requested_skills(
+    *,
+    requested_skills: Optional[List[str]],
+    user_id: Optional[str] = None,
+    workspace: Optional[str] = None,
+) -> List[str]:
+    normalized = [skill.strip() for skill in (requested_skills or []) if skill and skill.strip()]
+    if not normalized:
+        return []
+
+    result = list_available_skills(user_id=user_id, workspace=workspace)
+    available_names = {item["name"] for item in result.get("list", [])}
+    missing = [skill for skill in normalized if skill not in available_names]
+    if missing:
+        available_display = ", ".join(sorted(available_names)) if available_names else "(none)"
+        next_steps = ["Run `sage skills` to inspect currently visible skills."]
+        if workspace:
+            next_steps.append(
+                f"Run `sage skills --workspace {os.path.abspath(workspace)}` to inspect workspace skills."
+            )
+        raise RuntimeError(
+            "Unknown CLI skill(s): "
+            f"{', '.join(missing)}\n"
+            f"Available skills: {available_display}\n"
+            "Suggested next steps:\n"
+            + "\n".join(f"- {item}" for item in next_steps)
+        )
+    return normalized
 
 
 async def get_session_summary(
