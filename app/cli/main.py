@@ -31,6 +31,17 @@ def _print_session_summary(summary: Dict[str, Any], *, prefix: str = "session") 
     print(f"message_count: {summary.get('message_count')}")
 
 
+def _print_message_preview(message: Optional[Dict[str, Any]], *, label: str) -> None:
+    if not message:
+        print(f"{label}: (none)")
+        return
+    role = message.get("role") or "unknown"
+    message_type = message.get("type")
+    content = _truncate(message.get("content") or "", 120)
+    suffix = f" [{message_type}]" if message_type else ""
+    print(f"{label}: [{role}]{suffix} {content}")
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     from app.cli.service import get_default_cli_user_id
 
@@ -100,6 +111,20 @@ def build_argument_parser() -> argparse.ArgumentParser:
     sessions_parser.add_argument("--agent-id", dest="agent_id")
     sessions_parser.add_argument("--json", action="store_true", help="Print sessions as JSON")
     sessions_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
+    sessions_subparsers = sessions_parser.add_subparsers(dest="sessions_command")
+    sessions_inspect_parser = sessions_subparsers.add_parser("inspect", help="Inspect a specific CLI session")
+    sessions_inspect_parser.add_argument("session_id", help="Session id to inspect, or `latest`")
+    sessions_inspect_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
+    sessions_inspect_parser.add_argument("--agent-id", dest="agent_id")
+    sessions_inspect_parser.add_argument(
+        "--messages",
+        dest="message_limit",
+        type=int,
+        default=5,
+        help="Number of recent messages to preview",
+    )
+    sessions_inspect_parser.add_argument("--json", action="store_true", help="Print session details as JSON")
+    sessions_inspect_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
 
     skills_parser = subparsers.add_parser("skills", help="List available CLI skills")
     skills_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
@@ -405,7 +430,42 @@ def _doctor_command() -> int:
 
 
 async def _sessions_command(args: argparse.Namespace) -> int:
-    from app.cli.service import cli_db_runtime, list_sessions
+    from app.cli.service import cli_db_runtime, inspect_session, list_sessions
+
+    if args.sessions_command == "inspect":
+        async with cli_db_runtime(verbose=args.verbose):
+            result = await inspect_session(
+                session_id=args.session_id,
+                user_id=args.user_id,
+                agent_id=args.agent_id,
+                message_limit=args.message_limit,
+            )
+
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+
+        print("session:")
+        _print_session_summary(result, prefix="session")
+        print(f"user_id: {result.get('user_id')}")
+        print(f"agent_id: {result.get('agent_id')}")
+        print(f"created_at: {result.get('created_at')}")
+        print(f"user_count: {result.get('user_count')}")
+        print(f"agent_count: {result.get('agent_count')}")
+        _print_message_preview(result.get("last_user_message"), label="last_user_message")
+        _print_message_preview(result.get("last_assistant_message"), label="last_assistant_message")
+        messages = result.get("recent_messages") or []
+        print(f"recent_messages: {len(messages)}")
+        if not messages:
+            print("  (none)")
+            return 0
+
+        for item in messages:
+            role = item.get("role") or "unknown"
+            index = item.get("index")
+            content = _truncate(item.get("content") or "", 120)
+            print(f"  - #{index} [{role}] {content}")
+        return 0
 
     async with cli_db_runtime(verbose=args.verbose):
         result = await list_sessions(
@@ -438,6 +498,11 @@ async def _sessions_command(args: argparse.Namespace) -> int:
             f"  - {session_id} | {title} | "
             f"{agent_name} | updated={updated_at} | messages={message_count}"
         )
+        last_message = item.get("last_message")
+        if last_message:
+            preview = _truncate(last_message.get("content") or "", 100)
+            role = last_message.get("role") or "unknown"
+            print(f"    last_message: [{role}] {preview}")
     return 0
 
 

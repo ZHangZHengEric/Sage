@@ -364,6 +364,26 @@ async def list_sessions(
     from common.models.conversation import ConversationDao
     from common.schemas.conversation import ConversationInfo
 
+    def _normalize_messages(raw_messages: Any) -> List[Dict[str, Any]]:
+        if isinstance(raw_messages, str):
+            try:
+                raw_messages = json.loads(raw_messages)
+            except Exception:  # noqa: BLE001
+                return []
+        return raw_messages if isinstance(raw_messages, list) else []
+
+    def _build_last_message_preview(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+        for message in reversed(messages):
+            role = (message or {}).get("role")
+            content = ((message or {}).get("content") or "").strip()
+            if role and content:
+                return {
+                    "role": role,
+                    "content": content,
+                    "type": (message or {}).get("type"),
+                }
+        return {}
+
     resolved_user_id = user_id or get_default_cli_user_id()
     dao = ConversationDao()
     conversations, total_count = await dao.get_conversations_paginated(
@@ -378,8 +398,11 @@ async def list_sessions(
     items: List[Dict[str, Any]] = []
     for conv in conversations:
         message_count = conv.get_message_count()
+        messages = _normalize_messages(conv.messages)
+        last_message = _build_last_message_preview(messages)
         items.append(
-            ConversationInfo(
+            {
+                **ConversationInfo(
                 session_id=conv.session_id,
                 user_id=conv.user_id,
                 agent_id=conv.agent_id,
@@ -390,7 +413,9 @@ async def list_sessions(
                 agent_count=message_count.get("agent_count", 0),
                 created_at=conv.created_at.isoformat() if conv.created_at else "",
                 updated_at=conv.updated_at.isoformat() if conv.updated_at else "",
-            ).model_dump()
+                ).model_dump(),
+                "last_message": last_message or None,
+            }
         )
 
     return {
@@ -527,6 +552,99 @@ async def get_session_summary(
         "agent_count": counts.get("agent_count", 0),
         "created_at": conversation.created_at.isoformat() if conversation.created_at else "",
         "updated_at": conversation.updated_at.isoformat() if conversation.updated_at else "",
+    }
+
+
+async def inspect_session(
+    *,
+    session_id: str,
+    user_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    message_limit: int = 5,
+) -> Dict[str, Any]:
+    from common.models.conversation import ConversationDao
+
+    def _normalize_messages(raw_messages: Any) -> List[Dict[str, Any]]:
+        if isinstance(raw_messages, str):
+            try:
+                raw_messages = json.loads(raw_messages)
+            except Exception:  # noqa: BLE001
+                return []
+        return raw_messages if isinstance(raw_messages, list) else []
+
+    def _find_last_message(messages: List[Dict[str, Any]], *, role: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        for message in reversed(messages):
+            message_role = (message or {}).get("role")
+            content = ((message or {}).get("content") or "").strip()
+            if role and message_role != role:
+                continue
+            if content:
+                return {
+                    "role": message_role,
+                    "type": (message or {}).get("type"),
+                    "content": content,
+                    "message_id": (message or {}).get("message_id"),
+                }
+        return None
+
+    dao = ConversationDao()
+    resolved_user_id = user_id or get_default_cli_user_id()
+
+    if session_id == "latest":
+        recent = await dao.get_recent_conversations(
+            user_id=resolved_user_id,
+            agent_id=agent_id,
+        )
+        conversation = recent[0] if recent else None
+    else:
+        conversation = await dao.get_by_session_id(session_id)
+
+    if not conversation:
+        if session_id == "latest":
+            scope_suffix = f" for user {resolved_user_id}"
+            if agent_id:
+                scope_suffix += f" and agent {agent_id}"
+            raise RuntimeError(f"No recent session found{scope_suffix}")
+        raise RuntimeError(f"Session not found: {session_id}")
+
+    if resolved_user_id and conversation.user_id and conversation.user_id != resolved_user_id:
+        raise RuntimeError(f"Session {conversation.session_id} is not visible to user {resolved_user_id}")
+    if agent_id and conversation.agent_id and conversation.agent_id != agent_id:
+        raise RuntimeError(f"Session {conversation.session_id} is not visible to agent {agent_id}")
+
+    counts = conversation.get_message_count()
+    messages = _normalize_messages(conversation.messages or [])
+
+    normalized_limit = max(0, int(message_limit))
+    preview_messages = []
+    start_index = max(0, len(messages) - normalized_limit)
+    for index, message in enumerate(messages[start_index:], start=start_index):
+        preview_messages.append(
+            {
+                "index": index,
+                "role": (message or {}).get("role"),
+                "type": (message or {}).get("type"),
+                "content": (message or {}).get("content"),
+                "message_id": (message or {}).get("message_id"),
+            }
+        )
+
+    return {
+        "session_id": conversation.session_id,
+        "user_id": conversation.user_id,
+        "agent_id": conversation.agent_id,
+        "agent_name": conversation.agent_name,
+        "title": conversation.title,
+        "message_count": counts.get("user_count", 0) + counts.get("agent_count", 0),
+        "user_count": counts.get("user_count", 0),
+        "agent_count": counts.get("agent_count", 0),
+        "created_at": conversation.created_at.isoformat() if conversation.created_at else "",
+        "updated_at": conversation.updated_at.isoformat() if conversation.updated_at else "",
+        "last_user_message": _find_last_message(messages, role="user"),
+        "last_assistant_message": _find_last_message(messages, role="assistant")
+        or _find_last_message(messages, role="agent"),
+        "recent_messages": preview_messages,
+        "message_preview_limit": normalized_limit,
     }
 
 
