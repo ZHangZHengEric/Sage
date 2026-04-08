@@ -359,11 +359,30 @@ build_python_sidecar() {
         mv "$NODE_TEMP_DIR" "$NODE_DIR"
         chmod -R +x "$NODE_DIR/bin/"
     fi
+
+    if [ "$OS_TYPE" = "macos" ] && [ -d "$TAURI_SIDECAR_DIR" ]; then
+        echo "[Sidecar] 清除 macOS sidecar 扩展属性..."
+        if command -v xattr >/dev/null 2>&1; then
+            xattr -cr "$TAURI_SIDECAR_DIR" 2>/dev/null || true
+        fi
+        chmod +x "$TAURI_SIDECAR_DIR"/sage-desktop 2>/dev/null || true
+    fi
 }
 
 build_frontend() {
     echo "[Frontend] 正在构建前端..."
     cd "$UI_DIR"
+
+    # Prefer the bundled Node runtime we just prepared for reproducible builds.
+    if [ -d "$TAURI_NODE_SIDECAR_DIR/bin" ]; then
+        export PATH="$TAURI_NODE_SIDECAR_DIR/bin:$PATH"
+        echo "[Frontend] 使用内置 Node.js: $TAURI_NODE_SIDECAR_DIR/bin"
+    fi
+
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "[Frontend] 错误: 未找到 npm。请先确认 Node.js 运行时准备成功。"
+        exit 1
+    fi
 
     # 智能依赖安装
     local LOCK_FILE="package-lock.json"
