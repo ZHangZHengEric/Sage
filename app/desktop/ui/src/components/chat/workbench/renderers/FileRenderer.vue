@@ -56,6 +56,17 @@
           <ExternalLink class="w-4 h-4 sm:mr-1" />
           <span class="workbench-action-label">打开</span>
         </Button>
+        <Button
+          v-if="drawioOpenUrl"
+          variant="ghost"
+          size="sm"
+          @click="openInDrawio"
+          class="workbench-action-button h-7 px-2"
+          title="在 draw.io 中打开"
+        >
+          <Globe class="w-4 h-4 sm:mr-1" />
+          <span class="workbench-action-label">draw.io</span>
+        </Button>
       </div>
     </div>
 
@@ -105,6 +116,8 @@
           <p class="text-sm">空文件夹</p>
         </div>
       </div>
+
+      <DrawioEmbedRenderer v-else-if="drawioXmlContent" :xml="drawioXmlContent" />
 
       <!-- PDF 预览 -->
       <PdfRenderer v-else-if="fileType === 'pdf'" :file-path="filePath" />
@@ -234,7 +247,14 @@ import TextRenderer from './filerender/TextRenderer.vue'
 import DocxRenderer from './filerender/DocxRenderer.vue'
 import XlsxRenderer from './filerender/XlsxRenderer.vue'
 import PptxRenderer from './filerender/PptxRenderer.vue'
+import DrawioEmbedRenderer from './filerender/DrawioEmbedRenderer.vue'
 import WorkspaceFileTree from '../../WorkspaceFileTree.vue'
+import {
+  buildDrawioPreviewUrlFromArrayBuffer,
+  buildDrawioPreviewUrlFromText,
+  isDirectDrawioExtension,
+  isPotentialDrawioExtension
+} from './filerender/drawio'
 
 const props = defineProps({
   filePath: {
@@ -387,6 +407,9 @@ const fileType = computed(() => {
     'html': 'html', 'htm': 'html',
     'md': 'markdown', 'markdown': 'markdown',
     'excalidraw': 'excalidraw',
+    'drawio': 'drawio', 'dio': 'drawio',
+    'vsdx': 'drawio', 'vssx': 'drawio', 'vstx': 'drawio',
+    'gliffy': 'drawio', 'lucid': 'drawio', 'lucidchart': 'drawio',
     'js': 'code', 'ts': 'code', 'jsx': 'code', 'tsx': 'code',
     'py': 'code', 'java': 'code', 'cpp': 'code', 'c': 'code', 'go': 'code', 'rs': 'code',
     'json': 'code', 'xml': 'code', 'yaml': 'code', 'yml': 'code',
@@ -411,6 +434,7 @@ const fileTypeLabel = computed(() => {
     'html': 'HTML',
     'markdown': 'Markdown',
     'excalidraw': 'Excalidraw',
+    'drawio': 'Draw.io',
     'code': '代码',
     'text': '文本',
     'office': officeFileType.value,
@@ -429,6 +453,7 @@ const fileIcon = computed(() => {
     'html': '🌐',
     'markdown': '📝',
     'excalidraw': '✏️',
+    'drawio': '📊',
     'code': '📜',
     'text': '📃',
     'office': '📊',
@@ -474,8 +499,36 @@ const canCopy = computed(() => {
 
 const canPreviewInDialog = computed(() => {
   if (props.dialogMode || isDirectory.value) return false
-  return ['pdf', 'image', 'video', 'audio', 'html', 'markdown', 'code', 'excalidraw', 'text', 'office'].includes(fileType.value)
+  return ['pdf', 'image', 'video', 'audio', 'html', 'markdown', 'code', 'excalidraw', 'drawio', 'text', 'office'].includes(fileType.value)
 })
+
+const drawioOpenUrl = ref('')
+const drawioXmlContent = ref('')
+
+const createDrawioPreviewUrl = ({ textContent = '', arrayBuffer = null } = {}) => {
+  if (!isPotentialDrawioExtension(fileExtension.value)) return ''
+  const direct = isDirectDrawioExtension(fileExtension.value)
+
+  if (textContent) {
+    return buildDrawioPreviewUrlFromText({
+      content: textContent,
+      fileName: displayFileName.value,
+      extension: fileExtension.value,
+      force: direct
+    })
+  }
+
+  if (arrayBuffer) {
+    return buildDrawioPreviewUrlFromArrayBuffer({
+      arrayBuffer,
+      fileName: displayFileName.value,
+      extension: fileExtension.value,
+      force: direct
+    })
+  }
+
+  return ''
+}
 
 // 检查文件内容是否为二进制（例如 ZIP/PPTX 文件被错误标记为 .md）
 const isBinaryContent = computed(() => {
@@ -672,8 +725,10 @@ const loadContent = async () => {
   try {
     loading.value = true
     error.value = null
+    drawioOpenUrl.value = ''
+    drawioXmlContent.value = ''
     
-    if (['pdf', 'image', 'audio'].includes(fileType.value)) {
+    if (['pdf', 'image', 'audio'].includes(fileType.value) && !isPotentialDrawioExtension(fileExtension.value)) {
       loading.value = false
       return
     }
@@ -685,7 +740,33 @@ const loadContent = async () => {
       const base64 = btoa(String.fromCharCode(...new Uint8Array(fileData)))
       fileContent.value = base64
     } else {
-      fileContent.value = await readTextFile(props.filePath)
+      const shouldTryBinaryForDrawio = isPotentialDrawioExtension(fileExtension.value)
+      let fileArrayBufferValue = null
+
+      if (shouldTryBinaryForDrawio) {
+        const fileData = await readFile(props.filePath)
+        fileArrayBufferValue = new Uint8Array(fileData).buffer
+        drawioOpenUrl.value = createDrawioPreviewUrl({ arrayBuffer: fileArrayBufferValue })
+      }
+
+      if (!drawioOpenUrl.value || fileType.value === 'drawio' || ['html', 'markdown', 'code', 'text'].includes(fileType.value)) {
+        fileContent.value = await readTextFile(props.filePath)
+        if (!drawioOpenUrl.value) {
+          drawioOpenUrl.value = createDrawioPreviewUrl({ textContent: fileContent.value })
+        }
+        if (
+          (fileType.value === 'drawio' || fileExtension.value === 'xml') &&
+          fileContent.value &&
+          fileContent.value.includes('<mxfile')
+        ) {
+          drawioXmlContent.value = fileContent.value
+        }
+      }
+
+      if (drawioXmlContent.value || fileType.value === 'drawio') {
+        loading.value = false
+        return
+      }
     }
 
     if (fileType.value === 'excalidraw') {
@@ -788,6 +869,15 @@ const downloadFile = async () => {
 // 在 Excalidraw 打开
 const openInExcalidraw = () => {
   window.open('https://excalidraw.com', '_blank')
+}
+
+const openInDrawio = async () => {
+  if (!drawioOpenUrl.value) return
+  try {
+    await open(drawioOpenUrl.value)
+  } catch (error) {
+    console.error('在 draw.io 中打开失败:', error)
+  }
 }
 
 // 复制内容

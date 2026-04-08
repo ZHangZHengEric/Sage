@@ -25,6 +25,7 @@
     "lucide-vue-next": "^0.563.0",
     "mammoth": "^1.11.0",
     "marked": "^16.4.0",
+    "mermaid": "^11.12.3",
     "pinia": "^3.0.3",
     "pptx-parser": "^1.1.7-beta.9",
     "pptx-preview": "^1.0.7",

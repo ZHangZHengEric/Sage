@@ -16,6 +16,12 @@
         :item="item"
       />
 
+      <CodeRenderer
+        v-else-if="item.type === 'code'"
+        :content="item.data?.code"
+        :language="item.data?.language"
+      />
+
       <!-- 默认：显示原始数据 -->
       <DefaultRenderer
         v-else
@@ -27,6 +33,7 @@
 
 <script setup>
 import FileRenderer from './renderers/FileRenderer.vue'
+import CodeRenderer from './renderers/filerender/CodeRenderer.vue'
 import ToolCallRenderer from './renderers/ToolCallRenderer.vue'
 import DefaultRenderer from './renderers/DefaultRenderer.vue'
 

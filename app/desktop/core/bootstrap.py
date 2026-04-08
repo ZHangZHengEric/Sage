@@ -58,7 +58,10 @@ async def initialize_tool_manager():
     """初始化工具管理器"""
     try:
         from sagents.skill.skill_tool import SkillTool
+        from .services.browser_tools import BrowserBridgeTool
+
         tool_manager_instance = ToolManager.get_instance()
+        tool_manager_instance.register_tools_from_object(BrowserBridgeTool())
         return tool_manager_instance
     except Exception as e:
         logger.error(f"工具管理器初始化失败: {e}")

@@ -14,6 +14,10 @@ export const toolAPI = {
     return await request.get('/api/tools')
   },
 
+  getBrowserExtensionStatus: async () => {
+    return await request.get('/api/browser-extension/status')
+  },
+
 
 
   /**

@@ -15,12 +15,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, watch, nextTick, ref } from 'vue'
+import { computed, nextTick, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import mermaid from 'mermaid'
 import { FileText, ExternalLink } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
+import { isMermaidLanguage } from './drawio'
 
 const props = defineProps({
   filePath: {
@@ -32,10 +33,6 @@ const props = defineProps({
     default: ''
   }
 })
-
-const contentRef = ref(null)
-const isRendering = ref(false)
-const renderedMermaidIds = ref(new Set()) // 跟踪已经渲染的 mermaid 图表
 
 const isBinary = computed(() => {
   if (!props.content) return false
@@ -52,108 +49,35 @@ const isBinary = computed(() => {
   return false
 })
 
-// Mermaid 图表列表
-const mermaidList = []
-
-// 自定义 marked renderer 来处理 mermaid
 const renderer = new marked.Renderer()
+const mermaidList = []
 
 renderer.code = (token) => {
   const code = token.text
   const language = token.lang
-  if (language === 'mermaid') {
-    const id = `mermaid-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  if (isMermaidLanguage(language)) {
+    const id = `workbench-mermaid-${Date.now()}-${Math.random().toString(36).slice(2)}`
     mermaidList.push({ id, code })
-    // 返回 loading 状态的占位符
-    return `<div class="mermaid-chart" id="${id}">
-      <div class="flex items-center justify-center p-8 bg-muted/30 rounded-lg border border-border/50">
-        <div class="flex items-center gap-3 text-muted-foreground">
-          <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          <span class="text-sm">正在渲染图表...</span>
-        </div>
-      </div>
-    </div>`
+    return `<div class="mermaid-chart not-prose" id="${id}">${escapeHtml(code)}</div>`
   }
-  return `<pre><code class="language-${language}">${code}</code></pre>`
+  return `<pre><code class="language-${language || 'text'}">${escapeHtml(code)}</code></pre>`
 }
 
-marked.setOptions({ renderer })
+marked.setOptions({ renderer, breaks: true })
 
 const renderedContent = computed(() => {
   if (!props.content) return ''
-  // 清空 mermaid 列表
   mermaidList.length = 0
   const html = marked(props.content)
   return DOMPurify.sanitize(html)
 })
 
-// 渲染 Mermaid 图表 - 使用 requestIdleCallback 避免阻塞主线程
-const renderMermaid = async () => {
-  await nextTick()
-  await new Promise(resolve => setTimeout(resolve, 50))
-
-  if (mermaidList.length === 0) return
-
-  // 过滤掉已经渲染过的图表
-  const unrenderedItems = mermaidList.filter(({ id }) => !renderedMermaidIds.value.has(id))
-  if (unrenderedItems.length === 0) return
-
-  isRendering.value = true
-
-  // 初始化 mermaid
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: document.documentElement.classList.contains('dark') ? 'dark' : 'default',
-    securityLevel: 'loose'
-  })
-
-  // 使用 requestIdleCallback 或 setTimeout 分批渲染，避免阻塞主线程
-  const renderBatch = async (items, batchSize = 3) => {
-    for (let i = 0; i < items.length; i += batchSize) {
-      const batch = items.slice(i, i + batchSize)
-
-      // 每批渲染前让出主线程
-      if (i > 0) {
-        await new Promise(resolve => {
-          if (typeof requestIdleCallback !== 'undefined') {
-            requestIdleCallback(resolve, { timeout: 100 })
-          } else {
-            setTimeout(resolve, 0)
-          }
-        })
-      }
-
-      // 渲染当前批次
-      await Promise.all(batch.map(async ({ id, code }) => {
-        // 检查是否已经渲染过
-        if (renderedMermaidIds.value.has(id)) return
-
-        const el = document.getElementById(id)
-        if (!el) return
-
-        try {
-          // 使用 mermaid.render 生成 SVG
-          const { svg } = await mermaid.render(`mermaid-svg-${id}`, code)
-          el.innerHTML = svg
-          el.classList.add('mermaid-rendered')
-          // 标记为已渲染
-          renderedMermaidIds.value.add(id)
-        } catch (err) {
-          console.error(`Mermaid 图表 ${id} 渲染失败:`, err)
-          el.innerHTML = `<pre class="text-destructive p-4 border border-destructive/50 rounded bg-destructive/10">Mermaid 渲染错误: ${err.message}</pre>`
-          // 即使失败也标记为已渲染，避免重复尝试
-          renderedMermaidIds.value.add(id)
-        }
-      }))
-    }
-  }
-
-  await renderBatch(unrenderedItems)
-  isRendering.value = false
-}
+const escapeHtml = (content) => String(content)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;')
 
 const openFile = () => {
   if (props.filePath) {
@@ -161,22 +85,36 @@ const openFile = () => {
   }
 }
 
-// 监听内容变化，重新渲染 mermaid
-watch(() => props.content, async (newContent, oldContent) => {
-  // 只在内容真正变化时重新渲染，避免重复渲染
-  if (newContent !== oldContent) {
-    renderedMermaidIds.value = new Set()
-    await renderMermaid()
-  }
-}, { immediate: true })
+const sanitizeMermaidCode = (code = '') => code
+  .replace(/(participant\s+\S+\s+as)\s+([^\n]+)/g, (_, prefix, label) => {
+    const trimmed = label.trim()
+    if (!trimmed || /^["'].*["']$/.test(trimmed)) return `${prefix} ${trimmed}`
+    return `${prefix} "${trimmed.replace(/"/g, '\\"')}"`
+  })
 
-onMounted(() => {
-  // onMounted 时不需要调用 renderMermaid，因为 watch 的 immediate: true 已经处理了初始渲染
-  // 但如果 watch 因为内容为空没有触发，则需要手动调用
-  if (!props.content) {
-    renderMermaid()
+const renderMermaid = async () => {
+  await nextTick()
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: document.documentElement.classList.contains('dark') ? 'dark' : 'default',
+    securityLevel: 'strict'
+  })
+
+  for (const { id, code } of mermaidList) {
+    const el = document.getElementById(id)
+    if (!el) continue
+
+    try {
+      const { svg } = await mermaid.render(`svg-${id}`, sanitizeMermaidCode(code))
+      el.innerHTML = svg
+    } catch (err) {
+      console.error('Failed to render Mermaid in markdown:', err)
+      el.innerHTML = `<pre class="text-destructive p-4 border border-destructive/50 rounded bg-destructive/10">Mermaid 渲染错误: ${escapeHtml(err?.message || '未知错误')}</pre>`
+    }
   }
-})
+}
+
+watch(() => renderedContent.value, renderMermaid, { immediate: true })
 </script>
 
 <style scoped>
@@ -193,12 +131,11 @@ onMounted(() => {
   @apply bg-transparent p-0 text-sm font-mono leading-relaxed;
 }
 
-/* Mermaid Chart Styles */
 .markdown-workbench :deep(.mermaid-chart) {
-  @apply my-4;
+  @apply my-4 overflow-hidden rounded-xl border border-border/60 bg-background/70;
 }
 
 .markdown-workbench :deep(.mermaid-chart svg) {
-  @apply mx-auto max-w-full;
+  @apply mx-auto h-auto max-w-full;
 }
 </style>

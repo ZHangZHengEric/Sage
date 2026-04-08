@@ -125,7 +125,7 @@
         </TooltipProvider>
       </div>
     </div>
-    <div class="flex flex-1 flex-row overflow-hidden pb-4">
+    <div class="relative flex flex-1 flex-row overflow-hidden pb-4">
       <!-- 主聊天区域 -->
       <div
         class="flex-1 flex flex-col min-w-0 bg-muted/5 relative transition-all duration-200"

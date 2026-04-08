@@ -30,7 +30,7 @@
     <div class="flex-1 overflow-y-auto p-4">
       <!-- 代码部分 -->
       <div v-if="code" class="mb-4">
-        <SyntaxHighlighter :code="code" :language="language" :show-header="false" :show-copy-button="false" />
+        <CodeRenderer :content="code" :language="language" :show-header="false" :show-copy-button="false" />
       </div>
 
       <!-- 输出部分 -->
@@ -46,7 +46,7 @@ import { ref, computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Copy, Check } from 'lucide-vue-next'
-import SyntaxHighlighter from '../../SyntaxHighlighter.vue'
+import CodeRenderer from './filerender/CodeRenderer.vue'
 import { useLanguage } from '../../../../utils/i18n.js'
 
 const { t } = useLanguage()
