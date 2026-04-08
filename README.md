@@ -8,15 +8,15 @@
 [![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python)](https://python.org)
-[![Version](https://img.shields.io/badge/Version-1.0.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/Version-1.1.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-Learn%20More-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 [![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
-# 🧠 **Sage Multi-Agent Framework**
+# 🧠 **Sage Agent Platform**
 
-### 🎯 **Making Complex Tasks Simple**
+### 🎯 **From Complex Work to Reliable Delivery**
 
-> 🌟 **A production-ready, modular, and intelligent multi-agent orchestration framework for complex problem solving.**
+> 🌟 **A production-ready agent platform for task execution, automation, browser workflows, IM delivery, and enterprise deployment.**
 
 </div>
 
@@ -51,16 +51,14 @@
 
 ## ✨ **Key Features**
 
-- 🧠 **Multi-Agent Orchestration**: Support for **TaskExecutor** (Sequential), **FibreAgent** (Parallel), and **AgentFlow** (Declarative) orchestration modes.
-- 🎯 **Maximized Model Capability**: Stable execution of complex tasks even on smaller models like **Qwen3.5 35B-A3B**, with framework-level optimizations unlocking model potential.
-- 🧩 **Built-in High-Stability Skills**: Pre-installed production-ready Skills that work out of the box, ensuring reliable execution for critical tasks.
-- 🛡️ **Secure Sandbox**: Isolated execution environment (`sagents.utils.sandbox`) for safe agent code execution.
-- 👁️ **Full Observability**: Integrated **OpenTelemetry** tracing to visualize agent thought processes and execution paths.
-- 🧩 **Modular Components**: Plug-and-play architecture for **Skills**, **Tools**, and **MCP Servers**.
-- 📊 **Context Management**: Advanced **Context Budget** controls for precise token optimization.
-- 💻 **Cross-Platform Desktop**: Native desktop apps for **macOS** (Intel/Apple Silicon), **Windows**, and **Linux**.
-- 🛠️ **Visual Workbench**: Unified workspace for file preview, tool results, and code execution with 15+ format support.
-- 🔌 **MCP Protocol**: Model Context Protocol support for standardized tool integration.
+- 🤖 **Planning to Delivery**: Built-in planning, execution, self-check, memory recall, and tool suggestion agents for complex task completion.
+- 🌐 **Multi-Entry Product Surface**: Use Sage from desktop, web, CLI, and Chrome extension depending on the workflow.
+- 🔁 **Automation & Recurring Tasks**: Run scheduled jobs, questionnaire-driven collection flows, and long-running operational tasks with progress visibility.
+- 💬 **Omnichannel IM Integration**: Connect WeChat Personal (iLink), WeCom, Feishu, and DingTalk with message and file delivery support.
+- 🧰 **Unified Tooling System**: Combine built-in tools, Skills, MCP servers, browser automation, search, and image generation in one execution stack.
+- 🛡️ **Sandboxed Execution**: Local, passthrough, and remote sandbox options for safer agent runtime isolation.
+- 🛠️ **Visual Workbench**: Inspect files, tool outputs, code, charts, Mermaid, Draw.io, audio, video, and remote previews in one workspace.
+- 🏢 **Enterprise-Ready Foundation**: OAuth2, configurable auth and CORS, shared service architecture, CI coverage, and deployable multi-platform packaging.
 
 ---
 
@@ -208,74 +206,83 @@ npm run dev
 
 ```mermaid
 graph TD
-    User[User/Client] --> Desktop[💻 Desktop App]
-    User --> Web[🌐 Web UI]
-    Desktop --> API[Sage Server API]
-    Web --> API
-    
-    subgraph Core[Core Engine]
-        API --> Orch[🧠 Agent Orchestrator]
-        Orch -- "Dispatch" --> Flow[📋 AgentFlow]
-        Flow -- "Execute" --> Agents["🤖 Agents<br/>Fibre / Simple / Multi"]
-        Agents -- "Use" --> RAG[📚 RAG Engine]
-        Agents -- "Use" --> Tools[🛠️ Tools & Skills]
-        Agents -- "Use" --> MCP[🔌 MCP Servers]
-        Agents -- "Run in" --> Box[📦 Security Sandbox]
+    User[User] --> Desktop[💻 Desktop App]
+    User --> Web[🌐 Web App]
+    User --> CLI[⌨️ CLI]
+    User --> Ext[🧩 Chrome Extension]
+    User --> IM[💬 IM Channels]
+
+    Desktop --> AppLayer[🧭 App Service Layer]
+    Web --> AppLayer
+    CLI --> AppLayer
+    Ext --> AppLayer
+    IM --> AppLayer
+
+    subgraph App[Product Layer]
+        AppLayer --> Chat[💬 Chat & Sessions]
+        AppLayer --> AgentsUI[🤖 Agent Management]
+        AppLayer --> Tasks[⏰ Tasks & Automations]
+        AppLayer --> Browser[🌐 Browser Bridge]
+        AppLayer --> Workbench[🛠️ Visual Workbench]
     end
 
-    subgraph Infra[Enterprise Infrastructure]
-        RAG <--> ES[(Elasticsearch)]
-        Tools <--> RustFS[(RustFS)]
-        Orch <--> DB[(SQL Database)]
+    subgraph Core[SAgents Core]
+        AppLayer --> Runtime[🧠 Session Runtime]
+        Runtime --> Flow[📋 AgentFlow]
+        Flow --> Agents["🤖 Agents<br/>Plan / Simple / Fibre / Self-Check"]
+        Agents --> Memory[🧠 Memory Recall]
+        Agents --> Skills[🧩 Skills]
+        Agents --> ToolMgr[🛠️ Tool Manager]
     end
-    
-    Core -.-> Obs["👁️ Observability<br/>OpenTelemetry"]
-    Core -.-> Workbench["🛠️ Visual Workbench"]
+
+    subgraph Tools[Execution & Integration]
+        ToolMgr --> MCP[🔌 MCP Servers]
+        ToolMgr --> BrowserTools[🌍 Browser Automation]
+        ToolMgr --> Search[🔎 Unified Search]
+        ToolMgr --> ImageGen[🎨 Image Generation]
+        ToolMgr --> Questionnaire[📝 Questionnaire]
+        ToolMgr --> IMTools[📨 IM Delivery]
+    end
+
+    subgraph RuntimeEnv[Runtime & Infrastructure]
+        Agents --> Sandbox[📦 Sandbox Runtime]
+        Sandbox --> Local[Local]
+        Sandbox --> Pass[Passthrough]
+        Sandbox --> Remote[Remote]
+        AppLayer <--> Common[🧱 Shared Common Services]
+        Common <--> DB[(SQL Database)]
+        Memory <--> ES[(Elasticsearch)]
+        Workbench <--> FS[(RustFS / Local Files)]
+        Runtime -.-> Obs["👁️ Observability<br/>OpenTelemetry"]
+    end
 ```
 
 ---
 
-## 📅 **What's New in v1.0.0**
+## 📅 **What's New in v1.1.0**
 
 ### 🤖 **SAgents Kernel Updates**
 
-- **Session Management Refactor**: Global `SessionManager` with parent-child session tracking
-- **AgentFlow Engine**: Declarative workflow orchestration with Router → DeepThink → Mode Switch → Suggest flow
-- **Fibre Mode Optimization**: 
-  - Dynamic sub-agent spawning with `sys_spawn_agent`
-  - Parallel task delegation with `sys_delegate_task`
-  - Hour-level long-running task support
-  - 4-level hierarchy depth control
-  - Recursive orchestration capabilities
-- **Lock Management**: Global `LockManager` for session-level isolation
-- **Observability**: OpenTelemetry integration with performance monitoring
+- **Execution Chain Enhancements**: Added `PlanAgent`, `SelfCheckAgent`, `MemoryRecallAgent`, and `ToolSuggestionAgent`
+- **Context Efficiency**: Improved user input optimization and conversation history compression for long-running tasks
+- **Session & Messaging**: Added edit-and-rerun support, richer progress feedback, and better session inspection workflows
+- **Tooling Expansion**: Added questionnaire collection workflows and improved tool-call rendering, truncation, and observability
 
-### 💻 **App Layer Updates**
+### 💻 **Product Layer Updates**
 
-- **Visual Workbench**: 
-  - 20+ rendering components
-  - 15+ file format support (PDF, DOCX, PPTX, XLSX, etc.)
-  - List/Single view dual mode
-  - Timeline navigation
-  - Session-isolated state management
-- **Cross-Platform Desktop**: 
-  - macOS (Intel/Apple Silicon) - DMG
-  - Windows - NSIS Installer
-  - Linux - DEB support
-- **Real-time Collaboration**: 
-  - Message stream optimization
-  - File reference extraction
-  - Code block highlighting
-  - Disconnect detection & resume
-- **MCP Support**: Model Context Protocol for external tool integration
+- **New Entry Points**: Added Sage CLI, Chrome extension, and browser automation tooling
+- **Workbench Upgrades**: Expanded support for audio, video, Mermaid, Draw.io, remote file preview, and richer tool cards
+- **Chat Experience**: Improved progress messages, delivery flow display, reasoning content presentation, and workspace interactions
+- **IM Integrations**: Expanded WeChat Personal (iLink), WeCom, Feishu, and DingTalk support with stronger file messaging flows
 
-### 🔧 **Infrastructure**
+### 🛡️ **Platform & Infrastructure**
 
-- **Tauri 2.0**: Upgraded to stable version with new permission system
-- **Build Optimization**: Rust caching, parallel builds, auto-signing
-- **State Management**: Pinia store with session isolation
+- **Enterprise Readiness**: Added OAuth2, email verification, and stronger auth/CORS/security controls
+- **Sandbox & Runtime**: Refactored local/passthrough/remote sandbox support and improved Node runtime/sidecar packaging
+- **Shared Architecture**: Extracted reusable `common/` services, models, and schemas across desktop and server
+- **Documentation & CI**: Rebuilt the docs structure, added CLI guides, and expanded CI/test coverage
 
-**[View Full Release Notes](release_notes/v1.0.0.md)**
+**[View Full Release Notes](release_notes/v1.1.0.md)**
 
 ---
 
@@ -283,7 +290,7 @@ graph TD
 
 - 📖 **Full Documentation**: [https://wiki.sage.zavixai.com/](https://wiki.sage.zavixai.com/)
 - 📝 **Release Notes**: [release_notes/](release_notes/)
-- 🏗️ **Architecture**: See `sagents/` directory for core framework
+- 🏗️ **Architecture**: See `sagents/`, `common/`, and `app/` for the core runtime and product layers
 - 🔧 **Configuration**: Environment variables and config files in `app/desktop/`
 
 ---
@@ -294,20 +301,16 @@ graph TD
 
 ```
 Sage/
-├── sagents/                    # Core Agent Framework
-│   ├── agent/                  # Agent implementations
-│   │   ├── fibre/              # Fibre multi-agent orchestration
-│   │   ├── simple_agent.py     # Simple mode agent
-│   │   └── ...
-│   ├── flow/                   # AgentFlow engine
-│   ├── context/                # Session & message management
-│   ├── tool/                   # Tool system
-│   └── session_runtime.py      # Session manager
-├── app/desktop/                # Desktop Application
-│   ├── core/                   # Python backend (FastAPI)
-│   ├── ui/                     # Vue3 frontend
-│   └── tauri/                  # Tauri 2.0 desktop shell
-└── skills/                     # Built-in skills
+├── sagents/                    # SAgents core runtime, flow, context, tools, sandbox
+├── common/                     # Shared models, schemas, services, core clients
+├── app/
+│   ├── desktop/                # Desktop app (Python backend + Vue UI + Tauri shell)
+│   ├── server/                 # Server app and web frontend
+│   ├── cli/                    # Sage CLI entrypoint and services
+│   └── chrome-extension/       # Browser extension and sidepanel
+├── mcp_servers/                # IM, search, scheduler, image generation and more
+├── docs/                       # English and Chinese documentation
+└── release_notes/              # Version release notes
 ```
 
 ### Contributing
