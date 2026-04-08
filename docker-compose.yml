@@ -52,8 +52,6 @@ services:
       VITE_SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage/}
     depends_on:
       - sage-server
-    mem_limit: 512m
-    cpus: 0.5
 
   sage-wiki:
     restart: always
