@@ -6,7 +6,10 @@ from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
 from common.core.render import Response
-from ..services.browser_capability import get_browser_capability_coordinator
+from ..services.browser_capability import (
+    get_browser_capability_coordinator,
+    get_browser_tool_sync_state,
+)
 from ..services.browser_bridge import BrowserBridgeHub
 from ..user_context import get_desktop_user_id
 
@@ -36,10 +39,9 @@ class CommandResultRequest(BaseModel):
 @browser_extension_router.get("/status")
 async def extension_status(http_request: Request):
     user_id = get_desktop_user_id(http_request)
-    hub = BrowserBridgeHub.get_instance()
     return await Response.succ(
         message="浏览器插件状态获取成功",
-        data=await hub.get_status(user_id),
+        data=await get_browser_tool_sync_state(user_id),
     )
 
 
@@ -47,7 +49,7 @@ async def extension_status(http_request: Request):
 async def extension_heartbeat(req: ExtensionHeartbeatRequest, http_request: Request):
     user_id = get_desktop_user_id(http_request)
     hub = BrowserBridgeHub.get_instance()
-    data = await hub.heartbeat(
+    await hub.heartbeat(
         user_id=user_id,
         extension_id=req.extension_id,
         extension_version=req.extension_version,
@@ -56,6 +58,7 @@ async def extension_heartbeat(req: ExtensionHeartbeatRequest, http_request: Requ
         capabilities=req.capabilities,
     )
     get_browser_capability_coordinator().notify_activity()
+    data = await get_browser_tool_sync_state(user_id)
     return await Response.succ(message="浏览器插件心跳已更新", data=data)
 
 

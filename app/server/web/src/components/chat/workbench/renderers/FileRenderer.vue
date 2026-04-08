@@ -46,6 +46,17 @@
           <Download class="w-4 h-4 sm:mr-1" />
           <span class="workbench-action-label">{{ t('workspace.download') }}</span>
         </Button>
+        <Button
+          v-if="drawioOpenUrl"
+          variant="ghost"
+          size="sm"
+          @click="openInDrawio"
+          class="workbench-action-button h-7 px-2"
+          title="在 draw.io 中打开"
+        >
+          <Globe class="w-4 h-4 sm:mr-1" />
+          <span class="workbench-action-label">draw.io</span>
+        </Button>
       </div>
     </div>
 
@@ -71,6 +82,8 @@
           {{ t('common.retry') || '重试' }}
         </Button>
       </div>
+
+      <DrawioEmbedRenderer v-else-if="drawioXmlContent" :xml="drawioXmlContent" />
 
       <!-- PDF 预览 -->
       <PdfRenderer v-else-if="fileType === 'pdf'" :file-url="blobUrl" />
@@ -158,13 +171,20 @@ import {
   File,
   FileText,
   Download,
-  Eye
+  Eye,
+  Globe
 } from 'lucide-vue-next'
 import { useThemeStore } from '@/stores/theme'
 import PdfRenderer from './filerender/PdfRenderer.vue'
 import ImageRenderer from './filerender/ImageRenderer.vue'
 import TextRenderer from './filerender/TextRenderer.vue'
 import { agentAPI } from '@/api/agent'
+import {
+  buildDrawioPreviewUrlFromArrayBuffer,
+  buildDrawioPreviewUrlFromText,
+  isDirectDrawioExtension,
+  isPotentialDrawioExtension
+} from '@/utils/drawio'
 
 import { 
   getFileExtension, 
@@ -180,6 +200,7 @@ import {
 const HtmlRenderer = defineAsyncComponent(() => import('./filerender/HtmlRenderer.vue'))
 const MarkdownRenderer = defineAsyncComponent(() => import('./filerender/MarkdownRenderer.vue'))
 const CodeRenderer = defineAsyncComponent(() => import('./filerender/CodeRenderer.vue'))
+const DrawioEmbedRenderer = defineAsyncComponent(() => import('./filerender/DrawioEmbedRenderer.vue'))
 const ExcalidrawRenderer = defineAsyncComponent(() => import('./filerender/ExcalidrawRenderer.vue'))
 const DocxRenderer = defineAsyncComponent(() => import('./filerender/DocxRenderer.vue'))
 const XlsxRenderer = defineAsyncComponent(() => import('./filerender/XlsxRenderer.vue'))
@@ -314,8 +335,36 @@ const canCopy = computed(() => {
 
 const canPreviewInDialog = computed(() => {
   if (props.dialogMode) return false
-  return ['pdf', 'image', 'html', 'markdown', 'code', 'excalidraw', 'text', 'office'].includes(fileType.value)
+  return ['pdf', 'image', 'html', 'markdown', 'code', 'excalidraw', 'drawio', 'text', 'office'].includes(fileType.value)
 })
+
+const drawioOpenUrl = ref('')
+const drawioXmlContent = ref('')
+
+const createDrawioPreviewUrl = ({ textContent = '', arrayBuffer = null } = {}) => {
+  if (!isPotentialDrawioExtension(fileExtension.value)) return ''
+  const direct = isDirectDrawioExtension(fileExtension.value)
+
+  if (textContent) {
+    return buildDrawioPreviewUrlFromText({
+      content: textContent,
+      fileName: displayFileName.value,
+      extension: fileExtension.value,
+      force: direct
+    })
+  }
+
+  if (arrayBuffer) {
+    return buildDrawioPreviewUrlFromArrayBuffer({
+      arrayBuffer,
+      fileName: displayFileName.value,
+      extension: fileExtension.value,
+      force: direct
+    })
+  }
+
+  return ''
+}
 
 // Excalidraw 特定数据
 const excalidrawElementCount = ref(0)
@@ -381,6 +430,8 @@ const loadContent = async () => {
   try {
     loading.value = true
     error.value = null
+    drawioOpenUrl.value = ''
+    drawioXmlContent.value = ''
 
     // 如果是在线图片 URL，直接使用该 URL 预览
     if (isOnlineImageUrl.value) {
@@ -409,6 +460,30 @@ const loadContent = async () => {
         URL.revokeObjectURL(blobUrl.value)
     }
     blobUrl.value = URL.createObjectURL(blob)
+
+    if (isPotentialDrawioExtension(fileExtension.value)) {
+      const arrayBuffer = await blob.arrayBuffer()
+      drawioOpenUrl.value = createDrawioPreviewUrl({ arrayBuffer })
+      if (!drawioOpenUrl.value || fileType.value === 'drawio' || fileExtension.value === 'xml') {
+        const textContent = await blob.text()
+        fileContent.value = textContent
+        if (!drawioOpenUrl.value) {
+          drawioOpenUrl.value = createDrawioPreviewUrl({ textContent })
+        }
+      }
+      if (
+        (fileType.value === 'drawio' || fileExtension.value === 'xml') &&
+        fileContent.value &&
+        fileContent.value.includes('<mxfile')
+      ) {
+        drawioXmlContent.value = fileContent.value
+      }
+
+      if (drawioXmlContent.value || fileType.value === 'drawio') {
+        loading.value = false
+        return
+      }
+    }
     
     // 根据文件类型处理内容
     if (['pdf', 'image'].includes(fileType.value)) {
@@ -491,6 +566,11 @@ const openFile = async () => {
         console.error('下载失败', e)
     }
   }
+}
+
+const openInDrawio = () => {
+  if (!drawioOpenUrl.value) return
+  window.open(drawioOpenUrl.value, '_blank', 'noopener,noreferrer')
 }
 
 // 复制内容

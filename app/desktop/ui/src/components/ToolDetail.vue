@@ -10,7 +10,7 @@
           <component :is="getToolIcon(tool.type)" class="h-6 w-6" />
         </div>
         <div class="min-w-0 flex-1">
-          <h1 class="text-xl md:text-2xl font-bold tracking-tight truncate">{{ tool.name }}</h1>
+          <h1 class="text-xl md:text-2xl font-bold tracking-tight truncate">{{ getToolLabel(tool.name, t) }}</h1>
           <Badge :variant="getToolTypeBadgeVariant(tool.type)" class="mt-1">
             {{ getToolTypeLabel(tool.type) }}
           </Badge>
@@ -51,7 +51,7 @@
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div class="space-y-1">
                 <span class="text-sm font-medium text-muted-foreground">{{ t('toolDetail.toolName') }}</span>
-                <p class="font-medium">{{ tool.name }}</p>
+                <p class="font-medium">{{ getToolLabel(tool.name, t) }}</p>
               </div>
               <div class="space-y-1">
                 <span class="text-sm font-medium text-muted-foreground">{{ t('toolDetail.toolType') }}</span>
@@ -134,6 +134,7 @@ import { computed } from 'vue'
 import { ArrowLeft, Database, Code, Wrench, Globe, Cpu } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { getMcpServerLabel } from '../utils/mcpLabels.js'
+import { getToolLabel } from '../utils/messageLabels.js'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'

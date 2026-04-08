@@ -39,7 +39,7 @@ class BrowserBridgeTool:
         if not online:
             return {
                 "ok": False,
-                "error": "浏览器插件当前离线，请先打开 Sage 浏览器侧边栏。",
+                "error": "浏览器插件当前离线，请确认扩展已安装且浏览器页面仍在活动中。",
                 "status": status,
             }
 

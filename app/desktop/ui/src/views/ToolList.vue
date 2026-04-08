@@ -151,8 +151,8 @@
                 </div>
                 <div class="space-y-1 overflow-hidden flex-1 min-w-0">
                   <div class="flex items-center justify-between gap-2">
-                    <CardTitle class="text-sm font-semibold truncate" :title="tool.name">
-                      {{ tool.name }}
+                    <CardTitle class="text-sm font-semibold truncate" :title="getToolLabel(tool.name, t)">
+                      {{ getToolLabel(tool.name, t) }}
                     </CardTitle>
                   </div>
                   <p class="text-xs text-muted-foreground line-clamp-3 h-8">
@@ -278,6 +278,7 @@ import { useRouter } from 'vue-router'
 import { Wrench, Search, Code, Database, Globe, Cpu, Plus, Trash2, Loader, RefreshCw, LayoutGrid, Server, Edit, Info, Power, PowerOff } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { getMcpServerLabel } from '../utils/mcpLabels.js'
+import { getToolLabel } from '../utils/messageLabels.js'
 import { toolAPI } from '../api/tool.js'
 import { getCurrentUser } from '../utils/auth.js'
 import McpServerAdd from '../components/McpServerAdd.vue'
@@ -324,6 +325,7 @@ const filteredTools = computed(() => {
   if (searchTerm.value.trim()) {
     const query = searchTerm.value.toLowerCase()
     filtered = filtered.filter(tool =>
+      getToolLabel(tool.name, t).toLowerCase().includes(query) ||
       tool.name.toLowerCase().includes(query) ||
       tool.description.toLowerCase().includes(query)
     )
