@@ -161,7 +161,7 @@ app/desktop/scripts/build.sh release
 
 **Command Line Interface (CLI)**:
 ```bash
-# Install editable package once
+# Install editable package
 pip install -e .
 
 # Configure the minimum runtime variables
@@ -173,64 +173,19 @@ export SAGE_DB_TYPE="file"
 # Diagnose local runtime config
 sage doctor
 
-# Show effective CLI config
-sage config show
-
-# Create a minimal local CLI config
+# Create a minimal local CLI config if needed
 sage config init
 
-# List recent sessions for the current CLI user
-sage sessions
-
-# List available skills
-sage skills
-
-# Run a single task
-sage run "Help me analyze the current repository"
-
-# Run a task and print execution stats
-sage run --stats "Help me analyze the current repository"
-
-# Run a task and emit structured stream events plus a final cli_stats event
-sage run --json "Help me analyze the current repository"
-
-# Run against a specific local workspace
-sage run --workspace /path/to/project --stats "Say hello briefly."
-
-# Run with a specific skill enabled
-sage run --skill my_skill --stats "Say hello briefly."
-
-# Inspect skills from a specific workspace
-sage skills --workspace /path/to/project
+# Run a quick task
+sage run --stats "Say hello briefly."
 
 # Start an interactive chat session
 sage chat
-
-# Resume an existing session
-sage resume your-session-id
 ```
 
-In `sage chat` and `sage resume`, you can use:
-- `/help` to show built-in chat commands
-- `/session` to print the current session id
-- `/exit` or `/quit` to leave the session
-
-By default, the CLI uses a stable local user id. You can override it with `--user-id`, `SAGE_CLI_USER_ID`, or `SAGE_DESKTOP_USER_ID`.
-
-If you prefer not to install an editable package yet, you can run the module directly:
-
-```bash
-python -m app.cli.main doctor
-python -m app.cli.main config show
-python -m app.cli.main config init
-python -m app.cli.main sessions
-python -m app.cli.main skills
-python -m app.cli.main run "Help me analyze the current repository"
-python -m app.cli.main run --workspace /path/to/project "Help me analyze the current repository"
-python -m app.cli.main run --stats "Help me analyze the current repository"
-python -m app.cli.main chat
-python -m app.cli.main resume your-session-id
-```
+Detailed CLI usage is documented here:
+- English: [docs/en/CLI.md](docs/en/CLI.md)
+- 中文: [docs/zh/CLI.md](docs/zh/CLI.md)
 
 The current CLI MVP still uses the existing Sage runtime config system, so `.env` and shell environment variables remain the primary configuration mechanism.
 When `--json` is enabled, the CLI emits stream events and appends a final `cli_stats` event for structured post-run inspection.

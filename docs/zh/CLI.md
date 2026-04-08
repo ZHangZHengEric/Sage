@@ -200,6 +200,23 @@ sage sessions --search debug
 sage sessions --agent-id my-agent
 ```
 
+查看某个具体会话的详情：
+
+```bash
+sage sessions inspect <session_id>
+sage sessions inspect latest
+sage sessions inspect --json <session_id>
+sage sessions inspect --agent-id my-agent latest
+sage sessions inspect --messages 8 <session_id>
+```
+
+`inspect` 视图会输出：
+
+- 会话摘要信息，例如标题、agent、时间戳、消息数
+- 最近一条用户消息和助手消息摘要（如果存在）
+- 最近几条消息预览
+- 可选的 JSON 输出，便于调试和脚本处理
+
 ### `sage skills`
 
 查看 CLI 当前可见的 skills。

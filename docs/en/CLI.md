@@ -200,6 +200,23 @@ sage sessions --search debug
 sage sessions --agent-id my-agent
 ```
 
+Inspect one session in more detail:
+
+```bash
+sage sessions inspect <session_id>
+sage sessions inspect latest
+sage sessions inspect --json <session_id>
+sage sessions inspect --agent-id my-agent latest
+sage sessions inspect --messages 8 <session_id>
+```
+
+The inspect view includes:
+
+- session summary fields such as title, agent, timestamps, and message counts
+- last user and assistant message summaries when available
+- recent message previews
+- optional JSON output for scripting or debugging
+
 ### `sage skills`
 
 Inspect skills currently visible to the CLI.
