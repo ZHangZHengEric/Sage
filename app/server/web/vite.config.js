@@ -38,8 +38,8 @@ export default defineConfig(({ mode }) => {
       environment: 'jsdom'
     },
     build: {
+      sourcemap: false,
       rollupOptions: {
-        sourcemap: false,
         onwarn(warning, warn) {
           if (warning.code === 'MODULE_LEVEL_DIRECTIVE') {
             return

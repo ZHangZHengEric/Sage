@@ -1,7 +1,7 @@
 # --- Build stage: use Node 22 to satisfy Vite requirements ---
 FROM docker.m.daocloud.io/node:22-alpine AS builder
 WORKDIR /app
-ENV NODE_OPTIONS=--dns-result-order=ipv4first
+ENV NODE_OPTIONS="--dns-result-order=ipv4first --max-old-space-size=4096"
 RUN npm config set registry https://registry.npmmirror.com && npm config set fetch-retries 5 && npm config set fetch-retry-maxtimeout 600000
 
 # Copy dependency manifests first so source edits do not invalidate npm install
