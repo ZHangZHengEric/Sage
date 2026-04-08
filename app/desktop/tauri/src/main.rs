@@ -88,6 +88,23 @@ fn first_existing_path(candidates: impl IntoIterator<Item = PathBuf>) -> Option<
     candidates.into_iter().find(|path| path.exists())
 }
 
+fn is_valid_chrome_extension_dir(path: &Path) -> bool {
+    path.exists() && path.join("manifest.json").exists()
+}
+
+fn collect_extension_dir_candidates_from_cwd() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        // direct path from current dir
+        out.push(cwd.join("app").join("chrome-extension"));
+        // walk ancestors so dev cwd like app/desktop/tauri can still locate repo root
+        for ancestor in cwd.ancestors() {
+            out.push(ancestor.join("app").join("chrome-extension"));
+        }
+    }
+    out
+}
+
 fn build_prepended_path(path: &Path, current_path: Option<OsString>) -> Result<OsString, String> {
     let mut paths = vec![path.to_path_buf()];
     if let Some(current_path) = current_path {
@@ -497,6 +514,41 @@ fn get_server_port() -> Option<u16> {
     std::env::var("SAGE_PORT").ok().and_then(|p| p.parse().ok())
 }
 
+fn can_bind_local_port(port: u16) -> bool {
+    std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
+fn choose_desktop_backend_port() -> u16 {
+    // 1) Explicit env wins if valid and bindable.
+    if let Ok(raw) = std::env::var("SAGE_PORT") {
+        if let Ok(port) = raw.parse::<u16>() {
+            if can_bind_local_port(port) {
+                println!("Using explicit SAGE_PORT: {}", port);
+                return port;
+            }
+            println!("SAGE_PORT={} is occupied, trying fallback ports", port);
+        } else {
+            println!("Invalid SAGE_PORT='{}', trying fallback ports", raw);
+        }
+    }
+
+    // 2) Stable preferred ports (extension can probe these quickly).
+    let preferred_ports: [u16; 6] = [18080, 18081, 18082, 8080, 8000, 18090];
+    for port in preferred_ports {
+        if can_bind_local_port(port) {
+            println!("Selected preferred backend port: {}", port);
+            return port;
+        }
+    }
+
+    // 3) Last resort: ephemeral.
+    let free_port = std::net::TcpListener::bind("127.0.0.1:0")
+        .map(|l| l.local_addr().map(|addr| addr.port()).unwrap_or(18080))
+        .unwrap_or(18080);
+    println!("Preferred ports unavailable, using ephemeral port: {}", free_port);
+    free_port
+}
+
 #[tauri::command]
 fn get_sage_node_modules_path() -> Result<String, String> {
     match std::env::var("SAGE_NODE_MODULES_DIR") {
@@ -527,6 +579,92 @@ fn skip_npx_installation() -> Result<(), String> {
 #[tauri::command]
 fn is_npx_installation_skipped() -> bool {
     should_skip_npx_install()
+}
+
+#[tauri::command]
+fn get_chrome_extension_dir(app: tauri::AppHandle) -> Result<String, String> {
+    let resource_candidate = app
+        .path()
+        .resolve("chrome-extension", BaseDirectory::Resource)
+        .ok();
+    let resource_app_candidate = app
+        .path()
+        .resolve("app/chrome-extension", BaseDirectory::Resource)
+        .ok();
+    let home_candidate = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()
+        .map(|home| PathBuf::from(home).join(".sage").join("chrome-extension"));
+
+    let mut candidates: Vec<PathBuf> = collect_extension_dir_candidates_from_cwd();
+    if let Some(path) = resource_candidate {
+        candidates.push(path);
+    }
+    if let Some(path) = resource_app_candidate {
+        candidates.push(path);
+    }
+    if let Some(path) = home_candidate {
+        candidates.push(path);
+    }
+
+    if let Some(found) = candidates
+        .iter()
+        .find(|path| is_valid_chrome_extension_dir(path))
+    {
+        return Ok(found.to_string_lossy().to_string());
+    }
+
+    let tried = candidates
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect::<Vec<_>>()
+        .join(" | ");
+    Err(format!(
+        "无法定位有效插件目录（缺少 manifest.json），已尝试: {}",
+        tried
+    ))
+}
+
+#[tauri::command]
+fn open_chrome_extensions_page() -> Result<(), String> {
+    let url = "chrome://extensions/";
+
+    #[cfg(target_os = "macos")]
+    {
+        let chrome_app = std::process::Command::new("open")
+            .args(["-a", "Google Chrome", url])
+            .status();
+        if chrome_app.map(|s| s.success()).unwrap_or(false) {
+            return Ok(());
+        }
+
+        let default_handler = std::process::Command::new("open").arg(url).status();
+        if default_handler.map(|s| s.success()).unwrap_or(false) {
+            return Ok(());
+        }
+
+        return Err("无法打开 Chrome 扩展页，请确认 Chrome 已安装".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .status();
+        if status.map(|s| s.success()).unwrap_or(false) {
+            return Ok(());
+        }
+        return Err("无法打开 Chrome 扩展页，请确认 Chrome 可用".to_string());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::process::Command::new("xdg-open").arg(url).status();
+        if status.map(|s| s.success()).unwrap_or(false) {
+            return Ok(());
+        }
+        return Err("无法打开 Chrome 扩展页，请确认浏览器已安装".to_string());
+    }
 }
 
 #[tauri::command]
@@ -785,6 +923,84 @@ fn log_host_memory_snapshot() {
     );
 }
 
+fn is_desktop_backend_process(process: &sysinfo::Process, current_pid: Pid) -> bool {
+    if process.pid() == current_pid {
+        return false;
+    }
+
+    let cmdline = process
+        .cmd()
+        .iter()
+        .map(|part| part.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if cmdline.contains("app/desktop/entry.py") {
+        return true;
+    }
+
+    if let Some(exe_path) = process.exe() {
+        let exe_str = exe_path.to_string_lossy();
+        if (exe_str.contains("/sidecar/") || exe_str.contains("\\sidecar\\"))
+            && (exe_str.ends_with("/sage-desktop") || exe_str.ends_with("\\sage-desktop.exe"))
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn terminate_pid(pid: Pid) {
+    #[cfg(unix)]
+    {
+        std::process::Command::new("kill")
+            .arg(pid.to_string())
+            .output()
+            .ok();
+    }
+
+    #[cfg(windows)]
+    {
+        std::process::Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string()])
+            .output()
+            .ok();
+    }
+}
+
+fn cleanup_orphaned_desktop_backends() {
+    let current_pid = Pid::from_u32(std::process::id());
+    let mut sys = System::new_all();
+    sys.refresh_all();
+
+    let orphan_pids: Vec<Pid> = sys
+        .processes()
+        .iter()
+        .filter_map(|(pid, process)| {
+            if is_desktop_backend_process(process, current_pid) {
+                Some(*pid)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if orphan_pids.is_empty() {
+        return;
+    }
+
+    println!(
+        "Found {} stale desktop backend process(es): {:?}",
+        orphan_pids.len(),
+        orphan_pids
+    );
+
+    for pid in orphan_pids {
+        println!("Terminating stale desktop backend pid={}", pid);
+        terminate_pid(pid);
+    }
+}
+
 fn main() {
     // Load .sage_env file first before setting other environment variables
     load_sage_env_file();
@@ -987,17 +1203,8 @@ fn main() {
             std::env::set_var("SAGE_ROOT", format!("{}/.sage", home_dir));
             println!("Set SAGE_SKILL_WORKSPACE: {}", skill_workspace);
 
-            // Use SAGE_PORT from environment if set, otherwise find a free port
-            let port: u16 = std::env::var("SAGE_PORT")
-                .ok()
-                .and_then(|p| p.parse().ok())
-                .unwrap_or_else(|| {
-                    let free_port = std::net::TcpListener::bind("127.0.0.1:0")
-                        .map(|l| l.local_addr().unwrap().port())
-                        .expect("failed to find free port");
-                    println!("No SAGE_PORT set, using free port: {}", free_port);
-                    free_port
-                });
+            // Use stable preferred port strategy to help browser extension discovery.
+            let port: u16 = choose_desktop_backend_port();
             std::env::set_var("SAGE_PORT", port.to_string());
             println!("Set SAGE_PORT: {}", port);
 
@@ -1042,6 +1249,8 @@ fn main() {
             });
 
             tauri::async_runtime::spawn(async move {
+                cleanup_orphaned_desktop_backends();
+
                 // Determine how to run the backend
                 let sidecar_dir = app_handle
                     .path()
@@ -1163,6 +1372,7 @@ fn main() {
                 let mut cmd = Command::new(command);
                 cmd.args(args)
                     .env("SAGE_PORT", port.to_string())
+                    .env("SAGE_HOST_PID", std::process::id().to_string())
                     .env("OMP_NUM_THREADS", "4")
                     .env("MKL_NUM_THREADS", "4")
                     .env("TOKENIZERS_PARALLELISM", "false")
@@ -1293,7 +1503,7 @@ fn main() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_server_port, get_sage_env_content, save_sage_env_content, handle_close_dialog_result, get_sage_node_modules_path, get_sage_node_path, skip_npx_installation, is_npx_installation_skipped])
+        .invoke_handler(tauri::generate_handler![get_server_port, get_sage_env_content, save_sage_env_content, handle_close_dialog_result, get_sage_node_modules_path, get_sage_node_path, skip_npx_installation, is_npx_installation_skipped, get_chrome_extension_dir, open_chrome_extensions_page])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -1,60 +1,60 @@
 <template>
   <div class="file-renderer h-full flex flex-col overflow-hidden">
     <!-- 整合后的头部：包含 ItemHeader 信息和文件操作 -->
-    <div class="flex items-center justify-between px-3 py-2.5 bg-muted/30 border-b border-border flex-none h-12">
-      <div class="flex items-center gap-2 min-w-0">
+    <div class="workbench-header flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border bg-muted/30 px-3 py-2.5 flex-none">
+      <div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
         <!-- ItemHeader 信息 -->
         <span class="font-medium text-sm" :class="roleColor">{{ roleLabel }}</span>
-        <span class="text-muted-foreground/50">|</span>
+        <span class="header-divider text-muted-foreground/50">|</span>
         <span class="text-sm text-muted-foreground">{{ formatTime(item?.timestamp) }}</span>
-        <span class="text-muted-foreground/50">|</span>
+        <span class="header-divider text-muted-foreground/50">|</span>
         <!-- 文件信息 -->
         <span class="text-xl">{{ isDirectory ? '📁' : fileIcon }}</span>
         <span class="text-sm font-medium truncate">{{ displayFileName }}</span>
         <Badge variant="secondary" class="text-xs">{{ isDirectory ? '文件夹' : fileTypeLabel }}</Badge>
       </div>
-      <div class="flex items-center gap-1 flex-shrink-0">
+      <div class="workbench-actions flex w-full flex-wrap items-center gap-1 sm:w-auto sm:justify-end">
         <Button
           v-if="canPreviewInDialog"
           variant="ghost"
           size="sm"
           @click="previewDialogOpen = true"
-          class="h-7 px-2"
+          class="workbench-action-button h-7 px-2"
           :title="t('workbench.view')"
         >
-          <Eye class="w-4 h-4 mr-1" />
-          {{ t('workbench.view') }}
+          <Eye class="w-4 h-4 sm:mr-1" />
+          <span class="workbench-action-label">{{ t('workbench.view') }}</span>
         </Button>
         <Button 
           v-if="!isDirectory && canCopy"
           variant="ghost" 
           size="sm"
           @click="copyContent"
-          class="h-7 px-2"
+          class="workbench-action-button h-7 px-2"
         >
-          <Copy v-if="!copied" class="w-4 h-4 mr-1" />
-          <Check v-else class="w-4 h-4 mr-1 text-green-500" />
-          {{ copied ? '已复制' : '复制' }}
+          <Copy v-if="!copied" class="w-4 h-4 sm:mr-1" />
+          <Check v-else class="w-4 h-4 text-green-500 sm:mr-1" />
+          <span class="workbench-action-label">{{ copied ? '已复制' : '复制' }}</span>
         </Button>
         <Button 
           variant="ghost" 
           size="sm"
           @click="downloadFile"
-          class="h-7 px-2"
+          class="workbench-action-button h-7 px-2"
           :title="isDirectory ? '下载文件夹' : '下载文件'"
         >
-          <Download class="w-4 h-4 mr-1" />
-          下载
+          <Download class="w-4 h-4 sm:mr-1" />
+          <span class="workbench-action-label">下载</span>
         </Button>
         <Button 
           variant="ghost" 
           size="sm"
           @click="openFile"
-          class="h-7 px-2"
+          class="workbench-action-button h-7 px-2"
           :title="isDirectory ? '打开文件夹' : '打开文件'"
         >
-          <ExternalLink class="w-4 h-4 mr-1" />
-          打开
+          <ExternalLink class="w-4 h-4 sm:mr-1" />
+          <span class="workbench-action-label">打开</span>
         </Button>
       </div>
     </div>
@@ -1167,6 +1167,28 @@ onUnmounted(() => {
 <style scoped>
 .file-renderer {
   height: 100%;
+}
+
+@media (max-width: 640px) {
+  .workbench-actions {
+    width: 100%;
+  }
+
+  .workbench-action-button {
+    flex: 0 0 auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .workbench-action-label,
+  .header-divider {
+    display: none;
+  }
+
+  .workbench-action-button {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
 }
 
 .markdown-preview :deep(pre) {

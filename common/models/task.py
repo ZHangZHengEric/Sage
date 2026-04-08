@@ -141,6 +141,37 @@ class TaskDao(BaseDao):
         await self.save(task)
         return task
 
+    async def advance_recurring_task_cursor(
+        self,
+        task_id: int,
+        *,
+        expected_last_executed: Optional[datetime],
+        executed_at: datetime,
+        user_id: Optional[str] = None,
+    ) -> bool:
+        """
+        原子推进 recurring task 的执行游标。
+
+        通过比较旧的 last_executed_at 实现简单的 compare-and-set，避免多个调度器
+        同时为同一条循环任务重复生成 one-time 实例。
+        """
+        db = await self._get_db()
+        async with db.get_session() as session:  # type: ignore[attr-defined]
+            stmt = update(RecurringTask).where(
+                RecurringTask.id == task_id,
+                RecurringTask.enabled == True,  # noqa: E712
+            )
+            if user_id:
+                stmt = stmt.where(RecurringTask.user_id == user_id)
+            if expected_last_executed is None:
+                stmt = stmt.where(RecurringTask.last_executed_at.is_(None))
+            else:
+                stmt = stmt.where(RecurringTask.last_executed_at == expected_last_executed)
+
+            stmt = stmt.values(last_executed_at=executed_at, updated_at=executed_at)
+            result = await session.execute(stmt)
+            return bool(result.rowcount)
+
     async def delete_recurring_task(self, task_id: int) -> bool:
         return await self.delete_by_id(RecurringTask, task_id)
 
@@ -194,6 +225,26 @@ class TaskDao(BaseDao):
         where = [
             Task.recurring_task_id == recurring_task_id,
             Task.status == "pending",
+        ]
+        if user_id:
+            where.append(Task.user_id == user_id)
+
+        items = await self.get_list(
+            Task,
+            where=where,
+            limit=1,
+        )
+        return bool(items)
+
+    async def has_active_task_instance(
+        self,
+        recurring_task_id: int,
+        *,
+        user_id: Optional[str] = None,
+    ) -> bool:
+        where = [
+            Task.recurring_task_id == recurring_task_id,
+            Task.status.in_(("pending", "processing")),
         ]
         if user_id:
             where.append(Task.user_id == user_id)

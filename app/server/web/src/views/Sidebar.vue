@@ -1,45 +1,16 @@
 <template>
-  <div 
-    class="group relative flex flex-col h-full bg-muted/40 border-r transition-all duration-300 ease-in-out"
-    :class="[isCollapsed ? 'w-[70px]' : 'w-[170px]']"
+  <div
+    class="sidebar-shell group relative flex h-full flex-col overflow-hidden border-r border-white/10 transition-all duration-300 ease-in-out dark:border-white/10"
+    :class="[isCollapsed ? 'w-[78px]' : 'w-[246px]']"
+    :style="sidebarShellStyle"
   >
-    <!-- Header -->
-    <div class="p-4 flex items-center justify-between" :class="{'justify-center': isCollapsed}">
-      <div v-if="!isCollapsed" class="flex items-center gap-2 overflow-hidden">
-        <img :src="logoUrl" alt="Sage Logo" class="h-8 w-8 shrink-0" />
-        <h2 
-          class="text-xl font-bold bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent truncate"
-        >
-          Sage
-        </h2>
-      </div>
-      <div v-else class="flex justify-center w-full">
-         <img :src="logoUrl" alt="Sage Logo" class="h-8 w-8 shrink-0" />
-      </div>
-
-      <Button 
-        v-if="!isCollapsed"
-        variant="ghost" 
-        size="icon" 
-        @click="toggleCollapse"
-        :title="isCollapsed ? t('common.expand') : t('common.collapse')"
-        class="text-muted-foreground hover:text-foreground shrink-0 ml-1"
-      >
-        <PanelLeftClose class="h-4 w-4" />
-      </Button>
-      <Button 
-         v-else
-         variant="ghost"
-         size="icon"
-         @click="toggleCollapse"
-         :title="t('common.expand')"
-         class="absolute -right-3 top-6 bg-background border shadow-sm rounded-full h-6 w-6 p-0 hover:bg-accent z-50 flex items-center justify-center"
-      >
-         <PanelLeftOpen class="h-3 w-3" />
-      </Button>
+    <div class="pointer-events-none absolute inset-0 opacity-30">
+      <div class="absolute inset-x-0 top-[-12%] h-40" :style="sidebarTopGlowStyle" />
+      <div class="absolute inset-x-0 bottom-[-10%] h-48" :style="sidebarBottomGlowStyle" />
     </div>
 
-    <!-- Change Password Dialog -->
+    <div class="relative h-4 shrink-0" />
+
     <Dialog v-model:open="showChangePasswordDialog">
       <DialogContent class="sm:max-w-[425px]">
         <DialogHeader>
@@ -53,39 +24,24 @@
             <Label for="old-password" class="text-right">
               {{ t('profile.currentPassword') }}
             </Label>
-            <Input
-              id="old-password"
-              v-model="changePasswordForm.oldPassword"
-              type="password"
-              class="col-span-3"
-            />
+            <Input id="old-password" v-model="changePasswordForm.oldPassword" type="password" class="col-span-3" />
           </div>
           <div class="grid grid-cols-4 items-center gap-4">
             <Label for="new-password" class="text-right">
               {{ t('profile.newPassword') }}
             </Label>
-            <Input
-              id="new-password"
-              v-model="changePasswordForm.newPassword"
-              type="password"
-              class="col-span-3"
-            />
+            <Input id="new-password" v-model="changePasswordForm.newPassword" type="password" class="col-span-3" />
           </div>
           <div class="grid grid-cols-4 items-center gap-4">
             <Label for="confirm-password" class="text-right">
               {{ t('profile.confirmNewPassword') }}
             </Label>
-            <Input
-              id="confirm-password"
-              v-model="changePasswordForm.confirmPassword"
-              type="password"
-              class="col-span-3"
-            />
+            <Input id="confirm-password" v-model="changePasswordForm.confirmPassword" type="password" class="col-span-3" />
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" @click="showChangePasswordDialog = false">{{ t('common.cancel') }}</Button>
-          <Button type="submit" @click="handleChangePassword" :disabled="changingPassword">
+          <Button type="submit" :disabled="changingPassword" @click="handleChangePassword">
             <span v-if="changingPassword">{{ t('profile.changingPassword') }}</span>
             <span v-else>{{ t('profile.confirmChangePassword') }}</span>
           </Button>
@@ -93,11 +49,10 @@
       </DialogContent>
     </Dialog>
 
-    <!-- Navigation -->
-    <ScrollArea class="flex-1 px-3">
-      <div class="space-y-4">
+    <ScrollArea class="relative z-10 flex-1 px-2.5 pb-3">
+      <div class="space-y-3 pt-0.5">
         <div v-if="activeSessionItems.length > 0" class="space-y-2">
-          <div v-if="!isCollapsed" class="px-2 text-[11px] font-medium tracking-wide text-muted-foreground/80">
+          <div v-if="!isCollapsed" class="px-2.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-foreground/40">
             {{ t('sidebar.activeSessions') }}
           </div>
           <div v-if="!isCollapsed" class="space-y-1">
@@ -105,17 +60,13 @@
               v-for="session in activeSessionItems"
               :key="session.id"
               variant="ghost"
-              class="w-full justify-start h-9 px-2 text-sm font-normal text-muted-foreground border border-transparent hover:border-border hover:bg-background hover:text-foreground"
+              class="h-9 w-full justify-start rounded-[16px] border border-transparent px-2.5 text-[14px] font-medium text-muted-foreground transition-all duration-200 hover:border-white/10 hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]"
               :class="cn(
-                isActiveSessionCurrent(session) && 'bg-background text-primary border-border shadow-sm font-medium'
+                isActiveSessionCurrent(session) && 'border-white/10 bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_8px_20px_rgba(15,23,42,0.08)] dark:bg-[rgba(255,255,255,0.07)]'
               )"
               @click="handleActiveSessionClick(session)"
             >
-              <component
-                :is="getSessionStatusIcon(session.sessionStatus)"
-                class="mr-2 h-4 w-4 shrink-0"
-                :class="getSessionStatusClass(session.sessionStatus)"
-              />
+              <component :is="getSessionStatusIcon(session.sessionStatus)" class="mr-2 h-4 w-4 shrink-0" :class="getSessionStatusClass(session.sessionStatus)" />
               <span class="truncate">{{ session.rawName }}</span>
             </Button>
           </div>
@@ -126,94 +77,75 @@
               variant="ghost"
               size="icon"
               :title="session.rawName"
-              class="transition-all duration-200 text-muted-foreground hover:text-foreground"
-              :class="isActiveSessionCurrent(session) ? 'bg-background shadow text-primary' : ''"
+              class="h-9 w-9 rounded-[14px] text-muted-foreground transition-all duration-200 hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]"
+              :class="isActiveSessionCurrent(session) ? 'bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_6px_16px_rgba(15,23,42,0.10)] dark:bg-[rgba(255,255,255,0.07)]' : ''"
               @click="handleActiveSessionClick(session)"
             >
-              <component
-                :is="getSessionStatusIcon(session.sessionStatus)"
-                class="h-4 w-4"
-                :class="getSessionStatusClass(session.sessionStatus)"
-              />
+              <component :is="getSessionStatusIcon(session.sessionStatus)" class="h-4 w-4" :class="getSessionStatusClass(session.sessionStatus)" />
             </Button>
           </div>
         </div>
+
         <template v-for="item in predefinedServices" :key="item.id">
-          
-          <!-- Collapsed Mode -->
-          <div v-if="isCollapsed" class="flex justify-center group/item relative">
-            <!-- Item with children (Category) -->
+          <div v-if="isCollapsed" class="group/item relative flex justify-center">
             <DropdownMenu v-if="item.children">
-               <DropdownMenuTrigger as-child>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    :class="[
-                      'transition-all duration-200',
-                      isCategoryActive(item) ? 'bg-background shadow text-primary' : 'text-muted-foreground hover:text-foreground'
-                    ]"
-                  >
-                     <component :is="getCategoryIcon(item.key)" class="h-4 w-4" />
-                  </Button>
-               </DropdownMenuTrigger>
-               <DropdownMenuContent side="right" align="start" class="w-48 ml-2">
-                 <DropdownMenuLabel>{{ item.rawName || t(item.nameKey) }}</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem 
-                    v-for="service in item.children" 
-                    :key="service.id"
-                    @click="handleMenuClick(service.url, service.rawName || t(service.nameKey), service.isInternal, service.query)"
-                    :class="{'bg-muted font-medium text-primary': isCurrentService(service.url, service.isInternal)}"
-                  >
-                     {{ service.rawName || t(service.nameKey) }}
-                  </DropdownMenuItem>
-               </DropdownMenuContent>
+              <DropdownMenuTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  :class="[
+                    'h-9 w-9 rounded-[14px] transition-all duration-200',
+                    isCategoryActive(item) ? 'bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_6px_16px_rgba(15,23,42,0.10)] dark:bg-[rgba(255,255,255,0.07)]' : 'text-muted-foreground hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]'
+                  ]"
+                >
+                  <component :is="getCategoryIcon(item.key)" class="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="right" align="start" class="w-48 ml-2">
+                <DropdownMenuLabel>{{ item.rawName || t(item.nameKey) }}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  v-for="service in item.children"
+                  :key="service.id"
+                  :class="{ 'bg-muted font-medium text-primary': isCurrentService(service.url, service.isInternal) }"
+                  @click="handleMenuClick(service.url, service.rawName || t(service.nameKey), service.isInternal, service.query)"
+                >
+                  {{ service.rawName || t(service.nameKey) }}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
             </DropdownMenu>
 
-            <!-- Item without children (Direct Link) -->
             <Button
-               v-else
-               variant="ghost"
-               size="icon"
-               :title="item.rawName || t(item.nameKey)"
-               :class="[
-                 'transition-all duration-200',
-                 isCurrentService(item.url, item.isInternal) ? 'bg-background shadow text-primary' : 'text-muted-foreground hover:text-foreground'
-               ]"
-               @click="handleMenuClick(item.url, item.rawName || t(item.nameKey), item.isInternal, item.query)"
+              v-else
+              variant="ghost"
+              size="icon"
+              :title="item.rawName || t(item.nameKey)"
+              :class="[
+                'h-9 w-9 rounded-[14px] transition-all duration-200',
+                isCurrentService(item.url, item.isInternal) ? 'bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_6px_16px_rgba(15,23,42,0.10)] dark:bg-[rgba(255,255,255,0.07)]' : 'text-muted-foreground hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]'
+              ]"
+              @click="handleMenuClick(item.url, item.rawName || t(item.nameKey), item.isInternal, item.query)"
             >
-               <component :is="getCategoryIcon(item.key)" class="h-4 w-4" />
+              <component :is="getCategoryIcon(item.key)" class="h-4 w-4" />
             </Button>
           </div>
 
-          <!-- Expanded Mode -->
           <template v-else>
-            <!-- Item with children (Category) -->
-            <Collapsible
-              v-if="item.children"
-              v-model:open="expandedCategories[item.key]"
-              class="space-y-1"
-            >
-              <CollapsibleTrigger class="flex items-center w-full px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-colors group">
+            <Collapsible v-if="item.children" v-model:open="expandedCategories[item.key]" class="space-y-1">
+              <CollapsibleTrigger class="group flex w-full items-center rounded-[16px] px-2.5 py-2 text-[14px] font-medium text-muted-foreground transition-all duration-200 hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]">
                 <component :is="getCategoryIcon(item.key)" class="mr-2 h-4 w-4" />
                 <span class="flex-1 text-left truncate">{{ item.rawName || t(item.nameKey) }}</span>
-                <ChevronDown
-                  class="h-4 w-4 transition-transform duration-200 text-muted-foreground/50 group-hover:text-muted-foreground"
-                  :class="{ '-rotate-90': !expandedCategories[item.key] }"
-                />
+                <ChevronDown class="h-4 w-4 text-muted-foreground/50 transition-transform duration-200 group-hover:text-foreground/60" :class="{ '-rotate-90': !expandedCategories[item.key] }" />
               </CollapsibleTrigger>
-              
+
               <CollapsibleContent class="space-y-1">
-                <div 
-                  v-for="service in item.children" 
-                  :key="service.id"
-                >
+                <div v-for="service in item.children" :key="service.id">
                   <Button
                     variant="ghost"
-                    class="w-full justify-start h-9 pl-9 mb-0.5 text-sm font-normal text-muted-foreground"
+                    class="mb-0.5 h-8.5 w-full justify-start rounded-[14px] pl-8 text-[13px] font-medium text-muted-foreground"
                     :class="cn(
-                      'hover:bg-background hover:shadow-sm hover:text-primary transition-all duration-200',
-                      isCurrentService(service.url, service.isInternal) && 'bg-background shadow text-primary font-semibold'
+                      'transition-all duration-200 hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]',
+                      isCurrentService(service.url, service.isInternal) && 'bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_6px_16px_rgba(15,23,42,0.08)] dark:bg-[rgba(255,255,255,0.07)]'
                     )"
                     @click="handleMenuClick(service.url, service.rawName || t(service.nameKey), service.isInternal, service.query)"
                   >
@@ -223,13 +155,12 @@
               </CollapsibleContent>
             </Collapsible>
 
-            <!-- Item without children (Direct Link) -->
             <Button
               v-else
               variant="ghost"
-            class="w-full justify-start h-10 px-3 font-medium text-muted-foreground hover:text-foreground hover:bg-background hover:shadow-sm transition-all duration-200 mb-1"
-            :class="cn(
-                isCurrentService(item.url, item.isInternal) && 'bg-background shadow text-primary font-bold'
+              class="mb-0.5 h-9.5 w-full justify-start rounded-[16px] px-2.5 font-medium text-muted-foreground transition-all duration-200 hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]"
+              :class="cn(
+                isCurrentService(item.url, item.isInternal) && 'bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_6px_16px_rgba(15,23,42,0.08)] dark:bg-[rgba(255,255,255,0.07)]'
               )"
               @click="handleMenuClick(item.url, item.rawName || t(item.nameKey), item.isInternal, item.query)"
             >
@@ -237,33 +168,31 @@
               <span class="flex-1 text-left truncate">{{ item.rawName || t(item.nameKey) }}</span>
             </Button>
           </template>
-
         </template>
       </div>
     </ScrollArea>
 
-    <!-- Download Client -->
-    <div class="px-3 py-2">
-      <div v-if="isCollapsed" class="flex justify-center group/item relative">
+    <div class="relative z-10 px-2.5 pb-2">
+      <div v-if="isCollapsed" class="group/item relative flex justify-center">
         <Button
-           variant="ghost"
-           size="icon"
-           :title="t('sidebar.downloadClient')"
-           :class="[
-             'transition-all duration-200',
-             isCurrentService('Download', true) ? 'bg-background shadow text-primary' : 'text-muted-foreground hover:text-foreground'
-           ]"
-           @click="handleMenuClick('Download', t('sidebar.downloadClient'), true)"
+          variant="ghost"
+          size="icon"
+          :title="t('sidebar.downloadClient')"
+          :class="[
+            'h-9 w-9 rounded-[14px] transition-all duration-200',
+            isCurrentService('Download', true) ? 'bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_6px_16px_rgba(15,23,42,0.10)] dark:bg-[rgba(255,255,255,0.07)]' : 'text-muted-foreground hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]'
+          ]"
+          @click="handleMenuClick('Download', t('sidebar.downloadClient'), true)"
         >
-           <Download class="h-4 w-4" />
+          <Download class="h-4 w-4" />
         </Button>
       </div>
       <Button
         v-else
         variant="ghost"
-        class="w-full justify-start h-10 px-3 font-medium text-muted-foreground hover:text-foreground hover:bg-background hover:shadow-sm transition-all duration-200"
+        class="mb-0.5 h-9.5 w-full justify-start rounded-[16px] px-2.5 font-medium text-muted-foreground transition-all duration-200 hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]"
         :class="cn(
-          isCurrentService('Download', true) && 'bg-background shadow text-primary font-bold'
+          isCurrentService('Download', true) && 'bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_6px_16px_rgba(15,23,42,0.08)] dark:bg-[rgba(255,255,255,0.07)]'
         )"
         @click="handleMenuClick('Download', t('sidebar.downloadClient'), true)"
       >
@@ -272,43 +201,63 @@
       </Button>
     </div>
 
-    <!-- Footer User Profile -->
-    <div class="p-4 mt-auto" v-if="currentUser">
+    <div class="relative z-10 border-t border-white/10 px-3 pb-3 pt-2.5 dark:border-white/10">
+      <div class="flex items-center gap-2.5" :class="isCollapsed ? 'justify-center' : ''">
+        <div class="flex items-center gap-3 overflow-hidden">
+          <img :src="logoUrl" alt="Sage Logo" class="h-9 w-9 shrink-0 rounded-xl" />
+          <div v-if="!isCollapsed" class="min-w-0">
+            <p class="truncate text-[14px] font-semibold tracking-[0.01em] text-foreground">Sage</p>
+          </div>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="ml-auto h-7.5 w-7.5 shrink-0 rounded-[12px] text-muted-foreground transition-all duration-200 hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]"
+          :title="isCollapsed ? t('common.expand') : t('common.collapse')"
+          @click="toggleCollapse"
+        >
+          <PanelLeftClose v-if="!isCollapsed" class="h-4 w-4" />
+          <PanelLeftOpen v-else class="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+
+    <div v-if="currentUser" class="relative z-10 px-3 pb-3">
       <DropdownMenu v-model:open="isDropdownOpen">
         <DropdownMenuTrigger as-child>
-          <div 
-            class="flex items-center gap-3 p-2 rounded-xl cursor-pointer hover:bg-background hover:shadow-sm transition-all duration-200 w-full group"
-            :class="{'justify-center': isCollapsed}"
+          <div
+            class="flex w-full cursor-pointer items-center gap-3 rounded-[16px] border border-transparent p-2.5 transition-all duration-200 hover:border-white/10 hover:bg-[rgba(255,255,255,0.07)] group dark:hover:bg-[rgba(255,255,255,0.06)]"
+            :class="{ 'justify-center': isCollapsed }"
           >
-            <Avatar class="h-9 w-9 border-2 border-background shadow-sm group-hover:border-primary/20 transition-colors shrink-0">
+            <Avatar class="h-9 w-9 shrink-0 border border-white/10 bg-background/40">
               <AvatarImage :src="currentUser.avatar" />
               <AvatarFallback class="bg-primary/10 text-primary font-bold">
                 {{ (currentUser.nickname?.[0] || currentUser.username?.[0] || 'U').toUpperCase() }}
               </AvatarFallback>
             </Avatar>
             <div v-if="!isCollapsed" class="flex-1 min-w-0 text-left">
-              <p class="text-sm font-medium truncate text-foreground/80 group-hover:text-foreground">
+              <p class="text-sm font-medium truncate text-foreground/85 group-hover:text-foreground">
                 {{ currentUser.nickname || currentUser.username }}
               </p>
             </div>
-            <ChevronDown 
+            <ChevronDown
               v-if="!isCollapsed"
-              class="w-4 h-4 text-muted-foreground/50 group-hover:text-muted-foreground transition-transform duration-200" 
+              class="w-4 h-4 text-muted-foreground/50 transition-transform duration-200 group-hover:text-muted-foreground"
               :class="{ '-rotate-90': !isDropdownOpen, 'rotate-180': isDropdownOpen }"
             />
           </div>
         </DropdownMenuTrigger>
         <DropdownMenuContent class="w-56" :side="isCollapsed ? 'right' : 'top'" align="end" :sideOffset="isCollapsed ? 10 : 0">
-          <DropdownMenuLabel class="font-normal" v-if="isCollapsed">
-             <div class="flex flex-col space-y-1">
-                <p class="text-sm font-medium leading-none">{{ currentUser.nickname || currentUser.username }}</p>
-                <p class="text-xs leading-none text-muted-foreground">{{ t('sidebar.userProfile') }}</p>
-             </div>
+          <DropdownMenuLabel v-if="isCollapsed" class="font-normal">
+            <div class="flex flex-col space-y-1">
+              <p class="text-sm font-medium leading-none">{{ currentUser.nickname || currentUser.username }}</p>
+              <p class="text-xs leading-none text-muted-foreground">{{ t('sidebar.userProfile') }}</p>
+            </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator v-if="isCollapsed" />
           <DropdownMenuItem @click="toggleLanguage">
-             <Globe class="mr-2 h-4 w-4" />
-             <span>{{ isZhCN ? t('sidebar.langToggleZh') : t('sidebar.langToggleEn') }}</span>
+            <Globe class="mr-2 h-4 w-4" />
+            <span>{{ isZhCN ? t('sidebar.langToggleZh') : t('sidebar.langToggleEn') }}</span>
           </DropdownMenuItem>
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
@@ -342,7 +291,7 @@
             <span>{{ t('profile.changePassword') }}</span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem @click="handleLogout" class="text-red-600">
+          <DropdownMenuItem class="text-red-600" @click="handleLogout">
             <LogOut class="mr-2 h-4 w-4" />
             <span>{{ t('auth.logout') }}</span>
           </DropdownMenuItem>
@@ -355,15 +304,15 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { 
-  MessageSquare, 
-  Bot, 
-  Wrench, 
-  Zap, 
-  Book, 
-  Clock, 
-  Code, 
-  Globe, 
+import {
+  MessageSquare,
+  Bot,
+  Wrench,
+  Zap,
+  Book,
+  Clock,
+  Code,
+  Globe,
   ChevronDown,
   LogOut,
   Settings,
@@ -385,7 +334,6 @@ import { useLanguage } from '../utils/i18n.js'
 import { useThemeStore } from '../stores/theme.js'
 import { getCurrentUser, logout } from '../utils/auth.js'
 import { userAPI } from '@/api/user'
-import { chatAPI } from '@/api/chat'
 import { toast } from 'vue-sonner'
 import { useSidebarActiveSessions } from '@/composables/sidebar/useSidebarActiveSessions'
 import { Button } from '@/components/ui/button'
@@ -412,7 +360,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog'
 import {
   Collapsible,
@@ -434,6 +381,37 @@ const observabilityProxyUrl = '/jaeger/'
 
 const currentUser = ref(getCurrentUser())
 const isCollapsed = ref(false)
+const isDropdownOpen = ref(false)
+const showChangePasswordDialog = ref(false)
+const changePasswordForm = ref({
+  oldPassword: '',
+  newPassword: '',
+  confirmPassword: ''
+})
+const changingPassword = ref(false)
+
+const sidebarShellStyle = computed(() => ({
+  backgroundColor: themeStore.isDark ? 'rgba(20, 24, 31, 0.85)' : 'rgba(255, 255, 255, 0.85)',
+  backgroundImage: themeStore.isDark
+    ? 'linear-gradient(180deg, rgba(148, 163, 184, 0.08), rgba(15, 23, 42, 0.02))'
+    : 'linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.03))',
+  boxShadow: themeStore.isDark
+    ? 'inset -1px 0 0 rgba(255, 255, 255, 0.08)'
+    : 'inset -1px 0 0 rgba(255, 255, 255, 0.35)'
+}))
+
+const sidebarTopGlowStyle = computed(() => ({
+  background: themeStore.isDark
+    ? 'radial-gradient(circle at top left, rgba(59,130,246,0.06), transparent 60%)'
+    : 'radial-gradient(circle at top left, rgba(96,165,250,0.08), transparent 60%)'
+}))
+
+const sidebarBottomGlowStyle = computed(() => ({
+  background: themeStore.isDark
+    ? 'radial-gradient(circle at bottom, rgba(20,184,166,0.04), transparent 60%)'
+    : 'radial-gradient(circle at bottom, rgba(45,212,191,0.04), transparent 60%)'
+}))
+
 const handleActiveSessionNavigate = (session) => {
   handleMenuClick(session.url, session.rawName, session.isInternal, session.query)
 }
@@ -456,30 +434,21 @@ const toggleCollapse = () => {
   isCollapsed.value = !isCollapsed.value
 }
 
-const isDropdownOpen = ref(false)
-const showChangePasswordDialog = ref(false)
-const changePasswordForm = ref({
-  oldPassword: '',
-  newPassword: '',
-  confirmPassword: ''
-})
-const changingPassword = ref(false)
-
 const handleChangePassword = async () => {
   if (!changePasswordForm.value.oldPassword || !changePasswordForm.value.newPassword) {
     toast.error(t('profile.passwordRequired'))
     return
   }
-  
+
   if (changePasswordForm.value.newPassword !== changePasswordForm.value.confirmPassword) {
     toast.error(t('auth.passwordsMismatch'))
     return
   }
-  
+
   changingPassword.value = true
   try {
     await userAPI.changePassword(
-      changePasswordForm.value.oldPassword, 
+      changePasswordForm.value.oldPassword,
       changePasswordForm.value.newPassword
     )
     toast.success(t('profile.passwordChangedRelogin'))
@@ -537,7 +506,7 @@ const predefinedServices = computed(() => {
     }
   ]
 
-    if (currentUser.value?.role === 'admin') {
+  if (currentUser.value?.role === 'admin') {
     services.push({
       id: 'cat_sys',
       key: 'system_management',
@@ -548,17 +517,17 @@ const predefinedServices = computed(() => {
         { id: 'svc_version_list', nameKey: 'system.versionManagement', url: 'VersionList', isInternal: true }
       ]
     })
-    
+
     services.push({
       id: 'cat_ops',
       key: 'operation_management',
       nameKey: 'sidebar.operationManagement',
       children: [
-        { 
-          id: 'svc_request_records', 
-          nameKey: 'sidebar.requestRecords', 
-          url: observabilityProxyUrl, 
-          isInternal: false 
+        {
+          id: 'svc_request_records',
+          nameKey: 'sidebar.requestRecords',
+          url: observabilityProxyUrl,
+          isInternal: false
         }
       ]
     })
@@ -623,19 +592,22 @@ const handleMenuClick = (url, name, isInternal, query = {}) => {
   if (isInternal) {
     if (url === 'Chat' && !query.session_id) {
       emit('new-chat')
-      // 如果已经在 Chat 页面且没有session_id参数，触发重置后直接返回，避免重复 push
       if (route.name === 'Chat' && !route.query.session_id) return
     }
-    
-    // 如果已经在当前页面，且是AgentConfig，添加刷新参数触发重置
+
     if (route.name === url && url === 'AgentConfig') {
-      router.replace({ 
-        name: url, 
-        query: { ...route.query, refresh: Date.now() } 
+      router.replace({
+        name: url,
+        query: { ...route.query, refresh: Date.now() }
       })
       return
     }
-    
+
+    if (url === 'Download') {
+      router.push({ name: 'Download' })
+      return
+    }
+
     router.push({ name: url, query })
   } else {
     window.open(url, '_blank')
@@ -652,3 +624,9 @@ const handleLogout = async () => {
   })
 }
 </script>
+
+<style scoped>
+.sidebar-shell {
+  backdrop-filter: none;
+}
+</style>

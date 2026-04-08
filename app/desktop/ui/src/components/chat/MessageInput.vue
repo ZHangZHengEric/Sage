@@ -90,9 +90,9 @@
       </div>
 
       <!-- 底部区域：附件按钮和会话开关在左下角，发送按钮在右下角 -->
-      <div class="flex items-center justify-between">
+      <div class="flex flex-wrap items-center justify-between gap-2">
         <!-- 左下角操作区：附件上传 + 会话开关 -->
-        <div class="flex items-center gap-2">
+        <div class="flex min-w-0 flex-wrap items-center gap-2">
           <Button
             type="button"
             variant="ghost"
@@ -140,7 +140,7 @@
           </Button>
         </div>
 
-        <div class="flex items-center gap-2">
+        <div class="ml-auto flex items-center gap-2">
           <Button
             type="button"
             variant="ghost"

@@ -1,6 +1,6 @@
 <template>
   <div class="timeline-container flex-none border-t border-border/60 bg-background/45 px-3 py-2">
-    <div class="flex items-center gap-2">
+    <div class="timeline-toolbar flex flex-wrap items-center gap-2">
       <!-- 列表/单例显示切换按钮 -->
       <Button
         variant="ghost"
@@ -28,7 +28,7 @@
       </Button>
 
       <!-- 进度条与时间信息 -->
-      <div class="flex min-w-0 flex-1 items-center gap-2">
+      <div class="timeline-slider-row flex min-w-0 flex-1 basis-full items-center gap-2 sm:basis-auto">
         <span class="hidden w-12 shrink-0 text-[10px] text-muted-foreground/80 sm:block">
           {{ formatTime(startTime) }}
         </span>
@@ -70,12 +70,12 @@
       <Button
         variant="outline"
         size="sm"
-        class="h-7 rounded-full px-2.5 text-[10px] transition-colors duration-200"
+        class="timeline-realtime-button h-7 rounded-full px-2.5 text-[10px] transition-colors duration-200"
         :class="isRealtime ? 'bg-green-500/10 text-green-600 border-green-500/30 hover:bg-green-500/20 hover:text-green-700' : 'text-muted-foreground hover:text-foreground'"
         @click="toggleRealtime"
       >
         <Radio :class="isRealtime ? 'w-3 h-3 mr-1 animate-pulse text-green-600' : 'w-3 h-3 mr-1'" />
-        {{ t('workbench.realtime') }}
+        <span class="timeline-realtime-label">{{ t('workbench.realtime') }}</span>
       </Button>
     </div>
   </div>
@@ -204,6 +204,24 @@ watch(() => props.items.length, (newLength, oldLength) => {
     emit('update:currentIndex', newLength - 1)
   }
 })
-
-
 </script>
+
+<style scoped>
+@media (max-width: 640px) {
+  .timeline-slider-row {
+    order: 10;
+    width: 100%;
+  }
+}
+
+@media (max-width: 520px) {
+  .timeline-realtime-label {
+    display: none;
+  }
+
+  .timeline-realtime-button {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+}
+</style>

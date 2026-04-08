@@ -14,6 +14,7 @@ from .task import task_router
 from .oss import oss_router
 from .im import im_router
 from .questionnaire import questionnaire_router
+from .browser_extension import browser_extension_router
 
 # Export all routers for easy import
 __all__ = [
@@ -34,3 +35,4 @@ def register_routes(app):
     app.include_router(oss_router)
     app.include_router(im_router)
     app.include_router(questionnaire_router)
+    app.include_router(browser_extension_router)
