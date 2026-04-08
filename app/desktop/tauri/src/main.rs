@@ -271,35 +271,41 @@ async fn initialize_sage_node_modules(
 
     // 安装预设的 npx 包
     println!("Installing preset npx packages...");
-    
+
     // 发送开始安装事件
     let total_packages = PRESET_NPX_PACKAGES.len();
-    let _ = app_handle.emit("sage-npx-install-started", serde_json::json!({
-        "total": total_packages,
-        "packages": PRESET_NPX_PACKAGES,
-    }));
-    
+    let _ = app_handle.emit(
+        "sage-npx-install-started",
+        serde_json::json!({
+            "total": total_packages,
+            "packages": PRESET_NPX_PACKAGES,
+        }),
+    );
+
     if let Some(runtime) = node_runtime.as_ref() {
         println!("Using Node.js: {:?}", runtime.node_executable);
         println!("Using NPM CLI: {:?}", runtime.npm_cli);
     } else {
         println!("Using system npm to install preset npx packages");
     }
-    
+
     let mut installed_count = 0;
     let mut failed_packages: Vec<String> = Vec::new();
-    
+
     for (index, package) in PRESET_NPX_PACKAGES.iter().enumerate() {
         let package_name = *package;
         println!("Checking package: {}", package_name);
 
         // 发送进度事件
-        let _ = app_handle.emit("sage-npx-install-progress", serde_json::json!({
-            "current": index + 1,
-            "total": total_packages,
-            "package": package_name,
-            "status": "checking",
-        }));
+        let _ = app_handle.emit(
+            "sage-npx-install-progress",
+            serde_json::json!({
+                "current": index + 1,
+                "total": total_packages,
+                "package": package_name,
+                "status": "checking",
+            }),
+        );
 
         // 检查包是否已安装 (对于 scoped packages，检查 scope 目录)
         let scoped_package_dir = node_modules_dir
@@ -309,24 +315,30 @@ async fn initialize_sage_node_modules(
         if scoped_package_dir.exists() {
             println!("Package {} already installed, skipping", package_name);
             installed_count += 1;
-            let _ = app_handle.emit("sage-npx-install-progress", serde_json::json!({
-                "current": index + 1,
-                "total": total_packages,
-                "package": package_name,
-                "status": "skipped",
-            }));
+            let _ = app_handle.emit(
+                "sage-npx-install-progress",
+                serde_json::json!({
+                    "current": index + 1,
+                    "total": total_packages,
+                    "package": package_name,
+                    "status": "skipped",
+                }),
+            );
             continue;
         }
 
         println!("Installing package: {}", package_name);
-        
+
         // 发送开始安装事件
-        let _ = app_handle.emit("sage-npx-install-progress", serde_json::json!({
-            "current": index + 1,
-            "total": total_packages,
-            "package": package_name,
-            "status": "installing",
-        }));
+        let _ = app_handle.emit(
+            "sage-npx-install-progress",
+            serde_json::json!({
+                "current": index + 1,
+                "total": total_packages,
+                "package": package_name,
+                "status": "installing",
+            }),
+        );
 
         let mut install_command = build_npm_command(node_runtime.as_ref())?;
         let install_result = install_command
@@ -339,36 +351,45 @@ async fn initialize_sage_node_modules(
         if install_result.status.success() {
             println!("Successfully installed {}", package_name);
             installed_count += 1;
-            let _ = app_handle.emit("sage-npx-install-progress", serde_json::json!({
-                "current": index + 1,
-                "total": total_packages,
-                "package": package_name,
-                "status": "success",
-            }));
+            let _ = app_handle.emit(
+                "sage-npx-install-progress",
+                serde_json::json!({
+                    "current": index + 1,
+                    "total": total_packages,
+                    "package": package_name,
+                    "status": "success",
+                }),
+            );
         } else {
             let stderr = String::from_utf8_lossy(&install_result.stderr);
             eprintln!("Warning: Failed to install {}: {}", package_name, stderr);
             failed_packages.push(package_name.to_string());
-            let _ = app_handle.emit("sage-npx-install-progress", serde_json::json!({
-                "current": index + 1,
-                "total": total_packages,
-                "package": package_name,
-                "status": "failed",
-                "error": stderr.to_string(),
-            }));
+            let _ = app_handle.emit(
+                "sage-npx-install-progress",
+                serde_json::json!({
+                    "current": index + 1,
+                    "total": total_packages,
+                    "package": package_name,
+                    "status": "failed",
+                    "error": stderr.to_string(),
+                }),
+            );
             // 继续安装其他包，不中断
         }
     }
 
     println!("Preset npx packages installation completed");
-    
+
     // 发送完成事件
-    let _ = app_handle.emit("sage-npx-install-completed", serde_json::json!({
-        "total": total_packages,
-        "installed": installed_count,
-        "failed": failed_packages,
-    }));
-    
+    let _ = app_handle.emit(
+        "sage-npx-install-completed",
+        serde_json::json!({
+            "total": total_packages,
+            "installed": installed_count,
+            "failed": failed_packages,
+        }),
+    );
+
     Ok(node_modules_dir)
 }
 
@@ -1022,6 +1043,12 @@ fn main() {
 
             tauri::async_runtime::spawn(async move {
                 // Determine how to run the backend
+                let sidecar_dir = app_handle
+                    .path()
+                    .resolve("sidecar", BaseDirectory::Resource)
+                    .ok()
+                    .filter(|path| path.exists());
+
                 let (command, args) = if cfg!(debug_assertions) {
                     // In debug mode, try to run python directly
                     // We need to find the python script path relative to the project root
@@ -1106,9 +1133,8 @@ fn main() {
                         // Fallback to sidecar if script not found
                          println!("Python script not found at {:?}, falling back to sidecar", script_path);
                          // Resolve the sidecar path from resources
-                        let sidecar_dir = app_handle
-                            .path()
-                            .resolve("sidecar", BaseDirectory::Resource)
+                        let sidecar_dir = sidecar_dir
+                            .clone()
                             .expect("failed to resolve sidecar resource");
 
                         let sidecar_executable = if cfg!(target_os = "windows") {
@@ -1120,9 +1146,8 @@ fn main() {
                     }
                 } else {
                      // In release mode, always use sidecar
-                    let sidecar_dir = app_handle
-                        .path()
-                        .resolve("sidecar", BaseDirectory::Resource)
+                    let sidecar_dir = sidecar_dir
+                        .clone()
                         .expect("failed to resolve sidecar resource");
 
                     let sidecar_executable = if cfg!(target_os = "windows") {
@@ -1144,7 +1169,12 @@ fn main() {
                     .env("RAYON_NUM_THREADS", "4")
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped());
-                
+
+                if let Some(ref sidecar_dir) = sidecar_dir {
+                    cmd.current_dir(sidecar_dir)
+                        .env("TAURI_RESOURCES_DIR", sidecar_dir);
+                }
+
                 // Pass bundled Node.js path to Python backend
                 if let Some(ref node_bin) = bundled_node_path {
                     cmd.env("SAGE_BUNDLED_NODE_BIN", node_bin);
@@ -1210,7 +1240,7 @@ fn main() {
                 while let Ok(Some(line)) = reader.next_line().await {
                     let line: String = line;
                     println!("PYTHON: {}", line);
-                    
+
                     // Check for startup timeout
                     if !backend_started && start_time.elapsed() > timeout {
                         eprintln!("Backend startup timeout after 60 seconds");
@@ -1220,7 +1250,7 @@ fn main() {
                         })).unwrap();
                         break;
                     }
-                    
+
                     if line.contains("Starting Sage Desktop Server on port") {
                         // Extract port. Line format: "Starting Sage Desktop Server on port 12345..."
                         if let Some(last_word) = line.split_whitespace().rev().next() {
