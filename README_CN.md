@@ -7,16 +7,16 @@
 [![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
 [![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg?logo=python)](https://python.org)
-[![Version](https://img.shields.io/badge/Version-1.0.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python)](https://python.org)
+[![Version](https://img.shields.io/badge/Version-1.1.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-查看文档-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 [![Slack](https://img.shields.io/badge/Slack-加入社区-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
-# 🧠 **Sage 多智能体框架**
+# 🧠 **Sage 智能体平台**
 
-### 🎯 **让复杂任务变得简单**
+### 🎯 **让复杂工作走向可靠交付**
 
-> 🌟 **生产级、模块化、智能化的多智能体编排框架，专为复杂问题求解而生。**
+> 🌟 **面向任务执行、自动化调度、浏览器工作流、IM 交付与企业部署的生产级智能体平台。**
 
 </div>
 
@@ -51,16 +51,14 @@
 
 ## ✨ **核心亮点**
 
-- 🧠 **多智能体编排**：支持 **TaskExecutor** (串行)、**FibreAgent** (并行) 和 **AgentFlow** (声明式) 三种编排模式。
-- � **模型能力最大化**：即使在 **Qwen3.5 35B-A3B** 等小模型上也能稳定完成复杂任务，框架级优化释放模型潜能。
-- 🧩 **内置高稳定性 Skill**：预装多种经过实战验证的 Skill，开箱即用，确保关键任务稳定执行。
-- 🛡️ **安全沙箱**：提供隔离执行环境 (`sagents.utils.sandbox`) 确保智能体代码执行安全。
-- 👁️ **全链路可观测性**：集成 **OpenTelemetry** 追踪，可视化智能体思考与执行路径。
-- 🧩 **模块化组件**：**Skills**、**Tools** 和 **MCP Servers** 的即插即用架构。
-- 📊 **上下文管理**：先进的 **Context Budget** 控制，实现精准的 Token 优化。
-- 💻 **跨平台桌面端**：原生桌面应用支持 **macOS** (Intel/Apple Silicon)、**Windows** 和 **Linux**。
-- 🛠️ **可视化工作台**：统一的文件预览、工具结果和代码执行工作空间，支持 15+ 种格式。
-- 🔌 **MCP 协议**：Model Context Protocol 支持，实现标准化工具集成。
+- 🤖 **从规划到交付**：内置规划、执行、自检、记忆召回与工具推荐等智能体能力，面向复杂任务闭环。
+- 🌐 **多入口接入**：支持桌面端、Web、CLI 和 Chrome 扩展，覆盖开发、运营与日常使用场景。
+- 🔁 **自动化与循环任务**：支持定时任务、问卷收集流程与长任务执行，并提供可见的进度反馈。
+- 💬 **全渠道 IM 集成**：支持 WeChat Personal(iLink)、企业微信、飞书、钉钉等渠道的消息与文件收发。
+- 🧰 **统一工具体系**：内置工具、Skills、MCP 服务、浏览器自动化、搜索与图片生成能力可统一编排。
+- 🛡️ **安全沙箱执行**：支持本地、passthrough、远程等多种沙箱模式，保障运行时隔离与安全。
+- 🛠️ **可视化工作台**：统一查看文件、工具输出、代码、图表、Mermaid、Draw.io、音视频与远程预览内容。
+- 🏢 **企业级基础能力**：提供 OAuth2、可配置认证与 CORS、共享服务架构、CI 覆盖和多平台发布能力。
 
 ---
 
@@ -206,74 +204,83 @@ npm run dev
 
 ```mermaid
 graph TD
-    User[用户/客户端] --> Desktop[💻 桌面应用]
-    User --> Web[🌐 Web 界面]
-    Desktop --> API[Sage Server API]
-    Web --> API
-    
-    subgraph Core[核心引擎]
-        API --> Orch[🧠 智能体编排器]
-        Orch -- "调度" --> Flow[📋 AgentFlow]
-        Flow -- "执行" --> Agents["🤖 智能体<br/>Fibre / Simple / Multi"]
-        Agents -- "使用" --> RAG[📚 RAG 引擎]
-        Agents -- "使用" --> Tools[🛠️ 工具与技能]
-        Agents -- "使用" --> MCP[🔌 MCP 服务器]
-        Agents -- "运行于" --> Box[📦 安全沙箱]
+    User[用户] --> Desktop[💻 桌面应用]
+    User --> Web[🌐 Web 应用]
+    User --> CLI[⌨️ CLI]
+    User --> Ext[🧩 Chrome 扩展]
+    User --> IM[💬 IM 渠道]
+
+    Desktop --> AppLayer[🧭 应用服务层]
+    Web --> AppLayer
+    CLI --> AppLayer
+    Ext --> AppLayer
+    IM --> AppLayer
+
+    subgraph App[产品层]
+        AppLayer --> Chat[💬 对话与会话]
+        AppLayer --> AgentsUI[🤖 Agent 管理]
+        AppLayer --> Tasks[⏰ 任务与自动化]
+        AppLayer --> Browser[🌐 浏览器桥接]
+        AppLayer --> Workbench[🛠️ 可视化工作台]
     end
 
-    subgraph Infra[企业级基础设施]
-        RAG <--> ES[(Elasticsearch)]
-        Tools <--> RustFS[(RustFS)]
-        Orch <--> DB[(SQL 数据库)]
+    subgraph Core[SAgents 核心]
+        AppLayer --> Runtime[🧠 Session Runtime]
+        Runtime --> Flow[📋 AgentFlow]
+        Flow --> Agents["🤖 智能体<br/>Plan / Simple / Fibre / Self-Check"]
+        Agents --> Memory[🧠 记忆召回]
+        Agents --> Skills[🧩 Skills]
+        Agents --> ToolMgr[🛠️ 工具管理器]
     end
-    
-    Core -.-> Obs["👁️ 可观测性<br/>OpenTelemetry"]
-    Core -.-> Workbench["🛠️ 可视化工作台"]
+
+    subgraph Tools[执行与集成]
+        ToolMgr --> MCP[🔌 MCP 服务]
+        ToolMgr --> BrowserTools[🌍 浏览器自动化]
+        ToolMgr --> Search[🔎 统一搜索]
+        ToolMgr --> ImageGen[🎨 图片生成]
+        ToolMgr --> Questionnaire[📝 问卷]
+        ToolMgr --> IMTools[📨 IM 交付]
+    end
+
+    subgraph RuntimeEnv[运行时与基础设施]
+        Agents --> Sandbox[📦 沙箱运行时]
+        Sandbox --> Local[本地]
+        Sandbox --> Pass[Passthrough]
+        Sandbox --> Remote[远程]
+        AppLayer <--> Common[🧱 共享 Common 服务层]
+        Common <--> DB[(SQL 数据库)]
+        Memory <--> ES[(Elasticsearch)]
+        Workbench <--> FS[(RustFS / 本地文件)]
+        Runtime -.-> Obs["👁️ 可观测性<br/>OpenTelemetry"]
+    end
 ```
 
 ---
 
-## 📅 **v1.0.0 更新内容**
+## 📅 **v1.1.0 更新内容**
 
 ### 🤖 **SAgents 内核更新**
 
-- **Session 管理体系重构**：全局 `SessionManager`，支持父子会话关联追踪
-- **AgentFlow 编排引擎**：声明式工作流编排，支持 Router → DeepThink → Mode Switch → Suggest 流程
-- **Fibre 模式深度优化**：
-  - `sys_spawn_agent` 动态子智能体生成
-  - `sys_delegate_task` 并行任务委派
-  - 支持小时级长时任务执行
-  - 4 级层级深度控制
-  - 递归编排能力
-- **锁管理**：全局 `LockManager` 实现会话级隔离
-- **可观测性**：OpenTelemetry 集成，支持性能监控
+- **执行链路增强**：新增 `PlanAgent`、`SelfCheckAgent`、`MemoryRecallAgent` 与 `ToolSuggestionAgent`
+- **上下文效率优化**：补强用户输入优化与历史消息压缩，提升长任务执行稳定性
+- **会话与消息能力升级**：支持编辑并重跑、增强进度反馈、补强 Session 检查与调试体验
+- **工具能力扩展**：新增问卷采集工作流，强化工具调用展示、结果截断与可观测性
 
-### 💻 **应用层更新**
+### 💻 **产品层更新**
 
-- **可视化工作台**：
-  - 20+ 渲染组件
-  - 15+ 文件格式支持（PDF、DOCX、PPTX、XLSX 等）
-  - 列表/单例双模式
-  - 时间轴导航
-  - 会话隔离的状态管理
-- **跨平台桌面端**：
-  - macOS (Intel/Apple Silicon) - DMG
-  - Windows - NSIS 安装包
-  - Linux - DEB 支持
-- **实时协作**：
-  - 消息流优化
-  - 文件引用提取
-  - 代码块高亮
-  - 断开检测与恢复
-- **MCP 支持**：Model Context Protocol 外部工具集成
+- **新增多入口**：加入 Sage CLI、Chrome 扩展与浏览器自动化能力
+- **工作台升级**：增强音频、视频、Mermaid、Draw.io、远程文件预览等渲染支持
+- **聊天体验优化**：完善进度消息、交付流展示、推理内容展示与工作区交互
+- **IM 集成增强**：扩展 WeChat Personal(iLink)、企业微信、飞书、钉钉等渠道能力，并强化文件消息流程
 
-### 🔧 **基础设施**
+### 🛡️ **平台与基础设施**
 
-- **Tauri 2.0**：升级至稳定版，新的权限系统
-- **构建优化**：Rust 缓存、并行构建、自动签名
-- **状态管理**：Pinia Store 会话隔离
+- **企业级能力补齐**：新增 OAuth2、邮箱验证，并增强认证、CORS 与安全配置
+- **沙箱与运行时升级**：重构本地 / passthrough / 远程沙箱能力，完善 Node runtime 与 sidecar 打包
+- **共享架构升级**：抽离 `common/` 共享服务、模型与 Schema，提升桌面端与服务端复用度
+- **文档与 CI**：重建文档体系，新增 CLI 指南，并补充测试与持续集成覆盖
 
-**[查看完整发布说明](release_notes/v1.0.0.md)**
+**[查看完整发布说明](release_notes/v1.1.0.md)**
 
 ---
 
@@ -281,7 +288,7 @@ graph TD
 
 - 📖 **完整文档**: [https://wiki.sage.zavixai.com/](https://wiki.sage.zavixai.com/)
 - 📝 **发布说明**: [release_notes/](release_notes/)
-- 🏗️ **架构说明**: 查看 `sagents/` 目录了解核心框架
+- 🏗️ **架构说明**: 查看 `sagents/`、`common/` 与 `app/` 目录了解核心运行时与产品层结构
 - 🔧 **配置指南**: `app/desktop/` 目录下的环境变量和配置文件
 
 ---
@@ -292,20 +299,16 @@ graph TD
 
 ```
 Sage/
-├── sagents/                    # 核心智能体框架
-│   ├── agent/                  # 智能体实现
-│   │   ├── fibre/              # Fibre 多智能体编排
-│   │   ├── simple_agent.py     # 简单模式智能体
-│   │   └── ...
-│   ├── flow/                   # AgentFlow 引擎
-│   ├── context/                # 会话与消息管理
-│   ├── tool/                   # 工具系统
-│   └── session_runtime.py      # 会话管理器
-├── app/desktop/                # 桌面应用
-│   ├── core/                   # Python 后端 (FastAPI)
-│   ├── ui/                     # Vue3 前端
-│   └── tauri/                  # Tauri 2.0 桌面壳
-└── skills/                     # 内置技能
+├── sagents/                    # SAgents 核心运行时、流程、上下文、工具与沙箱
+├── common/                     # 共享模型、Schema、服务与核心客户端
+├── app/
+│   ├── desktop/                # 桌面应用（Python 后端 + Vue UI + Tauri 壳）
+│   ├── server/                 # 服务端应用与 Web 前端
+│   ├── cli/                    # Sage CLI 入口与服务
+│   └── chrome-extension/       # 浏览器扩展与侧边栏
+├── mcp_servers/                # IM、搜索、调度、图片生成等服务
+├── docs/                       # 中英文文档
+└── release_notes/              # 版本发布说明
 ```
 
 ### 参与贡献
