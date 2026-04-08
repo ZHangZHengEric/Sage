@@ -39,6 +39,7 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       rollupOptions: {
+        sourcemap: false,
         onwarn(warning, warn) {
           if (warning.code === 'MODULE_LEVEL_DIRECTIVE') {
             return
