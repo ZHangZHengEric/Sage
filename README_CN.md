@@ -171,64 +171,19 @@ export SAGE_DB_TYPE="file"
 # 检查本地运行环境
 sage doctor
 
-# 查看 CLI 生效配置
-sage config show
-
-# 生成一份最小本地 CLI 配置
+# 生成最小本地配置
 sage config init
 
-# 查看当前 CLI 用户的最近会话
-sage sessions
-
-# 查看可用技能
-sage skills
-
-# 执行单次任务
-sage run "帮我分析当前仓库"
-
-# 执行任务并输出运行统计
-sage run --stats "帮我分析当前仓库"
-
-# 输出结构化流事件，并在结束时附带 cli_stats 摘要事件
-sage run --json "帮我分析当前仓库"
-
-# 指定本地工作目录执行
-sage run --workspace /path/to/project --stats "用一句话介绍你自己"
-
-# 指定技能执行
-sage run --skill my_skill --stats "用一句话介绍你自己"
-
-# 查看某个工作目录下可见的技能
-sage skills --workspace /path/to/project
+# 快速执行一次任务
+sage run --stats "用一句话介绍你自己"
 
 # 进入交互式对话
 sage chat
-
-# 恢复已有会话
-sage resume your-session-id
 ```
 
-在 `sage chat` 和 `sage resume` 中，可以使用：
-- `/help` 查看内置命令帮助
-- `/session` 查看当前会话 ID
-- `/exit` 或 `/quit` 退出会话
-
-CLI 默认会使用一个稳定的本地用户 ID。你可以通过 `--user-id`、`SAGE_CLI_USER_ID` 或 `SAGE_DESKTOP_USER_ID` 覆盖它。
-
-如果你暂时不想安装可编辑包，也可以直接运行模块：
-
-```bash
-python -m app.cli.main doctor
-python -m app.cli.main config show
-python -m app.cli.main config init
-python -m app.cli.main sessions
-python -m app.cli.main skills
-python -m app.cli.main run "帮我分析当前仓库"
-python -m app.cli.main run --workspace /path/to/project "帮我分析当前仓库"
-python -m app.cli.main run --stats "帮我分析当前仓库"
-python -m app.cli.main chat
-python -m app.cli.main resume your-session-id
-```
+完整 CLI 使用说明请看：
+- English: [docs/en/CLI.md](docs/en/CLI.md)
+- 中文: [docs/zh/CLI.md](docs/zh/CLI.md)
 
 当前这版 CLI MVP 仍然复用 Sage 现有的运行时配置体系，所以 `.env` 和 shell 环境变量仍然是主要配置方式。
 启用 `--json` 时，CLI 会输出流式事件，并在结束时附加一个最终的 `cli_stats` 结构化摘要事件。
