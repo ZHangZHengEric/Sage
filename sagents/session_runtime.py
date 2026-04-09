@@ -215,17 +215,17 @@ class Session:
                 self.session_context.parent_session_id = parent_session_id
             return self.session_context
 
-        saved_system_context = self._load_saved_system_context(session_id)
+        # saved_system_context = self._load_saved_system_context(session_id)
         merged_system_context = dict(system_context or {})
-        if saved_system_context:
-            if merged_system_context:
-                base = saved_system_context.copy()
-                base.update(merged_system_context)
-                merged_system_context = base
-                logger.info(f"SessionContext: Merged saved system_context with provided for session {session_id}")
-            else:
-                merged_system_context = saved_system_context
-                logger.info(f"SessionContext: Using saved system_context for session {session_id}")
+        # if saved_system_context:
+        #     if merged_system_context:
+        #         base = saved_system_context.copy()
+        #         base.update(merged_system_context)
+        #         merged_system_context = base
+        #         logger.info(f"SessionContext: Merged saved system_context with provided for session {session_id}")
+        #     else:
+        #         merged_system_context = saved_system_context
+        #         logger.info(f"SessionContext: Using saved system_context for session {session_id}")
 
         # 调试：检查 workspace 配置
         logger.info(f"SessionRuntime: 创建 SessionContext，"
