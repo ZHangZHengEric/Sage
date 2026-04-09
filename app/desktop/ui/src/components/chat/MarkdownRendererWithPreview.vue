@@ -13,6 +13,7 @@
         :key="fileInfo.id"
         :file-path="fileInfo.path"
         :file-name="fileInfo.name"
+        :message-id="messageId"
         :is-directory="fileInfo.isDirectory"
         class="my-1"
       />
@@ -33,6 +34,10 @@ const props = defineProps({
   compact: {
     type: Boolean,
     default: false
+  },
+  messageId: {
+    type: String,
+    default: ''
   }
 })
 

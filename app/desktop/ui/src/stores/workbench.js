@@ -47,10 +47,59 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     return -1
   }
 
+  const findItemIndexByStableKey = (stableKey) => {
+    if (!stableKey) return -1
+    return filteredItems.value.findIndex(item => item?.stableKey === stableKey)
+  }
+
   // Actions
-  const setSessionId = (sessionId) => {
+  const compactSessionItems = (sessionId) => {
+    if (!sessionId) return
+    const seen = new Set()
+    const nextItems = []
+
+    for (const item of items.value) {
+      if (!item || item.sessionId !== sessionId) {
+        nextItems.push(item)
+        continue
+      }
+
+      let dedupKey = null
+      if (item.stableKey) {
+        dedupKey = `stable:${item.stableKey}`
+      } else if (item.type === 'file') {
+        const path = item.data?.filePath || item.data?.path || item.data?.src || ''
+        dedupKey = `file:${item.messageId || ''}:${path}`
+      } else if (item.type === 'tool_call' && item.data?.id) {
+        dedupKey = `tool:${item.data.id}`
+      } else if (item.type === 'code' && item.data?.code) {
+        dedupKey = `code:${item.messageId || ''}:${item.data.code}`
+      }
+
+      if (dedupKey && seen.has(dedupKey)) {
+        continue
+      }
+      if (dedupKey) {
+        seen.add(dedupKey)
+      }
+      nextItems.push(item)
+    }
+
+    items.value = nextItems
+  }
+
+  const setSessionId = (sessionId, options = {}) => {
+    const { autoJumpToLast = true } = options
+    if (currentSessionId.value === sessionId) {
+      console.log('[Workbench] setSessionId skipped (unchanged):', sessionId)
+      return
+    }
     console.log('[Workbench] setSessionId:', sessionId)
     currentSessionId.value = sessionId
+    compactSessionItems(sessionId)
+    if (!autoJumpToLast) {
+      return
+    }
     // 切换会话后，自动跳转到该会话的最后一项
     setTimeout(() => {
       const filteredLength = filteredItems.value.length
@@ -95,12 +144,21 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       if (item.data.path) item.data.path = path
     }
 
-    // 检查是否已存在相同的项（根据 type 和唯一标识）
+    const stableKey = buildStableKey(item)
+    if (stableKey) {
+      item.stableKey = stableKey
+    }
+
+    // 检查是否已存在相同的项（根据稳定键或 type+唯一标识）
     const existingItem = items.value.find(i => {
+      if (stableKey && i?.stableKey === stableKey) return true
       if (i.type !== item.type) return false
-      // 文件类型：同一路径的不同版本也要保留，因此不在这里去重
+      // 文件类型：同一消息内同一路径去重，避免流式更新导致重复堆积
       if (item.type === 'file') {
-        return false
+        const newPath = item.data?.filePath || item.data?.path || item.data?.src || ''
+        const oldPath = i.data?.filePath || i.data?.path || i.data?.src || ''
+        const sameMessage = item.messageId && i.messageId && item.messageId === i.messageId
+        return sameMessage && newPath === oldPath
       }
       // 代码块类型：根据 messageId + code 内容去重
       if (item.type === 'code' && item.data?.code) {
@@ -146,6 +204,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       id: `item-${Date.now()}-${itemIdCounter}-${Math.random().toString(36).substr(2, 5)}`,
       timestamp: Date.now(),
       sessionId: currentSessionId.value, // 关联当前会话
+      stableKey: stableKey || item.stableKey || null,
       ...item
     }
     items.value.push(newItem)
@@ -208,6 +267,16 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const setCurrentIndexByMessageId = (messageId, itemIndex = 0) => {
     const index = findItemIndexByMessageId(messageId, itemIndex)
     console.log('[Workbench] setCurrentIndexByMessageId:', messageId, itemIndex, '->', index)
+    if (index !== -1) {
+      setCurrentIndex(index)
+      return true
+    }
+    return false
+  }
+
+  const setCurrentIndexByStableKey = (stableKey) => {
+    const index = findItemIndexByStableKey(stableKey)
+    console.log('[Workbench] setCurrentIndexByStableKey:', stableKey, '->', index)
     if (index !== -1) {
       setCurrentIndex(index)
       return true
@@ -354,7 +423,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     currentItem,
     maxIndex,
     findItemIndexByMessageId,
+    findItemIndexByStableKey,
     // Actions
+    compactSessionItems,
     setSessionId,
     addItem,
     clearItems,
@@ -362,6 +433,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     clearSessionItems,
     setCurrentIndex,
     setCurrentIndexByMessageId,
+    setCurrentIndexByStableKey,
     toggleRealtime,
     setRealtime,
     toggleListView,
@@ -419,4 +491,45 @@ function extractCodeBlocks(content) {
   }
 
   return codeBlocks
+}
+
+function normalizeFilePathForStableKey(path) {
+  if (!path) return ''
+  let normalized = path
+  try {
+    normalized = decodeURIComponent(normalized).trim()
+  } catch (e) {}
+  if (normalized.startsWith('/sage-workspace/')) {
+    normalized = normalized.replace('/sage-workspace/', '/')
+  }
+  if (normalized.startsWith('file://')) {
+    normalized = normalized.replace(/^file:\/\/\/?/i, '/')
+  }
+  return normalized
+}
+
+function buildStableKey(item) {
+  if (!item || !item.type) return null
+  const messageId = item.messageId || item.data?.message_id || item.data?.messageId || ''
+
+  if (item.type === 'tool_call') {
+    const toolCallId = item.data?.id || item.data?.tool_call_id || ''
+    if (messageId && toolCallId) return `tool:${messageId}:${toolCallId}`
+    if (toolCallId) return `tool:${toolCallId}`
+    return null
+  }
+
+  if (item.type === 'file') {
+    const path = normalizeFilePathForStableKey(item.data?.filePath || item.data?.path || item.data?.src || '')
+    if (!path) return null
+    if (messageId) return `file:${messageId}:${path}`
+    return `file:${path}`
+  }
+
+  if (item.type === 'code' && messageId && item.data?.code) {
+    return `code:${messageId}:${item.data.code}`
+  }
+
+  if (messageId) return `${item.type}:${messageId}`
+  return null
 }

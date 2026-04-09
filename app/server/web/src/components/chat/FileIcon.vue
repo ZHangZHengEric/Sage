@@ -33,6 +33,10 @@ const props = defineProps({
     type: String,
     default: ''
   },
+  messageId: {
+    type: String,
+    default: ''
+  },
   // 是否是文件夹
   isDirectory: {
     type: Boolean,
@@ -71,40 +75,85 @@ const iconSrc = computed(() => {
 
 const handleClick = () => {
   const normalizedPath = normalizeFilePath(props.filePath)
+  const stableKey = props.messageId
+    ? `file:${props.messageId}:${normalizedPath}`
+    : `file:${normalizedPath}`
 
   // 先打开工作台
   panelStore.openWorkbench()
+  // 点击历史项时，先关闭实时，避免被流式新增项拉回最后
+  workbenchStore.setRealtime(false)
   
   // 如果指定了工作台项ID，直接跳转到该项
   if (props.workbenchItemId) {
-    const index = workbenchStore.items.findIndex(item => item.id === props.workbenchItemId)
+    let target = (workbenchStore.filteredItems || []).find(item => item?.id === props.workbenchItemId)
+    if (!target) {
+      target = (workbenchStore.items || []).find(item => item?.id === props.workbenchItemId)
+      if (target?.sessionId) {
+        workbenchStore.setSessionId(target.sessionId, { autoJumpToLast: false })
+      }
+    }
+    if (target) {
+      const index = (workbenchStore.filteredItems || []).findIndex(item => item?.id === target.id)
+      if (index !== -1) {
+        workbenchStore.setCurrentIndex(index)
+      }
+      return
+    }
+  }
+
+  const targetByMessage = (workbenchStore.items || []).find(item => item?.stableKey === stableKey)
+  if (targetByMessage?.sessionId) {
+    workbenchStore.setSessionId(targetByMessage.sessionId, { autoJumpToLast: false })
+    const index = (workbenchStore.filteredItems || []).findIndex(item => item?.id === targetByMessage.id)
     if (index !== -1) {
       workbenchStore.setCurrentIndex(index)
-      workbenchStore.setRealtime(false)
       return
     }
   }
   
   // 否则查找对应的文件项
-  const index = workbenchStore.items.findIndex(item => 
+  let index = (workbenchStore.filteredItems || []).findIndex(item => 
     item.type === 'file' && normalizeFilePath(item.data.filePath) === normalizedPath
   )
   
   if (index !== -1) {
     workbenchStore.setCurrentIndex(index)
-    workbenchStore.setRealtime(false)
-  } else {
-    // 如果工作台中没有，添加并跳转
-    workbenchStore.addItem({
-      type: 'file',
-      role: 'assistant',
-      timestamp: Date.now(),
-      data: {
-        filePath: normalizedPath,
-        fileName: displayFileName.value
-      }
-    })
-    workbenchStore.setRealtime(false)
+    return
+  }
+
+  // 再兜底：全局按路径找最后一个同路径文件项，并切换到对应会话
+  const globalSamePath = [...(workbenchStore.items || [])]
+    .reverse()
+    .find(item =>
+      item?.type === 'file' &&
+      normalizeFilePath(item?.data?.filePath || item?.data?.path) === normalizedPath
+    )
+  if (globalSamePath?.sessionId) {
+    workbenchStore.setSessionId(globalSamePath.sessionId, { autoJumpToLast: false })
+    index = (workbenchStore.filteredItems || []).findIndex(item => item?.id === globalSamePath.id)
+    if (index !== -1) {
+      workbenchStore.setCurrentIndex(index)
+      return
+    }
+  }
+
+  // 如果工作台中没有，添加并跳转到新建项
+  const createdItem = workbenchStore.addItem({
+    type: 'file',
+    role: 'assistant',
+    timestamp: Date.now(),
+    messageId: props.messageId || null,
+    data: {
+      filePath: normalizedPath,
+      fileName: displayFileName.value
+    }
+  })
+  if (createdItem?.id) {
+    const createdIndex = (workbenchStore.filteredItems || []).findIndex(item => item?.id === createdItem.id)
+    if (createdIndex !== -1) {
+      workbenchStore.setCurrentIndex(createdIndex)
+    }
   }
 }
 </script>

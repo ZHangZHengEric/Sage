@@ -218,6 +218,17 @@ class PassthroughSandboxProvider(ISandboxHandle):
         else:
             cwd = self._sandbox_agent_workspace
 
+        # 为 npm/npx 配置项目级缓存，避免写入用户主目录 ~/.npm 导致权限问题
+        npm_cache_dir = os.path.join(os.path.expanduser("~"), ".sage", ".npm-cache")
+        try:
+            os.makedirs(npm_cache_dir, exist_ok=True)
+        except Exception as e:
+            logger.warning(f"PassthroughSandboxProvider: Failed to create npm cache dir {npm_cache_dir}: {e}")
+
+        merged_env = {**os.environ, **(env or {})}
+        merged_env.setdefault("npm_config_cache", npm_cache_dir)
+        merged_env.setdefault("NPM_CONFIG_CACHE", npm_cache_dir)
+
         # 执行命令
         try:
             process = await asyncio.create_subprocess_shell(
@@ -225,7 +236,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
-                env={**os.environ, **(env or {})},
+                env=merged_env,
             )
 
             stdout, stderr = await asyncio.wait_for(
