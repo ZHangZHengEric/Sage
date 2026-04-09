@@ -285,6 +285,13 @@ skills_info_label = {
     "pt": "\nLista de Habilidades Disponíveis (Skills), use a ferramenta `load_skill` para carregar se necessário:\n"
 }
 
+# 循环重复纠偏提示模板（用于过程内 assistant 自检消息）
+repeat_pattern_self_correction_template = {
+    "zh": "自检：检测到执行出现重复循环模式（周期={period}，重复={cycles}轮）。从下一步开始禁止复用同一路径；必须改变执行策略：优先尝试不同工具或参数；若仍无法推进，先明确阻塞点并提出最小必要澄清问题。",
+    "en": "Self-check: Repeating execution loop detected (period={period}, cycles={cycles}). Starting now, do not reuse the same path; you must change strategy: try different tools or parameters first; if still blocked, state the blocker clearly and ask one minimal clarification question.",
+    "pt": "Autoverificação: Foi detectado um loop de execução repetitivo (período={period}, ciclos={cycles}). A partir de agora, não reutilize o mesmo caminho; você deve mudar a estratégia: tente ferramentas ou parâmetros diferentes primeiro; se ainda houver bloqueio, descreva o impedimento e faça uma única pergunta mínima de esclarecimento."
+}
+
 # 工具建议模板
 tool_suggestion_template = {
     "zh": """你是一个工具推荐专家，你的任务是根据用户的需求，为用户推荐合适的工具。

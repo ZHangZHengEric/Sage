@@ -136,6 +136,21 @@ const createFinishTaskMessage = (message, toolCall, toolResult) => {
   }
 }
 
+const createPendingFinishTaskMessage = (message, toolCall) => ({
+  ...message,
+  message_id: `${message.message_id || 'message'}:finish:pending:${toolCall.id || 'tool'}`,
+  role: 'assistant',
+  tool_calls: [toolCall],
+  metadata: {
+    ...(message.metadata || {}),
+    finish_task: {
+      status: 'pending',
+      tool_call_id: toolCall.id || null,
+      source_message_id: message.message_id || null
+    }
+  }
+})
+
 export const normalizeChatMessages = (messages = []) => {
   const toolResultMap = buildToolResultMap(messages)
   const finishTaskIds = new Set()
@@ -183,7 +198,9 @@ export const normalizeChatMessages = (messages = []) => {
       const syntheticMessage = createFinishTaskMessage(message, toolCall, toolResultMap.get(toolCall.id))
       if (syntheticMessage) {
         normalized.push(syntheticMessage)
+        return
       }
+      normalized.push(createPendingFinishTaskMessage(message, toolCall))
     })
   })
 

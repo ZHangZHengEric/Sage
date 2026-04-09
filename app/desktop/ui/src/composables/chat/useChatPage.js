@@ -284,6 +284,28 @@ export const useChatPage = (props) => {
   const handleMessage = (messageData) => {
     if (messageData.type === 'stream_end') return
     const messageId = messageData.message_id
+
+    const extractWorkbenchFromMessage = (message) => {
+      if (!message) return
+      const effectiveAgentId = message.agent_id || selectedAgent.value?.id || selectedAgentId.value || null
+      workbenchStore.extractFromMessage(message, effectiveAgentId)
+
+      if (isToolResultMessage(message) && message.tool_call_id) {
+        const plainToolResult = JSON.parse(JSON.stringify(message))
+        workbenchStore.updateToolResult(message.tool_call_id, plainToolResult)
+        return
+      }
+
+      if (message.tool_calls && message.tool_calls.length > 0) {
+        message.tool_calls.forEach((toolCall) => {
+          const toolResult = toolCall?.function?.result
+          if (toolCall?.id && toolResult) {
+            const plainToolResult = JSON.parse(JSON.stringify(toolResult))
+            workbenchStore.updateToolResult(toolCall.id, plainToolResult)
+          }
+        })
+      }
+    }
     
     // 处理工具调用消息 - 记录 pending 状态
     if (messageData.tool_calls && messageData.tool_calls.length > 0) {
@@ -325,6 +347,7 @@ export const useChatPage = (props) => {
         }
       }
       messages.value.splice(targetIndex, 1, nextMessage)
+      extractWorkbenchFromMessage(nextMessage)
       return
     }
     const appended = {
@@ -335,6 +358,7 @@ export const useChatPage = (props) => {
     if (appended.message_id) {
       messageIdIndexMap.value.set(appended.message_id, messages.value.length - 1)
     }
+    extractWorkbenchFromMessage(appended)
     // 不要强制重置 shouldAutoScroll，也不要强制滚动
     // 只有当 shouldAutoScroll 为 true 时（即用户在底部），scrollToBottom 才会执行滚动
     nextTick(() => scrollToBottom())
