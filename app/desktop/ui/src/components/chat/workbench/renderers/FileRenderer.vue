@@ -120,7 +120,7 @@
       <DrawioEmbedRenderer v-else-if="drawioXmlContent" :xml="drawioXmlContent" />
 
       <!-- PDF 预览 -->
-      <PdfRenderer v-else-if="fileType === 'pdf'" :file-path="filePath" />
+      <PdfRenderer v-else-if="fileType === 'pdf'" :file-path="filePath" @open-file="openFile" />
 
       <!-- 图片预览 -->
       <ImageRenderer v-else-if="fileType === 'image'" :file-path="filePath" :file-name="displayFileName" />
@@ -826,9 +826,55 @@ const loadContent = async () => {
 // 打开文件
 const openFile = async () => {
   try {
+    if (fileType.value === 'pdf') {
+      const pdfCheck = await quickValidatePdf(filePath.value)
+      if (!pdfCheck.ok) {
+        toast.error(
+          t('workbench.pdf.toastCorrupt', {
+            name: displayFileName.value,
+            reason: pdfCheck.reason
+          })
+        )
+        return
+      }
+    }
     await open(props.filePath)
   } catch (err) {
     console.error('打开文件失败:', err)
+    if (fileType.value === 'pdf') {
+      toast.error(
+        t('workbench.pdf.toastOpenFailed', { name: displayFileName.value })
+      )
+      return
+    }
+    toast.error(t('workbench.file.openFailed', { message: err?.message || 'Unknown' }))
+  }
+}
+
+const quickValidatePdf = async (path) => {
+  try {
+    const fileData = await readFile(path)
+    if (!fileData || fileData.length < 8) {
+      return { ok: false, reason: t('workbench.pdf.checkEmpty') }
+    }
+
+    const u8 = new Uint8Array(fileData)
+    const decoder = new TextDecoder('ascii')
+    const header = decoder.decode(u8.slice(0, Math.min(8, u8.length)))
+    if (!header.startsWith('%PDF-')) {
+      return { ok: false, reason: t('workbench.pdf.checkInvalidHeader') }
+    }
+
+    // 允许尾部有空白，检查末尾 2KB 是否包含 EOF 标记。
+    const tailBytes = u8.slice(Math.max(0, u8.length - 2048))
+    const tail = decoder.decode(tailBytes)
+    if (!tail.includes('%%EOF')) {
+      return { ok: false, reason: t('workbench.pdf.checkMissingEof') }
+    }
+
+    return { ok: true, reason: '' }
+  } catch (err) {
+    return { ok: false, reason: err?.message || t('workbench.pdf.checkReadFailed') }
   }
 }
 

@@ -11,6 +11,11 @@ import json
 import uuid
 from copy import deepcopy
 import re
+from sagents.utils.repeat_pattern import (
+    build_loop_signature as _build_loop_signature_util,
+    detect_repeat_pattern as _detect_repeat_pattern_util,
+    build_self_correction_message as _build_self_correction_message_util,
+)
 
 
 def _get_system_prefix(tool_manager: Optional[ToolManager], language: str) -> str:
@@ -52,9 +57,42 @@ class SimpleAgent(AgentBase):
 
         # 最大循环次数常量
         self.max_loop_count = 100
+        # 循环模式触发阈值：连续命中后触发软纠偏/硬暂停
+        self.max_repeat_pattern_hits = 2
         self.agent_name = "SimpleAgent"
         self.agent_description = """SimpleAgent: 简单智能体，负责无推理策略的直接任务执行，比ReAct策略更快速。适用于不需要推理或早期处理的任务。"""
         logger.debug(f"SimpleAgent 初始化完成，最大循环次数为 {self.max_loop_count}")
+
+    def _build_loop_signature(self, chunks: List[MessageChunk]) -> str:
+        """
+        为单轮输出构建签名（同时覆盖文本与工具调用/结果）。
+        """
+        return _build_loop_signature_util(chunks)
+
+    def _detect_repeat_pattern(
+        self,
+        signatures: List[str],
+        max_period: int = 8,
+    ) -> Optional[Dict[str, int]]:
+        """
+        在最近签名序列中检测循环模式，支持:
+        - AAAAAAA (period=1)
+        - ABABAB / ABBABB (period=2/3)
+        - AABBAABB (period=4)
+        """
+        return _detect_repeat_pattern_util(signatures, max_period=max_period)
+
+    def _build_self_correction_message(self, pattern: Dict[str, int], language: str = 'zh') -> str:
+        template = PromptManager().get_prompt(
+            key='repeat_pattern_self_correction_template',
+            agent='common',
+            language=language,
+            default=_build_self_correction_message_util(pattern),
+        )
+        try:
+            return template.format(period=pattern['period'], cycles=pattern['cycles'])
+        except Exception:
+            return _build_self_correction_message_util(pattern)
 
     async def run_stream(
         self,
@@ -340,6 +378,8 @@ class SimpleAgent(AgentBase):
             return
         all_new_response_chunks: List[MessageChunk] = []
         loop_count = 0
+        recent_signatures: List[str] = []
+        repeat_pattern_hits = 0
         # 从session context 检查一下是否有max_loop_count ，如果有，本次请求使用session context 中的max_loop_count
         max_loop_count = session_context.agent_config.get('max_loop_count', self.max_loop_count)
         logger.info(f"SimpleAgent: 开始执行主循环，最大循环次数：{max_loop_count}")
@@ -394,6 +434,46 @@ class SimpleAgent(AgentBase):
             if self._should_stop_execution(all_new_response_chunks):
                 logger.info("SimpleAgent: 检测到停止条件，终止执行")
                 break
+
+            # 检测循环模式：支持文本与工具调用/结果混合重复
+            loop_signature = self._build_loop_signature(all_new_response_chunks)
+            recent_signatures.append(loop_signature)
+            if len(recent_signatures) > 24:
+                recent_signatures = recent_signatures[-24:]
+
+            pattern = self._detect_repeat_pattern(recent_signatures)
+            if pattern:
+                repeat_pattern_hits += 1
+                correction_message = self._build_self_correction_message(
+                    pattern,
+                    language=session_context.get_language(),
+                )
+                logger.warning(
+                    f"SimpleAgent: 检测到循环模式 period={pattern['period']} cycles={pattern['cycles']} "
+                    f"(hit={repeat_pattern_hits}/{self.max_repeat_pattern_hits})"
+                )
+
+                # 通过过程 assistant 文本注入纠偏，而非修改 system prompt
+                correction_chunk = MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content=correction_message,
+                    type=MessageType.DO_SUBTASK_RESULT.value,
+                    agent_name=self.agent_name,
+                )
+                all_new_response_chunks.append(correction_chunk)
+
+                if repeat_pattern_hits >= self.max_repeat_pattern_hits:
+                    yield [MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        content=(
+                            "检测到任务进入重复循环，且已尝试过程内纠偏仍未跳出。"
+                            "已自动暂停，避免无效重复。请给我一个新的约束或允许我切换执行路径后继续。"
+                        ),
+                        type=MessageType.ASSISTANT_TEXT.value
+                    )]
+                    break
+            else:
+                repeat_pattern_hits = 0
 
             messages_input = MessageManager.merge_new_messages_to_old_messages(
                 cast(List[Union[MessageChunk, Dict[str, Any]]], all_new_response_chunks),
