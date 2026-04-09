@@ -69,6 +69,11 @@ class IMServiceManager:
         self._running = False
         self._monitor_task: Optional[asyncio.Task] = None
         
+        # Message merging (3-second window)
+        self._message_buffers: Dict[str, Dict] = {}
+        self._buffer_lock = asyncio.Lock()
+        self._merge_window = 3.0  # 3 seconds
+        
     def _make_key(self, sage_user_id: str, provider_type: str) -> str:
         """Make connection key."""
         return f"{sage_user_id}:{provider_type}"
@@ -1055,27 +1060,190 @@ class IMServiceManager:
                     logger.warning(f"[ServiceManager] Empty message from {provider_type}")
                     return
 
-                # Import here to avoid circular import
-                from .im_server import handle_incoming_message
+                # Handle slash commands immediately (no merging)
+                if text.startswith('/'):
+                    handled = await self._handle_slash_command(
+                        text, user_id, chat_id, provider_type, sage_user_id, user_name
+                    )
+                    if handled:
+                        logger.info(f"[ServiceManager] Slash command handled: {text}")
+                        return
 
-                # Call the centralized message handler
-                # Pass sage_user_id as default_agent_id to route to the correct agent
-                logger.info(f"[ServiceManager] Calling handle_incoming_message with agent_id={sage_user_id}")
-                await handle_incoming_message(
-                    provider=provider_type,
-                    user_id=user_id,
-                    content=text,
-                    chat_id=chat_id,
-                    user_name=user_name,
-                    default_agent_id=sage_user_id,  # Use the agent this channel belongs to
-                    file_info=file_info
-                )
-                logger.info(f"[ServiceManager] ====== Message handler END ======")
+                # Message merging logic (3-second window)
+                buffer_key = f"{sage_user_id}:{provider_type}:{user_id}"
+                
+                async with self._buffer_lock:
+                    if buffer_key in self._message_buffers:
+                        # Add to existing buffer, reset timer
+                        self._message_buffers[buffer_key]['messages'].append(text)
+                        old_timer = self._message_buffers[buffer_key].get('timer')
+                        if old_timer:
+                            old_timer.cancel()
+                        self._message_buffers[buffer_key]['timer'] = asyncio.create_task(
+                            self._delayed_process(buffer_key, sage_user_id, provider_type,
+                                                 user_id, chat_id, user_name)
+                        )
+                        logger.info(f"[ServiceManager] Message added to buffer: {buffer_key}, messages={len(self._message_buffers[buffer_key]['messages'])}")
+                    else:
+                        # Create new buffer
+                        self._message_buffers[buffer_key] = {
+                            'messages': [text],
+                            'timer': asyncio.create_task(
+                                self._delayed_process(buffer_key, sage_user_id, provider_type,
+                                                     user_id, chat_id, user_name)
+                            ),
+                            'chat_id': chat_id,
+                            'user_name': user_name
+                        }
+                        logger.info(f"[ServiceManager] New message buffer created: {buffer_key}")
+                
+                logger.info(f"[ServiceManager] ====== Message handler END (buffered) ======")
 
             except Exception as e:
                 logger.error(f"[ServiceManager] Error handling message: {e}", exc_info=True)
 
         return handler
+    
+    async def _delayed_process(self, buffer_key: str, sage_user_id: str, provider_type: str,
+                               user_id: str, chat_id: Optional[str], user_name: Optional[str]):
+        """Wait for more messages, then process merged content."""
+        await asyncio.sleep(self._merge_window)
+        await self._process_merged_messages(buffer_key, sage_user_id, provider_type,
+                                           user_id, chat_id, user_name)
+    
+    async def _process_merged_messages(self, buffer_key: str, sage_user_id: str, 
+                                      provider_type: str, user_id: str, chat_id: Optional[str],
+                                      user_name: Optional[str]):
+        """Process merged messages after buffer timeout."""
+        async with self._buffer_lock:
+            buffer_data = self._message_buffers.pop(buffer_key, None)
+        
+        if not buffer_data:
+            return
+        
+        # Merge messages
+        merged_text = " ".join(buffer_data['messages'])
+        logger.info(f"[ServiceManager] Processing merged message from {user_id}: {merged_text[:100]}...")
+        
+        # Process the merged message
+        from .im_server import handle_incoming_message
+        await handle_incoming_message(
+            provider=provider_type,
+            user_id=user_id,
+            content=merged_text,
+            chat_id=chat_id,
+            user_name=user_name,
+            default_agent_id=sage_user_id,
+            file_info=None
+        )
+    
+    async def _handle_slash_command(self, text: str, user_id: str, chat_id: Optional[str],
+                                    provider_type: str, sage_user_id: str, 
+                                    user_name: Optional[str]) -> bool:
+        """Handle slash commands like /help, /status, /reset.
+        
+        Returns:
+            True if command was handled, False otherwise
+        """
+        if not text.startswith('/'):
+            return False
+        
+        cmd_parts = text[1:].strip().split(maxsplit=1)
+        cmd = cmd_parts[0].lower() if cmd_parts else ''
+        args = cmd_parts[1] if len(cmd_parts) > 1 else ''
+        
+        commands = {
+            'help': self._cmd_help,
+            'status': self._cmd_status,
+            'reset': self._cmd_reset,
+            'clear': self._cmd_reset,  # Alias
+            'task': self._cmd_task,
+        }
+        
+        if cmd in commands:
+            try:
+                response = await commands[cmd](args, user_id, sage_user_id)
+                # Send response via IM
+                await self._send_im_response(provider_type, sage_user_id, user_id, chat_id, response)
+                return True
+            except Exception as e:
+                logger.error(f"[ServiceManager] Error handling command /{cmd}: {e}")
+                return False
+        return False
+    
+    async def _cmd_help(self, args: str, user_id: str, sage_user_id: str) -> str:
+        """Handle /help command."""
+        return """🤖 **可用命令**
+
+/help - 显示帮助
+/status - 查看会话状态
+/reset - 重置会话（清空上下文）
+/clear - 同上
+/task - 查看任务列表
+/task add <内容> - 添加任务
+/task done <序号> - 完成任务
+
+💡 提示: 首次对话可能需要几秒钟启动
+"""
+    
+    async def _cmd_status(self, args: str, user_id: str, sage_user_id: str) -> str:
+        """Handle /status command."""
+        from .session_manager import get_session_manager
+        session_mgr = get_session_manager()
+        
+        session_id = session_mgr.find_session_by_user("unknown", user_id)
+        if not session_id:
+            return "📊 **会话状态**\n\n状态：未创建\n💬 发送消息开始新对话"
+        
+        binding = session_mgr.get_binding(session_id)
+        if binding:
+            return f"📊 **会话状态**\n\n会话ID: `{session_id[:8]}...`\n状态: 活跃\n💡 发送 /reset 重置会话"
+        return "📊 **会话状态**\n\n状态：未绑定\n💬 发送消息开始新对话"
+    
+    async def _cmd_reset(self, args: str, user_id: str, sage_user_id: str) -> str:
+        """Handle /reset command."""
+        from .session_manager import get_session_manager
+        session_mgr = get_session_manager()
+        
+        # Find and unbind user's session
+        session_id = session_mgr.find_session_by_user("unknown", user_id)
+        if session_id:
+            session_mgr.unbind_session(session_id)
+        
+        return "🔄 **会话已重置**\n\n✅ 上下文已清空\n💬 发送消息开始新对话"
+    
+    async def _cmd_task(self, args: str, user_id: str, sage_user_id: str) -> str:
+        """Handle /task command."""
+        if not args:
+            # Show help for task command
+            return "📋 **任务管理**\n\n/task - 查看任务列表\n/task add <内容> - 添加新任务\n/task done <序号> - 完成任务\n\n💡 或直接说'查看我的任务'"
+        elif args.startswith('add '):
+            task_content = args[4:].strip()
+            if not task_content:
+                return "❌ **添加任务失败**\n\n请输入任务内容，例如:\n/task add 完成项目文档"
+            return f"➕ **添加任务**\n\n内容: {task_content}\n\n💡 请对 Agent 说: 添加任务 {task_content}"
+        elif args.startswith('done '):
+            task_desc = args[5:].strip()
+            if not task_desc:
+                return "❌ **完成任务失败**\n\n请指定任务序号或名称，例如:\n/task done 1"
+            return f"✅ **完成任务**\n\n任务: {task_desc}\n\n💡 请对 Agent 说: 完成任务 {task_desc}"
+        else:
+            return "❓ **任务命令格式**\n\n/task - 查看任务列表\n/task add <内容> - 添加任务\n/task done <序号> - 完成任务"
+    
+    async def _send_im_response(self, provider: str, agent_id: str, user_id: str, 
+                               chat_id: Optional[str], content: str):
+        """Send a response message via IM."""
+        try:
+            from .im_server import send_message_through_im
+            await send_message_through_im(
+                content=content,
+                provider=provider,
+                agent_id=agent_id,
+                user_id=user_id,
+                chat_id=chat_id
+            )
+        except Exception as e:
+            logger.error(f"[ServiceManager] Failed to send IM response: {e}")
     
     async def _get_default_agent_id(self) -> str:
         """Get default agent ID."""
