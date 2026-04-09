@@ -171,7 +171,7 @@ export SAGE_DB_TYPE="file"
 # Diagnose local runtime config
 sage doctor
 
-# Create a minimal local CLI config if needed
+# Create a shared local CLI/Desktop config in ~/.sage/.sage_env if needed
 sage config init
 
 # Run a quick task
@@ -185,7 +185,8 @@ Detailed CLI usage is documented here:
 - English: [docs/en/CLI.md](docs/en/CLI.md)
 - 中文: [docs/zh/CLI.md](docs/zh/CLI.md)
 
-The current CLI MVP still uses the existing Sage runtime config system, so `.env` and shell environment variables remain the primary configuration mechanism.
+The CLI now defaults to the same local data root as desktop: `~/.sage/`.
+By default it reads `~/.sage/.sage_env` first, and then lets a repository-local `.env` override it for development.
 When `--json` is enabled, the CLI emits stream events and appends a final `cli_stats` event for structured post-run inspection.
 
 **Web Application (FastAPI + Vue3)**:

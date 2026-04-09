@@ -50,7 +50,21 @@ python -m app.cli.main --help
 
 ## Minimum Configuration
 
-The CLI still uses the existing Sage runtime configuration model. The simplest usable setup is:
+The CLI now defaults to the same local storage root as desktop: `~/.sage/`.
+
+By default it:
+
+- reads shared local environment variables from `~/.sage/.sage_env` when present
+- stores local data under `~/.sage/`
+- lets a repository-local `.env` override the shared file for development
+
+You can inspect the effective file and load order with:
+
+```bash
+sage config show
+```
+
+The simplest usable setup is:
 
 ```bash
 export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
@@ -63,6 +77,12 @@ You can also initialize a minimal local config file:
 
 ```bash
 sage config init
+```
+
+By default this writes to:
+
+```text
+~/.sage/.sage_env
 ```
 
 Then inspect what the CLI is actually using:
@@ -101,7 +121,7 @@ It reports:
 
 - Python path
 - current working directory
-- `.env` path and existence
+- effective env file path and existence
 - auth mode and DB type
 - important directories such as `agents_dir`, `session_dir`, and `logs_dir`
 - dependency availability

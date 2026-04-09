@@ -14,15 +14,20 @@ from common.core import config
 from common.schemas.chat import Message, StreamRequest
 
 
-DEFAULT_CLI_USER_ID = (
-    os.environ.get("SAGE_CLI_USER_ID")
-    or os.environ.get("SAGE_DESKTOP_USER_ID")
-    or "default_user"
-)
+def _load_cli_env_defaults() -> Dict[str, str]:
+    local_defaults = config.get_local_storage_defaults()
+    load_dotenv(local_defaults["env_file"], override=False)
+    load_dotenv(".env", override=True)
+    return local_defaults
 
 
 def get_default_cli_user_id() -> str:
-    return DEFAULT_CLI_USER_ID
+    _load_cli_env_defaults()
+    return (
+        os.environ.get("SAGE_CLI_USER_ID")
+        or os.environ.get("SAGE_DESKTOP_USER_ID")
+        or "default_user"
+    )
 
 
 def _dependency_status() -> Dict[str, bool]:
@@ -47,15 +52,15 @@ def _collect_runtime_issues(cfg: config.StartupConfig) -> Dict[str, List[str]]:
 
     if not (cfg.default_llm_api_key or "").strip():
         errors.append("Missing SAGE_DEFAULT_LLM_API_KEY")
-        next_steps.append("Set SAGE_DEFAULT_LLM_API_KEY in your shell or .env before using run/chat.")
+        next_steps.append("Set SAGE_DEFAULT_LLM_API_KEY in your shell, ~/.sage/.sage_env, or local .env before using run/chat.")
 
     if not (cfg.default_llm_api_base_url or "").strip():
         errors.append("Missing SAGE_DEFAULT_LLM_API_BASE_URL")
-        next_steps.append("Set SAGE_DEFAULT_LLM_API_BASE_URL in your shell or .env.")
+        next_steps.append("Set SAGE_DEFAULT_LLM_API_BASE_URL in your shell, ~/.sage/.sage_env, or local .env.")
 
     if not (cfg.default_llm_model_name or "").strip():
         errors.append("Missing SAGE_DEFAULT_LLM_MODEL_NAME")
-        next_steps.append("Set SAGE_DEFAULT_LLM_MODEL_NAME in your shell or .env.")
+        next_steps.append("Set SAGE_DEFAULT_LLM_MODEL_NAME in your shell, ~/.sage/.sage_env, or local .env.")
 
     if cfg.db_type == "mysql":
         warnings.append("CLI is using MySQL. For local development, file DB is usually simpler.")
@@ -72,7 +77,19 @@ def _collect_runtime_issues(cfg: config.StartupConfig) -> Dict[str, List[str]]:
 
 
 def init_cli_config(*, init_logging: bool = True) -> config.StartupConfig:
-    load_dotenv(".env")
+    local_defaults = _load_cli_env_defaults()
+
+    env_defaults = {
+        config.ENV.LOGS_DIR: local_defaults["logs_dir"],
+        config.ENV.SESSION_DIR: local_defaults["session_dir"],
+        config.ENV.AGENTS_DIR: local_defaults["agents_dir"],
+        config.ENV.SKILL_DIR: local_defaults["skill_dir"],
+        config.ENV.USER_DIR: local_defaults["user_dir"],
+        config.ENV.DB_FILE: local_defaults["db_file"],
+    }
+    for env_name, default_value in env_defaults.items():
+        os.environ.setdefault(env_name, default_value)
+
     cfg = config.init_startup_config(mode="server")
     if init_logging:
         from common.utils.logging import init_logging_base
@@ -80,7 +97,7 @@ def init_cli_config(*, init_logging: bool = True) -> config.StartupConfig:
         init_logging_base(
             log_name="sage-cli",
             log_level=getattr(cfg, "log_level", "INFO"),
-            log_path="./logs",
+            log_path=cfg.logs_dir,
             use_safe_stdout=True,
         )
     return cfg
@@ -230,6 +247,13 @@ async def run_request_stream(
 
 def collect_doctor_info() -> Dict[str, Any]:
     cfg = init_cli_config(init_logging=False)
+    local_defaults = config.get_local_storage_defaults()
+    shared_env_file = local_defaults["env_file"]
+    project_env_file = os.path.abspath(".env")
+    effective_env_file = shared_env_file if os.path.exists(shared_env_file) else project_env_file
+    env_files = [shared_env_file]
+    if os.path.exists(project_env_file):
+        env_files.append(project_env_file)
     dependency_status = _dependency_status()
     issues = _collect_runtime_issues(cfg)
     status = "ok"
@@ -243,8 +267,9 @@ def collect_doctor_info() -> Dict[str, Any]:
         "python": os.environ.get("PYTHON_BIN") or os.environ.get("CONDA_PYTHON_EXE") or "python",
         "cwd": os.getcwd(),
         "cwd_writable": os.access(os.getcwd(), os.W_OK),
-        "env_file": os.path.abspath(".env"),
-        "env_file_exists": os.path.exists(os.path.abspath(".env")),
+        "env_file": effective_env_file,
+        "env_files": env_files,
+        "env_file_exists": os.path.exists(shared_env_file) or os.path.exists(project_env_file),
         "app_mode": cfg.app_mode,
         "auth_mode": cfg.auth_mode,
         "port": cfg.port,
@@ -264,8 +289,16 @@ def collect_doctor_info() -> Dict[str, Any]:
 
 def collect_config_info() -> Dict[str, Any]:
     cfg = init_cli_config(init_logging=False)
+    local_defaults = config.get_local_storage_defaults()
+    shared_env_file = local_defaults["env_file"]
+    project_env_file = os.path.abspath(".env")
+    effective_env_file = shared_env_file if os.path.exists(shared_env_file) else project_env_file
+    env_files = [shared_env_file]
+    if os.path.exists(project_env_file):
+        env_files.append(project_env_file)
     return {
-        "env_file": os.path.abspath(".env"),
+        "env_file": effective_env_file,
+        "env_files": env_files,
         "default_cli_user_id": get_default_cli_user_id(),
         "app_mode": cfg.app_mode,
         "auth_mode": cfg.auth_mode,
@@ -277,6 +310,8 @@ def collect_config_info() -> Dict[str, Any]:
         "session_dir": cfg.session_dir,
         "logs_dir": cfg.logs_dir,
         "env_sources": {
+            "SAGE_HOME": local_defaults["sage_home"],
+            "SAGE_ENV_FILE": shared_env_file,
             "SAGE_CLI_USER_ID": os.environ.get("SAGE_CLI_USER_ID"),
             "SAGE_DESKTOP_USER_ID": os.environ.get("SAGE_DESKTOP_USER_ID"),
             "SAGE_DEFAULT_LLM_API_KEY": "(set)" if os.environ.get("SAGE_DEFAULT_LLM_API_KEY") else None,
@@ -317,8 +352,10 @@ def build_minimal_cli_env_template() -> str:
     return "\n".join(lines)
 
 
-def write_cli_config_file(*, path: str = ".env", force: bool = False) -> Dict[str, Any]:
-    output_path = os.path.abspath(path)
+def write_cli_config_file(*, path: Optional[str] = None, force: bool = False) -> Dict[str, Any]:
+    output_target = path or config.get_local_storage_defaults()["env_file"]
+    os.makedirs(os.path.dirname(os.path.abspath(output_target)), exist_ok=True)
+    output_path = os.path.abspath(output_target)
     existed_before = os.path.exists(output_path)
     if existed_before and not force:
         raise RuntimeError(
