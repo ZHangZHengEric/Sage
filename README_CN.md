@@ -169,7 +169,7 @@ export SAGE_DB_TYPE="file"
 # 检查本地运行环境
 sage doctor
 
-# 生成最小本地配置
+# 在 ~/.sage/.sage_env 生成共享的 CLI/Desktop 最小配置
 sage config init
 
 # 快速执行一次任务
@@ -183,7 +183,8 @@ sage chat
 - English: [docs/en/CLI.md](docs/en/CLI.md)
 - 中文: [docs/zh/CLI.md](docs/zh/CLI.md)
 
-当前这版 CLI MVP 仍然复用 Sage 现有的运行时配置体系，所以 `.env` 和 shell 环境变量仍然是主要配置方式。
+CLI 现在默认和 desktop 共用 `~/.sage/` 本地数据目录。
+默认会先读取 `~/.sage/.sage_env`，开发时如果仓库内存在 `.env`，则会再用本地 `.env` 覆盖。
 启用 `--json` 时，CLI 会输出流式事件，并在结束时附加一个最终的 `cli_stats` 结构化摘要事件。
 
 **Web 应用 (FastAPI + Vue3)**：

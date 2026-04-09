@@ -12,6 +12,24 @@ from typing import Any, Dict, List, Optional
 _GLOBAL_STARTUP_CONFIG: Any
 
 
+def get_default_sage_home() -> Path:
+    return Path.home() / ".sage"
+
+
+def get_local_storage_defaults() -> Dict[str, str]:
+    sage_home = get_default_sage_home()
+    return {
+        "sage_home": str(sage_home),
+        "logs_dir": str(sage_home / "logs"),
+        "session_dir": str(sage_home / "sessions"),
+        "agents_dir": str(sage_home / "agents"),
+        "skill_dir": str(sage_home / "skills"),
+        "user_dir": str(sage_home / "users"),
+        "db_file": str(sage_home / "sage.db"),
+        "env_file": str(sage_home / ".sage_env"),
+    }
+
+
 @dataclass
 class StartupConfig:
     app_mode: str = "server"
@@ -297,13 +315,17 @@ def _normalize_paths(cfg: StartupConfig) -> StartupConfig:
 
 def build_startup_config(mode: str = "server") -> StartupConfig:
     if mode == "desktop":
-        desktop_db_file = str(Path.home() / ".sage" / "sage.db")
+        local_defaults = get_local_storage_defaults()
         cfg = StartupConfig(
             app_mode="desktop",
             port=env_int(ENV.PORT, StartupConfig.port),
-            logs_dir=env_str(ENV.LOGS_DIR, StartupConfig.logs_dir) or StartupConfig.logs_dir,
+            logs_dir=env_str(ENV.LOGS_DIR, local_defaults["logs_dir"]) or local_defaults["logs_dir"],
+            session_dir=env_str(ENV.SESSION_DIR, local_defaults["session_dir"]) or local_defaults["session_dir"],
+            agents_dir=env_str(ENV.AGENTS_DIR, local_defaults["agents_dir"]) or local_defaults["agents_dir"],
+            skill_dir=env_str(ENV.SKILL_DIR, local_defaults["skill_dir"]) or local_defaults["skill_dir"],
+            user_dir=env_str(ENV.USER_DIR, local_defaults["user_dir"]) or local_defaults["user_dir"],
             db_type=env_str(ENV.DB_TYPE, StartupConfig.db_type) or StartupConfig.db_type,
-            db_file=env_str(ENV.DB_FILE, desktop_db_file) or desktop_db_file,
+            db_file=env_str(ENV.DB_FILE, local_defaults["db_file"]) or local_defaults["db_file"],
             preset_mcp_config=env_str(ENV.PRESET_MCP_CONFIG, StartupConfig.preset_mcp_config) or StartupConfig.preset_mcp_config,
             preset_running_config=env_str(ENV.PRESET_RUNNING_CONFIG, StartupConfig.preset_running_config) or StartupConfig.preset_running_config,
             default_llm_api_key=env_str(ENV.DEFAULT_LLM_API_KEY, StartupConfig.default_llm_api_key) or StartupConfig.default_llm_api_key,
