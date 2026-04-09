@@ -404,6 +404,15 @@ class LocalSandboxProvider(ISandboxHandle):
                 env["PATH"] = sage_node_env_bin + os.pathsep + env.get("PATH", "")
                 logger.debug(f"LocalSandboxProvider: Added Sage node_modules/.bin to PATH: {sage_node_env_bin}")
 
+        # 为 npm/npx 配置项目级缓存，避免写入用户主目录 ~/.npm 导致权限问题
+        npm_cache_dir = os.path.join(os.path.expanduser("~"), ".sage", ".npm-cache")
+        try:
+            os.makedirs(npm_cache_dir, exist_ok=True)
+        except Exception as e:
+            logger.warning(f"LocalSandboxProvider: Failed to create npm cache dir {npm_cache_dir}: {e}")
+        env.setdefault("npm_config_cache", npm_cache_dir)
+        env.setdefault("NPM_CONFIG_CACHE", npm_cache_dir)
+
         # 添加额外环境变量
         if env_vars:
             env.update(env_vars)

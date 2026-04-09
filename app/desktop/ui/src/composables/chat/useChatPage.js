@@ -76,25 +76,116 @@ export const useChatPage = (props) => {
 
   // 打开工作台（统一方法）
   const openWorkbench = (options = {}) => {
-    const { toolCallId = null, realtime = true } = options
+    const { toolCallId = null, messageId = null, realtime = true } = options
+    const toolStableKey = toolCallId
+      ? (messageId ? `tool:${messageId}:${toolCallId}` : `tool:${toolCallId}`)
+      : null
 
     // 打开工作台
     panelStore.openWorkbench()
+
+    // 对齐当前会话，避免 filteredItems 过滤到错误会话导致定位失败
+    const isLocateTarget = !!toolCallId || !!messageId
+    const targetGlobalItem = toolStableKey
+      ? (workbenchStore.items || []).find(item => item?.stableKey === toolStableKey)
+      : (toolCallId
+      ? (workbenchStore.items || []).find(item =>
+          item?.type === 'tool_call' && item?.data?.id === toolCallId
+        )
+      : (messageId
+          ? (workbenchStore.items || []).find(item => item?.messageId === messageId)
+          : null))
+    const targetSessionId = targetGlobalItem?.sessionId || currentSessionId.value
+    if (currentSessionId.value) {
+      workbenchStore.setSessionId(targetSessionId, {
+        autoJumpToLast: !isLocateTarget
+      })
+    }
 
     // 设置实时模式
     if (realtime) {
       workbenchStore.setRealtime(true)
     }
+    if (isLocateTarget) {
+      workbenchStore.setRealtime(false)
+    }
 
     // 如果指定了 toolCallId，跳转到对应项
-    if (toolCallId) {
-      const filteredItems = workbenchStore.filteredItems
-      const index = filteredItems.findIndex(item =>
-        item.type === 'tool_call' && item.data.id === toolCallId
-      )
-      if (index !== -1) {
-        workbenchStore.setCurrentIndex(index)
-        workbenchStore.setRealtime(false)
+    if (toolCallId || messageId) {
+      const ensureToolCallItemExists = () => {
+        if (!toolCallId) return
+        const exists = (workbenchStore.items || []).some(item =>
+          item?.type === 'tool_call' && item?.data?.id === toolCallId
+        )
+        if (exists) return
+
+        const sourceMessage = (messages.value || []).find(message =>
+          message?.session_id === targetSessionId &&
+          Array.isArray(message?.tool_calls) &&
+          message.tool_calls.some(call => (call?.id || call?.tool_call_id) === toolCallId)
+        )
+        if (sourceMessage) {
+          const effectiveAgentId = sourceMessage.agent_id || selectedAgent.value?.id || selectedAgentId.value || null
+          workbenchStore.extractFromMessage(sourceMessage, effectiveAgentId)
+        }
+      }
+
+      const jumpToToolCall = () => {
+        ensureToolCallItemExists()
+        const filteredItems = workbenchStore.filteredItems || []
+        let index = -1
+
+        if (toolStableKey) {
+          index = filteredItems.findIndex(item => item?.stableKey === toolStableKey)
+        }
+
+        if (index === -1 && toolCallId && targetGlobalItem?.id) {
+          index = filteredItems.findIndex(item => item?.id === targetGlobalItem.id)
+        }
+
+        if (toolCallId && index === -1) {
+          index = filteredItems.findIndex(item =>
+            item?.type === 'tool_call' && item?.data?.id === toolCallId
+          )
+        }
+
+        // 兜底：在全量 items 中找到后，映射回 filteredItems 索引
+        if (toolCallId && index === -1) {
+          const globalItem = (workbenchStore.items || []).find(item =>
+            item?.type === 'tool_call' && item?.data?.id === toolCallId
+          )
+          if (globalItem) {
+            index = filteredItems.findIndex(item => item?.id === globalItem.id)
+          }
+        }
+
+        if (index === -1 && messageId) {
+          index = filteredItems.findIndex(item => item?.messageId === messageId)
+        }
+
+        if (index !== -1) {
+          workbenchStore.setCurrentIndex(index)
+          workbenchStore.setRealtime(false)
+          return true
+        }
+        return false
+      }
+
+      // 多次重试，覆盖面板挂载/会话切换/流式入库的异步时序
+      const retryDelays = [0, 32, 120, 300]
+      const initialMatched = jumpToToolCall()
+      if (!initialMatched) {
+        retryDelays.forEach((delay) => {
+          setTimeout(() => {
+            jumpToToolCall()
+          }, delay)
+        })
+      } else {
+        retryDelays.slice(1).forEach((delay) => {
+          setTimeout(() => {
+            jumpToToolCall()
+          }, delay)
+        })
       }
     }
   }

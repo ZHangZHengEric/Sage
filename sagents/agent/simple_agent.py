@@ -228,6 +228,51 @@ class SimpleAgent(AgentBase):
         ]
         return any(re.search(pattern, text) for pattern in patterns)
 
+    def _normalize_task_interrupted_decision(
+        self,
+        reason: str,
+        task_interrupted: bool,
+    ) -> bool:
+        """根据 reason 做轻量一致性兜底，避免输出语义与布尔值矛盾。"""
+        reason_text = (reason or "").strip().lower()
+        if not reason_text:
+            return task_interrupted
+
+        wait_tool_markers = [
+            "waiting for tool call",
+            "waiting for generation",
+            "waiting for tool",
+            "等待工具调用",
+            "等待生成",
+            "处理中",
+            "aguardando chamada de ferramenta",
+            "aguardando geração",
+        ]
+        if any(marker in reason_text for marker in wait_tool_markers):
+            return False
+
+        wait_user_markers = [
+            "waiting for user",
+            "waiting user",
+            "need user input",
+            "need user confirmation",
+            "awaiting user",
+            "等待用户",
+            "等待用户确认",
+            "等待用户输入",
+            "需要用户确认",
+            "需要用户输入",
+            "用户补充",
+            "aguardando usuário",
+            "aguardando confirmação",
+            "entrada do usuário",
+            "confirmação do usuário",
+        ]
+        if any(marker in reason_text for marker in wait_user_markers):
+            return True
+
+        return task_interrupted
+
     async def _must_continue_by_rules(self, messages_input: List[MessageChunk]) -> bool:
         """通过确定性规则判断是否必须继续执行
 
@@ -347,8 +392,16 @@ class SimpleAgent(AgentBase):
         try:
             result_clean = MessageChunk.extract_json_from_markdown(all_content)
             result = json.loads(result_clean)
-            logger.info(f"SimpleAgent: 任务完成 LLM 判断结果: {result}")
-            return result.get('task_interrupted', False)
+            task_interrupted = bool(result.get('task_interrupted', False))
+            reason = str(result.get('reason', ''))
+            normalized = self._normalize_task_interrupted_decision(reason, task_interrupted)
+            if normalized != task_interrupted:
+                logger.warning(
+                    f"SimpleAgent: 任务完成判断存在语义冲突，已自动修正。reason={reason}, "
+                    f"task_interrupted={task_interrupted} -> {normalized}"
+                )
+            logger.info(f"SimpleAgent: 任务完成 LLM 判断结果: {result}, normalized={normalized}")
+            return normalized
         except json.JSONDecodeError:
             logger.warning("SimpleAgent: 解析任务完成判断响应时JSON解码错误，默认继续执行")
             return False

@@ -171,6 +171,7 @@
             class="text-foreground/90 overflow-hidden break-words w-full font-sans text-sm leading-6">
             <MarkdownRendererWithPreview
               :content="formatMessageContent(getTextContent(message.content))"
+              :message-id="message.message_id || message.id"
             />
           </div>
           <!-- 图片内容 -->
@@ -246,7 +247,7 @@
                :openWorkbench="props.openWorkbench"
                @sendMessage="handleSendMessage"
               @openSubSession="emit('openSubSession', $event)"
-              @click="handleToolClick"
+              @click="handleToolClick($event, getParsedToolResult(toolCall), toolCall)"
             />
             <!-- Standard Tool Call Message (普通工具调用) -->
             <ToolCallMessage
@@ -256,7 +257,7 @@
               :timestamp="message.timestamp"
               :isCancelled="message.cancelledToolCalls?.includes(toolCall.id)"
               :cancelledReason="message.cancelledToolCalls?.includes(toolCall.id) ? '已取消' : ''"
-              @click="handleToolClick"
+              @click="handleToolClick($event, getParsedToolResult(toolCall), toolCall)"
             />
            </div>
          </div>
@@ -642,25 +643,26 @@ const showToolDetails = ref(false)
 const selectedToolExecution = ref(null)
 const toolResult = ref(null)
 
-const handleToolClick = (toolCall, result) => {
-  // Prevent custom tools from triggering the detail modal via native click events
-  // ToolDefaultCard explicitly emits 'click' with (toolCall, toolResult)
-  // Custom tools (without explicit emit) trigger native click with (MouseEvent)
-  if (toolCall instanceof Event) {
-    return
-  }
+const handleToolClick = (rawToolCall, fallbackResult = null, fallbackToolCall = null) => {
+  const toolCall = rawToolCall instanceof Event
+    ? fallbackToolCall
+    : (rawToolCall || fallbackToolCall)
+  if (!toolCall) return
+
+  const toolCallId = toolCall?.id || toolCall?.tool_call_id || null
+  const messageId = props.message?.message_id || props.message?.id || null
 
   // 使用统一的 openWorkbench 方法
   if (props.openWorkbench) {
-    props.openWorkbench({ toolCallId: toolCall.id, realtime: false })
+    props.openWorkbench({ toolCallId, messageId, realtime: false })
   }
 
   // 保留原来的弹窗逻辑（代码可以保留）
   selectedToolExecution.value = toolCall
-  toolResult.value = result
+  toolResult.value = fallbackResult
   // showToolDetails.value = true  // 注释掉弹窗
 
-  emit('toolClick', toolCall, result)
+  emit('toolClick', toolCall, fallbackResult)
 }
 
 const handleDownloadFile = (filePath) => {

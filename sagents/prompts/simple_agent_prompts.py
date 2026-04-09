@@ -79,11 +79,16 @@ task_complete_template = {
 - 你认为当前对话中，Assistant 已经给出了**完整、清晰的最终回答**，用户不需要再等待后续操作。
 - 如果有工具调用，其关键结果已经用自然语言解释清楚，用户可以直接根据当前回复采取行动。
 - 当前回复没有任何“接下来/然后/我将/下一步”等继续执行的暗示。
+- 当前需要用户确认、用户补充信息、或用户做选择后才能继续时，必须中断并等待用户输入。
 
 ## 需要继续执行任务（task_interrupted = false）的情况：
 - 当前回复主要是在**说明过程、汇报进度、罗列中间产物**，而不是面向用户的最终结果。
 - 你觉得还缺少总结、整理、格式化、补充说明等步骤，才能算真正给到用户交付。
 - 当前回复虽然说“已经完成了某个阶段”，但从整体任务看，仍然有后续要做的事情。
+
+## 输出一致性规则（必须遵守）：
+1. 如果 reason 表示“等待工具调用/等待生成/处理中”，则 task_interrupted 必须是 false。
+2. 如果 reason 表示“等待用户确认/等待用户输入/需要用户补充”，则 task_interrupted 必须是 true。
 
 ## agent 的配置要求
 {system_prompt}
@@ -121,6 +126,7 @@ task_complete_template = {
 
 ## Output Content Consistency Logic
 1. If reason is "waiting for tool call", then task_interrupted is false
+2. If reason indicates "waiting for user confirmation/input", then task_interrupted is true
 
 ## User's Conversation History and Request Execution Process
 {messages}
@@ -155,6 +161,7 @@ reason should be as simple as possible, maximum 20 characters""",
 
 ## Lógica de Consistência do Conteúdo de Saída
 1. Se o motivo for "aguardando chamada de ferramenta", então task_interrupted é false
+2. Se o motivo indicar "aguardando confirmação/entrada do usuário", então task_interrupted é true
 
 ## Histórico de Conversas do Usuário e Processo de Execução da Solicitação
 {messages}
