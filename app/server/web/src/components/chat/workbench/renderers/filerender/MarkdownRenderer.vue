@@ -15,11 +15,13 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import mermaid from 'mermaid'
 import { FileText, ExternalLink } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
+import { isMermaidLanguage } from '@/utils/drawio'
 
 const props = defineProps({
   filePath: {
@@ -47,8 +49,34 @@ const isBinary = computed(() => {
   return false
 })
 
+const escapeHtml = (content) => String(content)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;')
+
+const renderer = new marked.Renderer()
+const mermaidList = []
+
+renderer.code = (token) => {
+  const code = token.text
+  const language = token.lang
+
+  if (isMermaidLanguage(language)) {
+    const id = `workbench-mermaid-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    mermaidList.push({ id, code })
+    return `<div class="mermaid-chart not-prose" id="${id}">${escapeHtml(code)}</div>`
+  }
+
+  return `<pre><code class="language-${language || 'text'}">${escapeHtml(code)}</code></pre>`
+}
+
+marked.setOptions({ renderer, breaks: true })
+
 const renderedContent = computed(() => {
   if (!props.content) return ''
+  mermaidList.length = 0
   const html = marked(props.content)
   return DOMPurify.sanitize(html)
 })
@@ -58,4 +86,45 @@ const openFile = () => {
     window.__TAURI__.shell.open(props.filePath)
   }
 }
+
+const sanitizeMermaidCode = (code = '') => code
+  .replace(/(participant\s+\S+\s+as)\s+([^\n]+)/g, (_, prefix, label) => {
+    const trimmed = label.trim()
+    if (!trimmed || /^["'].*["']$/.test(trimmed)) return `${prefix} ${trimmed}`
+    return `${prefix} "${trimmed.replace(/"/g, '\\"')}"`
+  })
+
+const renderMermaid = async () => {
+  await nextTick()
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: document.documentElement.classList.contains('dark') ? 'dark' : 'default',
+    securityLevel: 'strict'
+  })
+
+  for (const { id, code } of mermaidList) {
+    const el = document.getElementById(id)
+    if (!el) continue
+
+    try {
+      const { svg } = await mermaid.render(`svg-${id}`, sanitizeMermaidCode(code))
+      el.innerHTML = svg
+    } catch (err) {
+      console.error('Failed to render Mermaid in markdown:', err)
+      el.innerHTML = `<pre class="text-destructive p-4 border border-destructive/50 rounded bg-destructive/10">Mermaid 渲染错误: ${escapeHtml(err?.message || '未知错误')}</pre>`
+    }
+  }
+}
+
+watch(() => renderedContent.value, renderMermaid, { immediate: true })
 </script>
+
+<style scoped>
+.mermaid-chart {
+  @apply my-4 overflow-hidden rounded-xl border border-border/60 bg-background/70;
+}
+
+.mermaid-chart :deep(svg) {
+  @apply mx-auto h-auto max-w-full;
+}
+</style>

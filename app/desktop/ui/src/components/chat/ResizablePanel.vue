@@ -1,11 +1,37 @@
 <template>
-  <div 
+  <div v-if="isCompactViewport" class="compact-panel-root absolute inset-0 z-30">
+    <div class="compact-panel-overlay absolute inset-0 z-40 bg-black/20 backdrop-blur-[2px]" @click="emitClose" />
+    <div class="compact-panel-shell absolute inset-y-2 right-2 z-50 flex w-[min(96%,42rem)] max-w-[42rem]">
+      <div class="panel-surface compact-panel-surface flex h-full w-full flex-col overflow-hidden rounded-[24px] border border-border/60 bg-background/95 shadow-[0_24px_80px_rgba(0,0,0,0.32)] backdrop-blur-xl" @click.stop>
+        <div class="flex flex-none items-center justify-between border-b border-border/60 px-4 py-2.5">
+          <div class="flex items-center gap-2.5">
+            <slot name="icon"></slot>
+            <h3 class="text-sm font-semibold tracking-tight text-foreground">{{ title }}</h3>
+            <span v-if="badge" class="rounded-full bg-muted/35 px-1.5 py-0.5 text-[11px] text-muted-foreground">{{ badge }}</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            @click="emitClose"
+            class="h-7.5 w-7.5 rounded-full p-0 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+          >
+            <X class="w-4 h-4" />
+          </Button>
+        </div>
+
+        <div class="flex-1 overflow-hidden">
+          <slot></slot>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div
+    v-else
     class="resizable-panel relative my-2 mr-2 ml-0 flex flex-col self-start overflow-visible"
     :style="panelStyle"
   >
-    <!-- 调整大小的拖拽条 -->
-    <div 
-      v-if="!isCompactViewport"
+    <div
       class="resize-handle absolute inset-y-0 left-0 z-50 flex w-4 cursor-ew-resize items-center justify-start pl-0.5"
       :class="{ 'is-resizing': isResizing }"
       @mousedown="startResize"
@@ -14,24 +40,22 @@
     </div>
 
     <div class="panel-surface flex h-full flex-col overflow-hidden rounded-[22px] border border-border/55 bg-background/90 shadow-[0_1px_0_rgba(255,255,255,0.06),0_14px_40px_rgba(0,0,0,0.18)] backdrop-blur-sm">
-      <!-- 头部 -->
       <div class="flex flex-none items-center justify-between border-b border-border/60 px-4 py-2.5">
         <div class="flex items-center gap-2.5">
           <slot name="icon"></slot>
           <h3 class="text-sm font-semibold tracking-tight text-foreground">{{ title }}</h3>
           <span v-if="badge" class="rounded-full bg-muted/35 px-1.5 py-0.5 text-[11px] text-muted-foreground">{{ badge }}</span>
         </div>
-        <Button 
-          variant="ghost" 
+        <Button
+          variant="ghost"
           size="sm"
-          @click="$emit('close')"
+          @click="emitClose"
           class="h-7.5 w-7.5 rounded-full p-0 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
         >
           <X class="w-4 h-4" />
         </Button>
       </div>
 
-      <!-- 内容区域 -->
       <div class="flex-1 overflow-hidden">
         <slot></slot>
       </div>
@@ -60,16 +84,21 @@ const props = defineProps({
   }
 })
 
-defineEmits(['close'])
+const emit = defineEmits(['close'])
 
 const VIEWPORT_COMPACT_BREAKPOINT = 1280
 const SIDEBAR_WIDTH = 240
 const PANEL_GUTTER = 24
+const CHAT_MIN_WIDTH = 280
 
 // 获取右侧可用区域宽度
 const getRightAreaWidth = () => {
   const windowWidth = window.innerWidth
   return Math.max(windowWidth - SIDEBAR_WIDTH - PANEL_GUTTER, 260)
+}
+
+const getMaxPanelWidthByChatWidth = (rightAreaWidth) => {
+  return Math.max(rightAreaWidth - CHAT_MIN_WIDTH, 240)
 }
 
 const getCompactState = () => window.innerWidth <= VIEWPORT_COMPACT_BREAKPOINT
@@ -105,7 +134,10 @@ const syncPanelMetrics = ({ resetWidth = false } = {}) => {
   const rightAreaWidth = getRightAreaWidth()
   const compact = getCompactState()
   const nextMinWidth = rightAreaWidth < 360 ? 240 : 280
-  const nextMaxWidth = Math.max(getMaxWidth(rightAreaWidth, compact), nextMinWidth)
+  const nextMaxWidth = Math.max(
+    Math.min(getMaxWidth(rightAreaWidth, compact), getMaxPanelWidthByChatWidth(rightAreaWidth)),
+    nextMinWidth
+  )
   const nextDefaultWidth = Math.min(
     Math.max(getDefaultWidth(rightAreaWidth, compact), nextMinWidth),
     nextMaxWidth
@@ -134,6 +166,7 @@ onUnmounted(() => {
 
 // 调整大小
 const isResizing = ref(false)
+const emitClose = () => emit('close')
 
 const startResize = (e) => {
   e.preventDefault()
@@ -173,18 +206,56 @@ const startResize = (e) => {
   animation: slideIn 0.2s ease;
 }
 
+.compact-panel-root {
+  pointer-events: none;
+}
+
+.compact-panel-overlay {
+  animation: fadeIn 0.18s ease;
+  pointer-events: auto;
+}
+
+.compact-panel-shell {
+  animation: slideInCompact 0.22s ease;
+  pointer-events: auto;
+}
+
 .panel-surface {
   width: 100%;
   height: 100%;
+}
+
+.compact-panel-surface {
+  min-height: 0;
 }
 
 .resize-handle.is-resizing > div {
   background: hsl(var(--border));
 }
 
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @keyframes slideIn {
   from {
     transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideInCompact {
+  from {
+    transform: translateX(16px);
     opacity: 0;
   }
   to {

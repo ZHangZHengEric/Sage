@@ -75,6 +75,18 @@ export const toolLabelKeys = {
   'execute_javascript_code': 'tools.executeJavascriptCode',
   // 网页抓取工具
   'fetch_webpages': 'tools.fetchWebpages',
+  'browser_get_context': 'tools.browserGetContext',
+  'browser_navigate': 'tools.browserNavigate',
+  'browser_find_text': 'tools.browserFindText',
+  'browser_scroll': 'tools.browserScroll',
+  'browser_send_keys': 'tools.browserSendKeys',
+  'browser_wait': 'tools.browserWait',
+  'browser_list_tabs': 'tools.browserListTabs',
+  'browser_switch_tab': 'tools.browserSwitchTab',
+  'browser_select_dropdown': 'tools.browserSelectDropdown',
+  'browser_upload_file': 'tools.browserUploadFile',
+  'browser_screenshot': 'tools.browserScreenshot',
+  'browser_dom_action': 'tools.browserDomAction',
   // 图片理解工具
   'analyze_image': 'tools.analyzeImage',
   // 任务清单工具
@@ -151,6 +163,18 @@ export const toolLabels = {
   'execute_javascript_code': '执行JS',
   // 网页抓取工具
   'fetch_webpages': '抓取网页',
+  'browser_get_context': '获取浏览器上下文',
+  'browser_navigate': '浏览器导航',
+  'browser_find_text': '页面查找文本',
+  'browser_scroll': '页面滚动',
+  'browser_send_keys': '发送按键',
+  'browser_wait': '浏览器等待',
+  'browser_list_tabs': '列出标签页',
+  'browser_switch_tab': '切换标签页',
+  'browser_select_dropdown': '选择下拉项',
+  'browser_upload_file': '上传文件到页面',
+  'browser_screenshot': '浏览器截图',
+  'browser_dom_action': 'DOM 操作',
   // 图片理解工具
   'analyze_image': '图片理解',
   // 任务清单工具

@@ -62,9 +62,9 @@ def convert_spec_to_openai_format(
     """
 
     def _resolve_text(base: str, i18n: Optional[Dict[str, str]]) -> str:
-        if not i18n or not isinstance(i18n, dict) or not lang:
+        if not i18n or not isinstance(i18n, dict):
             return base or ""
-        if lang in i18n and i18n[lang]:
+        if lang and lang in i18n and i18n[lang]:
             return i18n[lang]
         if fallback_chain:
             for fb in fallback_chain:

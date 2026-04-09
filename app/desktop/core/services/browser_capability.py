@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from loguru import logger
-from sagents.tool import get_tool_manager
-from sagents.tool.tool_schema import ToolSpec
 
 from ..user_context import DEFAULT_DESKTOP_USER_ID
 from .browser_bridge import BrowserBridgeHub
@@ -19,8 +17,7 @@ OFFLINE_GRACE_SECONDS = 60.0
 
 class BrowserCapabilityCoordinator:
     """
-    Coordinates dynamic browser tool registration with lease-based liveness.
-    It updates ToolManager only on online/offline edge transitions.
+    Tracks browser extension liveness and logs online/offline transitions.
     """
 
     def __init__(self, user_id: str = DEFAULT_DESKTOP_USER_ID) -> None:
@@ -29,8 +26,6 @@ class BrowserCapabilityCoordinator:
         self._task: Optional[asyncio.Task] = None
         self._wake_event = asyncio.Event()
         self._current_online: Optional[bool] = None
-        self._tool_instance: Optional[BrowserBridgeTool] = None
-        self._tool_names = set(BrowserBridgeTool.TOOL_NAMES)
 
     def start(self) -> None:
         if self._task and not self._task.done():
@@ -76,10 +71,6 @@ class BrowserCapabilityCoordinator:
 
         if self._current_online is None:
             self._current_online = online
-            if online:
-                self._activate_tools()
-            else:
-                self._deactivate_tools()
             logger.info(f"[BrowserCapability] initialized state online={online}")
             return
 
@@ -88,38 +79,9 @@ class BrowserCapabilityCoordinator:
 
         self._current_online = online
         if online:
-            self._activate_tools()
             logger.info("[BrowserCapability] transition offline -> online")
         else:
-            self._deactivate_tools()
             logger.info("[BrowserCapability] transition online -> offline")
-
-    def _activate_tools(self) -> None:
-        tm = get_tool_manager()
-        if not tm:
-            logger.warning("[BrowserCapability] ToolManager is unavailable, skip activation")
-            return
-        if self._tool_instance is None:
-            self._tool_instance = BrowserBridgeTool(user_id=self.user_id)
-        tm.register_tools_from_object(self._tool_instance)
-
-    def _deactivate_tools(self) -> None:
-        tm = get_tool_manager()
-        if not tm:
-            return
-        for tool_name in list(tm.tools.keys()):
-            if tool_name not in self._tool_names:
-                continue
-            spec = tm.tools.get(tool_name)
-            if not isinstance(spec, ToolSpec):
-                continue
-            # Guard: only remove our tool implementations.
-            func = getattr(spec, "func", None)
-            if not func:
-                continue
-            if getattr(func, "__module__", "") != "app.desktop.core.services.browser_tools":
-                continue
-            del tm.tools[tool_name]
 
 
 _COORDINATOR: Optional[BrowserCapabilityCoordinator] = None
@@ -131,3 +93,36 @@ def get_browser_capability_coordinator() -> BrowserCapabilityCoordinator:
         _COORDINATOR = BrowserCapabilityCoordinator()
     return _COORDINATOR
 
+
+async def get_browser_tool_sync_state(
+    user_id: str = DEFAULT_DESKTOP_USER_ID,
+) -> dict[str, Any]:
+    """
+    Return browser extension liveness plus the browser tools that should be
+    considered available to the current chat request/UI state.
+    """
+    hub = BrowserBridgeHub.get_instance()
+    status = await hub.get_status(user_id)
+
+    last_seen_at = float(status.get("last_seen_at") or 0.0)
+    ttl = float(status.get("heartbeat_ttl_seconds") or 45.0)
+    browser_tools_online = False
+    if last_seen_at > 0:
+        browser_tools_online = (time.time() - last_seen_at) <= (ttl + OFFLINE_GRACE_SECONDS)
+
+    reported_capabilities = status.get("capabilities") or []
+    if isinstance(reported_capabilities, list) and reported_capabilities:
+        supported_tools = [
+            tool_name
+            for tool_name in BrowserBridgeTool.TOOL_NAMES
+            if tool_name in reported_capabilities
+        ]
+    else:
+        supported_tools = list(BrowserBridgeTool.TOOL_NAMES)
+
+    return {
+        **status,
+        "browser_tools_online": browser_tools_online,
+        "browser_tools": supported_tools,
+        "browser_tool_class_tools": list(BrowserBridgeTool.TOOL_NAMES),
+    }
