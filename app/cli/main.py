@@ -136,7 +136,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
     config_show_parser = config_subparsers.add_parser("show", help="Show effective CLI config")
     config_show_parser.add_argument("--json", action="store_true", help="Print config as JSON")
     config_init_parser = config_subparsers.add_parser("init", help="Create a minimal local CLI config")
-    config_init_parser.add_argument("--path", default=".env", help="Path to write the config file")
+    config_init_parser.add_argument(
+        "--path",
+        default=None,
+        help="Path to write the config file (defaults to ~/.sage/.sage_env)",
+    )
     config_init_parser.add_argument("--force", action="store_true", help="Overwrite an existing config file")
     return parser
 

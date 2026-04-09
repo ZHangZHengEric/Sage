@@ -50,7 +50,21 @@ python -m app.cli.main --help
 
 ## 最小配置
 
-CLI 仍然沿用 Sage 现有的运行时配置方式。最小可用配置通常是：
+CLI 现在默认和 desktop 共用 `~/.sage/` 本地数据目录。
+
+默认行为是：
+
+- 如果存在，先读取 `~/.sage/.sage_env`
+- 本地数据默认存到 `~/.sage/`
+- 开发时如果仓库内有 `.env`，则再用本地 `.env` 覆盖共享配置
+
+可以通过下面的命令查看实际生效的配置文件和加载顺序：
+
+```bash
+sage config show
+```
+
+最小可用配置通常是：
 
 ```bash
 export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
@@ -63,6 +77,12 @@ export SAGE_DB_TYPE="file"
 
 ```bash
 sage config init
+```
+
+默认会写到：
+
+```text
+~/.sage/.sage_env
 ```
 
 然后查看 CLI 当前实际读取到的配置：
@@ -101,7 +121,7 @@ sage run --user-id alice --stats "用一句话介绍你自己。"
 
 - Python 路径
 - 当前工作目录
-- `.env` 路径和是否存在
+- 实际生效的环境文件路径和是否存在
 - auth mode 和 db type
 - `agents_dir`、`session_dir`、`logs_dir` 等关键目录
 - 依赖是否可用
