@@ -658,6 +658,15 @@ class AgentClient:
             full_content += f"\n- 发送文本: send_message_through_im(provider='{provider}', agent_id='{agent_id}', user_id='{user_id or ''}', chat_id='{chat_id or ''}', content='消息内容')"
             full_content += f"\n- 发送文件: send_file_through_im(provider='{provider}', agent_id='{agent_id}', user_id='{user_id or ''}', chat_id='{chat_id or ''}', file_path='文件的绝对路径')"
             
+            # 添加 IM 交互指南
+            full_content += f"\n\n【IM 交互指南】"
+            full_content += f"\n你可以自主决定何时向用户发送消息："
+            full_content += f"\n1. 任务较简单：直接处理，最后一次性返回结果"
+            full_content += f"\n2. 任务较复杂/耗时长：可以先用 send_message_through_im 发送进度消息（如'正在搜索相关资料...'），让用户知道你在工作"
+            full_content += f"\n3. 多步骤任务：可以在关键步骤完成后发送进度更新"
+            full_content += f"\n4. 需要用户等待时：主动告知预计等待时间或当前进展"
+            full_content += f"\n\n注意：不要过度发送消息，保持自然、友好的沟通节奏。"
+            
             payload = {
                 "agent_id": agent_id,
                 "messages": [{"role": "user", "content": full_content}],
@@ -666,16 +675,6 @@ class AgentClient:
             }
             
             logger.info(f"Sending async message to agent {agent_id}...")
-            
-            # Track execution state for dynamic progress
-            execution_steps = []  # List of executed tools
-            reported_indices = set()  # Track which steps we've reported
-            
-            # Send initial message
-            await self._send_progress_message(
-                "🤖 已收到消息，正在分析需求...",
-                provider, agent_id, user_id, chat_id
-            )
             
             chunks = []
             
@@ -688,7 +687,7 @@ class AgentClient:
                 ) as response:
                     response.raise_for_status()
                     
-                    # Process stream in real-time
+                    # Process stream and collect chunks
                     async for line in response.aiter_lines():
                         if not line:
                             continue
@@ -697,42 +696,9 @@ class AgentClient:
                         
                         try:
                             data = json.loads(line)
+                            logger.debug(f"[AgentClient] Stream data: {data}")
                         except json.JSONDecodeError:
                             continue
-                        
-                        # Debug: log all data to understand format
-                        logger.debug(f"[AgentClient] Stream data: {data}")
-                        
-                        # Skip control messages
-                        msg_type = data.get("type")
-                        if msg_type in ("chunk_start", "chunk_end", "json_chunk"):
-                            continue
-                        
-                        # Check for tool calls
-                        tool_info = self._extract_tool_info(data)
-                        if tool_info:
-                            tool_name = tool_info.get("name", "")
-                            logger.info(f"[AgentClient] Detected tool call: {tool_name}")
-                            
-                            # Generate dynamic description based on tool and arguments
-                            step_desc = self._generate_step_description(
-                                tool_name, 
-                                tool_info.get("arguments", "{}"),
-                                len(execution_steps) + 1
-                            )
-                            execution_steps.append({
-                                "tool": tool_name,
-                                "description": step_desc,
-                                "reported": False
-                            })
-                            
-                            # Report this step
-                            step_num = len(execution_steps)
-                            progress_msg = f"步骤 {step_num}: {step_desc}"
-                            await self._send_progress_message(
-                                progress_msg,
-                                provider, agent_id, user_id, chat_id
-                            )
             
             # Stream ended - create mock response and parse
             class MockResponse:
