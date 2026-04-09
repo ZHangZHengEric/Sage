@@ -1,6 +1,9 @@
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
+import { fileURLToPath } from 'url'
+
+const projectRoot = fileURLToPath(new URL('.', import.meta.url))
 
 const normalizeBasePath = (value) => {
   const raw = (value || '/sage/').trim()
@@ -10,7 +13,7 @@ const normalizeBasePath = (value) => {
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, __dirname, '')
+  const env = loadEnv(mode, projectRoot, '')
   const backendApiBaseUrl = (env.VITE_SAGE_API_BASE_URL || 'http://127.0.0.1:8080').trim()
 
   return {
@@ -18,7 +21,7 @@ export default defineConfig(({ mode }) => {
     plugins: [vue()],
     resolve: {
       alias: {
-        '@': resolve(__dirname, 'src')
+        '@': resolve(projectRoot, 'src')
       }
     },
     server: {
@@ -35,6 +38,7 @@ export default defineConfig(({ mode }) => {
       environment: 'jsdom'
     },
     build: {
+      sourcemap: false,
       rollupOptions: {
         onwarn(warning, warn) {
           if (warning.code === 'MODULE_LEVEL_DIRECTIVE') {

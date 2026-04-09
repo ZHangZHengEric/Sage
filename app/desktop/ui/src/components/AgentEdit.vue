@@ -421,17 +421,18 @@
                       <div v-for="tool in displayedTools" :key="tool.name" class="flex items-start gap-3 p-3 rounded-lg border border-muted/50 hover:bg-accent/5 transition-colors">
                         <Checkbox 
                           :id="`tool-${tool.name}`" 
-                          :checked="isRequiredTool(tool.name) || store.formData.availableTools.includes(tool.name)" 
-                          :disabled="isRequiredTool(tool.name) || isIMToolDisabled(tool.name)"
+                          :checked="isToolChecked(tool.name)" 
+                          :disabled="isToolLocked(tool.name)"
                           @update:checked="() => handleToolToggle(tool.name)" 
                           class="mt-0.5"
                         />
                         <div class="flex-1 min-w-0">
                           <div class="flex items-center gap-2">
-                            <label :for="`tool-${tool.name}`" class="text-sm font-medium cursor-pointer" :class="{ 'opacity-50': isRequiredTool(tool.name) || isIMToolDisabled(tool.name) }">
-                              {{ tool.name }}
+                            <label :for="`tool-${tool.name}`" class="text-sm font-medium cursor-pointer" :class="{ 'opacity-50': isToolLocked(tool.name) }">
+                              {{ getToolLabel(tool.name, t) }}
                             </label>
-                            <Badge v-if="isRequiredTool(tool.name) === 'skill'" variant="secondary" class="text-[10px] h-5 px-1.5">{{ t('agentEdit.badge.skillRequired') }}</Badge>
+                            <Badge v-if="isRequiredTool(tool.name) === 'browser'" variant="secondary" class="text-[10px] h-5 px-2 bg-emerald-100 text-emerald-700 whitespace-nowrap">{{ t('agentEdit.badge.browserRequired') }}</Badge>
+                            <Badge v-else-if="isRequiredTool(tool.name) === 'skill'" variant="secondary" class="text-[10px] h-5 px-1.5">{{ t('agentEdit.badge.skillRequired') }}</Badge>
                             <Badge v-else-if="isRequiredTool(tool.name) === 'im'" variant="secondary" class="text-[10px] h-5 px-1.5 bg-blue-100 text-blue-700">{{ t('agentEdit.badge.imRequired') }}</Badge>
                             <Badge v-else-if="isIMToolDisabled(tool.name)" variant="secondary" class="text-[10px] h-5 px-1.5 bg-gray-100 text-gray-500">{{ t('agentEdit.badge.imNeeded') }}</Badge>
                             <Badge v-else-if="isRequiredTool(tool.name)" variant="secondary" class="text-[10px] h-5 px-1.5">{{ t('agentEdit.badge.required') }}</Badge>
@@ -1072,6 +1073,8 @@ import { useAgentEditStore } from '../stores/agentEdit'
 import { useLanguage } from '../utils/i18n.js'
 import { getMcpServerLabel } from '../utils/mcpLabels.js'
 import { agentAPI } from '../api/agent.js'
+import { toolAPI } from '../api/tool.js'
+import { getToolLabel } from '../utils/messageLabels.js'
 import { modelProviderAPI } from '@/api/modelProvider'
 import request from '@/utils/request.js'
 import { 
@@ -1804,6 +1807,7 @@ watch(() => imTestStatus.value, (newVal, oldVal) => {
 const handleToolsUpdated = async () => {
   // 等待 props.tools 更新（使用 nextTick）
   await nextTick()
+  await refreshBrowserToolStatus()
 
   // 获取当前可用的工具名称
   const availableToolNames = new Set(props.tools.map(t => t.name))
@@ -1900,6 +1904,8 @@ onMounted(() => {
   }
   
   store.initForm(props.agent)
+  refreshBrowserToolStatus()
+  startBrowserToolStatusPolling()
   if (contentRef.value) {
     contentRef.value.addEventListener('scroll', handleScroll, { passive: true })
   }
@@ -1914,6 +1920,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  stopBrowserToolStatusPolling()
   if (contentRef.value) {
     contentRef.value.removeEventListener('scroll', handleScroll)
   }
@@ -1944,6 +1951,7 @@ watch(() => props.agent, (newAgent) => {
   } else {
     store.initForm(newAgent)
   }
+  refreshBrowserToolStatus()
   
   // Reload IM config when agent changes (even for same agent, to get latest saved config)
   if (newAgent?.id) {
@@ -2241,6 +2249,24 @@ onBeforeUnmount(() => {
 // Tools logic
 const searchQueries = reactive({ tools: '', skills: '' })
 const selectedGroupSource = ref('')
+const browserToolsOnline = ref(false)
+const browserToolNames = ref([])
+let browserToolStatusTimer = null
+
+const FALLBACK_BROWSER_TOOL_NAMES = [
+  'browser_get_context',
+  'browser_navigate',
+  'browser_find_text',
+  'browser_scroll',
+  'browser_send_keys',
+  'browser_wait',
+  'browser_list_tabs',
+  'browser_switch_tab',
+  'browser_select_dropdown',
+  'browser_upload_file',
+  'browser_screenshot',
+  'browser_dom_action'
+]
 
 const REQUIRED_TOOLS_FOR_SKILLS = [
   'file_read', 'execute_python_code', 'execute_javascript_code',
@@ -2256,7 +2282,63 @@ const REQUIRED_TOOLS_FOR_FIBRE = ['sys_spawn_agent', 'sys_delegate_task', 'sys_f
 // IM 频道必需的工具
 const REQUIRED_TOOLS_FOR_IM = ['send_message_through_im', 'send_file_through_im', 'send_image_through_im']
 
+const isBrowserTool = (toolName) => {
+  const names = browserToolNames.value.length > 0 ? browserToolNames.value : FALLBACK_BROWSER_TOOL_NAMES
+  return names.includes(toolName)
+}
+
+const syncBrowserToolSelection = () => {
+  if (!Array.isArray(store.formData.availableTools)) {
+    store.formData.availableTools = []
+  }
+
+  const browserTools = browserToolNames.value.length > 0 ? browserToolNames.value : FALLBACK_BROWSER_TOOL_NAMES
+  const currentTools = new Set(store.formData.availableTools)
+
+  if (browserToolsOnline.value) {
+    browserTools.forEach((toolName) => currentTools.add(toolName))
+  } else {
+    browserTools.forEach((toolName) => currentTools.delete(toolName))
+  }
+
+  store.formData.availableTools = Array.from(currentTools)
+}
+
+const refreshBrowserToolStatus = async () => {
+  try {
+    const response = await toolAPI.getBrowserExtensionStatus()
+    const data = response?.data || response || {}
+    browserToolsOnline.value = Boolean(data.browser_tools_online)
+    browserToolNames.value = Array.isArray(data.browser_tool_class_tools) && data.browser_tool_class_tools.length > 0
+      ? data.browser_tool_class_tools
+      : FALLBACK_BROWSER_TOOL_NAMES
+    syncBrowserToolSelection()
+  } catch (error) {
+    console.error('[AgentEdit] Failed to refresh browser tool status:', error)
+    browserToolsOnline.value = false
+    browserToolNames.value = FALLBACK_BROWSER_TOOL_NAMES
+    syncBrowserToolSelection()
+  }
+}
+
+const startBrowserToolStatusPolling = () => {
+  if (browserToolStatusTimer) return
+  browserToolStatusTimer = window.setInterval(() => {
+    refreshBrowserToolStatus()
+  }, 5000)
+}
+
+const stopBrowserToolStatusPolling = () => {
+  if (!browserToolStatusTimer) return
+  window.clearInterval(browserToolStatusTimer)
+  browserToolStatusTimer = null
+}
+
 const isRequiredTool = (toolName) => {
+  if (browserToolsOnline.value && isBrowserTool(toolName)) {
+    return 'browser'
+  }
+
   // 检查是否是技能必需的工具
   const hasSkills = store.formData.availableSkills?.length > 0
   if (hasSkills && REQUIRED_TOOLS_FOR_SKILLS.includes(toolName)) {
@@ -2284,10 +2366,19 @@ const isRequiredTool = (toolName) => {
   return false
 }
 
+const isToolChecked = (toolName) => {
+  return Boolean(isRequiredTool(toolName)) || store.formData.availableTools.includes(toolName)
+}
+
+const isToolLocked = (toolName) => {
+  return Boolean(isRequiredTool(toolName)) || isIMToolDisabled(toolName)
+}
+
 const filteredTools = computed(() => {
   if (!searchQueries.tools) return props.tools
   const query = searchQueries.tools.toLowerCase()
   return props.tools.filter(tool => 
+    getToolLabel(tool.name, t).toLowerCase().includes(query) ||
     tool.name.toLowerCase().includes(query) || 
     (tool.description && tool.description.toLowerCase().includes(query))
   )
@@ -2377,6 +2468,10 @@ watch(() => store.formData.agentMode, (newAgentMode) => {
   }
 })
 
+watch(browserToolsOnline, () => {
+  syncBrowserToolSelection()
+})
+
 // 监听工具列表变化，自动清理已不存在（被禁用）的工具
 watch(() => props.tools, (newTools) => {
   console.log('[AgentEdit] props.tools changed:', newTools?.length, 'tools')
@@ -2391,7 +2486,7 @@ watch(() => props.tools, (newTools) => {
   // 过滤掉已不存在的工具（保留必需的技能工具）
   const filteredTools = currentTools.filter(toolName => {
     // 如果是必需的技能工具，保留
-    if (isRequiredTool(toolName) === 'skill') return true
+    if (['skill', 'browser'].includes(isRequiredTool(toolName))) return true
     // 如果工具仍然存在于可用列表中，保留
     return availableToolNames.has(toolName)
   })
