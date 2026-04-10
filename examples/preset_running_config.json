@@ -3,6 +3,5 @@
   "system_context": {},
   "available_workflows": {},
   "available_tools": [],
-  "max_loop_count": 10,
   "deepThinking": false
 }

@@ -74,6 +74,7 @@ class FibreBackendClient:
         available_workflows: Optional[Dict[str, List[str]]] = None,
         system_context: Optional[Dict[str, Any]] = None,
         available_sub_agent_ids: Optional[List[str]] = None,
+        max_loop_count: Optional[int] = None,
         llm_provider_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> Optional[str]:
@@ -88,6 +89,8 @@ class FibreBackendClient:
         """
         if not self.available:
             return None
+        if max_loop_count is None:
+            raise ValueError("max_loop_count is required when creating a Fibre agent")
 
         payload = {
             "id": agent_id,
@@ -100,7 +103,7 @@ class FibreBackendClient:
             "systemContext": system_context or {},
             "availableSubAgentIds": available_sub_agent_ids or [],
             "memoryType": "session",
-            "maxLoopCount": 100,
+            "maxLoopCount": max_loop_count,
             "deepThinking": False,
             "llm_provider_id": llm_provider_id,
             "multiAgent": False,
@@ -283,6 +286,7 @@ class FibreBackendClient:
         session_id: Optional[str] = None,
         system_context: Optional[Dict[str, Any]] = None,
         user_id: Optional[str] = None,
+        max_loop_count: Optional[int] = None,
     ) -> AsyncGenerator[List[MessageChunk], None]:
         """
         流式执行 Agent 任务，解析 SSE 返回结构化数据并合并 chunks
@@ -297,6 +301,8 @@ class FibreBackendClient:
         """
         if not self.available:
             raise RuntimeError("Backend not available")
+        if max_loop_count is None:
+            raise ValueError("max_loop_count is required when streaming a Fibre sub-agent task")
 
         payload = {
             "agent_id": agent_id,
@@ -304,6 +310,7 @@ class FibreBackendClient:
             "session_id": session_id,
             "system_context": system_context or {},
         }
+        payload["max_loop_count"] = max_loop_count
         
         headers_user_id = user_id if user_id else "unknown"
         

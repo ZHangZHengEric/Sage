@@ -49,9 +49,9 @@ class FibreTools:
         return f"Agent spawned successfully. ID: {new_agent_id}. Ready to receive messages."
 
     @tool(
-        description_i18n={"zh": "给子agent 分配具体任务并执行，tasks 列表中的任务是并发执行的。可以给同一个 agent 委派两个并行的任务，它们会同时执行（需要使用不同的 session_id）。如果有前后顺序依赖的任务，应该分两次调用本工具，先执行前置任务，再执行后置任务。具体任务细节（如'写贪吃蛇'）应在这里通过 content 指定。注意：**不要把当前正在运行的父会话 session_id 直接传给子任务**，否则会因为该会话已在执行中而校验失败。新委派任务时，建议将任务里的 `session_id` 留空，由系统自动分配新的会话；只有在明确要继续某个子智能体已有子会话时，才填写那个子会话的 session_id。"},
+        description_i18n={"zh": "给子agent 分配具体任务并执行，tasks 列表中的任务是并发执行的。可以给同一个 agent 委派两个并行的任务，它们会同时执行（需要使用不同的 session_id）。如果有前后顺序依赖的任务，应该分两次调用本工具，先执行前置任务，再执行后置任务。具体任务细节（如'写贪吃蛇'）应在这里通过 content 指定。注意：**不要把当前正在运行的父会话 session_id 直接传给子任务**，否则会因为该会话已在执行中而校验失败。新委派任务时，建议将任务里的 `session_id` 留空，由系统自动分配新的会话；**如果子智能体之前的任务没有完成好，需要继续或重新委派时，务必使用上一次的 session_id，让该智能体继续之前的会话完成任务**；只有在明确要继续某个子智能体已有子会话时，才填写那个子会话的 session_id。"},
         param_description_i18n={
-            "tasks": {"zh": "任务列表，每个任务包含 'agent_id', 'content' 等字段。'content' 必须包含详细的具体任务描述、上下文信息、具体要求以及期望的返回格式。任务里的 'session_id' 为可选项，仅在需要继续某个子智能体已有子会话时才填写；**不要填写当前父会话的 session_id**，因为当前会话正在执行中，会导致校验失败。对于新任务，建议留空，由系统自动分配新的 session_id。注意：列表中的任务是并发执行的，可以给同一个 agent 分配多个并行任务（需使用不同的 session_id，或都留空自动分配），如果有依赖关系请分多次调用。"}
+            "tasks": {"zh": "任务列表，每个任务包含 'agent_id', 'content' 等字段。'content' 必须包含详细的具体任务描述、上下文信息、具体要求以及期望的返回格式。任务里的 'session_id' 为可选项，仅在需要继续某个子智能体已有子会话时才填写；**不要填写当前父会话的 session_id**，因为当前会话正在执行中，会导致校验失败。对于新任务，建议留空，由系统自动分配新的 session_id。**重要：如果子智能体之前的任务没有完成好（如返回失败、结果不完整、需要修正），再次委派时务必使用上一次的 session_id，让该智能体继续之前的会话上下文来完成任务，这样可以保持上下文连续性，避免从头开始。注意：列表中的任务是并发执行的，可以给同一个 agent 分配多个并行任务（需使用不同的 session_id，或都留空自动分配），如果有依赖关系请分多次调用。"}
         },
         param_schema={
             "tasks": {
@@ -76,13 +76,13 @@ class FibreTools:
                         },
                         "content": {
                             "type": "string",
-                            "description": "Detailed task description. Must include: 1) Task background and purpose; 2) Specific objectives; 3) Input resources (file paths, data); 4) Detailed requirements (functional, quality, format); 5) Constraints (time, technical); 6) Expected outputs (deliverables, save paths, acceptance criteria); 7) Notes (risks, dependencies).",
-                            "description_i18n": {"zh": "详细的子任务描述。必须包含以下部分：\n1. **任务背景**：说明这个子任务的上下文和目的\n2. **具体目标**：明确要完成的具体目标\n3. **输入资源**：提供必要的输入文件路径、数据或参考资料\n4. **具体要求**：\n   - 功能要求：需要实现什么功能\n   - 质量要求：代码规范、性能要求等\n   - 格式要求：输出格式、命名规范等\n5. **约束条件**：时间限制、技术限制、不能做的事\n6. **期望输出**：\n   - 产出物清单（文件、代码、报告等）\n   - 验收标准（如何判断任务完成）\n7. **注意事项**：特殊说明、潜在风险、依赖关系"}
+                            "description": "Detailed task description. Must include: 1) Task background and purpose; 2) Specific objectives; 3) Input resources (file paths, data); 4) Detailed requirements (functional, quality, format); 5) Constraints (time, technical); 6) Expected outputs (deliverables, save paths, acceptance criteria); 7) Notes (risks, dependencies). IMPORTANT: All file paths must be ABSOLUTE paths, not relative paths or just filenames.",
+                            "description_i18n": {"zh": "详细的子任务描述。必须包含以下部分：\n1. **任务背景**：说明这个子任务的上下文和目的\n2. **具体目标**：明确要完成的具体目标\n3. **输入资源**：提供必要的输入文件路径、数据或参考资料。**重要：所有文件路径必须是绝对路径，不能使用相对路径或仅文件名**\n4. **具体要求**：\n   - 功能要求：需要实现什么功能\n   - 质量要求：代码规范、性能要求等\n   - 格式要求：输出格式、命名规范等\n5. **约束条件**：时间限制、技术限制、不能做的事\n6. **期望输出**：\n   - 产出物清单（文件、代码、报告等）\n   - 验收标准（如何判断任务完成）\n7. **注意事项**：特殊说明、潜在风险、依赖关系"}
                         },
                         "session_id": {
                             "type": "string",
-                            "description": "Optional: Session ID of an existing child-agent conversation to continue. Do not pass the current parent session ID. Leave empty for new tasks and the system will create a new session automatically.",
-                            "description_i18n": {"zh": "可选：如需继续某个子智能体已有的子会话，请填写那个已有的 Session ID；**不要传入当前父会话的 session_id**。如为新任务，请留空，系统会自动创建新的子会话。"}
+                            "description": "Optional: Session ID of an existing child-agent conversation to continue. Do not pass the current parent session ID. Leave empty for new tasks and the system will create a new session automatically. IMPORTANT: If the sub-agent did not complete the task successfully (failed, incomplete, or needs correction), you MUST reuse the same session_id to continue the conversation context.",
+                            "description_i18n": {"zh": "可选：如需继续某个子智能体已有的子会话，请填写那个已有的 Session ID；**不要传入当前父会话的 session_id**。如为新任务，请留空，系统会自动创建新的子会话。**重要：如果子智能体之前的任务没有完成好（失败、结果不完整或需要修正），再次委派时务必使用上一次的 session_id，让该智能体继续之前的会话上下文来完成任务。**"}
                         }
                     },
                     "required": ["agent_id", "task_name", "original_task", "content"]
@@ -127,8 +127,8 @@ class FibreTools:
                 "en": "Task execution status, options: 'success' or 'failed'"
             },
             "result": {
-                "zh": "任务执行的详细结果总结。必须包含：1) 执行过程的关键步骤；2) 生成的资源文件路径；3) 数据分析结论；4) 建议或后续行动。支持 Markdown 格式，可以包含表格、列表等结构化内容。",
-                "en": "Detailed summary of task execution results. Must include: 1) Key execution steps; 2) Generated resource file paths; 3) Data analysis conclusions; 4) Recommendations or follow-up actions. Supports Markdown format with tables, lists, etc."
+                "zh": "任务执行的详细结果总结。必须包含：1) 执行过程的关键步骤；2) 生成的资源文件路径（**必须是绝对路径**）；3) 数据分析结论；4) 建议或后续行动。支持 Markdown 格式，可以包含表格、列表等结构化内容。",
+                "en": "Detailed summary of task execution results. Must include: 1) Key execution steps; 2) Generated resource file paths (**must be ABSOLUTE paths**); 3) Data analysis conclusions; 4) Recommendations or follow-up actions. Supports Markdown format with tables, lists, etc."
             }
         }
     )

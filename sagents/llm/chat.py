@@ -4,35 +4,59 @@ from collections import defaultdict
 from typing import Optional, Dict, List, Any
 from openai import AsyncOpenAI
 from sagents.utils.logger import logger
+from sagents.llm.sage_openai import SageAsyncOpenAI
+
 
 class OpenAIChat:
     """
     OpenAI Chat 客户端封装
+    支持标准模型和快速模型双配置
     """
     def __init__(
-        self, 
-        api_key: str, 
-        base_url: Optional[str] = "https://api.openai.com/v1", 
-        model_name: Optional[str] = "gpt-4o"
+        self,
+        api_key: str,
+        base_url: Optional[str] = "https://api.openai.com/v1",
+        model_name: Optional[str] = "gpt-4o",
+        # 快速模型配置（可选）
+        fast_api_key: Optional[str] = None,
+        fast_base_url: Optional[str] = None,
+        fast_model_name: Optional[str] = None,
     ):
         self.model_name = model_name
-        self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-        # 将 model_name 绑定到 client 上，方便后续获取（虽然这不是标准做法，但保持兼容性）
-        self.client.model_name = model_name
         
+        # 创建标准模型客户端
+        self._standard_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        self._standard_client.model_name = model_name
+        
+        # 创建快速模型客户端（如果配置了）
+        self._fast_client = None
+        if fast_model_name:
+            fast_key = fast_api_key or api_key
+            fast_url = fast_base_url or base_url
+            self._fast_client = AsyncOpenAI(api_key=fast_key, base_url=fast_url)
+            self._fast_client.model_name = fast_model_name
+            logger.info(f"Fast model configured: {fast_model_name}")
+        
+        # 创建 SageAsyncOpenAI 实例
+        self._sage_client = SageAsyncOpenAI(
+            standard_client=self._standard_client,
+            fast_client=self._fast_client,
+        )
 
     @property
-    def raw_client(self) -> AsyncOpenAI:
-        return self.client
+    def raw_client(self) -> SageAsyncOpenAI:
+        """返回 SageAsyncOpenAI 实例"""
+        return self._sage_client
 
     async def close(self) -> None:
         """
         关闭客户端
         """
         try:
-            await self.client.close()
+            await self._sage_client.close()
         except Exception as e:
             logger.error(f"Failed to close OpenAIChat client: {e}")
+
 
 class ChatClientPool:
     """

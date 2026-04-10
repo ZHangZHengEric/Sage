@@ -11,6 +11,41 @@ _TEST_IMAGE_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAIAAAA
 _COLOR_KEYWORDS = ["red", "红色", "红", "赤", "绯", "朱", "丹", "绛"]
 
 
+def _is_openai_reasoning_model(model_name: str) -> bool:
+    """判断是否为 OpenAI 推理模型"""
+    return (
+        model_name.startswith("o3-") or
+        model_name.startswith("o1-") or
+        "gpt" in model_name.lower() or
+        "gpt-5.1" in model_name.lower()
+    )
+
+
+def _build_thinking_disabled_extra_body(model_name: str) -> Dict[str, Any]:
+    """
+    构建用于关闭思考模式的 extra_body 参数
+
+    Args:
+        model_name: 模型名称
+
+    Returns:
+        Dict[str, Any]: extra_body 参数
+    """
+    extra_body: Dict[str, Any] = {}
+
+    if _is_openai_reasoning_model(model_name):
+        # OpenAI 推理模型使用 reasoning_effort 参数
+        # low = 最小化推理
+        extra_body["reasoning_effort"] = "low"
+    else:
+        # 其他模型（如 Qwen3、DeepSeek 等）使用 enable_thinking/thinking 参数
+        extra_body["chat_template_kwargs"] = {"enable_thinking": False}
+        extra_body["enable_thinking"] = False
+        extra_body["thinking"] = {"type": "disabled"}
+
+    return extra_body
+
+
 def _normalize_base_url(base_url: Optional[str]) -> Optional[str]:
     return base_url.rstrip("/") if base_url else base_url
 
@@ -32,10 +67,15 @@ async def verify_provider(data: LLMProviderCreate) -> None:
         base_url=data.base_url,
         timeout=10.0,
     )
+
+    # 构建 extra_body 以关闭思考模式
+    extra_body = _build_thinking_disabled_extra_body(data.model)
+
     await client.chat.completions.create(
         model=data.model,
         messages=[{"role": "user", "content": "Hi"}],
         max_tokens=5,
+        extra_body=extra_body,
     )
 
 
@@ -49,6 +89,10 @@ async def verify_multimodal(data: LLMProviderCreate) -> Dict[str, Any]:
         base_url=data.base_url,
         timeout=30.0,
     )
+
+    # 构建 extra_body 以关闭思考模式
+    extra_body = _build_thinking_disabled_extra_body(data.model)
+
     response = await client.chat.completions.create(
         model=data.model,
         messages=[
@@ -65,6 +109,7 @@ async def verify_multimodal(data: LLMProviderCreate) -> Dict[str, Any]:
         ],
         max_tokens=50,
         temperature=0.1,
+        extra_body=extra_body,
     )
 
     content = response.choices[0].message.content.lower() if response.choices[0].message.content else ""

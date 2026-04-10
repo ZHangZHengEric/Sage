@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 from openai import AsyncOpenAI
+from sagents.llm.chat import OpenAIChat
 
 from common.core import config
 
@@ -28,20 +29,42 @@ def _get_first_api_key(api_key: Any) -> Any:
 
 
 def create_model_client(client_params: Dict[str, Any]) -> Any:
+    """
+    创建模型客户端
+    
+    支持标准模型和快速模型双配置
+    快速模型配置参数（可选）：
+    - fast_api_key: 快速模型 API Key（默认使用标准模型的 key）
+    - fast_base_url: 快速模型 Base URL（默认使用标准模型的 URL）
+    - fast_model_name: 快速模型名称（如果不设置，则不启用快速模型）
+    """
     api_key = _get_first_api_key(client_params.get("api_key"))
     base_url = client_params.get("base_url")
+    model_name = client_params.get("model")
     timeout = client_params.get("timeout", 60 * 30)
+    
+    # 快速模型配置（可选）
+    fast_api_key = client_params.get("fast_api_key")
+    fast_base_url = client_params.get("fast_base_url")
+    fast_model_name = client_params.get("fast_model_name")
 
     logger.info(
-        f"初始化Chat模型客户端: model={client_params.get('model')}, base_url={base_url}"
+        f"初始化Chat模型客户端: model={model_name}, base_url={base_url}, "
+        f"fast_model={fast_model_name if fast_model_name else '未配置'}"
     )
-    model_client = AsyncOpenAI(
+    
+    # 使用 OpenAIChat 创建客户端（支持双模型）
+    openai_chat = OpenAIChat(
         api_key=api_key,
         base_url=base_url,
-        timeout=timeout,
+        model_name=model_name,
+        fast_api_key=fast_api_key,
+        fast_base_url=fast_base_url,
+        fast_model_name=fast_model_name,
     )
-    model_client.model = client_params.get("model")
-    return model_client
+    
+    # 返回 SageAsyncOpenAI 实例
+    return openai_chat.raw_client
 
 
 def create_tool_proxy(available_tools: List[str]):

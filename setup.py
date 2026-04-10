@@ -1,4 +1,24 @@
 from setuptools import find_packages, setup
+from pathlib import Path
+
+
+def get_docs_files():
+    """获取 docs 目录下的所有 markdown 文件，用于 data_files 配置"""
+    docs_files = []
+    docs_dir = Path("docs")
+    if docs_dir.exists():
+        for lang in ["en", "zh"]:
+            lang_dir = docs_dir / lang
+            if lang_dir.exists():
+                # 收集该语言目录下的所有 markdown 文件
+                md_files = [str(f) for f in lang_dir.glob("*.md")]
+                if md_files:
+                    # 目标路径: share/sage/docs/{lang}/
+                    docs_files.append(
+                        (f"share/sage/docs/{lang}", md_files)
+                    )
+    return docs_files
+
 
 setup(
     name="sage",
@@ -12,9 +32,10 @@ setup(
     license="MIT",
     packages=find_packages(
         include=["sagents*", "common*", "app*"],
-        exclude=["tests*", "app.desktop*", "app.skills*", "app.wiki*", "docs*", "assets*", "logs*"],
+        exclude=["tests*", "app.desktop*", "app.skills*", "app.wiki*", "assets*", "logs*"],
     ),
     include_package_data=True,
+    data_files=get_docs_files(),
     entry_points={
         "console_scripts": [
             "sage=app.cli.main:main",

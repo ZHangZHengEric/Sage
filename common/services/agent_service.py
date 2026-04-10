@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 from openai import AsyncOpenAI
+from sagents.llm.chat import OpenAIChat
 from sagents.tool.tool_manager import get_tool_manager
 from sagents.tool.tool_proxy import ToolProxy
 from sagents.utils.auto_gen_agent import AutoGenAgentFunc
@@ -115,9 +116,24 @@ def _get_cfg() -> config.StartupConfig:
 
 
 def _create_model_client(client_params: Dict[str, Any], *, randomize_keys: bool = False) -> Any:
+    """
+    创建模型客户端
+    
+    支持标准模型和快速模型双配置
+    快速模型配置参数（可选）：
+    - fast_api_key: 快速模型 API Key（默认使用标准模型的 key）
+    - fast_base_url: 快速模型 Base URL（默认使用标准模型的 URL）
+    - fast_model_name: 快速模型名称（如果不设置，则不启用快速模型）
+    """
     api_key = client_params.get("api_key")
     base_url = client_params.get("base_url")
+    model_name = client_params.get("model")
     timeout = client_params.get("timeout", 60 * 30)
+    
+    # 快速模型配置（可选）
+    fast_api_key = client_params.get("fast_api_key")
+    fast_base_url = client_params.get("fast_base_url")
+    fast_model_name = client_params.get("fast_model_name")
 
     if randomize_keys and api_key and isinstance(api_key, str) and "," in api_key:
         keys = [k.strip() for k in api_key.split(",") if k.strip()]
@@ -126,15 +142,22 @@ def _create_model_client(client_params: Dict[str, Any], *, randomize_keys: bool 
             logger.info(f"Using random key from {len(keys)} available keys")
 
     logger.info(
-        f"初始化Chat模型客户端: model={client_params.get('model')}, base_url={base_url}"
+        f"初始化Chat模型客户端: model={model_name}, base_url={base_url}, "
+        f"fast_model={fast_model_name if fast_model_name else '未配置'}"
     )
-    model_client = AsyncOpenAI(
+    
+    # 使用 OpenAIChat 创建客户端（支持双模型）
+    openai_chat = OpenAIChat(
         api_key=api_key,
         base_url=base_url,
-        timeout=timeout,
+        model_name=model_name,
+        fast_api_key=fast_api_key,
+        fast_base_url=fast_base_url,
+        fast_model_name=fast_model_name,
     )
-    model_client.model = client_params.get("model")
-    return model_client
+    
+    # 返回 SageAsyncOpenAI 实例
+    return openai_chat.raw_client
 
 
 def _select_provider(providers: List[LLMProvider]) -> Optional[LLMProvider]:
@@ -513,7 +536,7 @@ def _build_openclaw_agent_config(
     return {
         "name": DEFAULT_OPENCLAW_AGENT_NAME,
         "description": DEFAULT_OPENCLAW_AGENT_DESCRIPTION,
-        "maxLoopCount": 100,
+        "maxLoopCount": None,
         "memoryType": "session",
         "agentMode": "fibre",
         "availableTools": DEFAULT_OPENCLAW_AGENT_TOOLS.copy(),
@@ -609,6 +632,43 @@ def _copy_directory_contents(
         else:
             target_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(child, target_path)
+
+
+def _copy_docs_to_workspace(agent_workspace: Path) -> None:
+    """
+    将项目文档复制到 Agent 工作空间中
+    
+    Args:
+        agent_workspace: Agent 工作空间路径
+    """
+    # 获取项目根目录（假设当前文件在 common/services/ 下）
+    project_root = Path(__file__).parent.parent.parent.parent
+    docs_dir = project_root / "docs"
+    
+    if not docs_dir.exists() or not docs_dir.is_dir():
+        logger.warning(f"Docs 目录不存在: {docs_dir}")
+        return
+    
+    # 目标目录：workspace/docs
+    target_docs_dir = agent_workspace / "docs"
+    
+    try:
+        # 只复制 en 和 zh 目录下的 markdown 文件
+        for lang in ["en", "zh"]:
+            lang_dir = docs_dir / lang
+            if lang_dir.exists() and lang_dir.is_dir():
+                target_lang_dir = target_docs_dir / lang
+                target_lang_dir.mkdir(parents=True, exist_ok=True)
+                
+                # 复制所有 .md 文件
+                for md_file in lang_dir.glob("*.md"):
+                    target_file = target_lang_dir / md_file.name
+                    shutil.copy2(md_file, target_file)
+                    logger.debug(f"复制文档: {md_file.name} -> {target_file}")
+        
+        logger.info(f"Docs 文档已复制到 Agent 工作空间: {target_docs_dir}")
+    except Exception as e:
+        logger.warning(f"复制 Docs 文档失败: {e}")
 
 
 def _link_openclaw_skills(agent_workspace: Path, skill_sources: Dict[str, Path]) -> List[str]:

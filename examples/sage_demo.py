@@ -48,11 +48,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
                         help='默认LLM API Base')
     parser.add_argument('--default_llm_model_name', required=True,
                         help='默认LLM API Model')
-    parser.add_argument('--default_llm_max_tokens', default=4096, type=int,
+    parser.add_argument('--default_llm_max_tokens', default=None, type=int,
                         help='默认LLM API Max Tokens')
     parser.add_argument('--default_llm_temperature', default=0.3, type=float,
                         help='默认LLM API Temperature')
-    parser.add_argument('--default_llm_max_model_len', default=54000, type=int,
+    parser.add_argument('--default_llm_max_model_len', default=64000, type=int,
                         help='默认LLM 最大上下文')
     parser.add_argument('--default_llm_top_p', default=0.9, type=float,
                         help='默认LLM Top P')
@@ -391,7 +391,7 @@ class StreamingHandler:
         # 准备preset配置参数
         system_context = None
         available_workflows = None
-        max_loop_count = 10  # 默认值
+        max_loop_count = None
 
         if self.component_manager:
             system_context = self.component_manager.preset_system_context
@@ -399,6 +399,8 @@ class StreamingHandler:
             # 如果配置中有指定，则使用配置的值
             if self.component_manager.preset_max_loop_count is not None:
                 max_loop_count = self.component_manager.preset_max_loop_count
+        if max_loop_count is None:
+            raise ValueError("max_loop_count is required")
 
         # 准备模型配置
         model_config = {

@@ -55,13 +55,11 @@ class SimpleAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
 
-        # 最大循环次数常量
-        self.max_loop_count = 100
         # 循环模式触发阈值：连续命中后触发软纠偏/硬暂停
         self.max_repeat_pattern_hits = 2
         self.agent_name = "SimpleAgent"
         self.agent_description = """SimpleAgent: 简单智能体，负责无推理策略的直接任务执行，比ReAct策略更快速。适用于不需要推理或早期处理的任务。"""
-        logger.debug(f"SimpleAgent 初始化完成，最大循环次数为 {self.max_loop_count}")
+        logger.debug("SimpleAgent 初始化完成")
 
     def _build_loop_signature(self, chunks: List[MessageChunk]) -> str:
         """
@@ -380,6 +378,10 @@ class SimpleAgent(AgentBase):
             session_id=session_id,
             step_name="task_complete_judge",
             enable_thinking=False,
+            model_config_override={
+                'model_type': 'fast',  # 使用快速模型
+                'response_format': {'type': 'json_object'}  # 要求JSON返回
+            }
         )
 
         all_content = ""
@@ -433,8 +435,10 @@ class SimpleAgent(AgentBase):
         loop_count = 0
         recent_signatures: List[str] = []
         repeat_pattern_hits = 0
-        # 从session context 检查一下是否有max_loop_count ，如果有，本次请求使用session context 中的max_loop_count
-        max_loop_count = session_context.agent_config.get('max_loop_count', self.max_loop_count)
+        # 从session context 获取 max_loop_count；缺失则直接报错，避免静默兜底
+        max_loop_count = session_context.agent_config.get('max_loop_count')
+        if max_loop_count is None:
+            raise ValueError("SimpleAgent requires session_context.agent_config.max_loop_count")
         logger.info(f"SimpleAgent: 开始执行主循环，最大循环次数：{max_loop_count}")
         while True:
             if self._should_abort_due_to_session(session_context):
@@ -837,7 +841,7 @@ class SimpleAgent(AgentBase):
         logger.info(f"SimpleAgent: 提取后消息数量: {len(extracted_messages)}")
 
         # 2. 检查是否需要压缩
-        max_model_len = self.model_config.get('max_model_len', 40000)
+        max_model_len = self.model_config.get('max_model_len', 64000)
         max_new_tokens = self.model_config.get('max_tokens', 20000)
         should_compress, current_tokens, max_model_len = MessageManager.should_compress_messages(
             extracted_messages, max_model_len, max_new_tokens

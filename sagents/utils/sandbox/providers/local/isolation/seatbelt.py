@@ -47,6 +47,24 @@ class SeatbeltIsolation:
         if additional_write_paths:
             allowed.extend(additional_write_paths)
         
+        # 添加系统关键路径（用于 Rosetta 和动态库加载）
+        system_paths = [
+            "/usr/lib",
+            "/usr/local/lib",
+            "/System/Library",
+            "/Library/Apple/usr/lib",
+            "/Library/Apple/usr/share",
+            "/var/db/dyld",  # dyld 共享缓存
+            "/private/var/db/dyld",
+        ]
+        allowed.extend(system_paths)
+        
+        # 添加 conda 环境路径（如果 Python 在 conda 中）
+        conda_base = os.environ.get("CONDA_PREFIX") or os.environ.get("CONDA_ROOT")
+        if conda_base:
+            allowed.append(conda_base)
+            allowed.append(os.path.dirname(conda_base))  # envs 目录
+        
         # 去重
         allowed = list(set(allowed))
         
@@ -102,15 +120,24 @@ class SeatbeltIsolation:
         with open(input_pkl, "wb") as f:
             pickle.dump(payload, f)
         
-        # 生成 profile
-        additional_write = [cwd] if cwd else []
-        profile_path = self._generate_profile(output_pkl, 
-                                             additional_read_paths=[input_pkl],
-                                             additional_write_paths=additional_write)
-        
-        # 使用沙箱的 venv Python
+        # 使用沙箱的 venv Python（解析符号链接获取真实路径）
         python_bin = os.path.join(self.venv_dir, "bin", "python")
+        # 解析符号链接，获取真实路径（sandbox-exec 可能无法执行符号链接）
+        python_bin_dir = None
+        if os.path.islink(python_bin):
+            python_bin = os.path.realpath(python_bin)
+            python_bin_dir = os.path.dirname(python_bin)
+            logger.info(f"[SeatbeltIsolation] Python 是符号链接，已解析为真实路径: {python_bin}")
         launcher_path = os.path.join(self.sandbox_dir, "launcher.py")
+
+        # 生成 profile（如果 Python 是符号链接，需要额外添加真实路径到允许列表）
+        additional_write = [cwd] if cwd else []
+        additional_read = [input_pkl]
+        if python_bin_dir:
+            additional_read.append(python_bin_dir)
+        profile_path = self._generate_profile(output_pkl,
+                                             additional_read_paths=additional_read,
+                                             additional_write_paths=additional_write)
         if not os.path.exists(launcher_path):
             with open(launcher_path, "w") as f:
                 f.write(LAUNCHER_SCRIPT)

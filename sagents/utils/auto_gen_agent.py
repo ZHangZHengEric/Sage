@@ -383,6 +383,10 @@ Agent系统提示词：
             完整的Agent配置
         """
         try:
+            max_loop_count = basic_config.get("maxLoopCount") or basic_config.get("max_loop_count")
+            if max_loop_count is None:
+                raise ValueError("maxLoopCount is required in generated agent config")
+
             config = {
                 "id": str(int(time.time() * 1000)),  # 使用时间戳作为ID
                 "name": basic_config.get("name", "自动生成Agent"),
@@ -391,7 +395,7 @@ Agent系统提示词：
                 "deepThinking": False,
                 "multiAgent": False,
                 "moreSupport": False,
-                "maxLoopCount": 100,
+                "maxLoopCount": max_loop_count,
                 "llmConfig": {
                     "model": "",
                     "maxTokens": "",

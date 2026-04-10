@@ -166,7 +166,7 @@ const form = reactive({
   base_url: '',
   api_keys_str: '',
   model: '',
-  maxTokens: 8192,
+  maxTokens: null,
   temperature: 0.7,
   topP: 0.95,
   presencePenalty: 0,
@@ -185,7 +185,10 @@ const buildProviderPayload = () => ({
   base_url: form.base_url,
   api_keys: buildApiKeys(),
   model: form.model,
-  max_tokens: form.maxTokens,
+  ...(() => {
+    const maxTokensValue = Number(form.maxTokens)
+    return Number.isFinite(maxTokensValue) ? { max_tokens: maxTokensValue } : {}
+  })(),
   temperature: form.temperature,
   top_p: form.topP,
   presence_penalty: form.presencePenalty,

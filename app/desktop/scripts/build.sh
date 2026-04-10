@@ -294,6 +294,17 @@ build_python_sidecar() {
     find "$TARGET_MCP_DIR/wiki" -name "node_modules" -type d -exec rm -rf {} + 2>/dev/null || true
     find "$TARGET_MCP_DIR/wiki" -name ".vitepress" -type d -exec rm -rf {} + 2>/dev/null || true
 
+    # Copy docs to distribution directory
+    echo "[Sidecar] 正在复制 docs 到分发目录..."
+    mkdir -p "$TARGET_MCP_DIR/docs"
+    # 只复制 en 和 zh 目录下的 markdown 文件
+    for lang in en zh; do
+        if [ -d "$ROOT_DIR/docs/$lang" ]; then
+            mkdir -p "$TARGET_MCP_DIR/docs/$lang"
+            cp "$ROOT_DIR/docs/$lang"/*.md "$TARGET_MCP_DIR/docs/$lang/" 2>/dev/null || true
+        fi
+    done
+
     cd "$ROOT_DIR"
 
     # Move Binary to Tauri

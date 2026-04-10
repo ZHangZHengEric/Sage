@@ -282,7 +282,7 @@ class Session:
         session_id: Optional[str] = None,
         user_id: Optional[str] = None,
         deep_thinking: Optional[Union[bool, str]] = None,
-        max_loop_count: int = 10,
+        max_loop_count: Optional[int] = None,
         agent_mode: Optional[str] = None,
         more_suggest: bool = False,
         force_summary: bool = False,
@@ -295,6 +295,8 @@ class Session:
         available_workflows = available_workflows or {}
         merged_system_context = dict(system_context or {})
         with session_scope(session_id):
+            if max_loop_count is None:
+                raise ValueError("max_loop_count is required")
             # 确保SessionContext存在，并进行初始化
             session_context = await self._ensure_session_context(
                 session_id=session_id,

@@ -283,6 +283,94 @@ def _copy_sage_usage_docs_to_workspace(agent_workspace: str) -> None:
         logger.warning(f"复制 sage-usage-docs 到 workspace 失败: {e}")
 
 
+def _copy_docs_to_agent_workspace(agent_workspace: str) -> None:
+    """
+    将项目文档复制到 sage_usage_docs 下的 code_docs 文件夹中
+    支持从源码目录、PyInstaller 打包目录、pip install 或 data_files 安装位置中查找 docs
+
+    Args:
+        agent_workspace: Agent 工作空间路径
+    """
+    try:
+        docs_dir = None
+
+        # 尝试从多个位置查找 docs 目录
+        # 1. 源码目录（开发环境）
+        project_root = Path(__file__).parent.parent.parent.parent
+        possible_docs = project_root / "docs"
+        if possible_docs.exists() and possible_docs.is_dir():
+            docs_dir = possible_docs
+            logger.debug(f"从源码目录找到 docs: {docs_dir}")
+
+        # 2. PyInstaller 打包后的 _internal 目录（Desktop 生产环境）
+        if docs_dir is None:
+            # PyInstaller 运行时，sys._MEIPASS 指向临时解压目录
+            import sys
+            if hasattr(sys, '_MEIPASS'):
+                possible_docs = Path(sys._MEIPASS) / "docs"
+                if possible_docs.exists() and possible_docs.is_dir():
+                    docs_dir = possible_docs
+                    logger.debug(f"从 PyInstaller 目录找到 docs: {docs_dir}")
+
+        # 3. 包安装目录（pip install 生产环境 - 旧方式）
+        if docs_dir is None:
+            import sagents
+            package_dir = Path(sagents.__file__).parent.parent
+            possible_docs = package_dir / "docs"
+            if possible_docs.exists() and possible_docs.is_dir():
+                docs_dir = possible_docs
+                logger.debug(f"从包目录找到 docs: {docs_dir}")
+
+        # 4. data_files 安装位置（pip install 生产环境 - 新方式）
+        # data_files 会安装到 sys.prefix/share/sage/docs 或 /usr/local/share/sage/docs
+        if docs_dir is None:
+            import sys
+            possible_paths = [
+                Path(sys.prefix) / "share" / "sage" / "docs",
+                Path("/usr") / "local" / "share" / "sage" / "docs",
+                Path("/usr") / "share" / "sage" / "docs",
+            ]
+            for possible_docs in possible_paths:
+                if possible_docs.exists() and possible_docs.is_dir():
+                    docs_dir = possible_docs
+                    logger.debug(f"从 data_files 目录找到 docs: {docs_dir}")
+                    break
+
+        # 5. 系统 site-packages 目录
+        if docs_dir is None:
+            import site
+            for site_dir in site.getsitepackages():
+                possible_docs = Path(site_dir) / "docs"
+                if possible_docs.exists() and possible_docs.is_dir():
+                    docs_dir = possible_docs
+                    logger.debug(f"从 site-packages 找到 docs: {docs_dir}")
+                    break
+
+        if docs_dir is None:
+            logger.debug("未找到 docs 目录")
+            return
+
+        # 目标目录：workspace/sage_usage_docs/code_docs
+        target_docs_dir = Path(agent_workspace) / "sage_usage_docs" / "code_docs"
+
+        # 只复制 en 和 zh 目录下的 markdown 文件
+        for lang in ["en", "zh"]:
+            lang_dir = docs_dir / lang
+            if lang_dir.exists() and lang_dir.is_dir():
+                target_lang_dir = target_docs_dir / lang
+                target_lang_dir.mkdir(parents=True, exist_ok=True)
+
+                # 复制所有 .md 文件
+                for md_file in lang_dir.glob("*.md"):
+                    target_file = target_lang_dir / md_file.name
+                    shutil.copy2(md_file, target_file)
+                    logger.debug(f"复制文档: {md_file.name} -> {target_file}")
+
+        logger.info(f"Docs 文档已复制到: {target_docs_dir}")
+    except Exception as e:
+        logger.warning(f"复制 Docs 文档失败: {e}")
+
+
 async def _copy_sage_usage_docs_to_agent_workspace(
     agent_id: str,
     agent_workspace_base: str,
@@ -498,7 +586,8 @@ async def populate_request_from_agent_config(
         request.llm_model_config["base_url"] = provider.base_url
         request.llm_model_config["api_key"] = _get_provider_api_key(provider)
         request.llm_model_config["model"] = provider.model
-        request.llm_model_config["max_tokens"] = provider.max_tokens
+        if provider.max_tokens is not None:
+            request.llm_model_config["max_tokens"] = provider.max_tokens
         request.llm_model_config["temperature"] = provider.temperature
         request.llm_model_config["top_p"] = provider.top_p
         request.llm_model_config["presence_penalty"] = provider.presence_penalty
@@ -511,7 +600,7 @@ async def populate_request_from_agent_config(
             request.llm_model_config["api_key"] = _get_provider_api_key(provider)
         if request.llm_model_config.get("model") is None:
             request.llm_model_config["model"] = provider.model
-        if request.llm_model_config.get("max_tokens") is None:
+        if request.llm_model_config.get("max_tokens") is None and provider.max_tokens is not None:
             request.llm_model_config["max_tokens"] = provider.max_tokens
         if request.llm_model_config.get("temperature") is None:
             request.llm_model_config["temperature"] = provider.temperature
@@ -522,8 +611,22 @@ async def populate_request_from_agent_config(
         if request.llm_model_config.get("max_model_len") is None:
             request.llm_model_config["max_model_len"] = provider.max_model_len
 
+    # 处理快速模型配置
+    fast_provider_id = agent_config.get("fast_llm_provider_id") if agent_config else None
+    if fast_provider_id:
+        fast_provider = await provider_dao.get_by_id(fast_provider_id)
+        if fast_provider:
+            request.llm_model_config["fast_api_key"] = _get_provider_api_key(fast_provider)
+            request.llm_model_config["fast_base_url"] = fast_provider.base_url
+            request.llm_model_config["fast_model_name"] = fast_provider.model
+            logger.info(f"Fast model configured: {fast_provider.model}")
+
     if request.max_loop_count is None:
-        request.max_loop_count = 50
+        raise SageHTTPException(
+            status_code=400,
+            detail="max_loop_count 必须显式传入",
+            error_detail="Missing required field: max_loop_count",
+        )
 
     _fill_if_none(request, "available_tools", [])
     _fill_if_none(request, "available_skills", [])
@@ -558,10 +661,14 @@ async def populate_request_from_agent_config(
         _merge_dict(request, "system_context", {"当前AgentId": request.agent_id})
         if _is_desktop_mode():
             sage_home = os.path.join(Path.home(), ".sage")
+            agent_workspace = os.path.join(sage_home, "agents", request.agent_id)
+            # 复制 sage-usage-docs
             await _copy_sage_usage_docs_to_agent_workspace(
                 request.agent_id,
                 os.path.join(sage_home, "agents"),
             )
+            # 复制项目 docs 到 agent workspace
+            _copy_docs_to_agent_workspace(agent_workspace)
 
     if not _is_desktop_mode() and request.available_knowledge_bases:
         kdb_dao = KdbDao()

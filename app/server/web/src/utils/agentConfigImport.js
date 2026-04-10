@@ -24,7 +24,7 @@ export const buildImportedAgentDraft = (importedConfig, importSuffix = '') => {
     systemPrefix: importedConfig.systemPrefix || '',
     deepThinking: importedConfig.deepThinking || false,
     multiAgent: importedConfig.multiAgent || false,
-    maxLoopCount: importedConfig.maxLoopCount || 10,
+    maxLoopCount: importedConfig.maxLoopCount ?? null,
     availableTools: importedConfig.availableTools || [],
     availableSkills: importedConfig.availableSkills || [],
     availableKnowledgeBases: importedConfig.availableKnowledgeBases || [],

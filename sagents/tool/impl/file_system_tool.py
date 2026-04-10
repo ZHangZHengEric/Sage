@@ -192,17 +192,27 @@ class FileSystemTool:
 
     @tool(
         description_i18n={
-            "zh": "写入文本到文件",
-            "en": "Write text to file",
+            "zh": "写入文本到文件。适合短内容写入；较长的代码或文档请拆成多次追加写入，每次 content 不超过 1000 个字。",
+            "en": "Write text to a file. Best for short content; for longer code or documents, write in multiple append calls, keeping each content under 1000 characters.",
         },
         param_description_i18n={
             "file_path": {"zh": "文件虚拟路径", "en": "File virtual path"},
-            "content": {"zh": "要写入的文本内容", "en": "Text content to write"},
+            "mode": {"zh": "写入模式：overwrite 覆盖写入，append 追加到文件末尾", "en": "Write mode: overwrite replaces the file, append adds to the end of the file"},
+            "content": {"zh": "要写入的文本内容，不能超过 1000 个字；较长的代码或文档请分多次追加写入", "en": "Text content to write, must not exceed 1000 characters; for longer code or documents, use multiple append calls"},
             "session_id": {"zh": "会话ID（必填，自动注入）", "en": "Session ID (Required, Auto-injected)"},
         },
         param_schema={
             "file_path": {"type": "string", "description": "File virtual path"},
-            "content": {"type": "string", "description": "Text content to write"},
+            "mode": {
+                "type": "string",
+                "enum": ["overwrite", "append"],
+                "default": "overwrite",
+                "description": "Write mode: overwrite replaces the file, append adds to the end of the file",
+            },
+            "content": {
+                "type": "string",
+                "description": "Text content to write. Keep it under 1000 characters; for longer code or documents, use multiple append calls",
+            },
             "session_id": {"type": "string", "description": "Session ID"},
         }
     )
@@ -210,13 +220,15 @@ class FileSystemTool:
         self,
         file_path: str,
         content: str,
+        mode: str = "overwrite",
         session_id: str = None,
     ) -> Dict[str, Any]:
-        """写入文本到文件（覆盖模式）
+        """写入文本到文件。
 
         Args:
             file_path: 文件虚拟路径
-            content: 要写入的内容
+            content: 要写入的内容，不能超过 1000 个字；较长的代码或文档请分多次追加写入
+            mode: 写入模式，overwrite 覆盖写入，append 追加到文件末尾
             session_id: 会话ID（必填）
 
         Returns:
@@ -224,6 +236,8 @@ class FileSystemTool:
         """
         if not session_id:
             raise ValueError("FileSystemTool: session_id is required")
+        if mode not in {"overwrite", "append"}:
+            raise ValueError("FileSystemTool: mode must be one of ['overwrite', 'append']")
 
         sandbox = self._get_sandbox(session_id)
 
@@ -232,13 +246,23 @@ class FileSystemTool:
             if dir_path:
                 await sandbox.ensure_directory(dir_path)
 
-            await sandbox.write_file(file_path, content, mode="overwrite")
+            if mode == "append":
+                existing = ""
+                try:
+                    if await sandbox.file_exists(file_path):
+                        existing = await sandbox.read_file(file_path, encoding="utf-8")
+                except Exception:
+                    existing = ""
+                await sandbox.write_file(file_path, existing + content, mode="overwrite")
+            else:
+                await sandbox.write_file(file_path, content, mode="overwrite")
 
             return {
                 "status": "success",
                 "message": "文件写入成功",
                 "file_path": file_path,
                 "content_length": len(content),
+                "mode": mode,
             }
 
         except Exception as e:
@@ -251,14 +275,14 @@ class FileSystemTool:
 
     @tool(
         description_i18n={
-            "zh": "更新单个文件内容，统一通过 operations 定义多个替换操作，支持按搜索模式替换和按行区间替换",
-            "en": "Update a single file through operations, supporting pattern replacement and line-range replacement",
+            "zh": "更新单个文件内容。优先使用局部替换或按行区间替换，不要整文件重写；较大的修改请拆成多次小范围更新。",
+            "en": "Update a single file. Prefer local replacement or line-range replacement instead of rewriting the whole file; split larger changes into multiple small updates.",
         },
         param_description_i18n={
             "file_path": {"zh": "文件虚拟路径", "en": "File virtual path"},
             "operations": {
-                "zh": "替换操作列表。每项要么提供 search_pattern 和 replacement，要么提供 start_line、end_line 和 replacement。按行替换时：start_line 和 end_line 都是包含边界（0-based）。search_pattern 可以写普通文本，也可以写正则表达式；执行时会先按普通文本匹配，未命中再按正则处理",
-                "en": "Replacement operations. Each item must provide either search_pattern and replacement, or start_line, end_line and replacement. For line-range mode: both start_line and end_line are inclusive (0-based). search_pattern can be plain text or a regex; execution first tries plain-text matching, then falls back to regex if not found",
+                "zh": "替换操作列表。优先传局部替换操作，每项要么提供 search_pattern 和 replacement，要么提供 start_line、end_line 和 replacement。按行替换时：start_line 和 end_line 都是包含边界（0-based）。search_pattern 可以写普通文本，也可以写正则表达式；执行时会先按普通文本匹配，未命中再按正则处理。请不要用它整文件重写",
+                "en": "Replacement operations. Prefer local updates. Each item must provide either search_pattern and replacement, or start_line, end_line and replacement. For line-range mode: both start_line and end_line are inclusive (0-based). search_pattern can be plain text or a regex; execution first tries plain-text matching, then falls back to regex if not found. Do not use it to rewrite the whole file",
             },
             "session_id": {"zh": "会话ID（必填，自动注入）", "en": "Session ID (Required, Auto-injected)"},
         },
@@ -266,25 +290,25 @@ class FileSystemTool:
             "file_path": {"type": "string", "description": "File virtual path"},
             "operations": {
                 "type": "array",
-                "description": "Replacement operations for the same file. search_pattern may be plain text or regex; plain text is tried first, then regex if no literal match is found",
+                "description": "Replacement operations for the same file. Prefer small local updates. search_pattern may be plain text or regex; plain text is tried first, then regex if no literal match is found",
                 "items": {
                     "type": "object",
                     "properties": {
                         "search_pattern": {
                             "type": "string",
-                            "description": "Text or regex pattern to replace. Literal text match is attempted first; if not found, it is treated as regex"
+                            "description": "Text or regex pattern to replace. Literal text match is attempted first; if not found, it is treated as regex. Use this for local replacements only"
                         },
                         "replacement": {
                             "type": "string",
-                            "description": "Replacement content"
+                            "description": "Replacement content. Keep it small and local whenever possible"
                         },
                         "start_line": {
                             "type": "integer",
-                            "description": "Start line number (inclusive, 0-based) for line-range replacement"
+                            "description": "Start line number (inclusive, 0-based) for line-range replacement. Use for local edits"
                         },
                         "end_line": {
                             "type": "integer",
-                            "description": "End line number (inclusive, 0-based) for line-range replacement"
+                            "description": "End line number (inclusive, 0-based) for line-range replacement. Use for local edits"
                         },
                     },
                 },
@@ -298,11 +322,11 @@ class FileSystemTool:
         operations: Optional[List[Dict[str, Any]]] = None,
         session_id: str = None,
     ) -> Dict[str, Any]:
-        """更新单个文件内容，统一通过 operations 描述替换动作。
+        """更新单个文件内容。优先使用局部替换或按行区间替换，不要整文件重写。
 
         Args:
             file_path: 文件虚拟路径
-            operations: 同一文件的替换操作列表。每项支持两种形式：
+            operations: 同一文件的替换操作列表。优先传局部更新，每项支持两种形式：
                 1. {"search_pattern": "...", "replacement": "..."}，其中 search_pattern 可以是普通文本，也可以是正则表达式；会优先按普通文本匹配，未命中再按正则处理
                 2. {"start_line": 10, "end_line": 12, "replacement": "..."}，其中 start_line 和 end_line 都是包含边界（0-based）
             session_id: 会话ID（必填）
