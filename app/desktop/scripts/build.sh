@@ -3,6 +3,9 @@ set -eu
 # Add cargo to PATH
 export PATH="$HOME/.cargo/bin:$PATH"
 
+# 忽略 Python Broken Pipe 错误（当输出被管道到已关闭的读取端时）
+export PYTHONUNBUFFERED=1
+
 ########################################
 # Sage Desktop Industrial Build Script
 ########################################
@@ -118,8 +121,9 @@ else
   CONDA_BASE=$($CONDA_EXE info --base)
   source "$CONDA_BASE/etc/profile.d/conda.sh"
 
-  # Check if environment exists
-  if conda info --envs | grep -q "$ENV_NAME"; then
+  # Check if environment exists (avoid pipe to prevent BrokenPipeError)
+  ENVS_OUTPUT=$(conda env list 2>/dev/null || true)
+  if echo "$ENVS_OUTPUT" | grep -q "$ENV_NAME" 2>/dev/null; then
     echo "Conda 环境 '$ENV_NAME' 已存在。"
   else
     echo "正在创建 Conda 环境 '$ENV_NAME' (Python 3.11)..."
@@ -130,8 +134,8 @@ else
   conda activate "$ENV_NAME"
 fi
 
-echo "Python 版本: $(python --version)"
-echo "Pip 版本: $(pip --version)"
+echo "Python 版本: $(python --version 2>&1)"
+echo "Pip 版本: $(pip --version 2>&1)" || true
 
 # 1.1 Install Python Dependencies
 install_python_deps() {
@@ -151,7 +155,8 @@ install_python_deps() {
 
     # 简单检查环境是否完整 (检查是否能 import 关键包)
     local ENV_OK=false
-    if pip list | grep -q "requests"; then
+    PIP_LIST_OUTPUT=$(pip list 2>/dev/null || true)
+    if echo "$PIP_LIST_OUTPUT" | grep -q "requests" 2>/dev/null; then
         ENV_OK=true
     fi
 
