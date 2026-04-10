@@ -33,7 +33,12 @@ from ...interface import (
 )
 from ...config import VolumeMount
 from sagents.utils.logger import logger
-from sagents.utils.common_utils import get_system_python_path, resolve_python_venv_dir, file_lock
+from sagents.utils.common_utils import (
+    get_system_python_path,
+    resolve_python_venv_dir,
+    resolve_sandbox_runtime_dir,
+    file_lock,
+)
 
 
 class LocalSandboxProvider(ISandboxHandle):
@@ -93,6 +98,9 @@ class LocalSandboxProvider(ISandboxHandle):
 
             # 设置 venv 目录（desktop 可切换为共享 venv）
             self._venv_dir = resolve_python_venv_dir(self._sandbox_agent_workspace)
+            sandbox_runtime_dir = resolve_sandbox_runtime_dir(self._sandbox_agent_workspace)
+            if sandbox_runtime_dir:
+                os.makedirs(sandbox_runtime_dir, exist_ok=True)
 
             # 初始化隔离层（如果需要）
             if self._linux_isolation_mode != "subprocess" or self._macos_isolation_mode != "subprocess":
@@ -110,6 +118,7 @@ class LocalSandboxProvider(ISandboxHandle):
                 self._isolation = SeatbeltIsolation(
                     venv_dir=self._venv_dir,
                     sandbox_agent_workspace=self._sandbox_agent_workspace,
+                    sandbox_runtime_dir=resolve_sandbox_runtime_dir(self._sandbox_agent_workspace),
                     volume_mounts=self._volume_mounts,
                     limits={"cpu_time": self._cpu_time_limit, "memory": self._memory_limit_mb * 1024 * 1024},
                 )
@@ -118,6 +127,7 @@ class LocalSandboxProvider(ISandboxHandle):
                 self._isolation = BwrapIsolation(
                     venv_dir=self._venv_dir,
                     sandbox_agent_workspace=self._sandbox_agent_workspace,
+                    sandbox_runtime_dir=resolve_sandbox_runtime_dir(self._sandbox_agent_workspace),
                     volume_mounts=self._volume_mounts,
                     limits={"cpu_time": self._cpu_time_limit, "memory": self._memory_limit_mb * 1024 * 1024},
                 )

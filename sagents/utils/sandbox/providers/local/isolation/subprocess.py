@@ -11,6 +11,7 @@ import platform
 from typing import Dict, Any, Optional, List
 from sagents.utils.logger import logger
 from sagents.utils.sandbox.config import VolumeMount
+from sagents.utils.common_utils import resolve_sandbox_runtime_dir
 
 
 # Launcher 脚本
@@ -249,9 +250,17 @@ if __name__ == "__main__":
 class SubprocessIsolation:
     """直接执行模式，无文件系统隔离"""
     
-    def __init__(self, venv_dir: str, sandbox_agent_workspace: str, volume_mounts: Optional[List[VolumeMount]] = None, limits: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        venv_dir: str,
+        sandbox_agent_workspace: str,
+        sandbox_runtime_dir: Optional[str] = None,
+        volume_mounts: Optional[List[VolumeMount]] = None,
+        limits: Optional[Dict[str, Any]] = None,
+    ):
         self.venv_dir = venv_dir
         self.sandbox_agent_workspace = sandbox_agent_workspace
+        self.sandbox_runtime_dir = sandbox_runtime_dir or resolve_sandbox_runtime_dir(sandbox_agent_workspace) or os.path.join(sandbox_agent_workspace, ".sandbox")
         self.volume_mounts = volume_mounts or []
         self.limits = limits or {}
         
@@ -275,7 +284,8 @@ class SubprocessIsolation:
         
         # 创建临时文件
         run_id = str(uuid.uuid4())
-        sandbox_dir = os.path.join(self.sandbox_agent_workspace, ".sandbox")
+        sandbox_dir = self.sandbox_runtime_dir
+        os.makedirs(sandbox_dir, exist_ok=True)
         input_pkl = os.path.join(sandbox_dir, f"input_{run_id}.pkl")
         output_pkl = os.path.join(sandbox_dir, f"output_{run_id}.pkl")
         
@@ -307,7 +317,7 @@ class SubprocessIsolation:
         env["PATH"] = f"{venv_bin}{os.pathsep}{current_path}"
         
         # 设置 PYTHONPATH
-        pylibs_dir = os.path.join(self.sandbox_agent_workspace, ".sandbox", ".pylibs")
+        pylibs_dir = os.path.join(sandbox_dir, ".pylibs")
         env["PIP_TARGET"] = pylibs_dir
         current_pythonpath = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = f"{pylibs_dir}{os.pathsep}{self.sandbox_agent_workspace}{os.pathsep}{current_pythonpath}"
