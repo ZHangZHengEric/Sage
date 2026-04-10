@@ -7,9 +7,11 @@ from pathlib import Path
 from loguru import logger
 
 from .bootstrap import (
+    close_observability,
     close_skill_manager,
     close_tool_manager,
     copy_wiki_docs,
+    initialize_observability,
     initialize_db_connection,
     initialize_im_service,
     initialize_skill_manager,
@@ -41,6 +43,7 @@ async def initialize_system():
     logger.info("sage-desktop：开始初始化")
     _setup_memory_root_path()
     _start_host_watchdog()
+    await initialize_observability()
     await initialize_db_connection()
     await initialize_tool_manager()
     global _browser_capability_coordinator
@@ -215,6 +218,7 @@ async def cleanup_system():
     if _browser_capability_coordinator:
         await _browser_capability_coordinator.stop()
         _browser_capability_coordinator = None
+    await close_observability()
     # 关闭第三方客户端
     await shutdown_clients()
     try:

@@ -1076,6 +1076,7 @@ export default {
   'history.exportMarkdown': '导出为 Markdown',
   'history.exportHTML': '导出为 HTML',
   'history.copySessionId': '点击复制',
+  'history.trace': '链路追踪',
   'history.sessionIdCopied': 'session_id已复制',
   'history.copyFailed': '复制失败',
   'history.loadListFailed': '加载对话列表失败',

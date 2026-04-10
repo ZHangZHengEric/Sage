@@ -489,9 +489,31 @@ class Session:
                     )
                 ]
         finally:
+            session_context = self.session_context
+            if self.observability_manager and session_context:
+                try:
+                    timing_summary = session_context._build_execution_timing_summary()
+                    for item in timing_summary.get("message_timings", []):
+                        message_id = item.get("message_id")
+                        if not message_id:
+                            continue
+                        role = item.get("role")
+                        if role not in {"assistant", "tool"}:
+                            continue
+                        self.observability_manager.on_message_end(
+                            session_id=session_id,
+                            message_id=message_id,
+                            role=role,
+                            message_type=item.get("message_type"),
+                            tool_call_id=item.get("tool_call_id"),
+                            end_ts=item.get("end_ts"),
+                            duration_ms=item.get("duration_ms"),
+                        )
+                except Exception as e:
+                    logger.debug(f"SAgent: 发送 message_end 观测事件失败: {e}")
+
             if self.observability_manager:
                 self.observability_manager.on_chain_end(output_data={"status": "finished"}, session_id=session_id)
-            session_context = self.session_context
             self._cache_session_workspace(session_id, session_context)
             
             if session_context:

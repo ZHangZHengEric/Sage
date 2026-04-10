@@ -11,6 +11,7 @@ import sys
 import os
 import asyncio
 import threading
+import subprocess
 from typing import Dict, Any, Optional, Callable, List
 
 from sagents.utils.logger import logger
@@ -179,6 +180,7 @@ class Sandbox:
 
                     logger.info(f"使用 Python 解释器创建 venv: {system_python}")
                     venv.create(self.venv_dir, with_pip=True, executable=system_python)
+                    self._ensure_uv_in_venv(self.venv_dir)
                     logger.info(f"虚拟环境创建完成: {self.venv_dir}")
             except Exception as e:
                 logger.error(f"创建虚拟环境失败: {self.venv_dir}, 错误: {e}")
@@ -187,6 +189,31 @@ class Sandbox:
         thread = threading.Thread(target=create_venv_in_background, daemon=True)
         thread.start()
         logger.info(f"虚拟环境创建任务已启动（后台）: {self.venv_dir}")
+
+    def _ensure_uv_in_venv(self, venv_dir: str):
+        """在 venv 内预装 uv（失败不阻塞）。"""
+        if not venv_dir:
+            return
+        venv_python = os.path.join(venv_dir, "Scripts", "python.exe") if sys.platform == "win32" else os.path.join(venv_dir, "bin", "python")
+        if not os.path.exists(venv_python):
+            return
+
+        install_cmd = [
+            venv_python, "-m", "pip", "install", "-U", "uv",
+            "--index-url", "https://mirrors.aliyun.com/pypi/simple/",
+            "--trusted-host", "mirrors.aliyun.com",
+        ]
+        result = subprocess.run(install_cmd, capture_output=True, text=True, timeout=180)
+        if result.returncode == 0:
+            logger.info(f"[Sandbox] uv 已安装到 venv: {venv_dir}")
+            return
+
+        fallback_cmd = [venv_python, "-m", "pip", "install", "-U", "uv"]
+        fallback_result = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=180)
+        if fallback_result.returncode == 0:
+            logger.info(f"[Sandbox] uv 已安装到 venv（默认源）: {venv_dir}")
+        else:
+            logger.warning(f"[Sandbox] 预装 uv 失败，不影响运行: {fallback_result.stderr}")
 
     def _init_isolation(self):
         from .isolation import SubprocessIsolation, SeatbeltIsolation, BwrapIsolation
