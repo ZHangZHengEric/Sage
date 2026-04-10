@@ -217,6 +217,36 @@ class LocalSandboxProvider(ISandboxHandle):
             # 确保 Python 解释器有执行权限
             self._ensure_python_executable()
 
+            # 尝试在 venv 内预装 uv（失败不阻塞）
+            self._ensure_uv_in_venv()
+
+    def _ensure_uv_in_venv(self):
+        """在 venv 中安装 uv，便于后续按需使用。"""
+        import subprocess
+
+        venv_python = self._get_venv_python()
+        if not venv_python:
+            logger.warning("[LocalSandboxProvider] 未找到 venv python，跳过 uv 预装")
+            return
+
+        install_cmd = [
+            venv_python, "-m", "pip", "install", "-U", "uv",
+            "--index-url", "https://mirrors.aliyun.com/pypi/simple/",
+            "--trusted-host", "mirrors.aliyun.com",
+        ]
+        result = subprocess.run(install_cmd, capture_output=True, text=True, timeout=180)
+        if result.returncode == 0:
+            logger.info("[LocalSandboxProvider] uv 已安装到 venv")
+            return
+
+        # 镜像失败时回退到默认源
+        fallback_cmd = [venv_python, "-m", "pip", "install", "-U", "uv"]
+        fallback_result = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=180)
+        if fallback_result.returncode == 0:
+            logger.info("[LocalSandboxProvider] uv 已安装到 venv（默认源）")
+        else:
+            logger.warning(f"[LocalSandboxProvider] 预装 uv 失败，不影响后续执行: {fallback_result.stderr}")
+
     @property
     def sandbox_type(self) -> SandboxType:
         return SandboxType.LOCAL

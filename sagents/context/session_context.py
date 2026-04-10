@@ -1,6 +1,5 @@
 # 负责管理会话的上下文，以及过程中产生的日志以及状态记录。
 import asyncio
-from math import log
 import time
 import threading
 from typing import Dict, Any, Optional, List, Union
@@ -129,6 +128,7 @@ class SessionContext:
         self.llm_requests_logs: List[Dict[str, Any]] = []
         self.thread_id = threading.get_ident()
         self.start_time = time.time()
+        self._perf_origin = time.perf_counter()
         self.end_time = None
         self.status = SessionStatus.IDLE
         self.message_manager = MessageManager(context_budget_config=context_budget_config)
@@ -139,6 +139,136 @@ class SessionContext:
         self.custom_sub_agents: List[Dict[str, Any]] = []
         self.orchestrator: Optional[Any] = None
         self.child_session_ids: List[str] = []
+        self.execution_timeline_events: List[Dict[str, Any]] = []
+        self._message_timing: Dict[str, Dict[str, Any]] = {}
+        self.record_timing_event(
+            "session_start",
+            status=self.status.value,
+            session_id=self.session_id,
+        )
+
+    def _now_perf_ms(self) -> float:
+        return (time.perf_counter() - self._perf_origin) * 1000.0
+
+    def record_timing_event(self, event_type: str, **fields: Any) -> None:
+        try:
+            event = {
+                "event_type": event_type,
+                "timestamp": time.time(),
+                "perf_ms": self._now_perf_ms(),
+            }
+            event.update(fields)
+            self.execution_timeline_events.append(make_serializable(event))
+        except Exception as e:
+            logger.debug(f"SessionContext: 记录 timing 事件失败 {event_type}: {e}")
+
+    def _record_message_timing(self, message: Union[MessageChunk, Dict[str, Any]]) -> None:
+        try:
+            if isinstance(message, MessageChunk):
+                msg = message.to_dict()
+            elif isinstance(message, dict):
+                msg = message
+            else:
+                return
+
+            message_id = str(msg.get("message_id") or "").strip()
+            if not message_id:
+                return
+
+            now_ts = time.time()
+            now_perf_ms = self._now_perf_ms()
+            role = msg.get("role")
+            message_type = msg.get("message_type") or msg.get("type")
+
+            stat = self._message_timing.get(message_id)
+            if not stat:
+                stat = {
+                    "message_id": message_id,
+                    "role": role,
+                    "message_type": message_type,
+                    "tool_call_id": msg.get("tool_call_id"),
+                    "start_ts": now_ts,
+                    "start_perf_ms": now_perf_ms,
+                    "end_ts": now_ts,
+                    "end_perf_ms": now_perf_ms,
+                }
+                self._message_timing[message_id] = stat
+                self.record_timing_event(
+                    "message_start",
+                    message_id=message_id,
+                    role=role,
+                    message_type=message_type,
+                )
+            else:
+                stat["end_ts"] = now_ts
+                stat["end_perf_ms"] = now_perf_ms
+                if not stat.get("role") and role:
+                    stat["role"] = role
+                if not stat.get("message_type") and message_type:
+                    stat["message_type"] = message_type
+
+        except Exception as e:
+            logger.debug(f"SessionContext: 记录 message 时序失败: {e}")
+
+    def _build_execution_timing_summary(self) -> Dict[str, Any]:
+        messages = list(self._message_timing.values())
+        messages.sort(key=lambda item: float(item.get("start_ts") or 0.0))
+
+        message_timings: List[Dict[str, Any]] = []
+        for item in messages:
+            start_ts = float(item.get("start_ts") or 0.0)
+            end_ts = float(item.get("end_ts") or start_ts)
+            message_timings.append(
+                {
+                    "message_id": item.get("message_id"),
+                    "role": item.get("role"),
+                    "message_type": item.get("message_type"),
+                    "tool_call_id": item.get("tool_call_id"),
+                    "start_ts": start_ts,
+                    "end_ts": end_ts,
+                    "duration_ms": max(0.0, (end_ts - start_ts) * 1000.0),
+                    "start_perf_ms": float(item.get("start_perf_ms") or 0.0),
+                    "end_perf_ms": float(item.get("end_perf_ms") or 0.0),
+                }
+            )
+
+        message_intervals: List[Dict[str, Any]] = []
+        for i in range(1, len(message_timings)):
+            prev_item = message_timings[i - 1]
+            cur_item = message_timings[i]
+            gap_start_to_start_ms = max(
+                0.0,
+                (float(cur_item["start_ts"]) - float(prev_item["start_ts"])) * 1000.0,
+            )
+            gap_prev_end_to_cur_start_ms = max(
+                0.0,
+                (float(cur_item["start_ts"]) - float(prev_item["end_ts"])) * 1000.0,
+            )
+            message_intervals.append(
+                {
+                    "from_message_id": prev_item["message_id"],
+                    "to_message_id": cur_item["message_id"],
+                    "start_to_start_gap_ms": gap_start_to_start_ms,
+                    "prev_end_to_cur_start_gap_ms": gap_prev_end_to_cur_start_ms,
+                }
+            )
+
+        flow_node_timings = [
+            evt
+            for evt in self.execution_timeline_events
+            if evt.get("event_type") == "flow_node_end"
+        ]
+
+        return {
+            "session_id": self.session_id,
+            "status": self.status.value if hasattr(self.status, "value") else str(self.status),
+            "generated_at": time.time(),
+            "total_timeline_events": len(self.execution_timeline_events),
+            "message_count": len(message_timings),
+            "message_timings": message_timings,
+            "message_intervals": message_intervals,
+            "flow_node_timings": flow_node_timings,
+        }
 
     def add_messages(self, messages: Union[MessageChunk, List[MessageChunk], List[Dict[str, Any]]]) -> None:
         """
@@ -164,6 +294,8 @@ class SessionContext:
                 valid_messages.append(msg)
 
         if valid_messages:
+            for msg in valid_messages:
+                self._record_message_timing(msg)
             self.message_manager.add_messages(valid_messages)
 
     def get_messages(self) -> List[MessageChunk]:
@@ -712,6 +844,11 @@ class SessionContext:
         """
         old_status = self.status
         self.status = status
+        self.record_timing_event(
+            "session_status_changed",
+            old_status=old_status.value if hasattr(old_status, "value") else str(old_status),
+            new_status=status.value if hasattr(status, "value") else str(status),
+        )
         logger.debug(f"SessionContext: Session {self.session_id} status changed from {old_status.value} to {status.value}")
 
         # 级联传播到子会话（当状态为 INTERRUPTED 或 ERROR 时）
@@ -976,6 +1113,11 @@ class SessionContext:
                 json.dump(tools_usage, f, ensure_ascii=False, indent=4)
         except Exception as e:
             logger.error(f"SessionContext: Failed to save tools_usage.json: {e}")
+
+        self.record_timing_event(
+            "session_end",
+            status=self.status.value if hasattr(self.status, "value") else str(self.status),
+        )
 
     # def _serialize_messages_for_history_memory(self, messages: List[MessageChunk]) -> str:
     #     """序列化消息列表为系统上下文格式的字符串（私有方法）"""

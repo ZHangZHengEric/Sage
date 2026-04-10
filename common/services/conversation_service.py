@@ -4,6 +4,7 @@ Conversation shared service-layer entry points for server and desktop routers.
 
 import json
 import os
+import hashlib
 from collections import Counter
 from datetime import timedelta
 from pathlib import Path
@@ -47,6 +48,25 @@ def _conversation_error_kwargs(
     if _is_desktop_mode():
         kwargs["status_code"] = 500
     return kwargs
+
+
+def _build_session_trace_id(session_id: str) -> str:
+    return hashlib.md5(session_id.encode("utf-8")).hexdigest()
+
+
+def _build_session_trace_url(session_id: str) -> Optional[str]:
+    cfg = _get_cfg()
+    if not cfg.trace_jaeger_endpoint:
+        return None
+
+    trace_id = _build_session_trace_id(session_id)
+    if _is_desktop_mode():
+        base = (cfg.trace_jaeger_public_url or "").rstrip("/")
+        if not base:
+            return None
+        return f"{base}/trace/{trace_id}"
+
+    return f"/jaeger/trace/{trace_id}"
 
 
 async def interrupt_session(
@@ -135,6 +155,8 @@ def build_conversation_list_result(
     conversation_items: List[ConversationInfo] = []
     for conv in conversations:
         message_count = conv.get_message_count()
+        trace_id = _build_session_trace_id(conv.session_id)
+        trace_url = _build_session_trace_url(conv.session_id)
         conversation_items.append(
             ConversationInfo(
                 session_id=conv.session_id,
@@ -147,6 +169,8 @@ def build_conversation_list_result(
                 agent_count=message_count.get("agent_count", 0),
                 created_at=conv.created_at.isoformat() if conv.created_at else "",
                 updated_at=conv.updated_at.isoformat() if conv.updated_at else "",
+                trace_id=trace_id,
+                trace_url=trace_url,
             )
         )
 

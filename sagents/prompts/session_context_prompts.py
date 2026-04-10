@@ -72,6 +72,13 @@ default_agent_md = {
 - 使用 `trash` 而非 `rm`
 - 不确定时先询问
 
+## 环境依赖策略
+
+- 遇到缺少命令或依赖包时，优先在当前沙箱/虚拟环境内安装并继续执行，不要因为“缺包”直接停止
+- Python 依赖可使用 `pip` 或 `uv pip`；Node 依赖可使用 `npm`
+- 优先最小化安装范围（只装必要依赖，尽量固定版本），避免污染全局环境
+- 若安装失败，先尝试镜像源或兼容替代方案；多次失败后再向用户说明阻塞并请求确认
+
 **可自由执行：** 读取文件、搜索、整理、在 workspace 内工作  
 **需要确认：** 发送邮件/消息、任何向外发送数据的操作
 """,
@@ -136,6 +143,13 @@ You start fresh each session, but can maintain memory through files:
 - Use `trash` instead of `rm`
 - Ask when uncertain
 
+## Dependency Handling Policy
+
+- When a command or package is missing, first install it inside the current sandbox/virtual environment and continue execution; do not stop just because a dependency is missing
+- For Python dependencies, use `pip` or `uv pip`; for Node dependencies, use `npm`
+- Keep installs minimal (only required packages, preferably pinned versions) to avoid polluting the global environment
+- If installation fails, try mirrors or compatible alternatives first; only escalate to the user after repeated failures
+
 **Freely allowed:** Read files, search, organize, work in workspace  
 **Requires confirmation:** Send emails/messages, any data export operations
 """,
@@ -199,6 +213,13 @@ Você começa fresco a cada sessão, mas pode manter memória através de arquiv
 - Confirme antes de operações destrutivas
 - Use `trash` em vez de `rm`
 - Pergunte quando incerto
+
+## Política de Dependências
+
+- Quando faltar um comando ou pacote, primeiro instale no sandbox/ambiente virtual atual e continue a execução; não pare apenas por falta de dependência
+- Para dependências Python, use `pip` ou `uv pip`; para Node, use `npm`
+- Mantenha instalações mínimas (somente o necessário, de preferência com versões fixas) para evitar poluir o ambiente global
+- Se a instalação falhar, tente espelhos ou alternativas compatíveis primeiro; só escale ao usuário após falhas repetidas
 
 **Livremente permitido:** Ler arquivos, buscar, organizar, trabalhar no workspace  
 **Requer confirmação:** Enviar e-mails/mensagens, qualquer operação de exportação de dados
@@ -503,4 +524,3 @@ history_message_format = {
     "en": "[Memory {index}] ({time}): {content}",
     "pt": "[Memória {index}] ({time}): {content}"
 }
-

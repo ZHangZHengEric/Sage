@@ -1022,6 +1022,7 @@ export default {
   'history.exportMarkdown': 'Markdown',
   'history.exportHTML': 'HTML',
   'history.copySessionId': 'Copy',
+  'history.trace': 'Trace',
   'history.sessionIdCopied': 'session_id copied',
   'history.copyFailed': 'Copy failed',
   'history.loadListFailed': 'Failed to load conversations',
