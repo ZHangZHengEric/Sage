@@ -23,6 +23,9 @@ class FileDocument:
     size: int           # File size
     hash: str           # Content hash
     doc_id: int         # Document ID (index in BM25)
+    chunk_index: int = 0
+    line_start: int = 1
+    line_end: int = 1
 
 
 @dataclass
@@ -75,6 +78,9 @@ class MemoryIndex:
         '.rb', '.php', '.pl',
     ]
     DEFAULT_FILE_PROCESS_CONCURRENCY = 8
+    INDEX_SCHEMA_VERSION = 2
+    DEFAULT_CHUNK_SIZE = 1200
+    DEFAULT_CHUNK_OVERLAP = 200
 
     def __init__(self, sandbox, workspace_path: str, index_path: str, blacklist: Optional[Set[str]] = None):
         """
@@ -96,7 +102,7 @@ class MemoryIndex:
         # In-memory data
         self.bm25 = None
         self.documents: Dict[int, FileDocument] = {}
-        self.path_to_id: Dict[str, int] = {}
+        self.path_to_doc_ids: Dict[str, List[int]] = {}
         self._next_doc_id = 0
 
         # Directory mtime cache for incremental updates
@@ -126,9 +132,19 @@ class MemoryIndex:
                 self.bm25 = data.get('bm25')
                 self.documents = data.get('documents', {})
                 self._dir_mtime_cache = data.get('dir_mtime_cache', {})
+                schema_version = data.get('schema_version', 1)
+                if schema_version != self.INDEX_SCHEMA_VERSION:
+                    logger.info(
+                        f"MemoryIndex: Index schema {schema_version} != {self.INDEX_SCHEMA_VERSION}, clearing cached index for rebuild"
+                    )
+                    self.bm25 = None
+                    self.documents = {}
+                    self.path_to_doc_ids = {}
+                    self._next_doc_id = 0
+                    self._dir_mtime_cache = {}
+                    return False
 
-                # Rebuild path -> id mapping
-                self.path_to_id = {doc.path: doc.doc_id for doc in self.documents.values()}
+                self.path_to_doc_ids = data.get('path_to_doc_ids') or self._rebuild_path_to_doc_ids()
 
                 # Calculate next doc_id
                 if self.documents:
@@ -147,11 +163,18 @@ class MemoryIndex:
             logger.warning(f"MemoryIndex: Failed to load index: {e}")
             self.bm25 = None
             self.documents = {}
-            self.path_to_id = {}
+            self.path_to_doc_ids = {}
             self._next_doc_id = 0
             self._dir_mtime_cache = {}
 
         return False
+
+    def _rebuild_path_to_doc_ids(self) -> Dict[str, List[int]]:
+        path_to_doc_ids: Dict[str, List[int]] = {}
+        for doc_id in sorted(self.documents.keys()):
+            doc = self.documents[doc_id]
+            path_to_doc_ids.setdefault(doc.path, []).append(doc_id)
+        return path_to_doc_ids
 
     def _save_index(self) -> bool:
         """Save index to single pkl file"""
@@ -159,8 +182,10 @@ class MemoryIndex:
 
         try:
             data = {
+                'schema_version': self.INDEX_SCHEMA_VERSION,
                 'bm25': self.bm25,
                 'documents': self.documents,
+                'path_to_doc_ids': self.path_to_doc_ids,
                 'dir_mtime_cache': self._dir_mtime_cache,
                 'document_count': len(self.documents)
             }
@@ -235,6 +260,59 @@ class MemoryIndex:
         text = text.lower()
         tokens = re.findall(r'[a-z0-9_]+|[\u4e00-\u9fff]', text)
         return tokens
+
+    def _split_into_chunks(self, content: str) -> List[Dict[str, Any]]:
+        if not content:
+            return []
+
+        lines = content.splitlines()
+        if not lines:
+            return [{
+                "content": content,
+                "line_start": 1,
+                "line_end": 1,
+            }]
+
+        chunks: List[Dict[str, Any]] = []
+        current_lines: List[str] = []
+        current_line_start = 1
+        current_chars = 0
+
+        for index, line in enumerate(lines, start=1):
+            line_len = len(line) + 1
+            if current_lines and current_chars + line_len > self.DEFAULT_CHUNK_SIZE:
+                chunks.append({
+                    "content": "\n".join(current_lines),
+                    "line_start": current_line_start,
+                    "line_end": current_line_start + len(current_lines) - 1,
+                })
+
+                overlap_lines: List[str] = []
+                overlap_chars = 0
+                for existing_line in reversed(current_lines):
+                    existing_len = len(existing_line) + 1
+                    if overlap_lines and overlap_chars + existing_len > self.DEFAULT_CHUNK_OVERLAP:
+                        break
+                    overlap_lines.insert(0, existing_line)
+                    overlap_chars += existing_len
+
+                current_lines = overlap_lines[:]
+                current_chars = sum(len(existing_line) + 1 for existing_line in current_lines)
+                current_line_start = index - len(current_lines)
+
+            if not current_lines:
+                current_line_start = index
+            current_lines.append(line)
+            current_chars += line_len
+
+        if current_lines:
+            chunks.append({
+                "content": "\n".join(current_lines),
+                "line_start": current_line_start,
+                "line_end": current_line_start + len(current_lines) - 1,
+            })
+
+        return chunks
 
     def _build_bm25(self) -> None:
         """Build BM25 index"""
@@ -321,7 +399,7 @@ class MemoryIndex:
             # But we still need to collect files from this directory from existing index
             # logger.debug(f"MemoryIndex: Skipping unchanged directory: {dir_path}")
             # Collect files from existing index that belong to this directory
-            for filepath in self.path_to_id.keys():
+            for filepath in self.path_to_doc_ids.keys():
                 if filepath.startswith(dir_path + '/') or filepath == dir_path:
                     current_files.add(filepath)
             return
@@ -371,10 +449,10 @@ class MemoryIndex:
             size = entry.size or 0
 
             try:
-                if filepath in self.path_to_id:
+                if filepath in self.path_to_doc_ids:
                     # File exists in index, check if modified
-                    doc_id = self.path_to_id[filepath]
-                    old_doc = self.documents[doc_id]
+                    existing_doc_ids = self.path_to_doc_ids[filepath]
+                    old_doc = self.documents[existing_doc_ids[0]]
 
                     # Quick check: compare mtime and size
                     if old_doc.mtime == mtime and old_doc.size == size:
@@ -383,37 +461,51 @@ class MemoryIndex:
 
                     # mtime or size changed, treat as content changed and refresh directly.
                     content = await self._read_file_content(filepath)
-                    self.documents[doc_id] = FileDocument(
-                        path=filepath,
-                        content=content,
-                        mtime=mtime,
-                        size=size,
-                        hash="",
-                        doc_id=doc_id
-                    )
+                    self._replace_file_documents(filepath, content, mtime, size)
                     stats["updated"] += 1
                     logger.debug(f"MemoryIndex: Updated file {filepath}")
                 else:
                     # New file, add to index
                     content = await self._read_file_content(filepath)
-                    doc_id = self._next_doc_id
-                    self._next_doc_id += 1
-
-                    self.documents[doc_id] = FileDocument(
-                        path=filepath,
-                        content=content,
-                        mtime=mtime,
-                        size=size,
-                        hash="",
-                        doc_id=doc_id
-                    )
-                    self.path_to_id[filepath] = doc_id
+                    self._replace_file_documents(filepath, content, mtime, size)
                     stats["added"] += 1
                     logger.debug(f"MemoryIndex: Added file {filepath}")
 
             except Exception as e:
                 logger.warning(f"MemoryIndex: Failed to process file {filepath}: {e}")
                 stats["errors"] += 1
+
+    def _replace_file_documents(self, filepath: str, content: str, mtime: float, size: int) -> None:
+        existing_doc_ids = self.path_to_doc_ids.pop(filepath, [])
+        for doc_id in existing_doc_ids:
+            self.documents.pop(doc_id, None)
+
+        chunks = self._split_into_chunks(content)
+        if not chunks:
+            chunks = [{
+                "content": "",
+                "line_start": 1,
+                "line_end": 1,
+            }]
+
+        new_doc_ids: List[int] = []
+        for chunk_index, chunk in enumerate(chunks):
+            doc_id = self._next_doc_id
+            self._next_doc_id += 1
+            self.documents[doc_id] = FileDocument(
+                path=filepath,
+                content=chunk["content"],
+                mtime=mtime,
+                size=size,
+                hash="",
+                doc_id=doc_id,
+                chunk_index=chunk_index,
+                line_start=chunk["line_start"],
+                line_end=chunk["line_end"],
+            )
+            new_doc_ids.append(doc_id)
+
+        self.path_to_doc_ids[filepath] = new_doc_ids
 
     async def update_index(self, file_extensions: Optional[List[str]] = None, force: bool = False) -> Dict[str, Any]:
         """
@@ -462,17 +554,16 @@ class MemoryIndex:
             current_files
         )
         
-        # logger.debug(f"MemoryIndex: Scan complete. Found {len(current_files)} current files, {len(self.path_to_id)} indexed files")
+        # logger.debug(f"MemoryIndex: Scan complete. Found {len(current_files)} current files, {len(self.path_to_doc_ids)} indexed files")
 
         # Check for deleted files
-        indexed_paths = set(self.path_to_id.keys())
+        indexed_paths = set(self.path_to_doc_ids.keys())
         deleted_paths = indexed_paths - current_files
 
         for filepath in deleted_paths:
             try:
-                doc_id = self.path_to_id[filepath]
-                del self.documents[doc_id]
-                del self.path_to_id[filepath]
+                for doc_id in self.path_to_doc_ids.pop(filepath, []):
+                    self.documents.pop(doc_id, None)
                 stats["removed"] += 1
                 logger.debug(f"MemoryIndex: Removed file {filepath}")
             except Exception as e:
@@ -597,8 +688,9 @@ class MemoryIndex:
 
                 # Build preview from snippets or fallback to first 500 chars
                 if snippets:
+                    line_base = getattr(doc, "line_start", 1) - 1
                     preview = "\n\n".join([
-                        f"[Line {s['line_number']}] {s['snippet']}"
+                        f"[Line {line_base + s['line_number']}] {s['snippet']}"
                         for s in snippets
                     ])
                 else:
@@ -610,7 +702,10 @@ class MemoryIndex:
                     path=doc.path,
                     score=float(score),
                     content=preview,
-                    line_number=snippets[0]["line_number"] if snippets else 0
+                    line_number=(
+                        getattr(doc, "line_start", 1) + snippets[0]["line_number"] - 1
+                        if snippets else getattr(doc, "line_start", 1)
+                    )
                 ))
 
             elapsed = time.time() - start_time
@@ -631,7 +726,7 @@ class MemoryIndex:
 
         self.bm25 = None
         self.documents = {}
-        self.path_to_id = {}
+        self.path_to_doc_ids = {}
         self._next_doc_id = 0
         self._dir_mtime_cache = {}
 
