@@ -15,6 +15,7 @@ from typing import Dict, Any, Optional, Callable, List
 
 from sagents.utils.logger import logger
 from sagents.utils.sandbox.config import VolumeMount
+from sagents.utils.common_utils import get_system_python_path, resolve_python_venv_dir, file_lock
 
 
 class SandboxError(Exception):
@@ -128,10 +129,14 @@ class Sandbox:
             self.isolation = None
             return
 
-        # 在 sandbox_agent_workspace 下创建 .sandbox 目录
-        self.sandbox_dir = os.path.join(self.sandbox_agent_workspace, ".sandbox")
-        self.venv_dir = os.path.join(self.sandbox_dir, "venv")
-        os.makedirs(self.sandbox_dir, exist_ok=True)
+        # 在 desktop 共享模式下使用统一 venv，否则仍使用 workspace 本地 venv
+        self.venv_dir = resolve_python_venv_dir(self.sandbox_agent_workspace)
+        self.sandbox_dir = (
+            os.path.join(self.sandbox_agent_workspace, ".sandbox")
+            if self.sandbox_agent_workspace else None
+        )
+        if self.sandbox_dir:
+            os.makedirs(self.sandbox_dir, exist_ok=True)
 
         # 在后台异步创建 venv
         self._ensure_venv_async()
@@ -151,26 +156,30 @@ class Sandbox:
 
     def _ensure_venv_async(self):
         """在后台异步创建虚拟环境，不阻塞初始化"""
-        if os.path.exists(self.venv_dir):
+        if not self.venv_dir or os.path.exists(self.venv_dir):
             return  # 已存在，无需创建
 
         def create_venv_in_background():
             try:
                 import venv
-                from sagents.utils.common_utils import get_system_python_path
 
-                logger.info(f"后台创建虚拟环境: {self.venv_dir}")
-                os.makedirs(os.path.dirname(self.venv_dir), exist_ok=True)
+                lock_path = os.path.join(os.path.dirname(self.venv_dir), ".venv.lock")
+                with file_lock(lock_path):
+                    if os.path.exists(self.venv_dir):
+                        return
 
-                # 获取正确的 Python 解释器路径（处理 PyInstaller 打包环境）
-                system_python = get_system_python_path()
-                if not system_python:
-                    logger.error("无法找到系统 Python 解释器")
-                    return
+                    logger.info(f"后台创建虚拟环境: {self.venv_dir}")
+                    os.makedirs(os.path.dirname(self.venv_dir), exist_ok=True)
 
-                logger.info(f"使用 Python 解释器创建 venv: {system_python}")
-                venv.create(self.venv_dir, with_pip=True, executable=system_python)
-                logger.info(f"虚拟环境创建完成: {self.venv_dir}")
+                    # 获取正确的 Python 解释器路径（处理 PyInstaller 打包环境）
+                    system_python = get_system_python_path()
+                    if not system_python:
+                        logger.error("无法找到系统 Python 解释器")
+                        return
+
+                    logger.info(f"使用 Python 解释器创建 venv: {system_python}")
+                    venv.create(self.venv_dir, with_pip=True, executable=system_python)
+                    logger.info(f"虚拟环境创建完成: {self.venv_dir}")
             except Exception as e:
                 logger.error(f"创建虚拟环境失败: {self.venv_dir}, 错误: {e}")
 
@@ -221,9 +230,6 @@ class Sandbox:
 
     def get_venv_python(self) -> Optional[str]:
         """获取沙箱 venv 的 Python 路径"""
-        import sys
-        from sagents.utils.common_utils import get_system_python_path
-
         if self.venv_dir:
             if sys.platform == 'win32':
                 venv_python = os.path.join(self.venv_dir, 'Scripts', 'python.exe')

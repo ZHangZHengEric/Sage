@@ -6,6 +6,7 @@
 #[cfg(target_os = "macos")]
 use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicy};
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::ffi::OsString;
 use std::path::Path;
 use std::path::PathBuf;
@@ -50,6 +51,7 @@ struct ClosePreferenceState(Mutex<Option<ClosePreference>>);
 
 const SAGE_ENV_FILE: &str = ".sage_env";
 const SAGE_NODE_MODULES_DIR: &str = ".sage_node_env";
+const SAGE_NODE_RUNTIME_SUBDIR: &str = "runtime";
 
 #[cfg(target_os = "linux")]
 fn apply_linux_webkit_env_defaults() {
@@ -71,6 +73,8 @@ const PRESET_NPX_PACKAGES: &[&str] = &[
     // Skill 依赖
     "agent-browser", // social-push, agent-browser skills
     "docx",          // docx skill - 创建 Word 文档
+    "pnpm",          // provide pnpm in shared desktop node environment
+    "yarn",          // provide yarn classic in shared desktop node environment
 ];
 
 fn get_sage_root_dir() -> PathBuf {
@@ -84,8 +88,132 @@ fn get_sage_node_modules_dir() -> PathBuf {
     get_sage_root_dir().join(SAGE_NODE_MODULES_DIR)
 }
 
+fn get_sage_node_runtime_dir() -> PathBuf {
+    get_sage_node_modules_dir().join(SAGE_NODE_RUNTIME_SUBDIR)
+}
+
 fn first_existing_path(candidates: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.exists())
+}
+
+fn resolve_node_runtime_from_dir(node_dir: &Path) -> Option<NodeRuntime> {
+    if !node_dir.exists() {
+        return None;
+    }
+
+    let node_executable = first_existing_path([
+        node_dir.join("node"),
+        node_dir.join("node.exe"),
+        node_dir.join("bin").join("node"),
+        node_dir.join("bin").join("node.exe"),
+    ])?;
+
+    let npm_cli = first_existing_path([
+        node_dir
+            .join("lib")
+            .join("node_modules")
+            .join("npm")
+            .join("bin")
+            .join("npm-cli.js"),
+        node_dir
+            .join("node_modules")
+            .join("npm")
+            .join("bin")
+            .join("npm-cli.js"),
+    ]);
+
+    let bin_dir = node_executable
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| node_dir.to_path_buf());
+
+    Some(NodeRuntime {
+        node_executable,
+        npm_cli,
+        bin_dir,
+    })
+}
+
+fn get_node_runtime_root(runtime: &NodeRuntime) -> PathBuf {
+    runtime
+        .node_executable
+        .parent()
+        .and_then(|parent| {
+            if parent.file_name().is_some_and(|name| name == "bin") {
+                parent.parent()
+            } else {
+                Some(parent)
+            }
+        })
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| runtime.bin_dir.clone())
+}
+
+fn read_optional_text(path: &Path) -> Option<String> {
+    fs::read_to_string(path).ok().map(|value| value.trim().to_string())
+}
+
+fn copy_dir_recursive(source: &Path, target: &Path) -> Result<(), String> {
+    if !source.exists() {
+        return Err(format!("source directory does not exist: {:?}", source));
+    }
+
+    fs::create_dir_all(target)
+        .map_err(|e| format!("Failed to create target directory {:?}: {}", target, e))?;
+
+    for entry in fs::read_dir(source)
+        .map_err(|e| format!("Failed to read source directory {:?}: {}", source, e))?
+    {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        let metadata = entry
+            .metadata()
+            .map_err(|e| format!("Failed to read metadata for {:?}: {}", source_path, e))?;
+
+        if metadata.is_dir() {
+            copy_dir_recursive(&source_path, &target_path)?;
+        } else if metadata.is_file() {
+            if let Some(parent) = target_path.parent() {
+                fs::create_dir_all(parent).map_err(|e| {
+                    format!("Failed to create parent directory {:?}: {}", parent, e)
+                })?;
+            }
+            fs::copy(&source_path, &target_path).map_err(|e| {
+                format!(
+                    "Failed to copy file from {:?} to {:?}: {}",
+                    source_path, target_path, e
+                )
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
+fn sync_bundled_node_runtime_to_sage_home(runtime: &NodeRuntime) -> Result<NodeRuntime, String> {
+    let source_root = get_node_runtime_root(runtime);
+    let target_root = get_sage_node_runtime_dir();
+    let source_version = read_optional_text(&source_root.join(".node-version"));
+    let target_version = read_optional_text(&target_root.join(".node-version"));
+
+    let target_ready = resolve_node_runtime_from_dir(&target_root).is_some();
+    let needs_sync = !target_ready || source_version != target_version;
+
+    if needs_sync {
+        if target_root.exists() {
+            fs::remove_dir_all(&target_root)
+                .map_err(|e| format!("Failed to clear old node runtime {:?}: {}", target_root, e))?;
+        }
+        copy_dir_recursive(&source_root, &target_root)?;
+    }
+
+    resolve_node_runtime_from_dir(&target_root).ok_or_else(|| {
+        format!(
+            "Failed to resolve synced node runtime from target directory {:?}",
+            target_root
+        )
+    })
 }
 
 fn is_valid_chrome_extension_dir(path: &Path) -> bool {
@@ -129,37 +257,7 @@ fn resolve_bundled_node_runtime(app_handle: &tauri::AppHandle) -> Option<NodeRun
                 .filter(|path| path.exists())
         })?;
 
-    let node_executable = first_existing_path([
-        node_dir.join("node"),
-        node_dir.join("node.exe"),
-        node_dir.join("bin").join("node"),
-        node_dir.join("bin").join("node.exe"),
-    ])?;
-
-    let npm_cli = first_existing_path([
-        node_dir
-            .join("lib")
-            .join("node_modules")
-            .join("npm")
-            .join("bin")
-            .join("npm-cli.js"),
-        node_dir
-            .join("node_modules")
-            .join("npm")
-            .join("bin")
-            .join("npm-cli.js"),
-    ]);
-
-    let bin_dir = node_executable
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| node_dir.clone());
-
-    Some(NodeRuntime {
-        node_executable,
-        npm_cli,
-        bin_dir,
-    })
+    resolve_node_runtime_from_dir(&node_dir)
 }
 
 fn apply_bundled_node_runtime(runtime: &NodeRuntime) -> Result<(), String> {
@@ -1209,7 +1307,26 @@ fn main() {
             println!("Set SAGE_PORT: {}", port);
 
             let bundled_node_runtime = resolve_bundled_node_runtime(&app_handle);
-            if let Some(runtime) = bundled_node_runtime.as_ref() {
+            let shared_node_runtime = bundled_node_runtime.as_ref().and_then(|runtime| {
+                match sync_bundled_node_runtime_to_sage_home(runtime) {
+                    Ok(synced_runtime) => {
+                        println!(
+                            "Using shared Sage Node runtime at {:?}",
+                            synced_runtime.node_executable
+                        );
+                        Some(synced_runtime)
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Failed to sync bundled Node runtime to ~/.sage, falling back to resource runtime: {}",
+                            e
+                        );
+                        Some(runtime.clone())
+                    }
+                }
+            });
+
+            if let Some(runtime) = shared_node_runtime.as_ref() {
                 if let Err(e) = apply_bundled_node_runtime(runtime) {
                     eprintln!("Failed to prepare bundled Node runtime: {}", e);
                 }
@@ -1221,8 +1338,8 @@ fn main() {
 
             // Initialize .sage_node_modules and set environment variable
             let app_handle_clone = app.handle().clone();
-            let node_runtime_for_init = bundled_node_runtime.clone();
-            let bundled_node_path = bundled_node_runtime
+            let node_runtime_for_init = shared_node_runtime.clone();
+            let bundled_node_path = shared_node_runtime
                 .as_ref()
                 .map(|runtime| runtime.bin_dir.to_string_lossy().to_string());
             tauri::async_runtime::spawn(async move {

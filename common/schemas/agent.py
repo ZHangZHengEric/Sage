@@ -44,6 +44,7 @@ class AgentConfigDTO(BaseModel):
     availableWorkflows: Optional[Dict[str, List[str]]] = None
     availableTools: Optional[List[str]] = None
     availableSubAgentIds: Optional[List[str]] = None
+    subAgentSelectionMode: Optional[str] = None
     availableSkills: Optional[List[str]] = None
     availableKnowledgeBases: Optional[List[str]] = None
     memoryType: Optional[str] = None
@@ -99,6 +100,8 @@ def convert_config_to_agent(
         availableTools=config.get("availableTools") or config.get("available_tools"),
         availableSubAgentIds=config.get("availableSubAgentIds")
         or config.get("available_sub_agent_ids"),
+        subAgentSelectionMode=config.get("subAgentSelectionMode")
+        or config.get("sub_agent_selection_mode"),
         availableSkills=config.get("availableSkills") or config.get("available_skills"),
         availableKnowledgeBases=config.get("availableKnowledgeBases")
         or config.get("available_knowledge_bases"),
@@ -125,6 +128,7 @@ def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
         "availableWorkflows": agent.availableWorkflows,
         "availableTools": agent.availableTools,
         "availableSubAgentIds": agent.availableSubAgentIds,
+        "subAgentSelectionMode": agent.subAgentSelectionMode,
         "availableSkills": agent.availableSkills,
         "availableKnowledgeBases": agent.availableKnowledgeBases,
         "memoryType": agent.memoryType,

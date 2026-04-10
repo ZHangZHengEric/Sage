@@ -477,7 +477,7 @@ class SessionContext:
             permission_paths.extend([str(p) for p in self.external_paths])
         paths_str = ", ".join(permission_paths)
         sandbox_root = workspace
-        common_dirs = ["data", "outputs", "temp", "logs"]
+        common_dirs = ["data", "projects", "temp", "logs"]
         for d in common_dirs:
             dir_path = os.path.join(sandbox_root, d)
             # 通过沙箱创建目录

@@ -385,6 +385,37 @@ const onKeyConfigChange = () => {
   verified.value = false
 }
 
+const buildProviderPayload = () => ({
+  name: actualProviderName.value,
+  base_url: modelForm.base_url,
+  api_keys: modelForm.api_keys_str.trim().split(/[\n,]+/).map(k => k.trim()).filter(k => k),
+  model: actualModelName.value,
+  max_tokens: DEFAULT_MAX_TOKENS,
+  temperature: DEFAULT_TEMPERATURE,
+  top_p: DEFAULT_TOP_P,
+  presence_penalty: DEFAULT_PRESENCE_PENALTY,
+  max_model_len: DEFAULT_MAX_MODEL_LEN,
+  is_default: true
+})
+
+const verifyProviderCapabilities = async () => {
+  const data = buildProviderPayload()
+  await modelProviderAPI.verifyModelProvider(data)
+
+  let supportsMultimodal = false
+  try {
+    const multimodalResult = await modelProviderAPI.verifyMultimodal(data)
+    supportsMultimodal = Boolean(multimodalResult?.supports_multimodal)
+  } catch (error) {
+    console.warn('Failed to detect multimodal capability during setup:', error)
+  }
+
+  return {
+    ...data,
+    supports_multimodal: supportsMultimodal
+  }
+}
+
 const openProviderWebsite = async () => {
   if (currentProvider.value?.website) {
     try {
@@ -467,21 +498,9 @@ const handleVerify = async () => {
 
   verifying.value = true
   try {
-    const data = {
-      name: actualProviderName.value,
-      base_url: modelForm.base_url,
-      api_keys: modelForm.api_keys_str.trim().split(/[\n,]+/).map(k => k.trim()).filter(k => k),
-      model: actualModelName.value,
-      max_tokens: DEFAULT_MAX_TOKENS,
-      temperature: DEFAULT_TEMPERATURE,
-      top_p: DEFAULT_TOP_P,
-      presence_penalty: DEFAULT_PRESENCE_PENALTY,
-      max_model_len: DEFAULT_MAX_MODEL_LEN,
-      is_default: true
-    }
-    await modelProviderAPI.verifyModelProvider(data)
+    const data = await verifyProviderCapabilities()
     verified.value = true
-    toast.success('连接验证成功')
+    toast.success(data.supports_multimodal ? '连接验证成功，已检测到多模态支持' : '连接验证成功')
   } catch (error) {
     console.error('Failed to verify model provider:', error)
     verified.value = false
@@ -509,15 +528,26 @@ const createDefaultAgent = async (providerId = null) => {
     }
 
     let currentProviderId = providerId
+    let currentProviderSupportsMultimodal = false
     if (!currentProviderId) {
       try {
         const providers = await modelProviderAPI.listModelProviders()
         if (providers?.length > 0) {
           const defaultProvider = providers.find(p => p.is_default)
-          currentProviderId = defaultProvider ? defaultProvider.id : providers[0].id
+          const selectedProvider = defaultProvider || providers[0]
+          currentProviderId = selectedProvider.id
+          currentProviderSupportsMultimodal = Boolean(selectedProvider.supports_multimodal)
         }
       } catch (e) {
         console.error('Failed to fetch providers for default agent', e)
+      }
+    } else {
+      try {
+        const providers = await modelProviderAPI.listModelProviders()
+        const selectedProvider = providers?.find(p => p.id === currentProviderId)
+        currentProviderSupportsMultimodal = Boolean(selectedProvider?.supports_multimodal)
+      } catch (e) {
+        console.error('Failed to fetch provider capability for default agent', e)
       }
     }
 
@@ -534,17 +564,18 @@ const createDefaultAgent = async (providerId = null) => {
       description: '默认智能体',
       is_default: true,
       maxLoopCount: 100,
-      memoryType: "session",
+      memoryType: "user",
       agentMode: "fibre",
       availableTools: [
         'todo_write', 'todo_read', 'execute_shell_command',
-        'file_read', 'file_write',
+        'file_read', 'file_write','search_memory','questionnaire','analyze_image',
         'file_update', 'load_skill', 'add_task', 'delete_task', 'complete_task',
         'enable_task', 'get_task_details', 'fetch_webpages', 'search_web_page', 'search_image_from_web'
       ],
       availableSkills: skills.value.map(s => s.name),
       systemPrefix: systemPrompt,
-      llm_provider_id: currentProviderId
+      llm_provider_id: currentProviderId,
+      enableMultimodal: currentProviderSupportsMultimodal
     }
     
     await agentAPI.createAgent(agentData)
@@ -567,19 +598,8 @@ const handleModelSubmit = async () => {
   // 先验证连接
   loading.value = true
   try {
-    const verifyData = {
-      name: actualProviderName.value,
-      base_url: modelForm.base_url,
-      api_keys: modelForm.api_keys_str.trim().split(/[\n,]+/).map(k => k.trim()).filter(k => k),
-      model: actualModelName.value,
-      max_tokens: DEFAULT_MAX_TOKENS,
-      temperature: DEFAULT_TEMPERATURE,
-      top_p: DEFAULT_TOP_P,
-      presence_penalty: DEFAULT_PRESENCE_PENALTY,
-      max_model_len: DEFAULT_MAX_MODEL_LEN,
-      is_default: true
-    }
-    await modelProviderAPI.verifyModelProvider(verifyData)
+    const verifyData = await verifyProviderCapabilities()
+    verified.value = true
     
     // 验证成功后保存
     const res = await modelProviderAPI.createModelProvider(verifyData)

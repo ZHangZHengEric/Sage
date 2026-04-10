@@ -33,6 +33,7 @@ from ...interface import (
 )
 from ...config import VolumeMount
 from sagents.utils.logger import logger
+from sagents.utils.common_utils import get_system_python_path, resolve_python_venv_dir, file_lock
 
 
 class LocalSandboxProvider(ISandboxHandle):
@@ -90,8 +91,8 @@ class LocalSandboxProvider(ISandboxHandle):
             # 使用 volume_mounts 创建文件系统
             self._file_system = SandboxFileSystem(volume_mounts=volume_mounts)
 
-            # 设置 venv 目录（在 sandbox_agent_workspace 下）
-            self._venv_dir = os.path.join(self._sandbox_agent_workspace, ".sandbox", "venv")
+            # 设置 venv 目录（desktop 可切换为共享 venv）
+            self._venv_dir = resolve_python_venv_dir(self._sandbox_agent_workspace)
 
             # 初始化隔离层（如果需要）
             if self._linux_isolation_mode != "subprocess" or self._macos_isolation_mode != "subprocess":
@@ -183,9 +184,15 @@ class LocalSandboxProvider(ISandboxHandle):
 
     def _ensure_venv(self):
         """确保 venv 存在"""
-        if not os.path.exists(self._venv_dir):
+        if not self._venv_dir:
+            raise RuntimeError("venv 目录未初始化")
+
+        lock_path = os.path.join(os.path.dirname(self._venv_dir), ".venv.lock")
+        with file_lock(lock_path):
+            if os.path.exists(self._venv_dir):
+                return
+
             import subprocess
-            from sagents.utils.common_utils import get_system_python_path
 
             os.makedirs(os.path.dirname(self._venv_dir), exist_ok=True)
 

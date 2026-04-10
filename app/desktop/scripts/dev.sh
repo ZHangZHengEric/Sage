@@ -14,6 +14,9 @@ TAURI_DIR="$APP_DIR/tauri"
 DIST_DIR="$APP_DIR/dist"
 TAURI_SIDECAR_DIR="$TAURI_DIR/sidecar"
 TAURI_BIN_DIR="$TAURI_DIR/bin"
+SAGE_HOME_DIR="${HOME}/.sage"
+SAGE_NODE_ENV_DIR="$SAGE_HOME_DIR/.sage_node_env"
+SAGE_NODE_RUNTIME_DIR="$SAGE_NODE_ENV_DIR/runtime"
 
 NO_PYTHON_BUILD=1
 MODE="debug"
@@ -210,15 +213,47 @@ else
     exit 1
 fi
 
-# 设置 PATH，优先使用 sidecar 中的 Node.js
-export PATH="$NODE_DIR/bin:$PATH"
-echo "[Node.js] PATH 已更新: $NODE_DIR/bin"
+# 同步到 ~/.sage 共享运行时，保持 dev / build 行为一致
+mkdir -p "$SAGE_NODE_ENV_DIR"
+SOURCE_NODE_VERSION_FILE="$NODE_DIR/.node-version"
+TARGET_NODE_VERSION_FILE="$SAGE_NODE_RUNTIME_DIR/.node-version"
+
+NEEDS_NODE_SYNC=0
+if [ ! -x "$SAGE_NODE_RUNTIME_DIR/bin/node" ]; then
+  NEEDS_NODE_SYNC=1
+elif [ -f "$SOURCE_NODE_VERSION_FILE" ] && [ -f "$TARGET_NODE_VERSION_FILE" ]; then
+  if ! cmp -s "$SOURCE_NODE_VERSION_FILE" "$TARGET_NODE_VERSION_FILE"; then
+    NEEDS_NODE_SYNC=1
+  fi
+elif [ -f "$SOURCE_NODE_VERSION_FILE" ] || [ -f "$TARGET_NODE_VERSION_FILE" ]; then
+  NEEDS_NODE_SYNC=1
+fi
+
+if [ "$NEEDS_NODE_SYNC" -eq 1 ]; then
+  echo "[Node.js] 正在同步共享运行时到 $SAGE_NODE_RUNTIME_DIR"
+  rm -rf "$SAGE_NODE_RUNTIME_DIR"
+  mkdir -p "$(dirname "$SAGE_NODE_RUNTIME_DIR")"
+  cp -R "$NODE_DIR" "$SAGE_NODE_RUNTIME_DIR"
+fi
+
+RUNTIME_NODE_DIR="$SAGE_NODE_RUNTIME_DIR"
+if [ ! -x "$RUNTIME_NODE_DIR/bin/node" ]; then
+  echo "[Node.js] 共享运行时不可用，回退到 sidecar 运行时"
+  RUNTIME_NODE_DIR="$NODE_DIR"
+fi
+
+# 设置 PATH，优先使用 ~/.sage 共享 Node.js 运行时
+export PATH="$RUNTIME_NODE_DIR/bin:$PATH"
+export SAGE_BUNDLED_NODE_BIN="$RUNTIME_NODE_DIR/bin"
+echo "[Node.js] PATH 已更新: $RUNTIME_NODE_DIR/bin"
+echo "[Node.js] SAGE_BUNDLED_NODE_BIN: $SAGE_BUNDLED_NODE_BIN"
 
 # Link resources for dev mode
 echo "正在链接开发模式资源..."
-rm -rf "$TAURI_SIDECAR_DIR/skills" "$TAURI_SIDECAR_DIR/mcp_servers"
+rm -rf "$TAURI_SIDECAR_DIR/skills" "$TAURI_SIDECAR_DIR/mcp_servers" "$TAURI_SIDECAR_DIR/wiki"
 ln -sf "$ROOT_DIR/app/skills" "$TAURI_SIDECAR_DIR/skills"
 ln -sf "$ROOT_DIR/mcp_servers" "$TAURI_SIDECAR_DIR/mcp_servers"
+ln -sf "$ROOT_DIR/app/wiki" "$TAURI_SIDECAR_DIR/wiki"
 
 ########################################
 # 3. Build Python Sidecar (Wrapper Script)

@@ -257,7 +257,8 @@ async def list_skills(
         tm = get_skill_manager()
         if not tm:
             return []
-        _sync_desktop_agent_skills()
+        # Disabled temporarily: do not auto-sync agent workspace skills into ~/.sage/skills during desktop skill listing.
+        # _sync_desktop_agent_skills()
         tm.reload()
         return [
             {"name": skill.name, "description": skill.description}

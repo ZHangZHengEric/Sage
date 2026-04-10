@@ -29,6 +29,40 @@ from ..user_context import get_desktop_user_id
 # 创建路由器
 agent_router = APIRouter(prefix="/api/agent", tags=["Agent"])
 
+
+def _normalize_desktop_sub_agent_selection(
+    agent: AgentConfigDTO,
+    *,
+    current_agent_id: str | None = None,
+) -> None:
+    agent_mode = agent.agentMode or "simple"
+    if agent_mode != "fibre":
+        agent.subAgentSelectionMode = None
+        if agent.availableSubAgentIds is None:
+            agent.availableSubAgentIds = []
+        return
+
+    if agent.subAgentSelectionMode not in {"auto_all", "manual"}:
+        existing_ids = [
+            sub_agent_id
+            for sub_agent_id in (agent.availableSubAgentIds or [])
+            if sub_agent_id and sub_agent_id != current_agent_id
+        ]
+        agent.subAgentSelectionMode = "manual" if existing_ids else "auto_all"
+
+    if agent.subAgentSelectionMode == "auto_all":
+        agent.availableSubAgentIds = []
+    else:
+        unique_ids: list[str] = []
+        seen = set()
+        for sub_agent_id in agent.availableSubAgentIds or []:
+            normalized_id = str(sub_agent_id or "").strip()
+            if not normalized_id or normalized_id == current_agent_id or normalized_id in seen:
+                continue
+            seen.add(normalized_id)
+            unique_ids.append(normalized_id)
+        agent.availableSubAgentIds = unique_ids
+
 @agent_router.get("/list")
 async def list(http_request: Request):
     """
@@ -105,6 +139,8 @@ async def create(agent: AgentConfigDTO, http_request: Request):
 
         if tools_added:
             logger.info(f"[Agent Create] Auto-added IM tools for agent={agent.id}: {tools_added}")
+
+    _normalize_desktop_sub_agent_selection(agent, current_agent_id=agent.id)
 
     config_dict = convert_agent_to_config(agent)
     logger.info(f"[Agent Create] Config dict: is_default={config_dict.get('is_default')}")
@@ -187,6 +223,8 @@ async def update(agent_id: str, agent: AgentConfigDTO, http_request: Request):
 
         if tools_added:
             logger.info(f"[Agent Update] Auto-added IM tools for agent={agent_id}: {tools_added}")
+
+    _normalize_desktop_sub_agent_selection(agent, current_agent_id=agent_id)
 
     # 更新 Agent 基本信息
     await agent_service.update_agent(
