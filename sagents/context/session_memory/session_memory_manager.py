@@ -3,8 +3,10 @@
 
 负责使用 BM25 算法对历史消息进行检索和召回
 """
+import hashlib
+import json
 import re
-from typing import List
+from typing import List, Optional, Tuple
 
 from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.context_budget import ContextBudgetManager
@@ -17,7 +19,10 @@ class SessionMemoryManager:
     """历史消息检索器"""
     
     def __init__(self):
-        pass
+        self._message_bm25_cache_key: Optional[str] = None
+        self._message_bm25_cache: Optional[Tuple[BM25Okapi, List[List[str]]]] = None
+        self._chat_bm25_cache_key: Optional[str] = None
+        self._chat_bm25_cache: Optional[Tuple[BM25Okapi, List[List[str]], List[List[MessageChunk]]]] = None
     
     def _tokenize_text(self, text: str) -> List[str]:
         """文本分词（用于BM25，私有辅助方法）"""
@@ -48,6 +53,63 @@ class SessionMemoryManager:
     def _calculate_messages_tokens(self, messages: List[MessageChunk]) -> int:
         """计算多条消息的总token数（私有辅助方法）"""
         return sum(self._calculate_message_tokens(msg) for msg in messages)
+
+    @staticmethod
+    def _serialize_content(content) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        return json.dumps(content, ensure_ascii=False, sort_keys=True, default=str)
+
+    def _fingerprint_messages(self, messages: List[MessageChunk]) -> str:
+        digests: List[str] = []
+        for msg in messages:
+            content = self._serialize_content(msg.get_content())
+            content_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
+            normalized_type = msg.normalized_message_type() if hasattr(msg, "normalized_message_type") else None
+            digests.append(
+                f"{msg.message_id}|{msg.role}|{normalized_type or ''}|{content_hash}"
+            )
+        return hashlib.md5("\n".join(digests).encode("utf-8")).hexdigest()
+
+    def _get_or_build_message_bm25(self, messages: List[MessageChunk]) -> Optional[BM25Okapi]:
+        cache_key = self._fingerprint_messages(messages)
+        if self._message_bm25_cache_key == cache_key and self._message_bm25_cache:
+            return self._message_bm25_cache[0]
+
+        corpus = [self._tokenize_text(msg.get_content()) for msg in messages]
+        if not corpus:
+            return None
+
+        bm25 = BM25Okapi(corpus)
+        self._message_bm25_cache_key = cache_key
+        self._message_bm25_cache = (bm25, corpus)
+        return bm25
+
+    def _get_or_build_chat_bm25(self, messages: List[MessageChunk]) -> Tuple[Optional[BM25Okapi], List[List[MessageChunk]]]:
+        cache_key = self._fingerprint_messages(messages)
+        if self._chat_bm25_cache_key == cache_key and self._chat_bm25_cache:
+            return self._chat_bm25_cache[0], self._chat_bm25_cache[2]
+
+        chat_list = self._group_messages_by_chat(messages)
+        if not chat_list:
+            return None, []
+
+        corpus = []
+        for chat in chat_list:
+            combined_content = ""
+            for msg in chat:
+                combined_content += f" {msg.get_content()}"
+            corpus.append(self._tokenize_text(combined_content.strip()))
+
+        if not corpus:
+            return None, chat_list
+
+        bm25 = BM25Okapi(corpus)
+        self._chat_bm25_cache_key = cache_key
+        self._chat_bm25_cache = (bm25, corpus, chat_list)
+        return bm25, chat_list
 
     def _group_messages_by_chat(self, messages: List[MessageChunk]) -> List[List[MessageChunk]]:
         """按对话轮次分组消息"""
@@ -83,26 +145,10 @@ class SessionMemoryManager:
          
         try:
             # 按对话轮次分组
-            chat_list = self._group_messages_by_chat(messages)
-             
-            if not chat_list:
+            bm25, chat_list = self._get_or_build_chat_bm25(messages)
+            if not bm25 or not chat_list:
                 return messages
-             
-            # 构建BM25语料库（每轮对话作为一个文档）
-            corpus = []
-            for chat in chat_list:
-                # 合并一轮对话中所有消息的内容
-                combined_content = ""
-                for msg in chat:
-                    content = msg.get_content()
-                    combined_content += f" {content}"
-                corpus.append(self._tokenize_text(combined_content.strip()))
-             
-            if not corpus:
-                return messages
-             
-            # BM25重排序
-            bm25 = BM25Okapi(corpus)
+
             query_tokens = self._tokenize_text(query)
             scores = bm25.get_scores(query_tokens)
              
@@ -154,17 +200,10 @@ class SessionMemoryManager:
             return messages
         
         try:
-            # 构建BM25语料库
-            corpus = []
-            for msg in messages:
-                content = msg.get_content()
-                corpus.append(self._tokenize_text(content))
-            
-            if not corpus:
+            bm25 = self._get_or_build_message_bm25(messages)
+            if not bm25:
                 return messages
-            
-            # BM25重排序
-            bm25 = BM25Okapi(corpus)
+
             query_tokens = self._tokenize_text(query)
             scores = bm25.get_scores(query_tokens)
             
@@ -203,4 +242,3 @@ class SessionMemoryManager:
         except Exception as e:
             logger.error(f"HistoryMessageRetriever: 历史消息召回失败: {e}")
             return messages
-
