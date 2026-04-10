@@ -16,7 +16,12 @@ from typing import Dict, Any, Optional, Callable, List
 
 from sagents.utils.logger import logger
 from sagents.utils.sandbox.config import VolumeMount
-from sagents.utils.common_utils import get_system_python_path, resolve_python_venv_dir, file_lock
+from sagents.utils.common_utils import (
+    get_system_python_path,
+    resolve_python_venv_dir,
+    resolve_sandbox_runtime_dir,
+    file_lock,
+)
 
 
 class SandboxError(Exception):
@@ -133,8 +138,9 @@ class Sandbox:
         # 在 desktop 共享模式下使用统一 venv，否则仍使用 workspace 本地 venv
         self.venv_dir = resolve_python_venv_dir(self.sandbox_agent_workspace)
         self.sandbox_dir = (
-            os.path.join(self.sandbox_agent_workspace, ".sandbox")
-            if self.sandbox_agent_workspace else None
+            resolve_sandbox_runtime_dir(self.sandbox_agent_workspace)
+            if self.sandbox_agent_workspace
+            else None
         )
         if self.sandbox_dir:
             os.makedirs(self.sandbox_dir, exist_ok=True)
@@ -227,30 +233,31 @@ class Sandbox:
         if self.isolation_mode == 'subprocess':
             self.isolation = SubprocessIsolation(
                 venv_dir=self.venv_dir,
-                host_workspace=self.sandbox_agent_workspace,
-                limits=self.limits
+                sandbox_agent_workspace=self.sandbox_agent_workspace,
+                sandbox_runtime_dir=self.sandbox_dir,
+                limits=self.limits,
             )
         elif self.isolation_mode == 'seatbelt':
             self.isolation = SeatbeltIsolation(
                 venv_dir=self.venv_dir,
-                host_workspace=self.sandbox_agent_workspace,
+                sandbox_agent_workspace=self.sandbox_agent_workspace,
+                sandbox_runtime_dir=self.sandbox_dir,
                 limits=self.limits,
-                allowed_paths=self.limits['allowed_paths'],
-                sandbox_dir=self.sandbox_dir
             )
         elif self.isolation_mode == 'bwrap':
             self.isolation = BwrapIsolation(
                 venv_dir=self.venv_dir,
-                host_workspace=self.sandbox_agent_workspace,
+                sandbox_agent_workspace=self.sandbox_agent_workspace,
+                sandbox_runtime_dir=self.sandbox_dir,
                 limits=self.limits,
-                virtual_workspace=self.sandbox_agent_workspace
             )
         else:
             logger.warning(f"未知的隔离模式: {self.isolation_mode}，使用 subprocess")
             self.isolation = SubprocessIsolation(
                 venv_dir=self.venv_dir,
-                host_workspace=self.sandbox_agent_workspace,
-                limits=self.limits
+                sandbox_agent_workspace=self.sandbox_agent_workspace,
+                sandbox_runtime_dir=self.sandbox_dir,
+                limits=self.limits,
             )
 
         logger.info(f"隔离策略初始化完成: {type(self.isolation).__name__}")
