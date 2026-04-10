@@ -255,6 +255,8 @@ def main():
         user_home = Path.home()
         sage_home = user_home / ".sage"
         sage_home.mkdir(parents=True, exist_ok=True)
+        os.environ.setdefault("SAGE_SHARED_PYTHON_ENV", "1")
+        os.environ.setdefault("SAGE_SHARED_PYTHON_ENV_DIR", str(sage_home / ".sage_py_env"))
 
         logs_dir = sage_home / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
@@ -263,11 +265,12 @@ def main():
         skills_dir.mkdir(parents=True, exist_ok=True)
         
         # Sync IDE skills to Sage skills folder
-        try:
-            from .skill_sync import sync_skills_with_logging
-            sync_skills_with_logging()
-        except Exception as e:
-            print(f"Warning: Failed to sync IDE skills: {e}", flush=True)
+        # Disabled temporarily: do not auto-import external IDE/CLI skills on desktop startup.
+        # try:
+        #     from .skill_sync import sync_skills_with_logging
+        #     sync_skills_with_logging()
+        # except Exception as e:
+        #     print(f"Warning: Failed to sync IDE skills: {e}", flush=True)
         
         agents_workspace_dir = sage_home / "agents"
         agents_workspace_dir.mkdir(parents=True, exist_ok=True)

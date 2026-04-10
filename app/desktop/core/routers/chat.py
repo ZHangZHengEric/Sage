@@ -15,6 +15,7 @@ from loguru import logger
 from sqlalchemy.orm import query
 
 from common.core.exceptions import SageHTTPException
+from common.models.agent import AgentConfigDao
 from common.services import chat_service
 from common.services import conversation_service
 from common.schemas.chat import ChatRequest, StreamRequest, UserInputOptimizeRequest
@@ -43,6 +44,34 @@ class RerunStreamRequest(BaseModel):
 def _build_current_time_with_weekday() -> str:
     now = datetime.now().astimezone()
     return now.strftime("%a, %d %b %Y %H:%M:%S %z")
+
+
+async def _apply_desktop_auto_sub_agents(request: StreamRequest) -> None:
+    if not request.agent_id or request.agent_mode != "fibre":
+        return
+
+    agent = await AgentConfigDao().get_by_id(request.agent_id)
+    if not agent or not agent.config:
+        return
+
+    config = agent.config or {}
+    selection_mode = config.get("subAgentSelectionMode") or config.get("sub_agent_selection_mode")
+    configured_ids = config.get("availableSubAgentIds")
+    if selection_mode is None:
+        selection_mode = "manual" if configured_ids else "auto_all"
+
+    if selection_mode != "auto_all":
+        return
+
+    if request.available_sub_agent_ids:
+        return
+
+    all_agents = await AgentConfigDao().get_all()
+    request.available_sub_agent_ids = [
+        sub_agent.agent_id
+        for sub_agent in all_agents
+        if sub_agent.agent_id and sub_agent.agent_id != request.agent_id
+    ]
 
 
 async def _sync_browser_tools_for_request(request: StreamRequest) -> None:
@@ -89,6 +118,7 @@ async def _start_web_stream_session(
         request,
         require_agent_id=False,
     )
+    await _apply_desktop_auto_sub_agents(request)
     await _sync_browser_tools_for_request(request)
     stream_service, lock = await chat_service.prepare_session(request)
     session_id = request.session_id
@@ -245,6 +275,7 @@ async def chat(request: ChatRequest, http_request: Request):
         inner_request,
         require_agent_id=True,
     )
+    await _apply_desktop_auto_sub_agents(inner_request)
     await _sync_browser_tools_for_request(inner_request)
 
     stream_service, lock = await chat_service.prepare_session(inner_request)

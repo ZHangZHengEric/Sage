@@ -3,8 +3,8 @@
     <!-- Header Area -->
     <div class="flex-none bg-background border-b">
       <!-- Categories / Tabs -->
-      <div class="p-4 md:px-6 pb-4 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
-        <div class="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+      <div class="p-4 md:px-6 pb-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
+        <div class="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 min-w-0">
           <button
             v-for="group in groups"
             :key="group.id"
@@ -19,8 +19,8 @@
             <span class="ml-1 text-xs opacity-70 bg-black/10 dark:bg-white/10 px-1.5 rounded-full">{{ group.count }}</span>
           </button>
         </div>
-        <div class="flex items-center gap-2 w-full sm:w-auto">
-          <div class="inline-flex rounded-md border bg-background p-0.5">
+        <div class="flex flex-wrap items-center gap-2 w-full xl:w-auto xl:justify-end">
+          <div class="inline-flex rounded-md border bg-background p-0.5 shrink-0">
             <Button
               variant="ghost"
               size="sm"
@@ -42,7 +42,7 @@
               {{ t('skills.viewList') || '列表' }}
             </Button>
           </div>
-          <div class="relative flex-1 sm:w-64 sm:flex-none">
+          <div class="relative min-w-[220px] flex-1 xl:w-64 xl:flex-none">
             <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input v-model="searchTerm" :placeholder="t('skills.searchPlaceholder')" class="pl-9 h-9 w-full" />
           </div>

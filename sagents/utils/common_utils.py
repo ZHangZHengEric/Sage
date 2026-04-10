@@ -3,6 +3,7 @@ import ast
 import os
 import sys
 import shutil
+from contextlib import contextmanager
 from typing import Any, List, Union, Optional
 
 
@@ -77,6 +78,46 @@ def get_system_python_path() -> Optional[str]:
     else:
         # 非打包环境，直接使用 sys.executable
         return sys.executable
+
+
+def use_shared_python_env() -> bool:
+    value = str(os.environ.get("SAGE_SHARED_PYTHON_ENV", "")).strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def get_shared_python_env_dir() -> str:
+    custom_path = os.environ.get("SAGE_SHARED_PYTHON_ENV_DIR")
+    if custom_path:
+        return os.path.abspath(os.path.expanduser(custom_path))
+    return os.path.join(os.path.expanduser("~"), ".sage", ".sage_py_env")
+
+
+def resolve_python_venv_dir(workspace_path: Optional[str]) -> Optional[str]:
+    if use_shared_python_env():
+        return get_shared_python_env_dir()
+    if not workspace_path:
+        return None
+    return os.path.join(workspace_path, ".sandbox", "venv")
+
+
+@contextmanager
+def file_lock(lock_path: str):
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    lock_file = open(lock_path, "w")
+    try:
+        if os.name != "nt":
+            import fcntl
+
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            if os.name != "nt":
+                import fcntl
+
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        finally:
+            lock_file.close()
 
 def ensure_list(content: Union[str, List[Any]], separator: str = None) -> List[Any]:
     """

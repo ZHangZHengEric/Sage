@@ -135,6 +135,22 @@ async def copy_default_skills():
     try:
         import shutil
         from pathlib import Path
+
+        def has_valid_skills(path: Path | None) -> bool:
+            if not path or not path.exists() or not path.is_dir():
+                return False
+            try:
+                for skill_path in path.iterdir():
+                    if not skill_path.is_dir():
+                        continue
+                    if any(
+                        child.is_file() and child.name.lower() == "skill.md"
+                        for child in skill_path.iterdir()
+                    ):
+                        return True
+            except Exception as scan_error:
+                logger.warning(f"检查默认 skills 目录失败 {path}: {scan_error}")
+            return False
         
         # 用户 skills 目录
         user_home = Path.home()
@@ -173,8 +189,21 @@ async def copy_default_skills():
             logger.warning(f"无法确定默认 skills 目录: {e}")
             return
         
-        if not default_skills_dir or not default_skills_dir.exists():
-            logger.warning(f"默认 skills 目录不存在: {default_skills_dir}")
+        if not has_valid_skills(default_skills_dir):
+            current_file = Path(__file__).resolve()
+            fallback_candidates = [
+                current_file.parent.parent.parent / "skills",
+                current_file.parent.parent.parent.parent / "skills",
+            ]
+            fallback_dir = next((path for path in fallback_candidates if has_valid_skills(path)), None)
+            if fallback_dir:
+                logger.warning(
+                    f"默认 skills 目录不可用或为空: {default_skills_dir}，回退到 {fallback_dir}"
+                )
+                default_skills_dir = fallback_dir
+
+        if not has_valid_skills(default_skills_dir):
+            logger.warning(f"默认 skills 目录不存在或不包含有效技能: {default_skills_dir}")
             return
         
         logger.info(f"同步内置 skills 从 {default_skills_dir} 到 {user_skills_dir}")
@@ -208,6 +237,15 @@ async def copy_wiki_docs():
     try:
         import shutil
         from pathlib import Path
+
+        def has_markdown_docs(path: Path | None) -> bool:
+            if not path or not path.exists() or not path.is_dir():
+                return False
+            try:
+                return any(path.rglob("*.md"))
+            except Exception as scan_error:
+                logger.warning(f"检查 wiki 文档目录失败 {path}: {scan_error}")
+                return False
         
         # 用户 sage 使用说明文档目录
         user_home = Path.home()
@@ -224,15 +262,31 @@ async def copy_wiki_docs():
             
             # 检查是否在 tauri 环境中
             if 'TAURI_RESOURCES_DIR' in os.environ:
-                wiki_docs_dir = Path(os.environ['TAURI_RESOURCES_DIR']) / "docs"
+                tauri_resources_dir = Path(os.environ['TAURI_RESOURCES_DIR'])
+                resource_candidates = [
+                    tauri_resources_dir / "wiki",
+                    tauri_resources_dir / "docs",
+                ]
+                wiki_docs_dir = next(
+                    (candidate for candidate in resource_candidates if candidate.exists()),
+                    resource_candidates[0],
+                )
             elif getattr(sys, 'frozen', False):
                 # 打包环境：使用 _MEIPASS 临时目录
                 if hasattr(sys, '_MEIPASS'):
-                    wiki_docs_dir = Path(sys._MEIPASS) / "docs"
+                    meipass_dir = Path(sys._MEIPASS)
+                    resource_candidates = [
+                        meipass_dir / "wiki",
+                        meipass_dir / "docs",
+                    ]
+                    wiki_docs_dir = next(
+                        (candidate for candidate in resource_candidates if candidate.exists()),
+                        resource_candidates[0],
+                    )
                 else:
                     # 备用方案：向上查找
                     current_file = Path(__file__).resolve()
-                    wiki_docs_dir = current_file.parent.parent.parent.parent / "docs"
+                    wiki_docs_dir = current_file.parent.parent.parent.parent / "wiki"
                 
                 # 如果找不到，尝试相对于可执行文件的位置（PyInstaller 打包环境）
                 if not wiki_docs_dir.exists():
@@ -248,8 +302,21 @@ async def copy_wiki_docs():
             logger.warning(f"无法确定 wiki 文档目录: {e}")
             return
         
-        if not wiki_docs_dir or not wiki_docs_dir.exists():
-            logger.warning(f"Wiki 文档目录不存在: {wiki_docs_dir}")
+        if not has_markdown_docs(wiki_docs_dir):
+            current_file = Path(__file__).resolve()
+            fallback_candidates = [
+                current_file.parent.parent.parent / "wiki",
+                current_file.parent.parent.parent.parent / "wiki",
+            ]
+            fallback_dir = next((path for path in fallback_candidates if has_markdown_docs(path)), None)
+            if fallback_dir:
+                logger.warning(
+                    f"Wiki 文档目录不可用或为空: {wiki_docs_dir}，回退到 {fallback_dir}"
+                )
+                wiki_docs_dir = fallback_dir
+
+        if not has_markdown_docs(wiki_docs_dir):
+            logger.warning(f"Wiki 文档目录不存在或不包含 markdown: {wiki_docs_dir}")
             return
         
         logger.info(f"同步 wiki 文档从 {wiki_docs_dir} 到 {user_docs_dir}")

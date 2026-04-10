@@ -293,8 +293,10 @@ export const useChatStream = ({
         agent_mode: config.agentMode,
         more_suggest: config.moreSuggest,
         max_loop_count: config.maxLoopCount,
-        available_sub_agent_ids: Array.isArray(config.availableSubAgentIds) ? config.availableSubAgentIds : [],
         agent_id: selectedAgent.id
+      }
+      if (config.subAgentSelectionMode === 'manual') {
+        requestBody.available_sub_agent_ids = Array.isArray(config.availableSubAgentIds) ? config.availableSubAgentIds : []
       }
 
       const response = await chatAPI.streamChat(requestBody, abortControllerRef?.value)
@@ -354,8 +356,10 @@ export const useChatStream = ({
         agent_mode: config?.agentMode,
         more_suggest: config?.moreSuggest,
         max_loop_count: config?.maxLoopCount,
-        available_sub_agent_ids: Array.isArray(config?.availableSubAgentIds) ? config.availableSubAgentIds : [],
         agent_id: selectedAgent?.id
+      }
+      if (config?.subAgentSelectionMode === 'manual') {
+        requestBody.available_sub_agent_ids = Array.isArray(config?.availableSubAgentIds) ? config.availableSubAgentIds : []
       }
 
       const response = await chatAPI.rerunConversationStream(sessionId, requestBody, abortControllerRef?.value)

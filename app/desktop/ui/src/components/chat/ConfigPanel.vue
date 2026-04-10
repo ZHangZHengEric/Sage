@@ -38,15 +38,35 @@
       </div>
 
       <div v-if="(config.agentMode || 'auto') === 'fibre'" class="space-y-2">
-        <Label>子智能体</Label>
+        <Label>{{ t('agentEdit.subAgents') }}</Label>
         <p class="text-xs text-muted-foreground">
-          仅在 Fibre 模式生效，用于临时覆盖当前会话可调用的子智能体。
+          {{ t('config.subAgentsDesc') }}
         </p>
         <div class="flex items-center gap-2">
           <button
             type="button"
             class="text-xs text-primary hover:underline"
+            @click="setSubAgentSelectionMode('auto_all')"
+          >
+            {{ t('agentEdit.subAgentModeAutoAll') }}
+          </button>
+          <button
+            type="button"
+            class="text-xs text-primary hover:underline"
+            @click="setSubAgentSelectionMode('manual')"
+          >
+            {{ t('agentEdit.subAgentModeManual') }}
+          </button>
+          <span class="text-xs text-muted-foreground">
+            {{ t('config.subAgentsCurrent') }}{{ subAgentSelectionMode === 'manual' ? t('agentEdit.subAgentModeManual') : t('agentEdit.subAgentModeAutoAll') }}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="text-xs text-primary hover:underline"
             @click="selectAllSubAgents"
+            :disabled="subAgentSelectionMode !== 'manual'"
           >
             全选
           </button>
@@ -54,6 +74,7 @@
             type="button"
             class="text-xs text-muted-foreground hover:underline"
             @click="clearSubAgents"
+            :disabled="subAgentSelectionMode !== 'manual'"
           >
             清空
           </button>
@@ -66,6 +87,7 @@
           >
             <Checkbox
               :checked="selectedSubAgentIds.includes(agent.id)"
+              :disabled="subAgentSelectionMode !== 'manual'"
               @update:checked="(checked) => toggleSubAgent(agent.id, checked === true)"
             />
             <span class="text-sm truncate">{{ agent.name }}</span>
@@ -157,23 +179,40 @@ const selectableSubAgents = computed(() => {
 })
 
 const selectedSubAgentIds = computed(() => (
-  Array.isArray(props.config?.availableSubAgentIds) ? props.config.availableSubAgentIds : []
+  subAgentSelectionMode.value === 'manual'
+    ? (Array.isArray(props.config?.availableSubAgentIds) ? props.config.availableSubAgentIds : [])
+    : selectableSubAgents.value.map(agent => agent.id)
+))
+
+const subAgentSelectionMode = computed(() => (
+  props.config?.subAgentSelectionMode === 'manual' ? 'manual' : 'auto_all'
 ))
 
 const toggleSubAgent = (agentId, checked) => {
+  if (subAgentSelectionMode.value !== 'manual') return
   const current = [...selectedSubAgentIds.value]
   const next = checked
     ? [...new Set([...current, agentId])]
     : current.filter(id => id !== agentId)
-  handleConfigChange({ availableSubAgentIds: next })
+  handleConfigChange({ availableSubAgentIds: next, subAgentSelectionMode: 'manual' })
 }
 
 const selectAllSubAgents = () => {
-  handleConfigChange({ availableSubAgentIds: selectableSubAgents.value.map(agent => agent.id) })
+  handleConfigChange({
+    availableSubAgentIds: selectableSubAgents.value.map(agent => agent.id),
+    subAgentSelectionMode: 'manual'
+  })
 }
 
 const clearSubAgents = () => {
-  handleConfigChange({ availableSubAgentIds: [] })
+  handleConfigChange({ availableSubAgentIds: [], subAgentSelectionMode: 'manual' })
+}
+
+const setSubAgentSelectionMode = (mode) => {
+  handleConfigChange({
+    subAgentSelectionMode: mode === 'manual' ? 'manual' : 'auto_all',
+    ...(mode === 'auto_all' ? {} : { availableSubAgentIds: selectedSubAgentIds.value })
+  })
 }
 
 const handleConfigToggle = (key) => {

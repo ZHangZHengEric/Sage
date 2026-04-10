@@ -303,7 +303,54 @@
               </div>
             </div>
             <div class="pl-10">
-              <FormItem :label="t('agentEdit.subAgents')">
+              <FormItem>
+                <div class="mb-4 space-y-3">
+                  <span class="text-sm font-medium text-foreground">{{ t('agentEdit.subAgentMode') }}</span>
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      class="rounded-xl border p-4 text-left transition-all duration-200"
+                      :class="(store.formData.subAgentSelectionMode || 'auto_all') === 'auto_all'
+                        ? 'border-primary/50 bg-primary/10 shadow-sm'
+                        : 'border-border bg-muted/20 hover:bg-muted/35'"
+                      @click="setSubAgentSelectionMode('auto_all')"
+                    >
+                      <div class="flex items-start justify-between gap-3">
+                        <div class="space-y-1">
+                          <div class="text-sm font-semibold text-foreground">{{ t('agentEdit.subAgentModeAutoAll') }}</div>
+                          <p class="text-xs leading-5 text-muted-foreground">{{ t('agentEdit.subAgentModeAutoDesc') }}</p>
+                        </div>
+                        <span
+                          class="mt-1 inline-flex h-2.5 w-2.5 shrink-0 rounded-full"
+                          :class="(store.formData.subAgentSelectionMode || 'auto_all') === 'auto_all'
+                            ? 'bg-primary shadow-[0_0_0_4px_rgba(59,130,246,0.12)]'
+                            : 'bg-muted-foreground/30'"
+                        />
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-xl border p-4 text-left transition-all duration-200"
+                      :class="(store.formData.subAgentSelectionMode || 'auto_all') === 'manual'
+                        ? 'border-primary/50 bg-primary/10 shadow-sm'
+                        : 'border-border bg-muted/20 hover:bg-muted/35'"
+                      @click="setSubAgentSelectionMode('manual')"
+                    >
+                      <div class="flex items-start justify-between gap-3">
+                        <div class="space-y-1">
+                          <div class="text-sm font-semibold text-foreground">{{ t('agentEdit.subAgentModeManual') }}</div>
+                          <p class="text-xs leading-5 text-muted-foreground">{{ t('agentEdit.subAgentModeManualDesc') }}</p>
+                        </div>
+                        <span
+                          class="mt-1 inline-flex h-2.5 w-2.5 shrink-0 rounded-full"
+                          :class="(store.formData.subAgentSelectionMode || 'auto_all') === 'manual'
+                            ? 'bg-primary shadow-[0_0_0_4px_rgba(59,130,246,0.12)]'
+                            : 'bg-muted-foreground/30'"
+                        />
+                      </div>
+                    </button>
+                  </div>
+                </div>
                 <div class="border rounded-lg overflow-hidden bg-background">
                   <div class="px-3 py-2 border-b bg-muted/30 flex items-center justify-between">
                     <span class="text-xs font-medium text-muted-foreground">{{ t('agentEdit.availableSubAgents') }} ({{ filteredAgents.length }})</span>
@@ -312,7 +359,7 @@
                       size="sm"
                       class="h-7 text-xs px-2"
                       @click="selectAllSubAgents"
-                      :disabled="filteredAgents.length === 0"
+                      :disabled="filteredAgents.length === 0 || (store.formData.subAgentSelectionMode || 'auto_all') !== 'manual'"
                     >
                       {{ t('agentEdit.selectAll') }}
                     </Button>
@@ -328,6 +375,7 @@
                           :class="isSubAgentSelected(agent.id) 
                             ? 'bg-primary/10 border-primary/40 text-primary hover:bg-primary/20' 
                             : 'bg-muted/30 border-muted hover:bg-muted/50 hover:border-muted-foreground/30'"
+                          :disabled="(store.formData.subAgentSelectionMode || 'auto_all') !== 'manual'"
                           @click="toggleSubAgent(agent.id, !isSubAgentSelected(agent.id))"
                         >
                           <span 
@@ -2130,6 +2178,9 @@ const filteredAgents = computed(() => {
 })
 
 const selectedSubAgents = computed(() => {
+  if ((store.formData.subAgentSelectionMode || 'auto_all') === 'auto_all') {
+    return filteredAgents.value
+  }
   const ids = store.formData.availableSubAgentIds || []
   if (ids.length === 0) return []
   return ids
@@ -2138,10 +2189,18 @@ const selectedSubAgents = computed(() => {
 })
 
 const isSubAgentSelected = (id) => {
+  if ((store.formData.subAgentSelectionMode || 'auto_all') === 'auto_all') {
+    return filteredAgents.value.some(agent => agent.id === id)
+  }
   return store.formData.availableSubAgentIds?.includes(id) || false
 }
 
+const setSubAgentSelectionMode = (mode) => {
+  store.formData.subAgentSelectionMode = mode === 'manual' ? 'manual' : 'auto_all'
+}
+
 const toggleSubAgent = (id, checked) => {
+  if ((store.formData.subAgentSelectionMode || 'auto_all') !== 'manual') return
   const currentIds = [...(store.formData.availableSubAgentIds || [])]
   if (checked) {
     if (!currentIds.includes(id)) currentIds.push(id)
@@ -2153,11 +2212,13 @@ const toggleSubAgent = (id, checked) => {
 }
 
 const selectAllSubAgents = () => {
+  store.formData.subAgentSelectionMode = 'manual'
   const allAgentIds = filteredAgents.value.map(agent => agent.id)
   store.formData.availableSubAgentIds = [...new Set([...(store.formData.availableSubAgentIds || []), ...allAgentIds])]
 }
 
 const deselectAllSubAgents = () => {
+  store.formData.subAgentSelectionMode = 'manual'
   store.formData.availableSubAgentIds = []
 }
 
