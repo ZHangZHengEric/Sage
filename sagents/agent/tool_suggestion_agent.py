@@ -199,13 +199,14 @@ class ToolSuggestionAgent(AgentBase):
             logger.error(f"ToolSuggestionAgent: 分析工具推荐时发生错误: {str(e)}")
             return []
 
-    async def _get_tool_suggestions(self, llm_request_messages: List[MessageChunk], session_id: str) -> List[str]:
+    async def _get_tool_suggestions(self, llm_request_messages: List[MessageChunk], session_id: str, require_json: bool = True) -> List[str]:
         """
         调用LLM获取工具建议
 
         Args:
             llm_request_messages: LLM请求消息列表
             session_id: 会话ID
+            require_json: 是否要求返回JSON格式，默认为True
 
         Returns:
             List[str]: 建议工具ID列表
@@ -213,11 +214,18 @@ class ToolSuggestionAgent(AgentBase):
         logger.debug("ToolSuggestionAgent: 调用LLM获取工具建议")
 
         messages_input = llm_request_messages
+
+        # 构建模型配置覆盖项
+        model_config_override = {"model_type": "fast"}  # 使用快速模型
+        if require_json:
+            model_config_override["response_format"] = {"type": "json_object"}
+
         response = self._call_llm_streaming(
             messages=messages_input,
             session_id=session_id,
             step_name="tool_suggestion",
-            enable_thinking=False
+            enable_thinking=False,
+            model_config_override=model_config_override
         )
 
         # 收集流式响应内容

@@ -785,7 +785,7 @@ class SessionContext:
                          available_tools: Optional[list] = None, available_skills: Optional[list] = None, system_context: Optional[dict] = None,
                          available_workflows: Optional[dict] = None, deep_thinking: Optional[bool] = None,
                          agent_mode: Optional[str] = None, more_suggest: bool = False,
-                         max_loop_count: int = 10, agent_id: Optional[str] = None):
+                         max_loop_count: Optional[int] = None, agent_id: Optional[str] = None):
         """设置agent配置信息
 
         Args:
@@ -803,6 +803,8 @@ class SessionContext:
             max_loop_count: 最大循环次数
             agent_id: Agent ID (Fibre用)
         """
+        if max_loop_count is None:
+            raise ValueError("max_loop_count is required")
         # 生成与preset_running_agent_config.json格式一致的配置
         current_time = datetime.datetime.now().astimezone()
 
@@ -1024,28 +1026,57 @@ class SessionContext:
         """获取tokens使用信息"""
         tokens_info = {"total_info": {}, "per_step_info": []}
         for i, llm_request in enumerate(self.llm_requests_logs):
-            # logger.info(f"get_tokens_usage_info: processing request {i}")
             raw_response = llm_request['response']
-            # logger.info(f"get_tokens_usage_info: raw_response type={type(raw_response)}, has usage={hasattr(raw_response, 'usage') if raw_response else False}")
             if raw_response and hasattr(raw_response, 'usage'):
                 logger.debug(f"get_tokens_usage_info: raw_response.usage={raw_response.usage}")
-            
+
             response_dict = make_serializable(raw_response)
-            # logger.info(f"get_tokens_usage_info: response_dict type={type(response_dict)}, keys={response_dict.keys() if isinstance(response_dict, dict) else 'N/A'}")
             if not isinstance(response_dict, dict):
                 continue
             if 'usage' in response_dict and response_dict['usage']:
-                # logger.info(f"get_tokens_usage_info: usage={response_dict['usage']}")
+                usage = response_dict['usage']
                 step_info = {
                     "step_name": (llm_request.get("request") or {}).get("step_name", "unknown"),
-                    "usage": response_dict.get("usage"),
+                    "usage": usage,
                 }
                 tokens_info["per_step_info"].append(step_info)
-                for key, value in response_dict['usage'].items():
-                    if isinstance(value, int) or isinstance(value, float):
+
+                # 处理基本 token 字段
+                for key, value in usage.items():
+                    if isinstance(value, (int, float)):
                         if key not in tokens_info["total_info"]:
                             tokens_info["total_info"][key] = 0
                         tokens_info["total_info"][key] += value
+
+                # 处理 prompt_tokens_details 中的 cached_tokens
+                prompt_details = usage.get('prompt_tokens_details')
+                if prompt_details and isinstance(prompt_details, dict):
+                    cached_tokens = prompt_details.get('cached_tokens')
+                    if isinstance(cached_tokens, (int, float)):
+                        if 'cached_tokens' not in tokens_info["total_info"]:
+                            tokens_info["total_info"]['cached_tokens'] = 0
+                        tokens_info["total_info"]['cached_tokens'] += cached_tokens
+
+                    audio_tokens = prompt_details.get('audio_tokens')
+                    if isinstance(audio_tokens, (int, float)):
+                        if 'prompt_audio_tokens' not in tokens_info["total_info"]:
+                            tokens_info["total_info"]['prompt_audio_tokens'] = 0
+                        tokens_info["total_info"]['prompt_audio_tokens'] += audio_tokens
+
+                # 处理 completion_tokens_details
+                completion_details = usage.get('completion_tokens_details')
+                if completion_details and isinstance(completion_details, dict):
+                    reasoning_tokens = completion_details.get('reasoning_tokens')
+                    if isinstance(reasoning_tokens, (int, float)):
+                        if 'reasoning_tokens' not in tokens_info["total_info"]:
+                            tokens_info["total_info"]['reasoning_tokens'] = 0
+                        tokens_info["total_info"]['reasoning_tokens'] += reasoning_tokens
+
+                    audio_tokens = completion_details.get('audio_tokens')
+                    if isinstance(audio_tokens, (int, float)):
+                        if 'completion_audio_tokens' not in tokens_info["total_info"]:
+                            tokens_info["total_info"]['completion_audio_tokens'] = 0
+                        tokens_info["total_info"]['completion_audio_tokens'] += audio_tokens
             else:
                 # 流式响应可能没有 usage 字段，记录提示
                 logger.info(f"get_tokens_usage_info: no usage in response_dict, keys={response_dict.keys()}")

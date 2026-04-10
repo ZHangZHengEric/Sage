@@ -1,32 +1,49 @@
 <template>
-  <div class="h-full flex flex-col p-6">
-    <Tabs v-model="activeTab" class="w-full flex flex-col h-full">
-      <div class="flex items-center justify-between mb-6">
-        <TabsList class="bg-muted/50">
-          <TabsTrigger value="recurring" class="gap-2">
-            <Repeat class="w-4 h-4" />
-            {{ t('scheduledTask.title') }}
-          </TabsTrigger>
-          <TabsTrigger value="one-time" class="gap-2">
-            <Clock class="w-4 h-4" />
-            {{ t('scheduledTask.oneTimeTitle') }}
-          </TabsTrigger>
-        </TabsList>
-        <div class="flex items-center justify-end">
-          <Button @click="handleCreate" v-if="activeTab === 'recurring'" class="gap-2">
-            <Plus class="h-4 w-4" />
-            {{ t('common.create') }}
-          </Button>
-          <Button @click="handleCreateOneTime" v-else class="gap-2">
-            <Plus class="h-4 w-4" />
-            {{ t('common.create') }}
-          </Button>
+  <div class="h-full overflow-y-auto bg-background">
+    <div class="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-6">
+      <div class="flex items-center justify-between gap-4 border-b border-border/55 pb-3">
+        <div class="min-w-0">
+          <h1 class="text-[15px] font-semibold tracking-tight text-foreground">{{ t('scheduledTask.menuTitle') }}</h1>
+          <p class="text-[11px] text-muted-foreground">
+            {{ activeTab === 'recurring'
+              ? t('scheduledTask.recurringCount', { count: tasks.length })
+              : t('scheduledTask.oneTimeCount', { count: oneTimeTasks.length })
+            }}
+          </p>
         </div>
+
+        <Tabs v-model="activeTab" class="flex-none">
+          <TabsList class="bg-muted/50">
+            <TabsTrigger value="recurring" class="gap-2">
+              <Repeat class="w-4 h-4" />
+              {{ t('scheduledTask.title') }}
+            </TabsTrigger>
+            <TabsTrigger value="one-time" class="gap-2">
+              <Clock class="w-4 h-4" />
+              {{ t('scheduledTask.oneTimeTitle') }}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        <Button class="h-9 rounded-xl px-3.5" @click="handleCreate" v-if="activeTab === 'recurring'">
+          <Plus class="mr-2 h-4 w-4" />
+          {{ t('scheduledTask.createTitle') }}
+        </Button>
+        <Button class="h-9 rounded-xl px-3.5" @click="handleCreateOneTime" v-else>
+          <Plus class="mr-2 h-4 w-4" />
+          {{ t('scheduledTask.createOneTime') }}
+        </Button>
       </div>
 
-      <!-- Recurring Tasks - Task Ticket Style -->
-      <TabsContent value="recurring" class="flex-1 overflow-hidden">
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 overflow-y-auto h-full pb-4 content-start">
+      <Tabs v-model="activeTab" class="w-full flex flex-col flex-1 min-h-0">
+        <TabsList class="hidden">
+          <TabsTrigger value="recurring" />
+          <TabsTrigger value="one-time" />
+        </TabsList>
+
+        <!-- Recurring Tasks - Task Ticket Style -->
+        <TabsContent value="recurring" class="flex-1 overflow-hidden">
+          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 overflow-y-auto h-full pb-4 content-start">
           <!-- Task Ticket Card -->
           <div
             v-for="task in tasks"
@@ -413,6 +430,7 @@
       </DialogContent>
     </Dialog>
     <AppConfirmDialog ref="confirmDialogRef" />
+    </div>
   </div>
 </template>
 

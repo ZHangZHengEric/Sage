@@ -258,27 +258,15 @@ class MemoryRecallAgent(AgentBase):
             )
         ]
 
-        # 调用LLM生成搜索查询，最大重试3次
-        max_retries = 3
-        retry_count = 0
+        # 调用LLM生成搜索查询
+        search_query = await self._get_search_query(llm_request_messages, session_context.session_id)
         
-        while retry_count < max_retries:
-            search_query = await self._get_search_query(llm_request_messages, session_context.session_id)
-            if search_query:
-                return search_query
-            retry_count += 1
-            logger.warning(f"MemoryRecallAgent: 第{retry_count}次尝试未获取到搜索查询，继续重试...")
-
-        logger.warning(f"MemoryRecallAgent: 最大重试{max_retries}次后仍未获取到搜索查询")
+        # 如果search_query为空，返回空字符串（代表不需要搜索记忆）
+        if not search_query:
+            logger.debug("MemoryRecallAgent: 搜索查询为空，跳过记忆搜索")
+            return ""
         
-        # 降级策略：使用最后一条用户消息作为搜索查询
-        for msg in reversed(messages):
-            if msg.get('role') == 'user':
-                content = msg.get('content', '')
-                # 提取前100个字符作为搜索查询
-                return content[:100] if len(content) > 100 else content
-        
-        return ""
+        return search_query
 
     async def _get_search_query(
         self, 
@@ -301,7 +289,11 @@ class MemoryRecallAgent(AgentBase):
             messages=llm_request_messages,
             session_id=session_id,
             step_name="memory_recall",
-            model_config_override={'max_tokens':128},
+            model_config_override={
+                'max_tokens': 128,
+                'model_type': 'fast',  # 使用快速模型
+                'response_format': {'type': 'json_object'}  # 要求JSON返回
+            },
             enable_thinking=False
         )
 

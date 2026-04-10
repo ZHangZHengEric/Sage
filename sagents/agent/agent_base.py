@@ -10,6 +10,8 @@ from sagents.context.session_context import  SessionContext, SessionStatus
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.messages.message_manager import MessageManager
+from sagents.utils.prompt_caching import add_cache_control_to_messages
+from sagents.llm.sage_openai import SageAsyncOpenAI
 import traceback
 import time
 import os
@@ -23,7 +25,7 @@ from openai.types.chat import (
 )
 from openai.types.chat.chat_completion import Choice
 from openai.types.chat.chat_completion_message_tool_call import Function
-from openai.types.completion_usage import CompletionUsage
+from openai.types.completion_usage import CompletionUsage, PromptTokensDetails, CompletionTokensDetails
 
 
 class AgentBase(ABC):
@@ -240,7 +242,7 @@ class AgentBase(ABC):
             messages: 输入消息列表
             session_id: 会话ID（用于请求记录）
             step_name: 步骤名称（用于请求记录）
-            model_config_override: 覆盖模型配置（用于工具调用等）
+            model_config_override: 覆盖模型配置（用于工具调用等），可包含response_format等参数
             enable_thinking: 是否启用思考模式，优先使用此参数，为None时使用deep_thinking配置。
                            对于OpenAI推理模型(o3-mini, GPT-5.2等)，会转换为reasoning_effort参数
 
@@ -269,6 +271,14 @@ class AgentBase(ABC):
         final_config.pop('api_key', None)
         final_config.pop('maxTokens', None)
         final_config.pop('base_url', None)
+        # 移除快速模型相关配置（这些是我们内部使用的参数）
+        final_config.pop('fast_api_key', None)
+        final_config.pop('fast_base_url', None)
+        final_config.pop('fast_model_name', None)
+        # 只有当 model 不是 SageAsyncOpenAI 类型时，才移除 model_type
+        # SageAsyncOpenAI 需要 model_type 来选择使用哪个客户端
+        if not isinstance(self.model, SageAsyncOpenAI):
+            final_config.pop('model_type', None)
         all_chunks = []
 
         # 重试配置 - 增加重试次数以应对网络不稳定情况
@@ -301,6 +311,12 @@ class AgentBase(ABC):
                 # 只保留model.chat.completions.create 需要的messages的key，移除掉不不要的
                 serializable_messages = [{k: v for k, v in msg.items() if k in ['role', 'content', 'tool_calls', 'tool_call_id']} for msg in serializable_messages]
 
+                # 为消息添加 prompt caching 支持（Anthropic 格式）
+                # 在最后一个消息的最后一个 content block 上添加 cache_control
+                # 这对 Anthropic 模型有效，OpenAI 自动忽略，其他模型通常也会忽略
+                if serializable_messages:
+                    add_cache_control_to_messages(serializable_messages)
+
                 # 统计图片数量
                 image_count = 0
                 for msg in serializable_messages:
@@ -327,6 +343,7 @@ class AgentBase(ABC):
                 # 提取tools 的value
                 logger_final_config = {k: v for k, v in final_config.items() if k != 'tools'}
                 logger.debug(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成 (尝试 {retry_count + 1}/{max_retries}) |final_config={logger_final_config}")
+                final_config = {k: v for k, v in final_config.items() if v is not None}
 
                 # 根据 enable_thinking 参数或 deep_thinking 配置决定是否启用思考模式
                 # 优先使用传入的 enable_thinking 参数
@@ -353,7 +370,7 @@ class AgentBase(ABC):
                 is_openai_reasoning_model = (
                     model_name.startswith("o3-") or
                     model_name.startswith("o1-") or
-                    "gpt-5.2" in model_name.lower() or
+                    "gpt" in model_name.lower() or
                     "gpt-5.1" in model_name.lower()
                 )
 
@@ -512,7 +529,7 @@ class AgentBase(ABC):
                         llm_request = {
                             "step_name": step_name,
                             "model_config": final_config,
-                            "messages": messages,
+                            "messages": serializable_messages,
                         }
                         # 将流式的chunk，进行合并成非流式的response，保存下chunk所有的记录
                         try:
@@ -1241,10 +1258,30 @@ class AgentBase(ABC):
                 id_, model_, created_ = chk.id, chk.model, chk.created
 
             if chk.usage:  # 最后的 usage chunk
+                # 处理 prompt_tokens_details
+                prompt_tokens_details = None
+                if chk.usage.prompt_tokens_details:
+                    prompt_tokens_details = PromptTokensDetails(
+                        cached_tokens=chk.usage.prompt_tokens_details.cached_tokens,
+                        audio_tokens=chk.usage.prompt_tokens_details.audio_tokens,
+                    )
+                
+                # 处理 completion_tokens_details
+                completion_tokens_details = None
+                if chk.usage.completion_tokens_details:
+                    completion_tokens_details = CompletionTokensDetails(
+                        reasoning_tokens=chk.usage.completion_tokens_details.reasoning_tokens,
+                        audio_tokens=chk.usage.completion_tokens_details.audio_tokens,
+                        accepted_prediction_tokens=chk.usage.completion_tokens_details.accepted_prediction_tokens,
+                        rejected_prediction_tokens=chk.usage.completion_tokens_details.rejected_prediction_tokens,
+                    )
+                
                 usage = CompletionUsage(
                     prompt_tokens=chk.usage.prompt_tokens,
                     completion_tokens=chk.usage.completion_tokens,
                     total_tokens=chk.usage.total_tokens,
+                    prompt_tokens_details=prompt_tokens_details,
+                    completion_tokens_details=completion_tokens_details,
                 )
 
             if not chk.choices:

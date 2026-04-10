@@ -200,7 +200,7 @@
                 </FormItem>
 
                 <FormItem :label="t('agent.maxLoopCount')">
-                  <Input type="number" v-model.number="store.formData.maxLoopCount" min="1" max="50" class="h-10" />
+                  <Input type="number" v-model.number="store.formData.maxLoopCount" min="1" max="200" class="h-10" />
                 </FormItem>
               </div>
 
@@ -247,6 +247,32 @@
                     </SelectItem>
                   </SelectContent>
                 </Select>
+              </FormItem>
+
+              <!-- 快速模型选择（可选） -->
+              <FormItem :label="t('agent.fastModelProvider')">
+                <Select v-model="fastLlmProviderSelectValue">
+                  <SelectTrigger class="h-10">
+                    <SelectValue :placeholder="t('agent.selectFastModelProvider')" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem :value="defaultProviderOption">
+                      <div class="flex items-center gap-2">
+                        <span>{{ t('agent.sameAsLLMModel') }}</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem v-for="provider in providers" :key="provider.id" :value="provider.id">
+                      <div class="flex items-center gap-2">
+                        <span>{{ provider.name }} ({{ provider.model }})</span>
+                        <div class="flex items-center gap-1 ml-2">
+                          <span class="inline-flex items-center justify-center w-4 h-4 text-[10px] font-medium bg-primary/10 text-primary rounded">T</span>
+                          <ImageIcon v-if="provider.supports_multimodal" class="w-4 h-4 text-primary" />
+                        </div>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p class="text-xs text-muted-foreground mt-1">{{ t('agent.fastModelDescription') }}</p>
               </FormItem>
 
               <FormItem :label="t('agentEdit.enableMultimodal')">
@@ -935,6 +961,14 @@ const llmProviderSelectValue = computed({
     store.formData.llm_provider_id = val === defaultProviderOption ? null : val
     // Reset multimodal when provider changes
     store.formData.enableMultimodal = false
+  }
+})
+
+// 快速模型选择（可选）
+const fastLlmProviderSelectValue = computed({
+  get: () => store.formData.fast_llm_provider_id ?? defaultProviderOption,
+  set: (val) => {
+    store.formData.fast_llm_provider_id = val === defaultProviderOption ? null : val
   }
 })
 

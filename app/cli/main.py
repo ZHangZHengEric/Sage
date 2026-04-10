@@ -65,7 +65,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         choices=["simple", "multi", "fibre"],
         default="simple",
     )
-    run_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=50)
+    run_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=None)
     run_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     run_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     run_parser.add_argument("--stats", action="store_true", help="Print execution summary after completion")
@@ -82,7 +82,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         choices=["simple", "multi", "fibre"],
         default="simple",
     )
-    chat_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=50)
+    chat_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=None)
     chat_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     chat_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     chat_parser.add_argument("--stats", action="store_true", help="Print execution summary for each turn")
@@ -99,7 +99,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         choices=["simple", "multi", "fibre"],
         default="simple",
     )
-    resume_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=50)
+    resume_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=None)
     resume_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     resume_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     resume_parser.add_argument("--stats", action="store_true", help="Print execution summary for each turn")

@@ -177,7 +177,9 @@ def convert_spec_to_openai_format(
                 "type": "object",
                 "properties": localized_params,
                 "required": getattr(tool_spec, "required", []),
+                "additionalProperties": False,
             },
+            "strict": True,
             **({"returns": localized_returns} if localized_returns else {}),
         },
     }

@@ -7,6 +7,7 @@
         Token 使用: 输入 <span class="font-mono font-medium">{{ inputTokensFormatted }}</span>
         , 输出 <span class="font-mono font-medium">{{ outputTokensFormatted }}</span>
         , 总计 <span class="font-mono font-medium">{{ totalTokensFormatted }}</span>
+        <span v-if="cachedTokens > 0" class="text-green-600 ml-1">(缓存 {{ cachedTokensFormatted }})</span>
       </span>
       <button
         v-if="hasStepInfo"
@@ -23,6 +24,14 @@
         <div class="flex justify-between">
           <span class="text-muted-foreground">输入 Token:</span>
           <span class="font-mono">{{ inputTokensFormatted }}</span>
+        </div>
+        <div v-if="cachedTokens > 0" class="flex justify-between text-green-600">
+          <span class="text-muted-foreground">└─ 缓存命中:</span>
+          <span class="font-mono">{{ cachedTokensFormatted }}</span>
+        </div>
+        <div v-if="reasoningTokens > 0" class="flex justify-between text-blue-600">
+          <span class="text-muted-foreground">└─ 推理 Token:</span>
+          <span class="font-mono">{{ reasoningTokensFormatted }}</span>
         </div>
         <div class="flex justify-between">
           <span class="text-muted-foreground">输出 Token:</span>
@@ -56,6 +65,15 @@
                 <span class="font-mono">{{ formatTokens(stepInfo?.usage?.total_tokens) }}</span>
               </span>
             </div>
+            <!-- 显示 details 信息 -->
+            <div v-if="stepInfo?.usage?.prompt_tokens_details?.cached_tokens || stepInfo?.usage?.completion_tokens_details?.reasoning_tokens" class="mt-1 pl-2 text-[9px]">
+              <span v-if="stepInfo?.usage?.prompt_tokens_details?.cached_tokens" class="text-green-600 mr-2">
+                缓存: {{ formatTokens(stepInfo.usage.prompt_tokens_details.cached_tokens) }}
+              </span>
+              <span v-if="stepInfo?.usage?.completion_tokens_details?.reasoning_tokens" class="text-blue-600">
+                推理: {{ formatTokens(stepInfo.usage.completion_tokens_details.reasoning_tokens) }}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -81,12 +99,16 @@ const perStepInfo = computed(() => props.tokenUsage?.per_step_info || [])
 const inputTokens = computed(() => totalInfo.value?.prompt_tokens || 0)
 const outputTokens = computed(() => totalInfo.value?.completion_tokens || 0)
 const totalTokens = computed(() => totalInfo.value?.total_tokens || (inputTokens.value + outputTokens.value))
+const cachedTokens = computed(() => totalInfo.value?.cached_tokens || 0)
+const reasoningTokens = computed(() => totalInfo.value?.reasoning_tokens || 0)
 
 const formatTokens = (n) => Number(n || 0).toLocaleString()
 
 const inputTokensFormatted = computed(() => formatTokens(inputTokens.value))
 const outputTokensFormatted = computed(() => formatTokens(outputTokens.value))
 const totalTokensFormatted = computed(() => formatTokens(totalTokens.value))
+const cachedTokensFormatted = computed(() => formatTokens(cachedTokens.value))
+const reasoningTokensFormatted = computed(() => formatTokens(reasoningTokens.value))
 
 const hasStepInfo = computed(() => Array.isArray(perStepInfo.value) && perStepInfo.value.length > 0)
 

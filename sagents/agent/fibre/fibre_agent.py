@@ -52,9 +52,12 @@ class FibreAgent(AgentBase):
             raise ValueError("ToolManager is not initialized in SessionContext")
         
         session_id = session_context.session_id or str(uuid.uuid4())
-        max_loop_count = 50
         if session_context and isinstance(getattr(session_context, "agent_config", None), dict):
-            max_loop_count = session_context.agent_config.get("max_loop_count", 100)
+            max_loop_count = session_context.agent_config.get("max_loop_count")
+        else:
+            max_loop_count = None
+        if max_loop_count is None:
+            raise ValueError("FibreAgent requires session_context.agent_config.max_loop_count")
         
         if self.observability_manager:
             self.observability_manager.on_chain_start(session_id=session_id, input_data=list(session_context.message_manager.messages))

@@ -39,7 +39,7 @@ class SAgent:
         user_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         deep_thinking: Optional[Union[bool, str]] = None,
-        max_loop_count: int = 50,
+        max_loop_count: Optional[int] = None,
         agent_mode: Optional[str] = None,
         more_suggest: bool = False,
         force_summary: bool = False,
@@ -130,6 +130,8 @@ class SAgent:
             raise ValueError("run_stream 参数 model 不能为空")
         if not isinstance(model_config, dict) or not model_config:
             raise ValueError("run_stream 参数 model_config 必须是非空字典")
+        if max_loop_count is None:
+            raise ValueError("run_stream 参数 max_loop_count 不能为空")
 
         # 确定沙箱类型（优先级：参数 > __init__ > 环境变量 > 默认）
         effective_sandbox_type = (
@@ -288,7 +290,7 @@ class SAgent:
             logger.info(f"SAgent: 会话完整执行耗时 {total_ms} ms", session_id)
             self.session_manager.close_session(session_id)
 
-    def _build_default_flow(self, agent_mode: Optional[str], max_loop_count: int = 20) -> AgentFlow:
+    def _build_default_flow(self, agent_mode: Optional[str], max_loop_count: int) -> AgentFlow:
         """构建默认的执行流程，兼容原有逻辑"""
         
         # 1. 任务路由
