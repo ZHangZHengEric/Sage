@@ -17,6 +17,8 @@ CHAT_COMMAND_HELP = (
 )
 
 TOOL_NAME_TAG_PATTERN = re.compile(r"<tool_name>\s*([A-Za-z0-9_.-]+)\s*</tool_name>")
+TOOL_CALL_FUNCTION_PATTERN = re.compile(r"<call\s+function=\"([A-Za-z0-9_.-]+)\"")
+TOOL_RESULT_NAME_PATTERN = re.compile(r"<function_result\s+name=\"([A-Za-z0-9_.-]+)\"")
 
 
 def _truncate(value: Optional[str], max_len: int) -> str:
@@ -220,6 +222,12 @@ def _collect_event_tool_names(event: Dict[str, Any], *, content_buffer: str = ""
         combined_content += content
     if combined_content:
         for match in TOOL_NAME_TAG_PATTERN.findall(combined_content):
+            if match:
+                tool_names.append(match.strip())
+        for match in TOOL_CALL_FUNCTION_PATTERN.findall(combined_content):
+            if match:
+                tool_names.append(match.strip())
+        for match in TOOL_RESULT_NAME_PATTERN.findall(combined_content):
             if match:
                 tool_names.append(match.strip())
 
