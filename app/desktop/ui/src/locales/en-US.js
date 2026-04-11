@@ -1332,6 +1332,7 @@ export default {
 
   // Workbench ToolCall
   'workbench.tool.arguments': 'Arguments',
+  'workbench.tool.argumentsStreaming': 'Arguments streaming...',
   'workbench.tool.result': 'Result',
   'workbench.tool.compressingHistory': 'Compressing history...',
   'workbench.tool.compressFailed': 'Compression failed',
