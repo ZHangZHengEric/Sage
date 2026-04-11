@@ -8,17 +8,27 @@ import os
 from typing import Dict, Any, Optional, List
 from sagents.utils.logger import logger
 from sagents.utils.sandbox.config import VolumeMount
+from sagents.utils.common_utils import resolve_sandbox_runtime_dir
+from .subprocess import LAUNCHER_SCRIPT
 
 
 class SeatbeltIsolation:
     """macOS sandbox-exec 隔离模式"""
     
-    def __init__(self, venv_dir: str, sandbox_agent_workspace: str, volume_mounts: Optional[List[VolumeMount]] = None, limits: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        venv_dir: str,
+        sandbox_agent_workspace: str,
+        sandbox_runtime_dir: Optional[str] = None,
+        volume_mounts: Optional[List[VolumeMount]] = None,
+        limits: Optional[Dict[str, Any]] = None,
+    ):
         self.venv_dir = venv_dir
         self.sandbox_agent_workspace = sandbox_agent_workspace
         self.volume_mounts = volume_mounts or []
         self.limits = limits or {}
-        self.sandbox_dir = os.path.join(sandbox_agent_workspace, ".sandbox")
+        self.sandbox_dir = sandbox_runtime_dir or resolve_sandbox_runtime_dir(sandbox_agent_workspace) or os.path.join(sandbox_agent_workspace, ".sandbox")
+        os.makedirs(self.sandbox_dir, exist_ok=True)
         
     def _generate_profile(self, output_pkl: str, additional_read_paths: list = None,
                          additional_write_paths: list = None) -> str:
@@ -36,6 +46,24 @@ class SeatbeltIsolation:
             allowed.extend(additional_read_paths)
         if additional_write_paths:
             allowed.extend(additional_write_paths)
+        
+        # 添加系统关键路径（用于 Rosetta 和动态库加载）
+        system_paths = [
+            "/usr/lib",
+            "/usr/local/lib",
+            "/System/Library",
+            "/Library/Apple/usr/lib",
+            "/Library/Apple/usr/share",
+            "/var/db/dyld",  # dyld 共享缓存
+            "/private/var/db/dyld",
+        ]
+        allowed.extend(system_paths)
+        
+        # 添加 conda 环境路径（如果 Python 在 conda 中）
+        conda_base = os.environ.get("CONDA_PREFIX") or os.environ.get("CONDA_ROOT")
+        if conda_base:
+            allowed.append(conda_base)
+            allowed.append(os.path.dirname(conda_base))  # envs 目录
         
         # 去重
         allowed = list(set(allowed))
@@ -85,21 +113,34 @@ class SeatbeltIsolation:
         logger.info(f"[SeatbeltIsolation] 开始执行")
         
         run_id = str(uuid.uuid4())
+        os.makedirs(self.sandbox_dir, exist_ok=True)
         input_pkl = os.path.join(self.sandbox_dir, f"input_{run_id}.pkl")
         output_pkl = os.path.join(self.sandbox_dir, f"output_{run_id}.pkl")
-        
+
         with open(input_pkl, "wb") as f:
             pickle.dump(payload, f)
         
-        # 生成 profile
-        additional_write = [cwd] if cwd else []
-        profile_path = self._generate_profile(output_pkl, 
-                                             additional_read_paths=[input_pkl],
-                                             additional_write_paths=additional_write)
-        
-        # 使用沙箱的 venv Python
+        # 使用沙箱的 venv Python（解析符号链接获取真实路径）
         python_bin = os.path.join(self.venv_dir, "bin", "python")
+        # 解析符号链接，获取真实路径（sandbox-exec 可能无法执行符号链接）
+        python_bin_dir = None
+        if os.path.islink(python_bin):
+            python_bin = os.path.realpath(python_bin)
+            python_bin_dir = os.path.dirname(python_bin)
+            logger.info(f"[SeatbeltIsolation] Python 是符号链接，已解析为真实路径: {python_bin}")
         launcher_path = os.path.join(self.sandbox_dir, "launcher.py")
+
+        # 生成 profile（如果 Python 是符号链接，需要额外添加真实路径到允许列表）
+        additional_write = [cwd] if cwd else []
+        additional_read = [input_pkl]
+        if python_bin_dir:
+            additional_read.append(python_bin_dir)
+        profile_path = self._generate_profile(output_pkl,
+                                             additional_read_paths=additional_read,
+                                             additional_write_paths=additional_write)
+        if not os.path.exists(launcher_path):
+            with open(launcher_path, "w") as f:
+                f.write(LAUNCHER_SCRIPT)
         
         cmd = [
             "sandbox-exec", "-f", profile_path,
@@ -156,5 +197,11 @@ class SeatbeltIsolation:
         
         # 使用 subprocess 模式执行
         from .subprocess import SubprocessIsolation
-        subproc = SubprocessIsolation(self.venv_dir, self.sandbox_agent_workspace, self.volume_mounts, self.limits)
+        subproc = SubprocessIsolation(
+            venv_dir=self.venv_dir,
+            sandbox_agent_workspace=self.sandbox_agent_workspace,
+            sandbox_runtime_dir=self.sandbox_dir,
+            volume_mounts=self.volume_mounts,
+            limits=self.limits,
+        )
         return subproc.execute_background(command, cwd)

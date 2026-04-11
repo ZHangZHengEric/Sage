@@ -130,7 +130,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       if (item.data.path) item.data.path = normalizedPath
     }
 
-    const stableKey = buildStableKey(item)
+    const stableKey = item.stableKey || buildStableKey(item)
     if (stableKey) {
       item.stableKey = stableKey
     }
@@ -163,6 +163,13 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       if (item.type === 'file') {
         existingItem.timestamp = Date.now()
         existingItem.refreshVersion = (existingItem.refreshVersion || 0) + 1
+      }
+
+      if (item.type === 'tool_call') {
+        existingItem.data = mergeToolCallData(existingItem.data, item.data)
+        if (item.toolResult) {
+          existingItem.toolResult = item.toolResult
+        }
       }
 
       // 如果存在但没有 agentId，更新它
@@ -304,6 +311,50 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     isListView.value = value
   }
 
+  const mergeToolCallData = (existingData = {}, incomingData = {}) => {
+    if (!incomingData || typeof incomingData !== 'object') return existingData
+    if (!existingData || typeof existingData !== 'object') return { ...incomingData }
+
+    const existingFn = existingData.function && typeof existingData.function === 'object'
+      ? existingData.function
+      : {}
+    const incomingFn = incomingData.function && typeof incomingData.function === 'object'
+      ? incomingData.function
+      : {}
+
+    const mergedFn = { ...existingFn, ...incomingFn }
+    if (existingFn.name && !incomingFn.name) mergedFn.name = existingFn.name
+    if (incomingFn.name) mergedFn.name = incomingFn.name
+
+    const existingArgs = typeof existingFn.arguments === 'string' ? existingFn.arguments : ''
+    const incomingArgs = typeof incomingFn.arguments === 'string' ? incomingFn.arguments : ''
+    if (incomingArgs) {
+      mergedFn.arguments = incomingArgs.startsWith(existingArgs) && incomingArgs.length >= existingArgs.length
+        ? incomingArgs
+        : `${existingArgs}${incomingArgs}`
+    } else if (typeof existingFn.arguments === 'string') {
+      mergedFn.arguments = existingFn.arguments
+    }
+
+    const mergedData = {
+      ...existingData,
+      ...incomingData,
+      function: mergedFn
+    }
+
+    if (existingData.id && !incomingData.id) {
+      mergedData.id = existingData.id
+    }
+    if (existingData.tool_call_id && !incomingData.tool_call_id) {
+      mergedData.tool_call_id = existingData.tool_call_id
+    }
+    if (existingData.index !== undefined && incomingData.index === undefined) {
+      mergedData.index = existingData.index
+    }
+
+    return mergedData
+  }
+
   // 从消息中提取工作台项（用于历史消息加载）
   // 只处理 AI (assistant) 和 Tool 的消息，不处理用户消息
   const extractFromMessage = (message, agentId = null) => {
@@ -339,6 +390,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
           return
         }
         console.log('[Workbench] Adding tool_call:', idx, toolCall.function?.name)
+        const toolStableKey = messageId ? `tool:${messageId}:${idx}` : (toolCall.id ? `tool:${toolCall.id}` : null)
         addItem({
           type: 'tool_call',
           role: role,
@@ -346,6 +398,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
           sessionId: sessionId,
           messageId: messageId, // 关联消息ID
           agentId: finalAgentId, // 关联AgentID
+          stableKey: toolStableKey,
           data: toolCall,
           toolResult: null // 工具结果会在后续更新
         })
@@ -393,7 +446,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const updateToolResult = (toolCallId, result) => {
     console.log('[Workbench] updateToolResult called with:', toolCallId, result)
     const item = items.value.find(i =>
-      i.type === 'tool_call' && i.data.id === toolCallId
+      i.type === 'tool_call' && (i.data.id === toolCallId || i.data.tool_call_id === toolCallId)
     )
     if (item) {
       item.toolResult = result

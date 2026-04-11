@@ -33,7 +33,12 @@ from ...interface import (
 )
 from ...config import VolumeMount
 from sagents.utils.logger import logger
-from sagents.utils.common_utils import get_system_python_path, resolve_python_venv_dir, file_lock
+from sagents.utils.common_utils import (
+    get_system_python_path,
+    resolve_python_venv_dir,
+    resolve_sandbox_runtime_dir,
+    file_lock,
+)
 
 
 class LocalSandboxProvider(ISandboxHandle):
@@ -93,6 +98,9 @@ class LocalSandboxProvider(ISandboxHandle):
 
             # 设置 venv 目录（desktop 可切换为共享 venv）
             self._venv_dir = resolve_python_venv_dir(self._sandbox_agent_workspace)
+            sandbox_runtime_dir = resolve_sandbox_runtime_dir(self._sandbox_agent_workspace)
+            if sandbox_runtime_dir:
+                os.makedirs(sandbox_runtime_dir, exist_ok=True)
 
             # 初始化隔离层（如果需要）
             if self._linux_isolation_mode != "subprocess" or self._macos_isolation_mode != "subprocess":
@@ -110,6 +118,7 @@ class LocalSandboxProvider(ISandboxHandle):
                 self._isolation = SeatbeltIsolation(
                     venv_dir=self._venv_dir,
                     sandbox_agent_workspace=self._sandbox_agent_workspace,
+                    sandbox_runtime_dir=resolve_sandbox_runtime_dir(self._sandbox_agent_workspace),
                     volume_mounts=self._volume_mounts,
                     limits={"cpu_time": self._cpu_time_limit, "memory": self._memory_limit_mb * 1024 * 1024},
                 )
@@ -118,6 +127,7 @@ class LocalSandboxProvider(ISandboxHandle):
                 self._isolation = BwrapIsolation(
                     venv_dir=self._venv_dir,
                     sandbox_agent_workspace=self._sandbox_agent_workspace,
+                    sandbox_runtime_dir=resolve_sandbox_runtime_dir(self._sandbox_agent_workspace),
                     volume_mounts=self._volume_mounts,
                     limits={"cpu_time": self._cpu_time_limit, "memory": self._memory_limit_mb * 1024 * 1024},
                 )
@@ -216,6 +226,36 @@ class LocalSandboxProvider(ISandboxHandle):
 
             # 确保 Python 解释器有执行权限
             self._ensure_python_executable()
+
+            # 尝试在 venv 内预装 uv（失败不阻塞）
+            self._ensure_uv_in_venv()
+
+    def _ensure_uv_in_venv(self):
+        """在 venv 中安装 uv，便于后续按需使用。"""
+        import subprocess
+
+        venv_python = self._get_venv_python()
+        if not venv_python:
+            logger.warning("[LocalSandboxProvider] 未找到 venv python，跳过 uv 预装")
+            return
+
+        install_cmd = [
+            venv_python, "-m", "pip", "install", "-U", "uv",
+            "--index-url", "https://mirrors.aliyun.com/pypi/simple/",
+            "--trusted-host", "mirrors.aliyun.com",
+        ]
+        result = subprocess.run(install_cmd, capture_output=True, text=True, timeout=180)
+        if result.returncode == 0:
+            logger.info("[LocalSandboxProvider] uv 已安装到 venv")
+            return
+
+        # 镜像失败时回退到默认源
+        fallback_cmd = [venv_python, "-m", "pip", "install", "-U", "uv"]
+        fallback_result = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=180)
+        if fallback_result.returncode == 0:
+            logger.info("[LocalSandboxProvider] uv 已安装到 venv（默认源）")
+        else:
+            logger.warning(f"[LocalSandboxProvider] 预装 uv 失败，不影响后续执行: {fallback_result.stderr}")
 
     @property
     def sandbox_type(self) -> SandboxType:
@@ -461,6 +501,7 @@ class LocalSandboxProvider(ISandboxHandle):
         # 使用异步 subprocess 执行命令，避免阻塞
         import asyncio
         proc = None
+        collected_output = []
         try:
             # 使用 exec 模式避免 shell 配置文件覆盖 PATH
             # 通过显式传递 PATH 环境变量确保 venv 的 Python 优先
@@ -473,20 +514,56 @@ class LocalSandboxProvider(ISandboxHandle):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
-            # 使用 wait_for 包装 communicate 来限制整个执行时间
-            stdout, _ = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=timeout,
-            )
-            stdout_text = stdout.decode('utf-8', errors='replace') if stdout else ""
-            return CommandResult(
-                success=proc.returncode == 0,
-                stdout=stdout_text,
-                stderr="",  # 已合并到 stdout
-                return_code=proc.returncode,
-                execution_time=0,
-            )
-        except asyncio.TimeoutError:
+
+            # 使用增量读取方式，确保超时前能获取已产生的输出
+            async def read_output():
+                while True:
+                    try:
+                        chunk = await asyncio.wait_for(
+                            proc.stdout.read(4096),
+                            timeout=0.5
+                        )
+                        if not chunk:
+                            break
+                        collected_output.append(chunk.decode('utf-8', errors='replace'))
+                    except asyncio.TimeoutError:
+                        # 继续读取，检查进程是否还在运行
+                        if proc.returncode is not None:
+                            break
+                        continue
+                return ''.join(collected_output)
+
+            try:
+                stdout_text = await asyncio.wait_for(
+                    read_output(),
+                    timeout=timeout,
+                )
+                return CommandResult(
+                    success=proc.returncode == 0,
+                    stdout=stdout_text,
+                    stderr="",  # 已合并到 stdout
+                    return_code=proc.returncode,
+                    execution_time=0,
+                )
+            except asyncio.TimeoutError:
+                # 超时发生时，返回已收集的输出
+                stdout_text = ''.join(collected_output)
+                if proc:
+                    try:
+                        proc.kill()
+                        await proc.wait()
+                    except Exception:
+                        pass
+                return CommandResult(
+                    success=False,
+                    stdout=stdout_text,
+                    stderr=f"Command timed out after {timeout} seconds",
+                    return_code=-1,
+                    execution_time=timeout,
+                )
+        except Exception as e:
+            # 其他异常，返回已收集的输出
+            stdout_text = ''.join(collected_output)
             if proc:
                 try:
                     proc.kill()
@@ -495,10 +572,10 @@ class LocalSandboxProvider(ISandboxHandle):
                     pass
             return CommandResult(
                 success=False,
-                stdout="",
-                stderr=f"Command timed out after {timeout} seconds",
+                stdout=stdout_text,
+                stderr=str(e),
                 return_code=-1,
-                execution_time=timeout,
+                execution_time=0,
             )
 
     async def execute_python(

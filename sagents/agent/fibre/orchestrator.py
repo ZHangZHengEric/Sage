@@ -65,7 +65,7 @@ class FibreOrchestrator:
     async def run_loop(
         self,
         session_context: SessionContext,
-        max_loop_count: int = 10,
+        max_loop_count: int,
     ) -> AsyncGenerator[List[MessageChunk], None]:
         """
         Main orchestration loop.
@@ -288,7 +288,8 @@ class FibreOrchestrator:
         self,
         session_context: SessionContext,
         is_main_agent: bool = True,
-        custom_system_prompt: str = ""
+        custom_system_prompt: str = "",
+        include_system_mechanics: bool = True
     ) -> str:
         """
         Get the Fibre System Prompt.
@@ -297,6 +298,8 @@ class FibreOrchestrator:
             session_context: The session context
             is_main_agent: True for main agent (orchestrator), False for sub-agent (strand)
             custom_system_prompt: Custom system prompt (for both main and sub-agents)
+            include_system_mechanics: Whether to include fibre_system_prompt mechanics.
+                Set to False for sub-agents that are FibreAgent themselves to avoid duplication.
 
         Returns:
             Complete system prompt
@@ -311,17 +314,29 @@ class FibreOrchestrator:
         # 1. Base Description (custom_system_prompt)
         base_desc = custom_system_prompt or ""
 
-        # 2. System Mechanics (Shared)
-        system_mechanics = pm.get_prompt('fibre_system_prompt', agent='FibreAgent', language=lang)
+        # 2. System Mechanics (Shared) - only include if requested
+        if include_system_mechanics:
+            system_mechanics = pm.get_prompt('fibre_system_prompt', agent='FibreAgent', language=lang)
+        else:
+            system_mechanics = ""
 
         # 3. Common rules for both main and sub agents
-        common_rules = pm.get_prompt('common_agent_rules', agent='FibreAgent', language=lang)
+        # Only include if system_mechanics is also included (i.e., not a FibreAgent sub-agent)
+        if include_system_mechanics:
+            common_rules = pm.get_prompt('common_agent_rules', agent='FibreAgent', language=lang)
+        else:
+            common_rules = ""
 
         # Combine for all agents
+        parts = []
         if base_desc:
-            return f"{base_desc}\n\n{system_mechanics}\n\n{common_rules}"
-        else:
-            return f"{system_mechanics}\n\n{common_rules}"
+            parts.append(base_desc)
+        if system_mechanics:
+            parts.append(system_mechanics)
+        if common_rules:
+            parts.append(common_rules)
+
+        return "\n\n".join(parts)
 
     async def spawn_agent(
         self,
@@ -441,12 +456,19 @@ class FibreOrchestrator:
 
             # Create agent in backend (without system_prompt first, we'll update later if needed)
             # Use a temporary system prompt
+            # Check if sub-agent will be a FibreAgent (inherit agent_mode from parent)
+            parent_agent_mode = parent_session.session_context.agent_config.get("agent_mode") if parent_session and parent_session.session_context else None
+            is_sub_agent_fibre = parent_agent_mode == "fibre"
+            
             temp_system_prompt = system_prompt
             if parent_session:
+                # If sub-agent is FibreAgent, don't include system_mechanics to avoid duplication
+                # because FibreAgent.__init__ will add its own system prompt
                 temp_system_prompt = self._get_fibre_system_prompt_content(
                     session_context=parent_session.session_context,
                     is_main_agent=False,
-                    custom_system_prompt=system_prompt
+                    custom_system_prompt=system_prompt,
+                    include_system_mechanics=not is_sub_agent_fibre
                 )
 
             # Get user_id from parent session context
@@ -463,6 +485,7 @@ class FibreOrchestrator:
                 available_workflows=available_workflows or {},
                 system_context=system_context,
                 available_sub_agent_ids=available_sub_agent_ids if available_sub_agent_ids else None,
+                max_loop_count=parent_session.session_context.agent_config.get("max_loop_count") if parent_session and parent_session.session_context else None,
                 llm_provider_id=llm_provider_id,
                 user_id=user_id
             )
@@ -475,10 +498,12 @@ class FibreOrchestrator:
 
         # 4. Generate final system prompt
         if parent_session:
+            # If sub-agent is FibreAgent, don't include system_mechanics to avoid duplication
             complete_system_prompt = self._get_fibre_system_prompt_content(
                 session_context=parent_session.session_context,
                 is_main_agent=False,
-                custom_system_prompt=system_prompt
+                custom_system_prompt=system_prompt,
+                include_system_mechanics=not is_sub_agent_fibre
             )
         else:
             complete_system_prompt = system_prompt
@@ -888,7 +913,8 @@ class FibreOrchestrator:
                 messages=messages,
                 session_id=session_id,
                 system_context=system_context,
-                user_id=user_id
+                user_id=user_id,
+                max_loop_count=parent_session_context.agent_config.get("max_loop_count") if parent_session_context else None,
             ):
                 # Filter chunks for current session and assistant role
                 # Skip non-content types like 'token_usage', 'stream_end'
@@ -1060,7 +1086,7 @@ class FibreOrchestrator:
                 tool_manager=sub_session.session_context.tool_manager,
                 skill_manager=sub_session.session_context.skill_manager,
                 session_id=session_id,
-                max_loop_count=sub_session.session_context.agent_config.get("max_loop_count", 10),
+                max_loop_count=sub_session.session_context.agent_config.get("max_loop_count"),
                 deep_thinking=sub_session.session_context.agent_config.get("deep_thinking", False),
                 agent_mode=sub_session.session_context.agent_config.get("agent_mode", "simple")
             ):
@@ -1276,7 +1302,7 @@ class FibreOrchestrator:
             deep_thinking=parent_agent_config.get("deep_thinking", False),
             agent_mode=parent_agent_config.get("agent_mode"),
             more_suggest=parent_agent_config.get("more_suggest", False),
-            max_loop_count=parent_agent_config.get("max_loop_count", 10),
+            max_loop_count=parent_agent_config.get("max_loop_count"),
             agent_id=agent_id,
         )
         

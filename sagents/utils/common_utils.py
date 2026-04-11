@@ -3,6 +3,7 @@ import ast
 import os
 import sys
 import shutil
+import hashlib
 from contextlib import contextmanager
 from typing import Any, List, Union, Optional
 
@@ -92,12 +93,45 @@ def get_shared_python_env_dir() -> str:
     return os.path.join(os.path.expanduser("~"), ".sage", ".sage_py_env")
 
 
+def get_shared_sandbox_runtime_root() -> str:
+    custom_path = os.environ.get("SAGE_SHARED_SANDBOX_RUNTIME_DIR")
+    if custom_path:
+        return os.path.abspath(os.path.expanduser(custom_path))
+    return os.path.join(os.path.expanduser("~"), ".sage", ".sandbox_runtime")
+
+
 def resolve_python_venv_dir(workspace_path: Optional[str]) -> Optional[str]:
     if use_shared_python_env():
         return get_shared_python_env_dir()
     if not workspace_path:
         return None
     return os.path.join(workspace_path, ".sandbox", "venv")
+
+
+def resolve_sandbox_runtime_dir(workspace_path: Optional[str]) -> Optional[str]:
+    """
+    统一解析本地沙箱运行时目录（launcher/input/output/pylibs 等）。
+
+    优先级：
+    1) SAGE_SANDBOX_RUNTIME_DIR（固定目录）
+    2) 共享环境模式（desktop 常见）：~/.sage/.sandbox_runtime/<workspace-hash>
+    3) 默认：<workspace>/.sandbox
+    """
+    forced_dir = os.environ.get("SAGE_SANDBOX_RUNTIME_DIR")
+    if forced_dir:
+        return os.path.abspath(os.path.expanduser(forced_dir))
+
+    if not workspace_path:
+        return None
+
+    workspace_abs = os.path.abspath(os.path.expanduser(workspace_path))
+    if use_shared_python_env():
+        root = get_shared_sandbox_runtime_root()
+        digest = hashlib.sha1(workspace_abs.encode("utf-8")).hexdigest()[:12]
+        workspace_name = os.path.basename(workspace_abs.rstrip(os.sep)) or "workspace"
+        return os.path.join(root, f"{workspace_name}_{digest}")
+
+    return os.path.join(workspace_abs, ".sandbox")
 
 
 @contextmanager

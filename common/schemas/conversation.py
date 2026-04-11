@@ -12,3 +12,5 @@ class ConversationInfo(BaseModel):
     created_at: str
     updated_at: str
     user_id: str | None = None
+    trace_id: str | None = None
+    trace_url: str | None = None

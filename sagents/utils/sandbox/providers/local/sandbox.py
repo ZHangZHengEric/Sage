@@ -11,11 +11,17 @@ import sys
 import os
 import asyncio
 import threading
+import subprocess
 from typing import Dict, Any, Optional, Callable, List
 
 from sagents.utils.logger import logger
 from sagents.utils.sandbox.config import VolumeMount
-from sagents.utils.common_utils import get_system_python_path, resolve_python_venv_dir, file_lock
+from sagents.utils.common_utils import (
+    get_system_python_path,
+    resolve_python_venv_dir,
+    resolve_sandbox_runtime_dir,
+    file_lock,
+)
 
 
 class SandboxError(Exception):
@@ -132,8 +138,9 @@ class Sandbox:
         # 在 desktop 共享模式下使用统一 venv，否则仍使用 workspace 本地 venv
         self.venv_dir = resolve_python_venv_dir(self.sandbox_agent_workspace)
         self.sandbox_dir = (
-            os.path.join(self.sandbox_agent_workspace, ".sandbox")
-            if self.sandbox_agent_workspace else None
+            resolve_sandbox_runtime_dir(self.sandbox_agent_workspace)
+            if self.sandbox_agent_workspace
+            else None
         )
         if self.sandbox_dir:
             os.makedirs(self.sandbox_dir, exist_ok=True)
@@ -179,6 +186,7 @@ class Sandbox:
 
                     logger.info(f"使用 Python 解释器创建 venv: {system_python}")
                     venv.create(self.venv_dir, with_pip=True, executable=system_python)
+                    self._ensure_uv_in_venv(self.venv_dir)
                     logger.info(f"虚拟环境创建完成: {self.venv_dir}")
             except Exception as e:
                 logger.error(f"创建虚拟环境失败: {self.venv_dir}, 错误: {e}")
@@ -187,6 +195,31 @@ class Sandbox:
         thread = threading.Thread(target=create_venv_in_background, daemon=True)
         thread.start()
         logger.info(f"虚拟环境创建任务已启动（后台）: {self.venv_dir}")
+
+    def _ensure_uv_in_venv(self, venv_dir: str):
+        """在 venv 内预装 uv（失败不阻塞）。"""
+        if not venv_dir:
+            return
+        venv_python = os.path.join(venv_dir, "Scripts", "python.exe") if sys.platform == "win32" else os.path.join(venv_dir, "bin", "python")
+        if not os.path.exists(venv_python):
+            return
+
+        install_cmd = [
+            venv_python, "-m", "pip", "install", "-U", "uv",
+            "--index-url", "https://mirrors.aliyun.com/pypi/simple/",
+            "--trusted-host", "mirrors.aliyun.com",
+        ]
+        result = subprocess.run(install_cmd, capture_output=True, text=True, timeout=180)
+        if result.returncode == 0:
+            logger.info(f"[Sandbox] uv 已安装到 venv: {venv_dir}")
+            return
+
+        fallback_cmd = [venv_python, "-m", "pip", "install", "-U", "uv"]
+        fallback_result = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=180)
+        if fallback_result.returncode == 0:
+            logger.info(f"[Sandbox] uv 已安装到 venv（默认源）: {venv_dir}")
+        else:
+            logger.warning(f"[Sandbox] 预装 uv 失败，不影响运行: {fallback_result.stderr}")
 
     def _init_isolation(self):
         from .isolation import SubprocessIsolation, SeatbeltIsolation, BwrapIsolation
@@ -200,30 +233,31 @@ class Sandbox:
         if self.isolation_mode == 'subprocess':
             self.isolation = SubprocessIsolation(
                 venv_dir=self.venv_dir,
-                host_workspace=self.sandbox_agent_workspace,
-                limits=self.limits
+                sandbox_agent_workspace=self.sandbox_agent_workspace,
+                sandbox_runtime_dir=self.sandbox_dir,
+                limits=self.limits,
             )
         elif self.isolation_mode == 'seatbelt':
             self.isolation = SeatbeltIsolation(
                 venv_dir=self.venv_dir,
-                host_workspace=self.sandbox_agent_workspace,
+                sandbox_agent_workspace=self.sandbox_agent_workspace,
+                sandbox_runtime_dir=self.sandbox_dir,
                 limits=self.limits,
-                allowed_paths=self.limits['allowed_paths'],
-                sandbox_dir=self.sandbox_dir
             )
         elif self.isolation_mode == 'bwrap':
             self.isolation = BwrapIsolation(
                 venv_dir=self.venv_dir,
-                host_workspace=self.sandbox_agent_workspace,
+                sandbox_agent_workspace=self.sandbox_agent_workspace,
+                sandbox_runtime_dir=self.sandbox_dir,
                 limits=self.limits,
-                virtual_workspace=self.sandbox_agent_workspace
             )
         else:
             logger.warning(f"未知的隔离模式: {self.isolation_mode}，使用 subprocess")
             self.isolation = SubprocessIsolation(
                 venv_dir=self.venv_dir,
-                host_workspace=self.sandbox_agent_workspace,
-                limits=self.limits
+                sandbox_agent_workspace=self.sandbox_agent_workspace,
+                sandbox_runtime_dir=self.sandbox_dir,
+                limits=self.limits,
             )
 
         logger.info(f"隔离策略初始化完成: {type(self.isolation).__name__}")

@@ -804,8 +804,13 @@ onMounted(() => {
     console.log('[MessageRenderer] Adding tool_calls to workbench:', props.message.tool_calls.length)
     props.message.tool_calls.forEach((toolCall, index) => {
       console.log(`[MessageRenderer] Adding tool_call ${index}:`, toolCall.id)
+      const toolStableKey = messageId ? `tool:${messageId}:${index}` : (toolCall.id ? `tool:${toolCall.id}` : null)
       const existingToolItem = workbenchStore.items.find(item =>
-        item.type === 'tool_call' && item.data?.id === toolCall.id
+        item.type === 'tool_call' && (
+          item.data?.id === toolCall.id ||
+          item.data?.tool_call_id === toolCall.id ||
+          (toolStableKey && item.stableKey === toolStableKey)
+        )
       )
       if (existingToolItem) {
         return
@@ -820,6 +825,7 @@ onMounted(() => {
         messageId: messageId,
         agent_id: props.agentId,
         agent_name: currentAgentName.value,
+        stableKey: toolStableKey,
         data: toolCall
         // toolResult 会在 watch 中更新
       })
@@ -887,8 +893,14 @@ watch(() => props.message, (newMessage, oldMessage) => {
     newMessage.tool_calls.forEach((toolCall) => {
       // 流式场景下，tool_calls 可能在消息已挂载后才到达：
       // 先确保工作台存在对应 tool_call 卡片，再尝试更新结果。
+      const toolIndex = newMessage.tool_calls.indexOf(toolCall)
+      const toolStableKey = messageId ? `tool:${messageId}:${toolIndex}` : (toolCall.id ? `tool:${toolCall.id}` : null)
       const existingToolItem = workbenchStore.items.find(item =>
-        item.type === 'tool_call' && item.data?.id === toolCall.id
+        item.type === 'tool_call' && (
+          item.data?.id === toolCall.id ||
+          item.data?.tool_call_id === toolCall.id ||
+          (toolStableKey && item.stableKey === toolStableKey)
+        )
       )
       if (!existingToolItem) {
         workbenchStore.addItem({
@@ -899,6 +911,7 @@ watch(() => props.message, (newMessage, oldMessage) => {
           messageId: messageId,
           agent_id: props.agentId,
           agent_name: currentAgentName.value,
+          stableKey: toolStableKey,
           data: toolCall
         })
       }

@@ -34,9 +34,9 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--default_llm_api_key", required=True, help="默认LLM API Key")
     parser.add_argument("--default_llm_api_base_url", required=True, help="默认LLM API Base")
     parser.add_argument("--default_llm_model_name", required=True, help="默认LLM API Model")
-    parser.add_argument("--default_llm_max_tokens", default=4096, type=int, help="默认LLM API Max Tokens")
+    parser.add_argument("--default_llm_max_tokens", default=None, type=int, help="默认LLM API Max Tokens")
     parser.add_argument("--default_llm_temperature", default=0.2, type=float, help="默认LLM API Temperature")
-    parser.add_argument("--default_llm_max_model_len", default=54000, type=int, help="默认LLM 最大上下文")
+    parser.add_argument("--default_llm_max_model_len", default=64000, type=int, help="默认LLM 最大上下文")
     parser.add_argument("--default_llm_top_p", default=0.9, type=float, help="默认LLM Top P")
     parser.add_argument("--default_llm_presence_penalty", default=0.0, type=float, help="默认LLM Presence Penalty")
 
@@ -93,9 +93,9 @@ server_args = parser.parse_args()
 
 # 处理 default_llm_max_model_len 逻辑
 if server_args.default_llm_max_model_len is None:
-    server_args.default_llm_max_model_len = 54000
+    server_args.default_llm_max_model_len = 64000
 elif server_args.default_llm_max_model_len < 8000:
-    server_args.default_llm_max_model_len = 54000
+    server_args.default_llm_max_model_len = 64000
 
 if server_args.workspace:
     server_args.workspace = os.path.abspath(server_args.workspace)
@@ -290,6 +290,8 @@ class SageStreamService:
         """处理流式聊天请求"""
         logger.info(f"🚀 SageStreamService.process_stream 开始，会话ID: {session_id}")
         logger.info(f"📝 参数: deep_thinking={deep_thinking}, agent_mode={agent_mode}, messages_count={len(messages)}")
+        if max_loop_count is None and self.preset_max_loop_count is None:
+            raise ValueError("max_loop_count is required")
         if isinstance(deep_thinking, str):
             if deep_thinking == 'auto':
                 deep_thinking = None
@@ -329,7 +331,7 @@ class SageStreamService:
                 user_id=user_id,
                 agent_id=self.agent_id,
                 deep_thinking=deep_thinking if deep_thinking is not None else self.preset_deep_thinking,
-                max_loop_count = max_loop_count if max_loop_count is not None else self.preset_max_loop_count ,
+                max_loop_count=max_loop_count if max_loop_count is not None else self.preset_max_loop_count,
                 agent_mode=agent_mode if agent_mode is not None else self.preset_agent_mode,
                 # more_suggest = more_suggest,
                 system_context=system_context,
@@ -621,7 +623,7 @@ class StreamRequest(BaseModel):
     session_id: Optional[str] = None
     user_id: Optional[str] = None
     deep_thinking: Optional[Union[bool, str]] = None
-    max_loop_count: int = 10
+    max_loop_count: Optional[int] = None
     multi_agent: Optional[Union[bool, str]] = None
     agent_mode: Optional[str] = None # fibre, simple, multi
     summary : bool =True  # 过时字段

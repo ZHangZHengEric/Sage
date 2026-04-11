@@ -130,6 +130,56 @@ async def initialize_session_manager():
         return None
 
 
+async def initialize_observability():
+    """初始化 OpenTelemetry 观测链路（desktop）"""
+    cfg = get_startup_config()
+    if not cfg:
+        logger.warning("Startup config 不可用，跳过观测链路初始化")
+        return None
+
+    try:
+        from opentelemetry import trace
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    except ImportError:
+        logger.warning("OpenTelemetry 未安装，跳过观测链路初始化")
+        return None
+
+    if isinstance(trace.get_tracer_provider(), TracerProvider):
+        logger.info("观测链路上报已初始化")
+        return None
+
+    try:
+        resource = Resource(attributes={SERVICE_NAME: "sage-desktop"})
+        provider = TracerProvider(resource=resource)
+        if cfg.trace_jaeger_endpoint:
+            otlp_exporter = OTLPSpanExporter(endpoint=cfg.trace_jaeger_endpoint, insecure=True)
+            provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+        trace.set_tracer_provider(provider)
+        logger.info("观测链路上报已初始化")
+    except Exception as e:
+        logger.error(f"观测链路上报初始化失败: {e}")
+
+
+async def close_observability():
+    """关闭 OpenTelemetry 观测链路（desktop）"""
+    try:
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+    except ImportError:
+        logger.info("OpenTelemetry 未安装，跳过观测链路关闭")
+        return
+
+    provider = trace.get_tracer_provider()
+    if isinstance(provider, TracerProvider):
+        try:
+            provider.shutdown()
+            logger.info("观测链路上报已关闭")
+        except Exception as e:
+            logger.error(f"观测链路上报关闭失败: {e}")
+
 async def copy_default_skills():
     """复制默认 skills 到用户目录（每次启动都检查并同步）"""
     try:

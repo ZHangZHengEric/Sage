@@ -350,7 +350,7 @@
                       </div>
                       <div class="grid gap-2 md:col-span-2">
                         <Label>{{ t('agent.maxModelLen') }}</Label>
-                        <Input type="number" v-model.number="form.maxModelLen" class="h-10 rounded-xl" placeholder="32000" />
+                        <Input type="number" v-model.number="form.maxModelLen" class="h-10 rounded-xl" placeholder="64000" />
                       </div>
                     </div>
                   </div>
@@ -440,7 +440,7 @@ const form = reactive({
   base_url: '',
   api_keys_str: '',
   model: '',
-  maxTokens: 8192,
+  maxTokens: null,
   temperature: 0.7,
   topP: 0.95,
   presencePenalty: 0,
@@ -538,7 +538,10 @@ const buildProviderPayload = () => ({
   base_url: form.base_url,
   api_keys: buildApiKeys(),
   model: form.model,
-  max_tokens: form.maxTokens,
+  ...(() => {
+    const maxTokensValue = Number(form.maxTokens)
+    return Number.isFinite(maxTokensValue) ? { max_tokens: maxTokensValue } : {}
+  })(),
   temperature: form.temperature,
   top_p: form.topP,
   presence_penalty: form.presencePenalty,
@@ -625,7 +628,7 @@ const handleCreate = () => {
   form.base_url = ''
   form.api_keys_str = ''
   form.model = ''
-  form.maxTokens = 8192
+  form.maxTokens = null
   form.temperature = 0.7
   form.topP = 0.95
   form.presencePenalty = 0
@@ -663,11 +666,11 @@ const handleEdit = (provider) => {
   }
   form.api_keys_str = keys.join(',')
   form.model = provider.model
-  form.maxTokens = provider.max_tokens ?? 4096
+  form.maxTokens = provider.max_tokens ?? null
   form.temperature = provider.temperature ?? 0.7
   form.topP = provider.top_p ?? 0.9
   form.presencePenalty = provider.presence_penalty ?? 0.0
-  form.maxModelLen = provider.max_model_len ?? 32000
+  form.maxModelLen = provider.max_model_len ?? 64000
   form.supportsMultimodal = provider.supports_multimodal ?? false
 
   // 保存原始值用于比较

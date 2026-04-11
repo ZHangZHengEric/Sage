@@ -15,7 +15,7 @@ export const useChatAgentConfig = ({
     deepThinking: true,
     agentMode: 'simple',
     moreSuggest: false,
-    maxLoopCount: 10,
+    maxLoopCount: null,
     availableSubAgentIds: []
   })
   const userConfigOverrides = ref({})
@@ -55,7 +55,7 @@ export const useChatAgentConfig = ({
         deepThinking: userConfigOverrides.value.deepThinking !== undefined ? userConfigOverrides.value.deepThinking : agent.deepThinking,
         agentMode: userConfigOverrides.value.agentMode !== undefined ? normalizeAgentMode(userConfigOverrides.value.agentMode) : agentMode,
         moreSuggest: userConfigOverrides.value.moreSuggest !== undefined ? userConfigOverrides.value.moreSuggest : (agent.moreSuggest ?? false),
-        maxLoopCount: userConfigOverrides.value.maxLoopCount !== undefined ? userConfigOverrides.value.maxLoopCount : (agent.maxLoopCount ?? 10),
+        maxLoopCount: userConfigOverrides.value.maxLoopCount !== undefined ? userConfigOverrides.value.maxLoopCount : agent.maxLoopCount,
         availableSubAgentIds: userConfigOverrides.value.availableSubAgentIds !== undefined
           ? userConfigOverrides.value.availableSubAgentIds
           : (agent.availableSubAgentIds ?? [])

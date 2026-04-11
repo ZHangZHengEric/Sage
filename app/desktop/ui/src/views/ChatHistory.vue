@@ -157,6 +157,17 @@
                     </Tooltip>
                   </TooltipProvider>
 
+                  <template v-if="conversation.trace_url">
+                    <span class="text-border/80">·</span>
+                    <button
+                      class="inline-flex shrink-0 items-center gap-1 rounded-full px-1 py-0.5 text-muted-foreground transition-colors hover:bg-muted/18 hover:text-primary"
+                      @click.stop="handleOpenTrace(conversation)"
+                    >
+                      <Activity class="h-3 w-3" />
+                      <span>{{ t('history.trace') }}</span>
+                    </button>
+                  </template>
+
                   <span class="text-border/80">·</span>
 
                   <span class="truncate text-muted-foreground/80">{{ formatDateTime(conversation.updated_at) }}</span>
@@ -224,6 +235,24 @@
                   </TooltipTrigger>
                   <TooltipContent side="left">
                     <p>{{ t('history.share') }}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              <TooltipProvider v-if="conversation.trace_url">
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="h-7.5 w-7.5 rounded-full text-muted-foreground/75 opacity-0 transition-all hover:bg-primary/10 hover:text-primary group-hover:opacity-100"
+                      @click.stop="handleOpenTrace(conversation)"
+                    >
+                      <Activity class="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">
+                    <p>{{ t('history.trace') }}</p>
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
@@ -331,6 +360,7 @@ import {
   Loader, 
   Trash2, 
   Download,
+  Activity,
   Info,
   Copy,
   FileText,
@@ -554,6 +584,12 @@ const copySessionId = async (conversation) => {
   } catch (e) {
     toast.error(t('history.copyFailed'))
   }
+}
+
+const handleOpenTrace = (conversation) => {
+  const traceUrl = conversation?.trace_url
+  if (!traceUrl) return
+  window.open(traceUrl, '_blank', 'noopener,noreferrer')
 }
 
 const formatMessageForExport = (messages) => {

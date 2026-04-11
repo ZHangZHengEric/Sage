@@ -25,8 +25,9 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     agentMode: 'simple',
     moreSuggest: false,
     memoryType: "session",
-    maxLoopCount: 10,
+    maxLoopCount: null,
     llm_provider_id: null,
+    fast_llm_provider_id: null,  // 快速模型提供商ID（可选）
     enableMultimodal: false,
     llmConfig: {},
     systemContext: {},

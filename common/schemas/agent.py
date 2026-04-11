@@ -48,7 +48,7 @@ class AgentConfigDTO(BaseModel):
     availableSkills: Optional[List[str]] = None
     availableKnowledgeBases: Optional[List[str]] = None
     memoryType: Optional[str] = None
-    maxLoopCount: Optional[int] = 10
+    maxLoopCount: Optional[int] = None
     deepThinking: Optional[bool] = False
     llm_provider_id: Optional[str] = None
     enableMultimodal: Optional[bool] = False
@@ -59,6 +59,7 @@ class AgentConfigDTO(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     im_channels: Optional[Dict[str, Dict[str, Any]]] = None
+    fast_llm_provider_id: Optional[str] = None  # 快速模型提供商ID（可选）
 
 
 class AutoGenAgentRequest(BaseModel):
@@ -106,7 +107,7 @@ def convert_config_to_agent(
         availableKnowledgeBases=config.get("availableKnowledgeBases")
         or config.get("available_knowledge_bases"),
         memoryType=config.get("memoryType") or config.get("memory_type"),
-        maxLoopCount=config.get("maxLoopCount") or config.get("max_loop_count", 10),
+        maxLoopCount=config.get("maxLoopCount") or config.get("max_loop_count"),
         deepThinking=config.get("deepThinking") or config.get("deep_thinking", False),
         enableMultimodal=config.get("enableMultimodal")
         or config.get("enable_multimodal", False),
@@ -117,6 +118,7 @@ def convert_config_to_agent(
         created_at=config.get("created_at"),
         updated_at=config.get("updated_at"),
         llm_provider_id=config.get("llm_provider_id"),
+        fast_llm_provider_id=config.get("fast_llm_provider_id") or config.get("fast_llm_provider_id"),
     )
 
 
@@ -142,8 +144,17 @@ def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
         "created_at": agent.created_at,
         "updated_at": agent.updated_at,
         "llm_provider_id": agent.llm_provider_id,
+        "fast_llm_provider_id": agent.fast_llm_provider_id,
     }
-    return {k: v for k, v in config.items() if v is not None}
+    # 保留 llm_provider_id 和 fast_llm_provider_id 即使为 None
+    # 其他字段为 None 时过滤掉
+    result = {}
+    for k, v in config.items():
+        if k in ("llm_provider_id", "fast_llm_provider_id"):
+            result[k] = v
+        elif v is not None:
+            result[k] = v
+    return result
 
 
 AgentAbilitiesResponse = BaseResponse[AgentAbilitiesData]

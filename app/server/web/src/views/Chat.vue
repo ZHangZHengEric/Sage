@@ -1,9 +1,9 @@
 <template>
-  <div class="flex flex-col h-full bg-background">
-    <div class="sticky top-0 z-10 flex min-h-[60px] flex-none flex-wrap items-center gap-2 bg-background/80 px-3 py-2 backdrop-blur-md supports-[backdrop-filter]:bg-background/60 sm:px-4 md:justify-end">
+  <div class="flex flex-col h-full bg-background dark:bg-[rgba(5,5,6,1)]">
+    <div class="sticky top-0 z-10 flex min-h-[60px] flex-none flex-wrap items-center gap-2 bg-background/80 px-3 py-2 backdrop-blur-md supports-[backdrop-filter]:bg-background/60 dark:bg-[rgba(5,5,6,0.96)] sm:px-4 md:justify-end">
       <div class="flex w-full items-center justify-between gap-2 md:w-auto md:justify-end">
         <Select :model-value="selectedAgentId" @update:model-value="handleAgentChange">
-          <SelectTrigger class="h-9 w-[148px] min-w-0 rounded-full border-muted-foreground/20 bg-muted/50 px-2.5 transition-colors hover:bg-muted/80 focus:ring-1 focus:ring-primary/20 sm:w-[172px]">
+          <SelectTrigger class="h-9 w-[148px] min-w-0 rounded-full border-muted-foreground/20 bg-muted/50 px-2.5 transition-colors hover:bg-muted/80 focus:ring-1 focus:ring-primary/20 dark:bg-[rgba(4,4,5,0.92)] dark:hover:bg-[rgba(10,10,12,0.96)] sm:w-[172px]">
             <div class="flex items-center gap-2 w-full">
               <div class="w-5 h-5 rounded-full overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/10">
                 <img
@@ -53,13 +53,13 @@
         </Select>
 
         <TooltipProvider>
-          <div class="flex h-9 items-center rounded-full border border-border/80 bg-muted/50 p-1 shadow-inner">
+          <div class="flex h-9 items-center rounded-full border border-border/80 bg-muted/50 p-1 shadow-inner dark:bg-[rgba(4,4,5,0.92)]">
             <Tooltip>
               <TooltipTrigger as-child>
                 <button
                   type="button"
                   class="flex h-7 w-7 items-center justify-center rounded-full transition-all"
-                  :class="displayMode === CHAT_DISPLAY_MODES.EXECUTION ? 'bg-foreground/10 text-foreground shadow-sm ring-1 ring-border/80 backdrop-blur-sm' : 'text-muted-foreground hover:bg-background/80 hover:text-foreground'"
+                  :class="displayMode === CHAT_DISPLAY_MODES.EXECUTION ? 'bg-foreground/10 text-foreground shadow-sm ring-1 ring-border/80 backdrop-blur-sm' : 'text-muted-foreground hover:bg-background/80 hover:text-foreground dark:hover:bg-[rgba(10,10,12,0.96)]'"
                   @click="setDisplayMode(CHAT_DISPLAY_MODES.EXECUTION)"
                 >
                   <List class="h-4 w-4" />
@@ -75,7 +75,7 @@
                 <button
                   type="button"
                   class="flex h-7 w-7 items-center justify-center rounded-full transition-all"
-                  :class="displayMode === CHAT_DISPLAY_MODES.DELIVERY ? 'bg-foreground/10 text-foreground shadow-sm ring-1 ring-border/80 backdrop-blur-sm' : 'text-muted-foreground hover:bg-background/80 hover:text-foreground'"
+                  :class="displayMode === CHAT_DISPLAY_MODES.DELIVERY ? 'bg-foreground/10 text-foreground shadow-sm ring-1 ring-border/80 backdrop-blur-sm' : 'text-muted-foreground hover:bg-background/80 hover:text-foreground dark:hover:bg-[rgba(10,10,12,0.96)]'"
                   @click="setDisplayMode(CHAT_DISPLAY_MODES.DELIVERY)"
                 >
                   <FileText class="h-4 w-4" />
@@ -94,7 +94,7 @@
           <div class="flex items-center gap-2">
             <Tooltip>
               <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="toggleWorkbench">
+                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80 dark:hover:bg-[rgba(10,10,12,0.96)]" @click="toggleWorkbench">
                   <Monitor class="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -105,7 +105,7 @@
 
             <Tooltip>
               <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="toggleWorkspace">
+                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80 dark:hover:bg-[rgba(10,10,12,0.96)]" @click="toggleWorkspace">
                   <FolderOpen class="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -121,7 +121,7 @@
 
     <div class="relative flex-1 overflow-hidden flex flex-row pb-6">
       <div
-        class="flex-1 flex flex-col min-w-0 bg-muted/5 relative transition-all duration-200"
+        class="flex-1 flex flex-col min-w-0 bg-muted/5 relative transition-all duration-200 dark:bg-[rgba(5,5,6,1)]"
         :class="{ 'mr-0': !anyPanelOpen }"
       >
         <div v-if="!showAbilityPanel && filteredMessages.length === 0" class="absolute top-5 left-0 right-0 h-[25%] min-h-[100px] max-h-[180px] overflow-hidden pointer-events-none z-10">
@@ -159,7 +159,7 @@
               v-if="!filteredMessages || filteredMessages.length === 0"
               class="flex flex-col items-center justify-center text-center p-8 h-full text-muted-foreground animate-in fade-in zoom-in duration-500"
             >
-              <div class="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-6 shadow-sm overflow-hidden">
+              <div class="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-6 shadow-sm overflow-hidden dark:bg-[rgba(10,10,12,0.96)]">
                 <img
                   v-if="selectedAgent"
                   :src="`https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,square01,square02&seed=${encodeURIComponent(selectedAgent.id)}`"
@@ -222,7 +222,7 @@
           <div ref="messagesEndRef" />
         </div>
 
-        <div class="flex-none p-4 bg-background" v-if="selectedAgent">
+        <div class="flex-none p-4 bg-background dark:bg-[rgba(5,5,6,1)]" v-if="selectedAgent">
           <div class="w-full max-w-[800px] mx-auto">
             <div class="flex justify-start items-start pb-2 pr-1">
               <Button

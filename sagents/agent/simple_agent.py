@@ -55,13 +55,11 @@ class SimpleAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
 
-        # 最大循环次数常量
-        self.max_loop_count = 100
         # 循环模式触发阈值：连续命中后触发软纠偏/硬暂停
         self.max_repeat_pattern_hits = 2
         self.agent_name = "SimpleAgent"
         self.agent_description = """SimpleAgent: 简单智能体，负责无推理策略的直接任务执行，比ReAct策略更快速。适用于不需要推理或早期处理的任务。"""
-        logger.debug(f"SimpleAgent 初始化完成，最大循环次数为 {self.max_loop_count}")
+        logger.debug("SimpleAgent 初始化完成")
 
     def _build_loop_signature(self, chunks: List[MessageChunk]) -> str:
         """
@@ -380,6 +378,10 @@ class SimpleAgent(AgentBase):
             session_id=session_id,
             step_name="task_complete_judge",
             enable_thinking=False,
+            model_config_override={
+                'model_type': 'fast',  # 使用快速模型
+                'response_format': {'type': 'json_object'}  # 要求JSON返回
+            }
         )
 
         all_content = ""
@@ -432,8 +434,10 @@ class SimpleAgent(AgentBase):
         all_new_response_chunks: List[MessageChunk] = []
         loop_count = 0
         repeat_pattern_hits = 0
-        # 从session context 检查一下是否有max_loop_count ，如果有，本次请求使用session context 中的max_loop_count
-        max_loop_count = session_context.agent_config.get('max_loop_count', self.max_loop_count)
+        # 从session context 获取 max_loop_count；缺失则直接报错，避免静默兜底
+        max_loop_count = session_context.agent_config.get('max_loop_count')
+        if max_loop_count is None:
+            raise ValueError("SimpleAgent requires session_context.agent_config.max_loop_count")
         logger.info(f"SimpleAgent: 开始执行主循环，最大循环次数：{max_loop_count}")
         
         # 从 MessageManager 加载跨调用的签名历史，支持检测跨 SimpleAgent 调用的循环模式
@@ -597,7 +601,7 @@ class SimpleAgent(AgentBase):
         content_response_message_id = str(uuid.uuid4())
         last_tool_call_id = None
         full_content_accumulator = ""
-        # tool_calls_messages_id = str(uuid.uuid4())
+        tool_calls_messages_id = str(uuid.uuid4())
         # 处理流式响应块
         async for chunk in response:
             # print(chunk)
@@ -621,22 +625,23 @@ class SimpleAgent(AgentBase):
                         last_tool_call_id = tool_call.id
 
                 # # 流式返回工具调用消息
-                # output_messages = [MessageChunk(
-                #     role=MessageRole.ASSISTANT.value,
-                #     tool_calls=chunk.choices[0].delta.tool_calls,
-                #     message_id=tool_calls_messages_id,
-                #     message_type=MessageType.TOOL_CALL.value
-                # )]
-                # yield (output_messages, False)
-
-                # yield 一个空的消息块以避免生成器卡住
                 output_messages = [MessageChunk(
                     role=MessageRole.ASSISTANT.value,
-                    content="",
-                    message_id=content_response_message_id,
-                    message_type=MessageType.EMPTY.value
+                    tool_calls=chunk.choices[0].delta.tool_calls,
+                    message_id=tool_calls_messages_id,
+                    message_type=MessageType.TOOL_CALL.value,
+                    agent_name=self.agent_name
                 )]
                 yield (output_messages, False)
+
+                # yield 一个空的消息块以避免生成器卡住
+                # output_messages = [MessageChunk(
+                #     role=MessageRole.ASSISTANT.value,
+                #     content="",
+                #     message_id=content_response_message_id,
+                #     message_type=MessageType.EMPTY.value
+                # )]
+                # yield (output_messages, False)
 
             elif chunk.choices[0].delta.content:
                 if len(chunk.choices[0].delta.content) > 0:
@@ -681,7 +686,8 @@ class SimpleAgent(AgentBase):
                 tool_calls=tool_calls,
                 tool_manager=tool_manager,
                 messages_input=messages_input,
-                session_id=session_id or ""
+                session_id=session_id or "",
+                emit_tool_call_message=False
             ):
                 # chunk 是 (messages, is_complete)
                 messages, is_complete = chunk
@@ -843,7 +849,7 @@ class SimpleAgent(AgentBase):
         logger.info(f"SimpleAgent: 提取后消息数量: {len(extracted_messages)}")
 
         # 2. 检查是否需要压缩
-        max_model_len = self.model_config.get('max_model_len', 40000)
+        max_model_len = self.model_config.get('max_model_len', 64000)
         max_new_tokens = self.model_config.get('max_tokens', 20000)
         should_compress, current_tokens, max_model_len = MessageManager.should_compress_messages(
             extracted_messages, max_model_len, max_new_tokens

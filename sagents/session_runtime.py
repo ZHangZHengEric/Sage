@@ -282,7 +282,7 @@ class Session:
         session_id: Optional[str] = None,
         user_id: Optional[str] = None,
         deep_thinking: Optional[Union[bool, str]] = None,
-        max_loop_count: int = 10,
+        max_loop_count: Optional[int] = None,
         agent_mode: Optional[str] = None,
         more_suggest: bool = False,
         force_summary: bool = False,
@@ -295,6 +295,8 @@ class Session:
         available_workflows = available_workflows or {}
         merged_system_context = dict(system_context or {})
         with session_scope(session_id):
+            if max_loop_count is None:
+                raise ValueError("max_loop_count is required")
             # 确保SessionContext存在，并进行初始化
             session_context = await self._ensure_session_context(
                 session_id=session_id,
@@ -489,9 +491,31 @@ class Session:
                     )
                 ]
         finally:
+            session_context = self.session_context
+            if self.observability_manager and session_context:
+                try:
+                    timing_summary = session_context._build_execution_timing_summary()
+                    for item in timing_summary.get("message_timings", []):
+                        message_id = item.get("message_id")
+                        if not message_id:
+                            continue
+                        role = item.get("role")
+                        if role not in {"assistant", "tool"}:
+                            continue
+                        self.observability_manager.on_message_end(
+                            session_id=session_id,
+                            message_id=message_id,
+                            role=role,
+                            message_type=item.get("message_type"),
+                            tool_call_id=item.get("tool_call_id"),
+                            end_ts=item.get("end_ts"),
+                            duration_ms=item.get("duration_ms"),
+                        )
+                except Exception as e:
+                    logger.debug(f"SAgent: 发送 message_end 观测事件失败: {e}")
+
             if self.observability_manager:
                 self.observability_manager.on_chain_end(output_data={"status": "finished"}, session_id=session_id)
-            session_context = self.session_context
             self._cache_session_workspace(session_id, session_context)
             
             if session_context:

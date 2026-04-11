@@ -263,6 +263,69 @@ export const useChatPage = (props) => {
     messageIdIndexMap.value = next
   }
 
+  const mergeToolCall = (existingToolCall = {}, incomingToolCall = {}) => {
+    if (!incomingToolCall || typeof incomingToolCall !== 'object') return existingToolCall
+    if (!existingToolCall || typeof existingToolCall !== 'object') return { ...incomingToolCall }
+
+    const existingFn = existingToolCall.function && typeof existingToolCall.function === 'object'
+      ? existingToolCall.function
+      : {}
+    const incomingFn = incomingToolCall.function && typeof incomingToolCall.function === 'object'
+      ? incomingToolCall.function
+      : {}
+
+    const mergedFn = { ...existingFn, ...incomingFn }
+    if (existingFn.name && !incomingFn.name) mergedFn.name = existingFn.name
+    if (incomingFn.name) mergedFn.name = incomingFn.name
+
+    const existingArgs = typeof existingFn.arguments === 'string' ? existingFn.arguments : ''
+    const incomingArgs = typeof incomingFn.arguments === 'string' ? incomingFn.arguments : ''
+    if (incomingArgs) {
+      mergedFn.arguments = incomingArgs.startsWith(existingArgs) && incomingArgs.length >= existingArgs.length
+        ? incomingArgs
+        : `${existingArgs}${incomingArgs}`
+    } else if (typeof existingFn.arguments === 'string') {
+      mergedFn.arguments = existingFn.arguments
+    }
+
+    const mergedToolCall = {
+      ...existingToolCall,
+      ...incomingToolCall,
+      function: mergedFn
+    }
+
+    if (existingToolCall.id && !incomingToolCall.id) {
+      mergedToolCall.id = existingToolCall.id
+    }
+    if (existingToolCall.tool_call_id && !incomingToolCall.tool_call_id) {
+      mergedToolCall.tool_call_id = existingToolCall.tool_call_id
+    }
+    if (existingToolCall.index !== undefined && incomingToolCall.index === undefined) {
+      mergedToolCall.index = existingToolCall.index
+    }
+
+    return mergedToolCall
+  }
+
+  const mergeToolCalls = (existingToolCalls = [], incomingToolCalls = []) => {
+    const existingList = Array.isArray(existingToolCalls) ? existingToolCalls : []
+    const incomingList = Array.isArray(incomingToolCalls) ? incomingToolCalls : []
+    const maxLength = Math.max(existingList.length, incomingList.length)
+    const merged = []
+
+    for (let i = 0; i < maxLength; i += 1) {
+      const existingToolCall = existingList[i]
+      const incomingToolCall = incomingList[i]
+      if (existingToolCall && incomingToolCall) {
+        merged.push(mergeToolCall(existingToolCall, incomingToolCall))
+        continue
+      }
+      merged.push(incomingToolCall || existingToolCall)
+    }
+
+    return merged.filter(Boolean)
+  }
+
   const createSession = (_agentId = null) => {
     const sessionId = `session_${Date.now()}`
     currentSessionId.value = sessionId
@@ -435,6 +498,9 @@ export const useChatPage = (props) => {
           ...messageData,
           content: (existing.content || '') + (messageData.content || ''),
           timestamp: messageData.timestamp || Date.now()
+        }
+        if (messageData.tool_calls || existing.tool_calls) {
+          nextMessage.tool_calls = mergeToolCalls(existing.tool_calls || [], messageData.tool_calls || [])
         }
       }
       messages.value.splice(targetIndex, 1, nextMessage)

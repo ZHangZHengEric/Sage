@@ -10,6 +10,5 @@
   "availableWorkflows": {},
   "systemContext": {},
   "systemPrefix": "You are a helpful AI assistant.",
-  "maxLoopCount": 10,
   "memoryType": "session"
 }

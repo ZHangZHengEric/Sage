@@ -39,7 +39,7 @@ class SAgent:
         user_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         deep_thinking: Optional[Union[bool, str]] = None,
-        max_loop_count: int = 50,
+        max_loop_count: Optional[int] = None,
         agent_mode: Optional[str] = None,
         more_suggest: bool = False,
         force_summary: bool = False,
@@ -130,6 +130,8 @@ class SAgent:
             raise ValueError("run_stream 参数 model 不能为空")
         if not isinstance(model_config, dict) or not model_config:
             raise ValueError("run_stream 参数 model_config 必须是非空字典")
+        if max_loop_count is None:
+            raise ValueError("run_stream 参数 max_loop_count 不能为空")
 
         # 确定沙箱类型（优先级：参数 > __init__ > 环境变量 > 默认）
         effective_sandbox_type = (
@@ -197,48 +199,98 @@ class SAgent:
         flow = custom_flow
         if flow is None:
             flow = self._build_default_flow(agent_mode=agent_mode, max_loop_count=max_loop_count)
-            
-        async for message_chunks in session.run_stream_safe(
-                input_messages=input_messages,
-                flow=flow,
-                tool_manager=tool_manager,
-                skill_manager=skill_manager,
-                session_id=session_id,
-                user_id=user_id,
-                deep_thinking=deep_thinking,
-                max_loop_count=max_loop_count,
-                agent_mode=agent_mode,
-                more_suggest=more_suggest,
-                force_summary=force_summary,
-                system_context=system_context,
-                available_workflows=available_workflows or {},
-                context_budget_config=context_budget_config,
-                custom_sub_agents=custom_sub_agents,
-            ):
-            for message_chunk in message_chunks:
-                if not message_chunk.session_id:
-                    message_chunk.session_id = session_id
-                if first_show_time is None:
-                    try:
-                        content = message_chunk.content
-                        if content and str(content).strip():
-                            first_show_time = time.time()
-                            delta_ms = int((first_show_time - start_time) * 1000)
-                            logger.info(f"SAgent: 会话首个可显示内容耗时 {delta_ms} ms")
-                    except Exception as e:
-                        logger.error(f"SAgent: 统计首个content耗时出错: {e}\n{traceback.format_exc()}")
-                if (
-                    message_chunk.content
-                    or message_chunk.tool_calls
-                    or message_chunk.matches_message_types([MessageType.TOKEN_USAGE.value])
+
+        message_timings: Dict[str, Dict[str, Any]] = {}
+        last_started_stat: Optional[Dict[str, Any]] = None
+        message_sequence_index = 0
+        try:
+            async for message_chunks in session.run_stream_safe(
+                    input_messages=input_messages,
+                    flow=flow,
+                    tool_manager=tool_manager,
+                    skill_manager=skill_manager,
+                    session_id=session_id,
+                    user_id=user_id,
+                    deep_thinking=deep_thinking,
+                    max_loop_count=max_loop_count,
+                    agent_mode=agent_mode,
+                    more_suggest=more_suggest,
+                    force_summary=force_summary,
+                    system_context=system_context,
+                    available_workflows=available_workflows or {},
+                    context_budget_config=context_budget_config,
+                    custom_sub_agents=custom_sub_agents,
                 ):
-                    yield [message_chunk]
+                for message_chunk in message_chunks:
+                    if not message_chunk.session_id:
+                        message_chunk.session_id = session_id
 
-        total_ms = int((time.time() - start_time) * 1000)
-        logger.info(f"SAgent: 会话完整执行耗时 {total_ms} ms", session_id)
-        self.session_manager.close_session(session_id)
+                    if (
+                        session.observability_manager
+                        and message_chunk.message_id
+                        and message_chunk.role in {"assistant", "tool"}
+                    ):
+                        now_ts = time.time()
+                        stat = message_timings.get(message_chunk.message_id)
+                        if not stat:
+                            start_gap_ms = None
+                            prev_end_gap_ms = None
+                            if last_started_stat:
+                                start_gap_ms = max(0.0, (now_ts - float(last_started_stat["start_ts"])) * 1000.0)
+                                prev_end_gap_ms = max(0.0, (now_ts - float(last_started_stat["end_ts"])) * 1000.0)
+                            stat = {
+                                "message_id": message_chunk.message_id,
+                                "start_ts": now_ts,
+                                "end_ts": now_ts,
+                                "role": message_chunk.role,
+                                "message_type": message_chunk.message_type or message_chunk.type,
+                                "tool_call_id": message_chunk.tool_call_id,
+                                "sequence_index": message_sequence_index,
+                            }
+                            message_sequence_index += 1
+                            message_timings[message_chunk.message_id] = stat
+                            session.observability_manager.on_message_start(
+                                session_id=session_id,
+                                message_id=message_chunk.message_id,
+                                role=stat["role"],
+                                message_type=stat["message_type"],
+                                tool_call_id=stat["tool_call_id"],
+                                sequence_index=stat["sequence_index"],
+                                start_ts=stat["start_ts"],
+                                start_to_prev_start_gap_ms=start_gap_ms,
+                                prev_end_to_start_gap_ms=prev_end_gap_ms,
+                            )
+                            last_started_stat = stat
+                        else:
+                            stat["end_ts"] = now_ts
+                            if not stat.get("role"):
+                                stat["role"] = message_chunk.role
+                            if not stat.get("message_type"):
+                                stat["message_type"] = message_chunk.message_type or message_chunk.type
+                            if not stat.get("tool_call_id"):
+                                stat["tool_call_id"] = message_chunk.tool_call_id
 
-    def _build_default_flow(self, agent_mode: Optional[str], max_loop_count: int = 20) -> AgentFlow:
+                    if first_show_time is None:
+                        try:
+                            content = message_chunk.content
+                            if content and str(content).strip():
+                                first_show_time = time.time()
+                                delta_ms = int((first_show_time - start_time) * 1000)
+                                logger.info(f"SAgent: 会话首个可显示内容耗时 {delta_ms} ms")
+                        except Exception as e:
+                            logger.error(f"SAgent: 统计首个content耗时出错: {e}\n{traceback.format_exc()}")
+                    if (
+                        message_chunk.content
+                        or message_chunk.tool_calls
+                        or message_chunk.matches_message_types([MessageType.TOKEN_USAGE.value])
+                    ):
+                        yield [message_chunk]
+        finally:
+            total_ms = int((time.time() - start_time) * 1000)
+            logger.info(f"SAgent: 会话完整执行耗时 {total_ms} ms", session_id)
+            self.session_manager.close_session(session_id)
+
+    def _build_default_flow(self, agent_mode: Optional[str], max_loop_count: int) -> AgentFlow:
         """构建默认的执行流程，兼容原有逻辑"""
         
         # 1. 任务路由

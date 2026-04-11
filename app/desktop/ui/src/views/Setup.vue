@@ -281,12 +281,10 @@ const modelForm = reactive({
   model: ''
 })
 
-// 高级参数默认值（写死）
-const DEFAULT_MAX_TOKENS = 4096
 const DEFAULT_TEMPERATURE = 0.3
 const DEFAULT_TOP_P = 0.95
 const DEFAULT_PRESENCE_PENALTY = 0
-const DEFAULT_MAX_MODEL_LEN = 32000
+const DEFAULT_MAX_MODEL_LEN = 64000
 
 const selectedProvider = ref('')
 const currentProvider = computed(() => MODEL_PROVIDERS.find(p => p.name === selectedProvider.value))
@@ -390,7 +388,6 @@ const buildProviderPayload = () => ({
   base_url: modelForm.base_url,
   api_keys: modelForm.api_keys_str.trim().split(/[\n,]+/).map(k => k.trim()).filter(k => k),
   model: actualModelName.value,
-  max_tokens: DEFAULT_MAX_TOKENS,
   temperature: DEFAULT_TEMPERATURE,
   top_p: DEFAULT_TOP_P,
   presence_penalty: DEFAULT_PRESENCE_PENALTY,

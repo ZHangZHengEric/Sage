@@ -340,3 +340,56 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
 
     def on_tool_error(self, error: Exception, **kwargs: Any) -> Any:
         self._end_span_on_error(error)
+
+    def on_message_start(self, session_id: str, message_id: str, **kwargs: Any) -> Any:
+        span = self._get_current_span() or trace.get_current_span()
+        if not span:
+            return
+
+        attrs = {
+            "session_id": session_id,
+            "message_id": message_id,
+        }
+        for key in (
+            "role",
+            "message_type",
+            "tool_call_id",
+            "sequence_index",
+            "start_ts",
+            "start_to_prev_start_gap_ms",
+            "prev_end_to_start_gap_ms",
+        ):
+            value = kwargs.get(key)
+            if value is not None:
+                attrs[key] = value
+
+        try:
+            span.add_event("message.start", attributes=attrs)
+        except Exception as e:
+            logger.debug(f"OpenTelemetry: add message.start event failed: {e}")
+
+    def on_message_end(self, session_id: str, message_id: str, **kwargs: Any) -> Any:
+        span = self._get_current_span() or trace.get_current_span()
+        if not span:
+            return
+
+        attrs = {
+            "session_id": session_id,
+            "message_id": message_id,
+        }
+        for key in (
+            "role",
+            "message_type",
+            "tool_call_id",
+            "sequence_index",
+            "end_ts",
+            "duration_ms",
+        ):
+            value = kwargs.get(key)
+            if value is not None:
+                attrs[key] = value
+
+        try:
+            span.add_event("message.end", attributes=attrs)
+        except Exception as e:
+            logger.debug(f"OpenTelemetry: add message.end event failed: {e}")

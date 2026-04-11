@@ -78,3 +78,13 @@ class BaseTraceHandler(ABC):
     def on_tool_error(self, error: Exception, **kwargs: Any) -> Any:
         """Run when a tool errors."""
         pass
+
+    @abstractmethod
+    def on_message_start(self, session_id: str, message_id: str, **kwargs: Any) -> Any:
+        """Run when a message starts streaming/emitting."""
+        pass
+
+    @abstractmethod
+    def on_message_end(self, session_id: str, message_id: str, **kwargs: Any) -> Any:
+        """Run when a message finishes streaming/emitting."""
+        pass

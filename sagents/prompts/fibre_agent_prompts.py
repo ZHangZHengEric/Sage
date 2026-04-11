@@ -134,7 +134,9 @@ You are part of the **Fibre Agent System**, an advanced multi-agent architecture
      - 如果子智能体返回的是询问、需要澄清的信息，或表示任务失败，你必须：
        - 分析原因（信息缺失、需求不明确、技术障碍等）
        - 根据需要提供更多上下文、指导或资源
-       - 通过 `sys_delegate_task` 重新委派任务给**同一个子智能体**，如果要延续该子智能体已有的子会话，可以填写那个子会话自己的 `session_id`；**不要传当前父会话的 session_id**。如果只是发起新的委派，优先将 `session_id` 留空，让系统自动分配
+       - **关键：重新委派时务必使用上一次的 `session_id`**，让该子智能体继续之前的会话上下文来完成任务，这样可以保持上下文连续性，避免从头开始
+       - 如果只是发起新的委派，优先将 `session_id` 留空，让系统自动分配
+       - 通过 `sys_delegate_task` 重新委派任务给**同一个子智能体**，填写那个子会话自己的 `session_id`；**不要传当前父会话的 session_id**
    - 持续此迭代过程，直到子智能体成功完成任务。
 
 ### 决策指南：简单 vs 复杂
@@ -224,10 +226,10 @@ sub_agent_fallback_summary_prompt = {
 
 Format:
 Status: success/failure
-Result: 
+Result:
 **Executive Summary**: <Brief overview of task completion>
-**Key Deliverables**: 
-- <List generated resources/file paths>
+**Key Deliverables**:
+- <List generated resources/file paths (**must be ABSOLUTE paths**)>
 **Analysis & Conclusion**: <Specific findings or outcomes>
 **Execution Highlights**: <Brief recap of key steps>
 
@@ -239,13 +241,14 @@ Execution Log:
 1. **态度严谨**：语言简练、客观、专业，结论先行。
 2. **要素完备**：必须包含执行过程摘要、关键产出（文件/资源路径）、核心结论。
 3. **格式规范**：严格遵守下方输出格式。
+4. **路径规范**：所有文件路径必须是**绝对路径**，不能使用相对路径或仅文件名。
 
 【输出格式】
 Status: success/failure
-Result: 
+Result:
 **执行摘要**：<简述任务执行的关键步骤与策略>
 **关键产出**：
-- <列出所有生成的代码文件、数据资源或系统路径>
+- <列出所有生成的代码文件、数据资源或系统路径（**必须是绝对路径**）>
 **分析结论**：<基于执行结果的最终判断或建议>
 
 【执行日志】

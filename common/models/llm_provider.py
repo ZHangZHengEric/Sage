@@ -35,7 +35,7 @@ class LLMProvider(Base):
         base_url: str,
         api_keys: List[str],
         model: str,
-        max_tokens: int = 4096,
+        max_tokens: Optional[int] = None,
         temperature: float = 0.3,
         top_p: float = 0.95,
         presence_penalty: float = 0.0,

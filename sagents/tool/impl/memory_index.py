@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """
-File-based memory index using BM25 algorithm - Sandbox version
-Supports incremental updates and fast search through sandbox interface
+File-based memory index for sandbox workspaces.
+
+Current design:
+- file content is indexed as overlapping chunks
+- chunk rows are stored in a local SQLite FTS5 database
+- lightweight metadata is still persisted in a pickle sidecar for incremental updates
 """
 import asyncio
 import os
 import pickle
+import sqlite3
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Set
@@ -23,6 +28,9 @@ class FileDocument:
     size: int           # File size
     hash: str           # Content hash
     doc_id: int         # Document ID (index in BM25)
+    chunk_index: int = 0
+    line_start: int = 1
+    line_end: int = 1
 
 
 @dataclass
@@ -36,7 +44,7 @@ class SearchResult:
 
 class MemoryIndex:
     """
-    BM25-based memory index manager - Sandbox version
+    File-memory index manager for sandbox workspaces.
 
     Features:
     1. Incremental updates - only process changed files
@@ -75,6 +83,10 @@ class MemoryIndex:
         '.rb', '.php', '.pl',
     ]
     DEFAULT_FILE_PROCESS_CONCURRENCY = 8
+    INDEX_SCHEMA_VERSION = 2
+    FTS_SCHEMA_VERSION = 1
+    DEFAULT_CHUNK_SIZE = 1200
+    DEFAULT_CHUNK_OVERLAP = 200
 
     def __init__(self, sandbox, workspace_path: str, index_path: str, blacklist: Optional[Set[str]] = None):
         """
@@ -92,11 +104,12 @@ class MemoryIndex:
         self.workspace_path = workspace_path.rstrip('/')
         self.index_path = Path(index_path)
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
+        self.fts_index_path = self.index_path.with_suffix(".sqlite3")
         logger.info(f"MemoryIndex: Index path created: {self.index_path},workspace_path: {self.workspace_path}")
         # In-memory data
         self.bm25 = None
         self.documents: Dict[int, FileDocument] = {}
-        self.path_to_id: Dict[str, int] = {}
+        self.path_to_doc_ids: Dict[str, List[int]] = {}
         self._next_doc_id = 0
 
         # Directory mtime cache for incremental updates
@@ -110,6 +123,12 @@ class MemoryIndex:
 
         # Load existing index
         self._load_index()
+        self._ensure_fts_schema()
+        fts_has_documents = self._fts_has_documents()
+        if bool(self.documents) != fts_has_documents:
+            # Keep the sidecar metadata and the FTS store in sync. This also clears
+            # stale FTS rows left behind by older layouts or interrupted rebuilds.
+            self._rebuild_fts_index()
 
         elapsed = time.time() - start_time
         logger.info(f"MemoryIndex: Initialized in {elapsed:.3f}s")
@@ -123,12 +142,22 @@ class MemoryIndex:
                 with open(self.index_path, 'rb') as f:
                     data = pickle.load(f)
 
-                self.bm25 = data.get('bm25')
+                self.bm25 = None
                 self.documents = data.get('documents', {})
                 self._dir_mtime_cache = data.get('dir_mtime_cache', {})
+                schema_version = data.get('schema_version', 1)
+                if schema_version != self.INDEX_SCHEMA_VERSION:
+                    logger.info(
+                        f"MemoryIndex: Index schema {schema_version} != {self.INDEX_SCHEMA_VERSION}, clearing cached index for rebuild"
+                    )
+                    self.bm25 = None
+                    self.documents = {}
+                    self.path_to_doc_ids = {}
+                    self._next_doc_id = 0
+                    self._dir_mtime_cache = {}
+                    return False
 
-                # Rebuild path -> id mapping
-                self.path_to_id = {doc.path: doc.doc_id for doc in self.documents.values()}
+                self.path_to_doc_ids = data.get('path_to_doc_ids') or self._rebuild_path_to_doc_ids()
 
                 # Calculate next doc_id
                 if self.documents:
@@ -147,11 +176,18 @@ class MemoryIndex:
             logger.warning(f"MemoryIndex: Failed to load index: {e}")
             self.bm25 = None
             self.documents = {}
-            self.path_to_id = {}
+            self.path_to_doc_ids = {}
             self._next_doc_id = 0
             self._dir_mtime_cache = {}
 
         return False
+
+    def _rebuild_path_to_doc_ids(self) -> Dict[str, List[int]]:
+        path_to_doc_ids: Dict[str, List[int]] = {}
+        for doc_id in sorted(self.documents.keys()):
+            doc = self.documents[doc_id]
+            path_to_doc_ids.setdefault(doc.path, []).append(doc_id)
+        return path_to_doc_ids
 
     def _save_index(self) -> bool:
         """Save index to single pkl file"""
@@ -159,8 +195,10 @@ class MemoryIndex:
 
         try:
             data = {
-                'bm25': self.bm25,
+                'schema_version': self.INDEX_SCHEMA_VERSION,
+                'bm25': None,
                 'documents': self.documents,
+                'path_to_doc_ids': self.path_to_doc_ids,
                 'dir_mtime_cache': self._dir_mtime_cache,
                 'document_count': len(self.documents)
             }
@@ -236,38 +274,176 @@ class MemoryIndex:
         tokens = re.findall(r'[a-z0-9_]+|[\u4e00-\u9fff]', text)
         return tokens
 
-    def _build_bm25(self) -> None:
-        """Build BM25 index"""
-        start_time = time.time()
+    def _split_into_chunks(self, content: str) -> List[Dict[str, Any]]:
+        if not content:
+            return []
 
+        lines = content.splitlines()
+        if not lines:
+            return [{
+                "content": content,
+                "line_start": 1,
+                "line_end": 1,
+            }]
+
+        chunks: List[Dict[str, Any]] = []
+        current_lines: List[str] = []
+        current_line_start = 1
+        current_chars = 0
+
+        for index, line in enumerate(lines, start=1):
+            line_len = len(line) + 1
+            if current_lines and current_chars + line_len > self.DEFAULT_CHUNK_SIZE:
+                chunks.append({
+                    "content": "\n".join(current_lines),
+                    "line_start": current_line_start,
+                    "line_end": current_line_start + len(current_lines) - 1,
+                })
+
+                overlap_lines: List[str] = []
+                overlap_chars = 0
+                for existing_line in reversed(current_lines):
+                    existing_len = len(existing_line) + 1
+                    if overlap_lines and overlap_chars + existing_len > self.DEFAULT_CHUNK_OVERLAP:
+                        break
+                    overlap_lines.insert(0, existing_line)
+                    overlap_chars += existing_len
+
+                current_lines = overlap_lines[:]
+                current_chars = sum(len(existing_line) + 1 for existing_line in current_lines)
+                current_line_start = index - len(current_lines)
+
+            if not current_lines:
+                current_line_start = index
+            current_lines.append(line)
+            current_chars += line_len
+
+        if current_lines:
+            chunks.append({
+                "content": "\n".join(current_lines),
+                "line_start": current_line_start,
+                "line_end": current_line_start + len(current_lines) - 1,
+            })
+
+        return chunks
+
+    def _connect_fts(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.fts_index_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _ensure_fts_schema(self) -> None:
+        with self._connect_fts() as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            row = conn.execute("SELECT value FROM meta WHERE key = 'fts_schema_version'").fetchone()
+            current_version = row["value"] if row else None
+            if current_version != str(self.FTS_SCHEMA_VERSION):
+                conn.execute("DROP TABLE IF EXISTS memory_fts")
+                conn.execute("DELETE FROM meta")
+            conn.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts
+                USING fts5(
+                    path UNINDEXED,
+                    search_text,
+                    content UNINDEXED,
+                    line_start UNINDEXED,
+                    line_end UNINDEXED,
+                    chunk_index UNINDEXED,
+                    tokenize='unicode61'
+                )
+                """
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES ('fts_schema_version', ?)",
+                (str(self.FTS_SCHEMA_VERSION),),
+            )
+            conn.commit()
+
+    def _fts_has_documents(self) -> bool:
+        if not self.fts_index_path.exists():
+            return False
         try:
-            from rank_bm25 import BM25Okapi
+            with self._connect_fts() as conn:
+                row = conn.execute("SELECT COUNT(*) AS count FROM memory_fts").fetchone()
+                return bool(row and row["count"] > 0)
+        except Exception as e:
+            logger.warning(f"MemoryIndex: Failed to inspect FTS index: {e}")
+            return False
 
-            if not self.documents:
-                self.bm25 = None
-                return
+    def has_search_index(self) -> bool:
+        return bool(self.documents) and self._fts_has_documents()
 
-            # Prepare corpus
-            corpus = []
+    def _build_search_text(self, doc: FileDocument) -> str:
+        filename = os.path.basename(doc.path)
+        text = f"{filename} {doc.content}"
+        return " ".join(self._tokenize(text))
+
+    def _delete_file_from_fts(self, filepath: str) -> None:
+        self._ensure_fts_schema()
+        with self._connect_fts() as conn:
+            conn.execute("DELETE FROM memory_fts WHERE path = ?", (filepath,))
+            conn.commit()
+
+    def _sync_file_to_fts(self, filepath: str) -> None:
+        self._ensure_fts_schema()
+        doc_ids = self.path_to_doc_ids.get(filepath, [])
+        with self._connect_fts() as conn:
+            conn.execute("DELETE FROM memory_fts WHERE path = ?", (filepath,))
+            rows = []
+            for doc_id in doc_ids:
+                doc = self.documents.get(doc_id)
+                if not doc:
+                    continue
+                rows.append(
+                    (
+                        doc.path,
+                        self._build_search_text(doc),
+                        doc.content,
+                        str(doc.line_start),
+                        str(doc.line_end),
+                        str(doc.chunk_index),
+                    )
+                )
+            if rows:
+                conn.executemany(
+                    """
+                    INSERT INTO memory_fts(path, search_text, content, line_start, line_end, chunk_index)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    rows,
+                )
+            conn.commit()
+
+    def _rebuild_fts_index(self) -> None:
+        start_time = time.time()
+        self._ensure_fts_schema()
+        with self._connect_fts() as conn:
+            conn.execute("DELETE FROM memory_fts")
+            rows = []
             for doc_id in sorted(self.documents.keys()):
                 doc = self.documents[doc_id]
-                filename = os.path.basename(doc.path)
-                text = f"{filename} {doc.content}"
-                tokens = self._tokenize(text)
-                corpus.append(tokens)
-
-            # Build BM25
-            self.bm25 = BM25Okapi(corpus)
-
-            elapsed = time.time() - start_time
-            logger.info(f"MemoryIndex: Built BM25 index for {len(corpus)} documents in {elapsed:.3f}s")
-
-        except ImportError:
-            logger.error("MemoryIndex: Please install rank-bm25: pip install rank-bm25")
-            raise
-        except Exception as e:
-            logger.error(f"MemoryIndex: Failed to build BM25: {e}")
-            raise
+                rows.append(
+                    (
+                        doc.path,
+                        self._build_search_text(doc),
+                        doc.content,
+                        str(doc.line_start),
+                        str(doc.line_end),
+                        str(doc.chunk_index),
+                    )
+                )
+            if rows:
+                conn.executemany(
+                    """
+                    INSERT INTO memory_fts(path, search_text, content, line_start, line_end, chunk_index)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    rows,
+                )
+            conn.commit()
+        elapsed = time.time() - start_time
+        logger.info(f"MemoryIndex: Rebuilt SQLite FTS index for {len(rows)} chunks in {elapsed:.3f}s")
 
     def _is_path_blacklisted(self, path: str) -> bool:
         """Check if path is in blacklist"""
@@ -321,7 +497,7 @@ class MemoryIndex:
             # But we still need to collect files from this directory from existing index
             # logger.debug(f"MemoryIndex: Skipping unchanged directory: {dir_path}")
             # Collect files from existing index that belong to this directory
-            for filepath in self.path_to_id.keys():
+            for filepath in self.path_to_doc_ids.keys():
                 if filepath.startswith(dir_path + '/') or filepath == dir_path:
                     current_files.add(filepath)
             return
@@ -371,10 +547,10 @@ class MemoryIndex:
             size = entry.size or 0
 
             try:
-                if filepath in self.path_to_id:
+                if filepath in self.path_to_doc_ids:
                     # File exists in index, check if modified
-                    doc_id = self.path_to_id[filepath]
-                    old_doc = self.documents[doc_id]
+                    existing_doc_ids = self.path_to_doc_ids[filepath]
+                    old_doc = self.documents[existing_doc_ids[0]]
 
                     # Quick check: compare mtime and size
                     if old_doc.mtime == mtime and old_doc.size == size:
@@ -383,37 +559,53 @@ class MemoryIndex:
 
                     # mtime or size changed, treat as content changed and refresh directly.
                     content = await self._read_file_content(filepath)
-                    self.documents[doc_id] = FileDocument(
-                        path=filepath,
-                        content=content,
-                        mtime=mtime,
-                        size=size,
-                        hash="",
-                        doc_id=doc_id
-                    )
+                    self._replace_file_documents(filepath, content, mtime, size)
+                    self._sync_file_to_fts(filepath)
                     stats["updated"] += 1
                     logger.debug(f"MemoryIndex: Updated file {filepath}")
                 else:
                     # New file, add to index
                     content = await self._read_file_content(filepath)
-                    doc_id = self._next_doc_id
-                    self._next_doc_id += 1
-
-                    self.documents[doc_id] = FileDocument(
-                        path=filepath,
-                        content=content,
-                        mtime=mtime,
-                        size=size,
-                        hash="",
-                        doc_id=doc_id
-                    )
-                    self.path_to_id[filepath] = doc_id
+                    self._replace_file_documents(filepath, content, mtime, size)
+                    self._sync_file_to_fts(filepath)
                     stats["added"] += 1
                     logger.debug(f"MemoryIndex: Added file {filepath}")
 
             except Exception as e:
                 logger.warning(f"MemoryIndex: Failed to process file {filepath}: {e}")
                 stats["errors"] += 1
+
+    def _replace_file_documents(self, filepath: str, content: str, mtime: float, size: int) -> None:
+        existing_doc_ids = self.path_to_doc_ids.pop(filepath, [])
+        for doc_id in existing_doc_ids:
+            self.documents.pop(doc_id, None)
+
+        chunks = self._split_into_chunks(content)
+        if not chunks:
+            chunks = [{
+                "content": "",
+                "line_start": 1,
+                "line_end": 1,
+            }]
+
+        new_doc_ids: List[int] = []
+        for chunk_index, chunk in enumerate(chunks):
+            doc_id = self._next_doc_id
+            self._next_doc_id += 1
+            self.documents[doc_id] = FileDocument(
+                path=filepath,
+                content=chunk["content"],
+                mtime=mtime,
+                size=size,
+                hash="",
+                doc_id=doc_id,
+                chunk_index=chunk_index,
+                line_start=chunk["line_start"],
+                line_end=chunk["line_end"],
+            )
+            new_doc_ids.append(doc_id)
+
+        self.path_to_doc_ids[filepath] = new_doc_ids
 
     async def update_index(self, file_extensions: Optional[List[str]] = None, force: bool = False) -> Dict[str, Any]:
         """
@@ -462,17 +654,17 @@ class MemoryIndex:
             current_files
         )
         
-        # logger.debug(f"MemoryIndex: Scan complete. Found {len(current_files)} current files, {len(self.path_to_id)} indexed files")
+        # logger.debug(f"MemoryIndex: Scan complete. Found {len(current_files)} current files, {len(self.path_to_doc_ids)} indexed files")
 
         # Check for deleted files
-        indexed_paths = set(self.path_to_id.keys())
+        indexed_paths = set(self.path_to_doc_ids.keys())
         deleted_paths = indexed_paths - current_files
 
         for filepath in deleted_paths:
             try:
-                doc_id = self.path_to_id[filepath]
-                del self.documents[doc_id]
-                del self.path_to_id[filepath]
+                for doc_id in self.path_to_doc_ids.pop(filepath, []):
+                    self.documents.pop(doc_id, None)
+                self._delete_file_from_fts(filepath)
                 stats["removed"] += 1
                 logger.debug(f"MemoryIndex: Removed file {filepath}")
             except Exception as e:
@@ -480,12 +672,14 @@ class MemoryIndex:
 
         stats["scan_time"] = time.time() - scan_start
 
-        # Rebuild BM25 index if needed
+        # Persist metadata if the file set changed. The FTS rows are updated inline
+        # during file processing and full rebuild is only needed on force refresh.
         build_start = time.time()
         has_changes = stats["added"] > 0 or stats["updated"] > 0 or stats["removed"] > 0
 
         if has_changes or force:
-            self._build_bm25()
+            if force:
+                self._rebuild_fts_index()
             stats["build_time"] = time.time() - build_start
 
             save_start = time.time()
@@ -567,51 +761,61 @@ class MemoryIndex:
         """
         start_time = time.time()
 
-        if not self.bm25 or not self.documents:
+        if not self.documents or not self._fts_has_documents():
             logger.warning("MemoryIndex: Index is empty, please update index first")
             return []
 
         try:
             query_tokens = self._tokenize(query)
-
             if not query_tokens:
                 return []
 
-            # Get scores for all documents
-            scores = self.bm25.get_scores(query_tokens)
-
-            # Get top_k results
-            top_indices = scores.argsort()[-top_k:][::-1]
-
             results = []
-            for idx in top_indices:
-                score = scores[idx]
-                if score <= 0:
+            match_expr = " OR ".join(f'"{token}"' for token in query_tokens)
+            row_limit = max(top_k * 5, top_k)
+            with self._connect_fts() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT path, content, line_start, line_end, chunk_index, bm25(memory_fts) AS raw_score
+                    FROM memory_fts
+                    WHERE search_text MATCH ?
+                    ORDER BY raw_score
+                    LIMIT ?
+                    """,
+                    (match_expr, row_limit),
+                ).fetchall()
+
+            seen_paths = set()
+            for row in rows:
+                path = row["path"]
+                if path in seen_paths:
                     continue
+                seen_paths.add(path)
 
-                doc_id = list(sorted(self.documents.keys()))[idx]
-                doc = self.documents[doc_id]
+                chunk_content = row["content"] or ""
+                line_start = int(row["line_start"] or 1)
+                snippets = self._extract_snippets(chunk_content, query)
 
-                # Extract relevant snippets
-                snippets = self._extract_snippets(doc.content, query)
-
-                # Build preview from snippets or fallback to first 500 chars
                 if snippets:
+                    line_base = line_start - 1
                     preview = "\n\n".join([
-                        f"[Line {s['line_number']}] {s['snippet']}"
+                        f"[Line {line_base + s['line_number']}] {s['snippet']}"
                         for s in snippets
                     ])
                 else:
-                    preview = doc.content[:500]
-                    if len(doc.content) > 500:
+                    preview = chunk_content[:500]
+                    if len(chunk_content) > 500:
                         preview += "..."
 
+                raw_score = float(row["raw_score"]) if row["raw_score"] is not None else 0.0
                 results.append(SearchResult(
-                    path=doc.path,
-                    score=float(score),
+                    path=path,
+                    score=-raw_score,
                     content=preview,
-                    line_number=snippets[0]["line_number"] if snippets else 0
+                    line_number=(line_start + snippets[0]["line_number"] - 1) if snippets else line_start,
                 ))
+                if len(results) >= top_k:
+                    break
 
             elapsed = time.time() - start_time
             logger.info(f"MemoryIndex: Search '{query}' completed, found {len(results)} results in {elapsed:.3f}s")
@@ -631,12 +835,14 @@ class MemoryIndex:
 
         self.bm25 = None
         self.documents = {}
-        self.path_to_id = {}
+        self.path_to_doc_ids = {}
         self._next_doc_id = 0
         self._dir_mtime_cache = {}
 
         if self.index_path.exists():
             self.index_path.unlink()
+        if self.fts_index_path.exists():
+            self.fts_index_path.unlink()
 
         elapsed = time.time() - start_time
         logger.info(f"MemoryIndex: Index cleared in {elapsed:.3f}s")

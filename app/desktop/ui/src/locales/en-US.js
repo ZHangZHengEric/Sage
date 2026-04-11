@@ -648,6 +648,7 @@ export default {
   'agentEdit.startOptimization': 'Start Optimization',
   'agentEdit.maxLoopTooLarge': 'Max loop count cannot exceed 100',
   'agentEdit.maxLoopTooSmall': 'Max loop count cannot be less than 1',
+  'agentEdit.maxLoopRequired': 'Max loop count is required',
   'agentEdit.saveConfigFailed': 'Failed to save config',
   'agentEdit.enableAfterTest': 'Please pass connection test before enabling',
   'agentEdit.retestAfterChange': 'Configuration changed, please re-test before enabling',
@@ -1021,6 +1022,7 @@ export default {
   'history.exportMarkdown': 'Markdown',
   'history.exportHTML': 'HTML',
   'history.copySessionId': 'Copy',
+  'history.trace': 'Trace',
   'history.sessionIdCopied': 'session_id copied',
   'history.copyFailed': 'Copy failed',
   'history.loadListFailed': 'Failed to load conversations',
@@ -1330,6 +1332,7 @@ export default {
 
   // Workbench ToolCall
   'workbench.tool.arguments': 'Arguments',
+  'workbench.tool.argumentsStreaming': 'Arguments streaming...',
   'workbench.tool.result': 'Result',
   'workbench.tool.compressingHistory': 'Compressing history...',
   'workbench.tool.compressFailed': 'Compression failed',

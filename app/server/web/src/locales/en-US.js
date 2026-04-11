@@ -1022,6 +1022,7 @@ export default {
   'history.exportMarkdown': 'Markdown',
   'history.exportHTML': 'HTML',
   'history.copySessionId': 'Copy',
+  'history.trace': 'Trace',
   'history.sessionIdCopied': 'session_id copied',
   'history.copyFailed': 'Copy failed',
   'history.loadListFailed': 'Failed to load conversations',
@@ -1212,6 +1213,7 @@ export default {
 
   // Workbench ToolCall
   'workbench.tool.arguments': 'Arguments',
+  'workbench.tool.argumentsStreaming': 'Arguments streaming...',
   'workbench.tool.result': 'Result',
   'workbench.tool.compressingHistory': 'Compressing history...',
   'workbench.tool.compressFailed': 'Compression failed',

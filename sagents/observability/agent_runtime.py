@@ -166,11 +166,13 @@ class AgentRuntime:
         
         self.observability_manager.on_agent_start(session_id, agent_name, input=log_input)
         
+        original_tool_manager = tool_manager
         try:
             # 3. Wrap Dependencies (ToolManager)
             wrapped_tm = tool_manager
             if tool_manager:
                 wrapped_tm = ObservableToolManager(tool_manager, self.observability_manager, session_id)
+                session_context.tool_manager = wrapped_tm
             
             # 4. Execute Agent
             async for chunk in self.agent.run_stream(session_context):
@@ -183,4 +185,5 @@ class AgentRuntime:
             self.observability_manager.on_agent_error(e, session_id=session_id)
             raise e
         finally:
+            session_context.tool_manager = original_tool_manager
             self.observability_manager.on_agent_end(agent_end_status, session_id=session_id)
