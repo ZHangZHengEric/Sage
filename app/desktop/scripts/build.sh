@@ -512,6 +512,15 @@ if [ "$OS_TYPE" = "macos" ]; then
     xattr -rc "$TAURI_SIDECAR_DIR" 2>/dev/null || true
 fi
 
+# 为 DMG 构建准备背景图片（Tauri 的 bundle_dmg.sh 期望在特定路径找到背景图片）
+if [ "$OS_TYPE" = "macos" ]; then
+    echo "[Tauri Build] 准备 DMG 背景图片..."
+    # 创建 Tauri 期望的目录结构
+    mkdir -p "$TAURI_DIR/target/release/bundle/tauri/icons"
+    # 复制背景图片到 Tauri 期望的位置
+    cp "$TAURI_DIR/icons/dmg-background.png" "$TAURI_DIR/target/release/bundle/tauri/icons/" 2>/dev/null || true
+fi
+
 "${TAURI_CMD[@]}" "${TAURI_BUILD_ARGS[@]}"
 
 echo "======================================"
