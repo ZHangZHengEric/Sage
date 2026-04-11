@@ -501,6 +501,7 @@ class LocalSandboxProvider(ISandboxHandle):
         # 使用异步 subprocess 执行命令，避免阻塞
         import asyncio
         proc = None
+        collected_output = []
         try:
             # 使用 exec 模式避免 shell 配置文件覆盖 PATH
             # 通过显式传递 PATH 环境变量确保 venv 的 Python 优先
@@ -513,20 +514,56 @@ class LocalSandboxProvider(ISandboxHandle):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
-            # 使用 wait_for 包装 communicate 来限制整个执行时间
-            stdout, _ = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=timeout,
-            )
-            stdout_text = stdout.decode('utf-8', errors='replace') if stdout else ""
-            return CommandResult(
-                success=proc.returncode == 0,
-                stdout=stdout_text,
-                stderr="",  # 已合并到 stdout
-                return_code=proc.returncode,
-                execution_time=0,
-            )
-        except asyncio.TimeoutError:
+
+            # 使用增量读取方式，确保超时前能获取已产生的输出
+            async def read_output():
+                while True:
+                    try:
+                        chunk = await asyncio.wait_for(
+                            proc.stdout.read(4096),
+                            timeout=0.5
+                        )
+                        if not chunk:
+                            break
+                        collected_output.append(chunk.decode('utf-8', errors='replace'))
+                    except asyncio.TimeoutError:
+                        # 继续读取，检查进程是否还在运行
+                        if proc.returncode is not None:
+                            break
+                        continue
+                return ''.join(collected_output)
+
+            try:
+                stdout_text = await asyncio.wait_for(
+                    read_output(),
+                    timeout=timeout,
+                )
+                return CommandResult(
+                    success=proc.returncode == 0,
+                    stdout=stdout_text,
+                    stderr="",  # 已合并到 stdout
+                    return_code=proc.returncode,
+                    execution_time=0,
+                )
+            except asyncio.TimeoutError:
+                # 超时发生时，返回已收集的输出
+                stdout_text = ''.join(collected_output)
+                if proc:
+                    try:
+                        proc.kill()
+                        await proc.wait()
+                    except Exception:
+                        pass
+                return CommandResult(
+                    success=False,
+                    stdout=stdout_text,
+                    stderr=f"Command timed out after {timeout} seconds",
+                    return_code=-1,
+                    execution_time=timeout,
+                )
+        except Exception as e:
+            # 其他异常，返回已收集的输出
+            stdout_text = ''.join(collected_output)
             if proc:
                 try:
                     proc.kill()
@@ -535,10 +572,10 @@ class LocalSandboxProvider(ISandboxHandle):
                     pass
             return CommandResult(
                 success=False,
-                stdout="",
-                stderr=f"Command timed out after {timeout} seconds",
+                stdout=stdout_text,
+                stderr=str(e),
                 return_code=-1,
-                execution_time=timeout,
+                execution_time=0,
             )
 
     async def execute_python(

@@ -230,6 +230,9 @@ class PassthroughSandboxProvider(ISandboxHandle):
         merged_env.setdefault("NPM_CONFIG_CACHE", npm_cache_dir)
 
         # 执行命令
+        process = None
+        collected_stdout = []
+        collected_stderr = []
         try:
             process = await asyncio.create_subprocess_shell(
                 converted_command,
@@ -239,28 +242,82 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 env=merged_env,
             )
 
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=timeout,
-            )
+            # 使用增量读取方式，确保超时前能获取已产生的输出
+            async def read_output():
+                while True:
+                    try:
+                        stdout_chunk = await asyncio.wait_for(
+                            process.stdout.read(4096),
+                            timeout=0.5
+                        )
+                        if stdout_chunk:
+                            collected_stdout.append(stdout_chunk.decode('utf-8', errors='replace'))
 
-            return CommandResult(
-                exit_code=process.returncode,
-                stdout=stdout.decode('utf-8', errors='replace'),
-                stderr=stderr.decode('utf-8', errors='replace'),
-            )
-        except asyncio.TimeoutError:
-            process.kill()
-            return CommandResult(
-                exit_code=-1,
-                stdout="",
-                stderr=f"Command timed out after {timeout} seconds",
-            )
+                        stderr_chunk = await asyncio.wait_for(
+                            process.stderr.read(4096),
+                            timeout=0.5
+                        )
+                        if stderr_chunk:
+                            collected_stderr.append(stderr_chunk.decode('utf-8', errors='replace'))
+
+                        if not stdout_chunk and not stderr_chunk:
+                            if process.returncode is not None:
+                                break
+                    except asyncio.TimeoutError:
+                        # 继续读取，检查进程是否还在运行
+                        if process.returncode is not None:
+                            break
+                        continue
+                return (
+                    ''.join(collected_stdout),
+                    ''.join(collected_stderr)
+                )
+
+            try:
+                stdout_text, stderr_text = await asyncio.wait_for(
+                    read_output(),
+                    timeout=timeout,
+                )
+                return CommandResult(
+                    success=process.returncode == 0,
+                    stdout=stdout_text,
+                    stderr=stderr_text,
+                    return_code=process.returncode,
+                    execution_time=0,
+                )
+            except asyncio.TimeoutError:
+                # 超时发生时，返回已收集的输出
+                stdout_text = ''.join(collected_stdout)
+                stderr_text = ''.join(collected_stderr)
+                if process:
+                    try:
+                        process.kill()
+                        await process.wait()
+                    except Exception:
+                        pass
+                return CommandResult(
+                    success=False,
+                    stdout=stdout_text,
+                    stderr=stderr_text + f"\nCommand timed out after {timeout} seconds",
+                    return_code=-1,
+                    execution_time=timeout,
+                )
         except Exception as e:
+            # 其他异常，返回已收集的输出
+            stdout_text = ''.join(collected_stdout)
+            stderr_text = ''.join(collected_stderr)
+            if process:
+                try:
+                    process.kill()
+                    await process.wait()
+                except Exception:
+                    pass
             return CommandResult(
-                exit_code=-1,
-                stdout="",
-                stderr=str(e),
+                success=False,
+                stdout=stdout_text,
+                stderr=stderr_text + f"\n{str(e)}",
+                return_code=-1,
+                execution_time=0,
             )
 
     async def read_file(self, path: str, encoding: str = "utf-8") -> str:

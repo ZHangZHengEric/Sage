@@ -82,7 +82,10 @@ class FileSystemTool:
             match_mode = "text"
         else:
             pattern = re.compile(search_pattern)
-            new_content, replace_count = pattern.subn(replacement, content)
+            # 对 replacement 中的反斜杠进行转义，避免被解释为正则替换模板
+            # 例如 \s 会被替换为 \\s，这样在 subn 中会被正确处理为字面量 \s
+            escaped_replacement = replacement.replace("\\", "\\\\")
+            new_content, replace_count = pattern.subn(escaped_replacement, content)
             match_mode = "regex"
 
         return {
