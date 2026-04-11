@@ -81,6 +81,7 @@ class CommonAgent(AgentBase):
         reasoning_content_response_message_id = str(uuid.uuid4())
         content_response_message_id = str(uuid.uuid4())
         last_tool_call_id = None
+        tool_calls_messages_id = str(uuid.uuid4())
 
         # 处理流式响应块
         async for chunk in response:
@@ -93,12 +94,12 @@ class CommonAgent(AgentBase):
                 for tool_call in chunk.choices[0].delta.tool_calls:
                     if tool_call.id is not None and len(tool_call.id) > 0:
                         last_tool_call_id = tool_call.id
-                # yield 一个空的消息块以避免生成器卡住
+                # 流式返回工具调用消息，让前端先展示工具名并进入 loading。
                 output_messages = [MessageChunk(
                     role=MessageRole.ASSISTANT.value,
-                    content="",
-                    message_id=content_response_message_id,
-                    message_type=MessageType.EMPTY.value
+                    tool_calls=chunk.choices[0].delta.tool_calls,
+                    message_id=tool_calls_messages_id,
+                    message_type=MessageType.TOOL_CALL.value
                 )]
                 yield output_messages
 
@@ -131,7 +132,8 @@ class CommonAgent(AgentBase):
                 tool_calls=tool_calls,
                 tool_manager=tool_manager,
                 messages_input=messages_input,
-                session_id=session_id
+                session_id=session_id,
+                emit_tool_call_message=False
             ):
                 yield msg
         else:
@@ -148,7 +150,8 @@ class CommonAgent(AgentBase):
                            tool_calls: Dict[str, Any],
                            tool_manager: Optional[Any],
                            messages_input: List[Dict[str, Any]],
-                           session_id: str) -> AsyncGenerator[List[MessageChunk], None]:
+                           session_id: str,
+                           emit_tool_call_message: bool = True) -> AsyncGenerator[List[MessageChunk], None]:
         """
         处理工具调用
 
@@ -180,9 +183,10 @@ class CommonAgent(AgentBase):
                 )]
                 return
 
-            # 发送工具调用消息
-            output_messages = self._create_tool_call_message(tool_call)
-            yield output_messages
+            # 如果上游已经把 tool_call 以流式消息发出来了，这里就不要重复发卡片了。
+            if emit_tool_call_message:
+                output_messages = self._create_tool_call_message(tool_call)
+                yield output_messages
 
             # 执行工具
             async for message_chunk_list in self._execute_tool(

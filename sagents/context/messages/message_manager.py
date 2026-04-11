@@ -526,6 +526,18 @@ class MessageManager:
         new_message_id = new_message.message_id
         # 有new_message_id，查找是否已存在相同message_id的消息，如果old最后一个相同则认为找到，否则认为没有找到
         existing_message = old_messages[-1] if old_messages and old_messages[-1].message_id == new_message_id else None
+        def _tool_call_to_dict(tc):
+            if isinstance(tc, dict):
+                return deepcopy(tc)
+            return {
+                'id': getattr(tc, 'id', '') or '',
+                'index': getattr(tc, 'index', None),
+                'type': getattr(tc, 'type', 'function') or 'function',
+                'function': {
+                    'name': getattr(getattr(tc, 'function', None), 'name', '') or '',
+                    'arguments': getattr(getattr(tc, 'function', None), 'arguments', '') or ''
+                }
+            }
         if existing_message:
             # 流式消息的特点是每次传递的都是新的增量内容
             if new_message.content is not None:
@@ -540,63 +552,54 @@ class MessageManager:
             if new_message.tool_calls is not None:
                 if existing_message.tool_calls is None:
                     existing_message.tool_calls = []
+                else:
+                    existing_message.tool_calls = [_tool_call_to_dict(tc) for tc in existing_message.tool_calls]
                 
-                # 遍历新的 tool_calls，按 id 合并
+                # 遍历新的 tool_calls，优先按 index 合并，其次按 id 合并
                 for new_tc in new_message.tool_calls:
-                    # 兼容字典和对象形式（如 ChoiceDeltaToolCall）
-                    if hasattr(new_tc, 'id'):
-                        # 对象形式
-                        tc_id = new_tc.id
-                        tc_function = new_tc.function if hasattr(new_tc, 'function') else None
-                        tc_name = tc_function.name if tc_function and hasattr(tc_function, 'name') else None
-                        tc_args = tc_function.arguments if tc_function and hasattr(tc_function, 'arguments') else None
-                    else:
-                        # 字典形式
-                        tc_id = new_tc.get('id')
-                        tc_function = new_tc.get('function', {})
-                        tc_name = tc_function.get('name') if isinstance(tc_function, dict) else getattr(tc_function, 'name', None)
-                        tc_args = tc_function.get('arguments') if isinstance(tc_function, dict) else getattr(tc_function, 'arguments', None)
+                    new_tc = _tool_call_to_dict(new_tc)
+                    tc_id = new_tc.get('id') or ''
+                    tc_index = new_tc.get('index')
+                    tc_function = new_tc.get('function', {}) if isinstance(new_tc.get('function', {}), dict) else {}
+                    tc_name = tc_function.get('name')
+                    tc_args = tc_function.get('arguments')
                     
-                    # 如果 id 为空，则尝试合并到最后一个 tool_call（流式特性）
-                    if not tc_id and existing_message.tool_calls:
-                        existing_tc = existing_message.tool_calls[-1]
-                        # 合并 function 参数
-                        if tc_name is not None:
-                            if hasattr(existing_tc, 'function') and hasattr(existing_tc.function, 'name'):
-                                existing_tc.function.name = tc_name
-                            elif isinstance(existing_tc.get('function'), dict):
-                                existing_tc['function']['name'] = tc_name
-                        if tc_args is not None:
-                            if hasattr(existing_tc, 'function') and hasattr(existing_tc.function, 'arguments'):
-                                existing_args = existing_tc.function.arguments or ''
-                                existing_tc.function.arguments = existing_args + tc_args
-                            elif isinstance(existing_tc.get('function'), dict):
-                                existing_args = existing_tc['function'].get('arguments') or ''
-                                existing_tc['function']['arguments'] = existing_args + tc_args
-                        continue
-                    
-                    # 查找是否已存在相同 id 的 tool_call
+                    # 查找是否已存在相同 id / index 的 tool_call
                     existing_tc = None
-                    for etc in existing_message.tool_calls:
-                        etc_id = etc.id if hasattr(etc, 'id') else etc.get('id')
-                        if etc_id == tc_id:
-                            existing_tc = etc
-                            break
+                    existing_tc_index = -1
+                    if tc_id:
+                        for idx, etc in enumerate(existing_message.tool_calls):
+                            etc_id = etc.get('id') if isinstance(etc, dict) else getattr(etc, 'id', None)
+                            if etc_id == tc_id:
+                                existing_tc = etc
+                                existing_tc_index = idx
+                                break
+                    if existing_tc is None and tc_index is not None:
+                        for idx, etc in enumerate(existing_message.tool_calls):
+                            etc_index = etc.get('index') if isinstance(etc, dict) else getattr(etc, 'index', None)
+                            if etc_index == tc_index:
+                                existing_tc = etc
+                                existing_tc_index = idx
+                                break
+                    if existing_tc is None and tc_index is None and existing_message.tool_calls:
+                        existing_tc = existing_message.tool_calls[-1]
+                        existing_tc_index = len(existing_message.tool_calls) - 1
                     
                     if existing_tc:
-                        # 合并 function 参数
-                        if tc_name is not None:
-                            if hasattr(existing_tc, 'function') and hasattr(existing_tc.function, 'name'):
-                                existing_tc.function.name = tc_name
-                            elif isinstance(existing_tc.get('function'), dict):
-                                existing_tc['function']['name'] = tc_name
-                        if tc_args is not None:
-                            if hasattr(existing_tc, 'function') and hasattr(existing_tc.function, 'arguments'):
-                                existing_args = existing_tc.function.arguments or ''
-                                existing_tc.function.arguments = existing_args + tc_args
-                            elif isinstance(existing_tc.get('function'), dict):
-                                existing_args = existing_tc['function'].get('arguments') or ''
-                                existing_tc['function']['arguments'] = existing_args + tc_args
+                        if not isinstance(existing_tc, dict):
+                            existing_tc = _tool_call_to_dict(existing_tc)
+                            existing_message.tool_calls[existing_tc_index] = existing_tc
+                        if tc_id:
+                            existing_tc['id'] = tc_id
+                        if tc_index is not None and existing_tc.get('index') is None:
+                            existing_tc['index'] = tc_index
+                        if tc_name:
+                            existing_tc.setdefault('function', {})
+                            existing_tc['function']['name'] = tc_name
+                        if tc_args:
+                            existing_tc.setdefault('function', {})
+                            existing_args = existing_tc['function'].get('arguments') or ''
+                            existing_tc['function']['arguments'] = existing_args + tc_args
                     else:
                         # 添加新的 tool_call
                         existing_message.tool_calls.append(new_tc)
@@ -1154,7 +1157,14 @@ class MessageManager:
                         tool_calls_dict.append(tc_dict)
                     else:
                         # 已经是字典形式
-                        tool_calls_dict.append(tc)
+                        tool_calls_dict.append({
+                            'id': tc.get('id'),
+                            'type': tc.get('type', 'function'),
+                            'function': {
+                                'name': tc.get('function', {}).get('name') if isinstance(tc.get('function'), dict) else None,
+                                'arguments': tc.get('function', {}).get('arguments') if isinstance(tc.get('function'), dict) else None
+                            }
+                        })
             
             clean_msg = {
                 'role': msg.role,
