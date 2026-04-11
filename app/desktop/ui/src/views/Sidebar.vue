@@ -1,7 +1,7 @@
 <template>
   <div
-    class="sidebar-shell group relative flex h-full flex-col overflow-hidden border-r border-white/10 transition-all duration-300 ease-in-out dark:border-white/10"
-    :class="[isCollapsed ? 'w-[78px]' : 'w-[246px]']"
+    class="sidebar-shell group relative hidden h-full shrink-0 flex-col overflow-hidden border-r border-white/10 transition-all ease-in-out dark:border-white/10 lg:flex"
+    :class="isResizing ? 'duration-0' : 'duration-300'"
     data-tauri-drag-region
     @mousedown="handleSidebarMouseDown"
     :style="sidebarShellStyle"
@@ -271,7 +271,7 @@ export default {
 </script>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import LoginModal from '../components/LoginModal.vue'
 import { 
@@ -339,11 +339,33 @@ const router = useRouter()
 const route = useRoute()
 const { t } = useLanguage()
 const { startSidebarTour } = useTour()
-const emit = defineEmits(['new-chat'])
+const props = defineProps({
+  expandedWidth: {
+    type: Number,
+    default: 246
+  },
+  collapsedWidth: {
+    type: Number,
+    default: 78
+  },
+  isResizing: {
+    type: Boolean,
+    default: false
+  }
+})
+
+const emit = defineEmits(['new-chat', 'collapse-change'])
 const isMacOS = computed(() => typeof navigator !== 'undefined' && /mac/i.test(navigator.platform || ''))
 
 const currentUser = ref(getCurrentUser())
 const isCollapsed = ref(false)
+watch(
+  isCollapsed,
+  (value) => {
+    emit('collapse-change', value)
+  },
+  { immediate: true }
+)
 const handleActiveSessionNavigate = (session) => {
   handleMenuClick(session.url, session.rawName, session.isInternal, session.query)
 }
@@ -545,24 +567,27 @@ const handleLoginSuccess = () => {
 }
 
 const sidebarShellStyle = computed(() => ({
-  backgroundColor: themeStore.isDark ? 'rgba(20, 24, 31, 0.85)' : 'rgba(255, 255, 255, 0.85)',
+  width: `${isCollapsed.value ? props.collapsedWidth : props.expandedWidth}px`,
+  minWidth: `${isCollapsed.value ? props.collapsedWidth : props.expandedWidth}px`,
+  maxWidth: `${isCollapsed.value ? props.collapsedWidth : props.expandedWidth}px`,
+  backgroundColor: themeStore.isDark ? 'rgba(4, 4, 5, 0.94)' : 'rgba(255, 255, 255, 0.85)',
   backgroundImage: themeStore.isDark
-    ? 'linear-gradient(180deg, rgba(148, 163, 184, 0.08), rgba(15, 23, 42, 0.02))'
+    ? 'linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01))'
     : 'linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.03))',
   boxShadow: themeStore.isDark
-    ? 'inset -1px 0 0 rgba(255, 255, 255, 0.08)'
+    ? 'inset -1px 0 0 rgba(255, 255, 255, 0.06)'
     : 'inset -1px 0 0 rgba(255, 255, 255, 0.35)'
 }))
 
 const sidebarTopGlowStyle = computed(() => ({
   background: themeStore.isDark
-    ? 'radial-gradient(circle at top left, rgba(59,130,246,0.06), transparent 60%)'
+    ? 'radial-gradient(circle at top left, rgba(255,255,255,0.05), transparent 60%)'
     : 'radial-gradient(circle at top left, rgba(96,165,250,0.08), transparent 60%)'
 }))
 
 const sidebarBottomGlowStyle = computed(() => ({
   background: themeStore.isDark
-    ? 'radial-gradient(circle at bottom, rgba(20,184,166,0.04), transparent 60%)'
+    ? 'radial-gradient(circle at bottom, rgba(255,255,255,0.03), transparent 60%)'
     : 'radial-gradient(circle at bottom, rgba(45,212,191,0.04), transparent 60%)'
 }))
 
