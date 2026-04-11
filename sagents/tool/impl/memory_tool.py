@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Memory tool based on BM25 file system - Sandbox version
-Get workspace through session_id, build file index and support search
+Memory tool for workspace file memory and session-history retrieval.
+
+File memory currently uses a scoped chunk index; session history keeps the
+existing BM25-based retrieval path.
 """
 import hashlib
 import json
@@ -82,7 +84,7 @@ class FileMemoryRetriever:
 
             now = time.time()
             should_refresh = (
-                cache_entry.index.bm25 is None
+                not cache_entry.index.has_search_index()
                 or (now - cache_entry.last_refresh_at) >= self.INDEX_REFRESH_INTERVAL_SECONDS
             )
             if should_refresh:
@@ -317,7 +319,7 @@ class MemoryTool:
     @tool(
         description_i18n={
             "zh": "搜索 Agent 的记忆。包括工作空间中的长期记忆（代码文件、文档等）和本次会话的历史对话。返回最相关的内容。",
-            "en": "Search Agent's memory. Includes long-term memory (code files, docs) in workspace and current session history. Uses BM25 algorithm."
+            "en": "Search Agent's memory. Includes long-term memory (code files, docs) in workspace and current session history."
         },
         param_description_i18n={
             "query": {
@@ -392,7 +394,7 @@ class MemoryTool:
             }
 
     async def _search_file_memory(self, query: str, top_k: int, session_id: str) -> List[Dict[str, Any]]:
-        """Search file memory using cached BM25 index through sandbox"""
+        """Search file memory using the scoped file-memory index through sandbox."""
         try:
             from sagents.session_runtime import get_global_session_manager
 
