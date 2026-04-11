@@ -18,6 +18,7 @@ import datetime
 import time
 import re
 import uuid
+import hashlib
 from typing import Dict, List, Optional, Any, Union, Sequence
 from copy import deepcopy
 from sagents.utils.logger import logger
@@ -87,9 +88,15 @@ class MessageManager:
             'filtered_messages': 0,
             'compressed_messages': 0,
             'system_messages_rejected': 0,
+            'duplicate_content_rejected': 0,
             'created_at': datetime.datetime.now().isoformat(),
             'last_updated': datetime.datetime.now().isoformat()
         }
+
+        # 跨 Agent 调用的签名历史（用于检测循环模式）
+        # 存储最近几轮 SimpleAgent 执行的签名，支持跨调用检测 AAAA/ABAB 等模式
+        self._recent_loop_signatures: List[str] = []
+        self._max_loop_signatures = 24  # 保留最近24个签名
         
     
     def update_messages(self, messages: Union[MessageChunk, List[MessageChunk]]) -> None:
@@ -175,6 +182,40 @@ class MessageManager:
     
     
 
+    def get_recent_loop_signatures(self) -> List[str]:
+        """
+        获取最近的循环签名历史
+        
+        供 SimpleAgent 在 _execute_loop 开始时加载历史签名
+        
+        Returns:
+            List[str]: 最近的签名列表
+        """
+        return self._recent_loop_signatures.copy()
+    
+    def add_loop_signature(self, signature: str) -> None:
+        """
+        添加循环签名到历史记录
+        
+        供 SimpleAgent 在每轮执行后记录签名
+        
+        Args:
+            signature: 签名字符串
+        """
+        self._recent_loop_signatures.append(signature)
+        
+        # 限制列表大小，避免内存无限增长
+        if len(self._recent_loop_signatures) > self._max_loop_signatures:
+            self._recent_loop_signatures = self._recent_loop_signatures[-self._max_loop_signatures:]
+
+    def clear_loop_signatures(self) -> None:
+        """
+        清除循环签名历史
+        
+        在会话重置或需要重新开始检测时调用
+        """
+        self._recent_loop_signatures.clear()
+
     def add_messages(self, messages: Union[MessageChunk, List[MessageChunk]], agent_name: Optional[str] = None) -> bool:
         """
         添加消息或消息列表
@@ -202,6 +243,7 @@ class MessageManager:
                 continue
 
             self.messages = MessageManager.merge_new_message_old_messages(message,self.messages)
+            
         self.stats['total_messages'] = len(self.messages)
         self.stats['total_chunks'] += len(messages)
         self.stats['last_updated'] = datetime.datetime.now().isoformat()
