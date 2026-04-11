@@ -922,25 +922,72 @@ class AgentBase(ABC):
             return
 
         for tool_call in chunk.choices[0].delta.tool_calls:
-            if tool_call.id is not None and len(tool_call.id) > 0:
-                last_tool_call_id = tool_call.id
+            tc_id = tool_call.id if tool_call.id is not None and len(tool_call.id) > 0 else ""
+            tc_index = getattr(tool_call, "index", None)
+            temp_key = f"__tool_call_index_{tc_index}" if tc_index is not None else None
 
-            if last_tool_call_id not in tool_calls:
-                logger.info(f"{self.agent_name}: 检测到新工具调用: {last_tool_call_id}, 工具名称: {tool_call.function.name}")
-                tool_calls[last_tool_call_id] = {
-                    'id': last_tool_call_id,
-                    'type': tool_call.type,
+            target_key = None
+            if tc_id and tc_id in tool_calls:
+                target_key = tc_id
+            elif tc_index is not None:
+                # 优先按 index 复用已有的 tool_call，避免多 tool 场景下串台
+                for existing_key, existing_value in tool_calls.items():
+                    if isinstance(existing_value, dict) and existing_value.get("index") == tc_index:
+                        target_key = existing_key
+                        break
+                if target_key is None and temp_key and temp_key in tool_calls:
+                    target_key = temp_key
+                if target_key is None and tc_id:
+                    target_key = tc_id
+                if target_key is None and temp_key:
+                    target_key = temp_key
+                if target_key is None and last_tool_call_id and last_tool_call_id in tool_calls:
+                    target_key = last_tool_call_id
+                if target_key is None and tool_calls:
+                    target_key = next(reversed(tool_calls))
+            elif last_tool_call_id and last_tool_call_id in tool_calls:
+                target_key = last_tool_call_id
+            elif tc_id:
+                target_key = tc_id
+            elif tool_calls:
+                target_key = next(reversed(tool_calls))
+
+            if target_key is None:
+                continue
+
+            entry = tool_calls.get(target_key)
+            if entry is None:
+                logger.info(
+                    f"{self.agent_name}: 检测到新工具调用: "
+                    f"{tc_id or target_key}, index={tc_index}, 工具名称: {tool_call.function.name}"
+                )
+                entry = {
+                    'id': tc_id or "",
+                    'index': tc_index,
+                    'type': tool_call.type or 'function',
                     'function': {
                         'name': tool_call.function.name or "",
-                        'arguments': tool_call.function.arguments if tool_call.function.arguments else ""
+                        'arguments': tool_call.function.arguments or ""
                     }
                 }
+                tool_calls[target_key] = entry
             else:
+                if tc_id and not entry.get('id'):
+                    entry['id'] = tc_id
+                    if target_key != tc_id:
+                        tool_calls[tc_id] = entry
+                        del tool_calls[target_key]
+                        target_key = tc_id
+                if tc_index is not None and entry.get('index') is None:
+                    entry['index'] = tc_index
                 if tool_call.function.name:
-                    logger.info(f"{self.agent_name}: 更新工具调用: {last_tool_call_id}, 工具名称: {tool_call.function.name}")
-                    tool_calls[last_tool_call_id]['function']['name'] = tool_call.function.name
+                    logger.info(
+                        f"{self.agent_name}: 更新工具调用: {entry.get('id') or target_key}, "
+                        f"index={tc_index}, 工具名称: {tool_call.function.name}"
+                    )
+                    entry['function']['name'] = tool_call.function.name
                 if tool_call.function.arguments:
-                    tool_calls[last_tool_call_id]['function']['arguments'] += tool_call.function.arguments
+                    entry['function']['arguments'] += tool_call.function.arguments
 
     def _create_tool_call_error_message(self,
                                         tool_name: str,
@@ -1295,15 +1342,21 @@ class AgentBase(ABC):
 
             for tc in delta.tool_calls or []:
                 idx = tc.index
+                if idx is None:
+                    continue
                 if idx not in tool_calls:
                     tool_calls[idx] = {
                         "id": tc.id or "",
                         "type": tc.type or "function",
                         "function": {"name": "", "arguments": ""},
                     }
-                func = tool_calls[idx]["function"]
-                func["name"] += tc.function.name or ""
-                func["arguments"] += tc.function.arguments or ""
+                entry = tool_calls[idx]
+                if tc.id and not entry["id"]:
+                    entry["id"] = tc.id
+                if tc.function.name and not entry["function"]["name"]:
+                    entry["function"]["name"] = tc.function.name
+                if tc.function.arguments:
+                    entry["function"]["arguments"] += tc.function.arguments
         if finish_reason is None:
             finish_reason = "stop"
         if id_ is None:
@@ -1350,7 +1403,8 @@ class AgentBase(ABC):
                                  tool_manager: Optional[ToolManager],
                                  messages_input: List[Any],
                                  session_id: str,
-                                 handle_complete_task: bool = False) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
+                                 handle_complete_task: bool = False,
+                                 emit_tool_call_message: bool = True) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
         """
         处理工具调用
 
@@ -1412,9 +1466,10 @@ class AgentBase(ABC):
                 )], True)
                 return
 
-            # 发送工具调用消息,如果流式已经返回了，则需要注释掉这个
-            output_messages = self._create_tool_call_message(tool_call)
-            yield (output_messages, False)
+            # 如果上游已经把 tool_call 以流式消息发出来了，这里就不要重复发卡片了。
+            if emit_tool_call_message:
+                output_messages = self._create_tool_call_message(tool_call)
+                yield (output_messages, False)
 
             # 执行工具
             async for message_chunk_list in self._execute_tool(

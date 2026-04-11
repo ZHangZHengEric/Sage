@@ -719,6 +719,31 @@ onMounted(() => {
   // 2. 提取工具调用、文件引用和代码块
   // 使用 props.agentId 或 message.agent_id 作为 fallback
   const effectiveAgentId = props.agentId || props.message.agent_id
+  const messageId = props.message?.message_id || props.message?.id || null
+  if (props.message.tool_calls && props.message.tool_calls.length > 0) {
+    props.message.tool_calls.forEach((toolCall, index) => {
+      const toolStableKey = messageId ? `tool:${messageId}:${index}` : (toolCall.id ? `tool:${toolCall.id}` : null)
+      const existingToolItem = workbenchStore.items.find(item =>
+        item.type === 'tool_call' && (
+          item.data?.id === toolCall.id ||
+          item.data?.tool_call_id === toolCall.id ||
+          (toolStableKey && item.stableKey === toolStableKey)
+        )
+      )
+      if (existingToolItem) return
+      workbenchStore.addItem({
+        type: 'tool_call',
+        role: props.message.role,
+        timestamp: props.message.timestamp || Date.now(),
+        sessionId: props.message.session_id || null,
+        messageId,
+        agentId: effectiveAgentId,
+        stableKey: toolStableKey,
+        data: toolCall,
+        toolResult: null
+      })
+    })
+  }
   workbenchStore.extractFromMessage(props.message, effectiveAgentId)
 })
 
@@ -730,6 +755,31 @@ watch(() => props.message, (newMessage) => {
   // 1. 实时提取新出现的工具调用、文件引用和代码块
   // 使用 props.agentId 或 message.agent_id 作为 fallback
   const effectiveAgentId = props.agentId || newMessage.agent_id
+  const messageId = newMessage?.message_id || newMessage?.id || null
+  if (newMessage.tool_calls && newMessage.tool_calls.length > 0) {
+    newMessage.tool_calls.forEach((toolCall, index) => {
+      const toolStableKey = messageId ? `tool:${messageId}:${index}` : (toolCall.id ? `tool:${toolCall.id}` : null)
+      const existingToolItem = workbenchStore.items.find(item =>
+        item.type === 'tool_call' && (
+          item.data?.id === toolCall.id ||
+          item.data?.tool_call_id === toolCall.id ||
+          (toolStableKey && item.stableKey === toolStableKey)
+        )
+      )
+      if (existingToolItem) return
+      workbenchStore.addItem({
+        type: 'tool_call',
+        role: newMessage.role,
+        timestamp: newMessage.timestamp || Date.now(),
+        sessionId: newMessage.session_id || null,
+        messageId,
+        agentId: effectiveAgentId,
+        stableKey: toolStableKey,
+        data: toolCall,
+        toolResult: null
+      })
+    })
+  }
   workbenchStore.extractFromMessage(newMessage, effectiveAgentId)
 
   // 2. 实时更新工具结果
