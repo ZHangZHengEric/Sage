@@ -8,15 +8,24 @@ import os
 from typing import Dict, Any, Optional, List
 from sagents.utils.logger import logger
 from sagents.utils.sandbox.config import VolumeMount
+from sagents.utils.common_utils import resolve_sandbox_runtime_dir
 from .subprocess import LAUNCHER_SCRIPT
 
 
 class BwrapIsolation:
     """Linux bubblewrap 隔离模式"""
     
-    def __init__(self, venv_dir: str, sandbox_agent_workspace: str, volume_mounts: Optional[List[VolumeMount]] = None, limits: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        venv_dir: str,
+        sandbox_agent_workspace: str,
+        sandbox_runtime_dir: Optional[str] = None,
+        volume_mounts: Optional[List[VolumeMount]] = None,
+        limits: Optional[Dict[str, Any]] = None,
+    ):
         self.venv_dir = venv_dir
         self.sandbox_agent_workspace = sandbox_agent_workspace
+        self.sandbox_runtime_dir = sandbox_runtime_dir or resolve_sandbox_runtime_dir(sandbox_agent_workspace) or os.path.join(sandbox_agent_workspace, ".sandbox")
         self.volume_mounts = volume_mounts or []
         self.limits = limits or {}
         
@@ -30,7 +39,8 @@ class BwrapIsolation:
         logger.info(f"[BwrapIsolation] 开始执行")
         
         run_id = str(uuid.uuid4())
-        sandbox_dir = os.path.join(self.sandbox_agent_workspace, ".sandbox")
+        sandbox_dir = self.sandbox_runtime_dir
+        os.makedirs(sandbox_dir, exist_ok=True)
         input_pkl = os.path.join(sandbox_dir, f"input_{run_id}.pkl")
         output_pkl = os.path.join(sandbox_dir, f"output_{run_id}.pkl")
         
@@ -111,5 +121,11 @@ class BwrapIsolation:
         
         # 使用 subprocess 模式执行
         from .subprocess import SubprocessIsolation
-        subproc = SubprocessIsolation(self.venv_dir, self.sandbox_agent_workspace, self.volume_mounts, self.limits)
+        subproc = SubprocessIsolation(
+            venv_dir=self.venv_dir,
+            sandbox_agent_workspace=self.sandbox_agent_workspace,
+            sandbox_runtime_dir=self.sandbox_runtime_dir,
+            volume_mounts=self.volume_mounts,
+            limits=self.limits,
+        )
         return subproc.execute_background(command, cwd)

@@ -59,9 +59,9 @@ class StartupConfig:
     default_llm_api_key: str = ""
     default_llm_api_base_url: str = "https://api.deepseek.com/v1"
     default_llm_model_name: str = "deepseek-chat"
-    default_llm_max_tokens: int = 4096
+    default_llm_max_tokens: Optional[int] = None
     default_llm_temperature: float = 0.2
-    default_llm_max_model_len: int = 54000
+    default_llm_max_model_len: int = 64000
     default_llm_top_p: float = 0.9
     default_llm_presence_penalty: float = 0.0
 

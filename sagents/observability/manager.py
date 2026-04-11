@@ -108,3 +108,17 @@ class ObservabilityManager(BaseTraceHandler):
                 handler.on_tool_error(error, **kwargs)
             except Exception as e:
                 self._log_handler_error(handler, "on_tool_error", e)
+
+    def on_message_start(self, session_id: str, message_id: str, **kwargs: Any) -> Any:
+        for handler in self.handlers:
+            try:
+                handler.on_message_start(session_id, message_id, **kwargs)
+            except Exception as e:
+                self._log_handler_error(handler, "on_message_start", e)
+
+    def on_message_end(self, session_id: str, message_id: str, **kwargs: Any) -> Any:
+        for handler in self.handlers:
+            try:
+                handler.on_message_end(session_id, message_id, **kwargs)
+            except Exception as e:
+                self._log_handler_error(handler, "on_message_end", e)

@@ -6,7 +6,7 @@
       <div class="flex w-full items-center justify-between gap-2 md:w-auto md:justify-end">
         <!-- Agent 选择器 - 紧凑网格布局 -->
         <Select :model-value="selectedAgentId" @update:model-value="handleAgentChange">
-          <SelectTrigger class="h-9 w-[148px] min-w-0 rounded-full border border-border/80 bg-background/88 px-3 shadow-[0_10px_30px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.22)] transition-all hover:border-border hover:bg-background focus:ring-2 focus:ring-primary/20 sm:w-[172px] dark:border-white/12 dark:bg-[rgba(20,24,31,0.82)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.06)] dark:hover:border-white/18 dark:hover:bg-[rgba(24,29,37,0.9)]">
+          <SelectTrigger class="h-9 w-[148px] min-w-0 rounded-full border border-border/80 bg-background/88 px-3 shadow-[0_10px_30px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.22)] transition-all hover:border-border hover:bg-background focus:ring-2 focus:ring-primary/20 sm:w-[172px] dark:border-white/12 dark:bg-[rgba(4,4,5,0.92)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.04)] dark:hover:border-white/18 dark:hover:bg-[rgba(10,10,12,0.96)]">
             <div class="flex items-center gap-2 w-full">
               <!-- Agent 头像 -->
               <div class="w-5 h-5 rounded-full overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/15">
@@ -60,7 +60,7 @@
         </Select>
 
         <TooltipProvider>
-          <div class="flex h-9 items-center rounded-full border border-border/75 bg-background/88 p-1 shadow-[0_10px_28px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.18)] dark:border-white/12 dark:bg-[rgba(20,24,31,0.82)] dark:shadow-[0_12px_30px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.05)]">
+          <div class="flex h-9 items-center rounded-full border border-border/75 bg-background/88 p-1 shadow-[0_10px_28px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.18)] dark:border-white/12 dark:bg-[rgba(4,4,5,0.92)] dark:shadow-[0_12px_30px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.04)]">
             <Tooltip>
               <TooltipTrigger as-child>
                 <button
@@ -101,7 +101,7 @@
           <div class="flex items-center gap-1.5">
             <Tooltip>
               <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="h-9 w-9 rounded-full border border-transparent bg-background/65 text-muted-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] hover:border-border/70 hover:bg-background hover:text-foreground dark:bg-[rgba(20,24,31,0.72)] dark:hover:border-white/10 dark:hover:bg-[rgba(24,29,37,0.9)]" @click="togglePanel('workbench')">
+                <Button variant="ghost" size="icon" class="h-9 w-9 rounded-full border border-transparent bg-background/65 text-muted-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] hover:border-border/70 hover:bg-background hover:text-foreground dark:bg-[rgba(4,4,5,0.9)] dark:hover:border-white/10 dark:hover:bg-[rgba(10,10,12,0.98)]" @click="togglePanel('workbench')">
                   <Monitor class="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -112,7 +112,7 @@
 
             <Tooltip>
               <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="h-9 w-9 rounded-full border border-transparent bg-background/65 text-muted-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] hover:border-border/70 hover:bg-background hover:text-foreground dark:bg-[rgba(20,24,31,0.72)] dark:hover:border-white/10 dark:hover:bg-[rgba(24,29,37,0.9)]" @click="togglePanel('workspace')">
+                <Button variant="ghost" size="icon" class="h-9 w-9 rounded-full border border-transparent bg-background/65 text-muted-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] hover:border-border/70 hover:bg-background hover:text-foreground dark:bg-[rgba(4,4,5,0.9)] dark:hover:border-white/10 dark:hover:bg-[rgba(10,10,12,0.98)]" @click="togglePanel('workspace')">
                   <FolderOpen class="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -125,10 +125,10 @@
         </TooltipProvider>
       </div>
     </div>
-    <div class="relative flex flex-1 flex-row overflow-hidden pb-4">
+    <div class="relative flex flex-1 flex-row overflow-hidden pb-4 dark:bg-[rgba(5,5,6,1)]">
       <!-- 主聊天区域 -->
       <div
-        class="flex-1 flex flex-col min-w-0 bg-muted/5 relative transition-all duration-200"
+        class="flex-1 flex flex-col min-w-0 bg-muted/5 relative transition-all duration-200 dark:bg-[rgba(5,5,6,1)]"
         :class="{ 'mr-0': !anyPanelOpen }"
       >
         <!-- 弹幕叠在聊天区域上方；能力面板打开或用户已发送消息时不渲染弹幕 -->

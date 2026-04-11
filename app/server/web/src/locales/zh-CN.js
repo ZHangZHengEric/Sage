@@ -325,6 +325,10 @@ export default {
   'agent.useSystemDefault': '使用系统默认',
   'agent.noProviders': '暂无可用模型源，请先在模型源管理中添加',
   'agent.currentModel': '当前模型',
+  'agent.fastModelProvider': '快速LLM模型',
+  'agent.selectFastModelProvider': '选择快速模型源',
+  'agent.sameAsLLMModel': '与LLM模型相同',
+  'agent.fastModelDescription': '快速模型用于执行简单任务，可降低成本并提高响应速度',
   'agent.agentMode': 'Agent模式',
   'agent.modeAuto': '自动 (Auto)',
   'agent.modeFibre': 'Fibre (复杂任务规划)',
@@ -1076,6 +1080,7 @@ export default {
   'history.exportMarkdown': '导出为 Markdown',
   'history.exportHTML': '导出为 HTML',
   'history.copySessionId': '点击复制',
+  'history.trace': '链路追踪',
   'history.sessionIdCopied': 'session_id已复制',
   'history.copyFailed': '复制失败',
   'history.loadListFailed': '加载对话列表失败',
@@ -1221,6 +1226,7 @@ export default {
 
   // Workbench ToolCall
   'workbench.tool.arguments': '输入参数',
+  'workbench.tool.argumentsStreaming': '参数生成中...',
   'workbench.tool.result': '输出结果',
   'workbench.tool.compressingHistory': '正在压缩历史消息...',
   'workbench.tool.compressFailed': '压缩失败',

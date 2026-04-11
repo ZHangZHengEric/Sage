@@ -34,9 +34,9 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument('--default_llm_api_key', required=True, help='默认LLM API Key')
     parser.add_argument('--default_llm_api_base_url', required=True, help='默认LLM API Base')
     parser.add_argument('--default_llm_model_name', required=True, help='默认LLM API Model')
-    parser.add_argument('--default_llm_max_tokens', default=4096, type=int, help='默认LLM API Max Tokens')
+    parser.add_argument('--default_llm_max_tokens', default=None, type=int, help='默认LLM API Max Tokens')
     parser.add_argument('--default_llm_temperature', default=0.2, type=float, help='默认LLM API Temperature')
-    parser.add_argument('--default_llm_max_model_len', default=54000, type=int, help='默认LLM 最大上下文')
+    parser.add_argument('--default_llm_max_model_len', default=64000, type=int, help='默认LLM 最大上下文')
     parser.add_argument('--default_llm_top_p', default=0.9, type=float, help='默认LLM Top P')
     parser.add_argument('--default_llm_presence_penalty', default=0.0, type=float, help='默认LLM Presence Penalty')
 
@@ -527,7 +527,7 @@ async def chat_fibre_simple(
                 available_workflows=config.get('available_workflows'),
                 system_context=config.get('system_context'),
                 context_budget_config=context_budget_config,
-                max_loop_count=config.get('max_loop_count', 100)
+                max_loop_count=config.get('max_loop_count')
             ):
                     for chunk in chunks:
                         if isinstance(chunk, MessageChunk):
@@ -769,7 +769,7 @@ async def chat_fibre(
                 available_workflows=config.get('available_workflows'),
                 system_context=config.get('system_context'),
                 context_budget_config=context_budget_config,
-                max_loop_count=config.get('max_loop_count', 100)
+                max_loop_count=config.get('max_loop_count')
             ):
                 for chunk in chunks:
                     if isinstance(chunk, MessageChunk):
@@ -906,8 +906,12 @@ def parse_arguments() -> Dict[str, Any]:
         'base_url': args.default_llm_api_base_url,
         'tools_folders': args.tools_folders,
         'skills_path': args.skills_path,
-        'max_tokens': args.default_llm_max_tokens if args.default_llm_max_tokens else int(preset_running_agent_config.get('llmConfig', {}).get('maxTokens', 4096)),
-        'temperature': args.default_llm_temperature if args.default_llm_temperature else float(preset_running_agent_config.get('llmConfig', {}).get('temperature', 0.2)),
+        'max_tokens': (
+            args.default_llm_max_tokens
+            if args.default_llm_max_tokens is not None
+            else preset_running_agent_config.get('llmConfig', {}).get('maxTokens')
+        ),
+        'temperature': args.default_llm_temperature if args.default_llm_temperature is not None else preset_running_agent_config.get('llmConfig', {}).get('temperature', 0.2),
         'max_model_len': args.default_llm_max_model_len,
         'top_p': args.default_llm_top_p,
         'presence_penalty': args.default_llm_presence_penalty,
@@ -923,7 +927,7 @@ def parse_arguments() -> Dict[str, Any]:
         'system_context': preset_running_agent_config.get('systemContext', {}),
         'available_tools': preset_running_agent_config.get('availableTools', []),
         'system_prefix': preset_running_agent_config.get('systemPrefix', ''),
-        'max_loop_count': preset_running_agent_config.get('maxLoopCount', 99),
+        'max_loop_count': preset_running_agent_config.get('maxLoopCount'),
         'user_id': args.user_id,
         'memory_root': args.memory_root,
         'context_history_ratio': args.context_history_ratio,

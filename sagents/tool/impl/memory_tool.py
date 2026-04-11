@@ -1,14 +1,218 @@
 #!/usr/bin/env python3
 """
-Memory tool based on BM25 file system - Sandbox version
-Get workspace through session_id, build file index and support search
+Memory tool for workspace file memory and session-history retrieval.
+
+File memory currently uses a scoped chunk index; session history keeps the
+existing BM25-based retrieval path.
 """
+import hashlib
+import json
 import os
 import re
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from ..tool_base import tool
 from sagents.utils.logger import logger
+
+
+@dataclass
+class _FileIndexCacheEntry:
+    index: Any
+    last_refresh_at: float = 0.0
+
+
+@dataclass
+class _SessionHistoryCacheEntry:
+    messages_fingerprint: str
+    agent_config_fingerprint: str
+    history_messages: List[Any]
+
+
+class FileMemoryRetriever:
+    """文件级长期记忆检索。
+
+    作用域按 user + agent + workspace 区分，避免不同工作区/Agent 串用索引。
+    """
+
+    INDEX_REFRESH_INTERVAL_SECONDS = 10.0
+    _index_cache: Dict[str, _FileIndexCacheEntry] = {}
+
+    def __init__(self, memory_tool: "MemoryTool"):
+        self.memory_tool = memory_tool
+
+    @staticmethod
+    def _build_scope_key(user_id: str, agent_id: str, workspace_path: str) -> str:
+        scope = f"{user_id}|{agent_id}|{workspace_path}"
+        return hashlib.md5(scope.encode("utf-8")).hexdigest()
+
+    async def search(self, query: str, top_k: int, session_context) -> List[Dict[str, Any]]:
+        try:
+            sandbox = session_context.sandbox
+            if not sandbox:
+                logger.warning("MemoryTool: No sandbox available for file memory search")
+                return []
+
+            workspace_path = getattr(session_context, "sandbox_agent_workspace", None) or "/sage-workspace"
+            agent_id = getattr(session_context, "agent_id", None)
+            user_id = getattr(session_context, "user_id", None) or "default_user"
+
+            if not agent_id:
+                logger.warning("MemoryTool: Cannot get agent_id for file memory search")
+                return []
+
+            from .memory_index import MemoryIndex
+
+            scope_key = self._build_scope_key(user_id, agent_id, workspace_path)
+            index_path = self.memory_tool._get_index_path(
+                user_id=user_id,
+                agent_id=agent_id,
+                workspace_path=workspace_path,
+            )
+            cache_entry = self._index_cache.get(scope_key)
+
+            if not cache_entry:
+                cache_entry = _FileIndexCacheEntry(
+                    index=MemoryIndex(sandbox, workspace_path, index_path)
+                )
+                self._index_cache[scope_key] = cache_entry
+            else:
+                # 同作用域下复用 MemoryIndex，但每次绑定当前 session 的 sandbox 引用。
+                cache_entry.index.sandbox = sandbox
+                cache_entry.index.workspace_path = workspace_path.rstrip("/")
+
+            now = time.time()
+            should_refresh = (
+                not cache_entry.index.has_search_index()
+                or (now - cache_entry.last_refresh_at) >= self.INDEX_REFRESH_INTERVAL_SECONDS
+            )
+            if should_refresh:
+                stats = await cache_entry.index.update_index()
+                cache_entry.last_refresh_at = now
+                logger.info(f"MemoryTool: File memory index update stats: {stats}")
+
+            results = cache_entry.index.search(query, top_k)
+
+            formatted_results = []
+            for result in results:
+                snippets = []
+                if result.content:
+                    snippet_matches = re.findall(r'\[Line (\d+)\] (.*?)(?=\n\n|\Z)', result.content, re.DOTALL)
+                    for line_num, snippet_text in snippet_matches:
+                        snippets.append({
+                            "line_number": int(line_num),
+                            "text": snippet_text.strip()
+                        })
+
+                formatted_results.append({
+                    "path": result.path,
+                    "snippets": snippets,
+                })
+
+            return formatted_results
+
+        except Exception as e:
+            logger.error(f"MemoryTool: File memory search failed: {e}")
+            return []
+
+
+class SessionHistoryRetriever:
+    """会话级历史记忆检索。
+
+    保持当前 history_messages 的语义边界不变，只优化 prepare/BM25 的重复开销。
+    """
+
+    _history_cache: Dict[str, _SessionHistoryCacheEntry] = {}
+
+    def __init__(self, memory_tool: "MemoryTool"):
+        self.memory_tool = memory_tool
+
+    @staticmethod
+    def _serialize_message_content(content: Any) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        return json.dumps(content, ensure_ascii=False, sort_keys=True, default=str)
+
+    def _fingerprint_messages(self, messages: List[Any]) -> str:
+        digests: List[str] = []
+        for msg in messages:
+            content = self._serialize_message_content(msg.get_content())
+            content_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
+            normalized_type = msg.normalized_message_type() if hasattr(msg, "normalized_message_type") else None
+            digests.append(
+                f"{msg.message_id}|{msg.role}|{normalized_type or ''}|{content_hash}"
+            )
+        return hashlib.md5("\n".join(digests).encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _fingerprint_agent_config(agent_config: Dict[str, Any]) -> str:
+        try:
+            serialized = json.dumps(agent_config or {}, ensure_ascii=False, sort_keys=True, default=str)
+        except Exception:
+            serialized = str(agent_config or {})
+        return hashlib.md5(serialized.encode("utf-8")).hexdigest()
+
+    def _get_history_messages(self, session_id: str, session_context) -> List[Any]:
+        message_manager = session_context.message_manager
+        agent_config = getattr(session_context, "agent_config", {}) or {}
+
+        messages_fingerprint = self._fingerprint_messages(message_manager.messages)
+        agent_config_fingerprint = self._fingerprint_agent_config(agent_config)
+
+        cache_entry = self._history_cache.get(session_id)
+        if (
+            cache_entry
+            and cache_entry.messages_fingerprint == messages_fingerprint
+            and cache_entry.agent_config_fingerprint == agent_config_fingerprint
+        ):
+            return cache_entry.history_messages
+
+        prepare_result = message_manager.prepare_history_split(agent_config)
+        history_messages = prepare_result["split_result"]["history_messages"]
+        self._history_cache[session_id] = _SessionHistoryCacheEntry(
+            messages_fingerprint=messages_fingerprint,
+            agent_config_fingerprint=agent_config_fingerprint,
+            history_messages=history_messages,
+        )
+        return history_messages
+
+    def search(self, query: str, top_k: int, session_id: str, session_context) -> List[Dict[str, Any]]:
+        try:
+            history_messages = self._get_history_messages(session_id, session_context)
+            if not history_messages:
+                logger.debug("MemoryTool: No history messages to search")
+                return []
+
+            session_memory_manager = session_context.session_memory_manager
+            retrieved_messages = session_memory_manager.retrieve_history_messages(
+                messages=history_messages,
+                query=query,
+                history_budget=top_k * 200
+            )
+            retrieved_messages = retrieved_messages[:top_k]
+
+            logger.info(f"MemoryTool: Retrieved {len(retrieved_messages)} history messages for query '{query}'")
+
+            formatted_results = []
+            for msg in retrieved_messages:
+                content = msg.content or ""
+                snippet = self.memory_tool._extract_history_snippet(content, query.lower().split())
+                formatted_results.append({
+                    "role": msg.role,
+                    "content_preview": snippet,
+                    "timestamp": getattr(msg, 'timestamp', None)
+                })
+
+            return formatted_results
+
+        except Exception as e:
+            logger.error(f"MemoryTool: Session history search failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return []
 
 
 class MemoryTool:
@@ -21,6 +225,10 @@ class MemoryTool:
     3. Search session history messages
     4. Use file extension whitelist and directory blacklist managed by MemoryIndex
     """
+
+    def __init__(self):
+        self.file_memory_retriever = FileMemoryRetriever(self)
+        self.session_history_retriever = SessionHistoryRetriever(self)
 
     def _get_sandbox(self, session_id: str):
         """通过 session_id 获取沙箱"""
@@ -84,11 +292,10 @@ class MemoryTool:
             logger.error(f"MemoryTool: Get agent_id failed: {e}")
             return None
 
-    def _get_index_path(self, agent_id: str) -> str:
-        """Get index file path for agent (stored on host)
-        
-        Args:
-            agent_id: Agent ID (not session_id)
+    def _get_index_path(self, user_id: str, agent_id: str, workspace_path: str) -> str:
+        """Get scoped index file path (stored on host).
+
+        文件长期记忆按 user + agent + workspace 隔离，避免不同作用域复用同一个磁盘索引。
         """
         # Get MEMORY_ROOT_PATH from environment variable
         memory_root = os.environ.get('MEMORY_ROOT_PATH')
@@ -100,8 +307,11 @@ class MemoryTool:
         # Create memory directory
         memory_dir = Path(memory_root)
         memory_dir.mkdir(parents=True, exist_ok=True)
-        
-        index_path = memory_dir / f"{agent_id}.pkl"
+
+        workspace_hash = hashlib.md5(workspace_path.encode("utf-8")).hexdigest()[:12]
+        safe_user_id = re.sub(r"[^A-Za-z0-9._-]+", "_", user_id or "default_user")
+        safe_agent_id = re.sub(r"[^A-Za-z0-9._-]+", "_", agent_id or "default_agent")
+        index_path = memory_dir / f"{safe_user_id}__{safe_agent_id}__{workspace_hash}.pkl"
         logger.debug(f"MemoryTool: Index path: {index_path}")
         
         return str(index_path)
@@ -109,7 +319,7 @@ class MemoryTool:
     @tool(
         description_i18n={
             "zh": "搜索 Agent 的记忆。包括工作空间中的长期记忆（代码文件、文档等）和本次会话的历史对话。返回最相关的内容。",
-            "en": "Search Agent's memory. Includes long-term memory (code files, docs) in workspace and current session history. Uses BM25 algorithm."
+            "en": "Search Agent's memory. Includes long-term memory (code files, docs) in workspace and current session history."
         },
         param_description_i18n={
             "query": {
@@ -184,55 +394,18 @@ class MemoryTool:
             }
 
     async def _search_file_memory(self, query: str, top_k: int, session_id: str) -> List[Dict[str, Any]]:
-        """Search file memory using BM25 index through sandbox"""
+        """Search file memory using the scoped file-memory index through sandbox."""
         try:
-            # Get sandbox and workspace path
-            sandbox = self._get_sandbox(session_id)
-            workspace_path = self._get_workspace_path(session_id)
-            if not workspace_path:
-                logger.warning(f"MemoryTool: Cannot get workspace path for session {session_id}")
+            from sagents.session_runtime import get_global_session_manager
+
+            session_manager = get_global_session_manager()
+            session = session_manager.get(session_id)
+            if not session or not session.session_context:
+                logger.warning(f"MemoryTool: Session not found for file memory search: {session_id}")
                 return []
-            
-            # Get agent_id and index path (stored on host, keyed by agent_id)
-            agent_id = self._get_agent_id(session_id)
-            if not agent_id:
-                logger.warning(f"MemoryTool: Cannot get agent_id for session {session_id}")
-                return []
-            
-            index_path = self._get_index_path(agent_id)
-            
-            # Load/build index
-            from .memory_index import MemoryIndex
-            index = MemoryIndex(sandbox, workspace_path, index_path)
-            
-            # Auto update index (fast check if no changes)
-            stats = await index.update_index()
-            logger.info(f"MemoryTool: Index update stats: {stats}")
-            
-            # Search
-            results = index.search(query, top_k)
-            
-            # Format results with snippets
-            formatted_results = []
-            for r in results:
-                # Extract snippets from the content preview
-                snippets = []
-                if r.content:
-                    # Split by line number markers
-                    snippet_matches = re.findall(r'\[Line (\d+)\] (.*?)(?=\n\n|\Z)', r.content, re.DOTALL)
-                    for line_num, snippet_text in snippet_matches:
-                        snippets.append({
-                            "line_number": int(line_num),
-                            "text": snippet_text.strip()
-                        })
-                
-                formatted_results.append({
-                    "path": r.path,
-                    "snippets": snippets,
-                })
-            
-            return formatted_results
-            
+
+            return await self.file_memory_retriever.search(query, top_k, session.session_context)
+
         except Exception as e:
             logger.error(f"MemoryTool: File memory search failed: {e}")
             return []
@@ -254,48 +427,8 @@ class MemoryTool:
                 return []
             
             session_context = session.session_context
-            message_manager = session_context.message_manager
-            session_memory_manager = session_context.session_memory_manager
-            
-            # 1. 准备历史上下文（计算预算、切分消息）
-            agent_config = getattr(session_context, 'agent_config', {})
-            prepare_result = message_manager.prepare_history_split(agent_config)
-            
-            # 2. 获取历史消息（排除最近的消息）
-            history_messages = prepare_result['split_result']['history_messages']
-            
-            if not history_messages:
-                logger.debug("MemoryTool: No history messages to search")
-                return []
-            
-            # 3. 使用 session_memory_manager 进行 BM25 检索
-            retrieved_messages = session_memory_manager.retrieve_history_messages(
-                messages=history_messages,
-                query=query,
-                history_budget=top_k * 200  # 估算每个消息约500字符
-            )
-            
-            # 4. 限制返回数量
-            retrieved_messages = retrieved_messages[:top_k]
-            
-            logger.info(f"MemoryTool: Retrieved {len(retrieved_messages)} history messages for query '{query}'")
-            
-            # 5. 格式化结果
-            formatted_results = []
-            for msg in retrieved_messages:
-                content = msg.content or ""
-                
-                # 提取包含查询词的片段
-                snippet = self._extract_history_snippet(content, query.lower().split())
-                
-                formatted_results.append({
-                    "role": msg.role,
-                    "content_preview": snippet,
-                    "timestamp": getattr(msg, 'timestamp', None)
-                })
-            
-            return formatted_results
-            
+            return self.session_history_retriever.search(query, top_k, session_id, session_context)
+
         except Exception as e:
             logger.error(f"MemoryTool: Session history search failed: {e}")
             import traceback

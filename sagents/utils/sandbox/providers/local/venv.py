@@ -40,6 +40,7 @@ class VenvManager:
 
             # 创建虚拟环境，指定正确的 Python 解释器
             venv.create(self.venv_dir, with_pip=True, executable=system_python)
+            self._install_uv_in_venv()
 
             # 配置阿里云 pip 源
             self._configure_pip_mirror()
@@ -83,6 +84,32 @@ class VenvManager:
 
         except Exception as e:
             logger.warning(f"[VenvManager] 配置 pip 镜像源时出错: {e}")
+
+    def _install_uv_in_venv(self):
+        """在 venv 中安装 uv，失败不阻塞。"""
+        import subprocess
+
+        python_bin = self.get_python_bin()
+        if not os.path.exists(python_bin):
+            logger.warning("[VenvManager] venv python 不存在，跳过 uv 安装")
+            return
+
+        install_cmd = [
+            python_bin, "-m", "pip", "install", "-U", "uv",
+            "--index-url", "https://mirrors.aliyun.com/pypi/simple/",
+            "--trusted-host", "mirrors.aliyun.com",
+        ]
+        result = subprocess.run(install_cmd, capture_output=True, text=True, timeout=180)
+        if result.returncode == 0:
+            logger.info("[VenvManager] uv 已安装到 venv")
+            return
+
+        fallback_cmd = [python_bin, "-m", "pip", "install", "-U", "uv"]
+        fallback_result = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=180)
+        if fallback_result.returncode == 0:
+            logger.info("[VenvManager] uv 已安装到 venv（默认源）")
+        else:
+            logger.warning(f"[VenvManager] uv 安装失败，不影响后续: {fallback_result.stderr}")
             
     def get_python_bin(self) -> str:
         """获取 Python 解释器路径"""

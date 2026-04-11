@@ -223,7 +223,6 @@
                     type="number"
                     v-model.number="store.formData.maxLoopCount"
                     min="1"
-                    max="100"
                     class="h-10"
                     @blur="validateMaxLoopCount"
                   />
@@ -256,7 +255,8 @@
                 </TooltipProvider>
               </div>
             </div>
-            <div class="pl-10">
+            <div class="pl-10 space-y-5">
+              <!-- 标准模型选择 -->
               <FormItem :label="t('agent.modelProvider')">
                 <Select v-model="llmProviderSelectValue">
                   <SelectTrigger class="h-10">
@@ -276,6 +276,32 @@
                     </SelectItem>
                   </SelectContent>
                 </Select>
+              </FormItem>
+
+              <!-- 快速模型选择（可选） -->
+              <FormItem :label="t('agent.fastModelProvider')">
+                <Select v-model="fastLlmProviderSelectValue">
+                  <SelectTrigger class="h-10">
+                    <SelectValue :placeholder="t('agent.selectFastModelProvider')" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem :value="defaultProviderOption">
+                      <div class="flex items-center gap-2">
+                        <span>{{ t('agent.sameAsLLMModel') }}</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem v-for="provider in providers" :key="provider.id" :value="provider.id">
+                      <div class="flex items-center gap-2">
+                        <span>{{ provider.name }} ({{ provider.model }})</span>
+                        <div class="flex items-center gap-1 ml-2">
+                          <span class="inline-flex items-center justify-center w-4 h-4 text-[10px] font-medium bg-primary/10 text-primary rounded">T</span>
+                          <ImageIcon v-if="provider.supports_multimodal" class="w-4 h-4 text-primary" />
+                        </div>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p class="text-xs text-muted-foreground mt-1">{{ t('agent.fastModelDescription') }}</p>
               </FormItem>
             </div>
           </section>
@@ -1175,15 +1201,17 @@ const maxLoopCountError = ref('')
 
 const validateMaxLoopCount = () => {
   const value = store.formData.maxLoopCount
-  if (value > 100) {
-    store.formData.maxLoopCount = 100
-    maxLoopCountError.value = t('agentEdit.maxLoopTooLarge')
-  } else if (value < 1) {
+  if (value === null || value === undefined || value === '') {
+    maxLoopCountError.value = t('agentEdit.maxLoopRequired')
+    return false
+  }
+  if (value < 1) {
     store.formData.maxLoopCount = 1
     maxLoopCountError.value = t('agentEdit.maxLoopTooSmall')
   } else {
     maxLoopCountError.value = ''
   }
+  return true
 }
 
 // ============================================================================
@@ -2046,6 +2074,14 @@ const llmProviderSelectValue = computed({
   }
 })
 
+// 快速模型选择（可选）
+const fastLlmProviderSelectValue = computed({
+  get: () => store.formData.fast_llm_provider_id ?? defaultProviderOption,
+  set: (val) => {
+    store.formData.fast_llm_provider_id = val === defaultProviderOption ? null : val
+  }
+})
+
 // Check if selected provider supports multimodal
 const selectedProviderSupportsMultimodal = computed(() => {
   const providerId = store.formData.llm_provider_id
@@ -2137,7 +2173,9 @@ const handleSave = async (shouldExit = true) => {
     console.log('[AgentEdit] Saving IM channels:', JSON.parse(JSON.stringify(imChannels)))
     
     // 保存前验证 maxLoopCount
-    validateMaxLoopCount()
+    if (!validateMaxLoopCount()) {
+      return
+    }
     store.prepareForSave()
     const plainData = JSON.parse(JSON.stringify(store.formData))
     

@@ -1,10 +1,11 @@
 import argparse
 import asyncio
 import json
+import re
 import sys
 import time
 import uuid
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 
 CHAT_COMMAND_HELP = (
@@ -14,6 +15,10 @@ CHAT_COMMAND_HELP = (
     "  /exit     leave the session\n"
     "  /quit     leave the session"
 )
+
+TOOL_NAME_TAG_PATTERN = re.compile(r"<tool_name>\s*([A-Za-z0-9_.-]+)\s*</tool_name>")
+TOOL_CALL_FUNCTION_PATTERN = re.compile(r"<call\s+function=\"([A-Za-z0-9_.-]+)\"")
+TOOL_RESULT_NAME_PATTERN = re.compile(r"<function_result\s+name=\"([A-Za-z0-9_.-]+)\"")
 
 
 def _truncate(value: Optional[str], max_len: int) -> str:
@@ -62,7 +67,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         choices=["simple", "multi", "fibre"],
         default="simple",
     )
-    run_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=50)
+    run_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=None)
     run_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     run_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     run_parser.add_argument("--stats", action="store_true", help="Print execution summary after completion")
@@ -79,7 +84,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         choices=["simple", "multi", "fibre"],
         default="simple",
     )
-    chat_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=50)
+    chat_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=None)
     chat_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     chat_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     chat_parser.add_argument("--stats", action="store_true", help="Print execution summary for each turn")
@@ -96,7 +101,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         choices=["simple", "multi", "fibre"],
         default="simple",
     )
-    resume_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=50)
+    resume_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=None)
     resume_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     resume_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     resume_parser.add_argument("--stats", action="store_true", help="Print execution summary for each turn")
@@ -154,15 +159,9 @@ def _print_plain_event(event: Dict[str, Any]) -> None:
         sys.stdout.flush()
         return
 
-    tool_calls = event.get("tool_calls") or []
-    if tool_calls:
-        names = []
-        for tool_call in tool_calls:
-            function = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
-            name = function.get("name")
-            if name:
-                names.append(name)
-        if names:
+    names = _collect_event_tool_names(event)
+    if names:
+        if event.get("tool_calls"):
             sys.stderr.write(f"\n[tool] {', '.join(names)}\n")
             sys.stderr.flush()
 
@@ -194,7 +193,45 @@ def _empty_stats(*, request, workspace: Optional[str]) -> Dict[str, Any]:
         "completion_tokens": None,
         "total_tokens": None,
         "per_step_info": [],
+        "_tool_tag_buffer": "",
     }
+
+
+def _collect_event_tool_names(event: Dict[str, Any], *, content_buffer: str = "") -> List[str]:
+    tool_names: List[str] = []
+
+    tool_calls = event.get("tool_calls") or []
+    for tool_call in tool_calls:
+        function = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
+        name = function.get("name")
+        if name:
+            tool_names.append(name)
+
+    metadata = event.get("metadata") or {}
+    metadata_tool_name = metadata.get("tool_name")
+    if isinstance(metadata_tool_name, str) and metadata_tool_name:
+        tool_names.append(metadata_tool_name)
+
+    event_tool_name = event.get("tool_name")
+    if isinstance(event_tool_name, str) and event_tool_name:
+        tool_names.append(event_tool_name)
+
+    combined_content = content_buffer
+    content = event.get("content")
+    if isinstance(content, str) and content:
+        combined_content += content
+    if combined_content:
+        for match in TOOL_NAME_TAG_PATTERN.findall(combined_content):
+            if match:
+                tool_names.append(match.strip())
+        for match in TOOL_CALL_FUNCTION_PATTERN.findall(combined_content):
+            if match:
+                tool_names.append(match.strip())
+        for match in TOOL_RESULT_NAME_PATTERN.findall(combined_content):
+            if match:
+                tool_names.append(match.strip())
+
+    return sorted(set(tool_names))
 
 
 def _record_stats_event(stats: Dict[str, Any], event: Dict[str, Any], start_time: float) -> None:
@@ -206,17 +243,15 @@ def _record_stats_event(stats: Dict[str, Any], event: Dict[str, Any], start_time
     content = event.get("content")
     if isinstance(content, str) and content:
         has_visible_output = True
+        buffer = (stats.get("_tool_tag_buffer") or "") + content
+        stats["_tool_tag_buffer"] = buffer[-2048:]
 
-    tool_calls = event.get("tool_calls") or []
-    if tool_calls:
+    tool_names = _collect_event_tool_names(event, content_buffer=stats.get("_tool_tag_buffer") or "")
+    if tool_names:
         has_visible_output = True
-        tool_names = set(stats["tools"])
-        for tool_call in tool_calls:
-            function = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
-            name = function.get("name")
-            if name:
-                tool_names.add(name)
-        stats["tools"] = sorted(tool_names)
+        existing_tool_names = set(stats["tools"])
+        existing_tool_names.update(tool_names)
+        stats["tools"] = sorted(existing_tool_names)
 
     if event.get("type") == "error":
         has_visible_output = True

@@ -54,7 +54,7 @@ class StreamRequest(BaseChatRequest):
         deprecated=True,
         description="已过时。请改用消息中的 <enable_deep_thinking>true/false</enable_deep_thinking> 控制。",
     )
-    max_loop_count: Optional[int] = 50
+    max_loop_count: Optional[int] = None
     multi_agent: Optional[bool] = None
     agent_mode: Optional[str] = None
     more_suggest: Optional[bool] = None
