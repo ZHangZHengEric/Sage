@@ -1,8 +1,8 @@
 <template>
-  <div class="h-screen w-full bg-background flex flex-col">
+  <div class="h-screen w-full bg-background dark:bg-[rgba(5,5,6,1)] flex flex-col">
 
     <!-- Content -->
-    <div class="flex-1 overflow-hidden relative bg-muted/5">
+    <div class="flex-1 overflow-hidden relative bg-muted/5 dark:bg-[rgba(5,5,6,1)]">
       <div class="h-full overflow-y-auto p-4 sm:p-6 scroll-smooth">
         <div v-if="loading" class="flex flex-col items-center justify-center h-full">
           <Loader class="h-8 w-8 animate-spin text-primary" />
