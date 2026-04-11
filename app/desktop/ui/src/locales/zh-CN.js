@@ -1342,6 +1342,7 @@ export default {
 
   // Workbench ToolCall
   'workbench.tool.arguments': '输入参数',
+  'workbench.tool.argumentsStreaming': '参数生成中...',
   'workbench.tool.result': '输出结果',
   'workbench.tool.compressingHistory': '正在压缩历史消息...',
   'workbench.tool.compressFailed': '压缩失败',
