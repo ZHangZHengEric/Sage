@@ -2,6 +2,7 @@ import os
 import shutil
 import tempfile
 import zipfile
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -14,6 +15,113 @@ from sagents.skill.skill_manager import SkillManager, get_skill_manager
 from common.core import config
 from common.core.exceptions import SageHTTPException
 from common.models.agent import AgentConfigDao
+
+
+def _calculate_skill_hash(skill_path: str) -> str:
+    """
+    计算技能文件夹的哈希值，用于检测技能是否发生变化。
+
+    计算所有文件的哈希值（排除隐藏文件和缓存文件），
+    返回一个包含所有文件哈希的复合哈希值。
+    """
+    try:
+        if not os.path.exists(skill_path):
+            return ""
+
+        # 收集所有文件及其哈希值
+        file_hashes = {}
+        for root, dirs, files in os.walk(skill_path):
+            # 排除隐藏文件和缓存文件
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['__pycache__', 'node_modules']]
+
+            for file in sorted(files):
+                if file.startswith('.'):
+                    continue
+
+                file_path = os.path.join(root, file)
+                rel_path = os.path.relpath(file_path, skill_path)
+
+                try:
+                    with open(file_path, "rb") as f:
+                        file_hash = hashlib.md5(f.read()).hexdigest()
+                    file_hashes[rel_path] = file_hash
+                except Exception as e:
+                    logger.warning(f"计算文件哈希失败 {file_path}: {e}")
+
+        # 按文件路径排序后生成复合哈希
+        sorted_items = sorted(file_hashes.items())
+        composite = "|".join([f"{path}:{hash}" for path, hash in sorted_items])
+        return hashlib.md5(composite.encode("utf-8")).hexdigest()
+    except Exception as e:
+        logger.warning(f"计算技能哈希失败 {skill_path}: {e}")
+        return ""
+
+
+def _is_skill_need_update(source_skill_path: str, agent_skill_path: str) -> bool:
+    """
+    判断Agent工作空间的技能是否需要更新。
+
+    对比广场技能的所有文件与Agent本地技能的对应文件：
+    - 如果广场的文件在Agent本地不存在 → 需要更新
+    - 如果广场的文件内容与Agent本地不同 → 需要更新
+    - 如果Agent本地有多余的文件 → 不需要更新（忽略）
+
+    Args:
+        source_skill_path: 广场技能路径
+        agent_skill_path: Agent本地技能路径
+
+    Returns:
+        bool: 是否需要更新
+    """
+    try:
+        logger.info(f"对比技能: 广场={source_skill_path}, Agent={agent_skill_path}")
+
+        # 获取广场技能的所有文件
+        source_files = {}
+        for root, dirs, files in os.walk(source_skill_path):
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['__pycache__', 'node_modules']]
+
+            for file in sorted(files):
+                if file.startswith('.'):
+                    continue
+
+                file_path = os.path.join(root, file)
+                rel_path = os.path.relpath(file_path, source_skill_path)
+
+                try:
+                    with open(file_path, "rb") as f:
+                        source_files[rel_path] = hashlib.md5(f.read()).hexdigest()
+                except Exception as e:
+                    logger.warning(f"读取广场技能文件失败 {file_path}: {e}")
+
+        logger.info(f"广场技能文件: {list(source_files.keys())}")
+
+        # 对比Agent本地技能的对应文件
+        for rel_path, source_hash in source_files.items():
+            agent_file_path = os.path.join(agent_skill_path, rel_path)
+
+            # 如果Agent本地不存在该文件 → 需要更新
+            if not os.path.exists(agent_file_path):
+                logger.info(f"技能需要更新: Agent缺少文件 {rel_path}")
+                return True
+
+            # 如果Agent本地文件内容不同 → 需要更新
+            try:
+                with open(agent_file_path, "rb") as f:
+                    agent_hash = hashlib.md5(f.read()).hexdigest()
+                if agent_hash != source_hash:
+                    logger.info(f"技能需要更新: 文件 {rel_path} 内容不同")
+                    return True
+            except Exception as e:
+                logger.warning(f"读取Agent技能文件失败 {agent_file_path}: {e}")
+                return True
+
+        # 所有广场文件都存在且内容相同 → 不需要更新
+        logger.info(f"技能不需要更新")
+        return False
+    except Exception as e:
+        logger.warning(f"判断技能是否需要更新失败: {e}")
+        return False
 
 
 def _get_cfg() -> config.StartupConfig:
@@ -323,9 +431,19 @@ async def get_agent_available_skills(
     current_user_id: str,
     role: str = "user",
 ) -> List[Dict[str, Any]]:
-    if _is_desktop_mode():
-        return []
+    """
+    获取Agent可用的技能列表，包含是否需要更新状态。
 
+    只检测技能广场（系统/用户技能）与Agent工作空间中技能的差异。
+    如果Agent工作空间中的技能与广场不一致，则标记为需要更新。
+
+    返回的技能列表中每个技能会包含以下字段：
+    - name: 技能名称
+    - description: 技能描述
+    - source_dimension: 技能来源维度 (system, user)
+    - need_update: 是否需要更新 (bool)
+    - source_path: 源技能路径（用于更新）
+    """
     cfg = _get_cfg()
     skill_dir = cfg.skill_dir
     user_dir = cfg.user_dir
@@ -335,51 +453,214 @@ async def get_agent_available_skills(
     agent = await agent_dao.get_by_id(agent_id)
     agent_user_id = agent.user_id if agent and agent.user_id else current_user_id
 
-    skills_map: Dict[str, Dict[str, Any]] = {}
+    # 收集所有源技能（系统 + 用户）
+    source_skills: Dict[str, Dict[str, Any]] = {}
 
+    logger.info(f"技能广场路径: skill_dir={skill_dir}, user_dir={user_dir}")
+
+    # 1. 加载系统技能
     if os.path.exists(skill_dir):
         try:
             tm = SkillManager(skill_dirs=[skill_dir], isolated=True)
-            for skill in tm.list_skill_info():
-                skills_map[skill.name] = {
+            system_skills = list(tm.list_skill_info())
+            logger.info(f"系统技能数量: {len(system_skills)}")
+            for skill in system_skills:
+                source_skills[skill.name] = {
                     "name": skill.name,
                     "description": skill.description,
                     "source_dimension": "system",
+                    "path": skill.path,
+                    "hash": _calculate_skill_hash(skill.path),
                 }
         except Exception as e:
             logger.warning(f"加载系统技能失败: {e}")
 
+    # 2. 加载用户技能（优先级高于系统技能，覆盖系统技能）
     if os.path.exists(user_dir) and agent_user_id:
         user_skills_path = os.path.join(user_dir, agent_user_id, "skills")
+        logger.info(f"用户技能路径: {user_skills_path}, 存在={os.path.isdir(user_skills_path)}")
         if os.path.isdir(user_skills_path):
             try:
                 tm = SkillManager(skill_dirs=[user_skills_path], isolated=True)
-                for skill in tm.list_skill_info():
-                    skills_map[skill.name] = {
+                user_skills = list(tm.list_skill_info())
+                logger.info(f"用户技能数量: {len(user_skills)}")
+                for skill in user_skills:
+                    source_skills[skill.name] = {
                         "name": skill.name,
                         "description": skill.description,
                         "source_dimension": "user",
+                        "path": skill.path,
+                        "hash": _calculate_skill_hash(skill.path),
                     }
             except Exception as e:
                 logger.warning(f"加载用户技能失败: {e}")
+    else:
+        logger.info(f"用户技能目录不存在或参数不全: user_dir存在={os.path.exists(user_dir) if user_dir else False}, agent_user_id={agent_user_id}")
 
-    if os.path.exists(agents_dir) and agent_user_id and agent_id:
-        agent_skills_path = os.path.join(agents_dir, agent_user_id, agent_id, "skills")
-        if os.path.isdir(agent_skills_path):
-            try:
-                tm = SkillManager(skill_dirs=[agent_skills_path], isolated=True)
-                for skill in tm.list_skill_info():
-                    skills_map[skill.name] = {
-                        "name": skill.name,
-                        "description": skill.description,
-                        "source_dimension": "agent",
-                    }
-            except Exception as e:
-                logger.warning(f"加载Agent技能失败: {e}")
+    # 3. 加载Agent工作空间中的技能
+    agent_skills: Dict[str, Dict[str, Any]] = {}
+    logger.info(f"检查Agent工作空间: agents_dir={agents_dir}, agent_user_id={agent_user_id}, agent_id={agent_id}, app_mode={cfg.app_mode}")
 
-    skills_list = list(skills_map.values())
+    # 根据模式确定Agent技能路径
+    if cfg.app_mode == "desktop":
+        # Desktop模式: ~/.sage/agents/{agent_id}/skills
+        agent_skills_path = os.path.join(agents_dir, agent_id, "skills")
+    else:
+        # Server模式: agents_dir/{user_id}/{agent_id}/skills
+        if not agent_user_id:
+            logger.info(f"Server模式需要agent_user_id")
+        else:
+            agent_skills_path = os.path.join(agents_dir, agent_user_id, agent_id, "skills")
+
+    if agent_id and os.path.isdir(agent_skills_path):
+        logger.info(f"Agent技能路径: {agent_skills_path}, 存在={os.path.isdir(agent_skills_path)}")
+        try:
+            tm = SkillManager(skill_dirs=[agent_skills_path], isolated=True)
+            agent_skill_list = list(tm.list_skill_info())
+            logger.info(f"Agent工作空间技能数量: {len(agent_skill_list)}")
+            for skill in agent_skill_list:
+                agent_skills[skill.name] = {
+                    "name": skill.name,
+                    "description": skill.description,
+                    "path": skill.path,
+                    "hash": _calculate_skill_hash(skill.path),
+                }
+        except Exception as e:
+            logger.warning(f"加载Agent技能失败: {e}")
+    else:
+        logger.info(f"Agent工作空间不存在: {agent_skills_path if 'agent_skills_path' in locals() else '路径未确定'}")
+
+    # 4. 合并技能列表，检测是否需要更新
+    # 只返回广场中存在的技能，不显示孤立技能
+    skills_list: List[Dict[str, Any]] = []
+
+    logger.info(f"get_agent_available_skills: 广场技能={list(source_skills.keys())}, Agent技能={list(agent_skills.keys())}")
+
+    for skill_name, source_skill in source_skills.items():
+        skill_info = {
+            "name": skill_name,
+            "description": source_skill["description"],
+            "source_dimension": source_skill["source_dimension"],
+            "source_path": source_skill["path"],
+        }
+
+        # 检查Agent工作空间中是否存在该技能
+        if skill_name in agent_skills:
+            agent_skill = agent_skills[skill_name]
+            logger.info(f"检查技能 '{skill_name}': 广场={source_skill['path']}, Agent={agent_skill['path']}")
+            # 使用文件级对比判断是否需要更新
+            # 广场文件不存在于Agent本地，或内容不同 → 需要更新
+            # Agent本地有多余文件 → 忽略（不算需要更新）
+            need_update = _is_skill_need_update(source_skill["path"], agent_skill["path"])
+            skill_info["need_update"] = need_update
+            skill_info["agent_path"] = agent_skill["path"]
+            logger.info(f"技能 '{skill_name}' need_update={need_update}")
+        else:
+            # Agent工作空间中没有该技能，不需要显示更新状态
+            # 对话时会自动同步
+            skill_info["need_update"] = False
+            logger.info(f"技能 '{skill_name}' 不在Agent工作空间中")
+
+        skills_list.append(skill_info)
+
     skills_list.sort(key=lambda x: x["name"])
     return skills_list
+
+
+async def sync_skill_to_agent(
+    skill_name: str,
+    agent_id: str,
+    user_id: str = "",
+    role: str = "user",
+) -> Dict[str, Any]:
+    """
+    将技能同步到Agent工作空间。
+
+    从技能广场（系统或用户技能）复制技能到Agent工作空间。
+    如果Agent工作空间已存在该技能，则会覆盖更新。
+
+    Args:
+        skill_name: 技能名称
+        agent_id: Agent ID
+        user_id: 用户ID
+        role: 用户角色
+
+    Returns:
+        Dict: 包含同步结果的信息
+    """
+    cfg = _get_cfg()
+    skill_dir = cfg.skill_dir
+    user_dir = cfg.user_dir
+    agents_dir = cfg.agents_dir
+
+    # 获取Agent信息
+    agent_dao = AgentConfigDao()
+    agent = await agent_dao.get_by_id(agent_id)
+    if not agent:
+        raise SageHTTPException(detail=f"Agent '{agent_id}' 不存在")
+
+    agent_user_id = agent.user_id if agent.user_id else user_id
+
+    # 检查权限
+    if role != "admin" and agent_user_id != user_id:
+        raise SageHTTPException(detail="无权同步技能到该Agent")
+
+    # 1. 查找源技能（优先从用户技能，然后是系统技能）
+    source_skill_path = None
+    source_dimension = None
+
+    # 先查找用户技能
+    if os.path.exists(user_dir) and agent_user_id:
+        user_skill_path = os.path.join(user_dir, agent_user_id, "skills", skill_name)
+        if os.path.isdir(user_skill_path):
+            source_skill_path = user_skill_path
+            source_dimension = "user"
+
+    # 再查找系统技能
+    if source_skill_path is None and os.path.exists(skill_dir):
+        system_skill_path = os.path.join(skill_dir, skill_name)
+        if os.path.isdir(system_skill_path):
+            source_skill_path = system_skill_path
+            source_dimension = "system"
+
+    if source_skill_path is None:
+        raise SageHTTPException(detail=f"技能 '{skill_name}' 在技能广场中不存在")
+
+    # 2. 确保Agent工作空间技能目录存在
+    # 根据模式确定Agent技能路径
+    if cfg.app_mode == "desktop":
+        # Desktop模式: ~/.sage/agents/{agent_id}/skills
+        agent_skills_dir = os.path.join(agents_dir, agent_id, "skills")
+    else:
+        # Server模式: agents_dir/{user_id}/{agent_id}/skills
+        agent_skills_dir = os.path.join(agents_dir, agent_user_id, agent_id, "skills")
+    os.makedirs(agent_skills_dir, exist_ok=True)
+
+    # 3. 复制技能到Agent工作空间
+    target_skill_path = os.path.join(agent_skills_dir, skill_name)
+
+    try:
+        # 如果已存在，先删除
+        if os.path.exists(target_skill_path):
+            shutil.rmtree(target_skill_path)
+
+        # 复制技能文件夹
+        shutil.copytree(source_skill_path, target_skill_path)
+        _set_permissions_recursive(target_skill_path)
+
+        logger.info(f"技能 '{skill_name}' 已同步到Agent '{agent_id}' 工作空间")
+
+        return {
+            "skill_name": skill_name,
+            "agent_id": agent_id,
+            "source_dimension": source_dimension,
+            "source_path": source_skill_path,
+            "target_path": target_skill_path,
+            "sync_status": "synced",
+        }
+    except Exception as e:
+        logger.error(f"同步技能失败: {e}")
+        raise SageHTTPException(detail=f"同步技能失败: {str(e)}")
 
 
 async def delete_skill(

@@ -346,6 +346,9 @@
         </div>
       </DialogContent>
     </Dialog>
+
+    <!-- 确认对话框 -->
+    <AppConfirmDialog ref="confirmDialogRef" />
   </div>
 </template>
 
@@ -374,6 +377,7 @@ import { chatAPI } from '@/api/chat.js'
 import { getCurrentUser } from '@/utils/auth.js'
 import { sanitizeSessionTitle } from '@/utils/sessionTitle'
 import { isTokenUsageMessage } from '@/utils/messageLabels.js'
+import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 
 // UI Components
 import { Input } from '@/components/ui/input'
@@ -418,6 +422,9 @@ const selectedConversations = ref(new Set())
 const showShareModal = ref(false)
 const shareConversation = ref(null)
 const currentUser = ref(null)
+
+// 确认对话框引用
+const confirmDialogRef = ref(null)
 
 // 分页相关状态
 const currentPage = ref(parseInt(route.query.page) || 1)
@@ -496,8 +503,12 @@ const canDelete = (conversation) => {
 }
 
 const handleDeleteConversation = async (conversation) => {
-  if (!confirm(t('history.deleteConfirm'))) return
-  
+  const confirmed = await confirmDialogRef.value?.confirm(
+    t('history.deleteConfirm'),
+    { title: t('history.deleteConversationTitle') }
+  )
+  if (!confirmed) return
+
   try {
     await chatAPI.deleteConversation(conversation.session_id)
     toast.success(t('history.deleteSuccess'))

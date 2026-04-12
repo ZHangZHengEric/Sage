@@ -11,6 +11,7 @@
     "core:event:default",
     "core:window:default",
     "core:window:allow-start-dragging",
+    "core:window:allow-set-background-color",
     "core:path:default",
     "core:menu:default",
     "core:tray:default",

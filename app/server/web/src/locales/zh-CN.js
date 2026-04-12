@@ -655,6 +655,13 @@ export default {
   'agentEdit.applyOptimization': '应用优化',
   'agentEdit.startOptimization': '开始优化',
   'agentEdit.unknownSource': '未知来源',
+  'agentEdit.skillPendingUpdate': '待更新',
+  'agentEdit.updateSkill': '更新',
+  'agentEdit.refreshSkills': '刷新',
+  'agentEdit.agentNotSaved': '请先保存Agent',
+  'agentEdit.skillSyncSuccess': '技能同步成功',
+  'agentEdit.skillSyncFailed': '技能同步失败',
+  'agentEdit.loadSkillsFailed': '加载技能列表失败',
 
   // 工具调用
   'toolCall.completed': '已完成',

@@ -380,7 +380,11 @@ async def update_agent(
             created_at=existing_config.created_at,
         )
         await dao.save(orm_obj)
-        await _cleanup_desktop_agent_workspace_skills(agent_id, normalized_config)
+        await _cleanup_agent_workspace_skills(
+            agent_id,
+            normalized_config,
+            user_id=existing_config.user_id or user_id or ""
+        )
         logger.info(f"Agent {agent_id} 更新成功")
         return orm_obj
 
@@ -405,6 +409,14 @@ async def update_agent(
         created_at=existing_config.created_at,
     )
     await dao.save(orm_obj)
+
+    # 清理Agent工作空间中不再使用的技能
+    await _cleanup_agent_workspace_skills(
+        agent_id,
+        normalized_config,
+        user_id=existing_config.user_id or user_id or ""
+    )
+
     logger.info(f"Agent {agent_id} 更新成功")
     return orm_obj
 
@@ -726,12 +738,29 @@ def _sync_agent_skills_to_global(agent_workspace: Path) -> List[str]:
     return synced_skills
 
 
-async def _cleanup_desktop_agent_workspace_skills(
+async def _cleanup_agent_workspace_skills(
     agent_id: str,
     agent_config: Dict[str, Any],
+    user_id: str = "",
 ) -> None:
+    """
+    清理Agent工作空间中不再使用的技能
+
+    当Agent取消选择技能时，从Agent工作空间的skills文件夹中删除对应的技能
+    """
     try:
-        agent_skills_path = _get_sage_home() / "agents" / agent_id / "skills"
+        cfg = _get_cfg()
+
+        # 根据模式确定Agent工作空间路径
+        if cfg.app_mode == "desktop":
+            agent_skills_path = _get_sage_home() / "agents" / agent_id / "skills"
+        else:
+            # server模式
+            if not user_id:
+                logger.warning(f"Server模式下清理技能需要user_id")
+                return
+            agent_skills_path = Path(cfg.agents_dir) / user_id / agent_id / "skills"
+
         if not agent_skills_path.exists() or not agent_skills_path.is_dir():
             return
 
@@ -759,6 +788,10 @@ async def _cleanup_desktop_agent_workspace_skills(
             )
     except Exception as e:
         logger.bind(agent_id=agent_id).warning(f"清理agent工作空间skills失败: {e}")
+
+
+# 保留旧函数名以兼容现有代码
+_cleanup_desktop_agent_workspace_skills = _cleanup_agent_workspace_skills
 
 
 async def import_openclaw_agent(user_id: str = "") -> Dict[str, Any]:
