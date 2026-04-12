@@ -672,6 +672,13 @@ export default {
   'agentEdit.imessageNeedSender': 'iMessage 必须配置至少一个监听发送者',
   'agentEdit.needTestBeforeSave': '未通过测试连接，请先测试通过后再保存',
   'agentEdit.unknownSource': '未知来源',
+  'agentEdit.skillPendingUpdate': '待更新',
+  'agentEdit.updateSkill': '更新',
+  'agentEdit.refreshSkills': '刷新',
+  'agentEdit.agentNotSaved': '请先保存Agent',
+  'agentEdit.skillSyncSuccess': '技能同步成功',
+  'agentEdit.skillSyncFailed': '技能同步失败',
+  'agentEdit.loadSkillsFailed': '加载技能列表失败',
   'agentEdit.selectFolderTitle': '选择可访问文件夹',
   'agentEdit.enterFolderPath': '请输入文件夹路径:',
 

@@ -4,7 +4,7 @@
 
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, File, Request, UploadFile
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from pydantic import BaseModel
 
 from common.core.render import Response
@@ -101,6 +101,47 @@ async def update_skill_content(request: SkillUpdateRequest, http_request: Reques
     result = await skill_router_service.build_update_skill_content_response(
         name=request.name,
         content=request.content,
+        user_id=get_desktop_user_id(http_request),
+        role=get_desktop_user_role(http_request),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
+
+
+@skill_router.get("/agent-available")
+async def get_agent_available_skills(
+    http_request: Request,
+    agent_id: str
+):
+    """
+    获取Agent可用的技能列表（带维度来源标签和同步状态）
+
+    Args:
+        agent_id: Agent ID（必填）
+    """
+    result = await skill_router_service.build_agent_available_skills_response(
+        agent_id=agent_id,
+        user_id=get_desktop_user_id(http_request),
+        role=get_desktop_user_role(http_request),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
+
+
+@skill_router.post("/sync-to-agent")
+async def sync_skill_to_agent(
+    http_request: Request,
+    skill_name: str = Form(...),
+    agent_id: str = Form(...)
+):
+    """
+    将技能同步到Agent工作空间
+
+    Args:
+        skill_name: 技能名称（必填）
+        agent_id: Agent ID（必填）
+    """
+    result = await skill_router_service.build_sync_skill_to_agent_response(
+        skill_name=skill_name,
+        agent_id=agent_id,
         user_id=get_desktop_user_id(http_request),
         role=get_desktop_user_role(http_request),
     )

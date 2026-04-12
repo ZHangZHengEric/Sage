@@ -667,6 +667,13 @@ export default {
   'agentEdit.imessageNeedSender': 'iMessage requires at least one allowed sender',
   'agentEdit.needTestBeforeSave': 'has not passed test connection, please test before saving',
   'agentEdit.unknownSource': 'Unknown Source',
+  'agentEdit.skillPendingUpdate': 'Update Pending',
+  'agentEdit.updateSkill': 'Update',
+  'agentEdit.refreshSkills': 'Refresh',
+  'agentEdit.agentNotSaved': 'Please save the agent first',
+  'agentEdit.skillSyncSuccess': 'Skill synced successfully',
+  'agentEdit.skillSyncFailed': 'Failed to sync skill',
+  'agentEdit.loadSkillsFailed': 'Failed to load skills',
   'agentEdit.selectFolderTitle': 'Select Accessible Folder',
   'agentEdit.enterFolderPath': 'Enter folder path:',
 

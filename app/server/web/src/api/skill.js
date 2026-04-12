@@ -89,5 +89,18 @@ export const skillAPI = {
    */
   updateSkillContent: async (skillName, content) => {
     return await request.put('/api/skills/content', { name: skillName, content: content })
+  },
+
+  /**
+   * 同步技能到Agent工作空间
+   * @param {string} skillName - 技能名称
+   * @param {string} agentId - Agent ID
+   * @returns {Promise<Object>}
+   */
+  syncSkillToAgent: async (skillName, agentId) => {
+    const formData = new FormData()
+    formData.append('skill_name', skillName)
+    formData.append('agent_id', agentId)
+    return await request.post('/api/skills/sync-to-agent', formData)
   }
 }

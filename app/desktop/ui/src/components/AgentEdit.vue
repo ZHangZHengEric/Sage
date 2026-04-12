@@ -592,26 +592,58 @@
                     >
                       {{ t('agentEdit.deselectAll') }}
                     </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      class="h-8 text-xs px-2"
+                      @click="refreshSkills"
+                      :disabled="!props.agent?.id || loadingAgentSkills"
+                    >
+                      <RefreshCw class="h-3 w-3 mr-1" :class="{ 'animate-spin': loadingAgentSkills }" />
+                      {{ t('agentEdit.refreshSkills') || '刷新' }}
+                    </Button>
                   </div>
                 </div>
                 <ScrollArea class="h-[calc(350px-57px)]">
                   <div class="p-4 space-y-2">
-                    <div v-for="skill in filteredSkills" :key="skill.name || skill" 
-                      class="flex items-start gap-3 p-3 rounded-lg border border-muted/50 hover:bg-accent/5 transition-colors cursor-pointer"
-                      @click="store.toggleSkill(skill.name || skill)"
+                    <div v-for="skill in filteredSkills" :key="skill.name || skill"
+                      class="flex items-start gap-3 p-3 rounded-lg border border-muted/50 hover:bg-accent/5 transition-colors"
+                      :class="{ 'cursor-pointer': !isSkillSyncing(skill.name || skill) }"
                     >
-                      <Checkbox 
-                        :id="`skill-${skill.name || skill}`" 
-                        :checked="store.formData.availableSkills?.includes(skill.name || skill)" 
-                        @update:checked="() => store.toggleSkill(skill.name || skill)" 
+                      <Checkbox
+                        :id="`skill-${skill.name || skill}`"
+                        :checked="store.formData.availableSkills?.includes(skill.name || skill)"
+                        @update:checked="() => !isSkillSyncing(skill.name || skill) && store.toggleSkill(skill.name || skill)"
                         class="mt-0.5 pointer-events-none"
                       />
-                      <div class="flex-1 min-w-0">
-                        <label :for="`skill-${skill.name || skill}`" class="text-sm font-medium cursor-pointer pointer-events-none">
-                          {{ skill.name || skill }}
-                        </label>
+                      <div class="flex-1 min-w-0" @click="!isSkillSyncing(skill.name || skill) && store.toggleSkill(skill.name || skill)">
+                        <div class="flex items-center gap-2">
+                          <label :for="`skill-${skill.name || skill}`" class="text-sm font-medium cursor-pointer pointer-events-none">
+                            {{ skill.name || skill }}
+                          </label>
+                          <!-- 待更新标签 -->
+                          <Badge
+                            v-if="skill.need_update"
+                            variant="destructive"
+                            class="text-[10px] h-5 px-1.5"
+                          >
+                            <Loader v-if="isSkillSyncing(skill.name || skill)" class="h-3 w-3 mr-1 animate-spin" />
+                            {{ t('agentEdit.skillPendingUpdate') || '待更新' }}
+                          </Badge>
+                        </div>
                         <p v-if="skill.description" class="text-xs text-muted-foreground line-clamp-2 mt-1">{{ skill.description }}</p>
                       </div>
+                      <!-- 更新按钮 -->
+                      <Button
+                        v-if="skill.need_update && !isSkillSyncing(skill.name || skill)"
+                        variant="ghost"
+                        size="sm"
+                        class="h-7 text-xs px-2 text-primary hover:text-primary hover:bg-primary/10"
+                        @click.stop="syncSkill(skill.name || skill)"
+                      >
+                        <RefreshCw class="h-3 w-3 mr-1" />
+                        {{ t('agentEdit.updateSkill') || '更新' }}
+                      </Button>
                     </div>
                   </div>
                 </ScrollArea>
@@ -1148,13 +1180,14 @@ import { useLanguage } from '../utils/i18n.js'
 import { getMcpServerLabel } from '../utils/mcpLabels.js'
 import { agentAPI } from '../api/agent.js'
 import { toolAPI } from '../api/tool.js'
+import { toast } from 'vue-sonner'
 import { getToolLabel } from '../utils/messageLabels.js'
 import { modelProviderAPI } from '@/api/modelProvider'
 import request from '@/utils/request.js'
 import { 
   Loader, ChevronLeft, ChevronRight, ChevronDown, Save, Check, Plus, Trash2, 
   Sparkles, Bot, Wrench, Search, Server, Code, FolderOpen, User, Cpu, Database, Workflow,
-  GripVertical, X, Image as ImageIcon, AlertCircle, MessageSquare, Play
+  GripVertical, X, Image as ImageIcon, AlertCircle, MessageSquare, Play, RefreshCw
 } from 'lucide-vue-next'
 import Sortable from 'sortablejs'
 
@@ -1198,6 +1231,84 @@ const saving = ref(false)
 const contentRef = ref(null)
 const activeSection = ref('basic')
 const maxLoopCountError = ref('')
+
+// 技能列表状态
+const agentSkills = ref([])
+const loadingAgentSkills = ref(false)
+
+// 技能同步状态
+const syncingSkills = ref(new Set())  // 正在同步的技能名称集合
+
+// 检查技能是否正在同步
+const isSkillSyncing = (skillName) => {
+  return syncingSkills.value.has(skillName)
+}
+
+// 加载Agent可用技能列表
+const loadAgentAvailableSkills = async (agentId) => {
+  console.log('[SkillSync] loadAgentAvailableSkills called, agentId:', agentId)
+  if (!agentId) {
+    console.log('[SkillSync] No agentId, clearing agentSkills')
+    agentSkills.value = []
+    return
+  }
+  try {
+    loadingAgentSkills.value = true
+    console.log('[SkillSync] Calling API getAgentAvailableSkills...')
+    const { skillAPI } = await import('../api/skill.js')
+    const response = await skillAPI.getAgentAvailableSkills(agentId)
+    console.log('[SkillSync] API response:', response)
+    if (response.skills) {
+      agentSkills.value = response.skills
+      console.log('[SkillSync] Loaded skills count:', response.skills.length)
+      // 检查是否有需要更新的技能
+      const needUpdateSkills = response.skills.filter(s => s.need_update)
+      console.log('[SkillSync] Skills need update:', needUpdateSkills.map(s => s.name))
+    } else {
+      console.log('[SkillSync] No skills in response')
+      agentSkills.value = []
+    }
+  } catch (error) {
+    console.error('[SkillSync] Failed to load agent available skills:', error)
+    agentSkills.value = []
+    toast.error(t('agentEdit.loadSkillsFailed') || '加载技能列表失败')
+  } finally {
+    loadingAgentSkills.value = false
+  }
+}
+
+// 刷新技能列表
+const refreshSkills = async () => {
+  if (!props.agent?.id) return
+  await loadAgentAvailableSkills(props.agent.id)
+}
+
+// 同步技能到Agent工作空间
+const syncSkill = async (skillName) => {
+  if (!props.agent?.id) {
+    toast.error(t('agentEdit.agentNotSaved') || '请先保存Agent')
+    return
+  }
+
+  if (syncingSkills.value.has(skillName)) {
+    return
+  }
+
+  syncingSkills.value.add(skillName)
+
+  try {
+    const { skillAPI } = await import('../api/skill.js')
+    await skillAPI.syncSkillToAgent(skillName, props.agent.id)
+    // 同步成功后刷新技能列表
+    await loadAgentAvailableSkills(props.agent.id)
+    toast.success(t('agentEdit.skillSyncSuccess') || `技能 '${skillName}' 同步成功`)
+  } catch (error) {
+    console.error('Failed to sync skill:', error)
+    toast.error(t('agentEdit.skillSyncFailed') || `技能 '${skillName}' 同步失败`)
+  } finally {
+    syncingSkills.value.delete(skillName)
+  }
+}
 
 const validateMaxLoopCount = () => {
   const value = store.formData.maxLoopCount
@@ -1963,14 +2074,73 @@ const handleScroll = () => {
   }
 }
 
+// Browser tool functions (must be defined before onMounted)
+const FALLBACK_BROWSER_TOOL_NAMES = ['browser_navigate', 'browser_get_context', 'browser_find_text', 'browser_scroll', 'browser_send_keys', 'browser_click', 'browser_wait', 'browser_list_tabs', 'browser_switch_tab', 'browser_select_dropdown', 'browser_upload_file']
+
+const browserToolsOnline = ref(false)
+const browserToolNames = ref([])
+let browserToolStatusTimer = null
+
+const isBrowserTool = (toolName) => {
+  const names = browserToolNames.value.length > 0 ? browserToolNames.value : FALLBACK_BROWSER_TOOL_NAMES
+  return names.includes(toolName)
+}
+
+const syncBrowserToolSelection = () => {
+  if (!Array.isArray(store.formData.availableTools)) {
+    store.formData.availableTools = []
+  }
+
+  const browserTools = browserToolNames.value.length > 0 ? browserToolNames.value : FALLBACK_BROWSER_TOOL_NAMES
+  const currentTools = new Set(store.formData.availableTools)
+
+  if (browserToolsOnline.value) {
+    browserTools.forEach((toolName) => currentTools.add(toolName))
+  } else {
+    browserTools.forEach((toolName) => currentTools.delete(toolName))
+  }
+
+  store.formData.availableTools = Array.from(currentTools)
+}
+
+const refreshBrowserToolStatus = async () => {
+  try {
+    const response = await toolAPI.getBrowserExtensionStatus()
+    const data = response?.data || response || {}
+    browserToolsOnline.value = Boolean(data.browser_tools_online)
+    browserToolNames.value = Array.isArray(data.browser_tool_class_tools) && data.browser_tool_class_tools.length > 0
+      ? data.browser_tool_class_tools
+      : FALLBACK_BROWSER_TOOL_NAMES
+    syncBrowserToolSelection()
+  } catch (error) {
+    console.error('[AgentEdit] Failed to refresh browser tool status:', error)
+    browserToolsOnline.value = false
+    browserToolNames.value = FALLBACK_BROWSER_TOOL_NAMES
+    syncBrowserToolSelection()
+  }
+}
+
+const startBrowserToolStatusPolling = () => {
+  if (browserToolStatusTimer) return
+  browserToolStatusTimer = window.setInterval(() => {
+    refreshBrowserToolStatus()
+  }, 5000)
+}
+
+const stopBrowserToolStatusPolling = () => {
+  if (!browserToolStatusTimer) return
+  window.clearInterval(browserToolStatusTimer)
+  browserToolStatusTimer = null
+}
+
 // Initialize
 onMounted(() => {
   console.log('[AgentEdit] Component mounted, agent:', props.agent?.id)
-  
+
   // Always reset IM config on mount (component might be reused)
   console.log('[AgentEdit] Resetting IM config on mount')
   imConfig.value = getDefaultIMConfig()
-  
+
   // Only reset edit mode, preserve test status
   imEditMode.value = {
     wechat_work: false,
@@ -1978,7 +2148,7 @@ onMounted(() => {
     feishu: false,
     imessage: false
   }
-  
+
   store.initForm(props.agent)
   refreshBrowserToolStatus()
   startBrowserToolStatusPolling()
@@ -1986,12 +2156,19 @@ onMounted(() => {
     contentRef.value.addEventListener('scroll', handleScroll, { passive: true })
   }
   loadData()
-  
+
   // Explicitly load IM config on mount (watch might not trigger if id hasn't changed)
   if (props.agent?.id || store.formData.id) {
     loadIMConfig()
   }
-  
+
+  // 加载Agent可用技能列表（延迟到下一个tick，确保所有函数已定义）
+  nextTick(() => {
+    if (props.agent?.id) {
+      loadAgentAvailableSkills(props.agent.id)
+    }
+  })
+
   window.addEventListener('tools-updated', handleToolsUpdated)
 })
 
@@ -2034,7 +2211,16 @@ watch(() => props.agent, (newAgent) => {
     console.log('[AgentEdit] Reloading IM config for agent:', newAgent.id)
     loadIMConfig()
   }
-})
+
+  // 加载Agent可用技能列表（延迟到下一个tick，确保所有函数已定义）
+  nextTick(() => {
+    if (newAgent?.id) {
+      loadAgentAvailableSkills(newAgent.id)
+    } else {
+      agentSkills.value = []
+    }
+  })
+}, { immediate: true })
 
 // Data loading
 const providers = ref([])
@@ -2348,24 +2534,6 @@ onBeforeUnmount(() => {
 // Tools logic
 const searchQueries = reactive({ tools: '', skills: '' })
 const selectedGroupSource = ref('')
-const browserToolsOnline = ref(false)
-const browserToolNames = ref([])
-let browserToolStatusTimer = null
-
-const FALLBACK_BROWSER_TOOL_NAMES = [
-  'browser_get_context',
-  'browser_navigate',
-  'browser_find_text',
-  'browser_scroll',
-  'browser_send_keys',
-  'browser_wait',
-  'browser_list_tabs',
-  'browser_switch_tab',
-  'browser_select_dropdown',
-  'browser_upload_file',
-  'browser_screenshot',
-  'browser_dom_action'
-]
 
 const REQUIRED_TOOLS_FOR_SKILLS = [
   'file_read', 'execute_python_code', 'execute_javascript_code',
@@ -2380,58 +2548,6 @@ const REQUIRED_TOOLS_FOR_FIBRE = ['sys_spawn_agent', 'sys_delegate_task', 'sys_f
 
 // IM 频道必需的工具
 const REQUIRED_TOOLS_FOR_IM = ['send_message_through_im', 'send_file_through_im', 'send_image_through_im']
-
-const isBrowserTool = (toolName) => {
-  const names = browserToolNames.value.length > 0 ? browserToolNames.value : FALLBACK_BROWSER_TOOL_NAMES
-  return names.includes(toolName)
-}
-
-const syncBrowserToolSelection = () => {
-  if (!Array.isArray(store.formData.availableTools)) {
-    store.formData.availableTools = []
-  }
-
-  const browserTools = browserToolNames.value.length > 0 ? browserToolNames.value : FALLBACK_BROWSER_TOOL_NAMES
-  const currentTools = new Set(store.formData.availableTools)
-
-  if (browserToolsOnline.value) {
-    browserTools.forEach((toolName) => currentTools.add(toolName))
-  } else {
-    browserTools.forEach((toolName) => currentTools.delete(toolName))
-  }
-
-  store.formData.availableTools = Array.from(currentTools)
-}
-
-const refreshBrowserToolStatus = async () => {
-  try {
-    const response = await toolAPI.getBrowserExtensionStatus()
-    const data = response?.data || response || {}
-    browserToolsOnline.value = Boolean(data.browser_tools_online)
-    browserToolNames.value = Array.isArray(data.browser_tool_class_tools) && data.browser_tool_class_tools.length > 0
-      ? data.browser_tool_class_tools
-      : FALLBACK_BROWSER_TOOL_NAMES
-    syncBrowserToolSelection()
-  } catch (error) {
-    console.error('[AgentEdit] Failed to refresh browser tool status:', error)
-    browserToolsOnline.value = false
-    browserToolNames.value = FALLBACK_BROWSER_TOOL_NAMES
-    syncBrowserToolSelection()
-  }
-}
-
-const startBrowserToolStatusPolling = () => {
-  if (browserToolStatusTimer) return
-  browserToolStatusTimer = window.setInterval(() => {
-    refreshBrowserToolStatus()
-  }, 5000)
-}
-
-const stopBrowserToolStatusPolling = () => {
-  if (!browserToolStatusTimer) return
-  window.clearInterval(browserToolStatusTimer)
-  browserToolStatusTimer = null
-}
 
 const isRequiredTool = (toolName) => {
   if (browserToolsOnline.value && isBrowserTool(toolName)) {
@@ -2625,10 +2741,23 @@ const getGroupIcon = (source) => {
 }
 
 // Skills logic
+// 优先使用API加载的技能列表（包含need_update字段）
+const skillsList = computed(() => {
+  console.log('[SkillSync] skillsList computed, agentSkills:', agentSkills.value.length, 'props.skills:', props.skills?.length)
+  // 如果有agent id，优先使用API加载的技能列表
+  if (props.agent?.id && agentSkills.value.length > 0) {
+    console.log('[SkillSync] Using agentSkills from API')
+    return agentSkills.value
+  }
+  // 否则使用props.skills（父组件传入的）
+  console.log('[SkillSync] Using props.skills')
+  return props.skills || []
+})
+
 const filteredSkills = computed(() => {
-  if (!searchQueries.skills) return props.skills
+  if (!searchQueries.skills) return skillsList.value
   const query = searchQueries.skills.toLowerCase()
-  return props.skills.filter(skill => {
+  return skillsList.value.filter(skill => {
     const name = skill.name || skill
     const desc = skill.description || ''
     return name.toLowerCase().includes(query) || desc.toLowerCase().includes(query)
@@ -2639,7 +2768,7 @@ const filteredSkills = computed(() => {
 const selectedSkills = computed(() => {
   const selected = store.formData.availableSkills || []
   return selected.map(skillName => {
-    const skill = props.skills.find(s => (s.name || s) === skillName)
+    const skill = skillsList.value.find(s => (s.name || s) === skillName)
     return skill || skillName
   })
 })

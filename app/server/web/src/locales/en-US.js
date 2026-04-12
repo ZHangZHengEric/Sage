@@ -599,6 +599,13 @@ export default {
   'agentEdit.applyOptimization': 'Apply Optimization',
   'agentEdit.startOptimization': 'Start Optimization',
   'agentEdit.unknownSource': 'Unknown Source',
+  'agentEdit.skillPendingUpdate': 'Update Pending',
+  'agentEdit.updateSkill': 'Update',
+  'agentEdit.refreshSkills': 'Refresh',
+  'agentEdit.agentNotSaved': 'Please save the agent first',
+  'agentEdit.skillSyncSuccess': 'Skill synced successfully',
+  'agentEdit.skillSyncFailed': 'Failed to sync skill',
+  'agentEdit.loadSkillsFailed': 'Failed to load skills',
 
   // Tool Call
   'toolCall.completed': 'Completed',

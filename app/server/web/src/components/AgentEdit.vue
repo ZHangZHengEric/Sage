@@ -510,26 +510,58 @@
                     >
                       {{ t('agentEdit.deselectAll') }}
                     </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      class="h-8 text-xs px-2"
+                      @click="refreshSkills"
+                      :disabled="!props.agent?.id || loadingAgentSkills"
+                    >
+                      <RefreshCw class="h-3 w-3 mr-1" :class="{ 'animate-spin': loadingAgentSkills }" />
+                      {{ t('agentEdit.refreshSkills') || '刷新' }}
+                    </Button>
                   </div>
                 </div>
                 <ScrollArea class="h-[calc(350px-57px)]">
                   <div class="p-4 space-y-2">
                     <div v-for="skill in filteredSkills" :key="skill.name || skill" 
-                      class="flex items-start gap-3 p-3 rounded-lg border border-muted/50 hover:bg-accent/5 transition-colors cursor-pointer"
-                      @click="store.toggleSkill(skill.name || skill)"
+                      class="flex items-start gap-3 p-3 rounded-lg border border-muted/50 hover:bg-accent/5 transition-colors"
+                      :class="{ 'cursor-pointer': !isSkillSyncing(skill.name || skill) }"
                     >
                       <Checkbox 
                         :id="`skill-${skill.name || skill}`" 
                         :checked="store.formData.availableSkills?.includes(skill.name || skill)" 
-                        @update:checked="() => store.toggleSkill(skill.name || skill)" 
+                        @update:checked="() => !isSkillSyncing(skill.name || skill) && store.toggleSkill(skill.name || skill)" 
                         class="mt-0.5 pointer-events-none"
                       />
-                      <div class="flex-1 min-w-0">
-                        <label :for="`skill-${skill.name || skill}`" class="text-sm font-medium cursor-pointer pointer-events-none">
-                          {{ skill.name || skill }}
-                        </label>
+                      <div class="flex-1 min-w-0" @click="!isSkillSyncing(skill.name || skill) && store.toggleSkill(skill.name || skill)">
+                        <div class="flex items-center gap-2">
+                          <label :for="`skill-${skill.name || skill}`" class="text-sm font-medium cursor-pointer pointer-events-none">
+                            {{ skill.name || skill }}
+                          </label>
+                          <!-- 待更新标签 -->
+                          <Badge 
+                            v-if="skill.need_update" 
+                            variant="destructive" 
+                            class="text-[10px] h-5 px-1.5"
+                          >
+                            <Loader v-if="isSkillSyncing(skill.name || skill)" class="h-3 w-3 mr-1 animate-spin" />
+                            {{ t('agentEdit.skillPendingUpdate') || '待更新' }}
+                          </Badge>
+                        </div>
                         <p v-if="skill.description" class="text-xs text-muted-foreground line-clamp-2 mt-1">{{ skill.description }}</p>
                       </div>
+                      <!-- 更新按钮 -->
+                      <Button
+                        v-if="skill.need_update && !isSkillSyncing(skill.name || skill)"
+                        variant="ghost"
+                        size="sm"
+                        class="h-7 text-xs px-2 text-primary hover:text-primary hover:bg-primary/10"
+                        @click.stop="syncSkill(skill.name || skill)"
+                      >
+                        <RefreshCw class="h-3 w-3 mr-1" />
+                        {{ t('agentEdit.updateSkill') || '更新' }}
+                      </Button>
                     </div>
                   </div>
                 </ScrollArea>
@@ -793,10 +825,11 @@ import { getMcpServerLabel } from '../utils/mcpLabels.js'
 import { agentAPI } from '../api/agent.js'
 import { modelProviderAPI } from '@/api/modelProvider'
 import { skillAPI } from '../api/skill.js'
+import { toast } from 'vue-sonner'
 import { 
   Loader, ChevronLeft, ChevronRight, ChevronDown, Save, Check, Plus, Trash2, 
   Sparkles, Bot, Wrench, Search, Server, Code, User, Cpu, Database, Workflow,
-  FileText, X, Image as ImageIcon
+  FileText, X, Image as ImageIcon, RefreshCw
 } from 'lucide-vue-next'
 
 // UI Components
@@ -832,6 +865,40 @@ const contentRef = ref(null)
 const activeSection = ref('basic')
 const agentSkills = ref([])
 const loadingAgentSkills = ref(false)
+
+// 技能同步状态
+const syncingSkills = ref(new Set())  // 正在同步的技能名称集合
+
+// 检查技能是否正在同步
+const isSkillSyncing = (skillName) => {
+  return syncingSkills.value.has(skillName)
+}
+
+// 同步技能到Agent工作空间
+const syncSkill = async (skillName) => {
+  if (!props.agent?.id) {
+    toast.error(t('agentEdit.agentNotSaved') || '请先保存Agent')
+    return
+  }
+
+  if (syncingSkills.value.has(skillName)) {
+    return
+  }
+
+  syncingSkills.value.add(skillName)
+
+  try {
+    await skillAPI.syncSkillToAgent(skillName, props.agent.id)
+    // 同步成功后，刷新技能列表
+    await loadAgentAvailableSkills(props.agent.id)
+    toast.success(t('agentEdit.skillSyncSuccess') || `技能 '${skillName}' 同步成功`)
+  } catch (error) {
+    console.error('Failed to sync skill:', error)
+    toast.error(t('agentEdit.skillSyncFailed') || `技能 '${skillName}' 同步失败`)
+  } finally {
+    syncingSkills.value.delete(skillName)
+  }
+}
 
 // Navigation sections
 const sections = computed(() => {
@@ -892,22 +959,41 @@ const handleScroll = () => {
 
 // 加载Agent可用技能列表
 const loadAgentAvailableSkills = async (agentId) => {
+  console.log('[SkillSync] loadAgentAvailableSkills called, agentId:', agentId)
   if (!agentId) {
+    console.log('[SkillSync] No agentId, clearing agentSkills')
     agentSkills.value = []
     return
   }
   try {
     loadingAgentSkills.value = true
+    console.log('[SkillSync] Calling API getAgentAvailableSkills...')
     const response = await skillAPI.getAgentAvailableSkills(agentId)
+    console.log('[SkillSync] API response:', response)
     if (response.skills) {
       agentSkills.value = response.skills
+      console.log('[SkillSync] Loaded skills count:', response.skills.length)
+      // 检查是否有需要更新的技能
+      const needUpdateSkills = response.skills.filter(s => s.need_update)
+      console.log('[SkillSync] Skills need update:', needUpdateSkills.map(s => s.name))
+    } else {
+      console.log('[SkillSync] No skills in response')
+      agentSkills.value = []
     }
   } catch (error) {
-    console.error('Failed to load agent available skills:', error)
-    agentSkills.value = props.skills
+    console.error('[SkillSync] Failed to load agent available skills:', error)
+    // 出错时清空列表，不要回退到props.skills（因为props.skills没有need_update字段）
+    agentSkills.value = []
+    toast.error(t('agentEdit.loadSkillsFailed') || '加载技能列表失败')
   } finally {
     loadingAgentSkills.value = false
   }
+}
+
+// 刷新技能列表
+const refreshSkills = async () => {
+  if (!props.agent?.id) return
+  await loadAgentAvailableSkills(props.agent.id)
 }
 
 // Initialize
@@ -1247,8 +1333,18 @@ const getGroupIcon = (source) => {
 }
 
 // Skills logic
+// 优先使用API加载的技能列表（包含need_update字段）
+// 如果API加载失败，使用props.skills（但不会有need_update字段）
 const skillsList = computed(() => {
-  return agentSkills.value.length > 0 ? agentSkills.value : props.skills
+  console.log('[SkillSync] skillsList computed, agentSkills:', agentSkills.value.length, 'props.skills:', props.skills?.length)
+  // 如果有agent id，优先使用API加载的技能列表
+  if (props.agent?.id && agentSkills.value.length > 0) {
+    console.log('[SkillSync] Using agentSkills from API')
+    return agentSkills.value
+  }
+  // 否则使用props.skills（父组件传入的）
+  console.log('[SkillSync] Using props.skills')
+  return props.skills || []
 })
 
 const filteredSkills = computed(() => {

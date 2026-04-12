@@ -163,3 +163,28 @@ async def update_skill_content(request: SkillUpdateRequest, http_request: Reques
         role=get_request_role(http_request),
     )
     return await Response.succ(message=result["message"], data=result["data"])
+
+
+@skill_router.post("/sync-to-agent")
+async def sync_skill_to_agent(
+    http_request: Request,
+    skill_name: str = Form(...),
+    agent_id: str = Form(...)
+):
+    """
+    将技能同步到Agent工作空间
+
+    从技能广场（系统或用户技能）复制技能到Agent工作空间。
+    如果Agent工作空间已存在该技能，则会覆盖更新。
+
+    Args:
+        skill_name: 技能名称（必填）
+        agent_id: Agent ID（必填）
+    """
+    result = await skill_router_service.build_sync_skill_to_agent_response(
+        skill_name=skill_name,
+        agent_id=agent_id,
+        user_id=get_request_user_id(http_request),
+        role=get_request_role(http_request),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
