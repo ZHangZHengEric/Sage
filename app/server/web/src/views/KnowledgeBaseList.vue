@@ -154,27 +154,27 @@ const selectedGroup = ref('all')
 
 // Groups Configuration
 const groups = computed(() => [
-  { 
-    id: 'all', 
-    label: t('knowledgeBase.all') || 'All', 
+  {
+    id: 'all',
+    label: t('knowledgeBase.all'),
     icon: Layers,
     count: knowledgeBases.value.length
   },
-  { 
-    id: 'document', 
-    label: t('knowledgeBase.documentType') || 'Documents', 
+  {
+    id: 'document',
+    label: t('knowledgeBase.documentType'),
     icon: BookOpen,
     count: knowledgeBases.value.filter(k => k.dataSource === 'document').length
   },
-  { 
-    id: 'qa', 
-    label: t('knowledgeBase.qaType') || 'Q&A', 
+  {
+    id: 'qa',
+    label: t('knowledgeBase.qaType'),
     icon: MessageSquare,
     count: knowledgeBases.value.filter(k => k.dataSource === 'qa').length
   },
-  { 
-    id: 'code', 
-    label: t('knowledgeBase.codeType') || 'Code', 
+  {
+    id: 'code',
+    label: t('knowledgeBase.codeType'),
     icon: Code,
     count: knowledgeBases.value.filter(k => k.dataSource === 'code').length
   }
@@ -245,13 +245,13 @@ const getSimpleDescription = (kb) => {
 const getTypeName = (type) => {
   switch (type?.toLowerCase()) {
     case 'document':
-      return t('knowledgeBase.documentType') || 'Document'
+      return t('knowledgeBase.documentType')
     case 'qa':
-      return t('knowledgeBase.qaType') || 'Q&A'
+      return t('knowledgeBase.qaType')
     case 'code':
-      return t('knowledgeBase.codeType') || 'Code'
+      return t('knowledgeBase.codeType')
     default:
-      return t('knowledgeBase.unknownType') || 'Unknown'
+      return t('knowledgeBase.unknownType')
   }
 }
 

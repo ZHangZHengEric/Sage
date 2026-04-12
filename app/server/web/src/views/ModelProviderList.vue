@@ -185,7 +185,7 @@
                       class="h-8 rounded-lg px-2.5 text-[12px]"
                       @click="openProviderWebsite"
                     >
-                      Get API Key
+                      {{ t('modelProvider.getApiKey') }}
                       <ArrowRight class="ml-1 h-3.5 w-3.5" />
                     </Button>
                     <Button

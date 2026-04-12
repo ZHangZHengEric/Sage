@@ -29,7 +29,7 @@
               @click="viewMode = 'card'"
             >
               <LayoutGrid class="h-4 w-4 mr-1" />
-              {{ t('skills.viewCard') || '卡片' }}
+              {{ t('skills.viewCard') }}
             </Button>
             <Button
               variant="ghost"
@@ -39,7 +39,7 @@
               @click="viewMode = 'list'"
             >
               <List class="h-4 w-4 mr-1" />
-              {{ t('skills.viewList') || '列表' }}
+              {{ t('skills.viewList') }}
             </Button>
           </div>
           <div class="relative min-w-[220px] flex-1 xl:w-64 xl:flex-none">
@@ -108,7 +108,7 @@
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>
-                            <p>{{ t('skills.delete') || 'Delete' }}</p>
+                            <p>{{ t('skills.delete') }}</p>
                           </TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
@@ -121,9 +121,9 @@
               </CardHeader>
               <CardContent class="pt-0 pb-3">
                 <div class="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-                  <div v-if="skill.user_id === currentUser.userid" class="flex items-center gap-1 bg-primary/5 px-2 py-1 rounded text-primary/80">
+                  <div v-if="skill.user_id === currentUser.value.userid" class="flex items-center gap-1 bg-primary/5 px-2 py-1 rounded text-primary/80">
                     <User class="h-3 w-3" />
-                    <span>{{ t('skills.mine') || 'My Skill' }}</span>
+                    <span>{{ t('skills.mySkill') }}</span>
                   </div>
                 </div>
               </CardContent>
@@ -182,7 +182,7 @@
                     </div>
                     <div v-if="skill.user_id === currentUser.userid" class="mt-2 inline-flex items-center gap-1 bg-primary/5 px-2 py-1 rounded text-primary/80 text-xs">
                       <User class="h-3 w-3" />
-                      <span>{{ t('skills.mine') || 'My Skill' }}</span>
+                      <span>{{ t('skills.mySkill') }}</span>
                     </div>
                   </div>
                 </div>
@@ -195,7 +195,7 @@
           <div class="rounded-full bg-muted/50 p-6 mb-4">
             <Box class="h-10 w-10 text-muted-foreground/50" />
           </div>
-          <h3 class="text-lg font-medium text-foreground">{{ t('skills.noSkills') || 'No skills found' }}</h3>
+          <h3 class="text-lg font-medium text-foreground">{{ t('skills.noSkills') }}</h3>
           <p class="text-sm text-muted-foreground mt-1 max-w-xs mx-auto">
             {{ searchTerm ? t('skills.noSearchResults') : t('skills.noSkillsDesc') }}
           </p>

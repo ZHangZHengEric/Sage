@@ -263,7 +263,7 @@
         </div>
         <div class="p-6 pt-0 flex justify-end">
           <Button @click="isDetailsDialogOpen = false">
-            {{ t('tools.close') || 'Close' }}
+            {{ t('tools.close') }}
           </Button>
         </div>
       </DialogContent>
@@ -482,7 +482,7 @@ const handleMcpSubmit = async (payload) => {
       await toolAPI.deleteMcpServer(editingServerName.value)
       // Small delay to ensure deletion is processed if needed, though await should suffice
       await toolAPI.addMcpServer(payload)
-      toast.success(t('tools.updateSuccess') || 'Server updated successfully')
+      toast.success(t('tools.updateSuccess'))
       
       // Update selection if name changed
       if (editingServerName.value !== payload.name) {
@@ -491,7 +491,7 @@ const handleMcpSubmit = async (payload) => {
     } else {
       // Add mode
       await toolAPI.addMcpServer(payload)
-      toast.success(t('tools.addSuccess') || 'Server added successfully')
+      toast.success(t('tools.addSuccess'))
     }
     
     await loadMcpServers()
@@ -527,7 +527,7 @@ const canManage = (tool) => {
 const handleDeleteMcpTool = async (sourceName) => {
   const serverName = sourceName.startsWith('MCP Server: ') ? sourceName.substring('MCP Server: '.length) : sourceName
 
-  const confirmed = await confirmDialogRef.value.confirm(t('tools.deleteConfirm', { name: serverName }) || 'Are you sure you want to remove this MCP server?')
+  const confirmed = await confirmDialogRef.value.confirm(t('tools.deleteConfirm', { name: serverName }))
   if (!confirmed) {
     return
   }
@@ -535,7 +535,7 @@ const handleDeleteMcpTool = async (sourceName) => {
   try {
     loading.value = true
     await toolAPI.deleteMcpServer(serverName)
-    toast.success(t('tools.deleteSuccess') || 'Server removed successfully')
+    toast.success(t('tools.deleteSuccess'))
     await loadBasicTools()
     await loadMcpServers()
 
@@ -545,7 +545,7 @@ const handleDeleteMcpTool = async (sourceName) => {
     }
   } catch (error) {
     console.error('Failed to remove MCP server:', error)
-    toast.error(error.message || t('tools.deleteFailed') || 'Failed to remove server')
+    toast.error(error.message || t('tools.deleteFailed'))
   } finally {
     loading.value = false
   }
@@ -557,13 +557,13 @@ const handleRefreshMcpTool = async (sourceName) => {
   try {
     loading.value = true
     await toolAPI.refreshMcpServer(serverName)
-    toast.success(t('tools.refreshSuccess') || 'Server refreshed successfully')
+    toast.success(t('tools.refreshSuccess'))
     await loadMcpServers()
     await loadBasicTools()
     
   } catch (error) {
     console.error('Failed to refresh MCP server:', error)
-    toast.error(error.message || t('tools.refreshFailed') || 'Failed to refresh server')
+    toast.error(error.message || t('tools.refreshFailed'))
   } finally {
     loading.value = false
   }
@@ -667,7 +667,7 @@ const handleToggleMcpTool = async (sourceName) => {
     console.log('[ToolList] toggleMcpServer result:', result)
     const isDisabled = result?.disabled
     console.log('[ToolList] isDisabled:', isDisabled)
-    toast.success(isDisabled ? (t('tools.disabledSuccess') || '已禁用') : (t('tools.enabledSuccess') || '已启用'))
+    toast.success(isDisabled ? t('tools.disabledSuccess') : t('tools.enabledSuccess'))
     await loadMcpServers()
     await loadBasicTools()
     // 通知其他组件工具列表已更新
@@ -675,7 +675,7 @@ const handleToggleMcpTool = async (sourceName) => {
     window.dispatchEvent(new Event('tools-updated'))
   } catch (error) {
     console.error('Failed to toggle MCP server:', error)
-    toast.error(error.message || t('tools.toggleFailed') || '切换失败')
+    toast.error(error.message || t('tools.toggleFailed'))
   } finally {
     loading.value = false
   }
