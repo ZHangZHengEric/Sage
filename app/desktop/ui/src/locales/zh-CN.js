@@ -1186,6 +1186,7 @@ export default {
   'skills.deleteSuccess': '技能删除成功',
   'skills.deleteFailed': '删除技能失败',
   'skills.mine': '我的',
+  'skills.mySkill': '我的技能',
   'skills.noDescription': '暂无描述',
   'skills.noSkills': '暂无技能',
   'skills.noSearchResults': '未找到匹配的技能',
@@ -1207,6 +1208,8 @@ export default {
   'agent.auth.saveSuccess': '授权保存成功',
   'agent.auth.saveError': '授权保存失败',
   'common.you': '你自己',
+  'common.id': 'ID',
+  'common.sessionId': '会话 ID',
   'agent.authorize': '授权',
   
   // Cron Editor

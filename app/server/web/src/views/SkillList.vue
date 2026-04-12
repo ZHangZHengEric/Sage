@@ -18,7 +18,7 @@
             </TabsTrigger>
               <TabsTrigger value="agent" class="gap-2 rounded-full border data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:border-primary shadow-none">
               <Bot class="h-4 w-4" />
-              <span>{{ t('skills.agent') || 'Agent' }}</span>
+              <span>{{ t('skills.agent') }}</span>
               <span class="ml-1 text-xs opacity-70 bg-black/10 dark:bg-white/10 px-1.5 rounded-full">{{ counts.agent }}</span>
             </TabsTrigger>
             </TabsList>
@@ -35,7 +35,7 @@
               @click="viewMode = 'card'"
             >
               <LayoutGrid class="h-4 w-4 mr-1" />
-              {{ t('skills.viewCard') || '卡片' }}
+              {{ t('skills.viewCard') }}
             </Button>
             <Button
               variant="ghost"
@@ -45,17 +45,17 @@
               @click="viewMode = 'list'"
             >
               <List class="h-4 w-4 mr-1" />
-              {{ t('skills.viewList') || '列表' }}
+              {{ t('skills.viewList') }}
             </Button>
           </div>
           <div class="relative w-64">
             <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input v-model="searchTerm" :placeholder="t('skills.searchPlaceholder') || 'Search skills...'"
+            <Input v-model="searchTerm" :placeholder="t('skills.searchPlaceholder')"
               class="pl-9 h-10" />
           </div>
           <Button @click="openImportModal" class="gap-2">
             <Plus class="h-4 w-4" />
-            {{ t('skills.import') || 'Import' }}
+            {{ t('skills.import') }}
           </Button>
         </div>
       </div>
@@ -67,7 +67,7 @@
     <div class="flex-1 overflow-hidden p-6">
       <div v-if="loading" class="flex flex-col items-center justify-center h-full">
         <Loader class="h-8 w-8 animate-spin text-primary" />
-        <p class="text-sm text-muted-foreground mt-2">{{ t('common.loading') || 'Loading...' }}</p>
+        <p class="text-sm text-muted-foreground mt-2">{{ t('common.loading') }}</p>
       </div>
 
       <div v-else-if="displayedSkills.length === 0"
@@ -75,13 +75,13 @@
         <div class="rounded-full bg-muted/50 p-6 mb-4">
           <Box class="h-10 w-10 text-muted-foreground/50" />
         </div>
-        <h3 class="text-lg font-medium text-foreground">{{ t('skills.noSkills') || 'No skills found' }}</h3>
+        <h3 class="text-lg font-medium text-foreground">{{ t('skills.noSkills') }}</h3>
         <p class="text-sm text-muted-foreground mt-1 max-w-xs mx-auto">
           {{ searchTerm ? t('skills.noSearchResults') : t('skills.noSkillsDesc') }}
         </p>
         <Button variant="outline" class="mt-4" @click="openImportModal">
           <Plus class="mr-2 h-4 w-4" />
-          {{ t('skills.import') || 'Import Skill' }}
+          {{ t('skills.import') }}
         </Button>
       </div>
 
@@ -118,12 +118,12 @@
                           <DropdownMenuContent align="end" class="w-40">
                             <DropdownMenuItem v-if="canEdit(skill)" @click="openEditModal(skill)">
                               <Edit class="h-4 w-4 mr-2" />
-                              {{ t('skills.edit') || 'Edit' }}
+                              {{ t('skills.edit') }}
                             </DropdownMenuItem>
                             <DropdownMenuSeparator v-if="canEdit(skill) && canDelete(skill)" />
                             <DropdownMenuItem v-if="canDelete(skill)" class="text-destructive focus:text-destructive" @click="confirmDelete(skill, group.agentId)">
                               <Trash2 class="h-4 w-4 mr-2" />
-                              {{ t('skills.delete') || 'Delete' }}
+                              {{ t('skills.delete') }}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -153,7 +153,7 @@
             >
               <CardContent class="py-3 flex items-center gap-3 text-muted-foreground hover:text-primary transition-colors">
                 <Plus class="h-4 w-4" />
-                <span class="font-medium">{{ t('skills.import') || 'Import' }}</span>
+                <span class="font-medium">{{ t('skills.import') }}</span>
               </CardContent>
             </Card>
 
@@ -223,7 +223,7 @@
                 <div class="p-2 rounded-full bg-muted/50">
                   <Plus class="h-6 w-6" />
                 </div>
-                <span class="font-medium">{{ t('skills.import') || 'Import' }}</span>
+                <span class="font-medium">{{ t('skills.import') }}</span>
               </div>
             </Card>
 
@@ -248,13 +248,13 @@
                       <DropdownMenuContent align="end" class="w-40">
                         <DropdownMenuItem v-if="canEdit(skill)" @click="openEditModal(skill)">
                           <Edit class="h-4 w-4 mr-2" />
-                          {{ t('skills.edit') || 'Edit' }}
+                          {{ t('skills.edit') }}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator v-if="canEdit(skill) && canDelete(skill)" />
                         <DropdownMenuItem v-if="canDelete(skill)" class="text-destructive focus:text-destructive"
                           @click="confirmDelete(skill)">
                           <Trash2 class="h-4 w-4 mr-2" />
-                          {{ t('skills.delete') || 'Delete' }}
+                          {{ t('skills.delete') }}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -267,10 +267,10 @@
               <CardContent class="pt-0 pb-3">
                 <div class="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
                   <Badge variant="outline" class="text-[10px]">
-                    {{ selectedDimension === 'system' ? (t('skills.system') || 'System') : (t('skills.mine') || 'Mine') }}
+                    {{ selectedDimension === 'system' ? t('skills.system') : t('skills.mine') }}
                   </Badge>
                         <Badge v-if="skill.owner_user_id === currentUser.userid" variant="secondary" class="text-[10px]">
-                    {{ t('skills.mine') || 'My Skill' }}
+                    {{ t('skills.mySkill') }}
                   </Badge>
                 </div>
               </CardContent>
@@ -284,7 +284,7 @@
             >
               <CardContent class="py-3 flex items-center gap-3 text-muted-foreground hover:text-primary transition-colors">
                 <Plus class="h-4 w-4" />
-                <span class="font-medium">{{ t('skills.import') || 'Import' }}</span>
+                <span class="font-medium">{{ t('skills.import') }}</span>
               </CardContent>
             </Card>
 

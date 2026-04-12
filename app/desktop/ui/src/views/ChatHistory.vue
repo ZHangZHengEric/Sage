@@ -136,12 +136,12 @@
                           @click.stop
                         >
                           <Info class="h-3 w-3" />
-                          <span>ID</span>
+                          <span>{{ t('common.id') }}</span>
                         </button>
                       </TooltipTrigger>
                       <TooltipContent side="top" class="max-w-xs p-3">
                         <div class="space-y-2">
-                          <p class="font-medium text-sm">Session ID</p>
+                          <p class="font-medium text-sm">{{ t('common.sessionId') }}</p>
                           <p class="font-mono text-xs break-all bg-muted/50 p-2 rounded">{{ conversation.session_id }}</p>
                           <Button 
                             size="sm" 
@@ -190,12 +190,12 @@
                         @click.stop
                       >
                         <Info class="h-3 w-3" />
-                        <span>ID</span>
+                        <span>{{ t('common.id') }}</span>
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top" class="max-w-xs p-3">
                       <div class="space-y-2">
-                        <p class="font-medium text-sm">Session ID</p>
+                        <p class="font-medium text-sm">{{ t('common.sessionId') }}</p>
                         <p class="font-mono text-xs break-all bg-muted/50 p-2 rounded">{{ conversation.session_id }}</p>
                         <Button 
                           size="sm" 

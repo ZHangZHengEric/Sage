@@ -168,7 +168,7 @@
                     <span class="truncate" :title="getToolSourceLabel(tool.source)">{{ getToolSourceLabel(tool.source) }}</span>
                   </div>
                   <Badge variant="secondary" class="text-[10px] h-5 px-1.5 font-normal">
-                    {{ formatParameters(tool.parameters).length }} 参数
+                    {{ formatParameters(tool.parameters).length }} {{ t('tools.paramsCount') || '参数' }}
                   </Badge>
                 </div>
               </CardContent>

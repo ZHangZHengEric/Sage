@@ -1176,6 +1176,7 @@ export default {
   'skills.deleteSuccess': 'Deleted',
   'skills.deleteFailed': 'Delete failed',
   'skills.mine': 'Mine',
+  'skills.mySkill': 'My Skill',
   'skills.noDescription': 'No description',
   'skills.noSkills': 'No skills',
   'skills.noSearchResults': 'No results',
@@ -1197,6 +1198,8 @@ export default {
   'agent.auth.saveSuccess': 'Authorization saved',
   'agent.auth.saveError': 'Failed to save authorization',
   'common.you': 'You',
+  'common.id': 'ID',
+  'common.sessionId': 'Session ID',
   'agent.authorize': 'Authorize',
 
   // Cron Editor
