@@ -106,9 +106,6 @@ class LocalSandboxProvider(ISandboxHandle):
             if self._linux_isolation_mode != "subprocess" or self._macos_isolation_mode != "subprocess":
                 self._init_isolation()
 
-            # 确保 venv 存在（同步初始化）
-            self._ensure_venv()
-
     def _init_isolation(self):
         """初始化隔离层"""
         from .isolation import SeatbeltIsolation, BwrapIsolation
@@ -192,43 +189,48 @@ class LocalSandboxProvider(ISandboxHandle):
             except Exception as e:
                 logger.warning(f"[LocalSandboxProvider] 创建 python 符号链接失败: {e}")
 
-    def _ensure_venv(self):
+    async def _ensure_venv(self):
         """确保 venv 存在"""
         if not self._venv_dir:
             raise RuntimeError("venv 目录未初始化")
 
-        lock_path = os.path.join(os.path.dirname(self._venv_dir), ".venv.lock")
-        with file_lock(lock_path):
-            if os.path.exists(self._venv_dir):
-                return
+        def ensure_venv_sync():
+            lock_path = os.path.join(os.path.dirname(self._venv_dir), ".venv.lock")
+            with file_lock(lock_path):
+                if os.path.exists(self._venv_dir):
+                    return
 
-            import subprocess
+                import subprocess
 
-            os.makedirs(os.path.dirname(self._venv_dir), exist_ok=True)
+                os.makedirs(os.path.dirname(self._venv_dir), exist_ok=True)
 
-            # 获取正确的 Python 解释器路径（处理 PyInstaller 打包环境）
-            system_python = get_system_python_path()
-            if not system_python:
-                raise RuntimeError("无法找到系统 Python 解释器")
+                # 获取正确的 Python 解释器路径（处理 PyInstaller 打包环境）
+                system_python = get_system_python_path()
+                if not system_python:
+                    raise RuntimeError("无法找到系统 Python 解释器")
 
-            # 使用 subprocess 调用 python -m venv 创建虚拟环境
-            logger.info(f"[LocalSandboxProvider] 创建虚拟环境: {self._venv_dir} 使用 Python: {system_python}")
-            result = subprocess.run(
-                [system_python, "-m", "venv", self._venv_dir],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode != 0:
-                raise RuntimeError(f"创建虚拟环境失败: {result.stderr}")
+                # 使用 subprocess 调用 python -m venv 创建虚拟环境
+                logger.info(f"[LocalSandboxProvider] 创建虚拟环境: {self._venv_dir} 使用 Python: {system_python}")
+                result = subprocess.run(
+                    [system_python, "-m", "venv", self._venv_dir],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"创建虚拟环境失败: {result.stderr}")
 
-            # 确保 venv 中同时存在 python 和 python3 命令
-            self._ensure_python3_link()
+                # 确保 venv 中同时存在 python 和 python3 命令
+                self._ensure_python3_link()
 
-            # 确保 Python 解释器有执行权限
-            self._ensure_python_executable()
+                # 确保 Python 解释器有执行权限
+                self._ensure_python_executable()
 
-            # 尝试在 venv 内预装 uv（失败不阻塞）
-            self._ensure_uv_in_venv()
+                # 尝试在 venv 内预装 uv（失败不阻塞）
+                self._ensure_uv_in_venv()
+
+        import asyncio
+
+        await asyncio.to_thread(ensure_venv_sync)
 
     def _ensure_uv_in_venv(self):
         """在 venv 中安装 uv，便于后续按需使用。"""
@@ -293,7 +295,7 @@ class LocalSandboxProvider(ISandboxHandle):
     async def initialize(self) -> None:
         """初始化本地沙箱"""
         self._ensure_initialized()
-        self._ensure_venv()
+        await self._ensure_venv()
 
     async def cleanup(self) -> None:
         """清理本地沙箱资源"""
@@ -393,6 +395,7 @@ class LocalSandboxProvider(ISandboxHandle):
     ) -> CommandResult:
         """执行 shell 命令（使用 venv 环境）"""
         self._ensure_initialized()
+        await self._ensure_venv()
 
         # 转换工作目录
         actual_workdir = self.to_host_path(workdir) if workdir else self._sandbox_agent_workspace
@@ -587,6 +590,7 @@ class LocalSandboxProvider(ISandboxHandle):
     ) -> ExecutionResult:
         """执行 Python 代码（使用 venv）"""
         self._ensure_initialized()
+        await self._ensure_venv()
 
         # 安装依赖
         if requirements:
