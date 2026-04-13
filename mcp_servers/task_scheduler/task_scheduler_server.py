@@ -123,10 +123,6 @@ async def _request_json(
     timeout: float = 60.0,
 ) -> Any:
     url = f"{_get_api_base_url()}{path}"
-    logger.info(f"[HTTP Request] {method} {url} | timeout={timeout}s | user_id={user_id or SCHEDULER_USER_ID}")
-    if json_body:
-        logger.debug(f"[HTTP Request Body] {json.dumps(json_body, ensure_ascii=False)}")
-    
     start_time = time.time()
     try:
         timeout_config = httpx.Timeout(timeout, connect=5.0)
@@ -137,13 +133,10 @@ async def _request_json(
         ) as client:
             response = await client.request(method, url, json=json_body, params=params)
             elapsed = time.time() - start_time
-            logger.info(f"[HTTP Response] {method} {url} | status={response.status_code} | time={elapsed:.3f}s")
             response.raise_for_status()
             if not response.content:
-                logger.debug(f"[HTTP Response] {method} {url} | empty response")
                 return None
             result = response.json()
-            logger.debug(f"[HTTP Response Body] {json.dumps(result, ensure_ascii=False)[:500]}")
             return result
     except httpx.TimeoutException as e:
         elapsed = time.time() - start_time
@@ -343,8 +336,6 @@ async def _execute_task(task: Dict[str, Any]) -> None:
     task_user_id = str(task.get('user_id') or SCHEDULER_USER_ID)
 
     logger.info(f"[TASK EXECUTION] Starting task {task_id} for agent {agent_id} with task name: {name} and description: {description}")
-    logger.debug(f"[TASK EXECUTION] Task name: {name}")
-    logger.debug(f"[TASK EXECUTION] Task description: {description}")
 
     try:
         # Prepare the message content
@@ -360,21 +351,16 @@ async def _execute_task(task: Dict[str, Any]) -> None:
 
         api_base_url = _get_api_base_url()
         logger.info(f"[TASK EXECUTION] Sending task {task_id} to agent {agent_id}")
-        logger.debug(f"[TASK EXECUTION] API URL: {api_base_url}/api/chat")
-        logger.debug(f"[TASK EXECUTION] Payload: {json.dumps(payload, ensure_ascii=False)}")
 
         full_response_text = ""
 
         # Use an async client so the scheduler loop stays non-blocking.
         async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=10.0), trust_env=False) as client:
-            logger.debug(f"[TASK EXECUTION] HTTP client created, sending POST request...")
             async with client.stream("POST", f"{api_base_url}/api/chat", json=payload, headers=_internal_headers(task_user_id)) as response:
-                logger.debug(f"[TASK EXECUTION] Response received, status: {response.status_code}")
                 response.raise_for_status()
                 full_response_text = await _parse_stream_response(response)
 
         logger.info(f"[TASK EXECUTION] Task {task_id} completed successfully. Response length: {len(full_response_text)}")
-        logger.debug(f"[TASK EXECUTION] Response preview: {full_response_text[:200]}...")
 
         await _request_json(
             "POST",
@@ -409,9 +395,7 @@ async def _execute_task_claimed(task: Dict[str, Any]) -> None:
     """
     task_id = int(task['id'])
     task_user_id = str(task.get('user_id') or SCHEDULER_USER_ID)
-    
-    logger.debug(f"[TASK EXECUTION] Attempting to claim task {task_id}")
-    
+
     # Try to claim the task first (atomic operation)
     claim_result = await _request_json("POST", f"/tasks/internal/one-time/{task_id}/claim", user_id=task_user_id)
     if not claim_result or not claim_result.get("claimed"):
@@ -462,14 +446,10 @@ async def scheduler_loop_async():
         loop_count += 1
         sleep_seconds = 5
         try:
-            logger.debug(f"[SCHEDULER] === Loop iteration {loop_count} ===")
-            
             # Step 1: Check recurring tasks and spawn instances
-            logger.debug("[SCHEDULER] Checking recurring tasks...")
             spawned_count = await _check_and_spawn_recurring_tasks()
             
             # Step 2: Get all pending tasks that are due
-            logger.debug("[SCHEDULER] Getting pending tasks...")
             due_result = await _request_json("GET", "/tasks/internal/due", params={"limit": 200})
             pending_tasks = (due_result or {}).get("items") or []
             
@@ -491,14 +471,12 @@ async def scheduler_loop_async():
                     except Exception as e:
                         logger.error(f"[SCHEDULER] Failed to start task {task['id']}: {e}", exc_info=True)
             else:
-                logger.debug("[SCHEDULER] No pending tasks found")
                 if spawned_count == 0:
                     sleep_seconds = 30
                             
         except Exception as e:
             logger.error(f"[SCHEDULER] Scheduler error in loop {loop_count}: {e}", exc_info=True)
 
-        logger.debug(f"[SCHEDULER] Sleeping for {sleep_seconds} seconds...")
         await asyncio.sleep(sleep_seconds)
 
 

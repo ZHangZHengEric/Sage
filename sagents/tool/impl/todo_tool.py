@@ -17,7 +17,7 @@ class ToDoTool:
         try:
             from sagents.session_runtime import get_global_session_manager
             session_manager = get_global_session_manager()
-            session = session_manager.get(session_id)
+            session = session_manager.get_live_session(session_id) if session_manager else None
             if session:
                 return session.session_context
         except Exception as e:

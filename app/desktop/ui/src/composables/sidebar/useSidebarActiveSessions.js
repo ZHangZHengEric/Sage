@@ -25,7 +25,10 @@ export const useSidebarActiveSessions = ({
 
   const activeSessionItems = computed(() =>
     Object.entries(activeSessions.value || {})
-      .filter(([, meta]) => !!meta && !!meta.include_in_sidebar)
+      .filter(([, meta]) => {
+        if (!meta || !meta.include_in_sidebar) return false
+        return meta.status === 'running' || meta.status === 'interrupting'
+      })
       .sort(([, a], [, b]) => (b?.lastUpdate || 0) - (a?.lastUpdate || 0))
       .map(([sessionId, meta]) => {
         // 处理 user_input 可能是对象的情况
@@ -43,7 +46,7 @@ export const useSidebarActiveSessions = ({
         return {
           id: sessionId,
           sessionId,
-          sessionStatus: meta?.status === 'completed' ? 'completed' : 'running',
+          sessionStatus: meta?.status === 'interrupting' ? 'interrupting' : 'running',
           rawName: displayUserInput.split('\n')[0].trim()
             || displayTitle
             || `会话 ${sessionId.slice(-8)}`,
@@ -62,9 +65,6 @@ export const useSidebarActiveSessions = ({
   const handleActiveSessionClick = (session) => {
     activeSessionSelectionEnabled.value = true
     onSessionClick(session)
-    if (session.sessionStatus === 'completed') {
-      removeSessionFromCache(session.sessionId)
-    }
   }
 
   const disableActiveSessionSelection = () => {

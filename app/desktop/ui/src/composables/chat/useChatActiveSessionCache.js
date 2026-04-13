@@ -77,6 +77,9 @@ const updateLocalCacheFromRemote = (remoteSessions) => {
   remoteSessions.forEach(session => {
     remoteIds.add(session.session_id)
     const existing = localCache[session.session_id] || {}
+    const remoteStatus = typeof session.status === 'string' ? session.status : 'running'
+    const preserveStatus = ['interrupted', 'completed', 'error', 'interrupting'].includes(existing.status)
+    const nextStatus = preserveStatus ? existing.status : remoteStatus
     
     // 确保 query 是字符串类型
     const queryText = deriveSessionTitle(session.query)
@@ -85,7 +88,7 @@ const updateLocalCacheFromRemote = (remoteSessions) => {
       lastUpdate: session.last_activity * 1000,
       title: queryText,
       user_input: queryText,
-      status: 'running',
+      status: nextStatus,
       include_in_sidebar: true,
       last_index: existing.last_index || 0
     }
@@ -94,10 +97,10 @@ const updateLocalCacheFromRemote = (remoteSessions) => {
   // 2. Mark missing running sessions as completed
   Object.keys(localCache).forEach(sid => {
     const session = localCache[sid]
-    if (session.status === 'running' && !remoteIds.has(sid)) {
+    if ((session.status === 'running' || session.status === 'interrupting') && !remoteIds.has(sid)) {
       localCache[sid] = {
         ...session,
-        status: 'completed',
+        status: session.status === 'interrupting' ? 'interrupted' : 'completed',
         completedAt: Date.now()
       }
     }
@@ -108,6 +111,31 @@ const updateLocalCacheFromRemote = (remoteSessions) => {
   syncSessionOffsetsFromActiveSessions()
   window.dispatchEvent(new Event('active-sessions-updated'))
   syncDebugCounters()
+}
+
+const writeActiveSessionCache = (sessionId, patch = {}, persist = true) => {
+  if (!sessionId) return
+  const baseCache = {
+    ...readActiveSessionsCache(),
+    ...(activeSessions.value || {})
+  }
+  const existing = baseCache[sessionId] || activeSessions.value?.[sessionId] || {}
+  const next = {
+    ...existing,
+    ...patch,
+    session_id: sessionId,
+    lastUpdate: Date.now()
+  }
+
+  baseCache[sessionId] = next
+  activeSessions.value = baseCache
+  syncSessionOffsetsFromActiveSessions()
+  window.dispatchEvent(new Event('active-sessions-updated'))
+  syncDebugCounters()
+
+  if (persist) {
+    localStorage.setItem('activeSessions', JSON.stringify(baseCache))
+  }
 }
 
 const clearReconnectTimer = () => {
@@ -258,9 +286,31 @@ export const useChatActiveSessionCache = () => {
     localStorage.setItem('activeSessions', JSON.stringify(cache))
   }
 
-  const updateActiveSession = (sessionId, isActive, title = null, userInput = null, persist = true) => {
-    // Frontend no longer actively inserts data.
-    // Relies on SSE for sync.
+  const updateActiveSession = (sessionId, isActive, title = null, userInput = null, persist = true, overrides = {}) => {
+    if (!sessionId) return
+    const existing = activeSessions.value?.[sessionId] || readActiveSessionsCache()[sessionId] || {}
+    const nextStatus = typeof overrides.status === 'string'
+      ? overrides.status
+      : (isActive ? 'running' : 'completed')
+    const next = {
+      ...existing,
+      ...overrides,
+      title: title ?? existing.title ?? deriveSessionTitle(userInput || existing.user_input || ''),
+      user_input: userInput ?? existing.user_input ?? title ?? '',
+      status: nextStatus,
+      include_in_sidebar: overrides.include_in_sidebar ?? true
+    }
+    writeActiveSessionCache(sessionId, next, persist)
+  }
+
+  const markSessionInterrupted = (sessionId, reason = '用户请求中断', persist = true) => {
+    if (!sessionId) return
+    updateActiveSession(sessionId, false, null, null, persist, {
+      status: 'interrupted',
+      interruptedAt: Date.now(),
+      interruptReason: reason,
+      include_in_sidebar: true
+    })
   }
 
   const removeSessionFromCache = (sessionId) => {
@@ -281,6 +331,7 @@ export const useChatActiveSessionCache = () => {
     getSessionLastIndex,
     updateActiveSessionLastIndex,
     updateActiveSession,
+    markSessionInterrupted,
     removeSessionFromCache,
     deriveSessionTitle,
     startSSESync,

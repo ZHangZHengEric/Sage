@@ -30,7 +30,7 @@ class FibreTools:
 
         from sagents.session_runtime import get_global_session_manager
         session_manager = get_global_session_manager()
-        session = session_manager.get(session_id)
+        session = session_manager.get_live_session(session_id) if session_manager else None
         if not session:
             return f"Error: Session not found for session_id: {session_id}"
         session_context = session.session_context
@@ -105,7 +105,7 @@ class FibreTools:
         
         from sagents.session_runtime import get_global_session_manager
         session_manager = get_global_session_manager()
-        session = session_manager.get(session_id)
+        session = session_manager.get_live_session(session_id) if session_manager else None
         if not session:
             return f"Error: Session not found for session_id: {session_id}"
         session_context = session.session_context

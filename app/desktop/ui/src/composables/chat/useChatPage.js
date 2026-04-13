@@ -29,6 +29,7 @@ export const useChatPage = (props) => {
     getSessionLastIndex,
     updateActiveSessionLastIndex,
     updateActiveSession,
+    markSessionInterrupted,
     removeSessionFromCache,
     deriveSessionTitle,
     startSSESync,
@@ -278,14 +279,30 @@ export const useChatPage = (props) => {
     if (existingFn.name && !incomingFn.name) mergedFn.name = existingFn.name
     if (incomingFn.name) mergedFn.name = incomingFn.name
 
-    const existingArgs = typeof existingFn.arguments === 'string' ? existingFn.arguments : ''
-    const incomingArgs = typeof incomingFn.arguments === 'string' ? incomingFn.arguments : ''
-    if (incomingArgs) {
-      mergedFn.arguments = incomingArgs.startsWith(existingArgs) && incomingArgs.length >= existingArgs.length
-        ? incomingArgs
-        : `${existingArgs}${incomingArgs}`
-    } else if (typeof existingFn.arguments === 'string') {
-      mergedFn.arguments = existingFn.arguments
+    const existingArgs = existingFn.arguments
+    const incomingArgs = incomingFn.arguments
+    if (incomingArgs !== undefined && incomingArgs !== null && incomingArgs !== '') {
+      if (typeof incomingArgs === 'object') {
+        mergedFn.arguments = incomingArgs
+      } else if (typeof existingArgs === 'object' && existingArgs !== null) {
+        mergedFn.arguments = existingArgs
+      } else {
+        const existingText = typeof existingArgs === 'string' ? existingArgs : ''
+        const incomingText = typeof incomingArgs === 'string' ? incomingArgs : String(incomingArgs)
+        if (!existingText) {
+          mergedFn.arguments = incomingText
+        } else if (!incomingText) {
+          mergedFn.arguments = existingText
+        } else if (incomingText.startsWith(existingText)) {
+          mergedFn.arguments = incomingText
+        } else if (existingText.startsWith(incomingText)) {
+          mergedFn.arguments = existingText
+        } else {
+          mergedFn.arguments = `${existingText}${incomingText}`
+        }
+      }
+    } else if (existingArgs !== undefined && existingArgs !== null) {
+      mergedFn.arguments = existingArgs
     }
 
     const mergedToolCall = {
@@ -638,6 +655,7 @@ export const useChatPage = (props) => {
     getSessionLastIndex,
     updateActiveSessionLastIndex,
     updateActiveSession,
+    markSessionInterrupted,
     deriveSessionTitle,
     shouldAutoScroll,
     scrollToBottom,

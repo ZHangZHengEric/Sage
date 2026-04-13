@@ -17,6 +17,7 @@ class SessionState:
     task: Optional[asyncio.Task] = None
     created_at: float = field(default_factory=time.time)
     last_activity: float = field(default_factory=time.time)
+    status: str = "running"
     is_completed: bool = False
     lock: Optional[asyncio.Lock] = None
 
@@ -72,6 +73,7 @@ class StreamManager:
 
         session = SessionState(session_id=session_id)
         session.query = query
+        session.status = "running"
         self._sessions[session_id] = session
         await self._notify_session_list_changed()
         return session
@@ -185,6 +187,7 @@ class StreamManager:
                 await task
             except asyncio.CancelledError:
                 pass
+        session.status = "interrupted"
         await self.cleanup_session(session_id)
 
     async def subscribe(self, session_id: str, last_index: int = 0):
@@ -238,6 +241,7 @@ class StreamManager:
                 "session_id": session.session_id,
                 "created_at": session.created_at,
                 "is_completed": session.is_completed,
+                "status": session.status,
                 "last_activity": session.last_activity,
                 "query": session.query,
             }

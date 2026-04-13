@@ -104,6 +104,7 @@ export const useChatStream = ({
   getSessionLastIndex,
   updateActiveSessionLastIndex,
   updateActiveSession,
+  markSessionInterrupted,
   deriveSessionTitle,
   shouldAutoScroll,
   scrollToBottom,
@@ -480,6 +481,9 @@ export const useChatStream = ({
     }
     try {
       if (sessionId) {
+        if (typeof markSessionInterrupted === 'function') {
+          markSessionInterrupted(sessionId, '用户请求中断', true)
+        }
         await chatAPI.interruptSession(sessionId, '用户请求中断')
         window.dispatchEvent(new CustomEvent('questionnaire-session-interrupted', {
           detail: { sessionId }

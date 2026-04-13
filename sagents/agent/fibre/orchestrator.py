@@ -91,6 +91,9 @@ class FibreOrchestrator:
 
         # Register orchestrator in session context
         session_context.orchestrator = self
+        main_session = self.session_manager.get(session_context.session_id)
+        if main_session is None:
+            raise RuntimeError(f"FibreOrchestrator: main session 未找到，session_id={session_context.session_id}")
 
         # Log tool_manager status for debugging
         logger.info(f"run_loop: session_context.tool_manager={session_context.tool_manager}")
@@ -229,8 +232,7 @@ class FibreOrchestrator:
         try:
             # main_session.update_status("running") 
             # Session status is managed by SessionContext now
-            if session_context:
-                session_context.set_status(SessionStatus.RUNNING)
+            main_session.set_status(SessionStatus.RUNNING)
             
             # 2.1 Get Fibre System Prompt for main agent
             fibre_prompt = self._get_fibre_system_prompt_content(
@@ -281,32 +283,50 @@ class FibreOrchestrator:
             # Consumer loop
             try:
                 while True:
+                    if main_session.should_interrupt():
+                        logger.warning(f"FibreOrchestrator: session {session_context.session_id} marked interrupted, stopping producer")
+                        if not producer_task.done():
+                            producer_task.cancel()
+                        break
                     chunks = await self.output_queue.get()
                     if chunks is None:
                         break
+                    if main_session.should_interrupt():
+                        logger.warning(f"FibreOrchestrator: session {session_context.session_id} interrupted while draining queue")
+                        if not producer_task.done():
+                            producer_task.cancel()
+                        break
                     yield chunks
-                
+
                 # Wait for producer to finish cleanly
-                await producer_task
-                
-                # Update status on completion
-                if main_session and main_session.status != "interrupted":
-                    main_session.update_status("completed")
+                if not producer_task.done():
+                    await producer_task
+
+                # 这里不要提前把 main_session 标记为 COMPLETED。
+                # Fibre 的外层 Flow 还可能继续执行 self_check / 其他后续节点，
+                # 最终会话状态应由最外层 run_stream 统一收尾。
+                if main_session.should_interrupt():
+                    main_session.set_status(SessionStatus.INTERRUPTED, cascade=False)
                     
             except asyncio.CancelledError:
                 logger.warning(f"FibreOrchestrator: Session {session_context.session_id} interrupted")
-                if main_session:
-                    main_session.update_status("interrupted")
+                main_session.set_status(SessionStatus.INTERRUPTED, cascade=False)
+                if not producer_task.done():
+                    producer_task.cancel()
                 raise
             except Exception as e:
                 logger.error(f"FibreOrchestrator: Session {session_context.session_id} failed: {e}", exc_info=True)
-                if main_session:
-                    main_session.update_status("error")
+                main_session.set_status(SessionStatus.ERROR, cascade=False)
+                if not producer_task.done():
+                    producer_task.cancel()
                 raise
         finally:
             # Save session state
-            if main_session:
-                main_session.save_state()
+            try:
+                if main_session and hasattr(main_session, "save_state"):
+                    main_session.save_state()
+            except Exception as e:
+                logger.debug(f"FibreOrchestrator: save_state failed: {e}")
     
     def _get_fibre_system_prompt_content(
         self,
@@ -418,7 +438,7 @@ class FibreOrchestrator:
         logger.info(f"Registering agent definition: {agent_id}")
 
         # 2. Get parent session for configuration
-        parent_session = self.sub_session_manager.get(parent_session_id)
+        parent_session = self.sub_session_manager.get_live_session(parent_session_id)
 
         # 3. Try to store in backend first (if available) to get final agent_id
         backend_stored = False
@@ -565,14 +585,14 @@ class FibreOrchestrator:
         Root session has depth 0.
         """
         depth = 0
-        current_session = self.sub_session_manager.get(session_id)
+        current_session = self.sub_session_manager.get_live_session(session_id)
         
         while current_session and current_session.session_context:
             parent_session_id = current_session.session_context.system_context.get("parent_session_id")
             if not parent_session_id:
                 break
             depth += 1
-            current_session = self.sub_session_manager.get(parent_session_id)
+            current_session = self.sub_session_manager.get_live_session(parent_session_id)
             # Prevent infinite loop
             if depth > 100:
                 break
@@ -594,7 +614,7 @@ class FibreOrchestrator:
         import asyncio
         
         # Get caller's session to determine parent-child relationship
-        caller_session = self.sub_session_manager.get(caller_session_id)
+        caller_session = self.sub_session_manager.get_live_session(caller_session_id)
         if not caller_session or not caller_session.session_context:
             return f"Error: Caller session '{caller_session_id}' not found"
 
@@ -653,11 +673,11 @@ class FibreOrchestrator:
             
             # Check if session is already running (only for internal sessions)
             # Note: Backend-managed sessions are not tracked in sub_session_manager
-            existing_session = self.sub_session_manager.get(session_id)
+            existing_session = self.sub_session_manager.get_live_session(session_id)
             if existing_session and existing_session.session_context:
                 # Check if session is active via session_context status
                 from sagents.context.session_context import SessionStatus
-                if existing_session.session_context.status == SessionStatus.RUNNING:
+                if existing_session.get_status() == SessionStatus.RUNNING:
                     validation_errors.append(
                         f"Task {i}: Session '{session_id}' is currently running a task. "
                         f"Please wait for it to complete or use a different session ID."
@@ -736,7 +756,7 @@ class FibreOrchestrator:
         if parent_session_id:
             # 子任务：在父任务的 sub_tasks 下创建
             # 从 parent session 的 system_context 中获取 task_workspace
-            parent_session = self.sub_session_manager.get(parent_session_id)
+            parent_session = self.sub_session_manager.get_live_session(parent_session_id)
             parent_workspace = None
             if parent_session and parent_session.session_context:
                 parent_workspace = parent_session.session_context.system_context.get('task_workspace')
@@ -849,9 +869,7 @@ class FibreOrchestrator:
         """
         # Get parent session for workspace context
         parent_session = self.sub_session_manager.get(caller_session_id)
-        parent_session_context = None
-        if parent_session and parent_session.session_context:
-            parent_session_context = parent_session.session_context
+        parent_session_context = parent_session.session_context if parent_session else None
 
         # Create task workspace using the same logic as internal execution
         # For backend calls, we also create the directory in sandbox
@@ -939,42 +957,45 @@ class FibreOrchestrator:
                 system_context=system_context,
                 user_id=user_id,
                 max_loop_count=parent_session_context.agent_config.get("max_loop_count") if parent_session_context else None,
+                interrupt_event=parent_session.interrupt_event if parent_session else None,
             ):
-                # Filter chunks for current session and assistant role
-                # Skip non-content types like 'token_usage', 'stream_end'
+                if parent_session and parent_session.should_interrupt():
+                    logger.warning(f"[DelegateTask Backend] session {caller_session_id} interrupted, aborting child session {session_id}")
+                    await self.backend_client.interrupt_session(session_id, user_id=user_id)
+                    break
                 filtered_chunks = [
                     c for c in chunks
-                    if c.session_id == session_id 
+                    if c.session_id == session_id
                     and c.role == MessageRole.ASSISTANT.value
                     and c.type not in ('token_usage', 'stream_end')
                 ]
                 if filtered_chunks:
                     all_content_chunks.extend(filtered_chunks)
 
-                # Check for sys_finish_task in tool_calls
                 for chunk in chunks:
                     if chunk.tool_calls:
+                        logger.debug(f"[Orchestrator] Chunk has tool_calls: {chunk.tool_calls}")
                         for tc in chunk.tool_calls:
                             func_name = tc.get("function", {}).get("name") if isinstance(tc, dict) else getattr(getattr(tc, "function", None), "name", None)
+                            logger.debug(f"[Orchestrator] Checking tool call: {func_name}")
                             if func_name == "sys_finish_task":
                                 args_str = tc.get("function", {}).get("arguments", "{}") if isinstance(tc, dict) else getattr(getattr(tc, "function", None), "arguments", "{}")
                                 try:
                                     args = json.loads(args_str)
                                     task_result = f"Task finished: {args.get('status')}. Result: {args.get('result')}"
-                                    logger.info(f"[Orchestrator] sys_finish_task called with status={args.get('status')}, result={args.get('result')}")
+                                    logger.info(f"[Orchestrator] sys_finish_task called with status={args.get('status')}, result={args.get('result')[:200]}...")
                                 except Exception as e:
                                     logger.error(f"Error parsing sys_finish_task arguments: {e}")
 
-            # If sys_finish_task was called, return its result
+            if parent_session and parent_session.should_interrupt():
+                return f"SubSessionID: {session_id}\nInterrupted by parent session"
+
             if task_result:
                 return f"SubSessionID: {session_id} , if you need to continue the task, please use this SubSessionID.\n{task_result}"
 
-            # If no sys_finish_task, generate summary from accumulated content
-            # Extract content from MessageChunk objects
             content_texts = [chunk.content for chunk in all_content_chunks if chunk.content]
             history_str = "\n".join(content_texts)
 
-            # Debug logging
             logger.info(f"[DelegateTask Backend] Session: {session_id}, Agent: {agent_id}")
             logger.info(f"[DelegateTask Backend] Total chunks collected: {len(all_content_chunks)}")
             logger.info(f"[DelegateTask Backend] Chunks with content: {len(content_texts)}")
@@ -987,8 +1008,7 @@ class FibreOrchestrator:
                 logger.warning(f"[DelegateTask Backend] No content received from sub-agent {agent_id}")
                 return f"SubSessionID: {session_id}\nNo response from sub-agent"
 
-            # Get prompt from PromptManager
-            language = "zh"  # Default to Chinese, could be improved
+            language = "zh"
             if parent_session and parent_session.session_context:
                 language = parent_session.session_context.get_language() if hasattr(parent_session.session_context, 'get_language') else "zh"
 
@@ -999,12 +1019,9 @@ class FibreOrchestrator:
             )
             prompt = summary_prompt_template.format(history_str=history_str)
 
-            # Use main agent to generate summary (since we don't have sub_session)
             messages_input = [{'role': 'user', 'content': prompt}]
 
-            # Try to use the main agent's LLM for summary
             try:
-                # Get agent from main session (self.agent)
                 if self.agent and hasattr(self.agent, '_call_llm_streaming'):
                     from sagents.session_runtime import session_scope
                     with session_scope(caller_session_id):
@@ -1020,12 +1037,9 @@ class FibreOrchestrator:
                                 summary_content += chunk.choices[0].delta.content
 
                     return f"SubSessionID: {session_id}, if you need to continue the task, please use this SubSessionID.\nSub-agent finished without calling 'sys_finish_task'. AI Summary:\n{summary_content}"
-                else:
-                    # Fallback: return accumulated content directly
-                    return f"SubSessionID: {session_id}, if you need to continue the task, please use this SubSessionID.\nSub-agent response:\n{history_str}"
+                return f"SubSessionID: {session_id}, if you need to continue the task, please use this SubSessionID.\nSub-agent response:\n{history_str}"
             except Exception as e:
                 logger.warning(f"Failed to generate summary via LLM: {e}")
-                # Fallback: return accumulated content directly
                 return f"SubSessionID: {session_id}, if you need to continue the task, please use this SubSessionID.\nSub-agent response:\n{history_str}"
 
         except Exception as e:
@@ -1088,12 +1102,12 @@ class FibreOrchestrator:
 
         # Update status to running
         from sagents.context.session_context import SessionStatus
-        sub_session.session_context.set_status(SessionStatus.RUNNING)
+        sub_session.set_status(SessionStatus.RUNNING)
+
+        task_result = None
+        all_filtered_chunks = []
 
         try:
-            task_result = None
-            all_filtered_chunks = []
-
             # Use custom flow for sub-session
             from sagents.flow.schema import AgentFlow, SequenceNode, AgentNode
 
@@ -1114,10 +1128,13 @@ class FibreOrchestrator:
                 deep_thinking=sub_session.session_context.agent_config.get("deep_thinking", False),
                 agent_mode=sub_session.session_context.agent_config.get("agent_mode", "simple")
             ):
+                if sub_session.should_interrupt():
+                    logger.warning(f"[DelegateTask Internal] session {session_id} interrupted, stopping sub-session stream")
+                    break
                 filtered_chunks = [
-                        c for c in chunks
-                        if c.session_id == session_id and c.role == MessageRole.ASSISTANT.value
-                    ]
+                    c for c in chunks
+                    if c.session_id == session_id and c.role == MessageRole.ASSISTANT.value
+                ]
                 if filtered_chunks:
                     all_filtered_chunks.extend(filtered_chunks)
 
@@ -1135,10 +1152,12 @@ class FibreOrchestrator:
                                 except Exception as e:
                                     logger.error(f"Error parsing sys_finish_task arguments: {e}")
 
+            if sub_session.should_interrupt():
+                return f"SubSessionID: {session_id}\nInterrupted by parent session"
+
             # If sys_finish_task was called, return its result
             if task_result:
-                if sub_session.session_context:
-                    sub_session.session_context.set_status(SessionStatus.COMPLETED)
+                sub_session.set_status(SessionStatus.COMPLETED)
                 return f"SubSessionID: {session_id}\n{task_result}"
 
             # If sub-agent finished without calling sys_finish_task, generate summary using LLM
@@ -1178,26 +1197,35 @@ class FibreOrchestrator:
                             if chunk.choices and chunk.choices[0].delta.content:
                                 summary_content += chunk.choices[0].delta.content
 
-                    sub_session.session_context.set_status(SessionStatus.COMPLETED)
+                    sub_session.set_status(SessionStatus.COMPLETED)
                     return f"SubSessionID: {session_id}\nSub-agent finished without calling 'sys_finish_task'. AI Summary:\n{summary_content}"
 
             except Exception as e:
-                sub_session.session_context.set_status(SessionStatus.ERROR)
+                sub_session.set_status(SessionStatus.ERROR)
                 return f"Error generating summary: {e},{traceback.format_exc()}"
 
             # Fallback: return aggregated response
             # result_content = "".join([c.content for c in accumulated_chunks if c.content])
             # sub_session.update_status("completed")
             # return f"SubSessionID: {session_id}\nSub-agent finished without calling 'sys_finish_task'. Aggregated response:\n{result_content}"
-            
+
+        except asyncio.CancelledError:
+            logger.warning(f"[DelegateTask Internal] Cancelled while running child session {session_id}")
+            sub_session.request_interrupt("父会话中断", cascade=False)
+            raise
+
         except Exception as e:
             logger.error(f"Error executing sub-agent task: {e}", exc_info=True)
-            sub_session.session_context.set_status(SessionStatus.ERROR)
+            sub_session.set_status(SessionStatus.ERROR)
             return f"Error executing sub-agent task: {e},{traceback.format_exc()}"
         finally:
             # Save state via session_context
             if sub_session.session_context:
-                sub_session.session_context.save()
+                sub_session.session_context.save(
+                    session_status=sub_session.get_status(),
+                    child_session_ids=list(sub_session.child_session_ids),
+                    interrupt_reason=sub_session.interrupt_reason,
+                )
 
     async def _get_or_create_sub_session(
         self,
@@ -1217,7 +1245,7 @@ class FibreOrchestrator:
             Session instance or error message string
         """
         # Check if session already exists in global manager
-        existing_session = self.session_manager.get(session_id)
+        existing_session = self.session_manager.get_live_session(session_id)
         if existing_session:
             logger.warning(f"Session {session_id} already exists. Returning existing session.")
             return existing_session
@@ -1229,7 +1257,7 @@ class FibreOrchestrator:
         agent_def = self.sub_agents[agent_id]
         
         # Get parent session
-        parent_session = self.session_manager.get(parent_session_id)
+        parent_session = self.session_manager.get_live_session(parent_session_id)
         
         # Prepare system_context with shared workspace
         # Use parent's sandbox_agent_workspace if available
@@ -1312,6 +1340,9 @@ class FibreOrchestrator:
              parent_session_id=parent_session_id
         )
         logger.info(f"[Orchestrator] Created sub-session {session_id} and system context {sub_session.session_context.system_context}")
+
+        if parent_session:
+            parent_session.add_child_session(session_id)
         
         # Set agent_config with agent_id for Fibre (inherit from parent session)
         parent_agent_config = parent_session.session_context.agent_config if parent_session and parent_session.session_context else {}

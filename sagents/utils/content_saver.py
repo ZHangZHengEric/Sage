@@ -21,7 +21,7 @@ def save_agent_response_content(content: str, session_id: str):
         # Import inside function to avoid circular import
         from sagents.session_runtime import get_global_session_manager
         session_manager = get_global_session_manager()
-        session = session_manager.get(session_id)
+        session = session_manager.get_live_session(session_id) if session_manager else None
         if not session or not session.session_context:
             logger.error(f"SaveContent: Session {session_id} not found or has no context")
             return

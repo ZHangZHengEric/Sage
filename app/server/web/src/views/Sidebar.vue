@@ -327,6 +327,7 @@ import {
   Check,
   LoaderCircle,
   CircleCheckBig,
+  CircleX,
   Activity,
   Download
 } from 'lucide-vue-next'
@@ -589,10 +590,20 @@ const getCategoryIcon = (key) => {
   return map[key] || LayoutGrid
 }
 
-const getSessionStatusIcon = (status) => status === 'completed' ? CircleCheckBig : LoaderCircle
+const getSessionStatusIcon = (status) => {
+  if (status === 'completed') return CircleCheckBig
+  if (status === 'interrupting') return LoaderCircle
+  if (status === 'interrupted' || status === 'error') return CircleX
+  return LoaderCircle
+}
 
-const getSessionStatusClass = (status) =>
-  status === 'completed' ? 'text-emerald-500' : 'text-blue-500 animate-spin'
+const getSessionStatusClass = (status) => {
+  if (status === 'completed') return 'text-emerald-500'
+  if (status === 'interrupting') return 'text-amber-500 animate-spin'
+  if (status === 'interrupted') return 'text-zinc-400'
+  if (status === 'error') return 'text-red-500'
+  return 'text-blue-500 animate-spin'
+}
 
 const isCurrentService = (url, isInternal, query = {}) => {
   if (isInternal) {

@@ -64,6 +64,24 @@ class AgentBase(ABC):
 
         logger.debug(f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}, 最大输入长度（安全阈值）: {self.max_model_input_len}")
 
+    def _get_live_session(self, session_id: Optional[str]):
+        if not session_id:
+            return None
+        try:
+            from sagents.session_runtime import get_global_session_manager
+
+            session_manager = get_global_session_manager()
+            if not session_manager:
+                return None
+            return session_manager.get_live_session(session_id)
+        except Exception as e:
+            logger.debug(f"{self.__class__.__name__}: 获取 live session 失败, session_id={session_id}: {e}")
+            return None
+
+    def _get_live_session_context(self, session_id: Optional[str]):
+        session = self._get_live_session(session_id)
+        return session.session_context if session else None
+
     @abstractmethod
     async def run_stream(self,
                          session_context: SessionContext,
@@ -300,13 +318,11 @@ class AgentBase(ABC):
         logger.debug(f"{self.__class__.__name__}: 调用语言模型进行流式生成, session_id={session_id}")
 
         if session_id:
-            from sagents.session_runtime import get_global_session_manager
-            session_manager = get_global_session_manager()
-            session = session_manager.get(session_id)
+            session = self._get_live_session(session_id)
             if session is None:
                 logger.warning(f"{self.__class__.__name__}: session is None for session_id={session_id}")
-            elif session.session_context.status == SessionStatus.INTERRUPTED:
-                logger.info(f"{self.__class__.__name__}: 跳过模型调用，session上下文不存在或已中断，会话ID: {session_id}")
+            elif session.is_interrupted():
+                logger.info(f"{self.__class__.__name__}: 跳过模型调用，session已中断，会话ID: {session_id}")
                 return
         # 确定最终的模型配置
         final_config = {**self.model_config}
@@ -598,10 +614,7 @@ class AgentBase(ABC):
                     first_token_str = f"{first_token_latency:.3f}s" if first_token_latency else "N/A"
                     logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成，总耗时: {total_time:.3f}s, 首token延迟: {first_token_str}, 返回{len(all_chunks)}个chunk")
                     if session_id:
-                        from sagents.session_runtime import get_global_session_manager
-                        session_manager = get_global_session_manager()
-                        session = session_manager.get(session_id)
-                        session_context = session.session_context if session else None
+                        session_context = self._get_live_session_context(session_id)
 
                         llm_request = {
                             "step_name": step_name,
@@ -676,10 +689,7 @@ class AgentBase(ABC):
         system_prefix = ""
         session_context = None
         if session_id:
-            from sagents.session_runtime import get_global_session_manager
-            session_manager = get_global_session_manager()
-            session = session_manager.get(session_id)
-            session_context = session.session_context if session else None
+            session_context = self._get_live_session_context(session_id)
 
         # 1. Role Definition
         use_identity = False
@@ -1230,12 +1240,7 @@ class AgentBase(ABC):
         tool_name = tool_call['function']['name']
         if session_context is None and session_id:
             try:
-                from sagents.session_runtime import get_global_session_manager
-
-                session_manager = get_global_session_manager()
-                session = session_manager.get(session_id) if session_manager else None
-                if session:
-                    session_context = session.session_context
+                session_context = self._get_live_session_context(session_id)
             except Exception as e:
                 logger.debug(f"{self.agent_name}: 无法通过 session_id 获取 session_context: {e}")
 
@@ -1593,21 +1598,22 @@ class AgentBase(ABC):
 
     def _should_abort_due_to_session(self, session_context: SessionContext,session_id: Optional[str] = None) -> bool:
         session_id = session_context.session_id
-        from sagents.session_runtime import get_global_session_manager
-        session_manager = get_global_session_manager()
-        if session_id and session_manager.get(session_id) is None:
+        session = self._get_live_session(session_id)
+        if session_id and session is None:
             logger.info("SimpleAgent: 跳过执行，session上下文不存在或已中断")
             return True
         # 检查当前会话状态（中断、错误或已完成都应该停止）
-        if session_context.status in [SessionStatus.INTERRUPTED, SessionStatus.ERROR, SessionStatus.COMPLETED]:
-            logger.info(f"SimpleAgent: 跳过执行，session上下文状态为{session_context.status.value}")
+        if session and session.get_status() in [SessionStatus.INTERRUPTED, SessionStatus.ERROR, SessionStatus.COMPLETED]:
+            logger.info(f"SimpleAgent: 跳过执行，session状态为{session.get_status().value}")
             return True
         # 检查父会话状态（如果是子会话）
         if hasattr(session_context, 'parent_session_id') and session_context.parent_session_id:
-            parent_session = session_manager.get(session_context.parent_session_id)
-            if parent_session and parent_session.session_context and parent_session.session_context.status in [SessionStatus.INTERRUPTED, SessionStatus.ERROR, SessionStatus.COMPLETED]:
-                logger.info(f"SimpleAgent: 跳过执行，父会话 {session_context.parent_session_id} 状态为{parent_session.session_context.status.value}")
+            parent_session = self._get_live_session(session_context.parent_session_id)
+            if parent_session and parent_session.get_status() in [SessionStatus.INTERRUPTED, SessionStatus.ERROR, SessionStatus.COMPLETED]:
+                logger.info(f"SimpleAgent: 跳过执行，父会话 {session_context.parent_session_id} 状态为{parent_session.get_status().value}")
                 # 同时更新子会话状态
-                session_context.set_status(SessionStatus.INTERRUPTED, cascade=False)
+                if session is None:
+                    return True
+                session.set_status(SessionStatus.INTERRUPTED, cascade=False)
                 return True
         return False

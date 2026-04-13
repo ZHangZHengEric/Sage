@@ -187,7 +187,7 @@ def summarize_chat_completion_request(
     sanitized_kwargs = _sanitize_for_log(dict(request_kwargs))
     summary: Dict[str, Any] = {
         "model": model,
-        "messages": summarize_chat_completion_messages(messages),
+        # "messages": summarize_chat_completion_messages(messages),
         "request_kwargs": sanitized_kwargs,
     }
     if model_config is not None:

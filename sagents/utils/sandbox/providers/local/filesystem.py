@@ -1,5 +1,6 @@
 import os
 import re
+import asyncio
 from typing import Dict, Optional, List
 
 from sagents.utils.sandbox.config import VolumeMount
@@ -77,7 +78,7 @@ class SandboxFileSystem:
             
         return host_path
 
-    def write_file(self, path: str, content: str, encoding: str = 'utf-8', append: bool = False) -> str:
+    def _write_file_sync(self, path: str, content: str, encoding: str = 'utf-8', append: bool = False) -> str:
         """
         Writes content to a file in the sandbox.
         """
@@ -96,7 +97,7 @@ class SandboxFileSystem:
             
         return host_file_path
 
-    def read_file(self, path: str, encoding: str = 'utf-8') -> str:
+    def _read_file_sync(self, path: str, encoding: str = 'utf-8') -> str:
         """
         Reads content from a file in the sandbox.
         """
@@ -109,7 +110,7 @@ class SandboxFileSystem:
         with open(host_file_path, 'r', encoding=encoding) as f:
             return f.read()
 
-    def exists(self, path: str) -> bool:
+    def _exists_sync(self, path: str) -> bool:
         """
         Check if a path exists in the sandbox.
         """
@@ -121,7 +122,7 @@ class SandboxFileSystem:
         
         return os.path.exists(host_path)
 
-    def ensure_directory(self, path: str) -> str:
+    def _ensure_directory_sync(self, path: str) -> str:
         """
         Ensures that a directory exists in the sandbox.
         """
@@ -174,7 +175,7 @@ class SandboxFileSystem:
         """Return the virtual path representation."""
         return self.virtual_path
 
-    def get_file_tree_compact(
+    def _get_file_tree_compact_sync(
         self,
         include_hidden: bool = False,
         root_path: Optional[str] = None,
@@ -247,3 +248,30 @@ class SandboxFileSystem:
                 dirs[:] = []
         
         return "\n".join(result)
+
+    async def write_file(self, path: str, content: str, encoding: str = 'utf-8', append: bool = False) -> str:
+        return await asyncio.to_thread(self._write_file_sync, path, content, encoding, append)
+
+    async def read_file(self, path: str, encoding: str = 'utf-8') -> str:
+        return await asyncio.to_thread(self._read_file_sync, path, encoding)
+
+    async def exists(self, path: str) -> bool:
+        return await asyncio.to_thread(self._exists_sync, path)
+
+    async def ensure_directory(self, path: str) -> str:
+        return await asyncio.to_thread(self._ensure_directory_sync, path)
+
+    async def get_file_tree_compact(
+        self,
+        include_hidden: bool = False,
+        root_path: Optional[str] = None,
+        max_depth: Optional[int] = None,
+        max_items_per_dir: int = 5
+    ) -> str:
+        return await asyncio.to_thread(
+            self._get_file_tree_compact_sync,
+            include_hidden,
+            root_path,
+            max_depth,
+            max_items_per_dir,
+        )

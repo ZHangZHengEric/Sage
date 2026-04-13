@@ -35,7 +35,7 @@ class ImageUnderstandingTool:
         """通过 session_id 获取沙箱"""
         from sagents.session_runtime import get_global_session_manager
         session_manager = get_global_session_manager()
-        session = session_manager.get(session_id)
+        session = session_manager.get_live_session(session_id) if session_manager else None
         if not session or not session.session_context:
             raise ImageUnderstandingError(f"Invalid session_id={session_id}")
 

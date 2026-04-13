@@ -8,30 +8,71 @@ from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk
 from sagents.tool import ToolManager, ToolProxy
 from sagents.tool.impl.todo_tool import ToDoTool
+from sagents.context.session_context import SessionStatus
 
 
 class FlowExecutor:
     """流程执行器：负责解析并执行 AgentFlow 定义"""
 
-    def __init__(self, session_context: Any, tool_manager: Optional[Any], session_runtime: Any, session_id: str):
-        self.ctx = session_context
+    def __init__(self, tool_manager: Optional[Any], session_runtime: Any, session_id: str, session_manager: Any):
         self.tool_manager = tool_manager
         self.runtime = session_runtime
         self.session_id = session_id
+        self.session_manager = session_manager
 
         # 注册 ToDoTool 用于多智能体任务检查
         # self._todo_tool = ToDoTool()
         # if self.tool_manager:
         #     self.tool_manager.register_tools_from_object(self._todo_tool)
 
+    @staticmethod
+    def _is_terminal_session_state(session: Any) -> bool:
+        try:
+            return session.get_status() in {
+                SessionStatus.INTERRUPTED,
+                SessionStatus.ERROR,
+            }
+        except Exception:
+            return False
+
+    def _should_stop_now(self, session: Any, node_name: str) -> bool:
+        if session.should_interrupt():
+            logger.info(f"FlowExecutor: session {self.session_id} interrupted before executing {node_name}")
+            return True
+        if self._is_terminal_session_state(session):
+            logger.info(
+                f"FlowExecutor: session {self.session_id} already in terminal state "
+                f"{session.get_status().value}, stop executing {node_name}"
+            )
+            return True
+        return False
+
     async def execute(self, node: FlowNode) -> AsyncGenerator[List[MessageChunk], None]:
         """递归执行流程节点"""
+        if self.session_manager is None:
+            raise RuntimeError(f"FlowExecutor: session_manager 未初始化，session_id={self.session_id}")
+        session = self.session_manager.get_live_session(self.session_id)
+        if session is None:
+            raise RuntimeError(f"FlowExecutor: session 未绑定，session_id={self.session_id}")
+        ctx = session.get_context()
+        if ctx is None:
+            raise RuntimeError(f"FlowExecutor: session_context 未绑定，session_id={self.session_id}")
+        if self._should_stop_now(session, getattr(node, "node_type", "unknown")):
+            return
         logger.debug(f"FlowExecutor: Executing node type '{node.node_type}'")
 
         if isinstance(node, SequenceNode):
             for step in node.steps:
+                if self._should_stop_now(session, getattr(step, "node_type", "unknown")):
+                    return
                 async for chunk in self.execute(step):
                     yield chunk
+                if self._is_terminal_session_state(session):
+                    logger.info(
+                        f"FlowExecutor: session {self.session_id} reached terminal state "
+                        f"{session.get_status().value} after sequence step '{getattr(step, 'node_type', 'unknown')}', stopping"
+                    )
+                    return
 
         elif isinstance(node, ParallelNode):
             # 并行执行所有分支
@@ -58,27 +99,42 @@ class FlowExecutor:
                 if result:
                     yield result
 
+            if self._is_terminal_session_state(session):
+                logger.info(
+                    f"FlowExecutor: session {self.session_id} reached terminal state "
+                    f"{session.get_status().value} after parallel branches, stopping"
+                )
+                return
+
             logger.info(f"FlowExecutor: Parallel execution completed for {len(node.branches)} branches")
 
         elif isinstance(node, LoopNode):
             loop_count = 0
             # 检查初始条件
             while loop_count < node.max_loops:
+                if self._should_stop_now(session, f"loop:{node.condition}"):
+                    break
                 # 在循环开始前检查条件
-                if not ConditionRegistry.check(node.condition, self.ctx):
+                if not ConditionRegistry.check(node.condition, ctx, session=session):
                     logger.info(f"FlowExecutor: Loop condition '{node.condition}' met (False), exiting loop.")
                     break
 
                 logger.info(f"FlowExecutor: Loop iteration {loop_count + 1}/{node.max_loops}")
                 async for chunk in self.execute(node.body):
                     yield chunk
+                if self._is_terminal_session_state(session):
+                    logger.info(
+                        f"FlowExecutor: session {self.session_id} reached terminal state "
+                        f"{session.get_status().value} during loop, stopping"
+                    )
+                    break
                 loop_count += 1
 
             if loop_count >= node.max_loops:
                 logger.warning(f"FlowExecutor: Loop max iterations ({node.max_loops}) reached.")
 
         elif isinstance(node, IfNode):
-            condition_met = ConditionRegistry.check(node.condition, self.ctx)
+            condition_met = ConditionRegistry.check(node.condition, ctx, session=session)
             logger.debug(f"FlowExecutor: If condition '{node.condition}' -> {condition_met}")
 
             if condition_met:
@@ -91,9 +147,9 @@ class FlowExecutor:
         elif isinstance(node, SwitchNode):
             # 获取上下文变量值
             # 优先从 audit_status 获取，其次从 system_context 获取
-            variable_value = self.ctx.audit_status.get(node.variable)
+            variable_value = ctx.audit_status.get(node.variable)
             if variable_value is None:
-                variable_value = self.ctx.system_context.get(node.variable)
+                variable_value = ctx.system_context.get(node.variable)
 
             if variable_value is None:
                 error_msg = f"FlowExecutor: Switch variable '{node.variable}' not found in context."
@@ -114,6 +170,8 @@ class FlowExecutor:
 
         elif isinstance(node, AgentNode):
             agent_key = node.agent_key
+            if self._should_stop_now(session, f"agent '{agent_key}'"):
+                return
             logger.info(f"FlowExecutor: Running agent '{agent_key}'")
 
             # 特殊处理 multi agent 需要的工具注册 (如果 agent_key 是 multi 相关的)
@@ -132,13 +190,26 @@ class FlowExecutor:
             phase_name = node.description or agent.agent_name
 
             async for message_chunks in self.runtime._execute_agent_phase(
-                session_context=self.ctx,
+                session_id=self.session_id,
                 agent=agent,
                 phase_name=phase_name,
                 # override_config=node.override_config, # FlowNode definition does not have override_config yet
             ):
+                if self._is_terminal_session_state(session):
+                    logger.info(
+                        f"FlowExecutor: session {self.session_id} reached terminal state "
+                        f"{session.get_status().value} while running agent '{agent_key}', stopping"
+                    )
+                    return
                 # 将消息添加到上下文 (这一步在 _execute_agent_phase 外部做还是内部做？)
                 # 原逻辑是在外部做的: session_context.add_messages(message_chunks)
                 # 所以这里我们也做
-                self.ctx.add_messages(message_chunks)
+                ctx.add_messages(message_chunks)
                 yield message_chunks
+
+            if self._is_terminal_session_state(session):
+                logger.info(
+                    f"FlowExecutor: session {self.session_id} reached terminal state "
+                    f"{session.get_status().value} after agent '{agent_key}', stopping"
+                )
+                return
