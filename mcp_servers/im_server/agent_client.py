@@ -746,7 +746,7 @@ class AgentClient:
             logger.error(f"Failed to send async message to agent: {error_msg}")
             return {"success": False, "error": error_msg}
     
-    def health_check(self) -> Dict[str, Any]:
+    async def health_check(self) -> Dict[str, Any]:
         """
         Check if Agent API is accessible.
         
@@ -754,8 +754,11 @@ class AgentClient:
             Dict with 'success' and 'status' or 'error'
         """
         try:
-            with httpx.Client(timeout=10.0) as client:
-                response = client.get(f"{self.base_url}/health", headers={"X-Sage-Internal-UserId": "im_client"})
+            async with httpx.AsyncClient(timeout=10.0, trust_env=False) as client:
+                response = await client.get(
+                    f"{self.base_url}/health",
+                    headers={"X-Sage-Internal-UserId": "im_client"},
+                )
                 response.raise_for_status()
                 return {"success": True, "status": "healthy"}
         except Exception as e:

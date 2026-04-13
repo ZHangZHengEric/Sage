@@ -26,6 +26,7 @@ class LLMProviderBase(BaseModel):
     presence_penalty: Optional[float] = None
     max_model_len: Optional[int] = None
     supports_multimodal: bool = False
+    supports_structured_output: bool = False
     is_default: bool = False
 
     @field_validator("api_keys")
@@ -49,6 +50,7 @@ class LLMProviderUpdate(BaseModel):
     presence_penalty: Optional[float] = None
     max_model_len: Optional[int] = None
     supports_multimodal: Optional[bool] = None
+    supports_structured_output: Optional[bool] = None
     is_default: Optional[bool] = None
 
     @field_validator("api_keys")

@@ -91,10 +91,12 @@ class FibreBackendClient:
             return None
         if max_loop_count is None:
             raise ValueError("max_loop_count is required when creating a Fibre agent")
+        if not str(name or "").strip():
+            raise ValueError("agent name is required")
 
         payload = {
             "id": agent_id,
-            "name": name or agent_id,
+            "name": name,
             "systemPrefix": system_prompt,
             "description": description,
             "availableTools": available_tools or [],
@@ -178,7 +180,7 @@ class FibreBackendClient:
             logger.debug(f"Error getting agent: {e}")
             return None
 
-    async def list_agents(self, user_id: Optional[str] = None) -> List[str]:
+    async def list_agents(self, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         获取所有 Agent ID 列表
 
@@ -186,7 +188,7 @@ class FibreBackendClient:
             user_id: User ID for the request (required)
 
         Returns:
-            List of agent IDs
+            List of agent records from backend
         """
         if not self.available:
             return []
@@ -208,8 +210,42 @@ class FibreBackendClient:
                         data = await resp.json()
                         if data.get("success"):
                             agents_data = data.get("data", [])
-                            return [agent.get("id") for agent in agents_data if agent.get("id")]
+                            normalized_agents: List[Dict[str, Any]] = []
+                            for agent in agents_data:
+                                if isinstance(agent, dict):
+                                    agent_id = agent.get("id") or agent.get("agent_id")
+                                    agent_name = agent.get("name")
+                                    if not agent_id:
+                                        continue
+                                    if not str(agent_name or "").strip():
+                                        raise ValueError(
+                                            f"Backend returned agent without name: agent_id={agent_id}"
+                                        )
+                                    normalized_agents.append(
+                                        {
+                                            "agent_id": agent_id,
+                                            "name": agent_name,
+                                            "description": agent.get("description", ""),
+                                            "system_prompt": agent.get("systemPrefix")
+                                            or agent.get("system_prompt", ""),
+                                            "available_tools": agent.get("availableTools")
+                                            or agent.get("available_tools"),
+                                            "available_skills": agent.get("availableSkills")
+                                            or agent.get("available_skills"),
+                                            "available_workflows": agent.get("availableWorkflows")
+                                            or agent.get("available_workflows"),
+                                            "system_context": agent.get("systemContext")
+                                            or agent.get("system_context"),
+                                        }
+                                    )
+                                elif isinstance(agent, str) and agent.strip():
+                                    raise ValueError(
+                                        f"Backend returned agent id string without name: {agent.strip()}"
+                                    )
+                            return normalized_agents
                     return []
+        except ValueError:
+            raise
         except Exception as e:
             logger.debug(f"Error listing agents: {e}")
             return []

@@ -12,6 +12,11 @@ from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.messages.message_manager import MessageManager
 from sagents.utils.prompt_caching import add_cache_control_to_messages
 from sagents.llm.sage_openai import SageAsyncOpenAI
+from sagents.llm.capabilities import create_chat_completion_with_fallback
+from sagents.utils.llm_request_utils import (
+    format_api_error_details,
+    is_unsupported_input_format_error,
+)
 import traceback
 import time
 import os
@@ -162,6 +167,49 @@ class AgentBase(ABC):
                     new_content.append(item)
                     continue
 
+                # 检查是否已经是 base64 data URL
+                if url.startswith('data:image/'):
+                    # 已经是 base64 格式，需要解码、压缩后重新编码
+                    try:
+                        # 解析 data URL，格式: data:image/xxx;base64,xxxxx
+                        header, base64_str = url.split(',', 1)
+
+                        # 解码 base64 数据
+                        image_data = base64.b64decode(base64_str)
+
+                        # 打开图片并压缩
+                        buffer = io.BytesIO(image_data)
+                        with Image.open(buffer) as img:
+                            # 转换为 RGB 模式（处理 RGBA 等模式）
+                            if img.mode in ('RGBA', 'P'):
+                                img = img.convert('RGB')
+
+                            # 压缩图片至最大 512x512，保持原始比例
+                            img.thumbnail((512, 512), Image.Resampling.LANCZOS)
+
+                            # 保存到新的内存缓冲区
+                            output_buffer = io.BytesIO()
+                            img.save(output_buffer, format='JPEG', quality=85)
+                            compressed_data = output_buffer.getvalue()
+
+                        # 重新编码为 base64
+                        compressed_base64 = base64.b64encode(compressed_data).decode('utf-8')
+
+                        # 使用 JPEG MIME 类型（因为压缩后统一转为 JPEG）
+                        data_url = f"data:image/jpeg;base64,{compressed_base64}"
+
+                        new_content.append({
+                            'type': 'image_url',
+                            'image_url': {'url': data_url}
+                        })
+                        logger.debug(f"Compressed base64 image from {len(image_data)} to {len(compressed_data)} bytes")
+
+                    except Exception as e:
+                        logger.error(f"Failed to compress base64 image: {e}")
+                        # 压缩失败时保留原始数据，不进行截断
+                        new_content.append(item)
+                    continue
+
                 # 检查是否是本地文件路径
                 if url.startswith('file://'):
                     # 移除 file:// 前缀
@@ -285,6 +333,7 @@ class AgentBase(ABC):
         max_retries = 8
         retry_count = 0
         last_exception = None
+        structured_output_fallback_used = False
 
         while retry_count < max_retries:
             try:
@@ -344,6 +393,7 @@ class AgentBase(ABC):
                 logger_final_config = {k: v for k, v in final_config.items() if k != 'tools'}
                 logger.debug(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成 (尝试 {retry_count + 1}/{max_retries}) |final_config={logger_final_config}")
                 final_config = {k: v for k, v in final_config.items() if v is not None}
+                response_format = final_config.pop("response_format", None)
 
                 # 根据 enable_thinking 参数或 deep_thinking 配置决定是否启用思考模式
                 # 优先使用传入的 enable_thinking 参数
@@ -389,13 +439,16 @@ class AgentBase(ABC):
                     extra_body["thinking"] = {'type': "enabled" if final_enable_thinking else "disabled"}
                     logger.debug(f"{self.__class__.__name__} | {step_name}: 思考模式={final_enable_thinking}")
                 
-                stream = await self.model.chat.completions.create(
+                stream = await create_chat_completion_with_fallback(
+                    self.model,
                     model=model_name,
                     messages=cast(List[Any], serializable_messages),
+                    model_config=final_config,
+                    response_format=response_format,
                     stream=True,
                     stream_options={"include_usage": True},
                     extra_body=extra_body,
-                    **final_config
+                    **final_config,
                 )
                 async for chunk in stream:
                     # print(chunk)
@@ -413,6 +466,20 @@ class AgentBase(ABC):
                 break
 
             except (RateLimitError, APIError, APIConnectionError, httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ReadError) as e:
+                if (
+                    response_format is not None
+                    and not structured_output_fallback_used
+                    and is_unsupported_input_format_error(e)
+                ):
+                    structured_output_fallback_used = True
+                    response_format = None
+                    retry_count += 1
+                    last_exception = e
+                    logger.warning(
+                        f"{self.__class__.__name__}: structured output not supported in this runtime shape, retrying without response_format: {e}"
+                    )
+                    await asyncio.sleep(0)
+                    continue
                 retry_count += 1
                 last_exception = e
                 error_message = str(e).lower()
@@ -445,7 +512,12 @@ class AgentBase(ABC):
                     raise
                 else:
                     # 非可重试错误或已达到最大重试次数
-                    logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}")
+                    if isinstance(e, APIError):
+                        logger.error(
+                            f"{self.__class__.__name__}: LLM流式调用失败: {format_api_error_details(e)}\n{traceback.format_exc()}"
+                        )
+                    else:
+                        logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}")
                     all_chunks.append(
                         chat_completion_chunk.ChatCompletionChunk(
                             id="",
@@ -491,7 +563,12 @@ class AgentBase(ABC):
                     continue  # 继续重试循环
                 else:
                     # 非网络错误或已达到最大重试次数
-                    logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}")
+                    if isinstance(e, APIError):
+                        logger.error(
+                            f"{self.__class__.__name__}: LLM流式调用失败: {format_api_error_details(e)}\n{traceback.format_exc()}"
+                        )
+                    else:
+                        logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}")
                     all_chunks.append(
                         chat_completion_chunk.ChatCompletionChunk(
                             id="",
@@ -1136,7 +1213,8 @@ class AgentBase(ABC):
                             tool_call: Dict[str, Any],
                             tool_manager: Optional[ToolManager],
                             messages_input: List[Any],
-                            session_id: str) -> AsyncGenerator[List[MessageChunk], None]:
+                            session_id: str,
+                            session_context: Optional[SessionContext] = None) -> AsyncGenerator[List[MessageChunk], None]:
         """
         执行工具
 
@@ -1150,6 +1228,16 @@ class AgentBase(ABC):
             List[MessageChunk]: 消息块列表
         """
         tool_name = tool_call['function']['name']
+        if session_context is None and session_id:
+            try:
+                from sagents.session_runtime import get_global_session_manager
+
+                session_manager = get_global_session_manager()
+                session = session_manager.get(session_id) if session_manager else None
+                if session:
+                    session_context = session.session_context
+            except Exception as e:
+                logger.debug(f"{self.agent_name}: 无法通过 session_id 获取 session_context: {e}")
 
         try:
             # 解析并执行工具调用

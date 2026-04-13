@@ -6,6 +6,8 @@ from sagents.utils.prompt_manager import PromptManager
 
 
 def serialize_agent(agent: Agent) -> Dict[str, Any]:
+    if not str(agent.name or "").strip():
+        raise ValueError(f"Agent '{agent.agent_id}' is missing a display name")
     agent_resp = convert_config_to_agent(
         agent.agent_id,
         agent.config,

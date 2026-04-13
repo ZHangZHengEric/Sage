@@ -168,10 +168,10 @@ class FileDownloader:
     async def _get_client(self) -> httpx.AsyncClient:
         """获取或创建 HTTP 客户端"""
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=self.timeout)
+            self._client = httpx.AsyncClient(timeout=self.timeout, trust_env=False)
         return self._client
     
-    def download_sync(
+    async def _download_async(
         self, 
         url: str, 
         aes_key: Optional[str] = None,
@@ -180,10 +180,7 @@ class FileDownloader:
         chat_id: Optional[str] = None,
         user_id: Optional[str] = None
     ) -> FileInfo:
-        """同步下载文件（不依赖事件循环）
-        
-        使用同步 HTTP 客户端下载文件，完全避免事件循环依赖问题。
-        即使 WebSocket 连接断开，下载仍能正常完成。
+        """异步下载文件
         
         Args:
             url: 文件下载地址
@@ -196,19 +193,16 @@ class FileDownloader:
         Returns:
             FileInfo: 文件信息
         """
-        import httpx
-        
         try:
-            logger.info(f"[FileDownloader] 同步下载: {url[:50]}...")
-            
-            # 使用同步 HTTP 客户端
-            with httpx.Client(timeout=30) as client:
-                response = client.get(url)
-                response.raise_for_status()
-                
-                # 获取原始数据
-                raw_data = response.content
-                logger.info(f"[FileDownloader] 下载完成: {len(raw_data)} bytes")
+            logger.info(f"[FileDownloader] 异步下载: {url[:50]}...")
+
+            client = await self._get_client()
+            response = await client.get(url)
+            response.raise_for_status()
+
+            # 获取原始数据
+            raw_data = response.content
+            logger.info(f"[FileDownloader] 下载完成: {len(raw_data)} bytes")
             
             # 解密 (如果需要) - 解密是 CPU 操作，不需要事件循环
             if aes_key:
@@ -221,8 +215,16 @@ class FileDownloader:
             file_type = filename or "file"
             extension = self._detect_extension(response, url, data, file_type)
             
-            # 同步保存文件
-            local_path = self._save_file_sync(data, file_type, extension, provider, chat_id, user_id)
+            # 保存文件放到线程里，避免阻塞事件循环
+            local_path = await asyncio.to_thread(
+                self._save_file_sync,
+                data,
+                file_type,
+                extension,
+                provider,
+                chat_id,
+                user_id,
+            )
             
             # 构建完整文件名
             full_filename = f"{file_type}.{extension}"
@@ -245,6 +247,24 @@ class FileDownloader:
         except Exception as e:
             logger.error(f"[FileDownloader] 下载失败: {e}")
             raise
+
+    def download_sync(
+        self, 
+        url: str, 
+        aes_key: Optional[str] = None,
+        filename: Optional[str] = None,
+        provider: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        user_id: Optional[str] = None
+    ) -> FileInfo:
+        """同步下载文件兼容入口。"""
+        try:
+            return asyncio.run(
+                self._download_async(url, aes_key, filename, provider, chat_id, user_id)
+            )
+        finally:
+            if self._client is not None and not self._client.is_closed:
+                asyncio.run(self._client.aclose())
     
     async def download(
         self, 
@@ -255,21 +275,12 @@ class FileDownloader:
         chat_id: Optional[str] = None,
         user_id: Optional[str] = None
     ) -> FileInfo:
-        """异步下载文件（包装器）
-        
-        内部使用同步下载，但包装为 async 函数以兼容现有接口。
-        在单独的线程中执行下载，不阻塞事件循环。
-        
+        """异步下载文件（主入口）。
+
         Returns:
             FileInfo: 文件信息
         """
-        # 在后台线程中执行同步下载
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,  # 使用默认线程池
-            self.download_sync,
-            url, aes_key, filename, provider, chat_id, user_id
-        )
+        return await self._download_async(url, aes_key, filename, provider, chat_id, user_id)
     
     def _detect_extension(
         self, 

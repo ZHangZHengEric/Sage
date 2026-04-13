@@ -115,6 +115,21 @@ def _get_cfg() -> config.StartupConfig:
     return cfg
 
 
+def _require_agent_name(agent_name: str, *, agent_id: str = "") -> str:
+    normalized = str(agent_name or "").strip()
+    if not normalized:
+        if agent_id:
+            raise SageHTTPException(
+                detail=f"Agent '{agent_id}' 缺少名称",
+                error_detail=f"agent '{agent_id}' missing name",
+            )
+        raise SageHTTPException(
+            detail="Agent 名称不能为空",
+            error_detail="agent name is required",
+        )
+    return normalized
+
+
 def _create_model_client(client_params: Dict[str, Any], *, randomize_keys: bool = False) -> Any:
     """
     创建模型客户端
@@ -265,6 +280,7 @@ async def create_agent(
     cfg = _get_cfg()
     dao = AgentConfigDao()
     normalized_config = dict(agent_config)
+    agent_name = _require_agent_name(agent_name)
 
     if cfg.app_mode == "desktop":
         agent_id = normalized_config.pop("id", None) or generate_agent_id()
@@ -361,6 +377,7 @@ async def update_agent(
         )
 
     normalized_config = dict(agent_config)
+    agent_name = _require_agent_name(agent_name, agent_id=agent_id)
 
     if cfg.app_mode == "desktop":
         if user_id and existing_config.user_id and existing_config.user_id != user_id:
@@ -976,6 +993,8 @@ async def generate_agent_abilities(
             "api_key": api_key_str,
             "base_url": provider.base_url,
             "model": provider.model,
+            "supports_multimodal": provider.supports_multimodal,
+            "supports_structured_output": provider.supports_structured_output,
         }
     else:
         llm_config = {

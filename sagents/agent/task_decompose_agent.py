@@ -1,14 +1,12 @@
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
-from typing import Any, Dict, List, Optional, AsyncGenerator
+from typing import Any, Dict, List, AsyncGenerator
 from sagents.utils.logger import logger
-from sagents.tool.tool_manager import ToolManager
 from sagents.context.messages.message import MessageChunk, MessageRole,MessageType
 from sagents.context.session_context import SessionContext
 from sagents.utils.prompt_manager import PromptManager
-import json
 import uuid
-import re
+import os
 from sagents.tool.tool_schema import convert_spec_to_openai_format
 
 
@@ -55,16 +53,8 @@ class TaskDecomposeAgent(AgentBase):
             if todo_tool:
                 tools_json.append(convert_spec_to_openai_format(todo_tool, lang=session_context.get_language()))
             else:
-                # 如果 tool_manager 中没有，尝试手动加载（虽然不太可能，但为了健壮性）
-                try:
-                    from sagents.tool.impl.todo_tool import ToDoTool
-                    temp_tool = ToDoTool()
-                    # 这里我们只是临时用一下 schema，不注册
-                    # 但是 convert_spec_to_openai_format 需要 tool_func
-                    # 我们暂时跳过，假设 tool_manager 会有
-                    logger.warning("TaskDecomposeAgent: todo_write tool not found in tool_manager")
-                except ImportError:
-                    pass
+                # 如果 tool_manager 中没有，记录警告日志
+                logger.warning("TaskDecomposeAgent: todo_write tool not found in tool_manager")
 
         available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
         available_tools_str = ", ".join(available_tools_name) if available_tools_name else "无可用工具"
@@ -90,7 +80,9 @@ class TaskDecomposeAgent(AgentBase):
             model_config_override['tool_choice'] = 'required' # 强制使用工具
 
         message_id = str(uuid.uuid4())
-        
+        tool_calls_messages_id = str(uuid.uuid4())
+        content_response_message_id = str(uuid.uuid4())
+
         # 类似 SimpleAgent 的流式处理和工具调用逻辑
         tool_calls: Dict[str, Any] = {}
         last_tool_call_id = None
@@ -111,7 +103,29 @@ class TaskDecomposeAgent(AgentBase):
                 for tool_call in delta.tool_calls:
                     if tool_call.id:
                         last_tool_call_id = tool_call.id
-            
+
+                # 根据环境变量控制是否流式返回工具调用消息
+                # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
+                emit_on_complete = os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
+                if not emit_on_complete:
+                    # 流式返回工具调用消息
+                    output_messages = [MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        tool_calls=delta.tool_calls,
+                        message_id=tool_calls_messages_id,
+                        message_type=MessageType.TOOL_CALL.value
+                    )]
+                    yield output_messages
+                else:
+                    # yield 一个空的消息块以避免生成器卡住
+                    output_messages = [MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        content="",
+                        message_id=content_response_message_id,
+                        message_type=MessageType.EMPTY.value
+                    )]
+                    yield output_messages
+
             # 处理内容（如果 LLM 输出思考过程或解释）
             if delta.content:
                  yield [MessageChunk(
@@ -123,44 +137,30 @@ class TaskDecomposeAgent(AgentBase):
 
         # 执行工具调用
         if tool_calls:
-            # 发送工具调用消息
-            for tool_call in tool_calls.values():
-                 yield self._create_tool_call_message(tool_call)
+            # 构造消息输入上下文
+            messages_input = [
+                {'role': 'user', 'content': prompt}
+            ]
 
-            for tool_call_id, tool_call_info in tool_calls.items():
-                function_name = tool_call_info['function']['name']
-                arguments = tool_call_info['function']['arguments']
-                
-                # 构造消息输入上下文（虽然这里可能不需要完整的上下文，但为了接口一致性）
-                messages_input = [
-                    {'role': 'user', 'content': prompt} 
-                ] # 简化版，或者使用 llm_request_message
-
-                async for message_chunk_list in self._execute_tool(
-                    tool_call=tool_call_info,
-                    tool_manager=tool_manager,
-                    messages_input=messages_input,
-                    session_id=session_id
-                ):
-                    # 如果是 todo_write 的结果，我们希望它作为 TASK_DECOMPOSITION 类型返回
-                    # 但 _execute_tool 返回的是 TOOL_RESPONSE 类型
-                    # 我们可以转换一下，或者让它保持 TOOL_RESPONSE
-                    
-                    # 之前的逻辑是：
-                    # content=f"\n\n任务清单已生成：\n{result}",
-                    # message_type=MessageType.TASK_DECOMPOSITION.value
-                    
-                    # 这里为了保持行为一致，我们可以手动包装一下，或者信任 _execute_tool 的输出
-                    # _execute_tool 输出的是 list[MessageChunk]
-                    
-                    for chunk in message_chunk_list:
-                        if chunk.role == MessageRole.TOOL.value:
-                            # 我们可以发送一个额外的消息来说明任务已生成
-                            yield [MessageChunk(
-                                role=MessageRole.ASSISTANT.value,
-                                content=f"\n\n任务清单已生成：\n{chunk.content}",
-                                message_id=str(uuid.uuid4()),
-                                message_type=MessageType.TASK_DECOMPOSITION.value
-                            )]
-                        else:
-                            yield [chunk]
+            # 根据环境变量控制 emit_tool_call_message
+            # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
+            emit_on_complete = os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
+            async for messages, _ in self._handle_tool_calls(
+                tool_calls=tool_calls,
+                tool_manager=tool_manager,
+                messages_input=messages_input,
+                session_id=session_id or "",
+                emit_tool_call_message=emit_on_complete
+            ):
+                # 处理工具结果，转换为 TASK_DECOMPOSITION 类型
+                for chunk in messages:
+                    if chunk.role == MessageRole.TOOL.value:
+                        # 发送任务清单已生成的消息
+                        yield [MessageChunk(
+                            role=MessageRole.ASSISTANT.value,
+                            content=f"\n\n任务清单已生成：\n{chunk.content}",
+                            message_id=str(uuid.uuid4()),
+                            message_type=MessageType.TASK_DECOMPOSITION.value
+                        )]
+                    else:
+                        yield [chunk]

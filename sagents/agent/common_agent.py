@@ -1,7 +1,7 @@
-import traceback
 from typing import Any, Dict, List, Optional, AsyncGenerator
 import json
 import uuid
+import os
 
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
@@ -94,14 +94,27 @@ class CommonAgent(AgentBase):
                 for tool_call in chunk.choices[0].delta.tool_calls:
                     if tool_call.id is not None and len(tool_call.id) > 0:
                         last_tool_call_id = tool_call.id
-                # 流式返回工具调用消息，让前端先展示工具名并进入 loading。
-                output_messages = [MessageChunk(
-                    role=MessageRole.ASSISTANT.value,
-                    tool_calls=chunk.choices[0].delta.tool_calls,
-                    message_id=tool_calls_messages_id,
-                    message_type=MessageType.TOOL_CALL.value
-                )]
-                yield output_messages
+                # 根据环境变量控制是否流式返回工具调用消息
+                # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
+                emit_on_complete = os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
+                if not emit_on_complete:
+                    # 流式返回工具调用消息，让前端先展示工具名并进入 loading。
+                    output_messages = [MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        tool_calls=chunk.choices[0].delta.tool_calls,
+                        message_id=tool_calls_messages_id,
+                        message_type=MessageType.TOOL_CALL.value
+                    )]
+                    yield output_messages
+                else:
+                    # yield 一个空的消息块以避免生成器卡住
+                    output_messages = [MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        content="",
+                        message_id=content_response_message_id,
+                        message_type=MessageType.EMPTY.value
+                    )]
+                    yield output_messages
 
             elif chunk.choices[0].delta.content:
                 if len(tool_calls) > 0:
@@ -128,12 +141,15 @@ class CommonAgent(AgentBase):
                     yield output_messages
         # 处理工具调用
         if len(tool_calls) > 0:
+            # 根据环境变量控制 emit_tool_call_message
+            # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
+            emit_on_complete = os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
             async for msg in self._handle_tool_calls(
                 tool_calls=tool_calls,
                 tool_manager=tool_manager,
                 messages_input=messages_input,
                 session_id=session_id,
-                emit_tool_call_message=False
+                emit_tool_call_message=emit_on_complete
             ):
                 yield msg
         else:

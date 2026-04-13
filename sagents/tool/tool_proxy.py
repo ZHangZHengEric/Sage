@@ -131,7 +131,13 @@ class ToolProxy:
         except ValueError:
             return None
     
-    async def run_tool_async(self, tool_name: str, session_id: str, **kwargs) -> Any:
+    async def run_tool_async(
+        self,
+        tool_name: str,
+        session_id: str,
+        user_id=None,
+        **kwargs
+    ) -> Any:
         """
         异步执行工具（仅限可用工具）
         
@@ -145,7 +151,12 @@ class ToolProxy:
         for tm in self.tool_managers:
             if tm.get_tool(tool_name):
                 # 只传递 session_id，不传递 session_context
-                return await tm.run_tool_async(tool_name, session_id=session_id, **kwargs)
+                return await tm.run_tool_async(
+                    tool_name,
+                    session_id=session_id,
+                    user_id=user_id,
+                    **kwargs,
+                )
 
         raise ValueError(f"Tool {tool_name} not found")
 

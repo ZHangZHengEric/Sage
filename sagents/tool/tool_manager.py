@@ -221,6 +221,23 @@ def _innermost_exception_message(exc: BaseException) -> str:
     return msg if msg else repr(inner)
 
 
+def _resolve_session_context(session_id: str) -> Optional[SessionContext]:
+    if not session_id:
+        return None
+    try:
+        from sagents.session_runtime import get_global_session_manager
+
+        manager = get_global_session_manager()
+        if not manager:
+            return None
+        session = manager.get(session_id)
+        if session:
+            return session.session_context
+    except Exception as e:
+        logger.debug(f"Failed to resolve session_context for session_id={session_id}: {e}")
+    return None
+
+
 def _raise_innermost_exception(exc: BaseException) -> None:
     inner = _innermost_exception(exc)
     if isinstance(inner, Exception):
@@ -837,12 +854,15 @@ class ToolManager:
         self,
         tool_name: str,
         session_id: str = "",
+        user_id: Optional[str] = None,
         **kwargs,
     ) -> Any:
         """Execute a tool by name with provided arguments (async version)"""
         execution_start = time.time()
-        logger.debug(f"Executing tool: {tool_name} (session: {session_id})")
-        logger.debug(f"Tool arguments: {kwargs}")
+        logger.info(f"[Tool Execution] START | tool={tool_name} | session={session_id or 'NO_SESSION'}")
+        logger.info(f"[Tool Execution] Arguments: {json.dumps(kwargs, ensure_ascii=False, default=str)[:500]}")
+        session_context = _resolve_session_context(session_id)
+        resolved_user_id = user_id or getattr(session_context, "user_id", None)
         
         # Step 1: Tool Lookup
         tool = self.get_tool(tool_name)
@@ -871,6 +891,22 @@ class ToolManager:
             elif isinstance(tool, SageMcpToolSpec):
                 # Ensure session_id is not in kwargs
                 kwargs.pop("session_id", None)
+                if resolved_user_id and "user_id" not in kwargs:
+                    import inspect
+                    func_to_inspect = tool.func
+                    has_user_id_param = False
+                    try:
+                        sig = inspect.signature(func_to_inspect)
+                        has_user_id_param = "user_id" in sig.parameters
+                    except (ValueError, TypeError):
+                        pass
+                    if not has_user_id_param and hasattr(tool, 'parameters') and tool.parameters:
+                        has_user_id_param = 'user_id' in tool.parameters
+                    if not has_user_id_param and hasattr(tool, 'required') and tool.required:
+                        has_user_id_param = 'user_id' in tool.required
+                    if has_user_id_param:
+                        kwargs["user_id"] = resolved_user_id
+                        logger.debug(f"[Tool Execution] Injected user_id for {tool.name}")
                 final_result = await self._execute_standard_tool_async(tool, session_id=session_id, **kwargs)
             elif isinstance(tool, ToolSpec):
                 # 检查必填参数
@@ -915,6 +951,20 @@ class ToolManager:
                         kwargs["session_id"] = session_id
                         logger.debug(f"[Tool] Injected session_id for {tool.name}")
 
+                    if resolved_user_id and "user_id" not in kwargs:
+                        has_user_id_param = False
+                        try:
+                            has_user_id_param = "user_id" in sig.parameters
+                        except Exception:
+                            has_user_id_param = False
+                        if not has_user_id_param and hasattr(tool, 'parameters') and tool.parameters:
+                            has_user_id_param = 'user_id' in tool.parameters
+                        if not has_user_id_param and hasattr(tool, 'required') and tool.required:
+                            has_user_id_param = 'user_id' in tool.required
+                        if has_user_id_param:
+                            kwargs["user_id"] = resolved_user_id
+                            logger.debug(f"[Tool] Injected user_id for {tool.name}")
+
                     # Execute tool directly (tools use sandbox internally if needed)
                     result = await self._execute_standard_tool_async(tool, **kwargs)
                     # _execute_standard_tool_async 已经返回 JSON 字符串，直接使用
@@ -932,8 +982,8 @@ class ToolManager:
 
             # Step 4: Validate Result (for non-streaming tools)
             execution_time = time.time() - execution_start
-            logger.debug(
-                f"Tool '{tool_name}' completed successfully in {execution_time:.2f}s"
+            logger.info(
+                f"[Tool Execution] SUCCESS | tool={tool_name} | time={execution_time:.3f}s | result_length={len(str(final_result))}"
             )
 
             # Validate JSON format
@@ -1101,7 +1151,7 @@ class ToolManager:
 
     async def _execute_standard_tool_async(self, tool: ToolSpec, session_id: str = "", **kwargs) -> str:
         """Execute standard tool and format result (async version)"""
-        logger.debug(f"Executing standard tool: {tool.name}")
+        logger.info(f"[_execute_standard_tool_async] START | tool={tool.name} | session={session_id or 'NO_SESSION'}")
         execute_start = time.perf_counter()
 
         try:
@@ -1137,6 +1187,9 @@ class ToolManager:
                 logger.debug(f"[_execute_standard_tool_async] Injected session_id for tool: {tool.name}")
 
             # Execute the tool function
+            logger.info(f"[_execute_standard_tool_async] Executing | tool={tool.name} | is_async={asyncio.iscoroutinefunction(tool.func)}")
+            func_start = time.perf_counter()
+            
             if hasattr(tool.func, "__self__"):
                 # Bound method
                 if asyncio.iscoroutinefunction(tool.func):
@@ -1169,14 +1222,20 @@ class ToolManager:
                         # 在单独的线程中执行同步函数
                         result = await asyncio.to_thread(tool.func, **kwargs)
 
+            func_cost = time.perf_counter() - func_start
+            logger.info(f"[_execute_standard_tool_async] Function executed | tool={tool.name} | time={func_cost:.3f}s")
+
             # Format result - 避免双重JSON序列化
             execute_cost = time.perf_counter() - execute_start
             if execute_cost > 0.2:
-                logger.warning(f"Standard tool slow: {tool.name}, cost={execute_cost:.3f}s")
+                logger.warning(f"[_execute_standard_tool_async] SLOW | tool={tool.name} | total_time={execute_cost:.3f}s")
+            else:
+                logger.info(f"[_execute_standard_tool_async] SUCCESS | tool={tool.name} | total_time={execute_cost:.3f}s")
             return json.dumps({"content": make_serializable(result)}, ensure_ascii=False, indent=2)
 
         except Exception as e:
-            logger.error(f"Standard tool execution failed: {tool.name} - {str(e)}")
+            execute_cost = time.perf_counter() - execute_start
+            logger.error(f"[_execute_standard_tool_async] FAILED | tool={tool.name} | time={execute_cost:.3f}s | error={type(e).__name__}: {str(e)}")
             raise
 
     def _format_error_response(

@@ -592,6 +592,8 @@ async def populate_request_from_agent_config(
         request.llm_model_config["top_p"] = provider.top_p
         request.llm_model_config["presence_penalty"] = provider.presence_penalty
         request.llm_model_config["max_model_len"] = provider.max_model_len
+        request.llm_model_config["supports_multimodal"] = provider.supports_multimodal
+        request.llm_model_config["supports_structured_output"] = provider.supports_structured_output
     else:
         provider = await provider_dao.get_default()
         if request.llm_model_config.get("base_url") is None:
@@ -610,6 +612,10 @@ async def populate_request_from_agent_config(
             request.llm_model_config["presence_penalty"] = provider.presence_penalty
         if request.llm_model_config.get("max_model_len") is None:
             request.llm_model_config["max_model_len"] = provider.max_model_len
+        if request.llm_model_config.get("supports_multimodal") is None:
+            request.llm_model_config["supports_multimodal"] = provider.supports_multimodal
+        if request.llm_model_config.get("supports_structured_output") is None:
+            request.llm_model_config["supports_structured_output"] = provider.supports_structured_output
 
     # 处理快速模型配置
     fast_provider_id = agent_config.get("fast_llm_provider_id") if agent_config else None

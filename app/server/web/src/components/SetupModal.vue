@@ -32,13 +32,13 @@
               </SelectContent>
             </Select>
             
-            <Input v-if="selectedProvider === 'Custom'" v-model="form.name" :placeholder="t('modelProvider.customNamePlaceholder')" />
+            <Input v-if="selectedProvider === 'Custom'" v-model="form.name" :placeholder="t('modelProvider.customNamePlaceholder')" @update:model-value="handleConfigChange" />
           </div>
         </div>
         
         <div class="grid gap-2">
           <Label>{{ t('modelProvider.baseUrl') }}</Label>
-          <Input v-model="form.base_url" placeholder="https://api.openai.com/v1" />
+          <Input v-model="form.base_url" placeholder="https://api.openai.com/v1" @update:model-value="handleConfigChange" />
         </div>
         
         <div class="grid gap-2">
@@ -82,9 +82,10 @@
                    v-model="form.model" 
                    :placeholder="t('modelProvider.modelPlaceholder')" 
                    class="pr-10"
+                   @update:model-value="handleConfigChange"
                 />
                 <div class="absolute right-0 top-0 h-full">
-                   <Select :model-value="''" @update:model-value="(val) => form.model = val">
+                   <Select :model-value="''" @update:model-value="(val) => { form.model = val; handleConfigChange() }">
                       <SelectTrigger class="h-full w-8 px-0 border-l-0 rounded-l-none focus:ring-0">
                         <span class="sr-only">Select model</span>
                       </SelectTrigger>
@@ -170,7 +171,9 @@ const form = reactive({
   temperature: 0.7,
   topP: 0.95,
   presencePenalty: 0,
-  maxModelLen: 64000
+  maxModelLen: 64000,
+  supportsMultimodal: false,
+  supportsStructuredOutput: false
 })
 
 const currentProvider = computed(() => MODEL_PROVIDERS.find(p => p.name === selectedProvider.value))
@@ -192,7 +195,9 @@ const buildProviderPayload = () => ({
   temperature: form.temperature,
   top_p: form.topP,
   presence_penalty: form.presencePenalty,
-  max_model_len: form.maxModelLen
+  max_model_len: form.maxModelLen,
+  supports_multimodal: form.supportsMultimodal,
+  supports_structured_output: form.supportsStructuredOutput
 })
 
 const handleProviderChange = (val) => {
@@ -201,6 +206,7 @@ const handleProviderChange = (val) => {
     form.name = ''
     form.base_url = ''
     form.model = ''
+    handleConfigChange()
     return
   }
   const provider = MODEL_PROVIDERS.find(p => p.name === val)
@@ -209,6 +215,7 @@ const handleProviderChange = (val) => {
     form.base_url = provider.base_url
     // form.model = provider.models[0] || ''
   }
+  handleConfigChange()
 }
 
 const openProviderWebsite = () => {
@@ -219,6 +226,12 @@ const openProviderWebsite = () => {
 
 const handleApiKeyInput = (value) => {
   form.api_keys_str = `${value ?? ''}`.split(/\r?\n/, 1)[0]
+  handleConfigChange()
+}
+
+const handleConfigChange = () => {
+  form.supportsMultimodal = false
+  form.supportsStructuredOutput = false
 }
 
 const openProviderModelList = () => {
@@ -280,7 +293,9 @@ const handleVerify = async () => {
   
   verifying.value = true
   try {
-    await modelProviderAPI.verifyModelProvider(data)
+    const result = await modelProviderAPI.verifyModelProvider(data)
+    form.supportsMultimodal = Boolean(result?.supports_multimodal)
+    form.supportsStructuredOutput = Boolean(result?.supports_structured_output)
     toast.success(t('common.verifySuccess') || '验证成功')
   } catch (error) {
     toast.error(error.message || '验证失败')
