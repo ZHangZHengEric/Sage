@@ -262,7 +262,8 @@ const oauthProviderName = ref('OAuth2')
 const oauthEnabled = ref(false)
 let sendCodeTimer = null
 const defaultOauthProviderId = computed(() => authProviders.value.find((provider) => provider.type === 'oidc')?.id || null)
-const hasNativeProvider = computed(() => authProviders.value.some((provider) => provider.type === 'native'))
+const isLocalAuthProvider = (provider) => provider?.type === 'native' || provider?.id === 'native'
+const hasNativeProvider = computed(() => authProviders.value.some((provider) => isLocalAuthProvider(provider)))
 const isTrustedProxyMode = computed(() => authMode.value === 'trusted_proxy')
 const isOAuthMode = computed(() => authMode.value === 'oauth' && oauthEnabled.value)
 const dialogTitle = computed(() => {

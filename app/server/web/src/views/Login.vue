@@ -312,7 +312,7 @@ const navigateAfterAuth = async (targetPath) => {
   await router.replace(targetPath)
 }
 
-const isLocalAuthProvider = (provider) => provider?.type === 'native'
+const isLocalAuthProvider = (provider) => provider?.type === 'native' || provider?.id === 'native'
 
 const localProvider = computed(() => authProviders.value.find((provider) => isLocalAuthProvider(provider)) || null)
 const externalProviders = computed(() => (
@@ -542,6 +542,11 @@ const handleSendVerificationCode = async () => {
 }
 
 const handleProviderLogin = (provider) => {
+  if (isLocalAuthProvider(provider)) {
+    errorMessage.value = ''
+    localMode.value = 'login'
+    return
+  }
   errorMessage.value = ''
   window.location.href = buildOAuthLoginUrl(provider.id, safeNextPath.value)
 }
