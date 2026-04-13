@@ -278,7 +278,9 @@ const modelForm = reactive({
   name: '',
   base_url: '',
   api_keys_str: '',
-  model: ''
+  model: '',
+  supportsMultimodal: false,
+  supportsStructuredOutput: false
 })
 
 const DEFAULT_TEMPERATURE = 0.3
@@ -338,6 +340,8 @@ const toggleProviderInputMode = () => {
     showConfigFields.value = false
   }
   verified.value = false
+  modelForm.supportsMultimodal = false
+  modelForm.supportsStructuredOutput = false
 }
 
 const toggleModelInputMode = () => {
@@ -349,6 +353,8 @@ const toggleModelInputMode = () => {
     customModelName.value = ''
   }
   verified.value = false
+  modelForm.supportsMultimodal = false
+  modelForm.supportsStructuredOutput = false
 }
 
 const handleProviderChange = (val) => {
@@ -360,6 +366,8 @@ const handleProviderChange = (val) => {
   }
   verified.value = false
   customModelName.value = ''
+  modelForm.supportsMultimodal = false
+  modelForm.supportsStructuredOutput = false
   // Show config fields with animation
   showConfigFields.value = true
 }
@@ -381,6 +389,8 @@ const onCustomModelChange = (val) => {
 
 const onKeyConfigChange = () => {
   verified.value = false
+  modelForm.supportsMultimodal = false
+  modelForm.supportsStructuredOutput = false
 }
 
 const buildProviderPayload = () => ({
@@ -392,24 +402,21 @@ const buildProviderPayload = () => ({
   top_p: DEFAULT_TOP_P,
   presence_penalty: DEFAULT_PRESENCE_PENALTY,
   max_model_len: DEFAULT_MAX_MODEL_LEN,
-  is_default: true
+  is_default: true,
+  supports_multimodal: modelForm.supportsMultimodal,
+  supports_structured_output: modelForm.supportsStructuredOutput
 })
 
 const verifyProviderCapabilities = async () => {
   const data = buildProviderPayload()
-  await modelProviderAPI.verifyModelProvider(data)
-
-  let supportsMultimodal = false
-  try {
-    const multimodalResult = await modelProviderAPI.verifyMultimodal(data)
-    supportsMultimodal = Boolean(multimodalResult?.supports_multimodal)
-  } catch (error) {
-    console.warn('Failed to detect multimodal capability during setup:', error)
-  }
+  const result = await modelProviderAPI.verifyModelProvider(data)
+  modelForm.supportsMultimodal = Boolean(result?.supports_multimodal)
+  modelForm.supportsStructuredOutput = Boolean(result?.supports_structured_output)
 
   return {
     ...data,
-    supports_multimodal: supportsMultimodal
+    supports_multimodal: modelForm.supportsMultimodal,
+    supports_structured_output: modelForm.supportsStructuredOutput
   }
 }
 
@@ -497,7 +504,15 @@ const handleVerify = async () => {
   try {
     const data = await verifyProviderCapabilities()
     verified.value = true
-    toast.success(data.supports_multimodal ? '连接验证成功，已检测到多模态支持' : '连接验证成功')
+    if (data.supports_multimodal && data.supports_structured_output) {
+      toast.success('连接验证成功，已检测到多模态和结构化输出支持')
+    } else if (data.supports_multimodal) {
+      toast.success('连接验证成功，已检测到多模态支持')
+    } else if (data.supports_structured_output) {
+      toast.success('连接验证成功，已检测到结构化输出支持')
+    } else {
+      toast.success('连接验证成功')
+    }
   } catch (error) {
     console.error('Failed to verify model provider:', error)
     verified.value = false

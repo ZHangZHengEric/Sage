@@ -23,6 +23,7 @@ class LLMProvider(Base):
     presence_penalty: Mapped[float] = mapped_column(Float, nullable=True)
     max_model_len: Mapped[int] = mapped_column(Integer, nullable=True)
     supports_multimodal: Mapped[bool] = mapped_column(Boolean, default=False)
+    supports_structured_output: Mapped[bool] = mapped_column(Boolean, default=False)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     user_id: Mapped[str] = mapped_column(String(128), default="")
     created_at: Mapped[datetime] = mapped_column(nullable=False)
@@ -41,6 +42,7 @@ class LLMProvider(Base):
         presence_penalty: float = 0.0,
         max_model_len: int = 96000,
         supports_multimodal: bool = False,
+        supports_structured_output: bool = False,
         is_default: bool = False,
         user_id: str = "",
         created_at: Optional[datetime] = None,
@@ -57,6 +59,7 @@ class LLMProvider(Base):
         self.presence_penalty = presence_penalty
         self.max_model_len = max_model_len
         self.supports_multimodal = supports_multimodal
+        self.supports_structured_output = supports_structured_output
         self.is_default = is_default
         self.user_id = user_id
         self.created_at = created_at or get_local_now()
@@ -94,6 +97,7 @@ class LLMProvider(Base):
             "presence_penalty": self.presence_penalty,
             "max_model_len": self.max_model_len,
             "supports_multimodal": self.supports_multimodal,
+            "supports_structured_output": self.supports_structured_output,
             "is_default": self.is_default,
             "user_id": self.user_id,
             "created_at": self.created_at.isoformat(),

@@ -5,6 +5,7 @@ import asyncio
 from typing import Dict, Any
 import re
 from ..logger import logger
+from sagents.llm.capabilities import create_chat_completion_with_fallback
 
 
 class BaseAgentProcessor:
@@ -49,14 +50,15 @@ class BaseAgentProcessor:
                     # Default fallback or pass as is if typed dict matches
                     resp_fmt = {"type": r_format} # type: ignore
 
-                response = await self.client.chat.completions.create(
-                    response_format=resp_fmt, # type: ignore
+                response = await create_chat_completion_with_fallback(
+                    self.client,
                     model=model_name,
                     messages=full_prompt, # type: ignore
                     temperature=temperature,
                     timeout=timeout,
                     max_tokens=max_tokens,
                     top_p=top_p,
+                    response_format=resp_fmt,  # type: ignore
                 )
                 break  # 成功则跳出
 

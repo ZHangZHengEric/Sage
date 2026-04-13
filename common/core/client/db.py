@@ -158,11 +158,12 @@ class SessionManager:
                         engine_kwargs.update(
                             {
                                 "poolclass": StaticPool,
-                                "connect_args": {"check_same_thread": False},
+                                "connect_args": {"check_same_thread": False, "timeout": 30},
                             }
                         )
                     else:
                         url = f"sqlite+aiosqlite:///{self.db_file}"
+                        engine_kwargs["connect_args"] = {"timeout": 30}
 
                     self._engine = create_async_engine(url, future=True, **engine_kwargs)
 

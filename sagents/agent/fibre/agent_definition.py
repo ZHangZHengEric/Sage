@@ -42,8 +42,10 @@ class AgentDefinition:
             system_context: Additional system context/configuration
             backend_stored: Whether this agent is stored in backend (persisted)
         """
+        if not str(name or "").strip():
+            raise ValueError(f"AgentDefinition.name is required for agent_id={agent_id}")
         self.agent_id = agent_id
-        self.name = name or agent_id
+        self.name = name
         self.system_prompt = system_prompt
         self.description = description
         self.available_tools = available_tools or []

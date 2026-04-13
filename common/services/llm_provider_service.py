@@ -2,48 +2,10 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from openai import AsyncOpenAI
 
 from common.models.llm_provider import LLMProvider, LLMProviderDao
 from common.schemas.base import LLMProviderCreate, LLMProviderUpdate
-
-_TEST_IMAGE_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAIAAAAC64paAAAAG0lEQVR4nGP8z0A+YKJA76jmUc2jmkc1U0EzACKcASc1hNCeAAAAAElFTkSuQmCC"
-_COLOR_KEYWORDS = ["red", "红色", "红", "赤", "绯", "朱", "丹", "绛"]
-
-
-def _is_openai_reasoning_model(model_name: str) -> bool:
-    """判断是否为 OpenAI 推理模型"""
-    return (
-        model_name.startswith("o3-") or
-        model_name.startswith("o1-") or
-        "gpt" in model_name.lower() or
-        "gpt-5.1" in model_name.lower()
-    )
-
-
-def _build_thinking_disabled_extra_body(model_name: str) -> Dict[str, Any]:
-    """
-    构建用于关闭思考模式的 extra_body 参数
-
-    Args:
-        model_name: 模型名称
-
-    Returns:
-        Dict[str, Any]: extra_body 参数
-    """
-    extra_body: Dict[str, Any] = {}
-
-    if _is_openai_reasoning_model(model_name):
-        # OpenAI 推理模型使用 reasoning_effort 参数
-        # low = 最小化推理
-        extra_body["reasoning_effort"] = "low"
-    else:
-        # 其他模型（如 Qwen3、DeepSeek 等）使用 enable_thinking/thinking 参数
-        extra_body["chat_template_kwargs"] = {"enable_thinking": False}
-        extra_body["enable_thinking"] = False
-        extra_body["thinking"] = {"type": "disabled"}
-
-    return extra_body
+from sagents.llm import probe_connection, probe_llm_capabilities, probe_multimodal, probe_structured_output
 
 
 def _normalize_base_url(base_url: Optional[str]) -> Optional[str]:
@@ -61,65 +23,38 @@ async def verify_provider(data: LLMProviderCreate) -> None:
     api_key = data.api_keys[0] if data.api_keys else None
     if not api_key:
         raise ValueError("API Key is required")
-
-    client = AsyncOpenAI(
-        api_key=api_key,
-        base_url=data.base_url,
-        timeout=10.0,
-    )
-
-    # 构建 extra_body 以关闭思考模式
-    extra_body = _build_thinking_disabled_extra_body(data.model)
-
-    await client.chat.completions.create(
-        model=data.model,
-        messages=[{"role": "user", "content": "Hi"}],
-        max_tokens=5,
-        extra_body=extra_body,
-    )
+    await probe_connection(api_key, data.base_url, data.model)
 
 
 async def verify_multimodal(data: LLMProviderCreate) -> Dict[str, Any]:
     api_key = data.api_keys[0] if data.api_keys else None
     if not api_key:
         raise ValueError("API Key is required")
-
-    client = AsyncOpenAI(
-        api_key=api_key,
-        base_url=data.base_url,
-        timeout=30.0,
-    )
-
-    # 构建 extra_body 以关闭思考模式
-    extra_body = _build_thinking_disabled_extra_body(data.model)
-
-    response = await client.chat.completions.create(
-        model=data.model,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": _TEST_IMAGE_URL}},
-                    {
-                        "type": "text",
-                        "text": "What color is this image? Please answer with just the color name.",
-                    },
-                ],
-            }
-        ],
-        max_tokens=50,
-        temperature=0.1,
-        extra_body=extra_body,
-    )
-
-    content = response.choices[0].message.content.lower() if response.choices[0].message.content else ""
-    logger.info(f"Multimodal verification response: {content}")
-    recognized = any(keyword in content for keyword in _COLOR_KEYWORDS)
+    result = await probe_multimodal(api_key, data.base_url, data.model)
     return {
-        "supports_multimodal": True,
-        "response": content,
-        "recognized": recognized,
+        "supports_multimodal": bool(result.get("supported")),
+        "response": result.get("response"),
+        "recognized": bool(result.get("recognized")),
     }
+
+
+async def verify_structured_output(data: LLMProviderCreate) -> Dict[str, Any]:
+    api_key = data.api_keys[0] if data.api_keys else None
+    if not api_key:
+        raise ValueError("API Key is required")
+    result = await probe_structured_output(api_key, data.base_url, data.model)
+    return {
+        "supports_structured_output": bool(result.get("supported")),
+        "response": result.get("response"),
+        "error": result.get("error"),
+    }
+
+
+async def verify_capabilities(data: LLMProviderCreate) -> Dict[str, Any]:
+    api_key = data.api_keys[0] if data.api_keys else None
+    if not api_key:
+        raise ValueError("API Key is required")
+    return await probe_llm_capabilities(api_key, data.base_url, data.model)
 
 
 async def list_providers(user_id: str) -> List[Dict[str, Any]]:
@@ -164,6 +99,7 @@ async def create_provider(
         presence_penalty=data.presence_penalty,
         max_model_len=data.max_model_len,
         supports_multimodal=data.supports_multimodal,
+        supports_structured_output=data.supports_structured_output,
         is_default=bool(data.is_default),
         user_id=user_id,
     )
@@ -207,6 +143,8 @@ async def update_provider(
         provider.max_model_len = data.max_model_len
     if data.supports_multimodal is not None:
         provider.supports_multimodal = data.supports_multimodal
+    if data.supports_structured_output is not None:
+        provider.supports_structured_output = data.supports_structured_output
     if data.is_default is not None:
         provider.is_default = data.is_default
 

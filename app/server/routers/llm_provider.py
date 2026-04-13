@@ -18,6 +18,18 @@ async def verify_provider(data: LLMProviderCreate):
         return await Response.error(message=f"验证失败: {str(e)}")
 
 
+@router.post("/verify-capabilities")
+async def verify_capabilities(data: LLMProviderCreate):
+    """
+    验证模型连接并探测关键能力，包括多模态与结构化输出。
+    """
+    try:
+        result = await llm_provider_service.verify_capabilities(data)
+        return await Response.succ(message="能力验证成功", data=result)
+    except Exception as e:
+        return await Response.error(message=f"验证失败: {str(e)}")
+
+
 @router.post("/verify-multimodal")
 async def verify_multimodal(data: LLMProviderCreate):
     """

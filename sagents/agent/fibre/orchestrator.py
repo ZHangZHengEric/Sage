@@ -62,6 +62,17 @@ class FibreOrchestrator:
 
         self.output_queue: Optional[asyncio.Queue] = None
 
+    @staticmethod
+    def _resolve_agent_name(agent_cfg: Any, agent_id: Optional[str]) -> str:
+        if isinstance(agent_cfg, dict):
+            name = agent_cfg.get("name") or agent_cfg.get("display_name")
+        else:
+            name = getattr(agent_cfg, "name", None) or getattr(agent_cfg, "display_name", None)
+        normalized = str(name or "").strip()
+        if not normalized:
+            raise ValueError(f"Sub-agent name is required, agent_id={agent_id}")
+        return normalized
+
     async def run_loop(
         self,
         session_context: SessionContext,
@@ -105,11 +116,22 @@ class FibreOrchestrator:
                 # Filter out the current agent itself
                 current_agent_id = session_context.agent_config.get("agent_id") if session_context.agent_config else None
                 custom_sub_agents = [
-                    {"agent_id": aid}
-                    for aid in backend_agents
-                    if aid != current_agent_id
+                    {
+                        "agent_id": agent.get("agent_id") if isinstance(agent, dict) else agent,
+                        "name": self._resolve_agent_name(agent, agent.get("agent_id") if isinstance(agent, dict) else agent),
+                        "description": agent.get("description", "") if isinstance(agent, dict) else "",
+                        "system_prompt": agent.get("system_prompt", "") if isinstance(agent, dict) else "",
+                        "available_tools": agent.get("available_tools") if isinstance(agent, dict) else None,
+                        "available_skills": agent.get("available_skills") if isinstance(agent, dict) else None,
+                        "available_workflows": agent.get("available_workflows") if isinstance(agent, dict) else None,
+                        "system_context": agent.get("system_context") if isinstance(agent, dict) else None,
+                    }
+                    for agent in backend_agents
+                    if ((agent.get("agent_id") if isinstance(agent, dict) else agent) != current_agent_id)
                 ]
                 logger.info(f"FibreOrchestrator: Fetched {len(custom_sub_agents)} agents from backend (excluding self)")
+            except ValueError:
+                raise
             except Exception as e:
                 logger.warning(f"FibreOrchestrator: Failed to fetch agents from backend: {e}")
                 custom_sub_agents = []
@@ -125,6 +147,7 @@ class FibreOrchestrator:
                     agent_skills = agent_cfg.get("available_skills")
                     agent_workflows = agent_cfg.get("available_workflows")
                     agent_system_context = agent_cfg.get("system_context")
+                    agent_name = self._resolve_agent_name(agent_cfg, agent_id)
                 else:
                     agent_id = getattr(agent_cfg, "agent_id") or getattr(agent_cfg, "name", None)
                     agent_system_prompt = getattr(agent_cfg, "system_prompt", "")
@@ -133,6 +156,7 @@ class FibreOrchestrator:
                     agent_skills = getattr(agent_cfg, "available_skills", None)
                     agent_workflows = getattr(agent_cfg, "available_workflows", None)
                     agent_system_context = getattr(agent_cfg, "system_context", None)
+                    agent_name = self._resolve_agent_name(agent_cfg, agent_id)
 
                 # Skip if agent_id is empty or agent already exists
                 if not agent_id:
@@ -159,13 +183,13 @@ class FibreOrchestrator:
                     if session_context.system_context.get("available_sub_agents"):
                         session_context.system_context["available_sub_agents"].append({
                             "agent_id": agent_id,
-                            "name": agent_cfg.get("name", agent_id),
+                            "name": agent_name,
                             "description": agent_description
                         })
                     else:
                         session_context.system_context["available_sub_agents"] = [{
                             "agent_id": agent_id,
-                            "name": agent_cfg.get("name", agent_id),
+                            "name": agent_name,
                             "description": agent_description
                         }]
                     
@@ -176,7 +200,7 @@ class FibreOrchestrator:
                         from sagents.agent.fibre.agent_definition import AgentDefinition
                         agent_def = AgentDefinition(
                             agent_id=agent_id,
-                            name=agent_cfg.get("name", agent_id),
+                            name=agent_name,
                             description=agent_description,
                             system_prompt=agent_system_prompt,
                             backend_stored=True,
@@ -477,7 +501,7 @@ class FibreOrchestrator:
                 user_id = getattr(parent_session.session_context, 'user_id', None)
             backend_agent_id = await self.backend_client.create_agent(
                 agent_id=agent_id,
-                name=name or agent_id,
+                name=name,
                 system_prompt=temp_system_prompt,
                 description=description,
                 available_tools=available_tools or [],
@@ -511,7 +535,7 @@ class FibreOrchestrator:
         # 5. Create Agent Definition (memory storage as fallback or supplement)
         agent_def = AgentDefinition(
             agent_id=final_agent_id,
-            name=name or final_agent_id,
+            name=name,
             system_prompt=complete_system_prompt,
             description=description,
             available_tools=available_tools,
@@ -528,7 +552,7 @@ class FibreOrchestrator:
             if 'available_sub_agents' not in parent_session.session_context.system_context:
                 parent_session.session_context.system_context['available_sub_agents'] = []
 
-            agent_info = {"agent_id": final_agent_id, "name": name or final_agent_id, "description": description or system_prompt[:100]}
+            agent_info = {"agent_id": final_agent_id, "name": name, "description": description or system_prompt[:100]}
             existing_ids = [a.get("agent_id") for a in parent_session.session_context.system_context['available_sub_agents']]
             if agent_info["agent_id"] not in existing_ids:
                 parent_session.session_context.system_context['available_sub_agents'].append(agent_info)

@@ -21,12 +21,13 @@ class OpenAIChat:
         fast_api_key: Optional[str] = None,
         fast_base_url: Optional[str] = None,
         fast_model_name: Optional[str] = None,
+        model_capabilities: Optional[Dict[str, Any]] = None,
     ):
         self.model_name = model_name
+        self.model_capabilities = model_capabilities or {}
         
         # 创建标准模型客户端
         self._standard_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-        self._standard_client.model_name = model_name
         
         # 创建快速模型客户端（如果配置了）
         self._fast_client = None
@@ -34,13 +35,15 @@ class OpenAIChat:
             fast_key = fast_api_key or api_key
             fast_url = fast_base_url or base_url
             self._fast_client = AsyncOpenAI(api_key=fast_key, base_url=fast_url)
-            self._fast_client.model_name = fast_model_name
             logger.info(f"Fast model configured: {fast_model_name}")
         
         # 创建 SageAsyncOpenAI 实例
         self._sage_client = SageAsyncOpenAI(
             standard_client=self._standard_client,
             fast_client=self._fast_client,
+            model_capabilities=self.model_capabilities,
+            model_name=model_name,
+            fast_model_name=fast_model_name,
         )
 
     @property

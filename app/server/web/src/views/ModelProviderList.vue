@@ -29,10 +29,16 @@
                    <Bot class="h-4 w-4" />
                  </div>
                  <div class="min-w-0">
-                   <div class="flex items-center gap-2">
-                     <span class="truncate">{{ provider.name }}</span>
+             <div class="flex items-center gap-2">
+               <span class="truncate">{{ provider.name }}</span>
                  <Badge v-if="provider.is_default" variant="secondary">{{ t('common.default') }}</Badge>
-                   </div>
+                 <Badge v-if="provider.supports_multimodal" variant="outline" class="h-5 rounded-full px-2 text-[10px]">
+                   {{ t('modelProvider.multimodalLabel') }}
+                 </Badge>
+                 <Badge v-if="provider.supports_structured_output" variant="outline" class="h-5 rounded-full px-2 text-[10px]">
+                   {{ t('modelProvider.structuredOutputLabel') }}
+                 </Badge>
+                 </div>
                    <p class="text-xs text-muted-foreground truncate">{{ provider.model }}</p>
                  </div>
                </div>
@@ -98,6 +104,9 @@
                   <Badge :variant="verificationBadgeVariant" class="h-6 rounded-full px-2.5 text-[10px]">
                     {{ verificationBadgeLabel }}
                   </Badge>
+                  <Badge v-if="form.supportsStructuredOutput" variant="outline" class="h-6 rounded-full px-2.5 text-[10px] font-medium">
+                    {{ t('modelProvider.capabilityStructuredOutput') }}
+                  </Badge>
                   <Badge variant="outline" class="h-6 rounded-full px-2.5 text-[10px] font-medium">
                     {{ selectedProvider && selectedProvider !== 'Custom' ? selectedProvider : t('modelProvider.customProviderBadge') }}
                   </Badge>
@@ -135,6 +144,9 @@
                   </Badge>
                   <Badge variant="outline" class="h-6 rounded-full px-2.5 text-[10px] font-medium">
                     {{ capabilityDetailLabel }}
+                  </Badge>
+                  <Badge v-if="capabilityChecked && form.supportsStructuredOutput" variant="outline" class="h-6 rounded-full px-2.5 text-[10px] font-medium">
+                    {{ t('modelProvider.capabilityStructuredOutput') }}
                   </Badge>
                   <TooltipProvider>
                     <Tooltip>
@@ -445,7 +457,8 @@ const form = reactive({
   topP: 0.95,
   presencePenalty: 0,
   maxModelLen: 64000,
-  supportsMultimodal: false
+  supportsMultimodal: false,
+  supportsStructuredOutput: false
 })
 
 // 存储原始值用于比较（编辑模式）
@@ -546,12 +559,14 @@ const buildProviderPayload = () => ({
   top_p: form.topP,
   presence_penalty: form.presencePenalty,
   max_model_len: form.maxModelLen,
-  supports_multimodal: form.supportsMultimodal
+  supports_multimodal: form.supportsMultimodal,
+  supports_structured_output: form.supportsStructuredOutput
 })
 const resetCapabilityState = () => {
   verified.value = false
   capabilityChecked.value = false
   form.supportsMultimodal = false
+  form.supportsStructuredOutput = false
 }
 
 // 保存按钮是否可点击
@@ -634,6 +649,7 @@ const handleCreate = () => {
   form.presencePenalty = 0
   form.maxModelLen = 64000
   form.supportsMultimodal = false
+  form.supportsStructuredOutput = false
   verified.value = false
   capabilityChecked.value = false
   showApiKey.value = false
@@ -672,6 +688,7 @@ const handleEdit = (provider) => {
   form.presencePenalty = provider.presence_penalty ?? 0.0
   form.maxModelLen = provider.max_model_len ?? 64000
   form.supportsMultimodal = provider.supports_multimodal ?? false
+  form.supportsStructuredOutput = provider.supports_structured_output ?? false
 
   // 保存原始值用于比较
   originalValues.base_url = provider.base_url
@@ -709,22 +726,18 @@ const handleVerify = async () => {
 
   verifying.value = true
   try {
-    await modelProviderAPI.verifyModelProvider(data)
+    const res = await modelProviderAPI.verifyModelProvider(data)
     verified.value = true
-    form.supportsMultimodal = false
-
-    try {
-      const res = await modelProviderAPI.verifyMultimodal(data)
-      form.supportsMultimodal = Boolean(res?.supports_multimodal)
-      if (form.supportsMultimodal) {
-        toast.success(res?.recognized ? t('modelProvider.multimodalRecognized') : t('modelProvider.connectionVerifiedMultimodal'))
-      } else {
-        toast.success(t('modelProvider.connectionVerifiedTextOnly'))
-      }
-    } catch (error) {
-      console.warn('Multimodal capability probe failed:', error)
-      form.supportsMultimodal = false
-      toast.success(t('modelProvider.connectionVerifiedCapabilityUnknown'))
+    form.supportsMultimodal = Boolean(res?.supports_multimodal)
+    form.supportsStructuredOutput = Boolean(res?.supports_structured_output)
+    if (form.supportsMultimodal && form.supportsStructuredOutput) {
+      toast.success('连接验证成功，已检测到多模态和结构化输出支持')
+    } else if (form.supportsMultimodal) {
+      toast.success(t('modelProvider.connectionVerifiedMultimodal'))
+    } else if (form.supportsStructuredOutput) {
+      toast.success('连接验证成功，已检测到结构化输出支持')
+    } else {
+      toast.success(t('common.verifySuccess') || '验证成功')
     }
 
     capabilityChecked.value = true

@@ -11,6 +11,7 @@ import json
 import uuid
 from copy import deepcopy
 import re
+import os
 from sagents.utils.repeat_pattern import (
     build_loop_signature as _build_loop_signature_util,
     detect_repeat_pattern as _detect_repeat_pattern_util,
@@ -341,8 +342,6 @@ class SimpleAgent(AgentBase):
             return False
 
         # 第二层：LLM 综合判断
-        last_message = messages_input[-1]
-
         # 只提取最后一个 user 以及之后的 messages
         last_user_index = None
         for i, message in enumerate(messages_input):
@@ -624,24 +623,28 @@ class SimpleAgent(AgentBase):
                     if tool_call.id is not None and len(tool_call.id) > 0:
                         last_tool_call_id = tool_call.id
 
-                # # 流式返回工具调用消息
-                output_messages = [MessageChunk(
-                    role=MessageRole.ASSISTANT.value,
-                    tool_calls=chunk.choices[0].delta.tool_calls,
-                    message_id=tool_calls_messages_id,
-                    message_type=MessageType.TOOL_CALL.value,
-                    agent_name=self.agent_name
-                )]
-                yield (output_messages, False)
-
-                # yield 一个空的消息块以避免生成器卡住
-                # output_messages = [MessageChunk(
-                #     role=MessageRole.ASSISTANT.value,
-                #     content="",
-                #     message_id=content_response_message_id,
-                #     message_type=MessageType.EMPTY.value
-                # )]
-                # yield (output_messages, False)
+                # 根据环境变量控制是否流式返回工具调用消息
+                # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
+                emit_on_complete = os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
+                if not emit_on_complete:
+                    # 流式返回工具调用消息
+                    output_messages = [MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        tool_calls=chunk.choices[0].delta.tool_calls,
+                        message_id=tool_calls_messages_id,
+                        message_type=MessageType.TOOL_CALL.value,
+                        agent_name=self.agent_name
+                    )]
+                    yield (output_messages, False)
+                else:
+                    # yield 一个空的消息块以避免生成器卡住
+                    output_messages = [MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        content="",
+                        message_id=content_response_message_id,
+                        message_type=MessageType.EMPTY.value
+                    )]
+                    yield (output_messages, False)
 
             elif chunk.choices[0].delta.content:
                 if len(chunk.choices[0].delta.content) > 0:
@@ -682,12 +685,15 @@ class SimpleAgent(AgentBase):
                 if tool_call['function']['name'] in ['complete_task', 'sys_finish_task']:
                     termination_tool_ids.add(tool_call_id)
 
+            # 根据环境变量控制 emit_tool_call_message
+            # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
+            emit_on_complete = os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
             async for chunk in self._handle_tool_calls(
                 tool_calls=tool_calls,
                 tool_manager=tool_manager,
                 messages_input=messages_input,
                 session_id=session_id or "",
-                emit_tool_call_message=False
+                emit_tool_call_message=emit_on_complete
             ):
                 # chunk 是 (messages, is_complete)
                 messages, is_complete = chunk

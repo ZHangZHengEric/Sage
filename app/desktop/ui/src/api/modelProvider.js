@@ -43,7 +43,7 @@ export const modelProviderAPI = {
    * @returns {Promise<Object>}
    */
   verifyModelProvider: async (data) => {
-    return await request.post('/api/llm-provider/verify', data)
+    return await request.post('/api/llm-provider/verify-capabilities', data)
   },
 
   /**

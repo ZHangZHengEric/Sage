@@ -106,13 +106,13 @@ class SessionContext:
         self._init_sandbox_and_file_system(sandbox_mode=sandbox_mode)
         
         # 准备工作区引导文件（通过沙箱接口，在沙箱初始化后执行）
-        self._prepare_workspace_bootstrap_files()
+        await self._prepare_workspace_bootstrap_files()
         
         # 注册并准备技能
-        self._register_and_prepare_skills()
+        await self._register_and_prepare_skills()
         
         # 最终化系统上下文
-        self._finalize_system_context()
+        await self._finalize_system_context()
 
         # 加载已持久化的消息
         self._load_persisted_messages()
@@ -387,7 +387,7 @@ class SessionContext:
 
         os.makedirs(self.session_workspace, exist_ok=True)
 
-    def _prepare_workspace_bootstrap_files(self):
+    async def _prepare_workspace_bootstrap_files(self):
         """
         准备工作区引导文件（通过沙箱接口）
 
@@ -403,48 +403,31 @@ class SessionContext:
         if not use_claw_mode:
             return
 
-        # 通过沙箱接口异步创建引导文件
-        import asyncio
+        bootstrap_files = [
+            ("AGENT.md", "default_agent_md"),
+            ("USER.md", "default_user_md"),
+            ("SOUL.md", "default_soul_md"),
+            ("IDENTITY.md", "default_identity_md"),
+            ("MEMORY.md", "default_memory_md"),
+        ]
 
-        async def create_bootstrap_files():
-            # 定义引导文件
-            bootstrap_files = [
-                ("AGENT.md", "default_agent_md"),
-                ("USER.md", "default_user_md"),
-                ("SOUL.md", "default_soul_md"),
-                ("IDENTITY.md", "default_identity_md"),
-                ("MEMORY.md", "default_memory_md"),
-            ]
-
-            for filename, content_key in bootstrap_files:
-                file_path = os.path.join(self.sandbox_agent_workspace, filename)
-                try:
-                    # 检查文件是否已存在
-                    exists = await self.sandbox.file_exists(file_path)
-                    if not exists:
-                        # 获取默认内容
-                        content = self._get_default_md_content(content_key, filename)
-                        if content:
-                            await self.sandbox.write_file(file_path, content)
-                            logger.debug(f"创建引导文件: {file_path}")
-                except Exception as e:
-                    logger.warning(f"创建引导文件失败 {file_path}: {e}")
-
-            # 创建 memory 目录
+        for filename, content_key in bootstrap_files:
+            file_path = os.path.join(self.sandbox_agent_workspace, filename)
             try:
-                memory_dir = os.path.join(self.sandbox_agent_workspace, "memory")
-                await self.sandbox.ensure_directory(memory_dir)
+                exists = await self.sandbox.file_exists(file_path)
+                if not exists:
+                    content = self._get_default_md_content(content_key, filename)
+                    if content:
+                        await self.sandbox.write_file(file_path, content)
+                        logger.debug(f"创建引导文件: {file_path}")
             except Exception as e:
-                logger.warning(f"创建 memory 目录失败: {e}")
+                logger.warning(f"创建引导文件失败 {file_path}: {e}")
 
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(create_bootstrap_files())
-            else:
-                loop.run_until_complete(create_bootstrap_files())
-        except RuntimeError:
-            asyncio.run(create_bootstrap_files())
+            memory_dir = os.path.join(self.sandbox_agent_workspace, "memory")
+            await self.sandbox.ensure_directory(memory_dir)
+        except Exception as e:
+            logger.warning(f"创建 memory 目录失败: {e}")
 
     def _get_default_md_content(self, content_key: str, filename: str) -> str:
         """获取默认的 markdown 文件内容"""
@@ -535,7 +518,7 @@ class SessionContext:
         logger.info(f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s")
         
 
-    def _register_and_prepare_skills(self):
+    async def _register_and_prepare_skills(self):
         """
         注册并准备技能，主要是同步技能到沙箱
         """
@@ -555,14 +538,14 @@ class SessionContext:
             t1 = time.time()
             try:
                 # 初始化沙箱技能管理器并同步技能
-                self._init_sandbox_skill_manager()
+                await self._init_sandbox_skill_manager()
                 logger.debug(f"SessionContext: 技能同步完成，耗时: {time.time() - t1:.3f}s")
             except Exception as e:
                 logger.error(f"SessionContext: 技能同步失败: {e}", exc_info=True)
         else:
             logger.warning("SessionContext: SkillManager 未初始化，跳过技能复制")
 
-    def _init_sandbox_skill_manager(self):
+    async def _init_sandbox_skill_manager(self):
         """
         初始化沙箱技能管理器，并从宿主机同步技能
         
@@ -571,26 +554,12 @@ class SessionContext:
         2. 从宿主机同步技能到沙箱（只同步不存在的）
         3. 沙箱内的技能可以被 Agent 修改，不会影响宿主机
         """
-        import asyncio
-        
         # 创建沙箱技能管理器
         skills_dir = os.path.join(self.sandbox_agent_workspace, "skills")
         self.sandbox_skill_manager = SandboxSkillManager(self.sandbox, skills_dir)
-        
-        # 异步同步技能
-        async def sync_skills():
-            await self.sandbox_skill_manager.sync_from_host(self.skill_manager)
-        
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(sync_skills())
-            else:
-                loop.run_until_complete(sync_skills())
-        except RuntimeError:
-            asyncio.run(sync_skills())
+        await self.sandbox_skill_manager.sync_from_host(self.skill_manager)
 
-    def _finalize_system_context(self):
+    async def _finalize_system_context(self):
         """
         最终化系统上下文，设置私有工作区、用户ID和会话ID
         """
@@ -612,20 +581,8 @@ class SessionContext:
         common_dirs = ["data", "projects", "temp", "logs"]
         for d in common_dirs:
             dir_path = os.path.join(sandbox_root, d)
-            # 通过沙箱创建目录
             if hasattr(self.sandbox, 'ensure_directory'):
-                # 新接口：使用同步方式调用异步方法
-                import asyncio
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # 如果事件循环正在运行，创建新任务
-                        asyncio.ensure_future(self.sandbox.ensure_directory(dir_path))
-                    else:
-                        loop.run_until_complete(self.sandbox.ensure_directory(dir_path))
-                except RuntimeError:
-                    # 没有事件循环，使用 asyncio.run
-                    asyncio.run(self.sandbox.ensure_directory(dir_path))
+                await self.sandbox.ensure_directory(dir_path)
             else:
                 # 沙箱不支持 ensure_directory 接口，报错
                 raise NotImplementedError(

@@ -905,7 +905,7 @@ class MessageManager:
 
         # 处理多模态消息格式
         if isinstance(content, list):
-            # 多模态消息：压缩文本部分，保留图片
+            # 多模态消息：压缩文本部分，保留图片（图片数据不被截断）
             new_content = []
             for item in content:
                 if isinstance(item, dict):
@@ -918,11 +918,12 @@ class MessageManager:
                             text = text[:100] + f"...[Text omitted, length: {len(text)}]"
                         new_content.append({'type': 'text', 'text': text})
                     elif item.get('type') == 'image_url':
-                        # 保留图片，但在 Level 2 时可以考虑替换为占位符
+                        # 保留图片，但在 Level 2 时替换为占位符（移除图片，不截断）
                         if level == 2:
-                            # Level 2: 将图片替换为占位符描述
+                            # Level 2: 将图片替换为占位符描述（完整移除，不截断 base64 数据）
                             new_content.append({'type': 'text', 'text': '...[Image content omitted]...'})
                         else:
+                            # Level 1: 保留完整图片数据，不截断
                             new_content.append(item)
                     else:
                         new_content.append(item)

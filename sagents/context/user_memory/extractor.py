@@ -13,6 +13,7 @@ from typing import List, Dict, Any, TYPE_CHECKING
 from sagents.utils.logger import logger
 from sagents.context.messages.message_manager import MessageManager
 from sagents.utils.prompt_manager import PromptManager
+from sagents.llm.capabilities import create_chat_completion_with_fallback
 if TYPE_CHECKING:
     from sagents.context.session_context import SessionContext
 
@@ -136,10 +137,11 @@ class MemoryExtractor:
             ]
 
             # 调用LLM
-            response = await self.model.chat.completions.create(
+            response = await create_chat_completion_with_fallback(
+                self.model,
                 model=self.model.model_name,
                 messages=messages,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
             )
 
             content = response.choices[0].message.content
@@ -179,7 +181,8 @@ class MemoryExtractor:
                 {"role": "user", "content": dedup_prompt}
             ]
 
-            response = await self.model.chat.completions.create(
+            response = await create_chat_completion_with_fallback(
+                self.model,
                 model=self.model.model_name,
                 messages=messages,
                 response_format={"type": "json_object"},

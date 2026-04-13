@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 
 from .logger import logger
+from sagents.llm.capabilities import create_chat_completion_with_fallback
 
 
 class AgentAbilitiesGenerationError(Exception):
@@ -248,14 +249,14 @@ async def generate_agent_abilities_from_config(
 """.strip()
 
     try:
-        response = await client.chat.completions.create(
+        response = await create_chat_completion_with_fallback(
+            client,
             model=model,
             messages=[
                 {"role": "system", "content": _build_system_context_message(language)},
                 {"role": "user", "content": user_prompt},
             ],
             response_format={"type": "json_object"},
-            # temperature=0.7,
             max_tokens=1500,
             extra_body=_build_no_thinking_extra_body(model),
         )

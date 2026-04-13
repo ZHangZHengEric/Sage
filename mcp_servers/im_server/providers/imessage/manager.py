@@ -44,13 +44,13 @@ class iMessageManager:
             
         self._started = False
         
-    def start(self):
+    async def start(self):
         """Start listening for incoming messages."""
         if self._started:
             return
             
         # Check iMessage availability
-        result = self.provider.check_availability()
+        result = await self.provider.check_availability()
         if not result.get("available"):
             logger.error(f"iMessage not available: {result.get('error')}")
             return

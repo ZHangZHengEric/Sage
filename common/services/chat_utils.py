@@ -61,6 +61,11 @@ def create_model_client(client_params: Dict[str, Any]) -> Any:
         fast_api_key=fast_api_key,
         fast_base_url=fast_base_url,
         fast_model_name=fast_model_name,
+        model_capabilities={
+            key: client_params[key]
+            for key in ("supports_multimodal", "supports_structured_output")
+            if key in client_params
+        },
     )
     
     # 返回 SageAsyncOpenAI 实例

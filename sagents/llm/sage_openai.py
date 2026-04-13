@@ -5,10 +5,11 @@ SageAsyncOpenAI - 支持多模型模式的 OpenAI 客户端封装
 - model_type="standard" (默认): 使用标准模型
 - model_type="fast": 使用快速模型（如果配置了）
 """
-from typing import Optional, AsyncGenerator
+from typing import Any, AsyncGenerator, Dict, Optional
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionChunk
 from sagents.utils.logger import logger
+from sagents.llm.capabilities import sanitize_model_request_kwargs
 
 
 class SageAsyncOpenAI:
@@ -25,6 +26,9 @@ class SageAsyncOpenAI:
         self,
         standard_client: AsyncOpenAI,
         fast_client: Optional[AsyncOpenAI] = None,
+        model_capabilities: Optional[Dict[str, Any]] = None,
+        model_name: Optional[str] = None,
+        fast_model_name: Optional[str] = None,
     ):
         """
         初始化 SageAsyncOpenAI
@@ -35,13 +39,22 @@ class SageAsyncOpenAI:
         """
         self._standard = standard_client
         self._fast = fast_client
-        
-        # 绑定 model_name 到自身，保持兼容性
-        self.model_name = getattr(standard_client, 'model_name', 'unknown')
+        self.model_capabilities: Dict[str, Any] = model_capabilities or {}
+        self.model_name = model_name or getattr(standard_client, 'model_name', 'unknown')
+        self.fast_model_name = fast_model_name
         
         # 暴露 base_url 和 api_key 属性（从底层客户端获取）
         self.base_url = getattr(standard_client, '_base_url', None) or getattr(standard_client, 'base_url', None)
         self.api_key = getattr(standard_client, '_api_key', None) or getattr(standard_client, 'api_key', None)
+
+        # 常见能力位直接挂到对象上，便于调用点与日志中读取。
+        self.supports_multimodal = bool(self.model_capabilities.get("supports_multimodal", False))
+        self.supports_structured_output = bool(self.model_capabilities.get("supports_structured_output", False))
+        self.supports_image_input = bool(self.model_capabilities.get("supports_multimodal", False))
+
+    def get_model_capabilities(self) -> Dict[str, Any]:
+        """返回当前客户端绑定的模型能力报告。"""
+        return dict(self.model_capabilities)
     
     @property
     def chat(self) -> "SageChatCompletions":
@@ -89,7 +102,7 @@ class SageChatCompletions:
         # 选择客户端
         if model_type == "fast" and self._sage._fast:
             client = self._sage._fast
-            logger.debug(f"Using FAST model: {getattr(client, 'model_name', 'unknown')}")
+            logger.debug(f"Using FAST model: {self._sage.fast_model_name or 'unknown'}")
         else:
             client = self._sage._standard
             if model_type == "fast":
@@ -99,6 +112,11 @@ class SageChatCompletions:
         kwargs.pop('fast_api_key', None)
         kwargs.pop('fast_base_url', None)
         kwargs.pop('fast_model_name', None)
+        kwargs = sanitize_model_request_kwargs(
+            kwargs,
+            client=self._sage,
+            model_config=self._sage.model_capabilities,
+        )
         
         # 调用底层客户端
         return client.chat.completions.create(**kwargs)

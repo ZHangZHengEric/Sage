@@ -7,6 +7,7 @@ Note: iMessage doesn't support webhooks for incoming messages, so this is send-o
 import subprocess
 import platform
 import logging
+import asyncio
 from typing import Optional, Dict, Any
 
 from ..base import IMProviderBase
@@ -82,34 +83,36 @@ class iMessageProvider(IMProviderBase):
         logger.info(f"[iMessage] Sender '{sender}' is NOT in whitelist, ignoring message")
         return False
 
-    def _run_applescript(self, script: str) -> tuple[bool, str]:
+    async def _run_applescript(self, script: str) -> tuple[bool, str]:
         """Run AppleScript and return (success, output_or_error)."""
-        import shlex
         try:
             # Log the script for debugging (truncated if too long)
             script_preview = script[:200] + "..." if len(script) > 200 else script
             logger.debug(f"[iMessage] Executing AppleScript: {script_preview}")
-            
-            result = subprocess.run(
-                ["osascript", "-e", script],
-                capture_output=True,
-                text=True,
-                timeout=60  # Increased timeout for longer delays
+
+            proc = await asyncio.create_subprocess_exec(
+                "osascript",
+                "-e",
+                script,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+            result_stdout = stdout.decode().strip() if stdout else ""
+            result_stderr = stderr.decode().strip() if stderr else ""
+
+            logger.debug(f"[iMessage] AppleScript returncode: {proc.returncode}")
+            logger.debug(f"[iMessage] AppleScript stdout: {result_stdout}")
+            logger.debug(f"[iMessage] AppleScript stderr: {result_stderr}")
             
-            logger.debug(f"[iMessage] AppleScript returncode: {result.returncode}")
-            logger.debug(f"[iMessage] AppleScript stdout: {result.stdout.strip()}")
-            logger.debug(f"[iMessage] AppleScript stderr: {result.stderr.strip()}")
-            
-            if result.returncode == 0:
-                return True, result.stdout.strip()
+            if proc.returncode == 0:
+                return True, result_stdout
             else:
-                error_msg = result.stderr.strip()
-                # If stderr is empty but returncode is non-zero, include stdout as it might contain error
-                if not error_msg and result.stdout.strip():
-                    error_msg = result.stdout.strip()
+                error_msg = result_stderr
+                if not error_msg and result_stdout:
+                    error_msg = result_stdout
                 return False, error_msg
-        except subprocess.TimeoutExpired:
+        except asyncio.TimeoutError:
             logger.error("[iMessage] AppleScript execution timed out")
             return False, "AppleScript execution timed out"
         except Exception as e:
@@ -192,7 +195,7 @@ class iMessageProvider(IMProviderBase):
                 end if
             end tell
         '''
-        self._run_applescript(launch_script)
+        await self._run_applescript(launch_script)
         
         # Step 2: Activate Messages and wait
         activate_script = '''
@@ -201,7 +204,7 @@ class iMessageProvider(IMProviderBase):
                 delay 3
             end tell
         '''
-        activate_success, activate_output = self._run_applescript(activate_script)
+        activate_success, activate_output = await self._run_applescript(activate_script)
         if not activate_success:
             logger.warning(f"[iMessage] Failed to activate Messages app: {activate_output}")
         
@@ -218,7 +221,7 @@ class iMessageProvider(IMProviderBase):
         '''
 
         logger.info(f"[iMessage] AppleScript:\n{script}")
-        success, output = self._run_applescript(script)
+        success, output = await self._run_applescript(script)
         logger.info(f"[iMessage] AppleScript result: success={success}, output={output}")
         
         if success:
@@ -240,7 +243,7 @@ class iMessageProvider(IMProviderBase):
                     end tell
                 '''
                 logger.info(f"[iMessage] Retry AppleScript:\n{script}")
-                success, output = self._run_applescript(script)
+                success, output = await self._run_applescript(script)
                 logger.info(f"[iMessage] Retry result: success={success}, output={output}")
                 if success:
                     logger.info(f"[iMessage] Message sent successfully with original format")
@@ -256,7 +259,7 @@ class iMessageProvider(IMProviderBase):
         """iMessage doesn't support incoming webhooks, so this returns None."""
         return None
 
-    def get_chat_history(
+    async def get_chat_history(
         self,
         user_id: str,
         limit: int = 50
@@ -285,7 +288,7 @@ class iMessageProvider(IMProviderBase):
             end tell
         '''
         
-        success, output = self._run_applescript(script)
+        success, output = await self._run_applescript(script)
         
         if success:
             # Parse the AppleScript list output
@@ -294,7 +297,7 @@ class iMessageProvider(IMProviderBase):
         else:
             return {"success": False, "error": output}
 
-    def check_availability(self) -> Dict[str, Any]:
+    async def _check_availability_async(self) -> Dict[str, Any]:
         """Check if iMessage is available and configured.
         
         Returns:
@@ -306,7 +309,7 @@ class iMessageProvider(IMProviderBase):
             end tell
         '''
         
-        success, output = self._run_applescript(script)
+        success, output = await self._run_applescript(script)
         
         if success and output == "true":
             return {
@@ -320,3 +323,7 @@ class iMessageProvider(IMProviderBase):
                 "available": False,
                 "error": "iMessage is not available or not enabled"
             }
+
+    async def check_availability(self) -> Dict[str, Any]:
+        """Synchronous wrapper for startup checks."""
+        return await self._check_availability_async()

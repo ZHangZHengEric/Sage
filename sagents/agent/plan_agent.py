@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
+import os
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set, Union, cast
 
 from sagents.agent.agent_base import AgentBase
@@ -107,6 +108,8 @@ class PlanAgent(AgentBase):
                 tool_calls: Dict[str, Any] = {}
                 last_tool_call_id = ""
                 assistant_message_id = str(uuid.uuid4())
+                tool_calls_messages_id = str(uuid.uuid4())
+                content_response_message_id = str(uuid.uuid4())
                 assistant_content_parts: List[str] = []
 
                 async for llm_chunk in self._call_llm_streaming(
@@ -127,6 +130,29 @@ class PlanAgent(AgentBase):
                         for tool_call in delta.tool_calls:
                             if tool_call.id:
                                 last_tool_call_id = tool_call.id
+
+                        # 根据环境变量控制是否流式返回工具调用消息
+                        # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
+                        emit_on_complete = os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
+                        if not emit_on_complete:
+                            # 流式返回工具调用消息
+                            output_messages = [MessageChunk(
+                                role=MessageRole.ASSISTANT.value,
+                                tool_calls=delta.tool_calls,
+                                message_id=tool_calls_messages_id,
+                                message_type=MessageType.TOOL_CALL.value,
+                                agent_name=self.agent_name
+                            )]
+                            yield output_messages
+                        else:
+                            # yield 一个空的消息块以避免生成器卡住
+                            output_messages = [MessageChunk(
+                                role=MessageRole.ASSISTANT.value,
+                                content="",
+                                message_id=content_response_message_id,
+                                message_type=MessageType.EMPTY.value
+                            )]
+                            yield output_messages
 
                     if delta.content:
                         made_progress = True
@@ -375,21 +401,24 @@ class PlanAgent(AgentBase):
 
         这里直接复用 AgentBase 提供的标准工具消息生成与工具执行逻辑。
         """
-        for tool_call_id, tool_call in tool_calls.items():
+        # 处理 questionnaire 工具的特殊逻辑
+        for tool_call_id, tool_call in list(tool_calls.items()):
             if tool_call.get("function", {}).get("name") == "questionnaire":
-                tool_call = self._with_unique_questionnaire_session_id(tool_call, session_id, tool_call_id)
-                self._register_questionnaire_call(tool_call_id, tool_call)
+                updated_tool_call = self._with_unique_questionnaire_session_id(tool_call, session_id, tool_call_id)
+                self._register_questionnaire_call(tool_call_id, updated_tool_call)
+                tool_calls[tool_call_id] = updated_tool_call
 
-            tool_call_messages = self._create_tool_call_message(tool_call)
-            yield tool_call_messages
-
-            async for tool_result_messages in self._execute_tool(
-                tool_call=tool_call,
-                tool_manager=tool_manager,
-                messages_input=working_messages,
-                session_id=session_id,
-            ):
-                yield tool_result_messages
+        # 根据环境变量控制 emit_tool_call_message
+        # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
+        emit_on_complete = os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
+        async for messages, _ in self._handle_tool_calls(
+            tool_calls=tool_calls,
+            tool_manager=tool_manager,
+            messages_input=working_messages,
+            session_id=session_id,
+            emit_tool_call_message=emit_on_complete
+        ):
+            yield messages
 
     def _with_unique_questionnaire_session_id(
         self,
