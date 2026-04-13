@@ -85,4 +85,19 @@ describe('Login view', () => {
     expect(wrapper.text()).toContain('auth.welcomeBack')
     expect(wrapper.text()).not.toContain('Continue with 账号密码')
   })
+
+  it('falls back to native id when provider type is missing', async () => {
+    getSystemInfo.mockResolvedValue({
+      allow_registration: false,
+      auth_providers: [
+        { id: 'native', name: '账号密码' },
+      ],
+    })
+
+    const wrapper = await mountComponent()
+
+    expect(wrapper.find('form').exists()).toBe(true)
+    expect(wrapper.text()).toContain('auth.welcomeBack')
+    expect(wrapper.text()).not.toContain('Continue with 账号密码')
+  })
 })
