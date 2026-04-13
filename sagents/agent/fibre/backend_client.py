@@ -323,6 +323,7 @@ class FibreBackendClient:
         system_context: Optional[Dict[str, Any]] = None,
         user_id: Optional[str] = None,
         max_loop_count: Optional[int] = None,
+        interrupt_event: Any = None,
     ) -> AsyncGenerator[List[MessageChunk], None]:
         """
         流式执行 Agent 任务，解析 SSE 返回结构化数据并合并 chunks
@@ -365,6 +366,9 @@ class FibreBackendClient:
                 pending_messages: Dict[str, Dict[str, Any]] = {}
 
                 async for line in resp.content:
+                    if interrupt_event is not None and hasattr(interrupt_event, "is_set") and interrupt_event.is_set():
+                        logger.info(f"[Backend API] Stream chat interrupted for session={session_id}")
+                        break
                     line = line.decode('utf-8').strip()
                     if not line:
                         continue
@@ -421,9 +425,31 @@ class FibreBackendClient:
                         if data.get('content'):
                             pending['content'] = (pending['content'] or '') + data['content']
 
-                        # 合并 tool_calls（通常 tool_calls 是一次性的，不需要合并）
+                        # 合并 tool_calls（流式工具调用需要合并）
                         if data.get('tool_calls'):
-                            pending['tool_calls'] = data['tool_calls']
+                            if not pending.get('tool_calls'):
+                                pending['tool_calls'] = data['tool_calls']
+                            else:
+                                # 合并 tool_calls，避免覆盖已有数据
+                                existing_calls = {tc.get('id'): tc for tc in pending['tool_calls'] if tc.get('id')}
+                                for new_tc in data['tool_calls']:
+                                    tc_id = new_tc.get('id')
+                                    if tc_id and tc_id in existing_calls:
+                                        # 合并到现有的 tool_call
+                                        existing_tc = existing_calls[tc_id]
+                                        if new_tc.get('function'):
+                                            if not existing_tc.get('function'):
+                                                existing_tc['function'] = {}
+                                            # 合并 function 字段
+                                            for key, value in new_tc['function'].items():
+                                                if key == 'arguments' and existing_tc['function'].get(key):
+                                                    # 追加 arguments
+                                                    existing_tc['function'][key] += value
+                                                else:
+                                                    existing_tc['function'][key] = value
+                                    else:
+                                        # 新的 tool_call
+                                        pending['tool_calls'].append(new_tc)
 
                         # 更新其他字段
                         if data.get('type'):
@@ -442,3 +468,24 @@ class FibreBackendClient:
                 for message in pending_messages.values():
                     chunk = MessageChunk.from_dict(message)
                     yield [chunk]
+
+    async def interrupt_session(self, session_id: str, user_id: Optional[str] = None) -> bool:
+        """请求后端中断指定会话。"""
+        if not self.available:
+            return False
+
+        headers_user_id = user_id if user_id else "unknown"
+        logger.info(f"[Backend API] Interrupt session: POST {self.base_url}/api/sessions/{session_id}/interrupt")
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.base_url}/api/sessions/{session_id}/interrupt",
+                    json={"message": "用户请求中断"},
+                    headers={"X-Sage-Internal-UserId": headers_user_id},
+                    timeout=10
+                ) as resp:
+                    return resp.status == 200
+        except Exception as e:
+            logger.warning(f"Error interrupting backend session {session_id}: {e}")
+            return False

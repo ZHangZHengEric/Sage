@@ -22,6 +22,7 @@
 import os
 import re
 import shutil
+import asyncio
 from typing import Dict, List, Optional
 
 from ...interface import (
@@ -197,6 +198,43 @@ class PassthroughSandboxProvider(ISandboxHandle):
         converted_command = re.sub(path_pattern, replace_path, converted_command)
         return converted_command
 
+    def _read_file_sync(self, host_path: str, encoding: str) -> str:
+        with open(host_path, 'r', encoding=encoding) as f:
+            return f.read()
+
+    def _write_file_sync(self, host_path: str, content: str, encoding: str) -> None:
+        os.makedirs(os.path.dirname(host_path), exist_ok=True)
+        with open(host_path, 'w', encoding=encoding) as f:
+            f.write(content)
+
+    def _list_directory_sync(self, host_path: str) -> List[FileInfo]:
+        result = []
+        for entry in os.listdir(host_path):
+            entry_path = os.path.join(host_path, entry)
+            stat = os.stat(entry_path)
+            result.append(FileInfo(
+                name=entry,
+                path=os.path.join(host_path, entry),
+                is_dir=os.path.isdir(entry_path),
+                size=stat.st_size,
+                modified_time=stat.st_mtime,
+            ))
+        return result
+
+    def _delete_path_sync(self, host_path: str) -> None:
+        if os.path.exists(host_path):
+            if os.path.isdir(host_path):
+                shutil.rmtree(host_path)
+            else:
+                os.remove(host_path)
+
+    def _copy_from_host_sync(self, host_path: str, target_path: str) -> None:
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        if os.path.isdir(host_path):
+            shutil.copytree(host_path, target_path, dirs_exist_ok=True)
+        else:
+            shutil.copy2(host_path, target_path)
+
     # ... 其余方法保持不变
     async def execute_command(
         self,
@@ -323,52 +361,38 @@ class PassthroughSandboxProvider(ISandboxHandle):
     async def read_file(self, path: str, encoding: str = "utf-8") -> str:
         """读取文件"""
         host_path = self.to_host_path(path)
-        with open(host_path, 'r', encoding=encoding) as f:
-            return f.read()
+        return await asyncio.to_thread(self._read_file_sync, host_path, encoding)
 
     async def write_file(self, path: str, content: str, encoding: str = "utf-8") -> None:
         """写入文件"""
         host_path = self.to_host_path(path)
-        os.makedirs(os.path.dirname(host_path), exist_ok=True)
-        with open(host_path, 'w', encoding=encoding) as f:
-            f.write(content)
+        await asyncio.to_thread(self._write_file_sync, host_path, content, encoding)
 
     async def file_exists(self, path: str) -> bool:
         """检查文件是否存在"""
         host_path = self.to_host_path(path)
-        return os.path.exists(host_path)
+        return await asyncio.to_thread(os.path.exists, host_path)
 
     async def list_directory(self, path: str) -> List[FileInfo]:
         """列出目录内容"""
         host_path = self.to_host_path(path)
-        result = []
-        for entry in os.listdir(host_path):
-            entry_path = os.path.join(host_path, entry)
-            stat = os.stat(entry_path)
-            result.append(FileInfo(
-                name=entry,
-                path=os.path.join(path, entry),
-                is_dir=os.path.isdir(entry_path),
-                size=stat.st_size,
-                modified_time=stat.st_mtime,
-            ))
-        return result
+        return await asyncio.to_thread(self._list_directory_sync, host_path)
 
     async def ensure_directory(self, path: str) -> None:
         """确保目录存在"""
         host_path = self.to_host_path(path)
-        os.makedirs(host_path, exist_ok=True)
+        await asyncio.to_thread(os.makedirs, host_path, exist_ok=True)
 
     async def get_file_info(self, path: str) -> Optional[FileInfo]:
         """获取文件信息"""
         host_path = self.to_host_path(path)
-        if not os.path.exists(host_path):
+        if not await asyncio.to_thread(os.path.exists, host_path):
             return None
-        stat = os.stat(host_path)
+        stat = await asyncio.to_thread(os.stat, host_path)
         return FileInfo(
             name=os.path.basename(path),
             path=path,
-            is_dir=os.path.isdir(host_path),
+            is_dir=await asyncio.to_thread(os.path.isdir, host_path),
             size=stat.st_size,
             modified_time=stat.st_mtime,
         )
@@ -376,20 +400,12 @@ class PassthroughSandboxProvider(ISandboxHandle):
     async def delete_file(self, path: str) -> None:
         """删除文件"""
         host_path = self.to_host_path(path)
-        if os.path.exists(host_path):
-            if os.path.isdir(host_path):
-                shutil.rmtree(host_path)
-            else:
-                os.remove(host_path)
+        await asyncio.to_thread(self._delete_path_sync, host_path)
 
     async def copy_from_host(self, host_path: str, sandbox_path: str) -> None:
         """从宿主机复制文件到沙箱"""
         target_path = self.to_host_path(sandbox_path)
-        os.makedirs(os.path.dirname(target_path), exist_ok=True)
-        if os.path.isdir(host_path):
-            shutil.copytree(host_path, target_path, dirs_exist_ok=True)
-        else:
-            shutil.copy2(host_path, target_path)
+        await asyncio.to_thread(self._copy_from_host_sync, host_path, target_path)
 
     async def execute_python(self, code: str, timeout: Optional[int] = None) -> ExecutionResult:
         """执行 Python 代码"""
@@ -504,9 +520,9 @@ class PassthroughSandboxProvider(ISandboxHandle):
         fs = SandboxFileSystem(volume_mounts=[
             VolumeMount(self._sandbox_agent_workspace, self._sandbox_agent_workspace)
         ])
-        return fs.get_file_tree(
+        return await fs.get_file_tree_compact(
             include_hidden=include_hidden,
             root_path=target_path,
             max_depth=max_depth,
-            max_items_per_dir=max_items_per_dir
+            max_items_per_dir=max_items_per_dir,
         )

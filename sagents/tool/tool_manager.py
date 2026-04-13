@@ -230,7 +230,7 @@ def _resolve_session_context(session_id: str) -> Optional[SessionContext]:
         manager = get_global_session_manager()
         if not manager:
             return None
-        session = manager.get(session_id)
+        session = manager.get_live_session(session_id)
         if session:
             return session.session_context
     except Exception as e:

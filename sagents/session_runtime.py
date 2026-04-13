@@ -75,6 +75,13 @@ class Session:
         self.enable_obs = enable_obs
         self.sandbox_type = sandbox_type
         self.session_context: Optional[SessionContext] = None
+        self.session_workspace: Optional[str] = None
+        self.status: SessionStatus = SessionStatus.IDLE
+        self.interrupt_reason: Optional[str] = None
+        self.interrupt_event = asyncio.Event()
+        self.child_session_ids: List[str] = []
+        self.start_time: Optional[float] = None
+        self.end_time: Optional[float] = None
         self._agents: Dict[str, AgentBase] = {}
         self.model: Any = None
         self.model_config: Dict[str, Any] = {}
@@ -86,6 +93,8 @@ class Session:
         self.sandbox_id: Optional[str] = None  # 远程沙箱 ID
         self.observability_manager: Optional[ObservabilityManager] = None
         self._runtime_signature: Optional[tuple] = None
+        self._persisted_snapshot: Optional[Dict[str, Any]] = None
+        self._persisted_messages: Optional[List[MessageChunk]] = None
         self._agent_registry: Dict[str, Type[AgentBase]] = {
             "simple": SimpleAgent,
             "task_analysis": TaskAnalysisAgent,
@@ -104,6 +113,230 @@ class Session:
             "plan": PlanAgent,
             "self_check": SelfCheckAgent,
         }
+
+    def has_context(self) -> bool:
+        return self.session_context is not None
+
+    def set_context(self, session_context: SessionContext) -> None:
+        self.session_context = session_context
+        self.session_workspace = getattr(session_context, "session_workspace", self.session_workspace)
+        session_context.start_time = self.start_time
+        session_context.end_time = self.end_time
+        session_context.child_session_ids = list(self.child_session_ids)
+        if hasattr(session_context, "audit_status"):
+            session_context.audit_status["interrupt_reason"] = self.interrupt_reason
+
+    def clear_context(self) -> None:
+        self.session_context = None
+
+    def set_workspace(self, session_workspace: Optional[str]) -> None:
+        if session_workspace:
+            self.session_workspace = str(session_workspace)
+
+    def get_context(self) -> Optional[SessionContext]:
+        return self.session_context
+
+    def set_status(self, status: SessionStatus, cascade: bool = True) -> None:
+        old_status = self.status
+        self.status = status
+        if status == SessionStatus.INTERRUPTED:
+            self.interrupt_event.set()
+        if self.session_context:
+            self.session_context.end_time = time.time() if status in {SessionStatus.COMPLETED, SessionStatus.ERROR, SessionStatus.INTERRUPTED} else self.session_context.end_time
+        if status in {SessionStatus.COMPLETED, SessionStatus.ERROR, SessionStatus.INTERRUPTED}:
+            self.end_time = time.time()
+        logger.debug(f"SessionRuntime: Session {self.session_id} status changed from {old_status.value} to {status.value}")
+
+        if cascade and status in {SessionStatus.INTERRUPTED, SessionStatus.ERROR} and self.child_session_ids:
+            try:
+                manager = get_global_session_manager()
+            except Exception:
+                manager = None
+            if manager:
+                for child_session_id in list(self.child_session_ids):
+                    try:
+                        child_session = manager.get_live_session(child_session_id) or manager.get(child_session_id)
+                        if child_session:
+                            child_session.set_status(status, cascade=False)
+                    except Exception as exc:
+                        logger.warning(
+                            f"SessionRuntime: cascade {status.value} to child session {child_session_id} failed: {exc}"
+                        )
+
+    def request_interrupt(self, message: str = "用户请求中断", cascade: bool = True) -> bool:
+        self.interrupt_reason = message
+        if self.session_context:
+            self.session_context.audit_status["interrupt_reason"] = message
+        self.interrupt_event.set()
+        self.set_status(SessionStatus.INTERRUPTED, cascade=cascade)
+        return True
+
+    def should_interrupt(self) -> bool:
+        if self.interrupt_event.is_set():
+            return True
+        return self.status == SessionStatus.INTERRUPTED
+
+    def add_child_session(self, child_session_id: str) -> None:
+        if child_session_id not in self.child_session_ids:
+            self.child_session_ids.append(child_session_id)
+        if self.session_context and child_session_id not in self.session_context.child_session_ids:
+            self.session_context.child_session_ids.append(child_session_id)
+
+    def remove_child_session(self, child_session_id: str) -> None:
+        if child_session_id in self.child_session_ids:
+            self.child_session_ids.remove(child_session_id)
+        if self.session_context and child_session_id in self.session_context.child_session_ids:
+            self.session_context.child_session_ids.remove(child_session_id)
+
+    def _load_persisted_snapshot(self) -> Optional[Dict[str, Any]]:
+        if self._persisted_snapshot is not None:
+            return self._persisted_snapshot
+        if not self.session_workspace:
+            return None
+
+        context_path = os.path.join(self.session_workspace, "session_context.json")
+        if not os.path.exists(context_path):
+            return None
+
+        try:
+            with open(context_path, "r", encoding="utf-8") as f:
+                snapshot = json.load(f)
+            if isinstance(snapshot, dict):
+                self._persisted_snapshot = snapshot
+                return snapshot
+        except Exception as exc:
+            logger.debug(f"SessionRuntime: 读取 session {self.session_id} 快照失败: {exc}")
+        return None
+
+    def _load_persisted_messages(self) -> List[MessageChunk]:
+        if self._persisted_messages is not None:
+            return self._persisted_messages
+        if not self.session_workspace:
+            return []
+
+        messages_path = os.path.join(self.session_workspace, "messages.json")
+        if not os.path.exists(messages_path):
+            self._persisted_messages = []
+            return self._persisted_messages
+
+        try:
+            with open(messages_path, "r", encoding="utf-8") as f:
+                raw_messages = json.load(f)
+            if isinstance(raw_messages, list):
+                self._persisted_messages = [
+                    MessageChunk.from_dict(msg)
+                    for msg in raw_messages
+                    if isinstance(msg, dict)
+                ]
+            else:
+                self._persisted_messages = []
+        except Exception as exc:
+            logger.debug(f"SessionRuntime: 读取 session {self.session_id} messages 失败: {exc}")
+            self._persisted_messages = []
+        return self._persisted_messages
+
+    def load_persisted_state(self, session_workspace: Optional[str] = None) -> bool:
+        if session_workspace:
+            self.set_workspace(session_workspace)
+        snapshot = self._load_persisted_snapshot()
+        if snapshot is None and not self.session_workspace:
+            return False
+
+        if self.session_workspace:
+            self._persisted_messages = self._load_persisted_messages()
+
+        if snapshot is not None and self.session_context is None:
+            try:
+                agent_config = snapshot.get("agent_config") or {}
+                system_context = snapshot.get("system_context") or {}
+                self.session_context = SessionContext(
+                    session_id=str(snapshot.get("session_id") or self.session_id),
+                    user_id=str(snapshot.get("user_id") or ""),
+                    agent_id=str(agent_config.get("agent_id") or ""),
+                    session_root_space=str(snapshot.get("session_root_space") or self.session_space),
+                    sandbox_agent_workspace=snapshot.get("sandbox_agent_workspace"),
+                    volume_mounts=None,
+                    sandbox_id=None,
+                    context_budget_config=None,
+                    system_context=system_context if isinstance(system_context, dict) else {},
+                    tool_manager=None,
+                    skill_manager=None,
+                    parent_session_id=snapshot.get("parent_session_id"),
+                )
+                self.session_context.session_workspace = snapshot.get("session_workspace") or self.session_workspace
+                self.status = SessionStatus(str(snapshot.get("status") or SessionStatus.IDLE.value))
+                self.start_time = float(snapshot.get("created_at") or self.session_context.start_time)
+                self.end_time = snapshot.get("updated_at")
+                self.session_context.start_time = self.start_time
+                self.session_context.end_time = self.end_time
+                self.session_context.child_session_ids = list(snapshot.get("child_session_ids") or [])
+                self.child_session_ids = list(self.session_context.child_session_ids)
+                self.session_context.audit_status = snapshot.get("audit_status") or {}
+                if isinstance(agent_config, dict):
+                    self.session_context.agent_config = agent_config
+                self.session_context.message_manager.messages = self._load_persisted_messages()
+                if self.status == SessionStatus.INTERRUPTED:
+                    self.interrupt_event.set()
+            except Exception as exc:
+                logger.warning(f"SessionRuntime: 恢复 session {self.session_id} 快照失败: {exc}")
+                return False
+
+        return snapshot is not None or bool(self._persisted_messages)
+
+    def get_status(self) -> SessionStatus:
+        if self.status == SessionStatus.IDLE:
+            snapshot = self._load_persisted_snapshot()
+            if snapshot and snapshot.get("status"):
+                try:
+                    self.status = SessionStatus(str(snapshot.get("status")))
+                except Exception:
+                    self.status = SessionStatus.IDLE
+        return self.status
+
+    def is_interrupted(self) -> bool:
+        return self.get_status() == SessionStatus.INTERRUPTED
+
+    def get_start_time(self) -> Optional[float]:
+        if self.session_context:
+            self.start_time = self.session_context.start_time
+            return self.start_time
+        if self.start_time is None:
+            snapshot = self._load_persisted_snapshot()
+            if snapshot is not None:
+                created_at = snapshot.get("created_at")
+                self.start_time = float(created_at) if created_at is not None else None
+        return self.start_time
+
+    def get_messages(self) -> List[MessageChunk]:
+        if not self.session_context:
+            return list(self._load_persisted_messages())
+        return self.session_context.get_messages()
+
+    def get_tasks_status(self) -> Dict[str, Any]:
+        if not self.session_context or not self.session_context.task_manager:
+            snapshot = self._load_persisted_snapshot()
+            if snapshot is not None:
+                return snapshot.get("tasks_status") or {"tasks": []}
+            return {"tasks": []}
+        try:
+            return self.session_context.task_manager.to_dict()
+        except Exception as exc:
+            logger.warning(f"SessionRuntime: 获取 session {self.session_id} 任务状态失败: {exc}")
+            return {"tasks": []}
+
+    def request_interrupt(self, message: str = "用户请求中断", cascade: bool = True) -> bool:
+        if not self.session_context:
+            return False
+        try:
+            self.interrupt_reason = message
+            if self.session_context:
+                self.session_context.audit_status["interrupt_reason"] = message
+            self.interrupt_event.set()
+            self.set_status(SessionStatus.INTERRUPTED, cascade=cascade)
+            return True
+        except Exception as exc:
+            logger.warning(f"SessionRuntime: 中断 session {self.session_id} 失败: {exc}")
+            return False
 
     def configure_runtime(
         self,
@@ -213,6 +446,11 @@ class Session:
                 logger.debug(f"SAgent: 更新了 system_context 参数 keys: {list(system_context.keys())}")
             if parent_session_id and not self.session_context.parent_session_id:
                 self.session_context.parent_session_id = parent_session_id
+            if getattr(self.session_context, "sandbox", None) is None:
+                logger.warning(
+                    f"SessionRuntime: session_context for {session_id} has no sandbox, reinitializing"
+                )
+                await self.session_context.init_more(self.session_context._session_root_space)
             return self.session_context
 
         # saved_system_context = self._load_saved_system_context(session_id)
@@ -338,7 +576,7 @@ class Session:
                 max_loop_count=max_loop_count,
             )
 
-            session_context.set_status(SessionStatus.RUNNING)
+            self.set_status(SessionStatus.RUNNING)
 
             merge_before_num = len(session_context.message_manager.messages)
             all_message_ids = [m.message_id for m in session_context.message_manager.messages]
@@ -405,13 +643,13 @@ class Session:
             tool_manager = session_context.tool_manager
             
             # 3. 执行 Flow
-            executor = FlowExecutor(session_context, tool_manager, self, session_id)
+            executor = FlowExecutor(tool_manager, self, session_id, session_manager=get_global_session_manager())
             async for message_chunks in executor.execute(flow.root):
                 yield message_chunks
 
             # --- 会话结束处理 (原 run_stream 尾部逻辑) ---
-            if session_context.status != SessionStatus.INTERRUPTED:
-                session_context.set_status(SessionStatus.COMPLETED)
+            if self.get_status() != SessionStatus.INTERRUPTED:
+                self.set_status(SessionStatus.COMPLETED, cascade=False)
             else:
                 logger.warning(f"SAgent: 会话被中断，会话ID: {session_id}")
 
@@ -477,7 +715,7 @@ class Session:
                 self.observability_manager.on_chain_error(e, session_id=session_id)
             session_context = self.session_context
             if session_context:
-                session_context.set_status(SessionStatus.ERROR)
+                self.set_status(SessionStatus.ERROR)
                 async for chunk in self._handle_workflow_error(e):
                     session_context.add_messages(chunk)
                     yield chunk
@@ -530,7 +768,11 @@ class Session:
             if session_context:
                 try:
                     logger.debug("SAgent: 会话状态保存")
-                    session_context.save()
+                    session_context.save(
+                        session_status=self.status,
+                        child_session_ids=list(self.child_session_ids),
+                        interrupt_reason=self.interrupt_reason,
+                    )
                 except Exception as e:
                     logger.error(f"SAgent: 会话状态保存时出错: {e}")
             await self._cleanup_session_resources(session_id)
@@ -538,21 +780,30 @@ class Session:
 
     async def _execute_agent_phase(
         self,
-        session_context: SessionContext,
+        session_id: str,
         agent: AgentBase,
         phase_name: str,
         override_config: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[List[MessageChunk], None]:
-        session_id = session_context.session_id
+        session_manager = get_global_session_manager()
+        if not session_manager:
+            raise RuntimeError(f"SAgent: session_manager 未初始化，session_id={session_id}")
+        session = session_manager.get_live_session(session_id)
+        if session is None:
+            raise RuntimeError(f"SAgent: session 未绑定，session_id={session_id}")
+        session_context = session.get_context()
+        if session_context is None:
+            raise RuntimeError(f"SAgent: session_context 未绑定，session_id={session_id}")
+
         logger.info(f"SAgent: 使用 {agent.agent_description} 智能体，{phase_name}阶段")
         # 检查中断
-        if session_context.status == SessionStatus.INTERRUPTED:
+        if session.should_interrupt():
             logger.info(f"SAgent: {phase_name} 阶段被中断，会话ID: {session_id}")
             return
 
         async for chunk in agent.run_stream(session_context):
             # 在每个块之间检查中断
-            if session_context.status == SessionStatus.INTERRUPTED:
+            if session.should_interrupt():
                 logger.info(f"SAgent: {phase_name} 阶段在块处理中被中断，会话ID: {session_id}")
                 return
             yield chunk
@@ -566,7 +817,7 @@ class Session:
         return [MessageChunk.from_dict(msg) if isinstance(msg, dict) else msg for msg in input_messages]
 
     def close(self):
-        self.session_context = None
+        self.clear_context()
 
     async def _emit_token_usage_if_any(self, session_context: SessionContext, session_id: str) -> list[MessageChunk]:
         """
@@ -734,7 +985,7 @@ class SessionManager:
 
     def get(self, session_id: str) -> Optional[Session]:
         """
-        获取 Session（运行中的根会话和子会话都优先从内存获取）
+        获取 Session。优先返回内存中的活对象；如果不存在，则尝试从磁盘恢复。
         
         Args:
             session_id: 会话 ID
@@ -742,18 +993,41 @@ class SessionManager:
         Returns:
             Session 实例，找不到则返回 None
         """
+        session = self._sessions.get(session_id)
+        if session:
+            return session
+
+        workspace = self.get_session_workspace(session_id)
+        if not workspace:
+            return None
+
+        session = self.get_or_create(session_id)
+        session.set_workspace(workspace)
+        loaded = session.load_persisted_state(workspace)
+        if not loaded and not session.has_context() and not session.get_messages():
+            self._sessions.pop(session_id, None)
+            return None
+        return session
+
+    def get_live_session(self, session_id: str) -> Optional[Session]:
+        """仅获取内存中的活 session，不做磁盘恢复。"""
         return self._sessions.get(session_id)
+
+    def _get_live_session(self, session_id: str) -> Optional[Session]:
+        """兼容旧内部调用，优先使用 get_live_session。"""
+        return self.get_live_session(session_id)
 
     def register_session_context(self, session_id: str, session_context: SessionContext):
         """注册 SessionContext"""
         session = self.get_or_create(session_id)
-        session.session_context = session_context
+        session.set_context(session_context)
+        session.set_workspace(getattr(session_context, "session_workspace", None))
 
     def remove_session_context(self, session_id: str):
         """移除 SessionContext"""
-        session = self.get(session_id)
+        session = self.get_live_session(session_id)
         if session:
-            session.session_context = None
+            session.clear_context()
 
     def close_session(self, session_id: str):
         """关闭 Session"""
@@ -765,11 +1039,23 @@ class SessionManager:
                 logger.warning(f"清理session {session_id} 日志资源时出错: {e}")
             session.close()
 
+    def interrupt_session(self, session_id: str, message: str = "用户请求中断") -> bool:
+        """请求中断指定会话，并级联到已登记的子会话。"""
+        session = self.get_live_session(session_id)
+        if not session:
+            return False
+
+        try:
+            return session.request_interrupt(message)
+        except Exception as e:
+            logger.warning(f"SessionManager: 中断会话 {session_id} 失败: {e}")
+            return False
+
     def get_session_status(self, session_id: str) -> Optional[Dict[str, Any]]:
         """获取 Session 状态"""
         session = self.get(session_id)
-        if session and session.session_context:
-            return {"status": session.session_context.status}
+        if session:
+            return {"status": session.get_status().value}
         return None
 
     def list_active_sessions(self) -> List[Dict[str, Any]]:
@@ -777,11 +1063,11 @@ class SessionManager:
         return [
             {
                 "session_id": sid,
-                "status": sess.session_context.status.value if sess.session_context else SessionStatus.IDLE.value,
-                "start_time": sess.session_context.start_time if sess.session_context else None,
+                "status": sess.get_status().value,
+                "start_time": sess.get_start_time(),
             }
             for sid, sess in self._sessions.items()
-            if sess.session_context and not self._is_sub_session(sid)
+            if sess.has_context() and not self._is_sub_session(sid)
         ]
 
     def get_session_messages(self, session_id: str) -> List[MessageChunk]:
@@ -793,8 +1079,8 @@ class SessionManager:
         """
         # 1. 尝试从内存获取（只有根会话会保留在内存中）
         session = self.get(session_id)
-        if session and session.session_context:
-            return session.session_context.get_messages()
+        if session:
+            return session.get_messages()
 
         # 2. 尝试从磁盘获取（支持子会话按需加载）
         session_workspace_path = self.get_session_workspace(session_id)
@@ -832,6 +1118,27 @@ class SessionManager:
             elif isinstance(msg, MessageChunk):
                 messages.append(msg)
         return messages
+
+    def get_tasks_status(self, session_id: str) -> Optional[Dict[str, Any]]:
+        session = self.get(session_id)
+        if not session:
+            return None
+        return session.get_tasks_status()
+
+    def save_session(self, session_id: str) -> bool:
+        session = self.get(session_id)
+        if not session or not session.has_context():
+            return False
+        try:
+            session.get_context().save(
+                session_status=session.get_status(),
+                child_session_ids=list(session.child_session_ids),
+                interrupt_reason=session.interrupt_reason,
+            )
+            return True
+        except Exception as exc:
+            logger.warning(f"SessionManager: 保存会话 {session_id} 失败: {exc}")
+            return False
 
 
 def build_conversation_messages_view(session_id: str) -> Dict[str, Any]:

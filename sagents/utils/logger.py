@@ -300,7 +300,7 @@ class Logger:
                 # 获取session workspace路径
                 from sagents.session_runtime import get_global_session_manager
                 session_manager = get_global_session_manager()
-                session = session_manager.get(session_id)
+                session = session_manager.get_live_session(session_id) if session_manager else None
                 if session and session.session_context:
                     # 检查 session_workspace 属性是否存在（init_more 完成后才有）
                     if hasattr(session.session_context, 'session_workspace'):

@@ -15,13 +15,13 @@ class ConditionRegistry:
         return decorator
 
     @classmethod
-    def check(cls, name: str, context: Any) -> bool:
+    def check(cls, name: str, context: Any, session: Any = None) -> bool:
         """检查条件是否满足"""
         if name not in cls._registry:
             logger.warning(f"ConditionRegistry: Condition '{name}' not found, defaulting to False")
             return False
         try:
-            return cls._registry[name](context)
+            return cls._registry[name](context, session=session)
         except Exception as e:
             logger.error(f"ConditionRegistry: Error checking condition '{name}': {e}")
             return False
@@ -33,38 +33,38 @@ class ConditionRegistry:
 # --- 预置条件 ---
 
 @ConditionRegistry.register("is_deep_thinking")
-def check_deep_thinking(session_context) -> bool:
+def check_deep_thinking(session_context, session=None) -> bool:
     """检查是否启用了深度思考模式"""
     return session_context.audit_status.get("deep_thinking", False)
 
 @ConditionRegistry.register("enable_more_suggest")
-def check_more_suggest(session_context) -> bool:
+def check_more_suggest(session_context, session=None) -> bool:
     """检查是否启用了更多建议"""
     # 这个状态通常存在 audit_status 或者 system_context 中，这里假设在 audit_status
     # 如果没有，可能需要在 SessionContext 中维护
     return session_context.audit_status.get("more_suggest", False)
 
 @ConditionRegistry.register("enable_plan")
-def check_enable_plan(session_context) -> bool:
+def check_enable_plan(session_context, session=None) -> bool:
     """检查是否启用了规划阶段"""
     return session_context.audit_status.get("enable_plan", False)
 
 @ConditionRegistry.register("plan_should_start_execution")
-def check_plan_should_start_execution(session_context) -> bool:
+def check_plan_should_start_execution(session_context, session=None) -> bool:
     """检查规划阶段是否已经决定进入正式执行"""
     return session_context.audit_status.get("plan_status") == "start_execution"
 
 @ConditionRegistry.register("self_check_should_retry")
-def check_self_check_should_retry(session_context) -> bool:
+def check_self_check_should_retry(session_context, session=None) -> bool:
     """检查是否需要继续执行并重新通过自检。"""
     from sagents.context.session_context import SessionStatus
 
-    if session_context.status == SessionStatus.INTERRUPTED:
+    if session and session.get_status() == SessionStatus.INTERRUPTED:
         return False
     return session_context.audit_status.get("self_check_passed") is not True
 
 @ConditionRegistry.register("need_summary")
-def check_need_summary(session_context) -> bool:
+def check_need_summary(session_context, session=None) -> bool:
     """检查是否需要总结（例如最后一条消息是工具调用）"""
     from sagents.context.messages.message import MessageChunk, MessageRole
     if not session_context.message_manager.messages:
@@ -78,12 +78,22 @@ def check_need_summary(session_context) -> bool:
     return force_summary or last_msg_role == MessageRole.TOOL.value
 
 @ConditionRegistry.register("task_not_completed")
-def check_task_not_completed(session_context) -> bool:
+def check_task_not_completed(session_context, session=None) -> bool:
     """检查多智能体任务是否尚未全部完成"""
     from sagents.context.session_context import SessionStatus
     
-    # 1. 检查是否被中断
-    if session_context.status == SessionStatus.INTERRUPTED:
+    # 1. 检查是否已进入终态
+    if session:
+        session_status = session.get_status()
+        if session_status in {
+            SessionStatus.INTERRUPTED,
+            SessionStatus.COMPLETED,
+            SessionStatus.ERROR,
+        }:
+            return False
+
+    # 2. 检查是否被中断
+    if session and session.get_status() == SessionStatus.INTERRUPTED:
         return False
 
     # 如果自检失败，必须继续循环修复，不能被旧的 completion_status 短路。
@@ -91,18 +101,18 @@ def check_task_not_completed(session_context) -> bool:
         logger.info("SAgent: 检测到 self_check 失败，继续循环修复")
         return True
         
-    # 2. 检查审计状态中的完成标志
+    # 3. 检查审计状态中的完成标志
     if session_context.audit_status.get("task_completed", False):
         logger.info(f"SAgent: 检测到 task_completed 标志，任务结束")
         return False
         
-    # 3. 检查 completion_status
+    # 4. 检查 completion_status
     status = session_context.audit_status.get("completion_status")
     if status in ["completed", "need_user_input", "failed"]:
         logger.info(f"SAgent: 检测到 completion_status={status}，任务结束")
         return False
         
-    # 4. 检查待办任务列表 (如果存在)
+    # 5. 检查待办任务列表 (如果存在)
     # 尝试从 system_context 获取 todo_list
     todo_list = session_context.system_context.get("todo_list", [])
     if todo_list:

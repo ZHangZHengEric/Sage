@@ -145,9 +145,6 @@ class Sandbox:
         if self.sandbox_dir:
             os.makedirs(self.sandbox_dir, exist_ok=True)
 
-        # 在后台异步创建 venv
-        self._ensure_venv_async()
-
         # 初始化隔离
         self._init_isolation()
 

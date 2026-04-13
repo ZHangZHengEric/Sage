@@ -259,11 +259,7 @@ class TaskService:
         user_id: str = "",
         limit: int = 100,
     ) -> List[Task]:
-        start_time = time.perf_counter()
-        logger.info(f"[TaskService] get_due_pending_tasks START | user_id={user_id} | limit={limit}")
         items = await self.dao.get_due_pending_tasks(user_id=user_id or None, limit=limit)
-        elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] get_due_pending_tasks SUCCESS | count={len(items)} | time={elapsed:.3f}s")
         return items
 
     async def claim_one_time_task(self, task_id: int, *, user_id: str = "") -> bool:
@@ -339,25 +335,13 @@ class TaskService:
         *,
         user_id: str = "",
     ) -> List[Task]:
-        start_time = time.perf_counter()
-        logger.info(f"[TaskService] spawn_due_recurring_tasks START | user_id={user_id}")
-        
         if croniter is None:
             logger.warning(f"[TaskService] spawn_due_recurring_tasks SKIPPED | croniter not available")
             return []
 
         now = get_local_now()
         spawned: List[Task] = []
-        logger.info(f"[TaskService] spawn_due_recurring_tasks | loading enabled recurring tasks")
         recurring_tasks = await self.dao.get_enabled_recurring_tasks(user_id=user_id or None)
-        logger.info(
-            f"[TaskService] spawn_due_recurring_tasks | loaded enabled recurring tasks count={len(recurring_tasks)}"
-        )
-        if recurring_tasks:
-            logger.info(
-                f"[TaskService] spawn_due_recurring_tasks | checking recurring tasks count={len(recurring_tasks)} "
-                f"user_id={user_id or ''} now={now}"
-            )
 
         for recurring_task in recurring_tasks:
             try:
@@ -392,20 +376,12 @@ class TaskService:
                     missed_task.status = "cancelled"
                     missed_task.updated_at = now
                     await self.dao.save(missed_task)
-                    logger.info(
-                        f"[TaskService] spawn_due_recurring_tasks | cancelled missed recurring instance "
-                        f"recurring_task_id={recurring_task.id} task_id={missed_task.id} execute_at={missed_task.execute_at}"
-                    )
 
                 active_instances = [
                     task for task in active_instances
                     if not (task.status == "pending" and task.execute_at < next_run)
                 ]
                 if active_instances:
-                    logger.info(
-                        f"[TaskService] spawn_due_recurring_tasks | skip spawning recurring task because active future instance exists "
-                        f"recurring_task_id={recurring_task.id} next_run={next_run}"
-                    )
                     continue
 
                 claimed = await self.dao.advance_recurring_task_cursor(
@@ -415,10 +391,6 @@ class TaskService:
                     user_id=recurring_task.user_id or None,
                 )
                 if not claimed:
-                    logger.info(
-                        f"[TaskService] spawn_due_recurring_tasks | recurring task already claimed by another scheduler "
-                        f"recurring_task_id={recurring_task.id}"
-                    )
                     continue
 
                 task = Task(
@@ -433,18 +405,8 @@ class TaskService:
                 )
                 await self.dao.create_one_time_task(task)
                 spawned.append(task)
-                logger.info(
-                    f"[TaskService] spawn_due_recurring_tasks | spawned recurring one-time task "
-                    f"recurring_task_id={recurring_task.id} "
-                    f"task_id={task.id} "
-                    f"user_id={recurring_task.user_id} "
-                    f"execute_at={task.execute_at}"
-                )
             except Exception:
                 continue
-        
-        elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] spawn_due_recurring_tasks SUCCESS | spawned_count={len(spawned)} | time={elapsed:.3f}s")
         return spawned
 
 

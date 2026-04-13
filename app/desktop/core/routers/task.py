@@ -195,12 +195,8 @@ async def get_one_time_task_history(
 
 @task_router.post("/internal/spawn-due")
 async def spawn_due_recurring_tasks(request: Request):
-    start_time = time.perf_counter()
     user_id = _get_scheduler_scope_user_id(request)
-    logger.info(f"[TaskRouter] spawn_due_recurring_tasks START | user_id={user_id}")
     items = await task_service.spawn_due_recurring_tasks(user_id=user_id)
-    elapsed = time.perf_counter() - start_time
-    logger.info(f"[TaskRouter] spawn_due_recurring_tasks SUCCESS | spawned_count={len(items)} | time={elapsed:.3f}s")
     return {"items": _serialize_task_items(items)}
 
 @task_router.get("/internal/due")
@@ -208,12 +204,8 @@ async def get_due_pending_tasks(
     request: Request,
     limit: int = Query(100, ge=1, le=500)
 ):
-    start_time = time.perf_counter()
     user_id = _get_scheduler_scope_user_id(request)
-    logger.info(f"[TaskRouter] get_due_pending_tasks START | limit={limit} | user_id={user_id}")
     items = await task_service.get_due_pending_tasks(user_id=user_id, limit=limit)
-    elapsed = time.perf_counter() - start_time
-    logger.info(f"[TaskRouter] get_due_pending_tasks SUCCESS | count={len(items)} | time={elapsed:.3f}s")
     return {"items": _serialize_task_items(items)}
 
 @task_router.post("/internal/one-time/{task_id}/claim")

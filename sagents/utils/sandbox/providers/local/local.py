@@ -22,6 +22,7 @@ import os
 import re
 import shutil
 import sys
+import asyncio
 from typing import Dict, List, Optional
 
 from ...interface import (
@@ -75,7 +76,7 @@ class LocalSandboxProvider(ISandboxHandle):
         # venv 目录
         self._venv_dir = None
 
-    def _ensure_initialized(self):
+    async def _ensure_initialized(self):
         """确保沙箱已初始化"""
         if self._file_system is None:
             from .filesystem import SandboxFileSystem
@@ -106,8 +107,9 @@ class LocalSandboxProvider(ISandboxHandle):
             if self._linux_isolation_mode != "subprocess" or self._macos_isolation_mode != "subprocess":
                 self._init_isolation()
 
-            # 确保 venv 存在（同步初始化）
-            self._ensure_venv()
+    async def _ensure_initialized_async(self):
+        """异步确保沙箱已初始化，避免阻塞事件循环。"""
+        await self._ensure_initialized()
 
     def _init_isolation(self):
         """初始化隔离层"""
@@ -192,10 +194,12 @@ class LocalSandboxProvider(ISandboxHandle):
             except Exception as e:
                 logger.warning(f"[LocalSandboxProvider] 创建 python 符号链接失败: {e}")
 
-    def _ensure_venv(self):
+    async def _ensure_venv(self):
         """确保 venv 存在"""
         if not self._venv_dir:
             raise RuntimeError("venv 目录未初始化")
+        if os.path.exists(self._venv_dir):
+            return
 
         lock_path = os.path.join(os.path.dirname(self._venv_dir), ".venv.lock")
         with file_lock(lock_path):
@@ -213,10 +217,11 @@ class LocalSandboxProvider(ISandboxHandle):
 
             # 使用 subprocess 调用 python -m venv 创建虚拟环境
             logger.info(f"[LocalSandboxProvider] 创建虚拟环境: {self._venv_dir} 使用 Python: {system_python}")
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 [system_python, "-m", "venv", self._venv_dir],
                 capture_output=True,
-                text=True
+                text=True,
             )
             if result.returncode != 0:
                 raise RuntimeError(f"创建虚拟环境失败: {result.stderr}")
@@ -228,9 +233,9 @@ class LocalSandboxProvider(ISandboxHandle):
             self._ensure_python_executable()
 
             # 尝试在 venv 内预装 uv（失败不阻塞）
-            self._ensure_uv_in_venv()
+            await self._ensure_uv_in_venv()
 
-    def _ensure_uv_in_venv(self):
+    async def _ensure_uv_in_venv(self):
         """在 venv 中安装 uv，便于后续按需使用。"""
         import subprocess
 
@@ -244,14 +249,18 @@ class LocalSandboxProvider(ISandboxHandle):
             "--index-url", "https://mirrors.aliyun.com/pypi/simple/",
             "--trusted-host", "mirrors.aliyun.com",
         ]
-        result = subprocess.run(install_cmd, capture_output=True, text=True, timeout=180)
+        result = await asyncio.to_thread(
+            subprocess.run, install_cmd, capture_output=True, text=True, timeout=180
+        )
         if result.returncode == 0:
             logger.info("[LocalSandboxProvider] uv 已安装到 venv")
             return
 
         # 镜像失败时回退到默认源
         fallback_cmd = [venv_python, "-m", "pip", "install", "-U", "uv"]
-        fallback_result = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=180)
+        fallback_result = await asyncio.to_thread(
+            subprocess.run, fallback_cmd, capture_output=True, text=True, timeout=180
+        )
         if fallback_result.returncode == 0:
             logger.info("[LocalSandboxProvider] uv 已安装到 venv（默认源）")
         else:
@@ -281,7 +290,6 @@ class LocalSandboxProvider(ISandboxHandle):
 
     def add_mount(self, host_path: str, sandbox_path: str) -> None:
         """动态添加路径映射"""
-        self._ensure_initialized()
         if self._file_system:
             self._file_system.add_mapping(sandbox_path, host_path)
 
@@ -292,8 +300,7 @@ class LocalSandboxProvider(ISandboxHandle):
 
     async def initialize(self) -> None:
         """初始化本地沙箱"""
-        self._ensure_initialized()
-        self._ensure_venv()
+        await self._ensure_initialized_async()
 
     async def cleanup(self) -> None:
         """清理本地沙箱资源"""
@@ -327,7 +334,6 @@ class LocalSandboxProvider(ISandboxHandle):
 
     def to_host_path(self, virtual_path: str) -> str:
         """虚拟路径转宿主机路径"""
-        self._ensure_initialized()
         if self._file_system:
             host_path = self._file_system.to_host_path(virtual_path)
             if host_path != virtual_path:
@@ -337,7 +343,6 @@ class LocalSandboxProvider(ISandboxHandle):
 
     def to_virtual_path(self, host_path: str) -> str:
         """宿主机路径转虚拟路径"""
-        self._ensure_initialized()
         if self._file_system:
             return self._file_system.to_virtual_path(host_path)
         return host_path
@@ -384,6 +389,44 @@ class LocalSandboxProvider(ISandboxHandle):
         converted_command = re.sub(path_pattern, replace_path, converted_command)
         return converted_command
 
+    def _read_file_sync(self, actual_path: str, encoding: str) -> str:
+        with open(actual_path, "r", encoding=encoding) as f:
+            return f.read()
+
+    def _write_file_sync(self, actual_path: str, content: str, encoding: str, mode: str) -> None:
+        os.makedirs(os.path.dirname(actual_path), exist_ok=True)
+        write_mode = "a" if mode == "append" else "w"
+        with open(actual_path, write_mode, encoding=encoding) as f:
+            f.write(content)
+
+    def _list_directory_sync(self, actual_path: str, include_hidden: bool) -> List[FileInfo]:
+        if not os.path.isdir(actual_path):
+            return []
+
+        result = []
+        for entry in os.scandir(actual_path):
+            if not include_hidden and entry.name.startswith("."):
+                continue
+
+            stat = entry.stat()
+            result.append(
+                FileInfo(
+                    path=self.to_virtual_path(entry.path),
+                    is_file=entry.is_file(),
+                    is_dir=entry.is_dir(),
+                    size=stat.st_size,
+                    modified_time=stat.st_mtime,
+                )
+            )
+        return result
+
+    def _delete_path_sync(self, actual_path: str) -> None:
+        if os.path.exists(actual_path):
+            if os.path.isdir(actual_path):
+                shutil.rmtree(actual_path)
+            else:
+                os.remove(actual_path)
+
     async def execute_command(
         self,
         command: str,
@@ -392,7 +435,8 @@ class LocalSandboxProvider(ISandboxHandle):
         env_vars: Optional[Dict[str, str]] = None,
     ) -> CommandResult:
         """执行 shell 命令（使用 venv 环境）"""
-        self._ensure_initialized()
+        await self._ensure_initialized_async()
+        await self._ensure_venv()
 
         # 转换工作目录
         actual_workdir = self.to_host_path(workdir) if workdir else self._sandbox_agent_workspace
@@ -472,7 +516,7 @@ class LocalSandboxProvider(ISandboxHandle):
                     'command': converted_command,
                     'cwd': actual_workdir,
                 }
-                result = self._isolation.execute(payload, cwd=actual_workdir)
+                result = await self._isolation.execute(payload, cwd=actual_workdir)
                 if isinstance(result, dict):
                     return CommandResult(
                         success=result.get('success', True),
@@ -499,7 +543,6 @@ class LocalSandboxProvider(ISandboxHandle):
                     logger.error(f"Isolation execution failed: {e}, falling back to direct execution")
 
         # 使用异步 subprocess 执行命令，避免阻塞
-        import asyncio
         proc = None
         collected_output = []
         try:
@@ -586,7 +629,8 @@ class LocalSandboxProvider(ISandboxHandle):
         timeout: int = 60,
     ) -> ExecutionResult:
         """执行 Python 代码（使用 venv）"""
-        self._ensure_initialized()
+        await self._ensure_initialized_async()
+        await self._ensure_venv()
 
         # 安装依赖
         if requirements:
@@ -607,7 +651,6 @@ class LocalSandboxProvider(ISandboxHandle):
             python_cmd = venv_python if venv_python else "python"
 
             # 使用异步 subprocess 执行，避免阻塞
-            import asyncio
             proc = None
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -657,7 +700,7 @@ class LocalSandboxProvider(ISandboxHandle):
         timeout: int = 60,
     ) -> ExecutionResult:
         """执行 JavaScript 代码"""
-        self._ensure_initialized()
+        await self._ensure_initialized_async()
 
         # 安装依赖
         if packages:
@@ -675,7 +718,6 @@ class LocalSandboxProvider(ISandboxHandle):
 
         try:
             # 使用异步 subprocess 执行，避免阻塞
-            import asyncio
             proc = None
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -719,10 +761,9 @@ class LocalSandboxProvider(ISandboxHandle):
 
     async def read_file(self, path: str, encoding: str = "utf-8") -> str:
         """读取文件"""
-        self._ensure_initialized()
+        await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
-        with open(actual_path, "r", encoding=encoding) as f:
-            return f.read()
+        return await asyncio.to_thread(self._read_file_sync, actual_path, encoding)
 
     async def write_file(
         self,
@@ -732,18 +773,15 @@ class LocalSandboxProvider(ISandboxHandle):
         mode: str = "overwrite",
     ) -> None:
         """写入文件"""
-        self._ensure_initialized()
+        await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
-        os.makedirs(os.path.dirname(actual_path), exist_ok=True)
-        write_mode = "a" if mode == "append" else "w"
-        with open(actual_path, write_mode, encoding=encoding) as f:
-            f.write(content)
+        await asyncio.to_thread(self._write_file_sync, actual_path, content, encoding, mode)
 
     async def file_exists(self, path: str) -> bool:
         """检查文件是否存在"""
-        self._ensure_initialized()
+        await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
-        return os.path.exists(actual_path)
+        return await asyncio.to_thread(os.path.exists, actual_path)
 
     async def list_directory(
         self,
@@ -751,47 +789,21 @@ class LocalSandboxProvider(ISandboxHandle):
         include_hidden: bool = False,
     ) -> List[FileInfo]:
         """列出目录内容"""
-        self._ensure_initialized()
+        await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
-
-        if not os.path.isdir(actual_path):
-            return []
-
-        result = []
-        for entry in os.scandir(actual_path):
-            if not include_hidden and entry.name.startswith("."):
-                continue
-
-            stat = entry.stat()
-            result.append(
-                FileInfo(
-                    path=self.to_virtual_path(entry.path),
-                    is_file=entry.is_file(),
-                    is_dir=entry.is_dir(),
-                    size=stat.st_size,
-                    modified_time=stat.st_mtime,
-                )
-            )
-
-        return result
+        return await asyncio.to_thread(self._list_directory_sync, actual_path, include_hidden)
 
     async def ensure_directory(self, path: str) -> None:
         """确保目录存在"""
-        self._ensure_initialized()
+        await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
-        os.makedirs(actual_path, exist_ok=True)
+        await asyncio.to_thread(os.makedirs, actual_path, exist_ok=True)
 
     async def delete_file(self, path: str) -> None:
         """删除文件"""
-        self._ensure_initialized()
+        await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
-
-        if os.path.exists(actual_path):
-            if os.path.isdir(actual_path):
-                import shutil
-                shutil.rmtree(actual_path)
-            else:
-                os.remove(actual_path)
+        await asyncio.to_thread(self._delete_path_sync, actual_path)
 
     async def get_file_tree(
         self,
@@ -805,20 +817,26 @@ class LocalSandboxProvider(ISandboxHandle):
         
         使用 filesystem 的 get_file_tree_compact 方法
         """
-        self._ensure_initialized()
+        await self._ensure_initialized_async()
         
         if self._file_system:
             # 转换虚拟路径为宿主机路径
             host_root_path = self.to_host_path(root_path) if root_path else None
-            return self._file_system.get_file_tree_compact(
+            return await self._file_system.get_file_tree_compact(
                 include_hidden=include_hidden,
                 root_path=host_root_path,
                 max_depth=max_depth,
-                max_items_per_dir=max_items_per_dir
+                max_items_per_dir=max_items_per_dir,
             )
         
         # Fallback: 使用基本实现
-        return self._basic_get_file_tree(root_path, include_hidden, max_depth, max_items_per_dir)
+        return await asyncio.to_thread(
+            self._basic_get_file_tree,
+            root_path,
+            include_hidden,
+            max_depth,
+            max_items_per_dir,
+        )
     
     def _basic_get_file_tree(
         self,
@@ -894,7 +912,7 @@ class LocalSandboxProvider(ISandboxHandle):
         
         本地沙箱实现：直接复制到宿主机路径
         """
-        self._ensure_initialized()
+        await self._ensure_initialized_async()
         
         if not os.path.exists(host_source_path):
             logger.warning(f"源路径不存在: {host_source_path}")
@@ -912,18 +930,20 @@ class LocalSandboxProvider(ISandboxHandle):
                 # 使用 ignore 参数过滤文件
                 if ignore_patterns:
                     import fnmatch
+
                     def ignore_filter(dir, files):
                         ignored = []
                         for pattern in ignore_patterns:
                             ignored.extend([f for f in files if fnmatch.fnmatch(f, pattern)])
                         return ignored
-                    shutil.copytree(host_source_path, host_dest_path, ignore=ignore_filter)
+
+                    await asyncio.to_thread(shutil.copytree, host_source_path, host_dest_path, ignore=ignore_filter)
                 else:
-                    shutil.copytree(host_source_path, host_dest_path)
+                    await asyncio.to_thread(shutil.copytree, host_source_path, host_dest_path)
             else:
                 # 复制单个文件
-                os.makedirs(os.path.dirname(host_dest_path), exist_ok=True)
-                shutil.copy2(host_source_path, host_dest_path)
+                await asyncio.to_thread(os.makedirs, os.path.dirname(host_dest_path), exist_ok=True)
+                await asyncio.to_thread(shutil.copy2, host_source_path, host_dest_path)
             
             logger.debug(f"复制成功: {host_source_path} -> {sandbox_dest_path} (实际: {host_dest_path})")
             return True

@@ -79,7 +79,7 @@ class SandboxConfig:
     remote_provider_config: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_env(cls, sandbox_id: Optional[str] = None) -> "SandboxConfig":
+    async def from_env(cls, sandbox_id: Optional[str] = None) -> "SandboxConfig":
         """从环境变量加载配置
 
         Args:
@@ -122,7 +122,7 @@ class SandboxConfig:
         )
 
     @classmethod
-    def from_yaml(cls, config_path: str) -> "SandboxConfig":
+    async def from_yaml(cls, config_path: str) -> "SandboxConfig":
         """从YAML配置文件加载"""
         try:
             import yaml

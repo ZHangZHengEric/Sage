@@ -123,19 +123,14 @@ class TaskDao(BaseDao):
         *,
         user_id: Optional[str] = None,
     ) -> List[RecurringTask]:
-        start_time = time.perf_counter()
-        logger.info(f"[TaskDao] get_enabled_recurring_tasks START | user_id={user_id}")
         where = [RecurringTask.enabled == True]  # noqa: E712
         if user_id:
             where.append(RecurringTask.user_id == user_id)
-        result = await self.get_list(
+        return await self.get_list(
             RecurringTask,
             where=where,
             order_by=desc(RecurringTask.created_at),
         )
-        elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskDao] get_enabled_recurring_tasks SUCCESS | count={len(result)} | time={elapsed:.3f}s")
-        return result
 
     async def create_recurring_task(self, task: RecurringTask) -> RecurringTask:
         start_time = time.perf_counter()
@@ -331,20 +326,15 @@ class TaskDao(BaseDao):
         user_id: Optional[str] = None,
         limit: int = 100,
     ) -> List[Task]:
-        start_time = time.perf_counter()
-        logger.info(f"[TaskDao] get_due_pending_tasks START | user_id={user_id} | limit={limit}")
         where = [Task.status == "pending", Task.execute_at <= get_local_now()]
         if user_id:
             where.append(Task.user_id == user_id)
-        result = await self.get_list(
+        return await self.get_list(
             Task,
             where=where,
             order_by=Task.execute_at,
             limit=limit,
         )
-        elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskDao] get_due_pending_tasks SUCCESS | count={len(result)} | time={elapsed:.3f}s")
-        return result
 
     async def claim_one_time_task(
         self,

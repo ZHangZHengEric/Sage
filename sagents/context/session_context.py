@@ -64,6 +64,8 @@ class SessionContext:
         self.sandbox_agent_workspace: Optional[str] = sandbox_agent_workspace  # Agent 工作目录（沙箱内路径）
         self.volume_mounts: List[VolumeMount] = volume_mounts or []  # 额外卷挂载
         self.sandbox_id: Optional[str] = sandbox_id
+        # sandbox 会在 init_more() 中初始化；先占位避免半初始化上下文直接 AttributeError
+        self.sandbox: Optional[Any] = None
 
         self.tool_manager = tool_manager
         self.skill_manager = skill_manager
@@ -103,7 +105,7 @@ class SessionContext:
         self._init_external_paths_and_context()
         
         # 初始化沙箱和文件系统
-        self._init_sandbox_and_file_system(sandbox_mode=sandbox_mode)
+        await self._init_sandbox_and_file_system(sandbox_mode=sandbox_mode)
         
         # 准备工作区引导文件（通过沙箱接口，在沙箱初始化后执行）
         await self._prepare_workspace_bootstrap_files()
@@ -130,7 +132,7 @@ class SessionContext:
         self.start_time = time.time()
         self._perf_origin = time.perf_counter()
         self.end_time = None
-        self.status = SessionStatus.IDLE
+        self._status = SessionStatus.IDLE
         self.message_manager = MessageManager(context_budget_config=context_budget_config)
         self.workflow_manager = WorkflowManager()
         self.audit_status: Dict[str, Any] = {}
@@ -161,6 +163,14 @@ class SessionContext:
             self.execution_timeline_events.append(make_serializable(event))
         except Exception as e:
             logger.debug(f"SessionContext: 记录 timing 事件失败 {event_type}: {e}")
+
+    @property
+    def status(self) -> SessionStatus:
+        return self._status
+
+    @status.setter
+    def status(self, value: SessionStatus) -> None:
+        self._status = value
 
     def _record_message_timing(self, message: Union[MessageChunk, Dict[str, Any]]) -> None:
         try:
@@ -457,7 +467,7 @@ class SessionContext:
         if self.system_context.get('current_time') is None:
             self.system_context['current_time'] = current_time_str
 
-    def _init_sandbox_and_file_system(self, sandbox_mode: SandboxType):
+    async def _init_sandbox_and_file_system(self, sandbox_mode: SandboxType):
         """
         初始化沙箱环境和文件系统
 
@@ -511,7 +521,7 @@ class SessionContext:
                 macos_isolation_mode=os.environ.get("SAGE_LOCAL_MACOS_ISOLATION", "seatbelt")
             )
 
-        self.sandbox = SandboxProviderFactory.create(config)
+        self.sandbox = await SandboxProviderFactory.create(config)
         if sandbox_mode == SandboxType.REMOTE:
             self.sandbox_agent_workspace = self.sandbox.workspace_path
 
@@ -795,62 +805,19 @@ class SessionContext:
         logger.debug("SessionContext: 设置agent配置信息完成")
 
     def set_status(self, status: SessionStatus, cascade: bool = True) -> None:
-        """设置会话状态，支持级联传播到子会话
+        raise RuntimeError(f"SessionContext: set_status 已废弃，请通过 Session 操作，session_id={self.session_id}")
 
-        Args:
-            status: 新的会话状态
-            cascade: 是否级联传播到子会话，默认为 True
-        """
-        old_status = self.status
-        self.status = status
-        self.record_timing_event(
-            "session_status_changed",
-            old_status=old_status.value if hasattr(old_status, "value") else str(old_status),
-            new_status=status.value if hasattr(status, "value") else str(status),
-        )
-        logger.debug(f"SessionContext: Session {self.session_id} status changed from {old_status.value} to {status.value}")
+    def request_interrupt(self, reason: str = "用户请求中断", cascade: bool = True) -> None:
+        raise RuntimeError(f"SessionContext: request_interrupt 已废弃，请通过 Session 操作，session_id={self.session_id}")
 
-        # 级联传播到子会话（当状态为 INTERRUPTED 或 ERROR 时）
-        if cascade and status in [SessionStatus.INTERRUPTED, SessionStatus.ERROR]:
-            if self.child_session_ids:
-                logger.info(f"SessionContext: Cascading status {status.value} to {len(self.child_session_ids)} child sessions: {self.child_session_ids}")
-                for child_session_id in self.child_session_ids:
-                    try:
-                        # 从 _active_sessions 获取子会话上下文
-                        from sagents.session_runtime import get_global_session_manager
-                        session_manager = get_global_session_manager()
-                        child_session = session_manager.get(child_session_id)
-                        if child_session:
-                            child_context = child_session.session_context
-                        if child_context:
-                            child_context.set_status(status, cascade=False)  # 子会话不再级联，避免循环
-                            logger.info(f"SessionContext: Set child session {child_session_id} status to {status.value}")
-                        else:
-                            logger.warning(f"SessionContext: Child session {child_session_id} not found in _active_sessions, cannot cascade status")
-                    except Exception as e:
-                        logger.error(f"SessionContext: Failed to cascade status to child session {child_session_id}: {e}")
-            else:
-                logger.info(f"SessionContext: No child sessions to cascade status {status.value}")
+    def should_interrupt(self) -> bool:
+        raise RuntimeError(f"SessionContext: should_interrupt 已废弃，请通过 Session 操作，session_id={self.session_id}")
 
     def add_child_session(self, child_session_id: str) -> None:
-        """添加子会话ID
-
-        Args:
-            child_session_id: 子会话ID
-        """
-        if child_session_id not in self.child_session_ids:
-            self.child_session_ids.append(child_session_id)
-            logger.debug(f"SessionContext: Added child session {child_session_id} to session {self.session_id}")
+        raise RuntimeError(f"SessionContext: add_child_session 已废弃，请通过 Session 操作，session_id={self.session_id}")
 
     def remove_child_session(self, child_session_id: str) -> None:
-        """移除子会话ID
-
-        Args:
-            child_session_id: 子会话ID
-        """
-        if child_session_id in self.child_session_ids:
-            self.child_session_ids.remove(child_session_id)
-            logger.debug(f"SessionContext: Removed child session {child_session_id} from session {self.session_id}")
+        raise RuntimeError(f"SessionContext: remove_child_session 已废弃，请通过 Session 操作，session_id={self.session_id}")
 
     def set_parent_session(self, parent_session_id: str) -> None:
         """设置父会话ID
@@ -1046,8 +1013,17 @@ class SessionContext:
         logger.debug(f"get_tokens_usage_info: final tokens_info={tokens_info}")
         return tokens_info
 
-    def save(self):
+    def save(
+        self,
+        session_status: Optional[SessionStatus] = None,
+        child_session_ids: Optional[List[str]] = None,
+        interrupt_reason: Optional[str] = None,
+    ):
         """保存会话上下文（不包含 llm_requests，已在 add 时异步保存）"""
+        effective_status = session_status or self._status
+        effective_child_session_ids = child_session_ids if child_session_ids is not None else self.child_session_ids
+        if interrupt_reason is not None:
+            self.audit_status["interrupt_reason"] = interrupt_reason
         # 1. 保存 messages 到 messages.json
         # 始终覆盖，保存完整历史
         try:
@@ -1064,8 +1040,8 @@ class SessionContext:
                 "session_id": self.session_id,
                 "user_id": self.user_id,
                 "parent_session_id": self.parent_session_id,
-                "child_session_ids": self.child_session_ids,
-                "status": self.status.value if hasattr(self.status, 'value') else str(self.status),
+                "child_session_ids": effective_child_session_ids,
+                "status": effective_status.value if hasattr(effective_status, 'value') else str(effective_status),
                 "created_at": self.start_time,
                 "updated_at": time.time(),
                 "session_root_space": self.session_root_space,
@@ -1104,7 +1080,7 @@ class SessionContext:
 
         self.record_timing_event(
             "session_end",
-            status=self.status.value if hasattr(self.status, "value") else str(self.status),
+            status=effective_status.value if hasattr(effective_status, "value") else str(effective_status),
         )
 
     # def _serialize_messages_for_history_memory(self, messages: List[MessageChunk]) -> str:

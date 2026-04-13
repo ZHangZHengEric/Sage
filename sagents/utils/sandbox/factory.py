@@ -72,7 +72,7 @@ class SandboxProviderFactory:
         return cls._providers[SandboxType.PASSTHROUGH]
 
     @classmethod
-    def create(cls, config: Optional[SandboxConfig] = None) -> ISandboxHandle:
+    async def create(cls, config: Optional[SandboxConfig] = None) -> ISandboxHandle:
         """
         创建沙箱实例
 

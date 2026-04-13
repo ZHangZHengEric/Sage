@@ -39,7 +39,7 @@ class CompressHistoryTool:
         """通过 session_id 获取会话上下文"""
         from sagents.session_runtime import get_global_session_manager
         session_manager = get_global_session_manager()
-        session = session_manager.get(session_id)
+        session = session_manager.get_live_session(session_id) if session_manager else None
 
         if not session or not session.session_context:
             raise CompressHistoryError(f"无效的 session_id={session_id}")
@@ -79,7 +79,7 @@ class CompressHistoryTool:
         from sagents.session_runtime import get_global_session_manager
 
         session_manager = get_global_session_manager()
-        session = session_manager.get(session_id)
+        session = session_manager.get_live_session(session_id) if session_manager else None
 
         if not session:
             raise CompressHistoryError(f"无法获取会话: {session_id}")

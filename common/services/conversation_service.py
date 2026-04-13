@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
-from sagents.context.session_context import SessionStatus
 from sagents.session_runtime import (
     build_conversation_messages_view,
     get_global_session_manager,
@@ -74,20 +73,38 @@ async def interrupt_session(
     message: str = "用户请求中断",
 ) -> Dict[str, Any]:
     session_manager = get_global_session_manager()
-    session = session_manager.get(session_id)
+    session = session_manager.get_live_session(session_id)
     if not session:
         logger.bind(session_id=session_id).info("会话不存在或者已完成")
         return {"session_id": session_id}
 
-    session_context = getattr(session, "session_context", None)
-    if session_context is None:
-        logger.bind(session_id=session_id).warning("会话存在但缺少 session_context，跳过中断状态写入")
+    if not session.request_interrupt(message):
+        logger.bind(session_id=session_id).warning("会话存在但未能写入中断状态")
         return {"session_id": session_id}
+
+    stream_managers = []
+    try:
+        if _is_desktop_mode():
+            from app.desktop.core.services.chat.stream_manager import StreamManager as DesktopStreamManager
+            stream_managers.append(DesktopStreamManager.get_instance())
+    except Exception as e:
+        logger.bind(session_id=session_id).debug(f"无法加载 desktop StreamManager: {e}")
+
+    try:
+        from common.services.chat_stream_manager import StreamManager as CommonStreamManager
+        stream_managers.append(CommonStreamManager.get_instance())
+    except Exception as e:
+        logger.bind(session_id=session_id).debug(f"无法加载 common StreamManager: {e}")
+
+    for manager in stream_managers:
+        try:
+            await manager.stop_session(session_id)
+        except Exception as e:
+            logger.bind(session_id=session_id).warning(f"停止流式会话失败: {e}")
 
     if _is_desktop_mode():
         from common.models.questionnaire import QuestionnaireDao
 
-        session_context.set_status(SessionStatus.INTERRUPTED)
         try:
             await QuestionnaireDao().expire_pending_session(session_id)
             await QuestionnaireDao().expire_pending_sessions_by_prefix(
@@ -95,8 +112,6 @@ async def interrupt_session(
             )
         except Exception as e:
             logger.bind(session_id=session_id).warning(f"中断会话时更新问卷状态失败: {e}")
-    else:
-        session_context.status = SessionStatus.INTERRUPTED
 
     logger.bind(session_id=session_id).info("会话中断成功")
     return {"session_id": session_id}
@@ -116,7 +131,7 @@ async def get_session_status(session_id: str) -> Dict[str, Any]:
     if _is_desktop_mode():
         tasks_status: Dict[str, Any] = {}
     else:
-        tasks_status = session.session_context.task_manager.to_dict()
+        tasks_status = session.get_tasks_status()
 
     logger.bind(session_id=session_id).info(
         f"获取任务数量：{len(tasks_status.get('tasks', []))}"
@@ -293,9 +308,11 @@ def _load_session_raw_messages(session_id: str) -> List[Dict[str, Any]]:
     session_manager = get_global_session_manager()
     if session_manager:
         try:
-            raw_messages = session_manager.get_session_messages(session_id)
-            if raw_messages:
-                return [message.to_dict() for message in raw_messages]
+            session = session_manager.get(session_id)
+            if session:
+                raw_messages = session.get_messages()
+                if raw_messages:
+                    return [message.to_dict() for message in raw_messages]
         except Exception as exc:
             logger.bind(session_id=session_id).warning(f"读取 session 原始消息失败，回退数据库: {exc}")
     return []

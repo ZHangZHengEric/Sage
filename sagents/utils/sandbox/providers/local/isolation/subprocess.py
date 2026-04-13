@@ -8,6 +8,7 @@ import subprocess
 import os
 import sys
 import platform
+import asyncio
 from typing import Dict, Any, Optional, List
 from sagents.utils.logger import logger
 from sagents.utils.sandbox.config import VolumeMount
@@ -264,7 +265,7 @@ class SubprocessIsolation:
         self.volume_mounts = volume_mounts or []
         self.limits = limits or {}
         
-    def execute(self, payload: Dict[str, Any], cwd: Optional[str] = None) -> Any:
+    async def execute(self, payload: Dict[str, Any], cwd: Optional[str] = None) -> Any:
         """
         执行 payload。
         
@@ -328,13 +329,14 @@ class SubprocessIsolation:
         logger.info(f"[SubprocessIsolation] 执行命令: {' '.join(cmd[:3])}...")
         
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 cmd,
                 capture_output=True,
                 text=True,
                 cwd=cwd or self.sandbox_agent_workspace,
                 env=env,
-                timeout=300  # 5分钟超时
+                timeout=300,  # 5分钟超时
             )
             
             logger.info(f"[SubprocessIsolation] 返回码: {result.returncode}")
@@ -364,7 +366,7 @@ class SubprocessIsolation:
                 except:
                     pass
                     
-    def execute_background(self, command: str, cwd: Optional[str] = None) -> Dict[str, Any]:
+    async def execute_background(self, command: str, cwd: Optional[str] = None) -> Dict[str, Any]:
         """
         后台执行命令。
         

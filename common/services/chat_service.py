@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from loguru import logger
-from sagents.context.session_context import SessionStatus, get_session_run_lock
+from sagents.context.session_context import get_session_run_lock
 from sagents.sagents import SAgent
 from sagents.session_runtime import get_global_session_manager
 from sagents.tool import get_tool_manager
@@ -859,8 +859,8 @@ async def prepare_session(request: StreamRequest) -> Tuple[SageStreamService, as
     lock = get_session_run_lock(session_id)
     acquired = False
     if lock.locked():
-        session = get_global_session_manager().get(session_id)
-        if not session or session.session_context.status != SessionStatus.INTERRUPTED:
+        session = get_global_session_manager().get_live_session(session_id)
+        if not session or not session.is_interrupted():
             raise _chat_exception("会话正在运行中，请先调用 interrupt 或使用不同的会话ID")
 
     try:
@@ -906,9 +906,10 @@ async def execute_chat_session(
         async for result in stream_service.process_stream():
             stream_counter += 1
             current_time = time.time()
-            time_since_last = current_time - last_activity_time
-            last_activity_time = current_time
             if stream_counter % 100 == 0:
+                time_since_last = current_time - last_activity_time
+                last_activity_time = current_time
+
                 logger.bind(session_id=session_id).info(
                     f"📊 流处理状态 - 计数: {stream_counter}, 间隔: {time_since_last:.3f}s"
                 )
@@ -939,7 +940,8 @@ def _get_serialized_session_messages(session_id: str) -> List[Dict[str, Any]]:
         return []
 
     try:
-        raw_messages = session_manager.get_session_messages(session_id)
+        session = session_manager.get(session_id)
+        raw_messages = session.get_messages() if session else []
     except Exception as exc:
         logger.bind(session_id=session_id).warning(f"读取 session 最新消息失败: {exc}")
         return []

@@ -17,7 +17,7 @@ export const useSidebarActiveSessions = ({
 
   const activeSessionItems = computed(() =>
     Object.entries(activeSessions.value || {})
-      .filter(([, meta]) => !!meta && (meta.status === 'running' || meta.status === 'completed'))
+      .filter(([, meta]) => !!meta && meta.include_in_sidebar && (meta.status === 'running' || meta.status === 'interrupting'))
       .sort(([, a], [, b]) => (b?.lastUpdate || 0) - (a?.lastUpdate || 0))
       .map(([sessionId, meta]) => ({
         id: sessionId,
@@ -48,8 +48,6 @@ export const useSidebarActiveSessions = ({
   const handleActiveSessionClick = (session) => {
     activeSessionSelectionEnabled.value = true
     onSessionClick(session)
-    // 点击后从侧边栏移除（因为用户已经看到了）
-    removeActiveSession(session.sessionId)
   }
 
   const disableActiveSessionSelection = () => {
