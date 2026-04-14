@@ -38,20 +38,10 @@ class FirecrackerSandboxProvider(RemoteSandboxProvider):
 
     async def initialize(self) -> None:
         """创建 Firecracker 微虚拟机"""
-        # Firecracker 实现需要 firecracker-python 或其他客户端库
-        # 这里提供框架实现
-        logger.info(
-            f"FirecrackerSandboxProvider: 创建 MicroVM {self._sandbox_id}"
+        raise NotImplementedError(
+            "FirecrackerSandboxProvider is not yet implemented. "
+            "Please use 'opensandbox' or 'kubernetes' as your remote sandbox provider instead."
         )
-
-        # TODO: 实现 Firecracker VM 创建逻辑
-        # 1. 创建 MicroVM
-        # 2. 配置网络
-        # 3. 挂载磁盘/文件系统
-        # 4. 启动 VM
-
-        self._vm_id = self._sandbox_id
-        self._is_initialized = True
 
     async def execute_command(
         self,

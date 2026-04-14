@@ -14,9 +14,9 @@ from sagents.tool.tool_manager import ToolManager
 
 
 class CommonAgent(AgentBase):
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", tools_name: List[str] = [], max_model_len: int = 64000):
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", tools_name: Optional[List[str]] = None, max_model_len: int = 64000):
         super().__init__(model, model_config, system_prefix)
-        self.tools_name = tools_name
+        self.tools_name = tools_name if tools_name is not None else []
         self.max_history_context_length = max_model_len
 
     async def run_stream(self, session_context: SessionContext) -> AsyncGenerator[List[MessageChunk], None]:
