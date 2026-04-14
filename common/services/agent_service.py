@@ -21,6 +21,11 @@ from common.core.client.chat import get_chat_client
 from common.core.exceptions import SageHTTPException
 from common.models.agent import Agent, AgentConfigDao
 from common.models.llm_provider import LLMProvider, LLMProviderDao
+from common.services.agent_workspace import (
+    cleanup_unselected_skills,
+    get_agent_workspace_root,
+    sync_selected_skills_to_workspace,
+)
 from common.schemas.agent import AgentAbilityItem
 
 DEFAULT_OPENCLAW_AGENT_NAME = "openclaw的小龙虾"
@@ -318,6 +323,12 @@ async def create_agent(
             is_default=is_default,
         )
         await dao.save(orm_obj)
+        await sync_selected_skills_to_workspace(
+            agent_id,
+            normalized_config,
+            user_id=user_id,
+            role="user",
+        )
         logger.info(f"Agent {agent_id} 创建成功, is_default={is_default}")
         return orm_obj
 
@@ -343,6 +354,12 @@ async def create_agent(
         from app.server.services.agent_inherit import ensure_agent_inherit_dir
 
         ensure_agent_inherit_dir(agent_id)
+        await sync_selected_skills_to_workspace(
+            agent_id,
+            normalized_config,
+            user_id=user_id,
+            role="user",
+        )
     except Exception as e:
         logger.error(f"Agent {agent_id} inherit 目录初始化失败: {e}")
         try:
@@ -397,7 +414,13 @@ async def update_agent(
             created_at=existing_config.created_at,
         )
         await dao.save(orm_obj)
-        await _cleanup_agent_workspace_skills(
+        await sync_selected_skills_to_workspace(
+            agent_id,
+            normalized_config,
+            user_id=existing_config.user_id or user_id or "",
+            role=role,
+        )
+        cleanup_unselected_skills(
             agent_id,
             normalized_config,
             user_id=existing_config.user_id or user_id or ""
@@ -426,9 +449,14 @@ async def update_agent(
         created_at=existing_config.created_at,
     )
     await dao.save(orm_obj)
+    await sync_selected_skills_to_workspace(
+        agent_id,
+        normalized_config,
+        user_id=existing_config.user_id or user_id or "",
+        role=role,
+    )
 
-    # 清理Agent工作空间中不再使用的技能
-    await _cleanup_agent_workspace_skills(
+    cleanup_unselected_skills(
         agent_id,
         normalized_config,
         user_id=existing_config.user_id or user_id or ""
@@ -755,56 +783,17 @@ def _sync_agent_skills_to_global(agent_workspace: Path) -> List[str]:
     return synced_skills
 
 
-async def _cleanup_agent_workspace_skills(
+def _cleanup_agent_workspace_skills(
     agent_id: str,
     agent_config: Dict[str, Any],
     user_id: str = "",
 ) -> None:
-    """
-    清理Agent工作空间中不再使用的技能
-
-    当Agent取消选择技能时，从Agent工作空间的skills文件夹中删除对应的技能
-    """
-    try:
-        cfg = _get_cfg()
-
-        # 根据模式确定Agent工作空间路径
-        if cfg.app_mode == "desktop":
-            agent_skills_path = _get_sage_home() / "agents" / agent_id / "skills"
-        else:
-            # server模式
-            if not user_id:
-                logger.warning(f"Server模式下清理技能需要user_id")
-                return
-            agent_skills_path = Path(cfg.agents_dir) / user_id / agent_id / "skills"
-
-        if not agent_skills_path.exists() or not agent_skills_path.is_dir():
-            return
-
-        allowed_skills = set(
-            (agent_config.get("availableSkills") or agent_config.get("available_skills") or [])
-        )
-        removed_skills: List[str] = []
-
-        for skill_path in agent_skills_path.iterdir():
-            if not skill_path.is_dir():
-                continue
-            if skill_path.name in allowed_skills:
-                continue
-
-            try:
-                shutil.rmtree(skill_path)
-                removed_skills.append(skill_path.name)
-                logger.info(f"已删除agent工作空间中的skill: {skill_path.name}")
-            except Exception as e:
-                logger.warning(f"删除skill失败 {skill_path.name}: {e}")
-
-        if removed_skills:
-            logger.bind(agent_id=agent_id).info(
-                f"清理agent工作空间skills完成，删除: {removed_skills}"
-            )
-    except Exception as e:
-        logger.bind(agent_id=agent_id).warning(f"清理agent工作空间skills失败: {e}")
+    cleanup_unselected_skills(
+        agent_id,
+        agent_config,
+        user_id=user_id,
+        app_mode=_get_cfg().app_mode,
+    )
 
 
 # 保留旧函数名以兼容现有代码
@@ -845,7 +834,11 @@ async def import_openclaw_agent(user_id: str = "") -> Dict[str, Any]:
     try:
         created_agent = await create_agent(DEFAULT_OPENCLAW_AGENT_NAME, agent_config, user_id=user_id)
 
-        agent_workspace = _get_sage_home() / "agents" / created_agent.agent_id
+        agent_workspace = get_agent_workspace_root(
+            created_agent.agent_id,
+            app_mode="desktop",
+            ensure_exists=True,
+        )
         exclude_names = {"skills"} if (openclaw_workspace / "skills") in skill_dirs else set()
         _copy_directory_contents(openclaw_workspace, agent_workspace, exclude_names)
 
@@ -920,12 +913,22 @@ async def update_agent_authorizations(
 
 
 def get_server_agent_workspace_path(agent_id: str, user_id: str) -> str:
-    cfg = _get_cfg()
-    return os.path.join(cfg.agents_dir, user_id, agent_id)
+    return str(
+        get_agent_workspace_root(
+            agent_id,
+            user_id=user_id,
+            app_mode="server",
+            ensure_exists=False,
+        )
+    )
 
 
 def get_desktop_agent_workspace_path(agent_id: str) -> Path:
-    return _get_sage_home() / "agents" / agent_id
+    return get_agent_workspace_root(
+        agent_id,
+        app_mode="desktop",
+        ensure_exists=False,
+    )
 
 
 async def get_server_file_workspace(agent_id: str, user_id: str) -> Dict[str, Any]:

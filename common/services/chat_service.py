@@ -28,6 +28,11 @@ from common.models.im_channel import IMChannelConfigDao
 from common.models.kdb import KdbDao
 from common.models.llm_provider import LLMProviderDao
 from common.services.chat_processor import ContentProcessor
+from common.services.agent_workspace import (
+    get_agent_workspace_root,
+    get_agent_skill_dir,
+    sync_selected_skills_to_workspace,
+)
 from common.services.chat_utils import (
     create_model_client,
     create_skill_proxy,
@@ -645,6 +650,19 @@ async def populate_request_from_agent_config(
     _fill_if_none(request, "available_knowledge_bases", [])
     _fill_if_none(request, "available_sub_agent_ids", [])
 
+    if (not _is_desktop_mode()) and request.agent_id and request.available_skills:
+        try:
+            await sync_selected_skills_to_workspace(
+                request.agent_id,
+                agent_config or {},
+                user_id=request.user_id or "",
+                role="user",
+            )
+        except Exception as e:
+            logger.warning(
+                f"同步 server Agent skills 到工作空间失败: agent_id={request.agent_id}, error={e}"
+            )
+
     if _is_desktop_mode():
         try:
             all_im_configs = await IMChannelConfigDao().get_all_configs()
@@ -713,23 +731,30 @@ class SageStreamService:
         if _is_desktop_mode():
             self.sessions_root = Path(get_sessions_root())
             self.sessions_root.mkdir(parents=True, exist_ok=True)
-            self.agent_workspace_root = self._get_desktop_agent_workspace_root()
-            self.agent_workspace = str(self.agent_workspace_root / self.runtime_agent_id)
-        else:
-            self.agent_workspace = os.path.join(
-                self.cfg.agents_dir,
-                self.runtime_user_id,
+            self.agent_workspace_root = get_agent_workspace_root(
                 self.runtime_agent_id,
+                app_mode="desktop",
+                ensure_exists=True,
             )
-            if not os.path.exists(self.agent_workspace):
-                os.makedirs(self.agent_workspace, exist_ok=True)
-                if self.request.agent_id:
-                    importlib.import_module(
-                        "app.server.services.agent_inherit"
-                    ).copy_agent_inherit_to_workspace(
-                        self.request.agent_id,
-                        self.agent_workspace,
-                    )
+            self.agent_workspace = str(self.agent_workspace_root)
+        else:
+            workspace_root = get_agent_workspace_root(
+                self.runtime_agent_id,
+                user_id=self.runtime_user_id,
+                app_mode="server",
+                ensure_exists=False,
+            )
+            workspace_existed = workspace_root.exists()
+            workspace_root.mkdir(parents=True, exist_ok=True)
+            self.agent_workspace_root = workspace_root
+            self.agent_workspace = str(self.agent_workspace_root)
+            if (not workspace_existed) and self.request.agent_id:
+                importlib.import_module(
+                    "app.server.services.agent_inherit"
+                ).copy_agent_inherit_to_workspace(
+                    self.request.agent_id,
+                    self.agent_workspace,
+                )
             _copy_sage_usage_docs_to_workspace(self.agent_workspace)
 
         self.tool_manager = create_tool_proxy(request.available_tools)
@@ -750,14 +775,6 @@ class SageStreamService:
                 session_root_space=self.cfg.session_dir,
                 enable_obs=self.cfg.trace_jaeger_endpoint is not None,
             )
-
-    def _get_desktop_agent_workspace_root(self) -> Path:
-        if os.environ.get("SAGE_AGENTS_PATH"):
-            root = Path(os.environ.get("SAGE_AGENTS_PATH"))
-        else:
-            root = Path.home() / ".sage" / "agents"
-        root.mkdir(parents=True, exist_ok=True)
-        return root
 
     async def process_stream(self):
         session_id = self.request.session_id
@@ -954,11 +971,13 @@ async def _check_and_update_agent_skills(
 ) -> None:
     try:
         cfg = _get_cfg()
-        agent_skills_path = os.path.join(
-            cfg.agents_dir,
-            request.user_id or "default_user",
-            request.agent_id,
-            "skills",
+        agent_skills_path = str(
+            get_agent_skill_dir(
+                request.agent_id,
+                user_id=request.user_id or "default_user",
+                app_mode=cfg.app_mode,
+                ensure_exists=False,
+            )
         )
 
         actual_skills = set()
