@@ -934,47 +934,21 @@ async def execute_chat_session(
         await _finalize_session_end(request, original_skills)
 
 
-def _get_serialized_session_messages(session_id: str) -> List[Dict[str, Any]]:
-    session_manager = get_global_session_manager()
-    if not session_manager:
-        return []
-
-    try:
-        session = session_manager.get(session_id)
-        raw_messages = session.get_messages() if session else []
-    except Exception as exc:
-        logger.bind(session_id=session_id).warning(f"读取 session 最新消息失败: {exc}")
-        return []
-
-    serialized_messages: List[Dict[str, Any]] = []
-    for message in raw_messages or []:
-        if hasattr(message, "to_dict"):
-            serialized_messages.append(message.to_dict())
-        elif isinstance(message, dict):
-            serialized_messages.append(dict(message))
-    return serialized_messages
-
-
 async def _sync_conversation_state(session_id: str) -> None:
-    messages = _get_serialized_session_messages(session_id)
-    dao = ConversationDao()
-    if messages:
-        await dao.update_conversation_messages(session_id, messages)
-        logger.bind(session_id=session_id).info(
-            f"会话结束，已同步最新消息到 conversations 表，message_count={len(messages)}"
-        )
-        return
+    from common.services.conversation_service import persist_session_state
 
-    updated = await dao.update_timestamp(session_id)
-    if updated:
-        logger.bind(session_id=session_id).info("会话结束，已刷新 conversation 时间戳")
+    await persist_session_state(session_id)
 
 
 async def _finalize_session_end(
     request: StreamRequest,
     original_skills: List[str],
 ) -> None:
-    await _sync_conversation_state(request.session_id)
+    from common.services.conversation_service import (
+        persist_session_state_with_cancel_protection,
+    )
+
+    await persist_session_state_with_cancel_protection(request.session_id)
 
     if not _is_desktop_mode() and request.available_skills and request.agent_id:
         asyncio.create_task(_check_and_update_agent_skills(request, original_skills))

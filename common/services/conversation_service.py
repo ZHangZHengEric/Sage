@@ -2,6 +2,7 @@
 Conversation shared service-layer entry points for server and desktop routers.
 """
 
+import asyncio
 import json
 import os
 import hashlib
@@ -82,6 +83,8 @@ async def interrupt_session(
         logger.bind(session_id=session_id).warning("会话存在但未能写入中断状态")
         return {"session_id": session_id}
 
+    await persist_session_state(session_id)
+
     stream_managers = []
     try:
         if _is_desktop_mode():
@@ -115,6 +118,45 @@ async def interrupt_session(
 
     logger.bind(session_id=session_id).info("会话中断成功")
     return {"session_id": session_id}
+
+
+async def persist_session_state(session_id: str) -> None:
+    session_manager = get_global_session_manager()
+    if session_manager:
+        try:
+            session_manager.save_session(session_id)
+        except Exception as exc:
+            logger.bind(session_id=session_id).warning(f"保存会话快照失败: {exc}")
+
+    messages = _load_session_raw_messages(session_id)
+    dao = ConversationDao()
+    if messages:
+        await dao.update_conversation_messages(session_id, messages)
+        logger.bind(session_id=session_id).info(
+            f"会话状态已同步到 conversations 表，message_count={len(messages)}"
+        )
+        return
+
+    updated = await dao.update_timestamp(session_id)
+    if updated:
+        logger.bind(session_id=session_id).info("会话状态已刷新 conversation 时间戳")
+
+
+async def persist_session_state_with_cancel_protection(session_id: str) -> None:
+    persistence_task = asyncio.create_task(persist_session_state(session_id))
+    try:
+        await asyncio.shield(persistence_task)
+    except asyncio.CancelledError as cancel_exc:
+        logger.bind(session_id=session_id).warning("会话持久化遇到取消，等待后台任务完成")
+        current_task = asyncio.current_task()
+        uncancel_count = current_task.uncancel() if current_task and hasattr(current_task, "uncancel") else 0
+        try:
+            await asyncio.shield(persistence_task)
+        finally:
+            if current_task and uncancel_count:
+                for _ in range(uncancel_count):
+                    current_task.cancel()
+        raise cancel_exc
 
 
 async def get_session_status(session_id: str) -> Dict[str, Any]:
