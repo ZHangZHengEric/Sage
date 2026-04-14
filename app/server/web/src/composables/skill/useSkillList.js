@@ -1,13 +1,11 @@
 import { ref, computed, onMounted } from 'vue'
 import { skillAPI } from '../../api/skill.js'
-import { agentAPI } from '../../api/agent.js'
 import { getCurrentUser } from '../../utils/auth.js'
 import { toast } from 'vue-sonner'
 
 export function useSkillList(t) {
   // State
   const skills = ref([])
-  const agents = ref([]) // Agent列表，用于获取agent名称
   const loading = ref(false)
   const searchTerm = ref('')
   const selectedDimension = ref('system')
@@ -44,46 +42,8 @@ export function useSkillList(t) {
   const counts = computed(() => ({
     system: skills.value.filter(s => s.dimension === 'system').length,
     user: skills.value.filter(s => s.dimension === 'user').length,
-    agent: skills.value.filter(s => s.dimension === 'agent').length
   }))
 
-  // Agent名称映射表
-  const agentNameMap = computed(() => {
-    const map = {}
-    agents.value.forEach(agent => {
-      map[agent.id] = agent.name
-    })
-    return map
-  })
-
-  // Group skills by agent for agent dimension view
-  const groupedAgentSkills = computed(() => {
-    const groups = {}
-    skills.value
-      .filter(s => s.dimension === 'agent')
-      .filter(skill => {
-        if (!searchTerm.value.trim()) return true
-        const query = searchTerm.value.toLowerCase()
-        return skill.name.toLowerCase().includes(query) ||
-          (skill.description && skill.description.toLowerCase().includes(query))
-      })
-      .forEach(skill => {
-        const agentId = skill.agent_id || 'unknown'
-        // 优先使用agent列表中的名称，其次使用skill中的agent_name，最后使用agentId
-        const agentName = agentNameMap.value[agentId] || skill.agent_name || agentId
-        if (!groups[agentId]) {
-          groups[agentId] = {
-            agentId,
-            agentName,
-            skills: []
-          }
-        }
-        groups[agentId].skills.push(skill)
-      })
-    return Object.values(groups)
-  })
-
-  // Displayed skills filtered by current dimension and search term.
   const displayedSkills = computed(() => {
     let result = skills.value
 
@@ -91,7 +51,6 @@ export function useSkillList(t) {
       result = result.filter(skill => skill.dimension === selectedDimension.value)
     }
 
-    // Search filtering (client-side)
     if (searchTerm.value.trim()) {
       const query = searchTerm.value.toLowerCase()
       result = result.filter(skill =>
@@ -104,15 +63,12 @@ export function useSkillList(t) {
   })
 
   const isImportDisabled = computed(() => {
-    // Upload mode requires file
     if (importMode.value === 'upload') {
       if (!selectedFile.value) return true
     }
-    // URL mode requires URL
     if (importMode.value === 'url') {
       if (!importUrl.value) return true
     }
-    // System dimension requires admin
     if (importTargetDimension.value === 'system') {
       if (!isAdmin.value) return true
     }
@@ -124,7 +80,6 @@ export function useSkillList(t) {
     switch (dimension) {
       case 'system': return 'default'
       case 'user': return 'secondary'
-      case 'agent': return 'outline'
       default: return 'secondary'
     }
   }
@@ -133,7 +88,6 @@ export function useSkillList(t) {
     switch (dimension) {
       case 'system': return 'Shield'
       case 'user': return 'User'
-      case 'agent': return 'Bot'
       default: return 'Box'
     }
   }
@@ -142,19 +96,13 @@ export function useSkillList(t) {
     switch (dimension) {
       case 'system': return t('skills.system') || 'System'
       case 'user': return t('skills.user') || 'User'
-      case 'agent': return t('skills.agent') || 'Agent'
       default: return dimension
     }
   }
 
-  // Check if user can edit a skill
   const canEdit = (skill) => {
     if (skill.dimension === 'system') {
-      return isAdmin.value // Only admin can edit system skills
-    }
-    if (skill.dimension === 'agent') {
-      // Agent skills can be edited by the owner
-      return skill.owner_user_id === currentUserId.value
+      return isAdmin.value
     }
     return skill.owner_user_id === currentUserId.value
   }
@@ -162,30 +110,19 @@ export function useSkillList(t) {
   const canDelete = (skill) => {
     if (isAdmin.value) return true
     if (skill.dimension === 'system') return false
-    if (skill.dimension === 'agent') {
-      return skill.owner_user_id === currentUserId.value
-    }
     return skill.owner_user_id === currentUserId.value
   }
 
   // API Methods
-  const loadSkills = async () => {
-    try {
+  const loadSkills = async ({ silent = false } = {}) => {
+    if (!silent) {
       loading.value = true
-
-      // 并行请求skills和agents
-      const [skillsResponse, agentsResponse] = await Promise.all([
-        skillAPI.getSkills(),
-        agentAPI.getAgents().catch(() => []) // 如果获取agents失败，返回空数组
-      ])
-
-      if (skillsResponse.skills) {
-        skills.value = skillsResponse.skills
+    }
+    try {
+      const response = await skillAPI.getSkills()
+      if (response.skills) {
+        skills.value = response.skills
       }
-
-      // 保存agent列表用于显示agent名称
-      // 后端返回格式: [...]
-      agents.value = agentsResponse || []
     } catch (error) {
       console.error('Failed to load skills:', error)
       toast.error(t('skills.loadFailed') || 'Failed to load skills')
@@ -252,7 +189,7 @@ export function useSkillList(t) {
         })
       }
 
-      await loadSkills()
+      await loadSkills({ silent: true })
       showImportModal.value = false
       selectedFile.value = null
       importUrl.value = ''
@@ -267,7 +204,6 @@ export function useSkillList(t) {
   }
 
   const openEditModal = async (skill) => {
-    // Check if can edit
     if (!canEdit(skill)) {
       toast.error(t('skills.noEditPermission') || 'You do not have permission to edit this skill')
       return
@@ -296,7 +232,7 @@ export function useSkillList(t) {
       await skillAPI.updateSkillContent(editingSkill.value.name, skillContent.value)
       toast.success(t('skills.updateSuccess') || 'Skill updated successfully')
       showEditModal.value = false
-      loadSkills()
+      loadSkills({ silent: true })
     } catch (error) {
       console.error('Failed to update skill:', error)
       toast.error(t('skills.updateFailed') || 'Failed to update skill')
@@ -305,12 +241,8 @@ export function useSkillList(t) {
     }
   }
 
-  // 用于存储要删除的skill的agentId
-  const skillToDeleteAgentId = ref(null)
-
-  const confirmDelete = (skill, agentId = null) => {
+  const confirmDelete = (skill) => {
     skillToDelete.value = skill
-    skillToDeleteAgentId.value = agentId // 保存agentId用于删除
     showDeleteDialog.value = true
   }
 
@@ -319,14 +251,11 @@ export function useSkillList(t) {
 
     try {
       deleting.value = true
-      // 如果是Agent维度的skill，传入agent_id
-      const agentId = skillToDeleteAgentId.value
-      await skillAPI.deleteSkill(skillToDelete.value.name, agentId)
+      await skillAPI.deleteSkill(skillToDelete.value.name)
       toast.success(t('skills.deleteSuccess') || 'Skill deleted successfully')
       showDeleteDialog.value = false
       skillToDelete.value = null
-      skillToDeleteAgentId.value = null
-      await loadSkills()
+      await loadSkills({ silent: true })
     } catch (error) {
       toast.error(t('skills.deleteFailed') || 'Failed to delete skill')
     } finally {
@@ -371,7 +300,6 @@ export function useSkillList(t) {
     counts,
     displayedSkills,
     isImportDisabled,
-    groupedAgentSkills,
 
     // Methods
     getDimensionBadgeVariant,
