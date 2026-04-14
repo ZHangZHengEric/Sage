@@ -11,6 +11,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import anyio
 from loguru import logger
 from sagents.session_runtime import (
     build_conversation_messages_view,
@@ -83,7 +84,7 @@ async def interrupt_session(
         logger.bind(session_id=session_id).warning("会话存在但未能写入中断状态")
         return {"session_id": session_id}
 
-    await persist_session_state(session_id)
+    await persist_session_state_with_cancel_protection(session_id)
 
     stream_managers = []
     try:
@@ -143,15 +144,20 @@ async def persist_session_state(session_id: str) -> None:
 
 
 async def persist_session_state_with_cancel_protection(session_id: str) -> None:
-    persistence_task = asyncio.create_task(persist_session_state(session_id))
+    persistence_task = None
     try:
-        await asyncio.shield(persistence_task)
+        with anyio.CancelScope(shield=True):
+            persistence_task = asyncio.create_task(persist_session_state(session_id))
+            await asyncio.shield(persistence_task)
     except asyncio.CancelledError as cancel_exc:
         logger.bind(session_id=session_id).warning("会话持久化遇到取消，等待后台任务完成")
+        if persistence_task is None:
+            raise cancel_exc
         current_task = asyncio.current_task()
         uncancel_count = current_task.uncancel() if current_task and hasattr(current_task, "uncancel") else 0
         try:
-            await asyncio.shield(persistence_task)
+            with anyio.CancelScope(shield=True):
+                await asyncio.shield(persistence_task)
         finally:
             if current_task and uncancel_count:
                 for _ in range(uncancel_count):
