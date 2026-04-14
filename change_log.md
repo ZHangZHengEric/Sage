@@ -1,4 +1,6 @@
 
+2026-04-14 提取 agent 工作空间路径管理为独立模块 `agent_workspace.py`，重构 chat_service/skill_service/agent_service 统一调用新接口；server 模式下新增技能自动同步逻辑；content-script.js 加 IIFE 初始化守卫防重复执行。
+
 2026-02-22 12:40:00 Prompts Update: Enhanced Fibre Sub-Agent (Strand) prompts to include full Orchestrator capabilities (planning, decomposition, delegation) while retaining mandatory task result reporting requirement.
 2026-03-06 12:00:00 新增Session改造方案文档，采用预置Agent类注册并将default_memory_type改为运行时传入。
 2026-03-06 12:20:00 备份sagents.py并引入Session运行时，SAgent入口改为委托SessionManager。
