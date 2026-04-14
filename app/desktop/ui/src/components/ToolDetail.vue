@@ -167,7 +167,7 @@ const formattedParams = computed(() => {
   if (!props.tool || !props.tool.parameters) {
     return []
   }
-  return formatParameters(props.tool.parameters)
+  return formatParameters(props.tool.parameters, props.tool.required)
 })
 
 // Methods
@@ -233,17 +233,18 @@ const getToolTypeBadgeVariant = (type) => {
   }
 }
 
-const formatParameters = (parameters) => {
+const formatParameters = (parameters, requiredNames = []) => {
   if (!parameters || typeof parameters !== 'object') {
     return []
   }
 
+  const requiredSet = new Set(Array.isArray(requiredNames) ? requiredNames : [])
   return Object.entries(parameters).map(([key, value]) => {
     return {
       name: key,
       type: value.type || 'unknown',
       description: value.description || t('tools.noDescription'),
-      required: value.required || false
+      required: requiredSet.has(key) || value.required === true
     }
   })
 }

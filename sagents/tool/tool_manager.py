@@ -834,6 +834,7 @@ class ToolManager:
                 "name": fn.get("name", getattr(tool, "name", "")),
                 "description": fn.get("description", getattr(tool, "description", "")),
                 "parameters": params.get("properties", {}),
+                "required": params.get("required", getattr(tool, "required", [])),
                 "type": tool_type,
                 "source": source,
             })
