@@ -127,9 +127,9 @@ def check_task_not_completed(session_context, session=None) -> bool:
     return True
 
 @ConditionRegistry.register("always_true")
-def always_true(session_context) -> bool:
+def always_true(session_context, session=None) -> bool:
     return True
 
 @ConditionRegistry.register("always_false")
-def always_false(session_context) -> bool:
+def always_false(session_context, session=None) -> bool:
     return False
