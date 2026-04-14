@@ -70,14 +70,22 @@ def _raise_innermost_exception(exc: BaseException) -> None:
 
 class McpProxy:
 
-    async def run_mcp_tool(self, tool: McpToolSpec, session_id: Optional[str] = None, **kwargs) -> Any:
+    async def run_mcp_tool(
+        self,
+        tool: McpToolSpec,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        **kwargs,
+    ) -> Any:
         """Run an MCP tool asynchronously"""
         if not session_id:
             session_id = "default"
-        # 只有当工具参数定义中包含 session_id 时才传递
+        # 只有当工具参数定义中包含 session_id / user_id 时才传递
         tool_params = getattr(tool, 'parameters', {}) or {}
         if 'session_id' in tool_params:
             kwargs["session_id"] = session_id
+        if user_id and 'user_id' in tool_params and 'user_id' not in kwargs:
+            kwargs["user_id"] = user_id
         try:
             if isinstance(tool.server_params, SseServerParameters):
                 return await self._execute_sse_mcp_tool(tool, **kwargs)
