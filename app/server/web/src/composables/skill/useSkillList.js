@@ -12,6 +12,7 @@ export function useSkillList(t) {
   const searchTerm = ref('')
   const selectedDimension = ref('system')
   const currentUser = ref({ userid: '', role: 'user' })
+  const currentUserId = computed(() => currentUser.value?.userid || currentUser.value?.id || '')
 
   // Import dialog state
   const showImportModal = ref(false)
@@ -153,18 +154,18 @@ export function useSkillList(t) {
     }
     if (skill.dimension === 'agent') {
       // Agent skills can be edited by the owner
-      return skill.owner_user_id === currentUser.value.userid
+      return skill.owner_user_id === currentUserId.value
     }
-    return skill.owner_user_id === currentUser.value.userid
+    return skill.owner_user_id === currentUserId.value
   }
 
   const canDelete = (skill) => {
     if (isAdmin.value) return true
     if (skill.dimension === 'system') return false
     if (skill.dimension === 'agent') {
-      return skill.owner_user_id === currentUser.value.userid
+      return skill.owner_user_id === currentUserId.value
     }
-    return skill.owner_user_id === currentUser.value.userid
+    return skill.owner_user_id === currentUserId.value
   }
 
   // API Methods

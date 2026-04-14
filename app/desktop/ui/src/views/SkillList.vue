@@ -121,7 +121,7 @@
               </CardHeader>
               <CardContent class="pt-0 pb-3">
                 <div class="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-                  <div v-if="skill.user_id === currentUser.value.userid" class="flex items-center gap-1 bg-primary/5 px-2 py-1 rounded text-primary/80">
+                  <div v-if="skill.user_id === currentUserId" class="flex items-center gap-1 bg-primary/5 px-2 py-1 rounded text-primary/80">
                     <User class="h-3 w-3" />
                     <span>{{ t('skills.mySkill') }}</span>
                   </div>
@@ -180,7 +180,7 @@
                         </Button>
                       </div>
                     </div>
-                    <div v-if="skill.user_id === currentUser.userid" class="mt-2 inline-flex items-center gap-1 bg-primary/5 px-2 py-1 rounded text-primary/80 text-xs">
+                    <div v-if="skill.user_id === currentUserId" class="mt-2 inline-flex items-center gap-1 bg-primary/5 px-2 py-1 rounded text-primary/80 text-xs">
                       <User class="h-3 w-3" />
                       <span>{{ t('skills.mySkill') }}</span>
                     </div>
@@ -339,6 +339,7 @@ const importing = ref(false)
 const importError = ref('')
 const fileInput = ref(null)
 const currentUser = ref({ userid: '', role: 'user' })
+const currentUserId = computed(() => currentUser.value?.userid || currentUser.value?.id || '')
 const confirmDialogRef = ref(null)
 
 const showEditModal = ref(false)
@@ -358,13 +359,13 @@ const groups = computed(() => [
     id: 'mine', 
     label: t('skills.mySkills') || 'My Skills', 
     icon: User,
-    count: skills.value.filter(s => s.user_id === currentUser.value.userid).length
+    count: skills.value.filter(s => s.user_id === currentUserId.value).length
   },
   { 
     id: 'system', 
     label: t('skills.systemSkills') || 'System Skills', 
     icon: Shield,
-    count: skills.value.filter(s => s.user_id !== currentUser.value.userid).length
+    count: skills.value.filter(s => s.user_id !== currentUserId.value).length
   }
 ])
 
@@ -374,9 +375,9 @@ const displayedSkills = computed(() => {
 
   // Group filtering
   if (selectedGroup.value === 'mine') {
-    result = result.filter(s => s.user_id === currentUser.value.userid)
+    result = result.filter(s => s.user_id === currentUserId.value)
   } else if (selectedGroup.value === 'system') {
-    result = result.filter(s => s.user_id !== currentUser.value.userid)
+    result = result.filter(s => s.user_id !== currentUserId.value)
   }
 
   // Search filtering
@@ -401,10 +402,10 @@ const isImportDisabled = computed(() => {
 
 const canDelete = (skill) => {
   // If skill has no owner (system skill), user cannot delete
-  if (currentUser.value.role && currentUser.value.role.toLowerCase() === 'admin') return true
+  if (currentUser.value?.role?.toLowerCase() === 'admin') return true
   if (!skill.user_id) return false
-  const canDeleteResult = skill.user_id === currentUser.value.userid
-  console.log('[SkillList] canDelete check:', skill.name, 'skill.user_id:', skill.user_id, 'currentUser.userid:', currentUser.value.userid, 'result:', canDeleteResult)
+  const canDeleteResult = skill.user_id === currentUserId.value
+  console.log('[SkillList] canDelete check:', skill.name, 'skill.user_id:', skill.user_id, 'currentUser.userid:', currentUserId.value, 'result:', canDeleteResult)
   return canDeleteResult
 }
 
@@ -429,7 +430,7 @@ const loadSkills = async () => {
 
 const deleteSkill = async (skill) => {
   if (!canDelete(skill)) {
-    console.log('[SkillList] Cannot delete skill:', skill.name, 'user_id:', skill.user_id, 'currentUser:', currentUser.value.userid)
+    console.log('[SkillList] Cannot delete skill:', skill.name, 'user_id:', skill.user_id, 'currentUser:', currentUserId.value)
     return
   }
   const confirmed = await confirmDialogRef.value.confirm(t('skills.deleteConfirm', { name: skill.name }) || 'Are you sure you want to delete this skill?')
