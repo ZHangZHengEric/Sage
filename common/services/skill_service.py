@@ -15,6 +15,7 @@ from sagents.skill.skill_manager import SkillManager, get_skill_manager
 from common.core import config
 from common.core.exceptions import SageHTTPException
 from common.models.agent import AgentConfigDao
+from common.services.agent_workspace import get_agent_skill_dir
 
 
 def _calculate_skill_hash(skill_path: str) -> str:
@@ -217,11 +218,18 @@ def _get_skill_dimension(skill_path: str) -> Dict[str, Any]:
 
     if "agents" in parts:
         idx = parts.index("agents")
-        if len(parts) > idx + 3 and parts[idx + 3] == "skills":
+        tail = parts[idx + 1 :]
+        if len(tail) >= 3 and tail[2] == "skills":
             return {
                 "dimension": "agent",
-                "owner_user_id": parts[idx + 1],
-                "agent_id": parts[idx + 2],
+                "owner_user_id": tail[0],
+                "agent_id": tail[1],
+            }
+        if len(tail) >= 2 and tail[1] == "skills":
+            return {
+                "dimension": "agent",
+                "owner_user_id": "",
+                "agent_id": tail[0],
             }
 
     if "users" in parts:
@@ -501,16 +509,17 @@ async def get_agent_available_skills(
     agent_skills: Dict[str, Dict[str, Any]] = {}
     logger.info(f"检查Agent工作空间: agents_dir={agents_dir}, agent_user_id={agent_user_id}, agent_id={agent_id}, app_mode={cfg.app_mode}")
 
-    # 根据模式确定Agent技能路径
-    if cfg.app_mode == "desktop":
-        # Desktop模式: ~/.sage/agents/{agent_id}/skills
-        agent_skills_path = os.path.join(agents_dir, agent_id, "skills")
-    else:
-        # Server模式: agents_dir/{user_id}/{agent_id}/skills
-        if not agent_user_id:
-            logger.info(f"Server模式需要agent_user_id")
-        else:
-            agent_skills_path = os.path.join(agents_dir, agent_user_id, agent_id, "skills")
+    try:
+        agent_skills_path = str(
+            get_agent_skill_dir(
+                agent_id,
+                user_id=agent_user_id,
+                app_mode=cfg.app_mode,
+                ensure_exists=False,
+            )
+        )
+    except ValueError:
+        agent_skills_path = ""
 
     if agent_id and os.path.isdir(agent_skills_path):
         logger.info(f"Agent技能路径: {agent_skills_path}, 存在={os.path.isdir(agent_skills_path)}")
@@ -627,14 +636,14 @@ async def sync_skill_to_agent(
         raise SageHTTPException(detail=f"技能 '{skill_name}' 在技能广场中不存在")
 
     # 2. 确保Agent工作空间技能目录存在
-    # 根据模式确定Agent技能路径
-    if cfg.app_mode == "desktop":
-        # Desktop模式: ~/.sage/agents/{agent_id}/skills
-        agent_skills_dir = os.path.join(agents_dir, agent_id, "skills")
-    else:
-        # Server模式: agents_dir/{user_id}/{agent_id}/skills
-        agent_skills_dir = os.path.join(agents_dir, agent_user_id, agent_id, "skills")
-    os.makedirs(agent_skills_dir, exist_ok=True)
+    agent_skills_dir = str(
+        get_agent_skill_dir(
+            agent_id,
+            user_id=agent_user_id,
+            app_mode=cfg.app_mode,
+            ensure_exists=True,
+        )
+    )
 
     # 3. 复制技能到Agent工作空间
     target_skill_path = os.path.join(agent_skills_dir, skill_name)
@@ -691,7 +700,15 @@ async def delete_skill(
 
     cfg = _get_cfg()
     if agent_id:
-        agent_skills_path = os.path.join(cfg.agents_dir, user_id, agent_id, "skills", skill_name)
+        try:
+            agent_skills_path = get_agent_skill_dir(
+                agent_id,
+                user_id=user_id,
+                app_mode=cfg.app_mode,
+                ensure_exists=False,
+            ) / skill_name
+        except ValueError:
+            raise SageHTTPException(detail="删除Agent技能失败: 缺少 user_id")
         if not os.path.exists(agent_skills_path):
             raise SageHTTPException(detail=f"Skill '{skill_name}' not found in agent workspace")
         try:
@@ -901,8 +918,14 @@ async def import_skill_by_file(
         else:
             cfg = _get_cfg()
             if is_agent and agent_id:
-                target_dir = os.path.join(cfg.agents_dir, user_id, agent_id, "skills")
-                os.makedirs(target_dir, exist_ok=True)
+                target_dir = str(
+                    get_agent_skill_dir(
+                        agent_id,
+                        user_id=user_id,
+                        app_mode=cfg.app_mode,
+                        ensure_exists=True,
+                    )
+                )
             elif is_system:
                 target_dir = cfg.skill_dir
             else:
@@ -954,8 +977,14 @@ async def import_skill_by_url(
         else:
             cfg = _get_cfg()
             if is_agent and agent_id:
-                target_dir = os.path.join(cfg.agents_dir, user_id, agent_id, "skills")
-                os.makedirs(target_dir, exist_ok=True)
+                target_dir = str(
+                    get_agent_skill_dir(
+                        agent_id,
+                        user_id=user_id,
+                        app_mode=cfg.app_mode,
+                        ensure_exists=True,
+                    )
+                )
             elif is_system:
                 target_dir = cfg.skill_dir
             else:
