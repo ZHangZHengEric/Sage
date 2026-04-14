@@ -934,12 +934,6 @@ async def execute_chat_session(
         await _finalize_session_end(request, original_skills)
 
 
-async def _sync_conversation_state(session_id: str) -> None:
-    from common.services.conversation_service import persist_session_state
-
-    await persist_session_state(session_id)
-
-
 async def _finalize_session_end(
     request: StreamRequest,
     original_skills: List[str],
