@@ -19,7 +19,7 @@ if not logger.handlers:
     ))
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
-    logger.info("TaskScheduler logger initialized")
+    logger.debug("TaskScheduler logger initialized")
 
 # Try to import croniter, fallback to simple implementation if not available
 try:
@@ -399,7 +399,7 @@ async def _execute_task_claimed(task: Dict[str, Any]) -> None:
     # Try to claim the task first (atomic operation)
     claim_result = await _request_json("POST", f"/tasks/internal/one-time/{task_id}/claim", user_id=task_user_id)
     if not claim_result or not claim_result.get("claimed"):
-        logger.info(f"[TASK EXECUTION] Task {task_id} already being processed or not pending. Skipping.")
+        logger.debug(f"[TASK EXECUTION] Task {task_id} already being processed or not pending. Skipping.")
         return
     
     # Execute the task
@@ -422,6 +422,8 @@ async def _check_and_spawn_recurring_tasks():
         spawned_count = len((result or {}).get("items") or [])
         if spawned_count > 0:
             logger.info(f"Spawned {spawned_count} tasks from recurring tasks")
+        else:
+            logger.debug("No recurring tasks were due")
         return spawned_count
     except Exception as e:
         logger.error(f"Error spawning recurring tasks: {e}")
@@ -454,20 +456,20 @@ async def scheduler_loop_async():
             pending_tasks = (due_result or {}).get("items") or []
             
             if pending_tasks:
-                logger.info(f"[SCHEDULER] due returned {len(pending_tasks)} pending tasks")
-                logger.info(f"[SCHEDULER] Found {len(pending_tasks)} pending tasks to execute")
+                logger.debug(f"[SCHEDULER] due returned {len(pending_tasks)} pending tasks")
+                logger.debug(f"[SCHEDULER] Found {len(pending_tasks)} pending tasks to execute")
                 
                 # Process all pending tasks concurrently
                 # (no session-level locking needed since backend auto-generates session_id)
                 for task in pending_tasks:
                     try:
                         task_id = task['id']
-                        logger.info(f"[SCHEDULER] Starting task {task_id} in new thread")
+                        logger.debug(f"[SCHEDULER] Starting task {task_id} in new thread")
                         
                         # Start task in separate thread
                         task_future = asyncio.create_task(_execute_task_claimed(task), name=f"TaskExecutor-{task_id}")
                         _track_background_task(task_future)
-                        logger.info(f"[SCHEDULER] Task {task_id} started in async task {task_future.get_name()}")
+                        logger.debug(f"[SCHEDULER] Task {task_id} started in async task {task_future.get_name()}")
                     except Exception as e:
                         logger.error(f"[SCHEDULER] Failed to start task {task['id']}: {e}", exc_info=True)
             else:
