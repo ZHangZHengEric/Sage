@@ -888,7 +888,12 @@ class ToolManager:
             if isinstance(tool, McpToolSpec):
                 # For MCP tools, session_id is passed explicitly, so remove from kwargs
                 kwargs.pop("session_id", None)
-                final_result = await self._execute_mcp_tool(tool, session_id, **kwargs)
+                final_result = await self._execute_mcp_tool(
+                    tool,
+                    session_id,
+                    user_id=resolved_user_id,
+                    **kwargs,
+                )
             elif isinstance(tool, SageMcpToolSpec):
                 # Ensure session_id is not in kwargs
                 kwargs.pop("session_id", None)
@@ -1118,13 +1123,22 @@ class ToolManager:
         return normalized
 
     async def _execute_mcp_tool(
-        self, tool: McpToolSpec, session_id: str, **kwargs
+        self,
+        tool: McpToolSpec,
+        session_id: str,
+        user_id: Optional[str] = None,
+        **kwargs,
     ) -> str:
         """Execute MCP tool and format result"""
         logger.info(f"Executing MCP tool: {tool.name} on server: {tool.server_name}")
         mcp_proxy = McpProxy()
         try:
-            result = await mcp_proxy.run_mcp_tool(tool, session_id, **kwargs)
+            result = await mcp_proxy.run_mcp_tool(
+                tool,
+                session_id,
+                user_id=user_id,
+                **kwargs,
+            )
             logger.info(f"MCP tool {tool.name} execution completed successfully")
             # Process MCP result
             if isinstance(result, dict) and result.get("content"):

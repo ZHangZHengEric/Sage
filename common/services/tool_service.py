@@ -59,8 +59,8 @@ async def execute_tool(
 
     tool_response = await tool_manager.run_tool_async(
         tool_name=tool_name,
-        session_context=None,
         session_id="",
+        user_id=user_id,
         **tool_params,
     )
     if tool_response is not None:
