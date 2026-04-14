@@ -5,7 +5,7 @@
       <div class="flex items-center justify-between gap-4">
         <div class="p-4 md:px-6 pb-4 flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
           <Tabs v-model="selectedDimension" class="w-full">
-            <TabsList class="grid w-full max-w-md grid-cols-3 bg-transparent h-auto gap-2">
+            <TabsList class="grid w-full max-w-md grid-cols-2 bg-transparent h-auto gap-2">
               <TabsTrigger value="system" class="gap-2 rounded-full border data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:border-primary shadow-none">
               <Shield class="h-4 w-4" />
               <span>{{ t('skills.system') }}</span>
@@ -15,11 +15,6 @@
               <User class="h-4 w-4" />
               <span>{{ t('skills.mine')  }}</span>
               <span class="ml-1 text-xs opacity-70 bg-black/10 dark:bg-white/10 px-1.5 rounded-full">{{ counts.user }}</span>
-            </TabsTrigger>
-              <TabsTrigger value="agent" class="gap-2 rounded-full border data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:border-primary shadow-none">
-              <Bot class="h-4 w-4" />
-              <span>{{ t('skills.agent') }}</span>
-              <span class="ml-1 text-xs opacity-70 bg-black/10 dark:bg-white/10 px-1.5 rounded-full">{{ counts.agent }}</span>
             </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -59,8 +54,6 @@
           </Button>
         </div>
       </div>
-
- 
     </div>
 
     <!-- Main Content Area -->
@@ -87,134 +80,8 @@
 
       <ScrollArea v-else class="h-full">
         <div class="space-y-2 pr-4">
-          <!-- Agent Dimension: Group by Agent -->
-          <div v-if="selectedDimension === 'agent' && viewMode === 'card'">
-            <div v-for="group in groupedAgentSkills" :key="group.agentId" class="mb-6">
-              <!-- Agent Group Header -->
-              <div class="flex items-center gap-2 mb-3 px-2">
-                <Bot class="h-4 w-4 text-muted-foreground" />
-                <span class="text-sm font-medium text-muted-foreground">{{ group.agentName }}</span>
-                <Badge variant="secondary" class="text-xs">{{ group.skills?.length || 0 }}</Badge>
-              </div>
-              <!-- Agent Skills -->
-              <div class="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
-                <Card v-for="skill in group.skills" :key="skill.name"
-                  class="group hover:shadow-md transition-all duration-300 border-muted/60 hover:border-primary/50 bg-card">
-                  <CardHeader class="flex flex-row items-start gap-4 space-y-0 pb-3">
-                    <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                      <Box class="h-5 w-5" />
-                    </div>
-                    <div class="space-y-1 overflow-hidden flex-1">
-                      <div class="flex items-center justify-between">
-                        <CardTitle class="text-base truncate" :title="skill.name">
-                          {{ skill.name }}
-                        </CardTitle>
-                        <DropdownMenu v-if="canEdit(skill) || canDelete(skill)">
-                          <DropdownMenuTrigger as-child>
-                            <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
-                              <MoreVertical class="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" class="w-40">
-                            <DropdownMenuItem v-if="canEdit(skill)" @click="openEditModal(skill)">
-                              <Edit class="h-4 w-4 mr-2" />
-                              {{ t('skills.edit') }}
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator v-if="canEdit(skill) && canDelete(skill)" />
-                            <DropdownMenuItem v-if="canDelete(skill)" class="text-destructive focus:text-destructive" @click="confirmDelete(skill, group.agentId)">
-                              <Trash2 class="h-4 w-4 mr-2" />
-                              {{ t('skills.delete') }}
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                      <CardDescription class="line-clamp-2 text-xs">
-                        {{ skill.description || t('skills.noDescription') }}
-                      </CardDescription>
-                    </div>
-                  </CardHeader>
-                  <CardContent class="pt-0 pb-3">
-                    <div class="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-                      <Badge variant="outline" class="text-[10px]">
-                        {{ group.agentName }}
-                      </Badge>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-          </div>
-
-          <!-- Other Dimensions: Grid Cards -->
-          <div v-else-if="selectedDimension === 'agent'" class="space-y-4 pb-20">
-            <Card
-              class="border-dashed border-2 cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-all duration-300"
-              @click="openImportModal"
-            >
-              <CardContent class="py-3 flex items-center gap-3 text-muted-foreground hover:text-primary transition-colors">
-                <Plus class="h-4 w-4" />
-                <span class="font-medium">{{ t('skills.import') }}</span>
-              </CardContent>
-            </Card>
-
-            <div v-for="group in groupedAgentSkills" :key="`list-${group.agentId}`" class="space-y-2">
-              <div class="flex items-center gap-2 px-2">
-                <Bot class="h-4 w-4 text-muted-foreground" />
-                <span class="text-sm font-medium text-muted-foreground">{{ group.agentName }}</span>
-                <Badge variant="secondary" class="text-xs">{{ group.skills?.length || 0 }}</Badge>
-              </div>
-
-              <Card
-                v-for="skill in group.skills"
-                :key="`list-${group.agentId}-${skill.name}`"
-                class="group border-muted/60 hover:border-primary/40 transition-all"
-              >
-                <CardContent class="py-3">
-                  <div class="flex items-start gap-3">
-                    <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-                      <Box class="h-4 w-4" />
-                    </div>
-                    <div class="min-w-0 flex-1">
-                      <div class="flex items-center justify-between gap-2">
-                        <div class="min-w-0">
-                          <div class="font-medium text-sm truncate" :title="skill.name">{{ skill.name }}</div>
-                          <div class="text-xs text-muted-foreground line-clamp-1 mt-0.5">
-                            {{ skill.description || t('skills.noDescription') }}
-                          </div>
-                        </div>
-                        <div class="flex items-center gap-1">
-                          <Button
-                            v-if="canEdit(skill)"
-                            variant="ghost"
-                            size="icon"
-                            class="h-7 w-7 text-muted-foreground hover:text-primary"
-                            @click.stop="openEditModal(skill)"
-                          >
-                            <Edit class="h-4 w-4" />
-                          </Button>
-                          <Button
-                            v-if="canDelete(skill)"
-                            variant="ghost"
-                            size="icon"
-                            class="h-7 w-7 text-muted-foreground hover:text-destructive"
-                            @click.stop="confirmDelete(skill, group.agentId)"
-                          >
-                            <Trash2 class="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                      <div class="mt-2 inline-flex items-center gap-1 bg-primary/5 px-2 py-1 rounded text-primary/80 text-xs">
-                        <Bot class="h-3 w-3" />
-                        <span>{{ group.agentName }}</span>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-
-          <div v-else-if="viewMode === 'card'" class="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 pb-20">
+          <!-- Card View -->
+          <div v-if="viewMode === 'card'" class="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 pb-20">
             <Card
               class="flex flex-col items-center justify-center border-dashed border-2 cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-all duration-300 min-h-[140px]"
               @click="openImportModal"
@@ -269,7 +136,7 @@
                   <Badge variant="outline" class="text-[10px]">
                     {{ selectedDimension === 'system' ? t('skills.system') : t('skills.mine') }}
                   </Badge>
-                        <Badge v-if="skill.owner_user_id === currentUser.userid" variant="secondary" class="text-[10px]">
+                  <Badge v-if="skill.owner_user_id === currentUser.userid" variant="secondary" class="text-[10px]">
                     {{ t('skills.mySkill') }}
                   </Badge>
                 </div>
@@ -277,6 +144,7 @@
             </Card>
           </div>
 
+          <!-- List View -->
           <div v-else class="space-y-2 pb-20">
             <Card
               class="border-dashed border-2 cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-all duration-300"
@@ -468,12 +336,7 @@
         <CardHeader>
           <CardTitle class="text-lg">{{ t('skills.deleteConfirmTitle') || 'Delete Confirmation' }}</CardTitle>
           <CardDescription>
-            <template v-if="skillToDelete?.dimension === 'agent'">
-              {{ t('skills.deleteAgentSkillConfirm') || '即将删除 Agent 工作空间下的 Skill，是否确认？' }}
-            </template>
-            <template v-else>
-              {{ t('skills.deleteSkillConfirm', { name: skillToDelete?.name }) || `确定要删除 Skill "${skillToDelete?.name}" 吗？此操作无法撤销。` }}
-            </template>
+            {{ t('skills.deleteSkillConfirm', { name: skillToDelete?.name }) || `确定要删除 Skill "${skillToDelete?.name}" 吗？此操作无法撤销。` }}
           </CardDescription>
         </CardHeader>
         <CardFooter class="flex justify-end gap-3 pt-4">
@@ -502,7 +365,6 @@ import {
   Trash2,
   User,
   Shield,
-  Bot,
   Edit,
   LayoutGrid,
   List,
@@ -578,12 +440,8 @@ const {
   counts,
   displayedSkills,
   isImportDisabled,
-  groupedAgentSkills,
 
   // Methods
-  getDimensionBadgeVariant,
-  getDimensionIcon,
-  getDimensionLabel,
   canEdit,
   canDelete,
   openImportModal,
