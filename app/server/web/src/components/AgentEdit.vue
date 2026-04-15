@@ -200,7 +200,15 @@
                 </FormItem>
 
                 <FormItem :label="t('agent.maxLoopCount')">
-                  <Input type="number" v-model.number="store.formData.maxLoopCount" min="1" max="200" class="h-10" />
+                  <Input
+                    type="number"
+                    v-model.number="store.formData.maxLoopCount"
+                    min="1"
+                    max="200"
+                    class="h-10"
+                    @blur="validateMaxLoopCount"
+                  />
+                  <p v-if="maxLoopCountError" class="text-xs text-destructive mt-1">{{ maxLoopCountError }}</p>
                 </FormItem>
               </div>
 
@@ -873,6 +881,7 @@ const { listModelProviders } = modelProviderAPI
 const saving = ref(false)
 const contentRef = ref(null)
 const activeSection = ref('basic')
+const maxLoopCountError = ref('')
 const agentSkills = ref([])
 const loadingAgentSkills = ref(false)
 const syncingWorkspaceSkills = ref(false)
@@ -883,6 +892,21 @@ const syncingSkills = ref(new Set())  // 正在同步的技能名称集合
 // 检查技能是否正在同步
 const isSkillSyncing = (skillName) => {
   return syncingSkills.value.has(skillName)
+}
+
+const validateMaxLoopCount = () => {
+  const value = store.formData.maxLoopCount
+  if (value === null || value === undefined || value === '') {
+    maxLoopCountError.value = t('agentEdit.maxLoopRequired')
+    return false
+  }
+  if (value < 1) {
+    store.formData.maxLoopCount = 1
+    maxLoopCountError.value = t('agentEdit.maxLoopTooSmall')
+  } else {
+    maxLoopCountError.value = ''
+  }
+  return true
 }
 
 // 同步技能到Agent工作空间
@@ -1128,6 +1152,9 @@ const loadData = async () => {
 const handleSave = async (shouldExit = true) => {
   saving.value = true
   try {
+    if (!validateMaxLoopCount()) {
+      return
+    }
     store.prepareForSave()
     const plainData = JSON.parse(JSON.stringify(store.formData))
     await new Promise((resolve) => {

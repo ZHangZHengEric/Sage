@@ -25,7 +25,7 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     agentMode: 'simple',
     moreSuggest: false,
     memoryType: "session",
-    maxLoopCount: null,
+    maxLoopCount: 100,
     llm_provider_id: null,
     fast_llm_provider_id: null,  // 快速模型提供商ID（可选）
     enableMultimodal: false,
@@ -137,6 +137,11 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
         agentMode: normalizeAgentMode(agentData.agentMode)
       }
       formData.value = JSON.parse(JSON.stringify({ ...defaultFormData, ...processedData }))
+      if (formData.value.maxLoopCount === null || formData.value.maxLoopCount === undefined || formData.value.maxLoopCount === '') {
+        formData.value.maxLoopCount = 100
+      } else if (formData.value.maxLoopCount < 1) {
+        formData.value.maxLoopCount = 1
+      }
       if (!Array.isArray(formData.value.availableTools)) formData.value.availableTools = []
       if (!Array.isArray(formData.value.availableSkills)) formData.value.availableSkills = []
       if (!Array.isArray(formData.value.availableKnowledgeBases)) formData.value.availableKnowledgeBases = []
@@ -154,6 +159,7 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
       if (workflowPairs.value.length === 0) workflowPairs.value.push({ id: generateId(), key: '', steps: [''] })
     } else {
       formData.value = JSON.parse(JSON.stringify(defaultFormData))
+      formData.value.maxLoopCount = 100
       systemContextPairs.value = [{ key: '', value: '' }]
       workflowPairs.value = [{ id: generateId(), key: '', steps: [''] }]
     }

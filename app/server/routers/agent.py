@@ -18,6 +18,7 @@ from common.schemas.agent import (
     AgentAbilitiesRequest,
     AgentConfigDTO,
     AutoGenAgentRequest,
+    DeleteAgentWorkspaceRequest,
     AuthorizationRequest,
     SystemPromptOptimizeRequest,
     convert_agent_to_config,
@@ -337,3 +338,18 @@ async def delete_file(agent_id: str, request: Request, session_id: Optional[str]
     except Exception as e:
         logger.error(f"Delete failed: {e}")
         raise
+
+
+@agent_router.post("/workspace/delete")
+async def delete_agent_workspace(req: DeleteAgentWorkspaceRequest):
+    """
+    删除指定用户个人工作空间下的 Agent workspace。
+
+    注意：该接口不做业务鉴权校验，由调用方自行控制。
+    """
+    result = await agent_router_service.build_agent_workspace_delete_response(
+        agent_id=req.agent_id,
+        user_id=req.user_id,
+        deleter=lambda: agent_service.delete_server_agent_workspace(req.agent_id, req.user_id),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])

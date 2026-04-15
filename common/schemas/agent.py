@@ -35,6 +35,11 @@ class AuthorizationRequest(BaseModel):
     user_ids: List[str]
 
 
+class DeleteAgentWorkspaceRequest(BaseModel):
+    agent_id: str
+    user_id: str
+
+
 class AgentConfigDTO(BaseModel):
     id: Optional[str] = None
     user_id: Optional[str] = None
@@ -162,6 +167,7 @@ AgentAbilitiesResponse = BaseResponse[AgentAbilitiesData]
 
 __all__ = [
     "AuthorizationRequest",
+    "DeleteAgentWorkspaceRequest",
     "AgentConfigDTO",
     "AutoGenAgentRequest",
     "SystemPromptOptimizeRequest",

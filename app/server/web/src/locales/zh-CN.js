@@ -660,6 +660,8 @@ export default {
   'agentEdit.reOptimize': '重新优化',
   'agentEdit.applyOptimization': '应用优化',
   'agentEdit.startOptimization': '开始优化',
+  'agentEdit.maxLoopTooSmall': '最大循环次数不能小于 1',
+  'agentEdit.maxLoopRequired': '最大循环次数不能为空',
   'agentEdit.unknownSource': '未知来源',
   'agentEdit.skillPendingUpdate': '待更新',
   'agentEdit.updateSkill': '更新',

@@ -191,6 +191,7 @@ ref: http-api-reference
 | GET | `/api/system/info` | 无 | 系统公开配置 | 前端初始化 |
 | POST | `/api/system/update_settings` | `{"allow_registration"}` | `{}` | 更新系统设置 |
 | GET | `/api/health` | 无 | `{"status","timestamp","service"}` | 健康检查 |
+| POST | `/api/agent/workspace/delete` | `{"agent_id","user_id"}` | `{"agent_id","user_id","workspace_path","deleted"}` | 删除指定用户个人工作空间下的 Agent workspace |
 | POST | `/api/oss/upload` | `multipart/form-data` | `{"url"}` | 上传文件到对象存储 |
 | GET | `/api/system/version/check` | 无 | Tauri 更新响应 | 桌面端自动更新 |
 | GET | `/api/system/version/latest` | 无 | 最新版本 | Web 下载页 |

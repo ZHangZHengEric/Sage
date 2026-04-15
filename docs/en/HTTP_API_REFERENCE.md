@@ -189,6 +189,7 @@ These are still present mostly for backward compatibility and are largely equiva
 | GET | `/api/system/info` | none | public system config | Frontend bootstrap |
 | POST | `/api/system/update_settings` | `{"allow_registration"}` | `{}` | Update system settings |
 | GET | `/api/health` | none | `{"status","timestamp","service"}` | Health check |
+| POST | `/api/agent/workspace/delete` | `{"agent_id","user_id"}` | `{"agent_id","user_id","workspace_path","deleted"}` | Delete a user's personal agent workspace |
 | POST | `/api/oss/upload` | `multipart/form-data` | `{"url"}` | Upload file to object storage |
 | GET | `/api/system/version/check` | none | Tauri update response | Desktop auto-update |
 | GET | `/api/system/version/latest` | none | latest version | Web download page |
