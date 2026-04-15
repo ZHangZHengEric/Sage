@@ -576,6 +576,114 @@ async def get_agent_available_skills(
     return skills_list
 
 
+def _find_source_skill_path(
+    skill_name: str,
+    agent_user_id: str,
+    cfg: config.StartupConfig,
+) -> Optional[str]:
+    """在用户技能和系统技能中查找源技能路径（用户优先）。"""
+    if agent_user_id and os.path.exists(cfg.user_dir):
+        user_skill_path = os.path.join(cfg.user_dir, agent_user_id, "skills", skill_name)
+        if os.path.isdir(user_skill_path):
+            return user_skill_path
+
+    if os.path.exists(cfg.skill_dir):
+        system_skill_path = os.path.join(cfg.skill_dir, skill_name)
+        if os.path.isdir(system_skill_path):
+            return system_skill_path
+
+    return None
+
+
+async def sync_workspace_skills(
+    user_id: str,
+    agent_id: str,
+    purge_extra: bool = False,
+) -> Dict[str, List[str]]:
+    """
+    将 Agent 配置中的 skills 批量同步到 workspace 目录，
+    返回 synced / removed / unchanged 三个列表。
+    """
+    agent_dao = AgentConfigDao()
+    agent = await agent_dao.get_by_id(agent_id)
+    if not agent:
+        raise SageHTTPException(detail=f"Agent '{agent_id}' 不存在")
+
+    agent_config = agent.config or {}
+    selected_skills = [
+        str(name).strip()
+        for name in (
+            agent_config.get("availableSkills")
+            or agent_config.get("available_skills")
+            or []
+        )
+        if str(name).strip()
+    ]
+
+    cfg = _get_cfg()
+    agent_user_id = agent.user_id or user_id
+
+    try:
+        agent_skills_dir = get_agent_skill_dir(
+            agent_id,
+            user_id=agent_user_id,
+            app_mode=cfg.app_mode,
+            ensure_exists=True,
+        )
+    except ValueError:
+        raise SageHTTPException(detail="sync_workspace_skills 失败: 缺少 user_id")
+
+    existing_skills: set[str] = set()
+    if agent_skills_dir.exists():
+        for p in agent_skills_dir.iterdir():
+            if p.is_dir():
+                existing_skills.add(p.name)
+
+    synced: List[str] = []
+    unchanged: List[str] = []
+    removed: List[str] = []
+
+    for skill_name in selected_skills:
+        try:
+            source_path = _find_source_skill_path(skill_name, agent_user_id, cfg)
+            if not source_path:
+                logger.warning(f"sync_workspace_skills: 技能 '{skill_name}' 在技能广场中不存在，跳过")
+                unchanged.append(skill_name)
+                continue
+
+            target_path = str(agent_skills_dir / skill_name)
+
+            if os.path.isdir(target_path) and not _is_skill_need_update(source_path, target_path):
+                unchanged.append(skill_name)
+                continue
+
+            if os.path.exists(target_path):
+                shutil.rmtree(target_path)
+            shutil.copytree(source_path, target_path)
+            _set_permissions_recursive(target_path)
+            synced.append(skill_name)
+        except Exception as e:
+            logger.warning(f"sync_workspace_skills: skill={skill_name}, error={e}")
+            unchanged.append(skill_name)
+
+    if purge_extra:
+        selected_set = set(selected_skills)
+        for name in existing_skills:
+            if name not in selected_set:
+                try:
+                    shutil.rmtree(str(agent_skills_dir / name))
+                    removed.append(name)
+                    logger.info(f"sync_workspace_skills: 删除多余 skill '{name}'")
+                except Exception as e:
+                    logger.warning(f"sync_workspace_skills: 删除 skill '{name}' 失败: {e}")
+
+    logger.info(
+        f"sync_workspace_skills 完成: agent_id={agent_id}, "
+        f"synced={synced}, removed={removed}, unchanged={unchanged}"
+    )
+    return {"synced": synced, "removed": removed, "unchanged": unchanged}
+
+
 async def sync_skill_to_agent(
     skill_name: str,
     agent_id: str,

@@ -1,4 +1,6 @@
 
+2026-04-15 新增 POST /api/skills/sync-workspace-skills 接口，支持按 Agent 配置批量同步 skills 到 workspace，purge_extra 可清理多余 skill；server 与 desktop 共用同一业务逻辑。
+
 2026-04-14 修复 Web 端技能列表页保存后卡住：移除 Agent 维度 Tab 及 getAgents 并行调用，loadSkills 改为仅调 getSkills；保存/导入/删除后静默刷新不再全屏 loading。
 
 2026-04-14 提取 agent 工作空间路径管理为独立模块 `agent_workspace.py`，重构 chat_service/skill_service/agent_service 统一调用新接口；server 模式下新增技能自动同步逻辑；content-script.js 加 IIFE 初始化守卫防重复执行。
