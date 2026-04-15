@@ -27,6 +27,12 @@ class SkillUpdateRequest(BaseModel):
     content: str
 
 
+class SyncWorkspaceSkillsRequest(BaseModel):
+    user_id: str
+    agent_id: str
+    purge_extra: bool = False
+
+
 @skill_router.get("")
 async def get_skills(
     http_request: Request,
@@ -186,5 +192,25 @@ async def sync_skill_to_agent(
         agent_id=agent_id,
         user_id=get_request_user_id(http_request),
         role=get_request_role(http_request),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
+
+
+@skill_router.post("/sync-workspace-skills")
+async def sync_workspace_skills(
+    request: SyncWorkspaceSkillsRequest,
+    http_request: Request,
+):
+    """
+    批量同步 Agent 配置中的 skills 到其 workspace 目录。
+
+    purge_extra=true 时，workspace 中多出来的 skill 也会被删除，完全对齐配置；
+    purge_extra=false 时，只覆盖同名的，不删多余的。
+    """
+    target_user_id = request.user_id or get_request_user_id(http_request)
+    result = await skill_router_service.build_sync_workspace_skills_response(
+        user_id=target_user_id,
+        agent_id=request.agent_id,
+        purge_extra=request.purge_extra,
     )
     return await Response.succ(message=result["message"], data=result["data"])
