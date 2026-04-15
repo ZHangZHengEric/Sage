@@ -604,6 +604,8 @@ export default {
   'agentEdit.reOptimize': 'Optimize Again',
   'agentEdit.applyOptimization': 'Apply Optimization',
   'agentEdit.startOptimization': 'Start Optimization',
+  'agentEdit.maxLoopTooSmall': 'Max loop count cannot be less than 1',
+  'agentEdit.maxLoopRequired': 'Max loop count is required',
   'agentEdit.unknownSource': 'Unknown Source',
   'agentEdit.skillPendingUpdate': 'Update Pending',
   'agentEdit.updateSkill': 'Update',

@@ -135,6 +135,39 @@ def _require_agent_name(agent_name: str, *, agent_id: str = "") -> str:
     return normalized
 
 
+def _normalize_max_loop_count(agent_config: Dict[str, Any]) -> Dict[str, Any]:
+    loop_key = "maxLoopCount" if "maxLoopCount" in agent_config else "max_loop_count"
+    if loop_key not in agent_config:
+        loop_key = "maxLoopCount"
+
+    value = agent_config.get(loop_key)
+    if value is None or value == "":
+        raise SageHTTPException(
+            status_code=400,
+            detail="最大循环次数不能为空",
+            error_detail="maxLoopCount is required",
+        )
+
+    try:
+        normalized_value = int(value)
+    except (TypeError, ValueError):
+        raise SageHTTPException(
+            status_code=400,
+            detail="最大循环次数必须为整数",
+            error_detail="maxLoopCount must be an integer",
+        )
+
+    if normalized_value < 1:
+        raise SageHTTPException(
+            status_code=400,
+            detail="最大循环次数不能小于 1",
+            error_detail="maxLoopCount must be greater than or equal to 1",
+        )
+
+    agent_config[loop_key] = normalized_value
+    return agent_config
+
+
 def _create_model_client(client_params: Dict[str, Any], *, randomize_keys: bool = False) -> Any:
     """
     创建模型客户端
@@ -286,6 +319,7 @@ async def create_agent(
     dao = AgentConfigDao()
     normalized_config = dict(agent_config)
     agent_name = _require_agent_name(agent_name)
+    normalized_config = _normalize_max_loop_count(normalized_config)
 
     if cfg.app_mode == "desktop":
         agent_id = normalized_config.pop("id", None) or generate_agent_id()
@@ -395,6 +429,7 @@ async def update_agent(
 
     normalized_config = dict(agent_config)
     agent_name = _require_agent_name(agent_name, agent_id=agent_id)
+    normalized_config = _normalize_max_loop_count(normalized_config)
 
     if cfg.app_mode == "desktop":
         if user_id and existing_config.user_id and existing_config.user_id != user_id:
@@ -593,7 +628,7 @@ def _build_openclaw_agent_config(
     return {
         "name": DEFAULT_OPENCLAW_AGENT_NAME,
         "description": DEFAULT_OPENCLAW_AGENT_DESCRIPTION,
-        "maxLoopCount": None,
+        "maxLoopCount": 100,
         "memoryType": "session",
         "agentMode": "fibre",
         "availableTools": DEFAULT_OPENCLAW_AGENT_TOOLS.copy(),
@@ -948,6 +983,26 @@ async def download_server_agent_file(
 
 async def delete_server_agent_file(agent_id: str, user_id: str, file_path: str) -> bool:
     return delete_workspace_entry(get_server_agent_workspace_path(agent_id, user_id), file_path)
+
+
+async def delete_server_agent_workspace(agent_id: str, user_id: str) -> Dict[str, Any]:
+    workspace_path = Path(get_server_agent_workspace_path(agent_id, user_id))
+    if not workspace_path.exists():
+        return {
+            "agent_id": agent_id,
+            "user_id": user_id,
+            "workspace_path": str(workspace_path),
+            "deleted": False,
+        }
+
+    shutil.rmtree(workspace_path)
+    logger.info(f"已删除Agent工作空间: agent_id={agent_id}, user_id={user_id}, path={workspace_path}")
+    return {
+        "agent_id": agent_id,
+        "user_id": user_id,
+        "workspace_path": str(workspace_path),
+        "deleted": True,
+    }
 
 
 async def get_desktop_file_workspace(agent_id: str) -> Dict[str, Any]:
