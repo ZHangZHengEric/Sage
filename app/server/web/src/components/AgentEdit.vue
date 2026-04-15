@@ -452,6 +452,16 @@
               </div>
               <div class="flex items-center gap-2">
                 <h2 class="text-base font-semibold">{{ t('agent.availableSkills') }}</h2>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="h-8 text-xs px-3"
+                  @click="syncSelectedSkillsToWorkspaces"
+                  :disabled="!props.agent?.id || syncingWorkspaceSkills || !store.formData.availableSkills?.length"
+                >
+                  <RefreshCw class="h-3 w-3 mr-1" :class="{ 'animate-spin': syncingWorkspaceSkills }" />
+                  {{ t('agentEdit.syncWorkspaceSkills') || '更新用户工作空间技能' }}
+                </Button>
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger as-child>
@@ -865,6 +875,7 @@ const contentRef = ref(null)
 const activeSection = ref('basic')
 const agentSkills = ref([])
 const loadingAgentSkills = ref(false)
+const syncingWorkspaceSkills = ref(false)
 
 // 技能同步状态
 const syncingSkills = ref(new Set())  // 正在同步的技能名称集合
@@ -897,6 +908,39 @@ const syncSkill = async (skillName) => {
     toast.error(t('agentEdit.skillSyncFailed') || `技能 '${skillName}' 同步失败`)
   } finally {
     syncingSkills.value.delete(skillName)
+  }
+}
+
+const syncSelectedSkillsToWorkspaces = async () => {
+  if (!props.agent?.id) {
+    toast.error(t('agentEdit.agentNotSaved') || '请先保存Agent')
+    return
+  }
+
+  const selectedSkills = (store.formData.availableSkills || [])
+    .map(skill => String(skill).trim())
+    .filter(Boolean)
+
+  if (selectedSkills.length === 0 || syncingWorkspaceSkills.value) {
+    return
+  }
+
+  syncingWorkspaceSkills.value = true
+
+  try {
+    const result = await skillAPI.syncSkillsToAgentWorkspaces(props.agent.id, selectedSkills)
+    toast.success(
+      t('agentEdit.workspaceSkillsSyncSuccess', {
+        count: result?.updated_workspace_count ?? 0
+      }) || '用户工作空间技能更新成功'
+    )
+  } catch (error) {
+    console.error('Failed to sync skills to user workspaces:', error)
+    toast.error(
+      t('agentEdit.workspaceSkillsSyncFailed') || '用户工作空间技能更新失败'
+    )
+  } finally {
+    syncingWorkspaceSkills.value = false
   }
 }
 

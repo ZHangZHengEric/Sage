@@ -102,5 +102,18 @@ export const skillAPI = {
     formData.append('skill_name', skillName)
     formData.append('agent_id', agentId)
     return await request.post('/api/skills/sync-to-agent', formData)
+  },
+
+  /**
+   * 批量同步技能到所有用户Agent工作空间
+   * @param {string} agentId - Agent ID
+   * @param {Array<string>} skillNames - 当前Agent选择的技能列表
+   * @returns {Promise<Object>}
+   */
+  syncSkillsToAgentWorkspaces: async (agentId, skillNames = []) => {
+    return await request.post('/api/skills/sync-to-agent-workspaces', {
+      agent_id: agentId,
+      skill_names: skillNames
+    })
   }
 }
