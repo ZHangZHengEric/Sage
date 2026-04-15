@@ -19,11 +19,11 @@ sagents/retrieve_engine/
 
 ## 核心组件
 
-1.  **KnowledgeManager**: RAG 系统的控制中心，负责串联文档处理流程。
-2.  **BaseSplitter (Interface) / DefaultSplitter**: 定义如何将长文档切分为小的 Chunk。
-3.  **VectorStore (Interface)**: 向量数据库的抽象接口。你需要实现具体的子类。
-4.  **EmbeddingModel (Interface)**: 文本向量化模型的抽象接口。你需要适配具体的模型服务。
-5.  **SearchResultPostProcessTool**: 提供 RRF (Reciprocal Rank Fusion) 融合排序和重叠文本块合并功能。
+1. **KnowledgeManager**: RAG 系统的控制中心，负责串联文档处理流程。
+2. **BaseSplitter (Interface) / DefaultSplitter**: 定义如何将长文档切分为小的 Chunk。
+3. **VectorStore (Interface)**: 向量数据库的抽象接口。你需要实现具体的子类。
+4. **EmbeddingModel (Interface)**: 文本向量化模型的抽象接口。你需要适配具体的模型服务。
+5. **SearchResultPostProcessTool**: 提供 RRF (Reciprocal Rank Fusion) 融合排序和重叠文本块合并功能。
 
 ## 使用方法
 
@@ -131,9 +131,9 @@ final_results = tool.merge_overlap_chunk(fused_results)
 
 ## 扩展性
 
-*   **自定义切分器**: 继承 `BaseSplitter` 并实现 `split_text` 方法，然后在 `KnowledgeManager` 初始化时注入。
-*   **更换向量库**: 只需实现新的 `VectorStore` 子类，无需修改业务逻辑。
-
+- **自定义切分器**: 继承 `BaseSplitter` 并实现 `split_text` 方法，然后在 `KnowledgeManager` 初始化时注入。
+- **更换向量库**: 只需实现新的 `VectorStore` 子类，无需修改业务逻辑。
 
 ## 具体实现
+
 可以参照 app/server/service/knowledge_base 目录下的实现。

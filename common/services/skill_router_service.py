@@ -142,3 +142,20 @@ async def build_sync_skill_to_agent_response(
         "message": f"技能 '{skill_name}' 已成功同步到Agent工作空间",
         "data": result,
     }
+
+
+async def build_sync_workspace_skills_response(
+    *,
+    user_id: str,
+    agent_id: str,
+    purge_extra: bool = False,
+) -> Dict[str, Any]:
+    result = await skill_service.sync_workspace_skills(
+        user_id=user_id,
+        agent_id=agent_id,
+        purge_extra=purge_extra,
+    )
+    return {
+        "message": "workspace skills 同步完成",
+        "data": result,
+    }
