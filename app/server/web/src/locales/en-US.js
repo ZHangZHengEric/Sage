@@ -612,6 +612,9 @@ export default {
   'agentEdit.skillSyncSuccess': 'Skill synced successfully',
   'agentEdit.skillSyncFailed': 'Failed to sync skill',
   'agentEdit.loadSkillsFailed': 'Failed to load skills',
+  'agentEdit.syncWorkspaceSkills': 'Sync User Workspace Skills',
+  'agentEdit.workspaceSkillsSyncSuccess': 'Successfully updated {count} user workspaces',
+  'agentEdit.workspaceSkillsSyncFailed': 'Failed to sync user workspace skills',
 
   // Tool Call
   'toolCall.completed': 'Completed',

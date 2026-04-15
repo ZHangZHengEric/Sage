@@ -33,6 +33,11 @@ class SyncWorkspaceSkillsRequest(BaseModel):
     purge_extra: bool = False
 
 
+class SyncAgentWorkspacesSkillRequest(BaseModel):
+    agent_id: str
+    skill_names: Optional[List[str]] = None
+
+
 @skill_router.get("")
 async def get_skills(
     http_request: Request,
@@ -190,6 +195,26 @@ async def sync_skill_to_agent(
     result = await skill_router_service.build_sync_skill_to_agent_response(
         skill_name=skill_name,
         agent_id=agent_id,
+        user_id=get_request_user_id(http_request),
+        role=get_request_role(http_request),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
+
+
+@skill_router.post("/sync-to-agent-workspaces")
+async def sync_skill_to_agent_workspaces(
+    request: SyncAgentWorkspacesSkillRequest,
+    http_request: Request,
+):
+    """
+    批量同步指定Agent在所有现存用户workspace中的技能。
+
+    - 传 skill_names：按请求中的技能列表同步
+    - 不传时：按 Agent 配置中的 availableSkills 批量同步
+    """
+    result = await skill_router_service.build_sync_skill_to_agent_workspaces_response(
+        agent_id=request.agent_id,
+        skill_names=request.skill_names,
         user_id=get_request_user_id(http_request),
         role=get_request_role(http_request),
     )

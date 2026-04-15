@@ -668,6 +668,9 @@ export default {
   'agentEdit.skillSyncSuccess': '技能同步成功',
   'agentEdit.skillSyncFailed': '技能同步失败',
   'agentEdit.loadSkillsFailed': '加载技能列表失败',
+  'agentEdit.syncWorkspaceSkills': '更新用户工作空间技能',
+  'agentEdit.workspaceSkillsSyncSuccess': '已成功更新 {count} 个用户工作空间',
+  'agentEdit.workspaceSkillsSyncFailed': '用户工作空间技能更新失败',
 
   // 工具调用
   'toolCall.completed': '已完成',
