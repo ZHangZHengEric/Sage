@@ -10,6 +10,10 @@ from common.core.exceptions import SageHTTPException
 EML_CLIENT: Optional["Dm20151123Client"] = None # type: ignore
 
 
+def _has_eml_credentials(cfg: config.StartupConfig) -> bool:
+    return bool((cfg.eml_access_key_id or "").strip() and (cfg.eml_access_key_secret or "").strip())
+
+
 async def init_eml_client(
     cfg: Optional[config.StartupConfig] = None,
 ) -> Optional["Dm20151123Client"]: # pyright: ignore[reportUndefinedVariable]
@@ -27,25 +31,19 @@ async def init_eml_client(
     if cfg is None:
         raise RuntimeError("StartupConfig is required to initialize EML client")
 
+    if not _has_eml_credentials(cfg):
+        logger.info("未配置邮件 Access Key，跳过邮件客户端初始化")
+        return None
+
     try:
         access_key_id = (cfg.eml_access_key_id or "").strip()
         access_key_secret = (cfg.eml_access_key_secret or "").strip()
         security_token = (cfg.eml_security_token or "").strip()
-
-        if access_key_id and access_key_secret:
-            client_config = open_api_models.Config(
-                access_key_id=access_key_id,
-                access_key_secret=access_key_secret,
-                security_token=security_token,
-            )
-        else:
-            from alibabacloud_credentials.client import Client as CredentialClient
-
-            logger.warning(
-                "未在 .env 中配置 SAGE_EML_ACCESS_KEY_ID/SAGE_EML_ACCESS_KEY_SECRET，邮件客户端将回退到阿里云默认凭据链"
-            )
-            credential = CredentialClient()
-            client_config = open_api_models.Config(credential=credential)
+        client_config = open_api_models.Config(
+            access_key_id=access_key_id,
+            access_key_secret=access_key_secret,
+            security_token=security_token,
+        )
         client_config.endpoint = cfg.eml_endpoint or "dm.aliyuncs.com"
         EML_CLIENT = Dm20151123Client(client_config)
         logger.debug(f"邮件客户端初始化成功: {client_config.endpoint}")
@@ -78,6 +76,11 @@ async def send_register_verification_mail(to_address: str, code: str) -> None:
         raise SageHTTPException(
             detail="邮件服务未配置完整",
             error_detail="missing eml account name or template id",
+        )
+    if not _has_eml_credentials(cfg):
+        raise SageHTTPException(
+            detail="邮件服务未配置",
+            error_detail="missing eml access key configuration",
         )
 
     client = EML_CLIENT or await init_eml_client(cfg)

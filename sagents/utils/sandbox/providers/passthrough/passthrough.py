@@ -22,6 +22,7 @@
 import os
 import re
 import shutil
+import sys
 import asyncio
 from typing import Dict, List, Optional
 
@@ -202,19 +203,22 @@ class PassthroughSandboxProvider(ISandboxHandle):
         with open(host_path, 'r', encoding=encoding) as f:
             return f.read()
 
-    def _write_file_sync(self, host_path: str, content: str, encoding: str) -> None:
+    def _write_file_sync(self, host_path: str, content: str, encoding: str, mode: str) -> None:
         os.makedirs(os.path.dirname(host_path), exist_ok=True)
-        with open(host_path, 'w', encoding=encoding) as f:
+        write_mode = "a" if mode == "append" else "w"
+        with open(host_path, write_mode, encoding=encoding) as f:
             f.write(content)
 
-    def _list_directory_sync(self, host_path: str) -> List[FileInfo]:
+    def _list_directory_sync(self, host_path: str, include_hidden: bool) -> List[FileInfo]:
         result = []
         for entry in os.listdir(host_path):
+            if not include_hidden and entry.startswith("."):
+                continue
             entry_path = os.path.join(host_path, entry)
             stat = os.stat(entry_path)
             result.append(FileInfo(
-                name=entry,
-                path=os.path.join(host_path, entry),
+                path=self.to_virtual_path(entry_path),
+                is_file=os.path.isfile(entry_path),
                 is_dir=os.path.isdir(entry_path),
                 size=stat.st_size,
                 modified_time=stat.st_mtime,
@@ -239,20 +243,19 @@ class PassthroughSandboxProvider(ISandboxHandle):
     async def execute_command(
         self,
         command: str,
-        timeout: Optional[int] = None,
-        working_dir: Optional[str] = None,
-        env: Optional[Dict[str, str]] = None,
+        workdir: Optional[str] = None,
+        timeout: int = 30,
+        env_vars: Optional[Dict[str, str]] = None,
     ) -> CommandResult:
         """执行命令"""
         import asyncio
-        import subprocess
 
         # 转换命令中的虚拟路径到宿主机路径
         converted_command = self._convert_paths_in_command(command)
 
         # 设置工作目录
-        if working_dir:
-            cwd = self.to_host_path(working_dir)
+        if workdir:
+            cwd = self.to_host_path(workdir)
         else:
             cwd = self._sandbox_agent_workspace
 
@@ -263,7 +266,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
         except Exception as e:
             logger.warning(f"PassthroughSandboxProvider: Failed to create npm cache dir {npm_cache_dir}: {e}")
 
-        merged_env = {**os.environ, **(env or {})}
+        merged_env = {**os.environ, **(env_vars or {})}
         merged_env.setdefault("npm_config_cache", npm_cache_dir)
         merged_env.setdefault("NPM_CONFIG_CACHE", npm_cache_dir)
 
@@ -363,20 +366,26 @@ class PassthroughSandboxProvider(ISandboxHandle):
         host_path = self.to_host_path(path)
         return await asyncio.to_thread(self._read_file_sync, host_path, encoding)
 
-    async def write_file(self, path: str, content: str, encoding: str = "utf-8") -> None:
+    async def write_file(
+        self,
+        path: str,
+        content: str,
+        encoding: str = "utf-8",
+        mode: str = "overwrite",
+    ) -> None:
         """写入文件"""
         host_path = self.to_host_path(path)
-        await asyncio.to_thread(self._write_file_sync, host_path, content, encoding)
+        await asyncio.to_thread(self._write_file_sync, host_path, content, encoding, mode)
 
     async def file_exists(self, path: str) -> bool:
         """检查文件是否存在"""
         host_path = self.to_host_path(path)
         return await asyncio.to_thread(os.path.exists, host_path)
 
-    async def list_directory(self, path: str) -> List[FileInfo]:
+    async def list_directory(self, path: str, include_hidden: bool = False) -> List[FileInfo]:
         """列出目录内容"""
         host_path = self.to_host_path(path)
-        return await asyncio.to_thread(self._list_directory_sync, host_path)
+        return await asyncio.to_thread(self._list_directory_sync, host_path, include_hidden)
 
     async def ensure_directory(self, path: str) -> None:
         """确保目录存在"""
@@ -390,8 +399,8 @@ class PassthroughSandboxProvider(ISandboxHandle):
             return None
         stat = await asyncio.to_thread(os.stat, host_path)
         return FileInfo(
-            name=os.path.basename(path),
             path=path,
+            is_file=await asyncio.to_thread(os.path.isfile, host_path),
             is_dir=await asyncio.to_thread(os.path.isdir, host_path),
             size=stat.st_size,
             modified_time=stat.st_mtime,
@@ -407,11 +416,21 @@ class PassthroughSandboxProvider(ISandboxHandle):
         target_path = self.to_host_path(sandbox_path)
         await asyncio.to_thread(self._copy_from_host_sync, host_path, target_path)
 
-    async def execute_python(self, code: str, timeout: Optional[int] = None) -> ExecutionResult:
+    async def execute_python(
+        self,
+        code: str,
+        requirements: Optional[List[str]] = None,
+        workdir: Optional[str] = None,
+        timeout: int = 60,
+    ) -> ExecutionResult:
         """执行 Python 代码"""
-        import asyncio
-        import subprocess
         import tempfile
+
+        if requirements:
+            pip_cmd = f"pip install {' '.join(requirements)}"
+            await self.execute_command(pip_cmd, workdir=workdir, timeout=300)
+
+        actual_workdir = self.to_host_path(workdir) if workdir else self._sandbox_agent_workspace
 
         # 创建临时文件存储代码
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
@@ -425,7 +444,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 temp_file,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=self._sandbox_agent_workspace,
+                cwd=actual_workdir,
             )
 
             stdout, stderr = await asyncio.wait_for(
@@ -434,22 +453,28 @@ class PassthroughSandboxProvider(ISandboxHandle):
             )
 
             return ExecutionResult(
-                exit_code=process.returncode,
-                stdout=stdout.decode('utf-8', errors='replace'),
-                stderr=stderr.decode('utf-8', errors='replace'),
+                success=process.returncode == 0,
+                output=stdout.decode('utf-8', errors='replace'),
+                error=stderr.decode('utf-8', errors='replace') if process.returncode != 0 else None,
+                execution_time=0,
+                installed_packages=requirements or [],
             )
         except asyncio.TimeoutError:
             process.kill()
             return ExecutionResult(
-                exit_code=-1,
-                stdout="",
-                stderr=f"Python execution timed out after {timeout} seconds",
+                success=False,
+                output="",
+                error=f"Python execution timed out after {timeout} seconds",
+                execution_time=timeout,
+                installed_packages=requirements or [],
             )
         except Exception as e:
             return ExecutionResult(
-                exit_code=-1,
-                stdout="",
-                stderr=str(e),
+                success=False,
+                output="",
+                error=str(e),
+                execution_time=0,
+                installed_packages=requirements or [],
             )
         finally:
             # 清理临时文件
@@ -458,10 +483,19 @@ class PassthroughSandboxProvider(ISandboxHandle):
             except:
                 pass
 
-    async def execute_javascript(self, code: str, timeout: Optional[int] = None) -> ExecutionResult:
+    async def execute_javascript(
+        self,
+        code: str,
+        packages: Optional[List[str]] = None,
+        workdir: Optional[str] = None,
+        timeout: int = 60,
+    ) -> ExecutionResult:
         """执行 JavaScript 代码"""
-        import asyncio
-        import subprocess
+        if packages:
+            npm_cmd = f"npm install {' '.join(packages)}"
+            await self.execute_command(npm_cmd, workdir=workdir, timeout=300)
+
+        actual_workdir = self.to_host_path(workdir) if workdir else self._sandbox_agent_workspace
 
         # 检查是否有 node 环境
         try:
@@ -471,7 +505,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 code,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=self._sandbox_agent_workspace,
+                cwd=actual_workdir,
             )
 
             stdout, stderr = await asyncio.wait_for(
@@ -480,33 +514,47 @@ class PassthroughSandboxProvider(ISandboxHandle):
             )
 
             return ExecutionResult(
-                exit_code=process.returncode,
-                stdout=stdout.decode('utf-8', errors='replace'),
-                stderr=stderr.decode('utf-8', errors='replace'),
+                success=process.returncode == 0,
+                output=stdout.decode('utf-8', errors='replace'),
+                error=stderr.decode('utf-8', errors='replace') if process.returncode != 0 else None,
+                execution_time=0,
+                installed_packages=packages or [],
             )
         except FileNotFoundError:
             return ExecutionResult(
-                exit_code=-1,
-                stdout="",
-                stderr="Node.js not found. Please install Node.js to execute JavaScript code.",
+                success=False,
+                output="",
+                error="Node.js not found. Please install Node.js to execute JavaScript code.",
+                execution_time=0,
+                installed_packages=packages or [],
             )
         except asyncio.TimeoutError:
             process.kill()
             return ExecutionResult(
-                exit_code=-1,
-                stdout="",
-                stderr=f"JavaScript execution timed out after {timeout} seconds",
+                success=False,
+                output="",
+                error=f"JavaScript execution timed out after {timeout} seconds",
+                execution_time=timeout,
+                installed_packages=packages or [],
             )
         except Exception as e:
             return ExecutionResult(
-                exit_code=-1,
-                stdout="",
-                stderr=str(e),
+                success=False,
+                output="",
+                error=str(e),
+                execution_time=0,
+                installed_packages=packages or [],
             )
 
-    async def get_file_tree(self, include_hidden: bool = False, root_path: Optional[str] = None, max_depth: Optional[int] = None, max_items_per_dir: int = 5) -> str:
+    async def get_file_tree(
+        self,
+        root_path: Optional[str] = None,
+        include_hidden: bool = False,
+        max_depth: Optional[int] = None,
+        max_items_per_dir: int = 5,
+    ) -> str:
         """获取文件树"""
-        from .filesystem import SandboxFileSystem
+        from ..local.filesystem import SandboxFileSystem
 
         if root_path:
             target_path = self.to_host_path(root_path)
