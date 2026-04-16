@@ -3,7 +3,6 @@ from typing import List, Dict, Any, Optional, Union, AsyncGenerator, cast
 import json
 import uuid
 import asyncio
-from common.models.user import User
 from sagents.utils.logger import logger
 from sagents.tool.tool_manager import ToolManager
 from sagents.context.session_context import  SessionContext, SessionStatus
