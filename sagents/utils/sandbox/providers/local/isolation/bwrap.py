@@ -3,6 +3,7 @@ Bubblewrap isolation strategy (Linux).
 
 使用 Linux 的 bubblewrap 进行文件系统隔离。
 """
+import asyncio
 import subprocess
 import os
 from typing import Dict, Any, Optional, List
@@ -29,7 +30,7 @@ class BwrapIsolation:
         self.volume_mounts = volume_mounts or []
         self.limits = limits or {}
         
-    def execute(self, payload: Dict[str, Any], cwd: Optional[str] = None) -> Any:
+    async def execute(self, payload: Dict[str, Any], cwd: Optional[str] = None) -> Any:
         """
         使用 bwrap 执行 payload。
         """
@@ -47,14 +48,12 @@ class BwrapIsolation:
         with open(input_pkl, "wb") as f:
             pickle.dump(payload, f)
 
-        # 使用沙箱的 venv Python
         python_bin = os.path.join(self.venv_dir, "bin", "python")
         launcher_path = os.path.join(sandbox_dir, "launcher.py")
         if not os.path.exists(launcher_path):
             with open(launcher_path, "w") as f:
                 f.write(LAUNCHER_SCRIPT)
 
-        # 构建 bwrap 命令
         bwrap_cmd = [
             "bwrap",
             "--ro-bind", self.sandbox_agent_workspace, self.sandbox_agent_workspace,
@@ -69,9 +68,7 @@ class BwrapIsolation:
             "--tmpfs", "/tmp",
         ]
         
-        # 添加额外的 volume_mounts
         for mount in self.volume_mounts:
-            # 避免重复添加主工作区
             if mount.mount_path != self.sandbox_agent_workspace:
                 bwrap_cmd.extend(["--ro-bind", mount.host_path, mount.mount_path])
         
@@ -80,12 +77,13 @@ class BwrapIsolation:
         logger.info(f"[BwrapIsolation] 执行命令: {' '.join(bwrap_cmd[:5])}...")
         
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 bwrap_cmd,
                 capture_output=True,
                 text=True,
                 cwd=cwd or self.sandbox_agent_workspace,
-                timeout=300
+                timeout=300,
             )
             
             logger.info(f"[BwrapIsolation] 返回码: {result.returncode}")
@@ -106,7 +104,6 @@ class BwrapIsolation:
                 raise Exception(f"Error in bwrap: {res.get('error')}")
                 
         finally:
-            # 清理
             if os.path.exists(input_pkl):
                 try:
                     os.remove(input_pkl)

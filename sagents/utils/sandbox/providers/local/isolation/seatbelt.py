@@ -3,6 +3,7 @@ Seatbelt isolation strategy (macOS sandbox-exec).
 
 使用 macOS 的 sandbox-exec 进行文件系统隔离。
 """
+import asyncio
 import subprocess
 import os
 from typing import Dict, Any, Optional, List
@@ -103,7 +104,7 @@ class SeatbeltIsolation:
             
         return profile_path
         
-    def execute(self, payload: Dict[str, Any], cwd: Optional[str] = None) -> Any:
+    async def execute(self, payload: Dict[str, Any], cwd: Optional[str] = None) -> Any:
         """
         使用 sandbox-exec 执行 payload。
         """
@@ -122,7 +123,6 @@ class SeatbeltIsolation:
         
         # 使用沙箱的 venv Python（解析符号链接获取真实路径）
         python_bin = os.path.join(self.venv_dir, "bin", "python")
-        # 解析符号链接，获取真实路径（sandbox-exec 可能无法执行符号链接）
         python_bin_dir = None
         if os.path.islink(python_bin):
             python_bin = os.path.realpath(python_bin)
@@ -130,7 +130,6 @@ class SeatbeltIsolation:
             logger.info(f"[SeatbeltIsolation] Python 是符号链接，已解析为真实路径: {python_bin}")
         launcher_path = os.path.join(self.sandbox_dir, "launcher.py")
 
-        # 生成 profile（如果 Python 是符号链接，需要额外添加真实路径到允许列表）
         additional_write = [cwd] if cwd else []
         additional_read = [input_pkl]
         if python_bin_dir:
@@ -151,11 +150,13 @@ class SeatbeltIsolation:
         logger.info(f"[SeatbeltIsolation] 执行命令: {' '.join(cmd[:4])}...")
         
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 cmd,
                 capture_output=True,
                 text=True,
-                cwd=cwd or self.sandbox_dir
+                cwd=cwd or self.sandbox_dir,
+                timeout=300,
             )
             
             logger.info(f"[SeatbeltIsolation] 返回码: {result.returncode}")
@@ -176,7 +177,6 @@ class SeatbeltIsolation:
                 raise Exception(f"Error in seatbelt: {res.get('error')}")
                 
         finally:
-            # 清理
             if os.path.exists(input_pkl):
                 try:
                     os.remove(input_pkl)
