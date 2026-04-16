@@ -912,23 +912,33 @@ class SessionManager:
 
         logger.info(f"SessionManager: Migrating existing sessions from {self.session_root_space} into SQLite registry")
         entries = []
-        for entry in os.listdir(self.session_root_space):
-            entry_path = os.path.join(self.session_root_space, entry)
-            if not os.path.isdir(entry_path):
-                continue
+        try:
+            with os.scandir(self.session_root_space) as root_entries:
+                for entry in root_entries:
+                    if not entry.is_dir():
+                        continue
+                    entry_path = entry.path
+                    if os.path.exists(os.path.join(entry_path, "session_context.json")) or os.path.exists(os.path.join(entry_path, "messages.json")):
+                        entries.append((entry.name, entry_path, None))
+                        logger.debug(f"Migrating root session: {entry.name}")
 
-            if os.path.exists(os.path.join(entry_path, "session_context.json")) or os.path.exists(os.path.join(entry_path, "messages.json")):
-                entries.append((entry, entry_path, None))
-                logger.debug(f"Migrating root session: {entry}")
-
-            sub_sessions_dir = os.path.join(entry_path, "sub_sessions")
-            if os.path.exists(sub_sessions_dir):
-                for sub_entry in os.listdir(sub_sessions_dir):
-                    sub_entry_path = os.path.join(sub_sessions_dir, sub_entry)
-                    if os.path.isdir(sub_entry_path):
-                        if os.path.exists(os.path.join(sub_entry_path, "session_context.json")) or os.path.exists(os.path.join(sub_entry_path, "messages.json")):
-                            entries.append((sub_entry, sub_entry_path, entry))
-                            logger.debug(f"Migrating sub session: {sub_entry}")
+                    sub_sessions_dir = os.path.join(entry_path, "sub_sessions")
+                    if not os.path.isdir(sub_sessions_dir):
+                        continue
+                    with os.scandir(sub_sessions_dir) as sub_entries:
+                        for sub_entry in sub_entries:
+                            if not sub_entry.is_dir():
+                                continue
+                            sub_entry_path = sub_entry.path
+                            if os.path.exists(os.path.join(sub_entry_path, "session_context.json")) or os.path.exists(os.path.join(sub_entry_path, "messages.json")):
+                                entries.append((sub_entry.name, sub_entry_path, entry.name))
+                                logger.debug(f"Migrating sub session: {sub_entry.name}")
+        except FileNotFoundError:
+            logger.info(f"SessionManager: Session root space disappeared during migration: {self.session_root_space}")
+            return
+        except Exception as e:
+            logger.warning(f"SessionManager: Failed to scan sessions in {self.session_root_space}: {e}")
+            return
 
         if entries:
             self._registry.register_batch(entries)
