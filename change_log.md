@@ -1,4 +1,6 @@
 
+2026-04-16 delete_agent 在删除 DB 记录后调用 delete_agent_workspace_on_host，清理宿主机上该 Agent 工作区（desktop/server）；与本地/直通/远程 bind 挂载路径一致；未镜像到宿主机的纯远端数据不在此删除。
+
 2026-04-15 新增 POST /api/skills/sync-workspace-skills 接口，支持按 Agent 配置批量同步 skills 到 workspace，purge_extra 可清理多余 skill；server 与 desktop 共用同一业务逻辑。
 
 2026-04-14 修复 Web 端技能列表页保存后卡住：移除 Agent 维度 Tab 及 getAgents 并行调用，loadSkills 改为仅调 getSkills；保存/导入/删除后静默刷新不再全屏 loading。
