@@ -133,6 +133,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
     skills_parser = subparsers.add_parser("skills", help="List available CLI skills")
     skills_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
+    skills_parser.add_argument("--agent-id", dest="agent_id", help="Show the skills currently available to a specific agent")
     skills_parser.add_argument("--workspace", dest="workspace", help="Include skills from a specific workspace directory")
     skills_parser.add_argument("--json", action="store_true", help="Print skills as JSON")
 
@@ -360,12 +361,13 @@ async def _stream_request(request, json_output: bool, stats_output: bool, worksp
     return 0
 
 
-def _build_request(args: argparse.Namespace, task: str):
+async def _build_request(args: argparse.Namespace, task: str):
     from app.cli.service import build_run_request, validate_requested_skills
 
-    skills = validate_requested_skills(
+    skills = await validate_requested_skills(
         requested_skills=args.skills,
         user_id=args.user_id,
+        agent_id=args.agent_id,
         workspace=args.workspace,
     )
 
@@ -383,9 +385,9 @@ def _build_request(args: argparse.Namespace, task: str):
 async def _run_command(args: argparse.Namespace) -> int:
     from app.cli.service import cli_runtime, validate_cli_runtime_requirements
 
-    request = _build_request(args, args.task)
-    validate_cli_runtime_requirements()
     async with cli_runtime(verbose=args.verbose):
+        validate_cli_runtime_requirements()
+        request = await _build_request(args, args.task)
         await _stream_request(request, args.json, args.stats, workspace=args.workspace)
     return 0
 
@@ -436,8 +438,8 @@ async def _chat_command(args: argparse.Namespace) -> int:
                 print(args.session_id)
                 continue
 
-            request = _build_request(args, prompt)
             validate_cli_runtime_requirements()
+            request = await _build_request(args, prompt)
             await _stream_request(request, args.json, args.stats, workspace=args.workspace)
     return 0
 
@@ -545,15 +547,29 @@ async def _sessions_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def _skills_command(args: argparse.Namespace) -> int:
-    from app.cli.service import list_available_skills
+async def _skills_command(args: argparse.Namespace) -> int:
+    from app.cli.service import cli_db_runtime, list_available_skills
 
-    result = list_available_skills(user_id=args.user_id, workspace=args.workspace)
+    if args.agent_id:
+        async with cli_db_runtime(verbose=False):
+            result = await list_available_skills(
+                user_id=args.user_id,
+                agent_id=args.agent_id,
+                workspace=args.workspace,
+            )
+    else:
+        result = await list_available_skills(
+            user_id=args.user_id,
+            agent_id=None,
+            workspace=args.workspace,
+        )
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
     print(f"user_id: {result['user_id']}")
+    if result.get("agent_id"):
+        print(f"agent_id: {result['agent_id']}")
     if result.get("workspace"):
         print(f"workspace: {result['workspace']}")
     print(f"total: {result.get('total', 0)}")
@@ -629,7 +645,7 @@ async def _main_async(args: argparse.Namespace) -> int:
         if args.command == "sessions":
             return await _sessions_command(args)
         if args.command == "skills":
-            return _skills_command(args)
+            return await _skills_command(args)
         if args.command == "config" and args.config_command == "show":
             return _config_show_command(args)
         if args.command == "config" and args.config_command == "init":
