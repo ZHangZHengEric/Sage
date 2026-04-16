@@ -40,7 +40,7 @@ class AgentBase(ABC):
     流式处理和内容解析等核心功能。
     """
 
-    def __init__(self, model: Optional[AsyncOpenAI] = None, model_config: Dict[str, Any] = {}, system_prefix: str = ""):
+    def __init__(self, model: Optional[AsyncOpenAI] = None, model_config: Optional[Dict[str, Any]] = None, system_prefix: str = ""):
         """
         初始化智能体基类
 
@@ -50,7 +50,7 @@ class AgentBase(ABC):
             system_prefix: 系统前缀提示
         """
         self.model = model
-        self.model_config = model_config
+        self.model_config = model_config if model_config is not None else {}
         self.system_prefix = system_prefix
         self.agent_description = f"{self.__class__.__name__} agent"
         self.agent_name = self.__class__.__name__
