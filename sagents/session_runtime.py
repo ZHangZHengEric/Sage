@@ -888,8 +888,6 @@ class SessionManager:
         self._sessions: Dict[str, Session] = {}
         # 格式: {session_id: workspace_path}
         self._all_session_paths: Dict[str, str] = {}
-        self._last_scan_time: float = 0.0
-        self._rescan_cooldown_seconds: float = 1.0
         logger.info(f"SessionManager: Initialized with lazy session scanning, root={self.session_root_space}")
 
     @staticmethod
@@ -957,7 +955,6 @@ class SessionManager:
             return
 
         self._all_session_paths = discovered_paths
-        self._last_scan_time = time.monotonic()
         logger.info(f"SessionManager: Found {len(self._all_session_paths)} sessions total")
 
     def _is_sub_session(self, session_id: str) -> bool:
@@ -990,9 +987,6 @@ class SessionManager:
             return None
         # 2. 如果内存中没有，重新扫描会话目录
         # 这处理了会话在其他进程中创建的情况
-        now = time.monotonic()
-        if now - self._last_scan_time < self._rescan_cooldown_seconds:
-            return None
         logger.debug(f"SessionManager: Session {session_id} not in cache, rescanning...")
         self._scan_all_sessions()
         
