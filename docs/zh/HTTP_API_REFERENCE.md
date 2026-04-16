@@ -172,6 +172,7 @@ ref: http-api-reference
 | DELETE | `/api/skills` | Query: `name`,`agent_id?` | 无或空对象 | 删除 Skill |
 | GET | `/api/skills/content` | Query: `name` | `{"content"}` | 获取 `SKILL.md` 内容 |
 | PUT | `/api/skills/content` | `{"name","content"}` | 无或空对象 | 更新 `SKILL.md` |
+| POST | `/api/skills/sync-to-agent-workspaces` | `{"agent_id","skill_names?"}` | `{"agent_id","resolved_skill_names","workspace_count","updated_workspace_count","failed_workspace_count","results":[]}` | 批量同步指定 Agent 在所有现存用户 workspace 中的技能 |
 | POST | `/api/mcp/add` | `MCPServerRequest` | `{"server_name","status"}` | 新增 MCP Server |
 | GET | `/api/mcp/list` | 无 | `{"servers":[]}` | 获取 MCP Server 列表 |
 | DELETE | `/api/mcp/{server_name}` | 无 | `{"server_name"}` | 删除 MCP Server |
@@ -190,6 +191,7 @@ ref: http-api-reference
 | GET | `/api/system/info` | 无 | 系统公开配置 | 前端初始化 |
 | POST | `/api/system/update_settings` | `{"allow_registration"}` | `{}` | 更新系统设置 |
 | GET | `/api/health` | 无 | `{"status","timestamp","service"}` | 健康检查 |
+| POST | `/api/agent/workspace/delete` | `{"agent_id","user_id"}` | `{"agent_id","user_id","workspace_path","deleted"}` | 删除指定用户个人工作空间下的 Agent workspace |
 | POST | `/api/oss/upload` | `multipart/form-data` | `{"url"}` | 上传文件到对象存储 |
 | GET | `/api/system/version/check` | 无 | Tauri 更新响应 | 桌面端自动更新 |
 | GET | `/api/system/version/latest` | 无 | 最新版本 | Web 下载页 |
@@ -726,6 +728,19 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/import-url \
     "agent_id":null
   }'
 ```
+
+### 10.1 批量同步 Agent workspace skills
+
+```bash
+curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/sync-to-agent-workspaces \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "agent_id":"agent_xxx",
+    "skill_names":["research-helper","writer-helper"]
+  }'
+```
+
+不传 `skill_names` 时，会按 Agent 配置中的 `availableSkills` / `available_skills` 批量同步到所有现存 `agents/{user_id}/{agent_id}` workspace。
 
 ### 11. 上传对象存储文件
 

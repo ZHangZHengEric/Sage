@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full w-full bg-background flex flex-col overflow-hidden">
+  <div ref="skillListRoot" tabindex="-1" class="h-full w-full bg-background flex flex-col overflow-hidden outline-none">
     <!-- Header Area -->
     <div class="flex-none bg-background border-b">
       <div class="flex items-center justify-between gap-4">
@@ -106,20 +106,20 @@
                     <CardTitle class="text-base truncate" :title="skill.name">
                       {{ skill.name }}
                     </CardTitle>
-                    <DropdownMenu v-if="canEdit(skill) || canDelete(skill)">
+                    <DropdownMenu v-if="canEdit(skill) || canDelete(skill)" :modal="false">
                       <DropdownMenuTrigger as-child>
                         <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
                           <MoreVertical class="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" class="w-40">
-                        <DropdownMenuItem v-if="canEdit(skill)" @click="openEditModal(skill)">
+                        <DropdownMenuItem v-if="canEdit(skill)" @select="handleEditAction(skill)">
                           <Edit class="h-4 w-4 mr-2" />
                           {{ t('skills.edit') }}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator v-if="canEdit(skill) && canDelete(skill)" />
                         <DropdownMenuItem v-if="canDelete(skill)" class="text-destructive focus:text-destructive"
-                          @click="confirmDelete(skill)">
+                          @select="handleDeleteAction(skill)">
                           <Trash2 class="h-4 w-4 mr-2" />
                           {{ t('skills.delete') }}
                         </DropdownMenuItem>
@@ -303,8 +303,11 @@
     </Dialog>
 
     <!-- Edit Dialog -->
-    <Dialog :open="showEditModal" @update:open="showEditModal = $event">
-      <DialogContent class="sm:max-w-[800px] sm:h-[80vh] flex flex-col">
+    <Dialog v-model:open="showEditModal">
+      <DialogContent
+        class="sm:max-w-[800px] sm:h-[80vh] flex flex-col"
+        @close-auto-focus="handleEditDialogCloseAutoFocus"
+      >
         <DialogHeader>
           <DialogTitle>{{ t('skills.edit') }} - {{ editingSkill?.name }}</DialogTitle>
           <DialogDescription>
@@ -355,7 +358,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import {
   Box,
   Search,
@@ -410,6 +413,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 // Composables
 const { t } = useLanguage()
 const viewMode = ref('card')
+const skillListRoot = ref(null)
 
 // Use the skill list composable
 const {
@@ -453,4 +457,64 @@ const {
   confirmDelete,
   executeDelete
 } = useSkillList(t)
+
+const restoreSkillListFocus = () => {
+  if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
+
+  if (typeof document !== 'undefined') {
+    if (document.body?.style?.pointerEvents === 'none') {
+      document.body.style.pointerEvents = ''
+    }
+
+    if (document.documentElement?.style?.pointerEvents === 'none') {
+      document.documentElement.style.pointerEvents = ''
+    }
+  }
+
+  const focusRoot = () => {
+    skillListRoot.value?.focus?.()
+  }
+
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(focusRoot)
+    return
+  }
+
+  focusRoot()
+}
+
+const handleEditDialogCloseAutoFocus = (event) => {
+  event.preventDefault()
+  restoreSkillListFocus()
+}
+
+watch(showEditModal, async (open, wasOpen) => {
+  if (!open && wasOpen) {
+    await nextTick()
+    restoreSkillListFocus()
+  }
+})
+
+const queueMenuAction = (callback) => {
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(callback)
+    return
+  }
+
+  setTimeout(callback, 0)
+}
+
+const handleEditAction = (skill) => {
+  queueMenuAction(() => {
+    void openEditModal(skill)
+  })
+}
+
+const handleDeleteAction = (skill, agentId = null) => {
+  queueMenuAction(() => {
+    confirmDelete(skill, agentId)
+  })
+}
 </script>
