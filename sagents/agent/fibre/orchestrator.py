@@ -671,6 +671,17 @@ class FibreOrchestrator:
                 validation_errors.append(f"Task {i}: Agent '{agent_id}' not found")
                 continue
             
+            # Global conflict check: if session_id already registered under a DIFFERENT parent, reject
+            existing_workspace = self.sub_session_manager.get_session_workspace(session_id)
+            if existing_workspace:
+                registered_parent = self.sub_session_manager.get_parent_session_id(session_id)
+                if registered_parent and registered_parent != caller_session_id:
+                    validation_errors.append(
+                        f"Task {i}: Session ID '{session_id}' already belongs to parent session '{registered_parent}'. "
+                        f"Please choose a different session_id or leave it empty for auto-generation."
+                    )
+                    continue
+
             # Check if session is already running (only for internal sessions)
             # Note: Backend-managed sessions are not tracked in sub_session_manager
             existing_session = self.sub_session_manager.get_live_session(session_id)
@@ -929,6 +940,9 @@ class FibreOrchestrator:
             parent_ctx.pop('当前AgentId', None)
             parent_ctx.pop('private_workspace', None)
             parent_ctx.pop('file_permission', None)
+            # 子 session 应从后端 list_agents 拉取可用 agent，而非继承父 session 配置后重复创建
+            parent_ctx.pop('custom_sub_agents', None)
+            parent_ctx.pop('available_sub_agents', None)
             system_context.update(parent_ctx)
 
         # Set external_paths (current task's workspace)
@@ -974,18 +988,21 @@ class FibreOrchestrator:
 
                 for chunk in chunks:
                     if chunk.tool_calls:
-                        logger.debug(f"[Orchestrator] Chunk has tool_calls: {chunk.tool_calls}")
                         for tc in chunk.tool_calls:
                             func_name = tc.get("function", {}).get("name") if isinstance(tc, dict) else getattr(getattr(tc, "function", None), "name", None)
-                            logger.debug(f"[Orchestrator] Checking tool call: {func_name}")
                             if func_name == "sys_finish_task":
-                                args_str = tc.get("function", {}).get("arguments", "{}") if isinstance(tc, dict) else getattr(getattr(tc, "function", None), "arguments", "{}")
+                                args_str = tc.get("function", {}).get("arguments", "") if isinstance(tc, dict) else getattr(getattr(tc, "function", None), "arguments", "")
+                                # 流式传输中 arguments 是按 chunk 累积的，可能为空或不完整 JSON；
+                                # 只在可解析为完整 JSON 时更新结果
+                                if not args_str or not args_str.strip():
+                                    continue
                                 try:
                                     args = json.loads(args_str)
-                                    task_result = f"Task finished: {args.get('status')}. Result: {args.get('result')}"
-                                    logger.info(f"[Orchestrator] sys_finish_task called with status={args.get('status')}, result={args.get('result')[:200]}...")
-                                except Exception as e:
-                                    logger.error(f"Error parsing sys_finish_task arguments: {e}")
+                                except json.JSONDecodeError:
+                                    continue
+                                task_result = f"Task finished: {args.get('status')}. Result: {args.get('result')}"
+                                result_preview = str(args.get('result') or '')[:200]
+                                logger.info(f"[Orchestrator] sys_finish_task called with status={args.get('status')}, result={result_preview}...")
 
             if parent_session and parent_session.should_interrupt():
                 return f"SubSessionID: {session_id}\nInterrupted by parent session"
