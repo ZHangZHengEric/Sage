@@ -888,7 +888,51 @@ class SessionManager:
         self._sessions: Dict[str, Session] = {}
         # 格式: {session_id: workspace_path}
         self._all_session_paths: Dict[str, str] = {}
-        self._scan_all_sessions()
+        self._last_scan_time: float = 0.0
+        self._rescan_cooldown_seconds: float = 1.0
+        logger.info(f"SessionManager: Initialized with lazy session scanning, root={self.session_root_space}")
+
+    @staticmethod
+    def _has_session_marker(directory_path: str) -> bool:
+        """快速判断目录是否包含会话标记文件，避免重复 exists/stat 调用。"""
+        try:
+            with os.scandir(directory_path) as entries:
+                for entry in entries:
+                    if not entry.is_file():
+                        continue
+                    if entry.name in {"session_context.json", "messages.json"}:
+                        return True
+        except FileNotFoundError:
+            return False
+        except NotADirectoryError:
+            return False
+        except Exception as e:
+            logger.debug(f"SessionManager: Failed to inspect directory {directory_path}: {e}")
+            return False
+        return False
+
+    def _scan_session_root_entry(self, entry_name: str, entry_path: str, discovered_paths: Dict[str, str]):
+        """扫描单个根会话目录及其一级子会话目录。"""
+        if self._has_session_marker(entry_path):
+            discovered_paths[entry_name] = entry_path
+            logger.debug(f"Found root session: {entry_name}")
+
+        sub_sessions_dir = os.path.join(entry_path, "sub_sessions")
+        try:
+            with os.scandir(sub_sessions_dir) as sub_entries:
+                for sub_entry in sub_entries:
+                    if not sub_entry.is_dir():
+                        continue
+                    sub_entry_path = sub_entry.path
+                    if self._has_session_marker(sub_entry_path):
+                        discovered_paths[sub_entry.name] = sub_entry_path
+                        logger.debug(f"Found sub session: {sub_entry.name}")
+        except FileNotFoundError:
+            return
+        except NotADirectoryError:
+            return
+        except Exception as e:
+            logger.debug(f"SessionManager: Failed to scan sub sessions in {sub_sessions_dir}: {e}")
 
     def _scan_all_sessions(self):
         """启动时扫描所有会话（根会话+子会话），建立 ID 到 workspace 的映射"""
@@ -897,27 +941,23 @@ class SessionManager:
             return
         
         logger.debug(f"SessionManager: Scanning all sessions in {self.session_root_space}")
-        
-        for entry in os.listdir(self.session_root_space):
-            entry_path = os.path.join(self.session_root_space, entry)
-            if not os.path.isdir(entry_path):
-                continue
-                
-            # 检查是否是根会话
-            if os.path.exists(os.path.join(entry_path, "session_context.json")) or os.path.exists(os.path.join(entry_path, "messages.json")):
-                self._all_session_paths[entry] = entry_path
-                logger.debug(f"Found root session: {entry}")
-            
-            # 扫描子会话
-            sub_sessions_dir = os.path.join(entry_path, "sub_sessions")
-            if os.path.exists(sub_sessions_dir):
-                for sub_entry in os.listdir(sub_sessions_dir):
-                    sub_entry_path = os.path.join(sub_sessions_dir, sub_entry)
-                    if os.path.isdir(sub_entry_path):
-                        if os.path.exists(os.path.join(sub_entry_path, "session_context.json")) or os.path.exists(os.path.join(sub_entry_path, "messages.json")):
-                            self._all_session_paths[sub_entry] = sub_entry_path
-                            logger.debug(f"Found sub session: {sub_entry}")
-        
+
+        discovered_paths: Dict[str, str] = {}
+        try:
+            with os.scandir(self.session_root_space) as entries:
+                for entry in entries:
+                    if not entry.is_dir():
+                        continue
+                    self._scan_session_root_entry(entry.name, entry.path, discovered_paths)
+        except FileNotFoundError:
+            logger.info(f"SessionManager: Session root space disappeared during scan: {self.session_root_space}")
+            return
+        except Exception as e:
+            logger.warning(f"SessionManager: Failed to scan sessions in {self.session_root_space}: {e}")
+            return
+
+        self._all_session_paths = discovered_paths
+        self._last_scan_time = time.monotonic()
         logger.info(f"SessionManager: Found {len(self._all_session_paths)} sessions total")
 
     def _is_sub_session(self, session_id: str) -> bool:
@@ -940,10 +980,19 @@ class SessionManager:
         # 1. 首先尝试从内存缓存获取
         if session_id in self._all_session_paths:
             return self._all_session_paths[session_id]
+
+        direct_root_path = os.path.join(self.session_root_space, session_id)
+        if self._has_session_marker(direct_root_path):
+            self._all_session_paths[session_id] = direct_root_path
+            return direct_root_path
+
         if only_all_session_paths:
             return None
         # 2. 如果内存中没有，重新扫描会话目录
         # 这处理了会话在其他进程中创建的情况
+        now = time.monotonic()
+        if now - self._last_scan_time < self._rescan_cooldown_seconds:
+            return None
         logger.debug(f"SessionManager: Session {session_id} not in cache, rescanning...")
         self._scan_all_sessions()
         
