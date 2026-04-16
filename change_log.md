@@ -1,4 +1,7 @@
 
+2026-04-17 修复 desktop 模式下 populate_request_from_agent_config 用 agent 的 systemContext 直接覆盖 request.system_context，导致子 session 的 parent_session_id 等字段丢失；改为统一 merge（request 值优先）。同时 Fibre 子 session 冲突检查改为按 parent_session_id 判断，允许同一父 session 复用已结束的子 session_id；_delegate_task_via_backend 对流式 tool_calls.arguments 的空串/不完整 JSON 跳过而不再报 ERROR。
+2026-04-16 修复 Fibre 多层后端委派：parent_session_id 自动从 system_context 提取；子 session 不再继承父的 custom_sub_agents，改由后端 auto_all 自动配置；server 端 populate_request 补齐 auto_all 扩展逻辑；create_agent 处理"已存在"返回视为成功。
+2026-04-16 重构 SessionManager：用 SQLite 中央注册表（sessions_index.sqlite）替换内存字典 _all_session_paths 和启动全量扫描，首次启动自动迁移；Fibre delegate_tasks 增加手动 session_id 全局冲突校验。
 2026-04-16 移除 `sagents/agent/agent_base.py` 中未使用的 `User` 导入，避免 sagents 依赖 `common.models`。
 2026-04-16 delete_agent 在删除 DB 记录后调用 delete_agent_workspace_on_host，清理宿主机上该 Agent 工作区（desktop/server）；与本地/直通/远程 bind 挂载路径一致；未镜像到宿主机的纯远端数据不在此删除。
 

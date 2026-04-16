@@ -129,10 +129,8 @@ class FibreBackendClient:
                     logger.info(f"[Backend API] Create agent response: status={resp.status}, body={resp_text}")
                     if resp.status == 200:
                         data = json.loads(resp_text)
-                        # Check success by "success" field or "code" field
                         is_success = data.get("success") or data.get("code") == 200
                         if is_success:
-                            # 后端返回的 data 可能是对象或包含 agent_id 的字符串
                             resp_data = data.get("data")
                             if isinstance(resp_data, dict):
                                 return resp_data.get("agent_id", agent_id)
@@ -140,6 +138,15 @@ class FibreBackendClient:
                                 return resp_data
                             else:
                                 return agent_id
+                    # "已存在" means the agent is already stored in backend — treat as success
+                    try:
+                        err_data = json.loads(resp_text)
+                        err_msg = err_data.get("message", "") or err_data.get("error_detail", "")
+                        if "已存在" in err_msg:
+                            logger.info(f"[Backend API] Agent '{name}' already exists in backend, treating as stored")
+                            return agent_id
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
                     logger.warning(f"Failed to create agent via backend: {resp_text}")
                     return None
         except Exception as e:
