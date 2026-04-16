@@ -1,4 +1,5 @@
 
+2026-04-16 移除 `sagents/agent/agent_base.py` 中未使用的 `User` 导入，避免 sagents 依赖 `common.models`。
 2026-04-16 delete_agent 在删除 DB 记录后调用 delete_agent_workspace_on_host，清理宿主机上该 Agent 工作区（desktop/server）；与本地/直通/远程 bind 挂载路径一致；未镜像到宿主机的纯远端数据不在此删除。
 
 2026-04-15 新增 POST /api/skills/sync-workspace-skills 接口，支持按 Agent 配置批量同步 skills 到 workspace，purge_extra 可清理多余 skill；server 与 desktop 共用同一业务逻辑。
