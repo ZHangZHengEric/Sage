@@ -565,10 +565,7 @@ async def populate_request_from_agent_config(
         if agent_config.get("moreSuggest") is not None and request.more_suggest is None:
             request.more_suggest = agent_config.get("moreSuggest")
         if agent_config.get("systemContext") is not None:
-            if _is_desktop_mode():
-                request.system_context = agent_config.get("systemContext")
-            else:
-                _merge_dict(request, "system_context", agent_config.get("systemContext"))
+            _merge_dict(request, "system_context", agent_config.get("systemContext"))
         if agent_config.get("systemPrefix") is not None:
             request.system_prefix = agent_config.get("systemPrefix")
         if agent_config.get("memoryType") is not None:
@@ -577,6 +574,20 @@ async def populate_request_from_agent_config(
             request.available_knowledge_bases = agent_config.get("availableKnowledgeBases")
         if agent_config.get("availableSubAgentIds") is not None and request.available_sub_agent_ids is None:
             request.available_sub_agent_ids = agent_config.get("availableSubAgentIds")
+
+        # auto_all: when subAgentSelectionMode is "auto_all" (or defaults to it),
+        # auto-populate available_sub_agent_ids with all agents (excluding self)
+        if request.agent_mode == "fibre" and not request.available_sub_agent_ids:
+            selection_mode = agent_config.get("subAgentSelectionMode") or agent_config.get("sub_agent_selection_mode")
+            configured_ids = agent_config.get("availableSubAgentIds")
+            if selection_mode is None:
+                selection_mode = "manual" if configured_ids else "auto_all"
+            if selection_mode == "auto_all":
+                all_agents = await AgentConfigDao().get_all()
+                request.available_sub_agent_ids = [
+                    a.agent_id for a in all_agents
+                    if a.agent_id and a.agent_id != request.agent_id
+                ]
 
     if request.agent_name is None:
         request.agent_name = "Sage Assistant"
