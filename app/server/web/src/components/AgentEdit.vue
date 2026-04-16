@@ -200,7 +200,15 @@
                 </FormItem>
 
                 <FormItem :label="t('agent.maxLoopCount')">
-                  <Input type="number" v-model.number="store.formData.maxLoopCount" min="1" max="200" class="h-10" />
+                  <Input
+                    type="number"
+                    v-model.number="store.formData.maxLoopCount"
+                    min="1"
+                    max="200"
+                    class="h-10"
+                    @blur="validateMaxLoopCount"
+                  />
+                  <p v-if="maxLoopCountError" class="text-xs text-destructive mt-1">{{ maxLoopCountError }}</p>
                 </FormItem>
               </div>
 
@@ -452,6 +460,16 @@
               </div>
               <div class="flex items-center gap-2">
                 <h2 class="text-base font-semibold">{{ t('agent.availableSkills') }}</h2>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="h-8 text-xs px-3"
+                  @click="syncSelectedSkillsToWorkspaces"
+                  :disabled="!props.agent?.id || syncingWorkspaceSkills || !store.formData.availableSkills?.length"
+                >
+                  <RefreshCw class="h-3 w-3 mr-1" :class="{ 'animate-spin': syncingWorkspaceSkills }" />
+                  {{ t('agentEdit.syncWorkspaceSkills') || '更新用户工作空间技能' }}
+                </Button>
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger as-child>
@@ -863,8 +881,10 @@ const { listModelProviders } = modelProviderAPI
 const saving = ref(false)
 const contentRef = ref(null)
 const activeSection = ref('basic')
+const maxLoopCountError = ref('')
 const agentSkills = ref([])
 const loadingAgentSkills = ref(false)
+const syncingWorkspaceSkills = ref(false)
 
 // 技能同步状态
 const syncingSkills = ref(new Set())  // 正在同步的技能名称集合
@@ -872,6 +892,21 @@ const syncingSkills = ref(new Set())  // 正在同步的技能名称集合
 // 检查技能是否正在同步
 const isSkillSyncing = (skillName) => {
   return syncingSkills.value.has(skillName)
+}
+
+const validateMaxLoopCount = () => {
+  const value = store.formData.maxLoopCount
+  if (value === null || value === undefined || value === '') {
+    maxLoopCountError.value = t('agentEdit.maxLoopRequired')
+    return false
+  }
+  if (value < 1) {
+    store.formData.maxLoopCount = 1
+    maxLoopCountError.value = t('agentEdit.maxLoopTooSmall')
+  } else {
+    maxLoopCountError.value = ''
+  }
+  return true
 }
 
 // 同步技能到Agent工作空间
@@ -897,6 +932,39 @@ const syncSkill = async (skillName) => {
     toast.error(t('agentEdit.skillSyncFailed') || `技能 '${skillName}' 同步失败`)
   } finally {
     syncingSkills.value.delete(skillName)
+  }
+}
+
+const syncSelectedSkillsToWorkspaces = async () => {
+  if (!props.agent?.id) {
+    toast.error(t('agentEdit.agentNotSaved') || '请先保存Agent')
+    return
+  }
+
+  const selectedSkills = (store.formData.availableSkills || [])
+    .map(skill => String(skill).trim())
+    .filter(Boolean)
+
+  if (selectedSkills.length === 0 || syncingWorkspaceSkills.value) {
+    return
+  }
+
+  syncingWorkspaceSkills.value = true
+
+  try {
+    const result = await skillAPI.syncSkillsToAgentWorkspaces(props.agent.id, selectedSkills)
+    toast.success(
+      t('agentEdit.workspaceSkillsSyncSuccess', {
+        count: result?.updated_workspace_count ?? 0
+      }) || '用户工作空间技能更新成功'
+    )
+  } catch (error) {
+    console.error('Failed to sync skills to user workspaces:', error)
+    toast.error(
+      t('agentEdit.workspaceSkillsSyncFailed') || '用户工作空间技能更新失败'
+    )
+  } finally {
+    syncingWorkspaceSkills.value = false
   }
 }
 
@@ -1084,6 +1152,9 @@ const loadData = async () => {
 const handleSave = async (shouldExit = true) => {
   saving.value = true
   try {
+    if (!validateMaxLoopCount()) {
+      return
+    }
     store.prepareForSave()
     const plainData = JSON.parse(JSON.stringify(store.formData))
     await new Promise((resolve) => {

@@ -144,6 +144,25 @@ async def build_sync_skill_to_agent_response(
     }
 
 
+async def build_sync_skill_to_agent_workspaces_response(
+    *,
+    agent_id: str,
+    skill_names: Optional[list[str]],
+    user_id: str,
+    role: str = "user",
+) -> Dict[str, Any]:
+    result = await skill_service.sync_skill_to_agent_workspaces(
+        agent_id=agent_id,
+        skill_names=skill_names,
+        user_id=user_id,
+        role=role,
+    )
+    return {
+        "message": "Agent workspace 技能批量同步完成",
+        "data": result,
+    }
+
+
 async def build_sync_workspace_skills_response(
     *,
     user_id: str,

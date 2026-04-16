@@ -595,6 +595,167 @@ def _find_source_skill_path(
     return None
 
 
+def _resolve_agent_selected_skills(agent_config: Dict[str, Any]) -> List[str]:
+    raw_skills = agent_config.get("availableSkills")
+    if raw_skills is None:
+        raw_skills = agent_config.get("available_skills") or []
+
+    resolved_skills: List[str] = []
+    seen: set[str] = set()
+    for name in raw_skills:
+        normalized = str(name).strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        resolved_skills.append(normalized)
+    return resolved_skills
+
+
+def _list_existing_agent_workspaces(
+    agent_id: str,
+    cfg: config.StartupConfig,
+) -> List[Dict[str, str]]:
+    if cfg.app_mode == "desktop":
+        return []
+
+    agents_root = Path(cfg.agents_dir)
+    if not agents_root.exists() or not agents_root.is_dir():
+        return []
+
+    workspaces: List[Dict[str, str]] = []
+    for user_dir in sorted(agents_root.iterdir(), key=lambda item: item.name):
+        if not user_dir.is_dir():
+            continue
+        workspace_path = user_dir / agent_id
+        if not workspace_path.is_dir():
+            continue
+        workspaces.append(
+            {
+                "user_id": user_dir.name,
+                "workspace_path": str(workspace_path),
+            }
+        )
+    return workspaces
+
+
+def _copy_skill_to_workspace(
+    source_skill_path: str,
+    workspace_path: str,
+    skill_name: str,
+) -> str:
+    target_skill_path = Path(workspace_path) / "skills" / skill_name
+    target_skill_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if target_skill_path.exists():
+        shutil.rmtree(target_skill_path)
+
+    shutil.copytree(source_skill_path, target_skill_path)
+    _set_permissions_recursive(str(target_skill_path))
+    return str(target_skill_path)
+
+
+async def sync_skill_to_agent_workspaces(
+    agent_id: str,
+    skill_names: Optional[List[str]] = None,
+    user_id: str = "",
+    role: str = "user",
+) -> Dict[str, Any]:
+    cfg = _get_cfg()
+    if cfg.app_mode == "desktop":
+        raise SageHTTPException(status_code=500, detail="该接口仅支持 server 模式")
+
+    agent_dao = AgentConfigDao()
+    agent = await agent_dao.get_by_id(agent_id)
+    if not agent:
+        raise SageHTTPException(detail=f"Agent '{agent_id}' 不存在")
+
+    agent_owner_user_id = agent.user_id or user_id
+    if role != "admin" and agent_owner_user_id != user_id:
+        raise SageHTTPException(detail="无权批量同步该Agent工作空间中的技能")
+
+    if skill_names is not None:
+        resolved_skill_names = _resolve_agent_selected_skills({"availableSkills": skill_names})
+    else:
+        resolved_skill_names = _resolve_agent_selected_skills(agent.config or {})
+    workspaces = _list_existing_agent_workspaces(agent_id, cfg)
+
+    result: Dict[str, Any] = {
+        "agent_id": agent_id,
+        "resolved_skill_names": resolved_skill_names,
+        "workspace_count": len(workspaces),
+        "updated_workspace_count": 0,
+        "failed_workspace_count": 0,
+        "results": [],
+    }
+
+    if not resolved_skill_names:
+        return result
+
+    source_skill_paths: Dict[str, str] = {}
+    missing_source_skills: List[str] = []
+    for current_skill_name in resolved_skill_names:
+        source_skill_path = _find_source_skill_path(
+            current_skill_name,
+            agent_owner_user_id,
+            cfg,
+        )
+        if source_skill_path:
+            source_skill_paths[current_skill_name] = source_skill_path
+            continue
+
+        missing_source_skills.append(current_skill_name)
+        logger.warning(
+            "批量同步Agent工作空间技能时发现缺失源技能: "
+            f"agent_id={agent_id}, skill={current_skill_name}"
+        )
+
+    if not workspaces:
+        return result
+
+    for workspace in workspaces:
+        workspace_path = workspace["workspace_path"]
+        updated_skills: List[str] = []
+        failed_skills: List[str] = list(missing_source_skills)
+
+        for current_skill_name, source_skill_path in source_skill_paths.items():
+            try:
+                _copy_skill_to_workspace(
+                    source_skill_path,
+                    workspace_path,
+                    current_skill_name,
+                )
+                updated_skills.append(current_skill_name)
+            except Exception as e:
+                failed_skills.append(current_skill_name)
+                logger.warning(
+                    "批量同步Agent工作空间技能失败: "
+                    f"agent_id={agent_id}, workspace={workspace_path}, "
+                    f"skill={current_skill_name}, error={e}"
+                )
+
+        status = "success"
+        if failed_skills and updated_skills:
+            status = "partial_success"
+        elif failed_skills:
+            status = "failed"
+
+        result["results"].append(
+            {
+                "user_id": workspace["user_id"],
+                "workspace_path": workspace_path,
+                "updated_skills": updated_skills,
+                "failed_skills": failed_skills,
+                "status": status,
+            }
+        )
+        if updated_skills:
+            result["updated_workspace_count"] += 1
+        if failed_skills:
+            result["failed_workspace_count"] += 1
+
+    return result
+
+
 async def sync_workspace_skills(
     user_id: str,
     agent_id: str,

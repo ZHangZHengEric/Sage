@@ -604,6 +604,8 @@ export default {
   'agentEdit.reOptimize': 'Optimize Again',
   'agentEdit.applyOptimization': 'Apply Optimization',
   'agentEdit.startOptimization': 'Start Optimization',
+  'agentEdit.maxLoopTooSmall': 'Max loop count cannot be less than 1',
+  'agentEdit.maxLoopRequired': 'Max loop count is required',
   'agentEdit.unknownSource': 'Unknown Source',
   'agentEdit.skillPendingUpdate': 'Update Pending',
   'agentEdit.updateSkill': 'Update',
@@ -612,6 +614,9 @@ export default {
   'agentEdit.skillSyncSuccess': 'Skill synced successfully',
   'agentEdit.skillSyncFailed': 'Failed to sync skill',
   'agentEdit.loadSkillsFailed': 'Failed to load skills',
+  'agentEdit.syncWorkspaceSkills': 'Sync User Workspace Skills',
+  'agentEdit.workspaceSkillsSyncSuccess': 'Successfully updated {count} user workspaces',
+  'agentEdit.workspaceSkillsSyncFailed': 'Failed to sync user workspace skills',
 
   // Tool Call
   'toolCall.completed': 'Completed',

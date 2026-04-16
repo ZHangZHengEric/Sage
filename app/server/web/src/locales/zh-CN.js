@@ -660,6 +660,8 @@ export default {
   'agentEdit.reOptimize': '重新优化',
   'agentEdit.applyOptimization': '应用优化',
   'agentEdit.startOptimization': '开始优化',
+  'agentEdit.maxLoopTooSmall': '最大循环次数不能小于 1',
+  'agentEdit.maxLoopRequired': '最大循环次数不能为空',
   'agentEdit.unknownSource': '未知来源',
   'agentEdit.skillPendingUpdate': '待更新',
   'agentEdit.updateSkill': '更新',
@@ -668,6 +670,9 @@ export default {
   'agentEdit.skillSyncSuccess': '技能同步成功',
   'agentEdit.skillSyncFailed': '技能同步失败',
   'agentEdit.loadSkillsFailed': '加载技能列表失败',
+  'agentEdit.syncWorkspaceSkills': '更新用户工作空间技能',
+  'agentEdit.workspaceSkillsSyncSuccess': '已成功更新 {count} 个用户工作空间',
+  'agentEdit.workspaceSkillsSyncFailed': '用户工作空间技能更新失败',
 
   // 工具调用
   'toolCall.completed': '已完成',

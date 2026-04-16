@@ -170,6 +170,7 @@ These are still present mostly for backward compatibility and are largely equiva
 | DELETE | `/api/skills` | Query: `name`,`agent_id?` | empty result | Delete skill |
 | GET | `/api/skills/content` | Query: `name` | `{"content"}` | Read `SKILL.md` content |
 | PUT | `/api/skills/content` | `{"name","content"}` | empty result | Update `SKILL.md` |
+| POST | `/api/skills/sync-to-agent-workspaces` | `{"agent_id","skill_names?"}` | `{"agent_id","resolved_skill_names","workspace_count","updated_workspace_count","failed_workspace_count","results":[]}` | Bulk sync skills into all existing user workspaces for an agent |
 | POST | `/api/mcp/add` | `MCPServerRequest` | `{"server_name","status"}` | Add MCP server |
 | GET | `/api/mcp/list` | none | `{"servers":[]}` | List MCP servers |
 | DELETE | `/api/mcp/{server_name}` | none | `{"server_name"}` | Delete MCP server |
@@ -188,6 +189,7 @@ These are still present mostly for backward compatibility and are largely equiva
 | GET | `/api/system/info` | none | public system config | Frontend bootstrap |
 | POST | `/api/system/update_settings` | `{"allow_registration"}` | `{}` | Update system settings |
 | GET | `/api/health` | none | `{"status","timestamp","service"}` | Health check |
+| POST | `/api/agent/workspace/delete` | `{"agent_id","user_id"}` | `{"agent_id","user_id","workspace_path","deleted"}` | Delete a user's personal agent workspace |
 | POST | `/api/oss/upload` | `multipart/form-data` | `{"url"}` | Upload file to object storage |
 | GET | `/api/system/version/check` | none | Tauri update response | Desktop auto-update |
 | GET | `/api/system/version/latest` | none | latest version | Web download page |
@@ -724,6 +726,19 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/import-url \
     "agent_id":null
   }'
 ```
+
+### 10.1 Bulk sync agent workspace skills
+
+```bash
+curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/sync-to-agent-workspaces \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "agent_id":"agent_xxx",
+    "skill_names":["research-helper","writer-helper"]
+  }'
+```
+
+When `skill_names` is omitted, the server syncs every skill listed in the agent's `availableSkills` / `available_skills` into all existing `agents/{user_id}/{agent_id}` workspaces.
 
 ### 11. Upload a file to OSS
 

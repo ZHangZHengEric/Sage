@@ -153,3 +153,16 @@ async def build_workspace_delete_response(
         "message": f"文件 {file_path} 已删除",
         "data": {},
     }
+
+
+async def build_agent_workspace_delete_response(
+    *,
+    agent_id: str,
+    user_id: str,
+    deleter: Callable[[], Awaitable[Dict[str, Any]]],
+) -> Dict[str, Any]:
+    result = await deleter()
+    return {
+        "message": f"用户 {user_id} 的 Agent 工作空间已删除",
+        "data": result,
+    }
