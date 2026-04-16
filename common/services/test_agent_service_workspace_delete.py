@@ -48,3 +48,27 @@ def test_delete_server_agent_workspace_returns_false_when_missing(tmp_path, monk
     assert result["deleted"] is False
     assert result["agent_id"] == "agent_demo"
     assert result["user_id"] == "user_a"
+
+
+def test_delete_agent_workspace_on_host_desktop_removes_tree(tmp_path, monkeypatch):
+    agents_root = tmp_path / "agents_mount"
+    agents_root.mkdir()
+    monkeypatch.setenv("SAGE_AGENTS_PATH", str(agents_root))
+    cfg = config.StartupConfig(
+        app_mode="desktop",
+        logs_dir=str(tmp_path / "logs"),
+        session_dir=str(tmp_path / "sessions"),
+        agents_dir=str(tmp_path / "agents_unused"),
+        skill_dir=str(tmp_path / "skills"),
+        user_dir=str(tmp_path / "users"),
+    )
+    monkeypatch.setattr(config, "_GLOBAL_STARTUP_CONFIG", cfg, raising=False)
+
+    ws = agents_root / "agent_desktop"
+    ws.mkdir()
+    (ws / "x.txt").write_text("z", encoding="utf-8")
+
+    result = agent_service.delete_agent_workspace_on_host("agent_desktop", "")
+
+    assert result["deleted"] is True
+    assert not ws.exists()
