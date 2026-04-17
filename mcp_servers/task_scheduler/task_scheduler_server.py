@@ -421,9 +421,7 @@ async def _check_and_spawn_recurring_tasks():
         result = await _request_json("POST", "/tasks/internal/spawn-due")
         spawned_count = len((result or {}).get("items") or [])
         if spawned_count > 0:
-            logger.info(f"Spawned {spawned_count} tasks from recurring tasks")
-        else:
-            logger.debug("No recurring tasks were due")
+            logger.debug(f"Spawned {spawned_count} tasks from recurring tasks")
         return spawned_count
     except Exception as e:
         logger.error(f"Error spawning recurring tasks: {e}")

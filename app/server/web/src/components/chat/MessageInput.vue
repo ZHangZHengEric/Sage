@@ -71,16 +71,15 @@
           </button>
         </div>
 
-        <Textarea
-          ref="textareaRef"
+        <ChipInput
+          ref="editorRef"
           v-model="inputValue"
+          :placeholder="isLoading ? (t('messageInput.placeholderGenerating') || 'AI正在生成回复，可直接输入新消息...') : t('messageInput.placeholder')"
+          wrapper-class="flex-1"
           @keydown="handleKeyDown"
           @compositionstart="handleCompositionStart"
           @compositionend="handleCompositionEnd"
           @paste="handlePaste"
-          :placeholder="isLoading ? (t('messageInput.placeholderGenerating') || 'AI正在生成回复，可直接输入新消息...') : t('messageInput.placeholder')"
-          class="flex-1 min-h-[44px] max-h-[200px] py-1.5 px-1 bg-transparent border-0 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:outline-none resize-none shadow-none text-sm leading-relaxed outline-none !ring-0 !ring-offset-0 !border-0"
-          rows="2"
         />
       </div>
 
@@ -181,9 +180,14 @@ import { ossApi } from '../../api/oss.js'
 import { skillAPI } from '../../api/skill.js'
 import { chatAPI } from '../../api/chat.js'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 import { Loader2, Sparkles } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
+import ChipInput from './ChipInput.vue'
+import {
+  removeAttachmentPlaceholder,
+  textHasAttachmentPlaceholder,
+  buildOrderedMultimodalContent
+} from '../../utils/multimodalContent.js'
 
 const props = defineProps({
   isLoading: {
@@ -221,8 +225,13 @@ const emit = defineEmits(['sendMessage', 'stopGeneration', 'configChange'])
 const { t } = useLanguage()
 
 const inputValue = ref('')
-const textareaRef = ref(null)
+const editorRef = ref(null)
 const fileInputRef = ref(null)
+let nextAttachmentLocalId = 0
+const allocateAttachmentId = () => {
+  nextAttachmentLocalId += 1
+  return `${Date.now().toString(36)}-${nextAttachmentLocalId}`
+}
 
 const showSkillList = ref(false)
 const loadingSkills = ref(false)
@@ -245,17 +254,7 @@ watch(() => props.presetText, async (newVal) => {
   if (newVal === inputValue.value) return
   inputValue.value = newVal
   await nextTick()
-  const el = textareaRef.value?.$el || textareaRef.value
-  if (el && el.focus) {
-    el.focus()
-    const length = el.value?.length ?? 0
-    try {
-      el.setSelectionRange(length, length)
-    } catch {
-      // ignore
-    }
-  }
-  adjustTextareaHeight()
+  editorRef.value?.focus(true)
 })
 
 watch(() => props.agentId, () => {
@@ -290,9 +289,7 @@ const selectSkill = (skill) => {
   inputValue.value = ''
   showSkillList.value = false
   nextTick(() => {
-    const el = textareaRef.value?.$el || textareaRef.value
-    if (el) el.focus()
-    adjustTextareaHeight()
+    editorRef.value?.focus(true)
   })
 }
 
@@ -368,23 +365,11 @@ const handleDrop = async (e) => {
   }
 }
 
-const adjustTextareaHeight = async () => {
-  await nextTick()
-  const el = textareaRef.value?.$el || textareaRef.value
-  if (el && el.style) {
-    el.style.height = 'auto'
-    el.style.height = `${el.scrollHeight}px`
-  }
-}
-
 const LEADING_CONTROL_TAG_RE = /^\s*(?:<enable_plan>\s*(?:true|false)\s*<\/enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*<\/enable_deep_thinking>\s*)+/i
 const LEADING_SKILL_TAG_RE = /^<skill>(.*?)<\/skill>\s*/i
 
 watch(inputValue, async (newVal) => {
-  if (isComposing.value) {
-    adjustTextareaHeight()
-    return
-  }
+  if (isComposing.value) return
 
   const normalizedInput = newVal.replace(LEADING_CONTROL_TAG_RE, '')
   const skillMatch = normalizedInput.match(LEADING_SKILL_TAG_RE)
@@ -393,8 +378,6 @@ watch(inputValue, async (newVal) => {
     inputValue.value = normalizedInput.replace(skillMatch[0], '')
     return
   }
-
-  adjustTextareaHeight()
 
   if (newVal.startsWith('/')) {
     skillKeyword.value = newVal.slice(1)
@@ -421,129 +404,72 @@ watch(inputValue, async (newVal) => {
   }
 })
 
+const buildHeadPrefix = () => {
+  let prefix = ''
+  if (currentSkill.value) {
+    prefix = `<skill>${currentSkill.value}</skill> `
+  }
+  if (planEnabled.value) {
+    prefix = `<enable_plan>true</enable_plan>` + (prefix ? ` ${prefix}` : '')
+  }
+  return prefix
+}
+
+const buildSubmissionPayload = () => {
+  const isMultimodalEnabled = props.selectedAgent?.enableMultimodal === true
+  const headPrefix = buildHeadPrefix()
+  const readyFiles = uploadedFiles.value.filter(f => f.url)
+
+  const { contentArray, plainText } = buildOrderedMultimodalContent(
+    inputValue.value,
+    readyFiles,
+    { multimodalEnabled: isMultimodalEnabled, headPrefix }
+  )
+
+  const hasImagePart = contentArray.some(it => it.type === 'image_url')
+  const useMultimodal = isMultimodalEnabled && hasImagePart
+  return {
+    plainText,
+    multimodalContent: useMultimodal ? contentArray : null
+  }
+}
+
+const hasSubmittableInput = () => {
+  return Boolean(
+    inputValue.value.trim() ||
+    uploadedFiles.value.length > 0 ||
+    currentSkill.value
+  )
+}
+
+const dispatchSubmit = (needInterrupt) => {
+  const { plainText, multimodalContent } = buildSubmissionPayload()
+  if (!plainText && (!multimodalContent || multimodalContent.length === 0)) return
+
+  inputValue.value = ''
+  uploadedFiles.value = []
+  currentSkill.value = null
+
+  emit('sendMessage', plainText, {
+    multimodalContent,
+    needInterrupt
+  })
+}
+
 const handleSubmit = (e) => {
   e.preventDefault()
   cancelOptimizeInput()
   if (props.isLoading) {
-    if ((inputValue.value.trim() || uploadedFiles.value.length > 0 || currentSkill.value)) {
-      let messageContent = inputValue.value.trim()
-
-      if (currentSkill.value) {
-        messageContent = `<skill>${currentSkill.value}</skill> ${messageContent}`
-      }
-      messageContent = applyPlanTag(messageContent)
-
-      const multimodalContent = []
-
-      if (messageContent) {
-        multimodalContent.push({ type: 'text', text: messageContent })
-      }
-
-      const isMultimodalEnabled = props.selectedAgent?.enableMultimodal === true
-
-      if (isMultimodalEnabled) {
-        const imageFiles = uploadedFiles.value.filter(f => f.url && f.type === 'image')
-        for (const img of imageFiles) {
-          multimodalContent.push({
-            type: 'image_url',
-            image_url: { url: img.url }
-          })
-        }
-      }
-
-      const allFiles = uploadedFiles.value.filter(f => f.url)
-      if (allFiles.length > 0) {
-        const fileInfos = allFiles.map(f => {
-          let cleanName = f.name || '文件'
-          cleanName = cleanName.replace(/_\d{14}\.([^.]+)$/, '.$1')
-          cleanName = cleanName.replace(/_\d{14}_/, '_')
-          return { url: f.url, name: cleanName }
-        })
-
-        if (messageContent && fileInfos.length > 0) {
-          messageContent += '\n\n'
-        }
-        const markdownLinks = fileInfos.map(f => `[${f.name}](${f.url})`)
-        messageContent += markdownLinks.join('\n')
-
-        if (multimodalContent.length > 0 && multimodalContent[0].type === 'text') {
-          multimodalContent[0].text = messageContent
-        }
-      }
-
-      if (messageContent || multimodalContent.length > 0) {
-        const pendingMessage = messageContent
-        const pendingMultimodal = multimodalContent.length > 0 ? multimodalContent : null
-        inputValue.value = ''
-        uploadedFiles.value = []
-        currentSkill.value = null
-
-        emit('sendMessage', pendingMessage, {
-          multimodalContent: pendingMultimodal,
-          needInterrupt: true
-        })
-      }
+    if (hasSubmittableInput()) {
+      dispatchSubmit(true)
     } else {
       emit('stopGeneration')
     }
     return
   }
 
-  if (inputValue.value.trim() || uploadedFiles.value.length > 0 || currentSkill.value) {
-    let messageContent = inputValue.value.trim()
-
-    if (currentSkill.value) {
-      messageContent = `<skill>${currentSkill.value}</skill> ${messageContent}`
-    }
-    messageContent = applyPlanTag(messageContent)
-
-    const multimodalContent = []
-    if (messageContent) {
-      multimodalContent.push({ type: 'text', text: messageContent })
-    }
-
-    const isMultimodalEnabled = props.selectedAgent?.enableMultimodal === true
-    if (isMultimodalEnabled) {
-      const imageFiles = uploadedFiles.value.filter(f => f.url && f.type === 'image')
-      for (const img of imageFiles) {
-        multimodalContent.push({
-          type: 'image_url',
-          image_url: { url: img.url }
-        })
-      }
-    }
-
-    const allFiles = uploadedFiles.value.filter(f => f.url)
-    if (allFiles.length > 0) {
-      const fileInfos = allFiles.map(f => {
-        let cleanName = f.name || '文件'
-        cleanName = cleanName.replace(/_\d{14}\.([^.]+)$/, '.$1')
-        cleanName = cleanName.replace(/_\d{14}_/, '_')
-        return { url: f.url, name: cleanName }
-      })
-
-      if (messageContent && fileInfos.length > 0) {
-        messageContent += '\n\n'
-      }
-      const markdownLinks = fileInfos.map(f => `[${f.name}](${f.url})`)
-      messageContent += markdownLinks.join('\n')
-
-      if (multimodalContent.length > 0 && multimodalContent[0].type === 'text') {
-        multimodalContent[0].text = messageContent
-      }
-    }
-
-    if (messageContent || multimodalContent.length > 0) {
-      const pendingMessage = messageContent
-      const pendingMultimodal = multimodalContent.length > 0 ? multimodalContent : null
-      inputValue.value = ''
-      uploadedFiles.value = []
-      currentSkill.value = null
-      emit('sendMessage', pendingMessage, {
-        multimodalContent: pendingMultimodal,
-        needInterrupt: false
-      })
-    }
+  if (hasSubmittableInput()) {
+    dispatchSubmit(false)
   }
 }
 
@@ -692,16 +618,13 @@ const handleOptimizeInput = async () => {
       onDelta: ({ content }) => {
         streamedInput += content || ''
         inputValue.value = streamedInput
-        adjustTextareaHeight()
       },
       onDone: async ({ optimized_input: optimizedInput }) => {
         const nextInput = (optimizedInput || streamedInput || currentInput).trim()
         if (!nextInput) return
         inputValue.value = nextInput
         await nextTick()
-        adjustTextareaHeight()
-        const el = textareaRef.value?.$el || textareaRef.value
-        if (el?.focus) el.focus()
+        editorRef.value?.focus(true)
       }
     })
   } catch (error) {
@@ -734,6 +657,14 @@ const handleFileSelect = async (event) => {
   event.target.value = ''
 }
 
+const insertChipForFile = async (fileItem) => {
+  if (!fileItem) return
+  await nextTick()
+  if (editorRef.value?.insertPlaceholder) {
+    editorRef.value.insertPlaceholder(fileItem)
+  }
+}
+
 const processFile = async (file) => {
   const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg']
   const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi']
@@ -749,6 +680,7 @@ const processFile = async (file) => {
   }
 
   const fileItem = {
+    id: allocateAttachmentId(),
     file,
     preview,
     type: isImage ? 'image' : (isVideo ? 'video' : 'file'),
@@ -758,6 +690,7 @@ const processFile = async (file) => {
   }
 
   uploadedFiles.value.push(fileItem)
+  await insertChipForFile(fileItem)
 
   try {
     const response = await ossApi.uploadFile(file)
@@ -771,17 +704,41 @@ const processFile = async (file) => {
         URL.revokeObjectURL(preview)
       }
     }
+    inputValue.value = removeAttachmentPlaceholder(inputValue.value, fileItem.id)
     alert('文件上传失败，请重试')
   }
 }
 
 const removeFile = (index) => {
   const file = uploadedFiles.value[index]
+  if (!file) return
   if (file.preview) {
     URL.revokeObjectURL(file.preview)
   }
+  if (file.id != null) {
+    inputValue.value = removeAttachmentPlaceholder(inputValue.value, file.id)
+  }
   uploadedFiles.value.splice(index, 1)
 }
+
+// 当用户在 textarea 中手动删除某个占位符时，同步移除对应的附件项。
+watch(inputValue, (text) => {
+  if (uploadedFiles.value.length === 0) return
+  const stale = []
+  for (const f of uploadedFiles.value) {
+    if (f.id == null) continue
+    if (f.uploading) continue
+    if (!textHasAttachmentPlaceholder(text || '', f.id)) {
+      stale.push(f)
+    }
+  }
+  if (stale.length === 0) return
+  for (const f of stale) {
+    if (f.preview) URL.revokeObjectURL(f.preview)
+    const idx = uploadedFiles.value.indexOf(f)
+    if (idx > -1) uploadedFiles.value.splice(idx, 1)
+  }
+})
 
 const getInputValue = () => inputValue.value
 

@@ -4,12 +4,33 @@ import io
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request
+from fastapi.responses import FileResponse
 from common.utils.file import split_file_name
 from PIL import Image
 from loguru import logger
 
 oss_router = APIRouter(prefix="/api/oss", tags=["OSS"])
+
+
+def _resolve_upload_root(agent_id: Optional[str]) -> Path:
+    """根据 agent_id 解析上传文件根目录。"""
+    user_home = Path.home()
+    if agent_id:
+        return user_home / ".sage" / "agents" / agent_id / "upload_files"
+    return user_home / ".sage" / "files"
+
+
+def _build_public_url(request: Request, agent_id: Optional[str], filename: str) -> str:
+    """构建可被前端 <img src> / agent 后端拉取的 HTTP URL。
+
+    桌面端 sidecar 同时承担"上传/下载文件"的职责，前端拿到 URL 后即可与 web 端
+    完全一致地以 http(s) 形式直接渲染，不再需要 Tauri 的 convertFileSrc/readFile。
+    """
+    base = str(request.base_url).rstrip("/")
+    if agent_id:
+        return f"{base}/api/oss/file/{agent_id}/{filename}"
+    return f"{base}/api/oss/file/_default/{filename}"
 
 def compress_image_to_target_size(image: Image.Image, target_size_bytes: int = 1 * 1024 * 1024, max_dimension: int = 2048) -> bytes:
     """Compress image to target size (default 1MB) while maintaining aspect ratio."""
@@ -76,7 +97,11 @@ def is_image_file(filename: str) -> bool:
 
 
 @oss_router.post("/upload")
-async def upload_file(file: UploadFile = File(...), agent_id: Optional[str] = Form(None)):
+async def upload_file(
+    request: Request,
+    file: UploadFile = File(...),
+    agent_id: Optional[str] = Form(None),
+):
     """
     上传文件
 
@@ -85,15 +110,10 @@ async def upload_file(file: UploadFile = File(...), agent_id: Optional[str] = Fo
         agent_id: 可选的 Agent ID，如果提供，文件将保存到该 Agent 沙箱的 upload_files 文件夹
     """
     try:
-        user_home = Path.home()
-
-        # 如果提供了 agent_id，保存到 agent 沙箱的 upload_files 文件夹
+        sage_files_dir = _resolve_upload_root(agent_id)
         if agent_id:
-            sage_files_dir = user_home / ".sage" / "agents" / agent_id / "upload_files"
             logger.info(f"Uploading file to agent sandbox: {agent_id}, path: {sage_files_dir}")
         else:
-            # 兼容旧逻辑，保存到默认位置
-            sage_files_dir = user_home / ".sage" / "files"
             logger.info(f"Uploading file to default location: {sage_files_dir}")
 
         # 确保目录存在
@@ -143,14 +163,43 @@ async def upload_file(file: UploadFile = File(...), agent_id: Optional[str] = Fo
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
 
-        # 构建返回的 URL
+        # 统一返回 HTTP URL：前端 web/desktop 都直接以 <img src> 加载，
+        # agent_base 内部会把 127.0.0.1 的 sage 文件 URL 反解回本地路径再读为 base64。
+        public_url = _build_public_url(request, agent_id, final_filename)
+        payload = {"url": public_url, "filename": final_filename}
         if agent_id:
-            # 对于 agent 沙箱中的文件，返回完整的绝对路径
-            # 这样 agent_base.py 可以直接访问文件，无需路径转换
-            return {"url": str(file_path.absolute()), "agent_id": agent_id, "filename": final_filename}
-        else:
-            return {"url": str(file_path.absolute())}
+            payload["agent_id"] = agent_id
+        return payload
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@oss_router.get("/file/{agent_id}/{filename}")
+async def serve_uploaded_file(agent_id: str, filename: str):
+    """提供已上传文件的下载/预览。
+
+    桌面端把上传的文件以 HTTP 方式静态暴露给前端，使 desktop 与 server 渲染逻辑
+    完全一致（前端不再需要 Tauri convertFileSrc / readFile 这条本地路径分支）。
+    """
+    if "/" in filename or "\\" in filename or filename in ("..", "."):
+        raise HTTPException(status_code=400, detail="invalid filename")
+
+    if agent_id == "_default":
+        base_dir = _resolve_upload_root(None)
+    else:
+        if "/" in agent_id or "\\" in agent_id or agent_id in ("..", "."):
+            raise HTTPException(status_code=400, detail="invalid agent_id")
+        base_dir = _resolve_upload_root(agent_id)
+
+    file_path = (base_dir / filename).resolve()
+    try:
+        file_path.relative_to(base_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="path traversal not allowed")
+
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+
+    return FileResponse(str(file_path), filename=filename)

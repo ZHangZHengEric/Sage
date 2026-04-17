@@ -335,8 +335,18 @@ class TaskService:
         *,
         user_id: str = "",
     ) -> List[Task]:
+        """
+        为已到点的 recurring task 派生一条 one-time 实例。
+
+        语义：到点才派生（不再做提前预派生）。
+        - 取当前时间之前最近一次的 cron 触发点 prev_run
+        - 若 prev_run 大于该 recurring task 的调度游标 last_executed_at，
+          说明这一次触发还没派生过 → 创建一条 execute_at=prev_run 的 one-time 任务
+        - 否则跳过
+        - 首次见到（last_executed_at is None）只初始化游标到 now，不补派历史触发点
+        """
         if croniter is None:
-            logger.warning(f"[TaskService] spawn_due_recurring_tasks SKIPPED | croniter not available")
+            logger.warning("[TaskService] spawn_due_recurring_tasks SKIPPED | croniter not available")
             return []
 
         now = get_local_now()
@@ -349,14 +359,20 @@ class TaskService:
                     continue
 
                 last_executed = recurring_task.last_executed_at
-                base_time = last_executed or now
-                itr = croniter(recurring_task.cron_expression, base_time)
-                next_run = itr.get_next(datetime)
 
-                while next_run <= now:
-                    next_run = itr.get_next(datetime)
+                if last_executed is None:
+                    await self.dao.advance_recurring_task_cursor(
+                        recurring_task.id,
+                        expected_last_executed=None,
+                        executed_at=now,
+                        user_id=recurring_task.user_id or None,
+                    )
+                    continue
 
-                if next_run <= now:
+                itr = croniter(recurring_task.cron_expression, now)
+                prev_run = itr.get_prev(datetime)
+
+                if prev_run <= last_executed:
                     continue
 
                 active_instances = await self.dao.get_list(
@@ -365,29 +381,15 @@ class TaskService:
                         Task.recurring_task_id == recurring_task.id,
                         Task.status.in_(("pending", "processing")),
                     ],
-                    order_by=Task.execute_at,
+                    limit=1,
                 )
-
-                missed_instances = [
-                    task for task in active_instances
-                    if task.status == "pending" and task.execute_at < next_run
-                ]
-                for missed_task in missed_instances:
-                    missed_task.status = "cancelled"
-                    missed_task.updated_at = now
-                    await self.dao.save(missed_task)
-
-                active_instances = [
-                    task for task in active_instances
-                    if not (task.status == "pending" and task.execute_at < next_run)
-                ]
                 if active_instances:
                     continue
 
                 claimed = await self.dao.advance_recurring_task_cursor(
                     recurring_task.id,
                     expected_last_executed=last_executed,
-                    executed_at=next_run,
+                    executed_at=prev_run,
                     user_id=recurring_task.user_id or None,
                 )
                 if not claimed:
@@ -399,13 +401,14 @@ class TaskService:
                     session_id="one-time-" + datetime.now().strftime("%Y%m%d%H%M%S"),
                     description=recurring_task.description,
                     agent_id=recurring_task.agent_id,
-                    execute_at=next_run,
+                    execute_at=prev_run,
                     recurring_task_id=recurring_task.id,
                     status="pending",
                 )
                 await self.dao.create_one_time_task(task)
                 spawned.append(task)
-            except Exception:
+            except Exception as e:
+                logger.error(f"[TaskService] spawn_due_recurring_tasks error | recurring_task_id={recurring_task.id} | error={e}")
                 continue
         return spawned
 

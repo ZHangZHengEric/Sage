@@ -53,16 +53,16 @@
             </button>
           </div>
         </div>
-        <div v-else class="flex flex-col gap-1">
-          <div v-if="getTextContent(message.content)" class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-4 py-2.5 shadow-sm overflow-hidden break-all text-sm leading-6 tracking-wide font-sans">
+        <div v-else class="flex flex-col gap-1 items-end">
+          <div v-if="getTextContent(message.content)" class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-4 py-2.5 shadow-sm overflow-hidden break-words text-sm leading-6 tracking-wide font-sans max-w-full">
             <MarkdownRenderer
               :content="formatMessageContent(getTextContent(message.content))"
             />
           </div>
-        <!-- 图片内容 -->
-          <div v-if="getImageUrls(message.content).length > 0" class="flex flex-wrap gap-2">
+          <!-- 兜底：老消息没有 markdown 引用、image_url 单独成段时，把孤立图片以网格呈现 -->
+          <div v-if="orphanImageUrls.length > 0" class="flex flex-wrap gap-2">
             <div
-              v-for="(imgUrl, index) in getImageUrls(message.content)"
+              v-for="(imgUrl, index) in orphanImageUrls"
               :key="index"
               class="relative rounded-lg overflow-hidden border border-border shadow-sm w-[120px] h-[120px]"
             >
@@ -149,10 +149,10 @@
               :message-id="message.message_id || message.id"
               />
           </div>
-          <!-- 图片内容 -->
-          <div v-if="getImageUrls(message.content).length > 0" class="flex flex-wrap gap-2">
+          <!-- 兜底：老消息没有 markdown 引用、image_url 单独成段时，把孤立图片以网格呈现 -->
+          <div v-if="orphanImageUrls.length > 0" class="flex flex-wrap gap-2">
             <div
-              v-for="(imgUrl, index) in getImageUrls(message.content)"
+              v-for="(imgUrl, index) in orphanImageUrls"
               :key="index"
               class="relative rounded-lg overflow-hidden border border-border shadow-sm w-[120px] h-[120px]"
             >
@@ -253,6 +253,10 @@ import SysFinishTaskMessage from './tools/SysFinishTaskMessage.vue'
 import TodoTaskMessage from './tools/TodoTaskMessage.vue'
 import QuestionnaireCard from './tools/QuestionnaireCard.vue'
 import { useWorkbenchStore } from '@/stores/workbench.js'
+import {
+  getRenderableContentItems,
+  extractAttachmentName
+} from '@/utils/multimodalContent.js'
 
 // Custom Tools
 const TOOL_COMPONENT_MAP = {
@@ -476,6 +480,15 @@ const handleImageClick = (url) => {
   if (!url) return
   window.open(url, '_blank')
 }
+
+// 统一渲染策略：把 multimodal content 中的所有 text part 拼接后交给 MarkdownRenderer，
+// 它已经能渲染 http/https 图片（server-web）以及本地路径（desktop 通过 readFile）。
+// 只有"没在文本里出现 markdown 引用"的孤立 image_url 才走兜底网格。
+const orphanImageUrls = computed(() => {
+  const items = getRenderableContentItems(props.message?.content)
+  return items.filter(it => it.type === 'image_url').map(it => it.url)
+})
+const getAttachmentDisplayName = (url) => extractAttachmentName(url)
 
 const getToolResult = (toolCall) => {
   if (!props.messages || !Array.isArray(props.messages)) return null
