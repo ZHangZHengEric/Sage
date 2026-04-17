@@ -11,8 +11,10 @@
     spellcheck="false"
     @input="handleInput"
     @keydown="forward('keydown', $event)"
+    @keyup="onCaretActivity('keyup', $event)"
+    @click="onCaretActivity('click', $event)"
     @paste="forward('paste', $event)"
-    @focus="forward('focus', $event)"
+    @focus="onCaretActivity('focus', $event)"
     @blur="forward('blur', $event)"
     @compositionstart="onCompositionStart"
     @compositionend="onCompositionEnd"
@@ -36,7 +38,8 @@ const emit = defineEmits([
   'compositionstart',
   'compositionend',
   'focus',
-  'blur'
+  'blur',
+  'caret-update'
 ])
 
 const editorRef = ref(null)
@@ -146,11 +149,43 @@ const readText = () => {
   return root ? nodeToText(root) : ''
 }
 
+// 记录最近一次落在编辑器内的光标 range，便于失焦后（如点击下拉选项）仍能精确删除/恢复。
+let lastRange = null
+const rememberCaret = () => {
+  const root = editorRef.value
+  if (!root) return
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return
+  const r = sel.getRangeAt(0)
+  if (root.contains(r.endContainer)) {
+    lastRange = r.cloneRange()
+  }
+}
+
+const restoreCaret = () => {
+  if (!lastRange) return false
+  const root = editorRef.value
+  if (!root || !root.contains(lastRange.endContainer)) return false
+  const sel = window.getSelection()
+  if (!sel) return false
+  sel.removeAllRanges()
+  sel.addRange(lastRange.cloneRange())
+  return true
+}
+
 const handleInput = () => {
   if (isComposing.value) return
   const text = readText()
-  if (text === props.modelValue) return
-  emit('update:modelValue', text)
+  if (text !== props.modelValue) emit('update:modelValue', text)
+  rememberCaret()
+  emit('caret-update', { source: 'input' })
+}
+
+const onCaretActivity = (source, e) => {
+  if (source === 'focus') emit('focus', e)
+  if (isComposing.value) return
+  rememberCaret()
+  emit('caret-update', { source })
 }
 
 const onCompositionStart = (e) => {
@@ -298,12 +333,66 @@ const setText = (text) => {
   emit('update:modelValue', text || '')
 }
 
+/** 取出"从编辑器开头到当前光标"之间的扁平文本（chip 渲染为占位符 `![name](attachment://id)`）。 */
+const getTextBeforeCaret = () => {
+  const root = editorRef.value
+  if (!root) return ''
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return ''
+  const range = sel.getRangeAt(0)
+  if (!root.contains(range.endContainer)) return ''
+  const r = document.createRange()
+  r.setStart(root, 0)
+  r.setEnd(range.endContainer, range.endOffset)
+  const tmp = document.createElement('div')
+  tmp.appendChild(r.cloneContents())
+  return nodeToText(tmp)
+}
+
+/** 检测光标紧挨着的 slash 查询（仅当 `/` 出现在行首/空白后才识别，避免与 URL 冲突）。 */
+const SKILL_QUERY_RE = /(?:^|[\s])\/([^\s/<>]*)$/
+const getSkillQuery = () => {
+  const text = getTextBeforeCaret()
+  const m = text.match(SKILL_QUERY_RE)
+  if (!m) return null
+  return { keyword: m[1] || '', deleteLength: (m[1] || '').length + 1 }
+}
+
+/** 删除光标前 N 个字符（基于 Selection.modify）。 */
+const deleteCharsBeforeCaret = (n) => {
+  if (!n || n <= 0) return
+  const root = editorRef.value
+  if (!root) return
+  // 调用时编辑器可能已失焦（例如点击 popup 选项），先聚焦并恢复上次记忆的 caret。
+  root.focus()
+  const sel = window.getSelection()
+  if (!sel) return
+  const inside = sel.rangeCount > 0 && root.contains(sel.getRangeAt(0).endContainer)
+  if (!inside) {
+    if (!restoreCaret()) return
+  }
+  if (typeof sel.modify !== 'function' || sel.rangeCount === 0) return
+  if (!sel.isCollapsed) sel.collapseToEnd()
+  for (let i = 0; i < n; i++) {
+    sel.modify('extend', 'backward', 'character')
+  }
+  if (sel.rangeCount > 0) {
+    sel.getRangeAt(0).deleteContents()
+    sel.collapseToStart()
+  }
+  rememberCaret()
+  handleInput()
+}
+
 defineExpose({
   focus: focusEditor,
   insertPlaceholder,
   insertText,
   setText,
-  getElement: () => editorRef.value
+  getElement: () => editorRef.value,
+  getTextBeforeCaret,
+  getSkillQuery,
+  deleteCharsBeforeCaret
 })
 </script>
 

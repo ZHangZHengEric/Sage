@@ -1,4 +1,8 @@
 
+2026-04-17 修复 slash 触发选中后 `/` 未删除：点击下拉项时 contenteditable 失焦导致 Selection.modify 失效。下拉项加 `@mousedown.prevent` 阻止失焦；ChipInput 同时记录 lastRange，`deleteCharsBeforeCaret` 在调用时主动 focus + 必要时恢复 range，键鼠两条路径都能正确删掉触发的 `/keyword`。
+
+2026-04-17 输入框任意位置 `/` 触发技能选择 + 多技能支持：ChipInput 增加基于光标的 `getSkillQuery` / `deleteCharsBeforeCaret`（用 Selection.modify 跨 chip 安全删除），并在 input/keyup/click 抛 `caret-update`。MessageInput 用 `currentSkills` 数组承载多个技能 chip，选中后自动删除光标前 `/keyword`，提交时把所有 `<skill>name</skill>` 串联到消息头部；解析支持多个连续 `<skill>` 标签，Backspace 在空输入时逐个回删。Web 与 Desktop 同步。
+
 2026-04-17 修复 ChipInput 附件 chip 看起来"裸字"问题：chip 节点是 JS createElement 动态生成的，不带 Vue scoped 的 data-v 属性，导致 `<style scoped>` 里的 `.chip-input__chip` 选择器全部失效。把 chip 相关样式拆到非 scoped `<style>` 块，同时把外观调成更明显的卡片：圆角矩形 + 主题色细描边 + 半透明底 + 轻投影 + hover 反馈。Web 与 Desktop 同步。
 
 2026-04-17 桌面端图片走 HTTP 静态化与 server 端统一：sidecar 新增 `GET /api/oss/file/{agent_id}/{filename}`，`POST /api/oss/upload` 改为返回 `http://127.0.0.1:<port>/api/oss/file/...` URL；agent_base `_process_multimodal_content` 把 localhost 的 sage 文件 URL 反解回 `~/.sage/agents/<agent_id>/upload_files/<filename>` 再走"本地图片→base64"，避免远程 LLM 拉不到 localhost。前端 desktop MessageRenderer 删除 convertFileSrc/isLocalPath 分支，与 server-web 共用同一份 `<img src="http(s)://...">` 渲染路径。
