@@ -136,6 +136,23 @@ def _is_desktop_mode() -> bool:
     return _get_cfg().app_mode == "desktop"
 
 
+def _desktop_user_skills_root(user_id: str) -> str:
+    """Desktop 用户技能目录：与 server 的 user_dir/<id>/skills 一致。"""
+    cfg = _get_cfg()
+    return os.path.normpath(os.path.join(cfg.user_dir, user_id, "skills"))
+
+
+def _desktop_skill_owner_user_id(skill_path: str, current_user_id: str) -> str:
+    """根据磁盘路径判断是否为当前用户的技能（用于 list_skills）。"""
+    if not current_user_id:
+        return ""
+    root = _desktop_user_skills_root(current_user_id)
+    sp = os.path.normpath(skill_path)
+    if sp == root or sp.startswith(root + os.sep):
+        return current_user_id
+    return ""
+
+
 def _set_permissions_recursive(path: str, dir_mode: int = 0o755, file_mode: int = 0o644) -> None:
     try:
         if os.path.isdir(path):
@@ -376,10 +393,20 @@ async def list_skills(
         # Disabled temporarily: do not auto-sync agent workspace skills into ~/.sage/skills during desktop skill listing.
         # _sync_desktop_agent_skills()
         tm.reload()
-        return [
-            {"name": skill.name, "description": skill.description}
-            for skill in list(tm.list_skill_info())
-        ]
+        out: List[Dict[str, Any]] = []
+        for skill in list(tm.list_skill_info()):
+            uid = _desktop_skill_owner_user_id(skill.path, current_user_id)
+            out.append(
+                {
+                    "name": skill.name,
+                    "description": skill.description,
+                    "user_id": uid,
+                    "dimension": "user" if uid else "system",
+                    "owner_user_id": uid or None,
+                    "path": skill.path,
+                }
+            )
+        return out
 
     all_skills = _collect_server_skills()
     allowed_skills = None
@@ -1124,7 +1151,9 @@ async def _process_server_zip_to_dir(
             shutil.rmtree(temp_extract_dir)
 
 
-async def _process_desktop_zip_and_register(tm: Any, zip_path: str, original_filename: str) -> Tuple[bool, str]:
+async def _process_desktop_zip_and_register(
+    tm: Any, zip_path: str, original_filename: str, user_id: str
+) -> Tuple[bool, str]:
     temp_extract_dir = tempfile.mkdtemp()
     try:
         with zipfile.ZipFile(zip_path, "r") as zip_ref:
@@ -1134,9 +1163,12 @@ async def _process_desktop_zip_and_register(tm: Any, zip_path: str, original_fil
         if not skill_dir_name or not source_dir:
             return False, "未找到有效的技能结构 (缺少 SKILL.md)"
 
-        sage_skills_dir = Path.home() / ".sage" / "skills"
-        sage_skills_dir.mkdir(parents=True, exist_ok=True)
-        target_path = os.path.join(str(sage_skills_dir), skill_dir_name)
+        if not user_id:
+            return False, "桌面端导入技能需要有效的用户 ID"
+
+        user_skills_root = _desktop_user_skills_root(user_id)
+        os.makedirs(user_skills_root, exist_ok=True)
+        target_path = os.path.join(user_skills_root, skill_dir_name)
         if os.path.exists(target_path):
             try:
                 shutil.rmtree(target_path)
@@ -1183,7 +1215,9 @@ async def import_skill_by_file(
             tm = get_skill_manager()
             if not tm:
                 raise SageHTTPException(status_code=500, detail="技能管理器未初始化")
-            success, message = await _process_desktop_zip_and_register(tm, tmp_file_path, file.filename)
+            success, message = await _process_desktop_zip_and_register(
+                tm, tmp_file_path, file.filename, user_id
+            )
         else:
             cfg = _get_cfg()
             if is_agent and agent_id:
@@ -1242,7 +1276,9 @@ async def import_skill_by_url(
             tm = get_skill_manager()
             if not tm:
                 raise SageHTTPException(status_code=500, detail="技能管理器未初始化")
-            success, message = await _process_desktop_zip_and_register(tm, tmp_file_path, filename)
+            success, message = await _process_desktop_zip_and_register(
+                tm, tmp_file_path, filename, user_id
+            )
         else:
             cfg = _get_cfg()
             if is_agent and agent_id:
