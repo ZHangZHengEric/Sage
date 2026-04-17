@@ -232,9 +232,13 @@ class AgentBase(ABC):
                     # 移除 file:// 前缀
                     file_path = url[7:]
                 elif url.startswith('http://') or url.startswith('https://'):
-                    # 远程 URL，保持不变
-                    new_content.append(item)
-                    continue
+                    # 桌面端 sidecar 暴露的"本地静态文件"也走 http URL，
+                    # 但远程 LLM 无法访问 127.0.0.1，需要在这里反解回本地路径再走 base64。
+                    local_path = self._maybe_resolve_local_sage_url(url)
+                    if local_path is None:
+                        new_content.append(item)
+                        continue
+                    file_path = local_path
                 else:
                     file_path = url
 
@@ -284,6 +288,57 @@ class AgentBase(ABC):
 
         msg['content'] = new_content
         return msg
+
+    @staticmethod
+    def _maybe_resolve_local_sage_url(url: str) -> Optional[str]:
+        """把桌面端 sidecar 的本地 sage 文件 URL 反解为本地文件路径。
+
+        前端两端统一以 http(s) URL 渲染图片：
+        - server 端：是真正的远程 OSS URL，远程 LLM 可以直接访问；
+        - desktop 端：URL 形如 http://127.0.0.1:<port>/api/oss/file/<agent_id>/<filename>，
+          远程 LLM 访问不到 localhost，因此这里把它映射回 ~/.sage/agents/<agent_id>/upload_files/<filename>，
+          交由调用方走"本地图片 → base64"分支。
+
+        若不是本地 sage 文件 URL，返回 None。
+        """
+        try:
+            from urllib.parse import urlparse, unquote
+
+            parsed = urlparse(url)
+            if parsed.hostname not in ("127.0.0.1", "localhost", "0.0.0.0"):
+                return None
+
+            from pathlib import Path
+
+            path = unquote(parsed.path or "")
+            # 形如 /api/oss/file/<agent_id>/<filename>
+            prefix = "/api/oss/file/"
+            if not path.startswith(prefix):
+                return None
+            rest = path[len(prefix):]
+            parts = rest.split("/", 1)
+            if len(parts) != 2:
+                return None
+            agent_id, filename = parts[0], parts[1]
+            if not agent_id or not filename or "/" in filename or "\\" in filename:
+                return None
+
+            user_home = Path.home()
+            if agent_id == "_default":
+                base_dir = user_home / ".sage" / "files"
+            else:
+                base_dir = user_home / ".sage" / "agents" / agent_id / "upload_files"
+            file_path = (base_dir / filename).resolve()
+            try:
+                file_path.relative_to(base_dir.resolve())
+            except ValueError:
+                return None
+            if not file_path.exists() or not file_path.is_file():
+                return None
+            return str(file_path)
+        except Exception as exc:
+            logger.warning(f"Failed to resolve local sage url: {url}, error: {exc}")
+            return None
 
     def _get_mime_type(self, file_extension: str) -> str:
         """根据文件扩展名获取 MIME 类型"""
