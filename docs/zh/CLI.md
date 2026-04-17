@@ -124,6 +124,7 @@ sage run --user-id alice --stats "用一句话介绍你自己。"
 - 实际生效的环境文件路径和是否存在
 - auth mode 和 db type
 - `agents_dir`、`session_dir`、`logs_dir` 等关键目录
+- `session_dir` 下的 SQLite session registry 路径
 - 依赖是否可用
 - 运行时错误、警告和建议下一步
 
@@ -247,16 +248,20 @@ sage sessions inspect --messages 8 <session_id>
 sage skills
 sage skills --json
 sage skills --workspace /path/to/project
+sage skills --agent-id my-agent
 ```
 
 输出会包含：
 
 - 当前用户 id
+- 可选的 agent id
 - 可选的 workspace
 - 当前可见 skill 总数
 - 每个 source 下的数量
 - skill 名称和描述
 - source 层面的错误信息（如果有）
+
+当传入 `--agent-id` 时，CLI 会按当前 Agent 实际可用的 skill 集合来展示结果，而不是只看本地可见 skill。
 
 ## CLI 中的 Skill
 
