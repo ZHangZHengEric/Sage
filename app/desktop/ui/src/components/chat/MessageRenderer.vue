@@ -51,40 +51,25 @@
             </button>
           </div>
         </div>
-        <div v-else class="flex flex-col gap-1">
-          <!-- 文本内容 -->
-          <div v-if="getTextContent(message.content)" class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-4 py-2.5 shadow-sm overflow-hidden break-all text-sm leading-6 tracking-wide font-sans">
+        <div v-else class="flex flex-col gap-1 items-end">
+          <div v-if="getTextContent(message.content)" class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-4 py-2.5 shadow-sm overflow-hidden break-words text-sm leading-6 tracking-wide font-sans max-w-full">
             <MarkdownRenderer
               :content="formatMessageContent(getTextContent(message.content))"
             />
           </div>
-        <!-- 图片内容 -->
-          <div v-if="getImageUrls(message.content).length > 0" class="flex flex-wrap gap-2">
+          <!-- 兜底：老消息没有 markdown 引用、image_url 单独成段时，把孤立图片以网格呈现 -->
+          <div v-if="orphanImageUrls.length > 0" class="flex flex-wrap gap-2">
             <div
-              v-for="(imgUrl, index) in getImageUrls(message.content)"
+              v-for="(imgUrl, index) in orphanImageUrls"
               :key="index"
-              class="relative rounded-lg overflow-hidden border border-border shadow-sm"
-              :class="isLocalPath(imgUrl) ? '' : 'w-[120px] h-[120px]'"
+              class="relative rounded-lg overflow-hidden border border-border shadow-sm w-[120px] h-[120px]"
             >
-              <!-- 在线图片：直接渲染 -->
               <img
-                v-if="!isLocalPath(imgUrl)"
-                :src="resolveFilePath(imgUrl)"
+                :src="imgUrl"
                 :alt="`图片 ${index + 1}`"
                 class="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity"
                 @click="handleImageClick(imgUrl)"
               />
-              <!-- 本地路径：显示文件图标 -->
-              <div
-                v-else
-                class="flex items-center gap-2 px-3 py-2 bg-muted/50 hover:bg-muted rounded-lg cursor-pointer transition-colors group"
-                @click="handleLocalFileClick(imgUrl)"
-                :title="`打开文件: ${getFileName(imgUrl)}`"
-              >
-                <Image class="w-4 h-4 text-muted-foreground" />
-                <span class="text-xs font-medium truncate max-w-[150px]">{{ getFileName(imgUrl) }}</span>
-                <ExternalLink class="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-              </div>
             </div>
           </div>
         </div>
@@ -165,7 +150,6 @@
       <div v-else class="flex-none" :class="assistantAvatarSpacerClass" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="flex flex-col gap-1 w-full">
-          <!-- 文本内容 -->
           <div
             v-if="getTextContent(message.content)"
             class="text-foreground/90 overflow-hidden break-words w-full font-sans text-sm leading-6">
@@ -174,33 +158,19 @@
               :message-id="message.message_id || message.id"
             />
           </div>
-          <!-- 图片内容 -->
-          <div v-if="getImageUrls(message.content).length > 0" class="flex flex-wrap gap-2">
+          <!-- 兜底：没有 markdown 引用的孤立 image_url -->
+          <div v-if="orphanImageUrls.length > 0" class="flex flex-wrap gap-2">
             <div
-              v-for="(imgUrl, index) in getImageUrls(message.content)"
+              v-for="(imgUrl, index) in orphanImageUrls"
               :key="index"
-              class="relative rounded-lg overflow-hidden border border-border shadow-sm"
-              :class="isLocalPath(imgUrl) ? '' : 'w-[120px] h-[120px]'"
+              class="relative rounded-lg overflow-hidden border border-border shadow-sm w-[120px] h-[120px]"
             >
-              <!-- 在线图片：直接渲染 -->
               <img
-                v-if="!isLocalPath(imgUrl)"
-                :src="resolveFilePath(imgUrl)"
+                :src="imgUrl"
                 :alt="`图片 ${index + 1}`"
                 class="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity"
                 @click="handleImageClick(imgUrl)"
               />
-              <!-- 本地路径：显示文件图标 -->
-              <div
-                v-else
-                class="flex items-center gap-2 px-3 py-2 bg-muted/50 hover:bg-muted rounded-lg cursor-pointer transition-colors group"
-                @click="handleLocalFileClick(imgUrl)"
-                :title="`打开文件: ${getFileName(imgUrl)}`"
-              >
-                <Image class="w-4 h-4 text-muted-foreground" />
-                <span class="text-xs font-medium truncate max-w-[150px]">{{ getFileName(imgUrl) }}</span>
-                <ExternalLink class="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-              </div>
             </div>
           </div>
         </div>
@@ -284,7 +254,7 @@ import MarkdownRendererWithPreview from './MarkdownRendererWithPreview.vue'
 import EChartsRenderer from './EChartsRenderer.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
-import { Terminal, FileText, Search, Zap, Copy, Check, Image, SquarePen } from 'lucide-vue-next'
+import { Terminal, FileText, Search, Zap, Copy, Check, SquarePen } from 'lucide-vue-next'
 import { getMessageLabel, isTokenUsageMessage as isTokenUsageMessageValue } from '@/utils/messageLabels'
 import ToolErrorCard from './tools/ToolErrorCard.vue'
 import ToolDefaultCard from './tools/ToolDefaultCard.vue'
@@ -297,9 +267,8 @@ import SysDelegateTaskMessage from './tools/SysDelegateTaskMessage.vue'
 import TodoTaskMessage from './tools/TodoTaskMessage.vue'
 import QuestionnaireCard from './tools/QuestionnaireCard.vue'
 import { useWorkbenchStore } from '../../stores/workbench.js'
-import { convertFileSrc } from '@tauri-apps/api/core'
+import { textHasMarkdownImageRefForUrl } from '../../utils/multimodalContent.js'
 import { open } from '@tauri-apps/plugin-shell'
-import { FileIcon, ExternalLink } from 'lucide-vue-next'
 
 // Custom Tools
 const TOOL_COMPONENT_MAP = {
@@ -468,69 +437,14 @@ const getTextContent = (content) => {
   return ''
 }
 
-const resolveFilePath = (url) => {
-  if (!url) return ''
-  // 如果已经是 asset:// 或 file:// URL，直接返回
-  if (url.startsWith('asset://') || url.startsWith('http://') || url.startsWith('https://')) {
-    return url
-  }
-  let cleanPath = url
-  // 如果已经是 file:// URL，去掉协议头
-  if (url.startsWith('file://')) {
-    cleanPath = url.replace(/^file:\/\//i, '')
-  }
-  // 去掉开头的 /，因为 convertFileSrc 会将其编码为 %2F
-  cleanPath = cleanPath.replace(/^\//, '')
-  // 使用 Tauri 的 convertFileSrc 转换本地路径
-  return convertFileSrc(cleanPath)
-}
-
-// 判断是否为本地路径
-const isLocalPath = (url) => {
-  if (!url) return false
-  // 如果是 http:// 或 https:// 开头，是在线地址
-  if (url.startsWith('http://') || url.startsWith('https://')) {
-    return false
-  }
-  // 其他情况（file://、asset://、绝对路径、相对路径）都视为本地路径
-  return true
-}
-
-// 获取文件名
-const getFileName = (url) => {
-  if (!url) return 'file'
-  // 去掉 file:// 协议头
-  let cleanPath = url.replace(/^file:\/\//i, '')
-  // 获取最后一部分作为文件名
-  return cleanPath.split('/').pop() || 'file'
-}
-
-// 处理在线图片点击 - 打开浏览器
+// 桌面端 sidecar 已经把上传文件以 http://127.0.0.1:<port>/api/oss/file/... 暴露出来，
+// 前端图片 src 与 server 端逻辑完全一致，无需再做 Tauri convertFileSrc 转换。
 const handleImageClick = async (url) => {
   if (!url) return
   try {
     await open(url)
   } catch (err) {
     console.error('Failed to open URL:', err)
-  }
-}
-
-// 处理本地文件点击 - 用系统默认软件打开
-const handleLocalFileClick = async (url) => {
-  if (!url) return
-  try {
-    let filePath = url
-    // 如果是 file:// 协议，转换为普通路径
-    if (url.startsWith('file://')) {
-      filePath = url.replace(/^file:\/\//i, '')
-    }
-    // 确保路径以 / 开头
-    if (!filePath.startsWith('/')) {
-      filePath = '/' + filePath
-    }
-    await open(filePath)
-  } catch (err) {
-    console.error('Failed to open file:', err)
   }
 }
 
@@ -545,6 +459,15 @@ const getImageUrls = (content) => {
   }
   return []
 }
+
+// 已经在文本里以 markdown 引用方式呈现的 image_url 不再网格化重复显示，
+// 只把"孤立的"image_url（老消息或只发了图片的情况）作为兜底网格渲染。
+const orphanImageUrls = computed(() => {
+  const allText = getTextContent(props.message?.content) || ''
+  return getImageUrls(props.message?.content).filter(
+    (url) => !textHasMarkdownImageRefForUrl(allText, url)
+  )
+})
 
 
 const getToolResult = (toolCall) => {

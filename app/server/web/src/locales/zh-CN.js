@@ -198,6 +198,8 @@ export default {
   'modelProvider.connectionVerifiedCapabilityUnknown': '连接正常，未识别到多模态能力',
   'modelProvider.verifyCapabilitiesFirst': '请先完成能力验证',
   // 聊天页面
+  'chat.attachmentImage': '图片',
+  'chat.attachmentFile': '附件',
   'chat.title': '对话助手',
   'chat.current': '当前',
   'chat.agents': '个智能体',
@@ -618,6 +620,7 @@ export default {
   'agentEdit.availableSubAgents': '可选子智能体',
   'agentEdit.deselectAll': '取消',
   'agentEdit.searchSkills': '搜索技能...',
+  'agentEdit.skillsFilterAll': '全部',
   'agentEdit.searchKnowledgeBases': '搜索知识库...',
   'agentEdit.badge.skillRequired': '技能必需',
   'agentEdit.imProvider.wechatPersonal': '微信',

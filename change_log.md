@@ -1,4 +1,24 @@
 
+2026-04-17 修复 ChipInput 附件 chip 看起来"裸字"问题：chip 节点是 JS createElement 动态生成的，不带 Vue scoped 的 data-v 属性，导致 `<style scoped>` 里的 `.chip-input__chip` 选择器全部失效。把 chip 相关样式拆到非 scoped `<style>` 块，同时把外观调成更明显的卡片：圆角矩形 + 主题色细描边 + 半透明底 + 轻投影 + hover 反馈。Web 与 Desktop 同步。
+
+2026-04-17 桌面端图片走 HTTP 静态化与 server 端统一：sidecar 新增 `GET /api/oss/file/{agent_id}/{filename}`，`POST /api/oss/upload` 改为返回 `http://127.0.0.1:<port>/api/oss/file/...` URL；agent_base `_process_multimodal_content` 把 localhost 的 sage 文件 URL 反解回 `~/.sage/agents/<agent_id>/upload_files/<filename>` 再走"本地图片→base64"，避免远程 LLM 拉不到 localhost。前端 desktop MessageRenderer 删除 convertFileSrc/isLocalPath 分支，与 server-web 共用同一份 `<img src="http(s)://...">` 渲染路径。
+
+2026-04-17 修复 recurring task 调度：原逻辑用 `next_run`（未来时间）做 base 并把未到点的 pending 实例误判为 missed_instances 取消，导致同一任务每轮都被 cancel→重派生（日志一直刷）。改为"到点才派生"：用 `croniter.get_prev` 取最近触发点，与 `last_executed_at` 比较；首次见到只初始化游标。同时把 DAO/调度器中高频 INFO 日志降级为 DEBUG。
+
+2026-04-17 修复桌面端本地图片预览破图：resolveFilePath/imageUrl 不再剥掉绝对路径开头的 `/`，convertFileSrc 编码 %2F 后 Tauri asset handler 才能正确还原文件路径；同时将 data:/blob: 一并视为已可加载直接返回。MessageRenderer 与 ImageRenderer 同步。
+
+2026-04-17 桌面端气泡里 image_url part 不再走"本地路径=文件链接"分支，统一通过 Tauri convertFileSrc 转成 asset:// 直接渲染真实图片缩略图（最大 220/280px 内自适应）。
+
+2026-04-17 多模态提交内容补充图片路径：图片提交时同时写入 `![name](url)` 文本引用和 `image_url` 视觉 part，让 LLM 既能"看图"又能拿到资源 URL；前端渲染层对紧邻 `image_url` 的同 url markdown 引用自动剥离，气泡内不重复出现大图。
+
+2026-04-17 用户消息气泡融合：新格式 multimodal 消息改为单个气泡内自然交错文本与图片缩略图（不再切成多段独立气泡），去除冗余的文件名标签，图片直接以 220/280px 内的缩略图显示并支持点击放大。Web 与 Desktop 同步。
+
+2026-04-17 对话输入框附件 chip 化：新增 ChipInput（contenteditable）替换原 Textarea，光标位置插入图片/文件时渲染为不可分割的圆角胶囊（图标+文件名），Backspace 整体删除即同步移除附件。提交仍按位置切片成有序 multimodal content。Web 与 Desktop 同步。
+
+2026-04-17 对话输入框/气泡：附件按光标位置以 markdown 占位符插入，提交时按位置切片成有序 multimodal content；气泡按顺序渲染真实图片+文件名标签，文本与图片可交错展示。手动删除占位符同步移除附件；老消息保持原有"文本+图片网格"渲染。Web 与 Desktop 同步。
+
+2026-04-17 Agent 编辑页「可用技能」：增加全部/系统/我的筛选（依据 source_dimension/dimension），列表行展示来源徽标；修复复选框 pointer-events-none 导致点击无效，改为 label 包裹正文并与复选框联动。Web 与 Desktop 的 AgentEdit 同步。
+
 2026-04-17 桌面端技能列表：前端按后端 `dimension` 字段判定我的/系统（不再依赖前端拿不到的 userid），分类正确；Tab 顺序调整为「我的技能 → 系统技能 → 全部技能」。
 2026-04-17 桌面端技能：用户 ZIP 导入写入 `~/.sage/users/<用户>/skills`，`list_skills` 返回 `user_id`/`dimension`；`SkillManager` 注册新技能时在所有 skill 目录中解析路径，与「我的技能/系统技能」筛选及同步到 Agent 逻辑一致。
 2026-04-17 修复 desktop 模式下 populate_request_from_agent_config 用 agent 的 systemContext 直接覆盖 request.system_context，导致子 session 的 parent_session_id 等字段丢失；改为统一 merge（request 值优先）。同时 Fibre 子 session 冲突检查改为按 parent_session_id 判断，允许同一父 session 复用已结束的子 session_id；_delegate_task_via_backend 对流式 tool_calls.arguments 的空串/不完整 JSON 跳过而不再报 ERROR。

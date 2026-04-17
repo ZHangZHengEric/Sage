@@ -101,18 +101,15 @@ const isSvg = computed(() => {
 
 const imageUrl = computed(() => {
   if (!props.filePath) return ''
-  // 如果已经是 asset:// 或 http:// URL，直接返回
-  if (props.filePath.startsWith('asset://') || props.filePath.startsWith('http://') || props.filePath.startsWith('https://')) {
+  if (props.filePath.startsWith('asset://') || props.filePath.startsWith('http://') || props.filePath.startsWith('https://') || props.filePath.startsWith('data:') || props.filePath.startsWith('blob:')) {
     return props.filePath
   }
   let cleanPath = props.filePath
-  // 如果已经是 file:// URL，去掉协议头
   if (props.filePath.startsWith('file://')) {
     cleanPath = props.filePath.replace(/^file:\/\//i, '')
   }
-  // 去掉开头的 /，因为 convertFileSrc 会将其编码为 %2F
-  cleanPath = cleanPath.replace(/^\//, '')
-  // 使用 Tauri 的 convertFileSrc 转换本地路径
+  // 保留绝对路径开头的 `/`，convertFileSrc 会编码为 %2F，
+  // Tauri 的 asset handler 解码后才能定位文件。
   return convertFileSrc(cleanPath)
 })
 

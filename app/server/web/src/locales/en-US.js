@@ -198,6 +198,8 @@ export default {
   'modelProvider.connectionVerifiedCapabilityUnknown': 'Connection succeeded, but no multimodal capability was detected.',
   'modelProvider.verifyCapabilitiesFirst': 'Please complete capability verification first',
   // Chat
+  'chat.attachmentImage': 'Image',
+  'chat.attachmentFile': 'Attachment',
   'chat.title': 'Assistant',
   'chat.current': 'Current',
   'chat.agents': 'agents',
@@ -562,6 +564,7 @@ export default {
   'agentEdit.availableSubAgents': 'Available Sub Agents',
   'agentEdit.deselectAll': 'Clear',
   'agentEdit.searchSkills': 'Search skills...',
+  'agentEdit.skillsFilterAll': 'All',
   'agentEdit.searchKnowledgeBases': 'Search knowledge bases...',
   'agentEdit.badge.skillRequired': 'Skill Required',
   'agentEdit.imProvider.wechatPersonal': 'WeChat',
