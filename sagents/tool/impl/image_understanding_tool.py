@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 import os
 import io
+from urllib.parse import urlparse
+
+import httpx
 
 from ..tool_base import tool
 from sagents.utils.logger import logger
@@ -212,6 +215,66 @@ class ImageUnderstandingTool:
 
         return base64_data, mime_type
 
+    def _mime_from_url_or_headers(self, content_type: Optional[str], url: str) -> str:
+        """从响应头或 URL 路径推断图片 MIME。"""
+        if content_type:
+            mime = content_type.split(';')[0].strip().lower()
+            if mime.startswith('image/'):
+                return mime
+        ext = Path(urlparse(url).path).suffix.lower()
+        if ext in self.supported_formats:
+            return self._get_mime_type(ext)
+        return 'image/jpeg'
+
+    async def _fetch_url_image_to_base64(self, image_url: str, max_resolution: int = 512) -> tuple[str, str]:
+        """
+        通过 HTTP(S) 拉取图片并转为 base64（与部分仅接受 data URL / base64 的多模态 API 兼容）。
+        """
+        max_bytes = 20 * 1024 * 1024
+        timeout = httpx.Timeout(60.0, connect=15.0)
+        try:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                response = await client.get(image_url)
+                response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise ImageUnderstandingError(f"无法下载图片: HTTP {e.response.status_code}") from e
+        except httpx.RequestError as e:
+            raise ImageUnderstandingError(f"无法下载图片: {e}") from e
+
+        body = response.content
+        if len(body) > max_bytes:
+            raise ImageUnderstandingError("图片过大（超过 20MB）")
+        if not body:
+            raise ImageUnderstandingError("下载的图片为空")
+
+        mime_hint = self._mime_from_url_or_headers(
+            response.headers.get("content-type"), image_url
+        )
+
+        if PIL_AVAILABLE:
+            try:
+                img = Image.open(io.BytesIO(body))
+                img.load()
+            except Exception as e:
+                raise ImageUnderstandingError(f"下载内容不是有效图片: {e}") from e
+            try:
+                compressed = self._resize_image_if_needed(body, max_resolution)
+                b64 = base64.b64encode(compressed).decode('utf-8')
+                return b64, 'image/jpeg'
+            except Exception as e:
+                logger.warning(f"远程图片压缩失败: {e}，使用原始数据")
+                b64 = base64.b64encode(body).decode('utf-8')
+                return b64, mime_hint
+
+        if not mime_hint.startswith('image/'):
+            ext = Path(urlparse(image_url).path).suffix.lower()
+            if ext not in self.supported_formats:
+                raise ImageUnderstandingError(
+                    "无法识别为图片：请使用带图片扩展名的 URL，或安装 Pillow"
+                )
+        b64 = base64.b64encode(body).decode('utf-8')
+        return b64, mime_hint
+
     async def _call_llm_with_image(self, messages: list, session_id: Optional[str] = None) -> str:
         """
         调用 LLM 进行图片理解
@@ -320,21 +383,21 @@ class ImageUnderstandingTool:
             # 3. 构建消息格式（OpenAI 多模态格式）
             mime_type = "image/jpeg"  # 默认值
             if is_url:
-                # 对于 URL 图片，直接使用 URL
-                logger.info(f"使用 URL 图片: {image_path}")
+                # 远程图片先下载再 base64，兼容不接受直链的多模态网关（如部分阿里云接口）
+                logger.info(f"拉取 URL 图片并转为 base64: {image_path}")
+                try:
+                    base64_data, mime_type = await self._fetch_url_image_to_base64(image_path)
+                except ImageUnderstandingError as e:
+                    return {
+                        "status": "error",
+                        "message": str(e),
+                    }
                 image_content = {
                     "type": "image_url",
                     "image_url": {
-                        "url": image_path
-                    }
+                        "url": f"data:{mime_type};base64,{base64_data}",
+                    },
                 }
-                # 尝试从 URL 推断 MIME 类型
-                if image_path.lower().endswith('.png'):
-                    mime_type = "image/png"
-                elif image_path.lower().endswith('.gif'):
-                    mime_type = "image/gif"
-                elif image_path.lower().endswith('.webp'):
-                    mime_type = "image/webp"
             else:
                 # 对于沙箱内的本地图片，通过沙箱读取并转换为 base64
                 try:
