@@ -347,25 +347,31 @@ const editingSkill = ref(null)
 const skillContent = ref('')
 const saving = ref(false)
 
-// Groups Configuration
+const isMineSkill = (s) => {
+  if (s?.dimension) return s.dimension !== 'system'
+  return !!(s?.user_id || s?.owner_user_id)
+}
+const isSystemSkill = (s) => !isMineSkill(s)
+
+// Groups Configuration（顺序：我的技能、系统技能、全部技能）
 const groups = computed(() => [
-  { 
-    id: 'all', 
-    label: t('skills.allSkills') || 'All Skills', 
+  {
+    id: 'mine',
+    label: t('skills.mySkills') || 'My Skills',
+    icon: User,
+    count: skills.value.filter(isMineSkill).length
+  },
+  {
+    id: 'system',
+    label: t('skills.systemSkills') || 'System Skills',
+    icon: Shield,
+    count: skills.value.filter(isSystemSkill).length
+  },
+  {
+    id: 'all',
+    label: t('skills.allSkills') || 'All Skills',
     icon: Layers,
     count: skills.value.length
-  },
-  { 
-    id: 'mine', 
-    label: t('skills.mySkills') || 'My Skills', 
-    icon: User,
-    count: skills.value.filter(s => s.user_id === currentUserId.value).length
-  },
-  { 
-    id: 'system', 
-    label: t('skills.systemSkills') || 'System Skills', 
-    icon: Shield,
-    count: skills.value.filter(s => s.user_id !== currentUserId.value).length
   }
 ])
 
@@ -375,9 +381,9 @@ const displayedSkills = computed(() => {
 
   // Group filtering
   if (selectedGroup.value === 'mine') {
-    result = result.filter(s => s.user_id === currentUserId.value)
+    result = result.filter(isMineSkill)
   } else if (selectedGroup.value === 'system') {
-    result = result.filter(s => s.user_id !== currentUserId.value)
+    result = result.filter(isSystemSkill)
   }
 
   // Search filtering

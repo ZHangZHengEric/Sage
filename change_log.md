@@ -1,4 +1,6 @@
 
+2026-04-17 桌面端技能列表：前端按后端 `dimension` 字段判定我的/系统（不再依赖前端拿不到的 userid），分类正确；Tab 顺序调整为「我的技能 → 系统技能 → 全部技能」。
+2026-04-17 桌面端技能：用户 ZIP 导入写入 `~/.sage/users/<用户>/skills`，`list_skills` 返回 `user_id`/`dimension`；`SkillManager` 注册新技能时在所有 skill 目录中解析路径，与「我的技能/系统技能」筛选及同步到 Agent 逻辑一致。
 2026-04-16 修复 SeatbeltIsolation/BwrapIsolation 同步 subprocess.run 阻塞 asyncio 事件循环导致服务无响应的严重 Bug，改为 async def + asyncio.to_thread 异步执行，与 SubprocessIsolation 保持一致。
 2026-04-16 移除 `sagents/agent/agent_base.py` 中未使用的 `User` 导入，避免 sagents 依赖 `common.models`。
 2026-04-16 delete_agent 在删除 DB 记录后调用 delete_agent_workspace_on_host，清理宿主机上该 Agent 工作区（desktop/server）；与本地/直通/远程 bind 挂载路径一致；未镜像到宿主机的纯远端数据不在此删除。
