@@ -124,6 +124,7 @@ It reports:
 - effective env file path and existence
 - auth mode and DB type
 - important directories such as `agents_dir`, `session_dir`, and `logs_dir`
+- the SQLite session registry path under `session_dir`
 - dependency availability
 - runtime errors, warnings, and suggested next steps
 
@@ -247,16 +248,20 @@ Examples:
 sage skills
 sage skills --json
 sage skills --workspace /path/to/project
+sage skills --agent-id my-agent
 ```
 
 The output includes:
 
 - current user id
+- optional agent id
 - optional workspace
 - total visible skills
 - per-source counts
 - skill names and descriptions
 - source-level errors, if any
+
+When `--agent-id` is provided, the CLI shows the skills currently available to that specific agent after the newer agent-skill sync logic is applied.
 
 ## Skills In CLI
 

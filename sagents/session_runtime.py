@@ -435,6 +435,11 @@ class Session:
         skill_manager: Optional[Union[SkillManager, SkillProxy]],
         parent_session_id: Optional[str] = None,
     ) -> SessionContext:
+        if not parent_session_id and system_context:
+            parent_session_id = system_context.get("parent_session_id")
+            if parent_session_id:
+                logger.info(f"SessionRuntime: 从 system_context 中提取 parent_session_id={parent_session_id}")
+
         if self.session_context:
             self._cache_session_workspace(session_id, self.session_context)
             if tool_manager:
@@ -856,7 +861,11 @@ class Session:
         try:
             manager = get_global_session_manager()
             if manager:
-                manager.cache_session_workspace(session_id, session_context.session_workspace)
+                manager.cache_session_workspace(
+                    session_id,
+                    session_context.session_workspace,
+                    parent_session_id=getattr(session_context, 'parent_session_id', None),
+                )
         except Exception as e:
             logger.warning(f"SAgent: 缓存会话路径失败: {e}")
 
@@ -886,46 +895,62 @@ class SessionManager:
         self.session_root_space = str(session_root_space)
         self.enable_obs = enable_obs
         self._sessions: Dict[str, Session] = {}
-        # 格式: {session_id: workspace_path}
-        self._all_session_paths: Dict[str, str] = {}
-        self._scan_all_sessions()
 
-    def _scan_all_sessions(self):
-        """启动时扫描所有会话（根会话+子会话），建立 ID 到 workspace 的映射"""
+        from sagents.session_registry import SessionRegistry
+        db_path = os.path.join(self.session_root_space, "sessions_index.sqlite")
+        need_migrate = not os.path.exists(db_path)
+        os.makedirs(self.session_root_space, exist_ok=True)
+        self._registry = SessionRegistry(db_path, root_dir=self.session_root_space)
+        if need_migrate:
+            self._migrate_from_filesystem()
+
+    def _migrate_from_filesystem(self):
+        """One-time migration: scan existing directories and populate the SQLite registry."""
         if not os.path.exists(self.session_root_space):
             logger.info(f"SessionManager: Session root space does not exist: {self.session_root_space}")
             return
-        
-        logger.debug(f"SessionManager: Scanning all sessions in {self.session_root_space}")
-        
-        for entry in os.listdir(self.session_root_space):
-            entry_path = os.path.join(self.session_root_space, entry)
-            if not os.path.isdir(entry_path):
-                continue
-                
-            # 检查是否是根会话
-            if os.path.exists(os.path.join(entry_path, "session_context.json")) or os.path.exists(os.path.join(entry_path, "messages.json")):
-                self._all_session_paths[entry] = entry_path
-                logger.debug(f"Found root session: {entry}")
-            
-            # 扫描子会话
-            sub_sessions_dir = os.path.join(entry_path, "sub_sessions")
-            if os.path.exists(sub_sessions_dir):
-                for sub_entry in os.listdir(sub_sessions_dir):
-                    sub_entry_path = os.path.join(sub_sessions_dir, sub_entry)
-                    if os.path.isdir(sub_entry_path):
-                        if os.path.exists(os.path.join(sub_entry_path, "session_context.json")) or os.path.exists(os.path.join(sub_entry_path, "messages.json")):
-                            self._all_session_paths[sub_entry] = sub_entry_path
-                            logger.debug(f"Found sub session: {sub_entry}")
-        
-        logger.info(f"SessionManager: Found {len(self._all_session_paths)} sessions total")
+
+        logger.info(f"SessionManager: Migrating existing sessions from {self.session_root_space} into SQLite registry")
+        entries = []
+        try:
+            with os.scandir(self.session_root_space) as root_entries:
+                for entry in root_entries:
+                    if not entry.is_dir():
+                        continue
+                    entry_path = entry.path
+                    if os.path.exists(os.path.join(entry_path, "session_context.json")) or os.path.exists(os.path.join(entry_path, "messages.json")):
+                        entries.append((entry.name, entry_path, None))
+                        logger.debug(f"Migrating root session: {entry.name}")
+
+                    sub_sessions_dir = os.path.join(entry_path, "sub_sessions")
+                    if not os.path.isdir(sub_sessions_dir):
+                        continue
+                    with os.scandir(sub_sessions_dir) as sub_entries:
+                        for sub_entry in sub_entries:
+                            if not sub_entry.is_dir():
+                                continue
+                            sub_entry_path = sub_entry.path
+                            if os.path.exists(os.path.join(sub_entry_path, "session_context.json")) or os.path.exists(os.path.join(sub_entry_path, "messages.json")):
+                                entries.append((sub_entry.name, sub_entry_path, entry.name))
+                                logger.debug(f"Migrating sub session: {sub_entry.name}")
+        except FileNotFoundError:
+            logger.info(f"SessionManager: Session root space disappeared during migration: {self.session_root_space}")
+            return
+        except Exception as e:
+            logger.warning(f"SessionManager: Failed to scan sessions in {self.session_root_space}: {e}")
+            return
+
+        if entries:
+            self._registry.register_batch(entries)
+        logger.info(f"SessionManager: Migrated {len(entries)} sessions into SQLite registry")
 
     def _is_sub_session(self, session_id: str) -> bool:
-        """判断是否为子会话（通过检查路径是否包含 sub_sessions）"""
-        if session_id not in self._all_session_paths:
-            return False
-        path = self._all_session_paths[session_id]
-        return "sub_sessions" in path
+        """判断是否为子会话"""
+        return self._registry.is_sub_session(session_id)
+
+    def get_parent_session_id(self, session_id: str) -> Optional[str]:
+        """获取父会话 ID"""
+        return self._registry.get_parent_session_id(session_id)
 
     def get_session_workspace(self, session_id: str, only_all_session_paths: bool = False) -> Optional[str]:
         """
@@ -933,27 +958,17 @@ class SessionManager:
         
         Args:
             session_id: 会话 ID（全局唯一）
+            only_all_session_paths: 保留参数以兼容旧调用，行为不变
         
         Returns:
             工作区路径，找不到则返回 None
         """
-        # 1. 首先尝试从内存缓存获取
-        if session_id in self._all_session_paths:
-            return self._all_session_paths[session_id]
-        if only_all_session_paths:
-            return None
-        # 2. 如果内存中没有，重新扫描会话目录
-        # 这处理了会话在其他进程中创建的情况
-        logger.debug(f"SessionManager: Session {session_id} not in cache, rescanning...")
-        self._scan_all_sessions()
-        
-        # 3. 再次尝试获取
-        return self._all_session_paths.get(session_id)
+        return self._registry.get_workspace(session_id)
 
-    def cache_session_workspace(self, session_id: str, session_workspace: Optional[str]):
+    def cache_session_workspace(self, session_id: str, session_workspace: Optional[str], parent_session_id: Optional[str] = None):
         if not session_id or not session_workspace:
             return
-        self._all_session_paths[session_id] = os.path.abspath(session_workspace)
+        self._registry.register(session_id, session_workspace, parent_session_id=parent_session_id)
 
     def get_or_create(
         self,

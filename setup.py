@@ -22,7 +22,7 @@ def get_docs_files():
 
 setup(
     name="sage",
-    version="0.9.4",
+    version="1.1.0",
     description="A production-ready, modular, and intelligent multi-agent orchestration framework for complex problem solving.",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
