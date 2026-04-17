@@ -5,7 +5,7 @@ import uuid
 import asyncio
 from sagents.utils.logger import logger
 from sagents.tool.tool_manager import ToolManager
-from sagents.context.session_context import  SessionContext, SessionStatus
+from sagents.context.session_context import SessionContext, SessionStatus
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.messages.message_manager import MessageManager
@@ -965,16 +965,16 @@ class AgentBase(ABC):
 
             # 5. Available Skills
             if 'available_skills' in include_sections:
-                # 补充 Skills 信息
-                # 确保不仅skill_manager存在，而且确实有技能可用
-                if hasattr(session_context, 'skill_manager') and session_context.skill_manager:
-                    # 尝试加载新技能，以确保新安装的技能能被发现
-                    try:
-                        session_context.skill_manager.load_new_skills()
-                    except Exception as e:
-                        logger.warning(f"Failed to load new skills: {e}")
+                # 补充 Skills 信息（优先沙箱内 skills，与 load_skill 一致）
+                sm = session_context.effective_skill_manager
+                if sm:
+                    if hasattr(sm, "load_new_skills"):
+                        try:
+                            sm.load_new_skills()
+                        except Exception as e:
+                            logger.warning(f"Failed to load new skills: {e}")
 
-                    skill_infos = session_context.skill_manager.list_skill_info()
+                    skill_infos = sm.list_skill_info()
                     if skill_infos:
                         system_prefix += "<available_skills>\n"
                         for skill in skill_infos:

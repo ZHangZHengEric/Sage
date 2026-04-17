@@ -382,6 +382,17 @@ class PassthroughSandboxProvider(ISandboxHandle):
         host_path = self.to_host_path(path)
         return await asyncio.to_thread(os.path.exists, host_path)
 
+    async def get_mtime(self, path: str) -> float:
+        """直通模式直接读取宿主机 mtime。"""
+        host_path = self.to_host_path(path)
+        try:
+            if not await asyncio.to_thread(os.path.exists, host_path):
+                return 0
+            return float(await asyncio.to_thread(os.path.getmtime, host_path))
+        except Exception as e:
+            logger.debug(f"PassthroughSandboxProvider.get_mtime 失败 {path}: {e}")
+            return 0
+
     async def list_directory(self, path: str, include_hidden: bool = False) -> List[FileInfo]:
         """列出目录内容"""
         host_path = self.to_host_path(path)

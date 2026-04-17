@@ -31,7 +31,6 @@ from common.services.chat_processor import ContentProcessor
 from common.services.agent_workspace import (
     get_agent_workspace_root,
     get_agent_skill_dir,
-    sync_selected_skills_to_workspace,
 )
 from common.services.chat_utils import (
     create_model_client,
@@ -661,18 +660,12 @@ async def populate_request_from_agent_config(
     _fill_if_none(request, "available_knowledge_bases", [])
     _fill_if_none(request, "available_sub_agent_ids", [])
 
-    if (not _is_desktop_mode()) and request.agent_id and request.available_skills:
-        try:
-            await sync_selected_skills_to_workspace(
-                request.agent_id,
-                agent_config or {},
-                user_id=request.user_id or "",
-                role="user",
-            )
-        except Exception as e:
-            logger.warning(
-                f"同步 server Agent skills 到工作空间失败: agent_id={request.agent_id}, error={e}"
-            )
+    # 注意：此处不再每次 prompt 都同步 skills 到 workspace。
+    # skills 同步统一由"Agent 编辑页面"在 create/update agent 时触发
+    # （common/services/agent_service.py 中的 sync_selected_skills_to_workspace 调用），
+    # 运行时如沙箱里缺少某个 skill 目录，则由
+    # SandboxSkillManager.sync_from_host 按需 copy_from_host 一次性补齐，
+    # 这样避免每次会话刷新 mtime / 覆盖用户在 Agent workspace 里的手改。
 
     if _is_desktop_mode():
         try:

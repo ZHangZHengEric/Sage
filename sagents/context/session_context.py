@@ -76,6 +76,16 @@ class SessionContext:
         self._session_root_space = session_root_space
         self._volume_mounts = volume_mounts
 
+    @property
+    def effective_skill_manager(self) -> Optional[Any]:
+        """
+        Agent 提示词、任务分析、工具建议等使用的技能视图：若沙箱内已成功加载技能，
+        则与 load_skill 一致采用 agent workspace/skills 副本；否则回退宿主 SkillProxy / SkillManager。
+        """
+        if self.sandbox_skill_manager is not None and self.sandbox_skill_manager.list_skills():
+            return self.sandbox_skill_manager
+        return self.skill_manager
+
     async def init_more(self, session_root_space: Optional[str] = None):
         """
         初始化 SessionContext（异步方法，需要显式调用）
@@ -557,12 +567,8 @@ class SessionContext:
 
     async def _init_sandbox_skill_manager(self):
         """
-        初始化沙箱技能管理器，并从宿主机同步技能
-        
-        同步策略：
-        1. 创建沙箱技能管理器（通过沙箱接口操作）
-        2. 从宿主机同步技能到沙箱（只同步不存在的）
-        3. 沙箱内的技能可以被 Agent 修改，不会影响宿主机
+        初始化沙箱技能管理器：按宿主 SkillProxy 给出的名称，仅从沙箱内
+        ``<agent_workspace>/skills/<name>/`` 加载（与挂载目录一致），供 load_skill 与提示词使用。
         """
         # 创建沙箱技能管理器
         skills_dir = os.path.join(self.sandbox_agent_workspace, "skills")
