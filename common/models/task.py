@@ -306,10 +306,10 @@ class TaskDao(BaseDao):
         import time
         from loguru import logger
         start_time = time.perf_counter()
-        logger.info(f"[TaskDao] create_one_time_task START | name='{task.name}' | agent_id={task.agent_id}")
+        logger.debug(f"[TaskDao] create_one_time_task START | name='{task.name}' | agent_id={task.agent_id}")
         await self.insert(task)
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskDao] create_one_time_task SUCCESS | task_id={task.id} | time={elapsed:.3f}s")
+        logger.debug(f"[TaskDao] create_one_time_task SUCCESS | task_id={task.id} | time={elapsed:.3f}s")
         return task
 
     async def get_one_time_task(self, task_id: int) -> Optional[Task]:

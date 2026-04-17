@@ -567,13 +567,28 @@
               </div>
               
               <!-- Skills Selection Area -->
-              <div class="h-[350px] border rounded-lg overflow-hidden bg-muted/5">
-                <div class="p-3 border-b flex items-center justify-between gap-3">
-                  <div class="relative flex-1">
+              <div class="flex flex-col h-[380px] border rounded-lg overflow-hidden bg-muted/5">
+                <div class="p-3 border-b flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <Tabs v-model="skillDimensionFilter" class="w-full sm:w-auto shrink-0">
+                    <TabsList class="h-9 w-full grid grid-cols-3 sm:inline-flex sm:w-auto">
+                      <TabsTrigger value="all" class="text-xs px-2 sm:px-3">
+                        {{ t('agentEdit.skillsFilterAll') }}
+                      </TabsTrigger>
+                      <TabsTrigger value="system" class="text-xs px-2 sm:px-3 gap-1">
+                        <Shield class="h-3.5 w-3.5 shrink-0" />
+                        {{ t('skills.system') }}
+                      </TabsTrigger>
+                      <TabsTrigger value="user" class="text-xs px-2 sm:px-3 gap-1">
+                        <User class="h-3.5 w-3.5 shrink-0" />
+                        {{ t('skills.mine') }}
+                      </TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                  <div class="relative flex-1 min-w-0">
                     <Search class="absolute left-2 top-2 h-4 w-4 text-muted-foreground/70" />
                     <Input v-model="searchQueries.skills" :placeholder="t('agentEdit.searchSkills')" class="pl-8 h-9" />
                   </div>
-                  <div class="flex items-center gap-2">
+                  <div class="flex items-center gap-2 shrink-0 flex-wrap justify-end">
                     <Button
                       variant="ghost"
                       size="sm"
@@ -604,34 +619,51 @@
                     </Button>
                   </div>
                 </div>
-                <ScrollArea class="h-[calc(350px-57px)]">
+                <ScrollArea class="flex-1 min-h-0">
                   <div class="p-4 space-y-2">
                     <div v-for="skill in filteredSkills" :key="skill.name || skill"
                       class="flex items-start gap-3 p-3 rounded-lg border border-muted/50 hover:bg-accent/5 transition-colors"
-                      :class="{ 'cursor-pointer': !isSkillSyncing(skill.name || skill) }"
+                      :class="{ 'opacity-60': isSkillSyncing(skill.name || skill) }"
                     >
                       <Checkbox
                         :id="`skill-${skill.name || skill}`"
                         :checked="store.formData.availableSkills?.includes(skill.name || skill)"
+                        :disabled="isSkillSyncing(skill.name || skill)"
                         @update:checked="() => !isSkillSyncing(skill.name || skill) && store.toggleSkill(skill.name || skill)"
-                        class="mt-0.5 pointer-events-none"
+                        class="mt-0.5"
+                        @click.stop
                       />
-                      <div class="flex-1 min-w-0" @click="!isSkillSyncing(skill.name || skill) && store.toggleSkill(skill.name || skill)">
-                        <div class="flex items-center gap-2">
-                          <label :for="`skill-${skill.name || skill}`" class="text-sm font-medium cursor-pointer pointer-events-none">
-                            {{ skill.name || skill }}
-                          </label>
-                          <!-- 待更新标签 -->
-                          <Badge
-                            v-if="skill.need_update"
-                            variant="destructive"
-                            class="text-[10px] h-5 px-1.5"
-                          >
-                            <Loader v-if="isSkillSyncing(skill.name || skill)" class="h-3 w-3 mr-1 animate-spin" />
-                            {{ t('agentEdit.skillPendingUpdate') || '待更新' }}
-                          </Badge>
-                        </div>
-                        <p v-if="skill.description" class="text-xs text-muted-foreground line-clamp-2 mt-1">{{ skill.description }}</p>
+                      <div class="flex-1 min-w-0">
+                        <label :for="`skill-${skill.name || skill}`" class="block cursor-pointer">
+                          <div class="flex items-center gap-2 flex-wrap">
+                            <span class="text-sm font-medium">{{ skill.name || skill }}</span>
+                            <Badge
+                              v-if="skillSourceDimension(skill) === 'system'"
+                              variant="outline"
+                              class="text-[10px] h-5 px-1.5 gap-0.5 font-normal"
+                            >
+                              <Shield class="h-3 w-3" />
+                              {{ t('skills.system') }}
+                            </Badge>
+                            <Badge
+                              v-else-if="['user', 'agent'].includes(skillSourceDimension(skill))"
+                              variant="secondary"
+                              class="text-[10px] h-5 px-1.5 gap-0.5 font-normal"
+                            >
+                              <User class="h-3 w-3" />
+                              {{ t('skills.mine') }}
+                            </Badge>
+                            <Badge
+                              v-if="skill.need_update"
+                              variant="destructive"
+                              class="text-[10px] h-5 px-1.5"
+                            >
+                              <Loader v-if="isSkillSyncing(skill.name || skill)" class="h-3 w-3 mr-1 animate-spin" />
+                              {{ t('agentEdit.skillPendingUpdate') || '待更新' }}
+                            </Badge>
+                          </div>
+                          <p v-if="skill.description" class="text-xs text-muted-foreground line-clamp-2 mt-1">{{ skill.description }}</p>
+                        </label>
                       </div>
                       <!-- 更新按钮 -->
                       <Button
@@ -1187,7 +1219,7 @@ import request from '@/utils/request.js'
 import { 
   Loader, ChevronLeft, ChevronRight, ChevronDown, Save, Check, Plus, Trash2, 
   Sparkles, Bot, Wrench, Search, Server, Code, FolderOpen, User, Cpu, Database, Workflow,
-  GripVertical, X, Image as ImageIcon, AlertCircle, MessageSquare, Play, RefreshCw
+  GripVertical, X, Image as ImageIcon, AlertCircle, MessageSquare, Play, RefreshCw, Shield
 } from 'lucide-vue-next'
 import Sortable from 'sortablejs'
 
@@ -2533,6 +2565,7 @@ onBeforeUnmount(() => {
 
 // Tools logic
 const searchQueries = reactive({ tools: '', skills: '' })
+const skillDimensionFilter = ref('all')
 const selectedGroupSource = ref('')
 
 const REQUIRED_TOOLS_FOR_SKILLS = [
@@ -2754,10 +2787,26 @@ const skillsList = computed(() => {
   return props.skills || []
 })
 
+const skillSourceDimension = (skill) => {
+  if (!skill || typeof skill !== 'object') return ''
+  const raw = skill.source_dimension ?? skill.dimension ?? ''
+  return String(raw).toLowerCase()
+}
+
 const filteredSkills = computed(() => {
-  if (!searchQueries.skills) return skillsList.value
+  let list = skillsList.value
+  const dim = skillDimensionFilter.value
+  if (dim === 'system') {
+    list = list.filter(s => skillSourceDimension(s) === 'system')
+  } else if (dim === 'user') {
+    list = list.filter(s => {
+      const d = skillSourceDimension(s)
+      return d === 'user' || d === 'agent'
+    })
+  }
+  if (!searchQueries.skills) return list
   const query = searchQueries.skills.toLowerCase()
-  return skillsList.value.filter(skill => {
+  return list.filter(skill => {
     const name = skill.name || skill
     const desc = skill.description || ''
     return name.toLowerCase().includes(query) || desc.toLowerCase().includes(query)
