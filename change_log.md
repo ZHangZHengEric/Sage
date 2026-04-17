@@ -1,4 +1,10 @@
 
+2026-04-17 SandboxSkillManager.sync_from_host 改为按需补齐：沙箱已有 skill 直接加载（保留手改），缺失时才从宿主 SkillSchema.path 拷一次；同时移除 chat_service 每次 prompt 都同步技能到 workspace 的逻辑（统一改由 agent 编辑页 create/update 触发），desktop / server 行为一致。
+
+2026-04-17 修复 search_memory 卡顿：ISandboxHandle 新增 get_mtime（默认基于 list_directory(parent)），Local/Passthrough provider override 为 os.path.getmtime；MemoryIndex._get_dir_mtime 改走 sandbox.get_mtime，不再每个目录都启 sandbox-exec 跑 stat，递归扫描从秒级降到近瞬时，且不破坏沙箱抽象。
+
+2026-04-17 SandboxSkillManager 不再从 host_skill.path 拷贝，仅从沙箱 agent_workspace/skills 加载；SessionContext.effective_skill_manager 统一供提示词/任务分析等与 load_skill 对齐。
+
 2026-04-17 图片理解工具对 HTTP(S) URL 改为服务端先拉取再 base64（httpx），与沙箱路径一致可走 PIL 压缩，避免直连 URL 被多模态网关判无效（如阿里云 InvalidParameter）。
 
 2026-04-17 修复 slash 触发选中后 `/` 未删除：点击下拉项时 contenteditable 失焦导致 Selection.modify 失效。下拉项加 `@mousedown.prevent` 阻止失焦；ChipInput 同时记录 lastRange，`deleteCharsBeforeCaret` 在调用时主动 focus + 必要时恢复 range，键鼠两条路径都能正确删掉触发的 `/keyword`。

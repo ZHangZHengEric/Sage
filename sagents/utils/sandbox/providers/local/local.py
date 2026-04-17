@@ -783,6 +783,23 @@ class LocalSandboxProvider(ISandboxHandle):
         actual_path = self.to_host_path(path)
         return await asyncio.to_thread(os.path.exists, actual_path)
 
+    async def get_mtime(self, path: str) -> float:
+        """直接 ``os.path.getmtime``，避免每次 stat 都启 sandbox-exec 子进程。
+
+        本地沙箱本质就是宿主机上的同一个 inode，读取 mtime 不存在隔离语义
+        （隔离层只是限制写入与命令执行权限），所以这里走 host 直读，
+        和"在 Seatbelt 里跑 ``stat``"等价但 0.3~1s/次 的子进程开销没了。
+        """
+        await self._ensure_initialized_async()
+        actual_path = self.to_host_path(path)
+        try:
+            if not await asyncio.to_thread(os.path.exists, actual_path):
+                return 0
+            return float(await asyncio.to_thread(os.path.getmtime, actual_path))
+        except Exception as e:
+            logger.debug(f"LocalSandboxProvider.get_mtime 失败 {path}: {e}")
+            return 0
+
     async def list_directory(
         self,
         path: str,

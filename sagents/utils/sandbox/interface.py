@@ -177,6 +177,29 @@ class ISandboxHandle(ABC):
     ) -> List[FileInfo]:
         """列出目录内容"""
         pass
+
+    async def get_mtime(self, path: str) -> float:
+        """
+        获取文件/目录的修改时间（Unix 时间戳）。
+
+        默认实现通过 ``list_directory(parent)`` 找到对应条目。
+        各 provider 可按需 override 以避免无谓开销
+        （如本地沙箱可直接 ``os.path.getmtime``，远端沙箱可走原生 stat API）。
+
+        约定：路径不存在或读取失败时返回 ``0``。
+        """
+        import os as _os
+
+        parent = _os.path.dirname(path.rstrip("/")) or path
+        target = path.rstrip("/")
+        try:
+            entries = await self.list_directory(parent, include_hidden=True)
+        except Exception:
+            return 0
+        for entry in entries:
+            if entry.path.rstrip("/") == target:
+                return float(entry.modified_time or 0)
+        return 0
     
     @abstractmethod
     async def ensure_directory(self, path: str) -> None:
