@@ -1,4 +1,6 @@
 
+2026-04-17 图片理解工具对 HTTP(S) URL 改为服务端先拉取再 base64（httpx），与沙箱路径一致可走 PIL 压缩，避免直连 URL 被多模态网关判无效（如阿里云 InvalidParameter）。
+
 2026-04-17 修复 slash 触发选中后 `/` 未删除：点击下拉项时 contenteditable 失焦导致 Selection.modify 失效。下拉项加 `@mousedown.prevent` 阻止失焦；ChipInput 同时记录 lastRange，`deleteCharsBeforeCaret` 在调用时主动 focus + 必要时恢复 range，键鼠两条路径都能正确删掉触发的 `/keyword`。
 
 2026-04-17 输入框任意位置 `/` 触发技能选择 + 多技能支持：ChipInput 增加基于光标的 `getSkillQuery` / `deleteCharsBeforeCaret`（用 Selection.modify 跨 chip 安全删除），并在 input/keyup/click 抛 `caret-update`。MessageInput 用 `currentSkills` 数组承载多个技能 chip，选中后自动删除光标前 `/keyword`，提交时把所有 `<skill>name</skill>` 串联到消息头部；解析支持多个连续 `<skill>` 标签，Backspace 在空输入时逐个回删。Web 与 Desktop 同步。
