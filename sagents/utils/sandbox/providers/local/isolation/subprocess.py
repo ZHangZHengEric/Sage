@@ -225,10 +225,54 @@ def main():
                     "log_file": log_file,
                 }
             else:
-                proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=cwd)
+                # 流式执行：边跑边把命令 stdout 写到本进程 stdout（外层 sandbox parent
+                # 已经在用 PIPE 增量读，再转发到 host 的 sys.stdout 实现实时回显）。
+                # stderr 单独捕获用于报错；同时把 stdout 缓存到 result 里返回 pickle。
+                proc = subprocess.Popen(
+                    cmd,
+                    shell=True,
+                    cwd=cwd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    bufsize=0,
+                )
+                stdout_chunks = []
+                stderr_chunks = []
+                import threading as _t
+                def _drain_o():
+                    try:
+                        while True:
+                            b = proc.stdout.read(4096) if proc.stdout else b''
+                            if not b:
+                                break
+                            t = b.decode('utf-8', errors='replace')
+                            stdout_chunks.append(t)
+                            try:
+                                sys.stdout.write(t)
+                                sys.stdout.flush()
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                def _drain_e():
+                    try:
+                        while True:
+                            b = proc.stderr.read(4096) if proc.stderr else b''
+                            if not b:
+                                break
+                            stderr_chunks.append(b.decode('utf-8', errors='replace'))
+                    except Exception:
+                        pass
+                _to = _t.Thread(target=_drain_o, daemon=True)
+                _te = _t.Thread(target=_drain_e, daemon=True)
+                _to.start(); _te.start()
+                proc.wait()
+                _to.join(timeout=1.0); _te.join(timeout=1.0)
+                stdout_text = ''.join(stdout_chunks)
+                stderr_text = ''.join(stderr_chunks)
                 if proc.returncode != 0:
-                     raise Exception(f"Command failed with code {proc.returncode}: {proc.stderr}")
-                result = proc.stdout
+                    raise Exception(f"Command failed with code {proc.returncode}: {stderr_text}")
+                result = stdout_text
         else:
             raise ValueError(f"Unknown mode: {mode}")
 
@@ -298,11 +342,10 @@ class SubprocessIsolation:
         if platform.system() == "Windows":
              python_bin = os.path.join(self.venv_dir, "Scripts", "python.exe")
         
-        # 创建 launcher.py 如果不存在
+        # 始终覆盖 launcher.py，确保 LAUNCHER_SCRIPT 升级后旧沙箱也能用上新版
         launcher_path = os.path.join(sandbox_dir, "launcher.py")
-        if not os.path.exists(launcher_path):
-            with open(launcher_path, "w") as f:
-                f.write(LAUNCHER_SCRIPT)
+        with open(launcher_path, "w") as f:
+            f.write(LAUNCHER_SCRIPT)
         
         cmd = [python_bin, launcher_path, input_pkl, output_pkl]
         

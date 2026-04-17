@@ -877,14 +877,8 @@ watch(() => props.message, (newMessage, oldMessage) => {
           alt: file.fileName,
           name: file.fileName
         } : file
-  })
-})
-
-watch(isEditingThisUserMessage, (isEditing) => {
-  if (isEditing) {
-    editingContent.value = getTextContent(props.message.content)
-  }
-})
+      })
+    })
   }
 
   // 3. 处理代码块（实时流中代码块可能在消息更新时出现）
@@ -913,6 +907,12 @@ watch(isEditingThisUserMessage, (isEditing) => {
     })
   }
 }, { deep: true })
+
+watch(isEditingThisUserMessage, (isEditing) => {
+  if (isEditing) {
+    editingContent.value = getTextContent(props.message.content)
+  }
+})
 
 // 辅助函数：提取文件引用
 function extractFileReferences(content) {

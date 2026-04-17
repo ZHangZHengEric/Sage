@@ -9,6 +9,7 @@ import os
 from typing import Dict, Any, Optional, List
 from sagents.utils.logger import logger
 from sagents.utils.sandbox.config import VolumeMount
+from sagents.utils.sandbox._stdout_echo import run_with_streaming_stdout
 from sagents.utils.common_utils import resolve_sandbox_runtime_dir
 from .subprocess import LAUNCHER_SCRIPT
 
@@ -50,9 +51,9 @@ class BwrapIsolation:
 
         python_bin = os.path.join(self.venv_dir, "bin", "python")
         launcher_path = os.path.join(sandbox_dir, "launcher.py")
-        if not os.path.exists(launcher_path):
-            with open(launcher_path, "w") as f:
-                f.write(LAUNCHER_SCRIPT)
+        # 始终覆盖 launcher.py，确保 LAUNCHER_SCRIPT 升级后旧沙箱也能用上新版
+        with open(launcher_path, "w") as f:
+            f.write(LAUNCHER_SCRIPT)
 
         bwrap_cmd = [
             "bwrap",
@@ -77,20 +78,20 @@ class BwrapIsolation:
         logger.info(f"[BwrapIsolation] 执行命令: {' '.join(bwrap_cmd[:5])}...")
         
         try:
-            result = await asyncio.to_thread(
-                subprocess.run,
+            # 流式执行：launcher 内部跑命令时，stdout 实时转发到本进程 stdout
+            # （受 SAGE_ECHO_SHELL_OUTPUT 控制），stderr 完整捕获用于报错
+            returncode, stdout_text, stderr_text = await asyncio.to_thread(
+                run_with_streaming_stdout,
                 bwrap_cmd,
-                capture_output=True,
-                text=True,
                 cwd=cwd or self.sandbox_agent_workspace,
                 timeout=300,
             )
-            
-            logger.info(f"[BwrapIsolation] 返回码: {result.returncode}")
-            
-            if result.returncode != 0:
-                logger.error(f"[BwrapIsolation] 执行失败: {result.stderr[:500]}")
-                raise Exception(f"Bwrap execution failed: {result.stderr}")
+
+            logger.info(f"[BwrapIsolation] 返回码: {returncode}")
+
+            if returncode != 0:
+                logger.error(f"[BwrapIsolation] 执行失败: {stderr_text[:500]}")
+                raise Exception(f"Bwrap execution failed: {stderr_text}")
             
             if not os.path.exists(output_pkl):
                 raise Exception("No output file generated")
