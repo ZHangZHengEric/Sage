@@ -141,6 +141,17 @@ class Session:
         self.status = status
         if status == SessionStatus.INTERRUPTED:
             self.interrupt_event.set()
+        elif status == SessionStatus.RUNNING:
+            # 进入新的运行周期，清掉历史中断状态（可能来自上一轮被中断后持久化的状态）
+            if self.interrupt_event.is_set() or self.interrupt_reason:
+                logger.info(
+                    f"SessionRuntime: Session {self.session_id} entering RUNNING, "
+                    f"clearing stale interrupt state (reason={self.interrupt_reason!r})"
+                )
+            self.interrupt_event.clear()
+            self.interrupt_reason = None
+            if self.session_context and isinstance(getattr(self.session_context, "audit_status", None), dict):
+                self.session_context.audit_status.pop("interrupt_reason", None)
         if self.session_context:
             self.session_context.end_time = time.time() if status in {SessionStatus.COMPLETED, SessionStatus.ERROR, SessionStatus.INTERRUPTED} else self.session_context.end_time
         if status in {SessionStatus.COMPLETED, SessionStatus.ERROR, SessionStatus.INTERRUPTED}:
@@ -162,14 +173,6 @@ class Session:
                         logger.warning(
                             f"SessionRuntime: cascade {status.value} to child session {child_session_id} failed: {exc}"
                         )
-
-    def request_interrupt(self, message: str = "用户请求中断", cascade: bool = True) -> bool:
-        self.interrupt_reason = message
-        if self.session_context:
-            self.session_context.audit_status["interrupt_reason"] = message
-        self.interrupt_event.set()
-        self.set_status(SessionStatus.INTERRUPTED, cascade=cascade)
-        return True
 
     def should_interrupt(self) -> bool:
         if self.interrupt_event.is_set():
@@ -275,8 +278,11 @@ class Session:
                 if isinstance(agent_config, dict):
                     self.session_context.agent_config = agent_config
                 self.session_context.message_manager.messages = self._load_persisted_messages()
-                if self.status == SessionStatus.INTERRUPTED:
-                    self.interrupt_event.set()
+                # 注意：这里不再根据持久化的 INTERRUPTED 状态去 set interrupt_event。
+                # interrupt_event 是用于"当前运行周期"的中断信号，磁盘里的 INTERRUPTED 仅是上一轮
+                # 结束时的历史状态。如果在加载时把 event 置位，下一次新的 run_stream 进入时即使
+                # set_status(RUNNING)，FlowExecutor 仍会因 should_interrupt() 为 True 而立刻退出。
+                # 当前轮次是否需要中断，由 SessionManager.interrupt_session(...) 在运行期再次触发。
             except Exception as exc:
                 logger.warning(f"SessionRuntime: 恢复 session {self.session_id} 快照失败: {exc}")
                 return False

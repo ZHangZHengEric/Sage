@@ -1,4 +1,6 @@
 
+2026-04-17 修复中断会话后续请求秒退：load_persisted_state 不再把磁盘 INTERRUPTED 状态翻译成 interrupt_event.set()；set_status(RUNNING) 进入新轮次时主动清掉残留 interrupt_event/interrupt_reason/audit_status；删除 Session 中重复定义的 request_interrupt 死代码。
+
 2026-04-17 SandboxSkillManager.sync_from_host 改为按需补齐：沙箱已有 skill 直接加载（保留手改），缺失时才从宿主 SkillSchema.path 拷一次；同时移除 chat_service 每次 prompt 都同步技能到 workspace 的逻辑（统一改由 agent 编辑页 create/update 触发），desktop / server 行为一致。
 
 2026-04-17 修复 search_memory 卡顿：ISandboxHandle 新增 get_mtime（默认基于 list_directory(parent)），Local/Passthrough provider override 为 os.path.getmtime；MemoryIndex._get_dir_mtime 改走 sandbox.get_mtime，不再每个目录都启 sandbox-exec 跑 stat，递归扫描从秒级降到近瞬时，且不破坏沙箱抽象。
