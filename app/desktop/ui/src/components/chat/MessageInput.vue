@@ -49,6 +49,7 @@
             :key="skill.name"
             class="px-4 py-2 cursor-pointer hover:bg-accent hover:text-accent-foreground flex items-center justify-between transition-colors text-sm"
             :class="{'bg-accent text-accent-foreground': index === selectedSkillIndex}"
+            @mousedown.prevent
             @click="selectSkill(skill)"
           >
             <div class="flex flex-col overflow-hidden">
@@ -60,13 +61,17 @@
       </div>
 
       <!-- 输入区域：包含技能标签和文本框 -->
-      <div class="flex items-start gap-2">
-        <!-- 选中的技能展示 -->
-        <div v-if="currentSkill" class="flex items-center gap-1 h-7 px-2.5 bg-primary/10 text-primary rounded-full text-xs font-medium whitespace-nowrap border border-primary/20 flex-shrink-0 mt-1">
-          <span class="max-w-[100px] truncate">@{{ currentSkill }}</span>
+      <div class="flex items-start gap-2 flex-wrap">
+        <!-- 选中的多个技能展示 -->
+        <div
+          v-for="(name, idx) in currentSkills"
+          :key="`skill-${idx}-${name}`"
+          class="flex items-center gap-1 h-7 px-2.5 bg-primary/10 text-primary rounded-full text-xs font-medium whitespace-nowrap border border-primary/20 flex-shrink-0 mt-1"
+        >
+          <span class="max-w-[100px] truncate">@{{ name }}</span>
           <button
             type="button"
-            @click="currentSkill = null"
+            @click="removeSkillAt(idx)"
             class="ml-0.5 w-3.5 h-3.5 flex items-center justify-center rounded-full hover:bg-primary/20"
           >
             <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
@@ -85,6 +90,7 @@
           @compositionstart="handleCompositionStart"
           @compositionend="handleCompositionEnd"
           @paste="handlePaste"
+          @caret-update="handleCaretUpdate"
         />
       </div>
 
@@ -248,7 +254,10 @@ const loadingSkills = ref(false)
 const skills = ref([])
 const selectedSkillIndex = ref(0)
 const skillKeyword = ref('')
-const currentSkill = ref(null)
+// 已选中的技能列表（按选择顺序），提交时全部以 <skill> 形式串联到头部。
+const currentSkills = ref([])
+// 当前命中的 slash 查询：{ keyword, deleteLength } —— deleteLength 用于在选中技能后从光标前删掉 `/keyword`。
+const activeSkillQuery = ref(null)
 
 const filteredSkills = computed(() => {
   // 获取 agent 配置的可用技能列表
@@ -279,14 +288,30 @@ watch(() => props.presetText, async (newVal) => {
   editorRef.value?.focus(true)
 })
 
-// 选中技能
+// 选中技能：将技能追加到列表，并把光标前 `/keyword` 字符串删除（保留其它正文）。
 const selectSkill = (skill) => {
-  currentSkill.value = skill.name
-  inputValue.value = ''
+  if (!skill || !skill.name) return
+  // 同名技能不重复追加，保留首次的位置即可
+  if (!currentSkills.value.includes(skill.name)) {
+    currentSkills.value = [...currentSkills.value, skill.name]
+  }
+  const query = activeSkillQuery.value
+  if (query && editorRef.value?.deleteCharsBeforeCaret) {
+    editorRef.value.deleteCharsBeforeCaret(query.deleteLength)
+  }
+  activeSkillQuery.value = null
   showSkillList.value = false
+  skillKeyword.value = ''
   nextTick(() => {
-    editorRef.value?.focus(true)
+    editorRef.value?.focus(false)
   })
+}
+
+const removeSkillAt = (idx) => {
+  if (idx < 0 || idx >= currentSkills.value.length) return
+  const next = currentSkills.value.slice()
+  next.splice(idx, 1)
+  currentSkills.value = next
 }
 
 // 文件上传相关状态
@@ -443,55 +468,74 @@ const processTauriFile = async (filePath) => {
   }
 }
 
-// 监听输入值变化
+// 解析粘贴/手动输入到头部的控制标签 + 多个连续 <skill>...</skill>
 const LEADING_CONTROL_TAG_RE = /^\s*(?:<enable_plan>\s*(?:true|false)\s*<\/enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*<\/enable_deep_thinking>\s*)+/i
-const LEADING_SKILL_TAG_RE = /^<skill>(.*?)<\/skill>\s*/i
+const LEADING_SKILL_TAGS_RE = /^(?:\s*<skill>(.*?)<\/skill>\s*)+/i
+const SINGLE_SKILL_TAG_RE = /<skill>(.*?)<\/skill>/gi
 
-watch(inputValue, async (newVal) => {
-  // 如果在输入法组合状态中，不处理技能标签
+const ensureSkillsLoaded = async () => {
+  if (skills.value.length > 0 || loadingSkills.value) return
+  try {
+    loadingSkills.value = true
+    const res = await skillAPI.getSkills()
+    skills.value = Array.isArray(res?.skills) ? res.skills : []
+  } catch (error) {
+    console.error('获取技能列表失败:', error)
+    skills.value = []
+  } finally {
+    loadingSkills.value = false
+  }
+}
+
+watch(inputValue, (newVal) => {
   if (isComposing.value) return
-
-  // 检查是否包含技能标签（粘贴或手动输入）
+  // 头部如果出现一段连续的 <skill>xxx</skill>，自动剥离并并入 currentSkills（顺序保留、去重）
   const normalizedInput = newVal.replace(LEADING_CONTROL_TAG_RE, '')
-  const skillMatch = normalizedInput.match(LEADING_SKILL_TAG_RE)
-  if (skillMatch) {
-    currentSkill.value = skillMatch[1]
-    inputValue.value = normalizedInput.replace(skillMatch[0], '')
-    return
+  const skillBlock = normalizedInput.match(LEADING_SKILL_TAGS_RE)
+  if (!skillBlock) return
+  const names = []
+  let m
+  SINGLE_SKILL_TAG_RE.lastIndex = 0
+  while ((m = SINGLE_SKILL_TAG_RE.exec(skillBlock[0])) !== null) {
+    const name = (m[1] || '').trim()
+    if (name) names.push(name)
   }
-
-  if (newVal.startsWith('/')) {
-    const keyword = newVal.slice(1)
-    skillKeyword.value = keyword
-
-    // 如果技能列表为空，则获取
-    if (skills.value.length === 0 && !loadingSkills.value) {
-      try {
-        loadingSkills.value = true
-        console.log('Fetching skills...')
-        const res = await skillAPI.getSkills()
-        if (res.skills) {
-            skills.value = res.skills
-        }
-      } catch (error) {
-        console.error('获取技能列表失败:', error)
-        skills.value = []
-      } finally {
-        loadingSkills.value = false
-      }
-    }
-
-    showSkillList.value = true
-    selectedSkillIndex.value = 0
-  } else {
-    showSkillList.value = false
+  if (names.length === 0) return
+  const merged = currentSkills.value.slice()
+  for (const n of names) {
+    if (!merged.includes(n)) merged.push(n)
   }
+  currentSkills.value = merged
+  inputValue.value = normalizedInput.replace(skillBlock[0], '')
 })
 
+// 光标位置变化（input/keyup/click/focus）时，重新检测 slash 查询
+const handleCaretUpdate = async () => {
+  if (isComposing.value) return
+  const editor = editorRef.value
+  if (!editor || typeof editor.getSkillQuery !== 'function') {
+    activeSkillQuery.value = null
+    showSkillList.value = false
+    return
+  }
+  const query = editor.getSkillQuery()
+  if (!query) {
+    activeSkillQuery.value = null
+    showSkillList.value = false
+    return
+  }
+  activeSkillQuery.value = query
+  skillKeyword.value = query.keyword
+  selectedSkillIndex.value = 0
+  showSkillList.value = true
+  await ensureSkillsLoaded()
+}
+
 const buildHeadPrefix = () => {
+  // 多个 <skill> 标签按选择顺序串联，全部塞到头部
   let prefix = ''
-  if (currentSkill.value) {
-    prefix = `<skill>${currentSkill.value}</skill> `
+  if (currentSkills.value.length > 0) {
+    prefix = currentSkills.value.map(name => `<skill>${name}</skill>`).join(' ') + ' '
   }
   if (planEnabled.value) {
     prefix = `<enable_plan>true</enable_plan>` + (prefix ? ` ${prefix}` : '')
@@ -522,7 +566,7 @@ const hasSubmittableInput = () => {
   return Boolean(
     inputValue.value.trim() ||
     uploadedFiles.value.length > 0 ||
-    currentSkill.value
+    currentSkills.value.length > 0
   )
 }
 
@@ -532,7 +576,9 @@ const dispatchSubmit = (needInterrupt) => {
 
   inputValue.value = ''
   uploadedFiles.value = []
-  currentSkill.value = null
+  currentSkills.value = []
+  activeSkillQuery.value = null
+  showSkillList.value = false
 
   emit('sendMessage', plainText, {
     multimodalContent,
@@ -587,10 +633,10 @@ const handleKeyDown = (e) => {
     }
   }
 
-  // Backspace 删除技能（不在输入法组合状态时）
-  if (!composing && e.key === 'Backspace' && inputValue.value === '' && currentSkill.value) {
+  // Backspace：当输入为空时，删除最后一个已选技能（一次一个，符合 chip 行为）
+  if (!composing && e.key === 'Backspace' && inputValue.value === '' && currentSkills.value.length > 0) {
     e.preventDefault()
-    currentSkill.value = null
+    currentSkills.value = currentSkills.value.slice(0, -1)
     return
   }
 
