@@ -1,4 +1,6 @@
 
+2026-04-17 桌面端技能列表：前端按后端 `dimension` 字段判定我的/系统（不再依赖前端拿不到的 userid），分类正确；Tab 顺序调整为「我的技能 → 系统技能 → 全部技能」。
+2026-04-17 桌面端技能：用户 ZIP 导入写入 `~/.sage/users/<用户>/skills`，`list_skills` 返回 `user_id`/`dimension`；`SkillManager` 注册新技能时在所有 skill 目录中解析路径，与「我的技能/系统技能」筛选及同步到 Agent 逻辑一致。
 2026-04-17 修复 desktop 模式下 populate_request_from_agent_config 用 agent 的 systemContext 直接覆盖 request.system_context，导致子 session 的 parent_session_id 等字段丢失；改为统一 merge（request 值优先）。同时 Fibre 子 session 冲突检查改为按 parent_session_id 判断，允许同一父 session 复用已结束的子 session_id；_delegate_task_via_backend 对流式 tool_calls.arguments 的空串/不完整 JSON 跳过而不再报 ERROR。
 2026-04-16 修复 Fibre 多层后端委派：parent_session_id 自动从 system_context 提取；子 session 不再继承父的 custom_sub_agents，改由后端 auto_all 自动配置；server 端 populate_request 补齐 auto_all 扩展逻辑；create_agent 处理"已存在"返回视为成功。
 2026-04-16 重构 SessionManager：用 SQLite 中央注册表（sessions_index.sqlite）替换内存字典 _all_session_paths 和启动全量扫描，首次启动自动迁移；Fibre delegate_tasks 增加手动 session_id 全局冲突校验。
