@@ -25,6 +25,7 @@ import sys
 import asyncio
 from typing import Dict, List, Optional
 
+from ..._stdout_echo import echo_chunk
 from ...interface import (
     ISandboxHandle,
     SandboxType,
@@ -559,6 +560,7 @@ class LocalSandboxProvider(ISandboxHandle):
             )
 
             # 使用增量读取方式，确保超时前能获取已产生的输出
+            # 同时把 chunk 实时回显到当前进程 stdout（受 SAGE_ECHO_SHELL_OUTPUT 控制）
             async def read_output():
                 while True:
                     try:
@@ -568,7 +570,9 @@ class LocalSandboxProvider(ISandboxHandle):
                         )
                         if not chunk:
                             break
-                        collected_output.append(chunk.decode('utf-8', errors='replace'))
+                        chunk_text = chunk.decode('utf-8', errors='replace')
+                        collected_output.append(chunk_text)
+                        echo_chunk(chunk_text)
                     except asyncio.TimeoutError:
                         # 继续读取，检查进程是否还在运行
                         if proc.returncode is not None:

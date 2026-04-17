@@ -9,6 +9,7 @@ import os
 from typing import Dict, Any, Optional, List
 from sagents.utils.logger import logger
 from sagents.utils.sandbox.config import VolumeMount
+from sagents.utils.sandbox._stdout_echo import run_with_streaming_stdout
 from sagents.utils.common_utils import resolve_sandbox_runtime_dir
 from .subprocess import LAUNCHER_SCRIPT
 
@@ -70,30 +71,43 @@ class SeatbeltIsolation:
         allowed = list(set(allowed))
         
         # 构建 sandbox profile
+        # 策略：
+        #   - 系统调用 / IPC / 进程 / mach / sysctl / iokit 全部放行（否则
+        #     Python 启动会 SIGABRT 或卡死在系统服务上，而我们关心的不是限制系统调用）
+        #   - 文件读取默认放开（沙箱目的不是机密读保护，而是防止误写/越权写）
+        #   - 文件写入默认 deny，仅放行 workspace / sandbox_dir / volume_mounts /
+        #     系统临时目录 / /dev 等必要位置
         lines = [
             "(version 1)",
             "(deny default)",
-            "(allow process-fork)",
-            "(allow process-exec)",
+            "(allow process*)",
+            "(allow signal)",
+            "(allow mach*)",
+            "(allow iokit*)",
+            "(allow sysctl*)",
+            "(allow ipc*)",
+            "(allow system-socket)",
+            "(allow network*)",
+            # 文件读全放开（保留 file-write 的细粒度限制即可）
+            "(allow file-read*)",
+            # /dev 下必备的写
+            '(allow file-write* '
+            '(literal "/dev/null") (literal "/dev/zero") '
+            '(literal "/dev/dtracehelper") (literal "/dev/tty") '
+            '(literal "/dev/stdout") (literal "/dev/stderr"))',
+            # 系统临时目录写权限（tempfile、Python 缓存等）
+            '(allow file-write* (subpath "/private/tmp"))',
+            '(allow file-write* (subpath "/private/var/folders"))',
         ]
 
-        # 添加路径权限
+        # 用户允许写入的路径（workspace、sandbox_dir、volume_mounts 等）
         for path in allowed:
+            if not path:
+                continue
             if os.path.isdir(path):
-                lines.append(f"(allow file* (literal \"{path}\"))")
-                lines.append(f"(allow file* (subpath \"{path}\"))")
-                # 允许执行该路径下的程序
-                lines.append(f"(allow process-exec (subpath \"{path}\"))")
+                lines.append(f"(allow file-write* (subpath \"{path}\"))")
             elif os.path.isfile(path):
-                lines.append(f"(allow file* (literal \"{path}\"))")
-                lines.append(f"(allow process-exec (literal \"{path}\"))")
-        
-        # 允许网络
-        lines.append("(allow network*)")
-        
-        # 允许执行任何程序（在沙盒限制内）
-        lines.append("(allow process-exec (literal \"*\"))")
-        lines.append("(allow process-exec (regex \".*\"))")
+                lines.append(f"(allow file-write* (literal \"{path}\"))")
         
         profile_content = "\n".join(lines)
         
@@ -137,9 +151,9 @@ class SeatbeltIsolation:
         profile_path = self._generate_profile(output_pkl,
                                              additional_read_paths=additional_read,
                                              additional_write_paths=additional_write)
-        if not os.path.exists(launcher_path):
-            with open(launcher_path, "w") as f:
-                f.write(LAUNCHER_SCRIPT)
+        # 始终覆盖 launcher.py，确保 LAUNCHER_SCRIPT 升级后旧沙箱也能用上新版
+        with open(launcher_path, "w") as f:
+            f.write(LAUNCHER_SCRIPT)
         
         cmd = [
             "sandbox-exec", "-f", profile_path,
@@ -150,20 +164,34 @@ class SeatbeltIsolation:
         logger.info(f"[SeatbeltIsolation] 执行命令: {' '.join(cmd[:4])}...")
         
         try:
-            result = await asyncio.to_thread(
-                subprocess.run,
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=cwd or self.sandbox_dir,
-                timeout=300,
-            )
-            
-            logger.info(f"[SeatbeltIsolation] 返回码: {result.returncode}")
-            
-            if result.returncode != 0:
-                logger.error(f"[SeatbeltIsolation] 执行失败: {result.stderr[:500]}")
-                raise Exception(f"Seatbelt execution failed: {result.stderr}")
+            try:
+                # 用流式 helper：launcher 内部跑命令时实时把 stdout 转发到本进程
+                # stdout（受 SAGE_ECHO_SHELL_OUTPUT 控制），stderr 完整捕获用于报错
+                returncode, stdout_text, stderr_text = await asyncio.to_thread(
+                    run_with_streaming_stdout,
+                    cmd,
+                    cwd=cwd or self.sandbox_dir,
+                    timeout=300,
+                )
+            except subprocess.TimeoutExpired as te:
+                # 超时通常意味着 sandbox profile 缺权限导致 Python 启动卡死
+                logger.error(
+                    f"[SeatbeltIsolation] 执行超时(300s)，profile 保留以便排查: {profile_path}\n"
+                    f"stderr(部分): {(te.stderr or '')[:500]!r}"
+                )
+                # 保留 profile 不删，便于人工 cat 查看
+                profile_path = None
+                raise
+
+            logger.info(f"[SeatbeltIsolation] 返回码: {returncode}")
+
+            if returncode != 0:
+                logger.error(
+                    f"[SeatbeltIsolation] 执行失败 rc={returncode}\n"
+                    f"stderr: {stderr_text[:1000]}\n"
+                    f"stdout: {stdout_text[:500]}"
+                )
+                raise Exception(f"Seatbelt execution failed: {stderr_text}")
             
             if not os.path.exists(output_pkl):
                 raise Exception("No output file generated")
@@ -182,7 +210,7 @@ class SeatbeltIsolation:
                     os.remove(input_pkl)
                 except:
                     pass
-            if os.path.exists(profile_path):
+            if profile_path and os.path.exists(profile_path):
                 try:
                     os.remove(profile_path)
                 except:
