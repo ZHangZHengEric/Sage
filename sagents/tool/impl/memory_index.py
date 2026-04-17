@@ -214,20 +214,22 @@ class MemoryIndex:
             return False
 
     async def _get_dir_mtime(self, dir_path: str) -> float:
-        """Get directory modification time through sandbox"""
+        """通过沙箱接口拿目录 mtime。
+
+        统一走 ``sandbox.get_mtime``：
+        - 本地/直通沙箱内部用 ``os.path.getmtime``，恒定开销；
+        - 远端/容器沙箱用各自 provider 的实现（默认通过 ``list_directory(parent)``
+          找到该条目，避免每次启 ``stat`` 子进程）。
+
+        历史实现是 ``execute_command("stat ...")``，在 macOS Seatbelt 下每次
+        都要拉起 ``sandbox-exec + python launcher`` 子进程，单次 0.3~1s，
+        递归扫几十个子目录就把 ``search_memory`` 拖成"看起来卡死"。
+        """
         try:
-            # 在沙箱内执行命令，使用虚拟路径
-            # logger.debug(f"MemoryIndex: Executing stat command for: {dir_path}")
-            result = await self.sandbox.execute_command(
-                command=f"stat -c %Y {dir_path} 2>/dev/null || stat -f %m {dir_path}",
-                timeout=5
-            )
-            # logger.debug(f"MemoryIndex: Stat result for {dir_path}: success={result.success}")
-            if result.success:
-                return float(result.stdout.strip())
+            return float(await self.sandbox.get_mtime(dir_path))
         except Exception as e:
             logger.warning(f"MemoryIndex: Error getting mtime for {dir_path}: {e}")
-        return 0
+            return 0
 
     async def _read_file_content(self, filepath: str, max_size: int = 10 * 1024 * 1024) -> str:
         """Read file content with size limit through sandbox"""

@@ -49,8 +49,8 @@ class TaskAnalysisAgent(AgentBase):
 
         available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
 
-        # 获取skills metadata
-        skill_manager = session_context.skill_manager
+        # 获取 skills metadata（优先沙箱内副本）
+        skill_manager = session_context.effective_skill_manager
         if skill_manager and skill_manager.list_skills():
             available_skills_name = skill_manager.get_skill_description_lines()
         else:

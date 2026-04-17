@@ -166,7 +166,8 @@ class ToolSuggestionAgent(AgentBase):
                     pass
 
             # 确保有必要的工具
-            if session_context.skill_manager is not None and session_context.skill_manager.list_skills():
+            sm = session_context.effective_skill_manager
+            if sm is not None and sm.list_skills():
                 necessary_tools = [
                     'file_read', 'execute_python_code', 'execute_javascript_code',
                     'execute_shell_command', 'file_write', 'file_update', 'load_skill'
