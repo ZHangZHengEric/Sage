@@ -254,6 +254,7 @@ def collect_doctor_info() -> Dict[str, Any]:
     env_files = [shared_env_file]
     if os.path.exists(project_env_file):
         env_files.append(project_env_file)
+    session_registry_db = os.path.join(cfg.session_dir, "sessions_index.sqlite")
     dependency_status = _dependency_status()
     issues = _collect_runtime_issues(cfg)
     status = "ok"
@@ -280,6 +281,8 @@ def collect_doctor_info() -> Dict[str, Any]:
         "agents_dir_exists": os.path.exists(cfg.agents_dir),
         "session_dir": cfg.session_dir,
         "session_dir_exists": os.path.exists(cfg.session_dir),
+        "session_registry_db": session_registry_db,
+        "session_registry_db_exists": os.path.exists(session_registry_db),
         "logs_dir": cfg.logs_dir,
         "logs_dir_exists": os.path.exists(cfg.logs_dir),
         "dependencies": dependency_status,
@@ -296,6 +299,7 @@ def collect_config_info() -> Dict[str, Any]:
     env_files = [shared_env_file]
     if os.path.exists(project_env_file):
         env_files.append(project_env_file)
+    session_registry_db = os.path.join(cfg.session_dir, "sessions_index.sqlite")
     return {
         "env_file": effective_env_file,
         "env_files": env_files,
@@ -308,6 +312,7 @@ def collect_config_info() -> Dict[str, Any]:
         "default_llm_model_name": cfg.default_llm_model_name,
         "agents_dir": cfg.agents_dir,
         "session_dir": cfg.session_dir,
+        "session_registry_db": session_registry_db,
         "logs_dir": cfg.logs_dir,
         "env_sources": {
             "SAGE_HOME": local_defaults["sage_home"],
@@ -463,15 +468,51 @@ async def list_sessions(
     }
 
 
-def list_available_skills(
+async def list_available_skills(
     *,
     user_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
     workspace: Optional[str] = None,
 ) -> Dict[str, Any]:
     from sagents.skill.skill_manager import SkillManager
 
     cfg = init_cli_config(init_logging=False)
     resolved_user_id = user_id or get_default_cli_user_id()
+    if agent_id:
+        from common.services import skill_service
+
+        agent_skills = await skill_service.get_agent_available_skills(
+            agent_id=agent_id,
+            current_user_id=resolved_user_id,
+            role="admin" if resolved_user_id == "admin" else "user",
+        )
+        skills = []
+        source_counts: Dict[str, int] = {}
+        for item in agent_skills:
+            source_name = item.get("source_dimension") or item.get("dimension") or "unknown"
+            source_counts[source_name] = source_counts.get(source_name, 0) + 1
+            skills.append(
+                {
+                    "name": item.get("name"),
+                    "description": item.get("description"),
+                    "source": source_name,
+                    "path": item.get("path"),
+                    "need_update": bool(item.get("need_update")),
+                    "agent_id": agent_id,
+                }
+            )
+        skills.sort(key=lambda item: item["name"] or "")
+        return {
+            "user_id": resolved_user_id,
+            "agent_id": agent_id,
+            "workspace": None,
+            "sources": [],
+            "total": len(skills),
+            "source_counts": source_counts,
+            "list": skills,
+            "errors": [],
+        }
+
     skill_sources: List[Dict[str, Any]] = []
     skills_map: Dict[str, Dict[str, Any]] = {}
 
@@ -523,6 +564,7 @@ def list_available_skills(
 
     return {
         "user_id": resolved_user_id,
+        "agent_id": None,
         "workspace": os.path.abspath(workspace) if workspace else None,
         "sources": skill_sources,
         "total": len(skills),
@@ -532,22 +574,25 @@ def list_available_skills(
     }
 
 
-def validate_requested_skills(
+async def validate_requested_skills(
     *,
     requested_skills: Optional[List[str]],
     user_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
     workspace: Optional[str] = None,
 ) -> List[str]:
     normalized = [skill.strip() for skill in (requested_skills or []) if skill and skill.strip()]
     if not normalized:
         return []
 
-    result = list_available_skills(user_id=user_id, workspace=workspace)
+    result = await list_available_skills(user_id=user_id, agent_id=agent_id, workspace=workspace)
     available_names = {item["name"] for item in result.get("list", [])}
     missing = [skill for skill in normalized if skill not in available_names]
     if missing:
         available_display = ", ".join(sorted(available_names)) if available_names else "(none)"
         next_steps = ["Run `sage skills` to inspect currently visible skills."]
+        if agent_id:
+            next_steps[0] = f"Run `sage skills --agent-id {agent_id}` to inspect the skills currently available to that agent."
         if workspace:
             next_steps.append(
                 f"Run `sage skills --workspace {os.path.abspath(workspace)}` to inspect workspace skills."
