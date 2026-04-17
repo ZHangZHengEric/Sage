@@ -87,9 +87,17 @@ async def initialize_skill_manager():
         sage_skills_dir = user_home / ".sage" / "skills"
         sage_skills_dir.mkdir(parents=True, exist_ok=True)
         
-        # 添加到 skill manager
+        # 添加到 skill manager（内置/同步至 ~/.sage/skills，与 cfg.skill_dir 一致）
         skill_manager_instance.add_skill_dir(str(sage_skills_dir))
         logger.info(f"已添加技能目录: {sage_skills_dir}")
+
+        # 用户导入的技能目录（与 server 的 user_dir/<userId>/skills 一致，便于 list_skills 区分「我的」）
+        cfg = get_startup_config()
+        if cfg:
+            user_skills_dir = Path(cfg.user_dir) / DEFAULT_DESKTOP_USER_ID / "skills"
+            user_skills_dir.mkdir(parents=True, exist_ok=True)
+            skill_manager_instance.add_skill_dir(str(user_skills_dir))
+            logger.info(f"已添加用户技能目录: {user_skills_dir}")
         
         return skill_manager_instance
     except Exception as e:
