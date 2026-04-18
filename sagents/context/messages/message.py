@@ -200,6 +200,12 @@ class MessageChunk:
             if hasattr(tc, 'id') and hasattr(tc, 'function'):
                 # 对象形式 (如 ChoiceDeltaToolCall)
                 tc_dict = {'id': tc.id, 'type': getattr(tc, 'type', 'function')}
+                # OpenAI 流式增量 delta 中 index 至关重要：同一条 assistant 消息里
+                # 多个 tool_call 在分片时仅靠 index 区分，丢失会导致前端把后续
+                # 工具的参数累加到上一个工具上，进而出现"参数收集不到"或"工具消失"。
+                tc_index = getattr(tc, 'index', None)
+                if tc_index is not None:
+                    tc_dict['index'] = tc_index
                 function = tc.function if hasattr(tc, 'function') else None
                 if function:
                     tc_dict['function'] = {
@@ -208,7 +214,7 @@ class MessageChunk:
                     }
                 result.append(tc_dict)
             elif isinstance(tc, dict):
-                # 字典形式
+                # 字典形式 - 原样透传，保留 index 等额外字段
                 result.append(tc)
             else:
                 # 其他形式，转换为字符串

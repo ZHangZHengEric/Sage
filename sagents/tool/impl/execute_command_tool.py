@@ -8,6 +8,7 @@ Execute Command Tool
 from typing import Dict, Any, Optional
 from ..tool_base import tool
 from sagents.utils.logger import logger
+from sagents.utils.sandbox._stdout_echo import echo_header, echo_footer
 
 
 class SecurityManager:
@@ -127,13 +128,19 @@ class ExecuteCommandTool:
         # 获取沙箱
         sandbox = self._get_sandbox(session_id)
 
-        # 调用沙箱执行命令
-        result = await sandbox.execute_command(
-            command=command,
-            workdir=workdir,
-            timeout=timeout,
-            env_vars=env_vars
-        )
+        # 头尾打印一行分隔符，方便在 docker logs / 终端里看清是哪条命令
+        # （正文 stdout 由沙箱执行层在 read_output 里增量写出，受 SAGE_ECHO_SHELL_OUTPUT 控制）
+        echo_header(command)
+        result = None
+        try:
+            result = await sandbox.execute_command(
+                command=command,
+                workdir=workdir,
+                timeout=timeout,
+                env_vars=env_vars,
+            )
+        finally:
+            echo_footer(result.return_code if result is not None else None)
 
         logger.info(f"✅ ExecuteCommandTool: success={result.success}, rc={result.return_code}")
 

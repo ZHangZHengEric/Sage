@@ -112,7 +112,7 @@ class SkillTool:
         })
 
         # Limit total tokens to 8000, remove oldest if exceeded
-        MAX_SKILL_TOKENS = 8000
+        MAX_SKILL_TOKENS = 18000
         total_tokens = 0
 
         for skill in active_skills:

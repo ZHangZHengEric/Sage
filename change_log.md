@@ -1,4 +1,14 @@
 
+2026-04-18 sandbox/_stdout_echo 增加 48 条单测（test_stdout_echo.py），覆盖 echo 开关全部取值、空/None/异常 stdout 兜底、header 截断、footer 各种 rc、流式 helper 的 stdout/stderr 隔离/cwd/env/大输出/非 UTF-8/实时性断言/超时；测试中发现 timeout 路径会被持有 pipe 的子孙进程（如 sleep）阻塞 drain 线程~4s 的回归，顺手修：Popen 加 start_new_session，超时改成 killpg(SIGKILL) 干掉整个进程组，并去掉 raise 前重复的 join。
+
+2026-04-18 ExecuteCommandTool/沙箱命令实时回显：新增 sandbox/_stdout_echo（含 echo_chunk/header/footer 与 run_with_streaming_stdout helper），LocalSandboxProvider 直接路径在 read_output 里增量写 sys.stdout；Seatbelt/Bwrap parent 改用流式 helper 转发 stdout、stderr 单独捕获用于报错；launcher.py shell mode 也从 subprocess.run 换成 Popen+双线程 drain，命令 stdout 实时透传到外层；三处 isolation 始终覆盖 launcher.py 让升级生效；ExecuteCommandTool 加 $ <cmd> / ↪ rc=N 头尾分隔。受 SAGE_ECHO_SHELL_OUTPUT 控制，默认开启，0/false/no/off/空 关闭。
+
+2026-04-18 放开 todo 子任务"≤10"硬上限：task_decompose_prompts 三语全删掉 10 条上限，改成按复杂度自适应（trivial 1-3 / 常规 5-15 / 复杂多阶段 15-40+），并要求带"和/然后"或跨多文件的步骤必须继续拆；同步在 todo_write 工具描述里补上同样的颗粒度指导，让不走 task_decompose 的 SimpleAgent 也能拿到信号。
+
+2026-04-18 修复前端 file_write 等工具"参数收集不到 / 执行完后从页面消失"：MessageChunk._serialize_tool_calls 序列化时丢了 OpenAI delta 的 index 字段；同时 useChatPage.mergeToolCalls 用数组下标合并，导致同一条消息里多 tool_call 串台。后端补回 index，前端改为按 id/index 匹配合并，desktop/server 双端同步；顺手修了 desktop MessageRenderer.vue 中误置在 watch 内反复注册的 watch(isEditingThisUserMessage)。
+
+2026-04-17 22:30 修复 SeatbeltIsolation 在 macOS 卡死 5 分钟的问题：原 sandbox profile 把 mach/ipc/sysctl/iokit 全 deny 导致 Python 启动 SIGABRT 或阻塞 mach-lookup，重写为「系统调用全放行 + 文件写白名单」策略，仅限制写入到 workspace/sandbox_dir/volume_mounts，并在执行超时时保留 .sb 文件便于排查。
+
 2026-04-17 修复中断会话后续请求秒退：load_persisted_state 不再把磁盘 INTERRUPTED 状态翻译成 interrupt_event.set()；set_status(RUNNING) 进入新轮次时主动清掉残留 interrupt_event/interrupt_reason/audit_status；删除 Session 中重复定义的 request_interrupt 死代码。
 
 2026-04-17 SandboxSkillManager.sync_from_host 改为按需补齐：沙箱已有 skill 直接加载（保留手改），缺失时才从宿主 SkillSchema.path 拷一次；同时移除 chat_service 每次 prompt 都同步技能到 workspace 的逻辑（统一改由 agent 编辑页 create/update 触发），desktop / server 行为一致。
