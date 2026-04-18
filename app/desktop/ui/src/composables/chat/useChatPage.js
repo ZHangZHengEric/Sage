@@ -327,20 +327,41 @@ export const useChatPage = (props) => {
   const mergeToolCalls = (existingToolCalls = [], incomingToolCalls = []) => {
     const existingList = Array.isArray(existingToolCalls) ? existingToolCalls : []
     const incomingList = Array.isArray(incomingToolCalls) ? incomingToolCalls : []
-    const maxLength = Math.max(existingList.length, incomingList.length)
-    const merged = []
 
-    for (let i = 0; i < maxLength; i += 1) {
-      const existingToolCall = existingList[i]
-      const incomingToolCall = incomingList[i]
-      if (existingToolCall && incomingToolCall) {
-        merged.push(mergeToolCall(existingToolCall, incomingToolCall))
-        continue
-      }
-      merged.push(incomingToolCall || existingToolCall)
+    if (incomingList.length === 0) {
+      return existingList.filter(Boolean).map(tc => ({ ...tc }))
     }
 
-    return merged.filter(Boolean)
+    // 同一条 assistant 消息里多个工具调用是按 OpenAI delta 的 `index` 字段
+    // 区分的，绝对不能用数组下标硬合并 —— 否则后到的 file_write 增量会被
+    // 拼接到第一条 tool_call 上，造成"参数收集不到 / 工具从页面消失"。
+    const result = existingList.filter(Boolean).map(tc => ({ ...tc }))
+
+    const findTargetIdx = (incomingTC) => {
+      if (!incomingTC) return -1
+      const incomingId = incomingTC.id || incomingTC.tool_call_id
+      if (incomingId) {
+        const idx = result.findIndex(t => t && (t.id === incomingId || t.tool_call_id === incomingId))
+        if (idx !== -1) return idx
+      }
+      if (incomingTC.index !== undefined && incomingTC.index !== null) {
+        const idx = result.findIndex(t => t && t.index === incomingTC.index)
+        if (idx !== -1) return idx
+      }
+      return -1
+    }
+
+    incomingList.forEach((incomingTC) => {
+      if (!incomingTC) return
+      const targetIdx = findTargetIdx(incomingTC)
+      if (targetIdx !== -1) {
+        result[targetIdx] = mergeToolCall(result[targetIdx], incomingTC)
+      } else {
+        result.push({ ...incomingTC })
+      }
+    })
+
+    return result
   }
 
   const createSession = (_agentId = null) => {

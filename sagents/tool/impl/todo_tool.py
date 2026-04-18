@@ -225,13 +225,34 @@ class ToDoTool:
 
     @tool(
         description_i18n={
-            "zh": "创建或更新任务清单，新增任务需包含 id, content；更新任务只需 id 和变更字段(content/completed)。未变更的任务无需传入。",
-            "en": "Create or update todo list",
+            "zh": (
+                "创建或更新任务清单。新增任务需包含 id, content；更新任务只需 id 和变更字段(content/completed/conclusion)。未变更的任务无需传入。"
+                "颗粒度要求：子任务的数量必须与任务真实复杂度匹配，不要为了\"看起来简洁\"硬把多步骤合并成一条。"
+                "极简单/单步任务 1-3 条；常规多步任务 5-15 条；复杂、跨模块、跨阶段（全栈功能 / 调研+设计+实现+联调+验收 / 大型重构等）"
+                "可以拆到 15-40 条甚至更多，关键看每一步是否可独立验收。"
+                "如果一条 content 里包含\"并且/然后/接着\"等隐含多步动作，或预计需要多次工具调用 / 跨多个文件，就必须继续拆分；"
+                "只有当两个动作真的属于同一个原子动作时才合并。"
+            ),
+            "en": (
+                "Create or update the todo list. New tasks must include id and content; updates only need id and changed fields (content/completed/conclusion); unchanged tasks can be omitted. "
+                "Granularity rule: the number of subtasks MUST match the real complexity of the task. Do NOT collapse multiple steps into one just to keep the list short. "
+                "Trivial/single-step task: 1-3 items. Normal multi-step task: 5-15 items. "
+                "Complex, cross-module, multi-stage tasks (full-stack feature, research + design + implementation + integration + verification, large refactor, etc.) can legitimately reach 15-40 items or more, as long as each step is independently verifiable. "
+                "If a single content describes multiple actions (\"and/then/after that\"), or is expected to need multiple tool calls / changes across multiple files, split it further. Only merge when two actions truly form one atomic action."
+            ),
         },
         param_description_i18n={
             "tasks": {
-                "zh": "任务列表。新增任务需包含 id, content；更新任务只需 id 和变更字段(content/completed)。未变更的任务无需传入。",
-                "en": "List of tasks. New tasks need id, content; updates need id and changed fields (content/completed). Unchanged tasks can be omitted."
+                "zh": (
+                    "任务列表。新增任务需包含 id, content；更新任务只需 id 和变更字段(content/completed/conclusion)。未变更的任务无需传入。"
+                    "颗粒度要按任务复杂度自适应：极简单 1-3 条 / 常规 5-15 条 / 复杂多阶段 15-40+ 条；"
+                    "禁止为了\"清单短\"把可独立验收的多步骤合并成一条。"
+                ),
+                "en": (
+                    "List of tasks. New tasks need id and content; updates need id and changed fields (content/completed/conclusion). Unchanged tasks can be omitted. "
+                    "Granularity must match task complexity: trivial 1-3 / normal 5-15 / complex multi-stage 15-40+ items; "
+                    "never merge independently verifiable steps into one just to make the list shorter."
+                )
             },
             "session_id": {
                 "zh": "会话ID，用于定位工作区",
