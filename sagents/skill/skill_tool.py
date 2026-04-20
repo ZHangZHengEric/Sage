@@ -35,10 +35,8 @@ class SkillTool:
         if not session_id:
             raise ValueError("session_id is required for load_skill")
 
-        # Use local import to avoid circular dependency
-        from sagents.session_runtime import get_global_session_manager
-        session_manager = get_global_session_manager()
-        session = session_manager.get_live_session(session_id) if session_manager else None
+        from sagents.utils.agent_session_helper import get_live_session
+        session = get_live_session(session_id, log_prefix="SkillTool")
         if not session or not session.session_context:
             raise ValueError(f"Invalid session_id: {session_id}")
 

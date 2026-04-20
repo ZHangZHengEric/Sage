@@ -1,4 +1,10 @@
 
+2026-04-20 23:51 复用样板：agent_session_helper 增 get_session_sandbox()；file_system/memory/execute_command/image_understanding 4 个 tool 的 _get_sandbox 改为单行调用；compress_history、web_fetcher、todo、skill、content_saver、fibre/tools 共 8 处 get_global_session_manager+get_live_session 模板替换为 get_live_session/get_live_session_context helper；image_understanding._get_mime_type 改用 multimodal_image.get_mime_type。
+
+2026-04-20 架构文档拆分为多二级章节（zh+en）：父页 ARCHITECTURE 重写为流程图导览，新增 app/server、app/desktop、app/others 三篇，sagents 拆为 overview / agent-flow / session-context / tool-skill / sandbox-obs 五篇；以 mermaid 图为主，仅保留二开示例代码；修复带 () 与 / 的 subgraph 标题语法；docs/README 索引同步更新。
+
+2026-04-20 拆分 agent_base.py（1673→1291 行）：图片多模态、消息清洗、流→非流合并、stream tag 判断、session 辅助分别抽到 sagents/utils/{multimodal_image,message_sanitizer,stream_merger,stream_tag_parser,agent_session_helper}.py，base 内对应方法保留薄封装，外部 agent 调用零改动。
+
 2026-04-20 用户消息气泡优化：1) 收紧 max-w 到 80%/70% 并补 break-all/min-w-0，防止长内容溢出页面宽度；2) 仿 codex 加「显示更多 / 收起」折叠（>240 字或 >8 行触发，max-h 200px + 底部渐隐遮罩），按钮挪到时间行最左侧；desktop / server 双端同步。
 
 2026-04-20 修复 MessageInput 输入 / 后方向键不能切换技能：handleCaretUpdate 在 keyup 时无脑把 selectedSkillIndex 重置为 0，导致 ArrowUp/Down 看似不生效；改为仅在 keyword 真的变了才重置，并加 watch 把 index 夹回 filteredSkills 范围。同步把 placeholder 改为「输入您的消息... (Shift+Enter 换行 · 输入 / 选择技能)」让用户知道有这个入口。

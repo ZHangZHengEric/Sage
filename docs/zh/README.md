@@ -63,7 +63,9 @@ ref: home
 - [快速开始](GETTING_STARTED.md)：安装依赖并运行 CLI、服务端、Web UI 或桌面版
 - [CLI 使用指南](CLI.md)：命令行工作流、会话、技能、工作目录与结构化输出
 - [核心概念](CORE_CONCEPTS.md)：会话、智能体、工具、技能、流程和沙箱
-- [架构](ARCHITECTURE.md)：代码库整体组织方式
+- [架构](ARCHITECTURE.md)：代码库整体组织方式（含子章节）
+  - 应用层：[Server](ARCHITECTURE_APP_SERVER.md) · [Desktop](ARCHITECTURE_APP_DESKTOP.md) · [其它入口](ARCHITECTURE_APP_OTHERS.md)
+  - sagents 核心：[总览](ARCHITECTURE_SAGENTS_OVERVIEW.md) · [Agent / Flow](ARCHITECTURE_SAGENTS_AGENT_FLOW.md) · [Session / Context](ARCHITECTURE_SAGENTS_SESSION_CONTEXT.md) · [Tool / Skill](ARCHITECTURE_SAGENTS_TOOL_SKILL.md) · [Sandbox / LLM / Obs](ARCHITECTURE_SAGENTS_SANDBOX_OBS.md)
 - [配置](CONFIGURATION.md)：运行时环境变量与存储设置
 - [应用形态](APPLICATIONS.md)：不同入口分别适合什么场景
 - [MCP Servers](MCP_SERVERS.md)：内置 MCP Server 以及它们在平台中的角色
