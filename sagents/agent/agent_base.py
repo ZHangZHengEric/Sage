@@ -5,7 +5,7 @@ import uuid
 import asyncio
 from sagents.utils.logger import logger
 from sagents.tool.tool_manager import ToolManager
-from sagents.context.session_context import SessionContext, SessionStatus
+from sagents.context.session_context import SessionContext
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.messages.message_manager import MessageManager
@@ -16,20 +16,28 @@ from sagents.utils.llm_request_utils import (
     format_api_error_details,
     is_unsupported_input_format_error,
 )
+from sagents.utils.multimodal_image import (
+    process_multimodal_content as _process_multimodal_content_util,
+    resolve_local_sage_url as _resolve_local_sage_url_util,
+    get_mime_type as _get_mime_type_util,
+)
+from sagents.utils.message_sanitizer import (
+    remove_orphan_tool_calls as _remove_orphan_tool_calls_util,
+    strip_content_when_tool_calls as _strip_content_when_tool_calls_util,
+)
+from sagents.utils.stream_merger import merge_chat_completion_chunks as _merge_chunks_util
+from sagents.utils.stream_tag_parser import judge_delta_content_type as _judge_delta_content_type_util
+from sagents.utils.agent_session_helper import (
+    get_live_session as _get_live_session_util,
+    get_live_session_context as _get_live_session_context_util,
+    should_abort_due_to_session as _should_abort_due_to_session_util,
+)
 import traceback
 import time
 import os
 from openai import AsyncOpenAI, APIError, RateLimitError, APIConnectionError
 import httpx
 from openai.types.chat import chat_completion_chunk
-from openai.types.chat import (
-    ChatCompletion,
-    ChatCompletionMessage,
-    ChatCompletionMessageToolCall,
-)
-from openai.types.chat.chat_completion import Choice
-from openai.types.chat.chat_completion_message_tool_call import Function
-from openai.types.completion_usage import CompletionUsage, PromptTokensDetails, CompletionTokensDetails
 
 
 class AgentBase(ABC):
@@ -64,22 +72,10 @@ class AgentBase(ABC):
         logger.debug(f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}, 最大输入长度（安全阈值）: {self.max_model_input_len}")
 
     def _get_live_session(self, session_id: Optional[str]):
-        if not session_id:
-            return None
-        try:
-            from sagents.session_runtime import get_global_session_manager
-
-            session_manager = get_global_session_manager()
-            if not session_manager:
-                return None
-            return session_manager.get_live_session(session_id)
-        except Exception as e:
-            logger.debug(f"{self.__class__.__name__}: 获取 live session 失败, session_id={session_id}: {e}")
-            return None
+        return _get_live_session_util(session_id, log_prefix=self.__class__.__name__)
 
     def _get_live_session_context(self, session_id: Optional[str]):
-        session = self._get_live_session(session_id)
-        return session.session_context if session else None
+        return _get_live_session_context_util(session_id, log_prefix=self.__class__.__name__)
 
     @abstractmethod
     async def run_stream(self,
@@ -100,258 +96,35 @@ class AgentBase(ABC):
             yield []
 
     def _remove_tool_call_without_id(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """移除 tool_calls 没有对应 tool 回复的 assistant 消息。详见
+        ``sagents.utils.message_sanitizer.remove_orphan_tool_calls``。
         """
-        移除assistant 是tool call 但是在messages中其他的role 为tool 的消息中没有对应的tool call id
-
-        Args:
-            messages: 输入消息列表
-
-        Returns:
-            List[Dict[str, Any]]: 移除了没有对应 tool_call_id 的tool call 消息
-        """
-        new_messages = []
-        all_tool_call_ids_from_tool = []
-        for msg in messages:
-            if msg.get('role') == MessageRole.TOOL.value and 'tool_call_id' in msg:
-                all_tool_call_ids_from_tool.append(msg['tool_call_id'])
-        for msg in messages:
-            if msg.get('role') == MessageRole.ASSISTANT.value and 'tool_calls' in msg:
-                tool_calls = msg['tool_calls'] or []
-                # 如果tool_calls 里面的id 没有在其他的role 为tool 的消息中出现，就移除这个消息
-                # 兼容 ChoiceDeltaToolCall 对象和字典形式
-                def get_tool_call_id(tool_call):
-                    if hasattr(tool_call, 'id'):
-                        return tool_call.id
-                    return tool_call.get('id')
-                if any(get_tool_call_id(tool_call) not in all_tool_call_ids_from_tool for tool_call in tool_calls):
-                    continue
-            new_messages.append(msg)
-        return new_messages
+        return _remove_orphan_tool_calls_util(messages)
 
     def _remove_content_if_tool_calls(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """assistant 消息带 tool_calls 时移除 content 字段。详见
+        ``sagents.utils.message_sanitizer.strip_content_when_tool_calls``。
         """
-        如果 assistant 消息包含 tool_calls，则移除 content 字段
-
-        Args:
-            messages: 消息列表
-
-        Returns:
-            List[Dict[str, Any]]: 处理后的消息列表
-        """
-        for msg in messages:
-            if msg.get('role') == MessageRole.ASSISTANT.value and msg.get('tool_calls'):
-                msg.pop('content', None)
-        return messages
+        return _strip_content_when_tool_calls_util(messages)
 
     async def _process_multimodal_content(self, msg: Dict[str, Any]) -> Dict[str, Any]:
+        """处理多模态消息内容（本地图片转 base64、压缩到最大 512x512）。详见
+        ``sagents.utils.multimodal_image.process_multimodal_content``。
         """
-        处理多模态消息内容，将本地图片路径转换为 base64
-        保持远程图片 URL 不变
-        图片会被压缩至最大 512x512 像素
-
-        Args:
-            msg: 消息字典
-
-        Returns:
-            Dict[str, Any]: 处理后的消息字典
-        """
-        import base64
-        from pathlib import Path
-        from PIL import Image
-        import io
-
-        content = msg.get('content')
-        if not isinstance(content, list):
-            return msg
-
-        new_content = []
-        for item in content:
-            if not isinstance(item, dict):
-                new_content.append(item)
-                continue
-
-            item_type = item.get('type')
-
-            if item_type == 'text':
-                # 文本内容保持不变
-                new_content.append(item)
-
-            elif item_type == 'image_url':
-                image_url_data = item.get('image_url', {})
-                url = image_url_data.get('url', '') if isinstance(image_url_data, dict) else str(image_url_data)
-
-                if not url:
-                    new_content.append(item)
-                    continue
-
-                # 检查是否已经是 base64 data URL
-                if url.startswith('data:image/'):
-                    # 已经是 base64 格式，需要解码、压缩后重新编码
-                    try:
-                        # 解析 data URL，格式: data:image/xxx;base64,xxxxx
-                        header, base64_str = url.split(',', 1)
-
-                        # 解码 base64 数据
-                        image_data = base64.b64decode(base64_str)
-
-                        # 打开图片并压缩
-                        buffer = io.BytesIO(image_data)
-                        with Image.open(buffer) as img:
-                            # 转换为 RGB 模式（处理 RGBA 等模式）
-                            if img.mode in ('RGBA', 'P'):
-                                img = img.convert('RGB')
-
-                            # 压缩图片至最大 512x512，保持原始比例
-                            img.thumbnail((512, 512), Image.Resampling.LANCZOS)
-
-                            # 保存到新的内存缓冲区
-                            output_buffer = io.BytesIO()
-                            img.save(output_buffer, format='JPEG', quality=85)
-                            compressed_data = output_buffer.getvalue()
-
-                        # 重新编码为 base64
-                        compressed_base64 = base64.b64encode(compressed_data).decode('utf-8')
-
-                        # 使用 JPEG MIME 类型（因为压缩后统一转为 JPEG）
-                        data_url = f"data:image/jpeg;base64,{compressed_base64}"
-
-                        new_content.append({
-                            'type': 'image_url',
-                            'image_url': {'url': data_url}
-                        })
-                        logger.debug(f"Compressed base64 image from {len(image_data)} to {len(compressed_data)} bytes")
-
-                    except Exception as e:
-                        logger.error(f"Failed to compress base64 image: {e}")
-                        # 压缩失败时保留原始数据，不进行截断
-                        new_content.append(item)
-                    continue
-
-                # 检查是否是本地文件路径
-                if url.startswith('file://'):
-                    # 移除 file:// 前缀
-                    file_path = url[7:]
-                elif url.startswith('http://') or url.startswith('https://'):
-                    # 桌面端 sidecar 暴露的"本地静态文件"也走 http URL，
-                    # 但远程 LLM 无法访问 127.0.0.1，需要在这里反解回本地路径再走 base64。
-                    local_path = self._maybe_resolve_local_sage_url(url)
-                    if local_path is None:
-                        new_content.append(item)
-                        continue
-                    file_path = local_path
-                else:
-                    file_path = url
-
-                # 检查文件是否存在
-                path_obj = Path(file_path)
-                if not path_obj.exists():
-                    logger.warning(f"Image file not found: {file_path}")
-                    new_content.append(item)
-                    continue
-
-                try:
-                    # 打开图片并压缩
-                    with Image.open(path_obj) as img:
-                        # 转换为 RGB 模式（处理 RGBA 等模式）
-                        if img.mode in ('RGBA', 'P'):
-                            img = img.convert('RGB')
-
-                        # 压缩图片至最大 512x512，保持原始比例
-                        img.thumbnail((512, 512), Image.Resampling.LANCZOS)
-
-                        # 保存到内存缓冲区
-                        buffer = io.BytesIO()
-                        img.save(buffer, format='JPEG', quality=85)
-                        image_data = buffer.getvalue()
-
-                    base64_data = base64.b64encode(image_data).decode('utf-8')
-
-                    # 使用 JPEG MIME 类型（因为压缩后统一转为 JPEG）
-                    mime_type = 'image/jpeg'
-
-                    # 构建 data URL
-                    data_url = f"data:{mime_type};base64,{base64_data}"
-
-                    new_content.append({
-                        'type': 'image_url',
-                        'image_url': {'url': data_url}
-                    })
-                    logger.debug(f"Converted and compressed local image to base64: {file_path}, size: {len(image_data)} bytes")
-
-                except Exception as e:
-                    logger.error(f"Failed to convert image to base64: {file_path}, error: {e}")
-                    new_content.append(item)
-
-            else:
-                # 其他类型保持不变
-                new_content.append(item)
-
-        msg['content'] = new_content
-        return msg
+        return await _process_multimodal_content_util(msg)
 
     @staticmethod
     def _maybe_resolve_local_sage_url(url: str) -> Optional[str]:
-        """把桌面端 sidecar 的本地 sage 文件 URL 反解为本地文件路径。
-
-        前端两端统一以 http(s) URL 渲染图片：
-        - server 端：是真正的远程 OSS URL，远程 LLM 可以直接访问；
-        - desktop 端：URL 形如 http://127.0.0.1:<port>/api/oss/file/<agent_id>/<filename>，
-          远程 LLM 访问不到 localhost，因此这里把它映射回 ~/.sage/agents/<agent_id>/upload_files/<filename>，
-          交由调用方走"本地图片 → base64"分支。
-
-        若不是本地 sage 文件 URL，返回 None。
+        """桌面端 sidecar 的 ``http://127.0.0.1/api/oss/file/...`` 反解为本地路径。详见
+        ``sagents.utils.multimodal_image.resolve_local_sage_url``。
         """
-        try:
-            from urllib.parse import urlparse, unquote
-
-            parsed = urlparse(url)
-            if parsed.hostname not in ("127.0.0.1", "localhost", "0.0.0.0"):
-                return None
-
-            from pathlib import Path
-
-            path = unquote(parsed.path or "")
-            # 形如 /api/oss/file/<agent_id>/<filename>
-            prefix = "/api/oss/file/"
-            if not path.startswith(prefix):
-                return None
-            rest = path[len(prefix):]
-            parts = rest.split("/", 1)
-            if len(parts) != 2:
-                return None
-            agent_id, filename = parts[0], parts[1]
-            if not agent_id or not filename or "/" in filename or "\\" in filename:
-                return None
-
-            user_home = Path.home()
-            if agent_id == "_default":
-                base_dir = user_home / ".sage" / "files"
-            else:
-                base_dir = user_home / ".sage" / "agents" / agent_id / "upload_files"
-            file_path = (base_dir / filename).resolve()
-            try:
-                file_path.relative_to(base_dir.resolve())
-            except ValueError:
-                return None
-            if not file_path.exists() or not file_path.is_file():
-                return None
-            return str(file_path)
-        except Exception as exc:
-            logger.warning(f"Failed to resolve local sage url: {url}, error: {exc}")
-            return None
+        return _resolve_local_sage_url_util(url)
 
     def _get_mime_type(self, file_extension: str) -> str:
-        """根据文件扩展名获取 MIME 类型"""
-        mime_types = {
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.png': 'image/png',
-            '.gif': 'image/gif',
-            '.webp': 'image/webp',
-            '.bmp': 'image/bmp',
-            '.svg': 'image/svg+xml',
-        }
-        return mime_types.get(file_extension, 'image/jpeg')
+        """根据文件扩展名获取 MIME 类型。详见
+        ``sagents.utils.multimodal_image.get_mime_type``。
+        """
+        return _get_mime_type_util(file_extension)
 
     async def _call_llm_streaming(self, messages: List[Union[MessageChunk, Dict[str, Any]]], session_id: Optional[str] = None, step_name: str = "llm_call", model_config_override: Optional[Dict[str, Any]] = None, enable_thinking: Optional[bool] = None):
         """
@@ -1002,50 +775,10 @@ class AgentBase(ABC):
                                   delta_content: str,
                                   all_tokens_str: str,
                                   tag_type: Optional[List[str]] = None) -> str:
-        if tag_type is None:
-            tag_type = []
-
-        start_tag = [f"<{tag}>" for tag in tag_type]
-        end_tag = [f"</{tag}>" for tag in tag_type]
-
-        # 构造结束标签的所有可能前缀
-        end_tag_process_list = []
-        for tag in end_tag:
-            for i in range(len(tag)):
-                end_tag_process_list.append(tag[:i + 1])
-
-        last_tag = None
-        last_tag_index: Optional[int] = None
-
-        all_tokens_str = (all_tokens_str + delta_content).strip()
-
-        # 查找最后出现的标签
-        for tag in start_tag + end_tag:
-            index = all_tokens_str.rfind(tag)
-            if index != -1:
-                if last_tag_index is None or index > last_tag_index:
-                    last_tag = tag
-                    last_tag_index = index
-
-        if last_tag is None:
-            return "tag"
-
-        # Ensure last_tag_index is not None for mypy
-        if last_tag_index is None:
-            return "tag"
-
-        if last_tag in start_tag:
-            if last_tag_index + len(last_tag) == len(all_tokens_str):
-                return 'tag'
-            for end_tag_process in end_tag_process_list:
-                if all_tokens_str.endswith(end_tag_process):
-                    return 'unknown'
-            else:
-                return last_tag.replace("<", "").replace(">", "")
-        elif last_tag in end_tag:
-            return 'tag'
-
-        return "tag"
+        """根据已累积的输出，判断当前 delta 所属的 tag 类型。详见
+        ``sagents.utils.stream_tag_parser.judge_delta_content_type``。
+        """
+        return _judge_delta_content_type_util(delta_content, all_tokens_str, tag_type)
 
     def _handle_tool_calls_chunk(self,
                                  chunk,
@@ -1438,112 +1171,10 @@ class AgentBase(ABC):
         )]
 
     def merge_stream_response_to_non_stream_response(self, chunks):
+        """将流式的 chunk 合并成非流式的 response。详见
+        ``sagents.utils.stream_merger.merge_chat_completion_chunks``。
         """
-        将流式的chunk，进行合并成非流式的response
-        """
-        id_ = model_ = created_ = None
-        content = ""
-        tool_calls: dict[int, dict] = {}
-        finish_reason = None
-        usage = None
-
-        for chk in chunks:
-            if id_ is None:
-                id_, model_, created_ = chk.id, chk.model, chk.created
-
-            if chk.usage:  # 最后的 usage chunk
-                # 处理 prompt_tokens_details
-                prompt_tokens_details = None
-                if chk.usage.prompt_tokens_details:
-                    prompt_tokens_details = PromptTokensDetails(
-                        cached_tokens=chk.usage.prompt_tokens_details.cached_tokens,
-                        audio_tokens=chk.usage.prompt_tokens_details.audio_tokens,
-                    )
-                
-                # 处理 completion_tokens_details
-                completion_tokens_details = None
-                if chk.usage.completion_tokens_details:
-                    completion_tokens_details = CompletionTokensDetails(
-                        reasoning_tokens=chk.usage.completion_tokens_details.reasoning_tokens,
-                        audio_tokens=chk.usage.completion_tokens_details.audio_tokens,
-                        accepted_prediction_tokens=chk.usage.completion_tokens_details.accepted_prediction_tokens,
-                        rejected_prediction_tokens=chk.usage.completion_tokens_details.rejected_prediction_tokens,
-                    )
-                
-                usage = CompletionUsage(
-                    prompt_tokens=chk.usage.prompt_tokens,
-                    completion_tokens=chk.usage.completion_tokens,
-                    total_tokens=chk.usage.total_tokens,
-                    prompt_tokens_details=prompt_tokens_details,
-                    completion_tokens_details=completion_tokens_details,
-                )
-
-            if not chk.choices:
-                continue
-
-            delta = chk.choices[0].delta
-            finish_reason = chk.choices[0].finish_reason
-
-            if delta.content:
-                content += delta.content
-
-            for tc in delta.tool_calls or []:
-                idx = tc.index
-                if idx is None:
-                    continue
-                if idx not in tool_calls:
-                    tool_calls[idx] = {
-                        "id": tc.id or "",
-                        "type": tc.type or "function",
-                        "function": {"name": "", "arguments": ""},
-                    }
-                entry = tool_calls[idx]
-                if tc.id and not entry["id"]:
-                    entry["id"] = tc.id
-                if tc.function.name and not entry["function"]["name"]:
-                    entry["function"]["name"] = tc.function.name
-                if tc.function.arguments:
-                    entry["function"]["arguments"] += tc.function.arguments
-        if finish_reason is None:
-            finish_reason = "stop"
-        if id_ is None:
-            id_ = "stream-merge-empty"
-        if created_ is None:
-            created_ = 0
-        if model_ is None:
-            model_ = "unknown"
-        return ChatCompletion(
-            id=id_,
-            object="chat.completion",  # ← 关键修复
-            created=created_,
-            model=model_,
-            choices=[
-                Choice(
-                    index=0,
-                    message=ChatCompletionMessage(
-                        role="assistant",
-                        content=content or None,
-                        tool_calls=(
-                            [
-                                ChatCompletionMessageToolCall(
-                                    id=tc["id"],
-                                    type="function",
-                                    function=Function(
-                                        name=tc["function"]["name"],
-                                        arguments=tc["function"]["arguments"],
-                                    ),
-                                )
-                                for tc in tool_calls.values()
-                            ]
-                            if tool_calls
-                            else None
-                        ),
-                    ),
-                    finish_reason=finish_reason,
-                )
-            ],
-            usage=usage,
-        )
+        return _merge_chunks_util(chunks)
 
     async def _handle_tool_calls(self,
                                  tool_calls: Dict[str, Any],
@@ -1650,24 +1281,11 @@ class AgentBase(ABC):
             except (ValueError, SyntaxError, TypeError):
                 return None, False
 
-    def _should_abort_due_to_session(self, session_context: SessionContext,session_id: Optional[str] = None) -> bool:
-        session_id = session_context.session_id
-        session = self._get_live_session(session_id)
-        if session_id and session is None:
-            logger.info("SimpleAgent: 跳过执行，session上下文不存在或已中断")
-            return True
-        # 检查当前会话状态（中断、错误或已完成都应该停止）
-        if session and session.get_status() in [SessionStatus.INTERRUPTED, SessionStatus.ERROR, SessionStatus.COMPLETED]:
-            logger.info(f"SimpleAgent: 跳过执行，session状态为{session.get_status().value}")
-            return True
-        # 检查父会话状态（如果是子会话）
-        if hasattr(session_context, 'parent_session_id') and session_context.parent_session_id:
-            parent_session = self._get_live_session(session_context.parent_session_id)
-            if parent_session and parent_session.get_status() in [SessionStatus.INTERRUPTED, SessionStatus.ERROR, SessionStatus.COMPLETED]:
-                logger.info(f"SimpleAgent: 跳过执行，父会话 {session_context.parent_session_id} 状态为{parent_session.get_status().value}")
-                # 同时更新子会话状态
-                if session is None:
-                    return True
-                session.set_status(SessionStatus.INTERRUPTED, cascade=False)
-                return True
-        return False
+    def _should_abort_due_to_session(self, session_context: SessionContext, session_id: Optional[str] = None) -> bool:
+        """检查会话/父会话状态，命中即返回 True。详见
+        ``sagents.utils.agent_session_helper.should_abort_due_to_session``。
+        """
+        return _should_abort_due_to_session_util(
+            session_context,
+            log_prefix=self.__class__.__name__,
+        )

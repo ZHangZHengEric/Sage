@@ -62,7 +62,9 @@ Read:
 - [Getting Started](GETTING_STARTED.md): install dependencies and run the CLI, server, web UI, or desktop build
 - [CLI Guide](CLI.md): command-line workflows, sessions, skills, workspaces, and structured output
 - [Core Concepts](CORE_CONCEPTS.md): sessions, agents, tools, skills, flows, and sandboxing
-- [Architecture](ARCHITECTURE.md): how the codebase is organized
+- [Architecture](ARCHITECTURE.md): how the codebase is organized (with sub-chapters)
+  - App layer: [Server](ARCHITECTURE_APP_SERVER.md) · [Desktop](ARCHITECTURE_APP_DESKTOP.md) · [Other entries](ARCHITECTURE_APP_OTHERS.md)
+  - sagents core: [Overview](ARCHITECTURE_SAGENTS_OVERVIEW.md) · [Agent / Flow](ARCHITECTURE_SAGENTS_AGENT_FLOW.md) · [Session / Context](ARCHITECTURE_SAGENTS_SESSION_CONTEXT.md) · [Tool / Skill](ARCHITECTURE_SAGENTS_TOOL_SKILL.md) · [Sandbox / LLM / Obs](ARCHITECTURE_SAGENTS_SANDBOX_OBS.md)
 - [Configuration](CONFIGURATION.md): runtime environment variables and storage settings
 - [Applications](APPLICATIONS.md): which app surface to use for which job
 - [MCP Servers](MCP_SERVERS.md): built-in MCP servers and how they fit into the platform
