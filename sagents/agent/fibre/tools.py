@@ -28,9 +28,8 @@ class FibreTools:
         """
         logger.info(f"Tool Call: sys_spawn_agent(name={name}, description={description})")
 
-        from sagents.session_runtime import get_global_session_manager
-        session_manager = get_global_session_manager()
-        session = session_manager.get_live_session(session_id) if session_manager else None
+        from sagents.utils.agent_session_helper import get_live_session
+        session = get_live_session(session_id, log_prefix="FibreTools.sys_spawn_agent")
         if not session:
             return f"Error: Session not found for session_id: {session_id}"
         session_context = session.session_context
@@ -102,10 +101,9 @@ class FibreTools:
             session_id: The current session ID (auto-injected)
         """
         logger.info(f"Tool Call: sys_delegate_task(tasks_count={len(tasks)})")
-        
-        from sagents.session_runtime import get_global_session_manager
-        session_manager = get_global_session_manager()
-        session = session_manager.get_live_session(session_id) if session_manager else None
+
+        from sagents.utils.agent_session_helper import get_live_session
+        session = get_live_session(session_id, log_prefix="FibreTools.sys_delegate_task")
         if not session:
             return f"Error: Session not found for session_id: {session_id}"
         session_context = session.session_context

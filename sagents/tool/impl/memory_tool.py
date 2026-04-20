@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 from ..tool_base import tool
 from sagents.utils.logger import logger
+from sagents.utils.agent_session_helper import get_session_sandbox as _get_session_sandbox_util
 
 
 @dataclass
@@ -231,30 +232,21 @@ class MemoryTool:
         self.session_history_retriever = SessionHistoryRetriever(self)
 
     def _get_sandbox(self, session_id: str):
-        """通过 session_id 获取沙箱"""
-        from sagents.session_runtime import get_global_session_manager
-        session_manager = get_global_session_manager()
-        session = session_manager.get_live_session(session_id) if session_manager else None
-        if not session or not session.session_context:
-            raise ValueError(f"MemoryTool: Invalid session_id={session_id}")
-
-        sandbox = session.session_context.sandbox
-        if not sandbox:
-            raise ValueError(f"MemoryTool: No sandbox available for session_id={session_id}")
-
-        return sandbox
+        """通过 session_id 获取沙箱。详见
+        ``sagents.utils.agent_session_helper.get_session_sandbox``。
+        """
+        return _get_session_sandbox_util(session_id, log_prefix="MemoryTool")
 
     def _get_workspace_path(self, session_id: str) -> Optional[str]:
         """Get workspace virtual path from session"""
         try:
-            from sagents.session_runtime import get_global_session_manager
-            session_manager = get_global_session_manager()
-            session = session_manager.get_live_session(session_id) if session_manager else None
-            
+            from sagents.utils.agent_session_helper import get_live_session
+            session = get_live_session(session_id, log_prefix="MemoryTool")
+
             if not session:
                 logger.warning(f"MemoryTool: Session not found: {session_id}")
                 return None
-            
+
             session_context = session.session_context
             
             # Get sandbox_agent_workspace path
@@ -271,14 +263,13 @@ class MemoryTool:
     def _get_agent_id(self, session_id: str) -> Optional[str]:
         """Get agent_id from session"""
         try:
-            from sagents.session_runtime import get_global_session_manager
-            session_manager = get_global_session_manager()
-            session = session_manager.get_live_session(session_id) if session_manager else None
-            
+            from sagents.utils.agent_session_helper import get_live_session
+            session = get_live_session(session_id, log_prefix="MemoryTool")
+
             if not session:
                 logger.warning(f"MemoryTool: Session not found: {session_id}")
                 return None
-            
+
             session_context = session.session_context
             
             # Get agent_id from session_context
@@ -396,10 +387,9 @@ class MemoryTool:
     async def _search_file_memory(self, query: str, top_k: int, session_id: str) -> List[Dict[str, Any]]:
         """Search file memory using the scoped file-memory index through sandbox."""
         try:
-            from sagents.session_runtime import get_global_session_manager
+            from sagents.utils.agent_session_helper import get_live_session
 
-            session_manager = get_global_session_manager()
-            session = session_manager.get_live_session(session_id) if session_manager else None
+            session = get_live_session(session_id, log_prefix="MemoryTool")
             if not session or not session.session_context:
                 logger.warning(f"MemoryTool: Session not found for file memory search: {session_id}")
                 return []
@@ -417,11 +407,10 @@ class MemoryTool:
         流程：准备历史上下文 -> 使用 session_memory_manager 检索 -> 返回结果
         """
         try:
-            from sagents.session_runtime import get_global_session_manager
-            
-            session_manager = get_global_session_manager()
-            session = session_manager.get_live_session(session_id) if session_manager else None
-            
+            from sagents.utils.agent_session_helper import get_live_session
+
+            session = get_live_session(session_id, log_prefix="MemoryTool")
+
             if not session:
                 logger.warning(f"MemoryTool: Session not found: {session_id}")
                 return []

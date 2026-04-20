@@ -1,92 +1,119 @@
 ---
-layout: default
+
+## layout: default
 title: Architecture
 nav_order: 4
-description: "Repository and subsystem architecture"
+has_children: true
+description: "Repository and subsystem architecture overview, with sub-pages for apps and the sagents core runtime"
 lang: en
 ref: architecture
----
 
 {% include lang_switcher.html %}
 
 # Architecture
 
-## Repository Overview
+Sage is a layered codebase, not a single binary. The architecture chapter is split into two main tracks:
 
-Sage is structured as a layered repository rather than a single binary. The main top-level subsystems are:
+- **App architecture**: each user-facing entry (web server, desktop, CLI, examples, browser extension, etc.), its shape, startup path and boundary.
+- **Core runtime `sagents/` architecture**: the session and agent engine shared by every app — the actual driver of "one conversation / one task".
 
-- `sagents/`: core runtime and orchestration
-- `app/server/`: main FastAPI application and web client
-- `app/desktop/`: desktop-local application stack
-- `examples/`: lightweight runnable examples
-- `mcp_servers/`: built-in MCP server implementations
-- `release_notes/`: release-specific notes outside the main docs set
+This chapter has multiple sub-pages. This page is just the index and high-level map; details live in the children.
 
-## High-Level Dependency Shape
+## Repository Map
+
+```mermaid
+flowchart TB
+    subgraph G_App ["App Layer (app/)"]
+        Server[server<br/>main FastAPI + Vue 3 web]
+        Desktop[desktop<br/>desktop entry + local backend + UI]
+        CLI[cli<br/>sage command]
+        Ext[chrome-extension<br/>side panel]
+        Skills[skills<br/>built-in skill packs]
+        Wiki[wiki<br/>static site]
+    end
+
+    subgraph G_Ex ["Examples (examples/)"]
+        DemoCLI[sage_cli.py]
+        DemoUI[sage_demo.py · Streamlit]
+        DemoSrv[sage_server.py · FastAPI]
+    end
+
+    subgraph G_Sagents ["Core Runtime (sagents/)"]
+        Runtime[Session · Agent · Flow · Tool · Skill · Sandbox · Obs]
+    end
+
+    subgraph External
+        MCP[mcp_servers · built-in MCP]
+        Common[common · shared infra]
+        Docs[docs · this site]
+    end
+
+    Server --> Runtime
+    Desktop --> Runtime
+    CLI --> Runtime
+    DemoCLI --> Runtime
+    DemoUI --> Runtime
+    DemoSrv --> Runtime
+    Ext -->|HTTP| Server
+    Runtime --> MCP
+    Runtime -.shared.-> Common
+```
+
+
+
+## High-Level Data Flow of One Conversation
+
+```mermaid
+flowchart LR
+    UserIn((User input)) --> EntryApp[Some app entry]
+    EntryApp -->|run_stream call| SAgent[SAgent entry]
+    SAgent --> Sess[Session/SessionContext]
+    Sess --> Flow[FlowExecutor + AgentFlow]
+    Flow --> Agents[Specialized Agents]
+    Agents --> LLM[Model layer]
+    Agents --> Tools[Tool / Skill]
+    Tools --> Sandbox[Sandbox]
+    Sess --> Obs[Observability]
+    Agents -->|stream of MessageChunk| EntryApp
+    EntryApp -->|SSE/JSON| UserIn
+```
+
+
+
+## Sub-pages in this Chapter
+
+App architecture (different app entries):
+
+1. [Server & Web App Architecture](ARCHITECTURE_APP_SERVER.md)
+2. [Desktop App Architecture](ARCHITECTURE_APP_DESKTOP.md)
+3. [CLI, Examples & External Entries](ARCHITECTURE_APP_OTHERS.md)
+
+Core runtime `sagents/` architecture (the heart of this chapter):
+
+1. [sagents Overview](ARCHITECTURE_SAGENTS_OVERVIEW.md)
+2. [Agent & Flow Orchestration](ARCHITECTURE_SAGENTS_AGENT_FLOW.md)
+3. [Session & Context](ARCHITECTURE_SAGENTS_SESSION_CONTEXT.md)
+4. [Tool & Skill System](ARCHITECTURE_SAGENTS_TOOL_SKILL.md)
+5. [Sandbox, LLM Adapter & Observability](ARCHITECTURE_SAGENTS_SANDBOX_OBS.md)
+
+## Reading Tips
 
 ```mermaid
 flowchart TD
-    User[User Interfaces] --> Web[Web App]
-    User --> Desktop[Desktop App]
-    User --> Examples[Examples]
-    Web --> Server[app/server]
-    Desktop --> DesktopCore[app/desktop/core]
-    Server --> Runtime[sagents]
-    DesktopCore --> Runtime
-    Examples --> Runtime
-    Runtime --> Tools[Tool System]
-    Runtime --> Skills[Skill System]
-    Runtime --> Sandbox[Sandbox]
-    Runtime --> Obs[Observability]
-    Tools --> MCP[mcp_servers]
+    Want[What do you want to do]
+
+    Want --> A[Understand how a conversation runs]
+    A --> A1[sagents Overview] --> A2[Agent + Flow] --> A3[Session + Context]
+
+    Want --> B[Server integration / deployment]
+    B --> B1[Server & Web App Architecture] --> B2[Configuration + HTTP API Reference]
+
+    Want --> C[Extend with custom tool/MCP/skill/sub-agent]
+    C --> C1[Tool & Skill System] --> C2[Agent + Flow extension points]
+
+    Want --> D[Package the desktop app]
+    D --> D1[Desktop App Architecture] --> D2[app/desktop/scripts]
 ```
 
-## Core Runtime: `sagents/`
 
-- `sagents/sagents.py`: `SAgent` runtime entry and stream orchestration
-- `sagents/agent/`: agent implementations such as simple, planning, execution, routing, and fibre agents
-- `sagents/flow/`: flow schema, conditions, and executor
-- `sagents/tool/`: tool abstractions, built-ins, managers, and MCP support
-- `sagents/skill/`: skill management and proxies
-- `sagents/context/`: session and state handling
-- `sagents/utils/sandbox/`: sandbox configuration and providers
-- `sagents/observability/`: runtime tracing and telemetry hooks
 
-## Main Application: `app/server/`
-
-- `app/server/main.py`: primary FastAPI startup path
-- `app/server/routers/`: HTTP route registration
-- `app/server/services/`: business and integration services
-- `app/server/schemas/`: request and response models
-- `app/server/web/`: Vue 3 frontend
-
-This is the main multi-user application surface and the default place to understand the productized server behavior.
-
-## Desktop Application: `app/desktop/`
-
-- `app/desktop/entry.py`: desktop bootstrap
-- `app/desktop/core/main.py`: desktop-local FastAPI app
-- `app/desktop/ui/`: desktop frontend
-- `app/desktop/scripts/`: packaging and development scripts
-
-The desktop app reuses core platform concepts while packaging a local-first application flow.
-
-## Example Surfaces: `examples/`
-
-The `examples/` directory is intentionally lighter weight than `app/server/` and is useful for:
-
-- local experimentation
-- simple runtime validation
-- isolated demos
-- packaging experiments
-
-## MCP Servers: `mcp_servers/`
-
-Built-in MCP implementations are versioned in the repository and can be wired into the runtime through the tool layer.
-
-## Architectural Notes
-
-- `app/server/` is the primary application boundary.
-- `examples/` are useful, but they are not the canonical application stack.
-- `sagents/` is the runtime engine and extension substrate.
-- `mcp_servers/` and app-facing tool registration are separate concerns: implementation vs exposure.
