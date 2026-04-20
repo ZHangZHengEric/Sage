@@ -3,11 +3,17 @@ import re
 from typing import Dict, Any, Optional, List
 
 from ..tool_base import tool
+from sagents.utils.file_content_validator import FileContentValidator
 from sagents.utils.logger import logger
 
 
 class FileSystemTool:
     """文件系统操作工具集 - 通过沙箱执行"""
+
+    @staticmethod
+    def _build_validation_result(file_path: str, content: str) -> Dict[str, Any]:
+        """Run post-write validation for common file formats."""
+        return FileContentValidator.validate(file_path, content)
 
     @staticmethod
     def _apply_line_range_update(
@@ -93,6 +99,59 @@ class FileSystemTool:
             "content": new_content,
             "replacements": replace_count,
             "match_mode": match_mode,
+        }
+
+    @staticmethod
+    def _normalize_update_operation(
+        op: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """标准化单个更新操作并显式判定更新模式。
+
+        为了减少模型误用，这里要求两种模式尽量互斥：
+        - search_replace: 仅允许 search_pattern + replacement
+        - line_range: 仅允许 start_line + end_line + replacement
+        """
+        has_search = bool(op.get("search_pattern"))
+        has_start = op.get("start_line") is not None
+        has_end = op.get("end_line") is not None
+        update_mode = op.get("update_mode")
+
+        if update_mode not in (None, "search_replace", "line_range"):
+            return {
+                "status": "error",
+                "message": "update_mode 只能是 search_replace 或 line_range",
+            }
+
+        if update_mode == "line_range" or has_start or has_end:
+            if not (has_start and has_end):
+                return {
+                    "status": "error",
+                    "message": "按行替换时必须同时提供 start_line 和 end_line，且二者都为整数",
+                }
+            if has_search:
+                return {
+                    "status": "error",
+                    "message": "按行替换模式下不要同时提供 search_pattern",
+                }
+            return {
+                "status": "success",
+                "update_mode": "line_range",
+            }
+
+        if update_mode == "search_replace" or has_search:
+            if not has_search:
+                return {
+                    "status": "error",
+                    "message": "搜索替换时必须提供 search_pattern",
+                }
+            return {
+                "status": "success",
+                "update_mode": "search_replace",
+            }
+
+        return {
+            "status": "error",
+            "message": "每个操作必须明确指定 search_pattern 或 start_line/end_line",
         }
 
     def _get_sandbox(self, session_id: str):
@@ -217,7 +276,30 @@ class FileSystemTool:
                 "description": "Text content to write. Keep it under 1000 characters; for longer code or documents, use multiple append calls",
             },
             "session_id": {"type": "string", "description": "Session ID"},
-        }
+        },
+        return_data={
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "description": "success or error"},
+                "message": {"type": "string", "description": "Write result summary"},
+                "file_path": {"type": "string", "description": "Target file path"},
+                "validation": {
+                    "type": "object",
+                    "description": "Post-write content validation result",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "skipped": {"type": "boolean"},
+                        "passed": {"type": "boolean"},
+                        "status": {"type": "string", "description": "passed, warning, error, or skipped"},
+                        "validator": {"type": "string"},
+                        "file_extension": {"type": "string"},
+                        "message": {"type": "string"},
+                        "warnings": {"type": "array", "items": {"type": "string"}},
+                        "errors": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+        },
     )
     async def file_write(
         self,
@@ -245,6 +327,7 @@ class FileSystemTool:
         sandbox = self._get_sandbox(session_id)
 
         try:
+            final_content = content
             dir_path = os.path.dirname(file_path)
             if dir_path:
                 await sandbox.ensure_directory(dir_path)
@@ -256,16 +339,19 @@ class FileSystemTool:
                         existing = await sandbox.read_file(file_path, encoding="utf-8")
                 except Exception:
                     existing = ""
-                await sandbox.write_file(file_path, existing + content, mode="overwrite")
+                final_content = existing + content
+                await sandbox.write_file(file_path, final_content, mode="overwrite")
             else:
                 await sandbox.write_file(file_path, content, mode="overwrite")
 
+            validation = self._build_validation_result(file_path, final_content)
             return {
                 "status": "success",
-                "message": "文件写入成功",
+                "message": "文件写入成功" if validation.get("status") in {"passed", "skipped"} else "文件写入成功，但校验发现问题",
                 "file_path": file_path,
                 "content_length": len(content),
                 "mode": mode,
+                "validation": validation,
             }
 
         except Exception as e:
@@ -284,8 +370,8 @@ class FileSystemTool:
         param_description_i18n={
             "file_path": {"zh": "文件虚拟路径", "en": "File virtual path"},
             "operations": {
-                "zh": "替换操作列表。优先传局部替换操作，每项要么提供 search_pattern 和 replacement，要么提供 start_line、end_line 和 replacement。按行替换时：start_line 和 end_line 都是包含边界（0-based）。search_pattern 可以写普通文本，也可以写正则表达式；执行时会先按普通文本匹配，未命中再按正则处理。请不要用它整文件重写",
-                "en": "Replacement operations. Prefer local updates. Each item must provide either search_pattern and replacement, or start_line, end_line and replacement. For line-range mode: both start_line and end_line are inclusive (0-based). search_pattern can be plain text or a regex; execution first tries plain-text matching, then falls back to regex if not found. Do not use it to rewrite the whole file",
+                "zh": "替换操作列表。每项必须明确指定一种模式：search_replace 或 line_range。search_replace 只传 search_pattern + replacement；line_range 只传 start_line、end_line + replacement。按行替换时 start_line 和 end_line 都是包含边界（0-based），且二者必须同时提供。search_pattern 可以是普通文本，也可以是正则表达式；执行时会先按普通文本匹配，未命中再按正则处理。请不要用它整文件重写",
+                "en": "Replacement operations. Each item must explicitly choose one mode: search_replace or line_range. search_replace accepts only search_pattern + replacement; line_range accepts only start_line, end_line + replacement. For line-range mode, both start_line and end_line are inclusive (0-based) and must be provided together. search_pattern can be plain text or a regex; execution first tries plain-text matching, then falls back to regex if not found. Do not use it to rewrite the whole file",
             },
             "session_id": {"zh": "会话ID（必填，自动注入）", "en": "Session ID (Required, Auto-injected)"},
         },
@@ -293,13 +379,18 @@ class FileSystemTool:
             "file_path": {"type": "string", "description": "File virtual path"},
             "operations": {
                 "type": "array",
-                "description": "Replacement operations for the same file. Prefer small local updates. search_pattern may be plain text or regex; plain text is tried first, then regex if no literal match is found",
+                "description": "Replacement operations for the same file. Prefer small local updates. Each operation must choose search_replace or line_range explicitly",
                 "items": {
                     "type": "object",
                     "properties": {
+                        "update_mode": {
+                            "type": "string",
+                            "enum": ["search_replace", "line_range"],
+                            "description": "Explicit update mode for this operation"
+                        },
                         "search_pattern": {
                             "type": "string",
-                            "description": "Text or regex pattern to replace. Literal text match is attempted first; if not found, it is treated as regex. Use this for local replacements only"
+                            "description": "Text or regex pattern to replace. Use only when update_mode is search_replace"
                         },
                         "replacement": {
                             "type": "string",
@@ -307,17 +398,40 @@ class FileSystemTool:
                         },
                         "start_line": {
                             "type": "integer",
-                            "description": "Start line number (inclusive, 0-based) for line-range replacement. Use for local edits"
+                            "description": "Start line number (inclusive, 0-based) for line-range replacement. Use only when update_mode is line_range"
                         },
                         "end_line": {
                             "type": "integer",
-                            "description": "End line number (inclusive, 0-based) for line-range replacement. Use for local edits"
+                            "description": "End line number (inclusive, 0-based) for line-range replacement. Use only when update_mode is line_range"
                         },
                     },
                 },
             },
             "session_id": {"type": "string", "description": "Session ID"},
-        }
+        },
+        return_data={
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "description": "success or error"},
+                "message": {"type": "string", "description": "Update result summary"},
+                "file_path": {"type": "string", "description": "Target file path"},
+                "validation": {
+                    "type": "object",
+                    "description": "Post-update content validation result",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "skipped": {"type": "boolean"},
+                        "passed": {"type": "boolean"},
+                        "status": {"type": "string", "description": "passed, warning, error, or skipped"},
+                        "validator": {"type": "string"},
+                        "file_extension": {"type": "string"},
+                        "message": {"type": "string"},
+                        "warnings": {"type": "array", "items": {"type": "string"}},
+                        "errors": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+        },
     )
     async def file_update(
         self,
@@ -330,8 +444,8 @@ class FileSystemTool:
         Args:
             file_path: 文件虚拟路径
             operations: 同一文件的替换操作列表。优先传局部更新，每项支持两种形式：
-                1. {"search_pattern": "...", "replacement": "..."}，其中 search_pattern 可以是普通文本，也可以是正则表达式；会优先按普通文本匹配，未命中再按正则处理
-                2. {"start_line": 10, "end_line": 12, "replacement": "..."}，其中 start_line 和 end_line 都是包含边界（0-based）
+                1. {"update_mode": "search_replace", "search_pattern": "...", "replacement": "..."}
+                2. {"update_mode": "line_range", "start_line": 10, "end_line": 12, "replacement": "..."}，其中 start_line 和 end_line 都是包含边界（0-based）
             session_id: 会话ID（必填）
 
         Returns:
@@ -368,19 +482,20 @@ class FileSystemTool:
                     }
 
                 op_summary = {"index": index}
-                is_line_range = op.get("start_line") is not None or op.get("end_line") is not None
+                mode_result = self._normalize_update_operation(op)
+                if mode_result["status"] == "error":
+                    return {
+                        "status": "error",
+                        "message": f"第 {index + 1} 个操作失败: {mode_result['message']}",
+                        "file_path": file_path,
+                        "failed_operation_index": index,
+                    }
+                is_line_range = mode_result["update_mode"] == "line_range"
                 if is_line_range:
                     op_summary["start_line"] = op.get("start_line")
                     op_summary["end_line"] = op.get("end_line")
                     line_range_ops.append((index, op, op_summary))
                 else:
-                    if not op.get("search_pattern"):
-                        return {
-                            "status": "error",
-                            "message": f"第 {index + 1} 个操作缺少 search_pattern，或未提供行号区间",
-                            "file_path": file_path,
-                            "failed_operation_index": index,
-                        }
                     op_summary["search_pattern"] = op.get("search_pattern")
                     other_ops.append((index, op, op_summary))
 
@@ -464,9 +579,14 @@ class FileSystemTool:
                 }
 
             if total_replacements == 0 and line_range_ops:
+                validation = self._build_validation_result(file_path, current_content)
                 return {
                     "status": "success",
-                    "message": "已执行按行替换，但目标区间与替换内容一致，文件无变化",
+                    "message": (
+                        "已执行按行替换，但目标区间与替换内容一致，文件无变化"
+                        if validation.get("status") in {"passed", "skipped"}
+                        else "已执行按行替换，但目标区间与替换内容一致，文件无变化；校验发现问题"
+                    ),
                     "replacements": 0,
                     "operations_applied": len(operation_summaries),
                     "operations": sorted(operation_summaries, key=lambda item: item["index"]),
@@ -474,13 +594,19 @@ class FileSystemTool:
                     "new_length": len(current_content),
                     "file_path": file_path,
                     "update_mode": "batch" if len(operation_summaries) > 1 else operation_summaries[0]["update_mode"],
+                    "validation": validation,
                 }
 
             await sandbox.write_file(file_path, current_content, mode="overwrite")
+            validation = self._build_validation_result(file_path, current_content)
 
             result = {
                 "status": "success",
-                "message": f"成功执行 {len(operation_summaries)} 个更新操作，共替换 {total_replacements} 处内容",
+                "message": (
+                    f"成功执行 {len(operation_summaries)} 个更新操作，共替换 {total_replacements} 处内容"
+                    if validation.get("status") in {"passed", "skipped"}
+                    else f"成功执行 {len(operation_summaries)} 个更新操作，共替换 {total_replacements} 处内容；校验发现问题"
+                ),
                 "replacements": total_replacements,
                 "operations_applied": len(operation_summaries),
                 "operations": sorted(operation_summaries, key=lambda item: item["index"]),
@@ -488,6 +614,7 @@ class FileSystemTool:
                 "new_length": len(current_content),
                 "file_path": file_path,
                 "update_mode": "batch" if len(operation_summaries) > 1 else operation_summaries[0]["update_mode"],
+                "validation": validation,
             }
             if len(operation_summaries) == 1 and operation_summaries[0]["update_mode"] == "line_range":
                 result.update({

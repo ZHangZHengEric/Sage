@@ -3,8 +3,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
-from openai import AsyncOpenAI
-from sagents.llm.chat import OpenAIChat
 
 from common.core import config
 
@@ -53,6 +51,8 @@ def create_model_client(client_params: Dict[str, Any]) -> Any:
         f"fast_model={fast_model_name if fast_model_name else '未配置'}"
     )
     
+    from sagents.llm.chat import OpenAIChat
+
     # 使用 OpenAIChat 创建客户端（支持双模型）
     openai_chat = OpenAIChat(
         api_key=api_key,

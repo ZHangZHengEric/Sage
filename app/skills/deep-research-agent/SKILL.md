@@ -83,8 +83,10 @@ file_write(
 ```python
 file_update(
     file_path="{project_path}/report.md",
-    search_pattern="## 1. 研究背景与目标\n\n{研究背景说明}",
-    replacement="""## 1. 研究背景与目标
+    operations=[{
+        "update_mode": "search_replace",
+        "search_pattern": "## 1. 研究背景与目标\n\n{研究背景说明}",
+        "replacement": """## 1. 研究背景与目标
 
 ### 1.1 研究背景
 
@@ -99,6 +101,7 @@ file_update(
 ### 1.3 研究范围
 
 [范围界定]"""
+    }]
 )
 ```
 

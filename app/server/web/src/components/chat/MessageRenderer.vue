@@ -24,11 +24,11 @@
 
     <!-- 用户消息 -->
     <div v-else-if="message.role === 'user' && message.message_type !== 'guide'"
-      class="flex flex-row-reverse items-start gap-3 px-4 group">
+      class="flex flex-row-reverse items-start gap-3 px-4 group min-w-0">
       <div class="flex-none mt-1">
         <MessageAvatar :messageType="message.type || message.message_type" role="user" />
       </div>
-      <div class="flex flex-col items-end max-w-[85%] sm:max-w-[75%]">
+      <div class="flex flex-col items-end max-w-[80%] sm:max-w-[70%] min-w-0">
         <div v-if="isEditingThisUserMessage" class="w-full rounded-[20px] rounded-tr-[4px] border border-border/70 bg-secondary/80 px-4 py-3 shadow-sm">
           <textarea
             v-model="editingContent"
@@ -53,11 +53,24 @@
             </button>
           </div>
         </div>
-        <div v-else class="flex flex-col gap-1 items-end">
-          <div v-if="getTextContent(message.content)" class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-4 py-2.5 shadow-sm overflow-hidden break-words text-sm leading-6 tracking-wide font-sans max-w-full">
-            <MarkdownRenderer
-              :content="formatMessageContent(getTextContent(message.content))"
-            />
+        <div v-else class="flex flex-col gap-1 items-end max-w-full min-w-0">
+          <div
+            v-if="getTextContent(message.content)"
+            class="relative bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-4 py-2.5 shadow-sm break-words break-all overflow-hidden text-sm leading-6 tracking-wide font-sans max-w-full min-w-0"
+          >
+            <div
+              class="overflow-hidden transition-[max-height] duration-200 ease-out"
+              :class="{ 'max-h-[200px]': isUserContentCollapsed && isUserContentLong }"
+            >
+              <MarkdownRenderer
+                :content="formatMessageContent(getTextContent(message.content))"
+              />
+            </div>
+            <!-- 折叠时底部渐隐遮罩，提示有更多内容 -->
+            <div
+              v-if="isUserContentCollapsed && isUserContentLong"
+              class="pointer-events-none absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-secondary via-secondary/80 to-transparent"
+            ></div>
           </div>
           <!-- 兜底：老消息没有 markdown 引用、image_url 单独成段时，把孤立图片以网格呈现 -->
           <div v-if="orphanImageUrls.length > 0" class="flex flex-wrap gap-2">
@@ -75,25 +88,38 @@
             </div>
           </div>
         </div>
-        <div class="mt-1 mr-1 text-xs font-normal text-muted-foreground/60 flex items-center gap-2 justify-end">
-          <span v-if="message.timestamp" class="text-[10px] opacity-70 font-normal">
-            {{ formatTime(message.timestamp) }}
-          </span>
-          <button @click="handleCopy"
-            class="opacity-0 group-hover:opacity-70 transition-opacity p-1 hover:bg-muted/60 rounded text-muted-foreground/70 hover:text-muted-foreground"
-            :title="copied ? '已复制' : '复制内容'">
-            <Check v-if="copied" class="w-3 h-3 text-green-500" />
-            <Copy v-else class="w-3 h-3" />
-          </button>
+        <div class="mt-1 mr-1 w-full flex items-center gap-2 text-xs font-normal text-muted-foreground/60">
+          <!-- 长消息折叠开关：与时间在同一行，靠最左侧 -->
           <button
-            v-if="isEditableUserMessage && !isEditingThisUserMessage"
+            v-if="isUserContentLong"
             type="button"
-            class="opacity-0 group-hover:opacity-70 transition-opacity p-1 hover:bg-muted/60 rounded text-muted-foreground/70 hover:text-muted-foreground"
-            :title="t('chat.editLastUserMessage') || '编辑并重试'"
-            @click="handleStartEditUserMessage"
+            class="inline-flex items-center gap-0.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+            @click="isUserContentCollapsed = !isUserContentCollapsed"
           >
-            <SquarePen class="w-3 h-3" />
+            <ChevronDown v-if="isUserContentCollapsed" class="w-3 h-3" />
+            <ChevronUp v-else class="w-3 h-3" />
+            {{ isUserContentCollapsed ? (t('chat.showMore') || '显示更多') : (t('chat.collapse') || '收起') }}
           </button>
+          <div class="ml-auto flex items-center gap-2">
+            <span v-if="message.timestamp" class="text-[10px] opacity-70 font-normal">
+              {{ formatTime(message.timestamp) }}
+            </span>
+            <button @click="handleCopy"
+              class="opacity-0 group-hover:opacity-70 transition-opacity p-1 hover:bg-muted/60 rounded text-muted-foreground/70 hover:text-muted-foreground"
+              :title="copied ? '已复制' : '复制内容'">
+              <Check v-if="copied" class="w-3 h-3 text-green-500" />
+              <Copy v-else class="w-3 h-3" />
+            </button>
+            <button
+              v-if="isEditableUserMessage && !isEditingThisUserMessage"
+              type="button"
+              class="opacity-0 group-hover:opacity-70 transition-opacity p-1 hover:bg-muted/60 rounded text-muted-foreground/70 hover:text-muted-foreground"
+              :title="t('chat.editLastUserMessage') || '编辑并重试'"
+              @click="handleStartEditUserMessage"
+            >
+              <SquarePen class="w-3 h-3" />
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -239,7 +265,7 @@ import MarkdownRendererWithPreview from './MarkdownRendererWithPreview.vue'
 import EChartsRenderer from './EChartsRenderer.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
-import { Terminal, FileText, Search, Zap, Copy, Check, Image, SquarePen } from 'lucide-vue-next'
+import { Terminal, FileText, Search, Zap, Copy, Check, Image, SquarePen, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { getMessageLabel, isTokenUsageMessage as isTokenUsageMessageValue } from '@/utils/messageLabels'
 import ToolErrorCard from './tools/ToolErrorCard.vue'
 import ToolDefaultCard from './tools/ToolDefaultCard.vue'
@@ -337,6 +363,23 @@ const isEditingThisUserMessage = computed(() => (
   isEditableUserMessage.value &&
   currentMessageId.value === props.editingUserMessageId
 ))
+
+// 用户消息「显示更多 / 收起」状态：超过阈值时折叠到首屏，类似 codex 风格
+const USER_LONG_THRESHOLD_CHARS = 240
+const USER_LONG_THRESHOLD_LINES = 8
+const userContentText = computed(() => {
+  if (props.message.role !== 'user') return ''
+  return getTextContent(props.message.content) || ''
+})
+const isUserContentLong = computed(() => {
+  const text = userContentText.value
+  if (!text) return false
+  if (text.length > USER_LONG_THRESHOLD_CHARS) return true
+  if (text.split('\n').length > USER_LONG_THRESHOLD_LINES) return true
+  return false
+})
+const isUserContentCollapsed = ref(true)
+
 const hideAssistantAvatar = computed(() => (
   props.hideAssistantAvatar === true && props.message.role === 'assistant'
 ))

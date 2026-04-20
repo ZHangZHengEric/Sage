@@ -57,30 +57,35 @@
         </div>
       </div>
 
-      <div class="flex items-start gap-2 flex-wrap">
+      <div class="flex flex-col gap-2">
         <div
-          v-for="(name, idx) in currentSkills"
-          :key="`skill-${idx}-${name}`"
-          class="flex items-center gap-1 h-7 px-2.5 bg-primary/10 text-primary rounded-full text-xs font-medium whitespace-nowrap border border-primary/20 flex-shrink-0 mt-1"
+          v-if="currentSkills.length > 0"
+          class="flex items-center gap-2 flex-wrap"
         >
-          <span class="max-w-[100px] truncate">@{{ name }}</span>
-          <button
-            type="button"
-            @click="removeSkillAt(idx)"
-            class="ml-0.5 w-3.5 h-3.5 flex items-center justify-center rounded-full hover:bg-primary/20"
+          <div
+            v-for="(name, idx) in currentSkills"
+            :key="`skill-${idx}-${name}`"
+            class="flex items-center gap-1 h-7 px-2.5 bg-primary/10 text-primary rounded-full text-xs font-medium whitespace-nowrap border border-primary/20 flex-shrink-0"
           >
-            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
+            <span class="max-w-[160px] truncate">@{{ name }}</span>
+            <button
+              type="button"
+              @click="removeSkillAt(idx)"
+              class="ml-0.5 w-3.5 h-3.5 flex items-center justify-center rounded-full hover:bg-primary/20"
+            >
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
         </div>
 
         <ChipInput
           ref="editorRef"
           v-model="inputValue"
           :placeholder="isLoading ? (t('messageInput.placeholderGenerating') || 'AI正在生成回复，可直接输入新消息...') : t('messageInput.placeholder')"
-          wrapper-class="flex-1"
+          wrapper-class="w-full"
           @keydown="handleKeyDown"
           @compositionstart="handleCompositionStart"
           @compositionend="handleCompositionEnd"
@@ -445,12 +450,28 @@ const handleCaretUpdate = async () => {
     showSkillList.value = false
     return
   }
+  // 只有 keyword 真的变了才重置选中项；否则会被 ArrowUp/Down 的 keyup 反复重置回 0，
+  // 导致用户感觉「方向键不能切换可选技能」。
+  const keywordChanged = skillKeyword.value !== query.keyword
   activeSkillQuery.value = query
   skillKeyword.value = query.keyword
-  selectedSkillIndex.value = 0
+  if (keywordChanged) {
+    selectedSkillIndex.value = 0
+  }
   showSkillList.value = true
   await ensureSkillsLoaded()
 }
+
+watch(filteredSkills, (list) => {
+  if (!list || list.length === 0) {
+    selectedSkillIndex.value = 0
+    return
+  }
+  if (selectedSkillIndex.value >= list.length) {
+    selectedSkillIndex.value = list.length - 1
+  }
+  if (selectedSkillIndex.value < 0) selectedSkillIndex.value = 0
+})
 
 const buildHeadPrefix = () => {
   let prefix = ''

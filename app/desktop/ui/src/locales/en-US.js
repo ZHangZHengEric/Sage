@@ -1046,7 +1046,7 @@ export default {
   'history.visibleMessages': 'visible',
 
   // Message Input
-  'messageInput.placeholder': 'Type a message... (Shift+Enter for new line)',
+  'messageInput.placeholder': 'Type a message... (Shift+Enter for new line · type / to pick a skill)',
   'messageInput.placeholderGenerating': 'AI is generating response, you can type a new message...',
   'messageInput.send': 'Send',
   'messageInput.stop': 'Stop',
