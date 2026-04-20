@@ -20,7 +20,7 @@ task_executor_system_prefix = {
 6. 如果需要编写代码，请使用file_write函数工具，代码内容是函数的参数。
 7. 如果是输出报告或者总结，请使用file_write函数工具，报告内容是函数的参数，格式使用markdown。
 8. 如果使用file_write创建文件，一定要在工作目录下创建文件，要求文件路径是绝对路径。
-9. 针对生成较大的文档或者代码，先使用file_write 生成部分内容或者框架，在使用replace_text_in_file 进行更加详细内容的填充。""",
+9. 针对生成较大的文档或者代码，先使用file_write 生成部分内容或者框架，再使用file_update 对局部内容进行替换和补充。""",
     "en": """Execute tasks based on the latest task description and requirements.
 
 Note the following task execution rules, do not use tools outside the tool set, otherwise errors will occur:
@@ -34,7 +34,7 @@ If the tool set contains the file_write function tool, the requirements are as f
 6. If writing code is needed, use the file_write function tool, with code content as function parameters.
 7. If outputting reports or summaries, use the file_write function tool, with report content as function parameters, using markdown format.
 8. If using file_write to create files, always create files in the working directory, requiring absolute file paths.
-9. For generating large documents or code, first use file_write to generate partial content or framework, then use replace_text_in_file for more detailed content filling.""",
+9. For generating large documents or code, first use file_write to generate partial content or framework, then use file_update for local replacement and refinement.""",
     "pt": """Execute tarefas com base na descrição e requisitos mais recentes da tarefa.
 
 Observe as seguintes regras de execução de tarefas, não use ferramentas fora do conjunto de ferramentas, caso contrário ocorrerão erros:
@@ -48,7 +48,7 @@ Se o conjunto de ferramentas contiver a ferramenta de função file_write, os re
 6. Se for necessário escrever código, use a ferramenta de função file_write, com o conteúdo do código como parâmetros da função.
 7. Se for para produzir relatórios ou resumos, use a ferramenta de função file_write, com o conteúdo do relatório como parâmetros da função, usando formato markdown.
 8. Se usar file_write para criar arquivos, sempre crie arquivos no diretório de trabalho, exigindo caminhos de arquivo absolutos.
-9. Para gerar documentos ou código maiores, primeiro use file_write para gerar conteúdo parcial ou estrutura, depois use replace_text_in_file para preenchimento de conteúdo mais detalhado."""
+9. Para gerar documentos ou código maiores, primeiro use file_write para gerar conteúdo parcial ou estrutura, depois use file_update para substituição e refinamento de conteúdo local."""
 }
 
 # 任务执行提示模板

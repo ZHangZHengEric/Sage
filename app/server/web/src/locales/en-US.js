@@ -248,6 +248,7 @@ export default {
   'chat.unknownAgent': 'Unknown Agent',
   'chat.taskCompleted': 'Task Completed',
   'chat.showMore': 'Show More',
+  'chat.collapse': 'Collapse',
   'chat.executionFailed': 'Execution Failed',
   'chat.interruptFailed': 'Failed to interrupt current session, please try again later',
   'chat.noTasks': 'No tasks',
@@ -1055,7 +1056,7 @@ export default {
   'history.visibleMessages': 'visible',
 
   // Message Input
-  'messageInput.placeholder': 'Type a message... (Shift+Enter for new line)',
+  'messageInput.placeholder': 'Type a message... (Shift+Enter for new line · type / to pick a skill)',
   'messageInput.placeholderGenerating': 'AI is generating a response, please wait...',
   'messageInput.send': 'Send',
   'messageInput.stop': 'Stop',

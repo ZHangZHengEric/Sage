@@ -1053,7 +1053,7 @@ export default {
   'history.visibleMessages': '条可见消息',
 
   // 消息输入
-  'messageInput.placeholder': '输入您的消息... (Shift+Enter 换行)',
+  'messageInput.placeholder': '输入您的消息... (Shift+Enter 换行 · 输入 / 选择技能)',
   'messageInput.placeholderGenerating': 'AI正在生成回复，可直接输入新消息...',
   'messageInput.send': '发送',
   'messageInput.stop': '停止',

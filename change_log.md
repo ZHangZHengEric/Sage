@@ -1,4 +1,10 @@
 
+2026-04-20 用户消息气泡优化：1) 收紧 max-w 到 80%/70% 并补 break-all/min-w-0，防止长内容溢出页面宽度；2) 仿 codex 加「显示更多 / 收起」折叠（>240 字或 >8 行触发，max-h 200px + 底部渐隐遮罩），按钮挪到时间行最左侧；desktop / server 双端同步。
+
+2026-04-20 修复 MessageInput 输入 / 后方向键不能切换技能：handleCaretUpdate 在 keyup 时无脑把 selectedSkillIndex 重置为 0，导致 ArrowUp/Down 看似不生效；改为仅在 keyword 真的变了才重置，并加 watch 把 index 夹回 filteredSkills 范围。同步把 placeholder 改为「输入您的消息... (Shift+Enter 换行 · 输入 / 选择技能)」让用户知道有这个入口。
+
+2026-04-20 修复 MessageInput 选中技能后输入框只占行内剩余空间的问题：把技能 chip 与 ChipInput 从同一 flex-wrap 行拆成上下两行（chip 一行、输入框独占下一行 w-full），desktop / server 双端同步。
+
 2026-04-18 sandbox/_stdout_echo 增加 48 条单测（test_stdout_echo.py），覆盖 echo 开关全部取值、空/None/异常 stdout 兜底、header 截断、footer 各种 rc、流式 helper 的 stdout/stderr 隔离/cwd/env/大输出/非 UTF-8/实时性断言/超时；测试中发现 timeout 路径会被持有 pipe 的子孙进程（如 sleep）阻塞 drain 线程~4s 的回归，顺手修：Popen 加 start_new_session，超时改成 killpg(SIGKILL) 干掉整个进程组，并去掉 raise 前重复的 join。
 
 2026-04-18 ExecuteCommandTool/沙箱命令实时回显：新增 sandbox/_stdout_echo（含 echo_chunk/header/footer 与 run_with_streaming_stdout helper），LocalSandboxProvider 直接路径在 read_output 里增量写 sys.stdout；Seatbelt/Bwrap parent 改用流式 helper 转发 stdout、stderr 单独捕获用于报错；launcher.py shell mode 也从 subprocess.run 换成 Popen+双线程 drain，命令 stdout 实时透传到外层；三处 isolation 始终覆盖 launcher.py 让升级生效；ExecuteCommandTool 加 $ <cmd> / ↪ rc=N 头尾分隔。受 SAGE_ECHO_SHELL_OUTPUT 控制，默认开启，0/false/no/off/空 关闭。
