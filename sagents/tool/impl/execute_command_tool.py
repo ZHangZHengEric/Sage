@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional
 from ..tool_base import tool
 from sagents.utils.logger import logger
 from sagents.utils.sandbox._stdout_echo import echo_header, echo_footer
+from sagents.utils.agent_session_helper import get_session_sandbox as _get_session_sandbox_util
 
 
 class SecurityManager:
@@ -44,18 +45,10 @@ class ExecuteCommandTool:
         self.security_manager = SecurityManager()
 
     def _get_sandbox(self, session_id: str):
-        """通过 session_id 获取沙箱"""
-        from sagents.session_runtime import get_global_session_manager
-        session_manager = get_global_session_manager()
-        session = session_manager.get_live_session(session_id) if session_manager else None
-        if not session or not session.session_context:
-            raise ValueError(f"ExecuteCommandTool: Invalid session_id={session_id}")
-
-        sandbox = session.session_context.sandbox
-        if not sandbox:
-            raise ValueError(f"ExecuteCommandTool: No sandbox available for session_id={session_id}")
-
-        return sandbox
+        """通过 session_id 获取沙箱。详见
+        ``sagents.utils.agent_session_helper.get_session_sandbox``。
+        """
+        return _get_session_sandbox_util(session_id, log_prefix="ExecuteCommandTool")
 
     @tool(
         description_i18n={
