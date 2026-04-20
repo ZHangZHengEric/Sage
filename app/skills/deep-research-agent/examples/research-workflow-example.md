@@ -108,8 +108,10 @@ file_write(
 ```python
 file_update(
     file_path="./output/ai_medical_research/report.md",
-    search_pattern="### 1.1 行业定义",
-    replacement="""### 1.1 行业定义
+    operations=[{
+        "update_mode": "search_replace",
+        "search_pattern": "### 1.1 行业定义",
+        "replacement": """### 1.1 行业定义
 
 人工智能医疗（AI in Healthcare）是指将人工智能技术应用于医疗健康领域的总称。根据应用场景和技术类型，可分为以下几个主要类别：
 
@@ -126,12 +128,15 @@ file_update(
 
 [来源: Frost & Sullivan Healthcare AI Industry Report 2024]
 """
+    }]
 )
 
 file_update(
     file_path="./output/ai_medical_research/report.md",
-    search_pattern="### 1.2 发展历程",
-    replacement="""### 1.2 发展历程
+    operations=[{
+        "update_mode": "search_replace",
+        "search_pattern": "### 1.2 发展历程",
+        "replacement": """### 1.2 发展历程
 
 AI医疗的发展经历了三个主要阶段：
 
@@ -152,6 +157,7 @@ AI医疗的发展经历了三个主要阶段：
 
 [来源: Nature Medicine AI Review 2023]
 """
+    }]
 )
 ```
 
@@ -189,8 +195,10 @@ file_write(
 ```python
 file_update(
     file_path="./output/ai_medical_research/report.md",
-    search_pattern="### 2.1 宏观环境（PEST）",
-    replacement="""### 2.1 宏观环境（PEST）
+    operations=[{
+        "update_mode": "search_replace",
+        "search_pattern": "### 2.1 宏观环境（PEST）",
+        "replacement": """### 2.1 宏观环境（PEST）
 
 **政策环境（Political）**
 - 美国FDA采用预认证模式，已批准500+ AI医疗设备
@@ -213,6 +221,7 @@ file_update(
 - 多模态AI融合影像、文本、基因数据
 - 边缘计算实现实时诊断
 """
+    }]
 )
 ```
 
@@ -246,8 +255,10 @@ file_update(
 # 更新执行摘要（基于各章节内容总结）
 file_update(
     file_path="./output/ai_medical_research/report.md",
-    search_pattern="{3-5条核心发现 + 关键数据 + 建议}",
-    replacement="""全球人工智能医疗市场正处于快速发展期，预计到2025年市场规模将达到450亿美元。医学影像识别、药物研发、智能诊断是当前最成熟的三大应用场景。
+    operations=[{
+        "update_mode": "search_replace",
+        "search_pattern": "{3-5条核心发现 + 关键数据 + 建议}",
+        "replacement": """全球人工智能医疗市场正处于快速发展期，预计到2025年市场规模将达到450亿美元。医学影像识别、药物研发、智能诊断是当前最成熟的三大应用场景。
 
 ### 关键发现
 
@@ -263,6 +274,7 @@ file_update(
 2. **布局医学影像标准化**: 建立数据标准和质控体系是商业化关键
 3. **重视监管合规**: FDA/NMPA审批经验成为核心竞争力
 4. **投资边缘AI设备**: 满足数据隐私和实时性需求的新增长点"""
+    }]
 )
 
 # 保存结构化数据

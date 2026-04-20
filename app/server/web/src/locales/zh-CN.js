@@ -248,6 +248,7 @@ export default {
   'chat.unknownAgent': '未知智能体',
   'chat.taskCompleted': '任务完成',
   'chat.showMore': '显示更多',
+  'chat.collapse': '收起',
   'chat.executionFailed': '执行失败',
   'chat.interruptFailed': '中断当前会话失败，请稍后重试',
   'chat.noTasks': '暂无任务',
@@ -1113,7 +1114,7 @@ export default {
   'history.visibleMessages': '条可见消息',
 
   // 消息输入
-  'messageInput.placeholder': '输入您的消息... (Shift+Enter 换行)',
+  'messageInput.placeholder': '输入您的消息... (Shift+Enter 换行 · 输入 / 选择技能)',
   'messageInput.placeholderGenerating': 'AI正在生成回复，请稍候...',
   'messageInput.send': '发送',
   'messageInput.stop': '停止',

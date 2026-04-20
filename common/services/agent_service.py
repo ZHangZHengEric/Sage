@@ -9,12 +9,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
-from openai import AsyncOpenAI
-from sagents.llm.chat import OpenAIChat
-from sagents.tool.tool_manager import get_tool_manager
-from sagents.tool.tool_proxy import ToolProxy
-from sagents.utils.auto_gen_agent import AutoGenAgentFunc
-from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
 
 from common.core import config
 from common.core.client.chat import get_chat_client
@@ -89,6 +83,8 @@ def enforce_required_tools(agent_config: Dict[str, Any]) -> Dict[str, Any]:
 
 def validate_and_filter_tools(agent_config: Dict[str, Any]) -> Dict[str, Any]:
     """验证并过滤掉不可用的工具（server / desktop 共享逻辑）。"""
+    from sagents.tool.tool_manager import get_tool_manager
+
     tm = get_tool_manager()
     if not tm:
         return agent_config
@@ -199,6 +195,8 @@ def _create_model_client(client_params: Dict[str, Any], *, randomize_keys: bool 
         f"fast_model={fast_model_name if fast_model_name else '未配置'}"
     )
     
+    from sagents.llm.chat import OpenAIChat
+
     # 使用 OpenAIChat 创建客户端（支持双模型）
     openai_chat = OpenAIChat(
         api_key=api_key,
@@ -611,6 +609,10 @@ async def auto_generate_agent(
     user_id: str = "",
 ) -> Dict[str, Any]:
     logger.info(f"开始自动生成Agent: {agent_description}")
+    from sagents.tool.tool_manager import get_tool_manager
+    from sagents.tool.tool_proxy import ToolProxy
+    from sagents.utils.auto_gen_agent import AutoGenAgentFunc
+
     model_client, model_name = await _resolve_model_client(user_id)
     auto_gen_func = AutoGenAgentFunc()
 
@@ -644,6 +646,8 @@ async def optimize_system_prompt(
     user_id: str = "",
 ) -> Dict[str, Any]:
     logger.info("开始优化系统提示词")
+    from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
+
     model_client, model_name = await _resolve_model_client(user_id)
 
     optimizer = SystemPromptOptimizer()
