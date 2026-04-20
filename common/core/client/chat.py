@@ -1,7 +1,12 @@
-from typing import Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Optional
 
 from loguru import logger
-from openai import AsyncOpenAI
+
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
+
 from sagents.llm.chat import ChatClientPool, OpenAIChat
 
 _CLIENT_POOL: Optional[ChatClientPool] = None
@@ -11,7 +16,7 @@ async def init_chat_client(
     api_key: Optional[str] = None,
     base_url: Optional[str] = "https://api.openai.com/v1",
     model_name: Optional[str] = "gpt-4o",
-) -> Optional[AsyncOpenAI]:
+) -> Optional["AsyncOpenAI"]:
     """初始化全局 Chat 客户端实例 (Pool)。"""
     global _CLIENT_POOL
 
@@ -43,7 +48,7 @@ async def init_chat_client(
     return default_client_wrapper.raw_client
 
 
-def get_chat_client(model_name: Optional[str] = None) -> AsyncOpenAI:
+def get_chat_client(model_name: Optional[str] = None) -> "AsyncOpenAI":
     """获取全局 Chat 客户端实例 (原始 AsyncOpenAI)。"""
     global _CLIENT_POOL
 
