@@ -505,14 +505,23 @@
                             <label :for="`tool-${tool.name}`" class="text-sm font-medium cursor-pointer" :class="{ 'opacity-50': isToolLocked(tool.name) }">
                               {{ getToolLabel(tool.name, t) }}
                             </label>
-                            <Badge v-if="isRequiredTool(tool.name) === 'browser'" variant="secondary" class="text-[10px] h-5 px-2 bg-emerald-100 text-emerald-700 whitespace-nowrap">{{ t('agentEdit.badge.browserRequired') }}</Badge>
+                            <Badge v-if="isBrowserToolOffline(tool.name)" variant="secondary" class="text-[10px] h-5 px-2 bg-gray-100 text-gray-500 whitespace-nowrap">{{ t('agentEdit.badge.browserOffline') }}</Badge>
+                            <Badge v-else-if="isFibreOnlyToolUnavailable(tool.name)" variant="secondary" class="text-[10px] h-5 px-2 bg-gray-100 text-gray-500 whitespace-nowrap">{{ t('agentEdit.badge.fibreOnly') }}</Badge>
+                            <Badge v-else-if="isRequiredTool(tool.name) === 'browser'" variant="secondary" class="text-[10px] h-5 px-2 bg-emerald-100 text-emerald-700 whitespace-nowrap">{{ t('agentEdit.badge.browserRequired') }}</Badge>
                             <Badge v-else-if="isRequiredTool(tool.name) === 'skill'" variant="secondary" class="text-[10px] h-5 px-1.5">{{ t('agentEdit.badge.skillRequired') }}</Badge>
                             <Badge v-else-if="isRequiredTool(tool.name) === 'im'" variant="secondary" class="text-[10px] h-5 px-1.5 bg-blue-100 text-blue-700">{{ t('agentEdit.badge.imRequired') }}</Badge>
+                            <Badge v-else-if="isRequiredTool(tool.name) === 'fibre'" variant="secondary" class="text-[10px] h-5 px-2 bg-purple-100 text-purple-700 whitespace-nowrap">{{ t('agentEdit.badge.fibreOnly') }}</Badge>
                             <Badge v-else-if="isIMToolDisabled(tool.name)" variant="secondary" class="text-[10px] h-5 px-1.5 bg-gray-100 text-gray-500">{{ t('agentEdit.badge.imNeeded') }}</Badge>
                             <Badge v-else-if="isRequiredTool(tool.name)" variant="secondary" class="text-[10px] h-5 px-1.5">{{ t('agentEdit.badge.required') }}</Badge>
                           </div>
                           <p v-if="tool.description" class="text-xs text-muted-foreground line-clamp-2 mt-1">
                             {{ tool.description }}
+                          </p>
+                          <p v-if="isBrowserToolOffline(tool.name)" class="text-xs text-amber-600 mt-1">
+                            {{ t('agentEdit.browserToolOfflineHint') }}
+                          </p>
+                          <p v-else-if="isFibreOnlyToolUnavailable(tool.name)" class="text-xs text-amber-600 mt-1">
+                            {{ t('agentEdit.fibreOnlyHint') }}
                           </p>
                           <p v-if="isIMToolDisabled(tool.name)" class="text-xs text-amber-600 mt-1">
                             {{ t('agentEdit.imEnableToolHint') }}
@@ -2135,9 +2144,11 @@ const syncBrowserToolSelection = () => {
   store.formData.availableTools = Array.from(currentTools)
 }
 
-const refreshBrowserToolStatus = async () => {
+const refreshBrowserToolStatus = async ({ probe = false } = {}) => {
   try {
-    const response = await toolAPI.getBrowserExtensionStatus()
+    const response = probe
+      ? await toolAPI.probeBrowserExtension(5)
+      : await toolAPI.getBrowserExtensionStatus()
     const data = response?.data || response || {}
     browserToolsOnline.value = Boolean(data.browser_tools_online)
     browserToolNames.value = Array.isArray(data.browser_tool_class_tools) && data.browser_tool_class_tools.length > 0
@@ -2582,6 +2593,15 @@ const REQUIRED_TOOLS_FOR_FIBRE = ['sys_spawn_agent', 'sys_delegate_task', 'sys_f
 // IM 频道必需的工具
 const REQUIRED_TOOLS_FOR_IM = ['send_message_through_im', 'send_file_through_im', 'send_image_through_im']
 
+const isBrowserToolOffline = (toolName) => {
+  return isBrowserTool(toolName) && !browserToolsOnline.value
+}
+
+// Fibre 专属工具（智能体委派 / 创建 / 完成）只在 fibre 模式下可用
+const isFibreOnlyToolUnavailable = (toolName) => {
+  return REQUIRED_TOOLS_FOR_FIBRE.includes(toolName) && store.formData.agentMode !== 'fibre'
+}
+
 const isRequiredTool = (toolName) => {
   if (browserToolsOnline.value && isBrowserTool(toolName)) {
     return 'browser'
@@ -2615,10 +2635,18 @@ const isRequiredTool = (toolName) => {
 }
 
 const isToolChecked = (toolName) => {
+  // 浏览器工具在扩展离线时永远不可勾选（即使 availableTools 里残留也忽略显示）
+  if (isBrowserToolOffline(toolName)) return false
+  // Fibre 专属工具：非 fibre 模式下不可勾选
+  if (isFibreOnlyToolUnavailable(toolName)) return false
   return Boolean(isRequiredTool(toolName)) || store.formData.availableTools.includes(toolName)
 }
 
 const isToolLocked = (toolName) => {
+  // 浏览器工具离线时禁用复选框
+  if (isBrowserToolOffline(toolName)) return true
+  // Fibre 专属工具在非 fibre 模式下禁用复选框
+  if (isFibreOnlyToolUnavailable(toolName)) return true
   return Boolean(isRequiredTool(toolName)) || isIMToolDisabled(toolName)
 }
 
@@ -2654,6 +2682,10 @@ const displayedTools = computed(() => {
 const selectAllToolsInGroup = () => {
   const currentTools = displayedTools.value
   currentTools.forEach(tool => {
+    // 浏览器工具离线时不可被「全选」勾上
+    if (isBrowserToolOffline(tool.name)) return
+    // Fibre 专属工具在非 fibre 模式下不可被「全选」勾上
+    if (isFibreOnlyToolUnavailable(tool.name)) return
     if (!isRequiredTool(tool.name) && !store.formData.availableTools.includes(tool.name)) {
       store.formData.availableTools.push(tool.name)
     }
@@ -2705,12 +2737,20 @@ watch(() => store.formData.memoryType, (newMemoryType) => {
   }
 })
 
-// 监听 Agent 模式变化，自动添加 Fibre 必需工具
+// 监听 Agent 模式变化：fibre 模式下自动加入这三个工具；切出 fibre 模式时立即移除，
+// 避免后端收到「fibre 专属工具」却不在 fibre 策略下，造成 agent 误调用
 watch(() => store.formData.agentMode, (newAgentMode) => {
   if (newAgentMode === 'fibre') {
     REQUIRED_TOOLS_FOR_FIBRE.forEach(toolName => {
       if (!store.formData.availableTools.includes(toolName)) {
         store.formData.availableTools.push(toolName)
+      }
+    })
+  } else {
+    REQUIRED_TOOLS_FOR_FIBRE.forEach(toolName => {
+      const index = store.formData.availableTools.indexOf(toolName)
+      if (index > -1) {
+        store.formData.availableTools.splice(index, 1)
       }
     })
   }

@@ -18,6 +18,15 @@ export const toolAPI = {
     return await request.get('/api/browser-extension/status')
   },
 
+  /**
+   * 主动探活浏览器扩展（入队 ping 命令，等待回包）
+   * - 在线：~1s 内返回 online=true
+   * - 掉线：等满 timeout 后强制标记为 offline 再返回
+   */
+  probeBrowserExtension: async (timeoutSec = 5) => {
+    return await request.post(`/api/browser-extension/probe?timeout=${timeoutSec}`)
+  },
+
 
 
   /**
