@@ -1,12 +1,12 @@
 ---
-
-## layout: default
+layout: default
 title: Session & Context
 parent: Architecture
 nav_order: 6
 description: "Session, SessionContext, message manager, session/user memory and Workflow"
 lang: en
 ref: architecture-sagents-session-context
+---
 
 {% include lang_switcher.html %}
 

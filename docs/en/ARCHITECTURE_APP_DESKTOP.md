@@ -1,13 +1,12 @@
 ---
-
-## layout: default
-
+layout: default
 title: Desktop App Architecture
 parent: Architecture
 nav_order: 2
 description: "app/desktop/ desktop architecture: local backend, UI, Tauri shell and how it consumes sagents"
 lang: en
 ref: architecture-app-desktop
+---
 
 {% include lang_switcher.html %}
 

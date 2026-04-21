@@ -1,13 +1,12 @@
 ---
-
-## layout: default
-
+layout: default
 title: 智能体与流程编排
 parent: 架构
 nav_order: 5
 description: "AgentBase、各专用 Agent、AgentFlow / FlowExecutor、三种 agent_mode"
 lang: zh
 ref: architecture-sagents-agent-flow
+---
 
 {% include lang_switcher.html %}
 
