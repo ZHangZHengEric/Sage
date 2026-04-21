@@ -1,13 +1,12 @@
 ---
-
-## layout: default
-
+layout: default
 title: 架构
 nav_order: 4
 has_children: true
 description: "Sage 仓库与子系统架构总览，含应用与 sagents 核心运行时的二级文档"
 lang: zh
 ref: architecture
+---
 
 {% include lang_switcher.html %}
 

@@ -1,12 +1,12 @@
 ---
-
-## layout: default
+layout: default
 title: 沙箱 / LLM / 可观测性
 parent: 架构
 nav_order: 8
 description: "Sandbox 抽象（Local / Remote / Passthrough）、LLM 客户端封装与能力探针、ObservabilityManager 与 OpenTelemetry"
 lang: zh
 ref: architecture-sagents-sandbox-obs
+---
 
 {% include lang_switcher.html %}
 

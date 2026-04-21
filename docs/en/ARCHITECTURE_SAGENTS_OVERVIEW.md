@@ -1,12 +1,12 @@
 ---
-
-## layout: default
+layout: default
 title: sagents Overview
 parent: Architecture
 nav_order: 4
 description: "Layering, module boundaries and the full path of one run_stream call inside sagents/"
 lang: en
 ref: architecture-sagents-overview
+---
 
 {% include lang_switcher.html %}
 

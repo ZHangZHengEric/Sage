@@ -1,4 +1,6 @@
 
+2026-04-21 00:02 修复架构子页 YAML front matter 被破坏导致侧边栏丢失「架构」父级、子页全部提升为顶级项的问题：10 个文件（zh+en 各 5 份：ARCHITECTURE / ARCHITECTURE_SAGENTS_OVERVIEW / AGENT_FLOW / SESSION_CONTEXT / TOOL_SKILL / SANDBOX_OBS 与 ARCHITECTURE_APP_DESKTOP）第二行被换成了「## layout: default」且缺失结束的「---」，重建为标准 Jekyll front matter，恢复 has_children/parent 层级。
+
 2026-04-20 23:51 复用样板：agent_session_helper 增 get_session_sandbox()；file_system/memory/execute_command/image_understanding 4 个 tool 的 _get_sandbox 改为单行调用；compress_history、web_fetcher、todo、skill、content_saver、fibre/tools 共 8 处 get_global_session_manager+get_live_session 模板替换为 get_live_session/get_live_session_context helper；image_understanding._get_mime_type 改用 multimodal_image.get_mime_type。
 
 2026-04-20 架构文档拆分为多二级章节（zh+en）：父页 ARCHITECTURE 重写为流程图导览，新增 app/server、app/desktop、app/others 三篇，sagents 拆为 overview / agent-flow / session-context / tool-skill / sandbox-obs 五篇；以 mermaid 图为主，仅保留二开示例代码；修复带 () 与 / 的 subgraph 标题语法；docs/README 索引同步更新。
