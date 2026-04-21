@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 from pathlib import Path
@@ -121,6 +122,59 @@ def _file_to_base64_data_url(file_path: Path) -> Optional[str]:
         return None
 
 
+def _bytes_to_base64_data_url(raw: bytes) -> Optional[str]:
+    """把图片字节流压缩并编码为 data URL（用于 HTTP 抓取的兜底分支）。"""
+    try:
+        with Image.open(io.BytesIO(raw)) as img:
+            compressed = _compress_image_to_jpeg_bytes(img)
+        encoded = base64.b64encode(compressed).decode('utf-8')
+        logger.debug(f"Converted fetched image to base64: size={len(compressed)} bytes")
+        return f"data:image/jpeg;base64,{encoded}"
+    except Exception as exc:
+        logger.error(f"Failed to convert fetched bytes to base64: {exc}")
+        return None
+
+
+async def _fetch_url_to_base64(url: str, timeout: float = 10.0) -> Optional[str]:
+    """对 localhost 类 URL（或其他需要后端就近抓取的 URL）走 HTTP GET 拿字节流再转 base64。
+
+    远程 LLM（dashscope / openai）拉不到 ``http://127.0.0.1:<port>/...`` 这类
+    桌面/服务端本机地址，但 agent 进程自己一般是能访问的。如果通过 ``Path.home()``
+    无法把 URL 反解到本地文件（比如 agent 跑在容器里、HOME 不一致、或文件已被清理），
+    就退一步用 httpx 抓字节流再转成 ``data:image/...;base64`` 给 LLM。
+    """
+    try:
+        import httpx  # 局部导入，避免在不需要这条分支的环境里被强依赖
+    except ImportError:
+        logger.warning("httpx not installed, cannot fetch local image URL via HTTP fallback")
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                logger.warning(f"HTTP fallback fetch non-200: url={url}, status={resp.status_code}")
+                return None
+            data = resp.content
+            if not data:
+                logger.warning(f"HTTP fallback fetch returned empty body: url={url}")
+                return None
+            return await asyncio.get_event_loop().run_in_executor(
+                None, _bytes_to_base64_data_url, data
+            )
+    except Exception as exc:
+        logger.warning(f"HTTP fallback fetch failed for url={url}, error: {exc}")
+        return None
+
+
+def _is_localhost_url(url: str) -> bool:
+    """简单判断一个 URL 是否指向本机地址（127.0.0.1 / localhost / 0.0.0.0）。"""
+    try:
+        parsed = urlparse(url)
+        return parsed.hostname in ("127.0.0.1", "localhost", "0.0.0.0")
+    except Exception:
+        return False
+
+
 async def process_multimodal_content(msg: Dict[str, Any]) -> Dict[str, Any]:
     """处理多模态消息内容，将本地图片路径转换为 base64，远程 URL 保持不变。
 
@@ -170,6 +224,23 @@ async def process_multimodal_content(msg: Dict[str, Any]) -> Dict[str, Any]:
         elif url.startswith('http://') or url.startswith('https://'):
             local_path = resolve_local_sage_url(url)
             if local_path is None:
+                if _is_localhost_url(url):
+                    # 是本机地址但反解失败（多半是 HOME 不一致 / 跑在容器里 / 自定义沙箱目录）。
+                    # 这种 URL 给远程 LLM 用不了，所以即使不能映射到本地文件，也尝试通过 HTTP 抓取再转 base64。
+                    logger.warning(
+                        f"Local sage url cannot be resolved to a file path, "
+                        f"falling back to HTTP fetch: {url}"
+                    )
+                    data_url = await _fetch_url_to_base64(url)
+                    if data_url is None:
+                        logger.error(
+                            f"Both local resolve and HTTP fallback failed for image_url: {url}; "
+                            f"keeping original URL but remote LLM may reject it."
+                        )
+                        new_content.append(item)
+                    else:
+                        new_content.append({'type': 'image_url', 'image_url': {'url': data_url}})
+                    continue
                 # 真正的远端 URL 原样保留
                 new_content.append(item)
                 continue
@@ -180,6 +251,7 @@ async def process_multimodal_content(msg: Dict[str, Any]) -> Dict[str, Any]:
         path_obj = Path(file_path_str)
         if not path_obj.exists():
             logger.warning(f"Image file not found: {file_path_str}")
+            # file:// 或裸路径找不到只能放弃；http(s) 已在上面分支处理
             new_content.append(item)
             continue
 
