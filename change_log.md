@@ -1,4 +1,6 @@
 
+2026-04-21 21:30 server 端登录页：当 allow_registration=false 时新增显眼提示——告知当前网页不允许创建新用户，推荐下载桌面版 https://zavixai.com/html/sage.html，或自行从 GitHub 部署 Web 版，并附微信联系方式 cfyz0814 / zhangzheng-thu。新增 zh/en 文案和 2 条 Login 单测，全部通过。
+
 2026-04-21 17:10 限制 Fibre 专属工具仅在 fibre 模式下可选：AgentEdit.vue 增加 isFibreOnlyToolUnavailable，非 fibre 模式下 sys_spawn_agent / sys_delegate_task / sys_finish_task 复选框禁用并打「仅 Fibre 模式」徽章 + 提示；模式切出 fibre 时自动从 availableTools 移除；后端 chat router 新增 _sync_fibre_only_tools 兜底，非 fibre 请求强制剔除这三个工具。
 
 2026-04-21 16:30 新增设计文档 docs/zh/DESIGN_AGENT_FLOW_PRODUCTIZATION.md：把 AgentFlow 升级为「真正的 Agent Flow」——所有 AI 节点都是 Agent，引入 Agent 模板体系（business/router 两种内置模板），分支判据收敛到 flow_state.{input,vars,steps} 命名空间（v1 寄存于 audit_status 子树），AgentFlow 改为可保存可重置的 DAG 静态图配置（flow_version.graph_json），含分阶段实施路线、API 草案、改动点速查与待决问题。
