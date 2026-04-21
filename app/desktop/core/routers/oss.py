@@ -22,11 +22,7 @@ def _resolve_upload_root(agent_id: Optional[str]) -> Path:
 
 
 def _build_public_url(request: Request, agent_id: Optional[str], filename: str) -> str:
-    """构建可被前端 <img src> / agent 后端拉取的 HTTP URL。
-
-    桌面端 sidecar 同时承担"上传/下载文件"的职责，前端拿到 URL 后即可与 web 端
-    完全一致地以 http(s) 形式直接渲染，不再需要 Tauri 的 convertFileSrc/readFile。
-    """
+    """构建可被前端 <img src> / agent 后端拉取的 HTTP URL（保留旧字段，仅作降级展示用）。"""
     base = str(request.base_url).rstrip("/")
     if agent_id:
         return f"{base}/api/oss/file/{agent_id}/{filename}"
@@ -163,10 +159,18 @@ async def upload_file(
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
 
-        # 统一返回 HTTP URL：前端 web/desktop 都直接以 <img src> 加载，
-        # agent_base 内部会把 127.0.0.1 的 sage 文件 URL 反解回本地路径再读为 base64。
+        # 桌面端 sidecar 与 agent 跑在同一台机器上，直接把"本地绝对路径"作为 url 返回：
+        # - markdown 引用 / image_url part 都用本地路径，agent 不再需要走 HTTP 抓回来或反解 localhost URL；
+        # - 前端 MarkdownRenderer 已有 `convertFileSrc / data-local-image` 分支，能直接渲染本地路径；
+        # - http_url 字段仍然保留（指向 sidecar 的 GET /api/oss/file/...），便于以后调试 / 在浏览器中打开。
+        local_path = str(file_path.resolve())
         public_url = _build_public_url(request, agent_id, final_filename)
-        payload = {"url": public_url, "filename": final_filename}
+        payload = {
+            "url": local_path,
+            "local_path": local_path,
+            "http_url": public_url,
+            "filename": final_filename,
+        }
         if agent_id:
             payload["agent_id"] = agent_id
         return payload
