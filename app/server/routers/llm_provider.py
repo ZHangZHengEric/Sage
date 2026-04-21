@@ -53,8 +53,11 @@ async def list_providers(request: Request):
 @router.post("/create")
 async def create_provider(data: LLMProviderCreate, request: Request):
     user_id = get_request_user_id(request)
-    provider_id = await llm_provider_service.create_provider(data, user_id=user_id)
-    return await Response.succ(data={"provider_id": provider_id})
+    try:
+        provider_id = await llm_provider_service.create_provider(data, user_id=user_id)
+        return await Response.succ(data={"provider_id": provider_id})
+    except ValueError as e:
+        return await Response.error(message=str(e))
 
 @router.put("/update/{provider_id}")
 async def update_provider(provider_id: str, data: LLMProviderUpdate, request: Request):

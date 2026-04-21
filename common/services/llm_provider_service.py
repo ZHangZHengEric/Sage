@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 
 from common.models.llm_provider import LLMProvider, LLMProviderDao
+from common.services.llm_provider_probe_utils import friendly_provider_probe_error
 from common.schemas.base import LLMProviderCreate, LLMProviderUpdate
 from sagents.llm import probe_connection, probe_llm_capabilities, probe_multimodal, probe_structured_output
 
@@ -19,11 +20,29 @@ def _build_provider_name(model: str, normalized_base_url: Optional[str], name: O
     return f"{model}@{base}"
 
 
-async def verify_provider(data: LLMProviderCreate) -> None:
-    api_key = data.api_keys[0] if data.api_keys else None
+def _resolve_api_key(api_keys: Optional[List[str]]) -> str:
+    api_key = api_keys[0] if api_keys else None
     if not api_key:
         raise ValueError("API Key is required")
-    await probe_connection(api_key, data.base_url, data.model)
+    return api_key
+
+
+async def _probe_provider_or_raise(*, api_keys: Optional[List[str]], base_url: Optional[str], model: str, action: str) -> None:
+    api_key = _resolve_api_key(api_keys)
+    try:
+        await probe_connection(api_key, base_url or "", model)
+    except Exception as exc:
+        logger.warning(
+            f"[LLMProvider] Probe failed before {action}: base_url={base_url}, model={model}, error={exc}"
+        )
+        raise ValueError(
+            f"Cannot {action}. {friendly_provider_probe_error(exc, subject='Provider')}"
+        ) from exc
+
+
+async def verify_provider(data: LLMProviderCreate) -> None:
+    api_key = _resolve_api_key(data.api_keys)
+    await probe_connection(api_key, _normalize_base_url(data.base_url) or "", data.model)
 
 
 async def verify_multimodal(data: LLMProviderCreate) -> Dict[str, Any]:
@@ -86,6 +105,13 @@ async def create_provider(
             logger.info(f"[LLMProvider] Found matching provider: {provider.id}")
             return provider.id
 
+    await _probe_provider_or_raise(
+        api_keys=data.api_keys,
+        base_url=normalized_base_url,
+        model=data.model,
+        action="save provider",
+    )
+
     provider_id = str(uuid.uuid4())
     provider = LLMProvider(
         id=provider_id,
@@ -103,6 +129,8 @@ async def create_provider(
         is_default=bool(data.is_default),
         user_id=user_id,
     )
+    if provider.is_default:
+        await dao.clear_default_for_user(user_id=user_id, exclude_provider_id=provider_id)
     await dao.save(provider)
     return provider_id
 
@@ -123,10 +151,21 @@ async def update_provider(
     if not allow_system_default_update and not provider.user_id:
         raise PermissionError("Cannot modify system default provider")
 
+    effective_base_url = _normalize_base_url(data.base_url) if data.base_url is not None else provider.base_url
+    effective_api_keys = data.api_keys if data.api_keys is not None else provider.api_keys
+    effective_model = data.model if data.model is not None else provider.model
+
+    await _probe_provider_or_raise(
+        api_keys=effective_api_keys,
+        base_url=effective_base_url,
+        model=effective_model,
+        action="update provider",
+    )
+
     if data.name is not None:
         provider.name = data.name
     if data.base_url is not None:
-        provider.base_url = data.base_url
+        provider.base_url = effective_base_url or ""
     if data.api_keys is not None:
         provider.api_keys = data.api_keys
     if data.model is not None:
@@ -148,6 +187,8 @@ async def update_provider(
     if data.is_default is not None:
         provider.is_default = data.is_default
 
+    if provider.is_default:
+        await dao.clear_default_for_user(user_id=provider.user_id, exclude_provider_id=provider.id)
     await dao.save(provider)
     return provider
 

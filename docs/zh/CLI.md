@@ -263,6 +263,53 @@ sage skills --agent-id my-agent
 
 当传入 `--agent-id` 时，CLI 会按当前 Agent 实际可用的 skill 集合来展示结果，而不是只看本地可见 skill。
 
+### `sage provider`
+
+通过 CLI 查看和管理本地 LLM Provider。
+
+当前支持的子命令：
+
+- `list`
+- `inspect`
+- `verify`
+- `create`
+- `update`
+- `delete`
+
+示例：
+
+```bash
+sage provider list
+sage provider list --default-only
+sage provider list --model deepseek-chat
+sage provider list --name-contains deepseek
+
+sage provider inspect <provider_id>
+
+sage provider verify --base-url https://api.deepseek.com/v1 --model deepseek-chat --api-key <key>
+sage provider verify --json
+sage provider verify --base-url https://api.deepseek.com/v1 --model deepseek-chat --api-key <key> --json
+
+sage provider create --user-id alice --base-url https://api.deepseek.com/v1 --model deepseek-chat --api-key <key> --set-default
+sage provider create --user-id alice --name "CLI Default Provider" --json
+
+sage provider update <provider_id> --user-id alice --model deepseek-reasoner
+sage provider update <provider_id> --user-id alice --set-default
+
+sage provider delete <provider_id> --user-id alice
+```
+
+需要注意的行为：
+
+- `verify` 只做连通性探测，不会保存。
+- `create` 和 `update` 都要求 probe 成功后才允许保存。
+- `create` / `verify` 如果没有传 `--base-url`、`--api-key`、`--model`，会回退到当前 CLI 环境里的默认值。
+- 如果这些默认值本身缺失，`create` / `verify` 会直接返回 CLI 错误，并给出明确的下一步提示。
+- `update` 会拒绝空的 `--api-key`，如果没有传任何可更新字段，也会直接失败。
+- CLI 输出会对 API key 做脱敏，只显示简短预览。
+- 同一个用户最多只能有一个默认 provider；把某个 provider 设成默认时，会自动清掉该用户下其他 provider 的默认标记。
+- `delete` 仍然不允许删除当前默认 provider。
+
 ## CLI 中的 Skill
 
 CLI 现在支持在这些命令上显式传入 skill：
@@ -353,6 +400,20 @@ sage run --json --stats "用一句话介绍你自己。"
 - skills 是否反映当前本地可见 skill
 - stats 是否带上了正确的 user/workspace/skill 上下文
 - JSON 模式最后是否有 `cli_stats` 事件
+
+## 维护者验证
+
+如果你改了 provider 管理或 CLI 错误处理，建议再跑一遍真实集成测试：
+
+```bash
+/opt/miniconda3/envs/sage_dev/bin/python tests/app/cli/test_provider_integration.py
+```
+
+说明：
+
+- 默认系统 Python 如果缺少 `sqlalchemy`、`aiosqlite` 或 `loguru`，这个用例会被跳过
+- 这个测试会基于临时 file DB 走一遍 `provider create -> inspect -> update -> delete`
+- 同时会校验默认 provider 切换，以及认证失败、模型不存在、超时这几类 probe 错误的友好 JSON 输出
 
 ## 相关文档
 

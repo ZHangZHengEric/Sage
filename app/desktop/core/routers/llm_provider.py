@@ -54,19 +54,22 @@ async def list_providers(request: Request):
 @router.post("/create")
 async def create_provider(data: LLMProviderCreate, request: Request):
     user_id = get_desktop_user_id(request)
-    provider_id = await llm_provider_service.create_provider(data, user_id=user_id)
-    if data.is_default:
-        providers = await llm_provider_service.list_providers(user_id)
-        provider = next((item for item in providers if item.get("id") == provider_id), None)
-        if provider:
-            chat_client = await init_chat_client(
-                api_key=provider["api_keys"][0] if provider.get("api_keys") else None,
-                base_url=provider.get("base_url"),
-                model_name=provider.get("model"),
-            )
-            if chat_client is not None:
-                pass
-    return await Response.succ(data={"provider_id": provider_id})
+    try:
+        provider_id = await llm_provider_service.create_provider(data, user_id=user_id)
+        if data.is_default:
+            providers = await llm_provider_service.list_providers(user_id)
+            provider = next((item for item in providers if item.get("id") == provider_id), None)
+            if provider:
+                chat_client = await init_chat_client(
+                    api_key=provider["api_keys"][0] if provider.get("api_keys") else None,
+                    base_url=provider.get("base_url"),
+                    model_name=provider.get("model"),
+                )
+                if chat_client is not None:
+                    pass
+        return await Response.succ(data={"provider_id": provider_id})
+    except ValueError as e:
+        return await Response.error(message=str(e))
 
 @router.put("/update/{provider_id}")
 async def update_provider(provider_id: str, data: LLMProviderUpdate, request: Request):

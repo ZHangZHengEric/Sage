@@ -12,6 +12,22 @@ from dotenv import load_dotenv
 
 from common.core import config
 from common.schemas.chat import Message, StreamRequest
+from common.services.llm_provider_probe_utils import friendly_provider_probe_error
+
+
+class CLIError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        next_steps: Optional[List[str]] = None,
+        debug_detail: Optional[str] = None,
+        exit_code: int = 1,
+    ) -> None:
+        super().__init__(message)
+        self.next_steps = list(next_steps or [])
+        self.debug_detail = debug_detail
+        self.exit_code = exit_code
 
 
 def _load_cli_env_defaults() -> Dict[str, str]:
@@ -28,6 +44,18 @@ def get_default_cli_user_id() -> str:
         or os.environ.get("SAGE_DESKTOP_USER_ID")
         or "default_user"
     )
+
+
+def get_default_cli_max_loop_count() -> int:
+    _load_cli_env_defaults()
+    raw_value = (os.environ.get("SAGE_CLI_MAX_LOOP_COUNT") or "").strip()
+    if not raw_value:
+        return 50
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return 50
+    return value if value > 0 else 50
 
 
 def _dependency_status() -> Dict[str, bool]:
@@ -209,6 +237,44 @@ def build_run_request(
     )
 
 
+def validate_cli_request_options(
+    *,
+    workspace: Optional[str] = None,
+    max_loop_count: Optional[int] = None,
+) -> Optional[str]:
+    if max_loop_count is None or int(max_loop_count) < 1:
+        raise CLIError(
+            "Invalid max loop count",
+            next_steps=["Pass `--max-loop-count` with a positive integer value."],
+            debug_detail=f"max_loop_count={max_loop_count!r}",
+        )
+
+    if not workspace:
+        return None
+
+    workspace_path = os.path.abspath(workspace)
+    if os.path.exists(workspace_path) and not os.path.isdir(workspace_path):
+        raise CLIError(
+            f"Workspace path is not a directory: {workspace_path}",
+            next_steps=["Choose a directory path for `--workspace`, or remove the conflicting file."],
+        )
+
+    parent_dir = workspace_path if os.path.isdir(workspace_path) else os.path.dirname(workspace_path) or os.getcwd()
+    if not os.path.exists(parent_dir):
+        raise CLIError(
+            f"Workspace parent directory does not exist: {parent_dir}",
+            next_steps=["Create the parent directory first, or choose a different `--workspace` path."],
+        )
+
+    if not os.access(parent_dir, os.W_OK):
+        raise CLIError(
+            f"Workspace path is not writable: {parent_dir}",
+            next_steps=["Choose a writable `--workspace` path, or update directory permissions."],
+        )
+
+    return workspace_path
+
+
 async def run_request_stream(
     request: StreamRequest,
     workspace: Optional[str] = None,
@@ -276,6 +342,7 @@ def collect_doctor_info() -> Dict[str, Any]:
         "port": cfg.port,
         "db_type": cfg.db_type,
         "default_cli_user_id": get_default_cli_user_id(),
+        "default_cli_max_loop_count": get_default_cli_max_loop_count(),
         "default_llm_model_name": cfg.default_llm_model_name,
         "agents_dir": cfg.agents_dir,
         "agents_dir_exists": os.path.exists(cfg.agents_dir),
@@ -288,6 +355,42 @@ def collect_doctor_info() -> Dict[str, Any]:
         "dependencies": dependency_status,
         **issues,
     }
+
+
+async def probe_default_provider() -> Dict[str, Any]:
+    from sagents.llm import probe_connection
+
+    cfg = init_cli_config(init_logging=False)
+    issues = _collect_runtime_issues(cfg)
+    provider_errors = [
+        item
+        for item in issues["errors"]
+        if item.startswith("Missing SAGE_DEFAULT_LLM_")
+    ]
+    if provider_errors:
+        return {
+            "status": "error",
+            "message": "Default provider configuration is incomplete",
+            "detail": "; ".join(provider_errors),
+        }
+
+    try:
+        result = await probe_connection(
+            cfg.default_llm_api_key,
+            cfg.default_llm_api_base_url,
+            cfg.default_llm_model_name,
+        )
+        return {
+            "status": "ok" if result.get("supported") else "error",
+            "message": "Default provider probe succeeded" if result.get("supported") else "Default provider probe failed",
+            "response": result.get("response"),
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "message": friendly_provider_probe_error(exc, subject="Default provider"),
+            "detail": str(exc),
+        }
 
 
 def collect_config_info() -> Dict[str, Any]:
@@ -304,6 +407,7 @@ def collect_config_info() -> Dict[str, Any]:
         "env_file": effective_env_file,
         "env_files": env_files,
         "default_cli_user_id": get_default_cli_user_id(),
+        "default_cli_max_loop_count": get_default_cli_max_loop_count(),
         "app_mode": cfg.app_mode,
         "auth_mode": cfg.auth_mode,
         "port": cfg.port,
@@ -318,6 +422,7 @@ def collect_config_info() -> Dict[str, Any]:
             "SAGE_HOME": local_defaults["sage_home"],
             "SAGE_ENV_FILE": shared_env_file,
             "SAGE_CLI_USER_ID": os.environ.get("SAGE_CLI_USER_ID"),
+            "SAGE_CLI_MAX_LOOP_COUNT": os.environ.get("SAGE_CLI_MAX_LOOP_COUNT"),
             "SAGE_DESKTOP_USER_ID": os.environ.get("SAGE_DESKTOP_USER_ID"),
             "SAGE_DEFAULT_LLM_API_KEY": "(set)" if os.environ.get("SAGE_DEFAULT_LLM_API_KEY") else None,
             "SAGE_DEFAULT_LLM_API_BASE_URL": os.environ.get("SAGE_DEFAULT_LLM_API_BASE_URL"),
@@ -380,6 +485,378 @@ def write_cli_config_file(*, path: Optional[str] = None, force: bool = False) ->
             "Set SAGE_DEFAULT_LLM_API_KEY if it is still empty.",
             "Run `sage doctor` to verify the generated config.",
         ],
+    }
+
+
+def _trim_optional_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _mask_api_key(value: Optional[str]) -> Optional[str]:
+    normalized = _trim_optional_text(value)
+    if not normalized:
+        return None
+    if len(normalized) <= 8:
+        return "*" * len(normalized)
+    return f"{normalized[:4]}...{normalized[-4:]}"
+
+
+def _sanitize_provider_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    sanitized = dict(record)
+    raw_api_keys = sanitized.get("api_keys") or []
+    masked_api_keys = [_mask_api_key(item) for item in raw_api_keys if _mask_api_key(item)]
+    sanitized["api_keys"] = masked_api_keys
+    sanitized["api_key_preview"] = masked_api_keys[0] if masked_api_keys else None
+    return sanitized
+
+
+def _resolve_provider_create_data(
+    *,
+    name: Optional[str] = None,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+    max_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
+    presence_penalty: Optional[float] = None,
+    max_model_len: Optional[int] = None,
+    supports_multimodal: Optional[bool] = None,
+    supports_structured_output: Optional[bool] = None,
+    is_default: Optional[bool] = None,
+) -> Dict[str, Any]:
+    from common.schemas.base import LLMProviderCreate
+
+    cfg = init_cli_config(init_logging=False)
+    resolved_base_url = _trim_optional_text(base_url) or _trim_optional_text(cfg.default_llm_api_base_url)
+    resolved_api_key = _trim_optional_text(api_key) or _trim_optional_text(cfg.default_llm_api_key)
+    resolved_model = _trim_optional_text(model) or _trim_optional_text(cfg.default_llm_model_name)
+
+    next_steps: List[str] = []
+    if not resolved_api_key:
+        next_steps.append("Pass `--api-key`, or set `SAGE_DEFAULT_LLM_API_KEY` in `~/.sage/.sage_env` or local `.env`.")
+    if not resolved_base_url:
+        next_steps.append("Pass `--base-url`, or set `SAGE_DEFAULT_LLM_API_BASE_URL` in `~/.sage/.sage_env` or local `.env`.")
+    if not resolved_model:
+        next_steps.append("Pass `--model`, or set `SAGE_DEFAULT_LLM_MODEL_NAME` in `~/.sage/.sage_env` or local `.env`.")
+    if next_steps:
+        raise CLIError(
+            "Provider configuration is incomplete for create/verify.",
+            next_steps=next_steps,
+        )
+
+    return {
+        "data": LLMProviderCreate(
+            name=_trim_optional_text(name),
+            base_url=resolved_base_url,
+            api_keys=[resolved_api_key],
+            model=resolved_model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            presence_penalty=presence_penalty,
+            max_model_len=max_model_len,
+            supports_multimodal=bool(supports_multimodal),
+            supports_structured_output=bool(supports_structured_output),
+            is_default=bool(is_default),
+        ),
+        "sources": {
+            "base_url": "arg" if _trim_optional_text(base_url) else "default",
+            "api_key": "arg" if _trim_optional_text(api_key) else "default",
+            "model": "arg" if _trim_optional_text(model) else "default",
+        },
+    }
+
+
+def _build_provider_update_data(
+    *,
+    name: Optional[str] = None,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+    max_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
+    presence_penalty: Optional[float] = None,
+    max_model_len: Optional[int] = None,
+    supports_multimodal: Optional[bool] = None,
+    supports_structured_output: Optional[bool] = None,
+    is_default: Optional[bool] = None,
+) -> Any:
+    from common.schemas.base import LLMProviderUpdate
+
+    payload: Dict[str, Any] = {}
+    if name is not None:
+        payload["name"] = _trim_optional_text(name)
+    if base_url is not None:
+        payload["base_url"] = _trim_optional_text(base_url)
+    if api_key is not None:
+        normalized_api_key = _trim_optional_text(api_key)
+        if not normalized_api_key:
+            raise CLIError(
+                "Provider API key cannot be empty.",
+                next_steps=["Pass a non-empty `--api-key` value."],
+            )
+        payload["api_keys"] = [normalized_api_key]
+    if model is not None:
+        payload["model"] = _trim_optional_text(model)
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if top_p is not None:
+        payload["top_p"] = top_p
+    if presence_penalty is not None:
+        payload["presence_penalty"] = presence_penalty
+    if max_model_len is not None:
+        payload["max_model_len"] = max_model_len
+    if supports_multimodal is not None:
+        payload["supports_multimodal"] = supports_multimodal
+    if supports_structured_output is not None:
+        payload["supports_structured_output"] = supports_structured_output
+    if is_default is not None:
+        payload["is_default"] = is_default
+
+    if not payload:
+        raise CLIError(
+            "No provider fields were supplied for update.",
+            next_steps=[
+                "Pass at least one field such as `--model`, `--base-url`, `--api-key`, or `--name`.",
+            ],
+        )
+
+    return LLMProviderUpdate(**payload)
+
+
+async def list_cli_providers(*, user_id: Optional[str] = None) -> Dict[str, Any]:
+    from common.services import llm_provider_service
+
+    resolved_user_id = user_id or get_default_cli_user_id()
+    providers = await llm_provider_service.list_providers(resolved_user_id)
+    sanitized = [_sanitize_provider_record(item) for item in providers]
+    return {
+        "user_id": resolved_user_id,
+        "total": len(sanitized),
+        "list": sanitized,
+    }
+
+
+async def query_cli_providers(
+    *,
+    user_id: Optional[str] = None,
+    default_only: bool = False,
+    model: Optional[str] = None,
+    name_contains: Optional[str] = None,
+) -> Dict[str, Any]:
+    result = await list_cli_providers(user_id=user_id)
+    providers = list(result.get("list") or [])
+
+    normalized_model = _trim_optional_text(model)
+    normalized_name_query = (_trim_optional_text(name_contains) or "").lower()
+
+    if default_only:
+        providers = [item for item in providers if bool(item.get("is_default"))]
+    if normalized_model:
+        providers = [item for item in providers if item.get("model") == normalized_model]
+    if normalized_name_query:
+        providers = [
+            item
+            for item in providers
+            if normalized_name_query in ((item.get("name") or "").lower())
+        ]
+
+    return {
+        **result,
+        "filters": {
+            "default_only": default_only,
+            "model": normalized_model,
+            "name_contains": _trim_optional_text(name_contains),
+        },
+        "total": len(providers),
+        "list": providers,
+    }
+
+
+async def inspect_cli_provider(*, provider_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+    from common.models.llm_provider import LLMProviderDao
+
+    resolved_user_id = user_id or get_default_cli_user_id()
+    provider = await LLMProviderDao().get_by_id(provider_id)
+    if not provider:
+        raise CLIError(
+            f"Provider not found: {provider_id}",
+            next_steps=["Run `sage provider list` to inspect visible providers."],
+        )
+    if provider.user_id and provider.user_id != resolved_user_id:
+        raise CLIError(
+            f"Provider {provider_id} is not visible to user {resolved_user_id}",
+            next_steps=[f"Run `sage provider list --user-id {resolved_user_id}` to inspect visible providers."],
+        )
+    return {
+        "user_id": resolved_user_id,
+        "provider_id": provider_id,
+        "provider": _sanitize_provider_record(provider.to_dict()),
+    }
+
+
+async def verify_cli_provider(
+    *,
+    name: Optional[str] = None,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+    max_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
+    presence_penalty: Optional[float] = None,
+    max_model_len: Optional[int] = None,
+    supports_multimodal: Optional[bool] = None,
+    supports_structured_output: Optional[bool] = None,
+    is_default: Optional[bool] = None,
+) -> Dict[str, Any]:
+    from common.services import llm_provider_service
+
+    resolved = _resolve_provider_create_data(
+        name=name,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        presence_penalty=presence_penalty,
+        max_model_len=max_model_len,
+        supports_multimodal=supports_multimodal,
+        supports_structured_output=supports_structured_output,
+        is_default=is_default,
+    )
+    data = resolved["data"]
+    try:
+        await llm_provider_service.verify_provider(data)
+    except Exception as exc:
+        raise CLIError(
+            friendly_provider_probe_error(exc, subject="Provider"),
+            next_steps=[
+                "Check `--api-key`, `--base-url`, and `--model`, then run `sage provider verify` again.",
+            ],
+        ) from exc
+    return {
+        "status": "ok",
+        "message": "Provider verification succeeded",
+        "sources": resolved["sources"],
+        "provider": _sanitize_provider_record(data.model_dump()),
+    }
+
+
+async def create_cli_provider(
+    *,
+    user_id: Optional[str] = None,
+    name: Optional[str] = None,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+    max_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
+    presence_penalty: Optional[float] = None,
+    max_model_len: Optional[int] = None,
+    supports_multimodal: Optional[bool] = None,
+    supports_structured_output: Optional[bool] = None,
+    is_default: Optional[bool] = None,
+) -> Dict[str, Any]:
+    from common.services import llm_provider_service
+
+    resolved_user_id = user_id or get_default_cli_user_id()
+    resolved = _resolve_provider_create_data(
+        name=name,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        presence_penalty=presence_penalty,
+        max_model_len=max_model_len,
+        supports_multimodal=supports_multimodal,
+        supports_structured_output=supports_structured_output,
+        is_default=is_default,
+    )
+    provider_id = await llm_provider_service.create_provider(resolved["data"], user_id=resolved_user_id)
+    providers = await llm_provider_service.list_providers(resolved_user_id)
+    provider = next((item for item in providers if item.get("id") == provider_id), None)
+    return {
+        "status": "ok",
+        "message": "Provider saved",
+        "user_id": resolved_user_id,
+        "provider_id": provider_id,
+        "sources": resolved["sources"],
+        "provider": _sanitize_provider_record(provider or resolved["data"].model_dump()),
+    }
+
+
+async def update_cli_provider(
+    *,
+    provider_id: str,
+    user_id: Optional[str] = None,
+    name: Optional[str] = None,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+    max_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
+    presence_penalty: Optional[float] = None,
+    max_model_len: Optional[int] = None,
+    supports_multimodal: Optional[bool] = None,
+    supports_structured_output: Optional[bool] = None,
+    is_default: Optional[bool] = None,
+) -> Dict[str, Any]:
+    from common.services import llm_provider_service
+
+    resolved_user_id = user_id or get_default_cli_user_id()
+    data = _build_provider_update_data(
+        name=name,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        presence_penalty=presence_penalty,
+        max_model_len=max_model_len,
+        supports_multimodal=supports_multimodal,
+        supports_structured_output=supports_structured_output,
+        is_default=is_default,
+    )
+    provider = await llm_provider_service.update_provider(
+        provider_id,
+        data,
+        user_id=resolved_user_id,
+        allow_system_default_update=False,
+    )
+    return {
+        "status": "ok",
+        "message": "Provider updated",
+        "user_id": resolved_user_id,
+        "provider_id": provider_id,
+        "provider": _sanitize_provider_record(provider.to_dict()),
+    }
+
+
+async def delete_cli_provider(*, provider_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+    from common.services import llm_provider_service
+
+    resolved_user_id = user_id or get_default_cli_user_id()
+    await llm_provider_service.delete_provider(provider_id, user_id=resolved_user_id)
+    return {
+        "status": "ok",
+        "message": "Provider deleted",
+        "user_id": resolved_user_id,
+        "provider_id": provider_id,
+        "deleted": True,
     }
 
 
@@ -597,12 +1074,11 @@ async def validate_requested_skills(
             next_steps.append(
                 f"Run `sage skills --workspace {os.path.abspath(workspace)}` to inspect workspace skills."
             )
-        raise RuntimeError(
+        raise CLIError(
             "Unknown CLI skill(s): "
             f"{', '.join(missing)}\n"
-            f"Available skills: {available_display}\n"
-            "Suggested next steps:\n"
-            + "\n".join(f"- {item}" for item in next_steps)
+            f"Available skills: {available_display}",
+            next_steps=next_steps,
         )
     return normalized
 
@@ -686,13 +1162,25 @@ async def inspect_session(
             scope_suffix = f" for user {resolved_user_id}"
             if agent_id:
                 scope_suffix += f" and agent {agent_id}"
-            raise RuntimeError(f"No recent session found{scope_suffix}")
-        raise RuntimeError(f"Session not found: {session_id}")
+            raise CLIError(
+                f"No recent session found{scope_suffix}",
+                next_steps=["Run `sage sessions` to inspect visible sessions."],
+            )
+        raise CLIError(
+            f"Session not found: {session_id}",
+            next_steps=["Run `sage sessions` to inspect visible sessions."],
+        )
 
     if resolved_user_id and conversation.user_id and conversation.user_id != resolved_user_id:
-        raise RuntimeError(f"Session {conversation.session_id} is not visible to user {resolved_user_id}")
+        raise CLIError(
+            f"Session {conversation.session_id} is not visible to user {resolved_user_id}",
+            next_steps=["Check `--user-id`, or run `sage sessions --user-id <user>` to inspect visible sessions."],
+        )
     if agent_id and conversation.agent_id and conversation.agent_id != agent_id:
-        raise RuntimeError(f"Session {conversation.session_id} is not visible to agent {agent_id}")
+        raise CLIError(
+            f"Session {conversation.session_id} is not visible to agent {agent_id}",
+            next_steps=[f"Run `sage sessions --agent-id {agent_id}` to inspect sessions for that agent."],
+        )
 
     counts = conversation.get_message_count()
     messages = _normalize_messages(conversation.messages or [])
@@ -735,11 +1223,9 @@ def validate_cli_runtime_requirements() -> config.StartupConfig:
     issues = _collect_runtime_issues(cfg)
     if issues["errors"]:
         detail = "\n".join(f"- {item}" for item in issues["errors"])
-        next_steps = "\n".join(f"- {item}" for item in issues["next_steps"])
-        raise RuntimeError(
+        raise CLIError(
             "CLI runtime is not ready:\n"
-            f"{detail}\n"
-            "Suggested next steps:\n"
-            f"{next_steps}"
+            f"{detail}",
+            next_steps=issues["next_steps"],
         )
     return cfg
