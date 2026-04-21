@@ -26,6 +26,46 @@
           {{ errorMessage }}
         </div>
 
+        <div
+          v-if="showRegistrationDisabledNotice"
+          class="mb-5 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100"
+        >
+          <div class="flex items-start gap-2">
+            <Info class="mt-0.5 size-4 shrink-0 text-amber-400" />
+            <div class="space-y-2">
+              <p class="font-medium text-amber-100">{{ t('auth.registrationDisabledTitle') }}</p>
+              <p class="text-amber-100/90">
+                {{ t('auth.registrationDisabledIntro') }}
+                <a
+                  href="https://zavixai.com/html/sage.html"
+                  target="_blank"
+                  rel="noreferrer"
+                  class="font-medium text-amber-200 underline underline-offset-2 hover:text-amber-100"
+                >
+                  {{ t('auth.registrationDisabledDesktopLink') }}
+                </a>
+              </p>
+              <p class="text-amber-100/90">
+                {{ t('auth.registrationDisabledSelfHostIntro') }}
+                <a
+                  href="https://github.com/ZHangZHengEric/Sage"
+                  target="_blank"
+                  rel="noreferrer"
+                  class="font-medium text-amber-200 underline underline-offset-2 hover:text-amber-100"
+                >
+                  {{ t('auth.registrationDisabledRepoLink') }}
+                </a>
+              </p>
+              <p class="text-amber-100/90">
+                {{ t('auth.registrationDisabledContactIntro') }}
+                <span class="font-mono text-amber-200">{{ t('auth.registrationDisabledContactWeChat1') }}</span>
+                <span class="mx-1">/</span>
+                <span class="font-mono text-amber-200">{{ t('auth.registrationDisabledContactWeChat2') }}</span>
+              </p>
+            </div>
+          </div>
+        </div>
+
         <div v-if="localProvider">
           <form :class="formClass" @submit.prevent="handleLocalSubmit">
             <div :class="fieldClass">
@@ -256,7 +296,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowRight, Building2, Eye, EyeOff, Github, KeyRound, Mail, ShieldCheck } from 'lucide-vue-next'
+import { ArrowRight, Building2, Eye, EyeOff, Github, Info, KeyRound, Mail, ShieldCheck } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
 import AnimatedCharactersStage from '@/components/auth/AnimatedCharactersStage.vue'
@@ -315,6 +355,9 @@ const navigateAfterAuth = async (targetPath) => {
 const isLocalAuthProvider = (provider) => provider?.type === 'native' || provider?.id === 'native'
 
 const localProvider = computed(() => authProviders.value.find((provider) => isLocalAuthProvider(provider)) || null)
+const showRegistrationDisabledNotice = computed(() => (
+  Boolean(localProvider.value) && !allowRegistration.value && localMode.value === 'login'
+))
 const externalProviders = computed(() => (
   localOnlyMode.value
     ? []
