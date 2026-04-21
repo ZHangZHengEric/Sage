@@ -1,7 +1,13 @@
 
+2026-04-21 22:55 桌面端上传图片改回"本地绝对路径"链路：sidecar `POST /api/oss/upload` 现在把 `file_path.resolve()` 直接作为 `url` 返回（保留 `local_path` 同值字段，外加 `http_url` 仅作降级展示）。前端 markdown 引用 / image_url part 都用本地路径，命中 MarkdownRenderer 既有的 `convertFileSrc / data-local-image` 分支，agent 端 `multimodal_image.process_multimodal_content` 直接走"裸路径→base64"分支，不再需要 `resolve_local_sage_url` 反解 localhost URL，也省掉一次 HTTP 抓取，文件类工具可直接消费该路径。22:30 加的 HTTP fallback 保留，给 server-web 那种 HOME 不一致场景兜底。
+
+2026-04-21 22:30 修复 sage 上传图片两个问题：1) 输入框 markdown alt 与最终 URL 文件名不一致（原 png/被压成 jpg + 时间戳后缀）——oss.uploadFile 改返回 {url, filename}，MessageInput/ChipInput 在上传完成后用服务端文件名刷新 chip 与 file.name，buildOrderedMultimodalContent 直接取 URL 末段作为 alt，desktop+server-web 同步；2) image_url 没转 base64 导致 dashscope 报 InvalidParameter——multimodal_image.process_multimodal_content 增加本机地址 HTTP 抓取兜底（httpx 已在 requirements），Path.home 反解失败时再走 GET URL→压缩→data:image/jpeg;base64 分支，加 warning/error 日志便于排查。
+
 2026-04-21 21:30 server 端登录页：当 allow_registration=false 时新增显眼提示——告知当前网页不允许创建新用户，推荐下载桌面版 https://zavixai.com/html/sage.html，或自行从 GitHub 部署 Web 版，并附微信联系方式 cfyz0814 / zhangzheng-thu。新增 zh/en 文案和 2 条 Login 单测，全部通过。
 
 2026-04-21 17:10 限制 Fibre 专属工具仅在 fibre 模式下可选：AgentEdit.vue 增加 isFibreOnlyToolUnavailable，非 fibre 模式下 sys_spawn_agent / sys_delegate_task / sys_finish_task 复选框禁用并打「仅 Fibre 模式」徽章 + 提示；模式切出 fibre 时自动从 availableTools 移除；后端 chat router 新增 _sync_fibre_only_tools 兜底，非 fibre 请求强制剔除这三个工具。
+
+2026-04-21 17:10 更新 docs/zh/DESIGN_AGENT_FLOW_PRODUCTIZATION.md：产品名定为「智能体画布」（内核仍叫 AgentFlow），重写 §9 IA 决策（智能体/智能体画布平级菜单、Router Agent 同列表加 tab、Chat 调用侧统一、旧「工作流」字段改名「任务步骤」），把 §11 替换为不带时间的 21 步递进式开发计划，附录 B 增加 UI 文案强约束表。
 
 2026-04-21 16:30 新增设计文档 docs/zh/DESIGN_AGENT_FLOW_PRODUCTIZATION.md：把 AgentFlow 升级为「真正的 Agent Flow」——所有 AI 节点都是 Agent，引入 Agent 模板体系（business/router 两种内置模板），分支判据收敛到 flow_state.{input,vars,steps} 命名空间（v1 寄存于 audit_status 子树），AgentFlow 改为可保存可重置的 DAG 静态图配置（flow_version.graph_json），含分阶段实施路线、API 草案、改动点速查与待决问题。
 

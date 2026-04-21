@@ -30,6 +30,20 @@ export const buildAttachmentPlaceholder = (file) => {
 /** 转义正则中的特殊字符。 */
 const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
+/** 从一个完整 URL 中取出最后一段文件名（用作 markdown alt，确保与 URL 末段完全一致）。 */
+const extractUrlTailName = (url) => {
+  if (!url) return ''
+  try {
+    const u = new URL(url, 'http://localhost')
+    const last = decodeURIComponent(u.pathname.split('/').pop() || '')
+    return last || ''
+  } catch {
+    const s = String(url).split('?')[0].split('#')[0]
+    const last = s.split('/').pop() || ''
+    return last
+  }
+}
+
 /**
  * 从输入框文本中移除某个附件的占位符（一并清掉相邻的换行，避免留下空行）。
  */
@@ -98,7 +112,10 @@ export const buildOrderedMultimodalContent = (rawText, files = [], options = {})
     const file = filesById.get(String(id))
     if (file && file.url) {
       usedIds.add(String(id))
-      const cleanName = cleanupAttachmentName(filename || file.name)
+      // 让 markdown alt 与最终 URL 末段保持一致：优先用上传后服务端真实文件名（file.name 已在上传完成时刷新成 filename），
+      // 退化时再用占位符里的旧名字 / 清洗版本，避免后端 LLM 看到 alt 与链接不同导致疑惑。
+      const urlTailName = extractUrlTailName(file.url)
+      const cleanName = urlTailName || file.name || cleanupAttachmentName(filename || '') || '文件'
       const realImage = `![${cleanName}](${file.url})`
       const realLink = `[${cleanName}](${file.url})`
 
@@ -148,7 +165,7 @@ export const buildOrderedMultimodalContent = (rawText, files = [], options = {})
   if (orphans.length > 0) {
     const trailingTextPieces = []
     for (const f of orphans) {
-      const cleanName = cleanupAttachmentName(f.name)
+      const cleanName = extractUrlTailName(f.url) || f.name || cleanupAttachmentName(f.name)
       if (f.type === 'image') {
         if (multimodalEnabled) {
           items.push({ type: 'image_url', image_url: { url: f.url } })
