@@ -1040,6 +1040,11 @@ async function executeCommand(command) {
     return { ok: true, waited_seconds: seconds };
   }
 
+  if (action === "ping") {
+    // 后端 /api/browser-extension/probe 主动探活用，必须立即返回
+    return { ok: true, pong: true, ts: Date.now() };
+  }
+
   if (action === "list_tabs") {
     const tabs = await listWindowTabs(activeTab?.windowId);
     return { ok: true, activeTabId: activeTab?.id || null, tabs };
@@ -1076,18 +1081,19 @@ async function executeCommand(command) {
   throw new Error(`Unsupported action: ${action}`);
 }
 
-async function pollAndHandleOneCommand() {
-  if (COMMAND_RUNTIME_STATE.polling) return;
+async function pollAndHandleOneCommand({ pollTimeoutSec = 20 } = {}) {
+  if (COMMAND_RUNTIME_STATE.polling) return { handled: false, reason: "already_polling" };
   COMMAND_RUNTIME_STATE.polling = true;
   const state = await detectBackend(false);
   if (!state.detected || !state.apiBase) {
     COMMAND_RUNTIME_STATE.polling = false;
-    return;
+    return { handled: false, reason: "no_backend" };
   }
   try {
-    const payload = await fetchJson(state.apiBase, "/api/browser-extension/commands/poll?timeout=1", { method: "GET" });
+    const safeTimeout = Math.max(1, Math.min(60, Number(pollTimeoutSec) || 20));
+    const payload = await fetchJson(state.apiBase, `/api/browser-extension/commands/poll?timeout=${safeTimeout}`, { method: "GET" });
     const command = payload?.data?.command || null;
-    if (!command) return;
+    if (!command) return { handled: false, reason: "no_command" };
 
     try {
       COMMAND_RUNTIME_STATE.executing = true;
@@ -1123,10 +1129,29 @@ async function pollAndHandleOneCommand() {
       COMMAND_RUNTIME_STATE.currentCommandId = "";
       COMMAND_RUNTIME_STATE.lastCommandAt = Date.now();
     }
+    return { handled: true };
   } catch (err) {
-    // Ignore and retry on next cycle.
+    return { handled: false, reason: "error" };
   } finally {
     COMMAND_RUNTIME_STATE.polling = false;
+  }
+}
+
+// 在一个 alarm 周期内连续长轮询，最多持续 maxDurationMs（保持在 service worker 的 30s 存活窗口内）
+async function pollLoopWithinAlarmCycle(maxDurationMs = 26000) {
+  const startedAt = Date.now();
+  let cycles = 0;
+  while (Date.now() - startedAt < maxDurationMs) {
+    cycles++;
+    const remaining = Math.max(1, Math.floor((maxDurationMs - (Date.now() - startedAt)) / 1000));
+    const pollSec = Math.min(20, remaining);
+    if (pollSec <= 0) break;
+    const res = await pollAndHandleOneCommand({ pollTimeoutSec: pollSec });
+    // 处理完一条命令后立即继续抓下一条；否则就让长轮询自然超时返回
+    if (!res.handled && res.reason === "no_backend") {
+      await sleep(2000);
+    }
+    if (res.reason === "already_polling") break;
   }
 }
 
@@ -1153,10 +1178,13 @@ async function injectContentScriptToExistingTabs() {
   }
 }
 
+// Chrome 120+ 支持 0.5 分钟（30s）。低版本 Chrome 会被向下取整到 1 分钟，仍可用
+const HEARTBEAT_PERIOD_MIN = 0.5;
+
 chrome.runtime.onInstalled.addListener(async () => {
   await detectBackend(true);
   await injectContentScriptToExistingTabs();
-  chrome.alarms.create("sage-heartbeat", { periodInMinutes: 1 });
+  chrome.alarms.create("sage-heartbeat", { periodInMinutes: HEARTBEAT_PERIOD_MIN });
   if (chrome.sidePanel?.setPanelBehavior) {
     await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   }
@@ -1165,7 +1193,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.runtime.onStartup.addListener(async () => {
   await detectBackend(false);
   await injectContentScriptToExistingTabs();
-  chrome.alarms.create("sage-heartbeat", { periodInMinutes: 1 });
+  chrome.alarms.create("sage-heartbeat", { periodInMinutes: HEARTBEAT_PERIOD_MIN });
   if (chrome.sidePanel?.setPanelBehavior) {
     await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   }
@@ -1174,12 +1202,13 @@ chrome.runtime.onStartup.addListener(async () => {
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== "sage-heartbeat") return;
   await sendHeartbeat();
-  await pollAndHandleOneCommand();
+  // 长轮询一段时间，让后端入队的命令（含 ping 探活）能在 1-2 秒内被消费
+  await pollLoopWithinAlarmCycle();
 });
 
 chrome.tabs.onActivated.addListener(async () => {
   await sendHeartbeat();
-  await pollAndHandleOneCommand();
+  await pollAndHandleOneCommand({ pollTimeoutSec: 5 });
 });
 
 chrome.tabs.onUpdated.addListener(async (_tabId, changeInfo) => {
@@ -1228,13 +1257,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       await chrome.sidePanel.open({ windowId });
       const state = await sendHeartbeat();
-      await pollAndHandleOneCommand();
+      await pollLoopWithinAlarmCycle();
       sendResponse({ ok: true, state });
       return;
     }
 
     if (message?.type === "poll-command-now") {
-      await pollAndHandleOneCommand();
+      await pollLoopWithinAlarmCycle();
       sendResponse({ ok: true });
       return;
     }

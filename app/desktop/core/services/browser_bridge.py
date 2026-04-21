@@ -8,7 +8,10 @@ from dataclasses import dataclass
 from typing import Any
 
 
-HEARTBEAT_TTL_SECONDS = 45.0
+HEARTBEAT_TTL_SECONDS = 75.0  # Chrome 扩展心跳每 30s 一次，给两次心跳 + 一点抖动余量
+
+# 用户主动点击「重新检测」时，后端入队此 action 探活，扩展端必须立即响应
+PING_ACTION = "ping"
 
 
 @dataclass
@@ -67,6 +70,22 @@ class BrowserBridgeHub:
 
     async def get_status(self, user_id: str) -> dict[str, Any]:
         async with self._lock:
+            return self._serialize_state_unlocked(user_id)
+
+    async def force_offline(self, user_id: str) -> dict[str, Any]:
+        """强制把指定 user 的扩展状态置为离线（last_seen_at 清零）。
+
+        用于 /probe 主动探活失败、或用户希望立刻取消「在线」状态的场景。
+        清空 capabilities 和 page_context 防止界面继续展示陈旧信息，但保留 extension_id
+        以便 UI 显示「上次连接的扩展是哪一个」。
+        """
+        async with self._lock:
+            state = self._states.get(user_id)
+            if state is not None:
+                state["last_seen_at"] = 0.0
+                state["capabilities"] = []
+                state["page_context"] = None
+                state["active_tab"] = None
             return self._serialize_state_unlocked(user_id)
 
     async def enqueue_command(

@@ -9,6 +9,7 @@ from common.core.render import Response
 from ..services.browser_capability import (
     get_browser_capability_coordinator,
     get_browser_tool_sync_state,
+    probe_extension,
 )
 from ..services.browser_bridge import BrowserBridgeHub
 from ..user_context import get_desktop_user_id
@@ -42,6 +43,19 @@ async def extension_status(http_request: Request):
     return await Response.succ(
         message="浏览器插件状态获取成功",
         data=await get_browser_tool_sync_state(user_id),
+    )
+
+
+@browser_extension_router.post("/probe")
+async def extension_probe(
+    http_request: Request,
+    timeout: float = Query(default=5.0, ge=0.5, le=30.0),
+):
+    """主动 ping 浏览器扩展。超时即强制标记离线，便于前端立刻刷新。"""
+    user_id = get_desktop_user_id(http_request)
+    return await Response.succ(
+        message="浏览器插件探活完成",
+        data=await probe_extension(user_id, timeout_seconds=timeout),
     )
 
 

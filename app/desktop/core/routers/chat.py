@@ -74,25 +74,67 @@ async def _apply_desktop_auto_sub_agents(request: StreamRequest) -> None:
     ]
 
 
-async def _sync_browser_tools_for_request(request: StreamRequest) -> None:
+FIBRE_ONLY_TOOLS = ("sys_spawn_agent", "sys_delegate_task", "sys_finish_task")
+
+
+def _sync_fibre_only_tools(request: StreamRequest) -> None:
+    """Fibre 专属工具（智能体委派/创建/完成）只允许在 fibre 模式下出现在 available_tools。
+    其他模式下即便 agent 配置里残留也强制移除，避免 agent 误调用。
+    """
+    if request.agent_mode == "fibre":
+        return
     current_tools = list(request.available_tools or [])
-    browser_sync_state = await get_browser_tool_sync_state(request.user_id or "")
+    cleaned = [t for t in current_tools if t not in FIBRE_ONLY_TOOLS]
+    if len(cleaned) != len(current_tools):
+        logger.bind(session_id=request.session_id).info(
+            f"[FibreTools] 当前 agent_mode={request.agent_mode!r} 非 fibre，已移除 fibre 专属工具"
+        )
+    request.available_tools = cleaned
+
+
+async def _sync_browser_tools_for_request(request: StreamRequest) -> None:
+    """
+    根据浏览器扩展的实时状态，对 request.available_tools 中的浏览器工具做同步：
+    - 扩展离线/未安装：清掉所有浏览器工具（即便 agent 配置里勾了也无效，因为根本调不通）。
+    - 扩展在线：先剔除 agent 配置里那些扩展并未上报 capability 的浏览器工具，再把扩展支持
+      但 agent 配置里漏掉的工具补回来（保持 UI 一侧 syncBrowserToolSelection 的行为一致）。
+    """
+    current_tools = list(request.available_tools or [])
     all_browser_tools = set(BrowserBridgeTool.TOOL_NAMES)
-    online_browser_tools = set(browser_sync_state.get("browser_tools") or [])
 
-    # Remove browser tools that are currently offline or unsupported by the
-    # connected extension, regardless of agent config.
-    current_tools = [
-        tool_name for tool_name in current_tools if tool_name not in all_browser_tools
-    ]
+    browser_sync_state = await get_browser_tool_sync_state(request.user_id or "")
+    online = bool(browser_sync_state.get("browser_tools_online"))
+    supported_browser_tools = set(browser_sync_state.get("browser_tools") or [])
 
-    for tool_name in BrowserBridgeTool.TOOL_NAMES:
-        if tool_name not in online_browser_tools:
+    if not online:
+        # 没装/没在线：浏览器工具全部踢掉，避免注入空壳工具骗 agent 调用
+        cleaned = [t for t in current_tools if t not in all_browser_tools]
+        if len(cleaned) != len(current_tools):
+            logger.bind(session_id=request.session_id).info(
+                "[BrowserTools] 扩展离线，已从 available_tools 移除所有浏览器工具"
+            )
+        request.available_tools = cleaned
+        return
+
+    # 在线：保留扩展实际支持的；不支持的踢掉
+    cleaned: list[str] = []
+    dropped: list[str] = []
+    for tool_name in current_tools:
+        if tool_name in all_browser_tools and tool_name not in supported_browser_tools:
+            dropped.append(tool_name)
             continue
-        if tool_name not in current_tools:
-            current_tools.append(tool_name)
+        cleaned.append(tool_name)
+    if dropped:
+        logger.bind(session_id=request.session_id).info(
+            f"[BrowserTools] 扩展未上报 capability，移除不支持的浏览器工具: {dropped}"
+        )
 
-    request.available_tools = current_tools
+    # 扩展支持但 agent 配置里没列的工具补齐（与前端 syncBrowserToolSelection 行为一致）
+    for tool_name in BrowserBridgeTool.TOOL_NAMES:
+        if tool_name in supported_browser_tools and tool_name not in cleaned:
+            cleaned.append(tool_name)
+
+    request.available_tools = cleaned
 
 
 async def _start_web_stream_session(
@@ -119,6 +161,7 @@ async def _start_web_stream_session(
         require_agent_id=False,
     )
     await _apply_desktop_auto_sub_agents(request)
+    _sync_fibre_only_tools(request)
     await _sync_browser_tools_for_request(request)
     stream_service, lock = await chat_service.prepare_session(request)
     session_id = request.session_id
@@ -276,6 +319,7 @@ async def chat(request: ChatRequest, http_request: Request):
         require_agent_id=True,
     )
     await _apply_desktop_auto_sub_agents(inner_request)
+    _sync_fibre_only_tools(inner_request)
     await _sync_browser_tools_for_request(inner_request)
 
     stream_service, lock = await chat_service.prepare_session(inner_request)
