@@ -1,12 +1,12 @@
 ---
-
-## layout: default
+layout: default
 title: Tool & Skill System
 parent: Architecture
 nav_order: 7
 description: "ToolManager / ToolProxy, built-in tools, MCP proxy, SkillManager / SkillProxy and in-sandbox skills"
 lang: en
 ref: architecture-sagents-tool-skill
+---
 
 {% include lang_switcher.html %}
 

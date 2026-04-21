@@ -1,13 +1,12 @@
 ---
-
-## layout: default
-
+layout: default
 title: sagents 总览
 parent: 架构
 nav_order: 4
 description: "sagents/ 核心运行时的分层、模块边界与一次 run_stream 的全链路"
 lang: zh
 ref: architecture-sagents-overview
+---
 
 {% include lang_switcher.html %}
 

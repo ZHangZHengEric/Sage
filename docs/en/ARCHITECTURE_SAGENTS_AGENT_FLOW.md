@@ -1,12 +1,12 @@
 ---
-
-## layout: default
+layout: default
 title: Agent & Flow Orchestration
 parent: Architecture
 nav_order: 5
 description: "AgentBase, the specialized agents, AgentFlow / FlowExecutor and the three agent_modes"
 lang: en
 ref: architecture-sagents-agent-flow
+---
 
 {% include lang_switcher.html %}
 
