@@ -179,6 +179,10 @@ sage run --stats "Say hello briefly."
 
 # Start an interactive chat session
 sage chat
+
+# Inspect or manage local model providers
+sage provider list
+sage provider verify --base-url https://api.deepseek.com/v1 --model deepseek-chat --api-key <key>
 ```
 
 Detailed CLI usage is documented here:

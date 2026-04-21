@@ -263,6 +263,53 @@ The output includes:
 
 When `--agent-id` is provided, the CLI shows the skills currently available to that specific agent after the newer agent-skill sync logic is applied.
 
+### `sage provider`
+
+Inspect and manage local LLM providers from the CLI.
+
+Supported subcommands:
+
+- `list`
+- `inspect`
+- `verify`
+- `create`
+- `update`
+- `delete`
+
+Examples:
+
+```bash
+sage provider list
+sage provider list --default-only
+sage provider list --model deepseek-chat
+sage provider list --name-contains deepseek
+
+sage provider inspect <provider_id>
+
+sage provider verify --base-url https://api.deepseek.com/v1 --model deepseek-chat --api-key <key>
+sage provider verify --json
+sage provider verify --base-url https://api.deepseek.com/v1 --model deepseek-chat --api-key <key> --json
+
+sage provider create --user-id alice --base-url https://api.deepseek.com/v1 --model deepseek-chat --api-key <key> --set-default
+sage provider create --user-id alice --name "CLI Default Provider" --json
+
+sage provider update <provider_id> --user-id alice --model deepseek-reasoner
+sage provider update <provider_id> --user-id alice --set-default
+
+sage provider delete <provider_id> --user-id alice
+```
+
+Important behavior:
+
+- `verify` probes connectivity but does not save anything.
+- `create` and `update` both require a successful probe before saving.
+- omitted `--base-url`, `--api-key`, and `--model` values on `create`/`verify` fall back to the current CLI defaults from env.
+- when those fallback defaults are missing, `create`/`verify` fail early with a CLI error and concrete next steps.
+- `update` rejects empty `--api-key` values and also fails fast when no update fields are supplied.
+- provider output masks API keys and only shows a short preview.
+- each user can have at most one default provider; setting one provider as default clears the other default flags for that same user.
+- `delete` still refuses to remove the current default provider.
+
 ## Skills In CLI
 
 The CLI now supports explicit skill selection on:
@@ -353,6 +400,20 @@ Then verify:
 - skills output matches what is visible locally
 - stats include the expected user/workspace/skill context
 - JSON mode ends with a `cli_stats` event
+
+## Maintainer Validation
+
+When you change provider management or CLI error handling, also run the real integration test:
+
+```bash
+/opt/miniconda3/envs/sage_dev/bin/python app/cli/test_provider_integration.py
+```
+
+Notes:
+
+- the default system Python may skip this suite if `sqlalchemy`, `aiosqlite`, or `loguru` are not installed
+- this test exercises `provider create -> inspect -> update -> delete` against a temporary file DB
+- it also verifies default-provider switching and friendly JSON errors for auth, model-not-found, and timeout probe failures
 
 ## Related Docs
 

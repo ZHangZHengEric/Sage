@@ -158,3 +158,22 @@ class LLMProviderDao(BaseDao):
         if user_id is not None:
             where.append(LLMProvider.user_id == user_id)
         return await BaseDao.get_first(self, LLMProvider, where=where)
+
+    async def clear_default_for_user(
+        self,
+        *,
+        user_id: Optional[str] = None,
+        exclude_provider_id: Optional[str] = None,
+    ) -> None:
+        where = []
+        if user_id is not None:
+            where.append(LLMProvider.user_id == user_id)
+        if exclude_provider_id is not None:
+            where.append(LLMProvider.id != exclude_provider_id)
+        where.append(LLMProvider.is_default == True)  # noqa: E712
+        await BaseDao.update_where(
+            self,
+            LLMProvider,
+            where=where,
+            values={"is_default": False},
+        )

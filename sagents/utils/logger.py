@@ -92,7 +92,7 @@ class Logger:
 
         # Clear existing handlers to avoid duplicate logs
         if self.logger.handlers:
-            self.logger.handlers.clear()
+            self._close_handlers(self.logger)
 
         # Console handler - 只显示INFO及以上级别
         console_handler = logging.StreamHandler(sys.stdout)
@@ -275,6 +275,16 @@ class Logger:
             # 如果获取失败，返回None
             return None
 
+    @staticmethod
+    def _close_handlers(target_logger: logging.Logger) -> None:
+        """Close file-backed handlers before clearing them to avoid resource leaks."""
+        for handler in list(target_logger.handlers):
+            try:
+                handler.close()
+            except Exception:
+                pass
+        target_logger.handlers.clear()
+
     def _get_session_logger(self, session_id: str) -> logging.Logger:
         """获取或创建session专用的logger"""
         if session_id in self.session_loggers:
@@ -287,7 +297,7 @@ class Logger:
 
             # 清除可能存在的handlers
             if session_logger.handlers:
-                session_logger.handlers.clear()
+                self._close_handlers(session_logger)
             
             self.session_loggers[session_id] = session_logger
 
@@ -432,11 +442,7 @@ class Logger:
         """清理session专用的logger"""
         if session_id in self.session_loggers:
             session_logger = self.session_loggers[session_id]
-            # 关闭所有handlers
-            for handler in session_logger.handlers:
-                handler.close()
-            # 清除handlers
-            session_logger.handlers.clear()
+            self._close_handlers(session_logger)
             # 从缓存中移除
             del self.session_loggers[session_id]
 

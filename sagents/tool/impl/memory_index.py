@@ -84,9 +84,12 @@ class MemoryIndex:
     ]
     DEFAULT_FILE_PROCESS_CONCURRENCY = 8
     INDEX_SCHEMA_VERSION = 2
-    FTS_SCHEMA_VERSION = 1
+    FTS_SCHEMA_VERSION = 2
     DEFAULT_CHUNK_SIZE = 1200
     DEFAULT_CHUNK_OVERLAP = 200
+    DEFAULT_FILE_SEARCH_LIMIT_MULTIPLIER = 4
+    DEFAULT_RERANK_LIMIT_MULTIPLIER = 3
+    DEFAULT_CHUNK_ROW_LIMIT_MULTIPLIER = 4
 
     def __init__(self, sandbox, workspace_path: str, index_path: str, blacklist: Optional[Set[str]] = None):
         """
@@ -341,6 +344,7 @@ class MemoryIndex:
             current_version = row["value"] if row else None
             if current_version != str(self.FTS_SCHEMA_VERSION):
                 conn.execute("DROP TABLE IF EXISTS memory_fts")
+                conn.execute("DROP TABLE IF EXISTS memory_file_fts")
                 conn.execute("DELETE FROM meta")
             conn.execute(
                 """
@@ -357,6 +361,17 @@ class MemoryIndex:
                 """
             )
             conn.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS memory_file_fts
+                USING fts5(
+                    path UNINDEXED,
+                    search_text,
+                    content UNINDEXED,
+                    tokenize='unicode61'
+                )
+                """
+            )
+            conn.execute(
                 "INSERT OR REPLACE INTO meta(key, value) VALUES ('fts_schema_version', ?)",
                 (str(self.FTS_SCHEMA_VERSION),),
             )
@@ -367,8 +382,14 @@ class MemoryIndex:
             return False
         try:
             with self._connect_fts() as conn:
-                row = conn.execute("SELECT COUNT(*) AS count FROM memory_fts").fetchone()
-                return bool(row and row["count"] > 0)
+                chunk_row = conn.execute("SELECT COUNT(*) AS count FROM memory_fts").fetchone()
+                file_row = conn.execute("SELECT COUNT(*) AS count FROM memory_file_fts").fetchone()
+                return bool(
+                    chunk_row
+                    and file_row
+                    and chunk_row["count"] > 0
+                    and file_row["count"] > 0
+                )
         except Exception as e:
             logger.warning(f"MemoryIndex: Failed to inspect FTS index: {e}")
             return False
@@ -376,15 +397,21 @@ class MemoryIndex:
     def has_search_index(self) -> bool:
         return bool(self.documents) and self._fts_has_documents()
 
-    def _build_search_text(self, doc: FileDocument) -> str:
+    def _build_chunk_search_text(self, doc: FileDocument) -> str:
         filename = os.path.basename(doc.path)
         text = f"{filename} {doc.content}"
+        return " ".join(self._tokenize(text))
+
+    def _build_file_search_text(self, path: str, content: str) -> str:
+        filename = os.path.basename(path)
+        text = f"{filename} {content}"
         return " ".join(self._tokenize(text))
 
     def _delete_file_from_fts(self, filepath: str) -> None:
         self._ensure_fts_schema()
         with self._connect_fts() as conn:
             conn.execute("DELETE FROM memory_fts WHERE path = ?", (filepath,))
+            conn.execute("DELETE FROM memory_file_fts WHERE path = ?", (filepath,))
             conn.commit()
 
     def _sync_file_to_fts(self, filepath: str) -> None:
@@ -392,15 +419,18 @@ class MemoryIndex:
         doc_ids = self.path_to_doc_ids.get(filepath, [])
         with self._connect_fts() as conn:
             conn.execute("DELETE FROM memory_fts WHERE path = ?", (filepath,))
+            conn.execute("DELETE FROM memory_file_fts WHERE path = ?", (filepath,))
             rows = []
+            file_content_parts: List[str] = []
             for doc_id in doc_ids:
                 doc = self.documents.get(doc_id)
                 if not doc:
                     continue
+                file_content_parts.append(doc.content)
                 rows.append(
                     (
                         doc.path,
-                        self._build_search_text(doc),
+                        self._build_chunk_search_text(doc),
                         doc.content,
                         str(doc.line_start),
                         str(doc.line_end),
@@ -414,6 +444,19 @@ class MemoryIndex:
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     rows,
+                )
+            if file_content_parts:
+                full_content = "\n".join(file_content_parts)
+                conn.execute(
+                    """
+                    INSERT INTO memory_file_fts(path, search_text, content)
+                    VALUES (?, ?, ?)
+                    """,
+                    (
+                        filepath,
+                        self._build_file_search_text(filepath, full_content),
+                        full_content,
+                    ),
                 )
             conn.commit()
 
@@ -422,13 +465,28 @@ class MemoryIndex:
         self._ensure_fts_schema()
         with self._connect_fts() as conn:
             conn.execute("DELETE FROM memory_fts")
+            conn.execute("DELETE FROM memory_file_fts")
             rows = []
+            file_rows = []
+            for filepath in sorted(self.path_to_doc_ids.keys()):
+                doc_ids = self.path_to_doc_ids[filepath]
+                docs = [self.documents[doc_id] for doc_id in doc_ids if doc_id in self.documents]
+                if not docs:
+                    continue
+                full_content = "\n".join(doc.content for doc in docs)
+                file_rows.append(
+                    (
+                        filepath,
+                        self._build_file_search_text(filepath, full_content),
+                        full_content,
+                    )
+                )
             for doc_id in sorted(self.documents.keys()):
                 doc = self.documents[doc_id]
                 rows.append(
                     (
                         doc.path,
-                        self._build_search_text(doc),
+                        self._build_chunk_search_text(doc),
                         doc.content,
                         str(doc.line_start),
                         str(doc.line_end),
@@ -443,9 +501,19 @@ class MemoryIndex:
                     """,
                     rows,
                 )
+            if file_rows:
+                conn.executemany(
+                    """
+                    INSERT INTO memory_file_fts(path, search_text, content)
+                    VALUES (?, ?, ?)
+                    """,
+                    file_rows,
+                )
             conn.commit()
         elapsed = time.time() - start_time
-        logger.info(f"MemoryIndex: Rebuilt SQLite FTS index for {len(rows)} chunks in {elapsed:.3f}s")
+        logger.info(
+            f"MemoryIndex: Rebuilt SQLite FTS index for {len(file_rows)} files and {len(rows)} chunks in {elapsed:.3f}s"
+        )
 
     def _is_path_blacklisted(self, path: str) -> bool:
         """Check if path is in blacklist"""
@@ -750,6 +818,134 @@ class MemoryIndex:
             "matched_term": match.group()
         }]
 
+    def _build_result_preview(self, chunk_content: str, query: str, line_start: int) -> tuple[str, int]:
+        """Build a preview and line number from the strongest chunk hit."""
+        snippets = self._extract_snippets(chunk_content, query)
+        if snippets:
+            line_base = line_start - 1
+            preview = "\n\n".join([
+                f"[Line {line_base + s['line_number']}] {s['snippet']}"
+                for s in snippets
+            ])
+            return preview, line_start + snippets[0]["line_number"] - 1
+
+        preview = chunk_content[:500]
+        if len(chunk_content) > 500:
+            preview += "..."
+        return preview, line_start
+
+    def _filename_match_bonus(self, path: str, query_tokens: List[str]) -> float:
+        """Add a small bonus when the filename itself matches the query."""
+        basename = os.path.basename(path).lower()
+        stem, _ = os.path.splitext(basename)
+
+        significant_tokens = [token.lower() for token in query_tokens if len(token) > 1]
+        if not significant_tokens:
+            significant_tokens = [token.lower() for token in query_tokens if token]
+        if not significant_tokens:
+            return 0.0
+
+        basename_matches = sum(1 for token in significant_tokens if token in basename)
+        stem_matches = sum(1 for token in significant_tokens if token in stem)
+
+        coverage = basename_matches / len(significant_tokens)
+        stem_coverage = stem_matches / len(significant_tokens)
+        return min(0.2, coverage * 0.1 + stem_coverage * 0.1)
+
+    def _score_chunk_hits(self, rows: List[Any]) -> tuple[float, Optional[Any]]:
+        """Return a lightweight rerank boost plus the best chunk row."""
+        if not rows:
+            return 0.0, None
+
+        ranked_rows = sorted(
+            rows,
+            key=lambda row: -float(row["raw_score"]) if row["raw_score"] is not None else 0.0,
+            reverse=True,
+        )
+        chunk_scores = [
+            -float(row["raw_score"]) if row["raw_score"] is not None else 0.0
+            for row in ranked_rows[:3]
+        ]
+        best_score = chunk_scores[0]
+        second_score = chunk_scores[1] if len(chunk_scores) > 1 else 0.0
+        third_score = chunk_scores[2] if len(chunk_scores) > 2 else 0.0
+        hit_count_bonus = min(max(len(ranked_rows) - 1, 0), 4) * 0.03
+
+        return (
+            best_score * 0.2 + second_score * 0.08 + third_score * 0.04 + hit_count_bonus,
+            ranked_rows[0],
+        )
+
+    def _build_aggregated_search_result(
+        self,
+        path: str,
+        file_score: float,
+        query: str,
+        best_chunk_row: Optional[Any],
+    ) -> SearchResult:
+        """Build the final result preview after ranking has already completed."""
+        preview = ""
+        line_number = 1
+
+        if best_chunk_row is not None:
+            chunk_content = best_chunk_row["content"] or ""
+            line_start = int(best_chunk_row["line_start"] or 1)
+            preview, line_number = self._build_result_preview(chunk_content, query, line_start)
+        else:
+            doc_ids = self.path_to_doc_ids.get(path, [])
+            if doc_ids:
+                first_doc = self.documents.get(doc_ids[0])
+                if first_doc:
+                    preview, line_number = self._build_result_preview(first_doc.content or "", query, first_doc.line_start)
+
+        return SearchResult(
+            path=path,
+            score=file_score,
+            content=preview,
+            line_number=line_number,
+        )
+
+    def _score_file_candidate(
+        self,
+        path: str,
+        file_score: float,
+        rows: List[Any],
+        query: str,
+        query_tokens: List[str],
+    ) -> tuple[float, Optional[Any]]:
+        """Score a file candidate without eagerly building preview text."""
+        aggregate_score = file_score + self._filename_match_bonus(path, query_tokens)
+        chunk_boost, best_chunk_row = self._score_chunk_hits(rows)
+        aggregate_score += chunk_boost
+        return aggregate_score, best_chunk_row
+
+    def _fetch_chunk_rows(
+        self,
+        conn: sqlite3.Connection,
+        match_expr: str,
+        paths: List[str],
+        chunk_limit: int,
+    ) -> List[Any]:
+        """Fetch chunk hits for a bounded set of candidate files."""
+        if not paths:
+            return []
+
+        placeholders = ",".join("?" for _ in paths)
+        if not placeholders:
+            return []
+
+        return conn.execute(
+            f"""
+            SELECT path, content, line_start, line_end, chunk_index, bm25(memory_fts) AS raw_score
+            FROM memory_fts
+            WHERE search_text MATCH ?
+              AND path IN ({placeholders})
+            ORDER BY raw_score
+            LIMIT ?
+            """,
+            (match_expr, *paths, chunk_limit),
+        ).fetchall()
+
     def search(self, query: str, top_k: int = 5) -> List[SearchResult]:
         """
         Search memory
@@ -772,52 +968,93 @@ class MemoryIndex:
             if not query_tokens:
                 return []
 
-            results = []
             match_expr = " OR ".join(f'"{token}"' for token in query_tokens)
-            row_limit = max(top_k * 5, top_k)
+            file_limit = max(top_k * self.DEFAULT_FILE_SEARCH_LIMIT_MULTIPLIER, 20)
             with self._connect_fts() as conn:
-                rows = conn.execute(
+                file_rows = conn.execute(
                     """
-                    SELECT path, content, line_start, line_end, chunk_index, bm25(memory_fts) AS raw_score
-                    FROM memory_fts
+                    SELECT path, bm25(memory_file_fts) AS raw_file_score
+                    FROM memory_file_fts
                     WHERE search_text MATCH ?
-                    ORDER BY raw_score
+                    ORDER BY raw_file_score
                     LIMIT ?
                     """,
-                    (match_expr, row_limit),
+                    (match_expr, file_limit),
                 ).fetchall()
 
-            seen_paths = set()
-            for row in rows:
-                path = row["path"]
-                if path in seen_paths:
-                    continue
-                seen_paths.add(path)
+                if not file_rows:
+                    elapsed = time.time() - start_time
+                    logger.info(f"MemoryIndex: Search '{query}' completed, found 0 results in {elapsed:.3f}s")
+                    return []
 
-                chunk_content = row["content"] or ""
-                line_start = int(row["line_start"] or 1)
-                snippets = self._extract_snippets(chunk_content, query)
+                candidate_paths = [row["path"] for row in file_rows]
+                multi_term_query = len(query_tokens) > 1
 
-                if snippets:
-                    line_base = line_start - 1
-                    preview = "\n\n".join([
-                        f"[Line {line_base + s['line_number']}] {s['snippet']}"
-                        for s in snippets
-                    ])
+                if multi_term_query:
+                    rerank_limit = min(len(candidate_paths), max(top_k * self.DEFAULT_RERANK_LIMIT_MULTIPLIER, 12))
+                    rerank_paths = candidate_paths[:rerank_limit]
+                    chunk_limit = max(rerank_limit * self.DEFAULT_CHUNK_ROW_LIMIT_MULTIPLIER, top_k * 6, 20)
+                    chunk_rows = self._fetch_chunk_rows(conn, match_expr, rerank_paths, chunk_limit)
+
+                    file_hits: Dict[str, List[Any]] = {}
+                    for row in chunk_rows:
+                        path = row["path"]
+                        file_hits.setdefault(path, []).append(row)
+
+                    scored_candidates = []
+                    for file_row in file_rows:
+                        path = file_row["path"]
+                        file_score = -float(file_row["raw_file_score"]) if file_row["raw_file_score"] is not None else 0.0
+                        aggregate_score, best_chunk_row = self._score_file_candidate(
+                            path=path,
+                            file_score=file_score,
+                            rows=file_hits.get(path, []),
+                            query=query,
+                            query_tokens=query_tokens,
+                        )
+                        scored_candidates.append((aggregate_score, path, best_chunk_row))
+
+                    scored_candidates.sort(key=lambda item: item[0], reverse=True)
+                    top_candidates = scored_candidates[:top_k]
                 else:
-                    preview = chunk_content[:500]
-                    if len(chunk_content) > 500:
-                        preview += "..."
+                    preview_rerank_limit = min(len(candidate_paths), max(top_k * 2, 8))
+                    preview_rerank_paths = candidate_paths[:preview_rerank_limit]
+                    preview_chunk_limit = max(len(preview_rerank_paths) * 2, top_k * 2, 8)
+                    preview_rows = self._fetch_chunk_rows(conn, match_expr, preview_rerank_paths, preview_chunk_limit)
+                    preview_hits: Dict[str, List[Any]] = {}
+                    for row in preview_rows:
+                        preview_hits.setdefault(row["path"], []).append(row)
 
-                raw_score = float(row["raw_score"]) if row["raw_score"] is not None else 0.0
-                results.append(SearchResult(
+                    scored_candidates = []
+                    for file_row in file_rows:
+                        path = file_row["path"]
+                        file_score = -float(file_row["raw_file_score"]) if file_row["raw_file_score"] is not None else 0.0
+                        rows = preview_hits.get(path, [])
+                        if rows:
+                            aggregate_score, best_chunk_row = self._score_file_candidate(
+                                path=path,
+                                file_score=file_score,
+                                rows=rows,
+                                query=query,
+                                query_tokens=query_tokens,
+                            )
+                        else:
+                            aggregate_score = file_score + self._filename_match_bonus(path, query_tokens)
+                            best_chunk_row = None
+                        scored_candidates.append((aggregate_score, path, best_chunk_row))
+
+                    scored_candidates.sort(key=lambda item: item[0], reverse=True)
+                    top_candidates = scored_candidates[:top_k]
+
+            results = [
+                self._build_aggregated_search_result(
                     path=path,
-                    score=-raw_score,
-                    content=preview,
-                    line_number=(line_start + snippets[0]["line_number"] - 1) if snippets else line_start,
-                ))
-                if len(results) >= top_k:
-                    break
+                    file_score=score,
+                    query=query,
+                    best_chunk_row=best_chunk_row,
+                )
+                for score, path, best_chunk_row in top_candidates
+            ]
 
             elapsed = time.time() - start_time
             logger.info(f"MemoryIndex: Search '{query}' completed, found {len(results)} results in {elapsed:.3f}s")
