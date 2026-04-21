@@ -371,11 +371,17 @@ class ToolManager:
         if path:
             self._discover_import_path(path=path, root_package="sagents")
         else:
-            # 默认情况：直接导入 sagents.tool.impl，由其 __init__.py 控制导出哪些工具
-            try:
-                import sagents.tool.impl
-            except Exception as e:
-                logger.warning(f"Failed to import tools in impl package: {e}")
+            # 默认情况：扫描 sagents/tool/impl 下所有模块以触发 @tool 装饰器注册。
+            # 注意：不能仅 `import sagents.tool.impl`，因为该包使用了懒加载 __getattr__，
+            # 单纯导入包不会加载子模块，会导致装饰器不执行，工具丢失。
+            impl_path = Path(__file__).parent / "impl"
+            if impl_path.exists():
+                self._discover_import_path(path=str(impl_path), root_package="sagents")
+            else:
+                try:
+                    import sagents.tool.impl  # noqa: F401
+                except Exception as e:
+                    logger.warning(f"Failed to import tools in impl package: {e}")
 
         count = 0
         for funcs in _DISCOVERED_TOOLS.values():

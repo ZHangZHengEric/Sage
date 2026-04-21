@@ -702,12 +702,18 @@ const loadEnvVarsPreview = async () => {
   envVars.value = parseEnvContent(content || '')
 }
 
-const checkBrowserBridgeStatus = async () => {
+const checkBrowserBridgeStatus = async ({ probe = true } = {}) => {
   checkingBrowserBridge.value = true
   try {
-    const data = await request.get('/api/browser-extension/status')
+    // 主动 ping 扩展，扩展挂了会在 timeout 后强制返回 offline，避免被陈旧心跳误导
+    const data = probe
+      ? await request.post('/api/browser-extension/probe?timeout=5')
+      : await request.get('/api/browser-extension/status')
     browserBridgeStatus.value = data || null
     browserBridgeLastSeenAt.value = data?.last_seen_at || null
+    if (probe && data?.probe?.timed_out) {
+      toast.warning('未收到浏览器扩展响应，已标记为离线')
+    }
   } catch (error) {
     browserBridgeStatus.value = null
     browserBridgeLastSeenAt.value = null
@@ -757,6 +763,7 @@ onMounted(async () => {
   if (!userStore.avatarSeed) {
     randomizeAvatar()
   }
-  await checkBrowserBridgeStatus()
+  // 启动时先用快路径（不主动 ping，免得每次开页面都阻塞 5s）
+  await checkBrowserBridgeStatus({ probe: false })
 })
 </script>
