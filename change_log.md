@@ -1,4 +1,6 @@
 
+2026-04-21 文档站侧边栏真正根因：`docs/_includes/components/sidebar.html` 自定义实现里对 `nav_pages` 单层 for 循环输出链接，未调用主题自带的 `components/nav/pages.html`（parent 分组 + 递归子菜单），故无论 front matter 是否正确，左侧始终为扁平列表；已改为 `where` 过滤语言后 `include components/nav/pages.html`，恢复「架构」下二级菜单。
+
 2026-04-21 00:02 修复架构子页 YAML front matter 被破坏导致侧边栏丢失「架构」父级、子页全部提升为顶级项的问题：10 个文件（zh+en 各 5 份：ARCHITECTURE / ARCHITECTURE_SAGENTS_OVERVIEW / AGENT_FLOW / SESSION_CONTEXT / TOOL_SKILL / SANDBOX_OBS 与 ARCHITECTURE_APP_DESKTOP）第二行被换成了「## layout: default」且缺失结束的「---」，重建为标准 Jekyll front matter，恢复 has_children/parent 层级。
 
 2026-04-20 23:51 复用样板：agent_session_helper 增 get_session_sandbox()；file_system/memory/execute_command/image_understanding 4 个 tool 的 _get_sandbox 改为单行调用；compress_history、web_fetcher、todo、skill、content_saver、fibre/tools 共 8 处 get_global_session_manager+get_live_session 模板替换为 get_live_session/get_live_session_context helper；image_understanding._get_mime_type 改用 multimodal_image.get_mime_type。
