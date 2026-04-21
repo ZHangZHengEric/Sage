@@ -5,7 +5,7 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -106,7 +106,7 @@ def _install_stub_modules():
 
 def _load_service_module():
     _install_stub_modules()
-    module_path = Path(__file__).resolve().parent / "llm_provider_service.py"
+    module_path = REPO_ROOT / "common" / "services" / "llm_provider_service.py"
     spec = importlib.util.spec_from_file_location("llm_provider_service_under_test", module_path)
     module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader

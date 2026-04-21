@@ -406,7 +406,7 @@ sage run --json --stats "用一句话介绍你自己。"
 如果你改了 provider 管理或 CLI 错误处理，建议再跑一遍真实集成测试：
 
 ```bash
-/opt/miniconda3/envs/sage_dev/bin/python app/cli/test_provider_integration.py
+/opt/miniconda3/envs/sage_dev/bin/python tests/app/cli/test_provider_integration.py
 ```
 
 说明：
