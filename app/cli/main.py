@@ -4,6 +4,7 @@ import json
 import re
 import sys
 import time
+import traceback
 import uuid
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -19,6 +20,9 @@ CHAT_COMMAND_HELP = (
 TOOL_NAME_TAG_PATTERN = re.compile(r"<tool_name>\s*([A-Za-z0-9_.-]+)\s*</tool_name>")
 TOOL_CALL_FUNCTION_PATTERN = re.compile(r"<call\s+function=\"([A-Za-z0-9_.-]+)\"")
 TOOL_RESULT_NAME_PATTERN = re.compile(r"<function_result\s+name=\"([A-Za-z0-9_.-]+)\"")
+SKILL_TAG_PATTERN = re.compile(r"<skill>\s*([A-Za-z0-9_.-]+)\s*</skill>", re.DOTALL)
+SKILL_INPUT_TAG_PATTERN = re.compile(r"<skill_input>", re.DOTALL)
+SKILL_RESULT_TAG_PATTERN = re.compile(r"<skill_result>", re.DOTALL)
 
 
 def _truncate(value: Optional[str], max_len: int) -> str:
@@ -47,12 +51,90 @@ def _print_message_preview(message: Optional[Dict[str, Any]], *, label: str) -> 
     print(f"{label}: [{role}]{suffix} {content}")
 
 
+def _print_provider_summary(provider: Optional[Dict[str, Any]], *, prefix: str = "provider") -> None:
+    if not provider:
+        print(f"{prefix}: (none)")
+        return
+    print(f"{prefix}_id: {provider.get('id') or '(pending)'}")
+    print(f"name: {provider.get('name') or '(unnamed)'}")
+    print(f"model: {provider.get('model')}")
+    print(f"base_url: {provider.get('base_url')}")
+    print(f"api_key: {provider.get('api_key_preview') or '(hidden)'}")
+    print(f"is_default: {provider.get('is_default')}")
+    if provider.get("user_id") is not None:
+        print(f"user_id: {provider.get('user_id')}")
+    if provider.get("created_at"):
+        print(f"created_at: {provider.get('created_at')}")
+    if provider.get("updated_at"):
+        print(f"updated_at: {provider.get('updated_at')}")
+
+
+def _add_provider_config_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--name", help="Provider display name")
+    parser.add_argument("--base-url", dest="base_url", help="Provider base URL")
+    parser.add_argument("--api-key", dest="api_key", help="Provider API key")
+    parser.add_argument("--model", help="Provider model name")
+    parser.add_argument("--max-tokens", dest="max_tokens", type=int)
+    parser.add_argument("--temperature", type=float)
+    parser.add_argument("--top-p", dest="top_p", type=float)
+    parser.add_argument("--presence-penalty", dest="presence_penalty", type=float)
+    parser.add_argument("--max-model-len", dest="max_model_len", type=int)
+
+    multimodal_group = parser.add_mutually_exclusive_group()
+    multimodal_group.add_argument(
+        "--supports-multimodal",
+        dest="supports_multimodal",
+        action="store_true",
+        help="Mark the provider as multimodal-capable",
+    )
+    multimodal_group.add_argument(
+        "--no-supports-multimodal",
+        dest="supports_multimodal",
+        action="store_false",
+        help="Mark the provider as not multimodal-capable",
+    )
+
+    structured_group = parser.add_mutually_exclusive_group()
+    structured_group.add_argument(
+        "--supports-structured-output",
+        dest="supports_structured_output",
+        action="store_true",
+        help="Mark the provider as supporting structured output",
+    )
+    structured_group.add_argument(
+        "--no-supports-structured-output",
+        dest="supports_structured_output",
+        action="store_false",
+        help="Mark the provider as not supporting structured output",
+    )
+
+    default_group = parser.add_mutually_exclusive_group()
+    default_group.add_argument(
+        "--set-default",
+        dest="is_default",
+        action="store_true",
+        help="Mark the provider as default",
+    )
+    default_group.add_argument(
+        "--unset-default",
+        dest="is_default",
+        action="store_false",
+        help="Mark the provider as non-default",
+    )
+    parser.set_defaults(
+        supports_multimodal=None,
+        supports_structured_output=None,
+        is_default=None,
+    )
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
-    from app.cli.service import get_default_cli_user_id
+    from app.cli.service import get_default_cli_max_loop_count, get_default_cli_user_id
 
     parser = argparse.ArgumentParser(prog="sage", description="Sage CLI MVP")
     subparsers = parser.add_subparsers(dest="command", required=True)
     default_user_id = get_default_cli_user_id()
+    default_max_loop_count = get_default_cli_max_loop_count()
 
     run_parser = subparsers.add_parser("run", help="Run a single Sage task")
     run_parser.add_argument("task", help="Task prompt to execute")
@@ -67,7 +149,13 @@ def build_argument_parser() -> argparse.ArgumentParser:
         choices=["simple", "multi", "fibre"],
         default="simple",
     )
-    run_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=None)
+    run_parser.add_argument(
+        "--max-loop-count",
+        dest="max_loop_count",
+        type=int,
+        default=default_max_loop_count,
+        help=f"Maximum agent loop count (default: {default_max_loop_count})",
+    )
     run_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     run_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     run_parser.add_argument("--stats", action="store_true", help="Print execution summary after completion")
@@ -84,7 +172,13 @@ def build_argument_parser() -> argparse.ArgumentParser:
         choices=["simple", "multi", "fibre"],
         default="simple",
     )
-    chat_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=None)
+    chat_parser.add_argument(
+        "--max-loop-count",
+        dest="max_loop_count",
+        type=int,
+        default=default_max_loop_count,
+        help=f"Maximum agent loop count per turn (default: {default_max_loop_count})",
+    )
     chat_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     chat_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     chat_parser.add_argument("--stats", action="store_true", help="Print execution summary for each turn")
@@ -101,12 +195,19 @@ def build_argument_parser() -> argparse.ArgumentParser:
         choices=["simple", "multi", "fibre"],
         default="simple",
     )
-    resume_parser.add_argument("--max-loop-count", dest="max_loop_count", type=int, default=None)
+    resume_parser.add_argument(
+        "--max-loop-count",
+        dest="max_loop_count",
+        type=int,
+        default=default_max_loop_count,
+        help=f"Maximum agent loop count per turn (default: {default_max_loop_count})",
+    )
     resume_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     resume_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     resume_parser.add_argument("--stats", action="store_true", help="Print execution summary for each turn")
 
     doctor_parser = subparsers.add_parser("doctor", help="Show local CLI/runtime configuration")
+    doctor_parser.add_argument("--probe-provider", action="store_true", help="Run a lightweight connection probe against the default provider")
     doctor_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
 
     sessions_parser = subparsers.add_parser("sessions", help="List recent CLI sessions")
@@ -148,6 +249,60 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Path to write the config file (defaults to ~/.sage/.sage_env)",
     )
     config_init_parser.add_argument("--force", action="store_true", help="Overwrite an existing config file")
+
+    provider_parser = subparsers.add_parser("provider", help="Manage local LLM providers")
+    provider_subparsers = provider_parser.add_subparsers(dest="provider_command", required=True)
+
+    provider_list_parser = provider_subparsers.add_parser("list", help="List providers visible to a CLI user")
+    provider_list_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
+    provider_list_parser.add_argument(
+        "--default-only",
+        action="store_true",
+        help="Show only default providers for the selected user",
+    )
+    provider_list_parser.add_argument("--model", help="Filter by exact model name")
+    provider_list_parser.add_argument("--name-contains", dest="name_contains", help="Filter by provider name substring")
+    provider_list_parser.add_argument("--json", action="store_true", help="Print providers as JSON")
+    provider_list_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
+
+    provider_inspect_parser = provider_subparsers.add_parser("inspect", help="Inspect a specific provider")
+    provider_inspect_parser.add_argument("provider_id", help="Provider id to inspect")
+    provider_inspect_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
+    provider_inspect_parser.add_argument("--json", action="store_true", help="Print provider details as JSON")
+    provider_inspect_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
+
+    provider_verify_parser = provider_subparsers.add_parser(
+        "verify",
+        help="Probe a provider configuration without saving it",
+    )
+    _add_provider_config_args(provider_verify_parser)
+    provider_verify_parser.add_argument("--json", action="store_true", help="Print verification result as JSON")
+    provider_verify_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
+
+    provider_create_parser = provider_subparsers.add_parser(
+        "create",
+        help="Create a provider; omitted API settings fall back to current default CLI env",
+    )
+    provider_create_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
+    _add_provider_config_args(provider_create_parser)
+    provider_create_parser.add_argument("--json", action="store_true", help="Print saved provider as JSON")
+    provider_create_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
+
+    provider_update_parser = provider_subparsers.add_parser(
+        "update",
+        help="Update an existing provider; only supplied fields are changed",
+    )
+    provider_update_parser.add_argument("provider_id", help="Provider id to update")
+    provider_update_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
+    _add_provider_config_args(provider_update_parser)
+    provider_update_parser.add_argument("--json", action="store_true", help="Print updated provider as JSON")
+    provider_update_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
+
+    provider_delete_parser = provider_subparsers.add_parser("delete", help="Delete an existing provider")
+    provider_delete_parser.add_argument("provider_id", help="Provider id to delete")
+    provider_delete_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
+    provider_delete_parser.add_argument("--json", action="store_true", help="Print deletion result as JSON")
+    provider_delete_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     return parser
 
 
@@ -231,6 +386,9 @@ def _collect_event_tool_names(event: Dict[str, Any], *, content_buffer: str = ""
         for match in TOOL_RESULT_NAME_PATTERN.findall(combined_content):
             if match:
                 tool_names.append(match.strip())
+        for match in SKILL_TAG_PATTERN.findall(combined_content):
+            if match:
+                tool_names.append(match.strip())
 
     return sorted(set(tool_names))
 
@@ -253,6 +411,10 @@ def _record_stats_event(stats: Dict[str, Any], event: Dict[str, Any], start_time
         existing_tool_names = set(stats["tools"])
         existing_tool_names.update(tool_names)
         stats["tools"] = sorted(existing_tool_names)
+    elif stats.get("_tool_tag_buffer"):
+        buffer = stats["_tool_tag_buffer"]
+        if SKILL_INPUT_TAG_PATTERN.search(buffer) or SKILL_RESULT_TAG_PATTERN.search(buffer):
+            has_visible_output = True
 
     if event.get("type") == "error":
         has_visible_output = True
@@ -383,17 +545,24 @@ async def _build_request(args: argparse.Namespace, task: str):
 
 
 async def _run_command(args: argparse.Namespace) -> int:
-    from app.cli.service import cli_runtime, validate_cli_runtime_requirements
+    from app.cli.service import cli_runtime, validate_cli_request_options, validate_cli_runtime_requirements
 
+    validate_cli_runtime_requirements()
+    validate_cli_request_options(workspace=args.workspace, max_loop_count=args.max_loop_count)
     async with cli_runtime(verbose=args.verbose):
-        validate_cli_runtime_requirements()
         request = await _build_request(args, args.task)
         await _stream_request(request, args.json, args.stats, workspace=args.workspace)
     return 0
 
 
 async def _chat_command(args: argparse.Namespace) -> int:
-    from app.cli.service import cli_db_runtime, cli_runtime, get_session_summary, validate_cli_runtime_requirements
+    from app.cli.service import (
+        cli_db_runtime,
+        cli_runtime,
+        get_session_summary,
+        validate_cli_request_options,
+        validate_cli_runtime_requirements,
+    )
 
     if not args.session_id:
         args.session_id = str(uuid.uuid4())
@@ -412,6 +581,8 @@ async def _chat_command(args: argparse.Namespace) -> int:
         )
         sys.stderr.flush()
 
+    validate_cli_runtime_requirements()
+    validate_cli_request_options(workspace=args.workspace, max_loop_count=args.max_loop_count)
     async with cli_runtime(verbose=args.verbose):
         while True:
             try:
@@ -438,7 +609,6 @@ async def _chat_command(args: argparse.Namespace) -> int:
                 print(args.session_id)
                 continue
 
-            validate_cli_runtime_requirements()
             request = await _build_request(args, prompt)
             await _stream_request(request, args.json, args.stats, workspace=args.workspace)
     return 0
@@ -448,10 +618,12 @@ async def _resume_command(args: argparse.Namespace) -> int:
     return await _chat_command(args)
 
 
-def _doctor_command() -> int:
-    from app.cli.service import collect_doctor_info
+async def _doctor_command(args: argparse.Namespace) -> int:
+    from app.cli.service import collect_doctor_info, probe_default_provider
 
     info = collect_doctor_info()
+    if args.probe_provider:
+        info["provider_probe"] = await probe_default_provider()
     for key, value in info.items():
         if isinstance(value, dict):
             print(f"{key}:")
@@ -468,6 +640,95 @@ def _doctor_command() -> int:
             continue
         print(f"{key}: {value}")
     return 0
+
+
+def _build_cli_error_payload(exc: Exception, *, verbose: bool) -> Dict[str, Any]:
+    from app.cli.service import CLIError
+    try:
+        from common.core.exceptions import SageHTTPException
+    except Exception:  # noqa: BLE001
+        SageHTTPException = None  # type: ignore[assignment]
+
+    if isinstance(exc, CLIError):
+        return {
+            "type": "cli_error",
+            "message": str(exc),
+            "next_steps": list(exc.next_steps),
+            "debug_detail": exc.debug_detail if verbose else None,
+            "exit_code": exc.exit_code,
+        }
+
+    if SageHTTPException is not None and isinstance(exc, SageHTTPException):
+        return {
+            "type": "cli_error",
+            "message": exc.detail or "Sage request failed",
+            "next_steps": [],
+            "debug_detail": exc.error_detail if verbose and exc.error_detail else None,
+            "exit_code": 1,
+        }
+
+    if isinstance(exc, ModuleNotFoundError):
+        return {
+            "type": "cli_error",
+            "message": f"Missing dependency: {exc.name}",
+            "next_steps": ["Install project dependencies first, for example: `pip install -e .`."],
+            "debug_detail": None,
+            "exit_code": 1,
+        }
+
+    if isinstance(exc, PermissionError):
+        return {
+            "type": "cli_error",
+            "message": str(exc) or "Permission denied",
+            "next_steps": ["Check file permissions, selected user id, and agent visibility."],
+            "debug_detail": traceback.format_exc() if verbose else None,
+            "exit_code": 1,
+        }
+
+    if isinstance(exc, FileNotFoundError):
+        return {
+            "type": "cli_error",
+            "message": str(exc) or "File not found",
+            "next_steps": ["Check the file or workspace path and try again."],
+            "debug_detail": traceback.format_exc() if verbose else None,
+            "exit_code": 1,
+        }
+
+    if isinstance(exc, (NotADirectoryError, OSError, RuntimeError, ValueError)):
+        return {
+            "type": "cli_error",
+            "message": str(exc) or exc.__class__.__name__,
+            "next_steps": [],
+            "debug_detail": traceback.format_exc() if verbose else None,
+            "exit_code": 1,
+        }
+
+    return {
+        "type": "cli_error",
+        "message": f"Unexpected CLI error: {exc}",
+        "next_steps": ["Retry with `--verbose` to inspect the full error detail."],
+        "debug_detail": traceback.format_exc() if verbose else None,
+        "exit_code": 1,
+    }
+
+
+def _emit_cli_error(args: argparse.Namespace, payload: Dict[str, Any]) -> int:
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False))
+        return int(payload.get("exit_code", 1))
+
+    sys.stderr.write(f"{payload.get('message')}\n")
+    next_steps = payload.get("next_steps") or []
+    if next_steps:
+        sys.stderr.write("Next steps:\n")
+        for item in next_steps:
+            sys.stderr.write(f"- {item}\n")
+    debug_detail = payload.get("debug_detail")
+    if debug_detail:
+        sys.stderr.write("\n[debug]\n")
+        sys.stderr.write(f"{debug_detail.rstrip()}\n")
+    sys.stderr.flush()
+    return int(payload.get("exit_code", 1))
 
 
 async def _sessions_command(args: argparse.Namespace) -> int:
@@ -632,6 +893,119 @@ def _config_init_command(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _provider_command(args: argparse.Namespace) -> int:
+    from app.cli.service import (
+        cli_db_runtime,
+        create_cli_provider,
+        delete_cli_provider,
+        inspect_cli_provider,
+        query_cli_providers,
+        update_cli_provider,
+        verify_cli_provider,
+    )
+
+    if args.provider_command == "list":
+        async with cli_db_runtime(verbose=args.verbose):
+            result = await query_cli_providers(
+                user_id=args.user_id,
+                default_only=args.default_only,
+                model=args.model,
+                name_contains=args.name_contains,
+            )
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+
+        print(f"user_id: {result['user_id']}")
+        print(f"total: {result['total']}")
+        filters = result.get("filters") or {}
+        active_filters = [
+            f"default_only={filters.get('default_only')}" if filters.get("default_only") else None,
+            f"model={filters.get('model')}" if filters.get("model") else None,
+            f"name_contains={filters.get('name_contains')}" if filters.get("name_contains") else None,
+        ]
+        active_filters = [item for item in active_filters if item]
+        if active_filters:
+            print(f"filters: {', '.join(active_filters)}")
+        providers = result.get("list") or []
+        if not providers:
+            print("providers:\n  (none)")
+            return 0
+        print("providers:")
+        for item in providers:
+            print(
+                f"  - {item.get('id')} | {item.get('name')} | "
+                f"{item.get('model')} | default={item.get('is_default')} | {item.get('base_url')}"
+            )
+            print(f"    api_key: {item.get('api_key_preview') or '(hidden)'}")
+        return 0
+
+    if args.provider_command == "inspect":
+        async with cli_db_runtime(verbose=args.verbose):
+            result = await inspect_cli_provider(provider_id=args.provider_id, user_id=args.user_id)
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        print(f"user_id: {result['user_id']}")
+        print(f"provider_id: {result['provider_id']}")
+        _print_provider_summary(result.get("provider"))
+        return 0
+
+    common_kwargs = {
+        "name": getattr(args, "name", None),
+        "base_url": getattr(args, "base_url", None),
+        "api_key": getattr(args, "api_key", None),
+        "model": getattr(args, "model", None),
+        "max_tokens": getattr(args, "max_tokens", None),
+        "temperature": getattr(args, "temperature", None),
+        "top_p": getattr(args, "top_p", None),
+        "presence_penalty": getattr(args, "presence_penalty", None),
+        "max_model_len": getattr(args, "max_model_len", None),
+        "supports_multimodal": getattr(args, "supports_multimodal", None),
+        "supports_structured_output": getattr(args, "supports_structured_output", None),
+        "is_default": getattr(args, "is_default", None),
+    }
+
+    if args.provider_command == "verify":
+        result = await verify_cli_provider(**common_kwargs)
+    elif args.provider_command == "create":
+        async with cli_db_runtime(verbose=args.verbose):
+            result = await create_cli_provider(user_id=args.user_id, **common_kwargs)
+    elif args.provider_command == "update":
+        async with cli_db_runtime(verbose=args.verbose):
+            result = await update_cli_provider(
+                provider_id=args.provider_id,
+                user_id=args.user_id,
+                **common_kwargs,
+            )
+    elif args.provider_command == "delete":
+        async with cli_db_runtime(verbose=args.verbose):
+            result = await delete_cli_provider(provider_id=args.provider_id, user_id=args.user_id)
+    else:
+        raise ValueError(f"Unsupported provider command: {args.provider_command}")
+
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    print(f"status: {result.get('status')}")
+    print(f"message: {result.get('message')}")
+    if result.get("user_id"):
+        print(f"user_id: {result.get('user_id')}")
+    if result.get("provider_id"):
+        print(f"provider_id: {result.get('provider_id')}")
+    if result.get("deleted"):
+        print("deleted: true")
+        return 0
+    sources = result.get("sources") or {}
+    if sources:
+        print("sources:")
+        for key, value in sources.items():
+            print(f"  {key}: {value}")
+    _print_provider_summary(result.get("provider"))
+    return 0
+
+
 async def _main_async(args: argparse.Namespace) -> int:
     try:
         if args.command == "run":
@@ -641,7 +1015,7 @@ async def _main_async(args: argparse.Namespace) -> int:
         if args.command == "resume":
             return await _resume_command(args)
         if args.command == "doctor":
-            return _doctor_command()
+            return await _doctor_command(args)
         if args.command == "sessions":
             return await _sessions_command(args)
         if args.command == "skills":
@@ -650,21 +1024,11 @@ async def _main_async(args: argparse.Namespace) -> int:
             return _config_show_command(args)
         if args.command == "config" and args.config_command == "init":
             return _config_init_command(args)
+        if args.command == "provider":
+            return await _provider_command(args)
         raise ValueError(f"Unsupported command: {args.command}")
-    except ModuleNotFoundError as exc:
-        sys.stderr.write(
-            f"Missing dependency: {exc.name}. Install project dependencies before using this command.\n"
-        )
-        sys.stderr.flush()
-        return 1
-    except RuntimeError as exc:
-        sys.stderr.write(f"{exc}\n")
-        sys.stderr.flush()
-        return 1
-    except ValueError as exc:
-        sys.stderr.write(f"{exc}\n")
-        sys.stderr.flush()
-        return 1
+    except Exception as exc:
+        return _emit_cli_error(args, _build_cli_error_payload(exc, verbose=getattr(args, "verbose", False)))
 
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
