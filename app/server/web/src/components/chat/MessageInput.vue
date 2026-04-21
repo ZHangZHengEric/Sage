@@ -766,7 +766,15 @@ const processFile = async (file) => {
 
   try {
     const response = await ossApi.uploadFile(file)
-    fileItem.url = response.data?.url || response.url || response
+    const payload = response?.data ?? response
+    fileItem.url = payload?.url || (typeof payload === 'string' ? payload : '')
+    const serverFilename = (payload && typeof payload === 'object') ? payload.filename : ''
+    if (serverFilename) {
+      fileItem.name = serverFilename
+      try {
+        editorRef.value?.updateChipName?.(fileItem.id, serverFilename)
+      } catch (_) { /* noop */ }
+    }
     fileItem.uploading = false
   } catch (error) {
     const index = uploadedFiles.value.indexOf(fileItem)

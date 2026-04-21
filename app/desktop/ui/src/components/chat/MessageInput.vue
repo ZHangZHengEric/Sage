@@ -931,10 +931,19 @@ const processFile = async (file) => {
   try {
     // 调用OSS API上传，传递当前选中的 agent_id
     const agentId = props.selectedAgent?.id || props.selectedAgent?.agent_id
-    const url = await ossApi.uploadFile(file, agentId)
+    const result = await ossApi.uploadFile(file, agentId)
+    const url = typeof result === 'string' ? result : (result?.url || '')
+    const serverFilename = (typeof result === 'object' && result?.filename) ? result.filename : ''
 
-    // 更新文件URL
     fileItem.url = url
+    // 后端会追加时间戳 + 把图片压成 jpg，使用服务端文件名让 markdown alt 与真实 URL 文件名保持一致
+    if (serverFilename) {
+      fileItem.name = serverFilename
+      // 同步更新已插入的 chip 显示与 dataset，保证 readText() 输出的占位符 alt 与最终 URL 文件名一致
+      try {
+        editorRef.value?.updateChipName?.(fileItem.id, serverFilename)
+      } catch (_) { /* noop */ }
+    }
     fileItem.uploading = false
   } catch (error) {
 

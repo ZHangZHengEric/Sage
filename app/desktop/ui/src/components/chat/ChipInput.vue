@@ -388,6 +388,26 @@ const deleteCharsBeforeCaret = (n) => {
   handleInput()
 }
 
+/**
+ * 上传完成后用真实的服务端文件名刷新 chip：
+ * - 更新 dataset.attName / title / 文本节点，让 readText() 生成的占位符 alt 与 URL 末段一致；
+ * - 同步触发一次 update:modelValue，让父组件持有的 inputValue 跟着变。
+ */
+const updateChipName = (id, newName) => {
+  if (id == null || !newName) return false
+  const root = editorRef.value
+  if (!root) return false
+  const target = root.querySelector(`.chip-input__chip[data-att-id="${CSS.escape(String(id))}"]`)
+  if (!target) return false
+  target.dataset.attName = newName
+  target.setAttribute('title', newName)
+  const nameNode = target.querySelector('.chip-input__chip-name')
+  if (nameNode) nameNode.textContent = newName
+  // 触发一次同步：让 readText() 的输出立即写回 modelValue
+  handleInput()
+  return true
+}
+
 defineExpose({
   focus: focusEditor,
   insertPlaceholder,
@@ -396,7 +416,8 @@ defineExpose({
   getElement: () => editorRef.value,
   getTextBeforeCaret,
   getSkillQuery,
-  deleteCharsBeforeCaret
+  deleteCharsBeforeCaret,
+  updateChipName
 })
 </script>
 
