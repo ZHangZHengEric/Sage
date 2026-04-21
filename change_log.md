@@ -1,4 +1,6 @@
 
+2026-04-21 23:40 ChipInput 粘贴：非文件时阻止默认富文本插入，仅写入纯文本（优先 clipboard text/plain，否则从 text/html 取文本），避免保留来源页字体颜色等在深色输入框中对比度过低；仍先 emit paste 供 MessageInput 处理剪贴板图片/文件。desktop/ui 与 server/web 已同步。
+
 2026-04-21 22:55 桌面端上传图片改回"本地绝对路径"链路：sidecar `POST /api/oss/upload` 现在把 `file_path.resolve()` 直接作为 `url` 返回（保留 `local_path` 同值字段，外加 `http_url` 仅作降级展示）。前端 markdown 引用 / image_url part 都用本地路径，命中 MarkdownRenderer 既有的 `convertFileSrc / data-local-image` 分支，agent 端 `multimodal_image.process_multimodal_content` 直接走"裸路径→base64"分支，不再需要 `resolve_local_sage_url` 反解 localhost URL，也省掉一次 HTTP 抓取，文件类工具可直接消费该路径。22:30 加的 HTTP fallback 保留，给 server-web 那种 HOME 不一致场景兜底。
 
 2026-04-21 22:30 修复 sage 上传图片两个问题：1) 输入框 markdown alt 与最终 URL 文件名不一致（原 png/被压成 jpg + 时间戳后缀）——oss.uploadFile 改返回 {url, filename}，MessageInput/ChipInput 在上传完成后用服务端文件名刷新 chip 与 file.name，buildOrderedMultimodalContent 直接取 URL 末段作为 alt，desktop+server-web 同步；2) image_url 没转 base64 导致 dashscope 报 InvalidParameter——multimodal_image.process_multimodal_content 增加本机地址 HTTP 抓取兜底（httpx 已在 requirements），Path.home 反解失败时再走 GET URL→压缩→data:image/jpeg;base64 分支，加 warning/error 日志便于排查。
