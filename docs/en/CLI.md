@@ -406,7 +406,7 @@ Then verify:
 When you change provider management or CLI error handling, also run the real integration test:
 
 ```bash
-/opt/miniconda3/envs/sage_dev/bin/python app/cli/test_provider_integration.py
+/opt/miniconda3/envs/sage_dev/bin/python tests/app/cli/test_provider_integration.py
 ```
 
 Notes:
