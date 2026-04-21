@@ -1,4 +1,14 @@
 
+2026-04-21 17:10 限制 Fibre 专属工具仅在 fibre 模式下可选：AgentEdit.vue 增加 isFibreOnlyToolUnavailable，非 fibre 模式下 sys_spawn_agent / sys_delegate_task / sys_finish_task 复选框禁用并打「仅 Fibre 模式」徽章 + 提示；模式切出 fibre 时自动从 availableTools 移除；后端 chat router 新增 _sync_fibre_only_tools 兜底，非 fibre 请求强制剔除这三个工具。
+
+2026-04-21 16:30 新增设计文档 docs/zh/DESIGN_AGENT_FLOW_PRODUCTIZATION.md：把 AgentFlow 升级为「真正的 Agent Flow」——所有 AI 节点都是 Agent，引入 Agent 模板体系（business/router 两种内置模板），分支判据收敛到 flow_state.{input,vars,steps} 命名空间（v1 寄存于 audit_status 子树），AgentFlow 改为可保存可重置的 DAG 静态图配置（flow_version.graph_json），含分阶段实施路线、API 草案、改动点速查与待决问题。
+
+2026-04-21 12:05 浏览器插件离线检测体验全面整改：1) 后端新增 BrowserBridgeHub.force_offline 与 /api/browser-extension/probe 端点，主动 ping 扩展（5s 超时则强制标离线），并删掉 OFFLINE_GRACE_SECONDS 多余 60s 宽限；2) Chrome 扩展心跳 60s→30s、加入 ping action、改为单 alarm 内 ~26s 长轮询连续抓命令，让 probe ~1s 内有响应；3) SystemSettings「重新检测」按钮改用 probe；4) AgentEdit 中浏览器工具在离线时禁用复选框并显示「插件离线」徽章 + 提示，全选/勾选都跳过。
+
+2026-04-21 11:35 修复未装/离线浏览器扩展时仍把 12 个 browser_* 工具注入到 chat 请求的问题：browser_capability.get_browser_tool_sync_state 在扩展从未连接时把 supported_tools 默认成全集且不按 online 过滤，被 chat router 当成 online_browser_tools 全部 append。改为仅在 online 时返回 supported_tools，否则返回 [] ；_sync_browser_tools_for_request 离线时无条件清空所有浏览器工具，并补充日志便于排查。
+
+2026-04-21 11:20 修复 desktop 启动后 impl/ 下多数工具丢失问题：commit 4f9ff693 将 sagents/tool/impl/__init__.py 改为懒加载 __getattr__，导致 ToolManager.discover_tools_from_path 仅 `import sagents.tool.impl` 时不再触发子模块加载，@tool 装饰器未执行。改为默认调用 _discover_import_path 扫描 impl 目录，工具注册数从个位数恢复到 19。
+
 2026-04-21 文档站侧边栏真正根因：`docs/_includes/components/sidebar.html` 自定义实现里对 `nav_pages` 单层 for 循环输出链接，未调用主题自带的 `components/nav/pages.html`（parent 分组 + 递归子菜单），故无论 front matter 是否正确，左侧始终为扁平列表；已改为 `where` 过滤语言后 `include components/nav/pages.html`，恢复「架构」下二级菜单。
 
 2026-04-21 00:02 修复架构子页 YAML front matter 被破坏导致侧边栏丢失「架构」父级、子页全部提升为顶级项的问题：10 个文件（zh+en 各 5 份：ARCHITECTURE / ARCHITECTURE_SAGENTS_OVERVIEW / AGENT_FLOW / SESSION_CONTEXT / TOOL_SKILL / SANDBOX_OBS 与 ARCHITECTURE_APP_DESKTOP）第二行被换成了「## layout: default」且缺失结束的「---」，重建为标准 Jekyll front matter，恢复 has_children/parent 层级。
