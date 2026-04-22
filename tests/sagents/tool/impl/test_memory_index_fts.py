@@ -6,14 +6,11 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 
 def _load_memory_index_module():
+    repo_root = Path(__file__).resolve().parents[4]
     module_path = (
-        REPO_ROOT
+        repo_root
         / "sagents"
         / "tool"
         / "impl"
