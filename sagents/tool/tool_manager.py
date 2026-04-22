@@ -887,6 +887,10 @@ class ToolManager:
         # (e.g. updates="{\"start_at\":\"...\"}") which breaks MCP validation.
         kwargs = self._normalize_kwargs_by_schema(tool, tool_name, kwargs)
 
+        # In strict mode the LLM passes null for optional parameters; strip them out
+        # so tools receive their Python default values instead of None.
+        kwargs = {k: v for k, v in kwargs.items() if v is not None}
+
         # Step 2: Execute based on tool type (self-call prevention handled at agent level)
 
         try:

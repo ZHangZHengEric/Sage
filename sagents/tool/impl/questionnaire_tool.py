@@ -118,7 +118,7 @@ class QuestionnaireTool:
                             }
                         },
                         "default": {
-                            "oneOf": [
+                            "anyOf": [
                                 {"type": "string", "description": "单选或文本题的默认值"},
                                 {"type": "array", "items": {"type": "string"}, "description": "多选题的默认值(字符串数组)"}
                             ],

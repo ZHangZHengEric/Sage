@@ -66,7 +66,7 @@ class ExecuteCommandTool:
             "command": {"type": "string", "description": "Shell command to execute"},
             "workdir": {"type": "string", "description": "Working directory (virtual path)"},
             "timeout": {"type": "integer", "default": 30},
-            "env_vars": {"type": "object", "description": "Additional environment variables"},
+            "env_vars": {"type": "string", "description": "Additional environment variables as a JSON object string, e.g. '{\"KEY\": \"VALUE\"}'. Leave empty if not needed."},
             "session_id": {"type": "string", "description": "Session ID"},
         },
         return_data={
@@ -86,7 +86,7 @@ class ExecuteCommandTool:
         command: str,
         workdir: Optional[str] = None,
         timeout: int = 30,
-        env_vars: Optional[Dict[str, str]] = None,
+        env_vars: Optional[str] = None,
         session_id: str = None,
     ) -> Dict[str, Any]:
         """
@@ -96,7 +96,7 @@ class ExecuteCommandTool:
             command: Shell 命令字符串
             workdir: 执行目录（虚拟路径）
             timeout: 超时秒数
-            env_vars: 附加环境变量
+            env_vars: 附加环境变量（JSON 字符串格式，如 '{"KEY": "VALUE"}'）
             session_id: 会话ID（必填）
 
         Returns:
@@ -104,6 +104,17 @@ class ExecuteCommandTool:
         """
         if not session_id:
             raise ValueError("ExecuteCommandTool: session_id is required")
+
+        # env_vars 以 JSON 字符串传入，解析为 dict
+        parsed_env_vars: Optional[Dict[str, str]] = None
+        if env_vars and isinstance(env_vars, str) and env_vars.strip():
+            try:
+                import json as _json
+                parsed_env_vars = _json.loads(env_vars)
+            except Exception:
+                logger.warning(f"env_vars 解析失败，忽略: {env_vars!r}")
+        elif isinstance(env_vars, dict):
+            parsed_env_vars = env_vars
 
         logger.info(f"🖥️ ExecuteCommandTool: {command[:100]}{'...' if len(command) > 100 else ''}")
 
@@ -130,7 +141,7 @@ class ExecuteCommandTool:
                 command=command,
                 workdir=workdir,
                 timeout=timeout,
-                env_vars=env_vars,
+                env_vars=parsed_env_vars,
             )
         finally:
             echo_footer(result.return_code if result is not None else None)
