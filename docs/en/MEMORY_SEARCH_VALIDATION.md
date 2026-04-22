@@ -7,14 +7,18 @@ Detailed phase notes remain in:
 - `MEMORY_SEARCH_P1_VALIDATION.md`
 - `MEMORY_SEARCH_P2_VALIDATION.md`
 - `MEMORY_SEARCH_P3_VALIDATION.md`
+- `MEMORY_SEARCH_P4_VALIDATION.md`
+- `MEMORY_SEARCH_P5_VALIDATION.md`
 
 ## Scope
 
-The current memory-search line is split into two completed layers:
+The current memory-search line is split into these layers:
 
 - P1: search quality, ranking, preview quality, identifier/path-aware search
 - P2: retriever-boundary stabilization for file memory vs session history
 - P3: session-memory backend separation and factory wiring
+- P4: backend/strategy configurability and CLI diagnostics
+- P5: operational hardening for diagnostics, config templates, and unified validation
 
 ## Unified Validation Command
 
@@ -36,6 +40,7 @@ The combined validation runs:
 - `tests/test_memory_index_fts.py`
 - `tests/test_memory_tool.py`
 - `tests/sagents/context/test_session_memory_manager.py`
+- `tests/app/cli/test_doctor_memory_backends.py`
 - `scripts/memory_search_benchmark.py`
 
 ## Current Checkpoints
@@ -54,6 +59,14 @@ P2:
 - `e0f2c6c3` `docs: add unified memory search validation`
 
 P3:
+
+- pending current branch commits
+
+P4:
+
+- pending current branch commits
+
+P5:
 
 - pending current branch commits
 

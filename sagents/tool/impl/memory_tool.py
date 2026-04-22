@@ -15,7 +15,12 @@ from typing import Dict, Any, Optional, List
 from ..tool_base import tool
 from sagents.utils.logger import logger
 from sagents.utils.agent_session_helper import get_session_sandbox as _get_session_sandbox_util
-from .file_memory import ScopedIndexFileMemoryBackend, create_file_memory_backend
+from sagents.context.session_memory import resolve_session_memory_strategy
+from .file_memory import (
+    ScopedIndexFileMemoryBackend,
+    create_file_memory_backend,
+    resolve_file_memory_backend_name,
+)
 
 
 @dataclass
@@ -35,7 +40,9 @@ class FileMemoryRetriever:
 
     def __init__(self, memory_tool: "MemoryTool"):
         self.memory_tool = memory_tool
+        self._backend_cache: Dict[str, Any] = {}
         self.backend = create_file_memory_backend(memory_tool)
+        self._backend_cache[resolve_file_memory_backend_name()] = self.backend
 
     @classmethod
     def clear_cache(cls) -> None:
@@ -45,8 +52,23 @@ class FileMemoryRetriever:
     def _build_scope_key(user_id: str, agent_id: str, workspace_path: str) -> str:
         return ScopedIndexFileMemoryBackend._build_scope_key(user_id, agent_id, workspace_path)
 
+    def _resolve_backend(self, session_context):
+        agent_config = getattr(session_context, "agent_config", {}) or {}
+        backend_name = resolve_file_memory_backend_name(agent_config=agent_config)
+        backend = self._backend_cache.get(backend_name)
+        if backend is None:
+            backend = create_file_memory_backend(
+                self.memory_tool,
+                backend_name=backend_name,
+                agent_config=agent_config,
+            )
+            self._backend_cache[backend_name] = backend
+        self.backend = backend
+        return backend
+
     async def search(self, query: str, top_k: int, session_context) -> List[Dict[str, Any]]:
-        return await self.backend.search(query, top_k, session_context)
+        backend = self._resolve_backend(session_context)
+        return await backend.search(query, top_k, session_context)
 
 
 class SessionHistoryRetriever:
@@ -123,11 +145,28 @@ class SessionHistoryRetriever:
                 return []
 
             session_memory_manager = session_context.session_memory_manager
-            retrieved_messages = session_memory_manager.retrieve_history_messages(
-                messages=history_messages,
-                query=query,
-                history_budget=top_k * 200
-            )
+            agent_config = getattr(session_context, "agent_config", {}) or {}
+            strategy = resolve_session_memory_strategy(agent_config=agent_config)
+            if hasattr(session_memory_manager, "retrieve"):
+                retrieved_messages = session_memory_manager.retrieve(
+                    messages=history_messages,
+                    query=query,
+                    history_budget=top_k * 200,
+                    strategy=strategy,
+                    agent_config=agent_config,
+                )
+            elif strategy == "grouped_chat":
+                retrieved_messages = session_memory_manager.retrieve_group_messages_by_chat(
+                    messages=history_messages,
+                    query=query,
+                    history_budget=top_k * 200,
+                )
+            else:
+                retrieved_messages = session_memory_manager.retrieve_history_messages(
+                    messages=history_messages,
+                    query=query,
+                    history_budget=top_k * 200,
+                )
             retrieved_messages = retrieved_messages[:top_k]
 
             logger.info(f"MemoryTool: Retrieved {len(retrieved_messages)} history messages for query '{query}'")

@@ -70,7 +70,9 @@ setup(
         "python-pptx",
         "PyMuPDF",
         "tqdm",
-        "unstructured"
+        "unstructured",
+        "loguru>=0.7.0",
+        "rank-bm25>=0.2.2",
     ],
     python_requires=">=3.10",
     classifiers=[

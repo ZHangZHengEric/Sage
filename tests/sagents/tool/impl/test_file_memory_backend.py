@@ -11,9 +11,27 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
-from sagents.tool.impl.file_memory.factory import create_file_memory_backend
+if "rank_bm25" not in sys.modules:
+    fake_rank_bm25 = types.ModuleType("rank_bm25")
+
+    class _FakeBM25Okapi:
+        def __init__(self, corpus):
+            self.corpus = corpus
+
+        def get_scores(self, query_tokens):
+            return [1.0 for _ in self.corpus]
+
+    fake_rank_bm25.BM25Okapi = _FakeBM25Okapi
+    sys.modules["rank_bm25"] = fake_rank_bm25
+
+
+from sagents.tool.impl.file_memory.factory import (
+    create_file_memory_backend,
+    resolve_file_memory_backend_name,
+)
 from sagents.tool.impl.file_memory.index_backend import ScopedIndexFileMemoryBackend
 from sagents.tool.impl.file_memory.noop_backend import NoopFileMemoryBackend
+from sagents.tool.impl.memory_tool import FileMemoryRetriever
 
 
 class _FakeIndex:
@@ -63,6 +81,26 @@ class TestFileMemoryBackend(unittest.TestCase):
         backend = create_file_memory_backend(_FakeMemoryTool(), "noop")
         self.assertIsInstance(backend, NoopFileMemoryBackend)
 
+    def test_factory_prefers_agent_config_over_env(self):
+        agent_config = {"memory_backends": {"file_memory": "noop"}}
+        with patch.dict("os.environ", {"SAGE_FILE_MEMORY_BACKEND": "scoped_index"}):
+            backend = create_file_memory_backend(_FakeMemoryTool(), agent_config=agent_config)
+        self.assertIsInstance(backend, NoopFileMemoryBackend)
+
+    def test_factory_supports_legacy_agent_config_key(self):
+        backend = create_file_memory_backend(
+            _FakeMemoryTool(),
+            agent_config={"file_memory_backend": "noop"},
+        )
+        self.assertIsInstance(backend, NoopFileMemoryBackend)
+
+    def test_resolve_backend_name_prefers_explicit_argument(self):
+        resolved = resolve_file_memory_backend_name(
+            backend_name="scoped_index",
+            agent_config={"memory_backends": {"file_memory": "noop"}},
+        )
+        self.assertEqual(resolved, "scoped_index")
+
     def test_factory_rejects_unknown_backend(self):
         with self.assertRaisesRegex(ValueError, "Unsupported file memory backend"):
             create_file_memory_backend(_FakeMemoryTool(), "unknown")
@@ -89,6 +127,22 @@ class TestFileMemoryBackend(unittest.TestCase):
         self.assertEqual(len(second), 1)
         self.assertEqual(len(_FakeIndex.instances), 1)
         self.assertEqual(_FakeIndex.update_calls, 1)
+
+    def test_retriever_uses_agent_config_backend_selection(self):
+        retriever = FileMemoryRetriever(_FakeMemoryTool())
+        session_context = types.SimpleNamespace(
+            sandbox=object(),
+            sandbox_agent_workspace="/workspace",
+            agent_id="agent-a",
+            user_id="alice",
+            agent_config={"memory_backends": {"file_memory": "noop"}},
+        )
+
+        with patch.dict("os.environ", {"SAGE_FILE_MEMORY_BACKEND": "scoped_index"}):
+            result = asyncio.run(retriever.search("provider", 3, session_context))
+
+        self.assertEqual(result, [])
+        self.assertIsInstance(retriever.backend, NoopFileMemoryBackend)
 
 
 if __name__ == "__main__":
