@@ -1,12 +1,12 @@
 ---
-
-## layout: default
+layout: default
 title: 平台、存储与可观测
 parent: HTTP API 参考
 nav_order: 7
 description: "LLM Provider、系统、版本、OSS、Jaeger、探活、OAuth2 与外链"
 lang: zh
 ref: http-api-platform
+---
 
 {% include lang_switcher.html %}
 

@@ -1,13 +1,12 @@
 ---
-
-## layout: default
-
+layout: default
 title: 工具、技能与 MCP
 parent: HTTP API 参考
 nav_order: 5
 description: "list/exec、技能维度与同步、MCP 注册与刷新"
 lang: zh
 ref: http-api-tools
+---
 
 {% include lang_switcher.html %}
 
