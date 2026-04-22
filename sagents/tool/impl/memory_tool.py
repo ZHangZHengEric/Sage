@@ -171,8 +171,14 @@ class SessionHistoryRetriever:
         ):
             return cache_entry.history_messages
 
-        prepare_result = message_manager.prepare_history_split(agent_config)
-        history_messages = prepare_result["split_result"]["history_messages"]
+        # 历史边界：最近一次 compress_conversation_history 工具调用之前的所有消息
+        # 没有压缩调用时返回空列表（短会话不需要 RAG 检索）
+        anchor_index = message_manager.compute_history_anchor_index()
+        if anchor_index is None or anchor_index <= 0:
+            history_messages: List[Any] = []
+        else:
+            history_messages = list(message_manager.messages[:anchor_index])
+
         self._history_cache[session_id] = _SessionHistoryCacheEntry(
             messages_fingerprint=messages_fingerprint,
             agent_config_fingerprint=agent_config_fingerprint,

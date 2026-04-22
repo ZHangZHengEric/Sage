@@ -10,7 +10,7 @@
     aria-multiline="true"
     spellcheck="false"
     @input="handleInput"
-    @keydown="forward('keydown', $event)"
+    @keydown="onEditorKeydown"
     @keyup="onCaretActivity('keyup', $event)"
     @click="onCaretActivity('click', $event)"
     @paste="handlePaste"
@@ -23,6 +23,7 @@
 
 <script setup>
 import { ref, watch, onMounted, computed, nextTick } from 'vue'
+import { useLanguage } from '../../utils/i18n.js'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -41,6 +42,8 @@ const emit = defineEmits([
   'blur',
   'caret-update'
 ])
+
+const { t } = useLanguage()
 
 const editorRef = ref(null)
 const isComposing = ref(false)
@@ -72,6 +75,166 @@ const buildSegments = (text) => {
   return segments
 }
 
+const isAttachmentChip = (n) => n && n.nodeType === 1 && n.classList && n.classList.contains('chip-input__chip')
+
+/** 仅有零宽格或空白的文本节点，常插在正文与 chip 之间；需跳过才能命中附件 */
+const isSkippableTextBetween = (n) => {
+  if (!n || n.nodeType !== 3) return false
+  const t = n.textContent || ''
+  if (t === '\u200B' || t === '') return true
+  return t.replace(/[\s\u200B\uFEFF]/g, '') === ''
+}
+
+/**
+ * 在 contenteditable 中定位「紧邻光标之前」的附件 chip（供 Backspace 整段删除）。
+ */
+const findChipBeforeCaret = (root, range) => {
+  if (!range || !range.collapsed || !root?.contains?.(range.startContainer)) return null
+  const sc = range.startContainer
+  const so = range.startOffset
+  if (sc.nodeType === Node.ELEMENT_NODE) {
+    for (let j = so - 1; j >= 0; j--) {
+      const c = sc.childNodes[j]
+      if (isAttachmentChip(c)) return c
+      if (isSkippableTextBetween(c)) continue
+      break
+    }
+  }
+  if (sc.nodeType === Node.TEXT_NODE) {
+    if (so === 1 && sc.length === 1 && sc.textContent === '\u200B') {
+      let prev = sc.previousSibling
+      while (prev) {
+        if (isAttachmentChip(prev)) return prev
+        if (isSkippableTextBetween(prev)) {
+          prev = prev.previousSibling
+          continue
+        }
+        return null
+      }
+    }
+    if (so > 0) return null
+    let n = sc
+    while (n) {
+      let prev = n.previousSibling
+      while (prev) {
+        if (isAttachmentChip(prev)) return prev
+        if (isSkippableTextBetween(prev)) {
+          prev = prev.previousSibling
+          continue
+        }
+        return null
+      }
+      n = n.parentNode
+      if (!n || n === root) break
+      if (n.nodeType === 1) {
+        const p = n.parentNode
+        const i = [].indexOf.call(p.childNodes, n)
+        for (let j = i - 1; j >= 0; j--) {
+          const leftSib = p.childNodes[j]
+          if (isAttachmentChip(leftSib)) return leftSib
+          if (isSkippableTextBetween(leftSib)) continue
+          break
+        }
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * 在 contenteditable 中定位「紧邻光标之后」的附件 chip（供 Delete 整段删除）。
+ */
+const findChipAfterCaret = (root, range) => {
+  if (!range || !range.collapsed || !root?.contains?.(range.startContainer)) return null
+  const sc = range.startContainer
+  const so = range.startOffset
+  if (sc.nodeType === Node.ELEMENT_NODE) {
+    for (let j = so; j < sc.childNodes.length; j++) {
+      const c = sc.childNodes[j]
+      if (isAttachmentChip(c)) return c
+      if (isSkippableTextBetween(c)) continue
+      break
+    }
+  }
+  if (sc.nodeType === Node.TEXT_NODE) {
+    if (so < sc.length) return null
+    let next = sc.nextSibling
+    while (next) {
+      if (isAttachmentChip(next)) return next
+      if (isSkippableTextBetween(next)) {
+        next = next.nextSibling
+        continue
+      }
+      return null
+    }
+    let n = sc
+    while (n) {
+      n = n.parentNode
+      if (!n || n === root) break
+      if (n.nodeType === 1) {
+        const p = n.parentNode
+        const i = [].indexOf.call(p.childNodes, n)
+        for (let j = i + 1; j < p.childNodes.length; j++) {
+          const rightSib = p.childNodes[j]
+          if (isAttachmentChip(rightSib)) return rightSib
+          if (isSkippableTextBetween(rightSib)) continue
+          break
+        }
+      }
+    }
+  }
+  return null
+}
+
+const placeCaretAfterChipRemoval = (root, parent, afterBlock) => {
+  const sel = window.getSelection()
+  if (!sel) return
+  const r = document.createRange()
+  if (afterBlock && parent && parent.contains(afterBlock)) {
+    if (afterBlock.nodeType === Node.TEXT_NODE) {
+      r.setStart(afterBlock, 0)
+    } else {
+      r.setStartBefore(afterBlock)
+    }
+  } else if (parent && root?.contains?.(parent)) {
+    r.selectNodeContents(parent)
+    r.collapse(false)
+  } else {
+    return
+  }
+  r.collapse(true)
+  sel.removeAllRanges()
+  sel.addRange(r)
+}
+
+const removeAttachmentChip = (chipEl) => {
+  if (!chipEl || !editorRef.value?.contains(chipEl)) return
+  const root = editorRef.value
+  const parent = chipEl.parentNode
+  const afterBlock = (() => {
+    const nx = chipEl.nextSibling
+    if (isSkippableTextBetween(nx)) return nx.nextSibling
+    return nx
+  })()
+  const prev = chipEl.previousSibling
+  if (isSkippableTextBetween(prev)) {
+    try {
+      prev.remove()
+    } catch (_) { /* ignore */ }
+  }
+  const next = chipEl.nextSibling
+  if (isSkippableTextBetween(next)) {
+    try {
+      next.remove()
+    } catch (_) { /* ignore */ }
+  }
+  chipEl.remove()
+  if (root.contains(parent)) {
+    placeCaretAfterChipRemoval(root, parent, afterBlock)
+  }
+  handleInput()
+}
+
 const createChipElement = (seg) => {
   const chip = document.createElement('span')
   chip.setAttribute('contenteditable', 'false')
@@ -91,6 +254,27 @@ const createChipElement = (seg) => {
 
   chip.appendChild(icon)
   chip.appendChild(name)
+
+  if (!props.disabled) {
+    const label = t('messageInput.removeChip')
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'chip-input__chip-remove'
+    btn.setAttribute('aria-label', label)
+    btn.title = label
+    btn.appendChild(document.createTextNode('×'))
+    btn.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      removeAttachmentChip(chip)
+    })
+    btn.addEventListener('mousedown', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+    })
+    chip.appendChild(btn)
+  }
+
   return chip
 }
 
@@ -130,7 +314,11 @@ const nodeToText = (node) => {
       child.classList.contains('chip-input__chip')
     ) {
       const id = child.dataset.attId
-      const rawName = child.dataset.attName || child.textContent || 'file'
+      const nameNode = child.querySelector('.chip-input__chip-name')
+      const rawName =
+        child.dataset.attName ||
+        (nameNode ? nameNode.textContent : '') ||
+        'file'
       const name = String(rawName).replace(/\n/g, ' ').trim() || 'file'
       const isImage = child.dataset.attIsImage === 'true'
       const prefix = isImage ? '!' : ''
@@ -201,6 +389,45 @@ const onCompositionEnd = (e) => {
 
 const forward = (name, e) => {
   emit(name, e)
+}
+
+const onEditorKeydown = (e) => {
+  if (props.disabled) {
+    forward('keydown', e)
+    return
+  }
+  if (e.isComposing) {
+    forward('keydown', e)
+    return
+  }
+  const root = editorRef.value
+  if (!root) {
+    forward('keydown', e)
+    return
+  }
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) {
+    forward('keydown', e)
+    return
+  }
+  const range = sel.getRangeAt(0)
+  if (e.key === 'Backspace') {
+    const chip = findChipBeforeCaret(root, range)
+    if (chip) {
+      e.preventDefault()
+      removeAttachmentChip(chip)
+      return
+    }
+  }
+  if (e.key === 'Delete') {
+    const chip = findChipAfterCaret(root, range)
+    if (chip) {
+      e.preventDefault()
+      removeAttachmentChip(chip)
+      return
+    }
+  }
+  forward('keydown', e)
 }
 
 const placeCaretAtEnd = () => {
@@ -510,9 +737,35 @@ defineExpose({
 }
 
 .chip-input__chip-name {
-  max-width: 180px;
+  max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chip-input__chip-remove {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin: 0 -2px 0 2px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: hsl(var(--primary));
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.chip-input__chip-remove:hover {
+  opacity: 1;
+  background: hsl(var(--destructive) / 0.12);
+  color: hsl(var(--destructive));
 }
 </style>

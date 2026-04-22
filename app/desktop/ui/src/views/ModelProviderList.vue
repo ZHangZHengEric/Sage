@@ -82,8 +82,11 @@
     </div>
 
     <!-- Dialog -->
-    <Dialog :open="dialogOpen" @update:open="dialogOpen = $event">
-      <DialogContent class="flex h-[760px] max-h-[86vh] flex-col overflow-hidden border-border/60 bg-background p-0 sm:max-w-[760px]">
+    <Dialog :open="dialogOpen" @update:open="onDialogOpenChange">
+      <DialogContent
+        :closeable="!saving"
+        class="flex h-[760px] max-h-[86vh] flex-col overflow-hidden border-border/60 bg-background p-0 sm:max-w-[760px]"
+      >
         <DialogHeader class="border-b border-border/60 px-6 py-5 text-left">
           <DialogTitle class="text-[16px] font-semibold tracking-tight">
             {{ isEdit ? t('modelProvider.editTitle') : t('modelProvider.createTitle') }}
@@ -168,7 +171,7 @@
                 </div>
 
                 <div class="mt-3">
-                  <Button type="button" variant="secondary" class="h-9 w-full rounded-xl" @click="handleVerify" :disabled="verifying">
+                  <Button type="button" variant="secondary" class="h-9 w-full rounded-xl" @click="handleVerify" :disabled="verifying || saving">
                     <Loader v-if="verifying" class="mr-2 h-4 w-4 animate-spin" />
                     {{ verifyButtonLabel }}
                   </Button>
@@ -382,8 +385,11 @@
             {{ footerStatusHint }}
           </p>
           <div class="flex gap-2">
-            <Button variant="outline" class="h-9 rounded-xl px-3.5" @click="dialogOpen = false">{{ t('common.cancel') }}</Button>
-            <Button class="h-9 rounded-xl px-3.5" @click="submitForm" :disabled="!canSave">{{ t('common.save') }}</Button>
+            <Button variant="outline" class="h-9 rounded-xl px-3.5" :disabled="saving" @click="dialogOpen = false">{{ t('common.cancel') }}</Button>
+            <Button class="h-9 rounded-xl px-3.5" @click="submitForm" :disabled="!canSave">
+              <Loader v-if="saving" class="mr-2 h-4 w-4 animate-spin" />
+              {{ saving ? t('common.saving') : t('common.save') }}
+            </Button>
           </div>
         </DialogFooter>
       </DialogContent>
@@ -441,6 +447,7 @@ const dialogOpen = ref(false)
 const isEdit = ref(false)
 const currentId = ref(null)
 const verifying = ref(false)
+const saving = ref(false)
 const verified = ref(false)
 const capabilityChecked = ref(false)
 const showApiKey = ref(false)
@@ -487,6 +494,7 @@ const needsCapabilityVerification = computed(() => {
   return configChanged.value && !capabilityChecked.value
 })
 const verificationBadgeLabel = computed(() => {
+  if (saving.value) return t('common.saving')
   if (verifying.value) return t('modelProvider.verifying')
   if (!hasRequiredFields.value) return t('modelProvider.pendingConfig')
   if (needsCapabilityVerification.value) return t('modelProvider.pendingVerification')
@@ -494,7 +502,7 @@ const verificationBadgeLabel = computed(() => {
   return t('modelProvider.pendingConfig')
 })
 const verificationBadgeVariant = computed(() => {
-  if (verifying.value) return 'secondary'
+  if (saving.value || verifying.value) return 'secondary'
   if (needsCapabilityVerification.value || !hasRequiredFields.value) return 'outline'
   return 'secondary'
 })
@@ -527,6 +535,7 @@ const capabilityDetailLabel = computed(() => {
   return form.supportsMultimodal ? t('modelProvider.imageInputAvailable') : t('modelProvider.imageInputUnavailable')
 })
 const footerStatusHint = computed(() => {
+  if (saving.value) return t('common.saving')
   if (verifying.value) return t('modelProvider.footerVerifyingHint')
   if (!hasRequiredFields.value) return t('modelProvider.footerFillRequiredHint')
   if (needsCapabilityVerification.value) return t('modelProvider.footerNeedVerificationHint')
@@ -566,9 +575,14 @@ const resetCapabilityState = () => {
 // 保存按钮是否可点击
 const canSave = computed(() => {
   if (!hasRequiredFields.value) return false
-  if (verifying.value) return false
+  if (verifying.value || saving.value) return false
   return !needsCapabilityVerification.value
 })
+
+const onDialogOpenChange = (open) => {
+  if (!open && saving.value) return
+  dialogOpen.value = open
+}
 
 const handleProviderChange = (val) => {
   selectedProvider.value = val
@@ -652,6 +666,7 @@ const handleCreate = () => {
   originalValues.base_url = ''
   originalValues.api_keys_str = ''
   originalValues.model = ''
+  saving.value = false
   dialogOpen.value = true
 }
 
@@ -696,6 +711,7 @@ const handleEdit = (provider) => {
     showApiKey.value = false
     advancedOpen.value = false
 
+    saving.value = false
     dialogOpen.value = true
   } catch (error) {
     console.error('Failed to open edit dialog:', error)
@@ -716,6 +732,7 @@ const handleDelete = async (provider) => {
 }
 
 const handleVerify = async () => {
+  if (saving.value) return
   const data = buildProviderPayload()
 
   if (!data.name || !data.base_url || !data.api_keys.length || !data.model) {
@@ -749,6 +766,7 @@ const handleVerify = async () => {
 }
 
 const submitForm = async () => {
+  if (saving.value) return
   const data = buildProviderPayload()
 
   if (!hasRequiredFields.value) {
@@ -760,6 +778,7 @@ const submitForm = async () => {
     return
   }
 
+  saving.value = true
   try {
     if (isEdit.value) {
       await updateModelProvider(currentId.value, data)
@@ -772,6 +791,8 @@ const submitForm = async () => {
     fetchProviders()
   } catch (error) {
     toast.error(error.message)
+  } finally {
+    saving.value = false
   }
 }
 

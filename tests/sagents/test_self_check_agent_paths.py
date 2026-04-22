@@ -60,7 +60,8 @@ def _load_self_check_agent(monkeypatch):
     agent_base_module.AgentBase = AgentBase
     monkeypatch.setitem(sys.modules, "sagents.agent.agent_base", agent_base_module)
 
-    module_path = Path("/Users/zhangzheng/workspace/Sage/sagents/agent/self_check_agent.py")
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    module_path = repo_root / "sagents" / "agent" / "self_check_agent.py"
     spec = importlib.util.spec_from_file_location("sagents.agent.self_check_agent", module_path)
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, "sagents.agent.self_check_agent", module)

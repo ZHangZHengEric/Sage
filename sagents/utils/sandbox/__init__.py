@@ -11,7 +11,6 @@ from .interface import ISandboxHandle, SandboxType, CommandResult, ExecutionResu
 from .config import SandboxConfig, MountPath
 from .factory import SandboxProviderFactory
 
-# 向后兼容性导出
 from .providers.local import Sandbox, SandboxFileSystem, VenvManager
 
 __all__ = [
@@ -23,7 +22,6 @@ __all__ = [
     'SandboxConfig',
     'MountPath',
     'SandboxProviderFactory',
-    # 向后兼容性
     'Sandbox',
     'SandboxFileSystem',
     'VenvManager',

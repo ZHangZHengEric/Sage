@@ -12,6 +12,8 @@ from common.models.base import Base, BaseDao, get_local_now
 
 class Conversation(Base):
     __tablename__ = "conversations"
+    # 长 pytest 进程中模型可能被多次 import，避免重复注册同一张表
+    __table_args__ = {"extend_existing": True}
 
     session_id: Mapped[str] = mapped_column(String(255), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(255), nullable=False)

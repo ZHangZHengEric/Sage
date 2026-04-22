@@ -21,20 +21,20 @@ class SandboxFileSystem:
         """
         if not volume_mounts:
             raise ValueError("volume_mounts 不能为空")
-        
+
         self._volume_mounts = volume_mounts
-        
+
         # 第一个 mount 作为主映射
         first_mount = volume_mounts[0]
         self.host_path = os.path.abspath(first_mount.host_path)
         self.virtual_path = first_mount.mount_path.rstrip(os.sep) or os.sep
-        
+
         # 额外的映射
         self._mappings: Dict[str, str] = {}
         for mount in volume_mounts[1:]:
             normalized_virtual = mount.mount_path.rstrip(os.sep) or os.sep
             self._mappings[normalized_virtual] = os.path.abspath(mount.host_path)
-        
+
         # 如果 host_path == virtual_path，自动禁用路径映射
         self.enable_path_mapping = (self.host_path != self.virtual_path)
 
