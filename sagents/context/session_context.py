@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
-from sagents.context.session_memory.session_memory_manager import SessionMemoryManager
+from sagents.context.session_memory import create_session_memory_manager
 from sagents.skill import SkillProxy, SkillManager
 from sagents.skill.sandbox_skill_manager import SandboxSkillManager
 from sagents.utils.prompt_manager import prompt_manager
@@ -146,7 +146,7 @@ class SessionContext:
         self.message_manager = MessageManager(context_budget_config=context_budget_config)
         self.workflow_manager = WorkflowManager()
         self.audit_status: Dict[str, Any] = {}
-        self.session_memory_manager = SessionMemoryManager()
+        self.session_memory_manager = create_session_memory_manager()
         self.agent_config: Dict[str, Any] = {}
         self.custom_sub_agents: List[Dict[str, Any]] = []
         self.orchestrator: Optional[Any] = None
@@ -758,7 +758,8 @@ class SessionContext:
                          available_tools: Optional[list] = None, available_skills: Optional[list] = None, system_context: Optional[dict] = None,
                          available_workflows: Optional[dict] = None, deep_thinking: Optional[bool] = None,
                          agent_mode: Optional[str] = None, more_suggest: bool = False,
-                         max_loop_count: Optional[int] = None, agent_id: Optional[str] = None):
+                         max_loop_count: Optional[int] = None, agent_id: Optional[str] = None,
+                         memory_backends: Optional[Dict[str, str]] = None):
         """设置agent配置信息
 
         Args:
@@ -775,6 +776,7 @@ class SessionContext:
             more_suggest: 更多建议模式
             max_loop_count: 最大循环次数
             agent_id: Agent ID (Fibre用)
+            memory_backends: 记忆后端配置，如 {"session_history": "bm25", "file_memory": "scoped_index"}
         """
         if max_loop_count is None:
             raise ValueError("max_loop_count is required")
@@ -805,9 +807,11 @@ class SessionContext:
             "available_skills": available_skills or [],
             "system_context": system_context or {},
             "available_workflows": available_workflows or {},
+            "memory_backends": memory_backends or {},
             "exportTime": current_time.strftime('%Y-%m-%d %H:%M:%S'),
             "version": "1.0"
         }
+        self.session_memory_manager = create_session_memory_manager(agent_config=self.agent_config)
         logger.debug("SessionContext: 设置agent配置信息完成")
 
     def set_status(self, status: SessionStatus, cascade: bool = True) -> None:

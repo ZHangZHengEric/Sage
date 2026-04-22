@@ -43,6 +43,16 @@ class SearchResult:
     line_number: int    # Line number (if applicable)
 
 
+@dataclass
+class RowAnalysis:
+    row: Any
+    raw_score: float
+    line_start: int
+    line_end: int
+    chunk_index: int
+    matched_terms: Set[str]
+
+
 class MemoryIndex:
     """
     File-memory index manager for sandbox workspaces.
@@ -115,6 +125,8 @@ class MemoryIndex:
         self.documents: Dict[int, FileDocument] = {}
         self.path_to_doc_ids: Dict[str, List[int]] = {}
         self._next_doc_id = 0
+        self._path_token_cache: Dict[str, tuple[Set[str], Set[str], Set[str], Set[str]]] = {}
+        self._row_token_cache: Dict[tuple[str, int, int, int], Set[str]] = {}
 
         # Directory mtime cache for incremental updates
         self._dir_mtime_cache: Dict[str, float] = {}
@@ -451,9 +463,16 @@ class MemoryIndex:
             conn.execute("DELETE FROM memory_file_fts WHERE path = ?", (filepath,))
             conn.commit()
 
+    def _invalidate_path_caches(self, filepath: str) -> None:
+        self._path_token_cache.pop(filepath, None)
+        stale_row_keys = [key for key in self._row_token_cache if key[0] == filepath]
+        for key in stale_row_keys:
+            self._row_token_cache.pop(key, None)
+
     def _sync_file_to_fts(self, filepath: str) -> None:
         self._ensure_fts_schema()
         doc_ids = self.path_to_doc_ids.get(filepath, [])
+        self._invalidate_path_caches(filepath)
         with self._fts_connection() as conn:
             conn.execute("DELETE FROM memory_fts WHERE path = ?", (filepath,))
             conn.execute("DELETE FROM memory_file_fts WHERE path = ?", (filepath,))
@@ -771,6 +790,7 @@ class MemoryIndex:
             try:
                 for doc_id in self.path_to_doc_ids.pop(filepath, []):
                     self.documents.pop(doc_id, None)
+                self._invalidate_path_caches(filepath)
                 self._delete_file_from_fts(filepath)
                 stats["removed"] += 1
                 logger.debug(f"MemoryIndex: Removed file {filepath}")
@@ -865,7 +885,67 @@ class MemoryIndex:
             row_content = row["content"] or ""
         except (KeyError, TypeError):
             row_content = ""
-        return set(self._tokenize(f"{row_path} {row_content}"))
+        try:
+            row_key = (
+                row_path,
+                int(row["chunk_index"] or 0),
+                int(row["line_start"] or 1),
+                int(row["line_end"] or int(row["line_start"] or 1)),
+            )
+        except (KeyError, TypeError, ValueError):
+            row_key = None
+
+        if row_key is not None:
+            cached = self._row_token_cache.get(row_key)
+            if cached is not None:
+                return cached
+
+        row_tokens = set(self._tokenize(f"{row_path} {row_content}"))
+        if row_key is not None:
+            self._row_token_cache[row_key] = row_tokens
+        return row_tokens
+
+    def _get_path_token_sets(self, path: str) -> tuple[Set[str], Set[str], Set[str], Set[str]]:
+        cached = self._path_token_cache.get(path)
+        if cached is not None:
+            return cached
+
+        normalized_path = path.lower()
+        basename = os.path.basename(normalized_path)
+        stem, _ = os.path.splitext(basename)
+        directory_part = os.path.dirname(normalized_path)
+        token_sets = (
+            set(self._tokenize(basename)),
+            set(self._tokenize(stem)),
+            set(self._tokenize(directory_part)),
+            set(self._tokenize(normalized_path)),
+        )
+        self._path_token_cache[path] = token_sets
+        return token_sets
+
+    def _analyze_rows(
+        self,
+        rows: List[Any],
+        significant_tokens: List[str],
+    ) -> List[RowAnalysis]:
+        if not rows:
+            return []
+
+        analyses: List[RowAnalysis] = []
+        significant_token_set = set(significant_tokens)
+        for row in rows:
+            row_tokens = self._row_token_set(row)
+            analyses.append(
+                RowAnalysis(
+                    row=row,
+                    raw_score=-float(row["raw_score"]) if row["raw_score"] is not None else 0.0,
+                    line_start=int(row["line_start"] or 1),
+                    line_end=int(row["line_end"] or int(row["line_start"] or 1)),
+                    chunk_index=int(row["chunk_index"] or 0),
+                    matched_terms=row_tokens & significant_token_set,
+                )
+            )
+        return analyses
 
     def _build_result_preview(self, chunk_content: str, query: str, line_start: int) -> tuple[str, int]:
         """Build a preview and line number from the strongest chunk hit."""
@@ -883,66 +963,73 @@ class MemoryIndex:
             preview += "..."
         return preview, line_start
 
-    def _select_preview_rows(self, rows: List[Any], query_tokens: List[str], max_rows: int = 3) -> List[Any]:
+    def _select_preview_rows(
+        self,
+        rows_or_analyses: List[Any],
+        query_tokens_or_significant_tokens: List[str],
+        max_rows: int = 3,
+    ) -> List[Any]:
         """Greedily select preview rows that maximize query-term coverage."""
-        if not rows:
+        if not rows_or_analyses:
             return []
 
-        significant_tokens = self._significant_query_tokens(query_tokens)
+        if isinstance(rows_or_analyses[0], RowAnalysis):
+            analyses = rows_or_analyses
+            significant_tokens = query_tokens_or_significant_tokens
+        else:
+            significant_tokens = self._significant_query_tokens(query_tokens_or_significant_tokens)
+            analyses = self._analyze_rows(rows_or_analyses, significant_tokens)
+
         if not significant_tokens:
             ranked_rows = sorted(
-                rows,
-                key=lambda row: (
-                    -float(row["raw_score"]) if row["raw_score"] is not None else 0.0,
-                    -float(row["line_start"] or 1),
+                analyses,
+                key=lambda analysis: (
+                    analysis.raw_score,
+                    -analysis.line_start,
                 ),
                 reverse=True,
             )
-            return ranked_rows[:max_rows]
+            return [analysis.row for analysis in ranked_rows[:max_rows]]
 
         remaining_tokens = set(significant_tokens)
-        selected: List[Any] = []
-        remaining_rows = list(rows)
+        selected: List[RowAnalysis] = []
+        remaining_rows = list(analyses)
 
         while remaining_rows and len(selected) < max_rows:
-            best_row = None
+            best_row: Optional[RowAnalysis] = None
             best_key = None
-            for row in remaining_rows:
-                row_tokens = self._row_token_set(row)
-                matched_terms = {token for token in significant_tokens if token in row_tokens}
-                new_terms = matched_terms & remaining_tokens
-                if self._is_redundant_preview_row(row, selected, new_terms):
+            for analysis in remaining_rows:
+                new_terms = analysis.matched_terms & remaining_tokens
+                if self._is_redundant_preview_row(analysis, selected, new_terms):
                     continue
-                raw_score = -float(row["raw_score"]) if row["raw_score"] is not None else 0.0
                 candidate_key = (
                     len(new_terms),
-                    len(matched_terms),
-                    raw_score,
-                    -float(row["line_start"] or 1),
+                    len(analysis.matched_terms),
+                    analysis.raw_score,
+                    -analysis.line_start,
                 )
                 if best_key is None or candidate_key > best_key:
                     best_key = candidate_key
-                    best_row = row
+                    best_row = analysis
 
             if best_row is None:
                 break
 
             selected.append(best_row)
-            row_tokens = self._row_token_set(best_row)
-            remaining_tokens -= {token for token in significant_tokens if token in row_tokens}
-            remaining_rows = [row for row in remaining_rows if row is not best_row]
+            remaining_tokens -= best_row.matched_terms
+            remaining_rows = [analysis for analysis in remaining_rows if analysis is not best_row]
             if not remaining_tokens and len(selected) >= 2:
                 break
 
-        selected.sort(key=lambda row: float(row["line_start"] or 1))
-        return selected
+        selected.sort(key=lambda analysis: analysis.line_start)
+        return [analysis.row for analysis in selected]
 
-    def _row_overlap_ratio(self, left: Any, right: Any) -> float:
+    def _row_overlap_ratio(self, left: RowAnalysis, right: RowAnalysis) -> float:
         """Return line-range overlap ratio relative to the shorter row span."""
-        left_start = int(left["line_start"] or 1)
-        left_end = int(left["line_end"] or left_start)
-        right_start = int(right["line_start"] or 1)
-        right_end = int(right["line_end"] or right_start)
+        left_start = left.line_start
+        left_end = left.line_end
+        right_start = right.line_start
+        right_end = right.line_end
 
         overlap_start = max(left_start, right_start)
         overlap_end = min(left_end, right_end)
@@ -954,7 +1041,12 @@ class MemoryIndex:
         right_span = max(right_end - right_start + 1, 1)
         return overlap_span / min(left_span, right_span)
 
-    def _is_redundant_preview_row(self, candidate: Any, selected: List[Any], matched_terms: Set[str]) -> bool:
+    def _is_redundant_preview_row(
+        self,
+        candidate: RowAnalysis,
+        selected: List[RowAnalysis],
+        matched_terms: Set[str],
+    ) -> bool:
         """Skip strongly overlapping preview rows unless they add new query coverage."""
         if not selected:
             return False
@@ -973,9 +1065,18 @@ class MemoryIndex:
         self,
         rows: List[Any],
         query: str,
-        query_tokens: List[str],
+        significant_tokens: List[str],
+        analyses: Optional[List[RowAnalysis]] = None,
     ) -> tuple[str, int]:
-        preview_rows = self._select_preview_rows(rows, query_tokens)
+        preview_analyses = analyses or self._analyze_rows(rows, significant_tokens)
+        preview_rows = self._select_preview_rows(preview_analyses, significant_tokens)
+        return self._build_preview_from_rows(preview_rows, query)
+
+    def _build_preview_from_rows(
+        self,
+        preview_rows: List[Any],
+        query: str,
+    ) -> tuple[str, int]:
         if not preview_rows:
             return "", 1
 
@@ -996,26 +1097,17 @@ class MemoryIndex:
 
         return "\n\n".join(preview_parts), first_line_number or int(preview_rows[0]["line_start"] or 1)
 
-    def _filename_match_bonus(self, path: str, query_tokens: List[str]) -> float:
+    def _filename_match_bonus(self, path: str, significant_tokens: List[str]) -> float:
         """Add a small bonus when the file path itself matches the query."""
-        normalized_path = path.lower()
-        basename = os.path.basename(normalized_path)
-        stem, _ = os.path.splitext(basename)
-        directory_part = os.path.dirname(normalized_path)
-
-        significant_tokens = self._significant_query_tokens(query_tokens)
         if not significant_tokens:
             return 0.0
 
-        basename_token_set = set(self._tokenize(basename))
-        stem_token_set = set(self._tokenize(stem))
-        directory_token_set = set(self._tokenize(directory_part))
-        path_token_set = set(self._tokenize(normalized_path))
-
-        basename_matches = sum(1 for token in significant_tokens if token in basename_token_set)
-        stem_matches = sum(1 for token in significant_tokens if token in stem_token_set)
-        directory_matches = sum(1 for token in significant_tokens if token in directory_token_set)
-        path_matches = sum(1 for token in significant_tokens if token in path_token_set)
+        basename_token_set, stem_token_set, directory_token_set, path_token_set = self._get_path_token_sets(path)
+        significant_token_set = set(significant_tokens)
+        basename_matches = len(significant_token_set & basename_token_set)
+        stem_matches = len(significant_token_set & stem_token_set)
+        directory_matches = len(significant_token_set & directory_token_set)
+        path_matches = len(significant_token_set & path_token_set)
 
         coverage = basename_matches / len(significant_tokens)
         stem_coverage = stem_matches / len(significant_tokens)
@@ -1029,40 +1121,29 @@ class MemoryIndex:
             significant_tokens = [token.lower() for token in query_tokens if token]
         return significant_tokens
 
-    def _extract_row_token_stats(self, rows: List[Any], query_tokens: List[str]) -> tuple[Set[str], Dict[int, Set[str]]]:
-        significant_tokens = self._significant_query_tokens(query_tokens)
-        if not significant_tokens:
-            return set(), {}
-
+    def _extract_row_token_stats(self, analyses: List[RowAnalysis]) -> tuple[Set[str], Dict[int, Set[str]]]:
         matched_terms: Set[str] = set()
         chunk_matches: Dict[int, Set[str]] = {}
-        for row in rows:
-            row_tokens = self._row_token_set(row)
-            row_matches = {token for token in significant_tokens if token in row_tokens}
-            if not row_matches:
+        for analysis in analyses:
+            if not analysis.matched_terms:
                 continue
-            matched_terms.update(row_matches)
-            chunk_index = int(row["chunk_index"] or 0)
-            chunk_matches.setdefault(chunk_index, set()).update(row_matches)
+            matched_terms.update(analysis.matched_terms)
+            chunk_matches.setdefault(analysis.chunk_index, set()).update(analysis.matched_terms)
         return matched_terms, chunk_matches
 
-    def _select_best_chunk_row(self, rows: List[Any], query_tokens: List[str]) -> Optional[Any]:
-        if not rows:
+    def _select_best_chunk_row(self, analyses: List[RowAnalysis]) -> Optional[Any]:
+        if not analyses:
             return None
 
-        significant_tokens = self._significant_query_tokens(query_tokens)
-
-        def row_rank_key(row: Any) -> tuple[float, float, float]:
-            row_tokens = self._row_token_set(row)
-            matched_count = sum(1 for token in significant_tokens if token in row_tokens)
-            raw_score = -float(row["raw_score"]) if row["raw_score"] is not None else 0.0
-            return (
-                matched_count,
-                raw_score,
-                -float(row["line_start"] or 1),
-            )
-
-        return max(rows, key=row_rank_key)
+        best = max(
+            analyses,
+            key=lambda analysis: (
+                len(analysis.matched_terms),
+                analysis.raw_score,
+                -analysis.line_start,
+            ),
+        )
+        return best.row
 
     def _chunk_cohesion_bonus(
         self,
@@ -1129,26 +1210,22 @@ class MemoryIndex:
 
         return best_bonus
 
-    def _score_chunk_hits(self, rows: List[Any], query_tokens: List[str]) -> tuple[float, Optional[Any]]:
+    def _score_chunk_hits(
+        self,
+        analyses: List[RowAnalysis],
+        significant_tokens: List[str],
+    ) -> tuple[float, Optional[Any]]:
         """Return a rerank boost plus the best preview chunk row."""
-        if not rows:
+        if not analyses:
             return 0.0, None
 
-        ranked_rows = sorted(
-            rows,
-            key=lambda row: -float(row["raw_score"]) if row["raw_score"] is not None else 0.0,
-            reverse=True,
-        )
-        chunk_scores = [
-            -float(row["raw_score"]) if row["raw_score"] is not None else 0.0
-            for row in ranked_rows[:3]
-        ]
+        ranked_analyses = sorted(analyses, key=lambda analysis: analysis.raw_score, reverse=True)
+        chunk_scores = [analysis.raw_score for analysis in ranked_analyses[:3]]
         best_score = chunk_scores[0]
         second_score = chunk_scores[1] if len(chunk_scores) > 1 else 0.0
         third_score = chunk_scores[2] if len(chunk_scores) > 2 else 0.0
-        hit_count_bonus = min(max(len(ranked_rows) - 1, 0), 4) * 0.03
-        matched_terms, chunk_matches = self._extract_row_token_stats(ranked_rows, query_tokens)
-        significant_tokens = self._significant_query_tokens(query_tokens)
+        hit_count_bonus = min(max(len(ranked_analyses) - 1, 0), 4) * 0.03
+        matched_terms, chunk_matches = self._extract_row_token_stats(ranked_analyses)
         coverage_bonus = 0.0
         if significant_tokens:
             coverage_ratio = len(matched_terms) / len(significant_tokens)
@@ -1170,7 +1247,7 @@ class MemoryIndex:
             + chunk_diversity_bonus
             + cohesion_bonus
             + span_bonus,
-            self._select_best_chunk_row(ranked_rows, query_tokens),
+            self._select_best_chunk_row(ranked_analyses),
         )
 
     def _build_aggregated_search_result(
@@ -1178,7 +1255,7 @@ class MemoryIndex:
         path: str,
         file_score: float,
         query: str,
-        query_tokens: List[str],
+        significant_tokens: List[str],
         best_chunk_row: Optional[Any],
         preview_rows: Optional[List[Any]] = None,
     ) -> SearchResult:
@@ -1187,7 +1264,7 @@ class MemoryIndex:
         line_number = 1
 
         if preview_rows:
-            preview, line_number = self._build_multi_chunk_preview(preview_rows, query, query_tokens)
+            preview, line_number = self._build_preview_from_rows(preview_rows, query)
         elif best_chunk_row is not None:
             chunk_content = best_chunk_row["content"] or ""
             line_start = int(best_chunk_row["line_start"] or 1)
@@ -1211,15 +1288,15 @@ class MemoryIndex:
         path: str,
         file_score: float,
         rows: List[Any],
-        query: str,
-        query_tokens: List[str],
+        significant_tokens: List[str],
     ) -> tuple[float, Optional[Any], List[Any]]:
         """Score a file candidate without eagerly building preview text."""
-        file_score_weight = 0.65 if len(query_tokens) > 1 else 1.0
-        aggregate_score = file_score * file_score_weight + self._filename_match_bonus(path, query_tokens)
-        chunk_boost, best_chunk_row = self._score_chunk_hits(rows, query_tokens)
+        file_score_weight = 0.65 if len(significant_tokens) > 1 else 1.0
+        aggregate_score = file_score * file_score_weight + self._filename_match_bonus(path, significant_tokens)
+        analyses = self._analyze_rows(rows, significant_tokens)
+        chunk_boost, best_chunk_row = self._score_chunk_hits(analyses, significant_tokens)
         aggregate_score += chunk_boost
-        preview_rows = self._select_preview_rows(rows, query_tokens)
+        preview_rows = self._select_preview_rows(analyses, significant_tokens)
         return aggregate_score, best_chunk_row, preview_rows
 
     def _fetch_chunk_rows(
@@ -1338,6 +1415,7 @@ class MemoryIndex:
             query_tokens = self._tokenize(query)
             if not query_tokens:
                 return []
+            significant_tokens = self._significant_query_tokens(query_tokens)
 
             match_expr = self._build_match_expr(query_tokens, operator="OR")
             file_limit = max(top_k * self.DEFAULT_FILE_SEARCH_LIMIT_MULTIPLIER, 20)
@@ -1346,7 +1424,7 @@ class MemoryIndex:
 
                 if not file_rows:
                     elapsed = time.time() - start_time
-                    logger.info(f"MemoryIndex: Search '{query}' completed, found 0 results in {elapsed:.3f}s")
+                    logger.debug(f"MemoryIndex: Search '{query}' completed, found 0 results in {elapsed:.3f}s")
                     return []
 
                 candidate_paths = [row["path"] for row in file_rows]
@@ -1371,8 +1449,7 @@ class MemoryIndex:
                             path=path,
                             file_score=file_score,
                             rows=file_hits.get(path, []),
-                            query=query,
-                            query_tokens=query_tokens,
+                            significant_tokens=significant_tokens,
                         )
                         scored_candidates.append((aggregate_score, path, best_chunk_row, preview_rows))
 
@@ -1397,11 +1474,10 @@ class MemoryIndex:
                                 path=path,
                                 file_score=file_score,
                                 rows=rows,
-                                query=query,
-                                query_tokens=query_tokens,
+                                significant_tokens=significant_tokens,
                             )
                         else:
-                            aggregate_score = file_score + self._filename_match_bonus(path, query_tokens)
+                            aggregate_score = file_score + self._filename_match_bonus(path, significant_tokens)
                             best_chunk_row = None
                             preview_rows = []
                         scored_candidates.append((aggregate_score, path, best_chunk_row, preview_rows))
@@ -1414,7 +1490,7 @@ class MemoryIndex:
                     path=path,
                     file_score=score,
                     query=query,
-                    query_tokens=query_tokens,
+                    significant_tokens=significant_tokens,
                     best_chunk_row=best_chunk_row,
                     preview_rows=preview_rows,
                 )
@@ -1422,7 +1498,7 @@ class MemoryIndex:
             ]
 
             elapsed = time.time() - start_time
-            logger.info(f"MemoryIndex: Search '{query}' completed, found {len(results)} results in {elapsed:.3f}s")
+            logger.debug(f"MemoryIndex: Search '{query}' completed, found {len(results)} results in {elapsed:.3f}s")
             return results
 
         except Exception as e:
@@ -1442,6 +1518,8 @@ class MemoryIndex:
         self.path_to_doc_ids = {}
         self._next_doc_id = 0
         self._dir_mtime_cache = {}
+        self._path_token_cache = {}
+        self._row_token_cache = {}
 
         if self.index_path.exists():
             self.index_path.unlink()

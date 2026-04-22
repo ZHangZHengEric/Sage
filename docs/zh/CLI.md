@@ -36,7 +36,13 @@ Sage CLI 是本地验证运行时改动最快的入口，不需要先经过 Web 
 
 ## 安装
 
-在仓库根目录执行：
+如果你要获得完整的本地开发 / 运行环境，先安装仓库依赖：
+
+```bash
+pip install -r requirements.txt
+```
+
+如果你还希望当前仓库直接提供 `sage` 命令入口，再在仓库根目录执行：
 
 ```bash
 pip install -e .
@@ -123,6 +129,8 @@ sage run --user-id alice --stats "用一句话介绍你自己。"
 - 当前工作目录
 - 实际生效的环境文件路径和是否存在
 - auth mode 和 db type
+- 当前解析出的 `session_history` 与 `file_memory` memory backend
+- 当前解析出的 `session_history` 检索策略
 - `agents_dir`、`session_dir`、`logs_dir` 等关键目录
 - `session_dir` 下的 SQLite session registry 路径
 - 依赖是否可用
@@ -147,6 +155,24 @@ sage config init
 sage config init --path ./my-sage.env
 sage config init --force
 ```
+
+`sage config show` 也会展示当前默认解析到的 memory backend：
+
+- `session_history`
+- `file_memory`
+
+它也会展示当前默认解析到的 `session_history` 检索策略。
+
+对应的环境变量是：
+
+- `SAGE_SESSION_MEMORY_STRATEGY`
+
+如果 memory backend 或 strategy 配置成了不支持的值，`sage doctor` 和
+`sage config show` 也不会直接崩溃，而是会在对应的 `memory_backends.*`
+或 `memory_strategies.*` 字段里返回结构化校验错误。
+
+`sage config init` 生成的 env 模板里也会带上注释形式的 memory-search
+可选覆盖项，方便在一个文件里调整 backend 或 strategy。
 
 ### `sage run`
 

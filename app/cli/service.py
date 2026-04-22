@@ -76,7 +76,8 @@ def _collect_runtime_issues(cfg: config.StartupConfig) -> Dict[str, List[str]]:
     missing_deps = [name for name, present in deps.items() if not present]
     if missing_deps:
         errors.append(f"Missing Python dependencies: {', '.join(missing_deps)}")
-        next_steps.append("Install project dependencies first, for example: pip install -e .")
+        next_steps.append("Install project dependencies first, for example: pip install -r requirements.txt")
+        next_steps.append("If only rank_bm25 is missing, install it directly with: pip install rank-bm25")
 
     if not (cfg.default_llm_api_key or "").strip():
         errors.append("Missing SAGE_DEFAULT_LLM_API_KEY")
@@ -311,6 +312,89 @@ async def run_request_stream(
             continue
 
 
+def _safe_runtime_choice_diagnostic(
+    *,
+    resolve_fn,
+    available_fn,
+    env_name: str,
+    label: str,
+) -> Dict[str, Any]:
+    available = list(available_fn())
+    env_value = os.environ.get(env_name)
+    try:
+        resolved = resolve_fn()
+        if resolved not in available:
+            raise ValueError(
+                f"Unsupported {label}: {resolved}. Supported values: {', '.join(available)}"
+            )
+        return {
+            "status": "ok",
+            "resolved": resolved,
+            "available": available,
+            "env": env_value,
+            "error": None,
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "resolved": None,
+            "available": available,
+            "env": env_value,
+            "error": str(exc),
+        }
+
+
+def _collect_memory_runtime_diagnostics() -> Dict[str, Any]:
+    from sagents.context.session_memory import (
+        available_session_memory_backend_names,
+        available_session_memory_strategy_names,
+        resolve_session_memory_backend_name,
+        resolve_session_memory_strategy,
+    )
+    from sagents.tool.impl.file_memory import (
+        available_file_memory_backend_names,
+        resolve_file_memory_backend_name,
+    )
+
+    memory_backends = {
+        "session_history": _safe_runtime_choice_diagnostic(
+            resolve_fn=resolve_session_memory_backend_name,
+            available_fn=available_session_memory_backend_names,
+            env_name="SAGE_SESSION_MEMORY_BACKEND",
+            label="session memory backend",
+        ),
+        "file_memory": _safe_runtime_choice_diagnostic(
+            resolve_fn=resolve_file_memory_backend_name,
+            available_fn=available_file_memory_backend_names,
+            env_name="SAGE_FILE_MEMORY_BACKEND",
+            label="file memory backend",
+        ),
+    }
+    memory_strategies = {
+        "session_history": _safe_runtime_choice_diagnostic(
+            resolve_fn=resolve_session_memory_strategy,
+            available_fn=available_session_memory_strategy_names,
+            env_name="SAGE_SESSION_MEMORY_STRATEGY",
+            label="session memory strategy",
+        ),
+    }
+
+    issues: List[str] = []
+    for group_name, group_items in (
+        ("memory_backends", memory_backends),
+        ("memory_strategies", memory_strategies),
+    ):
+        for item_name, item in group_items.items():
+            if item["status"] == "error":
+                issues.append(f"Invalid {group_name}.{item_name}: {item['error']}")
+
+    return {
+        "memory_backends": memory_backends,
+        "memory_strategies": memory_strategies,
+        "issues": issues,
+    }
+
+
 def collect_doctor_info() -> Dict[str, Any]:
     cfg = init_cli_config(init_logging=False)
     local_defaults = config.get_local_storage_defaults()
@@ -323,6 +407,8 @@ def collect_doctor_info() -> Dict[str, Any]:
     session_registry_db = os.path.join(cfg.session_dir, "sessions_index.sqlite")
     dependency_status = _dependency_status()
     issues = _collect_runtime_issues(cfg)
+    memory_diagnostics = _collect_memory_runtime_diagnostics()
+    issues["errors"].extend(memory_diagnostics["issues"])
     status = "ok"
     if issues["errors"]:
         status = "error"
@@ -344,6 +430,8 @@ def collect_doctor_info() -> Dict[str, Any]:
         "default_cli_user_id": get_default_cli_user_id(),
         "default_cli_max_loop_count": get_default_cli_max_loop_count(),
         "default_llm_model_name": cfg.default_llm_model_name,
+        "memory_backends": memory_diagnostics["memory_backends"],
+        "memory_strategies": memory_diagnostics["memory_strategies"],
         "agents_dir": cfg.agents_dir,
         "agents_dir_exists": os.path.exists(cfg.agents_dir),
         "session_dir": cfg.session_dir,
@@ -403,6 +491,7 @@ def collect_config_info() -> Dict[str, Any]:
     if os.path.exists(project_env_file):
         env_files.append(project_env_file)
     session_registry_db = os.path.join(cfg.session_dir, "sessions_index.sqlite")
+    memory_diagnostics = _collect_memory_runtime_diagnostics()
     return {
         "env_file": effective_env_file,
         "env_files": env_files,
@@ -414,6 +503,8 @@ def collect_config_info() -> Dict[str, Any]:
         "db_type": cfg.db_type,
         "default_llm_api_base_url": cfg.default_llm_api_base_url,
         "default_llm_model_name": cfg.default_llm_model_name,
+        "memory_backends": memory_diagnostics["memory_backends"],
+        "memory_strategies": memory_diagnostics["memory_strategies"],
         "agents_dir": cfg.agents_dir,
         "session_dir": cfg.session_dir,
         "session_registry_db": session_registry_db,
@@ -428,6 +519,9 @@ def collect_config_info() -> Dict[str, Any]:
             "SAGE_DEFAULT_LLM_API_BASE_URL": os.environ.get("SAGE_DEFAULT_LLM_API_BASE_URL"),
             "SAGE_DEFAULT_LLM_MODEL_NAME": os.environ.get("SAGE_DEFAULT_LLM_MODEL_NAME"),
             "SAGE_DB_TYPE": os.environ.get("SAGE_DB_TYPE"),
+            "SAGE_SESSION_MEMORY_BACKEND": os.environ.get("SAGE_SESSION_MEMORY_BACKEND"),
+            "SAGE_FILE_MEMORY_BACKEND": os.environ.get("SAGE_FILE_MEMORY_BACKEND"),
+            "SAGE_SESSION_MEMORY_STRATEGY": os.environ.get("SAGE_SESSION_MEMORY_STRATEGY"),
         },
     }
 
@@ -457,6 +551,11 @@ def build_minimal_cli_env_template() -> str:
         "SAGE_DEFAULT_LLM_API_KEY=" + api_key,
         "SAGE_DEFAULT_LLM_API_BASE_URL=" + api_base_url,
         "SAGE_DEFAULT_LLM_MODEL_NAME=" + model_name,
+        "",
+        "# Optional memory-search overrides",
+        "# SAGE_SESSION_MEMORY_BACKEND=bm25",
+        "# SAGE_FILE_MEMORY_BACKEND=scoped_index",
+        "# SAGE_SESSION_MEMORY_STRATEGY=messages",
         "",
     ]
     return "\n".join(lines)
