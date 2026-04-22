@@ -15,7 +15,7 @@ ref: http-api-reference
 
 This page documents the backend HTTP endpoints that actually exist in the current codebase. It is organized as: quick rules, endpoint index, key payload models, and working `curl` examples.
 
-For the old runtime-facing Python API notes, see [API Reference](API_REFERENCE.md). For current server integration work, use this page.
+For embedding the Python runtime (`SAgent`, `run_stream`, tools), see [API Reference](API_REFERENCE.md). For the hosted FastAPI server, this page is authoritative.
 
 **Scope:** This list reflects `register_routes` in `app/server/routers` (the main platform FastAPI app). The desktop app (`app/desktop/`) has additional routes (IM, browser extension, questionnaire, etc.) that are **not** included here.
 
