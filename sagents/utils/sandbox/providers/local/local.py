@@ -84,23 +84,26 @@ class LocalSandboxProvider(ISandboxHandle):
 
             logger.info(f"LocalSandboxProvider: Initializing with workspace={self._sandbox_agent_workspace}")
 
-            # 构建 volume_mounts：sandbox_agent_workspace 映射到自身（直通模式）
-            # 然后添加额外的 volume_mounts
-            volume_mounts = [VolumeMount(
-                host_path=self._sandbox_agent_workspace,
-                mount_path=self._sandbox_agent_workspace
-            )]
-            
-            # 添加额外的 volume_mounts
-            for mount in (self._volume_mounts or []):
-                volume_mounts.append(mount)
+            # 显式传入 volume_mounts 时以其为准；否则用 sandbox_agent_workspace 作 1:1 宿主机映射
+            if self._volume_mounts:
+                volume_mounts = list(self._volume_mounts)
+            else:
+                volume_mounts = [
+                    VolumeMount(
+                        host_path=self._sandbox_agent_workspace,
+                        mount_path=self._sandbox_agent_workspace,
+                    )
+                ]
             
             # 使用 volume_mounts 创建文件系统
-            self._file_system = SandboxFileSystem(volume_mounts=volume_mounts)
+            self._file_system = SandboxFileSystem(volume_mounts)
+
+            # venv / 运行时目录必须落在宿主机路径上（虚拟路径如 /sage-workspace 不可直接 mkdir）
+            host_workspace = self._file_system.to_host_path(self._sandbox_agent_workspace)
 
             # 设置 venv 目录（desktop 可切换为共享 venv）
-            self._venv_dir = resolve_python_venv_dir(self._sandbox_agent_workspace)
-            sandbox_runtime_dir = resolve_sandbox_runtime_dir(self._sandbox_agent_workspace)
+            self._venv_dir = resolve_python_venv_dir(host_workspace)
+            sandbox_runtime_dir = resolve_sandbox_runtime_dir(host_workspace)
             if sandbox_runtime_dir:
                 os.makedirs(sandbox_runtime_dir, exist_ok=True)
 
@@ -440,7 +443,9 @@ class LocalSandboxProvider(ISandboxHandle):
         await self._ensure_venv()
 
         # 转换工作目录
-        actual_workdir = self.to_host_path(workdir) if workdir else self._sandbox_agent_workspace
+        actual_workdir = (
+            self.to_host_path(workdir) if workdir else self.to_host_path(self._sandbox_agent_workspace)
+        )
 
         # 转换命令中的虚拟路径为宿主机路径
         converted_command = self._convert_paths_in_command(command)
@@ -644,7 +649,9 @@ class LocalSandboxProvider(ISandboxHandle):
         # 创建临时文件执行代码
         import tempfile
 
-        actual_workdir = self.to_host_path(workdir) if workdir else self._sandbox_agent_workspace
+        actual_workdir = (
+            self.to_host_path(workdir) if workdir else self.to_host_path(self._sandbox_agent_workspace)
+        )
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(code)
@@ -714,7 +721,9 @@ class LocalSandboxProvider(ISandboxHandle):
         # 创建临时文件执行代码
         import tempfile
 
-        actual_workdir = self.to_host_path(workdir) if workdir else self._sandbox_agent_workspace
+        actual_workdir = (
+            self.to_host_path(workdir) if workdir else self.to_host_path(self._sandbox_agent_workspace)
+        )
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
             f.write(code)
@@ -867,7 +876,9 @@ class LocalSandboxProvider(ISandboxHandle):
         max_items_per_dir: int = 5
     ) -> str:
         """基本的文件树实现（当 filesystem 不可用时）"""
-        target_root = self.to_host_path(root_path) if root_path else self._sandbox_agent_workspace
+        target_root = (
+            self.to_host_path(root_path) if root_path else self.to_host_path(self._sandbox_agent_workspace)
+        )
         
         if not os.path.exists(target_root):
             return ""

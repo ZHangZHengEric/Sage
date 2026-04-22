@@ -38,13 +38,13 @@ class MessageManager:
     不允许保存system消息，所有system消息会被自动过滤。
     """
     
-    def __init__(self, session_id: Optional[str] = None, 
+    def __init__(self, session_id: Optional[str] = None,
                  max_token_limit: int = 8000,
                  compression_threshold: float = 0.7,
                  context_budget_config: Optional[Dict[str, Any]] = None):
         """
         初始化消息管理器
-        
+
         Args:
             session_id: 会话ID
             max_token_limit: 最大token限制
@@ -54,24 +54,21 @@ class MessageManager:
                 - history_ratio: 历史消息的比例（0-1之间），默认 0.2 (20%)
                 - active_ratio: 活跃消息的比例（0-1之间），默认 0.3 (30%)
                 - max_new_message_ratio: 新消息的比例（0-1之间），默认 0.5 (50%)
-                - recent_turns: 限制最近的对话轮数，0表示不限制，默认 0
         """
         self.session_id = session_id or f"session_{uuid.uuid4().hex[:8]}"
         self.max_token_limit = max_token_limit
         self.compression_threshold = compression_threshold
-        
-        # 处理context_budget_config为None的情况
+
         if context_budget_config is None:
             context_budget_config = {}
-        
+
         self.context_budget_manager = ContextBudgetManager(
             max_model_len=context_budget_config.get('max_model_len') or 40000,
             history_ratio=context_budget_config.get('history_ratio') or 0.2,
             active_ratio=context_budget_config.get('active_ratio') or 0.3,
             max_new_message_ratio=context_budget_config.get('max_new_message_ratio') or 0.5,
-            recent_turns=context_budget_config.get('recent_turns') or 0
         )
-        
+
         # 消息存储（只存储非system消息）
         self.messages: List[MessageChunk] = []
         
@@ -129,56 +126,34 @@ class MessageManager:
                    f"历史消息: {index if index else 0}条，"
                    f"活跃消息: {len(self.messages) - (index if index else 0)}条")
     
-    def _extract_current_query(self) -> str:
-        """提取最新用户查询（私有辅助方法）
-        
-        Returns:
-            最新用户消息的内容，如果没有则返回空字符串
-        """
-        for msg in reversed(self.messages):
-            if msg.role == MessageRole.USER.value:
-                return msg.get_content() or ""
-        return ""
-    
     def prepare_history_split(self, agent_config: Dict[str, Any]) -> Dict[str, Any]:
-        """准备历史消息切分
-        计算预算、切分消息、设置活跃消息起始索引，并提取最新用户查询
+        """计算 token 预算并刷新历史锚点。
+
+        说明：active_start_index 不再由 token budget 驱动（避免在 LLM 上下文层做硬截断）。
+        其语义已变更为：指向"最近一次 compress_conversation_history 工具调用"的位置，
+        仅供 memory 工具划定 RAG 检索范围使用；没有压缩调用时为 None。
+        本方法保留以维持 budget_info 计算（多个辅助 Agent 仍依赖它做局部规则压缩）。
         """
-        # 1. 计算预算
         budget_info = self.context_budget_manager.calculate_budget(agent_config)
-        
-        # 2. 切分消息
-        split_result = self.context_budget_manager.split_messages(
-            messages=self.messages,
-            active_budget=budget_info['active_budget']
-        )
-        
-        # 3. 设置活跃消息起始索引
-        # self.set_active_start_index(len(split_result['history_messages']))
-        split_index = len(split_result['history_messages'])
-        
-        # 查找最近两轮对话的起始索引 (User + AI + User + AI + User)
-        # 即倒数第3个User消息的索引
-        user_indices = [i for i, msg in enumerate(self.messages) if msg.role == MessageRole.USER.value]
-        if len(user_indices) >= 3:
-            two_rounds_index = user_indices[-3]
-        elif len(user_indices) > 0:
-            two_rounds_index = user_indices[0]
-        else:
-            two_rounds_index = 0
-            
-        # 取最小值，确保至少包含最近两轮对话
-        final_index = min(split_index, two_rounds_index)
-        self.set_active_start_index(final_index)
-        
-        # 4. 提取最新用户查询
-        current_query = self._extract_current_query()
-        
-        return {
-            'budget_info': budget_info,
-            'split_result': split_result,
-            'current_query': current_query
-        }
+        self._refresh_history_anchor_index()
+        return {'budget_info': budget_info}
+
+    def compute_history_anchor_index(self) -> Optional[int]:
+        """扫描 self.messages 找到最近一次 compress_conversation_history 调用的位置。
+
+        Returns:
+            该 Assistant 调用消息的索引；未找到时返回 None。
+            索引之前的消息视为"已被工具总结过的历史"，可作为 memory 检索范围；
+            索引及之后的消息（含工具结果）视为活跃段。
+        """
+        for i in range(len(self.messages) - 1, -1, -1):
+            if self._is_compress_history_tool_call(self.messages[i]):
+                return i
+        return None
+
+    def _refresh_history_anchor_index(self) -> None:
+        """根据最新压缩工具调用位置刷新 active_start_index（仅供 memory 使用）。"""
+        self.set_active_start_index(self.compute_history_anchor_index())
     
     
 
@@ -243,10 +218,13 @@ class MessageManager:
                 continue
 
             self.messages = MessageManager.merge_new_message_old_messages(message,self.messages)
-            
+
         self.stats['total_messages'] = len(self.messages)
         self.stats['total_chunks'] += len(messages)
         self.stats['last_updated'] = datetime.datetime.now().isoformat()
+
+        # 新消息可能包含 compress_conversation_history 工具调用，刷新锚点
+        self._refresh_history_anchor_index()
         return True
     @staticmethod
     def merge_new_messages_to_old_messages(new_messages: List[ Union[MessageChunk, Dict]],old_messages: List[Union[MessageChunk, Dict]]) -> List[MessageChunk]:
@@ -786,11 +764,14 @@ class MessageManager:
     def extract_all_context_messages(self, recent_turns: int = 0, last_turn_user_only: bool = True, allowed_message_types: Optional[List[str]] = None) -> List[MessageChunk]:
         """
         提取所有有意义的上下文消息，包括用户消息和助手消息，最后一个消息对话，可选是否只提取用户消息，如果只提取用户消息，即是本次请求的上下文，否则带上本次执行已有内容
-        
-        注意：消息的长度限制由 context_budget_manager 在 prepare_history_split() 中通过 active_start_index 控制
-        
-        新增：检测 compress_conversation_history 工具结果，只取最新的压缩工具对应的 User 消息及之后的消息
-        
+
+        注意：本方法不再按 active_start_index 做硬截断。
+        发往 LLM 的最终长度控制完全交给 SimpleAgent._prepare_messages_for_llm
+        中的 compress_messages / compress_conversation_history 链路统一处理。
+        本方法仍会按 recent_turns 限制对话轮数（辅助 Agent 依赖此行为）。
+
+        说明：检测 compress_conversation_history 工具调用，只取最新的压缩工具对应的 User 消息及之后的消息
+
         Args:
             recent_turns: 最近的对话轮数，0表示不限制
             last_turn_user_only: 是否只提取最后一个对话轮的用户消息，默认是True
@@ -813,11 +794,9 @@ class MessageManager:
                 MessageType.SKILL_OBSERVATION.value
             ]
 
-        if self.active_start_index is not None:
-            active_messages = self.messages[self.active_start_index:]
-        else:
-            active_messages = self.messages
-        
+        # 全量消息进入；后续靠 recent_turns + 上层压缩链路控制长度
+        active_messages = self.messages
+
         # --- 新增：检测 compress_conversation_history 工具调用 ---
         # 从后往前查找最新的压缩工具调用
         # 策略：找到最后一个压缩工具调用，然后往前找到对应的 User 消息
@@ -871,17 +850,17 @@ class MessageManager:
             last_chat = chat_list[-1]
             all_context_messages.append(last_chat[0])
             chat_list = chat_list[:-1]
-        # 合并消息（长度限制由 context_budget_manager 通过 active_start_index 控制）
+        # 合并消息（长度限制由上层 _prepare_messages_for_llm 统一控制）
         for chat in chat_list[::-1]:
             merged_messages = []
             merged_messages.append(chat[0])
-            
+
             for msg in chat[1:]:
                 if msg.matches_message_types(allowed_message_types):
                     merged_messages.append(msg)
-            
+
             all_context_messages.extend(merged_messages[::-1])
-        
+
         result_messages = all_context_messages[::-1]
         # 打印提取结果的统计信息
         total_tokens = MessageManager.calculate_messages_token_length(result_messages)

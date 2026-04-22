@@ -120,11 +120,12 @@ class Sandbox:
                 mount_path=self.sandbox_agent_workspace
             )]
         else:
-            # 默认使用当前目录
-            volume_mounts = [VolumeMount(host_path=".", mount_path=".")]
+            # 当前工作目录：宿主机与沙箱内使用同一绝对路径，不生成虚拟路径映射
+            _cwd = os.path.abspath(".")
+            volume_mounts = [VolumeMount(host_path=_cwd, mount_path=_cwd)]
 
         # 创建文件系统
-        self.file_system = SandboxFileSystem(volume_mounts=volume_mounts)
+        self.file_system = SandboxFileSystem(volume_mounts)
 
     def _init_venv_and_isolation(self):
         """初始化虚拟环境和隔离"""

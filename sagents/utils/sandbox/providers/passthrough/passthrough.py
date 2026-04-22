@@ -90,10 +90,12 @@ class PassthroughSandboxProvider(ISandboxHandle):
 
     def _iter_virtual_mappings(self) -> List[tuple[str, str]]:
         """生成虚拟路径到宿主机路径的映射列表"""
-        # 主映射：sandbox_agent_workspace 映射到自身（直通）
-        mappings = [(self._sandbox_agent_workspace, self._sandbox_agent_workspace)]
-        # 添加动态映射
-        mappings.extend(self._dynamic_mounts.items())
+        # 仅使用显式挂载与 add_mount；无映射时退化为 1:1 兼容旧用法
+        mappings: List[tuple[str, str]] = list(self._dynamic_mounts.items())
+        if not mappings:
+            mappings.append(
+                (self._sandbox_agent_workspace, self._sandbox_agent_workspace)
+            )
         return sorted(mappings, key=lambda item: len(item[0]), reverse=True)
 
     def _iter_host_mappings(self) -> List[tuple[str, str]]:
@@ -257,7 +259,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
         if workdir:
             cwd = self.to_host_path(workdir)
         else:
-            cwd = self._sandbox_agent_workspace
+            cwd = self.to_host_path(self._sandbox_agent_workspace)
 
         # 为 npm/npx 配置项目级缓存，避免写入用户主目录 ~/.npm 导致权限问题
         npm_cache_dir = os.path.join(os.path.expanduser("~"), ".sage", ".npm-cache")
@@ -441,7 +443,9 @@ class PassthroughSandboxProvider(ISandboxHandle):
             pip_cmd = f"pip install {' '.join(requirements)}"
             await self.execute_command(pip_cmd, workdir=workdir, timeout=300)
 
-        actual_workdir = self.to_host_path(workdir) if workdir else self._sandbox_agent_workspace
+        actual_workdir = (
+            self.to_host_path(workdir) if workdir else self.to_host_path(self._sandbox_agent_workspace)
+        )
 
         # 创建临时文件存储代码
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
@@ -506,7 +510,9 @@ class PassthroughSandboxProvider(ISandboxHandle):
             npm_cmd = f"npm install {' '.join(packages)}"
             await self.execute_command(npm_cmd, workdir=workdir, timeout=300)
 
-        actual_workdir = self.to_host_path(workdir) if workdir else self._sandbox_agent_workspace
+        actual_workdir = (
+            self.to_host_path(workdir) if workdir else self.to_host_path(self._sandbox_agent_workspace)
+        )
 
         # 检查是否有 node 环境
         try:
@@ -576,7 +582,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
             return ""
 
         # 使用 SandboxFileSystem 的 get_file_tree 方法
-        fs = SandboxFileSystem(volume_mounts=[
+        fs = SandboxFileSystem([
             VolumeMount(self._sandbox_agent_workspace, self._sandbox_agent_workspace)
         ])
         return await fs.get_file_tree_compact(
