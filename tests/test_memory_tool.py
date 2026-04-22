@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import json
 import sys
 import types
 import unittest
@@ -28,6 +29,11 @@ if "rank_bm25" not in sys.modules:
 
 def _load_memory_tool_module():
     return importlib.import_module("sagents.tool.impl.memory_tool")
+
+
+def _load_tool_manager_class():
+    module = importlib.import_module("sagents.tool.tool_manager")
+    return module.ToolManager
 
 
 class _FakeMessage:
@@ -109,6 +115,7 @@ class TestMemoryTool(unittest.TestCase):
         cls.MemoryTool = cls.module.MemoryTool
         cls.FileMemoryRetriever = cls.module.FileMemoryRetriever
         cls.SessionHistoryRetriever = cls.module.SessionHistoryRetriever
+        cls.ToolManager = _load_tool_manager_class()
 
     def setUp(self):
         self.FileMemoryRetriever.clear_cache()
@@ -154,6 +161,26 @@ class TestMemoryTool(unittest.TestCase):
         tool.session_history_retriever.search("history", 3, "session-1", session_context)
         self.assertEqual(message_manager.prepare_calls, 2)
 
+    def test_session_history_retriever_invalidates_cache_on_agent_config_change(self):
+        tool = self.MemoryTool()
+        history_messages = [_FakeMessage("h1", "assistant", "history snippet")]
+        session_context = types.SimpleNamespace(
+            message_manager=_FakeMessageManager(
+                messages=[_FakeMessage("m1", "user", "hello session")],
+                history_messages=history_messages,
+            ),
+            agent_config={"name": "demo-v1"},
+            session_memory_manager=_FakeSessionMemoryManager(retrieved_messages=history_messages),
+        )
+
+        tool.session_history_retriever.search("history", 3, "session-1", session_context)
+        tool.session_history_retriever.search("history", 3, "session-1", session_context)
+        self.assertEqual(session_context.message_manager.prepare_calls, 1)
+
+        session_context.agent_config = {"name": "demo-v2"}
+        tool.session_history_retriever.search("history", 3, "session-1", session_context)
+        self.assertEqual(session_context.message_manager.prepare_calls, 2)
+
     def test_file_memory_retriever_reuses_scoped_index_and_refreshes_once(self):
         tool = self.MemoryTool()
         session_context = types.SimpleNamespace(
@@ -174,6 +201,31 @@ class TestMemoryTool(unittest.TestCase):
         self.assertEqual(results1[0]["path"], "/workspace/app/cli/example.py")
         self.assertEqual(results1[0]["snippets"][0]["line_number"], 3)
 
+    def test_file_memory_retriever_refreshes_again_when_cached_index_is_stale(self):
+        tool = self.MemoryTool()
+        session_context = types.SimpleNamespace(
+            sandbox=object(),
+            sandbox_agent_workspace="/workspace",
+            agent_id="agent-a",
+            user_id="alice",
+        )
+
+        with patch("sagents.tool.impl.memory_index.MemoryIndex", _FakeIndex):
+            asyncio.run(tool.file_memory_retriever.search("provider cli", 3, session_context))
+
+            scope_key = tool.file_memory_retriever._build_scope_key(
+                user_id="alice",
+                agent_id="agent-a",
+                workspace_path="/workspace",
+            )
+            cache_entry = tool.file_memory_retriever._index_cache[scope_key]
+            cache_entry.last_refresh_at = 0.0
+
+            asyncio.run(tool.file_memory_retriever.search("provider cli", 3, session_context))
+
+        self.assertEqual(len(_FakeIndex.instances), 1)
+        self.assertEqual(_FakeIndex.update_calls, 2)
+
     def test_search_memory_success_returns_split_results(self):
         tool = self.MemoryTool()
 
@@ -190,6 +242,36 @@ class TestMemoryTool(unittest.TestCase):
         self.assertEqual(result["query"], "provider")
         self.assertEqual(len(result["long_term_memory"]), 1)
         self.assertEqual(len(result["session_history"]), 1)
+
+    def test_tool_manager_run_tool_async_injects_session_id_for_search_memory(self):
+        tool = self.MemoryTool()
+        manager = self.ToolManager(is_auto_discover=False, isolated=True)
+        manager.register_tools_from_object(tool)
+
+        async def fake_file_search(query, top_k, session_id):
+            self.assertEqual(session_id, "session-tool")
+            return [{"path": "/workspace/app/cli/example.py", "snippets": []}]
+
+        async def fake_history_search(query, top_k, session_id):
+            self.assertEqual(session_id, "session-tool")
+            return [{"role": "assistant", "content_preview": "history", "timestamp": 123}]
+
+        with patch.object(tool, "_search_file_memory", fake_file_search), patch.object(tool, "_search_session_history", fake_history_search):
+            raw = asyncio.run(
+                manager.run_tool_async(
+                    tool_name="search_memory",
+                    session_id="session-tool",
+                    query="provider",
+                    top_k=2,
+                )
+            )
+
+        payload = json.loads(raw)
+        self.assertIn("content", payload)
+        self.assertEqual(payload["content"]["status"], "success")
+        self.assertEqual(payload["content"]["query"], "provider")
+        self.assertEqual(len(payload["content"]["long_term_memory"]), 1)
+        self.assertEqual(len(payload["content"]["session_history"]), 1)
 
 
 if __name__ == "__main__":
