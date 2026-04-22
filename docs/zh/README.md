@@ -73,6 +73,7 @@ ref: home
 - [HTTP API 参考](HTTP_API_REFERENCE.md)：按当前代码库订正后的后端接口细节、请求体、返回体与示例
 - [OAuth2 对接指南（Lage）](OAUTH2_LAGE_INTEGRATION.md)：恢复自历史提交的 OAuth2 对接文档
 - [开发](DEVELOPMENT.md)：贡献流程和源码位置
+- [Memory Search 验证总入口](MEMORY_SEARCH_VALIDATION.md)：当前 memory-search 工作线的统一验证入口
 - [故障排查](TROUBLESHOOTING.md)：常见启动和环境问题
 
 ## 当前产品入口
