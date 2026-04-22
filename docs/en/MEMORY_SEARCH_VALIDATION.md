@@ -4,8 +4,8 @@ This document is the combined validation entry for the current memory-search wor
 
 Detailed phase notes remain in:
 
-- `docs/memory_search_p1_validation.md`
-- `docs/memory_search_p2_validation.md`
+- `MEMORY_SEARCH_P1_VALIDATION.md`
+- `MEMORY_SEARCH_P2_VALIDATION.md`
 
 ## Scope
 
@@ -48,6 +48,7 @@ P2:
 
 - `b3a67aa4` `feat: stabilize memory retriever boundaries`
 - `76280080` `test: expand memory retriever regression coverage`
+- `e0f2c6c3` `docs: add unified memory search validation`
 
 ## Notes
 

@@ -72,6 +72,7 @@ Read:
 - [HTTP API Reference](HTTP_API_REFERENCE.md): current backend HTTP endpoints, request and response bodies, and curl examples
 - [OAuth2 Lage Integration Guide](../zh/OAUTH2_LAGE_INTEGRATION.md): restored OAuth2 integration guide from historical docs
 - [Development](DEVELOPMENT.md): contributor workflow and source locations
+- [Memory Search Validation](MEMORY_SEARCH_VALIDATION.md): unified validation entry for the current memory-search workstream
 - [Troubleshooting](TROUBLESHOOTING.md): common startup and environment issues
 
 ## Current Product Surfaces
