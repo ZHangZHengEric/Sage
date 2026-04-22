@@ -1,6 +1,5 @@
 ---
-
-## layout: default
+layout: default
 title: HTTP API 参考
 parent: API 文档
 nav_order: 1
@@ -8,6 +7,7 @@ has_children: true
 description: "基于当前代码库的后端 HTTP API 参考"
 lang: zh
 ref: http-api-reference
+---
 
 {% include lang_switcher.html %}
 
