@@ -168,6 +168,82 @@ def convert_spec_to_openai_format(
         if isinstance(localized_returns.get("properties"), dict):
             _apply_prop_i18n(localized_returns["properties"], rdi_map)
 
+    # In strict mode, ALL properties must be in required, and every nested object
+    # must also have additionalProperties: false with a complete required array.
+    # session_id at the top level is always auto-injected and must not be exposed to the LLM.
+    _AUTO_INJECT_PARAMS = {"session_id"}
+
+    def _enforce_strict_schema(node: Any) -> None:
+        """Recursively enforce OpenAI strict-mode constraints on all nested object schemas.
+
+        Rules applied:
+        - oneOf / allOf → replaced with anyOf (strict mode only permits anyOf)
+        - Objects with properties: add additionalProperties=false; make ALL keys required;
+          optional properties (absent from original required) are wrapped as anyOf:[type, null]
+        - Bare objects (no properties): converted to string type with JSON-format hint
+        - Arrays: recurse into items
+        - anyOf members: recurse into each member
+        """
+        if not isinstance(node, dict):
+            return
+
+        # Replace forbidden combiners with anyOf
+        for forbidden in ("oneOf", "allOf"):
+            if forbidden in node:
+                node["anyOf"] = node.pop(forbidden)
+
+        if node.get("type") == "object":
+            if "properties" in node and isinstance(node["properties"], dict):
+                node["additionalProperties"] = False
+                original_required = set(node.get("required", []))
+                for prop_key, prop_node in node["properties"].items():
+                    _enforce_strict_schema(prop_node)
+                    if prop_key not in original_required:
+                        # Optional nested property: wrap as nullable
+                        desc = prop_node.pop("description", "")
+                        inner = dict(prop_node)
+                        prop_node.clear()
+                        prop_node["anyOf"] = [inner, {"type": "null"}]
+                        if desc:
+                            prop_node["description"] = desc
+                node["required"] = list(node["properties"].keys())
+            else:
+                # Free-form dict — not representable in strict mode; convert to string.
+                original_desc = node.get("description", "")
+                node.clear()
+                node["type"] = "string"
+                node["description"] = (
+                    (original_desc + " " if original_desc else "")
+                    + "(Pass as a JSON object string, e.g. '{\"key\": \"value\"}')"
+                ).strip()
+            return  # children already handled above
+
+        if node.get("type") == "array" and "items" in node:
+            _enforce_strict_schema(node["items"])
+
+        # Recurse into anyOf members (handles oneOf→anyOf converted nodes too)
+        if "anyOf" in node and isinstance(node["anyOf"], list):
+            for member in node["anyOf"]:
+                _enforce_strict_schema(member)
+
+    strictly_required = set(getattr(tool_spec, "required", []))
+    schema_params = {k: v for k, v in localized_params.items() if k not in _AUTO_INJECT_PARAMS}
+
+    for key, param_node in schema_params.items():
+        _enforce_strict_schema(param_node)
+        if key not in strictly_required:
+            # Strict mode requires ALL properties in required.
+            # For optional params, wrap as anyOf: [type, null] so the LLM can pass null.
+            desc = param_node.pop("description", "")
+            inner = dict(param_node)
+            param_node.clear()
+            param_node["anyOf"] = [inner, {"type": "null"}]
+            if desc:
+                param_node["description"] = desc
+
+    # Now all schema_params are required (optional ones accept null).
+    schema_required = list(schema_params.keys())
+
     return {
         "type": "function",
         "function": {
@@ -175,8 +251,8 @@ def convert_spec_to_openai_format(
             "description": localized_desc,
             "parameters": {
                 "type": "object",
-                "properties": localized_params,
-                "required": getattr(tool_spec, "required", []),
+                "properties": schema_params,
+                "required": schema_required,
                 "additionalProperties": False,
             },
             "strict": True,
