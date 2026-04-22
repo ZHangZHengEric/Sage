@@ -1,24 +1,29 @@
 ---
-layout: default
-title: API 参考
-nav_order: 9
-description: "Sage多智能体框架完整API参考文档"
+
+## layout: default
+title: Python 运行时 API（历史 v0.9）
+parent: API 文档
+nav_order: 2
+description: "历史 v0.9 运行时侧 Python 类与方法的参考（非当前 HTTP 对外接口）"
 lang: zh
 ref: api-reference
----
 
 {% include lang_switcher.html %}
 
 {: .note }
+
 > 需要英文版本？请查看 [API Reference](../en/API_REFERENCE.md)
 
 {: .warning }
+
 > 本页恢复自历史 v0.9 文档，描述的是较早期的运行时 Python API。当前仓库里的服务端 HTTP 接口，请优先查看 [HTTP API 参考](HTTP_API_REFERENCE.md)。
 
 ## 目录
+
 {: .no_toc .text-delta }
 
 1. TOC
+
 {:toc}
 
 # 📖 API 参考文档

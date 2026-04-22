@@ -54,9 +54,8 @@ ref: home
 
 1. [快速开始](GETTING_STARTED.md)
 2. [配置](CONFIGURATION.md)
-3. [API 参考](API_REFERENCE.md)
-4. [HTTP API 参考](HTTP_API_REFERENCE.md)
-5. [OAuth2 对接指南（Lage）](OAUTH2_LAGE_INTEGRATION.md)
+3. [API 文档](API_DOCS.md)（入口含 [HTTP API 参考](HTTP_API_REFERENCE.md) 与历史 Python 参考）
+4. [OAuth2 对接指南（Lage）](OAUTH2_LAGE_INTEGRATION.md)
 
 ## 文档地图
 
@@ -69,9 +68,10 @@ ref: home
 - [配置](CONFIGURATION.md)：运行时环境变量与存储设置
 - [应用形态](APPLICATIONS.md)：不同入口分别适合什么场景
 - [MCP Servers](MCP_SERVERS.md)：内置 MCP Server 以及它们在平台中的角色
-- [API 参考](API_REFERENCE.md)：主要 HTTP 路由分组与流式接口
-- [HTTP API 参考](HTTP_API_REFERENCE.md)：按当前代码库订正后的后端接口细节、请求体、返回体与示例
-  - 子文档：[认证与用户](HTTP_API_AUTH_USER.md) · [对话与流式](HTTP_API_CHAT.md) · [Agent 补充](HTTP_API_AGENT.md) · [知识库 RAG](HTTP_API_KNOWLEDGE_BASE.md) · [工具 / 技能 / MCP](HTTP_API_TOOLS_MCP.md) · [计划任务 /tasks](HTTP_API_TASKS.md) · [平台与可观测](HTTP_API_PLATFORM.md)
+- [API 文档](API_DOCS.md)：HTTP 与历史 Python API 的导航入口
+  - [HTTP API 参考](HTTP_API_REFERENCE.md)：与 `register_routes` 一致的后端接口、请求体、返回体与示例；侧栏可展开子文档
+    - 子文档：[认证与用户](HTTP_API_AUTH_USER.md) · [对话与流式](HTTP_API_CHAT.md) · [Agent 补充](HTTP_API_AGENT.md) · [知识库 RAG](HTTP_API_KNOWLEDGE_BASE.md) · [工具 / 技能 / MCP](HTTP_API_TOOLS_MCP.md) · [计划任务 /tasks](HTTP_API_TASKS.md) · [平台与可观测](HTTP_API_PLATFORM.md)
+  - [Python 运行时 API（历史 v0.9）](API_REFERENCE.md)：旧版运行时 Python 说明，非当前 HTTP 对外形态
 - [OAuth2 对接指南（Lage）](OAUTH2_LAGE_INTEGRATION.md)：恢复自历史提交的 OAuth2 对接文档
 - [开发](DEVELOPMENT.md)：贡献流程和源码位置
 - [Memory Search 验证总入口](MEMORY_SEARCH_VALIDATION.md)：当前 memory-search 工作线的统一验证入口

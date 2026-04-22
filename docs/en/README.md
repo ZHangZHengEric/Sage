@@ -54,8 +54,8 @@ Read:
 
 1. [Getting Started](GETTING_STARTED.md)
 2. [Configuration](CONFIGURATION.md)
-3. [API Reference](API_REFERENCE.md)
-4. [HTTP API Reference](HTTP_API_REFERENCE.md)
+3. [API documentation](API_DOCS.md) (includes [HTTP API Reference](HTTP_API_REFERENCE.md) and the legacy Python notes)
+4. [OAuth2 Lage Integration Guide](../zh/OAUTH2_LAGE_INTEGRATION.md)
 
 ## Documentation Map
 
@@ -68,9 +68,10 @@ Read:
 - [Configuration](CONFIGURATION.md): runtime environment variables and storage settings
 - [Applications](APPLICATIONS.md): which app surface to use for which job
 - [MCP Servers](MCP_SERVERS.md): built-in MCP servers and how they fit into the platform
-- [API Reference](API_REFERENCE.md): main HTTP route groups and streaming endpoints
-- [HTTP API Reference](HTTP_API_REFERENCE.md): current backend HTTP endpoints, request and response bodies, and curl examples
-  - Subpages: [Auth and users](HTTP_API_AUTH_USER.md) · [Chat and streaming](HTTP_API_CHAT.md) · [Agent extras](HTTP_API_AGENT.md) · [Knowledge base (RAG)](HTTP_API_KNOWLEDGE_BASE.md) · [Tools, skills, and MCP](HTTP_API_TOOLS_MCP.md) · [Planner /tasks](HTTP_API_TASKS.md) · [Platform and observability](HTTP_API_PLATFORM.md)
+- [API documentation](API_DOCS.md): navigation hub for HTTP vs legacy Python API
+  - [HTTP API Reference](HTTP_API_REFERENCE.md): backend endpoints aligned with `register_routes`; the sidebar lists subpages
+    - Subpages: [Auth and users](HTTP_API_AUTH_USER.md) · [Chat and streaming](HTTP_API_CHAT.md) · [Agent extras](HTTP_API_AGENT.md) · [Knowledge base (RAG)](HTTP_API_KNOWLEDGE_BASE.md) · [Tools, skills, and MCP](HTTP_API_TOOLS_MCP.md) · [Planner /tasks](HTTP_API_TASKS.md) · [Platform and observability](HTTP_API_PLATFORM.md)
+  - [Python runtime API (legacy v0.9)](API_REFERENCE.md): older runtime Python material, not the current HTTP surface
 - [OAuth2 Lage Integration Guide](../zh/OAUTH2_LAGE_INTEGRATION.md): restored OAuth2 integration guide from historical docs
 - [Development](DEVELOPMENT.md): contributor workflow and source locations
 - [Memory Search Validation](MEMORY_SEARCH_VALIDATION.md): unified validation entry for the current memory-search workstream

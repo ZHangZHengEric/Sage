@@ -1,9 +1,9 @@
 ---
 
 ## layout: default
-
 title: HTTP API 参考
-nav_order: 8.6
+parent: API 文档
+nav_order: 1
 has_children: true
 description: "基于当前代码库的后端 HTTP API 参考"
 lang: zh
@@ -40,7 +40,7 @@ ref: http-api-reference
 
 | 模块            | 路由源                           | 主要路径 / 族                                                                                                                                                |
 | ------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 流式与输入优化       | `chat.py`                     | `POST /api/chat` / `stream` / `web-stream`；`…/chat/optimize-input`；`GET …/stream/resume/*`、`/stream/active_sessions`                                    |
+| 流式与输入优化       | `chat.py`                     | `POST /api/chat` / `stream` / `web-stream`；`…/chat/optimize-input`；`GET …/stream/resume/`*、`/stream/active_sessions`                                    |
 | 会话、分享与中断      | `conversation.py`             | `GET/POST/DELETE /api/conversations*`，`…/share/…/messages`；`POST /api/sessions/…/interrupt`、tasks_status；`…/edit-last-user-message`、`/rerun-stream`     |
 | Agent 与工作区    | `agent.py`                    | `/api/agent/…`：CRUD、auto-generate*、system-prompt*、abilities、多用户 `auth`；`file_workspace`*；`GET/POST /api/agent/tasks/…` 异步大任务与 cancel；`workspace/delete` |
 | 知识库 RAG       | `kdb.py`                      | 统一前缀 `/api/knowledge-base/…`：库、retrieve、`/doc/`* 上传与任务进度等                                                                                               |
