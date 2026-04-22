@@ -1,3 +1,5 @@
+2026-04-22 文档：中/英 `API_REFERENCE` 与当前 `SAgent`/`run_stream`/`ToolManager`/`MessageChunk` 等源码对齐，更新 `API_DOCS`、双 README 与 HTTP 总页互链；`examples/sage_server.py` 注释改为 SAgent。
+
 2026-04-22 文档站：修复多份 `HTTP_API_*.md` 误写为 `## layout` 的 front matter，恢复侧栏「HTTP API 参考」下二级子页；新增中/英 `API_DOCS` 为「API 文档」父页，HTTP 与历史 Python 参考分栏并调 README 地图。
 
 2026-04-22 文档站：修复 `docs/zh` 中 `API_DOCS`、`HTTP_API_REFERENCE`、`API_REFERENCE` 的 front matter（`## layout` 误为标题导致无 `lang`），侧栏按 `page.lang` 过滤，否则回退为英文目录。

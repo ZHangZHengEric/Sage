@@ -15,7 +15,7 @@ ref: http-api-reference
 
 这页只写当前代码库里真实存在的后端 HTTP 接口，按“先总览、再细节、最后示例”的方式组织。
 
-旧版运行时 Python API 文档请看 [API 参考](API_REFERENCE.md)。如果你要接当前服务端，这页才是准的。
+在 Python 中嵌入运行时（`SAgent`）请看 [API 参考](API_REFERENCE.md)。接当前**服务端 HTTP** 以本页为准。
 
 **适用范围**：下列路由以 `app/server/routers` 的 `register_routes` 为准（Sage 主站 FastAPI）。桌面端 `app/desktop` 另有部分路由（如 IM、浏览器扩展、问卷等），**不在**本页列举。
 
