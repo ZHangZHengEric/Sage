@@ -26,6 +26,7 @@ if "rank_bm25" not in sys.modules:
 
 from sagents.context.session_memory.bm25_backend import Bm25SessionMemoryBackend
 from sagents.context.session_memory.factory import create_session_memory_manager
+from sagents.context.session_memory.noop_backend import NoopSessionMemoryBackend
 from sagents.context.session_memory.session_memory_manager import SessionMemoryManager
 
 
@@ -97,6 +98,10 @@ class TestSessionMemoryManager(unittest.TestCase):
         with patch.dict("os.environ", {"SAGE_SESSION_MEMORY_BACKEND": "bm25"}):
             manager = create_session_memory_manager()
         self.assertIsInstance(manager.backend, Bm25SessionMemoryBackend)
+
+    def test_factory_supports_noop_backend(self):
+        manager = create_session_memory_manager("noop")
+        self.assertIsInstance(manager.backend, NoopSessionMemoryBackend)
 
     def test_factory_rejects_unknown_backend(self):
         with self.assertRaisesRegex(ValueError, "Unsupported session memory backend"):
