@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
-from sagents.context.session_memory.session_memory_manager import SessionMemoryManager
+from sagents.context.session_memory import create_session_memory_manager
 from sagents.skill import SkillProxy, SkillManager
 from sagents.skill.sandbox_skill_manager import SandboxSkillManager
 from sagents.utils.prompt_manager import prompt_manager
@@ -146,7 +146,7 @@ class SessionContext:
         self.message_manager = MessageManager(context_budget_config=context_budget_config)
         self.workflow_manager = WorkflowManager()
         self.audit_status: Dict[str, Any] = {}
-        self.session_memory_manager = SessionMemoryManager()
+        self.session_memory_manager = create_session_memory_manager()
         self.agent_config: Dict[str, Any] = {}
         self.custom_sub_agents: List[Dict[str, Any]] = []
         self.orchestrator: Optional[Any] = None

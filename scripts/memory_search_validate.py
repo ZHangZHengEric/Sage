@@ -28,14 +28,20 @@ def main() -> int:
     py_compile_targets = [
         "sagents/tool/impl/memory_index.py",
         "sagents/tool/impl/memory_tool.py",
+        "sagents/context/session_memory/backend.py",
+        "sagents/context/session_memory/bm25_backend.py",
+        "sagents/context/session_memory/factory.py",
+        "sagents/context/session_memory/session_memory_manager.py",
         "tests/test_memory_index_fts.py",
         "tests/test_memory_tool.py",
+        "tests/sagents/context/test_session_memory_manager.py",
         "scripts/memory_search_benchmark.py",
     ]
 
     _run([sys.executable, "-m", "py_compile", *py_compile_targets])
     _run([sys.executable, "tests/test_memory_index_fts.py"])
     _run([sys.executable, "tests/test_memory_tool.py"])
+    _run([sys.executable, "tests/sagents/context/test_session_memory_manager.py"])
     _run(
         [
             sys.executable,
