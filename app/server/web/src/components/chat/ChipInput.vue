@@ -13,7 +13,7 @@
     @keydown="forward('keydown', $event)"
     @keyup="onCaretActivity('keyup', $event)"
     @click="onCaretActivity('click', $event)"
-    @paste="forward('paste', $event)"
+    @paste="handlePaste"
     @focus="onCaretActivity('focus', $event)"
     @blur="forward('blur', $event)"
     @compositionstart="onCompositionStart"
@@ -325,6 +325,36 @@ const insertText = (text) => {
     }
   }
   handleInput()
+}
+
+const clipboardPlainText = (cd) => {
+  if (!cd) return ''
+  const plain = cd.getData('text/plain')
+  if (plain) return plain
+  const html = cd.getData('text/html')
+  if (!html) return ''
+  const div = document.createElement('div')
+  div.innerHTML = html
+  return div.innerText || div.textContent || ''
+}
+
+const clipboardHasFileItems = (cd) => {
+  const items = cd?.items
+  if (!items?.length) return false
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+    if (item.type.startsWith('image/') || item.kind === 'file') return true
+  }
+  return false
+}
+
+const handlePaste = (e) => {
+  if (props.disabled) return
+  const cd = e.clipboardData
+  emit('paste', e)
+  if (clipboardHasFileItems(cd)) return
+  e.preventDefault()
+  insertText(clipboardPlainText(cd))
 }
 
 const setText = (text) => {
