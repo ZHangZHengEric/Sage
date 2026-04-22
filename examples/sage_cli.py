@@ -285,7 +285,7 @@ async def chat_simple(
 
             console.print("[magenta]SAgent:[/magenta]")
             last_message_id = None
-            messages.append(MessageChunk(role='user', content=user_input, type=MessageType.NORMAL.value))
+            messages.append(MessageChunk(role='user', content=user_input, type=MessageType.USER_INPUT.value))
             all_chunks = []
             current_message_box = None
             first_args = True
@@ -504,7 +504,7 @@ async def chat_fibre_simple(
             
             # 记录用户消息
             append_log(session_id, "你", user_input, "user")
-            messages.append(MessageChunk(role='user', content=user_input, type=MessageType.NORMAL.value))
+            messages.append(MessageChunk(role='user', content=user_input, type=MessageType.USER_INPUT.value))
             
             console.print("\n[magenta]FibreAgent 思考中...[/magenta]\n")
             
@@ -749,7 +749,7 @@ async def chat_fibre(
         active_states[session_id]["order"].append(user_msg_id)
         
         refresh_all()
-        messages.append(MessageChunk(role='user', content=user_input, type=MessageType.NORMAL.value))
+        messages.append(MessageChunk(role='user', content=user_input, type=MessageType.USER_INPUT.value))
         all_chunks = []
         try:
             async for chunks in agent.run_stream(

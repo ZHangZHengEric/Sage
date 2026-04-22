@@ -1,3 +1,30 @@
+2026-04-22 messages 测试补缺：新增 `test_history_anchor.py` 23 个用例，覆盖 `compute_history_anchor_index` 边界、`add_messages` 自动刷新锚点、`prepare_history_split` 新返回、`extract_all_context_messages` 不再被 `active_start_index` 截断、memory 工具锚点边界、旧 config 向后兼容；messages 全套 47 个用例通过。
+
+2026-04-22 死代码清理：删 `_build_dropped_prefix_bridge`/`_plain_preview_for_bridge`/`_extract_current_query`/`dropped_history_bridge_budget`；`prepare_history_split` 瘦身只保留 budget 计算与锚点刷新；`ContextBudgetManager` 删 `split_messages`/`recent_turns` 及配套私有方法。messages+sagents 单测全过。
+
+2026-04-22 消息上下文收口：`active_start_index` 不再由 token budget 驱动，仅作为最近一次 compress_conversation_history 调用的锚点；`extract_all_context_messages` 去掉硬截断与 dropped-prefix bridge，长度控制完全交给 `_prepare_messages_for_llm`；memory 工具历史边界改为锚点之前。`messages` 全套单测通过。
+
+2026-04-22 单测：默认每用例 2s 超时（`pytest.ini` + `pytest-timeout`）；删未过或全量不稳定的 `test_executor`、`test_questionnaire_tool`、`test_todo_tool`、`test_provider_integration` 及 `tests/sagents/tool/conftest.py`；全量 `pytest tests` 通过。
+
+2026-04-22 测试：删 Fibre/TaskManager 等已不存在模块的单测；压缩集成与 CommonAgent/AsyncMock 对齐；`common/utils/logging` InterceptHandler 在无 loguru sink 时补 sink 并降级；删失效 skill_sync；删 test_execute_python_code_trace_only。
+
+2026-04-22 移除 MessageType.NORMAL 与沙箱 env_helpers/旧构造参数；Sandbox 默认卷改为同一路径直通；测试改用 VolumeMount 与当前 API，删无效 trace 脚本；compress 单测按 role 填消息类型。
+
+2026-04-22 tests/conftest：不再改 sys.path；与 pytest.ini 中 `pythonpath = .` 重复，保留说明文档即可。
+
+2026-04-22 沙箱/测试：Local/Passthrough 路径与 cwd 用宿主机路径；单测对齐 VolumeMount、async factory、pytest-asyncio；条件 mock 加 session；自测用仓库相对路径。
+
+2026-04-22 文档：能力域总览去 Mermaid，改三层级 Markdown 表（模块、路由源、路径族），中/英一致。
+
+2026-04-22 ChipInput：Delete 一次即可删图——`findChipAfter`/`Before` 跳过正文与 chip 间零宽/空白文本节点，删除时顺带清 chip 前后可跳过节点。desktop/server 同步。
+
+2026-04-22 ChipInput：Backspace/Delete 在紧邻附件处拦截并整段删除 chip+零宽空格，`findChipBefore/AfterCaret` 覆盖根子边界与零宽后缘；删后重设选区。desktop/server 已同步。
+
+2026-04-22 ChipInput 附件 chip 增「×」删除并同步正文与附件列表；上传中删占位也会清项；若上传返回时占位已删则不再回写。desktop/server 同步。
+
+2026-04-22 消息输入区：未上传完成（`uploading` 或无处 `url`）禁止发送，`canSubmitNow`+`dispatchSubmit` 双保险，预览上居中 `Loader2` 遮罩；发送按钮 `title` 提示等待上传。desktop 与 server/web 的 MessageInput.vue 及 i18n 已同步。
+
+2026-04-22 模型源：保存请求进行中增加 `saving` 状态，保存/取消/验证/关闭与角标与底部提示同步 loading，防重复点击重复提交；desktop/ui 与 server/web 的 ModelProviderList.vue 同步，server 端补 `common.saving` 文案。
 
 2026-04-21 23:40 ChipInput 粘贴：非文件时阻止默认富文本插入，仅写入纯文本（优先 clipboard text/plain，否则从 text/html 取文本），避免保留来源页字体颜色等在深色输入框中对比度过低；仍先 emit paste 供 MessageInput 处理剪贴板图片/文件。desktop/ui 与 server/web 已同步。
 
