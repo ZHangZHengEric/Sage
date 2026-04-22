@@ -1,5 +1,7 @@
 2026-04-22 文档站：修复多份 `HTTP_API_*.md` 误写为 `## layout` 的 front matter，恢复侧栏「HTTP API 参考」下二级子页；新增中/英 `API_DOCS` 为「API 文档」父页，HTTP 与历史 Python 参考分栏并调 README 地图。
 
+2026-04-22 文档站：修复 `docs/zh` 中 `API_DOCS`、`HTTP_API_REFERENCE`、`API_REFERENCE` 的 front matter（`## layout` 误为标题导致无 `lang`），侧栏按 `page.lang` 过滤，否则回退为英文目录。
+
 2026-04-22 messages 测试补缺：新增 `test_history_anchor.py` 23 个用例，覆盖 `compute_history_anchor_index` 边界、`add_messages` 自动刷新锚点、`prepare_history_split` 新返回、`extract_all_context_messages` 不再被 `active_start_index` 截断、memory 工具锚点边界、旧 config 向后兼容；messages 全套 47 个用例通过。
 
 2026-04-22 死代码清理：删 `_build_dropped_prefix_bridge`/`_plain_preview_for_bridge`/`_extract_current_query`/`dropped_history_bridge_budget`；`prepare_history_split` 瘦身只保留 budget 计算与锚点刷新；`ContextBudgetManager` 删 `split_messages`/`recent_turns` 及配套私有方法。messages+sagents 单测全过。
