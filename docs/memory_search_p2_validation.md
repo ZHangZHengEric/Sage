@@ -50,9 +50,16 @@ python tests/test_memory_tool.py
 python tests/test_memory_index_fts.py
 ```
 
+Unified entry:
+
+```bash
+python scripts/memory_search_validate.py
+```
+
 ## Current Checkpoints
 
 - `b3a67aa4` `feat: stabilize memory retriever boundaries`
+- `76280080` `test: expand memory retriever regression coverage`
 
 ## Notes
 
