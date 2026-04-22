@@ -255,7 +255,7 @@ class SageStreamService:
         else:
             workspace = os.path.abspath("agent_workspace")
 
-        # 创建 Sage AgentController 实例
+        # 创建 SAgent 运行时实例
         # session_root_space 独立于 agent_workspace
         self.agent_workspace = workspace
         
