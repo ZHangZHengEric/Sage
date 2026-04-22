@@ -55,6 +55,7 @@ class _FakeMessageManager:
         self._messages = messages
         self._history_messages = history_messages
         self.compute_calls = 0
+        self._force_empty_anchor = False
 
     @property
     def messages(self):
@@ -62,6 +63,8 @@ class _FakeMessageManager:
 
     def compute_history_anchor_index(self):
         self.compute_calls += 1
+        if self._force_empty_anchor:
+            return None
         if not self._history_messages:
             return None
         return len(self._history_messages)
@@ -218,6 +221,26 @@ class TestMemoryTool(unittest.TestCase):
 
         self.assertEqual(len(results), 1)
         self.assertEqual(session_memory_manager.retrieve_message_ids, [["h1"]])
+
+    def test_session_history_retriever_returns_no_results_without_history_anchor(self):
+        tool = self.MemoryTool()
+        history_messages = [_FakeMessage("h1", "assistant", "history snippet")]
+        message_manager = _FakeMessageManager(
+            messages=[_FakeMessage("m1", "user", "latest question")],
+            history_messages=history_messages,
+        )
+        message_manager._force_empty_anchor = True
+        session_memory_manager = _FakeSessionMemoryManager(retrieved_messages=history_messages)
+        session_context = types.SimpleNamespace(
+            message_manager=message_manager,
+            agent_config={"name": "demo"},
+            session_memory_manager=session_memory_manager,
+        )
+
+        results = tool.session_history_retriever.search("history", 3, "session-1", session_context)
+
+        self.assertEqual(results, [])
+        self.assertEqual(session_memory_manager.retrieve_message_ids, [])
 
     def test_session_history_retriever_uses_grouped_chat_strategy_from_agent_config(self):
         tool = self.MemoryTool()
