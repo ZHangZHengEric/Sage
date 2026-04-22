@@ -74,6 +74,12 @@ python tests/test_memory_index_fts.py
 python scripts/memory_search_benchmark.py --noise-files 300
 ```
 
+Unified entry:
+
+```bash
+python scripts/memory_search_validate.py
+```
+
 ## Current Checkpoints
 
 - `cac18b1f` `feat: improve memory search ranking quality`

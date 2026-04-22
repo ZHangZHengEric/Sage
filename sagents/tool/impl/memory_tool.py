@@ -43,6 +43,10 @@ class FileMemoryRetriever:
     def __init__(self, memory_tool: "MemoryTool"):
         self.memory_tool = memory_tool
 
+    @classmethod
+    def clear_cache(cls) -> None:
+        cls._index_cache.clear()
+
     @staticmethod
     def _build_scope_key(user_id: str, agent_id: str, workspace_path: str) -> str:
         scope = f"{user_id}|{agent_id}|{workspace_path}"
@@ -128,6 +132,10 @@ class SessionHistoryRetriever:
 
     def __init__(self, memory_tool: "MemoryTool"):
         self.memory_tool = memory_tool
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        cls._history_cache.clear()
 
     @staticmethod
     def _serialize_message_content(content: Any) -> str:
@@ -230,6 +238,24 @@ class MemoryTool:
     def __init__(self):
         self.file_memory_retriever = FileMemoryRetriever(self)
         self.session_history_retriever = SessionHistoryRetriever(self)
+
+    @staticmethod
+    def _build_search_response(
+        status: str,
+        message: str,
+        query: Optional[str] = None,
+        long_term_memory: Optional[List[Dict[str, Any]]] = None,
+        session_history: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        response = {
+            "status": status,
+            "message": message,
+            "long_term_memory": long_term_memory or [],
+            "session_history": session_history or [],
+        }
+        if query is not None:
+            response["query"] = query
+        return response
 
     def _get_sandbox(self, session_id: str):
         """通过 session_id 获取沙箱。详见
@@ -345,20 +371,16 @@ class MemoryTool:
             Search results including files and history messages
         """
         if not session_id:
-            return {
-                "status": "error",
-                "message": "Session ID not provided",
-                "results": [],
-                "history_results": []
-            }
-        
+            return self._build_search_response(
+                status="error",
+                message="Session ID not provided",
+            )
+
         if not query or not query.strip():
-            return {
-                "status": "error",
-                "message": "Search query cannot be empty",
-                "results": [],
-                "history_results": []
-            }
+            return self._build_search_response(
+                status="error",
+                message="Search query cannot be empty",
+            )
         
         try:
             # 1. Search file memory
@@ -367,22 +389,21 @@ class MemoryTool:
             # 2. Search session history
             history_results = await self._search_session_history(query, top_k, session_id)
             
-            return {
-                "status": "success",
-                "message": f"Found {len(file_results)} files and {len(history_results)} history messages",
-                "query": query,
-                "long_term_memory": file_results,
-                "session_history": history_results
-            }
-            
+            return self._build_search_response(
+                status="success",
+                message=f"Found {len(file_results)} files and {len(history_results)} history messages",
+                query=query,
+                long_term_memory=file_results,
+                session_history=history_results,
+            )
+
         except Exception as e:
             logger.error(f"MemoryTool: Search failed: {e}")
-            return {
-                "status": "error",
-                "message": f"Search failed: {str(e)}",
-                "results": [],
-                "history_results": []
-            }
+            return self._build_search_response(
+                status="error",
+                message=f"Search failed: {str(e)}",
+                query=query,
+            )
 
     async def _search_file_memory(self, query: str, top_k: int, session_id: str) -> List[Dict[str, Any]]:
         """Search file memory using the scoped file-memory index through sandbox."""
