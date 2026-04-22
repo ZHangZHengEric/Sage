@@ -39,8 +39,8 @@ def main() -> int:
         "sagents/tool/impl/file_memory/factory.py",
         "sagents/tool/impl/file_memory/noop_backend.py",
         "app/cli/service.py",
-        "tests/test_memory_index_fts.py",
-        "tests/test_memory_tool.py",
+        "tests/sagents/tool/impl/test_memory_index_fts.py",
+        "tests/sagents/tool/impl/test_memory_tool.py",
         "tests/sagents/context/test_session_memory_manager.py",
         "tests/sagents/tool/impl/test_file_memory_backend.py",
         "tests/app/cli/test_doctor_memory_backends.py",
@@ -48,8 +48,8 @@ def main() -> int:
     ]
 
     _run([sys.executable, "-m", "py_compile", *py_compile_targets])
-    _run([sys.executable, "tests/test_memory_index_fts.py"])
-    _run([sys.executable, "tests/test_memory_tool.py"])
+    _run([sys.executable, "tests/sagents/tool/impl/test_memory_index_fts.py"])
+    _run([sys.executable, "tests/sagents/tool/impl/test_memory_tool.py"])
     _run([sys.executable, "tests/sagents/context/test_session_memory_manager.py"])
     _run([sys.executable, "tests/sagents/tool/impl/test_file_memory_backend.py"])
     _run([sys.executable, "tests/app/cli/test_doctor_memory_backends.py"])

@@ -46,7 +46,7 @@ Run the local validation for this branch:
 python -m py_compile sagents/context/session_memory/backend.py sagents/context/session_memory/bm25_backend.py sagents/context/session_memory/factory.py sagents/context/session_memory/session_memory_manager.py tests/sagents/context/test_session_memory_manager.py
 python tests/sagents/context/test_session_memory_manager.py
 python tests/sagents/tool/impl/test_file_memory_backend.py
-python tests/test_memory_tool.py
+python tests/sagents/tool/impl/test_memory_tool.py
 ```
 
 Unified entry:

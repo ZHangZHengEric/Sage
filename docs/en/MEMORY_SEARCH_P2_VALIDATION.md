@@ -27,7 +27,7 @@ Current improvements include:
 Primary P2 regression suite:
 
 ```bash
-python tests/test_memory_tool.py
+python tests/sagents/tool/impl/test_memory_tool.py
 ```
 
 Current coverage includes:
@@ -45,9 +45,9 @@ Current coverage includes:
 Run the local validation for this branch:
 
 ```bash
-python -m py_compile sagents/tool/impl/memory_tool.py tests/test_memory_tool.py
-python tests/test_memory_tool.py
-python tests/test_memory_index_fts.py
+python -m py_compile sagents/tool/impl/memory_tool.py tests/sagents/tool/impl/test_memory_tool.py
+python tests/sagents/tool/impl/test_memory_tool.py
+python tests/sagents/tool/impl/test_memory_index_fts.py
 ```
 
 Unified entry:

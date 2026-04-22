@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -52,17 +52,19 @@ class _FakeMessage:
 
 class _FakeMessageManager:
     def __init__(self, messages, history_messages):
-        self.messages = messages
+        self._messages = messages
         self._history_messages = history_messages
-        self.prepare_calls = 0
+        self.compute_calls = 0
 
-    def prepare_history_split(self, agent_config):
-        self.prepare_calls += 1
-        return {
-            "split_result": {
-                "history_messages": self._history_messages,
-            }
-        }
+    @property
+    def messages(self):
+        return list(self._history_messages) + list(self._messages)
+
+    def compute_history_anchor_index(self):
+        self.compute_calls += 1
+        if not self._history_messages:
+            return None
+        return len(self._history_messages)
 
 
 class _FakeSessionMemoryManager:
@@ -71,13 +73,16 @@ class _FakeSessionMemoryManager:
         self.calls = 0
         self.grouped_calls = 0
         self.retrieve_calls = []
+        self.retrieve_message_ids = []
 
     def retrieve_history_messages(self, messages, query, history_budget):
         self.calls += 1
+        self.retrieve_message_ids.append([msg.message_id for msg in messages])
         return self.retrieved_messages
 
     def retrieve_group_messages_by_chat(self, messages, query, history_budget):
         self.grouped_calls += 1
+        self.retrieve_message_ids.append([msg.message_id for msg in messages])
         return self.retrieved_messages
 
     def retrieve(self, messages, query, history_budget, *, strategy=None, agent_config=None):
@@ -149,7 +154,7 @@ class TestMemoryTool(unittest.TestCase):
         self.assertEqual(missing_query["long_term_memory"], [])
         self.assertEqual(missing_query["session_history"], [])
 
-    def test_session_history_retriever_reuses_prepare_history_split_cache(self):
+    def test_session_history_retriever_reuses_history_anchor_cache(self):
         tool = self.MemoryTool()
         messages = [_FakeMessage("m1", "user", "hello session")]
         history_messages = [_FakeMessage("h1", "assistant", "history snippet")]
@@ -164,14 +169,14 @@ class TestMemoryTool(unittest.TestCase):
         results1 = tool.session_history_retriever.search("history", 3, "session-1", session_context)
         results2 = tool.session_history_retriever.search("history", 3, "session-1", session_context)
 
-        self.assertEqual(message_manager.prepare_calls, 1)
+        self.assertEqual(message_manager.compute_calls, 1)
         self.assertEqual(session_memory_manager.calls, 2)
         self.assertEqual(len(results1), 1)
         self.assertEqual(len(results2), 1)
 
         messages.append(_FakeMessage("m2", "user", "new history"))
         tool.session_history_retriever.search("history", 3, "session-1", session_context)
-        self.assertEqual(message_manager.prepare_calls, 2)
+        self.assertEqual(message_manager.compute_calls, 2)
 
     def test_session_history_retriever_invalidates_cache_on_agent_config_change(self):
         tool = self.MemoryTool()
@@ -187,11 +192,32 @@ class TestMemoryTool(unittest.TestCase):
 
         tool.session_history_retriever.search("history", 3, "session-1", session_context)
         tool.session_history_retriever.search("history", 3, "session-1", session_context)
-        self.assertEqual(session_context.message_manager.prepare_calls, 1)
+        self.assertEqual(session_context.message_manager.compute_calls, 1)
 
         session_context.agent_config = {"name": "demo-v2"}
         tool.session_history_retriever.search("history", 3, "session-1", session_context)
-        self.assertEqual(session_context.message_manager.prepare_calls, 2)
+        self.assertEqual(session_context.message_manager.compute_calls, 2)
+
+    def test_session_history_retriever_only_uses_history_anchor_scope(self):
+        tool = self.MemoryTool()
+        history_messages = [_FakeMessage("h1", "assistant", "history snippet")]
+        session_memory_manager = _FakeSessionMemoryManager(retrieved_messages=history_messages)
+        session_context = types.SimpleNamespace(
+            message_manager=_FakeMessageManager(
+                messages=[
+                    _FakeMessage("m1", "user", "active question"),
+                    _FakeMessage("m2", "assistant", "active answer"),
+                ],
+                history_messages=history_messages,
+            ),
+            agent_config={"name": "demo"},
+            session_memory_manager=session_memory_manager,
+        )
+
+        results = tool.session_history_retriever.search("history", 3, "session-1", session_context)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(session_memory_manager.retrieve_message_ids, [["h1"]])
 
     def test_session_history_retriever_uses_grouped_chat_strategy_from_agent_config(self):
         tool = self.MemoryTool()
