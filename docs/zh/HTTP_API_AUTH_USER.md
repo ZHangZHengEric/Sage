@@ -1,12 +1,12 @@
 ---
-
-## layout: default
+layout: default
 title: 认证与用户
 parent: HTTP API 参考
 nav_order: 1
 description: "部署模式、session、本地/OIDC 登录、用户管理与兼容路径"
 lang: zh
 ref: http-api-auth
+---
 
 {% include lang_switcher.html %}
 

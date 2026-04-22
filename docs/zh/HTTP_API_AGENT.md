@@ -1,12 +1,12 @@
 ---
-
-## layout: default
+layout: default
 title: Agent 补充能力
 parent: HTTP API 参考
 nav_order: 3
 description: "异步 submit 任务、能力卡片、file workspace 与授权"
 lang: zh
 ref: http-api-agent
+---
 
 {% include lang_switcher.html %}
 
