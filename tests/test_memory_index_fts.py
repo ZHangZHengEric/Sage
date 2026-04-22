@@ -849,6 +849,226 @@ class TestMemoryIndexFTS(unittest.TestCase):
             self.assertEqual(results[0].path, "/workspace/app/cli/resume_session.py")
             self.assertLess(elapsed, 2.0)
 
+    def test_realistic_query_prefers_doctor_config_cli_implementation(self):
+        with TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "memory_index.pkl"
+            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx.DEFAULT_CHUNK_SIZE = 90
+            idx.DEFAULT_CHUNK_OVERLAP = 0
+
+            impl_content = "\n".join(
+                [
+                    "def doctor_command(show_config=False):",
+                    "    if show_config:",
+                    "        return load_cli_config()",
+                    "def load_cli_config():",
+                    "    return {'app_mode': 'server'}",
+                ]
+            )
+            docs_content = "\n".join(
+                [
+                    "# Doctor guide",
+                    "The CLI has a doctor command.",
+                    "The config can also be shown in the guide.",
+                ]
+            )
+
+            idx._replace_file_documents("/workspace/app/cli/doctor_config.py", impl_content, 1.0, len(impl_content))
+            idx._replace_file_documents("/workspace/docs/doctor.md", docs_content, 1.0, len(docs_content))
+            idx._sync_file_to_fts("/workspace/app/cli/doctor_config.py")
+            idx._sync_file_to_fts("/workspace/docs/doctor.md")
+            idx._save_index()
+
+            results = idx.search("doctor config cli", top_k=2)
+
+            self.assertEqual(len(results), 2)
+            self.assertEqual(results[0].path, "/workspace/app/cli/doctor_config.py")
+
+    def test_realistic_query_prefers_sessions_inspect_latest_implementation(self):
+        with TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "memory_index.pkl"
+            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx.DEFAULT_CHUNK_SIZE = 90
+            idx.DEFAULT_CHUNK_OVERLAP = 0
+
+            impl_content = "\n".join(
+                [
+                    "def inspect_latest_session(user_id):",
+                    "    return inspect_session('latest', user_id)",
+                    "def inspect_session(session_id, user_id):",
+                    "    return {'session_id': session_id, 'user_id': user_id}",
+                ]
+            )
+            docs_content = "\n".join(
+                [
+                    "# Sessions inspect",
+                    "The guide explains how to inspect a session.",
+                    "Users can choose the latest entry from history.",
+                ]
+            )
+
+            idx._replace_file_documents("/workspace/app/cli/sessions_inspect.py", impl_content, 1.0, len(impl_content))
+            idx._replace_file_documents("/workspace/docs/sessions_inspect.md", docs_content, 1.0, len(docs_content))
+            idx._sync_file_to_fts("/workspace/app/cli/sessions_inspect.py")
+            idx._sync_file_to_fts("/workspace/docs/sessions_inspect.md")
+            idx._save_index()
+
+            results = idx.search("sessions inspect latest", top_k=2)
+
+            self.assertEqual(len(results), 2)
+            self.assertEqual(results[0].path, "/workspace/app/cli/sessions_inspect.py")
+
+    def test_realistic_query_prefers_memory_report_scheduler_implementation(self):
+        with TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "memory_index.pkl"
+            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx.DEFAULT_CHUNK_SIZE = 90
+            idx.DEFAULT_CHUNK_OVERLAP = 0
+
+            impl_content = "\n".join(
+                [
+                    "def initialize_task_scheduler(memory_report_enabled=True):",
+                    "    if memory_report_enabled:",
+                    "        return build_memory_report_scheduler()",
+                    "def build_memory_report_scheduler():",
+                    "    return {}",
+                ]
+            )
+            docs_content = "\n".join(
+                [
+                    "# Runtime notes",
+                    "Task scheduling is initialized during startup.",
+                    "A memory report may be enabled in configuration.",
+                ]
+            )
+
+            idx._replace_file_documents("/workspace/app/server/task_scheduler.py", impl_content, 1.0, len(impl_content))
+            idx._replace_file_documents("/workspace/docs/runtime_notes.md", docs_content, 1.0, len(docs_content))
+            idx._sync_file_to_fts("/workspace/app/server/task_scheduler.py")
+            idx._sync_file_to_fts("/workspace/docs/runtime_notes.md")
+            idx._save_index()
+
+            results = idx.search("memory report scheduler", top_k=2)
+
+            self.assertEqual(len(results), 2)
+            self.assertEqual(results[0].path, "/workspace/app/server/task_scheduler.py")
+
+    def test_mixed_language_query_prefers_doctor_config_implementation(self):
+        with TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "memory_index.pkl"
+            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx.DEFAULT_CHUNK_SIZE = 90
+            idx.DEFAULT_CHUNK_OVERLAP = 0
+
+            impl_content = "\n".join(
+                [
+                    "# CLI doctor 配置",
+                    "def doctor_command(show_config=False):",
+                    "    return load_cli_config() if show_config else {}",
+                    "def load_cli_config():",
+                    "    return {'env_file': '.env'}",
+                ]
+            )
+            docs_content = "\n".join(
+                [
+                    "# doctor 文档",
+                    "这里说明 doctor 命令的用途。",
+                    "配置显示方式也会在这里解释。",
+                ]
+            )
+
+            idx._replace_file_documents("/workspace/app/cli/doctor_config.py", impl_content, 1.0, len(impl_content))
+            idx._replace_file_documents("/workspace/docs/doctor.md", docs_content, 1.0, len(docs_content))
+            idx._sync_file_to_fts("/workspace/app/cli/doctor_config.py")
+            idx._sync_file_to_fts("/workspace/docs/doctor.md")
+            idx._save_index()
+
+            results = idx.search("doctor 配置 cli", top_k=2)
+
+            self.assertEqual(len(results), 2)
+            self.assertEqual(results[0].path, "/workspace/app/cli/doctor_config.py")
+
+    def test_index_build_and_batch_search_latency_stay_reasonable(self):
+        with TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "memory_index.pkl"
+            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx.DEFAULT_CHUNK_SIZE = 120
+            idx.DEFAULT_CHUNK_OVERLAP = 0
+
+            build_start = time.perf_counter()
+            for i in range(300):
+                noisy_content = "\n".join(
+                    [
+                        f"generic filler note {i}",
+                        "ordinary search context",
+                        "miscellaneous runtime implementation detail",
+                    ]
+                )
+                path = f"/workspace/noise/batch_{i}.txt"
+                idx._replace_file_documents(path, noisy_content, 1.0, len(noisy_content))
+                idx._sync_file_to_fts(path)
+
+            target_files = {
+                "/workspace/app/cli/resume_session.py": "\n".join(
+                    [
+                        "def resume_session(session_id, user_id):",
+                        "    return load_session_for_user(session_id, user_id)",
+                        "def load_session_for_user(session_id, user_id):",
+                        "    return {'session_id': session_id, 'user_id': user_id}",
+                    ]
+                ),
+                "/workspace/app/cli/doctor_config.py": "\n".join(
+                    [
+                        "def doctor_command(show_config=False):",
+                        "    return load_cli_config() if show_config else {}",
+                        "def load_cli_config():",
+                        "    return {'env_file': '.env'}",
+                    ]
+                ),
+                "/workspace/app/cli/provider_verify.py": "\n".join(
+                    [
+                        "def verify_provider(base_url, api_key, model):",
+                        "    return probe_model_connectivity(base_url, api_key, model)",
+                    ]
+                ),
+                "/workspace/sagents/tool/impl/memory_index.py": "\n".join(
+                    [
+                        "class MemoryIndex:",
+                        "    def search(self, query, top_k=5):",
+                        "        return self._fetch_candidate_file_rows(None, [], top_k)",
+                    ]
+                ),
+                "/workspace/app/cli/sessions_inspect.py": "\n".join(
+                    [
+                        "def inspect_latest_session(user_id):",
+                        "    return inspect_session('latest', user_id)",
+                        "def inspect_session(session_id, user_id):",
+                        "    return {'session_id': session_id, 'user_id': user_id}",
+                    ]
+                ),
+            }
+            for path, content in target_files.items():
+                idx._replace_file_documents(path, content, 1.0, len(content))
+                idx._sync_file_to_fts(path)
+            idx._save_index()
+            build_elapsed = time.perf_counter() - build_start
+
+            query_start = time.perf_counter()
+            queries = [
+                "resume session user",
+                "doctor config cli",
+                "provider verify model",
+                "memory index search",
+                "sessions inspect latest",
+            ]
+            for query in queries:
+                results = idx.search(query, top_k=3)
+                self.assertGreaterEqual(len(results), 1)
+            query_elapsed = time.perf_counter() - query_start
+
+            self.assertLess(build_elapsed, 4.0)
+            self.assertLess(query_elapsed, 2.5)
+
 
 if __name__ == "__main__":
     unittest.main()
