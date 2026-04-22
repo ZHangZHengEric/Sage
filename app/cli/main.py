@@ -608,11 +608,18 @@ def _emit_stream_idle_notice(idle_seconds: float) -> None:
 def _emit_stream_idle_notice_for_state(render_state: Dict[str, Any], idle_seconds: float) -> None:
     last_tool_name = render_state.get("last_tool_name")
     last_visible_phase = render_state.get("last_visible_phase")
+    has_visible_output = bool(render_state.get("assistant_emitted")) or bool(
+        render_state.get("announced_tools")
+    )
 
-    if last_visible_phase == "assistant_text":
-        message = f"\n[working] generating response ({idle_seconds:.1f}s since last event)\n"
-    elif last_tool_name:
+    if last_tool_name:
         message = f"\n[working] waiting for {last_tool_name} ({idle_seconds:.1f}s since last event)\n"
+    elif last_visible_phase == "assistant_text" and not has_visible_output:
+        message = f"\n[working] generating response ({idle_seconds:.1f}s since last event)\n"
+    elif last_visible_phase == "assistant_text":
+        return
+    elif has_visible_output:
+        return
     else:
         message = f"\n[working] still running ({idle_seconds:.1f}s since last event)\n"
 

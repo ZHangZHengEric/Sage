@@ -163,7 +163,21 @@ class TestStatsToolDetection(unittest.TestCase):
             _emit_stream_idle_notice_for_state(render_state, 4.0)
 
         self.assertIsNone(render_state["last_tool_name"])
-        self.assertIn("[working] generating response (4.0s since last event)", stderr.getvalue())
+        self.assertEqual(stderr.getvalue(), "")
+
+    def test_idle_notice_is_suppressed_after_visible_assistant_output(self):
+        from io import StringIO
+        from unittest.mock import patch
+
+        render_state = _empty_render_state()
+        render_state["last_visible_phase"] = "assistant_text"
+        render_state["assistant_emitted"] = "你好！"
+
+        stderr = StringIO()
+        with patch("sys.stderr", stderr):
+            _emit_stream_idle_notice_for_state(render_state, 6.0)
+
+        self.assertEqual(stderr.getvalue(), "")
 
     def test_emit_chat_exit_summary_prints_resume_hint(self):
         from io import StringIO
