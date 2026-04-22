@@ -1,13 +1,12 @@
 ---
-
-## layout: default
-
+layout: default
 title: 知识库 RAG
 parent: HTTP API 参考
 nav_order: 4
 description: "创建、检索、文档与任务、与 Agent 的 availableKnowledgeBases 绑定"
 lang: zh
 ref: http-api-kdb
+---
 
 {% include lang_switcher.html %}
 

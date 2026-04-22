@@ -1,12 +1,12 @@
 ---
-
-## layout: default
+layout: default
 title: 对话、流式与消息编辑
 parent: HTTP API 参考
 nav_order: 2
 description: "optimize-input、三种流式入口、rerun-stream 与最后一条用户消息编辑"
 lang: zh
 ref: http-api-chat
+---
 
 {% include lang_switcher.html %}
 

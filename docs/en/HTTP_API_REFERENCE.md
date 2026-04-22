@@ -1,13 +1,13 @@
 ---
-
-## layout: default
-
+layout: default
 title: HTTP API Reference
-nav_order: 8.6
+parent: API documentation
+nav_order: 1
 has_children: true
 description: "Backend HTTP API reference based on the current codebase"
 lang: en
 ref: http-api-reference
+---
 
 {% include lang_switcher.html %}
 

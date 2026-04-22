@@ -1,13 +1,12 @@
 ---
-
-## layout: default
-
+layout: default
 title: 计划任务与 /tasks
 parent: HTTP API 参考
 nav_order: 6
 description: "一次性/周期任务、内部调度、响应格式与 Pydantic 模型"
 lang: zh
 ref: http-api-tasks
+---
 
 {% include lang_switcher.html %}
 

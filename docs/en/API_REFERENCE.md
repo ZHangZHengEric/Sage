@@ -1,8 +1,9 @@
 ---
 layout: default
-title: API Reference
-nav_order: 8
-description: "Complete API reference for the Sage Multi-Agent Framework"
+title: Python runtime API (legacy v0.9)
+parent: API documentation
+nav_order: 2
+description: "Restored v0.9 runtime Python API notes (not the current HTTP server surface)"
 lang: en
 ref: api-reference
 ---
