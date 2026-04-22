@@ -1,6 +1,7 @@
 import importlib.util
 import pickle
 import sys
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -707,6 +708,146 @@ class TestMemoryIndexFTS(unittest.TestCase):
 
             self.assertEqual(len(results), 2)
             self.assertEqual(results[0].path, "/workspace/app/cli/chat_session_runner.py")
+
+    def test_mixed_language_query_prefers_resume_session_user_implementation(self):
+        with TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "memory_index.pkl"
+            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx.DEFAULT_CHUNK_SIZE = 90
+            idx.DEFAULT_CHUNK_OVERLAP = 0
+
+            impl_content = "\n".join(
+                [
+                    "# 恢复用户 session",
+                    "def resume_session(session_id, user_id):",
+                    "    return load_session_for_user(session_id, user_id)",
+                    "def load_session_for_user(session_id, user_id):",
+                    "    return {'session_id': session_id, 'user_id': user_id}",
+                ]
+            )
+            docs_content = "\n".join(
+                [
+                    "# 恢复指南",
+                    "用户可以从 CLI 恢复之前的 session。",
+                    "文档说明如何继续历史会话。",
+                ]
+            )
+
+            idx._replace_file_documents("/workspace/app/cli/resume_session.py", impl_content, 1.0, len(impl_content))
+            idx._replace_file_documents("/workspace/docs/resume_guide.md", docs_content, 1.0, len(docs_content))
+            idx._sync_file_to_fts("/workspace/app/cli/resume_session.py")
+            idx._sync_file_to_fts("/workspace/docs/resume_guide.md")
+            idx._save_index()
+
+            results = idx.search("恢复 用户 session user id", top_k=2)
+
+            self.assertEqual(len(results), 2)
+            self.assertEqual(results[0].path, "/workspace/app/cli/resume_session.py")
+
+    def test_mixed_language_query_prefers_provider_verify_implementation(self):
+        with TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "memory_index.pkl"
+            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx.DEFAULT_CHUNK_SIZE = 90
+            idx.DEFAULT_CHUNK_OVERLAP = 0
+
+            impl_content = "\n".join(
+                [
+                    "# 验证 provider model",
+                    "def verify_provider(base_url, api_key, model):",
+                    "    return probe_model_connectivity(base_url, api_key, model)",
+                ]
+            )
+            docs_content = "\n".join(
+                [
+                    "# Provider 验证指南",
+                    "运行 provider verify 可以检查配置。",
+                    "文档也会提到 model 可用性。",
+                ]
+            )
+
+            idx._replace_file_documents("/workspace/app/cli/provider_verify.py", impl_content, 1.0, len(impl_content))
+            idx._replace_file_documents("/workspace/docs/provider_verify.md", docs_content, 1.0, len(docs_content))
+            idx._sync_file_to_fts("/workspace/app/cli/provider_verify.py")
+            idx._sync_file_to_fts("/workspace/docs/provider_verify.md")
+            idx._save_index()
+
+            results = idx.search("provider 验证 model", top_k=2)
+
+            self.assertEqual(len(results), 2)
+            self.assertEqual(results[0].path, "/workspace/app/cli/provider_verify.py")
+
+    def test_mixed_language_query_prefers_memory_search_identifier_implementation(self):
+        with TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "memory_index.pkl"
+            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx.DEFAULT_CHUNK_SIZE = 90
+            idx.DEFAULT_CHUNK_OVERLAP = 0
+
+            impl_content = "\n".join(
+                [
+                    "# 记忆 search helper",
+                    "def search_memory(user_id, query):",
+                    "    return {'user_id': user_id, 'query': query}",
+                ]
+            )
+            docs_content = "\n".join(
+                [
+                    "# memory 文档",
+                    "搜索记忆功能很重要。",
+                    "这个指南解释 search 行为。",
+                ]
+            )
+
+            idx._replace_file_documents("/workspace/app/cli/memory_search.py", impl_content, 1.0, len(impl_content))
+            idx._replace_file_documents("/workspace/docs/memory_search.md", docs_content, 1.0, len(docs_content))
+            idx._sync_file_to_fts("/workspace/app/cli/memory_search.py")
+            idx._sync_file_to_fts("/workspace/docs/memory_search.md")
+            idx._save_index()
+
+            results = idx.search("记忆 search user id", top_k=2)
+
+            self.assertEqual(len(results), 2)
+            self.assertEqual(results[0].path, "/workspace/app/cli/memory_search.py")
+
+    def test_search_latency_stays_reasonable_on_moderate_synthetic_corpus(self):
+        with TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "memory_index.pkl"
+            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx.DEFAULT_CHUNK_SIZE = 120
+            idx.DEFAULT_CHUNK_OVERLAP = 0
+
+            for i in range(250):
+                noisy_content = "\n".join(
+                    [
+                        f"ordinary filler line {i}",
+                        "generic implementation detail",
+                        "another unrelated search note",
+                    ]
+                )
+                path = f"/workspace/noise/file_{i}.txt"
+                idx._replace_file_documents(path, noisy_content, 1.0, len(noisy_content))
+                idx._sync_file_to_fts(path)
+
+            target_content = "\n".join(
+                [
+                    "def resume_session(session_id, user_id):",
+                    "    return load_session_for_user(session_id, user_id)",
+                    "def load_session_for_user(session_id, user_id):",
+                    "    return {'session_id': session_id, 'user_id': user_id}",
+                ]
+            )
+            idx._replace_file_documents("/workspace/app/cli/resume_session.py", target_content, 1.0, len(target_content))
+            idx._sync_file_to_fts("/workspace/app/cli/resume_session.py")
+            idx._save_index()
+
+            search_start = time.perf_counter()
+            results = idx.search("resume session user", top_k=3)
+            elapsed = time.perf_counter() - search_start
+
+            self.assertGreaterEqual(len(results), 1)
+            self.assertEqual(results[0].path, "/workspace/app/cli/resume_session.py")
+            self.assertLess(elapsed, 2.0)
 
 
 if __name__ == "__main__":
