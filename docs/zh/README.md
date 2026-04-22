@@ -71,6 +71,7 @@ ref: home
 - [MCP Servers](MCP_SERVERS.md)：内置 MCP Server 以及它们在平台中的角色
 - [API 参考](API_REFERENCE.md)：主要 HTTP 路由分组与流式接口
 - [HTTP API 参考](HTTP_API_REFERENCE.md)：按当前代码库订正后的后端接口细节、请求体、返回体与示例
+  - 子文档：[认证与用户](HTTP_API_AUTH_USER.md) · [对话与流式](HTTP_API_CHAT.md) · [Agent 补充](HTTP_API_AGENT.md) · [知识库 RAG](HTTP_API_KNOWLEDGE_BASE.md) · [工具 / 技能 / MCP](HTTP_API_TOOLS_MCP.md) · [计划任务 /tasks](HTTP_API_TASKS.md) · [平台与可观测](HTTP_API_PLATFORM.md)
 - [OAuth2 对接指南（Lage）](OAUTH2_LAGE_INTEGRATION.md)：恢复自历史提交的 OAuth2 对接文档
 - [开发](DEVELOPMENT.md)：贡献流程和源码位置
 - [Memory Search 验证总入口](MEMORY_SEARCH_VALIDATION.md)：当前 memory-search 工作线的统一验证入口

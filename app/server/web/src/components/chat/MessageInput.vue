@@ -13,10 +13,21 @@
             <span class="text-[10px] truncate w-full text-center">{{ file.name }}</span>
           </div>
 
+          <div
+            v-if="file.uploading"
+            class="absolute inset-0 z-10 flex items-center justify-center bg-background/60 backdrop-blur-[1px]"
+            aria-hidden="true"
+            role="status"
+            :aria-label="t('messageInput.uploadingAttachment')"
+          >
+            <Loader2 class="h-6 w-6 animate-spin text-primary" />
+          </div>
+
           <button
+            v-if="!file.uploading"
             type="button"
             @click="removeFile(index)"
-            class="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded-full bg-background/90 text-destructive hover:bg-destructive hover:text-destructive-foreground transition-colors shadow-sm opacity-0 group-hover:opacity-100"
+            class="absolute top-1 right-1 z-20 w-5 h-5 flex items-center justify-center rounded-full bg-background/90 text-destructive hover:bg-destructive hover:text-destructive-foreground transition-colors shadow-sm opacity-0 group-hover:opacity-100"
             :title="t('messageInput.removeFile')"
           >
             <span class="text-xs">✕</span>
@@ -160,13 +171,13 @@
           <Button
             type="submit"
             size="icon"
-            :disabled="isOptimizingInput || (!isLoading && !inputValue.trim() && uploadedFiles.length === 0)"
+            :disabled="isOptimizingInput || (!isLoading && !canSubmitNow)"
             class="h-7 w-7 rounded-full transition-all duration-200"
             :class="[
-              !isLoading && !inputValue.trim() && uploadedFiles.length === 0 ? 'opacity-50 cursor-not-allowed' : '',
+              !isLoading && !canSubmitNow ? 'opacity-50 cursor-not-allowed' : '',
               isLoading ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground' : ''
             ]"
-            :title="isLoading ? (inputValue.trim() || uploadedFiles.length > 0 ? t('messageInput.stopAndSendTitle') || '停止生成并发送' : t('messageInput.stopTitle') || '停止生成') : t('messageInput.sendTitle')"
+            :title="sendButtonTitle"
           >
             <svg v-if="!isLoading" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -262,6 +273,29 @@ const optimizeAbortController = ref(null)
 const deepThinkingEnabled = computed(() => props.config?.deepThinking !== false)
 const activeToggleClass = 'border-primary/30 bg-primary/10 text-foreground hover:bg-primary/15 hover:border-primary/40'
 const inactiveToggleClass = 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted/60'
+
+const canSubmitNow = computed(() => {
+  const hasContent = Boolean(
+    inputValue.value.trim() ||
+    uploadedFiles.value.length > 0 ||
+    currentSkills.value.length > 0
+  )
+  if (!hasContent) return false
+  if (uploadedFiles.value.some((f) => f.uploading || !f.url)) return false
+  return true
+})
+
+const sendButtonTitle = computed(() => {
+  if (!props.isLoading && uploadedFiles.value.some((f) => f.uploading)) {
+    return t('messageInput.waitForUpload')
+  }
+  if (props.isLoading) {
+    return inputValue.value.trim() || uploadedFiles.value.length > 0
+      ? (t('messageInput.stopAndSendTitle') || '停止生成并发送')
+      : (t('messageInput.stopTitle') || '停止生成')
+  }
+  return t('messageInput.sendTitle')
+})
 
 watch(() => props.presetText, async (newVal) => {
   if (typeof newVal !== 'string' || !newVal) return
@@ -503,15 +537,12 @@ const buildSubmissionPayload = () => {
   }
 }
 
-const hasSubmittableInput = () => {
-  return Boolean(
-    inputValue.value.trim() ||
-    uploadedFiles.value.length > 0 ||
-    currentSkills.value.length > 0
-  )
-}
+const hasSubmittableInput = () => canSubmitNow.value
 
 const dispatchSubmit = (needInterrupt) => {
+  if (uploadedFiles.value.some((f) => f.uploading || !f.url)) {
+    return
+  }
   const { plainText, multimodalContent } = buildSubmissionPayload()
   if (!plainText && (!multimodalContent || multimodalContent.length === 0)) return
 
@@ -767,6 +798,12 @@ const processFile = async (file) => {
   try {
     const response = await ossApi.uploadFile(file)
     const payload = response?.data ?? response
+
+    if (uploadedFiles.value.indexOf(fileItem) < 0) {
+      if (preview) URL.revokeObjectURL(preview)
+      return
+    }
+
     fileItem.url = payload?.url || (typeof payload === 'string' ? payload : '')
     const serverFilename = (payload && typeof payload === 'object') ? payload.filename : ''
     if (serverFilename) {
@@ -801,13 +838,12 @@ const removeFile = (index) => {
   uploadedFiles.value.splice(index, 1)
 }
 
-// 当用户在 textarea 中手动删除某个占位符时，同步移除对应的附件项。
+// 当用户在 textarea 中手动删除某个占位符（或点击 chip 删除）时，同步移除对应的附件项。
 watch(inputValue, (text) => {
   if (uploadedFiles.value.length === 0) return
   const stale = []
   for (const f of uploadedFiles.value) {
     if (f.id == null) continue
-    if (f.uploading) continue
     if (!textHasAttachmentPlaceholder(text || '', f.id)) {
       stale.push(f)
     }

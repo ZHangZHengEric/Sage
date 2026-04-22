@@ -20,6 +20,16 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 
+def _ensure_loguru_has_sink() -> None:
+    """单测等场景可能 `logger.remove()` 清空全部 sink，导致 opt().bind() 链异常。"""
+    try:
+        handlers = getattr(getattr(logger, "_core", None), "handlers", None)
+        if handlers is not None and len(handlers) == 0:
+            logger.add(sys.stderr, level="DEBUG")
+    except Exception:
+        pass
+
+
 class InterceptHandler(logging.Handler):
     """Bridge standard logging to loguru.
 
@@ -29,9 +39,13 @@ class InterceptHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:  # type: ignore[override]
         # Map logging level to loguru level
         try:
-            level: Any = logger.level(record.levelname).name
+            lvl = logger.level(record.levelname)
+            if lvl is not None:
+                level: Any = lvl.name
+            else:
+                level = record.levelname
         except ValueError:
-            level = record.levelno
+            level = record.levelname
 
         record_name = record.name or ""
         record_path = getattr(record, "pathname", "") or ""
@@ -65,9 +79,16 @@ class InterceptHandler(logging.Handler):
         if hasattr(record, "caller_lineno"):
             payload["line"] = record.caller_lineno
 
-        logger.opt(depth=depth, exception=record.exc_info).bind(**payload).log(
-            level, record.getMessage()
-        )
+        _ensure_loguru_has_sink()
+        try:
+            logger.opt(depth=depth, exception=record.exc_info).bind(**payload).log(
+                level, record.getMessage()
+            )
+        except Exception:
+            try:
+                sys.stderr.write(f"[InterceptHandler fallback] {record.getMessage()}\n")
+            except Exception:
+                pass
 
 
 class SafeStdout:
