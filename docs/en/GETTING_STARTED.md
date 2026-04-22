@@ -151,6 +151,7 @@ You should be able to complete at least one of these checks:
 The fastest way to validate the runtime is the CLI:
 
 ```bash
+pip install -r requirements.txt
 pip install -e .
 sage doctor
 sage run "Help me analyze the current repository"

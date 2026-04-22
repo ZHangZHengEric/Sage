@@ -142,6 +142,7 @@ export SAGE_AUTH_MODE="native"
 如果你想最快完成一次本地冒烟验证，可以运行 CLI：
 
 ```bash
+pip install -r requirements.txt
 pip install -e .
 sage doctor
 sage run "帮我分析当前仓库"

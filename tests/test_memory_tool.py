@@ -69,10 +69,22 @@ class _FakeSessionMemoryManager:
     def __init__(self, retrieved_messages):
         self.retrieved_messages = retrieved_messages
         self.calls = 0
+        self.grouped_calls = 0
+        self.retrieve_calls = []
 
     def retrieve_history_messages(self, messages, query, history_budget):
         self.calls += 1
         return self.retrieved_messages
+
+    def retrieve_group_messages_by_chat(self, messages, query, history_budget):
+        self.grouped_calls += 1
+        return self.retrieved_messages
+
+    def retrieve(self, messages, query, history_budget, *, strategy=None, agent_config=None):
+        self.retrieve_calls.append((strategy, agent_config))
+        if strategy == "grouped_chat":
+            return self.retrieve_group_messages_by_chat(messages, query, history_budget)
+        return self.retrieve_history_messages(messages, query, history_budget)
 
 
 class _FakeIndex:
@@ -180,6 +192,29 @@ class TestMemoryTool(unittest.TestCase):
         session_context.agent_config = {"name": "demo-v2"}
         tool.session_history_retriever.search("history", 3, "session-1", session_context)
         self.assertEqual(session_context.message_manager.prepare_calls, 2)
+
+    def test_session_history_retriever_uses_grouped_chat_strategy_from_agent_config(self):
+        tool = self.MemoryTool()
+        history_messages = [_FakeMessage("h1", "assistant", "history snippet")]
+        session_memory_manager = _FakeSessionMemoryManager(retrieved_messages=history_messages)
+        session_context = types.SimpleNamespace(
+            message_manager=_FakeMessageManager(
+                messages=[_FakeMessage("m1", "user", "hello session")],
+                history_messages=history_messages,
+            ),
+            agent_config={"memory_backends": {"session_history_strategy": "grouped_chat"}},
+            session_memory_manager=session_memory_manager,
+        )
+
+        results = tool.session_history_retriever.search("history", 3, "session-1", session_context)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(session_memory_manager.calls, 0)
+        self.assertEqual(session_memory_manager.grouped_calls, 1)
+        self.assertEqual(
+            session_memory_manager.retrieve_calls,
+            [("grouped_chat", {"memory_backends": {"session_history_strategy": "grouped_chat"}})],
+        )
 
     def test_file_memory_retriever_reuses_scoped_index_and_refreshes_once(self):
         tool = self.MemoryTool()
