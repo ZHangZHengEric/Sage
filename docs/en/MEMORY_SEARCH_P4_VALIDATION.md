@@ -33,7 +33,7 @@ Primary P4 regression suites:
 ```bash
 python tests/sagents/context/test_session_memory_manager.py
 python tests/sagents/tool/impl/test_file_memory_backend.py
-python tests/test_memory_tool.py
+python tests/sagents/tool/impl/test_memory_tool.py
 python tests/app/cli/test_doctor_memory_backends.py
 ```
 
@@ -55,11 +55,11 @@ Current coverage includes:
 Run the local validation for this branch:
 
 ```bash
-python -m py_compile app/cli/service.py sagents/context/memory_backend_registry.py sagents/context/session_memory/session_memory_manager.py sagents/tool/impl/memory_tool.py tests/app/cli/test_doctor_memory_backends.py tests/sagents/context/test_session_memory_manager.py tests/sagents/tool/impl/test_file_memory_backend.py tests/test_memory_tool.py
+python -m py_compile app/cli/service.py sagents/context/memory_backend_registry.py sagents/context/session_memory/session_memory_manager.py sagents/tool/impl/memory_tool.py tests/app/cli/test_doctor_memory_backends.py tests/sagents/context/test_session_memory_manager.py tests/sagents/tool/impl/test_file_memory_backend.py tests/sagents/tool/impl/test_memory_tool.py
 python tests/app/cli/test_doctor_memory_backends.py
 python tests/sagents/context/test_session_memory_manager.py
 python tests/sagents/tool/impl/test_file_memory_backend.py
-python tests/test_memory_tool.py
+python tests/sagents/tool/impl/test_memory_tool.py
 python scripts/memory_search_validate.py --noise-files 30 --top-k 2
 ```
 

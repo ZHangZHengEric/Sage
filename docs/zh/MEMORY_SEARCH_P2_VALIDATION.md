@@ -27,7 +27,7 @@ P2 主要稳定 `search_memory` 内部两条检索路径的边界：
 主回归测试：
 
 ```bash
-python tests/test_memory_tool.py
+python tests/sagents/tool/impl/test_memory_tool.py
 ```
 
 统一入口：
