@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
-import sys
 import tempfile
 import unittest
-from pathlib import Path
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from app.cli.main import _build_cli_error_payload
 from app.cli.service import CLIError, validate_cli_request_options
