@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run the current memory-search validation suite for P1 + P2.
+Run the current memory-search validation suite for P1 through P4.
 """
 
 from __future__ import annotations
@@ -33,14 +33,17 @@ def main() -> int:
         "sagents/context/session_memory/factory.py",
         "sagents/context/session_memory/session_memory_manager.py",
         "sagents/context/session_memory/noop_backend.py",
+        "sagents/context/memory_backend_registry.py",
         "sagents/tool/impl/file_memory/backend.py",
         "sagents/tool/impl/file_memory/index_backend.py",
         "sagents/tool/impl/file_memory/factory.py",
         "sagents/tool/impl/file_memory/noop_backend.py",
+        "app/cli/service.py",
         "tests/test_memory_index_fts.py",
         "tests/test_memory_tool.py",
         "tests/sagents/context/test_session_memory_manager.py",
         "tests/sagents/tool/impl/test_file_memory_backend.py",
+        "tests/app/cli/test_doctor_memory_backends.py",
         "scripts/memory_search_benchmark.py",
     ]
 
@@ -49,6 +52,7 @@ def main() -> int:
     _run([sys.executable, "tests/test_memory_tool.py"])
     _run([sys.executable, "tests/sagents/context/test_session_memory_manager.py"])
     _run([sys.executable, "tests/sagents/tool/impl/test_file_memory_backend.py"])
+    _run([sys.executable, "tests/app/cli/test_doctor_memory_backends.py"])
     _run(
         [
             sys.executable,

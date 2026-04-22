@@ -6,6 +6,7 @@ import sys
 import time
 import traceback
 import uuid
+from contextlib import suppress
 from typing import Any, Dict, Iterable, List, Optional
 
 
@@ -14,15 +15,46 @@ CHAT_COMMAND_HELP = (
     "  /help     show this help\n"
     "  /session  print the current session id\n"
     "  /exit     leave the session\n"
-    "  /quit     leave the session"
+    "  /quit     leave the session\n"
+    "\n"
+    "session recovery:\n"
+    "  sage resume <session_id>\n"
+    "  sage sessions\n"
+    "  sage sessions inspect latest"
 )
+CHAT_INPUT_PROMPT = "Sage> "
+STREAM_IDLE_NOTICE_SECONDS = 3.0
+STREAM_IDLE_REPEAT_SECONDS = 5.0
 
 TOOL_NAME_TAG_PATTERN = re.compile(r"<tool_name>\s*([A-Za-z0-9_.-]+)\s*</tool_name>")
 TOOL_CALL_FUNCTION_PATTERN = re.compile(r"<call\s+function=\"([A-Za-z0-9_.-]+)\"")
 TOOL_RESULT_NAME_PATTERN = re.compile(r"<function_result\s+name=\"([A-Za-z0-9_.-]+)\"")
+DSML_INVOKE_NAME_PATTERN = re.compile(r"<｜DSML｜invoke\s+name=\"([A-Za-z0-9_.-]+)\"")
 SKILL_TAG_PATTERN = re.compile(r"<skill>\s*([A-Za-z0-9_.-]+)\s*</skill>", re.DOTALL)
 SKILL_INPUT_TAG_PATTERN = re.compile(r"<skill_input>", re.DOTALL)
 SKILL_RESULT_TAG_PATTERN = re.compile(r"<skill_result>", re.DOTALL)
+FUNCTION_RESULTS_TAG_PATTERN = re.compile(r"<function_results>", re.DOTALL)
+RAW_ASSISTANT_BLOCK_PATTERNS = (
+    re.compile(r"(^|\n)\s*<skill>\s*.*?</skill>", re.DOTALL),
+    re.compile(r"(^|\n)\s*<skill_input>.*?</skill_input>", re.DOTALL),
+    re.compile(r"(^|\n)\s*<skill_result>.*?</skill_result>", re.DOTALL),
+    re.compile(r"(^|\n)\s*<call\s+function=\"[A-Za-z0-9_.-]+\".*?</call>", re.DOTALL),
+    re.compile(r"(^|\n)\s*<function_result\s+name=\"[A-Za-z0-9_.-]+\".*?</function_result>", re.DOTALL),
+    re.compile(r"(^|\n)\s*<function_results>.*?</function_results>", re.DOTALL),
+    re.compile(r"(^|\n)\s*<tool_name>\s*.*?</tool_name>", re.DOTALL),
+    re.compile(r"(^|\n)\s*<｜DSML｜tool_calls>.*?</｜DSML｜tool_calls>", re.DOTALL),
+    re.compile(r"(^|\n)\s*<｜DSML｜invoke\b.*?</｜DSML｜invoke>", re.DOTALL),
+)
+RAW_ASSISTANT_START_PATTERNS = (
+    re.compile(r"(^|\n)\s*<skill>"),
+    re.compile(r"(^|\n)\s*<skill_input>"),
+    re.compile(r"(^|\n)\s*<skill_result>"),
+    re.compile(r"(^|\n)\s*<call\s+function=\""),
+    re.compile(r"(^|\n)\s*<function_result\b"),
+    re.compile(r"(^|\n)\s*<function_results>"),
+    re.compile(r"(^|\n)\s*<tool_name>"),
+    re.compile(r"(^|\n)\s*<｜DSML｜"),
+)
 
 
 def _truncate(value: Optional[str], max_len: int) -> str:
@@ -306,7 +338,53 @@ def build_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_plain_event(event: Dict[str, Any]) -> None:
+def _empty_render_state() -> Dict[str, Any]:
+    return {
+        "assistant_buffer": "",
+        "assistant_emitted": "",
+        "tool_tag_buffer": "",
+        "announced_tools": set(),
+        "last_tool_name": None,
+        "last_visible_phase": None,
+    }
+
+
+def _split_visible_assistant_content(buffer: str) -> tuple[str, str]:
+    working = buffer
+    previous = None
+    while working != previous:
+        previous = working
+        for pattern in RAW_ASSISTANT_BLOCK_PATTERNS:
+            working = pattern.sub("", working)
+
+    start_positions = []
+    for pattern in RAW_ASSISTANT_START_PATTERNS:
+        match = pattern.search(working)
+        if match:
+            start_positions.append(match.start())
+
+    if not start_positions:
+        return working, ""
+
+    split_at = min(start_positions)
+    return working[:split_at], working[split_at:]
+
+
+def _render_assistant_content_delta(render_state: Dict[str, Any], content: str) -> str:
+    buffer = (render_state.get("assistant_buffer") or "") + content
+    visible, pending = _split_visible_assistant_content(buffer)
+    render_state["assistant_buffer"] = visible + pending
+
+    emitted = render_state.get("assistant_emitted") or ""
+    if visible.startswith(emitted):
+        delta = visible[len(emitted) :]
+    else:
+        delta = visible
+    render_state["assistant_emitted"] = visible
+    return delta
+
+
+def _print_plain_event(event: Dict[str, Any], render_state: Dict[str, Any]) -> None:
     event_type = event.get("type")
     if event_type == "stream_end":
         if not sys.stdout.isatty():
@@ -315,17 +393,30 @@ def _print_plain_event(event: Dict[str, Any]) -> None:
         sys.stdout.flush()
         return
 
-    names = _collect_event_tool_names(event)
+    content = event.get("content")
+    if isinstance(content, str) and content:
+        tool_tag_buffer = (render_state.get("tool_tag_buffer") or "") + content
+        render_state["tool_tag_buffer"] = tool_tag_buffer[-2048:]
+
+    names = _collect_event_tool_names(event, content_buffer=render_state.get("tool_tag_buffer") or "")
     if names:
-        if event.get("tool_calls"):
-            sys.stderr.write(f"\n[tool] {', '.join(names)}\n")
+        announced_tools = render_state.setdefault("announced_tools", set())
+        unseen_names = [name for name in names if name not in announced_tools]
+        if unseen_names:
+            announced_tools.update(unseen_names)
+            render_state["last_tool_name"] = unseen_names[-1]
+            render_state["last_visible_phase"] = "tool"
+            sys.stderr.write(f"\n[tool] {', '.join(unseen_names)}\n")
             sys.stderr.flush()
 
-    content = event.get("content")
     role = event.get("role")
     if role == "assistant" and isinstance(content, str) and content:
-        sys.stdout.write(content)
-        sys.stdout.flush()
+        visible_delta = _render_assistant_content_delta(render_state, content)
+        if visible_delta:
+            render_state["last_visible_phase"] = "assistant_text"
+            render_state["last_tool_name"] = None
+            sys.stdout.write(visible_delta)
+            sys.stdout.flush()
         return
 
     if event_type == "error":
@@ -384,6 +475,9 @@ def _collect_event_tool_names(event: Dict[str, Any], *, content_buffer: str = ""
             if match:
                 tool_names.append(match.strip())
         for match in TOOL_RESULT_NAME_PATTERN.findall(combined_content):
+            if match:
+                tool_names.append(match.strip())
+        for match in DSML_INVOKE_NAME_PATTERN.findall(combined_content):
             if match:
                 tool_names.append(match.strip())
         for match in SKILL_TAG_PATTERN.findall(combined_content):
@@ -506,17 +600,94 @@ def _print_stats(stats: Dict[str, Any], *, json_output: bool) -> None:
     sys.stdout.flush()
 
 
+def _emit_stream_idle_notice(idle_seconds: float) -> None:
+    sys.stderr.write(f"\n[working] still running ({idle_seconds:.1f}s since last event)\n")
+    sys.stderr.flush()
+
+
+def _emit_stream_idle_notice_for_state(render_state: Dict[str, Any], idle_seconds: float) -> None:
+    last_tool_name = render_state.get("last_tool_name")
+    last_visible_phase = render_state.get("last_visible_phase")
+
+    if last_visible_phase == "assistant_text":
+        message = f"\n[working] generating response ({idle_seconds:.1f}s since last event)\n"
+    elif last_tool_name:
+        message = f"\n[working] waiting for {last_tool_name} ({idle_seconds:.1f}s since last event)\n"
+    else:
+        message = f"\n[working] still running ({idle_seconds:.1f}s since last event)\n"
+
+    sys.stderr.write(message)
+    sys.stderr.flush()
+
+
+def _emit_chat_exit_summary(session_id: Optional[str], *, json_output: bool) -> None:
+    if json_output or not session_id:
+        return
+
+    sys.stderr.write(
+        "\n"
+        f"session_id: {session_id}\n"
+        f"resume: sage resume {session_id}\n"
+        "history: sage sessions\n"
+    )
+    sys.stderr.flush()
+
+
 async def _stream_request(request, json_output: bool, stats_output: bool, workspace: Optional[str] = None) -> int:
     from app.cli.service import run_request_stream
 
+    event_queue: asyncio.Queue = asyncio.Queue()
+
+    async def _pump_stream_events() -> None:
+        try:
+            async for event in run_request_stream(request, workspace=workspace):
+                await event_queue.put(("event", event))
+        except Exception as exc:  # noqa: BLE001
+            await event_queue.put(("error", exc))
+        finally:
+            await event_queue.put(("end", None))
+
     start_time = time.monotonic()
     stats = _empty_stats(request=request, workspace=workspace)
-    async for event in run_request_stream(request, workspace=workspace):
-        _record_stats_event(stats, event, start_time)
-        if json_output:
-            print(json.dumps(event, ensure_ascii=False))
-        else:
-            _print_plain_event(event)
+    render_state = _empty_render_state()
+    last_event_time = time.monotonic()
+    last_notice_time: Optional[float] = None
+    producer_task = asyncio.create_task(_pump_stream_events())
+
+    try:
+        while True:
+            try:
+                item_type, payload = await asyncio.wait_for(event_queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                if not json_output:
+                    now = time.monotonic()
+                    idle_seconds = now - last_event_time
+                    if idle_seconds >= STREAM_IDLE_NOTICE_SECONDS and (
+                        last_notice_time is None or (now - last_notice_time) >= STREAM_IDLE_REPEAT_SECONDS
+                    ):
+                        _emit_stream_idle_notice_for_state(render_state, idle_seconds)
+                        last_notice_time = now
+                continue
+
+            if item_type == "end":
+                break
+            if item_type == "error":
+                raise payload
+
+            event = payload
+
+            last_event_time = time.monotonic()
+            last_notice_time = None
+            _record_stats_event(stats, event, start_time)
+            if json_output:
+                print(json.dumps(event, ensure_ascii=False))
+            else:
+                _print_plain_event(event, render_state)
+    finally:
+        if not producer_task.done():
+            producer_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await producer_task
     stats["elapsed_seconds"] = round(time.monotonic() - start_time, 3)
     if stats_output:
         _print_stats(stats, json_output=json_output)
@@ -583,34 +754,37 @@ async def _chat_command(args: argparse.Namespace) -> int:
 
     validate_cli_runtime_requirements()
     validate_cli_request_options(workspace=args.workspace, max_loop_count=args.max_loop_count)
-    async with cli_runtime(verbose=args.verbose):
-        while True:
-            try:
-                prompt = input("> ").strip()
-            except EOFError:
-                if not args.json:
-                    sys.stdout.write("\n")
-                    sys.stdout.flush()
-                break
-            except KeyboardInterrupt:
-                if not args.json:
-                    sys.stdout.write("\n")
-                    sys.stdout.flush()
-                break
+    try:
+        async with cli_runtime(verbose=args.verbose):
+            while True:
+                try:
+                    prompt = input(CHAT_INPUT_PROMPT).strip()
+                except EOFError:
+                    if not args.json:
+                        sys.stdout.write("\n")
+                        sys.stdout.flush()
+                    break
+                except KeyboardInterrupt:
+                    if not args.json:
+                        sys.stdout.write("\n")
+                        sys.stdout.flush()
+                    break
 
-            if not prompt:
-                continue
-            if prompt in {"/exit", "/quit"}:
-                break
-            if prompt == "/help":
-                print(CHAT_COMMAND_HELP)
-                continue
-            if prompt == "/session":
-                print(args.session_id)
-                continue
+                if not prompt:
+                    continue
+                if prompt in {"/exit", "/quit"}:
+                    break
+                if prompt == "/help":
+                    print(CHAT_COMMAND_HELP)
+                    continue
+                if prompt == "/session":
+                    print(args.session_id)
+                    continue
 
-            request = await _build_request(args, prompt)
-            await _stream_request(request, args.json, args.stats, workspace=args.workspace)
+                request = await _build_request(args, prompt)
+                await _stream_request(request, args.json, args.stats, workspace=args.workspace)
+    finally:
+        _emit_chat_exit_summary(args.session_id, json_output=args.json)
     return 0
 
 
@@ -671,7 +845,10 @@ def _build_cli_error_payload(exc: Exception, *, verbose: bool) -> Dict[str, Any]
         return {
             "type": "cli_error",
             "message": f"Missing dependency: {exc.name}",
-            "next_steps": ["Install project dependencies first, for example: `pip install -e .`."],
+            "next_steps": [
+                "Install project dependencies first, for example: `pip install -r requirements.txt`.",
+                "If only `rank_bm25` is missing, install it directly with: `pip install rank-bm25`.",
+            ],
             "debug_detail": None,
             "exit_code": 1,
         }

@@ -36,7 +36,13 @@ Use the CLI when you want to:
 
 ## Install
 
-From the repository root:
+For a complete local development/runtime environment, install the repository requirements first:
+
+```bash
+pip install -r requirements.txt
+```
+
+If you also want the `sage` entrypoint available from the current checkout, add the editable install from the repository root:
 
 ```bash
 pip install -e .
@@ -123,6 +129,8 @@ It reports:
 - current working directory
 - effective env file path and existence
 - auth mode and DB type
+- resolved memory backends for `session_history` and `file_memory`
+- resolved session-history strategy for `session_history`
 - important directories such as `agents_dir`, `session_dir`, and `logs_dir`
 - the SQLite session registry path under `session_dir`
 - dependency availability
@@ -147,6 +155,27 @@ sage config init
 sage config init --path ./my-sage.env
 sage config init --force
 ```
+
+`sage config show` also reports the currently resolved memory backend defaults for:
+
+- `session_history`
+- `file_memory`
+
+It also reports the currently resolved session-history retrieval strategy for:
+
+- `session_history`
+
+The corresponding environment variable is:
+
+- `SAGE_SESSION_MEMORY_STRATEGY`
+
+If a memory backend or strategy is configured with an unsupported value, `sage doctor`
+and `sage config show` keep returning structured diagnostics and surface the validation
+error in the corresponding `memory_backends.*` or `memory_strategies.*` entry instead of
+crashing.
+
+`sage config init` also writes commented optional memory-search overrides into the
+generated env template so local backend or strategy changes can be made in one place.
 
 ### `sage run`
 
