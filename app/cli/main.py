@@ -695,6 +695,15 @@ def _emit_chat_exit_summary(session_id: Optional[str], *, json_output: bool) -> 
     sys.stderr.flush()
 
 
+def _read_chat_prompt(prompt_text: str) -> Optional[str]:
+    sys.stdout.write(prompt_text)
+    sys.stdout.flush()
+    line = sys.stdin.readline()
+    if line == "":
+        return None
+    return line.rstrip("\r\n")
+
+
 async def _stream_request(request, json_output: bool, stats_output: bool, workspace: Optional[str] = None) -> int:
     from app.cli.service import run_request_stream
 
@@ -820,7 +829,13 @@ async def _chat_command(args: argparse.Namespace) -> int:
         async with cli_runtime(verbose=args.verbose):
             while True:
                 try:
-                    prompt = input(CHAT_INPUT_PROMPT).strip()
+                    prompt = _read_chat_prompt(CHAT_INPUT_PROMPT)
+                    if prompt is None:
+                        if not args.json:
+                            sys.stdout.write("\n")
+                            sys.stdout.flush()
+                        break
+                    prompt = prompt.strip()
                 except EOFError:
                     if not args.json:
                         sys.stdout.write("\n")
