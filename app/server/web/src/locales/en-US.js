@@ -1140,7 +1140,7 @@ export default {
   'history.noConversationsDesc': 'Start a new chat',
   'history.startNewChat': 'Start Chat',
   'history.shareTitle': 'Share Chat',
-  'history.exportFormat': 'Format:',
+  'history.exportFormat': 'Choose an export format or copy the share link:',
   'history.exportMarkdown': 'Markdown',
   'history.exportHTML': 'HTML',
   'history.copySessionId': 'Copy',

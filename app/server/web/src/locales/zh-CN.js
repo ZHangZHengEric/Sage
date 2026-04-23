@@ -1200,7 +1200,7 @@ export default {
   'history.noConversationsDesc': '开始一个新对话来创建记录',
   'history.startNewChat': '开始新对话',
   'history.shareTitle': '分享对话记录',
-  'history.exportFormat': '选择导出格式：',
+  'history.exportFormat': '选择导出格式或复制分享链接：',
   'history.exportMarkdown': '导出为 Markdown',
   'history.exportHTML': '导出为 HTML',
   'history.copySessionId': '点击复制',
