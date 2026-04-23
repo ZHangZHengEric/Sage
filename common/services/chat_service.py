@@ -935,6 +935,7 @@ async def execute_chat_session(
 
     stream_counter = 0
     last_activity_time = time.time()
+    token_usage_persisted = False
     try:
         async for result in stream_service.process_stream():
             stream_counter += 1
@@ -954,7 +955,7 @@ async def execute_chat_session(
             yield_result.pop("chunk_id", None)
             yield json.dumps(yield_result, ensure_ascii=False) + "\n"
 
-        await _persist_token_usage_if_available(stream_service)
+        token_usage_persisted = await _persist_token_usage_if_available(stream_service)
 
         yield json.dumps(
             {
@@ -966,6 +967,8 @@ async def execute_chat_session(
             ensure_ascii=False,
         ) + "\n"
     finally:
+        if not token_usage_persisted:
+            await _persist_token_usage_if_available(stream_service)
         await _finalize_session_end(request, original_skills)
 
 
