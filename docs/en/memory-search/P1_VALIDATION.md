@@ -90,3 +90,4 @@ python scripts/memory_search_validate.py
 
 - this P1 line improves search quality and regression coverage, but does not redesign runtime memory architecture
 - benchmark numbers are intended as sanity signals, not hard performance guarantees across every machine
+

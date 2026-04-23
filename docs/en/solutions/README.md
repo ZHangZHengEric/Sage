@@ -1,7 +1,6 @@
 ---
 layout: default
 title: Solution Playbooks
-parent: Overview
 nav_order: 11
 has_children: true
 description: "Solution-style documents for specific business and industry scenarios"
@@ -24,4 +23,3 @@ These documents are optimized for:
 ## Current Documents
 
 1. [Collections Agent Proposal](COLLECTION_AGENT_SOLUTION.md)
-

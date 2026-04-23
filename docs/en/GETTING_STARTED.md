@@ -247,7 +247,7 @@ Windows source build:
 ## Recommended Reading After Setup
 
 1. [Core Concepts](CORE_CONCEPTS.md)
-2. [Architecture](ARCHITECTURE.md)
+2. [Architecture](architecture/README.md)
 3. [Configuration](CONFIGURATION.md)
 
 If something fails during startup, go next to [Troubleshooting](TROUBLESHOOTING.md).

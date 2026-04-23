@@ -65,3 +65,4 @@ python scripts/memory_search_validate.py
 
 - this P2 line intentionally keeps the current `long_term_memory` / `session_history` consumer contract
 - the goal here is not storage migration; it is to make the two retrieval paths easier to validate and evolve independently
+

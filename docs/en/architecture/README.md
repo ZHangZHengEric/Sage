@@ -1,12 +1,12 @@
 ---
-layout: default
+
+## layout: default
 title: Architecture
 nav_order: 4
 has_children: true
 description: "Repository and subsystem architecture overview, with sub-pages for apps and the sagents core runtime"
 lang: en
 ref: architecture
----
 
 {% include lang_switcher.html %}
 
