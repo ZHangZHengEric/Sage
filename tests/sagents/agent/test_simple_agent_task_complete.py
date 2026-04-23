@@ -10,9 +10,9 @@ class DummyModel:
 
 
 @pytest.fixture
-def enable_rule3(monkeypatch):
-    """显式启用规则 3（默认是 true=跳过）。"""
-    monkeypatch.setenv("SAGE_DISABLE_MUST_CONTINUE_RULE3", "false")
+def disable_keywords(monkeypatch):
+    """显式跳过"处理中关键词"规则（默认是启用）。"""
+    monkeypatch.setenv("SAGE_CONTINUE_ON_PROCESSING_KEYWORDS", "false")
     yield
 
 
@@ -20,8 +20,8 @@ def enable_rule3(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_must_continue_when_last_role_is_tool(monkeypatch):
-    """规则 1：tool 结果后必须继续。即使 rule3 默认关闭也不受影响。"""
-    monkeypatch.delenv("SAGE_DISABLE_MUST_CONTINUE_RULE3", raising=False)
+    """规则 1：tool 结果后必须继续。不受关键词开关影响。"""
+    monkeypatch.delenv("SAGE_CONTINUE_ON_PROCESSING_KEYWORDS", raising=False)
     agent = SimpleAgent(model=DummyModel(), model_config={})
     messages = [
         MessageChunk(
@@ -36,8 +36,8 @@ async def test_must_continue_when_last_role_is_tool(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_must_continue_when_last_assistant_ends_with_colon(monkeypatch):
-    """规则 4：':' 结尾必须继续。不受 rule3 开关影响。"""
-    monkeypatch.delenv("SAGE_DISABLE_MUST_CONTINUE_RULE3", raising=False)
+    """规则 4：':' 结尾必须继续。不受关键词开关影响。"""
+    monkeypatch.delenv("SAGE_CONTINUE_ON_PROCESSING_KEYWORDS", raising=False)
     agent = SimpleAgent(model=DummyModel(), model_config={})
     messages = [
         MessageChunk(
@@ -51,7 +51,7 @@ async def test_must_continue_when_last_assistant_ends_with_colon(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_not_must_continue_for_normal_assistant_message(monkeypatch):
-    monkeypatch.delenv("SAGE_DISABLE_MUST_CONTINUE_RULE3", raising=False)
+    monkeypatch.delenv("SAGE_CONTINUE_ON_PROCESSING_KEYWORDS", raising=False)
     agent = SimpleAgent(model=DummyModel(), model_config={})
     messages = [
         MessageChunk(
@@ -63,11 +63,12 @@ async def test_not_must_continue_for_normal_assistant_message(monkeypatch):
     assert await agent._must_continue_by_rules(messages) is False
 
 
-# ---- 规则 3：由 SAGE_DISABLE_MUST_CONTINUE_RULE3 控制 ----
+# ---- 规则 3：由 SAGE_CONTINUE_ON_PROCESSING_KEYWORDS 控制 ----
 
 @pytest.mark.asyncio
-async def test_rule3_hits_when_enabled(enable_rule3):
-    """env=false 时规则 3 启用，'正在处理' 命中必须继续。"""
+async def test_keywords_rule_hits_by_default(monkeypatch):
+    """默认（env 未设）启用关键词规则，'正在处理' 命中必须继续。"""
+    monkeypatch.delenv("SAGE_CONTINUE_ON_PROCESSING_KEYWORDS", raising=False)
     agent = SimpleAgent(model=DummyModel(), model_config={})
     messages = [
         MessageChunk(
@@ -80,9 +81,8 @@ async def test_rule3_hits_when_enabled(enable_rule3):
 
 
 @pytest.mark.asyncio
-async def test_rule3_skipped_by_default(monkeypatch):
-    """默认（env 未设）跳过规则 3，'正在处理' 自述也不强制继续。"""
-    monkeypatch.delenv("SAGE_DISABLE_MUST_CONTINUE_RULE3", raising=False)
+async def test_keywords_rule_skipped_when_disabled(disable_keywords):
+    """env=false 时跳过关键词规则，'正在处理' 自述也不强制继续。"""
     agent = SimpleAgent(model=DummyModel(), model_config={})
     messages = [
         MessageChunk(
@@ -95,9 +95,8 @@ async def test_rule3_skipped_by_default(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_rule3_skipped_but_rule4_still_fires(monkeypatch):
-    """规则 3 被跳过时，规则 4（冒号结尾）仍然生效。"""
-    monkeypatch.delenv("SAGE_DISABLE_MUST_CONTINUE_RULE3", raising=False)
+async def test_keywords_rule_skipped_but_rule4_still_fires(disable_keywords):
+    """关键词规则被跳过时，规则 4（冒号结尾）仍然生效。"""
     agent = SimpleAgent(model=DummyModel(), model_config={})
     messages = [
         MessageChunk(
@@ -110,9 +109,9 @@ async def test_rule3_skipped_but_rule4_still_fires(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_rule3_explicit_true_also_skips(monkeypatch):
-    """显式 env=true 同样跳过规则 3。"""
-    monkeypatch.setenv("SAGE_DISABLE_MUST_CONTINUE_RULE3", "true")
+async def test_keywords_rule_explicit_true_enables(monkeypatch):
+    """显式 env=true 同样启用关键词规则。"""
+    monkeypatch.setenv("SAGE_CONTINUE_ON_PROCESSING_KEYWORDS", "true")
     agent = SimpleAgent(model=DummyModel(), model_config={})
     messages = [
         MessageChunk(
@@ -121,4 +120,4 @@ async def test_rule3_explicit_true_also_skips(monkeypatch):
             message_type=MessageType.ASSISTANT_TEXT.value,
         ),
     ]
-    assert await agent._must_continue_by_rules(messages) is False
+    assert await agent._must_continue_by_rules(messages) is True
