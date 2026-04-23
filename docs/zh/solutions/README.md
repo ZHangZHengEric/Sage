@@ -1,7 +1,6 @@
 ---
 layout: default
 title: 落地应用方案
-parent: 概览
 nav_order: 11
 has_children: true
 description: "面向具体行业和业务场景的 Sage 落地方案集合"
@@ -24,4 +23,3 @@ ref: solution-playbooks
 ## 当前文档
 
 1. [催收 Agent 售前方案](COLLECTION_AGENT_SOLUTION.md)
-

@@ -47,3 +47,4 @@ python scripts/memory_search_validate.py --noise-files 30 --top-k 2
 
 - P5 does not change the external `search_memory` contract
 - this stage is about making configuration, diagnostics, and local validation robust enough for submission
+

@@ -59,3 +59,4 @@ python scripts/memory_search_validate.py
 
 - this P3 step does not replace BM25 yet; it isolates it behind backend boundaries
 - the goal is to make future session-history and file-memory backend changes independent from `MemoryTool` and `SessionContext`
+

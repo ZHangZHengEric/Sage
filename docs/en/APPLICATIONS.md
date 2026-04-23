@@ -1,11 +1,11 @@
 ---
-layout: default
+
+## layout: default
 title: Applications
 nav_order: 6
 description: "The main user-facing application surfaces in Sage"
 lang: en
 ref: applications
----
 
 {% include lang_switcher.html %}
 
