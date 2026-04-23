@@ -66,10 +66,14 @@ class _FakeStreamService:
     def __init__(self):
         self.request = SimpleNamespace(
             session_id="session-web-stream",
+            user_id="user-1",
             available_skills=[],
             agent_id="agent-1",
+            request_source="api/web-stream",
+            execution_started_at=None,
         )
         self.agent_skill_manager = None
+        self.sage_engine = SimpleNamespace(session_context=None)
 
     async def process_stream(self):
         yield {
@@ -78,14 +82,32 @@ class _FakeStreamService:
             "content": "hello",
             "message_id": "m-1",
         }
+        yield {
+            "type": "token_usage",
+            "role": "assistant",
+            "content": "",
+            "message_id": "m-token",
+            "metadata": {
+                "token_usage": {
+                    "total_info": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 5,
+                        "total_tokens": 15,
+                    },
+                    "per_step_info": [
+                        {"step_name": "direct_execution", "usage": {"total_tokens": 15}}
+                    ],
+                }
+            },
+        }
         await asyncio.sleep(10)
 
 
 def test_execute_chat_session_persists_token_usage_when_generator_closes_early(monkeypatch):
     calls = []
 
-    async def _fake_persist(stream_service):
-        calls.append("persist")
+    async def _fake_persist(stream_service, *, token_usage_payload=None):
+        calls.append(token_usage_payload)
         return True
 
     async def _fake_finalize(request, original_skills):
@@ -98,11 +120,15 @@ def test_execute_chat_session_persists_token_usage_when_generator_closes_early(m
         generator = chat_service.execute_chat_session(_FakeStreamService())
         first_chunk = await generator.__anext__()
         assert '"type": "assistant_text"' in first_chunk
+        second_chunk = await generator.__anext__()
+        assert '"type": "token_usage"' in second_chunk
         await generator.aclose()
 
     asyncio.run(_run())
 
-    assert calls == ["persist", "finalize"]
+    assert isinstance(calls[0], dict)
+    assert calls[0]["total_info"]["total_tokens"] == 15
+    assert calls[1] == "finalize"
 
 
 def test_stream_manager_stop_session_closes_background_generator():
