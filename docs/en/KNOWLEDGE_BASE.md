@@ -1,27 +1,20 @@
-***
-
+---
 layout: default
 title: Knowledge Base Guide
-nav\_order: 8
+nav_order: 7.5
 description: "Architecture, data flow, and extension notes for Sage Server knowledge base module"
--------------------------------------------------------------------------------------------------
+lang: en
+ref: knowledge-base
+---
+
+{% include lang_switcher.html %}
 
 {: .note }
-
 > Looking for the Chinese version? See [知识库指南](../zh/KNOWLEDGE_BASE.md)
-
-## Table of contents
-
-{: .no\_toc .text-delta }
-
-1. TOC
-   {:toc}
 
 # 📚 Sage Knowledge Base Guide
 
 This document focuses on `app/server/services/knowledge_base`, including the current architecture, indexing/retrieval flow, and extension points.
-
-***
 
 ## 1. Module role
 
@@ -32,8 +25,6 @@ The knowledge base module currently handles three responsibilities:
 - Agent integration: expose KB search via built-in MCP tool.
 
 In the current version, Elasticsearch is the default vector store and full-text engine.
-
-***
 
 ## 2. Folder layout
 
@@ -57,8 +48,6 @@ Core classes:
 - `EsVectorStore`: ES-backed `VectorStore` implementation.
 - `ServerEmbeddingAdapter`: server-side embedding adapter.
 
-***
-
 ## 3. Ingestion flow
 
 `DocumentService.sync_document(...)` executes full sync:
@@ -78,8 +67,6 @@ flowchart LR
     F --> G[EsVectorStore.add_documents]
     G --> H[(ES: index_doc/index_doc_full)]
 ```
-
-***
 
 ## 4. Retrieval flow (current)
 
@@ -105,8 +92,6 @@ flowchart LR
     G --> H[search_results]
 ```
 
-***
-
 ## 5. ES index model
 
 Each KB index uses two ES indices:
@@ -127,8 +112,6 @@ Each KB index uses two ES indices:
 - `full_content`
 - `origin_content/path/title/metadata`
 
-***
-
 ## 6. How Agent calls KB
 
 KB retrieval is exposed by built-in MCP tool `retrieve_on_zavixai_db`:
@@ -141,15 +124,11 @@ KB retrieval is exposed by built-in MCP tool `retrieve_on_zavixai_db`:
 4. Tool calls `DocumentService.doc_search(...)`.
 5. Result is written back as `role=tool` message for next-round reasoning.
 
-***
-
 ## 7. Current boundaries
 
 - Backend is hard-bound to ES in `DocumentService`.
 - `VectorStore.search` has no scalar filter argument yet.
 - Scheduler initialization depends on `es_url`.
-
-***
 
 ## 8. Troubleshooting checklist
 
