@@ -106,6 +106,69 @@ async def record_session_execution(
     return True
 
 
+async def record_execution_payload(
+    *,
+    token_usage: Dict[str, Any],
+    request_source: str,
+    session_id: str,
+    user_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    started_at: Any = None,
+    finished_at: Any = None,
+) -> bool:
+    if not isinstance(token_usage, dict):
+        return False
+
+    total_info = token_usage.get("total_info") or {}
+    if not isinstance(total_info, dict):
+        return False
+
+    total_tokens = total_info.get("total_tokens")
+    if not isinstance(total_tokens, (int, float)):
+        logger.bind(session_id=session_id).warning("跳过 token_usage 落库：payload 缺少 total_tokens")
+        return False
+
+    per_step_info = token_usage.get("per_step_info") or []
+    step_count = sum(
+        1
+        for step in per_step_info
+        if isinstance(step, dict) and str(step.get("step_name") or "").strip()
+    )
+
+    resolved_started_at = _to_local_datetime(started_at) or get_local_now()
+    resolved_finished_at = _to_local_datetime(finished_at) or get_local_now()
+    if resolved_finished_at < resolved_started_at:
+        resolved_finished_at = resolved_started_at
+
+    record = TokenUsage(
+        id=str(uuid.uuid4()),
+        session_id=str(session_id or ""),
+        user_id=str(user_id or ""),
+        agent_id=str(agent_id or ""),
+        request_source=str(request_source or ""),
+        input_tokens=_to_int(total_info.get("prompt_tokens")),
+        output_tokens=_to_int(total_info.get("completion_tokens")),
+        total_tokens=_to_int(total_tokens),
+        cached_tokens=_to_int(total_info.get("cached_tokens")),
+        reasoning_tokens=_to_int(total_info.get("reasoning_tokens")),
+        prompt_audio_tokens=_to_int(total_info.get("prompt_audio_tokens")),
+        completion_audio_tokens=_to_int(total_info.get("completion_audio_tokens")),
+        step_count=step_count,
+        usage_payload=token_usage,
+        started_at=resolved_started_at,
+        finished_at=resolved_finished_at,
+    )
+    await TokenUsageDao().save_usage(record)
+    logger.bind(
+        session_id=record.session_id,
+        agent_id=record.agent_id,
+        request_source=record.request_source,
+    ).info(
+        f"token_usage payload 已落库: total_tokens={record.total_tokens}, steps={record.step_count}"
+    )
+    return True
+
+
 async def get_token_usage_stats(
     *,
     group_by: str,

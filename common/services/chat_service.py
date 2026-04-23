@@ -936,6 +936,7 @@ async def execute_chat_session(
     stream_counter = 0
     last_activity_time = time.time()
     token_usage_persisted = False
+    token_usage_payload: Optional[Dict[str, Any]] = None
     try:
         async for result in stream_service.process_stream():
             stream_counter += 1
@@ -948,6 +949,8 @@ async def execute_chat_session(
                     f"📊 流处理状态 - 计数: {stream_counter}, 间隔: {time_since_last:.3f}s"
                 )
 
+            token_usage_payload = _extract_token_usage_payload(result) or token_usage_payload
+
             yield_result = result.copy()
             yield_result.pop("message_type", None)
             yield_result.pop("is_final", None)
@@ -955,7 +958,10 @@ async def execute_chat_session(
             yield_result.pop("chunk_id", None)
             yield json.dumps(yield_result, ensure_ascii=False) + "\n"
 
-        token_usage_persisted = await _persist_token_usage_if_available(stream_service)
+        token_usage_persisted = await _persist_token_usage_if_available(
+            stream_service,
+            token_usage_payload=token_usage_payload,
+        )
 
         yield json.dumps(
             {
@@ -968,7 +974,10 @@ async def execute_chat_session(
         ) + "\n"
     finally:
         if not token_usage_persisted:
-            await _persist_token_usage_if_available(stream_service)
+            await _persist_token_usage_if_available(
+                stream_service,
+                token_usage_payload=token_usage_payload,
+            )
         await _finalize_session_end(request, original_skills)
 
 
@@ -986,14 +995,43 @@ async def _finalize_session_end(
         asyncio.create_task(_check_and_update_agent_skills(request, original_skills))
 
 
-async def _persist_token_usage_if_available(stream_service: SageStreamService) -> bool:
+def _extract_token_usage_payload(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not isinstance(result, dict):
+        return None
+    message_type = result.get("message_type") or result.get("type")
+    if message_type != "token_usage":
+        return None
+    metadata = result.get("metadata") or {}
+    token_usage = metadata.get("token_usage")
+    return token_usage if isinstance(token_usage, dict) else None
+
+
+async def _persist_token_usage_if_available(
+    stream_service: SageStreamService,
+    *,
+    token_usage_payload: Optional[Dict[str, Any]] = None,
+) -> bool:
     request = getattr(stream_service, "request", None)
-    sage_engine = getattr(stream_service, "sage_engine", None)
-    session_context = getattr(sage_engine, "session_context", None)
-    if not request or not session_context:
+    if not request:
         return False
 
     try:
+        if token_usage_payload:
+            return await token_usage_service.record_execution_payload(
+                token_usage=token_usage_payload,
+                request_source=request.request_source or "",
+                session_id=request.session_id or "",
+                user_id=request.user_id,
+                agent_id=request.agent_id,
+                started_at=request.execution_started_at,
+                finished_at=get_local_now(),
+            )
+
+        sage_engine = getattr(stream_service, "sage_engine", None)
+        session_context = getattr(sage_engine, "session_context", None)
+        if not session_context:
+            return False
+
         return await token_usage_service.record_session_execution(
             session_context=session_context,
             request_source=request.request_source or "",
