@@ -8,7 +8,7 @@ description: "Architecture, data flow, and extension notes for Sage Server knowl
 
 {: .note }
 
-> Looking for the Chinese version? See [知识库指南](KNOWLEDGE_BASE_CN.html)
+> Looking for the Chinese version? See [知识库指南](../zh/KNOWLEDGE_BASE.md)
 
 ## Table of contents
 
@@ -162,4 +162,3 @@ KB retrieval is exposed by built-in MCP tool `retrieve_on_zavixai_db`:
 - Agent does not call KB:
   - Verify `available_knowledge_bases` exists in agent config.
   - Verify `retrieve_on_zavixai_db` appears in `available_tools`.
-

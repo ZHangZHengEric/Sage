@@ -25,7 +25,7 @@ The platform can run in combinations such as `native` (local accounts + email), 
 ## Integration patterns
 
 1. **First-party browser app**: use **session cookies** (`withCredentials: true` / `curl -c`) like the built-in web UI. Do not assume an OAuth2 `access_token` alone unlocks all product routes—most admin APIs rely on the server session (see the main “Quick rules” table).
-2. **M2M / third-party systems**: use the **OAuth2 authorization server** and/or your IdP, then `trusted_proxy` if applicable—different contract from `POST /api/auth/login`. For a worked example (doc is Chinese-only today), see [OAuth2 Lage integration guide](../zh/OAUTH2_LAGE_INTEGRATION.md).
+2. **M2M / third-party systems**: use the **OAuth2 authorization server** and/or your IdP, then `trusted_proxy` if applicable—different contract from `POST /api/auth/login`. For a worked example, see [OAuth2 Lage integration guide](../OAUTH2_LAGE_INTEGRATION.md).
 3. **User preferences**: `GET/POST /api/user/config` is **per user**, not the same as **system** settings in `POST /api/system/update_settings` (admin only).
 
 ## `/api/auth` vs legacy `/api/user`

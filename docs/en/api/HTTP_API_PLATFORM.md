@@ -45,6 +45,6 @@ Routers: `llm_provider.py`, `system.py`, `oss.py`, `version.py`, `observability.
 
 ## OAuth2 vs `/api/auth`
 
-- The OAuth2 surface (`/oauth2/*` and `/api/oauth2/*`) is for **standards-based clients** (metadata, `authorize`, `token`, `userinfo`). Your browser’s username/password form is a different path—see [Auth and users](HTTP_API_AUTH_USER.md) and, for a full third-party example, the repo’s [OAUTH2_LAGE_INTEGRATION.md](OAUTH2_LAGE_INTEGRATION.md) (Chinese, still useful for request shapes).
+- The OAuth2 surface (`/oauth2/*` and `/api/oauth2/*`) is for **standards-based clients** (metadata, `authorize`, `token`, `userinfo`). Your browser’s username/password form is a different path—see [Auth and users](HTTP_API_AUTH_USER.md) and, for a full third-party example, the repo’s [OAuth2 Lage integration guide](../OAUTH2_LAGE_INTEGRATION.md).
 
 [Back to HTTP API Reference](HTTP_API_REFERENCE.md)

@@ -8,7 +8,7 @@ description: "Sage Server 知识库模块架构、数据流与扩展说明"
 
 {: .note }
 
-> 需要英文版本？请查看 [Knowledge Base Guide](KNOWLEDGE_BASE.html)
+> 需要英文版本？请查看 [Knowledge Base Guide](../en/KNOWLEDGE_BASE.md)
 
 ## 目录
 
@@ -170,4 +170,3 @@ flowchart LR
 - Agent 未调用知识库：
   - 检查 Agent 配置是否包含 `available_knowledge_bases`。
   - 检查工具白名单里是否出现 `retrieve_on_zavixai_db`。
-
