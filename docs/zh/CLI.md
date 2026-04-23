@@ -203,6 +203,10 @@ sage run --workspace /path/to/project --stats "简单分析一下这个仓库。
 
 启动一个本地交互式会话。
 
+说明：
+- `sage chat` 按单行输入工作；一次粘贴多行内容会被视为多轮输入。
+- 如果不传 `--workspace`，写文件类工具会使用默认 agent workspace：`~/.sage/agents/<user>/<agent_id>/...`。
+
 示例：
 
 ```bash
@@ -406,6 +410,8 @@ sage skills --workspace /path/to/project
 ```
 
 这对文件型任务和 workspace 下 `skills/` 目录的发现尤其有用。
+
+如果不传 `--workspace`，交互式 chat 或写文件类任务会落到默认 agent workspace：`~/.sage/agents/<user>/<agent_id>/...`，而不是当前仓库目录。
 
 ## 推荐冒烟测试
 

@@ -37,8 +37,8 @@ python scripts/memory_search_validate.py --noise-files 300 --top-k 5
 The combined validation runs:
 
 - `py_compile` for the current memory-search implementation and test files
-- `tests/test_memory_index_fts.py`
-- `tests/test_memory_tool.py`
+- `tests/sagents/tool/impl/test_memory_index_fts.py`
+- `tests/sagents/tool/impl/test_memory_tool.py`
 - `tests/sagents/context/test_session_memory_manager.py`
 - `tests/app/cli/test_doctor_memory_backends.py`
 - `scripts/memory_search_benchmark.py`

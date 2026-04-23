@@ -206,6 +206,10 @@ Useful options:
 
 Start an interactive local chat session.
 
+Notes:
+- `sage chat` is line-oriented. Pasting multiple newline-separated lines will be treated as multiple turns.
+- If you do not pass `--workspace`, file-writing tool calls use the default agent workspace under `~/.sage/agents/<user>/<agent_id>/...`.
+
 Examples:
 
 ```bash
@@ -409,6 +413,8 @@ sage skills --workspace /path/to/project
 ```
 
 This is especially useful for file-oriented agent tasks and skill discovery under a workspace-specific `skills/` directory.
+
+Without `--workspace`, interactive chat/file-writing tasks will use the default agent workspace under `~/.sage/agents/<user>/<agent_id>/...` instead of your current repository.
 
 ## Recommended Smoke Test
 
