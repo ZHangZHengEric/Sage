@@ -216,6 +216,7 @@ async def chat(request: ChatRequest, http_request: Request):
         system_context=request.system_context,
         agent_id=request.agent_id,
     )
+    chat_service.mark_request_execution(inner_request, request_source="api/chat")
 
     await chat_service.populate_request_from_agent_config(
         inner_request,
@@ -241,6 +242,7 @@ async def chat(request: ChatRequest, http_request: Request):
 async def stream_chat(request: StreamRequest, http_request: Request):
     """流式聊天接口， 与chat不同的是入参不能够指定agent_id"""
     validate_and_prepare_request(request, http_request)
+    chat_service.mark_request_execution(request, request_source="api/stream")
     await chat_service.populate_request_from_agent_config(
         request,
         require_agent_id=False,
@@ -265,6 +267,7 @@ async def stream_chat(request: StreamRequest, http_request: Request):
 async def stream_chat_web(request: StreamRequest, http_request: Request):
     """这个接口有用户鉴权"""
     validate_and_prepare_request(request, http_request)
+    chat_service.mark_request_execution(request, request_source="api/web-stream")
 
     session_id = request.session_id
     manager = StreamManager.get_instance()
@@ -340,6 +343,10 @@ async def rerun_conversation_stream(
         more_suggest=rerun_request.more_suggest,
         max_loop_count=rerun_request.max_loop_count,
         available_sub_agent_ids=rerun_request.available_sub_agent_ids,
+    )
+    chat_service.mark_request_execution(
+        request,
+        request_source="api/conversations/rerun-stream",
     )
 
     manager = StreamManager.get_instance()

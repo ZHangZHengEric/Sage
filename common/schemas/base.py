@@ -1,7 +1,7 @@
-from typing import Any, Dict, Generic, List, Optional, TypeVar
+from typing import Any, Dict, Generic, List, Literal, Optional, TypeVar
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ===== LLM Provider Schemas =====
@@ -103,6 +103,49 @@ class AgentUsageStatsRequest(BaseModel):
 
 class AgentUsageStatsResponse(BaseModel):
     usage: Dict[str, int]
+
+
+class TokenUsageStatsRequest(BaseModel):
+    group_by: Literal["user", "agent", "session"]
+    user_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    session_id: Optional[str] = None
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def validate_time_range(self) -> "TokenUsageStatsRequest":
+        if self.start_time and self.end_time and self.start_time > self.end_time:
+            raise ValueError("start_time must be earlier than or equal to end_time")
+        return self
+
+
+class TokenUsageStatsSummary(BaseModel):
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    execution_count: int = 0
+    cached_tokens: int = 0
+    reasoning_tokens: int = 0
+
+
+class TokenUsageStatsItem(BaseModel):
+    user_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    session_id: Optional[str] = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    execution_count: int = 0
+    cached_tokens: int = 0
+    reasoning_tokens: int = 0
+    first_seen_at: Optional[datetime] = None
+    last_seen_at: Optional[datetime] = None
+
+
+class TokenUsageStatsResponse(BaseModel):
+    summary: TokenUsageStatsSummary
+    items: List[TokenUsageStatsItem]
 
 
 # ===== Base Response Schemas =====
@@ -430,6 +473,10 @@ __all__ = [
     "TauriUpdateResponse",
     "AgentUsageStatsRequest",
     "AgentUsageStatsResponse",
+    "TokenUsageStatsRequest",
+    "TokenUsageStatsSummary",
+    "TokenUsageStatsItem",
+    "TokenUsageStatsResponse",
     # BaseResponse
     "BaseResponse",
     # User

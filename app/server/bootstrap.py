@@ -351,6 +351,7 @@ async def ensure_system_init(cfg: StartupConfig):
     """Ensure system tables and default data exist."""
     from common.models.base import Base
     from common.models.llm_provider import LLMProvider, LLMProviderDao
+    from common.models.token_usage import TokenUsage  # noqa: F401
     from common.models.system import SystemInfoDao
     from common.models.user import User, UserDao
     from common.services.oauth.helpers import hash_password
