@@ -73,9 +73,9 @@ ref: home
   - [HTTP API 参考](api/HTTP_API_REFERENCE.md)：与 `register_routes` 一致的后端接口、请求体、返回体与示例；侧栏可展开子文档
     - 子文档：[认证与用户](api/HTTP_API_AUTH_USER.md) · [对话与流式](api/HTTP_API_CHAT.md) · [Agent 补充](api/HTTP_API_AGENT.md) · [知识库 RAG](api/HTTP_API_KNOWLEDGE_BASE.md) · [工具 / 技能 / MCP](api/HTTP_API_TOOLS_MCP.md) · [计划任务 /tasks](api/HTTP_API_TASKS.md) · [平台与可观测](api/HTTP_API_PLATFORM.md)
   - [Python 运行时 API](api/API_REFERENCE.md)：与 `sagents` 源码一致，主站对外 HTTP 请见上条
+- [Memory](memory/README.md)：记忆、检索与 memory-search 工作线
 - [OAuth2 对接指南（Lage）](OAUTH2_LAGE_INTEGRATION.md)：恢复自历史提交的 OAuth2 对接文档
 - [开发](DEVELOPMENT.md)：贡献流程和源码位置
-- [Memory Search 验证总入口](memory-search/README.md)：当前 memory-search 工作线的统一验证入口
 - [故障排查](TROUBLESHOOTING.md)：常见启动和环境问题
 
 ## 当前产品入口
