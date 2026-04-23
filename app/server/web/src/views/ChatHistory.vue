@@ -327,25 +327,30 @@
     </div>
 
     <Dialog :open="showShareModal" @update:open="showShareModal = $event">
-      <DialogContent class="sm:max-w-[500px]">
+      <DialogContent class="sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>{{ t('history.shareTitle') }}</DialogTitle>
           <DialogDescription>{{ t('history.exportFormat') }}</DialogDescription>
         </DialogHeader>
         <div class="py-4">
-          <div class="flex gap-4">
-            <Button class="flex-1" @click="handleExportToMarkdown">
+          <div class="grid gap-3 sm:grid-cols-3">
+            <Button class="w-full" @click="handleExportToMarkdown">
               <FileText class="w-4 h-4 mr-2" />
               {{ t('history.exportMarkdown') }}
             </Button>
-            <Button class="flex-1" variant="outline" @click="handleExportToHTML">
+            <Button class="w-full" variant="outline" @click="handleExportToHTML">
               <FileCode class="w-4 h-4 mr-2" />
               {{ t('history.exportHTML') }}
+            </Button>
+            <Button class="w-full" variant="secondary" @click="handleCopyShareLinkFromDialog">
+              <Share2 class="w-4 h-4 mr-2" />
+              {{ t('history.shareLink') }}
             </Button>
           </div>
           <div class="mt-4 p-4 bg-muted/50 rounded-lg text-sm space-y-2">
             <p><strong>{{ t('history.conversationTitle') }}</strong>: {{ shareConversation?.display_title || shareConversation?.title }}</p>
             <p><strong>{{ t('history.messageCount') }}</strong>: {{ getVisibleMessageCount() }} {{ t('history.visibleMessages') }}</p>
+            <p class="font-mono text-[11px] break-all text-muted-foreground/85">{{ shareConversation ? buildShareUrl(shareConversation.session_id) : '' }}</p>
           </div>
         </div>
       </DialogContent>
@@ -512,38 +517,66 @@ const getAgentName = (agentId) => {
   return agent ? agent.name : t('chat.unknownAgent')
 }
 
+const buildShareUrl = (sessionId) => {
+  if (!sessionId) return ''
+  return `${window.location.origin}/share/${sessionId}`
+}
+
+const copyTextToClipboard = async (text) => {
+  if (!text) return false
+  try {
+    if (navigator?.clipboard?.writeText && window.isSecureContext !== false) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch (err) {
+    console.warn('navigator.clipboard.writeText failed, falling back:', err)
+  }
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return ok
+  } catch (err) {
+    console.error('execCommand copy failed:', err)
+    return false
+  }
+}
+
 const handleCopyShareLink = async (conversation) => {
   const sessionId = conversation?.session_id
   if (!sessionId) {
     toast.error(t('history.shareLinkFailed'))
     return
   }
-  const shareUrl = `${window.location.origin}/share/${sessionId}`
-  try {
-    if (navigator?.clipboard?.writeText) {
-      await navigator.clipboard.writeText(shareUrl)
-    } else {
-      const textarea = document.createElement('textarea')
-      textarea.value = shareUrl
-      textarea.style.position = 'fixed'
-      textarea.style.opacity = '0'
-      document.body.appendChild(textarea)
-      textarea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textarea)
-    }
+  const ok = await copyTextToClipboard(buildShareUrl(sessionId))
+  if (ok) {
     toast.success(t('history.shareLinkSuccess'))
-  } catch (err) {
-    console.error('Failed to copy share link:', err)
+  } else {
     toast.error(t('history.shareLinkFailed'))
   }
 }
 
+const handleCopyShareLinkFromDialog = async () => {
+  if (!shareConversation.value) return
+  await handleCopyShareLink(shareConversation.value)
+}
+
 const handleShareConversation = async (conversation) => {
-  const response = await chatAPI.getConversationMessages(conversation.session_id)
-  conversation.messages = response.messages || []
   shareConversation.value = conversation
   showShareModal.value = true
+  try {
+    const response = await chatAPI.getConversationMessages(conversation.session_id)
+    conversation.messages = response.messages || []
+  } catch (err) {
+    console.error('Failed to load conversation messages for share dialog:', err)
+    conversation.messages = conversation.messages || []
+  }
 }
 
 const copySessionId = async (conversation) => {

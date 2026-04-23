@@ -1,3 +1,5 @@
+2026-04-23 22:20 server/web/ChatHistory：分享弹窗新增"复制分享链接"第三按钮并展示完整 URL；行内 Share2 与 Download/Trace/Trash 一致 hover 渐显；抽出 `buildShareUrl`/`copyTextToClipboard`，弹窗即开即可复制即使消息加载失败。
+
 2026-04-23 anytool/UI：补 `tools.saveChanges` 多语言；卡片增加编辑/删除按钮（仅 AnyTool 分组），新增 `DELETE /api/mcp/anytool/tool/{name}` 路由（server+desktop）与 `mcp_service.delete_anytool_tool` 服务，前端 `toolAPI.deleteAnyToolTool` 同步更新。
 
 2026-04-23 anytool：`upsert/delete_anytool_tool` 在 `update_mcp_server` 之后再强制 `remove_tool_by_mcp`+`register_mcp_server` 一次。原 `update_mcp_server` 流程是 register 早于 dao.save，导致 AnyTool 自身 HTTP 注册时仍读到旧工具，前端首次刷新看不到变化。
