@@ -748,7 +748,9 @@ export const useChatPage = (props) => {
       toast.error(t('chat.shareNoSession') || 'No active session to share')
       return
     }
-    const shareUrl = `${window.location.origin}/share/${currentSessionId.value}`
+    const rawBase = (import.meta.env?.BASE_URL || '/').toString()
+    const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`
+    const shareUrl = `${window.location.origin}${base}share/${currentSessionId.value}`
     copyToClipboard(shareUrl).then(() => {
       toast.success(t('chat.shareSuccess') || 'Share link copied to clipboard')
     }).catch(() => {
