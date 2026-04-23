@@ -279,6 +279,11 @@ class SimpleAgent(AgentBase):
         返回 False 表示未命中确定性规则，需要进入 LLM 判断
 
         这些规则基于客观事实，尽量保证误判率接近 0。
+
+        ENV 开关：SAGE_DISABLE_MUST_CONTINUE_RULE3（默认 true），仅控制规则 3。
+        - true：跳过规则 3（"处理中/正在…"关键词判定）。规则 1/2/4 正常运行。
+          默认开启，避免规则 3 在反问用户的场景下误判导致死循环。
+        - false：启用规则 3。
         """
         if not messages_input:
             return False
@@ -298,21 +303,26 @@ class SimpleAgent(AgentBase):
                 return True
 
         # 规则3：最后一条 assistant 消息包含明确的处理中表达
+        # 通过 SAGE_DISABLE_MUST_CONTINUE_RULE3 控制是否启用（默认 true=跳过）
+        rule3_disabled = os.environ.get("SAGE_DISABLE_MUST_CONTINUE_RULE3", "true").lower() == "true"
         if last_message.role == MessageRole.ASSISTANT.value and (last_message.content or "").strip():
             content = last_message.content
-            processing_keywords = [
-                "等待工具调用",
-                "等待生成",
-                "请稍等",
-                "正在处理",
-                "正在调用",
-                "正在执行",
-                "处理中",
-                "执行中",
-            ]
-            if any(keyword in content for keyword in processing_keywords):
-                logger.debug("[SimpleAgent] must_continue 规则3命中：assistant 文本包含处理中关键词，必须继续")
-                return True
+            if not rule3_disabled:
+                processing_keywords = [
+                    "等待工具调用",
+                    "等待生成",
+                    "请稍等",
+                    "正在处理",
+                    "正在调用",
+                    "正在执行",
+                    "处理中",
+                    "执行中",
+                ]
+                if any(keyword in content for keyword in processing_keywords):
+                    logger.debug("[SimpleAgent] must_continue 规则3命中：assistant 文本包含处理中关键词，必须继续")
+                    return True
+            else:
+                logger.debug("[SimpleAgent] 规则3 已通过 SAGE_DISABLE_MUST_CONTINUE_RULE3 关闭，跳过该规则")
 
             # 规则4：最后一个字符是表示还有后续内容的标点
             stripped = content.strip()
