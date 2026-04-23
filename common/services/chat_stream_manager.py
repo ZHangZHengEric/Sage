@@ -130,6 +130,10 @@ class StreamManager:
                 for queue in list(session.subscribers):
                     await queue.put((chunk_index, chunk))
                 await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            session.status = "interrupted"
+            logger.info(f"Background worker cancelled for {session.session_id}")
+            raise
         except Exception as e:
             logger.error(f"Background worker error for {session.session_id}: {e}")
             error_json = '{"type":"error","content":"Internal Server Error during stream processing"}\n'
@@ -138,6 +142,11 @@ class StreamManager:
             for queue in list(session.subscribers):
                 await queue.put((error_index, error_json))
         finally:
+            try:
+                if hasattr(generator, "aclose"):
+                    await generator.aclose()
+            except Exception as e:
+                logger.warning(f"Error closing generator for {session.session_id}: {e}")
             session.is_completed = True
             logger.debug(f"Session {session.session_id} completed. Total chunks: {len(session.history)}")
             for queue in list(session.subscribers):
