@@ -313,6 +313,7 @@ async def chat(request: ChatRequest, http_request: Request):
         agent_id=request.agent_id,
         user_id=request.user_id or get_desktop_user_id(http_request),
     )
+    chat_service.mark_request_execution(inner_request, request_source="api/chat")
 
     await chat_service.populate_request_from_agent_config(
         inner_request,
@@ -368,6 +369,7 @@ async def stream_chat_web(request: StreamRequest, http_request: Request):
     validate_and_prepare_request(request, http_request)
     if not request.user_id:
         request.user_id = get_desktop_user_id(http_request)
+    chat_service.mark_request_execution(request, request_source="api/web-stream")
 
     session_id = request.session_id
     manager = StreamManager.get_instance()
@@ -443,6 +445,10 @@ async def rerun_conversation_stream(
         more_suggest=rerun_request.more_suggest,
         max_loop_count=rerun_request.max_loop_count,
         available_sub_agent_ids=rerun_request.available_sub_agent_ids,
+    )
+    chat_service.mark_request_execution(
+        request,
+        request_source="api/conversations/rerun-stream",
     )
 
     manager = StreamManager.get_instance()

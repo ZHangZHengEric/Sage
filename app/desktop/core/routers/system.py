@@ -8,9 +8,11 @@ from common.schemas.base import (
     AgentUsageStatsResponse,
     BaseResponse,
     SystemSettingsRequest,
+    TokenUsageStatsRequest,
+    TokenUsageStatsResponse,
     TauriUpdateResponse,
 )
-from common.services import system_service
+from common.services import system_service, token_usage_service
 from ..user_context import get_desktop_user_id
 
 # 创建路由器
@@ -115,4 +117,23 @@ async def get_agent_usage_stats(req: AgentUsageStatsRequest, request: Request):
     return await Response.succ(
         message="获取 Agent 工具使用统计成功",
         data=AgentUsageStatsResponse(usage=stats).model_dump(),
+    )
+
+
+@system_router.post(
+    "/token-usage/stats",
+    response_model=BaseResponse[TokenUsageStatsResponse],
+)
+async def get_token_usage_stats(req: TokenUsageStatsRequest):
+    stats = await token_usage_service.get_token_usage_stats(
+        group_by=req.group_by,
+        user_id=req.user_id,
+        agent_id=req.agent_id,
+        session_id=req.session_id,
+        start_time=req.start_time,
+        end_time=req.end_time,
+    )
+    return await Response.succ(
+        message="获取 Token 使用统计成功",
+        data=TokenUsageStatsResponse(**stats).model_dump(exclude_none=True),
     )

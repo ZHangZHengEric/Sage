@@ -23,11 +23,13 @@ from sagents.utils.user_input_optimizer import UserInputOptimizer
 from common.core import config
 from common.core.exceptions import SageHTTPException
 from common.models.agent import AgentConfigDao
+from common.models.base import get_local_now
 from common.models.conversation import ConversationDao
 from common.models.im_channel import IMChannelConfigDao
 from common.models.kdb import KdbDao
 from common.models.llm_provider import LLMProviderDao
 from common.services.chat_processor import ContentProcessor
+from common.services import token_usage_service
 from common.services.agent_workspace import (
     get_agent_workspace_root,
     get_agent_skill_dir,
@@ -79,6 +81,16 @@ def _get_provider_api_key(provider: Any) -> Optional[str]:
         api_keys = getattr(provider, "api_keys", None) or []
         return ",".join(api_keys) if api_keys else None
     return getattr(provider, "api_key", None)
+
+
+def mark_request_execution(
+    request: StreamRequest,
+    *,
+    request_source: str,
+) -> None:
+    request.request_source = request_source
+    if request.execution_started_at is None:
+        request.execution_started_at = get_local_now()
 
 
 async def _resolve_input_optimization_model_client(
@@ -942,6 +954,8 @@ async def execute_chat_session(
             yield_result.pop("chunk_id", None)
             yield json.dumps(yield_result, ensure_ascii=False) + "\n"
 
+        await _persist_token_usage_if_available(stream_service)
+
         yield json.dumps(
             {
                 "type": "stream_end",
@@ -967,6 +981,28 @@ async def _finalize_session_end(
 
     if not _is_desktop_mode() and request.available_skills and request.agent_id:
         asyncio.create_task(_check_and_update_agent_skills(request, original_skills))
+
+
+async def _persist_token_usage_if_available(stream_service: SageStreamService) -> bool:
+    request = getattr(stream_service, "request", None)
+    sage_engine = getattr(stream_service, "sage_engine", None)
+    session_context = getattr(sage_engine, "session_context", None)
+    if not request or not session_context:
+        return False
+
+    try:
+        return await token_usage_service.record_session_execution(
+            session_context=session_context,
+            request_source=request.request_source or "",
+            session_id=request.session_id,
+            user_id=request.user_id,
+            agent_id=request.agent_id,
+            started_at=request.execution_started_at,
+            finished_at=get_local_now(),
+        )
+    except Exception as e:
+        logger.bind(session_id=request.session_id or "").error(f"token_usage 落库失败: {e}")
+        return False
 
 
 async def _check_and_update_agent_skills(

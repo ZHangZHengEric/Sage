@@ -17,6 +17,7 @@ async def initialize_db_connection():
         if db_client is not None:
             logger.info("数据库客户端已初始化")
             from common.models.base import Base
+            from common.models.token_usage import TokenUsage  # noqa: F401
             async with db_client._engine.begin() as conn:
                 # Create all tables
                 await conn.run_sync(Base.metadata.create_all)
