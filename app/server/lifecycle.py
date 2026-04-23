@@ -62,7 +62,21 @@ def post_initialize_task():
 
 async def _post_initialize():
     await validate_and_disable_mcp_servers()
+    create_safe_task(_ensure_default_anytool_server_ready(), name="ensure_default_anytool_server")
     await _start_task_scheduler()
+
+
+async def _ensure_default_anytool_server_ready():
+    from common.services.mcp_service import ensure_default_anytool_server
+
+    for attempt in range(3):
+        try:
+            await asyncio.sleep(2 if attempt == 0 else 3)
+            await ensure_default_anytool_server(register_tool_manager=True)
+            logger.info("默认 AnyTool MCP server 已激活")
+            return
+        except Exception as exc:
+            logger.warning(f"默认 AnyTool MCP server 激活失败（第 {attempt + 1} 次）: {exc}")
 
 
 async def _start_task_scheduler():

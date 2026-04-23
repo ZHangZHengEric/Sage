@@ -13,12 +13,27 @@ const normalizeBasePath = (value) => {
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, projectRoot, '')
-  const backendApiBaseUrl = (env.VITE_SAGE_API_BASE_URL || 'http://127.0.0.1:8080').trim()
+  const envWeb = loadEnv(mode, projectRoot, '')
+  // 仅使用本包 .env* 与进程环境；勿读仓库根 .env。本地/Docker 在此设 VITE_SAGE_API_BASE_URL
+  const backendApiBaseUrl = (
+    envWeb.VITE_SAGE_API_BASE_URL ||
+    process.env.VITE_SAGE_API_BASE_URL ||
+    'http://127.0.0.1:8080'
+  )
+    .trim()
 
   return {
-    base: normalizeBasePath(env.VITE_SAGE_WEB_BASE_PATH),
-    plugins: [vue()],
+    base: normalizeBasePath(envWeb.VITE_SAGE_WEB_BASE_PATH),
+    plugins: [
+      vue(),
+      {
+        name: 'sage-log-api-proxy',
+        configureServer() {
+          // eslint-disable-next-line no-console
+          console.log(`[vite] server/web: /dev-api -> ${backendApiBaseUrl}`)
+        }
+      }
+    ],
     resolve: {
       alias: {
         '@': resolve(projectRoot, 'src')

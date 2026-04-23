@@ -1,14 +1,10 @@
-"""
-MCP (Model Context Protocol) 相关路由
+"""MCP (Model Context Protocol) 相关路由"""
 
-提供MCP服务器的管理接口，包括添加、删除、配置等功能
-"""
-
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from common.core.render import Response
 from common.services import mcp_service
@@ -20,13 +16,35 @@ mcp_router = APIRouter(prefix="/api/mcp", tags=["MCP"])
 
 class MCPServerRequest(BaseModel):
     name: str
-    protocol: str  # 协议类型：streamable_http, sse, stdio
+    protocol: str
+    kind: str = "external"
     streamable_http_url: Optional[str] = None
     sse_url: Optional[str] = None
     api_key: Optional[str] = None
-    command: Optional[str] = None  # stdio 协议的命令
-    args: Optional[List[str]] = None  # stdio 协议的参数
-    env: Optional[Dict[str, str]] = None  # stdio 协议的环境变量
+    command: Optional[str] = None
+    args: Optional[List[str]] = None
+    env: Optional[Dict[str, str]] = None
+    tools: Optional[List[Dict[str, Any]]] = None
+    simulator: Optional[Dict[str, Any]] = None
+    description: Optional[str] = None
+
+
+class AnyToolPreviewRequest(BaseModel):
+    tool_name: str
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AnyToolDraftPreviewRequest(BaseModel):
+    tool_definition: Dict[str, Any]
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+    simulator: Optional[Dict[str, Any]] = None
+    server_name: Optional[str] = None
+
+
+class AnyToolToolUpsertRequest(BaseModel):
+    tool_definition: Dict[str, Any]
+    original_name: Optional[str] = None
+    server_name: Optional[str] = None
 
 
 @mcp_router.post("/add")
@@ -48,12 +66,16 @@ async def add(req: MCPServerRequest, http_request: Request):
         server_name = await mcp_service.add_mcp_server(
             name=req.name,
             protocol=req.protocol,
+            kind=req.kind,
             streamable_http_url=req.streamable_http_url,
             sse_url=req.sse_url,
             api_key=req.api_key,
             command=req.command,
             args=req.args,
             env=req.env,
+            tools=req.tools,
+            simulator=req.simulator,
+            description=req.description,
             disabled=False,
             user_id=get_desktop_user_id(http_request),
         )
@@ -83,6 +105,31 @@ async def list(http_request: Request):
     )
 
 
+@mcp_router.put("/{server_name}")
+async def update(server_name: str, req: MCPServerRequest, http_request: Request):
+    await mcp_service.update_mcp_server(
+        server_name=server_name,
+        name=req.name,
+        protocol=req.protocol,
+        kind=req.kind,
+        streamable_http_url=req.streamable_http_url,
+        sse_url=req.sse_url,
+        api_key=req.api_key,
+        command=req.command,
+        args=req.args,
+        env=req.env,
+        tools=req.tools,
+        simulator=req.simulator,
+        description=req.description,
+        disabled=False,
+        user_id=get_desktop_user_id(http_request),
+    )
+    return await Response.succ(
+        data={"server_name": server_name, "status": "success"},
+        message=f"MCP server {server_name} 更新成功",
+    )
+
+
 @mcp_router.delete("/{server_name}")
 async def remove(server_name: str, http_request: Request):
     """
@@ -99,6 +146,62 @@ async def remove(server_name: str, http_request: Request):
     return await Response.succ(
         data={"server_name": server_name}, message=f"MCP服务器 '{server_name}' 删除成功"
     )
+
+
+@mcp_router.post("/{server_name}/preview")
+async def preview(server_name: str, req: AnyToolPreviewRequest, http_request: Request):
+    result = await mcp_service.preview_mcp_server(
+        server_name=server_name,
+        tool_name=req.tool_name,
+        arguments=req.arguments,
+        user_id=get_desktop_user_id(http_request),
+    )
+    return await Response.succ(
+        data=result,
+        message=f"AnyTool 预览执行成功: {req.tool_name}",
+    )
+
+
+@mcp_router.post("/anytool/preview-draft")
+async def preview_draft(req: AnyToolDraftPreviewRequest, http_request: Request):
+    result = await mcp_service.preview_anytool_draft(
+        tool_definition=req.tool_definition,
+        arguments=req.arguments,
+        simulator=req.simulator,
+        server_name=req.server_name or "draft",
+        user_id=get_desktop_user_id(http_request),
+    )
+    return await Response.succ(
+        data=result,
+        message=f"AnyTool 草稿预览执行成功: {req.tool_definition.get('name', '')}",
+    )
+
+
+@mcp_router.post("/anytool/tool")
+async def upsert_anytool_tool(req: AnyToolToolUpsertRequest, http_request: Request):
+    # 必须显式声明，否则 `app.mount('/api/mcp/anytool', AnyToolStreamableHTTPApp())` 会把 `tool` 当 server_name，按 JSON-RPC 校验导致 400。
+    result = await mcp_service.upsert_anytool_tool(
+        tool_definition=req.tool_definition,
+        original_name=req.original_name,
+        server_name=req.server_name or "AnyTool",
+        user_id=get_desktop_user_id(http_request),
+        role="admin",
+    )
+    return await Response.succ(
+        data=result,
+        message=f"AnyTool 工具保存成功: {req.tool_definition.get('name', '')}",
+    )
+
+
+@mcp_router.delete("/anytool/tool/{tool_name}")
+async def delete_anytool_tool(tool_name: str, http_request: Request, server_name: Optional[str] = None):
+    result = await mcp_service.delete_anytool_tool(
+        tool_name=tool_name,
+        server_name=server_name or "AnyTool",
+        user_id=get_desktop_user_id(http_request),
+        role="admin",
+    )
+    return await Response.succ(data=result, message=f"AnyTool 工具已删除: {tool_name}")
 
 
 @mcp_router.post("/{server_name}/refresh")
