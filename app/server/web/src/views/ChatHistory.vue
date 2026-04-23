@@ -230,7 +230,25 @@
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="left">
-                    <p>{{ t('history.share') }}</p>
+                    <p>{{ t('history.export') }}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="h-7.5 w-7.5 rounded-full text-muted-foreground/75 opacity-0 transition-all hover:bg-primary/10 hover:text-primary group-hover:opacity-100"
+                      @click.stop="handleCopyShareLink(conversation)"
+                    >
+                      <Share2 class="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">
+                    <p>{{ t('history.shareLink') }}</p>
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
@@ -341,7 +359,7 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { MessageCircle, Search, Clock, Bot, Loader, Trash2, Download, Activity, Info, Copy, FileText, FileCode } from 'lucide-vue-next'
+import { MessageCircle, Search, Clock, Bot, Loader, Trash2, Download, Activity, Info, Copy, FileText, FileCode, Share2 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { useLanguage } from '@/utils/i18n.js'
 import { exportToHTML, exportToMarkdown } from '@/utils/exporter.js'
@@ -492,6 +510,33 @@ const formatDateTime = (timestamp) => {
 const getAgentName = (agentId) => {
   const agent = agents.value.find(a => a.id === agentId)
   return agent ? agent.name : t('chat.unknownAgent')
+}
+
+const handleCopyShareLink = async (conversation) => {
+  const sessionId = conversation?.session_id
+  if (!sessionId) {
+    toast.error(t('history.shareLinkFailed'))
+    return
+  }
+  const shareUrl = `${window.location.origin}/share/${sessionId}`
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(shareUrl)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = shareUrl
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+    }
+    toast.success(t('history.shareLinkSuccess'))
+  } catch (err) {
+    console.error('Failed to copy share link:', err)
+    toast.error(t('history.shareLinkFailed'))
+  }
 }
 
 const handleShareConversation = async (conversation) => {

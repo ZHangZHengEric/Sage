@@ -1,3 +1,17 @@
+2026-04-23 anytool/UI：补 `tools.saveChanges` 多语言；卡片增加编辑/删除按钮（仅 AnyTool 分组），新增 `DELETE /api/mcp/anytool/tool/{name}` 路由（server+desktop）与 `mcp_service.delete_anytool_tool` 服务，前端 `toolAPI.deleteAnyToolTool` 同步更新。
+
+2026-04-23 anytool：`upsert/delete_anytool_tool` 在 `update_mcp_server` 之后再强制 `remove_tool_by_mcp`+`register_mcp_server` 一次。原 `update_mcp_server` 流程是 register 早于 dao.save，导致 AnyTool 自身 HTTP 注册时仍读到旧工具，前端首次刷新看不到变化。
+
+2026-04-23 anytool：`returns` 未定义任何 `properties` 时不再下发 `outputSchema`，避免 MCP 默认 `additionalProperties=false`+空 properties 把模型输出的 `data`/`status`/`message` 等键全部拒掉。
+
+2026-04-23 anytool/UI：删除工具用 `AppConfirmDialog` 替换 `window.confirm`（Tauri 下不可用），server 端补全引用与 ref；删除后并行重载 MCP 与基础工具列表，确保卡片立即刷新。补全 4 处 `tools.saveChanges` 多语言。
+
+2026-04-23 anytool：调用 LLM 时按各 agent 同款关闭思考/推理（`enable_thinking=False`、`thinking.disabled`、OpenAI reasoning 模型用 `reasoning_effort=low`）；并按 `outputSchema.properties` 过滤 LLM 多余键，修复 MCP "Additional properties are not allowed ('message')" 校验失败。
+
+2026-04-23 desktop/core：补 `POST /api/mcp/anytool/tool` 路由（与 server 端对齐），否则被 mount 的 `AnyToolStreamableHTTPApp` 当 server_name=`tool` 解析，按 JSON-RPC 校验返回 400。
+
+2026-04-23 desktop/ui：dev 脚本改 `lsof -ti:1420 | xargs kill -9; vite`，修 `kill-port && vite` 在端口空闲时退出码非零导致 vite 不启动、Tauri 一直等 1420 的问题；反代仍按 `preferred_ports` 探测 `/api/health`。
+
 2026-04-22 文档：中/英 `API_REFERENCE` 与当前 `SAgent`/`run_stream`/`ToolManager`/`MessageChunk` 等源码对齐，更新 `API_DOCS`、双 README 与 HTTP 总页互链；`examples/sage_server.py` 注释改为 SAgent。
 
 2026-04-22 文档站：修复多份 `HTTP_API_*.md` 误写为 `## layout` 的 front matter，恢复侧栏「HTTP API 参考」下二级子页；新增中/英 `API_DOCS` 为「API 文档」父页，HTTP 与历史 Python 参考分栏并调 README 地图。
@@ -159,3 +173,5 @@
 2026-03-06 23:00:00 适配会话消息读取逻辑：在 `app/desktop/core/services/conversation.py` 中，更新 `get_conversation_messages` 和 `get_file_workspace` 以支持新的 `sessions` 和 `agents` 路径结构，并实现了对子会话消息的嵌套读取支持。
 2026-03-06 23:15:00 修正工作空间路径逻辑：在 `app/desktop/core/services/conversation.py` 中，修复 `get_file_workspace` 的路径推断逻辑，确保其使用正确的 `{sage_home}/agents/{agent_id}` 结构，与 `run_stream` 中的配置保持一致，避免因路径不匹配导致文件访问失败。
 2026-03-06 23:30:00 重构 Session 消息读取：将 `get_session_messages` 逻辑下沉至 `SessionManager`，利用其扫描能力自动定位会话路径，并从 `SessionContext` 中移除该函数。同时恢复了 `app/desktop` 中 `get_conversation_messages` 的原始调用结构，保持了接口的稳定性和兼容性。
+
+2026-04-23 17:43:00 服务端会话分享：在历史会话列表新增分享按钮，复制 /share/{sessionId} 公开免登链接；重写 SharedChat 页面以匹配对话样式，支持执行流/交付流切换，工具点击查看输入输出，仅展示对话不含侧边栏。
