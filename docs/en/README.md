@@ -27,6 +27,7 @@ This site documents the current repository as it exists today. It is organized a
 2. [Core Concepts](CORE_CONCEPTS.md) for the runtime model
 3. [Architecture](ARCHITECTURE.md) for repository and subsystem boundaries
 4. [Configuration](CONFIGURATION.md) for environment variables and deployment knobs
+5. [Solution Playbooks](solutions/README.md) for presales and business scenario documents
 
 ## Common Reading Paths
 
@@ -67,6 +68,7 @@ Read:
   - sagents core: [Overview](ARCHITECTURE_SAGENTS_OVERVIEW.md) · [Agent / Flow](ARCHITECTURE_SAGENTS_AGENT_FLOW.md) · [Session / Context](ARCHITECTURE_SAGENTS_SESSION_CONTEXT.md) · [Tool / Skill](ARCHITECTURE_SAGENTS_TOOL_SKILL.md) · [Sandbox / LLM / Obs](ARCHITECTURE_SAGENTS_SANDBOX_OBS.md)
 - [Configuration](CONFIGURATION.md): runtime environment variables and storage settings
 - [Applications](APPLICATIONS.md): which app surface to use for which job
+- [Solution Playbooks](solutions/README.md): presales documents for concrete business scenarios
 - [MCP Servers](MCP_SERVERS.md): built-in MCP servers and how they fit into the platform
 - [API documentation](API_DOCS.md): navigation hub for HTTP vs legacy Python API
   - [HTTP API Reference](HTTP_API_REFERENCE.md): backend endpoints aligned with `register_routes`; the sidebar lists subpages
