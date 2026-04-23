@@ -5,11 +5,10 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 from common.services.llm_provider_probe_utils import friendly_provider_probe_error
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 @dataclass
 class StubLLMProviderCreate:

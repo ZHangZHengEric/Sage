@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
 import asyncio
-import sys
 import unittest
-from pathlib import Path
 from unittest.mock import patch
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from app.cli.main import (
     CHAT_INPUT_PROMPT,
     CHAT_COMMAND_HELP,
+    _collect_event_file_paths,
     _collect_event_tool_names,
     _emit_chat_exit_summary,
     _emit_stream_idle_notice,
@@ -49,6 +44,22 @@ class TestStatsToolDetection(unittest.TestCase):
         }
         names = _collect_event_tool_names(event)
         self.assertEqual(names, ["ExecuteCommand"])
+
+    def test_collects_file_path_from_dsml_filewrite_tag(self):
+        event = {
+            "role": "assistant",
+            "content": (
+                "<｜DSML｜tool_calls>\n"
+                "<｜DSML｜invoke name=\"FileWrite\">\n"
+                "<｜DSML｜parameter name=\"file_path\" string=\"true\">"
+                "/tmp/demo.py"
+                "</｜DSML｜parameter>\n"
+                "</｜DSML｜invoke>\n"
+                "</｜DSML｜tool_calls>"
+            ),
+        }
+        paths = _collect_event_file_paths(event)
+        self.assertEqual(paths, ["/tmp/demo.py"])
 
     def test_records_tool_name_from_split_skill_stream(self):
         stats = _empty_stats(request=type("Request", (), {"session_id": None, "user_id": None, "agent_id": None, "agent_mode": "simple", "available_skills": [], "max_loop_count": 50})(), workspace=None)
@@ -107,6 +118,31 @@ class TestStatsToolDetection(unittest.TestCase):
 
         self.assertEqual(delta, "例如可以输出 `<skill>search_memory</skill>` 这样的标签示例。")
 
+    def test_print_plain_event_emits_file_write_path_once(self):
+        from io import StringIO
+        from unittest.mock import patch
+
+        render_state = _empty_render_state()
+        event = {
+            "role": "assistant",
+            "content": (
+                "<｜DSML｜tool_calls>\n"
+                "<｜DSML｜invoke name=\"FileWrite\">\n"
+                "<｜DSML｜parameter name=\"file_path\" string=\"true\">"
+                "/tmp/demo.py"
+                "</｜DSML｜parameter>\n"
+                "</｜DSML｜invoke>\n"
+                "</｜DSML｜tool_calls>"
+            ),
+        }
+
+        stderr = StringIO()
+        with patch("sys.stderr", stderr):
+            _print_plain_event(event, render_state)
+            _print_plain_event(event, render_state)
+
+        self.assertEqual(stderr.getvalue().count("[file] wrote to: /tmp/demo.py"), 1)
+
     def test_emit_stream_idle_notice_format(self):
         from io import StringIO
         from unittest.mock import patch
@@ -163,7 +199,21 @@ class TestStatsToolDetection(unittest.TestCase):
             _emit_stream_idle_notice_for_state(render_state, 4.0)
 
         self.assertIsNone(render_state["last_tool_name"])
-        self.assertIn("[working] generating response (4.0s since last event)", stderr.getvalue())
+        self.assertEqual(stderr.getvalue(), "")
+
+    def test_idle_notice_is_suppressed_after_visible_assistant_output(self):
+        from io import StringIO
+        from unittest.mock import patch
+
+        render_state = _empty_render_state()
+        render_state["last_visible_phase"] = "assistant_text"
+        render_state["assistant_emitted"] = "你好！"
+
+        stderr = StringIO()
+        with patch("sys.stderr", stderr):
+            _emit_stream_idle_notice_for_state(render_state, 6.0)
+
+        self.assertEqual(stderr.getvalue(), "")
 
     def test_emit_chat_exit_summary_prints_resume_hint(self):
         from io import StringIO

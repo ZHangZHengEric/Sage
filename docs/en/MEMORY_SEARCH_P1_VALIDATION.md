@@ -23,7 +23,7 @@ Current improvements include:
 Primary regression suite:
 
 ```bash
-python tests/test_memory_index_fts.py
+python tests/sagents/tool/impl/test_memory_index_fts.py
 ```
 
 Current coverage includes:
@@ -69,8 +69,8 @@ The benchmark prints:
 Run the full local validation for this branch:
 
 ```bash
-python -m py_compile sagents/tool/impl/memory_index.py tests/test_memory_index_fts.py scripts/memory_search_benchmark.py
-python tests/test_memory_index_fts.py
+python -m py_compile sagents/tool/impl/memory_index.py tests/sagents/tool/impl/test_memory_index_fts.py scripts/memory_search_benchmark.py
+python tests/sagents/tool/impl/test_memory_index_fts.py
 python scripts/memory_search_benchmark.py --noise-files 300
 ```
 
