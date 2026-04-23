@@ -67,6 +67,7 @@ ref: home
   - sagents 核心：[总览](ARCHITECTURE_SAGENTS_OVERVIEW.md) · [Agent / Flow](ARCHITECTURE_SAGENTS_AGENT_FLOW.md) · [Session / Context](ARCHITECTURE_SAGENTS_SESSION_CONTEXT.md) · [Tool / Skill](ARCHITECTURE_SAGENTS_TOOL_SKILL.md) · [Sandbox / LLM / Obs](ARCHITECTURE_SAGENTS_SANDBOX_OBS.md)
 - [配置](CONFIGURATION.md)：运行时环境变量与存储设置
 - [应用形态](APPLICATIONS.md)：不同入口分别适合什么场景
+- [落地应用方案](solutions/README.md)：面向行业与业务场景的售前方案集合
 - [MCP Servers](MCP_SERVERS.md)：内置 MCP Server 以及它们在平台中的角色
 - [API 文档](API_DOCS.md)：HTTP 与历史 Python API 的导航入口
   - [HTTP API 参考](HTTP_API_REFERENCE.md)：与 `register_routes` 一致的后端接口、请求体、返回体与示例；侧栏可展开子文档
