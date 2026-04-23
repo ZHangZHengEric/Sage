@@ -46,6 +46,9 @@
                   <h3 class="font-medium text-sm truncate flex-1" :title="getToolSourceLabel(group.source)">
                     {{ getToolSourceLabel(group.source) }}
                   </h3>
+                  <Badge v-if="group.source.startsWith('内置MCP:')" variant="outline" class="h-5 px-1.5 text-[10px] shrink-0">
+                    {{ t('tools.builtin') || 'Built-in' }}
+                  </Badge>
                   <Badge v-if="group.disabled" variant="destructive" class="h-5 px-1.5 text-[10px] shrink-0">
                     {{ t('tools.disabled') }}
                   </Badge>
@@ -96,14 +99,14 @@
           </Button>
 
           <Button
-            v-if="canEditGroup(selectedGroupSource)"
+            v-if="isAnyToolGroup(selectedGroupSource)"
             variant="outline"
             size="sm"
             class="h-8"
-            @click="handleEditMcpTool(selectedGroupSource)"
+            @click="openAnyToolEditor()"
           >
-            <Edit class="mr-2 h-3.5 w-3.5" />
-            {{ t('tools.edit') }}
+            <Plus class="mr-2 h-3.5 w-3.5" />
+            {{ t('tools.addTool') }}
           </Button>
 
           <Button
@@ -121,7 +124,13 @@
             <RefreshCw class="mr-2 h-3.5 w-3.5" />
             {{ t('tools.refresh') }}
           </Button>
-          <Button variant="outline" size="sm" class="h-8 text-destructive hover:text-destructive hover:bg-destructive/10" @click="handleDeleteMcpTool(selectedGroupSource)">
+          <Button
+            v-if="canDeleteGroup(selectedGroupSource)"
+            variant="outline"
+            size="sm"
+            class="h-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+            @click="handleDeleteMcpTool(selectedGroupSource)"
+          >
             <Trash2 class="mr-2 h-3.5 w-3.5" />
             {{ t('tools.delete') }}
           </Button>
@@ -135,13 +144,65 @@
         <div v-if="loading" class="flex flex-col items-center justify-center py-20">
           <Loader class="h-8 w-8 animate-spin text-primary" />
         </div>
+        <div v-else-if="displayedTools.length === 0" class="flex h-full min-h-[420px] items-center justify-center pb-20">
+          <div class="max-w-lg rounded-2xl border border-dashed bg-background/60 p-8 text-center shadow-sm">
+            <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <Plus class="h-6 w-6" />
+            </div>
+            <h3 class="text-lg font-semibold">
+              {{ isAnyToolGroup(selectedGroupSource) ? (t('tools.noAnyToolDefinitions') || 'No tool definitions yet. Add one to start simulating.') : (t('tools.noToolDefinitions') || 'No tools in this group yet.') }}
+            </h3>
+            <p class="mt-2 text-sm text-muted-foreground">
+              {{ isAnyToolGroup(selectedGroupSource) ? (t('tools.anyToolEditorHint') || 'Define simulated tools, preview them, and keep the built-in MCP server enabled or disabled.') : (t('tools.noDescription') || '') }}
+            </p>
+            <div class="mt-6 flex items-center justify-center gap-3">
+              <Button
+                v-if="isAnyToolGroup(selectedGroupSource)"
+                variant="default"
+                size="sm"
+                @click="openAnyToolEditor()"
+              >
+                <Plus class="mr-2 h-4 w-4" />
+                {{ t('tools.addTool') || 'Add Tool' }}
+              </Button>
+              <Button variant="outline" size="sm" @click="showMcpDetails(selectedGroupSource)">
+                <Info class="mr-2 h-4 w-4" />
+                {{ t('tools.details') || 'Details' }}
+              </Button>
+            </div>
+          </div>
+        </div>
         <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 pb-20">
            <Card 
               v-for="tool in displayedTools" 
               :key="tool.name" 
-              class="cursor-pointer transition-all duration-200 hover:shadow-md border-muted/60 hover:border-primary/50 group bg-card"
+              class="relative cursor-pointer transition-all duration-200 hover:shadow-md border-muted/60 hover:border-primary/50 group bg-card"
               @click="openToolDetail(tool)"
             >
+              <div
+                v-if="isAnyToolGroup(selectedGroupSource)"
+                class="absolute top-2 right-2 z-10 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                @click.stop
+              >
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="h-7 w-7"
+                  :title="t('tools.editTool') || 'Edit Tool'"
+                  @click.stop="openAnyToolEditor(tool)"
+                >
+                  <Edit class="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="h-7 w-7 text-destructive hover:text-destructive"
+                  :title="t('tools.deleteTool') || 'Delete Tool'"
+                  @click.stop="confirmDeleteAnyToolTool(tool)"
+                >
+                  <Trash2 class="h-3.5 w-3.5" />
+                </Button>
+              </div>
               <CardHeader class="flex flex-row items-start gap-3 space-y-0 pb-3 p-4">
                 <div 
                   class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white shadow-sm transition-all group-hover:scale-105"
@@ -268,6 +329,28 @@
         </div>
       </DialogContent>
     </Dialog>
+
+    <Dialog v-model:open="isAnyToolEditorOpen">
+      <DialogContent class="sm:max-w-[980px] max-h-[90vh] overflow-hidden flex flex-col p-0 gap-0">
+        <DialogHeader class="px-6 py-4 border-b">
+          <DialogTitle>
+            {{ anyToolEditorMode === 'edit' ? (t('tools.editTool') || 'Edit Tool') : (t('tools.addTool') || 'Add Tool') }}
+          </DialogTitle>
+          <DialogDescription class="hidden">
+            {{ anyToolEditorMode === 'edit' ? 'Edit an AnyTool definition' : 'Create an AnyTool definition' }}
+          </DialogDescription>
+        </DialogHeader>
+        <div class="flex-1 overflow-y-auto">
+          <AnyToolToolEditor
+            :tool="editingAnyToolTool"
+            :mode="anyToolEditorMode"
+            :loading="isSavingAnyToolTool"
+            @submit="handleAnyToolToolSubmit"
+            @cancel="isAnyToolEditorOpen = false"
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
     <AppConfirmDialog ref="confirmDialogRef" />
   </div>
 </template>
@@ -282,6 +365,7 @@ import { getToolLabel } from '../utils/messageLabels.js'
 import { toolAPI } from '../api/tool.js'
 import { getCurrentUser } from '../utils/auth.js'
 import McpServerAdd from '../components/McpServerAdd.vue'
+import AnyToolToolEditor from '../components/AnyToolToolEditor.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
@@ -307,13 +391,17 @@ const filterType = ref('all')
 const viewMode = ref('list') // 'list', 'detail'
 const isAddMcpDialogOpen = ref(false)
 const isDetailsDialogOpen = ref(false)
+const isAnyToolEditorOpen = ref(false)
 const loading = ref(false)
+const isSavingAnyToolTool = ref(false)
 const mcpServerAddRef = ref(null)
 const currentUser = ref({ userid: '', role: 'user' })
 const selectedGroupSource = ref('')
 const isGridExpanded = ref(true)
 const isEditMode = ref(false)
 const editingServerName = ref('')
+const anyToolEditorMode = ref('create')
+const editingAnyToolTool = ref(null)
 const mcpDetails = ref({})
 const confirmDialogRef = ref(null)
 
@@ -351,8 +439,9 @@ const groupedTools = computed(() => {
     mcpServers.value.forEach(server => {
       // Determine prefix based on server type or existing tools
       let prefix = 'MCP Server: '
+      const isAnyToolServer = server.kind === 'anytool' || server.type === 'builtin' || server.name === 'AnyTool'
       const hasBuiltinTools = filteredTools.value.some(t => t.source === `内置MCP: ${server.name}`)
-      if (server.type === 'builtin' || hasBuiltinTools) {
+      if (isAnyToolServer || hasBuiltinTools) {
         prefix = '内置MCP: '
       }
 
@@ -449,7 +538,7 @@ const showAddMcpForm = () => {
 }
 
 const showMcpDetails = (sourceName) => {
-  const serverName = sourceName.startsWith('MCP Server: ') ? sourceName.substring('MCP Server: '.length) : sourceName
+  const serverName = normalizeServerNameFromSource(sourceName)
   const server = mcpServers.value.find(s => s.name === serverName)
   if (server) {
     mcpDetails.value = server
@@ -458,7 +547,7 @@ const showMcpDetails = (sourceName) => {
 }
 
 const handleEditMcpTool = (sourceName) => {
-  const serverName = sourceName.startsWith('MCP Server: ') ? sourceName.substring('MCP Server: '.length) : sourceName
+  const serverName = normalizeServerNameFromSource(sourceName)
   const server = mcpServers.value.find(s => s.name === serverName)
   
   if (server) {
@@ -471,6 +560,54 @@ const handleEditMcpTool = (sourceName) => {
         mcpServerAddRef.value.setFormData(server)
       }
     }, 100)
+  }
+}
+
+const openAnyToolEditor = (tool = null) => {
+  anyToolEditorMode.value = tool ? 'edit' : 'create'
+  editingAnyToolTool.value = tool ? { ...tool } : null
+  isAnyToolEditorOpen.value = true
+}
+
+const handleAnyToolToolSubmit = async ({ tool_definition, original_name }) => {
+  try {
+    isSavingAnyToolTool.value = true
+    const response = await toolAPI.upsertAnyToolTool({
+      tool_definition,
+      original_name,
+      server_name: 'AnyTool',
+    })
+    toast.success(t('tools.saveSuccess') || 'Tool saved successfully')
+    isAnyToolEditorOpen.value = false
+    await loadMcpServers()
+    await loadBasicTools()
+    window.dispatchEvent(new Event('tools-updated'))
+    if (response?.tool_name) {
+      router.push({ name: 'ToolDetailView', params: { toolName: response.tool_name } })
+    }
+  } catch (error) {
+    console.error('Failed to save AnyTool:', error)
+    toast.error(error.message || t('tools.saveFailed') || 'Failed to save tool')
+  } finally {
+    isSavingAnyToolTool.value = false
+  }
+}
+
+const confirmDeleteAnyToolTool = async (tool) => {
+  if (!tool?.name) return
+  const confirmText = (t('tools.confirmDeleteTool') || 'Are you sure to delete tool "{name}"?').replace('{name}', tool.name)
+  // Tauri WebView 下 window.confirm 可能不可用，统一改用 AppConfirmDialog
+  const confirmed = await confirmDialogRef.value?.confirm(confirmText)
+  if (!confirmed) return
+  try {
+    await toolAPI.deleteAnyToolTool(tool.name, 'AnyTool')
+    toast.success(t('tools.deleteSuccess') || 'Tool deleted')
+    // 强制并行刷新两个数据源，确保卡片列表立即更新
+    await Promise.all([loadMcpServers(), loadBasicTools()])
+    window.dispatchEvent(new Event('tools-updated'))
+  } catch (error) {
+    console.error('Failed to delete AnyTool tool:', error)
+    toast.error(error?.message || t('tools.deleteFailed') || 'Failed to delete tool')
   }
 }
 
@@ -506,6 +643,7 @@ const handleMcpSubmit = async (payload) => {
 }
 
 const canEditGroup = (sourceName) => {
+  if (isAnyToolGroup(sourceName)) return false
   if (!sourceName.startsWith('MCP Server: ')) return false
   if (currentUser.value.role === 'admin') return true
   
@@ -514,6 +652,12 @@ const canEditGroup = (sourceName) => {
   
   if (!server || !server.user_id) return false
   return server.user_id === currentUser.value.userid
+}
+
+const canDeleteGroup = (sourceName) => {
+  const server = getServerByGroupSource(sourceName)
+  if (!server) return false
+  return (server.kind || server.type) !== 'anytool' && server.name !== 'AnyTool'
 }
 
 const canManage = (tool) => {
@@ -525,7 +669,7 @@ const canManage = (tool) => {
 }
 
 const handleDeleteMcpTool = async (sourceName) => {
-  const serverName = sourceName.startsWith('MCP Server: ') ? sourceName.substring('MCP Server: '.length) : sourceName
+  const serverName = normalizeServerNameFromSource(sourceName)
 
   const confirmed = await confirmDialogRef.value.confirm(t('tools.deleteConfirm', { name: serverName }))
   if (!confirmed) {
@@ -551,8 +695,13 @@ const handleDeleteMcpTool = async (sourceName) => {
   }
 }
 
+const getServerByGroupSource = (sourceName) => {
+  const serverName = normalizeServerNameFromSource(sourceName)
+  return mcpServers.value.find(s => s.name === serverName)
+}
+
 const handleRefreshMcpTool = async (sourceName) => {
-  const serverName = sourceName.startsWith('MCP Server: ') ? sourceName.substring('MCP Server: '.length) : sourceName
+  const serverName = normalizeServerNameFromSource(sourceName)
 
   try {
     loading.value = true
@@ -648,10 +797,26 @@ const isMcpGroup = (source) => {
     return source.startsWith('MCP Server:') || source.startsWith('内置MCP:')
 }
 
+const normalizeServerNameFromSource = (sourceName) => {
+  if (sourceName.startsWith('MCP Server: ')) return sourceName.substring('MCP Server: '.length)
+  if (sourceName.startsWith('内置MCP: ')) return sourceName.substring('内置MCP: '.length)
+  return sourceName
+}
+
 const getGroupCategoryLabel = (source) => {
-  if (source.startsWith('内置MCP:')) return t('tools.builtinMCP')
+  if (isAnyToolGroup(source)) return t('tools.builtinMCP')
   if (source.startsWith('MCP Server:')) return t('tools.externalMCP')
   return t('tools.basicTools')
+}
+
+const isBuiltInGroup = (source) => {
+  return source.startsWith('内置MCP:')
+}
+
+const isAnyToolGroup = (source) => {
+  const server = getServerByGroupSource(source)
+  const normalizedName = normalizeServerNameFromSource(source)
+  return server?.kind === 'anytool' || server?.name === 'AnyTool' || normalizedName === 'AnyTool'
 }
 
 const getCurrentGroupDisabled = () => {

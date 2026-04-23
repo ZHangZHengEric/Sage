@@ -59,11 +59,68 @@ export const toolAPI = {
   },
 
   /**
+   * 更新 MCP 服务器
+   * @param {string} serverName - 服务器名称
+   * @param {Object} payload - 服务器配置
+   * @returns {Promise<Object>}
+   */
+  updateMcpServer: async (serverName, payload) => {
+    return await request.put(`/api/mcp/${serverName}`, payload)
+  },
+
+  /**
+   * 执行任意工具
+   * @param {Object} payload - 执行请求
+   * @returns {Promise<Object>}
+   */
+  execTool: async (payload) => {
+    return await request.post('/api/tools/exec', payload)
+  },
+
+  /**
    * 刷新 MCP 服务器连接
    * @param {string} serverName - 服务器名称
    * @returns {Promise<Object>}
    */
   refreshMcpServer: async (serverName) => {
     return await request.post(`/api/mcp/${serverName}/refresh`)
+  },
+
+  /**
+   * 预览 AnyTool 执行结果
+   * @param {string} serverName - 服务器名称
+   * @param {Object} payload - 预览请求
+   * @returns {Promise<Object>}
+   */
+  previewMcpTool: async (serverName, payload) => {
+    return await request.post(`/api/mcp/${serverName}/preview`, payload)
+  },
+
+  /**
+   * 预览 AnyTool 草稿定义
+   * @param {Object} payload - 草稿预览请求
+   * @returns {Promise<Object>}
+   */
+  previewAnyToolDraft: async (payload) => {
+    return await request.post('/api/mcp/anytool/preview-draft', payload)
+  },
+
+  /**
+   * 新增或更新 AnyTool 中的单个工具
+   * @param {Object} payload - 工具保存请求
+   */
+  upsertAnyToolTool: async (payload) => {
+    return await request.post('/api/mcp/anytool/tool', payload)
+  },
+
+  /**
+   * 删除 AnyTool 中的单个工具
+   * @param {string} toolName - 工具名
+   * @param {string} [serverName='AnyTool'] - 所属 server 名
+   */
+  deleteAnyToolTool: async (toolName, serverName = 'AnyTool') => {
+    const encoded = encodeURIComponent(toolName)
+    const params = serverName && serverName !== 'AnyTool' ? `?server_name=${encodeURIComponent(serverName)}` : ''
+    return await request.delete(`/api/mcp/anytool/tool/${encoded}${params}`)
   }
 }

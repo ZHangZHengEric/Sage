@@ -17,15 +17,17 @@ tool_router = APIRouter(prefix="/api/tools")
 
 class ExecToolRequest(BaseModel):
     tool_name: str
-    tool_params: Dict[str, Any]
+    tool_params: Dict[str, Any] = {}
+    arguments: Dict[str, Any] = {}
 
 
 @tool_router.post("/exec")
 async def exec_tool(request: ExecToolRequest, http_request: Request):
     """执行工具"""
+    tool_params = request.tool_params or request.arguments or {}
     tool_response = await tool_service.execute_tool(
         request.tool_name,
-        request.tool_params,
+        tool_params,
         user_id=get_desktop_user_id(http_request),
         role=get_desktop_user_role(http_request),
     )

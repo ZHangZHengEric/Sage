@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import JSON, String
+from sqlalchemy import JSON, String, or_
 from sqlalchemy.orm import Mapped, mapped_column
 
 from common.models.base import Base, BaseDao, get_local_now
@@ -40,7 +40,10 @@ class MCPServerDao(BaseDao):
         return await BaseDao.get_by_id(self, MCPServer, name)
 
     async def get_list(self, user_id: Optional[str] = None) -> List["MCPServer"]:
-        where = [MCPServer.user_id == user_id] if user_id else None
+        if user_id is None:
+            where = None
+        else:
+            where = [or_(MCPServer.user_id == user_id, MCPServer.user_id == "")]
         return await BaseDao.get_list(
             self, MCPServer, where=where, order_by=MCPServer.created_at
         )
