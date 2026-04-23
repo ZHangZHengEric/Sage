@@ -52,7 +52,7 @@ Properties:
 - Suitable for local dev, prompt iteration, runtime diagnostics.
 - `sage doctor` checks environment (deps, model connectivity, sandbox).
 
-See [CLI Guide](CLI.md) for commands.
+See [CLI Guide](../applications/CLI.md) for commands.
 
 ## Examples: `examples/`
 

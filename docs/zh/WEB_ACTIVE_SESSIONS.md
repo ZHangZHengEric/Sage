@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Web 进行中会话接入
-nav_order: 8.8
+nav_order: 12
 description: "基于 active_sessions SSE 的 Web 端接入说明"
 lang: zh
 ---

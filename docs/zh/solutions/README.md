@@ -1,7 +1,7 @@
 ---
 layout: default
 title: 落地应用方案
-nav_order: 11
+nav_order: 9
 has_children: true
 description: "面向具体行业和业务场景的 Sage 落地方案集合"
 lang: zh

@@ -1,7 +1,7 @@
 ---
 layout: default
 title: MCP Servers
-nav_order: 7
+nav_order: 6
 description: "Sage 仓库中的内置 MCP Server"
 lang: zh
 ref: mcp-servers

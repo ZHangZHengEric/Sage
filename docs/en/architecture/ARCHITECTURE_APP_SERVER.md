@@ -177,7 +177,7 @@ The frontend subscribes to chunks via SSE and renders them based on `MessageChun
 - `python -m app.server.main` for development.
 - `docker-compose.yml` / `docker/` images for production (recommended).
 
-See [Configuration](CONFIGURATION.md) and [Getting Started](GETTING_STARTED.md).
+See [Configuration](CONFIGURATION.md) and [Getting Started](../applications/GETTING_STARTED.md).
 
 ## Extending: Add a New Router
 

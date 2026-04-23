@@ -1,7 +1,7 @@
 ---
 layout: default
 title: OAuth2 对接指南（Lage）
-nav_order: 10
+nav_order: 11
 description: "Sage Server 作为 OAuth2 授权服务器对接 Lage 的接入说明"
 lang: zh
 ref: oauth2-lage-integration

@@ -1,15 +1,23 @@
 ---
 layout: default
-title: 应用形态
-nav_order: 6
-description: "Sage 面向用户的主要应用入口"
+title: 应用入口
+nav_order: 2
+has_children: true
+description: "快速开始、CLI、主服务端与桌面端等 Sage 应用入口"
 lang: zh
 ref: applications
 ---
 
 {% include lang_switcher.html %}
 
-# 应用形态
+# 应用入口
+
+这部分收纳 Sage 的主要使用和启动入口。先看这一组文档，可以快速判断应该从 CLI、示例服务、主服务端，还是桌面端进入。
+
+## 当前文档
+
+1. [快速开始](GETTING_STARTED.md)
+2. [CLI 使用指南](CLI.md)
 
 ## 该选哪个入口
 

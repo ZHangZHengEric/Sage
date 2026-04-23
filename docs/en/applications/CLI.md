@@ -1,7 +1,8 @@
 ---
 layout: default
 title: CLI Guide
-nav_order: 3
+parent: Applications
+nav_order: 2
 description: "Use the Sage CLI for local development, validation, and session workflows"
 lang: en
 ref: cli-guide
@@ -454,5 +455,5 @@ Notes:
 
 - [Getting Started](GETTING_STARTED.md)
 - [Configuration](CONFIGURATION.md)
-- [Applications](APPLICATIONS.md)
+- [Applications](README.md)
 - [Troubleshooting](TROUBLESHOOTING.md)

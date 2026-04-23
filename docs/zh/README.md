@@ -22,11 +22,11 @@ ref: home
 
 ## 建议先读
 
-1. [快速开始](GETTING_STARTED.md)：本地安装与首次运行
-2. [CLI 使用指南](CLI.md)：命令行工作流与本地验证
+1. [应用入口](applications/README.md)：快速开始、CLI 与主应用入口
 2. [核心概念](CORE_CONCEPTS.md)：运行时模型
 3. [架构](architecture/README.md)：仓库与子系统边界
 4. [配置](CONFIGURATION.md)：环境变量与部署参数
+5. [API 文档](api/README.md)：HTTP 与运行时接口
 
 ## 常见阅读路径
 
@@ -34,9 +34,8 @@ ref: home
 
 建议阅读：
 
-1. [快速开始](GETTING_STARTED.md)
-2. [CLI 使用指南](CLI.md)
-2. [应用形态](APPLICATIONS.md)
+1. [应用入口](applications/README.md)
+2. [配置](CONFIGURATION.md)
 3. [故障排查](TROUBLESHOOTING.md)
 
 ### 我想扩展运行时
@@ -52,28 +51,28 @@ ref: home
 
 建议阅读：
 
-1. [快速开始](GETTING_STARTED.md)
+1. [应用入口](applications/README.md)
 2. [配置](CONFIGURATION.md)
 3. [API 文档](api/README.md)（入口含 [HTTP API 参考](api/HTTP_API_REFERENCE.md) 与历史 Python 参考）
 4. [OAuth2 对接指南（Lage）](OAUTH2_LAGE_INTEGRATION.md)
 
 ## 文档地图
 
-- [快速开始](GETTING_STARTED.md)：安装依赖并运行 CLI、服务端、Web UI 或桌面版
-- [CLI 使用指南](CLI.md)：命令行工作流、会话、技能、工作目录与结构化输出
+- [应用入口](applications/README.md)：快速开始、CLI、示例服务、主服务端与桌面版
+  - [快速开始](applications/GETTING_STARTED.md)
+  - [CLI 使用指南](applications/CLI.md)
 - [核心概念](CORE_CONCEPTS.md)：会话、智能体、工具、技能、流程和沙箱
 - [架构](architecture/README.md)：代码库整体组织方式（含子章节）
   - 应用层：[Server](architecture/ARCHITECTURE_APP_SERVER.md) · [Desktop](architecture/ARCHITECTURE_APP_DESKTOP.md) · [其它入口](architecture/ARCHITECTURE_APP_OTHERS.md)
   - sagents 核心：[总览](architecture/ARCHITECTURE_SAGENTS_OVERVIEW.md) · [Agent / Flow](architecture/ARCHITECTURE_SAGENTS_AGENT_FLOW.md) · [Session / Context](architecture/ARCHITECTURE_SAGENTS_SESSION_CONTEXT.md) · [Tool / Skill](architecture/ARCHITECTURE_SAGENTS_TOOL_SKILL.md) · [Sandbox / LLM / Obs](architecture/ARCHITECTURE_SAGENTS_SANDBOX_OBS.md)
 - [配置](CONFIGURATION.md)：运行时环境变量与存储设置
-- [应用形态](APPLICATIONS.md)：不同入口分别适合什么场景
-- [落地应用方案](solutions/README.md)：面向行业与业务场景的售前方案集合
 - [MCP Servers](MCP_SERVERS.md)：内置 MCP Server 以及它们在平台中的角色
 - [API 文档](api/README.md)：HTTP 与历史 Python API 的导航入口
   - [HTTP API 参考](api/HTTP_API_REFERENCE.md)：与 `register_routes` 一致的后端接口、请求体、返回体与示例；侧栏可展开子文档
     - 子文档：[认证与用户](api/HTTP_API_AUTH_USER.md) · [对话与流式](api/HTTP_API_CHAT.md) · [Agent 补充](api/HTTP_API_AGENT.md) · [知识库 RAG](api/HTTP_API_KNOWLEDGE_BASE.md) · [工具 / 技能 / MCP](api/HTTP_API_TOOLS_MCP.md) · [计划任务 /tasks](api/HTTP_API_TASKS.md) · [平台与可观测](api/HTTP_API_PLATFORM.md)
   - [Python 运行时 API](api/API_REFERENCE.md)：与 `sagents` 源码一致，主站对外 HTTP 请见上条
 - [Memory](memory/README.md)：记忆、检索与 memory-search 工作线
+- [落地应用方案](solutions/README.md)：面向行业与业务场景的售前方案集合
 - [OAuth2 对接指南（Lage）](OAUTH2_LAGE_INTEGRATION.md)：恢复自历史提交的 OAuth2 对接文档
 - [开发](DEVELOPMENT.md)：贡献流程和源码位置
 - [故障排查](TROUBLESHOOTING.md)：常见启动和环境问题
