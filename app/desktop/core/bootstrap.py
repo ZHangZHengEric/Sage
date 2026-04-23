@@ -7,6 +7,7 @@ from sagents.session_runtime import initialize_global_session_manager
 from common.core.client.chat import close_chat_client, init_chat_client
 from common.core.client.db import close_db_client, init_db_client
 from common.core.config import get_startup_config
+from common.services.mcp_service import ensure_default_anytool_server
 from .migrations import migrate_desktop_default_user_id
 from .user_context import DEFAULT_DESKTOP_USER_ID
 
@@ -513,11 +514,15 @@ async def validate_and_disable_mcp_servers():
     from common.models.mcp_server import MCPServerDao
 
     mcp_dao = MCPServerDao()
+    await ensure_default_anytool_server(register_tool_manager=False)
     servers = await mcp_dao.get_list()
     removed_count = 0
     registered_count = 0
     tm = ToolManager.get_instance()
     for srv in servers:
+        if (srv.config or {}).get("kind") == "anytool":
+            logger.info(f"MCP server {srv.name} 是内置 AnyTool，跳过验证注册")
+            continue
         if srv.config.get("disabled", True):
             logger.info(f"MCP server {srv.name} 已禁用，跳过验证")
             continue

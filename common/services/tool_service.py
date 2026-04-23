@@ -1,3 +1,4 @@
+import json
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -5,6 +6,8 @@ from sagents.tool.tool_manager import get_tool_manager
 
 from common.core.exceptions import SageHTTPException
 from common.models.mcp_server import MCPServerDao
+from common.services.mcp_service import ensure_default_anytool_server
+from sagents.utils.serialization import make_serializable
 
 
 def normalize_tool_source(source: str) -> str:
@@ -26,6 +29,74 @@ def _get_tool_manager_or_raise():
     return tool_manager
 
 
+def _try_parse_json_like(value: Any) -> Any:
+    current = value
+    for _ in range(3):
+        if isinstance(current, dict):
+            content = current.get("content")
+            if isinstance(content, str):
+                nested = _try_parse_json_like(content)
+                if nested != content:
+                    return nested
+            return current
+        if not isinstance(current, str):
+            return current
+
+        text = current.strip()
+        if not text:
+            return current
+
+        try:
+            current = json.loads(text)
+            continue
+        except Exception:
+            return current
+
+    return current
+
+
+def _format_result_text(parsed: Any, raw_text: str) -> str:
+    if isinstance(parsed, (dict, list)):
+        return json.dumps(parsed, ensure_ascii=False, indent=2, default=str)
+    if parsed is None:
+        return raw_text or ""
+    if isinstance(parsed, str):
+        return parsed
+    return str(parsed)
+
+
+def _normalize_tool_result(tool_response: Any) -> Dict[str, Any]:
+    raw_text = ""
+    parsed: Any = None
+    if isinstance(tool_response, dict):
+        raw_text = str(tool_response.get("raw_text") or "")
+        parsed = tool_response.get("parsed")
+        if parsed is None:
+            parsed = tool_response.get("content")
+        if parsed is None:
+            parsed = tool_response.get("result")
+        if not raw_text:
+            raw_text = tool_response.get("content") if isinstance(tool_response.get("content"), str) else ""
+    elif isinstance(tool_response, str):
+        raw_text = tool_response
+        parsed = tool_response
+    else:
+        parsed = tool_response
+
+    parsed = _try_parse_json_like(parsed)
+    if not raw_text:
+        raw_text = _format_result_text(parsed, raw_text)
+    formatted_text = _format_result_text(parsed, raw_text)
+
+    return {
+        "raw_text": raw_text,
+        "parsed": make_serializable(parsed),
+        "content": make_serializable(parsed),
+        "formatted_text": formatted_text,
+        "tool_response": make_serializable(tool_response),
+    }
+
+
 async def execute_tool(
     tool_name: str,
     tool_params: Dict[str, Any],
@@ -35,6 +106,10 @@ async def execute_tool(
 ) -> Any:
     logger.info(f"执行工具请求: tool={tool_name}")
 
+    try:
+        await ensure_default_anytool_server()
+    except Exception as exc:
+        logger.warning(f"AnyTool 预激活失败，继续执行普通工具: {exc}")
     tool_manager = _get_tool_manager_or_raise()
     if tool_name not in tool_manager.tools.keys():
         logger.error(f"执行工具失败: {tool_name}")
@@ -65,7 +140,7 @@ async def execute_tool(
     )
     if tool_response is not None:
         logger.info(f"执行工具成功: {tool_name}")
-        return tool_response
+        return _normalize_tool_result(tool_response)
 
     logger.error(f"执行工具失败: {tool_name}")
     raise SageHTTPException(
@@ -81,6 +156,10 @@ async def list_tools(
     role: str = "user",
     tool_type: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
+    try:
+        await ensure_default_anytool_server()
+    except Exception as exc:
+        logger.warning(f"AnyTool 预激活失败，继续列出工具: {exc}")
     tool_manager = get_tool_manager()
     if not tool_manager:
         return []
@@ -89,12 +168,17 @@ async def list_tools(
     dao = MCPServerDao()
     all_servers = await dao.get_list(user_id=None)
     source_owner_map = {server.name: server.user_id or "" for server in all_servers}
+    source_kind_map = {
+        server.name: (server.config or {}).get("kind", "external")
+        for server in all_servers
+    }
 
     tools: List[Dict[str, Any]] = []
     for tool_info in available_tools:
         current_tool_type = tool_info.get("type", "basic")
         source = tool_info.get("source", "internal")
         normalized_source = normalize_tool_source(source)
+        server_kind = source_kind_map.get(normalized_source, "")
 
         if tool_type is not None and current_tool_type != tool_type:
             continue
@@ -111,6 +195,8 @@ async def list_tools(
             if current_tool_type == "mcp"
             else ""
         )
+        if current_tool_type == "mcp" and server_kind == "anytool":
+            source = f"内置MCP: {normalized_source}"
         tools.append(
             {
                 "name": tool_info.get("name", ""),
@@ -120,6 +206,7 @@ async def list_tools(
                 "type": current_tool_type,
                 "source": source,
                 "user_id": tool_owner,
+                "server_kind": server_kind,
             }
         )
 

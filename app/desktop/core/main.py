@@ -48,6 +48,7 @@ from common.core.context import get_request_id
 from common.core.exceptions import register_exception_handlers
 from common.core.middleware import register_cors_middleware, register_request_logging_middleware
 from common.utils.logging import init_logging_base
+from mcp_servers.anytool.anytool_http import AnyToolStreamableHTTPApp
 from .user_context import get_desktop_user_claims
 from .lifecycle import (
     cleanup_system,
@@ -110,6 +111,7 @@ def create_fastapi_app() -> FastAPI:
 
     # 注册 HTTP API 路由
     register_chat_routes(app)
+    app.mount("/api/mcp/anytool", AnyToolStreamableHTTPApp())
 
     @app.get("/active")
     def active():

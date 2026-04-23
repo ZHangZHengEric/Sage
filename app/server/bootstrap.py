@@ -4,6 +4,7 @@ import os
 from loguru import logger
 
 from common.core.config import StartupConfig
+from common.services.mcp_service import ensure_default_anytool_server
 from .core.bootstrap_admin import format_bootstrap_admin_log, get_bootstrap_admin_spec
 
 
@@ -213,11 +214,15 @@ async def validate_and_disable_mcp_servers():
     from sagents.tool.tool_manager import ToolManager
 
     mcp_dao = MCPServerDao()
+    await ensure_default_anytool_server(register_tool_manager=False)
     servers = await mcp_dao.get_list()
     removed_count = 0
     registered_count = 0
     tm = ToolManager.get_instance()
     for srv in servers:
+        if (srv.config or {}).get("kind") == "anytool":
+            logger.info(f"MCP server {srv.name} 是内置 AnyTool，跳过验证注册")
+            continue
         if srv.config.get("disabled", True):
             logger.info(f"MCP server {srv.name} 已禁用，跳过验证")
             continue

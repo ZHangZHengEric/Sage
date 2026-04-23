@@ -596,6 +596,41 @@ fn load_sage_env_file() {
     }
 }
 
+/// 将最终选中的后端端口写回 `~/.sage/.sage_env`，供 Vite 反代在请求时读取（`beforeDevCommand` 时 Python 尚不存在，不能依赖启动时探测）。
+fn merge_sage_port_into_env_file(port: u16) {
+    let sage_root = get_sage_root_dir();
+    if let Err(e) = std::fs::create_dir_all(&sage_root) {
+        eprintln!("merge_sage_port_into_env_file: create_dir_all: {}", e);
+        return;
+    }
+    let path = sage_root.join(SAGE_ENV_FILE);
+    let content = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut out: Vec<String> = Vec::new();
+    let mut replaced = false;
+    for line in content.lines() {
+        let t = line.trim_start();
+        if t.starts_with("SAGE_PORT=") {
+            out.push(format!("SAGE_PORT={}", port));
+            replaced = true;
+        } else {
+            out.push(line.to_string());
+        }
+    }
+    if !replaced {
+        if !out.is_empty() {
+            out.push(String::new());
+        }
+        out.push(format!("SAGE_PORT={}", port));
+    }
+    let body = out.join("\n");
+    let body = if body.ends_with('\n') { body } else { body + "\n" };
+    if let Err(e) = std::fs::write(&path, body) {
+        eprintln!("merge_sage_port_into_env_file: write {:?}: {}", path, e);
+    } else {
+        println!("Updated {:?} with SAGE_PORT={}", path, port);
+    }
+}
+
 #[derive(Clone, serde::Serialize)]
 struct Payload {
     port: u16,
@@ -1305,6 +1340,7 @@ fn main() {
             let port: u16 = choose_desktop_backend_port();
             std::env::set_var("SAGE_PORT", port.to_string());
             println!("Set SAGE_PORT: {}", port);
+            merge_sage_port_into_env_file(port);
 
             let bundled_node_runtime = resolve_bundled_node_runtime(&app_handle);
             let shared_node_runtime = bundled_node_runtime.as_ref().and_then(|runtime| {
