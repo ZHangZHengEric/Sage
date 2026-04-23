@@ -1,12 +1,12 @@
 ---
-
-## layout: default
+layout: default
 title: Architecture
 nav_order: 4
 has_children: true
 description: "Repository and subsystem architecture overview, with sub-pages for apps and the sagents core runtime"
 lang: en
 ref: architecture
+---
 
 {% include lang_switcher.html %}
 
@@ -15,9 +15,9 @@ ref: architecture
 Sage is a layered codebase, not a single binary. The architecture chapter is split into two main tracks:
 
 - **App architecture**: each user-facing entry (web server, desktop, CLI, examples, browser extension, etc.), its shape, startup path and boundary.
-- **Core runtime `sagents/` architecture**: the session and agent engine shared by every app — the actual driver of "one conversation / one task".
+- **Core runtime `sagents/` architecture**: the session and agent engine shared by every app, which drives "one conversation / one task".
 
-This chapter has multiple sub-pages. This page is just the index and high-level map; details live in the children.
+This chapter has multiple sub-pages. This page is the index and high-level map; details live in the children.
 
 ## Repository Map
 
@@ -59,8 +59,6 @@ flowchart TB
     Runtime -.shared.-> Common
 ```
 
-
-
 ## High-Level Data Flow of One Conversation
 
 ```mermaid
@@ -78,8 +76,6 @@ flowchart LR
     EntryApp -->|SSE/JSON| UserIn
 ```
 
-
-
 ## Sub-pages in this Chapter
 
 App architecture (different app entries):
@@ -88,7 +84,7 @@ App architecture (different app entries):
 2. [Desktop App Architecture](ARCHITECTURE_APP_DESKTOP.md)
 3. [CLI, Examples & External Entries](ARCHITECTURE_APP_OTHERS.md)
 
-Core runtime `sagents/` architecture (the heart of this chapter):
+Core runtime `sagents/` architecture:
 
 1. [sagents Overview](ARCHITECTURE_SAGENTS_OVERVIEW.md)
 2. [Agent & Flow Orchestration](ARCHITECTURE_SAGENTS_AGENT_FLOW.md)
@@ -114,4 +110,3 @@ flowchart TD
     Want --> D[Package the desktop app]
     D --> D1[Desktop App Architecture] --> D2[app/desktop/scripts]
 ```
-

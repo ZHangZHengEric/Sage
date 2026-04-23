@@ -1,27 +1,20 @@
-***
-
+---
 layout: default
 title: 知识库指南
-nav\_order: 8
+nav_order: 7.5
 description: "Sage Server 知识库模块架构、数据流与扩展说明"
--------------------------------------------
+lang: zh
+ref: knowledge-base
+---
+
+{% include lang_switcher.html %}
 
 {: .note }
-
 > 需要英文版本？请查看 [Knowledge Base Guide](../en/KNOWLEDGE_BASE.md)
-
-## 目录
-
-{: .no\_toc .text-delta }
-
-1. TOC
-   {:toc}
 
 # 📚 Sage 知识库模块指南
 
 本文档聚焦 `app/server/services/knowledge_base` 模块，说明当前版本中知识库的数据流、检索链路以及扩展方式。
-
-***
 
 ## 1. 模块定位
 
@@ -32,8 +25,6 @@ description: "Sage Server 知识库模块架构、数据流与扩展说明"
 - 工具接入：通过内置 MCP Tool 暴露给 Agent，在对话中按需调用。
 
 当前实现默认使用 Elasticsearch 作为向量库与全文检索引擎。
-
-***
 
 ## 2. 目录结构与职责
 
@@ -56,8 +47,6 @@ app/server/services/knowledge_base/
 - `KnowledgeManager`：检索引擎编排层，组织 split/embed/store。
 - `EsVectorStore`：`VectorStore` 抽象接口的 ES 实现。
 - `ServerEmbeddingAdapter`：接入服务端 embedding client。
-
-***
 
 ## 3. 文档入库流程
 
@@ -83,8 +72,6 @@ flowchart LR
     G --> H[(ES: index_doc/index_doc_full)]
 ```
 
-***
-
 ## 4. 检索流程（当前实现）
 
 ### 4.1 检索入口
@@ -96,7 +83,7 @@ flowchart LR
    - 向量 KNN 检索（`emb` 字段）
    - BM25 关键词检索（`doc_content` 字段）
 3. 使用 `SearchResultPostProcessTool` 做 RRF 融合与重叠片段合并。
-4. 返回 chunk，并补充完整文档字段（title/path/full\_content）。
+4. 返回 chunk，并补充完整文档字段（title/path/full_content）。
 
 ### 4.2 检索链路图
 
@@ -113,8 +100,6 @@ flowchart LR
     G --> H[search_results]
 ```
 
-***
-
 ## 5. ES 索引设计
 
 当前每个知识库会维护两个索引：
@@ -127,7 +112,7 @@ flowchart LR
 - `doc_id`：所属文档 ID。
 - `doc_segment_id`：分片 ID。
 - `doc_content`：分片文本（BM25 检索）。
-- `emb`：向量字段（dense\_vector）。
+- `emb`：向量字段（dense_vector）。
 - `metadata/start/end/path/title/main_doc_id`：检索与展示辅助字段。
 
 ### 5.2 `_doc_full` 核心字段
@@ -135,8 +120,6 @@ flowchart LR
 - `doc_id`：文档 ID。
 - `full_content`：完整文本。
 - `origin_content/path/title/metadata`：原始与展示信息。
-
-***
 
 ## 6. Agent 如何调用知识库
 
@@ -149,15 +132,11 @@ flowchart LR
 3. 模型发起 tool call 后，调用 `DocumentService.doc_search(...)`。
 4. 检索结果作为 `role=tool` 消息写回会话历史，供后续轮次继续推理。
 
-***
-
 ## 7. 当前版本边界
 
 - 后端固定为 ES：`DocumentService` 构造时直接实例化 `EsVectorStore`。
 - `VectorStore.search` 当前无过滤参数，默认策略为向量 + BM25 并行融合。
 - 启动阶段对 `es_url` 有依赖，未配置时会跳过文档构建相关调度。
-
-***
 
 ## 8. 快速排查清单
 
