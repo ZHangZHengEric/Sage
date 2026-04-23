@@ -1093,7 +1093,7 @@
                   <Trash2 class="h-3.5 w-3.5" />
                 </Button>
               </div>
-              <Button variant="outline" size="sm" class="w-full border-dashed h-9">
+              <Button variant="outline" size="sm" class="w-full border-dashed h-9" @click="store.addSystemContextPair">
                 <Plus class="h-3.5 w-3.5 mr-2" /> {{ t('agent.addContext') }}
               </Button>
             </div>
@@ -1165,7 +1165,7 @@
                       <Trash2 class="h-3 w-3" />
                     </Button>
                   </div>
-                  <Button variant="outline" size="sm" class="w-full border-dashed h-9">
+                  <Button variant="outline" size="sm" class="w-full border-dashed h-9" @click="store.addWorkflowStep(index)">
                     <Plus class="h-3 w-3 mr-2" /> {{ t('agent.addStep') }}
                   </Button>
                 </div>
