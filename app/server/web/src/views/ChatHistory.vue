@@ -519,7 +519,9 @@ const getAgentName = (agentId) => {
 
 const buildShareUrl = (sessionId) => {
   if (!sessionId) return ''
-  return `${window.location.origin}/share/${sessionId}`
+  const rawBase = (import.meta.env?.BASE_URL || '/').toString()
+  const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`
+  return `${window.location.origin}${base}share/${sessionId}`
 }
 
 const copyTextToClipboard = async (text) => {

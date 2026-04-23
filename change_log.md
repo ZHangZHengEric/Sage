@@ -1,3 +1,5 @@
+2026-04-23 22:35 server/web 分享链接修复：`buildShareUrl` 与 `useChatPage.handleShare` 改为基于 `import.meta.env.BASE_URL` 拼接，避免在 `/sage/` 子路径部署下生成 `/share/<id>` 命中 nginx 404。
+
 2026-04-23 22:20 server/web/ChatHistory：分享弹窗新增"复制分享链接"第三按钮并展示完整 URL；行内 Share2 与 Download/Trace/Trash 一致 hover 渐显；抽出 `buildShareUrl`/`copyTextToClipboard`，弹窗即开即可复制即使消息加载失败。
 
 2026-04-23 anytool/UI：补 `tools.saveChanges` 多语言；卡片增加编辑/删除按钮（仅 AnyTool 分组），新增 `DELETE /api/mcp/anytool/tool/{name}` 路由（server+desktop）与 `mcp_service.delete_anytool_tool` 服务，前端 `toolAPI.deleteAnyToolTool` 同步更新。
