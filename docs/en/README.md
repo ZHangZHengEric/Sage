@@ -74,9 +74,9 @@ Read:
   - [HTTP API Reference](api/HTTP_API_REFERENCE.md): backend endpoints aligned with `register_routes`; the sidebar lists subpages
     - Subpages: [Auth and users](api/HTTP_API_AUTH_USER.md) · [Chat and streaming](api/HTTP_API_CHAT.md) · [Agent extras](api/HTTP_API_AGENT.md) · [Knowledge base (RAG)](api/HTTP_API_KNOWLEDGE_BASE.md) · [Tools, skills, and MCP](api/HTTP_API_TOOLS_MCP.md) · [Planner /tasks](api/HTTP_API_TASKS.md) · [Platform and observability](api/HTTP_API_PLATFORM.md)
   - [Python runtime API](api/API_REFERENCE.md): `SAgent` and related types aligned with `sagents/`, not the main HTTP app
+- [Memory](memory/README.md): memory, retrieval, and memory-search workstream
 - [OAuth2 Lage Integration Guide](../zh/OAUTH2_LAGE_INTEGRATION.md): restored OAuth2 integration guide from historical docs
 - [Development](DEVELOPMENT.md): contributor workflow and source locations
-- [Memory Search Validation](memory-search/README.md): unified validation entry for the current memory-search workstream
 - [Troubleshooting](TROUBLESHOOTING.md): common startup and environment issues
 
 ## Current Product Surfaces
