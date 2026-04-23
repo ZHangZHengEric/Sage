@@ -1,7 +1,7 @@
 ---
 layout: default
 title: 开发
-nav_order: 9
+nav_order: 10
 description: "贡献流程与源码位置"
 lang: zh
 ref: development

@@ -52,7 +52,7 @@ flowchart LR
 - 适合本地开发、提示词迭代、运行时诊断。
 - `sage doctor` 用于排查环境问题（依赖、模型连通性、沙箱）。
 
-详细命令请见 [CLI 使用指南](CLI.md)。
+详细命令请见 [CLI 使用指南](../applications/CLI.md)。
 
 ## Examples：`examples/`
 

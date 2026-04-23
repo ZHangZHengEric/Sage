@@ -1,7 +1,8 @@
 ---
 layout: default
 title: Getting Started
-nav_order: 2
+parent: Applications
+nav_order: 1
 description: "Install Sage and run the main entry points"
 lang: en
 ref: getting-started

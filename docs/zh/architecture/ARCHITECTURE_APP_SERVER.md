@@ -177,7 +177,7 @@ flowchart TB
 - 直接 `python -m app.server.main` 启动（开发态）。
 - 通过仓库提供的 `docker-compose.yml` / `docker/` 镜像启动（推荐生产）。
 
-详见 [配置](CONFIGURATION.md) 与 [快速开始](GETTING_STARTED.md)。
+详见 [配置](CONFIGURATION.md) 与 [快速开始](../applications/GETTING_STARTED.md)。
 
 ## 二次开发：新增一个路由
 

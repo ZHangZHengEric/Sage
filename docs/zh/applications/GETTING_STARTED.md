@@ -1,7 +1,8 @@
 ---
 layout: default
 title: 快速开始
-nav_order: 2
+parent: 应用入口
+nav_order: 1
 description: "安装 Sage 并运行主要入口"
 lang: zh
 ref: getting-started

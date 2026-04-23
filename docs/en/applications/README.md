@@ -1,15 +1,23 @@
 ---
-
-## layout: default
+layout: default
 title: Applications
-nav_order: 6
-description: "The main user-facing application surfaces in Sage"
+nav_order: 2
+has_children: true
+description: "Getting Started, CLI, and the main Sage application surfaces"
 lang: en
 ref: applications
+---
 
 {% include lang_switcher.html %}
 
 # Applications
+
+This section collects the main entry points for using and starting Sage. Read this group first if you want to decide whether to enter through the CLI, the demo app, the main server, or the desktop build.
+
+## Current Pages
+
+1. [Getting Started](GETTING_STARTED.md)
+2. [CLI Guide](CLI.md)
 
 ## Which Surface Should You Use
 

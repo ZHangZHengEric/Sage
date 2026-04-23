@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Solution Playbooks
-nav_order: 11
+nav_order: 9
 has_children: true
 description: "Solution-style documents for specific business and industry scenarios"
 lang: en

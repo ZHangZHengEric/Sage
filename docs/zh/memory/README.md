@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Memory
-nav_order: 12
+nav_order: 8
 has_children: true
 description: "与会话记忆、用户记忆、工作空间记忆与记忆搜索相关的文档集合"
 lang: zh

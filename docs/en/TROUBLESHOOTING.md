@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Troubleshooting
-nav_order: 10
+nav_order: 13
 description: "Common Sage setup and runtime issues"
 lang: en
 ref: troubleshooting

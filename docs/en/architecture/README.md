@@ -115,5 +115,3 @@ flowchart TD
     D --> D1[Desktop App Architecture] --> D2[app/desktop/scripts]
 ```
 
-
-

@@ -1,7 +1,7 @@
 ---
 layout: default
 title: 故障排查
-nav_order: 10
+nav_order: 13
 description: "常见 Sage 安装与运行问题"
 lang: zh
 ref: troubleshooting

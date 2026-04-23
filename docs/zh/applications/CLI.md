@@ -1,7 +1,8 @@
 ---
 layout: default
 title: CLI 使用指南
-nav_order: 3
+parent: 应用入口
+nav_order: 2
 description: "使用 Sage CLI 进行本地开发、验证和会话操作"
 lang: zh
 ref: cli-guide
@@ -451,5 +452,5 @@ sage run --json --stats "用一句话介绍你自己。"
 
 - [快速开始](GETTING_STARTED.md)
 - [配置](CONFIGURATION.md)
-- [应用形态](APPLICATIONS.md)
+- [应用入口](README.md)
 - [故障排查](TROUBLESHOOTING.md)
