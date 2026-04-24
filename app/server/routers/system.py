@@ -58,14 +58,15 @@ async def get_agent_usage_stats(request: Request, req: AgentUsageStatsRequest):
 )
 async def get_token_usage_stats(req: TokenUsageStatsRequest):
     stats = await token_usage_service.get_token_usage_stats(
-        group_by=req.group_by,
+        dimension=req.dimension,
         user_id=req.user_id,
         agent_id=req.agent_id,
         session_id=req.session_id,
-        start_time=req.start_time,
-        end_time=req.end_time,
+        request_source=req.request_source,
+        start_date=req.start_date,
+        end_date=req.end_date,
     )
     return await Response.succ(
-        data=TokenUsageStatsResponse(**stats).model_dump(exclude_none=True),
+        data=TokenUsageStatsResponse(**stats).model_dump(),
         message="获取 Token 使用统计成功",
     )

@@ -1,7 +1,7 @@
 from typing import Any, Dict, Generic, List, Literal, Optional, TypeVar
-from datetime import datetime
+from datetime import date, datetime
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ===== LLM Provider Schemas =====
@@ -106,41 +106,49 @@ class AgentUsageStatsResponse(BaseModel):
 
 
 class TokenUsageStatsRequest(BaseModel):
-    group_by: Literal["user", "agent", "session"]
+    model_config = ConfigDict(extra="forbid")
+
+    dimension: Literal["agent", "user", "session"]
     user_id: Optional[str] = None
     agent_id: Optional[str] = None
     session_id: Optional[str] = None
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
+    request_source: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
 
     @model_validator(mode="after")
     def validate_time_range(self) -> "TokenUsageStatsRequest":
-        if self.start_time and self.end_time and self.start_time > self.end_time:
-            raise ValueError("start_time must be earlier than or equal to end_time")
+        has_start = self.start_date is not None
+        has_end = self.end_date is not None
+        if has_start != has_end:
+            raise ValueError("start_date and end_date must be provided together")
+        if has_start and has_end and self.start_date > self.end_date:
+            raise ValueError("start_date must be earlier than or equal to end_date")
+        if not (self.dimension == "session" and self.session_id) and not (has_start and has_end):
+            raise ValueError("start_date and end_date are required unless querying a specific session")
         return self
 
 
 class TokenUsageStatsSummary(BaseModel):
+    session_count: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
-    execution_count: int = 0
-    cached_tokens: int = 0
-    reasoning_tokens: int = 0
+    average_tokens_per_session: float = 0
+    model_call_count: int = 0
 
 
 class TokenUsageStatsItem(BaseModel):
-    user_id: Optional[str] = None
-    agent_id: Optional[str] = None
-    session_id: Optional[str] = None
+    agent_id: str = ""
+    user_id: str = ""
+    session_id: str = ""
+    session_count: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
-    execution_count: int = 0
-    cached_tokens: int = 0
-    reasoning_tokens: int = 0
-    first_seen_at: Optional[datetime] = None
-    last_seen_at: Optional[datetime] = None
+    model_call_count: int = 0
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
 
 
 class TokenUsageStatsResponse(BaseModel):
