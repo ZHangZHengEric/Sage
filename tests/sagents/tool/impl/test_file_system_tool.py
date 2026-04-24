@@ -58,10 +58,12 @@ def test_apply_line_range_update_uses_inclusive_bounds():
 
 
 def test_apply_search_update_prefers_literal_match_before_regex():
+    # 默认要求唯一匹配；多匹配需要显式 replace_all=True
     result = FileSystemTool._apply_search_update(
         "foo.*bar foo.*bar",
         search_pattern="foo.*bar",
         replacement="baz",
+        replace_all=True,
     )
 
     assert result["status"] == "success"
@@ -75,9 +77,56 @@ def test_apply_search_update_falls_back_to_regex():
         "foo1 foo2",
         search_pattern=r"foo\d",
         replacement="x",
+        replace_all=True,
     )
 
     assert result["status"] == "success"
     assert result["match_mode"] == "regex"
     assert result["content"] == "x x"
     assert result["replacements"] == 2
+
+
+def test_apply_search_update_unique_match_succeeds():
+    result = FileSystemTool._apply_search_update(
+        "alpha beta gamma",
+        search_pattern="beta",
+        replacement="BETA",
+    )
+    assert result["status"] == "success"
+    assert result["replacements"] == 1
+    assert result["content"] == "alpha BETA gamma"
+
+
+def test_apply_search_update_multiple_text_matches_returns_error():
+    result = FileSystemTool._apply_search_update(
+        "a foo b\nfoo c\n",
+        search_pattern="foo",
+        replacement="X",
+    )
+    assert result["status"] == "error"
+    assert result["error_code"] == "MULTIPLE_MATCHES"
+    assert result["match_count"] == 2
+    assert isinstance(result["matches"], list) and len(result["matches"]) == 2
+    # 行号上下文存在
+    assert "line" in result["matches"][0]
+
+
+def test_apply_search_update_multiple_regex_matches_returns_error():
+    result = FileSystemTool._apply_search_update(
+        "v1\nv2\nv3\n",
+        search_pattern=r"v\d",
+        replacement="X",
+    )
+    assert result["status"] == "error"
+    assert result["error_code"] == "MULTIPLE_MATCHES"
+    assert result["match_count"] == 3
+
+
+def test_apply_search_update_invalid_regex_returns_error():
+    result = FileSystemTool._apply_search_update(
+        "abc",
+        search_pattern="(",
+        replacement="x",
+    )
+    assert result["status"] == "error"
+    assert result["error_code"] == "INVALID_ARGUMENT"

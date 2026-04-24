@@ -1,15 +1,8 @@
 <template>
   <div class="sys-delegate-task-container h-full flex flex-col">
-    <div v-if="!toolResult" class="flex items-center justify-center h-full text-muted-foreground p-4">
+    <div v-if="!toolResult && delegateTasks.length === 0" class="flex items-center justify-center h-full text-muted-foreground p-4">
       <Loader2 class="w-5 h-5 animate-spin mr-2" />
       <span>{{ t('workbench.tool.delegatingTask') }}</span>
-    </div>
-    <div v-else-if="toolResult?.is_error" class="flex items-start gap-3 p-4 text-destructive">
-      <XCircle class="w-5 h-5 flex-shrink-0 mt-0.5" />
-      <div>
-        <p class="font-medium">{{ t('workbench.tool.delegateFailed') }}</p>
-        <p class="text-sm opacity-80 mt-1">{{ delegationError }}</p>
-      </div>
     </div>
     <div v-else class="flex flex-col h-full overflow-hidden">
       <div class="flex items-center justify-center gap-6 py-4 border-b border-border/30 bg-muted/20 flex-shrink-0">

@@ -3,6 +3,7 @@ import re
 from typing import Dict, Any, Optional, List
 
 from ..tool_base import tool
+from ..error_codes import ToolErrorCode, make_tool_error
 from sagents.utils.file_content_validator import FileContentValidator
 from sagents.utils.logger import logger
 from sagents.utils.agent_session_helper import get_session_sandbox as _get_session_sandbox_util
@@ -30,16 +31,16 @@ class FileSystemTool:
         normalized_end = (total_lines - 1) if end_line is None else min(total_lines - 1, end_line)
 
         if normalized_start > normalized_end:
-            return {
-                "status": "error",
-                "message": "开始行号不能大于结束行号",
-            }
+            return make_tool_error(
+                ToolErrorCode.INVALID_ARGUMENT,
+                "开始行号不能大于结束行号",
+            )
 
         if total_lines == 0:
-            return {
-                "status": "error",
-                "message": "文件为空，无法执行按行替换",
-            }
+            return make_tool_error(
+                ToolErrorCode.PRECONDITION_FAILED,
+                "文件为空，无法执行按行替换",
+            )
 
         normalized_end_exclusive = normalized_end + 1
 
@@ -66,34 +67,116 @@ class FileSystemTool:
         }
 
     @staticmethod
+    def _format_match_contexts(content: str, match_positions: List[int], context_chars: int = 40, max_items: int = 3) -> List[Dict[str, Any]]:
+        """根据字符位置列出匹配的行号与上下文片段，便于 LLM 理解多匹配场景。"""
+        contexts: List[Dict[str, Any]] = []
+        if not match_positions:
+            return contexts
+
+        line_starts = [0]
+        for idx, ch in enumerate(content):
+            if ch == "\n":
+                line_starts.append(idx + 1)
+
+        def locate_line(pos: int) -> int:
+            lo, hi = 0, len(line_starts) - 1
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                if line_starts[mid] <= pos:
+                    lo = mid
+                else:
+                    hi = mid - 1
+            return lo
+
+        for pos in match_positions[:max_items]:
+            line_no = locate_line(pos)
+            line_start = line_starts[line_no]
+            line_end = line_starts[line_no + 1] - 1 if line_no + 1 < len(line_starts) else len(content)
+            line_text = content[line_start:line_end]
+            snippet_start = max(0, pos - context_chars)
+            snippet_end = min(len(content), pos + context_chars)
+            snippet = content[snippet_start:snippet_end].replace("\n", "\\n")
+            contexts.append({
+                "line": line_no,
+                "column": pos - line_start,
+                "line_text": line_text,
+                "snippet": snippet,
+            })
+        return contexts
+
+    @staticmethod
     def _apply_search_update(
         content: str,
         search_pattern: Optional[str],
         replacement: str,
+        replace_all: bool = False,
     ) -> Dict[str, Any]:
         """对文本内容执行搜索替换。
 
         规则：
         1. 如果 search_pattern 作为普通文本能直接命中，则按普通文本完全匹配替换；
-        2. 如果普通文本未命中，再尝试按正则表达式处理。
+        2. 如果普通文本未命中，再尝试按正则表达式处理；
+        3. 默认要求唯一匹配；多匹配时返回 MULTIPLE_MATCHES 错误，需显式 replace_all=True 才允许批量替换。
         """
         if not search_pattern:
-            return {
-                "status": "error",
-                "message": "搜索替换模式下必须提供 search_pattern",
-            }
+            return make_tool_error(
+                ToolErrorCode.INVALID_ARGUMENT,
+                "搜索替换模式下必须提供 search_pattern",
+            )
 
-        if search_pattern in content:
-            new_content = content.replace(search_pattern, replacement)
-            replace_count = content.count(search_pattern)
+        text_count = content.count(search_pattern) if search_pattern in content else 0
+        if text_count > 0:
             match_mode = "text"
+            if text_count > 1 and not replace_all:
+                positions: List[int] = []
+                start = 0
+                for _ in range(text_count):
+                    idx = content.find(search_pattern, start)
+                    if idx < 0:
+                        break
+                    positions.append(idx)
+                    start = idx + max(1, len(search_pattern))
+                return make_tool_error(
+                    ToolErrorCode.MULTIPLE_MATCHES,
+                    (
+                        f"search_pattern 在文件中命中 {text_count} 次，默认要求唯一匹配。"
+                        "请扩大 search_pattern 的上下文使其唯一，或显式设置 replace_all=true。"
+                    ),
+                    hint="扩大 search_pattern 上下文使其唯一，或对该 operation 设置 replace_all=true",
+                    match_mode=match_mode,
+                    match_count=text_count,
+                    matches=FileSystemTool._format_match_contexts(content, positions),
+                )
+            new_content = content.replace(search_pattern, replacement)
+            replace_count = text_count
         else:
-            pattern = re.compile(search_pattern)
+            try:
+                pattern = re.compile(search_pattern)
+            except re.error as exc:
+                return make_tool_error(
+                    ToolErrorCode.INVALID_ARGUMENT,
+                    f"search_pattern 不是有效的正则表达式: {exc}",
+                )
+            match_mode = "regex"
+            regex_matches = list(pattern.finditer(content))
+            regex_count = len(regex_matches)
+            if regex_count > 1 and not replace_all:
+                positions = [m.start() for m in regex_matches]
+                return make_tool_error(
+                    ToolErrorCode.MULTIPLE_MATCHES,
+                    (
+                        f"search_pattern 作为正则匹配命中 {regex_count} 次，默认要求唯一匹配。"
+                        "请使 search_pattern 更精确，或显式设置 replace_all=true。"
+                    ),
+                    hint="收紧正则使其唯一命中，或对该 operation 设置 replace_all=true",
+                    match_mode=match_mode,
+                    match_count=regex_count,
+                    matches=FileSystemTool._format_match_contexts(content, positions),
+                )
             # 对 replacement 中的反斜杠进行转义，避免被解释为正则替换模板
             # 例如 \s 会被替换为 \\s，这样在 subn 中会被正确处理为字面量 \s
             escaped_replacement = replacement.replace("\\", "\\\\")
             new_content, replace_count = pattern.subn(escaped_replacement, content)
-            match_mode = "regex"
 
         return {
             "status": "success",
@@ -118,22 +201,22 @@ class FileSystemTool:
         update_mode = op.get("update_mode")
 
         if update_mode not in (None, "search_replace", "line_range"):
-            return {
-                "status": "error",
-                "message": "update_mode 只能是 search_replace 或 line_range",
-            }
+            return make_tool_error(
+                ToolErrorCode.INVALID_ARGUMENT,
+                "update_mode 只能是 search_replace 或 line_range",
+            )
 
         if update_mode == "line_range" or has_start or has_end:
             if not (has_start and has_end):
-                return {
-                    "status": "error",
-                    "message": "按行替换时必须同时提供 start_line 和 end_line，且二者都为整数",
-                }
+                return make_tool_error(
+                    ToolErrorCode.INVALID_ARGUMENT,
+                    "按行替换时必须同时提供 start_line 和 end_line，且二者都为整数",
+                )
             if has_search:
-                return {
-                    "status": "error",
-                    "message": "按行替换模式下不要同时提供 search_pattern",
-                }
+                return make_tool_error(
+                    ToolErrorCode.INVALID_ARGUMENT,
+                    "按行替换模式下不要同时提供 search_pattern",
+                )
             return {
                 "status": "success",
                 "update_mode": "line_range",
@@ -141,25 +224,44 @@ class FileSystemTool:
 
         if update_mode == "search_replace" or has_search:
             if not has_search:
-                return {
-                    "status": "error",
-                    "message": "搜索替换时必须提供 search_pattern",
-                }
+                return make_tool_error(
+                    ToolErrorCode.INVALID_ARGUMENT,
+                    "搜索替换时必须提供 search_pattern",
+                )
             return {
                 "status": "success",
                 "update_mode": "search_replace",
             }
 
-        return {
-            "status": "error",
-            "message": "每个操作必须明确指定 search_pattern 或 start_line/end_line",
-        }
+        return make_tool_error(
+            ToolErrorCode.INVALID_ARGUMENT,
+            "每个操作必须明确指定 search_pattern 或 start_line/end_line",
+        )
 
     def _get_sandbox(self, session_id: str):
         """通过 session_id 获取沙箱。详见
         ``sagents.utils.agent_session_helper.get_session_sandbox``。
         """
         return _get_session_sandbox_util(session_id, log_prefix="FileSystemTool")
+
+    @staticmethod
+    async def _auto_lint(file_path: str, session_id: str, max_items: int = 20) -> Optional[Dict[str, Any]]:
+        """对刚写入的文件触发 lint，结果挂到上层返回。失败/跳过都返回结构化信息，从不抛异常。"""
+        if not file_path or not session_id:
+            return None
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext not in {".py", ".pyi", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".vue"}:
+            return None
+        if os.environ.get("SAGE_AUTO_LINT", "true").lower() == "false":
+            return None
+        try:
+            from .lint_tool import LintTool  # 本地引入避免循环依赖
+            lt = LintTool()
+            result = await lt.read_lints(paths=[file_path], max_diagnostics=max_items, session_id=session_id)
+            return result
+        except Exception as exc:
+            logger.warning(f"FileSystemTool: 自动 lint 失败 {file_path}: {exc}")
+            return {"status": "error", "reason": str(exc)}
 
     @tool(
         description_i18n={
@@ -237,13 +339,27 @@ class FileSystemTool:
                 "line_numbers_included": include_line_numbers,
             }
 
+        except FileNotFoundError as e:
+            logger.error(f"FileSystemTool: 读取文件失败 {file_path}: {e}")
+            return make_tool_error(
+                ToolErrorCode.NOT_FOUND,
+                f"读取文件失败: {str(e)}",
+                file_path=file_path,
+            )
+        except PermissionError as e:
+            logger.error(f"FileSystemTool: 读取文件失败 {file_path}: {e}")
+            return make_tool_error(
+                ToolErrorCode.PERMISSION_DENIED,
+                f"读取文件失败: {str(e)}",
+                file_path=file_path,
+            )
         except Exception as e:
             logger.error(f"FileSystemTool: 读取文件失败 {file_path}: {e}")
-            return {
-                "status": "error",
-                "message": f"读取文件失败: {str(e)}",
-                "file_path": file_path,
-            }
+            return make_tool_error(
+                ToolErrorCode.SANDBOX_ERROR,
+                f"读取文件失败: {str(e)}",
+                file_path=file_path,
+            )
 
     @tool(
         description_i18n={
@@ -338,22 +454,34 @@ class FileSystemTool:
                 await sandbox.write_file(file_path, content, mode="overwrite")
 
             validation = self._build_validation_result(file_path, final_content)
-            return {
+            lints = await self._auto_lint(file_path, session_id)
+            result: Dict[str, Any] = {
                 "status": "success",
+                "success": True,
                 "message": "文件写入成功" if validation.get("status") in {"passed", "skipped"} else "文件写入成功，但校验发现问题",
                 "file_path": file_path,
                 "content_length": len(content),
                 "mode": mode,
                 "validation": validation,
             }
+            if lints is not None:
+                result["lints"] = lints
+            return result
 
+        except PermissionError as e:
+            logger.error(f"FileSystemTool: 写入文件失败 {file_path}: {e}")
+            return make_tool_error(
+                ToolErrorCode.PERMISSION_DENIED,
+                f"写入文件失败: {str(e)}",
+                file_path=file_path,
+            )
         except Exception as e:
             logger.error(f"FileSystemTool: 写入文件失败 {file_path}: {e}")
-            return {
-                "status": "error",
-                "message": f"写入文件失败: {str(e)}",
-                "file_path": file_path,
-            }
+            return make_tool_error(
+                ToolErrorCode.SANDBOX_ERROR,
+                f"写入文件失败: {str(e)}",
+                file_path=file_path,
+            )
 
     @tool(
         description_i18n={
@@ -363,8 +491,8 @@ class FileSystemTool:
         param_description_i18n={
             "file_path": {"zh": "文件虚拟路径", "en": "File virtual path"},
             "operations": {
-                "zh": "替换操作列表。每项必须明确指定一种模式：search_replace 或 line_range。search_replace 只传 search_pattern + replacement；line_range 只传 start_line、end_line + replacement。按行替换时 start_line 和 end_line 都是包含边界（0-based），且二者必须同时提供。search_pattern 可以是普通文本，也可以是正则表达式；执行时会先按普通文本匹配，未命中再按正则处理。请不要用它整文件重写",
-                "en": "Replacement operations. Each item must explicitly choose one mode: search_replace or line_range. search_replace accepts only search_pattern + replacement; line_range accepts only start_line, end_line + replacement. For line-range mode, both start_line and end_line are inclusive (0-based) and must be provided together. search_pattern can be plain text or a regex; execution first tries plain-text matching, then falls back to regex if not found. Do not use it to rewrite the whole file",
+                "zh": "替换操作列表。每项必须明确指定一种模式：search_replace 或 line_range。search_replace 只传 search_pattern + replacement，默认要求 search_pattern 在文件中唯一命中，多匹配会返回 MULTIPLE_MATCHES 错误；如确需批量替换，对该 operation 显式设置 replace_all=true。line_range 只传 start_line、end_line + replacement。按行替换时 start_line 和 end_line 都是包含边界（0-based），且二者必须同时提供。search_pattern 可以是普通文本，也可以是正则表达式；执行时会先按普通文本匹配，未命中再按正则处理。请不要用它整文件重写",
+                "en": "Replacement operations. Each item must explicitly choose one mode: search_replace or line_range. search_replace accepts only search_pattern + replacement and by default REQUIRES the pattern to match uniquely in the file; multi-match returns MULTIPLE_MATCHES error. Set replace_all=true on the operation to opt-in batch replace. line_range accepts only start_line, end_line + replacement. For line-range mode, both start_line and end_line are inclusive (0-based) and must be provided together. search_pattern can be plain text or a regex; execution first tries plain-text matching, then falls back to regex if not found. Do not use it to rewrite the whole file",
             },
             "session_id": {"zh": "会话ID（必填，自动注入）", "en": "Session ID (Required, Auto-injected)"},
         },
@@ -396,6 +524,11 @@ class FileSystemTool:
                         "end_line": {
                             "type": "integer",
                             "description": "End line number (inclusive, 0-based) for line-range replacement. Use only when update_mode is line_range"
+                        },
+                        "replace_all": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Search-replace only. Default false: requires unique match; multi-match returns MULTIPLE_MATCHES error. Set true to allow replacing all occurrences."
                         },
                     },
                 },
@@ -457,32 +590,32 @@ class FileSystemTool:
 
             normalized_operations = [op for op in (operations or []) if isinstance(op, dict)]
             if not normalized_operations:
-                return {
-                    "status": "error",
-                    "message": "必须提供 operations，且每项必须是对象",
-                    "file_path": file_path,
-                }
+                return make_tool_error(
+                    ToolErrorCode.INVALID_ARGUMENT,
+                    "必须提供 operations，且每项必须是对象",
+                    file_path=file_path,
+                )
 
             line_range_ops = []
             other_ops = []
             for index, op in enumerate(normalized_operations):
                 if "replacement" not in op:
-                    return {
-                        "status": "error",
-                        "message": f"第 {index + 1} 个操作缺少 replacement",
-                        "file_path": file_path,
-                        "failed_operation_index": index,
-                    }
+                    return make_tool_error(
+                        ToolErrorCode.INVALID_ARGUMENT,
+                        f"第 {index + 1} 个操作缺少 replacement",
+                        file_path=file_path,
+                        failed_operation_index=index,
+                    )
 
                 op_summary = {"index": index}
                 mode_result = self._normalize_update_operation(op)
                 if mode_result["status"] == "error":
-                    return {
-                        "status": "error",
-                        "message": f"第 {index + 1} 个操作失败: {mode_result['message']}",
-                        "file_path": file_path,
-                        "failed_operation_index": index,
-                    }
+                    return make_tool_error(
+                        mode_result.get("error_code", ToolErrorCode.INVALID_ARGUMENT),
+                        f"第 {index + 1} 个操作失败: {mode_result['message']}",
+                        file_path=file_path,
+                        failed_operation_index=index,
+                    )
                 is_line_range = mode_result["update_mode"] == "line_range"
                 if is_line_range:
                     op_summary["start_line"] = op.get("start_line")
@@ -506,12 +639,12 @@ class FileSystemTool:
                     end_line=op.get("end_line"),
                 )
                 if step_result["status"] == "error":
-                    return {
-                        "status": "error",
-                        "message": f"第 {index + 1} 个操作失败: {step_result['message']}",
-                        "file_path": file_path,
-                        "failed_operation_index": index,
-                    }
+                    return make_tool_error(
+                        step_result.get("error_code", ToolErrorCode.INVALID_ARGUMENT),
+                        f"第 {index + 1} 个操作失败: {step_result['message']}",
+                        file_path=file_path,
+                        failed_operation_index=index,
+                    )
 
                 requested_start = op.get("start_line")
                 requested_end = op.get("end_line")
@@ -521,15 +654,15 @@ class FileSystemTool:
                     and requested_end >= requested_start
                     and step_result.get("lines_replaced", 0) == 0
                 ):
-                    return {
-                        "status": "error",
-                        "message": (
+                    return make_tool_error(
+                        ToolErrorCode.NO_MATCH,
+                        (
                             f"第 {index + 1} 个操作未替换任何行（start_line={requested_start}, end_line={requested_end}）。"
                             "当前工具使用 0-based 且 start_line/end_line 都是包含边界；请检查行号是否有效。"
                         ),
-                        "file_path": file_path,
-                        "failed_operation_index": index,
-                    }
+                        file_path=file_path,
+                        failed_operation_index=index,
+                    )
                 current_content = step_result["content"]
                 total_replacements += step_result["replacements"]
                 op_summary.update({
@@ -546,30 +679,39 @@ class FileSystemTool:
                     current_content,
                     search_pattern=op.get("search_pattern"),
                     replacement=op.get("replacement", ""),
+                    replace_all=bool(op.get("replace_all", False)),
                 )
                 if step_result["status"] == "error":
-                    return {
-                        "status": "error",
-                        "message": f"第 {index + 1} 个操作失败: {step_result['message']}",
+                    extras: Dict[str, Any] = {
                         "file_path": file_path,
                         "failed_operation_index": index,
                     }
+                    for key in ("match_count", "matches", "match_mode"):
+                        if key in step_result:
+                            extras[key] = step_result[key]
+                    return make_tool_error(
+                        step_result.get("error_code", ToolErrorCode.INVALID_ARGUMENT),
+                        f"第 {index + 1} 个操作失败: {step_result['message']}",
+                        hint=step_result.get("hint"),
+                        **extras,
+                    )
                 current_content = step_result["content"]
                 total_replacements += step_result["replacements"]
                 op_summary.update({
                     "update_mode": "search_replace",
                     "match_mode": step_result["match_mode"],
                     "replacements": step_result["replacements"],
+                    "replace_all": bool(op.get("replace_all", False)),
                 })
                 operation_summaries.append(op_summary)
 
             if total_replacements == 0 and not line_range_ops:
-                return {
-                    "status": "error",
-                    "message": "未找到匹配项，未进行任何替换",
-                    "replacements": 0,
-                    "file_path": file_path,
-                }
+                return make_tool_error(
+                    ToolErrorCode.NO_MATCH,
+                    "未找到匹配项，未进行任何替换",
+                    file_path=file_path,
+                    replacements=0,
+                )
 
             if total_replacements == 0 and line_range_ops:
                 validation = self._build_validation_result(file_path, current_content)
@@ -592,9 +734,11 @@ class FileSystemTool:
 
             await sandbox.write_file(file_path, current_content, mode="overwrite")
             validation = self._build_validation_result(file_path, current_content)
+            lints = await self._auto_lint(file_path, session_id)
 
             result = {
                 "status": "success",
+                "success": True,
                 "message": (
                     f"成功执行 {len(operation_summaries)} 个更新操作，共替换 {total_replacements} 处内容"
                     if validation.get("status") in {"passed", "skipped"}
@@ -615,13 +759,29 @@ class FileSystemTool:
                     "end_line": operation_summaries[0]["end_line"],
                     "lines_replaced": operation_summaries[0]["lines_replaced"],
                 })
+            if lints is not None:
+                result["lints"] = lints
 
             return result
 
+        except FileNotFoundError as e:
+            logger.error(f"FileSystemTool: 文件更新失败 {file_path}: {e}")
+            return make_tool_error(
+                ToolErrorCode.NOT_FOUND,
+                f"文件更新失败: {str(e)}",
+                file_path=file_path,
+            )
+        except PermissionError as e:
+            logger.error(f"FileSystemTool: 文件更新失败 {file_path}: {e}")
+            return make_tool_error(
+                ToolErrorCode.PERMISSION_DENIED,
+                f"文件更新失败: {str(e)}",
+                file_path=file_path,
+            )
         except Exception as e:
             logger.error(f"FileSystemTool: 文件更新失败 {file_path}: {e}")
-            return {
-                "status": "error",
-                "message": f"文件更新失败: {str(e)}",
-                "file_path": file_path,
-            }
+            return make_tool_error(
+                ToolErrorCode.SANDBOX_ERROR,
+                f"文件更新失败: {str(e)}",
+                file_path=file_path,
+            )

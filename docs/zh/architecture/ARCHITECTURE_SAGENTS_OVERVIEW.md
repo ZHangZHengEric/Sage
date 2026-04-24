@@ -148,12 +148,11 @@ flowchart TB
 - `sandbox_type` 优先级：参数 > `__init__` > `SAGE_SANDBOX_MODE` 环境变量 > 默认 `local`。
 - 不同沙箱模式对 `sandbox_agent_workspace` 的要求不同（local/passthrough 必填，remote 可由默认 `/sage-workspace` 兜底）。
 
-## 默认流程：三种 `agent_mode`
+## 默认流程：显式 `agent_mode`
 
 ```mermaid
 flowchart TB
-    Start([输入 messages]) --> Router[task_router]
-    Router --> DT{is_deep_thinking?}
+    Start([输入 messages]) --> DT{is_deep_thinking?}
     DT -->|是| Analysis[task_analysis] --> Sw
     DT -->|否| Sw
     Sw{agent_mode}
@@ -170,7 +169,7 @@ flowchart TB
 
 
 
-`task_router` 可以在运行期改写 `audit_status.agent_mode`，所以即使初始传 `simple`，路由后也可能切到 `multi` 或 `fibre`。逐节点细节见下一篇 [Agent 与 Flow 编排](ARCHITECTURE_SAGENTS_AGENT_FLOW.md)。
+`agent_mode` 由调用方或 UI 显式选择，默认流程里不再有运行期自动路由步骤。逐节点细节见下一篇 [Agent 与 Flow 编排](ARCHITECTURE_SAGENTS_AGENT_FLOW.md)。
 
 ## 模块之间是怎么协作的
 

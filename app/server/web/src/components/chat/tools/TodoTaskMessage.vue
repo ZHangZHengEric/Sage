@@ -19,29 +19,41 @@
 
       <!-- Tasks List -->
       <div v-if="tasks.length > 0" class="space-y-2">
-        <div 
-          v-for="(task, index) in tasks" 
-          :key="index" 
+        <div
+          v-for="(task, index) in tasks"
+          :key="index"
           class="flex items-start gap-3 p-2 rounded-md transition-colors hover:bg-muted/40"
           :class="{'opacity-60': task.status === 'completed'}"
         >
           <div class="pt-0.5 flex-shrink-0">
-            <div 
+            <div
               class="w-4 h-4 rounded border flex items-center justify-center transition-colors"
               :class="[
-                task.status === 'completed' 
-                  ? 'bg-primary border-primary text-primary-foreground' 
-                  : 'border-muted-foreground/40 bg-background'
+                task.status === 'completed'
+                  ? 'bg-primary border-primary text-primary-foreground'
+                  : task.status === 'in_progress'
+                    ? 'border-blue-500 bg-blue-500/10 text-blue-500'
+                    : 'border-muted-foreground/40 bg-background'
               ]"
             >
               <Check v-if="task.status === 'completed'" class="w-3 h-3" />
+              <Loader2 v-else-if="task.status === 'in_progress'" class="w-3 h-3 animate-spin" />
             </div>
           </div>
-          <span 
-            class="text-sm leading-tight break-words"
-            :class="{'line-through text-muted-foreground': task.status === 'completed'}"
+          <span
+            class="text-sm leading-tight break-words flex-1"
+            :class="{
+              'line-through text-muted-foreground': task.status === 'completed',
+              'text-blue-600 font-medium': task.status === 'in_progress'
+            }"
           >
             {{ task.name }}
+          </span>
+          <span
+            v-if="task.status === 'in_progress'"
+            class="text-[11px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-600 flex-shrink-0"
+          >
+            {{ t('workbench.tool.statusInProgress') || '开始执行' }}
           </span>
         </div>
       </div>
@@ -55,7 +67,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { ListTodo, Check } from 'lucide-vue-next'
+import { ListTodo, Check, Loader2 } from 'lucide-vue-next'
 import { useLanguage } from '@/utils/i18n.js'
 
 const props = defineProps({

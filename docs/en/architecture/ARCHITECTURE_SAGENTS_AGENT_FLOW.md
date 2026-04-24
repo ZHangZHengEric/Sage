@@ -37,8 +37,7 @@ Agents own no per-conversation state — that lives in `SessionContext` — so a
 
 ```mermaid
 flowchart TB
-    subgraph Routing & analysis
-        Router[task_router]
+    subgraph Analysis
         Analysis[task_analysis]
     end
 
@@ -71,7 +70,7 @@ flowchart TB
 
 
 
-Each agent's `agent_key` is how flow nodes reference it (e.g. `task_router`, `simple`, `task_planning`).
+Each agent's `agent_key` is how flow nodes reference it (e.g. `simple`, `task_planning`).
 
 ### 1.3 `FibreAgent` and Sub-agent Orchestration
 
@@ -165,8 +164,7 @@ What `SAgent._build_default_flow(agent_mode, max_loop_count)` actually builds:
 
 ```mermaid
 flowchart TB
-    Start([input messages]) --> R[task_router]
-    R --> DT{is_deep_thinking?}
+    Start([input messages]) --> DT{is_deep_thinking?}
     DT -->|yes| Ana[task_analysis] --> Sw
     DT -->|no| Sw
     Sw{Switch agent_mode}
@@ -275,7 +273,6 @@ from sagents.flow.schema import (
 custom_flow = AgentFlow(
     name="My Pipeline",
     root=SequenceNode(steps=[
-        AgentNode(agent_key="task_router"),
         IfNode(
             condition="user_paid",
             true_body=LoopNode(
