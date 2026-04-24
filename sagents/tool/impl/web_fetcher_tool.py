@@ -14,6 +14,7 @@ import aiohttp
 from typing import Dict, Any, List, Optional
 from urllib.parse import urlparse, unquote
 from ..tool_base import tool
+from ..error_codes import ToolErrorCode as _ToolErrorCode, make_tool_error as _make_tool_error
 from sagents.utils.logger import logger
 
 
@@ -79,18 +80,18 @@ class WebFetcherTool:
         if isinstance(urls, str):
             urls = [urls]
         elif not isinstance(urls, list):
-            return {
-                "status": "error",
-                "message": "urls参数必须是字符串或字符串列表",
-                "results": []
-            }
+            return _make_tool_error(
+                _ToolErrorCode.INVALID_ARGUMENT,
+                "urls参数必须是字符串或字符串列表",
+                results=[],
+            )
 
         if not urls:
-            return {
-                "status": "error",
-                "message": "URL列表不能为空",
-                "results": []
-            }
+            return _make_tool_error(
+                _ToolErrorCode.INVALID_ARGUMENT,
+                "URL列表不能为空",
+                results=[],
+            )
 
         # 获取工作空间路径
         workspace_path = self._get_workspace_path(session_id)

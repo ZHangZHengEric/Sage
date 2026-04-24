@@ -148,12 +148,11 @@ Constraints:
 - `sandbox_type` precedence: argument > `__init__` > `SAGE_SANDBOX_MODE` env > default `local`.
 - Sandbox modes have different `sandbox_agent_workspace` requirements (local/passthrough required; remote falls back to `/sage-workspace`).
 
-## Default Flow: the Three `agent_mode`s
+## Default Flow: explicit `agent_mode`s
 
 ```mermaid
 flowchart TB
-    Start([input messages]) --> Router[task_router]
-    Router --> DT{is_deep_thinking?}
+    Start([input messages]) --> DT{is_deep_thinking?}
     DT -->|yes| Analysis[task_analysis] --> Sw
     DT -->|no| Sw
     Sw{agent_mode}
@@ -170,7 +169,7 @@ flowchart TB
 
 
 
-`task_router` may rewrite `audit_status.agent_mode` at runtime, so even if `simple` is passed initially, the router may switch to `multi` or `fibre`. See [Agent & Flow Orchestration](ARCHITECTURE_SAGENTS_AGENT_FLOW.md) for node-by-node detail.
+`agent_mode` is selected explicitly by the caller or UI. There is no runtime auto-routing step in the default flow. See [Agent & Flow Orchestration](ARCHITECTURE_SAGENTS_AGENT_FLOW.md) for node-by-node detail.
 
 ## How the Modules Cooperate
 

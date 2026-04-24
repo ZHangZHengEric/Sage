@@ -77,7 +77,8 @@ def create_tool_proxy(available_tools: List[str]):
     from sagents.tool.tool_proxy import ToolProxy
 
     if not available_tools:
-        return ToolProxy(get_tool_manager(), [])
+        logger.info("初始化工具代理：未显式提供工具白名单，默认开放全部工具")
+        return ToolProxy(get_tool_manager(), None)
     logger.info(f"初始化工具代理，可用工具: {available_tools}")
     return ToolProxy(get_tool_manager(), available_tools)
 

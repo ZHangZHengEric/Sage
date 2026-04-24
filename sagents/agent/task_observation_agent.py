@@ -107,15 +107,20 @@ class TaskObservationAgent(AgentBase):
         # 重新获取最新的 todo_list (因为工具调用可能更新了它)
         latest_todo_list = session_context.system_context.get('todo_list', [])
         if latest_todo_list:
-            all_completed = all(todo.get('completed', False) for todo in latest_todo_list)
+            statuses = [todo.get('status') or 'pending' for todo in latest_todo_list]
+            all_completed = all(s == 'completed' for s in statuses)
             if all_completed:
                 logger.info(f"ObservationAgent: 检测到所有任务均已完成 (共 {len(latest_todo_list)} 个)")
                 session_context.audit_status['task_completed'] = True
             else:
                 session_context.audit_status['task_completed'] = False
-                # 计算完成进度
-                completed_count = sum(1 for todo in latest_todo_list if todo.get('completed', False))
-                logger.info(f"ObservationAgent: 任务进度: {completed_count}/{len(latest_todo_list)}")
+                completed_count = sum(1 for s in statuses if s == 'completed')
+                in_progress_count = sum(1 for s in statuses if s == 'in_progress')
+                pending_count = sum(1 for s in statuses if s == 'pending')
+                logger.info(
+                    f"ObservationAgent: 任务进度: {completed_count}/{len(latest_todo_list)} "
+                    f"(进行中: {in_progress_count}, 待办: {pending_count})"
+                )
 
     async def _call_llm_and_process_response(
         self, 

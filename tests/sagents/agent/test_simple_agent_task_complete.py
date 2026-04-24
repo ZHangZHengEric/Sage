@@ -63,12 +63,11 @@ async def test_not_must_continue_for_normal_assistant_message(monkeypatch):
     assert await agent._must_continue_by_rules(messages) is False
 
 
-# ---- 规则 3：由 SAGE_CONTINUE_ON_PROCESSING_KEYWORDS 控制 ----
+# ---- 关键词规则已移除：以下测试验证"中文关键词不再触发强制继续" ----
 
 @pytest.mark.asyncio
-async def test_keywords_rule_hits_by_default(monkeypatch):
-    """默认（env 未设）启用关键词规则，'正在处理' 命中必须继续。"""
-    monkeypatch.delenv("SAGE_CONTINUE_ON_PROCESSING_KEYWORDS", raising=False)
+async def test_processing_keyword_no_longer_forces_continue():
+    """'正在处理' 不再触发强制继续（关键词规则已下线）。"""
     agent = SimpleAgent(model=DummyModel(), model_config={})
     messages = [
         MessageChunk(
@@ -77,47 +76,18 @@ async def test_keywords_rule_hits_by_default(monkeypatch):
             message_type=MessageType.ASSISTANT_TEXT.value,
         ),
     ]
-    assert await agent._must_continue_by_rules(messages) is True
-
-
-@pytest.mark.asyncio
-async def test_keywords_rule_skipped_when_disabled(disable_keywords):
-    """env=false 时跳过关键词规则，'正在处理' 自述也不强制继续。"""
-    agent = SimpleAgent(model=DummyModel(), model_config={})
-    messages = [
-        MessageChunk(
-            role=MessageRole.ASSISTANT.value,
-            content='我正在处理这个请求',
-            message_type=MessageType.ASSISTANT_TEXT.value,
-        ),
-    ]
     assert await agent._must_continue_by_rules(messages) is False
 
 
 @pytest.mark.asyncio
-async def test_keywords_rule_skipped_but_rule4_still_fires(disable_keywords):
-    """关键词规则被跳过时，规则 4（冒号结尾）仍然生效。"""
+async def test_user_question_with_punctuation_does_not_force_continue():
+    """规则 4 不再对 USER 反问生效，避免被误判为继续。"""
     agent = SimpleAgent(model=DummyModel(), model_config={})
     messages = [
         MessageChunk(
-            role=MessageRole.ASSISTANT.value,
-            content='好的，先列出镜头：',
-            message_type=MessageType.ASSISTANT_TEXT.value,
+            role=MessageRole.USER.value,
+            content='你在处理什么？',
+            message_type=MessageType.USER_INPUT.value,
         ),
     ]
-    assert await agent._must_continue_by_rules(messages) is True
-
-
-@pytest.mark.asyncio
-async def test_keywords_rule_explicit_true_enables(monkeypatch):
-    """显式 env=true 同样启用关键词规则。"""
-    monkeypatch.setenv("SAGE_CONTINUE_ON_PROCESSING_KEYWORDS", "true")
-    agent = SimpleAgent(model=DummyModel(), model_config={})
-    messages = [
-        MessageChunk(
-            role=MessageRole.ASSISTANT.value,
-            content='正在处理中呢？',
-            message_type=MessageType.ASSISTANT_TEXT.value,
-        ),
-    ]
-    assert await agent._must_continue_by_rules(messages) is True
+    assert await agent._must_continue_by_rules(messages) is False
