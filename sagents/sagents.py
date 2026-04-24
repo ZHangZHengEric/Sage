@@ -293,16 +293,13 @@ class SAgent:
     def _build_default_flow(self, agent_mode: Optional[str], max_loop_count: int) -> AgentFlow:
         """构建默认的执行流程，兼容原有逻辑"""
         
-        # 1. 任务路由
-        steps = [AgentNode(agent_key="task_router")]
-        
-        # 2. 深度思考 (可选)
-        steps.append(IfNode(
+        # 1. 深度思考 (可选)
+        steps = [IfNode(
             condition="is_deep_thinking",
             true_body=AgentNode(agent_key="task_analysis")
-        ))
+        )]
         
-        # 3. 模式选择 (Switch)
+        # 2. 模式选择 (Switch)
         # 预定义多智能体循环体
         multi_agent_body = SequenceNode(steps=[
              AgentNode(agent_key="task_planning"),
@@ -370,11 +367,6 @@ class SAgent:
             ]),
         )
 
-        # 如果传入了 agent_mode，我们仍然使用 SwitchNode，因为 agent_mode 可能会在运行时被 Router 修改
-        # 但我们需要确保 agent_mode 的默认值被正确处理
-        # 这里 SwitchNode 的 variable 是 "agent_mode"，它会从 audit_status 或 system_context 中读取
-        # run_stream_with_flow 会将传入的 agent_mode 设置到 audit_status 中
-        
         steps.append(SwitchNode(
             variable="agent_mode",
             cases={
@@ -382,10 +374,10 @@ class SAgent:
                 "simple": simple_agent_body,
                 "multi": multi_agent_full
             },
-            default=simple_agent_body # 默认为 simple
+            default=simple_agent_body
         ))
-        
-        # 4. 更多建议 (可选)
+
+        # 3. 更多建议 (可选)
         steps.append(IfNode(
             condition="enable_more_suggest",
             true_body=AgentNode(agent_key="query_suggest")

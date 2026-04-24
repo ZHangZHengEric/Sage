@@ -19,7 +19,6 @@ from sagents.agent import (
     TaskExecutorAgent,
     TaskObservationAgent,
     TaskPlanningAgent,
-    TaskRouterAgent,
     TaskSummaryAgent,
     WorkflowSelectAgent,
     ToolSuggestionAgent,
@@ -107,7 +106,6 @@ class Session:
             "workflow_select": WorkflowSelectAgent,
             "query_suggest": QuerySuggestAgent,
             "tool_suggestion": ToolSuggestionAgent,
-            "task_router": TaskRouterAgent,
             "fibre": FibreAgent,
             "memory_recall": MemoryRecallAgent,
             "plan": PlanAgent,
@@ -645,11 +643,8 @@ class Session:
             session_context.audit_status.pop("self_check_summary", None)
             session_context.audit_status.pop("self_check_checked_files", None)
                 
-            # 2. 如果没有显式设置 agent_mode，可能需要通过 router 决定，但现在 Flow 逻辑应该包含 router
-            # 旧逻辑：先跑 router，然后根据结果设置 mode
-            # 新逻辑：Flow 中应该包含 router 节点，然后 Switch 节点根据上下文变量跳转
-            
-            # 为了支持动态设置工具，我们可能需要在 Flow 执行过程中动态调整
+            # 2. 准备工具白名单
+            # 这里直接按显式 agent_mode 收敛可用工具，不再经过自动路由分叉
             session_context.restrict_tools_for_mode(agent_mode)
             tool_manager = session_context.tool_manager
             

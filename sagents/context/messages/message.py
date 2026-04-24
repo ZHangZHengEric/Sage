@@ -48,7 +48,6 @@ class MessageType(Enum):
     SYSTEM = "system"
     QUERY_SUGGEST = "query_suggest"
     MEMORY_EXTRACTION = "memory_extraction"
-    TASK_ROUTER = "task_router"
     DO_SUBTASK_RESULT = "do_subtask_result"
 
     # 推理内容
