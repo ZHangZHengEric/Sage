@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Any, Dict, Optional
 
 from loguru import logger
@@ -91,7 +91,6 @@ async def record_session_execution(
         prompt_audio_tokens=_to_int(total_info.get("prompt_audio_tokens")),
         completion_audio_tokens=_to_int(total_info.get("completion_audio_tokens")),
         step_count=step_count,
-        usage_payload=token_usage,
         started_at=resolved_started_at,
         finished_at=resolved_finished_at,
     )
@@ -154,7 +153,6 @@ async def record_execution_payload(
         prompt_audio_tokens=_to_int(total_info.get("prompt_audio_tokens")),
         completion_audio_tokens=_to_int(total_info.get("completion_audio_tokens")),
         step_count=step_count,
-        usage_payload=token_usage,
         started_at=resolved_started_at,
         finished_at=resolved_finished_at,
     )
@@ -164,25 +162,39 @@ async def record_execution_payload(
         agent_id=record.agent_id,
         request_source=record.request_source,
     ).info(
-        f"token_usage payload 已落库: total_tokens={record.total_tokens}, steps={record.step_count}"
+        f"token_usage 已落库: total_tokens={record.total_tokens}, steps={record.step_count}"
     )
     return True
 
 
+def _date_start(value: Optional[date]) -> Optional[datetime]:
+    if value is None:
+        return None
+    return datetime.combine(value, time.min)
+
+
+def _date_end(value: Optional[date]) -> Optional[datetime]:
+    if value is None:
+        return None
+    return datetime.combine(value, time.max)
+
+
 async def get_token_usage_stats(
     *,
-    group_by: str,
+    dimension: str,
     user_id: Optional[str] = None,
     agent_id: Optional[str] = None,
     session_id: Optional[str] = None,
-    start_time: Optional[datetime] = None,
-    end_time: Optional[datetime] = None,
+    request_source: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
 ) -> Dict[str, Any]:
     return await TokenUsageDao().get_stats(
-        group_by=group_by,
+        dimension=dimension,
         user_id=user_id,
         agent_id=agent_id,
         session_id=session_id,
-        start_time=_to_local_datetime(start_time),
-        end_time=_to_local_datetime(end_time),
+        request_source=request_source,
+        start_time=_date_start(start_date),
+        end_time=_date_end(end_date),
     )

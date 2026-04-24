@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import JSON, DateTime, Index, Integer, String, func, select
+from sqlalchemy import DateTime, Index, Integer, String, func, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from common.models.base import Base, BaseDao, get_local_now
@@ -33,7 +33,6 @@ class TokenUsage(Base):
     prompt_audio_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     completion_audio_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     step_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    usage_payload: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=get_local_now)
@@ -54,7 +53,6 @@ class TokenUsage(Base):
         prompt_audio_tokens: int,
         completion_audio_tokens: int,
         step_count: int,
-        usage_payload: Dict[str, Any],
         started_at: datetime,
         finished_at: datetime,
         created_at: Optional[datetime] = None,
@@ -72,7 +70,6 @@ class TokenUsage(Base):
         self.prompt_audio_tokens = prompt_audio_tokens
         self.completion_audio_tokens = completion_audio_tokens
         self.step_count = step_count
-        self.usage_payload = usage_payload
         self.started_at = started_at
         self.finished_at = finished_at
         self.created_at = created_at or get_local_now()
@@ -85,22 +82,23 @@ class TokenUsageDao(BaseDao):
     async def get_stats(
         self,
         *,
-        group_by: str,
+        dimension: str,
         user_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         session_id: Optional[str] = None,
+        request_source: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         dimension_map = {
-            "user": ("user_id", TokenUsage.user_id),
             "agent": ("agent_id", TokenUsage.agent_id),
+            "user": ("user_id", TokenUsage.user_id),
             "session": ("session_id", TokenUsage.session_id),
         }
-        if group_by not in dimension_map:
-            raise ValueError(f"Unsupported group_by: {group_by}")
+        if dimension not in dimension_map:
+            raise ValueError(f"Unsupported dimension: {dimension}")
 
-        dimension_key, dimension_column = dimension_map[group_by]
+        dimension_key, dimension_column = dimension_map[dimension]
         where = []
         if user_id is not None:
             where.append(TokenUsage.user_id == user_id)
@@ -108,6 +106,8 @@ class TokenUsageDao(BaseDao):
             where.append(TokenUsage.agent_id == agent_id)
         if session_id is not None:
             where.append(TokenUsage.session_id == session_id)
+        if request_source is not None:
+            where.append(TokenUsage.request_source == request_source)
         if start_time is not None:
             where.append(TokenUsage.finished_at >= start_time)
         if end_time is not None:
@@ -119,9 +119,8 @@ class TokenUsageDao(BaseDao):
                 func.coalesce(func.sum(TokenUsage.input_tokens), 0).label("input_tokens"),
                 func.coalesce(func.sum(TokenUsage.output_tokens), 0).label("output_tokens"),
                 func.coalesce(func.sum(TokenUsage.total_tokens), 0).label("total_tokens"),
-                func.count(TokenUsage.id).label("execution_count"),
-                func.coalesce(func.sum(TokenUsage.cached_tokens), 0).label("cached_tokens"),
-                func.coalesce(func.sum(TokenUsage.reasoning_tokens), 0).label("reasoning_tokens"),
+                func.count(func.distinct(TokenUsage.session_id)).label("session_count"),
+                func.coalesce(func.sum(TokenUsage.step_count), 0).label("model_call_count"),
             )
             for cond in where:
                 summary_stmt = summary_stmt.where(cond)
@@ -133,11 +132,14 @@ class TokenUsageDao(BaseDao):
                     func.coalesce(func.sum(TokenUsage.input_tokens), 0).label("input_tokens"),
                     func.coalesce(func.sum(TokenUsage.output_tokens), 0).label("output_tokens"),
                     func.coalesce(func.sum(TokenUsage.total_tokens), 0).label("total_tokens"),
-                    func.count(TokenUsage.id).label("execution_count"),
-                    func.coalesce(func.sum(TokenUsage.cached_tokens), 0).label("cached_tokens"),
-                    func.coalesce(func.sum(TokenUsage.reasoning_tokens), 0).label("reasoning_tokens"),
-                    func.min(TokenUsage.finished_at).label("first_seen_at"),
-                    func.max(TokenUsage.finished_at).label("last_seen_at"),
+                    func.count(func.distinct(TokenUsage.session_id)).label("session_count"),
+                    func.coalesce(func.sum(TokenUsage.step_count), 0).label("model_call_count"),
+                    func.min(TokenUsage.started_at).label("started_at"),
+                    func.max(TokenUsage.finished_at).label("finished_at"),
+                    func.min(TokenUsage.user_id).label("resolved_user_id"),
+                    func.count(func.distinct(TokenUsage.user_id)).label("user_count"),
+                    func.min(TokenUsage.agent_id).label("resolved_agent_id"),
+                    func.count(func.distinct(TokenUsage.agent_id)).label("agent_count"),
                 )
                 .group_by(dimension_column)
                 .order_by(
@@ -151,30 +153,46 @@ class TokenUsageDao(BaseDao):
 
         items: List[Dict[str, Any]] = []
         for row in item_rows:
+            item_user_id = ""
+            item_agent_id = ""
+            item_session_id = ""
+            if dimension == "user":
+                item_user_id = str(row[dimension_key] or "")
+            elif dimension == "agent":
+                item_agent_id = str(row[dimension_key] or "")
+            else:
+                item_session_id = str(row[dimension_key] or "")
+                if int(row["user_count"] or 0) == 1:
+                    item_user_id = str(row["resolved_user_id"] or "")
+                if int(row["agent_count"] or 0) == 1:
+                    item_agent_id = str(row["resolved_agent_id"] or "")
+
             item = {
-                "user_id": None,
-                "agent_id": None,
-                "session_id": None,
+                "agent_id": item_agent_id,
+                "user_id": item_user_id,
+                "session_id": item_session_id,
+                "session_count": int(row["session_count"] or 0),
                 "input_tokens": int(row["input_tokens"] or 0),
                 "output_tokens": int(row["output_tokens"] or 0),
                 "total_tokens": int(row["total_tokens"] or 0),
-                "execution_count": int(row["execution_count"] or 0),
-                "cached_tokens": int(row["cached_tokens"] or 0),
-                "reasoning_tokens": int(row["reasoning_tokens"] or 0),
-                "first_seen_at": row["first_seen_at"],
-                "last_seen_at": row["last_seen_at"],
+                "model_call_count": int(row["model_call_count"] or 0),
+                "started_at": row["started_at"],
+                "finished_at": row["finished_at"],
             }
-            item[dimension_key] = row[dimension_key]
             items.append(item)
 
+        summary_session_count = int(summary_row["session_count"] or 0)
+        summary_total_tokens = int(summary_row["total_tokens"] or 0)
         return {
             "summary": {
                 "input_tokens": int(summary_row["input_tokens"] or 0),
                 "output_tokens": int(summary_row["output_tokens"] or 0),
-                "total_tokens": int(summary_row["total_tokens"] or 0),
-                "execution_count": int(summary_row["execution_count"] or 0),
-                "cached_tokens": int(summary_row["cached_tokens"] or 0),
-                "reasoning_tokens": int(summary_row["reasoning_tokens"] or 0),
+                "total_tokens": summary_total_tokens,
+                "session_count": summary_session_count,
+                "average_tokens_per_session": (
+                    summary_total_tokens / summary_session_count if summary_session_count else 0
+                ),
+                "model_call_count": int(summary_row["model_call_count"] or 0),
             },
             "items": items,
         }
