@@ -50,6 +50,7 @@ WHITELIST_API_PATHS = frozenset(
         "/api/system/version/latest",
         "/api/share/conversations/{conversation_id}/messages",
         "/api/mcp/anytool/AnyTool"
+        "/api/token-usage/stats",
     }
 )
 
