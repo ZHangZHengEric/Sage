@@ -23,9 +23,10 @@ import re
 import shutil
 import sys
 import asyncio
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ..._stdout_echo import echo_chunk
+from ..._bg_runner import HostBackgroundRunner
 from ...interface import (
     ISandboxHandle,
     SandboxType,
@@ -76,6 +77,9 @@ class LocalSandboxProvider(ISandboxHandle):
         self._isolation = None
         # venv 目录
         self._venv_dir = None
+        # 跨平台后台进程运行器（local 沙箱的后台命令直接走主机进程，
+        # 不进 bwrap/seatbelt，方便长跑任务管理）
+        self._bg_runner = HostBackgroundRunner()
 
     async def _ensure_initialized(self):
         """确保沙箱已初始化"""
@@ -310,6 +314,39 @@ class LocalSandboxProvider(ISandboxHandle):
         """清理本地沙箱资源"""
         # 本地沙箱不需要特殊清理
         pass
+
+    # ===== 跨平台后台命令原语（POSIX + Windows） =====
+
+    def supports_background(self) -> bool:
+        return True
+
+    async def start_background(
+        self,
+        command: str,
+        workdir: Optional[str] = None,
+        env_vars: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        await self._ensure_initialized_async()
+        converted = self._convert_paths_in_command(command)
+        host_workdir = (
+            self.to_host_path(workdir) if workdir else self.to_host_path(self._sandbox_agent_workspace)
+        )
+        return self._bg_runner.start(converted, workdir=host_workdir, env_vars=env_vars)
+
+    async def read_background_output(self, task_id: str, max_bytes: int = 8192) -> str:
+        return self._bg_runner.read_tail(task_id, max_bytes=max_bytes)
+
+    async def is_background_alive(self, task_id: str) -> bool:
+        return self._bg_runner.is_alive(task_id)
+
+    async def get_background_exit_code(self, task_id: str) -> Optional[int]:
+        return self._bg_runner.get_exit_code(task_id)
+
+    async def kill_background(self, task_id: str, force: bool = False) -> bool:
+        return self._bg_runner.kill(task_id, force=force)
+
+    async def cleanup_background(self, task_id: str) -> None:
+        self._bg_runner.cleanup(task_id)
 
     def add_allowed_paths(self, paths: List[str]) -> None:
         """添加允许访问的路径列表"""

@@ -2,6 +2,7 @@
 import asyncio
 import time
 import threading
+import uuid
 from typing import Dict, Any, Optional, List, Union
 from enum import Enum
 from concurrent.futures import ThreadPoolExecutor
@@ -24,6 +25,7 @@ import datetime
 import pytz
 from sagents.utils.sandbox import SandboxProviderFactory, SandboxConfig, SandboxType
 from sagents.utils.sandbox.config import VolumeMount
+from sagents.utils.common_utils import detect_machine_environment
 
 _session_context_file_io_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="session-context-io")
 
@@ -153,6 +155,9 @@ class SessionContext:
         self.child_session_ids: List[str] = []
         self.execution_timeline_events: List[Dict[str, Any]] = []
         self._message_timing: Dict[str, Dict[str, Any]] = {}
+        # per-request tokens 累加器（详见 start_request / end_request / add_llm_request）
+        self._current_request: Optional[Dict[str, Any]] = None
+        self._request_lock = threading.Lock()
         self.record_timing_event(
             "session_start",
             status=self.status.value,
@@ -587,6 +592,11 @@ class SessionContext:
             self.system_context['user_id'] = self.user_id
         # 设置会话ID
         self.system_context['session_id'] = self.session_id
+        # 设置机器运行环境摘要
+        self.system_context['machine_environment'] = detect_machine_environment(
+            sandbox=self.sandbox,
+            sandbox_agent_workspace=self.sandbox_agent_workspace,
+        )
         # 设置文件权限路径  
         permission_paths = [self.system_context['private_workspace']]
         logger.debug(f"self.external_paths: {self.external_paths}")
@@ -908,7 +918,12 @@ class SessionContext:
                 self._refresh_file_permission()
 
     def add_llm_request(self, request: Dict[str, Any], response: Optional[Dict[str, Any]]):
-        """添加LLM请求并异步保存到文件"""
+        """添加LLM请求并异步保存到文件。
+
+        若处于 ``start_request`` / ``end_request`` 之间，会同时把本次 LLM 调用
+        的 usage / 时延累加到 ``self._current_request``，最终在 ``end_request``
+        时序列化到 ``<session_workspace>/tokens_usage/<request_id>.json``。
+        """
         logger.debug(f"SessionContext: Adding LLM request to session {self.session_id}, step: {request.get('step_name')}")
 
         llm_request = {
@@ -919,8 +934,146 @@ class SessionContext:
         self.llm_requests_logs.append(llm_request)
         logger.debug(f"SessionContext: Current llm_requests_logs count for session {self.session_id}: {len(self.llm_requests_logs)}")
 
+        try:
+            self._accumulate_request_usage(request, response)
+        except Exception as exc:
+            logger.warning(f"SessionContext: 累加 per-request usage 失败: {exc}")
+
         # 异步保存日志，不阻塞主流程
         asyncio.create_task(self._async_save_llm_request(llm_request))
+
+    def start_request(self, metadata: Optional[Dict[str, Any]] = None) -> str:
+        """开启一次"用户请求"窗口；返回 request_id。
+
+        线程安全：同一 session 不允许嵌套 request；如已有未关闭的 request
+        会先把它结掉（status=interrupted）再开启新的。
+        """
+        with self._request_lock:
+            if self._current_request is not None:
+                logger.warning(
+                    f"SessionContext: start_request 检测到上一个 request 未结束，自动收尾"
+                    f" prev_id={self._current_request.get('request_id')}"
+                )
+                try:
+                    self._finalize_current_request("interrupted")
+                except Exception:
+                    self._current_request = None
+
+            request_id = "req_" + uuid.uuid4().hex[:12]
+            now = time.time()
+            self._current_request = {
+                "request_id": request_id,
+                "session_id": self.session_id,
+                "started_at": now,
+                "ended_at": None,
+                "status": "running",
+                "agent_mode": (metadata or {}).get("agent_mode"),
+                "model": (metadata or {}).get("model"),
+                "metadata": metadata or {},
+                "total_usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "cached_tokens": 0,
+                    "reasoning_tokens": 0,
+                },
+                "per_call": [],
+            }
+            return request_id
+
+    def end_request(self, status: str = "completed") -> Optional[str]:
+        """结束当前 request 窗口，把累加器序列化到 tokens_usage 目录。
+
+        Returns:
+            落盘文件路径；若没有活跃 request 则返回 None。
+        """
+        with self._request_lock:
+            return self._finalize_current_request(status)
+
+    def _finalize_current_request(self, status: str) -> Optional[str]:
+        cur = self._current_request
+        if cur is None:
+            return None
+        self._current_request = None
+        cur["ended_at"] = time.time()
+        cur["duration_sec"] = max(0.0, cur["ended_at"] - cur["started_at"])
+        cur["status"] = status
+        try:
+            target_dir = os.path.join(self.session_workspace, "tokens_usage")
+            os.makedirs(target_dir, exist_ok=True)
+            file_path = os.path.join(target_dir, f"{cur['request_id']}.json")
+            payload = make_serializable(cur)
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            logger.info(
+                f"SessionContext: tokens_usage saved request_id={cur['request_id']} "
+                f"calls={len(cur['per_call'])} total_tokens={cur['total_usage'].get('total_tokens')}"
+            )
+            return file_path
+        except Exception as exc:
+            logger.error(f"SessionContext: 落盘 tokens_usage 失败: {exc}")
+            return None
+
+    def _accumulate_request_usage(
+        self,
+        request: Dict[str, Any],
+        response: Optional[Dict[str, Any]],
+    ) -> None:
+        cur = self._current_request
+        if cur is None:
+            return
+        response_dict = make_serializable(response) if response is not None else None
+        usage = (response_dict or {}).get("usage") if isinstance(response_dict, dict) else None
+
+        # 提取 cached / reasoning 等子项，便于汇总
+        cached_tokens = 0
+        reasoning_tokens = 0
+        if isinstance(usage, dict):
+            prompt_details = usage.get("prompt_tokens_details") or {}
+            if isinstance(prompt_details, dict):
+                v = prompt_details.get("cached_tokens")
+                if isinstance(v, (int, float)):
+                    cached_tokens = int(v)
+            completion_details = usage.get("completion_tokens_details") or {}
+            if isinstance(completion_details, dict):
+                v = completion_details.get("reasoning_tokens")
+                if isinstance(v, (int, float)):
+                    reasoning_tokens = int(v)
+
+        # model 优先级：request["model"] > request["model_config"]["model"] > response.model
+        mc = request.get("model_config") if isinstance(request.get("model_config"), dict) else None
+        resolved_model = (
+            request.get("model")
+            or (mc.get("model") if mc else None)
+            or (response_dict.get("model") if isinstance(response_dict, dict) else None)
+        )
+        call_entry = {
+            "index": len(cur["per_call"]),
+            "step_name": request.get("step_name"),
+            "model": resolved_model,
+            "started_at": request.get("started_at"),
+            "first_token_time": request.get("first_token_time"),
+            "ttfb_sec": request.get("ttfb_sec"),
+            "duration_sec": request.get("duration_sec"),
+            "usage": usage,
+            "cached_tokens": cached_tokens,
+            "reasoning_tokens": reasoning_tokens,
+        }
+        cur["per_call"].append(call_entry)
+
+        # 累加 total_usage
+        total = cur["total_usage"]
+        if isinstance(usage, dict):
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                v = usage.get(key)
+                if isinstance(v, (int, float)):
+                    total[key] = total.get(key, 0) + int(v)
+        total["cached_tokens"] = total.get("cached_tokens", 0) + cached_tokens
+        total["reasoning_tokens"] = total.get("reasoning_tokens", 0) + reasoning_tokens
+
+        # 同步给前端方便对账：取首个 model 作为 request 的代表 model
+        if not cur.get("model") and call_entry.get("model"):
+            cur["model"] = call_entry["model"]
 
     async def _async_save_llm_request(self, llm_request: Dict[str, Any]):
         """异步保存单个LLM请求到文件"""
@@ -957,8 +1110,24 @@ class SessionContext:
             logger.error(f"SessionContext: Failed to async save LLM request: {e}")
 
     def get_tokens_usage_info(self):
-        """获取tokens使用信息"""
+        """获取tokens使用信息
+
+        - per_step_info 每条带 ``model`` 字段（来自 request.model > request.model_config.model > response.model）
+        - total_info 末尾追加 ``model``（首个非空 model）和 ``models``（去重保序的 model 列表）
+        - 没有任何 LLM 调用时也返回稳定结构（``total_info``/``per_step_info``/``models`` 都存在）
+        """
         tokens_info = {"total_info": {}, "per_step_info": []}
+        models_seen: List[str] = []
+
+        def _resolve_model(req: Dict[str, Any], resp_dict: Optional[Dict[str, Any]]) -> Optional[str]:
+            req = req or {}
+            mc = req.get("model_config") if isinstance(req.get("model_config"), dict) else None
+            return (
+                req.get("model")
+                or (mc.get("model") if mc else None)
+                or ((resp_dict or {}).get("model") if isinstance(resp_dict, dict) else None)
+            )
+
         for i, llm_request in enumerate(self.llm_requests_logs):
             raw_response = llm_request['response']
             if raw_response and hasattr(raw_response, 'usage'):
@@ -967,10 +1136,17 @@ class SessionContext:
             response_dict = make_serializable(raw_response)
             if not isinstance(response_dict, dict):
                 continue
+
+            request_dict = llm_request.get("request") or {}
+            step_model = _resolve_model(request_dict, response_dict)
+            if step_model and step_model not in models_seen:
+                models_seen.append(step_model)
+
             if 'usage' in response_dict and response_dict['usage']:
                 usage = response_dict['usage']
                 step_info = {
-                    "step_name": (llm_request.get("request") or {}).get("step_name", "unknown"),
+                    "step_name": request_dict.get("step_name", "unknown"),
+                    "model": step_model,
                     "usage": usage,
                 }
                 tokens_info["per_step_info"].append(step_info)
@@ -1015,11 +1191,18 @@ class SessionContext:
                 # 流式响应可能没有 usage 字段，记录提示
                 logger.info(f"get_tokens_usage_info: no usage in response_dict, keys={response_dict.keys()}")
                 step_info = {
-                    "step_name": (llm_request.get("request") or {}).get("step_name", "unknown"),
+                    "step_name": request_dict.get("step_name", "unknown"),
+                    "model": step_model,
                     "usage": None,
                     "note": "Stream response does not include token usage"
                 }
                 tokens_info["per_step_info"].append(step_info)
+
+        # 在 total_info 中追加 model 信息，方便前端/统计直接使用
+        tokens_info["models"] = models_seen
+        if models_seen:
+            tokens_info["total_info"]["model"] = models_seen[0]
+            tokens_info["total_info"]["models"] = models_seen
         logger.debug(f"get_tokens_usage_info: final tokens_info={tokens_info}")
         return tokens_info
 

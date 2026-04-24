@@ -881,7 +881,7 @@ import { toast } from 'vue-sonner'
 import { 
   Loader, ChevronLeft, ChevronRight, ChevronDown, Save, Check, Plus, Trash2, 
   Sparkles, Bot, Wrench, Search, Server, Code, User, Cpu, Database, Workflow,
-  FileText, X, Image as ImageIcon, RefreshCw, Shield
+  FileText, X, Image as ImageIcon, RefreshCw, Shield, Globe
 } from 'lucide-vue-next'
 
 // UI Components
@@ -1415,7 +1415,9 @@ const getToolSourceLabel = (source) => {
     '内置工具': 'tools.source.builtin',
     'Built-in Tools': 'tools.source.builtin',
     '系统工具': 'tools.source.system',
-    'System Tools': 'tools.source.system'
+    'System Tools': 'tools.source.system',
+    '浏览器扩展': 'tools.source.browserExtension',
+    'Browser Extension': 'tools.source.browserExtension'
   }
   const translationKey = sourceMapping[displaySource]
   return translationKey ? t(translationKey) : displaySource
@@ -1423,6 +1425,7 @@ const getToolSourceLabel = (source) => {
 
 const getGroupIcon = (source) => {
   if (source.includes('MCP')) return Server
+  if (['浏览器扩展', 'Browser Extension'].includes(source)) return Globe
   if (['基础工具', '内置工具', '系统工具', 'Basic Tools', 'Built-in Tools', 'System Tools'].includes(source)) return Code
   return Wrench
 }

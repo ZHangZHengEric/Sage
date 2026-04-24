@@ -38,6 +38,8 @@ async def verify_multimodal(data: LLMProviderCreate):
     """
     try:
         result = await llm_provider_service.verify_multimodal(data)
+        if not result["supports_multimodal"]:
+            return await Response.succ(message="该模型不支持多模态", data=result)
         return await Response.succ(
             message="多模态验证成功，模型正确识别了图片内容" if result["recognized"] else "模型支持多模态但未能正确识别图片内容",
             data=result,

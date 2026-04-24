@@ -36,6 +36,23 @@ class ToolProxy:
             if invalid_tools:
                 logger.warning(f"ToolProxy: 以下工具不存在: {invalid_tools}")
                 self._available_tools -= invalid_tools
+
+            # 强制注入：finish_turn 是 agent 终止协议的一部分，无论上游 availableTools
+            # 是否勾选都必须可用，否则模型只能退化到旧的 LLM 完成判定。前端列表里隐藏即可。
+            import os as _os
+            if _os.environ.get("SAGE_FINISH_TURN_TOOL_ENABLED", "true").lower() != "false":
+                if "finish_turn" in all_tools_names:
+                    self._available_tools.add("finish_turn")
+
+            # 工具捆绑组：组内任何一个被勾选，组内全部解锁（共享后台任务注册表，缺一个就废）。
+            _TOOL_BUNDLES: List[set] = [
+                {"execute_shell_command", "await_shell", "kill_shell"},
+            ]
+            for bundle in _TOOL_BUNDLES:
+                if self._available_tools & bundle:
+                    for name in bundle:
+                        if name in all_tools_names:
+                            self._available_tools.add(name)
     
     def _check_tool_available(self, tool_name: str) -> None:
         """
@@ -61,8 +78,14 @@ class ToolProxy:
                 name = tool['function']['name']
                 if self._available_tools is None or name in self._available_tools:
                     all_tools_map[name] = tool
-                    
-        return list(all_tools_map.values())
+
+        # 与 ToolManager.get_openai_tools 保持一致：按 function.name 字典序排序，
+        # 使 tools 字段在多次调用间稳定，提升 prompt cache 命中率。
+        import os as _os
+        ordered = list(all_tools_map.values())
+        if _os.environ.get("SAGE_STABLE_TOOLS_ORDER", "true").lower() != "false":
+            ordered.sort(key=lambda t: ((t.get("function") or {}).get("name") or ""))
+        return ordered
     
     def list_tools_simplified(self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """

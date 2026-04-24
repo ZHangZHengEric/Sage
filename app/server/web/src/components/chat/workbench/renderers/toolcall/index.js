@@ -9,3 +9,6 @@ export { default as CodeExecutionToolRenderer } from './CodeExecutionToolRendere
 export { default as SearchWebPageToolRenderer } from './SearchWebPageToolRenderer.vue'
 export { default as SearchImageFromWebToolRenderer } from './SearchImageFromWebToolRenderer.vue'
 export { default as CompressHistoryToolRenderer } from './CompressHistoryToolRenderer.vue'
+export { default as GrepToolRenderer } from './GrepToolRenderer.vue'
+export { default as GlobToolRenderer } from './GlobToolRenderer.vue'
+export { default as ListDirToolRenderer } from './ListDirToolRenderer.vue'

@@ -762,6 +762,12 @@ export default {
   'tools.fetchWebpage': '抓取网页',
   'tools.webFetcher': '网页抓取',
   'tools.questionnaire': '信息收集',
+  'tools.finishTurn': '结束本轮',
+  'tools.readLints': '代码 Lint',
+  'tools.awaitShell': '等待命令',
+  'tools.killShell': '终止命令',
+  'tools.grep': '代码搜索',
+  'tools.glob': '文件查找',
   'tools.default': '工具执行',
 
   // 角色标签
@@ -797,6 +803,7 @@ export default {
   'tools.source.basic': '基础工具',
   'tools.source.builtin': '内置工具',
   'tools.source.system': '系统工具',
+  'tools.source.browserExtension': '浏览器扩展',
   'tools.sourceGroups': '来源分组',
   'tools.builtinMCP': '内置MCP',
   'tools.externalMCP': '外部MCP',

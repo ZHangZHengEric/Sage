@@ -11,6 +11,9 @@ from .browser_bridge import BrowserBridgeHub
 class BrowserBridgeTool:
     """Built-in browser tools backed by Chrome extension bridge."""
 
+    # 让 ToolManager 把这组工具单独归到 "浏览器扩展" 来源，避免与基础工具混在一起。
+    TOOL_CATEGORY = "browser"
+
     TOOL_NAMES = [
         "browser_get_context",
         "browser_navigate",

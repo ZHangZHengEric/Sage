@@ -30,6 +30,13 @@ import subprocess
 MAX_TOOL_RESULT_TOKENS = 12000
 
 
+# `ToolSpec.category` → 前端展示的 source 标签映射。前端按 source 分组，并通过
+# locale (tools.source.*) 翻译显示文案。新增工具组时在这里登记一行即可。
+_CATEGORY_SOURCE_LABELS: Dict[str, str] = {
+    "browser": "浏览器扩展",
+}
+
+
 def _truncate_result(result: str, max_tokens: int = MAX_TOOL_RESULT_TOKENS) -> str:
     """截断工具返回结果，限制在最大 token 数内
     
@@ -393,6 +400,7 @@ class ToolManager:
                     continue
                 owner_module = getattr(func, "_tool_owner_module", None)
                 owner_qualname = getattr(func, "_tool_owner_qualname", None)
+                owner_cls = None
                 if owner_module and owner_qualname:
                     module = sys.modules.get(owner_module)
                     if module is None:
@@ -408,6 +416,13 @@ class ToolManager:
                                 break
                         if isinstance(target, type):
                             func.__objclass__ = target
+                            owner_cls = target
+                # 宿主类 TOOL_CATEGORY 回填：装饰器没显式声明 category 时，沿用宿主类的标签。
+                # 这里要在 register_tool 之前完成，因为同名同优先级会被 register_tool 保留旧值。
+                if owner_cls is not None and not getattr(tool_spec, "category", None):
+                    cls_category = getattr(owner_cls, "TOOL_CATEGORY", None)
+                    if cls_category:
+                        tool_spec.category = cls_category
                 if self.register_tool(tool_spec):
                     count += 1
         logger.debug(f"Registered {count} tools from package_path")
@@ -429,7 +444,12 @@ class ToolManager:
         
         registered_tools = []
         logger.debug(f"Discovering tools from object: {obj}")
-        
+
+        # 类级别的 TOOL_CATEGORY 标签会回填到每个 ToolSpec.category（仅当装饰器
+        # 没有显式覆写 category 时），让宿主类一次性把整组工具归入同一来源。
+        owner_cls = obj if inspect.isclass(obj) else type(obj)
+        owner_category: Optional[str] = getattr(owner_cls, "TOOL_CATEGORY", None)
+
         # Iterate over all members of the object
         for name, member in inspect.getmembers(obj):
             # Check if member has _tool_spec (added by @tool decorator)
@@ -461,7 +481,11 @@ class ToolManager:
                         # If member is not bound but obj is instance, it might be a staticmethod or we need to bind it manually?
                         # inspect.getmembers on instance returns bound methods for regular methods.
                         new_spec.func = member
-                        
+
+                    # 宿主类的 TOOL_CATEGORY 兜底注入，装饰器显式声明的优先
+                    if owner_category and not getattr(new_spec, "category", None):
+                        new_spec.category = owner_category
+
                     self.register_tool(new_spec)
                     registered_tools.append(new_spec.name)
                 except Exception as e:
@@ -827,7 +851,13 @@ class ToolManager:
                 source = f"内置MCP: {tool.server_name}"
             elif isinstance(tool, ToolSpec):
                 tool_type = "basic"
-                source = "基础工具"
+                # category 由 @tool(category=...) 或宿主类 TOOL_CATEGORY 显式声明，
+                # 用来把同一组工具归到独立的 source 下展示，避免和"基础工具"混在一起。
+                category = getattr(tool, "category", None)
+                if category:
+                    source = _CATEGORY_SOURCE_LABELS.get(category, f"分类: {category}")
+                else:
+                    source = "基础工具"
             else:
                 tool_type = "unknown"
                 source = "未知来源"
@@ -848,13 +878,20 @@ class ToolManager:
         return tools_with_type
 
     def get_openai_tools(self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-        """Get OpenAI-compatible function specs, localized via convert_spec_to_openai_format"""
+        """Get OpenAI-compatible function specs, localized via convert_spec_to_openai_format.
+
+        ``tools`` 字段顺序参与多家 provider（Anthropic / 阿里云）的 prompt cache key，
+        这里强制按 ``function.name`` 字典序排序，避免不同调用顺序导致 cache 频繁
+        失效。可通过环境变量 ``SAGE_STABLE_TOOLS_ORDER=false`` 关闭兜底。
+        """
         logger.debug(f"Getting OpenAI tool specifications for {len(self.tools)} tools")
 
         tools_json: List[Dict[str, Any]] = []
         for tool in self.tools.values():
             tools_json.append(convert_spec_to_openai_format(tool, lang=lang, fallback_chain=fallback_chain))
 
+        if os.environ.get("SAGE_STABLE_TOOLS_ORDER", "true").lower() != "false":
+            tools_json.sort(key=lambda t: ((t.get("function") or {}).get("name") or ""))
         return tools_json
 
     async def run_tool_async(
