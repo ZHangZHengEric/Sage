@@ -80,7 +80,6 @@ class SimpleBuilder:
                 "--hidden-import", "sagents.prompts.task_observation_prompts",
                 "--hidden-import", "sagents.prompts.task_planning_prompts",
                 "--hidden-import", "sagents.prompts.task_rewrite_prompts",
-                "--hidden-import", "sagents.prompts.task_router_prompts",
                 "--hidden-import", "sagents.prompts.task_stage_summary_prompts",
                 "--hidden-import", "sagents.prompts.task_summary_prompts",
                 "--hidden-import", "sagents.prompts.workflow_select_prompts",

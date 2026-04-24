@@ -164,6 +164,29 @@ def _normalize_max_loop_count(agent_config: Dict[str, Any]) -> Dict[str, Any]:
     return agent_config
 
 
+def _normalize_agent_mode(agent_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize legacy agent mode values to explicit runtime modes."""
+    mode_key = None
+    if "agentMode" in agent_config:
+        mode_key = "agentMode"
+    elif "agent_mode" in agent_config:
+        mode_key = "agent_mode"
+
+    if not mode_key:
+        return agent_config
+
+    raw_value = str(agent_config.get(mode_key) or "").strip().lower()
+    if raw_value in {"", "auto"}:
+        normalized_value = "simple"
+    elif raw_value in {"simple", "multi", "fibre"}:
+        normalized_value = raw_value
+    else:
+        normalized_value = "simple"
+
+    agent_config[mode_key] = normalized_value
+    return agent_config
+
+
 def _create_model_client(client_params: Dict[str, Any], *, randomize_keys: bool = False) -> Any:
     """
     创建模型客户端
@@ -318,6 +341,7 @@ async def create_agent(
     normalized_config = dict(agent_config)
     agent_name = _require_agent_name(agent_name)
     normalized_config = _normalize_max_loop_count(normalized_config)
+    normalized_config = _normalize_agent_mode(normalized_config)
 
     if cfg.app_mode == "desktop":
         agent_id = normalized_config.pop("id", None) or generate_agent_id()
@@ -428,6 +452,7 @@ async def update_agent(
     normalized_config = dict(agent_config)
     agent_name = _require_agent_name(agent_name, agent_id=agent_id)
     normalized_config = _normalize_max_loop_count(normalized_config)
+    normalized_config = _normalize_agent_mode(normalized_config)
 
     if cfg.app_mode == "desktop":
         if user_id and existing_config.user_id and existing_config.user_id != user_id:

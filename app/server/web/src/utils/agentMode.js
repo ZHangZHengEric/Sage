@@ -1,8 +1,7 @@
-const LEGACY_AGENT_MODE_MAP = {
-  multi: 'simple'
-}
-
 export const normalizeAgentMode = (mode, fallback = 'simple') => {
-  if (!mode) return fallback
-  return LEGACY_AGENT_MODE_MAP[mode] || mode
+  const normalized = String(mode || '').trim().toLowerCase()
+  if (!normalized) return fallback
+  if (normalized === 'fibre') return 'fibre'
+  if (normalized === 'simple') return 'simple'
+  return fallback
 }

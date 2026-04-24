@@ -17,12 +17,20 @@ export const buildImportedAgentDraft = (importedConfig, importSuffix = '') => {
     throw new Error('Imported agent config is missing required name')
   }
 
+  const deepThinking = importedConfig.deepThinking
+  const normalizedDeepThinking = deepThinking === true
+    || deepThinking === 'true'
+    || deepThinking === 'enabled'
+  const normalizedAgentMode = String(importedConfig.agentMode || importedConfig.agent_mode || 'simple').trim().toLowerCase()
+  const normalizedMode = normalizedAgentMode === 'fibre' ? 'fibre' : 'simple'
+
   return {
     name: `${importedConfig.name}${importSuffix}`,
     llm_provider_id: importedConfig.llm_provider_id || null,
     description: importedConfig.description || '',
     systemPrefix: importedConfig.systemPrefix || '',
-    deepThinking: importedConfig.deepThinking || false,
+    deepThinking: normalizedDeepThinking,
+    agentMode: normalizedMode,
     multiAgent: importedConfig.multiAgent || false,
     maxLoopCount: importedConfig.maxLoopCount ?? null,
     availableTools: importedConfig.availableTools || [],
