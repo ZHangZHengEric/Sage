@@ -587,6 +587,15 @@ class Session:
 
             self.set_status(SessionStatus.RUNNING)
 
+            try:
+                session_context.start_request({
+                    "agent_mode": agent_mode,
+                    "model": (self.model_config or {}).get("model") if isinstance(self.model_config, dict) else None,
+                    "max_loop_count": max_loop_count,
+                })
+            except Exception as exc:
+                logger.warning(f"SAgent: 开启 per-request tokens 统计失败: {exc}")
+
             merge_before_num = len(session_context.message_manager.messages)
             all_message_ids = [m.message_id for m in session_context.message_manager.messages]
             add_new_messages_num = 0
@@ -761,16 +770,31 @@ class Session:
             if self.observability_manager:
                 self.observability_manager.on_chain_end(output_data={"status": "finished"}, session_id=session_id)
             self._cache_session_workspace(session_id, session_context)
-            
+
+            # 顺序原则：先做"必须落盘"的副作用（end_request / save / 资源清理），
+            # 再尝试把 token_usage 作为最后一条 chunk 推给消费者。
+            # 因为 yield 在 finally 里如果遇到 GeneratorExit（消费者断开 / 取消）会
+            # 抛 BaseException，必须用 try/except BaseException 兜住，否则
+            # 后续清理会被跳过；同时保证就算推送失败，统计文件也已经落地。
             if session_context:
                 try:
-                     chunks = await self._emit_token_usage_if_any(session_context, session_id)
-                     if chunks:
-                         for i, chunk in enumerate(chunks):
-                             yield [chunk]
+                    if self.status == SessionStatus.ERROR:
+                        request_status = "error"
+                    elif self.status == SessionStatus.INTERRUPTED:
+                        request_status = "interrupted"
+                    else:
+                        request_status = "completed"
+                    session_context.end_request(status=request_status)
+                except Exception as exc:
+                    logger.warning(f"SAgent: 关闭 per-request tokens 统计失败: {exc}")
+
+            token_usage_chunks: List[MessageChunk] = []
+            if session_context:
+                try:
+                    token_usage_chunks = await self._emit_token_usage_if_any(session_context, session_id)
                 except Exception as e:
-                    logger.error(f"SAgent: 发送 token usage 失败: {e}")
-            
+                    logger.error(f"SAgent: 计算 token usage 失败: {e}")
+
             if session_context:
                 try:
                     logger.debug("SAgent: 会话状态保存")
@@ -782,6 +806,18 @@ class Session:
                 except Exception as e:
                     logger.error(f"SAgent: 会话状态保存时出错: {e}")
             await self._cleanup_session_resources(session_id)
+
+            # 真正向消费者推送 token_usage 放在最后；任何 yield 异常（含
+            # GeneratorExit）都不得影响前面的清理，因此放在所有清理之后。
+            for chunk in token_usage_chunks:
+                try:
+                    yield [chunk]
+                except BaseException as e:  # noqa: BLE001 - 包含 GeneratorExit
+                    logger.warning(
+                        f"SAgent: 发送 token_usage chunk 失败（消费者可能已断开）: "
+                        f"{type(e).__name__}: {e}"
+                    )
+                    break
 
 
     async def _execute_agent_phase(
@@ -826,35 +862,59 @@ class Session:
         self.clear_context()
 
     async def _emit_token_usage_if_any(self, session_context: SessionContext, session_id: str) -> list[MessageChunk]:
-        """
-        生成 token_usage MessageChunk（如有）
+        """生成 token_usage MessageChunk。
+
+        约定：只要 session_context 存在，本方法**一定**返回一条 chunk，便于上游
+        无论会话因何种原因结束（completed / interrupted / error / 未发生 LLM 调用）
+        都能拿到 token_usage 终态消息；统计字段为空时也保留稳定结构与 model 信息。
         """
         if not session_context:
             return []
 
+        token_usage: Dict[str, Any]
         try:
-            token_usage = session_context.get_tokens_usage_info()
-            if not token_usage:
-                logger.warning(f"SAgent: 会话 {session_id} 没有 token_usage 信息")
-                return []
-
-            logger.debug(f"SAgent: 生成 token_usage MessageChunk，会话 {session_id}: {token_usage}")
-
-            return [
-                MessageChunk(
-                    role=MessageRole.ASSISTANT.value,
-                    content="",
-                    message_type=MessageType.TOKEN_USAGE.value,
-                    metadata={
-                        "token_usage": token_usage,
-                        "session_id": session_id,
-                    },
-                )
-            ]
-
+            token_usage = session_context.get_tokens_usage_info() or {}
         except Exception as e:
-            logger.error(f"SAgent: 生成 token_usage MessageChunk 失败，会话 {session_id}: {e}")
-            return []
+            logger.error(f"SAgent: 计算 token_usage 失败，会话 {session_id}: {e}")
+            token_usage = {}
+
+        token_usage.setdefault("total_info", {})
+        token_usage.setdefault("per_step_info", [])
+        token_usage.setdefault("models", [])
+
+        # 兜底从 agent_config.llmConfig 取主 model，避免 0 LLM 调用 / 全部流式无 usage 时 model 缺失
+        primary_model = token_usage["total_info"].get("model")
+        if not primary_model:
+            try:
+                agent_cfg = getattr(session_context, "agent_config", None) or {}
+                llm_cfg = agent_cfg.get("llmConfig") or {}
+                primary_model = llm_cfg.get("model") or None
+            except Exception:
+                primary_model = None
+        if primary_model:
+            token_usage["total_info"]["model"] = primary_model
+            if primary_model not in token_usage["models"]:
+                token_usage["models"].insert(0, primary_model)
+
+        logger.info(
+            f"SAgent: 生成 token_usage MessageChunk，会话 {session_id}: "
+            f"model={primary_model} steps={len(token_usage['per_step_info'])} "
+            f"total={token_usage['total_info']}"
+        )
+
+        return [
+            MessageChunk(
+                role=MessageRole.ASSISTANT.value,
+                content="",
+                message_type=MessageType.TOKEN_USAGE.value,
+                metadata={
+                    "token_usage": token_usage,
+                    "model": primary_model,
+                    "models": list(token_usage.get("models") or []),
+                    "session_id": session_id,
+                },
+            )
+        ]
 
     def _cache_session_workspace(self, session_id: Optional[str], session_context: Optional[SessionContext]):
         if not session_id or not session_context:

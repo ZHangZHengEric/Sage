@@ -50,7 +50,7 @@ class WorkflowSelectAgent(AgentBase):
         )
 
         llm_request_message = [
-            await self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),
+            *await self.prepare_unified_system_messages(session_id=session_id, language=session_context.get_language()),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,

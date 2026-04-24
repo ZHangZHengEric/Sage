@@ -798,6 +798,12 @@ export default {
   'tools.questionnaire.workbenchReadonlyHint': 'The questionnaire in the workbench is preview-only and cannot be submitted there. Please submit it from the questionnaire card in the message list.',
   'tools.questionnaire.autoSubmitted': 'Auto Submitted',
   'tools.questionnaire.manuallySubmitted': 'Manually Submitted',
+  'tools.finishTurn': 'End Turn',
+  'tools.readLints': 'Code Lint',
+  'tools.awaitShell': 'Await Shell',
+  'tools.killShell': 'Kill Shell',
+  'tools.grep': 'Search Code',
+  'tools.glob': 'Find Files',
   'tools.default': 'Tool Execution',
 
   // Role Labels
@@ -833,6 +839,7 @@ export default {
   'tools.source.basic': 'Basic',
   'tools.source.builtin': 'Built-in',
   'tools.source.system': 'System',
+  'tools.source.browserExtension': 'Browser Extension',
   'tools.sourceGroups': 'Source Groups',
   'tools.anyTool': 'AnyTool',
   'tools.selectServerMode': 'Select server mode',

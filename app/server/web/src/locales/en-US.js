@@ -706,6 +706,12 @@ export default {
   'tools.fetchWebpage': 'Fetch Webpage',
   'tools.webFetcher': 'Web Fetcher',
   'tools.questionnaire': 'Info Collection',
+  'tools.finishTurn': 'End Turn',
+  'tools.readLints': 'Code Lint',
+  'tools.awaitShell': 'Await Shell',
+  'tools.killShell': 'Kill Shell',
+  'tools.grep': 'Search Code',
+  'tools.glob': 'Find Files',
   'tools.default': 'Tool Execution',
 
   // Role Labels
@@ -741,6 +747,7 @@ export default {
   'tools.source.basic': 'Basic',
   'tools.source.builtin': 'Built-in',
   'tools.source.system': 'System',
+  'tools.source.browserExtension': 'Browser Extension',
   'tools.sourceGroups': 'Source Groups',
   'tools.builtinMCP': 'Built-in MCP',
   'tools.externalMCP': 'External MCP',

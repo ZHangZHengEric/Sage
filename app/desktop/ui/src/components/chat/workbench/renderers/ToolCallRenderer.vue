@@ -201,7 +201,31 @@
         />
       </template>
 
-      <!-- 15. 其他工具 - 统一显示 -->
+      <!-- 15. grep - 结构化代码搜索 -->
+      <template v-else-if="isGrep">
+        <GrepToolRenderer
+          :tool-args="toolArgs"
+          :tool-result="toolResult"
+        />
+      </template>
+
+      <!-- 16. glob - 文件 glob 查找 -->
+      <template v-else-if="isGlob">
+        <GlobToolRenderer
+          :tool-args="toolArgs"
+          :tool-result="toolResult"
+        />
+      </template>
+
+      <!-- 17. list_dir - 目录树展示 -->
+      <template v-else-if="isListDir">
+        <ListDirToolRenderer
+          :tool-args="toolArgs"
+          :tool-result="toolResult"
+        />
+      </template>
+
+      <!-- 18. 其他工具 - 统一显示 -->
       <template v-else>
         <div class="p-4 h-full overflow-auto">
           <!-- 参数 -->
@@ -286,6 +310,9 @@ import CodeExecutionToolRenderer from './toolcall/CodeExecutionToolRenderer.vue'
 import SearchWebPageToolRenderer from './toolcall/SearchWebPageToolRenderer.vue'
 import SearchImageFromWebToolRenderer from './toolcall/SearchImageFromWebToolRenderer.vue'
 import CompressHistoryToolRenderer from './toolcall/CompressHistoryToolRenderer.vue'
+import GrepToolRenderer from './toolcall/GrepToolRenderer.vue'
+import GlobToolRenderer from './toolcall/GlobToolRenderer.vue'
+import ListDirToolRenderer from './toolcall/ListDirToolRenderer.vue'
 import { skillAPI } from '@/api/skill.js'
 import { agentAPI } from '@/api/agent.js'
 import { useLanguage } from '@/utils/i18n'
@@ -414,6 +441,9 @@ const isSearchImageFromWeb = computed(() => toolName.value === 'search_image_fro
 const isSearchMemory = computed(() => toolName.value === 'search_memory')
 const isQuestionnaire = computed(() => toolName.value === 'questionnaire')
 const isCompressHistory = computed(() => toolName.value === 'compress_conversation_history')
+const isGrep = computed(() => toolName.value === 'grep')
+const isGlob = computed(() => toolName.value === 'glob')
+const isListDir = computed(() => toolName.value === 'list_dir')
 
 // 显示名称映射
 const displayToolName = computed(() => {

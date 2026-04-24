@@ -18,6 +18,7 @@ def tool(
     return_data: Optional[Dict[str, Any]] = None,
     return_properties_i18n: Optional[Dict[str, Dict[str, Any]]] = None,
     param_schema: Optional[Dict[str, Dict[str, Any]]] = None,
+    category: Optional[str] = None,
 ):
     """Decorator factory for registering tool methods，如果disabled为True，则不注册该方法。
 
@@ -169,6 +170,7 @@ def tool(
             required=required,
             return_data=spec_return_data,
             return_properties_i18n=return_properties_i18n or None,
+            category=category,
         )
         if _profile:
             _t_total_end = time.perf_counter()

@@ -24,7 +24,7 @@ import re
 import shutil
 import sys
 import asyncio
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ...interface import (
     ISandboxHandle,
@@ -34,6 +34,7 @@ from ...interface import (
     FileInfo,
 )
 from ...config import VolumeMount
+from ..._bg_runner import HostBackgroundRunner
 from sagents.utils.logger import logger
 
 
@@ -60,6 +61,9 @@ class PassthroughSandboxProvider(ISandboxHandle):
         # 添加 volume_mounts 到动态映射
         for mount in self._volume_mounts:
             self.add_mount(mount.host_path, mount.mount_path)
+
+        # 跨平台后台进程运行器（passthrough = 主机直跑，与 host runner 行为一致）
+        self._bg_runner = HostBackgroundRunner()
 
     @property
     def sandbox_type(self) -> SandboxType:
@@ -110,28 +114,40 @@ class PassthroughSandboxProvider(ISandboxHandle):
             del self._dynamic_mounts[sandbox_path]
 
     def to_host_path(self, virtual_path: str) -> str:
-        """虚拟路径转宿主机路径，支持动态映射"""
+        """虚拟路径转宿主机路径，支持动态映射。
+
+        虚拟路径概念上是 POSIX 风格（``/sage-workspace/...``），但调用方有时
+        会把宿主机路径直接当虚拟路径传进来；在 Windows 上同时要兼容 ``\\`` 和 ``/``
+        作为分隔符，否则子路径匹配会失效。
+        """
         for sandbox_path, host_path in self._iter_virtual_mappings():
             if virtual_path == sandbox_path:
                 logger.debug(f"PassthroughSandboxProvider: Path conversion: {virtual_path} -> {host_path}")
                 return host_path
-            if virtual_path.startswith(sandbox_path + "/"):
-                rel_path = virtual_path[len(sandbox_path):].lstrip("/")
-                result = os.path.join(host_path, rel_path)
-                logger.debug(f"PassthroughSandboxProvider: Path conversion: {virtual_path} -> {result}")
-                return result
+            for sep in ("/", os.sep):
+                if sep and virtual_path.startswith(sandbox_path + sep):
+                    rel_path = virtual_path[len(sandbox_path):].lstrip("/").lstrip(os.sep)
+                    result = os.path.join(host_path, rel_path)
+                    logger.debug(f"PassthroughSandboxProvider: Path conversion: {virtual_path} -> {result}")
+                    return result
 
         return virtual_path
 
     def to_virtual_path(self, host_path: str) -> str:
-        """宿主机路径转虚拟路径"""
+        """宿主机路径转虚拟路径。
+
+        虚拟路径侧统一用 ``/``，避免 Windows 把 ``C:\\..`` 风格塞进虚拟命名空间。
+        """
         normalized_host = os.path.abspath(host_path)
         for mapped_host, mapped_virtual in self._iter_host_mappings():
             if normalized_host == mapped_host:
                 return mapped_virtual
-            if normalized_host.startswith(mapped_host + os.sep):
-                rel_path = normalized_host[len(mapped_host):].lstrip("/")
-                return os.path.join(mapped_virtual, rel_path)
+            for sep in (os.sep, "/"):
+                if sep and normalized_host.startswith(mapped_host + sep):
+                    rel_path = normalized_host[len(mapped_host):].lstrip(os.sep).lstrip("/")
+                    rel_posix = rel_path.replace(os.sep, "/") if os.sep != "/" else rel_path
+                    base = mapped_virtual.rstrip("/")
+                    return f"{base}/{rel_posix}" if base else f"/{rel_posix}"
         return host_path
 
     async def initialize(self) -> None:
@@ -143,6 +159,39 @@ class PassthroughSandboxProvider(ISandboxHandle):
         """清理直通模式沙箱资源"""
         # 直通模式不需要特殊清理
         pass
+
+    # ===== 跨平台后台命令原语（POSIX + Windows） =====
+
+    def supports_background(self) -> bool:
+        return True
+
+    async def start_background(
+        self,
+        command: str,
+        workdir: Optional[str] = None,
+        env_vars: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        # 路径转换 + workdir 落到宿主机
+        converted = self._convert_paths_in_command(command)
+        host_workdir = self.to_host_path(workdir) if workdir else self.to_host_path(
+            self._sandbox_agent_workspace
+        )
+        return self._bg_runner.start(converted, workdir=host_workdir, env_vars=env_vars)
+
+    async def read_background_output(self, task_id: str, max_bytes: int = 8192) -> str:
+        return self._bg_runner.read_tail(task_id, max_bytes=max_bytes)
+
+    async def is_background_alive(self, task_id: str) -> bool:
+        return self._bg_runner.is_alive(task_id)
+
+    async def get_background_exit_code(self, task_id: str) -> Optional[int]:
+        return self._bg_runner.get_exit_code(task_id)
+
+    async def kill_background(self, task_id: str, force: bool = False) -> bool:
+        return self._bg_runner.kill(task_id, force=force)
+
+    async def cleanup_background(self, task_id: str) -> None:
+        self._bg_runner.cleanup(task_id)
 
     def add_allowed_paths(self, paths: List[str]) -> None:
         """添加允许访问的路径列表 - 直通模式无限制，空实现"""

@@ -216,7 +216,7 @@
       <div v-else class="flex-none" :class="assistantAvatarSpacerClass" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage }">
-          <div v-for="(toolCall, index) in message.tool_calls" :key="toolCall.id || index">
+          <div v-for="(toolCall, index) in visibleToolCalls" :key="toolCall.id || index">
             <!-- Global Error Card -->
             <ToolErrorCard v-if="checkIsToolError(getParsedToolResult(toolCall))"
               :toolResult="getParsedToolResult(toolCall)" />
@@ -227,7 +227,7 @@
               :toolCall="toolCall"
               :toolResult="getParsedToolResult(toolCall)"
               :message="message"
-              :isLatest="index === message.tool_calls.length - 1 && isLatestMessage"
+              :isLatest="index === visibleToolCalls.length - 1 && isLatestMessage"
               :currentAgent="{ id: props.agentId, name: currentAgentName }"
               :openWorkbench="props.openWorkbench"
               @sendMessage="handleSendMessage"
@@ -432,9 +432,15 @@ const tokenUsageData = computed(() => {
   return props.message?.metadata?.token_usage || null
 })
 
-const hasToolCalls = computed(() => {
-  return props.message.tool_calls && Array.isArray(props.message.tool_calls) && props.message.tool_calls.length > 0
+// 协议性内置工具：仅作为 agent 控制信号，不在对话中渲染（数据仍保留在 message 内）
+const HIDDEN_TOOL_NAMES = new Set(['finish_turn'])
+
+const visibleToolCalls = computed(() => {
+  if (!props.message.tool_calls || !Array.isArray(props.message.tool_calls)) return []
+  return props.message.tool_calls.filter(tc => !HIDDEN_TOOL_NAMES.has(tc?.function?.name))
 })
+
+const hasToolCalls = computed(() => visibleToolCalls.value.length > 0)
 
 
 // Markdown组件配置
