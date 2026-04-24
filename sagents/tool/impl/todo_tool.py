@@ -96,8 +96,28 @@ class ToDoTool:
         except Exception as e:
             logger.error(f"清理其他 session todo 文件失败: {e}")
 
-    @staticmethod
-    def parse_todo_list(content: str) -> List[Dict[str, Any]]:
+    # 三态映射：markdown 复选框字符 ↔ status
+    _STATUS_BY_MARK = {'x': 'completed', '-': 'in_progress', ' ': 'pending'}
+    _MARK_BY_STATUS = {'completed': 'x', 'in_progress': '-', 'pending': ' '}
+    _VALID_STATUSES = ('pending', 'in_progress', 'completed')
+
+    @classmethod
+    def _normalize_status(cls, status_value: Any) -> str:
+        """将任意 status 输入归一化为三态。未识别值回落 pending。"""
+        if isinstance(status_value, str):
+            s = status_value.strip().lower()
+            if s in cls._VALID_STATUSES:
+                return s
+            if s in ('done', 'finish', 'finished'):
+                return 'completed'
+            if s in ('doing', 'started', 'running', 'in-progress', 'inprogress'):
+                return 'in_progress'
+            if s in ('todo', 'open', 'not_started'):
+                return 'pending'
+        return 'pending'
+
+    @classmethod
+    def parse_todo_list(cls, content: str) -> List[Dict[str, Any]]:
         """
         静态方法：解析任务清单内容字符串
 
@@ -110,28 +130,29 @@ class ToDoTool:
         tasks = []
         lines = content.splitlines()
 
-        # Regex for "- [ ] content (ID: id) (Created: timestamp) (Updated: timestamp)"
-        pattern = re.compile(r'- \[(x| )\] (.*?) \(ID: (.*?)\)(?: \(Created: (.*?)\))?(?: \(Updated: (.*?)\))?(?: \(Conclusion: (.*?)\))?$')
+        # Regex 三态：[ ] pending、[-] in_progress、[x] completed
+        pattern = re.compile(r'- \[(x|\-| )\] (.*?) \(ID: (.*?)\)(?: \(Created: (.*?)\))?(?: \(Updated: (.*?)\))?(?: \(Conclusion: (.*?)\))?$')
 
         for line in lines:
             line = line.strip()
             match = pattern.match(line)
             if match:
-                is_completed = match.group(1) == 'x'
+                mark = match.group(1)
+                status = cls._STATUS_BY_MARK.get(mark, 'pending')
                 content_text = match.group(2).strip()
                 task_id = match.group(3).strip()
                 created_at = match.group(4)
                 updated_at = match.group(5)
                 conclusion = match.group(6)
 
-                # 兼容旧文件：如果没有 created_at，使用 updated_at 代替
                 if not created_at and updated_at:
                     created_at = updated_at
 
                 tasks.append({
                     'id': task_id,
                     'content': content_text,
-                    'completed': is_completed,
+                    'status': status,
+                    'completed': status == 'completed',
                     'created_at': created_at if created_at else None,
                     'updated_at': updated_at if updated_at else None,
                     'conclusion': conclusion if conclusion else None
@@ -162,31 +183,35 @@ class ToDoTool:
             # 生成 Markdown 内容
             md_content = "# ToDo List\n\n"
 
-            pending_tasks = [t for t in tasks if not t.get('completed', False)]
-            completed_tasks = [t for t in tasks if t.get('completed', False)]
+            def _status_of(t):
+                return self._normalize_status(t.get('status'))
+
+            pending_tasks = [t for t in tasks if _status_of(t) == 'pending']
+            in_progress_tasks = [t for t in tasks if _status_of(t) == 'in_progress']
+            completed_tasks = [t for t in tasks if _status_of(t) == 'completed']
+
+            def _emit(section_title: str, items: List[Dict[str, Any]], mark: str, with_conclusion: bool = False) -> str:
+                if not items:
+                    return ''
+                buf = f"## {section_title}\n"
+                for t in items:
+                    line = f"- [{mark}] {t.get('content', '')} (ID: {t.get('id')})"
+                    if t.get('created_at'):
+                        line += f" (Created: {t.get('created_at')})"
+                    if t.get('updated_at'):
+                        line += f" (Updated: {t.get('updated_at')})"
+                    if with_conclusion and t.get('conclusion'):
+                        line += f" (Conclusion: {t.get('conclusion')})"
+                    buf += line + "\n"
+                return buf + "\n"
 
             if not tasks:
                 md_content += "(No tasks yet)\n"
             else:
-                md_content += "## Pending\n"
-                for t in pending_tasks:
-                    line = f"- [ ] {t.get('content', '')} (ID: {t.get('id')})"
-                    if t.get('created_at'):
-                        line += f" (Created: {t.get('created_at')})"
-                    if t.get('updated_at'):
-                        line += f" (Updated: {t.get('updated_at')})"
-                    md_content += line + "\n"
-
-                md_content += "\n## Completed\n"
-                for t in completed_tasks:
-                    line = f"- [x] {t.get('content', '')} (ID: {t.get('id')})"
-                    if t.get('created_at'):
-                        line += f" (Created: {t.get('created_at')})"
-                    if t.get('updated_at'):
-                        line += f" (Updated: {t.get('updated_at')})"
-                    if t.get('conclusion'):
-                        line += f" (Conclusion: {t.get('conclusion')})"
-                    md_content += line + "\n"
+                md_content += _emit("Pending", pending_tasks, ' ')
+                md_content += _emit("In Progress", in_progress_tasks, '-')
+                md_content += _emit("Completed", completed_tasks, 'x', with_conclusion=True)
+                md_content = md_content.rstrip() + "\n"
 
             if not sandbox:
                 raise ValueError("Sandbox not available for todo_write")
@@ -225,7 +250,11 @@ class ToDoTool:
     @tool(
         description_i18n={
             "zh": (
-                "创建或更新任务清单。新增任务需包含 id, content；更新任务只需 id 和变更字段(content/completed/conclusion)。未变更的任务无需传入。"
+                "创建或更新任务清单。任务三态：pending(待办)/in_progress(进行中)/completed(已完成)。"
+                "开始执行某条任务时，先把它的 status 标为 in_progress；执行完成后再改为 completed 并补充 conclusion。"
+                "**增量更新原则**：每次调用本工具时，tasks 数组里只放本次需要新增或需要修改的任务条目，未发生变化的任务严禁再次传入；"
+                "更新一条任务时，只填 id 加上真正变更的字段（如只改状态就只传 id+status，只补结论就只传 id+conclusion），不要把未变化字段也带上。"
+                "新增任务必须包含 id 与 content；id 只要在本会话内唯一即可（推荐短小可读，例如 t1/t2 或语义化短串）。"
                 "颗粒度要求：子任务的数量必须与任务真实复杂度匹配，不要为了\"看起来简洁\"硬把多步骤合并成一条。"
                 "极简单/单步任务 1-3 条；常规多步任务 5-15 条；复杂、跨模块、跨阶段（全栈功能 / 调研+设计+实现+联调+验收 / 大型重构等）"
                 "可以拆到 15-40 条甚至更多，关键看每一步是否可独立验收。"
@@ -233,7 +262,11 @@ class ToDoTool:
                 "只有当两个动作真的属于同一个原子动作时才合并。"
             ),
             "en": (
-                "Create or update the todo list. New tasks must include id and content; updates only need id and changed fields (content/completed/conclusion); unchanged tasks can be omitted. "
+                "Create or update the todo list. Three states: pending / in_progress / completed. "
+                "Mark a task in_progress BEFORE you start working on it; mark it completed (with a conclusion) when done. "
+                "**Incremental update rule**: each call must only include tasks that are NEW or that actually CHANGE. Never resend unchanged tasks. "
+                "When updating a task, send only its id plus the fields that truly change (e.g. id+status to flip status, id+conclusion to add a conclusion). Do not echo unchanged fields. "
+                "New tasks must include id and content; the id only needs to be unique within this session (short and readable, e.g. t1/t2 or a semantic slug). "
                 "Granularity rule: the number of subtasks MUST match the real complexity of the task. Do NOT collapse multiple steps into one just to keep the list short. "
                 "Trivial/single-step task: 1-3 items. Normal multi-step task: 5-15 items. "
                 "Complex, cross-module, multi-stage tasks (full-stack feature, research + design + implementation + integration + verification, large refactor, etc.) can legitimately reach 15-40 items or more, as long as each step is independently verifiable. "
@@ -243,12 +276,18 @@ class ToDoTool:
         param_description_i18n={
             "tasks": {
                 "zh": (
-                    "任务列表。新增任务需包含 id, content；更新任务只需 id 和变更字段(content/completed/conclusion)。未变更的任务无需传入。"
+                    "任务列表。**只放本次新增或需要变更的任务**，未变化的任务严禁再次传入。"
+                    "更新任务时只填 id 加真正变更的字段（id+status 切换状态，id+conclusion 补结论）。"
+                    "新增任务必须包含 id, content；status 取值 pending / in_progress / completed，缺省为 pending；"
+                    "开始执行前先标 in_progress，结束后再标 completed。"
                     "颗粒度要按任务复杂度自适应：极简单 1-3 条 / 常规 5-15 条 / 复杂多阶段 15-40+ 条；"
                     "禁止为了\"清单短\"把可独立验收的多步骤合并成一条。"
                 ),
                 "en": (
-                    "List of tasks. New tasks need id and content; updates need id and changed fields (content/completed/conclusion). Unchanged tasks can be omitted. "
+                    "List of tasks. **Only include tasks that are new or actually changing in this call**; never resend unchanged tasks. "
+                    "When updating, send only id plus the truly changed fields (id+status to flip state, id+conclusion to add a conclusion). "
+                    "New tasks must include id and content. status is one of pending / in_progress / completed, default pending; "
+                    "mark in_progress before you start, completed when done. "
                     "Granularity must match task complexity: trivial 1-3 / normal 5-15 / complex multi-stage 15-40+ items; "
                     "never merge independently verifiable steps into one just to make the list shorter."
                 )
@@ -272,9 +311,10 @@ class ToDoTool:
                             "type": "string",
                             "description": "Content/Description of the task. Required for new tasks."
                         },
-                        "completed": {
-                            "type": "boolean",
-                            "description": "Whether the task is completed. Default is false (pending)."
+                        "status": {
+                            "type": "string",
+                            "enum": ["pending", "in_progress", "completed"],
+                            "description": "Task status. Use 'pending' (not started), 'in_progress' (mark this BEFORE you start working on it), or 'completed' (done). Default 'pending' for new tasks. For an update call, only include this field if the status actually changes."
                         },
                         "conclusion": {
                             "type": "string",
@@ -317,14 +357,13 @@ class ToDoTool:
             if not task_id:
                 continue
 
-            # 兼容旧的 status 字段，转换为 completed 字段
-            if 'status' in new_task:
-                status = new_task.pop('status')
-                # 如果 status 是 "completed"，设置 completed 为 True
-                if status == 'completed' and 'completed' not in new_task:
-                    new_task['completed'] = True
+            # 入参中不再支持 completed 字段，统一忽略，避免与 status 冲突
+            new_task.pop('completed', None)
 
-            # Set updated_at
+            # 仅当显式提供 status 时才归一化（未提供则保留旧值，实现「只传变更字段」）
+            if 'status' in new_task:
+                new_task['status'] = self._normalize_status(new_task.get('status'))
+
             new_task['updated_at'] = now_str
 
             if task_id in task_map:
@@ -359,11 +398,15 @@ class ToDoTool:
                 task_map[task_id] = new_task
                 added_count += 1
 
-        # 转换回列表
+        # 转换回列表，对每条任务的 status 做归一化，缺省补 pending；保留 completed 派生字段供下游
         final_tasks = list(task_map.values())
+        for t in final_tasks:
+            normalized = self._normalize_status(t.get('status'))
+            t['status'] = normalized
+            t['completed'] = (normalized == 'completed')
 
-        # 检查是否所有任务都已完成
-        pending_tasks = [t for t in final_tasks if not t.get('completed', False)]
+        # 「未完成」= status != 'completed'（pending + in_progress 都算未完成）
+        pending_tasks = [t for t in final_tasks if t.get('status') != 'completed']
 
         # 构建任务列表（用于返回）- 按 created_at 排序（如果没有 created_at 则使用 updated_at）
         def get_sort_key(task):
@@ -387,7 +430,7 @@ class ToDoTool:
                 "index": idx,
                 "id": str(t.get('id', '')),
                 "name": content,
-                "status": "completed" if t.get('completed', False) else "pending"
+                "status": t.get('status') or ('completed' if t.get('completed', False) else 'pending')
             })
 
         logger.debug(f"ToDoTool: Checking deletion condition - pending_tasks: {len(pending_tasks)}, final_tasks: {len(final_tasks)}, file_path: {file_path}", session_id=session_id)
@@ -515,14 +558,16 @@ class ToDoTool:
         # 同步到 system_context
         await self._sync_to_system_context(tasks, session_id)
 
-        pending = [t for t in tasks if not t.get('completed', False)]
+        unfinished = [t for t in tasks if self._normalize_status(t.get('status')) != 'completed']
 
-        if not pending:
+        if not unfinished:
             return "当前没有未完成的任务。"
 
         result = "当前未完成任务清单:\n"
-        for t in pending:
-            result += f"- {t.get('content')} (ID: {t.get('id')})"
+        for t in unfinished:
+            status = self._normalize_status(t.get('status'))
+            tag = "[进行中]" if status == 'in_progress' else "[待办]"
+            result += f"- {tag} {t.get('content')} (ID: {t.get('id')})"
             if t.get('conclusion'):
                 result += f" [结论: {t.get('conclusion')}]"
             result += "\n"

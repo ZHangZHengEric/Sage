@@ -447,6 +447,10 @@ class AgentBase(ABC):
                             "step_name": step_name,
                             "model_config": final_config,
                             "messages": serializable_messages,
+                            "started_at": start_request_time,
+                            "first_token_time": first_token_time,
+                            "ttfb_sec": (first_token_time - start_request_time) if first_token_time else None,
+                            "duration_sec": total_time,
                         }
                         # 将流式的chunk，进行合并成非流式的response，保存下chunk所有的记录
                         try:

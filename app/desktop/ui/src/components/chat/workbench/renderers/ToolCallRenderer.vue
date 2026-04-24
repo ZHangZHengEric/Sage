@@ -771,9 +771,9 @@ const getTodoStatusVariant = (status) => {
 const getTodoStatusLabel = (status) => {
   const labelMap = {
     'completed': t('workbench.tool.statusCompleted'),
-    'pending': 'Pending',
-    'in_progress': 'In Progress',
-    'failed': 'Failed'
+    'pending': t('workbench.tool.statusPending'),
+    'in_progress': t('workbench.tool.statusInProgress'),
+    'failed': t('workbench.tool.statusFailed')
   }
   return labelMap[status] || status
 }

@@ -15,6 +15,8 @@ __all__ = [
     "ImageUnderstandingTool",
     "ToDoTool",
     "QuestionnaireTool",
+    "LintTool",
+    "FinishTurnTool",
 ]
 
 _EXPORTS = {
@@ -25,6 +27,8 @@ _EXPORTS = {
     "ImageUnderstandingTool": ".image_understanding_tool",
     "ToDoTool": ".todo_tool",
     "QuestionnaireTool": ".questionnaire_tool",
+    "LintTool": ".lint_tool",
+    "FinishTurnTool": ".finish_turn_tool",
 }
 
 
