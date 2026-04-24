@@ -108,6 +108,57 @@ class ISandboxHandle(ABC):
         """
         pass
     
+    # ========== 后台命令（跨平台） ==========
+
+    async def start_background(
+        self,
+        command: str,
+        workdir: Optional[str] = None,
+        env_vars: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """以后台方式启动命令；返回 ``{task_id, pid, log_path}``。
+
+        默认实现抛出 ``NotImplementedError``，由具体 Provider 覆写。
+        本机执行的 Provider（Passthrough/Local）应直接走 ``HostBackgroundRunner``，
+        远端 Provider 可以通过 sandbox API 实现。
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} 不支持 start_background；"
+            "请使用 Passthrough/Local 沙箱或在 Provider 中实现该原语。"
+        )
+
+    async def read_background_output(self, task_id: str, max_bytes: int = 8192) -> str:
+        """读取后台任务输出尾部。默认实现返回空串。"""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} 不支持 read_background_output"
+        )
+
+    async def is_background_alive(self, task_id: str) -> bool:
+        """后台任务是否仍在运行。默认实现 False。"""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} 不支持 is_background_alive"
+        )
+
+    async def get_background_exit_code(self, task_id: str) -> Optional[int]:
+        """已退出则返回 exit code，否则 ``None``。"""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} 不支持 get_background_exit_code"
+        )
+
+    async def kill_background(self, task_id: str, force: bool = False) -> bool:
+        """终止后台任务；force=True 表示直接 SIGKILL/TerminateProcess。"""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} 不支持 kill_background"
+        )
+
+    async def cleanup_background(self, task_id: str) -> None:
+        """从注册表中移除任务（关闭日志句柄等）；默认 no-op。"""
+        return None
+
+    def supports_background(self) -> bool:
+        """便于上层在不抛异常的情况下判断当前 sandbox 是否支持原生后台。"""
+        return False
+
     # ========== 代码执行 ==========
     
     @abstractmethod

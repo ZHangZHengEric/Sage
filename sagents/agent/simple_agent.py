@@ -129,13 +129,14 @@ class SimpleAgent(AgentBase):
             suggested_tools = []
         # 准备工具列表
         tools_json = self._prepare_tools(tool_manager, suggested_tools, session_context)
-        # 将system 加入到到messages中
-        system_message = await self.prepare_unified_system_message(
+        # 将 system message 拆成多段（stable / semi_stable / volatile）前置到 history，
+        # 配合 add_cache_control_to_messages 的多断点策略最大化 prompt cache 命中。
+        system_messages = await self.prepare_unified_system_messages(
             session_id,
             custom_prefix=current_system_prefix,
             language=session_context.get_language(),
         )
-        history_messages.insert(0, system_message)
+        history_messages = list(system_messages) + list(history_messages)
         async for chunks in self._execute_loop(
             messages_input=history_messages,
             tools_json=tools_json,
@@ -171,8 +172,10 @@ class SimpleAgent(AgentBase):
         tools_json = tool_manager.get_openai_tools(lang=session_context.get_language(), fallback_chain=["en"])
 
         # 根据建议过滤工具
-        # 强制包含 todo 工具，如果它们存在于可用工具中
-        always_include = ['todo_write','search_memory']
+        # 强制包含 todo / 终止工具 / 记忆工具，如果它们存在于可用工具中
+        always_include = ['todo_write', 'search_memory']
+        if os.environ.get("SAGE_FINISH_TURN_TOOL_ENABLED", "true").lower() != "false":
+            always_include.append('finish_turn')
         
         tools_suggest_json = [
             tool for tool in tools_json
@@ -181,6 +184,10 @@ class SimpleAgent(AgentBase):
         
         if tools_suggest_json:
             tools_json = tools_suggest_json
+
+        # 与 ToolManager/ToolProxy 一致：再排一次序，保证经过筛选后顺序仍稳定。
+        if os.environ.get("SAGE_STABLE_TOOLS_ORDER", "true").lower() != "false":
+            tools_json.sort(key=lambda t: ((t.get('function') or {}).get('name') or ''))
 
         tool_names = [tool['function']['name'] for tool in tools_json]
         logger.debug(f"SimpleAgent: 准备了 {len(tools_json)} 个工具: {tool_names}")
@@ -272,6 +279,65 @@ class SimpleAgent(AgentBase):
 
         return task_interrupted
 
+    def _has_recent_assistant_summary(self, messages_input: List[MessageChunk]) -> bool:
+        """判断 finish_turn 之前是否存在「干净的」assistant 自然语言总结。
+
+        finish_turn 的契约要求模型先输出总结、再调用工具结束本轮。
+
+        合法形态：
+        - 上一条 LLM 输出是纯文本（``content`` 非空且无 ``tool_calls``），随后这一次
+          LLM 输出只调用 finish_turn —— ``messages_input`` 末尾就是该 assistant 文本。
+
+        非法形态（之前会误判通过）：
+        - 末尾是 ``tool`` 消息（说明刚跑完工具，模型还没机会写总结）；
+        - 倒数第二条 assistant 既有 content 又有 tool_calls（那段文字是「我现在去做 X」
+          的过渡话，不是总结）。
+
+        判定规则：从尾部向前扫，
+        - 命中 ``tool`` 消息 → False（还有未消化的工具产出）；
+        - 命中 assistant：有 ``tool_calls`` → False；content 非空 → True；
+          content 为空且无 tool_calls → 继续向前；
+        - 命中真实 user 消息 → False。
+        """
+        if not messages_input:
+            return False
+
+        def _content_text(content: Any) -> str:
+            if isinstance(content, str):
+                return content.strip()
+            if isinstance(content, list):
+                buf = []
+                for part in content:
+                    if isinstance(part, dict):
+                        t = part.get("text") or part.get("content")
+                        if isinstance(t, str):
+                            buf.append(t)
+                return "".join(buf).strip()
+            return ""
+
+        for msg in reversed(messages_input):
+            role = getattr(msg, "role", None)
+            try:
+                if msg.is_user_input_message():
+                    return False
+            except Exception:
+                pass
+
+            if role == "tool":
+                return False
+            if role != "assistant":
+                continue
+
+            tool_calls = getattr(msg, "tool_calls", None)
+            if tool_calls:
+                return False
+
+            if _content_text(getattr(msg, "content", None)):
+                return True
+            # assistant 空消息：继续向前扫描
+
+        return False
+
     async def _must_continue_by_rules(self, messages_input: List[MessageChunk]) -> bool:
         """通过确定性规则判断是否必须继续执行
 
@@ -280,10 +346,11 @@ class SimpleAgent(AgentBase):
 
         这些规则基于客观事实，尽量保证误判率接近 0。
 
-        ENV 开关：SAGE_CONTINUE_ON_PROCESSING_KEYWORDS（默认 true），仅控制"处理中关键词"规则。
-        - true：启用关键词检测，assistant 文本含"正在处理/处理中/请稍等"等关键词时强制继续。
-        - false：跳过关键词检测，规则 1/2/4 正常运行。
-          适用于关键词在反问用户的场景下误判导致死循环时的应急关闭。
+        说明：历史上的"处理中关键词"规则已下线（多语种下脆弱、且对反问用户场景容易误判导致死循环）。
+        现在仅保留：
+        - 规则 1：最后一条是 tool 调用结果
+        - 规则 2：工具调用失败的过程消息
+        - 规则 4：assistant 以「继续标点」结尾且最近一条不是真实 user 消息
         """
         if not messages_input:
             return False
@@ -302,34 +369,14 @@ class SimpleAgent(AgentBase):
                 logger.debug("[SimpleAgent] must_continue 规则2命中：工具调用失败，必须继续")
                 return True
 
-        # 规则3：最后一条 assistant 消息包含明确的处理中表达
-        # 通过 SAGE_CONTINUE_ON_PROCESSING_KEYWORDS 控制是否启用（默认 true=启用）
-        keywords_enabled = os.environ.get("SAGE_CONTINUE_ON_PROCESSING_KEYWORDS", "true").lower() == "true"
+        # 规则4：assistant 文本以继续标点结尾时强制继续；
+        # 但若最后一条是真实 user 输入则不触发（避免反问用户被误判）
         if last_message.role == MessageRole.ASSISTANT.value and (last_message.content or "").strip():
             content = last_message.content
-            if keywords_enabled:
-                processing_keywords = [
-                    "等待工具调用",
-                    "等待生成",
-                    "请稍等",
-                    "正在处理",
-                    "正在调用",
-                    "正在执行",
-                    "处理中",
-                    "执行中",
-                ]
-                if any(keyword in content for keyword in processing_keywords):
-                    logger.debug("[SimpleAgent] must_continue 规则3命中：assistant 文本包含处理中关键词，必须继续")
-                    return True
-            else:
-                logger.debug("[SimpleAgent] 规则3 已通过 SAGE_CONTINUE_ON_PROCESSING_KEYWORDS=false 关闭，跳过该规则")
-
-            # 规则4：最后一个字符是表示还有后续内容的标点
             stripped = content.strip()
             if stripped:
                 last_char = stripped[-1]
                 continue_punctuations = [":", "："]
-                # 省略号可以是单个字符，也可以是三个点
                 if last_char in continue_punctuations or stripped.endswith("..."):
                     logger.debug("[SimpleAgent] must_continue 规则4命中：assistant 文本以继续标点结尾，必须继续")
                     return True
@@ -474,12 +521,16 @@ class SimpleAgent(AgentBase):
 
             # 更新system message，确保包含最新的子智能体列表等上下文信息
             if messages_input and messages_input[0].role == MessageRole.SYSTEM.value:
-                system_message = await self.prepare_unified_system_message(
+                # 把开头连续的多段 system 全部替换为新一轮的分段 system
+                head = 0
+                while head < len(messages_input) and messages_input[head].role == MessageRole.SYSTEM.value:
+                    head += 1
+                new_system_messages = await self.prepare_unified_system_messages(
                     session_id,
                     custom_prefix=current_system_prefix,
                     language=session_context.get_language(),
                 )
-                messages_input[0] = system_message
+                messages_input = list(new_system_messages) + list(messages_input[head:])
 
             # 调用LLM
             should_break = False
@@ -561,9 +612,15 @@ class SimpleAgent(AgentBase):
             if self._should_abort_due_to_session(session_context):
                 break
             # 检查任务是否完成
-            if await self._is_task_complete(messages_input, session_id, tool_manager, session_context):
-                logger.info("SimpleAgent: 任务完成，终止执行")
-                break
+            # finish_turn 启用时由模型主动调用 finish_turn 工具来结束本轮（见上方
+            # accept_finish_turn_ids 处理分支），不再走老的 LLM 任务完成判定，
+            # 避免重复消耗 token 且与 finish_turn 决策互相冲突。
+            # 仅当 finish_turn 被显式禁用 (SAGE_FINISH_TURN_TOOL_ENABLED=false) 时回退到旧路径。
+            finish_turn_enabled = os.environ.get("SAGE_FINISH_TURN_TOOL_ENABLED", "true").lower() != "false"
+            if not finish_turn_enabled:
+                if await self._is_task_complete(messages_input, session_id, tool_manager, session_context):
+                    logger.info("SimpleAgent: 任务完成，终止执行")
+                    break
 
 
     async def _call_llm_and_process_response(self,
@@ -689,11 +746,27 @@ class SimpleAgent(AgentBase):
 
         # 处理工具调用
         if len(tool_calls) > 0:
-            # 识别是否包含结束任务的工具调用
+            # 识别是否包含结束本轮的工具调用
             termination_tool_ids = set()
+            finish_turn_tool_ids = set()
+            finish_turn_enabled = os.environ.get("SAGE_FINISH_TURN_TOOL_ENABLED", "true").lower() != "false"
             for tool_call_id, tool_call in tool_calls.items():
-                if tool_call['function']['name'] in ['complete_task', 'sys_finish_task']:
+                tname = tool_call['function']['name']
+                if tname in ['complete_task', 'sys_finish_task']:
                     termination_tool_ids.add(tool_call_id)
+                if finish_turn_enabled and tname == 'finish_turn':
+                    finish_turn_tool_ids.add(tool_call_id)
+
+            # finish_turn 调用契约：本「轮」（自最近一次 user 消息以后）必须已经
+            # 出现过非空的 assistant 自然语言文本。情况包括：
+            #   (a) 当前 LLM 调用本身就既输出了总结也调用了 finish_turn；
+            #   (b) 上一次 LLM 调用先产出总结，本次只单独调用 finish_turn。
+            # 之前只看 (a) 会把 (b) 误杀，导致模型反复被拒绝。
+            has_summary = bool((full_content_accumulator or "").strip())
+            if finish_turn_tool_ids and not has_summary:
+                has_summary = self._has_recent_assistant_summary(messages_input)
+            reject_finish_turn_ids = finish_turn_tool_ids if (finish_turn_tool_ids and not has_summary) else set()
+            accept_finish_turn_ids = finish_turn_tool_ids - reject_finish_turn_ids
 
             # 根据环境变量控制 emit_tool_call_message
             # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
@@ -707,15 +780,32 @@ class SimpleAgent(AgentBase):
             ):
                 # chunk 是 (messages, is_complete)
                 messages, is_complete = chunk
-                
-                # 如果当前消息块是结束任务工具的执行结果，则标记为完成
-                if termination_tool_ids and not is_complete:
+
+                # 终止类工具：complete_task / sys_finish_task / 通过校验的 finish_turn → 标记完成
+                if (termination_tool_ids or accept_finish_turn_ids) and not is_complete:
                     for msg in messages:
-                        if msg.role == MessageRole.TOOL.value and msg.tool_call_id in termination_tool_ids:
-                            logger.info(f"SimpleAgent: 检测到结束任务工具 {msg.tool_call_id} 执行完成，标记任务结束")
+                        if msg.role == MessageRole.TOOL.value and (
+                            msg.tool_call_id in termination_tool_ids
+                            or msg.tool_call_id in accept_finish_turn_ids
+                        ):
+                            logger.info(f"SimpleAgent: 终止类工具 {msg.tool_call_id} 执行完成，标记本轮结束")
                             is_complete = True
                             break
-                
+
+                # 未通过总结校验的 finish_turn：把工具结果改写为拒绝消息，并保持未完成
+                if reject_finish_turn_ids and not is_complete:
+                    for msg in messages:
+                        if msg.role == MessageRole.TOOL.value and msg.tool_call_id in reject_finish_turn_ids:
+                            rejection = (
+                                "finish_turn 调用被拒绝：本轮 assistant 还没有输出任何自然语言总结。"
+                                "请先用一段中文/英文文字总结当前进展和结果（包含已完成的事项、关键产物或下一步建议），"
+                                "再调用 finish_turn(reason=...) 工具结束本轮。"
+                            )
+                            logger.warning(
+                                f"SimpleAgent: finish_turn 调用 {msg.tool_call_id} 缺少前置总结，已改写为拒绝消息"
+                            )
+                            msg.content = rejection
+
                 yield (messages, is_complete)
 
         else:

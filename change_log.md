@@ -1,3 +1,27 @@
+2026-04-25 05:40 修复 TOOL_CATEGORY 不生效：`discover_tools_from_path` 直接走 `_DISCOVERED_TOOLS → register_tool`，会先于 `register_tools_from_object` 把 spec 占住（同优先级保留旧值），导致宿主类 `TOOL_CATEGORY` 永远写不进去；改为在该循环中复用 owner 类查找结果回填 `tool_spec.category`，浏览器组 12 个工具正确归到「浏览器扩展」，基础工具回到 20。
+
+2026-04-25 05:20 finish_turn 总结校验加严 + 工具来源分类机制：`_has_recent_assistant_summary` 改为「碰到 tool 消息或带 tool_calls 的 assistant 立刻 False」，杜绝模型用「我现在去做 X：」过渡话骗过校验后无总结调用 finish_turn；新增 `ToolSpec.category` 字段 + `@tool(category=...)` + 宿主类 `TOOL_CATEGORY` 兜底，`tool_manager` 用 category→source 映射 (`browser → 浏览器扩展`)；前端 6 处 (AgentEdit/ToolList/ToolDetail × web+desktop) 加分组映射与 Globe 图标，4 份 locale 加 `tools.source.browserExtension`；3 例 `test_simple_agent_finish_summary` 新增覆盖故障场景。
+
+2026-04-25 04:35 codebase 三件套前端适配：`messageLabels.js` + locales (zh/en) 补 `tools.grep` / `tools.glob` (`list_dir` 已存在)；workbench 新增 `GrepToolRenderer` (按文件分组、行号列、count/files 三模式)、`GlobToolRenderer` (mtime 倒序文件列表)、`ListDirToolRenderer` (mono 树状)；`ToolCallRenderer` 注册 isGrep/isGlob/isListDir 分发；desktop 与 server web 同步双写。
+
+2026-04-25 04:10 codebase 三件套 + prompt cache 多断点：新增 `codebase_tool` (grep/glob/list_dir，rg + 兜底)；`tool_manager`/`tool_proxy` 按 name 排 tools_json；`agent_base` system message 拆 stable/semi/volatile 三段，`prompt_caching` 改多断点策略（Anthropic 上限 4）；新增 `docs/{zh,en}/ENV_VARS.md` 汇总所有 SAGE_* 环境变量；20 例新单测 + 221 例回归全绿。
+
+2026-04-25 03:25 工作台隐藏 finish_turn：`stores/workbench.js`（desktop + server）`extractFromMessage` 增加 `HIDDEN_WORKBENCH_TOOL_NAMES` 过滤，finish_turn 不再进入 workbench timeline，只保留消息数据。
+
+2026-04-25 03:10 finish_turn 总结校验放宽：之前只看当前 LLM 调用的 `full_content_accumulator`，把「上一步先输出总结、下一步再单独调 finish_turn」的合理流程误判为缺总结导致死循环。新增 `_has_recent_assistant_summary`，从尾部回扫到最近一条真实 user 消息为界，期间任何非空 assistant 文本都视为总结存在；补 5 例 `test_simple_agent_finish_summary.py`。
+
+2026-04-25 02:50 tokens_usage 补 model 字段：`agent_base._call_llm_streaming` 把已 pop 出去的 `model_name` 重新塞回 `model_config` 并新增顶层 `model`；SessionContext per-call 解析按 request.model > model_config.model > response.model 三级回退，避免之前统计文件里 model 始终为空。
+
+2026-04-25 02:30 Shell 三件套捆绑：ToolProxy 新增 `_TOOL_BUNDLES`，`{execute_shell_command, await_shell, kill_shell}` 任一被勾选即三个全部解锁（共享后台任务注册表，缺一即废）；`/api/tools` 同步隐藏 await_shell / kill_shell，仅以 execute_shell_command 作为入口；新增 4 例 `test_tool_proxy_bundles.py`。
+
+2026-04-25 02:10 finish_turn 强制接入 + 前端隐藏：ToolProxy 在白名单模式下自动注入 finish_turn，使其与上游 availableTools 解耦；SimpleAgent 在 finish_turn 启用时彻底跳过旧的 LLM `_is_task_complete` 判定。`/api/tools` 列表过滤掉 finish_turn，前端 MessageRenderer（desktop + server）按 HIDDEN_TOOL_NAMES 过滤 tool_calls 渲染（数据保留）；新内置工具 finish_turn / read_lints / await_shell / kill_shell 补 i18n。
+
+2026-04-25 01:40 Windows 兼容硬化：lifecycle `_ensure_default_anytool_server_ready` 加 `asyncio.wait_for` 超时兜底，避免 streamable_http 注册在 Windows 上无限阻塞；`_get_process_rss_mb` / `_host_process_is_alive` 改 ctypes 走 PSAPI / OpenProcess，去掉对 `ps` 与 POSIX `os.kill(pid,0)` 的依赖；Passthrough/Local 路径映射统一接受 `\` 与 `/`，`to_virtual_path` 始终输出 POSIX 风格；LintTool `_has_command` 在 Windows 用 `where`。
+
+2026-04-25 01:10 沙箱后台命令跨平台化：`ISandboxHandle` 增 `start/read/alive/exit_code/kill_background` 五原语，PassthroughSandbox / LocalSandbox 接入跨平台 `HostBackgroundRunner`（POSIX `start_new_session` + Windows `DETACHED_PROCESS`）；ExecuteCommandTool 优先走原生原语，bash 包装作为远端 Linux 兜底。补 `test_bg_runner.py` 7 例。
+
+2026-04-25 00:30 修复 execute_shell_command 后台启动在 macOS 失效：`_spawn_background` 改为 `setsid`/`nohup` 自动兜底；新增 9 例真沙箱（passthrough）集成单测，覆盖阻塞/后台/await/kill/safety 全链路。
+
 2026-04-24 23:55 Agent 能力提升一揽子改造：file_update 默认唯一匹配 + replace_all 显式开关；新增 finish_turn / read_lints / await_shell / kill_shell 工具，execute_shell 改两段式后台；统一工具错误码 error_codes；下线中文关键词强制继续；SessionContext 新增 per-request tokens_usage 落盘。补齐对应单测。
 
 2026-04-24 todo 工具升级三态：status=pending/in_progress/completed，markdown 复选框扩展 `[ ]/[-]/[x]` 三段写入；后端 conditions 与 ObservationAgent 把 in_progress 计入「未完成」；前端 TodoTaskMessage / 渲染器新增进行中视觉与 i18n（statusPending/InProgress/Failed）；旧 `[ ]/[x]` markdown 仍兼容。

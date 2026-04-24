@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Awaitable, Dict, Optional
 
 import httpx
 from loguru import logger
@@ -45,6 +45,19 @@ def _build_probe_extra_body(model: str) -> Dict[str, Any]:
         extra_body["thinking"] = {"type": "disabled"}
 
     return extra_body
+
+
+async def _probe_optional_capability(capability: str, probe_coro: Awaitable[Dict[str, Any]]) -> Dict[str, Any]:
+    try:
+        return await probe_coro
+    except Exception as exc:
+        logger.info(
+            f"[LLM Capability Probe] {capability} optional probe failed | error={exc}"
+        )
+        return {
+            "supported": False,
+            "error": str(exc),
+        }
 
 
 def _build_probe_messages() -> list[Dict[str, Any]]:
@@ -213,8 +226,14 @@ async def probe_llm_capabilities(api_key: str, base_url: str, model: str) -> Dic
         f"[LLM Capability Probe] start | model={model} | base_url={base_url}"
     )
     connection = await probe_connection(api_key, base_url, model)
-    multimodal = await probe_multimodal(api_key, base_url, model)
-    structured_output = await probe_structured_output(api_key, base_url, model)
+    multimodal = await _probe_optional_capability(
+        "multimodal",
+        probe_multimodal(api_key, base_url, model),
+    )
+    structured_output = await _probe_optional_capability(
+        "structured_output",
+        probe_structured_output(api_key, base_url, model),
+    )
 
     report = {
         "connection": connection,

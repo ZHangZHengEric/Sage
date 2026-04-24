@@ -58,7 +58,12 @@ class LintTool:
             return -1, "", str(exc)
 
     async def _has_command(self, sandbox: Any, name: str) -> bool:
-        rc, out, _ = await self._run(sandbox, f"command -v {shlex.quote(name)}", timeout=5)
+        # 跨平台命令探测：POSIX 用 ``command -v``，Windows 用 ``where``。
+        if os.name == "nt":
+            cmd = f"where {name}"
+        else:
+            cmd = f"command -v {shlex.quote(name)}"
+        rc, out, _ = await self._run(sandbox, cmd, timeout=5)
         return rc == 0 and bool((out or "").strip())
 
     async def _lint_python(self, sandbox: Any, paths: List[str]) -> Dict[str, Any]:

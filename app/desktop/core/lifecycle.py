@@ -74,14 +74,31 @@ async def _post_initialize():
 
 
 async def _ensure_default_anytool_server_ready():
+    """启动时异步注册默认 AnyTool MCP server。
+
+    必须保证：无论如何不阻塞 lifecycle / 主事件循环。
+    在 Windows 上观察到 streamable_http(127.0.0.1) 偶尔会因 TCP 握手 / 自身 HTTP 路由
+    尚未挂载而 hang 住。因此每次注册都加 ``asyncio.wait_for`` 超时兜底，
+    超时后直接进入下一次重试，最差结果是该 MCP server 暂未激活，不影响其它能力。
+    """
     from common.services.mcp_service import ensure_default_anytool_server
+
+    per_attempt_timeout = float(os.environ.get("SAGE_DEFAULT_ANYTOOL_TIMEOUT", "20"))
 
     for attempt in range(3):
         try:
             await asyncio.sleep(2 if attempt == 0 else 3)
-            await ensure_default_anytool_server(register_tool_manager=True)
+            await asyncio.wait_for(
+                ensure_default_anytool_server(register_tool_manager=True),
+                timeout=per_attempt_timeout,
+            )
             logger.info("sage-desktop：默认 AnyTool MCP server 已激活")
             return
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"sage-desktop：默认 AnyTool MCP server 激活第 {attempt + 1} 次超时"
+                f"（{per_attempt_timeout}s），稍后重试"
+            )
         except Exception as exc:
             logger.warning(f"sage-desktop：默认 AnyTool MCP server 激活失败（第 {attempt + 1} 次）: {exc}")
 
@@ -101,13 +118,36 @@ def _host_process_is_alive(host_pid: int) -> bool:
     if host_pid <= 0 or host_pid == os.getpid():
         return True
 
+    if os.name == "nt":
+        # Windows 上 os.kill(pid, 0) 会把进程当成 CTRL+BREAK 目标，会误杀。
+        # 改用 OpenProcess(SYNCHRONIZE) + WaitForSingleObject 的轻量探测。
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            STILL_ACTIVE = 259  # 进程还活着时 GetExitCodeProcess 返回的占位码
+
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, host_pid)
+            if not handle:
+                return False
+            try:
+                exit_code = wintypes.DWORD()
+                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                    return True  # 拿不到退出码，保守认为活着
+                return exit_code.value == STILL_ACTIVE
+            finally:
+                kernel32.CloseHandle(handle)
+        except Exception:
+            return True
+
     try:
         os.kill(host_pid, 0)
         return True
     except ProcessLookupError:
         return False
     except PermissionError:
-        # Treat permission errors as "still alive" to avoid false positives.
         return True
     except OSError:
         return False
@@ -158,20 +198,56 @@ def _start_host_watchdog():
 
 
 def _get_process_rss_mb() -> float | None:
+    """跨平台获取当前进程 RSS（MB）。
+
+    - POSIX：用 ``ps -o rss=``。
+    - Windows：``ps`` 不存在，改用 ``ctypes`` 调 ``GetProcessMemoryInfo``，失败再静默返回 None。
+    任何异常都吞掉，仅作监控用，不能影响 lifecycle。
+    """
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class _PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+                _fields_ = [
+                    ("cb", wintypes.DWORD),
+                    ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t),
+                ]
+
+            counters = _PROCESS_MEMORY_COUNTERS()
+            counters.cb = ctypes.sizeof(_PROCESS_MEMORY_COUNTERS)
+            handle = ctypes.windll.kernel32.GetCurrentProcess()
+            if not ctypes.windll.psapi.GetProcessMemoryInfo(
+                handle, ctypes.byref(counters), counters.cb
+            ):
+                return None
+            return round(counters.WorkingSetSize / (1024 * 1024), 1)
+        except Exception:
+            return None
+
     try:
-      result = subprocess.run(
-          ["ps", "-o", "rss=", "-p", str(os.getpid())],
-          capture_output=True,
-          text=True,
-          timeout=2,
-          check=False,
-      )
-      if result.returncode != 0:
-          return None
-      rss_kb = int(result.stdout.strip() or "0")
-      return round(rss_kb / 1024, 1)
+        result = subprocess.run(
+            ["ps", "-o", "rss=", "-p", str(os.getpid())],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        rss_kb = int(result.stdout.strip() or "0")
+        return round(rss_kb / 1024, 1)
     except Exception:
-      return None
+        return None
 
 
 async def _memory_reporter_loop():

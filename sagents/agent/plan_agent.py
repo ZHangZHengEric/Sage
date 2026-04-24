@@ -370,13 +370,13 @@ class PlanAgent(AgentBase):
             agent="PlanAgent",
             language=session_context.get_language(),
         )
-        system_message = await self.prepare_unified_system_message(
+        system_messages = await self.prepare_unified_system_messages(
             session_id=session_context.session_id,
             system_prefix_override=planning_prefix,
             language=session_context.get_language(),
             include_sections=["role_definition", "system_context"],
         )
-        return [system_message] + working_messages
+        return list(system_messages) + working_messages
 
     async def _execute_tool_calls(
         self,

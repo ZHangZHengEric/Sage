@@ -803,6 +803,12 @@ export default {
   'tools.questionnaire.workbenchReadonlyHint': '工作台中的问卷仅用于预览，不能直接提交。请回到消息流中的问卷卡片完成提交。',
   'tools.questionnaire.autoSubmitted': '自动提交',
   'tools.questionnaire.manuallySubmitted': '手动提交',
+  'tools.finishTurn': '结束本轮',
+  'tools.readLints': '代码 Lint',
+  'tools.awaitShell': '等待命令',
+  'tools.killShell': '终止命令',
+  'tools.grep': '代码搜索',
+  'tools.glob': '文件查找',
   'tools.default': '工具执行',
 
   // 角色标签
@@ -838,6 +844,7 @@ export default {
   'tools.source.basic': '基础工具',
   'tools.source.builtin': '内置工具',
   'tools.source.system': '系统工具',
+  'tools.source.browserExtension': '浏览器扩展',
   'tools.sourceGroups': '来源分组',
   'tools.anyTool': 'AnyTool',
   'tools.selectServerMode': '请选择服务器模式',

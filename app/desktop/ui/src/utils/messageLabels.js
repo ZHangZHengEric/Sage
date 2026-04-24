@@ -145,7 +145,14 @@ export const toolLabelKeys = {
   'fetch_webpage': 'tools.fetchWebpage',
   'web_fetcher': 'tools.webFetcher',
   'todo_write': 'tools.todoWrite',
-  'questionnaire': 'tools.questionnaire'
+  'questionnaire': 'tools.questionnaire',
+  'finish_turn': 'tools.finishTurn',
+  'read_lints': 'tools.readLints',
+  'await_shell': 'tools.awaitShell',
+  'kill_shell': 'tools.killShell',
+  // 代码库认知工具
+  'grep': 'tools.grep',
+  'glob': 'tools.glob'
 }
 
 // 工具名称标签映射 - 中文回退
@@ -234,7 +241,14 @@ export const toolLabels = {
   'fetch_webpage': '抓取网页',
   'web_fetcher': '网页抓取',
   'todo_write': '待办任务',
-  'questionnaire': '信息收集'
+  'questionnaire': '信息收集',
+  'finish_turn': '结束本轮',
+  'read_lints': '代码 Lint',
+  'await_shell': '等待命令',
+  'kill_shell': '终止命令',
+  // 代码库认知工具
+  'grep': '代码搜索',
+  'glob': '文件查找'
 }
 
 /**
