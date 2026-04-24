@@ -188,26 +188,29 @@ class AgentBase(ABC):
                 start_request_time = time.time()
                 first_token_time = None
                 serializable_messages = []
+                cache_segments: List[Optional[str]] = []
 
                 for msg in messages:
                     if isinstance(msg, MessageChunk):
                         msg_dict = msg.to_dict()
-                        # 处理多模态消息：将图片URL转换为base64
                         msg_dict = await self._process_multimodal_content(msg_dict)
                         serializable_messages.append(msg_dict)
+                        seg = None
+                        if isinstance(getattr(msg, 'metadata', None), dict):
+                            seg = msg.metadata.get('cache_segment')
+                        cache_segments.append(seg)
                     else:
-                        # 处理字典形式的消息
                         msg_copy = msg.copy()
                         msg_copy = await self._process_multimodal_content(msg_copy)
                         serializable_messages.append(msg_copy)
+                        cache_segments.append(None)
                 # 只保留model.chat.completions.create 需要的messages的key，移除掉不不要的
                 serializable_messages = [{k: v for k, v in msg.items() if k in ['role', 'content', 'tool_calls', 'tool_call_id']} for msg in serializable_messages]
 
                 # 为消息添加 prompt caching 支持（Anthropic 格式）
-                # 在最后一个消息的最后一个 content block 上添加 cache_control
-                # 这对 Anthropic 模型有效，OpenAI 自动忽略，其他模型通常也会忽略
+                # 多段 system 时按 cache_segments 打多个断点；老路径保持单断点回退
                 if serializable_messages:
-                    add_cache_control_to_messages(serializable_messages)
+                    add_cache_control_to_messages(serializable_messages, cache_segments=cache_segments)
 
                 # 统计图片数量
                 image_count = 0
@@ -443,9 +446,13 @@ class AgentBase(ABC):
                     if session_id:
                         session_context = self._get_live_session_context(session_id)
 
+                        # final_config 在前面已经把 'model' pop 走了，这里把模型名补回，
+                        # 让 SessionContext 的 per-request tokens 统计能拿到 model 字段。
+                        model_config_for_record = {**final_config, "model": model_name}
                         llm_request = {
                             "step_name": step_name,
-                            "model_config": final_config,
+                            "model_config": model_config_for_record,
+                            "model": model_name,
                             "messages": serializable_messages,
                             "started_at": start_request_time,
                             "first_token_time": first_token_time,
@@ -494,35 +501,36 @@ class AgentBase(ABC):
                         else:
                             logger.warning(f"{self.__class__.__name__}: session_context is None for session_id={session_id}, skip add_llm_request")
 
-    async def prepare_unified_system_message(self,
-                                       session_id: Optional[str] = None,
-                                       custom_prefix: Optional[str] = None,
-                                       language: Optional[str] = None,
-                                       system_prefix_override: Optional[str] = None,
-                                       include_sections: Optional[List[str]] = None) -> MessageChunk:
-        """
-        准备统一的系统消息
+    async def _build_system_segments(self,
+                                     session_id: Optional[str] = None,
+                                     custom_prefix: Optional[str] = None,
+                                     language: Optional[str] = None,
+                                     system_prefix_override: Optional[str] = None,
+                                     include_sections: Optional[List[str]] = None) -> Dict[str, str]:
+        """构建按缓存稳定度切分的 system 文本段。
 
-        Args:
-            session_id: 会话ID
-            custom_prefix: 自定义前缀,会添加到system_prefix 后面，system context 前面
-            language: 语言设置
-            system_prefix_override: 覆盖默认的系统前缀（避免修改self.SYSTEM_PREFIX_FIXED导致并发问题）
-            include_sections: 包含的部分列表，可选值：['role_definition', 'system_context', 'active_skill', 'workspace_files', 'available_skills']。默认为None，表示包含所有部分。
+        返回 dict 形如 ``{"stable": str, "semi_stable": str, "volatile": str}``。
+        命名按"自上而下越来越易变"排列，便于上层在多段 system message + Anthropic
+        cache_control 多断点策略下保持高 cache 命中率：
 
-        Returns:
-            MessageChunk: 系统消息
+        - ``stable``：role_definition + IDENTITY/AGENT/SOUL/USER/MEMORY md（按会话生命周期基本不变）
+        - ``semi_stable``：available_skills 列表 + active_skills 内容 + skills_usage_hint
+        - ``volatile``：system_context（含时间戳等动态字段）+ workspace_files + external_paths
         """
-        # 默认包含所有部分
         if include_sections is None:
-            include_sections = ['role_definition', 'system_context', 'active_skill', 'workspace_files', 'available_skills','AGENT.MD']
+            include_sections = ['role_definition', 'system_context', 'active_skill', 'workspace_files', 'available_skills', 'AGENT.MD']
 
-        system_prefix = ""
+        stable_buf = ""
+        semi_buf = ""
+        volatile_buf = ""
+
         session_context = None
         if session_id:
             session_context = self._get_live_session_context(session_id)
+        # 兼容旧逻辑使用的局部变量名
+        system_prefix = ""
 
-        # 1. Role Definition
+        # 1. Role Definition  → stable
         use_identity = False
         if 'role_definition' in include_sections:
             role_content = ""
@@ -534,7 +542,6 @@ class AgentBase(ABC):
                 role_content = self.system_prefix
             else:
                 if session_context and session_context.sandbox:
-                    # 使用新的沙箱接口读取 IDENTITY.md
                     identity_path = os.path.join(session_context.sandbox_agent_workspace, 'IDENTITY.md')
                     try:
                         if await session_context.sandbox.file_exists(identity_path):
@@ -542,7 +549,7 @@ class AgentBase(ABC):
                             use_identity = True
                     except Exception as e:
                         logger.warning(f"AgentBase: Failed to read IDENTITY.md: {e}")
-                
+
                 if not role_content:
                     role_content = prompt_manager.get_prompt(
                         'agent_intro_template',
@@ -552,9 +559,7 @@ class AgentBase(ABC):
             if custom_prefix:
                 role_content += f"\n\n{custom_prefix}"
 
-            system_prefix += f"<role_definition>\n{role_content}\n</role_definition>\n"
-
-        # 根据session_id获取session_context信息（用于获取system_context和agent_workspace）
+            stable_buf += f"<role_definition>\n{role_content}\n</role_definition>\n"
 
         if session_context:
             system_context_info = session_context.system_context.copy()
@@ -566,119 +571,97 @@ class AgentBase(ABC):
                     use_claw_mode = use_claw_mode.lower() == "true"
             logger.debug(f"{self.__class__.__name__}: use_claw_mode: {use_claw_mode}")
             if "AGENT.MD" in include_sections and use_claw_mode and session_context.sandbox:
-                # 使用新的沙箱接口读取各种 .md 文件
+                # 各种 .md 文件 → stable
                 workspace = session_context.sandbox_agent_workspace
-                
-                # 读取 AGENT.md
+
                 try:
                     agent_md_content = await session_context.sandbox.read_file(os.path.join(workspace, 'AGENT.md'))
                     if agent_md_content:
-                        system_prefix += f"<agent_md>\n{agent_md_content}\n</agent_md>\n"
+                        stable_buf += f"<agent_md>\n{agent_md_content}\n</agent_md>\n"
                 except Exception as e:
                     logger.debug(f"AgentBase: AGENT.md not found or error reading: {e}")
 
-                # 读取 SOUL.md
                 try:
                     soul_content = await session_context.sandbox.read_file(os.path.join(workspace, 'SOUL.md'))
                     if soul_content:
                         if len(soul_content) > 300:
                             soul_content = soul_content[:300]+"……"
-                        system_prefix += f"<soul>\n{soul_content}\n</soul>\n"
+                        stable_buf += f"<soul>\n{soul_content}\n</soul>\n"
                 except Exception as e:
                     logger.debug(f"AgentBase: SOUL.md not found or error reading: {e}")
 
-                # 读取 USER.md
                 try:
                     user_content = await session_context.sandbox.read_file(os.path.join(workspace, 'USER.md'))
                     if user_content:
                         if len(user_content) > 300:
                             user_content = user_content[:300]+"……"
-                        system_prefix += f"<user>\n{user_content}\n</user>\n"
+                        stable_buf += f"<user>\n{user_content}\n</user>\n"
                 except Exception as e:
                     logger.debug(f"AgentBase: USER.md not found or error reading: {e}")
 
-                # 读取 MEMORY.md
                 try:
                     memory_content = await session_context.sandbox.read_file(os.path.join(workspace, 'MEMORY.md'))
                     if memory_content:
                         if len(memory_content) > 500:
                             memory_content = memory_content[:500]+"……"
-                        system_prefix += f"<memory>\n{memory_content}\n</memory>\n"
+                        stable_buf += f"<memory>\n{memory_content}\n</memory>\n"
                 except Exception as e:
                     logger.debug(f"AgentBase: MEMORY.md not found or error reading: {e}")
 
-                # 读取 IDENTITY.md（如果之前没有读取过）
                 if not use_identity:
                     try:
                         identity_content = await session_context.sandbox.read_file(os.path.join(workspace, 'IDENTITY.md'))
                         if identity_content:
                             if len(identity_content) > 300:
                                 identity_content = identity_content[:300]+"……"
-                            system_prefix += f"<identity>\n{identity_content}\n</identity>\n"
+                            stable_buf += f"<identity>\n{identity_content}\n</identity>\n"
                     except Exception as e:
                         logger.debug(f"AgentBase: IDENTITY.md not found or error reading: {e}")
 
-            # 处理 active_skills (无论是否包含system_context，都先提取出来，避免污染通用context)
             active_skills = None
             if 'active_skills' in system_context_info:
                 active_skills = system_context_info.pop('active_skills')
 
-            # 2. System Context
+            # 2. System Context  → volatile（含时间戳/动态字段）
             if 'system_context' in include_sections:
-                system_prefix += "<system_context>\n"
-
-                # Exclude external_paths from generic system_context display as they are handled separately
+                volatile_buf += "<system_context>\n"
                 excluded_keys = {'active_skills', 'active_skill_instruction', '可以访问的其他路径文件夹', 'external_paths'}
-
                 for key, value in system_context_info.items():
                     if key in excluded_keys:
                         continue
-
                     if isinstance(value, (dict, list, tuple)):
-                        # 如果值是字典、列表或元组，格式化显示
-                        # 如果是元组，先转换为列表，确保序列化行为明确
                         if isinstance(value, tuple):
                             value = list(value)
-
-                        # 将value转换为JSON字符串
                         formatted_val = json.dumps(value, ensure_ascii=False, indent=2)
-                        system_prefix += f"  <{key}>\n{formatted_val}\n  </{key}>\n"
+                        volatile_buf += f"  <{key}>\n{formatted_val}\n  </{key}>\n"
                     else:
-                        # 其他类型直接转换为字符串
-                        system_prefix += f"  <{key}>{str(value)}</{key}>\n"
-                system_prefix += "</system_context>\n"
+                        volatile_buf += f"  <{key}>{str(value)}</{key}>\n"
+                volatile_buf += "</system_context>\n"
 
-            # 3. Active Skills - 使用新的格式 <active_skills><skill_name>content</skill_name>...</active_skills>
+            # 3. Active Skills  → semi_stable
             if 'active_skill' in include_sections and active_skills:
-                system_prefix += "<active_skills>\n"
+                semi_buf += "<active_skills>\n"
                 for skill in active_skills:
                     skill_name = skill.get('skill_name', 'unknown')
                     skill_content = skill.get('skill_content', '')
-                    # 转义 XML 特殊字符
                     skill_content_escaped = str(skill_content).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                    system_prefix += f"  <{skill_name}>\n{skill_content_escaped}\n  </{skill_name}>\n"
-                system_prefix += "</active_skills>\n"
+                    semi_buf += f"  <{skill_name}>\n{skill_content_escaped}\n  </{skill_name}>\n"
+                semi_buf += "</active_skills>\n"
 
-            logger.debug(f"{self.__class__.__name__}: 系统消息生成完成，总长度: {len(system_prefix)}")
-
-            # 4. Workspace Files
+            # 4. Workspace Files  → volatile
             if 'workspace_files' in include_sections:
-                # 使用新沙箱接口获取文件树
                 if hasattr(session_context, 'sandbox') and session_context.sandbox:
                     workspace_name = session_context.system_context.get('private_workspace', '')
-
-                    system_prefix += "<workspace_files>\n"
-                    # 使用PromptManager获取多语言文本
+                    volatile_buf += "<workspace_files>\n"
                     workspace_files = prompt_manager.get_prompt(
                         'workspace_files_label',
                         agent='common',
                         language=language,
                         default=f"当前工作空间 {workspace_name} 的文件情况（最大深度2层）：\n"
                     )
-                    system_prefix += workspace_files.format(workspace=workspace_name)
+                    volatile_buf += workspace_files.format(workspace=workspace_name)
 
                     try:
-                        # 使用新沙箱接口获取文件树
                         file_tree = await session_context.sandbox.get_file_tree(
                             include_hidden=True,
                             max_depth=2,
@@ -691,9 +674,9 @@ class AgentBase(ABC):
                                 language=language,
                                 default="当前工作空间下没有文件。\n"
                             )
-                            system_prefix += no_files
+                            volatile_buf += no_files
                         else:
-                            system_prefix += file_tree
+                            volatile_buf += file_tree
                     except Exception as e:
                         logger.error(f"AgentBase: 获取工作空间文件树时出错: {e}")
                         no_files = prompt_manager.get_prompt(
@@ -702,28 +685,24 @@ class AgentBase(ABC):
                             language=language,
                             default="当前工作空间下没有文件。\n"
                         )
-                        system_prefix += no_files
+                        volatile_buf += no_files
 
-                    system_prefix += "</workspace_files>\n"
+                    volatile_buf += "</workspace_files>\n"
 
-                # 4.1 External/Additional Paths
                 external_paths = session_context.system_context.get('external_paths')
-
                 if external_paths and isinstance(external_paths, list) and hasattr(session_context, 'sandbox') and session_context.sandbox:
-                    system_prefix += "<external_paths>\n"
+                    volatile_buf += "<external_paths>\n"
                     ext_paths_intro = prompt_manager.get_prompt(
                         'external_paths_intro',
                         agent='common',
                         language=language,
                         default="您还可以访问以下外部目录（访问深度不受限，此处仅展示前2层文件）：\n"
                     )
-                    system_prefix += ext_paths_intro
-
+                    volatile_buf += ext_paths_intro
                     for ext_path in external_paths:
                         if isinstance(ext_path, str):
-                            system_prefix += f"Path: {ext_path}\n"
+                            volatile_buf += f"Path: {ext_path}\n"
                             try:
-                                # 使用新沙箱接口获取外部路径文件树
                                 ext_tree = await session_context.sandbox.get_file_tree(
                                     root_path=ext_path,
                                     include_hidden=True,
@@ -731,18 +710,16 @@ class AgentBase(ABC):
                                     max_items_per_dir=5
                                 )
                                 if ext_tree:
-                                    system_prefix += ext_tree
+                                    volatile_buf += ext_tree
                                 else:
-                                    system_prefix += "(Empty)\n"
+                                    volatile_buf += "(Empty)\n"
                             except Exception as e:
-                                system_prefix += f"(Error listing files: {e})\n"
-                            system_prefix += "\n"
+                                volatile_buf += f"(Error listing files: {e})\n"
+                            volatile_buf += "\n"
+                    volatile_buf += "</external_paths>\n"
 
-                    system_prefix += "</external_paths>\n"
-
-            # 5. Available Skills
+            # 5. Available Skills  → semi_stable
             if 'available_skills' in include_sections:
-                # 补充 Skills 信息（优先沙箱内 skills，与 load_skill 一致）
                 sm = session_context.effective_skill_manager
                 if sm:
                     if hasattr(sm, "load_new_skills"):
@@ -753,12 +730,11 @@ class AgentBase(ABC):
 
                     skill_infos = sm.list_skill_info()
                     if skill_infos:
-                        system_prefix += "<available_skills>\n"
+                        semi_buf += "<available_skills>\n"
                         for skill in skill_infos:
-                            system_prefix += f"<skill>\n<skill_name>{skill.name}</skill_name>\n<skill_description>{skill.description[:50]+'...' if len(skill.description) > 50 else skill.description}</skill_description>\n</skill>\n"
-                        system_prefix += "</available_skills>\n"
+                            semi_buf += f"<skill>\n<skill_name>{skill.name}</skill_name>\n<skill_description>{skill.description[:50]+'...' if len(skill.description) > 50 else skill.description}</skill_description>\n</skill>\n"
+                        semi_buf += "</available_skills>\n"
 
-                        # 获取技能使用说明
                         skills_hint = prompt_manager.get_prompt(
                             'skills_usage_hint',
                             agent='common',
@@ -766,14 +742,99 @@ class AgentBase(ABC):
                             default=""
                         )
                         if skills_hint:
-                            system_prefix += f"<skill_usage>\n{skills_hint}\n</skill_usage>\n"
+                            semi_buf += f"<skill_usage>\n{skills_hint}\n</skill_usage>\n"
 
+        # 兼容已有局部变量名（避免上游 logger 行依赖）
+        system_prefix = stable_buf + semi_buf + volatile_buf
+        logger.debug(f"{self.__class__.__name__}: 系统消息生成完成，总长度: {len(system_prefix)}")
+
+        return {
+            "stable": stable_buf,
+            "semi_stable": semi_buf,
+            "volatile": volatile_buf,
+        }
+
+    async def prepare_unified_system_message(self,
+                                       session_id: Optional[str] = None,
+                                       custom_prefix: Optional[str] = None,
+                                       language: Optional[str] = None,
+                                       system_prefix_override: Optional[str] = None,
+                                       include_sections: Optional[List[str]] = None) -> MessageChunk:
+        """单条 system message（向后兼容）。
+
+        内部调用 ``_build_system_segments`` 后把三段顺序拼接成一条 system，保持
+        和旧版完全一致的行为；新接入方应优先使用 ``prepare_unified_system_messages``
+        以拿到分段结构、配合多断点 prompt cache。
+        """
+        segments = await self._build_system_segments(
+            session_id=session_id,
+            custom_prefix=custom_prefix,
+            language=language,
+            system_prefix_override=system_prefix_override,
+            include_sections=include_sections,
+        )
+        merged = segments["stable"] + segments["semi_stable"] + segments["volatile"]
         return MessageChunk(
             role=MessageRole.SYSTEM.value,
-            content=system_prefix,
+            content=merged,
             type=MessageType.SYSTEM.value,
-            agent_name=self.agent_name
+            agent_name=self.agent_name,
         )
+
+    async def prepare_unified_system_messages(self,
+                                              session_id: Optional[str] = None,
+                                              custom_prefix: Optional[str] = None,
+                                              language: Optional[str] = None,
+                                              system_prefix_override: Optional[str] = None,
+                                              include_sections: Optional[List[str]] = None) -> List[MessageChunk]:
+        """按 cache 稳定度切分的多段 system message。
+
+        - 返回顺序固定为 ``[stable, semi_stable, volatile]``，空段会被过滤掉
+        - 每条 ``MessageChunk.metadata["cache_segment"]`` 标注所属段，便于
+          ``add_cache_control_to_messages`` 在前两段末尾打 cache 断点
+        - 兜底：当环境变量 ``SAGE_SPLIT_SYSTEM=false`` 时，等价于
+          ``prepare_unified_system_message``，把所有段合并为单条 system
+        """
+        segments = await self._build_system_segments(
+            session_id=session_id,
+            custom_prefix=custom_prefix,
+            language=language,
+            system_prefix_override=system_prefix_override,
+            include_sections=include_sections,
+        )
+
+        if os.environ.get("SAGE_SPLIT_SYSTEM", "true").lower() == "false":
+            merged = segments["stable"] + segments["semi_stable"] + segments["volatile"]
+            return [MessageChunk(
+                role=MessageRole.SYSTEM.value,
+                content=merged,
+                type=MessageType.SYSTEM.value,
+                agent_name=self.agent_name,
+                metadata={"cache_segment": "stable"},
+            )]
+
+        out: List[MessageChunk] = []
+        for seg_name in ("stable", "semi_stable", "volatile"):
+            seg_text = segments.get(seg_name) or ""
+            if not seg_text.strip():
+                continue
+            out.append(MessageChunk(
+                role=MessageRole.SYSTEM.value,
+                content=seg_text,
+                type=MessageType.SYSTEM.value,
+                agent_name=self.agent_name,
+                metadata={"cache_segment": seg_name},
+            ))
+        # 至少保留一条空 stable，避免下游 history 为空时 LLM 直接拒绝
+        if not out:
+            out.append(MessageChunk(
+                role=MessageRole.SYSTEM.value,
+                content="",
+                type=MessageType.SYSTEM.value,
+                agent_name=self.agent_name,
+                metadata={"cache_segment": "stable"},
+            ))
+        return out
 
     def _judge_delta_content_type(self,
                                   delta_content: str,

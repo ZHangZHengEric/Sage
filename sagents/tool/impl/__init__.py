@@ -17,6 +17,7 @@ __all__ = [
     "QuestionnaireTool",
     "LintTool",
     "FinishTurnTool",
+    "CodebaseTool",
 ]
 
 _EXPORTS = {
@@ -29,6 +30,7 @@ _EXPORTS = {
     "QuestionnaireTool": ".questionnaire_tool",
     "LintTool": ".lint_tool",
     "FinishTurnTool": ".finish_turn_tool",
+    "CodebaseTool": ".codebase_tool",
 }
 
 

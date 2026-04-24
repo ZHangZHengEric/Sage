@@ -128,7 +128,7 @@ class ToolSuggestionAgent(AgentBase):
                 messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
             )
             llm_request_messages = [
-                await self.prepare_unified_system_message(session_id=session_context.session_id, 
+                *await self.prepare_unified_system_messages(session_id=session_context.session_id,
                                 language=session_context.get_language(),
                                 include_sections = ['role_definition', 'system_context', 'available_skills']),
                 MessageChunk(

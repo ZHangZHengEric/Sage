@@ -42,6 +42,9 @@ class ToolSpec:
     return_data : Optional[Dict[str, Any]] = None # 返回数据格式
     return_properties_i18n: Optional[Dict[str, Dict[str, Any]]] = None # 返回对象属性描述的多语言
     param_description_i18n: Optional[Dict[str, Dict[str, str]]] = None # 参数描述多语言映射 param -> {lang: text}
+    # 工具分类标签（如 "browser"），用于前端按来源分组；为 None 时按 "基础工具" 处理。
+    # 由 @tool(category=...) 显式声明，或由宿主类的 TOOL_CATEGORY 类属性批量赋值。
+    category: Optional[str] = None
 
 @dataclass
 class SageMcpToolSpec(ToolSpec):

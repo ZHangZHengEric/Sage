@@ -444,7 +444,8 @@ const getToolSourceLabel = (source) => {
   const sourceMapping = {
     '基础工具': 'tools.source.basic',
     '内置工具': 'tools.source.builtin',
-    '系统工具': 'tools.source.system'
+    '系统工具': 'tools.source.system',
+    '浏览器扩展': 'tools.source.browserExtension'
   }
 
   const translationKey = sourceMapping[displaySource]

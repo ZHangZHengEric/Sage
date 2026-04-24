@@ -66,7 +66,8 @@ class SandboxFileSystem:
 
     def to_virtual_path(self, host_path: str) -> str:
         """
-        Converts a host path to a virtual path.
+        Converts a host path to a virtual path. 虚拟路径统一用 POSIX 分隔符 ``/``，
+        避免 Windows 在虚拟命名空间里出现混合分隔符。
         """
         normalized_host = os.path.abspath(host_path)
         for mapped_host, mapped_virtual in self._iter_host_mappings():
@@ -74,8 +75,14 @@ class SandboxFileSystem:
                 return mapped_virtual
             if normalized_host.startswith(mapped_host + os.sep) or normalized_host.startswith(mapped_host + "/"):
                 rel_path = normalized_host[len(mapped_host):].lstrip(os.sep).lstrip("/")
-                return os.path.join(mapped_virtual, rel_path)
-            
+                rel_posix = rel_path.replace(os.sep, "/") if os.sep != "/" else rel_path
+                base = mapped_virtual.rstrip("/").rstrip(os.sep)
+                if not base:
+                    return f"/{rel_posix}"
+                # 如果虚拟路径本身是 POSIX（以 / 开头），保持 POSIX 拼接
+                if base.startswith("/"):
+                    return f"{base}/{rel_posix}"
+                return os.path.join(base, rel_posix)
         return host_path
 
     def _write_file_sync(self, path: str, content: str, encoding: str = 'utf-8', append: bool = False) -> str:

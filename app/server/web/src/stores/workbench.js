@@ -399,10 +399,15 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     })
 
     // 处理工具调用
+    // 协议性内置工具（如 finish_turn）只是 agent 控制信号，不进入工作台 timeline。
+    const HIDDEN_WORKBENCH_TOOL_NAMES = new Set(['finish_turn'])
     if (message.tool_calls && message.tool_calls.length > 0) {
       message.tool_calls.forEach((toolCall, idx) => {
         if (!toolCall || !toolCall.function) {
           console.warn('[Workbench] Skipping invalid toolCall:', idx, toolCall)
+          return
+        }
+        if (HIDDEN_WORKBENCH_TOOL_NAMES.has(toolCall.function?.name)) {
           return
         }
         console.log('[Workbench] Adding tool_call:', idx, toolCall.function?.name)

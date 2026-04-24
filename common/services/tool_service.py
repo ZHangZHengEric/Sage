@@ -165,6 +165,12 @@ async def list_tools(
         return []
 
     available_tools = tool_manager.list_tools_with_type()
+    # 隐藏工具：
+    # - finish_turn：协议性内置工具，由 SimpleAgent 强制注入，不让用户单独勾选；
+    # - await_shell / kill_shell：与 execute_shell_command 共享后台任务注册表，作为捆绑工具
+    #   随 execute_shell_command 一起解锁（见 ToolProxy._TOOL_BUNDLES），不在勾选列表单独出现。
+    _HIDDEN_TOOLS = {"finish_turn", "await_shell", "kill_shell"}
+    available_tools = [t for t in available_tools if t.get("name") not in _HIDDEN_TOOLS]
     dao = MCPServerDao()
     all_servers = await dao.get_list(user_id=None)
     source_owner_map = {server.name: server.user_id or "" for server in all_servers}
