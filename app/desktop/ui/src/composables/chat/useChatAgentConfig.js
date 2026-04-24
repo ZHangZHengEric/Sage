@@ -2,6 +2,12 @@ import { ref, computed } from 'vue'
 import { agentAPI } from '@/api/agent.js'
 import { isLoggedIn } from '@/utils/auth.js'
 
+const normalizeAgentMode = (mode) => {
+  const normalized = String(mode || '').trim().toLowerCase()
+  if (normalized === 'fibre') return 'fibre'
+  return 'simple'
+}
+
 export const useChatAgentConfig = ({
   t,
   toast,
@@ -39,8 +45,7 @@ export const useChatAgentConfig = ({
 
     selectedAgent.value = agent
     if (agent && (isAgentChange || forceConfigUpdate)) {
-      // 如果后端返回的 agentMode 是 'multi'，自动改为 'simple'
-      const agentMode = agent.agentMode === 'multi' ? 'simple' : (agent.agentMode || 'simple')
+      const agentMode = normalizeAgentMode(agent.agentMode)
       config.value = {
         deepThinking: userConfigOverrides.value.deepThinking !== undefined ? userConfigOverrides.value.deepThinking : agent.deepThinking,
         agentMode: userConfigOverrides.value.agentMode !== undefined ? userConfigOverrides.value.agentMode : agentMode,
@@ -58,9 +63,22 @@ export const useChatAgentConfig = ({
   }
 
   const updateConfig = (newConfig) => {
-    const updatedConfig = { ...config.value, ...newConfig }
+    const normalizedAgentMode = newConfig.agentMode !== undefined
+      ? normalizeAgentMode(newConfig.agentMode)
+      : config.value.agentMode
+    const updatedConfig = {
+      ...config.value,
+      ...newConfig,
+      agentMode: normalizedAgentMode,
+    }
     config.value = updatedConfig
-    const updatedOverrides = { ...userConfigOverrides.value, ...newConfig }
+    const updatedOverrides = {
+      ...userConfigOverrides.value,
+      ...newConfig,
+      agentMode: newConfig.agentMode !== undefined
+        ? normalizedAgentMode
+        : userConfigOverrides.value.agentMode,
+    }
     userConfigOverrides.value = updatedOverrides
   }
 
