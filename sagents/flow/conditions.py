@@ -116,7 +116,7 @@ def check_task_not_completed(session_context, session=None) -> bool:
     # 尝试从 system_context 获取 todo_list
     todo_list = session_context.system_context.get("todo_list", [])
     if todo_list:
-        pending_tasks = [t for t in todo_list if not t.get("completed", False)]
+        pending_tasks = [t for t in todo_list if (t.get("status") or "pending") != "completed"]
         if not pending_tasks:
             logger.info("SAgent: 所有任务已标记完成")
             # 如果确实有任务列表且都完成了，也可以视为结束

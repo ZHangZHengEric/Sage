@@ -1,11 +1,12 @@
 import json
 import ast
 import os
+import platform
 import sys
 import shutil
 import hashlib
 from contextlib import contextmanager
-from typing import Any, List, Union, Optional
+from typing import Any, Dict, List, Union, Optional
 
 
 def is_pyinstaller_frozen() -> bool:
@@ -79,6 +80,37 @@ def get_system_python_path() -> Optional[str]:
     else:
         # 非打包环境，直接使用 sys.executable
         return sys.executable
+
+
+def detect_machine_environment(
+    sandbox: Optional[Any] = None,
+    sandbox_agent_workspace: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    收集轻量沙箱运行环境信息，供 agent 判断当前平台和执行边界。
+
+    只读取 Python 与沙箱对象已有属性，不执行 shell 探测，避免拖慢 session 初始化。
+    """
+    environment = {
+        "os": platform.system(),
+        "machine": platform.machine(),
+        "python_version": platform.python_version(),
+        "path_separator": os.pathsep,
+    }
+
+    if sandbox is not None:
+        environment.update(
+            {
+                "sandbox_type": sandbox.__class__.__name__,
+                "sandbox_workspace": sandbox_agent_workspace
+                or getattr(sandbox, "sandbox_agent_workspace", None),
+                "sandbox_isolation": getattr(sandbox, "isolation_mode", None),
+                "sandbox_python_venv": getattr(sandbox, "venv_dir", None),
+                "sandbox_runtime_dir": getattr(sandbox, "sandbox_dir", None),
+            }
+        )
+
+    return environment
 
 
 def use_shared_python_env() -> bool:

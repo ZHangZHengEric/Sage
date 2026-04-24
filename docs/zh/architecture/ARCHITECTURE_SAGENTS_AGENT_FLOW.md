@@ -37,8 +37,7 @@ Agent 自身不持有“这次会话的状态”，状态都在 `SessionContext`
 
 ```mermaid
 flowchart TB
-    subgraph 路由与分析
-        Router[task_router]
+    subgraph 分析
         Analysis[task_analysis]
     end
 
@@ -71,7 +70,7 @@ flowchart TB
 
 
 
-各 Agent 的 `agent_key` 是流程中 `AgentNode` 引用它的标识，例如 `task_router`、`simple`、`task_planning` 等。
+各 Agent 的 `agent_key` 是流程中 `AgentNode` 引用它的标识，例如 `simple`、`task_planning` 等。
 
 ### 1.3 `FibreAgent` 与子智能体编排
 
@@ -165,8 +164,7 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    Start([输入 messages]) --> R[task_router]
-    R --> DT{is_deep_thinking?}
+    Start([输入 messages]) --> DT{is_deep_thinking?}
     DT -->|是| Ana[task_analysis] --> Sw
     DT -->|否| Sw
     Sw{Switch agent_mode}
@@ -275,7 +273,6 @@ from sagents.flow.schema import (
 custom_flow = AgentFlow(
     name="My Pipeline",
     root=SequenceNode(steps=[
-        AgentNode(agent_key="task_router"),
         IfNode(
             condition="user_paid",
             true_body=LoopNode(

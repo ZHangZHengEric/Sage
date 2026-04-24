@@ -1,5 +1,6 @@
 import asyncio
 import json
+from urllib.parse import quote
 from typing import List, Dict, Any, Optional
 
 from ..tool_base import tool
@@ -277,7 +278,7 @@ class QuestionnaireTool:
         while elapsed < wait_time:
             try:
                 # 通过 questionnaire_id 获取问卷结果
-                encoded_questionnaire_id = questionnaire_id
+                encoded_questionnaire_id = quote(questionnaire_id, safe="")
                 response = await backend_client.get(f"/api/questionnaires/{encoded_questionnaire_id}/results")
                 
                 if response.status_code == 200:

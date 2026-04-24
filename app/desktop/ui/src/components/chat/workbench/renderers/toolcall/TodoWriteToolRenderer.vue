@@ -86,8 +86,8 @@ const getTodoStatusVariant = (status) => ({
 }[status] || 'secondary')
 const getTodoStatusLabel = (status) => ({
   completed: t('workbench.tool.statusCompleted'),
-  pending: 'Pending',
-  in_progress: 'In Progress',
-  failed: 'Failed'
+  pending: t('workbench.tool.statusPending'),
+  in_progress: t('workbench.tool.statusInProgress'),
+  failed: t('workbench.tool.statusFailed')
 }[status] || status)
 </script>

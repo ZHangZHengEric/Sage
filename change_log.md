@@ -1,3 +1,13 @@
+2026-04-24 23:55 Agent 能力提升一揽子改造：file_update 默认唯一匹配 + replace_all 显式开关；新增 finish_turn / read_lints / await_shell / kill_shell 工具，execute_shell 改两段式后台；统一工具错误码 error_codes；下线中文关键词强制继续；SessionContext 新增 per-request tokens_usage 落盘。补齐对应单测。
+
+2026-04-24 todo 工具升级三态：status=pending/in_progress/completed，markdown 复选框扩展 `[ ]/[-]/[x]` 三段写入；后端 conditions 与 ObservationAgent 把 in_progress 计入「未完成」；前端 TodoTaskMessage / 渲染器新增进行中视觉与 i18n（statusPending/InProgress/Failed）；旧 `[ ]/[x]` markdown 仍兼容。
+
+2026-04-24 i18n：todo `statusInProgress` 文案由「进行中 / In Progress」改为「开始执行 / Started」，更贴合「该消息是历史快照、不会反映后续状态」的语义。
+
+2026-04-24 工作台 SysDelegateTaskToolRenderer（desktop+server）：toolArgs.tasks 已就绪时立即渲染委派任务输入卡片，不再被 `!toolResult` 屏蔽；底部状态条复用原有的 delegating / error / completed 三态。
+
+2026-04-24 todo_write schema 移除 `completed` 参数（保留 `status` 单一字段），required 仅 id；强化中英文描述与 simple_agent prompt：每次只传新增或本次变更的任务，更新仅传 id+变更字段。
+
 2026-04-23 22:35 server/web 分享链接修复：`buildShareUrl` 与 `useChatPage.handleShare` 改为基于 `import.meta.env.BASE_URL` 拼接，避免在 `/sage/` 子路径部署下生成 `/share/<id>` 命中 nginx 404。
 
 2026-04-23 22:20 server/web/ChatHistory：分享弹窗新增"复制分享链接"第三按钮并展示完整 URL；行内 Share2 与 Download/Trace/Trash 一致 hover 渐显；抽出 `buildShareUrl`/`copyTextToClipboard`，弹窗即开即可复制即使消息加载失败。

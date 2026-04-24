@@ -28,9 +28,12 @@ observation_template = {
 {task_description}
 
 ## 你的任务
-1. **分析进度**：仔细阅读上述对话和执行结果，判断哪些【任务清单】中的待办事项（pending）已经完成。
-2. **更新状态**：如果发现有任务已经完成，**必须**调用 `todo_write` 工具将对应的任务状态标记为 `completed`。
-3. **汇报进展**：用简练的语言总结当前的执行进展。
+1. **分析进度**：仔细阅读上述对话和执行结果，判断【任务清单】中各条任务的真实状态（pending / in_progress / completed）。
+2. **更新状态**：调用 `todo_write` 工具维护三态——
+   - 已经开始执行但尚未完成的任务，将 status 标记为 `in_progress`；
+   - 已完成的任务，将 status 标记为 `completed`，并补充 `conclusion`；
+   - 同一时刻最多只允许一条任务处于 `in_progress`。
+3. **汇报进展**：用简练的语言总结当前进展，区分已完成、进行中、待办的数量。
 
 ## 注意事项
 - 只有在有明确证据表明任务已完成时，才调用工具更新状态。
@@ -47,9 +50,12 @@ By reviewing the user's historical dialogue and recent execution results, compar
 {task_description}
 
 ## Your Task
-1. **Analyze Progress**: Carefully read the dialogue and execution results above, and determine which pending items in the [Todo List] have been completed.
-2. **Update Status**: If you find that any tasks have been completed, you **MUST** call the `todo_write` tool to mark the corresponding tasks as `completed`.
-3. **Report Progress**: Summarize the current execution progress in concise language.
+1. **Analyze Progress**: Carefully read the dialogue and execution results above, and determine the real status (pending / in_progress / completed) of each item in the [Todo List].
+2. **Update Status**: Use the `todo_write` tool to maintain three states:
+   - Tasks that have been started but not yet finished must be marked `in_progress`.
+   - Finished tasks must be marked `completed` with a `conclusion`.
+   - At any moment, at most one task may be `in_progress`.
+3. **Report Progress**: Summarize current progress concisely, distinguishing completed / in-progress / pending counts.
 
 ## Important Notes
 - Only call the tool to update status when there is clear evidence that a task is completed.
@@ -66,9 +72,12 @@ Ao revisar o diálogo histórico do usuário e os resultados recentes da execuç
 {task_description}
 
 ## Sua Tarefa
-1. **Analisar Progresso**: Leia atentamente o diálogo e os resultados da execução acima e determine quais itens pendentes na [Lista de Tarefas] foram concluídos.
-2. **Atualizar Status**: Se você descobrir que alguma tarefa foi concluída, você **DEVE** chamar a ferramenta `todo_write` para marcar as tarefas correspondentes como `completed`.
-3. **Relatar Progresso**: Resuma o progresso atual da execução em linguagem concisa.
+1. **Analisar Progresso**: Leia atentamente o diálogo e os resultados da execução acima e determine o status real (pending / in_progress / completed) de cada item na [Lista de Tarefas].
+2. **Atualizar Status**: Use a ferramenta `todo_write` para manter três estados:
+   - Tarefas iniciadas mas ainda não finalizadas devem ser marcadas como `in_progress`.
+   - Tarefas finalizadas devem ser marcadas como `completed` com uma `conclusion`.
+   - A qualquer momento, no máximo uma tarefa pode estar `in_progress`.
+3. **Relatar Progresso**: Resuma o progresso atual de forma concisa, distinguindo as contagens de concluídas / em andamento / pendentes.
 
 ## Notas Importantes
 - Chame a ferramenta para atualizar o status apenas quando houver evidências claras de que uma tarefa foi concluída.

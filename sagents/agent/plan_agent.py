@@ -3,31 +3,28 @@ from __future__ import annotations
 import json
 import uuid
 import os
+import posixpath
+import re
+import shlex
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set, Union, cast
 
 from sagents.agent.agent_base import AgentBase
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_context import SessionContext
-from sagents.tool import ToolManager, ToolProxy
+from sagents.tool import ToolProxy
 from sagents.utils.logger import logger
 from sagents.utils.prompt_manager import PromptManager
 
-PLAN_QUESTIONNAIRE_KIND_PLAN_INFORMATION = "plan_information"
-PLAN_QUESTIONNAIRE_KIND_PLAN_CONFIRMATION = "plan_confirmation"
-
-PLAN_READONLY_TOOLS = {
+PLAN_ALLOWED_TOOLS = {
     "file_read",
+    "file_write",
+    "file_update",
     "search_memory",
     "fetch_webpages",
     "search_web",
     "questionnaire",
     "execute_shell_command",
-}
-
-PLAN_CONFIRMATION_QUESTION_IDS = {
-    "decision",
-    "feedback",
 }
 
 class PlanAgent(AgentBase):
@@ -53,8 +50,7 @@ class PlanAgent(AgentBase):
         self.agent_description = "执行前规划智能体，负责调研、澄清、生成计划并确认是否执行"
         self._active_session_context: Optional[SessionContext] = None
         self._questionnaire_tool_call_ids: Set[str] = set()
-        self._confirmation_tool_call_ids: Set[str] = set()
-        self._questionnaire_kinds: Dict[str, str] = {}
+        self._should_judge_after_tool_calls = False
 
     async def run_stream(self, session_context: SessionContext) -> AsyncGenerator[List[MessageChunk], None]:
         """
@@ -65,7 +61,7 @@ class PlanAgent(AgentBase):
         - 提取一份更“干净”的 planning history
         - 用专用 system prompt 跑一个小循环
         - 在循环里允许模型自主调用 questionnaire
-        - 如果识别到“最终计划确认问卷”，就把结果翻译成单一的 plan_status
+        - 所有问卷结果都保留在消息流里，最终状态交给 `_judge_plan_status` 收口
         """
         session_id = session_context.session_id
         if self._should_abort_due_to_session(session_context):
@@ -187,8 +183,17 @@ class PlanAgent(AgentBase):
                         working_messages.extend(tool_chunks)
                         yield tool_chunks
 
-                    if self._planning_resolved(session_context):
-                        logger.info("PlanAgent: planning resolved after tool execution, stop loop")
+                    if self._should_judge_after_tool_calls:
+                        self._should_judge_after_tool_calls = False
+                        judged_status = await self._judge_plan_status(
+                            session_context=session_context,
+                            working_messages=working_messages,
+                            tool_manager=plan_tool_manager,
+                        )
+                        session_context.audit_status["plan_status"] = judged_status
+                        if judged_status == "continue_plan":
+                            logger.info("PlanAgent: judge requested continue_plan after tool calls, continue loop")
+                            continue
                         break
 
                     # 这一轮已经发生工具调用，先进入下一轮，让 agent 基于最新工具结果继续自主推进。
@@ -205,19 +210,10 @@ class PlanAgent(AgentBase):
                     logger.info("PlanAgent: judge requested continue_plan, continue loop")
                     continue
 
-                if self._planning_resolved(session_context):
-                    logger.info(f"PlanAgent: planning resolved by judge with status={judged_status}, stop loop")
-                    break
-
                 if not made_progress:
                     logger.info("PlanAgent: no progress in this loop, stop loop")
                     break
 
-            await self._finalize_state(
-                session_context=session_context,
-                working_messages=working_messages,
-                tool_manager=plan_tool_manager,
-            )
         finally:
             self._active_session_context = None
             session_context.tool_manager = original_tool_manager
@@ -230,44 +226,81 @@ class PlanAgent(AgentBase):
         """
         self._active_session_context = session_context
         self._questionnaire_tool_call_ids.clear()
-        self._confirmation_tool_call_ids.clear()
-        self._questionnaire_kinds.clear()
+        self._should_judge_after_tool_calls = False
         session_context.audit_status.pop("plan_status", None)
 
     def _build_plan_tool_proxy(
         self,
-        current_manager: Optional[Union[ToolManager, ToolProxy]],
-    ) -> Optional[ToolProxy]:
+        current_manager: Optional[Any],
+    ) -> Optional[Any]:
         """
-        裁剪工具集合，只保留 planning 阶段允许的只读工具。
+        裁剪工具集合，只保留 planning 阶段允许的工具。
+
+        PlanAgent 是固定能力阶段，不依赖 ToolSuggestionAgent 的推荐结果。
+        这里按工具管理接口读取当前会话真实可用工具，再构造 planning 专用白名单。
         """
         if current_manager is None:
             return None
 
-        managers: List[ToolManager] = []
-        currently_available: Set[str] = set()
-        all_known_names: Set[str] = set()
+        observable_wrapper = None
+        tool_source = current_manager
+        base_manager = getattr(current_manager, "_tool_manager", None)
+        if base_manager is not None:
+            observable_wrapper = current_manager
+            tool_source = base_manager
 
-        if isinstance(current_manager, ToolProxy):
-            managers = current_manager.tool_managers
-            currently_available = set(current_manager.list_all_tools_name())
-            for manager in managers:
-                all_known_names.update(manager.list_all_tools_name())
-        elif isinstance(current_manager, ToolManager):
-            managers = [current_manager]
-            currently_available = set(current_manager.list_all_tools_name())
-            all_known_names = set(currently_available)
-        else:
+        def with_observability(tool_proxy: ToolProxy) -> Any:
+            if observable_wrapper is None:
+                return tool_proxy
+            try:
+                from sagents.observability.agent_runtime import ObservableToolManager
+
+                return ObservableToolManager(
+                    tool_proxy,
+                    observable_wrapper.observability_manager,
+                    observable_wrapper.session_id,
+                )
+            except Exception as e:
+                logger.warning(f"PlanAgent: failed to restore observable tool wrapper: {e}")
+                return tool_proxy
+
+        if not all(
+            hasattr(tool_source, method)
+            for method in ("list_all_tools_name", "get_openai_tools", "run_tool_async")
+        ):
+            logger.warning(
+                f"PlanAgent: tool manager does not provide required tool interface: {type(tool_source)}"
+            )
             return None
 
-        allowed = {name for name in currently_available if name in PLAN_READONLY_TOOLS}
+        managers = list(getattr(tool_source, "tool_managers", []) or [tool_source])
+        currently_available = set(tool_source.list_all_tools_name())
+        all_known_names: Set[str] = set()
+        for manager in managers:
+            if hasattr(manager, "list_all_tools_name"):
+                all_known_names.update(manager.list_all_tools_name())
+
+        allowed = {name for name in currently_available if name in PLAN_ALLOWED_TOOLS}
         if "questionnaire" in all_known_names:
             allowed.add("questionnaire")
 
         if not allowed:
+            logger.warning(
+                "PlanAgent: planning tool intersection is empty, "
+                f"current={sorted(currently_available)}, allowed={sorted(PLAN_ALLOWED_TOOLS)}, "
+                f"known={sorted(all_known_names)}. Falling back to current tool manager."
+            )
+            return current_manager
+
+        logger.info(
+            "PlanAgent: planning tools resolved, "
+            f"current={sorted(currently_available)}, allowed={sorted(allowed)}"
+        )
+
+        if not managers:
             return None
 
-        return ToolProxy(managers, sorted(allowed))
+        return with_observability(ToolProxy(managers, sorted(allowed)))
 
     def _build_planning_history(self, session_context: SessionContext) -> List[MessageChunk]:
         """
@@ -337,62 +370,18 @@ class PlanAgent(AgentBase):
             agent="PlanAgent",
             language=session_context.get_language(),
         )
-        planning_prompt_suffix = self._build_planning_prompt_suffix(session_context)
         system_message = await self.prepare_unified_system_message(
             session_id=session_context.session_id,
-            custom_prefix=f"{planning_prefix}\n\n{planning_prompt_suffix}" if planning_prompt_suffix else planning_prefix,
+            system_prefix_override=planning_prefix,
             language=session_context.get_language(),
             include_sections=["role_definition", "system_context"],
         )
         return [system_message] + working_messages
 
-    def _build_planning_prompt_suffix(self, session_context: SessionContext) -> str:
-        """
-        给 planning prompt 增加少量运行时上下文。
-        """
-        parts: List[str] = []
-
-        execution_mode = (
-            session_context.audit_status.get("agent_mode")
-            or session_context.agent_config.get("agent_mode")
-            or "simple"
-        )
-        parts.append(f"后续正式执行模式：{execution_mode}")
-
-        custom_sub_agents = (
-            getattr(session_context, "custom_sub_agents", None)
-            or session_context.agent_config.get("custom_sub_agents")
-            or session_context.system_context.get("custom_sub_agents")
-            or session_context.system_context.get("available_sub_agents")
-            or []
-        )
-        if custom_sub_agents:
-            lines = []
-            seen_agent_keys = set()
-            for agent_cfg in custom_sub_agents:
-                if isinstance(agent_cfg, dict):
-                    agent_id = agent_cfg.get("agent_id")
-                    name = agent_cfg.get("name") or agent_id
-                    description = agent_cfg.get("description", "")
-                else:
-                    agent_id = getattr(agent_cfg, "agent_id", None)
-                    name = getattr(agent_cfg, "name", None) or agent_id
-                    description = getattr(agent_cfg, "description", "")
-                dedupe_key = agent_id or name
-                if not dedupe_key or dedupe_key in seen_agent_keys:
-                    continue
-                seen_agent_keys.add(dedupe_key)
-                if name:
-                    lines.append(f"- {name}: {description}")
-            if lines:
-                parts.append("可用子智能体信息：\n" + "\n".join(lines))
-
-        return "\n".join(parts)
-
     async def _execute_tool_calls(
         self,
         tool_calls: Dict[str, Any],
-        tool_manager: Union[ToolManager, ToolProxy],
+        tool_manager: Any,
         session_id: str,
         working_messages: List[MessageChunk],
     ) -> AsyncGenerator[List[MessageChunk], None]:
@@ -401,12 +390,33 @@ class PlanAgent(AgentBase):
 
         这里直接复用 AgentBase 提供的标准工具消息生成与工具执行逻辑。
         """
+        blocked_chunks: List[MessageChunk] = []
+
         # 处理 questionnaire 工具的特殊逻辑
         for tool_call_id, tool_call in list(tool_calls.items()):
-            if tool_call.get("function", {}).get("name") == "questionnaire":
+            tool_name = tool_call.get("function", {}).get("name")
+            block_reason = self._get_blocked_plan_tool_reason(tool_call)
+            if block_reason:
+                blocked_chunks.append(self._build_blocked_tool_result(tool_call_id, tool_name, block_reason))
+                del tool_calls[tool_call_id]
+                continue
+
+            if tool_name in {"file_write", "file_update"}:
+                self._record_plan_document_path(arguments=self._parse_tool_arguments(tool_call))
+
+            if tool_name == "questionnaire":
+                arguments = self._parse_tool_arguments(tool_call)
+                if arguments.get("questionnaire_kind") == "plan_confirmation":
+                    self._should_judge_after_tool_calls = True
                 updated_tool_call = self._with_unique_questionnaire_session_id(tool_call, session_id, tool_call_id)
                 self._register_questionnaire_call(tool_call_id, updated_tool_call)
                 tool_calls[tool_call_id] = updated_tool_call
+
+        if blocked_chunks:
+            yield blocked_chunks
+
+        if not tool_calls:
+            return
 
         # 根据环境变量控制 emit_tool_call_message
         # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
@@ -419,6 +429,115 @@ class PlanAgent(AgentBase):
             emit_tool_call_message=emit_on_complete
         ):
             yield messages
+
+    def _get_blocked_plan_tool_reason(self, tool_call: Dict[str, Any]) -> Optional[str]:
+        tool_name = tool_call.get("function", {}).get("name")
+        arguments = self._parse_tool_arguments(tool_call)
+
+        if tool_name == "execute_shell_command":
+            command = str(arguments.get("command") or "")
+            if not self._is_readonly_shell_command(command):
+                return (
+                    "Planning phase only allows read-only shell probes. "
+                    "Do not create, modify, install, run builds, or execute project code before plan confirmation."
+                )
+
+        if tool_name in {"file_write", "file_update"}:
+            file_path = str(arguments.get("file_path") or arguments.get("path") or "")
+            if not self._is_plan_document_path(file_path):
+                return (
+                    "Planning phase may only write or update the plan document at "
+                    "plans/<task_title_slug>_plan.md. Do not create implementation artifacts before confirmation."
+                )
+
+        return None
+
+    def _parse_tool_arguments(self, tool_call: Dict[str, Any]) -> Dict[str, Any]:
+        arguments_raw = tool_call.get("function", {}).get("arguments") or "{}"
+        try:
+            parsed = json.loads(arguments_raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+
+    def _build_blocked_tool_result(
+        self,
+        tool_call_id: str,
+        tool_name: Optional[str],
+        reason: str,
+    ) -> MessageChunk:
+        return MessageChunk(
+            role=MessageRole.TOOL.value,
+            content=json.dumps(
+                {
+                    "status": "blocked",
+                    "reason": reason,
+                    "next_action": "Continue planning, write/update the plan document, or ask a planning questionnaire.",
+                },
+                ensure_ascii=False,
+            ),
+            tool_call_id=tool_call_id,
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+            agent_name=self.agent_name,
+            metadata={"tool_name": tool_name or "unknown", "blocked_by": "plan_agent"},
+        )
+
+    def _is_plan_document_path(self, file_path: str) -> bool:
+        if not file_path:
+            return False
+
+        normalized = posixpath.normpath(file_path.replace("\\", "/"))
+        parts = [part for part in normalized.split("/") if part]
+        if len(parts) < 2:
+            return False
+
+        filename = parts[-1]
+        return parts[-2] == "plans" and filename.endswith("_plan.md")
+
+    def _record_plan_document_path(self, arguments: Dict[str, Any]) -> None:
+        session_context = self._active_session_context
+        if session_context is None:
+            return
+
+        raw_path = str(arguments.get("file_path") or arguments.get("path") or "").strip()
+        if not raw_path or not self._is_plan_document_path(raw_path):
+            return
+
+        normalized_path = raw_path.replace("\\", "/")
+        if not normalized_path.startswith("/"):
+            workspace = session_context.sandbox_agent_workspace or session_context.system_context.get("private_workspace")
+            if workspace:
+                normalized_path = posixpath.normpath(posixpath.join(str(workspace).replace("\\", "/"), normalized_path))
+
+        session_context.system_context["plan_document_path"] = normalized_path
+        session_context.system_context["plan_document_instruction"] = (
+            "Before formal execution, read this Markdown plan document first and keep execution aligned with it. "
+            "If execution intentionally changes direction, update the same plan document instead of creating a new one."
+        )
+
+    def _is_readonly_shell_command(self, command: str) -> bool:
+        if not command.strip():
+            return False
+
+        if re.search(r"(^|[\s;&|])(?:mkdir|touch|rm|rmdir|mv|cp|chmod|chown|install|npm|pnpm|yarn|pip|python|python3|node|uv|cargo|go|make)\b", command):
+            return False
+        if re.search(r">|>>|\btee\b|\bsed\s+-i\b", command):
+            return False
+
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            return False
+        if not tokens:
+            return False
+
+        executable = tokens[0]
+        readonly_commands = {"ls", "pwd", "find", "rg", "grep", "cat", "sed", "head", "tail", "wc", "tree"}
+        if executable in readonly_commands:
+            return True
+        if executable == "git":
+            return len(tokens) >= 2 and tokens[1] in {"status", "log", "diff", "show", "branch", "ls-files", "grep"}
+        return False
 
     def _with_unique_questionnaire_session_id(
         self,
@@ -440,31 +559,17 @@ class PlanAgent(AgentBase):
             return tool_call
 
         current_questionnaire_id = arguments.get("questionnaire_id")
-        if isinstance(current_questionnaire_id, str) and "__questionnaire__" in current_questionnaire_id:
-            if "questionnaire_kind" not in arguments:
-                arguments["questionnaire_kind"] = (
-                    PLAN_QUESTIONNAIRE_KIND_PLAN_CONFIRMATION
-                    if self._is_plan_confirmation_questionnaire(arguments)
-                    else PLAN_QUESTIONNAIRE_KIND_PLAN_INFORMATION
-                )
-                function_payload["arguments"] = json.dumps(arguments, ensure_ascii=False)
-                cloned_tool_call["function"] = function_payload
+        if isinstance(current_questionnaire_id, str) and current_questionnaire_id.strip():
             return cloned_tool_call
 
         arguments["questionnaire_id"] = f"{session_id}__questionnaire__{tool_call_id}"
-        if "questionnaire_kind" not in arguments:
-            arguments["questionnaire_kind"] = (
-                PLAN_QUESTIONNAIRE_KIND_PLAN_CONFIRMATION
-                if self._is_plan_confirmation_questionnaire(arguments)
-                else PLAN_QUESTIONNAIRE_KIND_PLAN_INFORMATION
-            )
         function_payload["arguments"] = json.dumps(arguments, ensure_ascii=False)
         cloned_tool_call["function"] = function_payload
         return cloned_tool_call
 
     def process_tool_response(self, tool_response: str, tool_call_id: str) -> List[MessageChunk]:
         """
-        在标准工具结果处理基础上，额外识别“最终计划确认问卷”的返回值。
+        在标准工具结果处理基础上，把 questionnaire 的结果标记回 planning 历史。
         """
         chunks = super().process_tool_response(tool_response, tool_call_id)
 
@@ -474,117 +579,19 @@ class PlanAgent(AgentBase):
                 if tool_call_id in self._questionnaire_tool_call_ids:
                     chunk.metadata["tool_name"] = "questionnaire"
 
-        session_context = self._active_session_context
-        if session_context and tool_call_id in self._confirmation_tool_call_ids:
-            confirmation = self._parse_plan_confirmation_result(tool_response)
-            self._persist_plan_status(session_context, confirmation)
-
         return chunks
 
     def _register_questionnaire_call(self, tool_call_id: str, tool_call: Dict[str, Any]) -> None:
         """
-        识别 questionnaire 调用，并判断它是否属于“最终计划确认问卷”。
+        识别 questionnaire 调用，确保工具结果能回到 planning 历史里。
         """
         self._questionnaire_tool_call_ids.add(tool_call_id)
-
-        arguments_raw = tool_call.get("function", {}).get("arguments") or "{}"
-        try:
-            arguments = json.loads(arguments_raw)
-        except Exception:
-            logger.warning("PlanAgent: failed to parse questionnaire arguments for registration")
-            return
-
-        questionnaire_kind = arguments.get("questionnaire_kind")
-        if questionnaire_kind not in {
-            PLAN_QUESTIONNAIRE_KIND_PLAN_INFORMATION,
-            PLAN_QUESTIONNAIRE_KIND_PLAN_CONFIRMATION,
-        }:
-            questionnaire_kind = (
-                PLAN_QUESTIONNAIRE_KIND_PLAN_CONFIRMATION
-                if self._is_plan_confirmation_questionnaire(arguments)
-                else PLAN_QUESTIONNAIRE_KIND_PLAN_INFORMATION
-            )
-
-        self._questionnaire_kinds[tool_call_id] = questionnaire_kind
-        if questionnaire_kind == PLAN_QUESTIONNAIRE_KIND_PLAN_CONFIRMATION:
-            self._confirmation_tool_call_ids.add(tool_call_id)
-
-    def _is_plan_confirmation_questionnaire(self, arguments: Dict[str, Any]) -> bool:
-        """
-        通过固定 question ids 识别“最终计划确认问卷”。
-        """
-        questions = arguments.get("questions")
-        if not isinstance(questions, list):
-            return False
-
-        question_ids = {
-            q.get("id")
-            for q in questions
-            if isinstance(q, dict) and isinstance(q.get("id"), str)
-        }
-        return PLAN_CONFIRMATION_QUESTION_IDS.issubset(question_ids)
-
-    def _parse_plan_confirmation_result(self, raw_content: Any) -> Dict[str, Any]:
-        """
-        解析 questionnaire 返回的确认结果，并把它映射成唯一的 plan_status。
-        """
-        fallback = {
-            "decision": "adjust_plan",
-            "answers": {},
-            "status": "failed",
-            "feedback": "",
-            "plan_status": "pause",
-        }
-
-        if not isinstance(raw_content, str) or not raw_content.strip():
-            return fallback
-
-        try:
-            parsed = json.loads(raw_content)
-        except Exception as e:
-            logger.warning(f"PlanAgent: failed to parse plan confirmation result: {e}")
-            return fallback
-
-        # 工具层返回的常见格式是 {"content": "<json string>"}，这里先解包一层。
-        if isinstance(parsed, dict) and "content" in parsed:
-            inner_content = parsed.get("content")
-            if isinstance(inner_content, str) and inner_content.strip():
-                try:
-                    parsed = json.loads(inner_content)
-                except Exception as e:
-                    logger.warning(f"PlanAgent: failed to parse inner plan confirmation content: {e}")
-                    return fallback
-
-        answers = parsed.get("answers") if isinstance(parsed.get("answers"), dict) else {}
-        decision = answers.get("decision") or "adjust_plan"
-        plan_status = "start_execution" if decision == "execute_plan" else "pause"
-
-        return {
-            "decision": decision,
-            "answers": answers,
-            "status": parsed.get("status") or "submitted",
-            "feedback": answers.get("feedback", "") if isinstance(answers.get("feedback", ""), str) else "",
-            "is_auto_submit": bool(parsed.get("is_auto_submit", False)),
-            "plan_status": plan_status,
-        }
-
-    def _persist_plan_status(self, session_context: SessionContext, confirmation: Dict[str, Any]) -> None:
-        """
-        PlanAgent 只写一个主状态：plan_status。
-        """
-        session_context.audit_status["plan_status"] = confirmation.get("plan_status", "pause")
-
-    def _planning_resolved(self, session_context: SessionContext) -> bool:
-        """
-        planning 是否已经到达一个可结束状态。
-        """
-        return session_context.audit_status.get("plan_status") in {"pause", "start_execution"}
 
     async def _judge_plan_status(
         self,
         session_context: SessionContext,
         working_messages: List[MessageChunk],
-        tool_manager: Optional[Union[ToolManager, ToolProxy]],
+        tool_manager: Optional[Any],
     ) -> str:
         """
         在 planning 主循环结束后，用一次轻量 LLM 判断来收口。
@@ -615,7 +622,7 @@ class PlanAgent(AgentBase):
 
         system_msg = await self.prepare_unified_system_message(
             session_context.session_id,
-            custom_prefix=PromptManager().get_prompt(
+            system_prefix_override=PromptManager().get_prompt(
                 "plan_system_prefix",
                 agent="PlanAgent",
                 language=session_context.get_language(),
@@ -628,7 +635,7 @@ class PlanAgent(AgentBase):
             language=session_context.get_language(),
         )
         prompt = judge_template.format(
-            system_prompt=system_msg,
+            system_prompt=system_msg.content,
             messages=json.dumps(clean_messages, ensure_ascii=False, indent=2),
         )
         response = self._call_llm_streaming(
@@ -656,19 +663,3 @@ class PlanAgent(AgentBase):
         if tool_manager and working_messages and working_messages[-1].role == MessageRole.TOOL.value:
             return "continue_plan"
         return "pause"
-
-    async def _finalize_state(
-        self,
-        session_context: SessionContext,
-        working_messages: List[MessageChunk],
-        tool_manager: Optional[Union[ToolManager, ToolProxy]],
-    ) -> None:
-        """
-        结束时做一次轻量校验。
-        """
-        if "plan_status" not in session_context.audit_status:
-            session_context.audit_status["plan_status"] = await self._judge_plan_status(
-                session_context=session_context,
-                working_messages=working_messages,
-                tool_manager=tool_manager,
-            )
