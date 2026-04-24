@@ -1,14 +1,56 @@
 import asyncio
 import json
 import os
+import stat
 from contextlib import asynccontextmanager
 from functools import wraps
+from pathlib import Path
 from typing import Any, Optional
 
 from loguru import logger
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, inspect, text
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+
+def ensure_sqlite_path_writable(db_file: str) -> None:
+    db_path = Path(db_file)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    candidate_paths = [
+        db_path,
+        db_path.with_name(f"{db_path.name}-wal"),
+        db_path.with_name(f"{db_path.name}-shm"),
+        db_path.with_name(f"{db_path.name}-journal"),
+    ]
+
+    for path in candidate_paths:
+        if not path.exists():
+            continue
+        try:
+            current_mode = path.stat().st_mode
+            os.chmod(path, current_mode | stat.S_IWRITE)
+        except OSError as exc:
+            logger.warning(f"[DB] Failed to clear read-only flag for {path}: {exc}")
+
+    probe_path = db_path.parent / f".sage_db_write_probe_{os.getpid()}.tmp"
+    try:
+        with open(probe_path, "a+b"):
+            pass
+        probe_path.unlink(missing_ok=True)
+    except OSError as exc:
+        raise RuntimeError(
+            f"SQLite directory is not writable: {db_path.parent} ({exc})"
+        ) from exc
+
+    if db_path.exists():
+        try:
+            with open(db_path, "a+b"):
+                pass
+        except OSError as exc:
+            raise RuntimeError(
+                f"SQLite database file is not writable: {db_path} ({exc})"
+            ) from exc
 
 def sync_database_schema(sync_conn, Base):
     inspector = inspect(sync_conn)
@@ -162,6 +204,7 @@ class SessionManager:
                             }
                         )
                     else:
+                        ensure_sqlite_path_writable(self.db_file)
                         url = f"sqlite+aiosqlite:///{self.db_file}"
                         engine_kwargs["connect_args"] = {"timeout": 30}
 

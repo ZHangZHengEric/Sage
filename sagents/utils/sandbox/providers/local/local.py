@@ -119,6 +119,11 @@ class LocalSandboxProvider(ISandboxHandle):
         """初始化隔离层"""
         from .isolation import SeatbeltIsolation, BwrapIsolation
 
+        if sys.platform == "win32":
+            logger.info("LocalSandboxProvider: Windows detected, process isolation disabled")
+            self._isolation = None
+            return
+
         if sys.platform == "darwin":
             if self._macos_isolation_mode == "seatbelt":
                 self._isolation = SeatbeltIsolation(
@@ -554,9 +559,16 @@ class LocalSandboxProvider(ISandboxHandle):
         try:
             # 使用 exec 模式避免 shell 配置文件覆盖 PATH
             # 通过显式传递 PATH 环境变量确保 venv 的 Python 优先
+            # Windows 无 /bin/sh，使用 COMSPEC（一般为 cmd.exe）+ /c
+            if sys.platform == "win32":
+                shell_exe = os.environ.get("COMSPEC", "cmd.exe")
+                shell_flag = "/c"
+            else:
+                shell_exe = "/bin/sh"
+                shell_flag = "-c"
             proc = await asyncio.create_subprocess_exec(
-                "/bin/sh",
-                "-c",
+                shell_exe,
+                shell_flag,
                 converted_command,
                 cwd=actual_workdir,
                 env=env,

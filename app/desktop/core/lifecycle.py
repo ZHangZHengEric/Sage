@@ -2,10 +2,12 @@ import os
 import asyncio
 import subprocess
 import threading
+import ctypes
 from pathlib import Path
 
 from loguru import logger
 
+from common.core.client import db as db_client_module
 from .bootstrap import (
     close_observability,
     close_skill_manager,
@@ -45,6 +47,8 @@ async def initialize_system():
     _start_host_watchdog()
     await initialize_observability()
     await initialize_db_connection()
+    if db_client_module.DB_MANAGER is None:
+        raise RuntimeError("桌面端数据库初始化失败，请检查数据库路径和目录写权限")
     await initialize_tool_manager()
     global _browser_capability_coordinator
     _browser_capability_coordinator = get_browser_capability_coordinator()
@@ -69,21 +73,7 @@ def post_initialize_task():
 
 async def _post_initialize():
     await validate_and_disable_mcp_servers()
-    create_safe_task(_ensure_default_anytool_server_ready(), name="ensure_default_anytool_server")
     await _start_task_scheduler()
-
-
-async def _ensure_default_anytool_server_ready():
-    from common.services.mcp_service import ensure_default_anytool_server
-
-    for attempt in range(3):
-        try:
-            await asyncio.sleep(2 if attempt == 0 else 3)
-            await ensure_default_anytool_server(register_tool_manager=True)
-            logger.info("sage-desktop：默认 AnyTool MCP server 已激活")
-            return
-        except Exception as exc:
-            logger.warning(f"sage-desktop：默认 AnyTool MCP server 激活失败（第 {attempt + 1} 次）: {exc}")
 
 
 async def _start_task_scheduler():
@@ -101,6 +91,31 @@ def _host_process_is_alive(host_pid: int) -> bool:
     if host_pid <= 0 or host_pid == os.getpid():
         return True
 
+    if os.name == "nt":
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+
+        try:
+            kernel32 = ctypes.windll.kernel32
+            process_handle = kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION,
+                False,
+                host_pid,
+            )
+            if not process_handle:
+                return False
+
+            try:
+                exit_code = ctypes.c_ulong()
+                if not kernel32.GetExitCodeProcess(process_handle, ctypes.byref(exit_code)):
+                    return True
+                return exit_code.value == STILL_ACTIVE
+            finally:
+                kernel32.CloseHandle(process_handle)
+        except Exception:
+            # Avoid killing a healthy backend because Windows process probing failed.
+            return True
+
     try:
         os.kill(host_pid, 0)
         return True
@@ -111,6 +126,8 @@ def _host_process_is_alive(host_pid: int) -> bool:
         return True
     except OSError:
         return False
+    except Exception:
+        return True
 
 
 async def _host_watchdog_loop(host_pid: int):
