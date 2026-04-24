@@ -197,9 +197,37 @@ def init_logging_base(
         "format": "{message}",
     }
 
-    logger.add(log_dir / f"{log_name}_debug.log", level="DEBUG", **params)
-    logger.add(log_dir / f"{log_name}_info.log", level="INFO", **params)
-    logger.add(log_dir / f"{log_name}_error.log", level="ERROR", **params)
+    def add_file_sink_with_fallback(path: Path, level: str, **sink_params: Any) -> None:
+        try:
+            logger.add(path, level=level, **sink_params)
+            return
+        except PermissionError as exc:
+            fallback_path = path.with_name(f"{path.stem}_{os.getpid()}{path.suffix}")
+            warning = (
+                f"Log file unavailable: {path} ({exc}). "
+                f"Falling back to {fallback_path}."
+            )
+            try:
+                logger.add(fallback_path, level=level, **sink_params)
+                print(warning, file=sys.stderr, flush=True)
+                return
+            except Exception as fallback_exc:
+                print(
+                    f"{warning} Fallback also failed: {fallback_exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return
+        except Exception as exc:
+            print(
+                f"Failed to initialize log file {path}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    add_file_sink_with_fallback(log_dir / f"{log_name}_debug.log", level="DEBUG", **params)
+    add_file_sink_with_fallback(log_dir / f"{log_name}_info.log", level="INFO", **params)
+    add_file_sink_with_fallback(log_dir / f"{log_name}_error.log", level="ERROR", **params)
 
     # Access log file
     access_params = {
@@ -209,7 +237,7 @@ def init_logging_base(
         "encoding": "utf8",
         "format": "{message}",
     }
-    logger.add(
+    add_file_sink_with_fallback(
         log_dir / f"{log_name}_access.log",
         level="INFO",
         filter=lambda record: "REQUEST_START" in record["message"]

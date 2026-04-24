@@ -11,7 +11,10 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Mutex;
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use sysinfo::{Pid, System};
 use tauri::{
     image::Image,
@@ -52,6 +55,19 @@ struct ClosePreferenceState(Mutex<Option<ClosePreference>>);
 const SAGE_ENV_FILE: &str = ".sage_env";
 const SAGE_NODE_MODULES_DIR: &str = ".sage_node_env";
 const SAGE_NODE_RUNTIME_SUBDIR: &str = "runtime";
+
+fn push_recent_line(buffer: &Arc<Mutex<Vec<String>>>, line: String) {
+    let mut guard = buffer.lock().unwrap();
+    guard.push(line);
+    if guard.len() > 40 {
+        let overflow = guard.len() - 40;
+        guard.drain(0..overflow);
+    }
+}
+
+fn recent_lines_to_string(buffer: &Arc<Mutex<Vec<String>>>) -> String {
+    buffer.lock().unwrap().join("\n")
+}
 
 #[cfg(target_os = "linux")]
 fn apply_linux_webkit_env_defaults() {
@@ -126,6 +142,27 @@ fn resolve_node_runtime_from_dir(node_dir: &Path) -> Option<NodeRuntime> {
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| node_dir.to_path_buf());
+
+    Some(NodeRuntime {
+        node_executable,
+        npm_cli,
+        bin_dir,
+    })
+}
+
+fn resolve_node_runtime_from_env() -> Option<NodeRuntime> {
+    let node_executable = std::env::var_os("SAGE_NODE_EXECUTABLE")
+        .map(PathBuf::from)
+        .filter(|path| path.exists())?;
+
+    let npm_cli = std::env::var_os("SAGE_NPM_CLI")
+        .map(PathBuf::from)
+        .filter(|path| path.exists());
+
+    let bin_dir = node_executable
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
 
     Some(NodeRuntime {
         node_executable,
@@ -566,7 +603,7 @@ fn load_sage_env_file() {
     let env_file_path = sage_root.join(SAGE_ENV_FILE);
 
     if !env_file_path.exists() {
-        println!(".sage_env file not found at {:?}", env_file_path);
+        println!("Optional .sage_env file not found at {:?}, using defaults", env_file_path);
         return;
     }
 
@@ -593,41 +630,6 @@ fn load_sage_env_file() {
         Err(e) => {
             eprintln!("Failed to read .sage_env file: {}", e);
         }
-    }
-}
-
-/// 将最终选中的后端端口写回 `~/.sage/.sage_env`，供 Vite 反代在请求时读取（`beforeDevCommand` 时 Python 尚不存在，不能依赖启动时探测）。
-fn merge_sage_port_into_env_file(port: u16) {
-    let sage_root = get_sage_root_dir();
-    if let Err(e) = std::fs::create_dir_all(&sage_root) {
-        eprintln!("merge_sage_port_into_env_file: create_dir_all: {}", e);
-        return;
-    }
-    let path = sage_root.join(SAGE_ENV_FILE);
-    let content = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut out: Vec<String> = Vec::new();
-    let mut replaced = false;
-    for line in content.lines() {
-        let t = line.trim_start();
-        if t.starts_with("SAGE_PORT=") {
-            out.push(format!("SAGE_PORT={}", port));
-            replaced = true;
-        } else {
-            out.push(line.to_string());
-        }
-    }
-    if !replaced {
-        if !out.is_empty() {
-            out.push(String::new());
-        }
-        out.push(format!("SAGE_PORT={}", port));
-    }
-    let body = out.join("\n");
-    let body = if body.ends_with('\n') { body } else { body + "\n" };
-    if let Err(e) = std::fs::write(&path, body) {
-        eprintln!("merge_sage_port_into_env_file: write {:?}: {}", path, e);
-    } else {
-        println!("Updated {:?} with SAGE_PORT={}", path, port);
     }
 }
 
@@ -1340,11 +1342,11 @@ fn main() {
             let port: u16 = choose_desktop_backend_port();
             std::env::set_var("SAGE_PORT", port.to_string());
             println!("Set SAGE_PORT: {}", port);
-            merge_sage_port_into_env_file(port);
 
             let bundled_node_runtime = resolve_bundled_node_runtime(&app_handle);
-            let shared_node_runtime = bundled_node_runtime.as_ref().and_then(|runtime| {
-                match sync_bundled_node_runtime_to_sage_home(runtime) {
+            let shared_node_runtime = bundled_node_runtime
+                .as_ref()
+                .and_then(|runtime| match sync_bundled_node_runtime_to_sage_home(runtime) {
                     Ok(synced_runtime) => {
                         println!(
                             "Using shared Sage Node runtime at {:?}",
@@ -1359,8 +1361,17 @@ fn main() {
                         );
                         Some(runtime.clone())
                     }
-                }
-            });
+                })
+                .or_else(|| {
+                    let env_runtime = resolve_node_runtime_from_env();
+                    if let Some(runtime) = env_runtime.as_ref() {
+                        println!(
+                            "Using Node runtime from environment at {:?}",
+                            runtime.node_executable
+                        );
+                    }
+                    env_runtime
+                });
 
             if let Some(runtime) = shared_node_runtime.as_ref() {
                 if let Err(e) = apply_bundled_node_runtime(runtime) {
@@ -1583,10 +1594,17 @@ fn main() {
                 let stdout = child.stdout.take().expect("Failed to capture stdout");
                 let stderr = child.stderr.take().expect("Failed to capture stderr");
 
+                let recent_stdout = Arc::new(Mutex::new(Vec::<String>::new()));
+                let recent_stderr = Arc::new(Mutex::new(Vec::<String>::new()));
+                let backend_started_flag = Arc::new(AtomicBool::new(false));
+                let startup_failure_emitted = Arc::new(AtomicBool::new(false));
+
+                let stderr_lines = recent_stderr.clone();
                 let app_handle_clone = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
                     let mut reader = BufReader::new(stderr).lines();
                     while let Ok(Some(line)) = reader.next_line().await {
+                        push_recent_line(&stderr_lines, line.clone());
                         eprintln!("PYTHON STDERR: {}", line);
                         if line.contains("Permission denied") && line.contains("Full Disk Access") {
                              app_handle_clone.emit("imessage-permission-denied", ()).unwrap();
@@ -1594,8 +1612,112 @@ fn main() {
                     }
                 });
 
-                let mut reader = BufReader::new(stdout).lines();
-                let mut backend_started = false;
+                let stdout_lines = recent_stdout.clone();
+                let backend_started_from_stdout = backend_started_flag.clone();
+                let app_handle_stdout = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut reader = BufReader::new(stdout).lines();
+                    while let Ok(Some(line)) = reader.next_line().await {
+                        push_recent_line(&stdout_lines, line.clone());
+                        println!("PYTHON: {}", line);
+                        if line.contains("Starting Sage Desktop Server on port")
+                            && !backend_started_from_stdout.swap(true, Ordering::SeqCst)
+                        {
+                            println!("Detected backend startup log, emitting sage-desktop-ready event...");
+                            app_handle_stdout.emit("sage-desktop-ready", Payload { port }).unwrap();
+                        }
+                    }
+                });
+
+                let start_time = std::time::Instant::now();
+                let timeout = std::time::Duration::from_secs(60);
+
+                loop {
+                    if backend_started_flag.load(Ordering::SeqCst) {
+                        break;
+                    }
+
+                    if tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+                        if !backend_started_flag.swap(true, Ordering::SeqCst) {
+                            println!("Detected backend port {} is accepting connections", port);
+                            app_handle.emit("sage-desktop-ready", Payload { port }).unwrap();
+                        }
+                        break;
+                    }
+
+                    match child.try_wait() {
+                        Ok(Some(status)) => {
+                            let stdout_excerpt = recent_lines_to_string(&recent_stdout);
+                            let stderr_excerpt = recent_lines_to_string(&recent_stderr);
+                            let mut details: Vec<String> = Vec::new();
+                            if !stderr_excerpt.is_empty() {
+                                details.push(format!("Recent stderr:\n{}", stderr_excerpt));
+                            }
+                            if !stdout_excerpt.is_empty() {
+                                details.push(format!("Recent stdout:\n{}", stdout_excerpt));
+                            }
+                            let message = if details.is_empty() {
+                                format!("后端进程在启动完成前退出，退出状态: {:?}", status)
+                            } else {
+                                format!(
+                                    "后端进程在启动完成前退出，退出状态: {:?}\n\n{}",
+                                    status,
+                                    details.join("\n\n")
+                                )
+                            };
+                            if !startup_failure_emitted.swap(true, Ordering::SeqCst) {
+                                eprintln!("Backend process exited before startup completed: {:?}", status);
+                                app_handle.emit("sage-backend-startup-failed", serde_json::json!({
+                                    "reason": "crashed",
+                                    "message": message
+                                })).unwrap();
+                            }
+                            break;
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            if !startup_failure_emitted.swap(true, Ordering::SeqCst) {
+                                let message = format!("检查后端进程状态失败: {}", err);
+                                eprintln!("{}", message);
+                                app_handle.emit("sage-backend-startup-failed", serde_json::json!({
+                                    "reason": "process_state_error",
+                                    "message": message
+                                })).unwrap();
+                            }
+                            break;
+                        }
+                    }
+
+                    if start_time.elapsed() > timeout {
+                        let stdout_excerpt = recent_lines_to_string(&recent_stdout);
+                        let stderr_excerpt = recent_lines_to_string(&recent_stderr);
+                        let mut details: Vec<String> = Vec::new();
+                        if !stderr_excerpt.is_empty() {
+                            details.push(format!("Recent stderr:\n{}", stderr_excerpt));
+                        }
+                        if !stdout_excerpt.is_empty() {
+                            details.push(format!("Recent stdout:\n{}", stdout_excerpt));
+                        }
+                        let message = if details.is_empty() {
+                            "后端服务启动超时，请检查日志或环境配置".to_string()
+                        } else {
+                            format!("后端服务启动超时。\n\n{}", details.join("\n\n"))
+                        };
+                        if !startup_failure_emitted.swap(true, Ordering::SeqCst) {
+                            eprintln!("Backend startup timeout after 60 seconds");
+                            app_handle.emit("sage-backend-startup-failed", serde_json::json!({
+                                "reason": "timeout",
+                                "message": message
+                            })).unwrap();
+                        }
+                        break;
+                    }
+
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                }
+
+                let mut backend_started = true;
+                let mut reader = BufReader::new(tokio::io::empty()).lines();
                 let start_time = std::time::Instant::now();
                 let timeout = std::time::Duration::from_secs(60); // 60秒超时
 
