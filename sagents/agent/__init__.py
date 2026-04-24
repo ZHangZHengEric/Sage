@@ -9,7 +9,6 @@ from .task_summary_agent import TaskSummaryAgent
 from .workflow_select_agent import WorkflowSelectAgent
 from .task_completion_judge_agent import TaskCompletionJudgeAgent
 from .query_suggest_agent import QuerySuggestAgent
-from .task_router_agent import TaskRouterAgent
 from .tool_suggestion_agent import ToolSuggestionAgent
 from .fibre.fibre_agent import FibreAgent
 from .memory_recall_agent import MemoryRecallAgent
@@ -30,7 +29,6 @@ __all__ = [
     "WorkflowSelectAgent",
     "TaskCompletionJudgeAgent",
     "QuerySuggestAgent",
-    "TaskRouterAgent",
     "ToolSuggestionAgent",
     "FibreAgent",
     "MemoryRecallAgent",

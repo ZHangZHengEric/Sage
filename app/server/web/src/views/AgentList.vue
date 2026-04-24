@@ -346,7 +346,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch, Teleport } from 'vue'
 import { toast } from 'vue-sonner'
-import { Plus, Edit, Trash2, FileBraces, Download, Upload, Copy, Loader, Sparkles, Wrench, Zap, GitBranch, Cpu, Brain, MoreHorizontal, X, Star, LayoutGrid, List, UserPlus } from 'lucide-vue-next'
+import { Plus, Edit, Trash2, FileBraces, Download, Upload, Copy, Loader, Sparkles, Wrench, Zap, GitBranch, Cpu, MoreHorizontal, X, Star, LayoutGrid, List, UserPlus } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { useLanguage } from '../utils/i18n.js'
 import { agentAPI } from '../api/agent.js'
@@ -794,36 +794,30 @@ const getModelShortName = (providerId) => {
 }
 
 const getAgentModeIcon = (mode) => {
-  const normalizedMode = normalizeAgentMode(mode, 'auto')
+  const normalizedMode = normalizeAgentMode(mode, 'simple')
   const iconMap = {
     fibre: GitBranch,
-    simple: Cpu,
-    multi: Brain,
-    auto: Sparkles
+    simple: Cpu
   }
-  return iconMap[normalizedMode] || Sparkles
+  return iconMap[normalizedMode] || Cpu
 }
 
 const getAgentModeLabel = (mode) => {
-  const normalizedMode = normalizeAgentMode(mode, 'auto')
+  const normalizedMode = normalizeAgentMode(mode, 'simple')
   const labelMap = {
     fibre: 'Fibre',
-    simple: 'Simple',
-    multi: 'Multi',
-    auto: 'Auto'
+    simple: 'Simple'
   }
-  return labelMap[normalizedMode] || 'Auto'
+  return labelMap[normalizedMode] || 'Simple'
 }
 
 const getModeBadgeVariant = (mode) => {
-  const normalizedMode = normalizeAgentMode(mode, 'auto')
+  const normalizedMode = normalizeAgentMode(mode, 'simple')
   const variantMap = {
     fibre: 'default',
-    simple: 'secondary',
-    multi: 'destructive',
-    auto: 'outline'
+    simple: 'secondary'
   }
-  return variantMap[normalizedMode] || 'outline'
+  return variantMap[normalizedMode] || 'secondary'
 }
 
 const getAgentAvatar = (agentId) => {
