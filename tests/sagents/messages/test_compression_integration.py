@@ -4,7 +4,6 @@ from unittest.mock import MagicMock, patch, AsyncMock
 import os
 
 from sagents.agent.task_decompose_agent import TaskDecomposeAgent
-from sagents.agent.task_router_agent import TaskRouterAgent
 from sagents.agent.common_agent import CommonAgent
 from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
@@ -26,10 +25,10 @@ class TestCompressionIntegration(unittest.TestCase):
         self.mock_session_context.get_language.return_value = 'zh'
         self.mock_session_context.audit_status = {}
         self.mock_session_context.task_manager = MagicMock()
-        # 无全局 session 时避免 should_abort 提前返回；TaskRouter 需完整 agent_config
+        # 无全局 session 时避免 should_abort 提前返回；这里保留完整 agent_config 结构
         self.mock_session_context.session_id = None
         self.mock_session_context.agent_config = {
-            "agent_mode": "auto",
+            "agent_mode": "simple",
             "deep_thinking": False,
         }
         
@@ -82,24 +81,6 @@ class TestCompressionIntegration(unittest.TestCase):
         self.mock_message_manager.extract_all_context_messages.assert_called()
         # Verify compress called with correct budget
         self.mock_compress.assert_called_with(self.mock_messages, 4000)
-
-    def test_task_router_agent_compression(self):
-        agent = TaskRouterAgent(self.mock_model, self.mock_config)
-        agent._should_abort_due_to_session = MagicMock(return_value=False)
-        async def mock_call_llm(*args, **kwargs):
-            yield MagicMock(choices=[])
-        agent._call_llm_streaming = mock_call_llm
-        agent.prepare_unified_system_message = AsyncMock(
-            return_value=MessageChunk(role="system", content="sys")
-        )
-        
-        import asyncio
-        async def run_test():
-            async for _ in agent.run_stream(self.mock_session_context):
-                pass
-        asyncio.run(run_test())
-        
-        self.mock_compress.assert_called_with(self.mock_messages, 2000)
 
     def test_common_agent_does_not_compress_in_run_stream(self):
         """CommonAgent.run_stream 仅拉取历史，不调用 MessageManager.compress_messages。"""

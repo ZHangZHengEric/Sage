@@ -23,7 +23,6 @@ from . import task_executor_agent_prompts
 from . import task_observation_prompts
 from . import task_planning_prompts
 from . import task_rewrite_prompts
-from . import task_router_prompts
 from . import task_stage_summary_prompts
 from . import task_summary_prompts
 from . import tool_suggestion_prompts

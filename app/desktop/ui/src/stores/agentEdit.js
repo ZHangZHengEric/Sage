@@ -139,9 +139,9 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     const { preserveStep = false } = options
 
     if (agentData) {
-      // 如果后端返回的 agentMode 是 'multi'，自动改为 'simple'
+      // 将旧的 auto 值收敛为默认的 simple
       const processedData = { ...agentData }
-      if (processedData.agentMode === 'multi') {
+      if (!['simple', 'fibre'].includes(String(processedData.agentMode || '').toLowerCase())) {
         processedData.agentMode = 'simple'
       }
       formData.value = JSON.parse(JSON.stringify({ ...defaultFormData, ...processedData }))
