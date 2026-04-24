@@ -163,7 +163,7 @@ AgentInstance（用户侧；当前 Agent 表的扩展）
 
 ### 3.4 与现有 `_agent_registry` 的关系
 
-今天 `session_runtime._agent_registry` 是「字符串 → Agent 类」的固定字典，承载内核阶段（`task_router`、`task_planning` 等）。改造后：
+今天 `session_runtime._agent_registry` 是「字符串 → Agent 类」的固定字典，承载内核阶段（`task_planning` 等）。改造后：
 
 - 内核阶段保留在该字典里，作为 **隐式系统 Agent**，仅供内置 `_build_default_flow` 引用。
 - 用户编排的 Flow 节点引用 `agent_id`（实例 ID），由 `FlowExecutor` 在执行前 **从 Agent 实例服务加载 → 走模板编译器 → 得到运行时 Agent 对象**。

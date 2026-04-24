@@ -109,7 +109,7 @@ async for chunks in agent.run_stream(
 
 ## 4. 默认执行图与 `agent_mode`
 
-未传 `custom_flow` 时，由 `_build_default_flow` 使用 `sagents/flow/schema.py` 中的 `SequenceNode`、`SwitchNode`、`LoopNode`、`IfNode` 等拼装（含 `task_router`、深度思考分支、`agent_mode` 分岔、`query_suggest` 等）。概念说明见 [核心概念](CORE_CONCEPTS.md) 与 [Agent / Flow 架构](ARCHITECTURE_SAGENTS_AGENT_FLOW.md)。
+未传 `custom_flow` 时，由 `_build_default_flow` 使用 `sagents/flow/schema.py` 中的 `SequenceNode`、`SwitchNode`、`LoopNode`、`IfNode` 等拼装（含深度思考分支、`agent_mode` 分岔、`query_suggest` 等）。概念说明见 [核心概念](CORE_CONCEPTS.md) 与 [Agent / Flow 架构](ARCHITECTURE_SAGENTS_AGENT_FLOW.md)。
 
 ## 5. 工具与技能
 

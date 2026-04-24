@@ -10,26 +10,33 @@
     <div class="h-full overflow-y-auto p-6 space-y-6">
       <!-- 深度思考 -->
       <div class="space-y-2">
-        <ThreeOptionSwitch
-          :value="config.deepThinking"
-          @change="(value) => handleConfigChange({ deepThinking: value })"
-          :label="t('config.deepThinking')"
-          :description="t('config.deepThinkingDesc')"
-        />
+        <div class="space-y-2">
+          <Label>{{ t('config.deepThinking') }}</Label>
+          <div class="flex items-center h-10 gap-3 border rounded-md px-3 bg-background">
+            <Switch
+              :checked="Boolean(config.deepThinking)"
+              @update:checked="(value) => handleConfigChange({ deepThinking: Boolean(value) })"
+            />
+            <span class="text-sm text-muted-foreground">
+              {{ config.deepThinking ? t('common.enabled') : t('common.disabled') }}
+            </span>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            {{ t('config.deepThinkingDesc') }}
+          </p>
+        </div>
       </div>
 
       <!-- Agent 模式 -->
       <div class="space-y-2">
         <Label>{{ t('config.agentMode') }}</Label>
-        <Select :model-value="config.agentMode || 'auto'" @update:model-value="(v) => handleConfigChange({ agentMode: v })">
+        <Select :model-value="config.agentMode || 'simple'" @update:model-value="(v) => handleConfigChange({ agentMode: v })">
           <SelectTrigger class="w-full">
-            <SelectValue :placeholder="t('config.modeAuto')" />
+            <SelectValue :placeholder="t('config.modeSimple')" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="auto">{{ t('config.modeAuto') }}</SelectItem>
             <SelectItem value="fibre">{{ t('config.modeFibre') }}</SelectItem>
             <SelectItem value="simple">{{ t('config.modeSimple') }}</SelectItem>
-            <!-- <SelectItem value="multi">{{ t('config.modeMulti') }}</SelectItem> -->
           </SelectContent>
         </Select>
         <p class="text-xs text-muted-foreground">
@@ -37,7 +44,7 @@
         </p>
       </div>
 
-      <div v-if="(config.agentMode || 'auto') === 'fibre'" class="space-y-2">
+      <div v-if="(config.agentMode || 'simple') === 'fibre'" class="space-y-2">
         <Label>{{ t('agentEdit.subAgents') }}</Label>
         <p class="text-xs text-muted-foreground">
           {{ t('config.subAgentsDesc') }}
@@ -140,11 +147,11 @@ import { computed } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import { Settings } from 'lucide-vue-next'
 import ResizablePanel from './ResizablePanel.vue'
-import ThreeOptionSwitch from './ThreeOptionSwitch.vue'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 
 // Props
 const props = defineProps({

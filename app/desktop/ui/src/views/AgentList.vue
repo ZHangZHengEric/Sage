@@ -358,7 +358,7 @@ import { ref, onMounted, onUnmounted, computed, watch, Teleport } from 'vue'
 import { toast } from 'vue-sonner'
 import { 
   Plus, Edit, Trash2, FileBraces, Download, Upload, Copy, Loader, 
-  Sparkles, Wrench, Zap, GitBranch, Cpu, Brain, MoreHorizontal, X, Star, LayoutGrid, List
+  Sparkles, Wrench, Zap, GitBranch, Cpu, MoreHorizontal, X, Star, LayoutGrid, List
 } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { useLanguage } from '../utils/i18n.js'
@@ -923,46 +923,42 @@ const getModelShortName = (providerId) => {
 
 // 获取Agent模式图标
 const getAgentModeIcon = (mode) => {
+  const normalizedMode = mode === 'fibre' ? 'fibre' : 'simple'
   const iconMap = {
     'fibre': GitBranch,
-    'simple': Cpu,
-    'multi': Brain,
-    'auto': Sparkles
+    'simple': Cpu
   }
-  return iconMap[mode] || Sparkles
+  return iconMap[normalizedMode] || Cpu
 }
 
 // 获取Agent模式提示文字
 const getAgentModeTooltip = (mode) => {
+  const normalizedMode = mode === 'fibre' ? 'fibre' : 'simple'
   const tooltipMap = {
     'fibre': t('agent.modeFibre'),
-    'simple': t('agent.modeSimple'),
-    'multi': t('agent.modeMulti'),
-    'auto': t('agent.modeAuto')
+    'simple': t('agent.modeSimple')
   }
-  return tooltipMap[mode] || t('agent.modeAuto')
+  return tooltipMap[normalizedMode] || t('agent.modeSimple')
 }
 
 // 获取Agent模式标签文字
 const getAgentModeLabel = (mode) => {
+  const normalizedMode = mode === 'fibre' ? 'fibre' : 'simple'
   const labelMap = {
     'fibre': 'Fibre',
-    'simple': 'Simple',
-    'multi': 'Multi',
-    'auto': 'Auto'
+    'simple': 'Simple'
   }
-  return labelMap[mode] || 'Auto'
+  return labelMap[normalizedMode] || 'Simple'
 }
 
 // 获取Agent模式Badge样式
 const getModeBadgeVariant = (mode) => {
+  const normalizedMode = mode === 'fibre' ? 'fibre' : 'simple'
   const variantMap = {
     'fibre': 'default',
-    'simple': 'secondary',
-    'multi': 'destructive',
-    'auto': 'outline'
+    'simple': 'secondary'
   }
-  return variantMap[mode] || 'outline'
+  return variantMap[normalizedMode] || 'secondary'
 }
 
 // Toggle flip card

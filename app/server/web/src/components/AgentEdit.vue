@@ -170,7 +170,7 @@
                 <FormItem :label="t('agent.agentMode')">
                   <Select v-model="store.formData.agentMode">
                     <SelectTrigger class="h-10">
-                      <SelectValue :placeholder="t('agent.modeAuto')" />
+                      <SelectValue :placeholder="t('agent.modeSimple')" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="fibre">{{ t('agent.modeFibre') }}</SelectItem>
@@ -183,13 +183,15 @@
               <!-- Row 2: Deep Thinking, More Suggest, Max Loop -->
               <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <FormItem :label="t('agent.deepThinking')">
-                  <Tabs :model-value="getSelectValue(store.formData.deepThinking)" @update:model-value="(v) => setSelectValue('deepThinking', v)">
-                    <TabsList class="grid w-full grid-cols-3 h-10">
-                      <TabsTrigger value="auto">{{ t('agent.auto') }}</TabsTrigger>
-                      <TabsTrigger value="enabled">{{ t('agent.enabled') }}</TabsTrigger>
-                      <TabsTrigger value="disabled">{{ t('agent.disabled') }}</TabsTrigger>
-                    </TabsList>
-                  </Tabs>
+                  <div class="flex items-center h-10 gap-3 border rounded-md px-3 bg-background">
+                    <Switch
+                      :checked="Boolean(store.formData.deepThinking)"
+                      @update:checked="(v) => { store.formData.deepThinking = Boolean(v) }"
+                    />
+                    <span class="text-sm text-muted-foreground">
+                      {{ store.formData.deepThinking ? t('agent.enabled') : t('agent.disabled') }}
+                    </span>
+                  </div>
                 </FormItem>
 
                 <FormItem :label="t('agent.moreSuggest')">
@@ -1201,18 +1203,6 @@ const handleSave = async (shouldExit = true) => {
 
 const handleReturn = () => {
   emit('update:visible', false)
-}
-
-// Helpers for Selects
-const getSelectValue = (val) => {
-  if (val === null) return 'auto'
-  return val ? 'enabled' : 'disabled'
-}
-
-const setSelectValue = (field, val) => {
-  if (val === 'auto') store.formData[field] = null
-  else if (val === 'enabled') store.formData[field] = true
-  else store.formData[field] = false
 }
 
 // Sub-agent Logic
