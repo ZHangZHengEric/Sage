@@ -92,6 +92,7 @@ docs/vendor/
 # PyBuilder
 .pybuilder/
 target/
+.sage-terminal-state/
 
 # Jupyter Notebook
 .ipynb_checkpoints
