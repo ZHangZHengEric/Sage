@@ -180,12 +180,41 @@ sage chat
 ```
 
 完整 CLI 使用说明请看：
-- English: [docs/en/CLI.md](docs/en/CLI.md)
-- 中文: [docs/zh/CLI.md](docs/zh/CLI.md)
+- English: [docs/en/applications/CLI.md](docs/en/applications/CLI.md)
+- 中文: [docs/zh/applications/CLI.md](docs/zh/applications/CLI.md)
 
 CLI 现在默认和 desktop 共用 `~/.sage/` 本地数据目录。
 默认会先读取 `~/.sage/.sage_env`，开发时如果仓库内存在 `.env`，则会再用本地 `.env` 覆盖。
 启用 `--json` 时，CLI 会输出流式事件，并在结束时附加一个最终的 `cli_stats` 结构化摘要事件。
+
+**终端 UI（TUI 预览）**：
+
+```bash
+# 先让本地 Sage CLI/backend 可用
+pip install -e .
+
+# 配置同一套最小运行环境
+export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
+export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
+export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
+export SAGE_DB_TYPE="file"
+
+# 从源码运行 Rust TUI
+cargo run --quiet --offline --manifest-path app/terminal/Cargo.toml
+```
+
+当前支持的启动形式：
+
+```bash
+sage-terminal
+sage-terminal resume
+sage-terminal resume latest
+sage-terminal resume <session_id>
+```
+
+完整 TUI 使用说明请看：
+- English: [docs/en/applications/TUI.md](docs/en/applications/TUI.md)
+- 中文: [docs/zh/applications/TUI.md](docs/zh/applications/TUI.md)
 
 **Web 应用 (FastAPI + Vue3)**：
 
