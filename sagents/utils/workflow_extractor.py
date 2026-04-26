@@ -9,6 +9,7 @@ import traceback
 from typing import Dict, List, Any, Optional
 import httpx
 from datetime import datetime
+from sagents.utils.prompt_manager import PromptManager
 
 
 class WorkflowExtractor:
@@ -16,7 +17,7 @@ class WorkflowExtractor:
     从agent对话messages中提取workflow的工具类
     """
     
-    def __init__(self, api_key: str, model: str = "deepseek-v3", base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1", abstraction_level: str = "abstract"):
+    def __init__(self, api_key: str, model: str = "deepseek-v3", base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1", abstraction_level: str = "abstract", language: str = "en"):
         """
         初始化WorkflowExtractor
         
@@ -30,6 +31,7 @@ class WorkflowExtractor:
         self.model = model
         self.base_url = base_url
         self.abstraction_level = abstraction_level
+        self.language = language
         self.headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
@@ -92,45 +94,15 @@ class WorkflowExtractor:
             messages_text = self._format_messages_for_analysis(messages)
             
             if abstraction_level == "abstract":
-                task_requirements = """
-请按照以下要求提取任务：
-1. 一个用户请求只能抽象出一个主要任务
-2. 识别用户提出的核心问题或需求，忽略次要的辅助任务
-3. 任务名称应该具有通用性，不包含具体的变量值、参数或实例信息
-4. 任务名称应该描述任务的类型而非具体内容
-5. 返回JSON格式，只包含一个任务
-
-示例：
-{"task": "数据库查询与统计分析"}
-{"task": "文件下载与内容分析"}
-{"task": "客户信息查询与筛选"}"""
+                task_requirements = 'Extract only one general, abstract primary task, and return JSON: {"task": "task name"}.'
             else:  # specific
-                 task_requirements = """
-请按照以下要求提取任务：
-1. 一个用户请求只能抽象出一个主要任务
-2. 识别用户提出的核心问题或需求，忽略次要的辅助任务
-3. 任务名称可以包含具体的业务场景、数据类型或操作对象，但不能包含具体的参数值
-4. 任务名称应该描述参数的类型而非具体数值（如"按时间段"而非"2025年9月16日至21日"）
-5. 任务名称应该更具体地描述要完成的工作，但保持一定的通用性
-6. 返回JSON格式，只包含一个任务
-
-示例：
-{"task": "5G核心网SMF网元用户类型会话数按时间段统计分析"}
-{"task": "销售数据库特定条件客户信息查询与业绩统计"}
-{"task": "CSV格式数据文件导入清洗与格式转换"}
-{"task": "指定时间范围订单数据分析与可视化报表生成"}"""
+                task_requirements = 'Extract only one more specific but still general primary task, and return JSON: {"task": "task name"}.'
             
-            prompt = f"""
-请分析以下agent对话记录，识别出其中包含的主要任务。
-
-对话记录：
-{messages_text}
-
-{task_requirements}
-
-返回格式：
-{{"task": "任务名称"}}
-"""
+            prompt = PromptManager().get_prompt(
+                "workflow_extractor_task_prompt",
+                agent="common_util",
+                language=self.language,
+            ).format(messages_text=messages_text, task_requirements=task_requirements)
 
             response = self._call_llm(prompt)
             
@@ -179,64 +151,20 @@ class WorkflowExtractor:
             
             # 根据抽象程度设置不同的prompt
             if abstraction_level == "specific":
-                abstraction_instruction = f"""
-4. 基于对话记录中实际执行的工具调用来生成步骤，一个工具调用对应一个步骤
-5. 不要将"解析用户需求"作为步骤
-6. 步骤应该具体明确，可以包含具体的工具名称、操作方法等详细信息
-7. 对于使用工具的步骤，在步骤末尾添加"[工具: 工具名称]"标识
-8. 工具名称必须从以下真实工具中选择：{', '.join(real_tools)}
-9. 如果步骤不需要执行工具（如纯分析、思考步骤），则不要添加工具标识
-10. 不要把一个工具调用拆分成多个步骤
-11. 颗粒度可以更细，包含具体的操作细节"""
-                example = """{{"workflow_steps": [
-    "查询数据库表结构 - 确认包含关键字段的数据表 [工具: get_askonce_database_tables]",
-    "编写并执行数据查询 - 构建查询语句并获取统计结果 [工具: execute_sql_code_on_askonce_database]",
-    "数据清洗处理 - 标准化日期格式和数值单位 [工具: calculate]",
-    "生成统计报告 - 汇总分类数据并计算关键指标 [工具: file_write]",
-    "分析数据趋势 - 识别关键模式和异常值",
-    "可视化展示 - 创建趋势图表对比不同类别数据 [工具: file_write]"
-]}}"""
-            else:  # abstract
-                abstraction_instruction = f"""
-4. 基于对话记录中实际执行的工具调用来生成步骤，一个工具调用对应一个步骤
-5. 不要将"解析用户需求"作为步骤
-6. 步骤应该具有通用性，避免过于具体的限定词（如"按天"、"按小时"等）
-7. 对于使用工具的步骤，在步骤末尾添加"[工具: 工具名称]"标识
-8. 工具名称必须从以下真实工具中选择：{', '.join(real_tools)}
-9. 如果步骤不需要执行工具（如纯分析、思考步骤），则不要添加工具标识
-10. 不要把一个工具调用拆分成多个步骤
-11. 颗粒度适中，描述操作的类型而非具体内容
-12. 对于非必选的步骤，在开头添加"【可选】"标识"""
-                example = """{{"workflow_steps": [
-    "查询数据库表结构 - 确认包含关键字段的数据表 [工具: get_askonce_database_tables]",
-    "编写并执行数据查询 - 构建查询语句并获取统计结果 [工具: execute_sql_code_on_askonce_database]",
-    "【可选】数据清洗处理 - 标准化数据格式和单位 [工具: calculate]",
-    "生成统计报告 - 汇总数据并计算关键指标 [工具: file_write]",
-    "分析数据趋势 - 识别关键模式和异常值",
-    "可视化展示 - 创建图表展示分析结果 [工具: file_write]"
-]}}"""
+                abstraction_instruction = "The steps should be more specific and may include tool names and operation details; tool usage must match real execution."
+            else:
+                abstraction_instruction = "The steps should remain general and not be overly specific; tool usage must match real execution."
 
-            prompt = f"""
-请分析以下agent对话记录，为任务"{task}"提取工作流步骤。
-
-对话记录：
-{messages_text}
-
-请按照以下要求提取工作流步骤：
-1. 仔细分析对话记录中assistant实际执行的工具调用，基于这些真实的工具调用来生成步骤
-2. 一个工具调用对应一个步骤，不要把一个工具调用拆分成多个步骤
-3. 每个步骤格式为："动作描述 - 目标说明"，如果使用了工具则添加"[工具: 工具名称]"
-{abstraction_instruction}
-12. 按照执行顺序排列
-13. 合并相似的操作，避免过于细化
-14. 返回JSON格式的步骤列表，最多8步
-
-返回格式：
-{{"workflow_steps": ["步骤1 - 目标1", "步骤2 - 目标2", ...]}}
-
-示例：
-{example}
-"""
+            prompt = PromptManager().get_prompt(
+                "workflow_extractor_steps_prompt",
+                agent="common_util",
+                language=self.language,
+            ).format(
+                messages_text=messages_text,
+                task=task,
+                abstraction_instruction=abstraction_instruction,
+                real_tools=", ".join(real_tools),
+            )
 
             response = self._call_llm(prompt)
             
@@ -276,18 +204,18 @@ class WorkflowExtractor:
             
             # 格式化消息内容
             if role == "user":
-                formatted_messages.append(f"用户: {content}")
+                formatted_messages.append(f"User: {content}")
             elif role == "assistant":
                 if tool_calls:
                     # 处理工具调用
                     for tool_call in tool_calls:
                         function_name = tool_call.get("function", {}).get("name", "unknown")
                         arguments = tool_call.get("function", {}).get("arguments", "{}")
-                        formatted_messages.append(f"助手调用工具: {function_name}({arguments})")
+                        formatted_messages.append(f"Assistant called tool: {function_name}({arguments})")
                 elif content:
-                    formatted_messages.append(f"助手: {content}")
+                    formatted_messages.append(f"Assistant: {content}")
             elif role == "tool":
-                formatted_messages.append(f"工具返回: {content[:200]}...")  # 截取前200字符
+                formatted_messages.append(f"Tool returned: {content[:200]}...")  # 截取前200 characters
         
         return "\n".join(formatted_messages)
     

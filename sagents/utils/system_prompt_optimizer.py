@@ -19,8 +19,12 @@ from datetime import datetime
 
 try:
     from sagents.utils.logger import logger
+    from sagents.utils.prompt_manager import PromptManager
+    from sagents.prompts.common_util_prompts import system_prompt_optimizer_section_definitions
 except ImportError:
     from logger import logger
+    from prompt_manager import PromptManager
+    from common_util_prompts import system_prompt_optimizer_section_definitions
 
 
 class SystemPromptOptimizer:
@@ -49,7 +53,8 @@ class SystemPromptOptimizer:
         current_prompt: str,
         llm_client,
         model: str = "gpt-3.5-turbo",
-        optimization_goal: Optional[str] = None
+        optimization_goal: Optional[str] = None,
+        language: str = "en",
     ) -> Dict[str, Any]:
         """
         优化系统指令
@@ -70,24 +75,31 @@ class SystemPromptOptimizer:
             logger.info("开始优化系统指令")
 
             # 1. 分析当前指令内容
-            analysis = await self._analyze_current_prompt(current_prompt, llm_client, model, optimization_goal)
+            analysis = await self._analyze_current_prompt(
+                current_prompt,
+                llm_client,
+                model,
+                optimization_goal,
+                language=language,
+            )
+            # 这里保留 language 入口，后续各段 prompt 会按请求语言生成
             logger.info("完成当前指令分析")
 
             # 2. 生成优化后的各个部分（默认使用分段生成，更精确）
             try:
                 sections: Dict[str, str] = await self._generate_optimized_sections_segmented(
-                    current_prompt, analysis, llm_client, model, optimization_goal
+                    current_prompt, analysis, llm_client, model, optimization_goal, language=language
                 )
                 logger.info("完成分段内容生成")
             except Exception as e:
                 logger.warning(f"分段生成失败，尝试整体生成: {str(e)}")
                 sections = await self._generate_optimized_sections(
-                    current_prompt, analysis, llm_client, model, optimization_goal
+                    current_prompt, analysis, llm_client, model, optimization_goal, language=language
                 )
                 logger.info("完成整体内容生成")
 
             # 3. 格式化为markdown
-            optimized_prompt = self._format_to_markdown(sections)
+            optimized_prompt = self._format_to_markdown(sections, language=language)
             logger.info("完成markdown格式化")
 
             result = {
@@ -111,7 +123,7 @@ class SystemPromptOptimizer:
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
 
-    async def _analyze_current_prompt(self, prompt: str, client, model: str, optimization_goal: Optional[str] = None) -> Dict[str, Any]:
+    async def _analyze_current_prompt(self, prompt: str, client, model: str, optimization_goal: Optional[str] = None, language: str = "en") -> Dict[str, Any]:
         """
         分析当前系统指令的内容和结构
 
@@ -134,34 +146,14 @@ class SystemPromptOptimizer:
 请在分析时特别关注与此目标相关的内容，并在分析结果中重点标注需要针对此目标进行改进的地方。
 """
 
-            analysis_prompt = f"""
-请分析以下Agent系统指令的内容和结构，识别出其中包含的信息：
-
-当前系统指令：
-{prompt}
-{optimization_guidance}
-请从以下维度进行分析：
-1. 角色定义：Agent扮演什么角色
-2. 核心技能：Agent具备哪些能力
-3. 工作偏好：Agent的工作方式和偏好
-4. 工具使用：是否涉及工具使用指导
-5. 输出要求：对结果内容和形式的要求
-6. 限制条件：Agent需要遵守的限制
-7. 特殊术语：是否有特定领域的术语定义
-8. 语言问题：表达不清晰或可以改进的地方
-
-请以JSON格式返回分析结果：
-{{
-    "role_info": "角色相关信息",
-    "skills_info": "技能相关信息", 
-    "preferences_info": "偏好相关信息",
-    "tool_info": "工具使用相关信息",
-    "output_requirements": "输出要求相关信息",
-    "constraints_info": "限制条件相关信息",
-    "terminology_info": "特殊术语相关信息",
-    "language_issues": "语言表达问题和改进建议"
-}}
-"""
+            analysis_prompt = PromptManager().get_prompt(
+                "system_prompt_optimizer_analysis_prompt",
+                agent="common_util",
+                language=language,
+            ).format(
+                prompt=prompt,
+                optimization_guidance=optimization_guidance,
+            )
 
             response = await self._call_llm(client, analysis_prompt, model)
             analysis_json = self._extract_json_from_response(response)
@@ -183,7 +175,8 @@ class SystemPromptOptimizer:
         analysis: Dict[str, Any],
         client,
         model: str,
-        optimization_goal: Optional[str] = None
+        optimization_goal: Optional[str] = None,
+        language: str = "en"
     ) -> Dict[str, str]:
         """
         生成优化后的各个部分内容
@@ -208,49 +201,15 @@ class SystemPromptOptimizer:
 请在生成各个部分时特别关注此优化目标，确保生成的内容能够更好地满足这个目标。
 """
 
-            sections_prompt = f"""
-请对以下原始指令进行结构化整理，只能重新组织和改善表述，绝对不能添加任何新内容。
-
-原始指令：
-{original_prompt}
-
-分析结果：
-{json.dumps(analysis, ensure_ascii=False, indent=2)}
-{optimization_guidance}
-
-**严格要求**：
-1. **只能重新组织原有内容**：不得添加任何原始指令中没有明确提到的信息
-2. **禁止编造任何内容**：包括但不限于新的功能、限制、术语、数字、时间限制等
-3. **完全保留原始细节**：所有具体的名词、数字、规则必须原样保留
-4. **不得扩展或推理**：不能基于原始内容进行任何推理或扩展
-
-**处理规则**：
-- 如果原始指令中没有某个部分的内容，该部分应该为空或简短
-- 只能改善语言表述的清晰度，不能改变含义
-- 不能添加任何示例、解释或补充说明
-- 不能添加任何原始指令中没有的专业术语或概念
-
-请严格按照原始指令内容整理各个部分：
-
-1. **角色部分**：仅重新表述原始指令中的角色描述
-2. **技能部分**：仅列出原始指令中明确提到的技能（如果没有则简短）
-3. **工具使用指导**：仅包含原始指令中的工具使用要求（如果没有则为空）
-4. **结果内容偏好**：仅包含原始指令中的内容要求（如果没有则为空）
-5. **结果形式偏好**：仅包含原始指令中的格式要求（如果没有则为空）
-6. **特殊名词定义**：仅包含原始指令中已定义的术语（如果没有则为空）
-7. **限制部分**：仅包含原始指令中的限制和禁止事项（如果没有则为空）
-
-请以JSON格式返回：
-{{
-    "role": "角色部分内容（仅基于原始指令）",
-    "skills": "技能部分内容（仅原始指令中的技能）",
-    "tool_guidance": "工具使用指导内容（仅原始指令中的指导，没有则为空）",
-    "content_preference": "结果内容偏好内容（仅原始指令中的偏好，没有则为空）",
-    "format_preference": "结果形式偏好内容（仅原始指令中的格式要求，没有则为空）",
-    "terminology": "特殊名词定义内容（仅原始指令中的定义，没有则为空）",
-    "constraints": "限制部分内容（仅原始指令中的限制，没有则为空）"
-}}
-"""
+            sections_prompt = PromptManager().get_prompt(
+                "system_prompt_optimizer_sections_prompt",
+                agent="common_util",
+                language=language,
+            ).format(
+                original_prompt=original_prompt,
+                analysis_json=json.dumps(analysis, ensure_ascii=False, indent=2),
+                optimization_guidance=optimization_guidance,
+            )
 
             response = await self._call_llm(client, sections_prompt, model)
             sections_json = self._extract_json_from_response(response)
@@ -282,7 +241,8 @@ class SystemPromptOptimizer:
         analysis: Dict[str, Any],
         client,
         model: str,
-        optimization_goal: Optional[str] = None
+        optimization_goal: Optional[str] = None,
+        language: str = "en"
     ) -> Dict[str, str]:
         """
         分段生成优化后的各个部分，提高稳定性
@@ -308,45 +268,6 @@ class SystemPromptOptimizer:
 
             sections: Dict[str, str] = {}
 
-            # 定义需要生成的部分 - 优化后的定义，更加明确各部分的职责
-            section_definitions = {
-                "role": {
-                    "description": "角色定义内容（简洁明确的角色描述，说明AI的身份和主要职责）",
-                    "examples": "例如：你是一个专业的数据分析师、你是一个客户服务助手等",
-                    "avoid_confusion": "不要包含具体的技能列表或操作指导"
-                },
-                "skills": {
-                    "description": "技能列表内容（无序列表格式，每项技能要具体明确，说明AI具备的专业能力）",
-                    "examples": "例如：数据分析能力、客户沟通技巧、问题解决能力等",
-                    "avoid_confusion": "不要包含工具使用方法或具体操作步骤"
-                },
-                "tool_guidance": {
-                    "description": "工具使用指导内容（无序列表格式，具体说明何时使用哪些工具，以及使用的条件和方法）",
-                    "examples": "例如：使用CRM工具查询客户信息、使用计算器进行数值计算等",
-                    "avoid_confusion": "专注于工具的使用方法，不要包含一般性的行为要求或禁止事项"
-                },
-                "content_preference": {
-                    "description": "结果内容偏好（无序列表格式，说明回答内容的质量标准、详细程度、专业性要求等积极的内容要求）",
-                    "examples": "例如：回答要准确详细、提供具体的数据支持、包含实用的建议等",
-                    "avoid_confusion": "专注于积极的内容要求，不要包含禁止性的限制条件"
-                },
-                "format_preference": {
-                    "description": "结果形式偏好（无序列表格式，说明回答的格式要求、结构规范、展示方式等）",
-                    "examples": "例如：使用表格展示数据、采用分点列举、包含标题和小结等",
-                    "avoid_confusion": "专注于格式和展示方式，不要包含内容质量要求或禁止事项"
-                },
-                "terminology": {
-                    "description": "特殊名词定义（无序列表格式，格式：术语名称：详细定义和使用说明）",
-                    "examples": "例如：CRM：客户关系管理系统，用于管理客户信息和销售流程",
-                    "avoid_confusion": "只包含专业术语的定义，不要包含操作指导或限制条件"
-                },
-                "constraints": {
-                    "description": "限制和约束（无序列表格式，明确的禁止行为、边界条件、安全要求等消极限制）",
-                    "examples": "例如：不要泄露客户隐私、不要提供医疗建议、不要执行危险操作等",
-                    "avoid_confusion": "只包含明确的禁止事项和限制条件，不要包含积极的要求或建议"
-                }
-            }
-
             # 优化生成顺序：按照逻辑依赖关系排序
             # 1. role - 基础角色定义
             # 2. skills - 基于角色的技能
@@ -364,7 +285,7 @@ class SystemPromptOptimizer:
                 try:
                     logger.info(f"[{i}/{len(generation_order)}] 正在生成部分: {section_key}")
 
-                    section_info = section_definitions[section_key]
+                    section_info = system_prompt_optimizer_section_definitions[section_key]
 
                     # 构建已生成部分的上下文信息
                     context_info = ""
@@ -375,66 +296,19 @@ class SystemPromptOptimizer:
                                 context_info += f"- {existing_key}: {existing_content[:100]}{'...' if len(existing_content) > 100 else ''}\n"
                         context_info += "\n**请确保当前生成的内容与上述部分不重复，各部分职责明确分离。**"
 
-                    # 构建单个部分的生成prompt
-                    section_prompt = f"""
-请从原始系统指令中提取并优化"{section_key}"部分的内容。
-
-原始系统指令：
-{original_prompt}
-
-{f"优化目标：{optimization_goal}" if optimization_goal else ""}
-
-**当前部分定义**：
-{section_info['description']}
-
-**内容示例**：
-{section_info['examples']}
-
-**避免混淆**：
-{section_info['avoid_confusion']}
-
-{context_info}
-
-**优化要求**：
-1. **内容忠实性**：只能使用原始指令中已有的信息，不能添加新的功能、限制或概念
-2. **语言优化**：可以改善表述方式，使语言更清晰、更专业、更有条理
-3. **结构优化**：可以重新组织内容结构，使逻辑更清晰
-4. **保留细节**：所有具体的名词、数字、规则必须原样保留
-5. **职责分离**：严格按照当前部分的定义提取内容，不要包含其他部分的内容
-
-**允许的优化**：
-- 改善语言表述的清晰度和专业性
-- 调整句式结构，使表达更流畅
-- 重新组织内容顺序，使逻辑更清晰
-- 统一术语使用，保持一致性
-- 优化格式，使内容更易读
-
-**严格禁止**：
-- 添加原始指令中没有的新信息
-- 编造具体的数字、名称或规则
-- 添加新的功能要求或限制条件
-- 推理或扩展原始内容的含义
-- 包含其他部分应该包含的内容
-
-**特别注意**：
-- 如果原始指令中没有明确的"{section_key}"相关内容，请返回"无"
-- 不要将其他部分的内容错误归类到当前部分
-- 严格按照部分定义的职责范围提取内容
-
-**重要输出要求**：
-- 直接输出优化后的内容，不要添加任何说明文字
-- 不要包含"以下是优化后的..."、"内容如下："等描述性前缀
-- 不要包装在JSON对象中
-- 不要添加任何解释或说明
-- 只输出纯粹的内容本身
-
-示例：
-错误输出：以下是优化后的"{section_key}"内容：
-- **具体内容**
-
-正确输出：
-- **具体内容**
-"""
+                    section_prompt = PromptManager().get_prompt(
+                        "system_prompt_optimizer_section_prompt",
+                        agent="common_util",
+                        language=language,
+                    ).format(
+                        section_key=section_key,
+                        original_prompt=original_prompt,
+                        optimization_goal_block=f"Optimization goal: {optimization_goal}\nPlease pay special attention to this goal while generating each section, and ensure the content better satisfies it." if optimization_goal else "",
+                        section_description=section_info["description"],
+                        section_examples=section_info["examples"],
+                        section_avoid_confusion=section_info["avoid_confusion"],
+                        context_info=context_info,
+                    )
 
                     logger.info(f"[{section_key}] 发送prompt长度: {len(section_prompt)} 字符")
 
@@ -464,28 +338,28 @@ class SystemPromptOptimizer:
                     sections[section_key] = content
 
                     # 记录最终内容状态
-                    if content.strip() == "无":
-                        logger.info(f"[{section_key}] ✓ 完成生成 - 原始指令中无相关内容")
+                    if not content.strip() or content.strip().lower() in {"none", "n/a"}:
+                        logger.info(f"[{section_key}] ✓ Completed generation - no relevant content in the original prompt")
                     else:
-                        logger.info(f"[{section_key}] ✓ 完成生成 - 最终内容长度: {len(content)} 字符")
+                        logger.info(f"[{section_key}] ✓ Completed generation - final content length: {len(content)} characters")
 
                 except Exception as e:
                     logger.error(f"[{section_key}] ❌ 生成失败: {str(e)}")
                     logger.error(traceback.format_exc())
                     # 如果单个部分失败，使用默认内容
-                    sections[section_key] = f"[{section_key}部分生成失败，请手动编辑]"
-                    logger.warning(f"[{section_key}] 使用默认错误内容")
+                    sections[section_key] = f"[{section_key} section generation failed. Please edit manually.]"
+                    logger.warning(f"[{section_key}] Using default error content")
 
             # 统计生成结果
-            successful_sections = [k for k, v in sections.items() if not v.startswith("[") and not v.endswith("失败，请手动编辑]")]
-            empty_sections = [k for k, v in sections.items() if v.strip() == "无"]
-            failed_sections = [k for k, v in sections.items() if v.startswith("[") and v.endswith("失败，请手动编辑]")]
+            successful_sections = [k for k, v in sections.items() if not v.startswith("[") and not v.endswith("Please edit manually.]")]
+            empty_sections = [k for k, v in sections.items() if not v.strip() or v.strip().lower() in {"none", "n/a"}]
+            failed_sections = [k for k, v in sections.items() if v.startswith("[") and v.endswith("Please edit manually.]")]
 
             logger.info("=" * 50)
-            logger.info("分段生成完成 - 统计结果:")
-            logger.info(f"✓ 成功生成: {len(successful_sections)} 个部分 {successful_sections}")
-            logger.info(f"○ 内容为空: {len(empty_sections)} 个部分 {empty_sections}")
-            logger.info(f"❌ 生成失败: {len(failed_sections)} 个部分 {failed_sections}")
+            logger.info("Segmented generation completed - statistics:")
+            logger.info(f"✓ Successful: {len(successful_sections)} sections {successful_sections}")
+            logger.info(f"○ Empty: {len(empty_sections)} sections {empty_sections}")
+            logger.info(f"❌ Failed: {len(failed_sections)} sections {failed_sections}")
             logger.info("=" * 50)
 
             return sections
@@ -495,7 +369,7 @@ class SystemPromptOptimizer:
             logger.error(traceback.format_exc())
             raise
 
-    def _format_to_markdown(self, sections: Dict[str, str]) -> str:
+    def _format_to_markdown(self, sections: Dict[str, str], language: str = "en") -> str:
         """
         将各部分内容格式化为标准markdown格式
 
@@ -548,9 +422,9 @@ class SystemPromptOptimizer:
             return "\n\n".join(markdown_parts)
 
         except Exception as e:
-            logger.error(f"格式化markdown时发生错误: {str(e)}")
+            logger.error(f"Error formatting markdown: {str(e)}")
             logger.error(traceback.format_exc())
-            return self._get_fallback_markdown(sections)
+            return self._get_fallback_markdown(sections, language=language)
 
     def _format_list_content(self, content) -> str:
         """
@@ -594,7 +468,7 @@ class SystemPromptOptimizer:
             return str(content)
 
         except (json.JSONDecodeError, TypeError) as e:
-            logger.error(f"格式化列表内容时发生错误: {e}")
+            logger.error(f"Error formatting list content: {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             # 如果解析失败，尝试转换为字符串返回
             return str(content)
@@ -742,14 +616,14 @@ class SystemPromptOptimizer:
             默认分析结果
         """
         return {
-            "role_info": "从原始指令中提取的角色信息",
-            "skills_info": "从原始指令中提取的技能信息",
-            "preferences_info": "从原始指令中提取的偏好信息",
-            "tool_info": "工具使用相关信息",
-            "output_requirements": "输出要求信息",
-            "constraints_info": "限制条件信息",
-            "terminology_info": "特殊术语信息",
-            "language_issues": "需要优化语言表达的清晰度和准确性"
+            "role_info": "Role information extracted from the original prompt",
+            "skills_info": "Skill information extracted from the original prompt",
+            "preferences_info": "Preference information extracted from the original prompt",
+            "tool_info": "Tool-related information",
+            "output_requirements": "Output requirement information",
+            "constraints_info": "Constraint information",
+            "terminology_info": "Terminology information",
+            "language_issues": "Language clarity and precision that need improvement"
         }
 
     def _get_default_sections(self, analysis: Dict[str, Any]) -> Dict[str, str]:
@@ -763,13 +637,13 @@ class SystemPromptOptimizer:
             默认部分内容
         """
         return {
-            "role": "您是一个专业的AI助手，具备丰富的知识和经验，致力于为用户提供高质量的服务和支持。",
-            "skills": "- 信息分析和处理能力\n- 问题解决和建议提供\n- 专业知识应用和解释\n- 逻辑推理和判断能力",
-            "tool_guidance": "- 根据任务需求合理选择和使用可用工具\n- 确保工具使用的准确性和效率\n- 优先使用工具获取的真实信息，避免编造内容",
-            "content_preference": "- 提供准确、相关、有价值的信息和建议\n- 确保内容的专业性和实用性\n- 保持信息的时效性和可靠性",
-            "format_preference": "- 使用清晰的结构化格式\n- 包括适当的标题、列表和段落组织\n- 确保内容易读易懂",
-            "terminology": "- 根据具体领域定义相关专业术语\n- 提供清晰的术语解释和说明",
-            "constraints": "- 确保信息的准确性和可靠性\n- 遵循用户的具体要求和偏好\n- 保持专业和友好的交流方式\n- 避免提供可能有害或不当的内容"
+            "role": "You are a professional AI assistant with strong knowledge and experience, dedicated to providing high-quality service and support.",
+            "skills": "- Information analysis and processing\n- Problem solving and recommendations\n- Applying and explaining domain knowledge\n- Logical reasoning and judgment",
+            "tool_guidance": "- Choose and use available tools appropriately based on task requirements\n- Ensure accuracy and efficiency when using tools\n- Prefer factual information obtained from tools over fabricated content",
+            "content_preference": "- Provide accurate, relevant, and valuable information and suggestions\n- Ensure professionalism and practicality in the content\n- Keep information timely and reliable",
+            "format_preference": "- Use a clear structured format\n- Include appropriate headings, lists, and paragraph organization\n- Keep the content easy to read and understand",
+            "terminology": "- Define relevant domain terminology based on the specific field\n- Provide clear explanations and usage notes for terms",
+            "constraints": "- Ensure information accuracy and reliability\n- Follow the user's specific requirements and preferences\n- Maintain a professional and friendly communication style\n- Avoid harmful or inappropriate content"
         }
 
     def _get_fallback_result(self, original_prompt: str) -> Dict[str, Any]:
@@ -784,13 +658,13 @@ class SystemPromptOptimizer:
         """
         return {
             "optimized_prompt": original_prompt,
-            "analysis": {"error": "分析失败，返回原始内容"},
-            "sections": {"error": "生成失败"},
+            "analysis": {"error": "Analysis failed; returning the original content."},
+            "sections": {"error": "Generation failed"},
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "status": "fallback"
         }
 
-    def _get_fallback_markdown(self, sections: Dict[str, str]) -> str:
+    def _get_fallback_markdown(self, sections: Dict[str, str], language: str = "en") -> str:
         """
         获取备用markdown格式（当格式化失败时）
 
@@ -800,35 +674,19 @@ class SystemPromptOptimizer:
         Returns:
             备用markdown字符串
         """
-        return f"""## 角色
-
-{sections.get('role', '角色信息')}
-
-## 技能
-
-{sections.get('skills', '技能信息')}
-
-## 偏好或者指导
-
-### 工具使用指导
-
-{sections.get('tool_guidance', '工具使用指导')}
-
-### 结果内容偏好
-
-{sections.get('content_preference', '结果内容偏好')}
-
-### 结果形式偏好
-
-{sections.get('format_preference', '结果形式偏好')}
-
-### 特殊名词定义
-
-{sections.get('terminology', '特殊名词定义')}
-
-## 限制
-
-{sections.get('constraints', '限制条件')}"""
+        return PromptManager().get_prompt(
+            "system_prompt_optimizer_fallback_markdown",
+            agent="common_util",
+            language=language,
+        ).format(
+            role=sections.get("role", "Role information"),
+            skills=sections.get("skills", "Skills information"),
+            tool_guidance=sections.get("tool_guidance", "Tool guidance"),
+            content_preference=sections.get("content_preference", "Content preference"),
+            format_preference=sections.get("format_preference", "Format preference"),
+            terminology=sections.get("terminology", "Terminology"),
+            constraints=sections.get("constraints", "Constraints"),
+        )
 
     def save_optimized_prompt(self, result: Dict[str, Any], file_path: str) -> str:
         """
@@ -857,13 +715,12 @@ class SystemPromptOptimizer:
 if __name__ == "__main__":
     # 测试用例
     optimizer = SystemPromptOptimizer()
-
-    # 示例系统指令
-    test_prompt = """
-    你是一个销售助手，帮助用户查询客户信息和分析销售数据。
-    你需要使用CRM工具来获取客户信息，使用数据分析工具来分析销售趋势。
-    回答要准确，格式要清晰。不要泄露客户隐私信息。
-    """
-
     print("SystemPromptOptimizer工具类已创建完成")
-    print(f"测试指令: {test_prompt}")
+    test_language = "en"
+    print(
+        PromptManager().get_prompt(
+            "auto_gen_agent_default_system_prefix",
+            agent="common_util",
+            language=test_language,
+        )
+    )

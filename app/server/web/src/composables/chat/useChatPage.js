@@ -592,7 +592,8 @@ export const useChatPage = (props) => {
     clearCurrentStreamViewState,
     loadConversationMessages,
     isHistoryLoading,
-    removeSessionFromCache
+    removeSessionFromCache,
+    language
   })
 
   const submitEditedLastUserMessage = async (content) => {

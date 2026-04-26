@@ -4,6 +4,13 @@
 
 import request from '../utils/request.js'
 
+const resolveRequestLanguage = (language) => {
+  const savedLanguage = language || (typeof localStorage !== 'undefined' ? localStorage.getItem('language') : null)
+  if (['ptBR', 'pt', 'pt-BR'].includes(savedLanguage)) return 'pt'
+  if (['enUS', 'en', 'en-US'].includes(savedLanguage)) return 'en'
+  return 'zh'
+}
+
 export const chatAPI = {
 
   /**
@@ -79,14 +86,20 @@ export const chatAPI = {
   },
 
   optimizeUserInput: async (payload, config = {}) => {
-    return await request.post('/api/chat/optimize-input', payload, {
+    return await request.post('/api/chat/optimize-input', {
+      ...payload,
+      language: resolveRequestLanguage(payload?.language)
+    }, {
       timeout: 1000 * 60 * 30,
       ...config
     })
   },
 
   optimizeUserInputStream: async (payload, config = {}) => {
-    return await request.postStream('/api/chat/optimize-input/stream', payload, {
+    return await request.postStream('/api/chat/optimize-input/stream', {
+      ...payload,
+      language: resolveRequestLanguage(payload?.language)
+    }, {
       timeout: 1000 * 60 * 30,
       ...config
     })

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import uuid
 from typing import Any
 
@@ -9,6 +10,20 @@ from loguru import logger
 
 from common.core import config
 from .context import set_request_context
+
+# Tauri / WebView2 may send different Origin values by platform & dev vs prod.
+# Keep an explicit list (fast path) plus a regex for localhost / dev server ports.
+_DESKTOP_CORS_ALLOW_ORIGINS = (
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+)
+# fullmatch: Starlette CORSMiddleware uses re.fullmatch on the Origin header.
+_DESKTOP_CORS_ORIGIN_REGEX = (
+    r"^https?://(localhost|127\.0\.0\.1|tauri\.localhost)(:\d+)?$"
+    r"|^tauri://.+$"
+    r"|^chrome-extension://.+$"
+)
 
 
 def _get_config() -> config.StartupConfig:
@@ -22,10 +37,17 @@ def register_cors_middleware(app: Any) -> None:
     """注册跨端共享的 CORS 策略。"""
     cfg = _get_config()
 
-    if cfg.app_mode == "desktop":
+    # Prefer StartupConfig; SAGE_INTERNAL_DESKTOP_PROCESS is set by app.desktop.core.main
+    # so the sidecar never falls through to server CORS (empty allow_origins) if cfg drifts.
+    is_desktop = (cfg.app_mode == "desktop") or (
+        os.environ.get("SAGE_INTERNAL_DESKTOP_PROCESS") == "1"
+    )
+
+    if is_desktop:
         app.add_middleware(
             CORSMiddleware,
-            allow_origin_regex="https?://.*|tauri://.*|chrome-extension://.*",
+            allow_origins=list(_DESKTOP_CORS_ALLOW_ORIGINS),
+            allow_origin_regex=_DESKTOP_CORS_ORIGIN_REGEX,
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],

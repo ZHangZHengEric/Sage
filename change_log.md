@@ -1,3 +1,13 @@
+2026-04-27 12:05 修复桌面端打包后 fetch 报 CORS：为 Tauri 源增加显式 allow_origins（tauri://localhost、http/https://tauri.localhost）与锚定 fullmatch 正则；main 设置 SAGE_INTERNAL_DESKTOP_PROCESS=1 防止误走 server 空 CORS； abilities 等接口若仍 500 可在修复 CORS 后从响应体看到真实错误。
+
+2026-04-26 23:50 桌面端构建优化两项：(1) PyInstaller 配置统一到 sage-desktop.spec，build.sh 不再传一长串 flags，仅通过 SAGE_PYI_MODE 控制 strip；(2) CSP 收紧，default-src 'self'、script-src 仅 'self'（彻底禁止 inline script），style-src 保留 'unsafe-inline' 兼容 radix-vue 运行时样式，显式声明 img/media/font/connect/worker/object/base-uri/frame-ancestors。
+
+2026-04-26 23:30 修复桌面端打包后白色滚动条问题：根因是 Tauri CSP 未含 'unsafe-inline'，拦截了 radix-vue 运行时注入的隐藏原生滚动条 <style>，导致 macOS native overlay scrollbar 漏出。index.css 显式声明 [data-radix-scroll-area-viewport] 隐藏原生滚动条规则；tauri.conf.json CSP 增加 style-src 'unsafe-inline' 与 img-src/media-src 放行 asset/blob/data。
+
+2026-04-26 22:55 桌面端切断对 server/web 的跨项目引用：McpServerAdd/AnyToolToolEditor 直接复制源码至 desktop，并新建 AnyToolSchemaFieldEditor，导入路径全部改为 @/ 别名；移除 vite.config 的 lucide-vue-next/pinia alias 与 tailwind.config 中 server/web 内容路径；build.sh 增加 --collect-submodules=sagents 修复 PyInstaller 漏打包基础工具。
+
+2026-04-26 22:40 修复桌面端打包后多个问题：sage-desktop.spec 与 tool_manager.py 显式枚举 sagents.tool.impl 子模块（绕过懒加载导致 PyInstaller 漏打包，修复"基础工具"丢失）；tailwind.config.js content 加入 server/web 组件路径，修复打包后样式 purge；VideoRenderer 改用动态 baseURL，修复打包后视频播放使用错误端口；vite.config.js 为 server/web 共享组件添加 lucide-vue-next/pinia alias，修复构建报错。
+
 2026-04-26 12:20 修复工具执行时间不实时更新问题：chatDisplayItems.js 的 buildToolGroupItem 新增 startTimestampMs 字段；DeliveryCollapsedGroup.vue 检测最后一条消息是否为未完成的 tool_call，若是则启动 setInterval 每秒更新计时器，工具完成后自动切换回静态 durationMs 展示，桌面端和 Web 端同步。
 
 2026-04-26 11:58 工作空间面板新增手动刷新按钮：ResizablePanel 新增 #actions slot，WorkspacePanel 在标题栏注入刷新图标，加载中自动旋转，桌面端和 Web 端同步。

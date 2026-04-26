@@ -37,8 +37,8 @@
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="zhCN">简体中文</SelectItem>
-                  <SelectItem value="enUS">English</SelectItem>
+                  <SelectItem value="zhCN">{{ t('system.languageOptionZhCN') }}</SelectItem>
+                  <SelectItem value="enUS">{{ t('system.languageOptionEnUS') }}</SelectItem>
                 </SelectContent>
               </Select>
             </div>

@@ -31,6 +31,25 @@ from ..user_context import get_desktop_user_id
 agent_router = APIRouter(prefix="/api/agent", tags=["Agent"])
 
 
+def _resolve_request_language(http_request: Request, language: Optional[str] = None, default: str = "zh") -> str:
+    candidate = (language or "").strip()
+    if not candidate:
+        headers = http_request.headers
+        candidate = (
+            headers.get("x-accept-language")
+            or headers.get("accept-language")
+            or ""
+        ).strip()
+    lowered = candidate.lower()
+    if lowered.startswith("pt"):
+        return "pt"
+    if lowered.startswith("en"):
+        return "en"
+    if lowered.startswith("zh") or lowered.startswith("cn"):
+        return "zh"
+    return default
+
+
 def _normalize_desktop_sub_agent_selection(
     agent: AgentConfigDTO,
     *,
@@ -81,7 +100,7 @@ async def list(http_request: Request):
 
 
 @agent_router.get("/template/default_system_prompt")
-async def get_default_system_prompt(language: str = "zh"):
+async def get_default_system_prompt(http_request: Request, language: str = "zh"):
     """
     获取默认的System Prompt模板（用于创建空白Agent时的初始草稿）
 
@@ -92,8 +111,9 @@ async def get_default_system_prompt(language: str = "zh"):
         StandardResponse: 包含默认System Prompt的内容
     """
     try:
+        resolved_language = _resolve_request_language(http_request, language, default="zh")
         result = await agent_router_service.build_default_system_prompt_response(
-            language=language,
+            language=resolved_language,
             blank_draft=True,
         )
         return await Response.succ(data=result["data"], message=result["message"])
@@ -348,10 +368,12 @@ async def auto_generate(request: AutoGenAgentRequest, http_request: Request):
         request: 自动生成Agent请求
 
     """
+    language = _resolve_request_language(http_request, request.language, default="zh")
     result = await agent_router_service.build_auto_generate_response(
         agent_description=request.agent_description,
         available_tools=request.available_tools,
         user_id=get_desktop_user_id(http_request),
+        language=language,
         wrap_key="agent",
     )
     return await Response.succ(data=result["data"], message=result["message"])
@@ -361,12 +383,13 @@ async def auto_generate(request: AutoGenAgentRequest, http_request: Request):
 async def get_agent_abilities(payload: AgentAbilitiesRequest, http_request: Request):
     """Desktop 端：生成指定 Agent 的能力卡片列表"""
     try:
-        logger.info(f"生成 Agent 语言: {payload.language}")
+        language = _resolve_request_language(http_request, payload.language, default="zh")
+        logger.info(f"生成 Agent 语言: {language}")
         result = await agent_router_service.build_agent_abilities_response(
             agent_id=payload.agent_id,
             session_id=payload.session_id,
             context=payload.context,
-            language=payload.language or "zh",
+            language=language,
             user_id=get_desktop_user_id(http_request),
             wrap_data_model=True,
         )
@@ -393,10 +416,12 @@ async def optimize(request: SystemPromptOptimizeRequest, http_request: Request):
     Returns:
         StandardResponse: 包含优化后的系统提示词的标准响应
     """
+    language = _resolve_request_language(http_request, request.language, default="zh")
     result = await agent_router_service.build_system_prompt_optimize_response(
         original_prompt=request.original_prompt,
         optimization_goal=request.optimization_goal,
         user_id=get_desktop_user_id(http_request),
+        language=language,
     )
     return await Response.succ(data=result["data"], message=result["message"])
 
