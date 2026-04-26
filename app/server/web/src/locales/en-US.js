@@ -1208,6 +1208,7 @@ export default {
 
   // Workspace
   'workspace.title': 'Workspace',
+  'workspace.refresh': 'Refresh',
   'workspace.noFiles': 'No files',
   'workspace.dropHere': 'Drop files or folders to upload',
   'workspace.dragHint': 'Drag files or folders here',

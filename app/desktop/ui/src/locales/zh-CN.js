@@ -1249,6 +1249,7 @@ export default {
 
   // 工作空间
   'workspace.title': '工作空间',
+  'workspace.refresh': '刷新',
   'workspace.noFiles': '暂无文件',
   'workspace.path': '路径:',
   'workspace.download': '下载文件',

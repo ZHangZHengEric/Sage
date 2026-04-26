@@ -9,14 +9,17 @@
             <h3 class="text-sm font-semibold tracking-tight text-foreground">{{ title }}</h3>
             <span v-if="badge" class="rounded-full bg-muted/35 px-1.5 py-0.5 text-[11px] text-muted-foreground">{{ badge }}</span>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            @click="emitClose"
-            class="h-7.5 w-7.5 rounded-full p-0 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-          >
-            <X class="w-4 h-4" />
-          </Button>
+          <div class="flex items-center gap-1">
+            <slot name="actions"></slot>
+            <Button
+              variant="ghost"
+              size="sm"
+              @click="emitClose"
+              class="h-7.5 w-7.5 rounded-full p-0 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+            >
+              <X class="w-4 h-4" />
+            </Button>
+          </div>
         </div>
 
         <div class="flex-1 overflow-hidden">
@@ -46,14 +49,17 @@
           <h3 class="text-sm font-semibold tracking-tight text-foreground">{{ title }}</h3>
           <span v-if="badge" class="rounded-full bg-muted/35 px-1.5 py-0.5 text-[11px] text-muted-foreground">{{ badge }}</span>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          @click="emitClose"
-          class="h-7.5 w-7.5 rounded-full p-0 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-        >
-          <X class="w-4 h-4" />
-        </Button>
+        <div class="flex items-center gap-1">
+          <slot name="actions"></slot>
+          <Button
+            variant="ghost"
+            size="sm"
+            @click="emitClose"
+            class="h-7.5 w-7.5 rounded-full p-0 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+          >
+            <X class="w-4 h-4" />
+          </Button>
+        </div>
       </div>
 
       <div class="flex-1 overflow-hidden">

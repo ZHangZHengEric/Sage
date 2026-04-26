@@ -8,6 +8,17 @@
     <template #icon>
       <FolderOpen class="h-4 w-4 text-muted-foreground" />
     </template>
+
+    <template #actions>
+      <button
+        class="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-50"
+        :title="t('workspace.refresh')"
+        :disabled="isLoading"
+        @click="$emit('refresh')"
+      >
+        <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': isLoading }" />
+      </button>
+    </template>
     
     <div 
       ref="dropZoneRef"
@@ -84,7 +95,7 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
-import { FolderOpen, Upload } from 'lucide-vue-next'
+import { FolderOpen, Upload, RefreshCw } from 'lucide-vue-next'
 import ResizablePanel from './ResizablePanel.vue'
 import WorkspaceFileTree from './WorkspaceFileTree.vue'
 import WorkspaceRemoteFilePreview from './WorkspaceRemoteFilePreview.vue'
@@ -105,7 +116,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'downloadFile', 'deleteFile', 'quotePath', 'uploadFiles'])
+const emit = defineEmits(['close', 'downloadFile', 'deleteFile', 'quotePath', 'uploadFiles', 'refresh'])
 
 const { t } = useLanguage()
 

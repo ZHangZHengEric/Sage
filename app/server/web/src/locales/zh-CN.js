@@ -1268,6 +1268,7 @@ export default {
 
   // 工作空间
   'workspace.title': '工作空间',
+  'workspace.refresh': '刷新',
   'workspace.noFiles': '暂无文件',
   'workspace.dropHere': '释放以上传文件或文件夹',
   'workspace.dragHint': '拖拽文件或文件夹到此处',
