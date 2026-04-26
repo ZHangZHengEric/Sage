@@ -253,3 +253,5 @@
 2026-03-06 23:30:00 重构 Session 消息读取：将 `get_session_messages` 逻辑下沉至 `SessionManager`，利用其扫描能力自动定位会话路径，并从 `SessionContext` 中移除该函数。同时恢复了 `app/desktop` 中 `get_conversation_messages` 的原始调用结构，保持了接口的稳定性和兼容性。
 
 2026-04-23 17:43:00 服务端会话分享：在历史会话列表新增分享按钮，复制 /share/{sessionId} 公开免登链接；重写 SharedChat 页面以匹配对话样式，支持执行流/交付流切换，工具点击查看输入输出，仅展示对话不含侧边栏。
+2026-04-26 13:38:00 修复桌面端视频播放失败：将 VideoRenderer.vue 中的 readFile+Blob 方式替换为 convertFileSrc，使用 asset:// 协议流式加载视频，解决大文件无法播放及 H.265 格式在 WKWebView 中播放失败问题。
+2026-04-26 13:46:00 合并 main 分支（4 commits），解决 VideoRenderer.vue 冲突，保留 main 版本的重构实现。新增桌面端 /api/agent/{id}/file_workspace/stream 接口，支持 HTTP Range 请求；VideoRenderer.vue 改为通过后端 stream 接口流式播放，不再直接访问文件系统。

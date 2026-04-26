@@ -3,11 +3,12 @@ Agent 相关路由
 """
 
 import os
+import re
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
 from fastapi import APIRouter, Request, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 import shutil
 
@@ -434,6 +435,67 @@ async def download_file(agent_id: str, request: Request):
     except Exception as e:
         logger.bind(agent_id=agent_id).error(f"Download failed: {e}")
         raise
+
+
+@agent_router.get("/{agent_id}/file_workspace/stream")
+async def stream_file(agent_id: str, request: Request):
+    """流式传输文件，支持 HTTP Range 请求（用于视频/音频在线播放）"""
+    file_path = request.query_params.get("file_path")
+    logger.bind(agent_id=agent_id).info(f"Stream request: file_path={file_path}")
+
+    try:
+        path, filename, media_type = await agent_service.download_desktop_agent_file(
+            agent_id,
+            file_path,
+        )
+    except Exception as e:
+        logger.bind(agent_id=agent_id).error(f"Stream resolve failed: {e}")
+        raise
+
+    file_size = os.path.getsize(path)
+    range_header = request.headers.get("range")
+
+    def iter_file(start: int, end: int):
+        with open(path, "rb") as f:
+            f.seek(start)
+            remaining = end - start + 1
+            while remaining > 0:
+                chunk = f.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    if range_header:
+        match = re.match(r"bytes=(\d+)-(\d*)", range_header)
+        if match:
+            start = int(match.group(1))
+            end = int(match.group(2)) if match.group(2) else file_size - 1
+            end = min(end, file_size - 1)
+            headers = {
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(end - start + 1),
+                "Content-Disposition": f'inline; filename="{filename}"',
+            }
+            return StreamingResponse(
+                iter_file(start, end),
+                status_code=206,
+                headers=headers,
+                media_type=media_type,
+            )
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(file_size),
+        "Content-Disposition": f'inline; filename="{filename}"',
+    }
+    return StreamingResponse(
+        iter_file(0, file_size - 1),
+        status_code=200,
+        headers=headers,
+        media_type=media_type,
+    )
 
 
 @agent_router.delete("/{agent_id}/file_workspace/delete")

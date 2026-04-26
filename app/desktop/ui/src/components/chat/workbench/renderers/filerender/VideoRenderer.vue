@@ -94,16 +94,31 @@ const durationLabel = computed(() => {
   return `${m}:${String(sec).padStart(2, '0')}`
 })
 
-// 用 convertFileSrc 把本地路径转为 asset:// URL，浏览器可直接流式播放
+// 从绝对路径中解析 agentId 和相对路径
+// 路径格式：/Users/.../.sage/agents/{agentId}/{relativePath}
+const parseAgentPath = (absPath) => {
+  const match = absPath.match(/\/agents\/([^/]+)\/(.+)$/)
+  if (match) return { agentId: match[1], relativePath: match[2] }
+  return null
+}
+
+// 构建视频 URL：优先通过后端 stream 接口，支持 Range 请求
 const buildVideoUrl = async (path) => {
   if (!path) return ''
   if (/^https?:\/\//i.test(path)) return path
+
+  const clean = path.replace(/^file:\/\//i, '')
+  const parsed = parseAgentPath(clean)
+  if (parsed) {
+    const baseURL = import.meta.env.VITE_BACKEND_API_PREFIX || ''
+    return `${baseURL}/api/agent/${parsed.agentId}/file_workspace/stream?file_path=${encodeURIComponent(parsed.relativePath)}`
+  }
+
+  // 降级：非 agent 工作区路径，使用 Tauri asset 协议
   try {
     const { convertFileSrc } = await import('@tauri-apps/api/core')
-    let clean = path.replace(/^file:\/\//i, '')
     return convertFileSrc(clean)
   } catch {
-    // 非 Tauri 环境（server web）：直接返回路径，让浏览器尝试
     return path
   }
 }
