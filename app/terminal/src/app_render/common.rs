@@ -2,7 +2,10 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
-pub(crate) fn finish_lines(mut lines: Vec<Line<'static>>, trailing_blank: bool) -> Vec<Line<'static>> {
+pub(crate) fn finish_lines(
+    mut lines: Vec<Line<'static>>,
+    trailing_blank: bool,
+) -> Vec<Line<'static>> {
     if lines.is_empty() {
         lines.push(Line::from(""));
     }
@@ -39,7 +42,9 @@ pub(crate) fn tool_title_style() -> Style {
 }
 
 pub(crate) fn system_title_style() -> Style {
-    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub(crate) fn subtle_body_style() -> Style {

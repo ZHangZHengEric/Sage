@@ -53,31 +53,40 @@ impl App {
                 self.queue_welcome_banner();
                 SubmitAction::Handled
             }
-            "/sessions" => {
-                let limit = match parts.next() {
-                    Some(value) => match value.parse::<usize>() {
-                        Ok(limit) if limit > 0 => limit,
-                        _ => {
-                            self.queue_message(
-                                MessageKind::System,
-                                "Usage: /sessions [positive_limit]",
-                            );
-                            self.status = format!("invalid command  {}", self.session_id);
-                            return SubmitAction::Handled;
-                        }
-                    },
-                    None => 10,
-                };
-                if parts.next().is_some() {
-                    self.queue_message(MessageKind::System, "Usage: /sessions [positive_limit]");
-                    self.status = format!("invalid command  {}", self.session_id);
-                    return SubmitAction::Handled;
-                }
-                SubmitAction::OpenSessionPicker {
+            "/sessions" => match (parts.next(), parts.next(), parts.next()) {
+                (None, None, None) => SubmitAction::OpenSessionPicker {
                     mode: crate::app::SessionPickerMode::Browse,
-                    limit,
+                    limit: 10,
+                },
+                (Some(value), None, None) => match value.parse::<usize>() {
+                    Ok(limit) if limit > 0 => SubmitAction::OpenSessionPicker {
+                        mode: crate::app::SessionPickerMode::Browse,
+                        limit,
+                    },
+                    _ => {
+                        self.queue_message(
+                            MessageKind::System,
+                            "Usage: /sessions [positive_limit] | /sessions inspect <latest|session_id>",
+                        );
+                        self.status = format!("invalid command  {}", self.session_id);
+                        SubmitAction::Handled
+                    }
+                },
+                (Some("inspect"), Some("latest"), None) => {
+                    SubmitAction::ShowSession("latest".to_string())
                 }
-            }
+                (Some("inspect"), Some(session_id), None) => {
+                    SubmitAction::ShowSession(session_id.to_string())
+                }
+                _ => {
+                    self.queue_message(
+                        MessageKind::System,
+                        "Usage: /sessions [positive_limit] | /sessions inspect <latest|session_id>",
+                    );
+                    self.status = format!("invalid command  {}", self.session_id);
+                    SubmitAction::Handled
+                }
+            },
             "/resume" => match (parts.next(), parts.next()) {
                 (None, None) => SubmitAction::OpenSessionPicker {
                     mode: crate::app::SessionPickerMode::Resume,
@@ -99,14 +108,48 @@ impl App {
                 }
                 SubmitAction::ListSkills
             }
-            "/config" => {
-                if parts.next().is_some() {
-                    self.queue_message(MessageKind::System, "Usage: /config");
-                    self.status = format!("invalid command  {}", self.session_id);
-                    return SubmitAction::Handled;
+            "/config" => match (parts.next(), parts.next(), parts.next()) {
+                (None, None, None) => SubmitAction::ShowConfig,
+                (Some("init"), None, None) => SubmitAction::InitConfig {
+                    path: None,
+                    force: false,
+                },
+                (Some("init"), Some(flag), None) if flag == "--force" => SubmitAction::InitConfig {
+                    path: None,
+                    force: true,
+                },
+                (Some("init"), Some(path), None) => SubmitAction::InitConfig {
+                    path: Some(path.to_string()),
+                    force: false,
+                },
+                (Some("init"), Some(path), Some(flag)) if flag == "--force" => {
+                    SubmitAction::InitConfig {
+                        path: Some(path.to_string()),
+                        force: true,
+                    }
                 }
-                SubmitAction::ShowConfig
-            }
+                _ => {
+                    self.queue_message(
+                        MessageKind::System,
+                        "Usage: /config | /config init [path] [--force]",
+                    );
+                    self.status = format!("invalid command  {}", self.session_id);
+                    SubmitAction::Handled
+                }
+            },
+            "/doctor" => match (parts.next(), parts.next()) {
+                (None, None) => SubmitAction::ShowDoctor {
+                    probe_provider: false,
+                },
+                (Some("probe-provider" | "--probe-provider"), None) => SubmitAction::ShowDoctor {
+                    probe_provider: true,
+                },
+                _ => {
+                    self.queue_message(MessageKind::System, "Usage: /doctor [probe-provider]");
+                    self.status = format!("invalid command  {}", self.session_id);
+                    SubmitAction::Handled
+                }
+            },
             "/providers" => {
                 if parts.next().is_some() {
                     self.queue_message(MessageKind::System, "Usage: /providers");
@@ -115,38 +158,37 @@ impl App {
                 }
                 SubmitAction::ListProviders
             }
-            "/provider" => match (parts.next(), parts.next(), parts.next()) {
-                (None, None, None) | (Some("help"), None, None) => {
-                    self.queue_message(MessageKind::Tool, provider_help_text());
-                    self.status = format!("provider help  {}", self.session_id);
-                    SubmitAction::Handled
-                }
-                (Some("inspect"), Some(provider_id), None) => {
-                    SubmitAction::ShowProvider(provider_id.to_string())
-                }
-                (Some("default"), Some(provider_id), None) => {
-                    SubmitAction::SetDefaultProvider(provider_id.to_string())
-                }
-                (Some("delete"), Some(provider_id), None) => {
-                    SubmitAction::DeleteProvider(provider_id.to_string())
-                }
-                (Some("create"), _, _) => {
-                    let fields = parts.map(ToString::to_string).collect::<Vec<_>>();
-                    SubmitAction::CreateProvider(fields)
-                }
-                (Some("update"), Some(provider_id), _) => {
-                    let fields = parts.map(ToString::to_string).collect::<Vec<_>>();
-                    SubmitAction::UpdateProvider {
-                        provider_id: provider_id.to_string(),
-                        fields,
+            "/provider" => {
+                let subcommand = parts.next();
+                let rest = parts.map(ToString::to_string).collect::<Vec<_>>();
+                match subcommand.as_deref() {
+                    None | Some("help") if rest.is_empty() => {
+                        self.queue_message(MessageKind::Tool, provider_help_text());
+                        self.status = format!("provider help  {}", self.session_id);
+                        SubmitAction::Handled
+                    }
+                    Some("inspect") if rest.len() == 1 => {
+                        SubmitAction::ShowProvider(rest[0].clone())
+                    }
+                    Some("verify") => SubmitAction::VerifyProvider(rest),
+                    Some("default") if rest.len() == 1 => {
+                        SubmitAction::SetDefaultProvider(rest[0].clone())
+                    }
+                    Some("delete") if rest.len() == 1 => {
+                        SubmitAction::DeleteProvider(rest[0].clone())
+                    }
+                    Some("create") => SubmitAction::CreateProvider(rest),
+                    Some("update") if !rest.is_empty() => SubmitAction::UpdateProvider {
+                        provider_id: rest[0].clone(),
+                        fields: rest[1..].to_vec(),
+                    },
+                    _ => {
+                        self.queue_message(MessageKind::System, provider_help_text());
+                        self.status = format!("invalid command  {}", self.session_id);
+                        SubmitAction::Handled
                     }
                 }
-                _ => {
-                    self.queue_message(MessageKind::System, provider_help_text());
-                    self.status = format!("invalid command  {}", self.session_id);
-                    SubmitAction::Handled
-                }
-            },
+            }
             "/skill" => match (parts.next(), parts.next(), parts.next()) {
                 (Some("add"), Some(name), None) => SubmitAction::EnableSkill(name.to_string()),
                 (Some("remove"), Some(name), None) => SubmitAction::DisableSkill(name.to_string()),

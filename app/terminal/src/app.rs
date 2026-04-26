@@ -31,9 +31,17 @@ pub enum SubmitAction {
     EnableSkill(String),
     DisableSkill(String),
     ClearSkills,
+    ShowDoctor {
+        probe_provider: bool,
+    },
     ShowConfig,
+    InitConfig {
+        path: Option<String>,
+        force: bool,
+    },
     ListProviders,
     ShowProvider(String),
+    VerifyProvider(Vec<String>),
     SetDefaultProvider(String),
     CreateProvider(Vec<String>),
     UpdateProvider {

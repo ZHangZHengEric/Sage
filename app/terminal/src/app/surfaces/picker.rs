@@ -1,4 +1,7 @@
-use crate::app::{App, FilteredSessionPicker, SessionPickerEntry, SessionPickerMode, SessionPickerState, SubmitAction};
+use crate::app::{
+    App, FilteredSessionPicker, SessionPickerEntry, SessionPickerMode, SessionPickerState,
+    SubmitAction,
+};
 use crate::app_preview::session_picker_preview_lines;
 use crate::bottom_pane::picker_overlay;
 

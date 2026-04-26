@@ -1,26 +1,15 @@
 use anyhow::Result;
 use serde_json::Value;
 
+use crate::backend::contract::{
+    expect_array_field, optional_str_field, optional_u64_field, required_str_field,
+    run_cli_command, CliJsonCommand,
+};
 use crate::backend::{SessionDetail, SessionMessage, SessionSummary};
-use crate::backend_support::run_cli_json;
 
 pub(crate) fn list_sessions(user_id: &str, limit: usize) -> Result<Vec<SessionSummary>> {
-    let limit = limit.max(1).to_string();
-    let value = run_cli_json(&[
-        "sessions",
-        "--json",
-        "--user-id",
-        user_id,
-        "--limit",
-        &limit,
-    ])?;
-
-    let items = value
-        .get("list")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-
+    let value = run_cli_command(CliJsonCommand::SessionsList { user_id, limit })?;
+    let items = expect_array_field(&value, "list", "sessions.list")?;
     Ok(items.iter().map(parse_session_summary).collect::<Vec<_>>())
 }
 
@@ -33,14 +22,10 @@ pub(crate) fn inspect_session(session_id: &str, user_id: &str) -> Result<Option<
 }
 
 fn inspect_session_impl(session_id: &str, user_id: &str) -> Result<Option<SessionDetail>> {
-    let value = run_cli_json(&[
-        "sessions",
-        "inspect",
+    let value = run_cli_command(CliJsonCommand::SessionInspect {
         session_id,
-        "--json",
-        "--user-id",
         user_id,
-    ])?;
+    })?;
 
     if value.is_null() {
         return Ok(None);
@@ -51,25 +36,12 @@ fn inspect_session_impl(session_id: &str, user_id: &str) -> Result<Option<Sessio
 
 fn parse_session_summary(value: &Value) -> SessionSummary {
     SessionSummary {
-        session_id: value
-            .get("session_id")
-            .and_then(Value::as_str)
+        session_id: required_str_field(value, "session_id", "sessions.list")
             .unwrap_or_default()
             .to_string(),
-        title: value
-            .get("title")
-            .and_then(Value::as_str)
-            .unwrap_or("(untitled)")
-            .to_string(),
-        message_count: value
-            .get("message_count")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        updated_at: value
-            .get("updated_at")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
+        title: optional_str_field(value, "title").unwrap_or_else(|| "(untitled)".to_string()),
+        message_count: optional_u64_field(value, "message_count"),
+        updated_at: optional_str_field(value, "updated_at").unwrap_or_default(),
         last_preview: value
             .get("last_message")
             .and_then(Value::as_object)
@@ -94,25 +66,12 @@ fn parse_session_detail(value: &Value) -> SessionDetail {
         .collect::<Vec<_>>();
 
     SessionDetail {
-        session_id: value
-            .get("session_id")
-            .and_then(Value::as_str)
+        session_id: required_str_field(value, "session_id", "sessions.inspect")
             .unwrap_or_default()
             .to_string(),
-        title: value
-            .get("title")
-            .and_then(Value::as_str)
-            .unwrap_or("(untitled)")
-            .to_string(),
-        message_count: value
-            .get("message_count")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        updated_at: value
-            .get("updated_at")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
+        title: optional_str_field(value, "title").unwrap_or_else(|| "(untitled)".to_string()),
+        message_count: optional_u64_field(value, "message_count"),
+        updated_at: optional_str_field(value, "updated_at").unwrap_or_default(),
         recent_messages,
     }
 }

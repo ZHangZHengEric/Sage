@@ -2,13 +2,16 @@ use anyhow::Result;
 
 use crate::app::{App, MessageKind};
 use crate::backend::{
-    BackendHandle, create_provider as create_provider_api,
-    delete_provider as delete_provider_api, inspect_provider,
-    list_providers as list_providers_api, set_default_provider as set_default_provider_api,
-    update_provider as update_provider_api,
+    create_provider as create_provider_api, delete_provider as delete_provider_api,
+    inspect_provider, list_providers as list_providers_api,
+    set_default_provider as set_default_provider_api, update_provider as update_provider_api,
+    verify_provider as verify_provider_api, BackendHandle,
 };
 use crate::terminal::stop_backend;
-use crate::terminal_support::{format_provider_detail, format_providers, parse_provider_mutation};
+use crate::terminal_support::{
+    format_provider_detail, format_provider_verify, format_providers, parse_provider_mutation,
+    parse_provider_mutation_allow_empty,
+};
 
 pub(super) fn list_providers(app: &mut App) -> Result<bool> {
     match list_providers_api(&app.user_id) {
@@ -31,7 +34,10 @@ pub(super) fn list_providers(app: &mut App) -> Result<bool> {
             app.set_status(format!("providers  {}", app.session_id));
         }
         Err(err) => {
-            app.push_message(MessageKind::System, format!("failed to list providers: {err}"));
+            app.push_message(
+                MessageKind::System,
+                format!("failed to list providers: {err}"),
+            );
             app.set_status(format!("error  {}", app.session_id));
         }
     }
@@ -66,7 +72,10 @@ pub(super) fn set_default_provider(
             app.clear_provider_catalog();
             app.push_message(
                 MessageKind::Tool,
-                format!("default provider set\n{}", format_provider_detail(&provider)),
+                format!(
+                    "default provider set\n{}",
+                    format_provider_detail(&provider)
+                ),
             );
             if !provider.model.is_empty() {
                 app.selected_model = None;
@@ -77,6 +86,25 @@ pub(super) fn set_default_provider(
             app.push_message(
                 MessageKind::System,
                 format!("failed to update provider: {err}"),
+            );
+            app.set_status(format!("error  {}", app.session_id));
+        }
+    }
+    Ok(true)
+}
+
+pub(super) fn verify_provider(app: &mut App, fields: &[String]) -> Result<bool> {
+    match parse_provider_mutation_allow_empty(fields, false)
+        .and_then(|mutation| verify_provider_api(&mutation))
+    {
+        Ok(result) => {
+            app.push_message(MessageKind::Tool, format_provider_verify(&result));
+            app.set_status(format!("provider verify  {}", app.session_id));
+        }
+        Err(err) => {
+            app.push_message(
+                MessageKind::System,
+                format!("failed to verify provider: {err}"),
             );
             app.set_status(format!("error  {}", app.session_id));
         }

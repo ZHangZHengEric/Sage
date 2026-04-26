@@ -26,8 +26,10 @@ impl App {
     }
 
     pub fn needs_skill_catalog(&self) -> bool {
-        matches!(self.skill_popup_context(), Some((crate::app::SkillPopupMode::Add, _)))
-            && self.skill_catalog.is_none()
+        matches!(
+            self.skill_popup_context(),
+            Some((crate::app::SkillPopupMode::Add, _))
+        ) && self.skill_catalog.is_none()
     }
 
     pub fn select_next_popup_item(&mut self) -> bool {

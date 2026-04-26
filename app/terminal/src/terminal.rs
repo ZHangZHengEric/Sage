@@ -9,9 +9,7 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use crossterm::terminal::{Clear, ClearType};
 
 use crate::app::{App, MessageKind, SubmitAction};
-use crate::backend::{
-    BackendEvent, BackendHandle, BackendRequest,
-};
+use crate::backend::{BackendEvent, BackendHandle, BackendRequest};
 use crate::custom_terminal::{BackendImpl, Terminal};
 use crate::history::insert_history_lines;
 use crate::terminal_layout::desired_viewport_height;

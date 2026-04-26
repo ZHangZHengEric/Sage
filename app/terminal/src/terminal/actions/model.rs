@@ -1,8 +1,8 @@
 use anyhow::Result;
 
 use crate::app::{App, MessageKind};
-use crate::backend::read_config;
-use crate::terminal_support::format_config;
+use crate::backend::{init_config as init_config_api, read_config, read_doctor_info};
+use crate::terminal_support::{format_config, format_config_init, format_doctor_info};
 
 pub(super) fn show_config(app: &mut App) -> Result<bool> {
     match read_config() {
@@ -15,6 +15,40 @@ pub(super) fn show_config(app: &mut App) -> Result<bool> {
         }
         Err(err) => {
             app.push_message(MessageKind::System, format!("failed to read config: {err}"));
+            app.set_status(format!("error  {}", app.session_id));
+        }
+    }
+    Ok(true)
+}
+
+pub(super) fn show_doctor(app: &mut App, probe_provider: bool) -> Result<bool> {
+    match read_doctor_info(probe_provider) {
+        Ok(info) => {
+            app.push_message(MessageKind::Tool, format_doctor_info(&info));
+            app.set_status(format!("doctor  {}", app.session_id));
+        }
+        Err(err) => {
+            app.push_message(
+                MessageKind::System,
+                format!("failed to read doctor info: {err}"),
+            );
+            app.set_status(format!("error  {}", app.session_id));
+        }
+    }
+    Ok(true)
+}
+
+pub(super) fn init_config(app: &mut App, path: Option<&str>, force: bool) -> Result<bool> {
+    match init_config_api(path, force) {
+        Ok(result) => {
+            app.push_message(MessageKind::Tool, format_config_init(&result));
+            app.set_status(format!("config  {}", app.session_id));
+        }
+        Err(err) => {
+            app.push_message(
+                MessageKind::System,
+                format!("failed to initialize config: {err}"),
+            );
             app.set_status(format!("error  {}", app.session_id));
         }
     }

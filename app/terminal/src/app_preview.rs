@@ -8,6 +8,7 @@ pub(crate) fn provider_help_text() -> String {
         "/providers",
         "/provider help",
         "/provider inspect <id>",
+        "/provider verify [key=value...]",
         "/provider default <id>",
         "/provider delete <id>",
         "/provider create name=<name> model=<model> base=<url> [key=<api_key>] [default=true|false]",
@@ -16,6 +17,7 @@ pub(crate) fn provider_help_text() -> String {
         "examples",
         "/provider create name=deepseek model=deepseek-chat base=https://api.deepseek.com/v1",
         "/provider update provider-123 model=deepseek-reasoner",
+        "/provider verify model=deepseek-chat base=https://api.deepseek.com/v1",
         "/provider default provider-123",
     ]
     .join("\n")

@@ -2,10 +2,7 @@ use crate::app::{App, ProviderCandidate, ProviderPopupMode};
 use crate::bottom_pane::command_popup;
 
 impl App {
-    pub fn set_provider_catalog(
-        &mut self,
-        providers: Vec<(String, String, String, String, bool)>,
-    ) {
+    pub fn set_provider_catalog(&mut self, providers: Vec<(String, String, String, String, bool)>) {
         self.provider_catalog = Some(
             providers
                 .into_iter()

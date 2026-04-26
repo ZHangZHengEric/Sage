@@ -36,6 +36,13 @@ pub struct ConfigInfo {
     pub env_file: String,
 }
 
+pub struct ConfigInitInfo {
+    pub path: String,
+    pub template: String,
+    pub overwritten: bool,
+    pub next_steps: Vec<String>,
+}
+
 pub struct ProviderInfo {
     pub id: String,
     pub name: String,
@@ -43,6 +50,13 @@ pub struct ProviderInfo {
     pub base_url: String,
     pub is_default: bool,
     pub api_key_preview: String,
+}
+
+pub struct ProviderVerifyInfo {
+    pub status: String,
+    pub message: String,
+    pub provider: ProviderInfo,
+    pub sources: Vec<(String, String)>,
 }
 
 #[derive(Debug)]

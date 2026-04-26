@@ -126,7 +126,8 @@ where
     pub fn clear(&mut self) -> io::Result<()> {
         self.backend
             .set_cursor_position(self.viewport_area.as_position())?;
-        self.backend.clear_region(ratatui::backend::ClearType::AfterCursor)?;
+        self.backend
+            .clear_region(ratatui::backend::ClearType::AfterCursor)?;
         self.previous_buffer_mut().reset();
         Ok(())
     }

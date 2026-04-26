@@ -1,11 +1,8 @@
 use crate::slash_command::SlashCommandDef;
 
 use super::{
-    matching_commands, popup_height,
-    model::CommandPopupItem,
-    render::popup_lines,
-    popup_query, props_from_matches,
-    CommandPopupProps,
+    matching_commands, model::CommandPopupItem, popup_height, popup_query, props_from_matches,
+    render::popup_lines, CommandPopupProps,
 };
 
 const COMMANDS: [SlashCommandDef; 5] = [

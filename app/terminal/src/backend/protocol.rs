@@ -1,8 +1,7 @@
 use std::sync::mpsc;
 
-use serde_json::Value;
-
 use crate::app::MessageKind;
+use crate::backend::contract::{parse_stream_event, CliStreamEvent};
 
 use super::BackendEvent;
 
@@ -26,25 +25,15 @@ pub(super) fn flush_complete_lines(
 
 pub(crate) fn parse_backend_line(line: &str) -> Vec<BackendEvent> {
     let mut events = Vec::new();
-    let value = match serde_json::from_str::<Value>(line) {
-        Ok(value) => value,
-        Err(_) => return events,
+    let event = match parse_stream_event(line) {
+        Some(event) => event,
+        None => return events,
     };
 
-    let event_type = value
-        .get("type")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let role = value
-        .get("role")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let content = value
-        .get("content")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    let tool_names = collect_tool_names(&value);
+    let event_type = event.event_type.as_str();
+    let role = event.role.as_str();
+    let tool_names = collect_tool_names(&event);
+    let content = event.content;
 
     if event_type == "cli_stats" {
         events.push(BackendEvent::Finished);
@@ -138,31 +127,23 @@ fn clean_single_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn collect_tool_names(value: &Value) -> Vec<String> {
+fn collect_tool_names(event: &CliStreamEvent) -> Vec<String> {
     let mut names = Vec::new();
-    if let Some(tool_calls) = value.get("tool_calls").and_then(Value::as_array) {
-        for tool_call in tool_calls {
-            if let Some(name) = tool_call
-                .get("function")
-                .and_then(Value::as_object)
-                .and_then(|function| function.get("name"))
-                .and_then(Value::as_str)
-            {
-                names.push(name.to_string());
-            }
+    for tool_call in &event.tool_calls {
+        if !tool_call.function.name.is_empty() {
+            names.push(tool_call.function.name.clone());
         }
     }
 
-    if let Some(metadata_name) = value
-        .get("metadata")
-        .and_then(Value::as_object)
-        .and_then(|metadata| metadata.get("tool_name"))
-        .and_then(Value::as_str)
+    if let Some(metadata_name) = event
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.tool_name.as_ref())
     {
         names.push(metadata_name.to_string());
     }
 
-    if let Some(event_name) = value.get("tool_name").and_then(Value::as_str) {
+    if let Some(event_name) = event.tool_name.as_ref() {
         names.push(event_name.to_string());
     }
 

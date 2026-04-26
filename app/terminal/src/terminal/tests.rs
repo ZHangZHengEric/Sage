@@ -1,8 +1,12 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use serde_json::json;
 
 use crate::app::{ActiveSurfaceKind, App, MessageKind, SubmitAction};
 use crate::terminal_layout::desired_viewport_height;
-use crate::terminal_support::parse_provider_mutation;
+use crate::terminal_support::{
+    format_config_init, format_doctor_info, parse_provider_mutation,
+    parse_provider_mutation_allow_empty,
+};
 
 use super::{handle_key, INLINE_VIEWPORT_IDLE_HEIGHT, INLINE_VIEWPORT_MAX_HEIGHT};
 
@@ -65,6 +69,15 @@ fn parse_provider_mutation_accepts_false_default_values() {
     )
     .expect("valid mutation should parse");
     assert_eq!(mutation.is_default, Some(false));
+}
+
+#[test]
+fn parse_provider_mutation_allow_empty_supports_verify_against_default_env() {
+    let mutation = parse_provider_mutation_allow_empty(&[], false)
+        .expect("empty verify mutation should be allowed");
+    assert!(mutation.name.is_none());
+    assert!(mutation.model.is_none());
+    assert!(mutation.base_url.is_none());
 }
 
 #[test]
@@ -232,5 +245,42 @@ fn ctrl_t_opens_transcript_overlay_when_idle() {
     .expect("ctrl-t should not fail");
 
     assert!(handled);
-    assert_eq!(app.active_surface_kind(), Some(ActiveSurfaceKind::Transcript));
+    assert_eq!(
+        app.active_surface_kind(),
+        Some(ActiveSurfaceKind::Transcript)
+    );
+}
+
+#[test]
+fn format_doctor_info_renders_nested_objects_and_lists() {
+    let info = json!({
+        "status": "ok",
+        "warnings": [],
+        "dependencies": {
+            "dotenv": true
+        }
+    });
+
+    let rendered = format_doctor_info(&info);
+    assert!(rendered.contains("status: ok"));
+    assert!(rendered.contains("warnings:"));
+    assert!(rendered.contains("(none)"));
+    assert!(rendered.contains("dependencies:"));
+    assert!(rendered.contains("dotenv: true"));
+}
+
+#[test]
+fn format_config_init_renders_next_steps() {
+    let rendered = format_config_init(&crate::backend::ConfigInitInfo {
+        path: "/tmp/.sage_env".to_string(),
+        template: "minimal".to_string(),
+        overwritten: true,
+        next_steps: vec!["export SAGE_DB_TYPE=file".to_string()],
+    });
+
+    assert!(rendered.contains("config initialized"));
+    assert!(rendered.contains("path: /tmp/.sage_env"));
+    assert!(rendered.contains("template: minimal"));
+    assert!(rendered.contains("overwritten: true"));
+    assert!(rendered.contains("- export SAGE_DB_TYPE=file"));
 }
