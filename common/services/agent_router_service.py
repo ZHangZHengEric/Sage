@@ -26,12 +26,14 @@ async def build_auto_generate_response(
     agent_description: str,
     available_tools: Optional[list[str]],
     user_id: str,
+    language: str = "en",
     wrap_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     agent_config = await agent_service.auto_generate_agent(
         agent_description=agent_description,
         available_tools=available_tools,
         user_id=user_id,
+        language=language,
     )
     data: Any = agent_config if not wrap_key else {wrap_key: agent_config}
     return {
@@ -45,6 +47,7 @@ async def submit_auto_generate_task(
     agent_description: str,
     available_tools: Optional[list[str]],
     user_id: str,
+    language: str = "en",
 ) -> Dict[str, Any]:
     task = await get_async_task_service().submit(
         task_type="agent_auto_generate",
@@ -54,6 +57,7 @@ async def submit_auto_generate_task(
             agent_description=agent_description,
             available_tools=available_tools,
             user_id=user_id,
+            language=language,
         ),
     )
     return {
@@ -67,11 +71,13 @@ async def build_system_prompt_optimize_response(
     original_prompt: str,
     optimization_goal: Optional[str],
     user_id: str,
+    language: str = "en",
 ) -> Dict[str, Any]:
     result = await agent_service.optimize_system_prompt(
         original_prompt=original_prompt,
         optimization_goal=optimization_goal,
         user_id=user_id,
+        language=language,
     )
     return {
         "message": "系统提示词优化成功",
@@ -84,6 +90,7 @@ async def submit_system_prompt_optimize_task(
     original_prompt: str,
     optimization_goal: Optional[str],
     user_id: str,
+    language: str = "en",
 ) -> Dict[str, Any]:
     task = await get_async_task_service().submit(
         task_type="system_prompt_optimize",
@@ -93,6 +100,7 @@ async def submit_system_prompt_optimize_task(
             original_prompt=original_prompt,
             optimization_goal=optimization_goal,
             user_id=user_id,
+            language=language,
         ),
     )
     return {

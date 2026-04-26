@@ -96,3 +96,4 @@ class UserInputOptimizeRequest(BaseModel):
     session_id: Optional[str] = None
     agent_id: Optional[str] = None
     user_id: Optional[str] = None
+    language: Optional[str] = None

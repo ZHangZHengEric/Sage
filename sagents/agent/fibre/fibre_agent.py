@@ -25,7 +25,7 @@ class FibreAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", enable_obs: bool = True):
         if not system_prefix:
             try:
-                system_prefix = PromptManager().get_prompt("fibre_agent_description", agent="FibreAgent", language="zh")
+                system_prefix = PromptManager().get_prompt("fibre_agent_description", agent="FibreAgent", language="en")
             except Exception as e:
                 logger.warning(f"Failed to load default system prefix: {e}")
         

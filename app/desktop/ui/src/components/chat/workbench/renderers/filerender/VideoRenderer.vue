@@ -52,6 +52,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, Film, VideoOff, RefreshCw } from 'lucide-vue-next'
+import request from '@/utils/request.js'
 
 const props = defineProps({
   filePath: { type: String, required: true },
@@ -110,7 +111,9 @@ const buildVideoUrl = async (path) => {
   const clean = path.replace(/^file:\/\//i, '')
   const parsed = parseAgentPath(clean)
   if (parsed) {
-    const baseURL = import.meta.env.VITE_BACKEND_API_PREFIX || ''
+    // Use the dynamically-resolved baseURL (updated by App.vue after sage-desktop-ready),
+    // falling back to the build-time env prefix only as a last resort.
+    const baseURL = request.baseURL || import.meta.env.VITE_BACKEND_API_PREFIX || ''
     return `${baseURL}/api/agent/${parsed.agentId}/file_workspace/stream?file_path=${encodeURIComponent(parsed.relativePath)}`
   }
 

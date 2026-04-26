@@ -57,13 +57,14 @@ class ToolSuggestionAgent(AgentBase):
         message_manager = session_context.message_manager
 
         logger.info(f"ToolSuggestionAgent: 开始为会话 {session_id} 分析工具推荐")
+        language = session_context.get_language()
 
         history_messages = message_manager.extract_all_context_messages(recent_turns=1)
         # 根据 active_budget 压缩消息
         budget_info = message_manager.context_budget_manager.budget_info
         if budget_info:
             history_messages = MessageManager.compress_messages(history_messages, max(budget_info.get('active_budget', 8000),2000))
-        available_tools = tool_manager.list_tools_simplified()
+        available_tools = tool_manager.list_tools_simplified(lang=language)
 
             
         
@@ -107,7 +108,7 @@ class ToolSuggestionAgent(AgentBase):
                     session_context.tool_manager._available_tools.add("sys_delegate_task")
                     session_context.tool_manager._available_tools.add("sys_finish_task")
 
-            available_tools = session_context.tool_manager.list_tools_simplified()
+            available_tools = session_context.tool_manager.list_tools_simplified(lang=session_context.get_language())
             # 准备工具列表字符串，包含ID和名称，以及描述的前100个字符
             available_tools_str = "\n".join([
                 f"{i+1}. {tool['name']} - {tool['description'][:50]+'...' if len(tool['description']) > 50 else tool['description']}"

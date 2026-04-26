@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 
 from .logger import logger
+from sagents.utils.prompt_manager import PromptManager
 from sagents.llm.capabilities import create_chat_completion_with_fallback
 
 
@@ -71,19 +72,19 @@ def _format_name_list(label: str, values: Iterable[str] | None, max_count: int =
 
 def _build_context_summary(context: Optional[Dict[str, Any]]) -> str:
     if not context or not isinstance(context, dict):
-        return "当前没有额外上下文。"
+        return "There is no additional context."
 
     parts: List[str] = []
     workspace = context.get("workspace") or context.get("workspace_name")
     if workspace:
-        parts.append(f"- 当前工作空间：{workspace}")
+        parts.append(f"- Current workspace: {workspace}")
 
     current_file = context.get("current_file") or context.get("file_path")
     if current_file:
-        parts.append(f"- 当前文件：{current_file}")
+        parts.append(f"- Current file: {current_file}")
 
     if not parts:
-        return "当前没有额外上下文。"
+        return "There is no additional context."
     return "\n".join(parts)
 
 
@@ -91,21 +92,11 @@ def _build_system_context_message(language: str) -> str:
     now = datetime.now().astimezone()
     timezone_name = now.tzname() or "local"
     current_time = now.strftime("%Y-%m-%d %H:%M:%S")
-    if str(language).lower().startswith("en"):
-        return (
-            "You are generating deterministic prompt suggestions for the current agent.\n"
-            "Use the current runtime context as background facts when helpful.\n"
-            f"Current local time: {current_time}\n"
-            f"Current timezone: {timezone_name}\n"
-            "Do not mention these system facts explicitly unless they materially help produce better prompts."
-        )
-    return (
-        "你正在为当前 Agent 生成可直接使用的能力模板。\n"
-        "如有必要，可以把当前运行环境基础信息当作背景事实使用。\n"
-        f"当前本地时间：{current_time}\n"
-        f"当前时区：{timezone_name}\n"
-        "除非确实有助于生成更好的模板，否则不要在结果中直接复述这些系统信息。"
-    )
+    return PromptManager().get_prompt(
+        "auto_gen_agent_system_context_prompt",
+        agent="common_util",
+        language=language,
+    ).format(current_time=current_time, timezone_name=timezone_name)
 
 
 async def generate_agent_abilities_from_config(
@@ -113,7 +104,7 @@ async def generate_agent_abilities_from_config(
     context: Optional[Dict[str, Any]],
     client: Any,
     model: str,
-    language: str = "zh",
+    language: str = "en",
     skills: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, str]]:
     """基于 Agent 配置调用 LLM 生成能力卡片列表.
@@ -189,64 +180,19 @@ async def generate_agent_abilities_from_config(
 
     context_summary = _build_context_summary(context)
 
-    user_prompt = f"""
-你是一个根据 Agent 描述和技能列表，生成「可直接运行、无需用户再提供任何输入」的问题模板的助手。
-
-核心原则：每条 promptText 必须是「确定性的、可直接执行」的完整指令。用户复制后发送即可，Agent 能立即根据该指令完成任务，无需用户再上传文件、补充链接、填写占位符或说明「稍后给你」。
-
-必须遵守的约束：
-1) 可直接运行：禁止出现需要用户「提供文件/链接/数据」的表述。例如不可写「我给你一个 Excel 文件，你整理一下」「你帮我分析这个网站」——用户不会真的提供文件或链接，因此这类问题不可用。应改为：在提问中写明具体任务与可推断的内容（如「根据 2024 年 Q1 销售数据格式，生成一个示例 Excel 表头并说明各列含义」），或明确指定可公开访问的对象（如「分析 https://example.com 首页的 SEO 问题」）。
-2) 明确指向性：所有引用必须具体化。
-   - 若涉及「做一份 PPT」：必须写明具体主题，例如「做一份关于新能源汽车市场趋势的 5 页 PPT 大纲」。
-   - 若涉及「某网站」：必须写出具体网站名称或 URL，例如「爬取豆瓣电影 Top250 前 10 条并整理成表格」。
-   - 若涉及「某项目/某代码」：要么写成「用 Python 写一个冒泡排序」这类自包含任务，要么指定公开可用的仓库/示例。
-3) 依据技能具体描述：严格根据下方「可用技能」及 Agent 简介中的能力描述来设计问题，使每条问题对应技能的真实用法，不虚构能力；这样模型才能实际执行。
-4) 禁止在提问中直接提及具体技能或工作流的内部名称/ID（例如 "deep-research-agent"、"my-workflow-1" 等），只描述用户要完成的任务本身，不要让用户显式指定某个 skill 或 workflow。
-5) 禁止占位符：promptText 中不得出现「请在这里粘贴」「在下方补充」「某个/某份」等需用户补充的内容；不要用「XXX」代替具体名称，必须写出示例性的具体名称或可执行的描述。
-
-输出要求：
-- 仅输出 JSON 字符串，不能包含任何额外说明。
-- JSON 结构：
-  {{
-    "items": [
-      {{
-        "id": "kebab-case-id",
-        "title": "短标题",
-        "description": "1-2 句说明",
-        "promptText": "用户可直接发送的完整、可执行的提问"
-      }}
-    ]
-  }}
-
-字段规范：
-- id：全部小写、短横线分隔，例如 "code-review"。
-- title：简洁概括场景或技能侧重点。
-- description：说明适用场景/解决问题，1-2 句话。
-- promptText：完整、确定性的自然语言指令，复制即用，不依赖用户再提供文件、链接或任何额外输入；主题、网站、示例等均需具体化。
-
-内容约束：
-- 严格依据给定的描述与技能信息，不要虚构技能。
-- 覆盖不同技能/场景，避免同义重复；总数最多 4 条。
-- 随机生成：每次生成时随机选择要体现的能力与场景，不要固定套路；输出的 4 条模板在主题、侧重点上应有随机性和多样性。
-- 忽略输入顺序：下方「可用工具」「可用技能」「可用工作流」等列表的先后顺序仅供参考，不要优先选用排在前面或后面的项；应把列表中所有项视为平等，随机挑选不同项来设计模板，使每次生成的结果在覆盖面上更随机。
-
-语言：生成语言为 "{language}"。
-
-仅输出 JSON，不要在 JSON 外输出任何内容。
-
-当前 Agent 配置：
-- Agent 名称：{agent_name}
-- Agent 简介：{agent_description}
-
-{tools_line}
-{skills_line}
-{workflows_line}
-
-可选上下文（如有）：
-{context_summary}
-
-请基于以上信息随机选取能力与场景，生成最多 4 条「可直接运行、确定性、有明确指向性」的提问模板，每条 promptText 必须具体、完整、无需用户再补充任何内容。不要按上述配置中列举顺序偏好选材，应随机覆盖。
-""".strip()
+    user_prompt = PromptManager().get_prompt(
+        "agent_abilities_user_prompt",
+        agent="common_util",
+        language=language,
+    ).format(
+        language=language,
+        agent_name=agent_name,
+        agent_description=agent_description,
+        tools_line=tools_line,
+        skills_line=skills_line,
+        workflows_line=workflows_line,
+        context_summary=context_summary,
+    )
 
     try:
         response = await create_chat_completion_with_fallback(

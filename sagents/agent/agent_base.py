@@ -657,7 +657,6 @@ class AgentBase(ABC):
                         'workspace_files_label',
                         agent='common',
                         language=language,
-                        default=f"当前工作空间 {workspace_name} 的文件情况（最大深度2层）：\n"
                     )
                     volatile_buf += workspace_files.format(workspace=workspace_name)
 
@@ -672,7 +671,6 @@ class AgentBase(ABC):
                                 'no_files_message',
                                 agent='common',
                                 language=language,
-                                default="当前工作空间下没有文件。\n"
                             )
                             volatile_buf += no_files
                         else:
@@ -683,7 +681,6 @@ class AgentBase(ABC):
                             'no_files_message',
                             agent='common',
                             language=language,
-                            default="当前工作空间下没有文件。\n"
                         )
                         volatile_buf += no_files
 
@@ -696,7 +693,6 @@ class AgentBase(ABC):
                         'external_paths_intro',
                         agent='common',
                         language=language,
-                        default="您还可以访问以下外部目录（访问深度不受限，此处仅展示前2层文件）：\n"
                     )
                     volatile_buf += ext_paths_intro
                     for ext_path in external_paths:

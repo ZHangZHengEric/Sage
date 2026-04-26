@@ -33,6 +33,25 @@ from ..user_context import get_desktop_user_id
 # 创建路由器
 chat_router = APIRouter()
 
+
+def _resolve_request_language(http_request: Request, language: str | None = None, default: str = "zh") -> str:
+    candidate = (language or "").strip()
+    if not candidate:
+        headers = http_request.headers
+        candidate = (
+            headers.get("x-accept-language")
+            or headers.get("accept-language")
+            or ""
+        ).strip()
+    lowered = candidate.lower()
+    if lowered.startswith("pt"):
+        return "pt"
+    if lowered.startswith("en"):
+        return "en"
+    if lowered.startswith("zh") or lowered.startswith("cn"):
+        return "zh"
+    return default
+
 class RerunStreamRequest(BaseModel):
     agent_id: str | None = None
     agent_mode: str | None = None
@@ -185,12 +204,14 @@ async def _start_web_stream_session(
 async def optimize_chat_input(request: UserInputOptimizeRequest, http_request: Request):
     if not request.user_id:
         request.user_id = get_desktop_user_id(http_request)
+    language = _resolve_request_language(http_request, request.language, default="zh")
     result = await chat_service.optimize_user_input(
         current_input=request.current_input,
         history_messages=[message.model_dump() for message in request.history_messages],
         session_id=request.session_id or "",
         agent_id=request.agent_id or "",
         user_id=request.user_id or "",
+        language=language,
     )
 
     return {
@@ -204,6 +225,7 @@ async def optimize_chat_input(request: UserInputOptimizeRequest, http_request: R
 async def optimize_chat_input_stream(request: UserInputOptimizeRequest, http_request: Request):
     if not request.user_id:
         request.user_id = get_desktop_user_id(http_request)
+    language = _resolve_request_language(http_request, request.language, default="zh")
     async def event_generator():
         async for chunk in chat_service.optimize_user_input_stream(
             current_input=request.current_input,
@@ -211,6 +233,7 @@ async def optimize_chat_input_stream(request: UserInputOptimizeRequest, http_req
             session_id=request.session_id or "",
             agent_id=request.agent_id or "",
             user_id=request.user_id or "",
+            language=language,
         ):
             yield json.dumps(chunk, ensure_ascii=False) + "\n"
 
