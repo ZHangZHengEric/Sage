@@ -337,14 +337,21 @@ const getGroupDurationMs = (messages) => {
   return Math.max(0, endTimestamp - startTimestamp)
 }
 
-const buildToolGroupItem = (turnId, messages, indices, options = {}) => ({
-  id: `tool-group:${turnId}:${indices[0] ?? 0}`,
-  type: 'tool_group',
-  messages,
-  messageIndices: indices,
-  actionCode: summarizeActionCode(messages),
-  durationMs: getExecutionGroupDurationMs(messages, options.previousMessage || null)
-})
+const buildToolGroupItem = (turnId, messages, indices, options = {}) => {
+  const previousMessage = options.previousMessage || null
+  const startTimestampMs =
+    toTimestampMs(previousMessage?.timestamp) ??
+    toTimestampMs(messages[0]?.timestamp)
+  return {
+    id: `tool-group:${turnId}:${indices[0] ?? 0}`,
+    type: 'tool_group',
+    messages,
+    messageIndices: indices,
+    actionCode: summarizeActionCode(messages),
+    durationMs: getExecutionGroupDurationMs(messages, previousMessage),
+    startTimestampMs,
+  }
+}
 
 const buildTurnSummaryItem = (turnId, messages, indices) => ({
   id: `turn-summary:${turnId}`,

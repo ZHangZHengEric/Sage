@@ -1,3 +1,5 @@
+2026-04-26 12:20 修复工具执行时间不实时更新问题：chatDisplayItems.js 的 buildToolGroupItem 新增 startTimestampMs 字段；DeliveryCollapsedGroup.vue 检测最后一条消息是否为未完成的 tool_call，若是则启动 setInterval 每秒更新计时器，工具完成后自动切换回静态 durationMs 展示，桌面端和 Web 端同步。
+
 2026-04-26 11:58 工作空间面板新增手动刷新按钮：ResizablePanel 新增 #actions slot，WorkspacePanel 在标题栏注入刷新图标，加载中自动旋转，桌面端和 Web 端同步。
 
 2026-04-26 11:26 修复 turn_status 调用后仍触发 TaskSummaryAgent(final_answer) 的问题：need_summary 条件新增识别 turn_status 协议工具结果，避免 need_user_input/blocked/task_done 后多余生成 final_answer。
