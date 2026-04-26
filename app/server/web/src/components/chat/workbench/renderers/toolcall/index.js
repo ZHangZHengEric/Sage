@@ -12,3 +12,4 @@ export { default as CompressHistoryToolRenderer } from './CompressHistoryToolRen
 export { default as GrepToolRenderer } from './GrepToolRenderer.vue'
 export { default as GlobToolRenderer } from './GlobToolRenderer.vue'
 export { default as ListDirToolRenderer } from './ListDirToolRenderer.vue'
+export { default as ImageUnderstandingToolRenderer } from './ImageUnderstandingToolRenderer.vue'

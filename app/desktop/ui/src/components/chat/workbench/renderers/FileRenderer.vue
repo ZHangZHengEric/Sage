@@ -728,7 +728,7 @@ const loadContent = async () => {
     drawioOpenUrl.value = ''
     drawioXmlContent.value = ''
     
-    if (['pdf', 'image', 'audio'].includes(fileType.value) && !isPotentialDrawioExtension(fileExtension.value)) {
+    if (['pdf', 'image', 'video', 'audio'].includes(fileType.value) && !isPotentialDrawioExtension(fileExtension.value)) {
       loading.value = false
       return
     }

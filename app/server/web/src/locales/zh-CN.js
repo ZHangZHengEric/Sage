@@ -762,7 +762,7 @@ export default {
   'tools.fetchWebpage': '抓取网页',
   'tools.webFetcher': '网页抓取',
   'tools.questionnaire': '信息收集',
-  'tools.finishTurn': '结束本轮',
+  'tools.turnStatus': '本轮状态',
   'tools.readLints': '代码 Lint',
   'tools.awaitShell': '等待命令',
   'tools.killShell': '终止命令',
@@ -1268,6 +1268,7 @@ export default {
 
   // 工作空间
   'workspace.title': '工作空间',
+  'workspace.refresh': '刷新',
   'workspace.noFiles': '暂无文件',
   'workspace.dropHere': '释放以上传文件或文件夹',
   'workspace.dragHint': '拖拽文件或文件夹到此处',
@@ -1422,6 +1423,8 @@ export default {
   'workbench.tool.searchingImages': '搜索图片中...',
   'workbench.tool.noSearchResults': '暂无搜索结果',
   'workbench.tool.noImageResults': '暂无图片结果',
+  'workbench.tool.analyzing': '正在分析图片...',
+  'workbench.tool.analysisResult': '分析结果',
   'workbench.tool.searchMemory': '搜索记忆',
   'workbench.tool.memorySearch': '记忆搜索',
   'workbench.tool.searchingMemory': '搜索记忆中...',

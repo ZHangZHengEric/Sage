@@ -76,6 +76,8 @@ class MessageType(Enum):
     TOKEN_USAGE = "token_usage"
     # 空数据
     EMPTY = "empty"
+    # 循环熔断：连续相同错误导致自动暂停，前端可用特殊样式展示
+    LOOP_BREAK = "loop_break"
 
 
 @dataclass

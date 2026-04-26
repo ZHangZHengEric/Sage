@@ -16,7 +16,7 @@ __all__ = [
     "ToDoTool",
     "QuestionnaireTool",
     "LintTool",
-    "FinishTurnTool",
+    "TurnStatusTool",
     "CodebaseTool",
 ]
 
@@ -29,7 +29,7 @@ _EXPORTS = {
     "ToDoTool": ".todo_tool",
     "QuestionnaireTool": ".questionnaire_tool",
     "LintTool": ".lint_tool",
-    "FinishTurnTool": ".finish_turn_tool",
+    "TurnStatusTool": ".turn_status_tool",
     "CodebaseTool": ".codebase_tool",
 }
 

@@ -225,7 +225,15 @@
         />
       </template>
 
-      <!-- 18. 其他工具 - 统一显示 -->
+      <!-- 18. analyze_image - 图片理解 -->
+      <template v-else-if="isAnalyzeImage">
+        <ImageUnderstandingToolRenderer
+          :tool-args="toolArgs"
+          :tool-result="toolResult"
+        />
+      </template>
+
+      <!-- 19. 其他工具 - 统一显示 -->
       <template v-else>
         <div class="p-4 h-full overflow-auto">
           <!-- 参数 -->
@@ -313,6 +321,7 @@ import CompressHistoryToolRenderer from './toolcall/CompressHistoryToolRenderer.
 import GrepToolRenderer from './toolcall/GrepToolRenderer.vue'
 import GlobToolRenderer from './toolcall/GlobToolRenderer.vue'
 import ListDirToolRenderer from './toolcall/ListDirToolRenderer.vue'
+import ImageUnderstandingToolRenderer from './toolcall/ImageUnderstandingToolRenderer.vue'
 import { skillAPI } from '@/api/skill.js'
 import { agentAPI } from '@/api/agent.js'
 import { useLanguage } from '@/utils/i18n'
@@ -444,6 +453,7 @@ const isCompressHistory = computed(() => toolName.value === 'compress_conversati
 const isGrep = computed(() => toolName.value === 'grep')
 const isGlob = computed(() => toolName.value === 'glob')
 const isListDir = computed(() => toolName.value === 'list_dir')
+const isAnalyzeImage = computed(() => toolName.value === 'analyze_image')
 
 // 显示名称映射
 const displayToolName = computed(() => {

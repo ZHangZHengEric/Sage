@@ -54,6 +54,21 @@ class TaskAPI {
   }
 
   /**
+   * 获取工作空间文件的流式 URL（用于视频等大文件，直接供浏览器流式播放）
+   * 桌面端后端无需认证，可直接使用绝对 URL
+   * @param {string} agentId - Agent ID
+   * @param {string} filePath - 文件路径
+   * @returns {string}
+   */
+  getFileStreamUrl(agentId, filePath) {
+    if (!agentId || !filePath) return ''
+    if (filePath.startsWith('http://') || filePath.startsWith('https://')) return filePath
+    let apiPrefix = this.request.baseURL || ''
+    if (apiPrefix.endsWith('/')) apiPrefix = apiPrefix.slice(0, -1)
+    return `${apiPrefix}/api/agent/${agentId}/file_workspace/download?file_path=${encodeURIComponent(filePath)}`
+  }
+
+  /**
    * 下载文件
    * @param {string} agentId - Agent ID
    * @param {string} filePath - 文件路径

@@ -91,6 +91,9 @@
       <!-- 图片预览 -->
       <ImageRenderer v-else-if="fileType === 'image'" :file-url="blobUrl" :file-name="displayFileName" />
 
+      <!-- 视频预览 -->
+      <VideoRenderer v-else-if="fileType === 'video'" :file-url="blobUrl || filePath" :file-name="displayFileName" />
+
       <!-- HTML 预览 -->
       <HtmlRenderer v-else-if="fileType === 'html'" :file-path="filePath" :content="fileContent" />
 
@@ -198,6 +201,7 @@ import {
 } from '@/utils/fileIcons.js'
 
 const HtmlRenderer = defineAsyncComponent(() => import('./filerender/HtmlRenderer.vue'))
+const VideoRenderer = defineAsyncComponent(() => import('./filerender/VideoRenderer.vue'))
 const MarkdownRenderer = defineAsyncComponent(() => import('./filerender/MarkdownRenderer.vue'))
 const CodeRenderer = defineAsyncComponent(() => import('./filerender/CodeRenderer.vue'))
 const DrawioEmbedRenderer = defineAsyncComponent(() => import('./filerender/DrawioEmbedRenderer.vue'))
@@ -486,8 +490,8 @@ const loadContent = async () => {
     }
     
     // 根据文件类型处理内容
-    if (['pdf', 'image'].includes(fileType.value)) {
-      // 图片和 PDF 直接使用 blobUrl，不需要额外处理内容
+    if (['pdf', 'image', 'video', 'audio'].includes(fileType.value)) {
+      // 这些类型直接使用 blobUrl 或原始 URL，不需要读取文本内容
       loading.value = false
       return
     }

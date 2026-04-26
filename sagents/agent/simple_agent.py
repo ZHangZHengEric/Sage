@@ -173,9 +173,11 @@ class SimpleAgent(AgentBase):
 
         # 根据建议过滤工具
         # 强制包含 todo / 终止工具 / 记忆工具，如果它们存在于可用工具中
-        always_include = ['todo_write', 'search_memory']
-        if os.environ.get("SAGE_FINISH_TURN_TOOL_ENABLED", "true").lower() != "false":
-            always_include.append('finish_turn')
+        # turn_status 始终包含：即使协议被禁用，模型仍可能因提示词而调用它；
+        # 若不包含则调用会被拒绝并触发错误→循环，导致相同文本重复出现。
+        # SAGE_AGENT_STATUS_PROTOCOL_ENABLED=false 只控制"强制 turn_status_only 轮"的触发，
+        # 而不应阻止模型主动调用该工具来终止本轮。
+        always_include = ['todo_write', 'search_memory', 'turn_status']
         
         tools_suggest_json = [
             tool for tool in tools_json
@@ -280,13 +282,14 @@ class SimpleAgent(AgentBase):
         return task_interrupted
 
     def _has_recent_assistant_summary(self, messages_input: List[MessageChunk]) -> bool:
-        """判断 finish_turn 之前是否存在「干净的」assistant 自然语言总结。
+        """判断 turn_status 之前是否存在用户可见的 assistant 收口文本。
 
-        finish_turn 的契约要求模型先输出总结、再调用工具结束本轮。
+        turn_status 的契约要求模型先输出总结、提问、确认请求或阻塞说明，
+        再调用工具结束本轮。
 
         合法形态：
         - 上一条 LLM 输出是纯文本（``content`` 非空且无 ``tool_calls``），随后这一次
-          LLM 输出只调用 finish_turn —— ``messages_input`` 末尾就是该 assistant 文本。
+          LLM 输出只调用 turn_status —— ``messages_input`` 末尾就是该 assistant 文本。
 
         非法形态（之前会误判通过）：
         - 末尾是 ``tool`` 消息（说明刚跑完工具，模型还没机会写总结）；
@@ -294,6 +297,7 @@ class SimpleAgent(AgentBase):
           的过渡话，不是总结）。
 
         判定规则：从尾部向前扫，
+        - 命中 ``system``/控制消息 → 跳过（协议提示不能作为合法收口文本）；
         - 命中 ``tool`` 消息 → False（还有未消化的工具产出）；
         - 命中 assistant：有 ``tool_calls`` → False；content 非空 → True；
           content 为空且无 tool_calls → 继续向前；
@@ -337,6 +341,116 @@ class SimpleAgent(AgentBase):
             # assistant 空消息：继续向前扫描
 
         return False
+
+    def _turn_status_enabled(self) -> bool:
+        return os.environ.get("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "true").lower() != "false"
+
+    def _tools_include(self, tools_json: List[Dict[str, Any]], tool_name: str) -> bool:
+        for tool in tools_json or []:
+            if ((tool.get("function") or {}).get("name") or "") == tool_name:
+                return True
+        return False
+
+    def _turn_status_tool_names(self) -> set[str]:
+        return {"turn_status"}
+
+    def _turn_status_tools_only(self, tools_json: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        status_tools = [
+            tool for tool in tools_json or []
+            if ((tool.get("function") or {}).get("name") or "") == "turn_status"
+        ]
+        return status_tools
+
+    def _turn_status_from_tool_call(self, tool_call: Dict[str, Any]) -> str:
+        raw_arguments = ((tool_call or {}).get("function") or {}).get("arguments") or ""
+        try:
+            parsed = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
+        except Exception:
+            return ""
+        if not isinstance(parsed, dict):
+            return ""
+        return str(parsed.get("status") or "")
+
+    def _allowed_tool_names(self, tools_json: List[Dict[str, Any]]) -> set[str]:
+        return {
+            ((tool.get("function") or {}).get("name") or "")
+            for tool in tools_json or []
+            if ((tool.get("function") or {}).get("name") or "")
+        }
+
+    def _is_turn_status_only_request(self, tools_json: List[Dict[str, Any]], force_tool_choice_required: bool) -> bool:
+        return force_tool_choice_required and self._allowed_tool_names(tools_json) == {"turn_status"}
+
+    def _coerce_invalid_status_only_tool_calls(
+        self,
+        tool_calls: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """状态补调用阶段，模型若试图调用行动工具，则转成 continue_work 状态。
+
+        一些 OpenAI-compatible 后端会在 `tools` 仅包含 turn_status 且
+        `tool_choice=required` 时仍返回不在 tools 列表里的旧工具名。这里不执行
+        违规工具，而是把“想继续行动”的意图表达为 turn_status(status=continue_work)。
+        """
+        original_id = next(iter(tool_calls.keys()), None) or f"turn_status_{uuid.uuid4().hex[:8]}"
+        return {
+            original_id: {
+                "id": original_id,
+                "type": "function",
+                "function": {
+                    "name": "turn_status",
+                    "arguments": json.dumps(
+                        {
+                            "status": "continue_work",
+                            "note": "model attempted an action tool during status-only protocol",
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            }
+        }
+
+    def _should_request_turn_status_after_text_response(
+        self,
+        chunks: List[MessageChunk],
+        tools_json: List[Dict[str, Any]],
+    ) -> bool:
+        """纯文本响应之后，下一次请求只允许补 turn_status。
+
+        这里刻意只看消息结构，不看自然语言内容：
+        - 有 assistant 可见文本；
+        - 没有任何 tool_calls；
+        - turn_status 当前可用。
+
+        这更接近 Codex / Claude Code 的收口方式：assistant 已经给出自然语言
+        交付时，宿主层要求模型补协议性的 turn_status 标记，
+        不再开放行动工具，避免模型继续改 todo 或重复执行。
+        """
+        if not self._turn_status_enabled() or not any(self._tools_include(tools_json, name) for name in self._turn_status_tool_names()):
+            return False
+
+        has_visible_assistant_text = False
+        has_tool_calls = False
+
+        for chunk in chunks or []:
+            if chunk.tool_calls:
+                has_tool_calls = True
+                break
+            if chunk.role != MessageRole.ASSISTANT.value:
+                continue
+            if chunk.matches_message_types([MessageType.REASONING_CONTENT.value, MessageType.EMPTY.value]):
+                continue
+            content = chunk.content
+            if isinstance(content, str) and content.strip():
+                has_visible_assistant_text = True
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict):
+                        text = part.get("text") or part.get("content")
+                        if isinstance(text, str) and text.strip():
+                            has_visible_assistant_text = True
+                            break
+
+        return has_visible_assistant_text and not has_tool_calls
 
     async def _must_continue_by_rules(self, messages_input: List[MessageChunk]) -> bool:
         """通过确定性规则判断是否必须继续执行
@@ -490,6 +604,10 @@ class SimpleAgent(AgentBase):
         all_new_response_chunks: List[MessageChunk] = []
         loop_count = 0
         repeat_pattern_hits = 0
+        # 连续错误轮次快速熔断：LLM 因温度导致每轮措辞不同，哈希签名无法命中，
+        # 但错误内容本身是固定的，可以快速检测。
+        consecutive_error_key: Optional[str] = None
+        consecutive_error_hits = 0
         # 从session context 获取 max_loop_count；缺失则直接报错，避免静默兜底
         max_loop_count = session_context.agent_config.get('max_loop_count')
         if max_loop_count is None:
@@ -500,6 +618,7 @@ class SimpleAgent(AgentBase):
         message_manager = session_context.message_manager
         recent_signatures: List[str] = message_manager.get_recent_loop_signatures()
         logger.debug(f"SimpleAgent: 加载历史签名 {len(recent_signatures)} 个")
+        turn_status_only_next = False
         while True:
             if self._should_abort_due_to_session(session_context):
                 break
@@ -532,13 +651,20 @@ class SimpleAgent(AgentBase):
                 )
                 messages_input = list(new_system_messages) + list(messages_input[head:])
 
+            current_turn_status_only = turn_status_only_next
+            turn_status_only_next = False
+            if current_turn_status_only:
+                logger.info("SimpleAgent: 上一轮纯文本无工具调用，本轮仅开放 turn_status 并启用 tool_choice=required")
+
             # 调用LLM
             should_break = False
+            current_tools_json = self._turn_status_tools_only(tools_json) if current_turn_status_only else tools_json
             async for chunks, is_complete in self._call_llm_and_process_response(
                 messages_input=messages_input,
-                tools_json=tools_json,
+                tools_json=current_tools_json,
                 tool_manager=tool_manager,
-                session_id=session_id
+                session_id=session_id,
+                force_tool_choice_required=current_turn_status_only,
             ):
                 non_empty_chunks = [c for c in chunks if (c.message_type != MessageType.EMPTY.value)]
                 if len(non_empty_chunks) > 0:
@@ -551,10 +677,66 @@ class SimpleAgent(AgentBase):
             if should_break:
                 break
 
+            if self._should_request_turn_status_after_text_response(all_new_response_chunks, tools_json):
+                if current_turn_status_only:
+                    logger.warning("SimpleAgent: turn_status-only 阶段模型仍未调用 turn_status，暂停避免循环")
+                    yield [MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        content=(
+                            "模型未按协议调用 turn_status 工具来报告本轮状态，已暂停以避免重复循环。"
+                            "请重试或切换支持 tool_choice=required 的模型配置。"
+                        ),
+                        type=MessageType.ERROR.value,
+                        agent_name=self.agent_name,
+                    )]
+                    break
+                turn_status_only_next = True
+
             # 检查是否应该停止
             if self._should_stop_execution(all_new_response_chunks):
                 logger.info("SimpleAgent: 检测到停止条件，终止执行")
                 break
+
+            # 快速错误熔断：LLM 温度导致签名哈希不同，但错误内容固定可直接比对。
+            # 根据错误类型设置不同的容忍阈值：
+            #   TOOL_REJECTED（工具调用被拒绝）→ 1次即熔断，根本无法执行无需重试
+            #   其他错误（超时/参数错误/未知）→ 连续2次熔断，给一次重试机会
+            error_chunks_this_turn = [
+                c for c in all_new_response_chunks
+                if c.message_type == MessageType.ERROR.value and (c.content or "").strip()
+            ]
+            if error_chunks_this_turn:
+                error_key = "|".join(
+                    (c.content or "").strip()[:120] for c in error_chunks_this_turn
+                )
+                # 识别错误类别
+                error_category = self._classify_error_category(error_chunks_this_turn)
+                fuse_threshold = 2
+
+                if error_key == consecutive_error_key:
+                    consecutive_error_hits += 1
+                else:
+                    consecutive_error_key = error_key
+                    consecutive_error_hits = 1
+
+                if consecutive_error_hits >= fuse_threshold:
+                    logger.warning(
+                        f"SimpleAgent: [{error_category}] 连续 {consecutive_error_hits} 轮出现相同错误，熔断停止。"
+                        f"错误摘要: {error_key[:80]}"
+                    )
+                    yield [MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        content=(
+                            f"检测到连续相同错误（类型：{error_category}，已出现 {consecutive_error_hits} 次），"
+                            "已自动暂停以避免无效循环。请检查工具配置或提供新的指令。"
+                        ),
+                        type=MessageType.LOOP_BREAK.value,
+                        agent_name=self.agent_name,
+                    )]
+                    break
+            else:
+                consecutive_error_key = None
+                consecutive_error_hits = 0
 
             # 检测循环模式：支持文本与工具调用/结果混合重复
             loop_signature = self._build_loop_signature(all_new_response_chunks)
@@ -612,12 +794,11 @@ class SimpleAgent(AgentBase):
             if self._should_abort_due_to_session(session_context):
                 break
             # 检查任务是否完成
-            # finish_turn 启用时由模型主动调用 finish_turn 工具来结束本轮（见上方
-            # accept_finish_turn_ids 处理分支），不再走老的 LLM 任务完成判定，
-            # 避免重复消耗 token 且与 finish_turn 决策互相冲突。
-            # 仅当 finish_turn 被显式禁用 (SAGE_FINISH_TURN_TOOL_ENABLED=false) 时回退到旧路径。
-            finish_turn_enabled = os.environ.get("SAGE_FINISH_TURN_TOOL_ENABLED", "true").lower() != "false"
-            if not finish_turn_enabled:
+            # 状态工具启用时由模型主动调用 turn_status 工具报告本轮状态，
+            # 不再走老的 LLM 任务完成判定，避免重复消耗 token 且与状态协议互相冲突。
+            # 仅当状态协议被显式禁用 (SAGE_AGENT_STATUS_PROTOCOL_ENABLED=false) 时回退到旧路径。
+            turn_status_enabled = os.environ.get("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "true").lower() != "false"
+            if not turn_status_enabled:
                 if await self._is_task_complete(messages_input, session_id, tool_manager, session_context):
                     logger.info("SimpleAgent: 任务完成，终止执行")
                     break
@@ -627,7 +808,8 @@ class SimpleAgent(AgentBase):
                                              messages_input: List[MessageChunk],
                                              tools_json: List[Dict[str, Any]],
                                              tool_manager: Optional[ToolManager],
-                                             session_id: str
+                                             session_id: str,
+                                             force_tool_choice_required: bool = False,
                                              ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
 
         # 准备消息：提取可用消息 -> 检查压缩 -> 执行压缩
@@ -654,6 +836,8 @@ class SimpleAgent(AgentBase):
 
         if len(tools_json) > 0:
             model_config_override['tools'] = tools_json
+            if force_tool_choice_required:
+                model_config_override['tool_choice'] = 'required'
 
         response = self._call_llm_streaming(
             messages=cast(List[Union[MessageChunk, Dict[str, Any]]], clean_message_input),
@@ -746,27 +930,61 @@ class SimpleAgent(AgentBase):
 
         # 处理工具调用
         if len(tool_calls) > 0:
-            # 识别是否包含结束本轮的工具调用
+            allowed_tool_names = self._allowed_tool_names(tools_json)
+            invalid_tool_names = {
+                (tool_call.get("function") or {}).get("name") or ""
+                for tool_call in tool_calls.values()
+                if ((tool_call.get("function") or {}).get("name") or "") not in allowed_tool_names
+            }
+            if invalid_tool_names:
+                if self._is_turn_status_only_request(tools_json, force_tool_choice_required):
+                    logger.warning(
+                        f"SimpleAgent: turn_status-only 阶段模型返回了未提供的工具 {sorted(invalid_tool_names)}，"
+                        "已改写为 turn_status(status=continue_work)"
+                    )
+                    tool_calls = self._coerce_invalid_status_only_tool_calls(tool_calls)
+                else:
+                    logger.warning(
+                        f"SimpleAgent: 模型返回未提供的工具 {sorted(invalid_tool_names)}，拒绝执行"
+                    )
+                    yield ([MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        content=(
+                            "模型尝试调用当前请求未提供的工具，已拒绝执行以避免越权或循环。"
+                            f"违规工具：{', '.join(sorted(name for name in invalid_tool_names if name))}"
+                        ),
+                        type=MessageType.ERROR.value,
+                        agent_name=self.agent_name,
+                    )], False)
+                    return
+
+            # 识别是否包含结束/状态工具调用
             termination_tool_ids = set()
-            finish_turn_tool_ids = set()
-            finish_turn_enabled = os.environ.get("SAGE_FINISH_TURN_TOOL_ENABLED", "true").lower() != "false"
+            turn_status_tool_ids = set()
+            continue_turn_status_ids = set()
+            turn_status_enabled = os.environ.get("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "true").lower() != "false"
             for tool_call_id, tool_call in tool_calls.items():
                 tname = tool_call['function']['name']
                 if tname in ['complete_task', 'sys_finish_task']:
                     termination_tool_ids.add(tool_call_id)
-                if finish_turn_enabled and tname == 'finish_turn':
-                    finish_turn_tool_ids.add(tool_call_id)
+                # 无论协议是否启用，模型主动调用 turn_status 时都应正常处理；
+                # SAGE_AGENT_STATUS_PROTOCOL_ENABLED=false 只禁止"强制 turn_status_only 轮"，
+                # 不禁止接受模型的主动调用，否则拒绝→错误→循环→文本重复。
+                if tname in self._turn_status_tool_names():
+                    turn_status_tool_ids.add(tool_call_id)
+                    if self._turn_status_from_tool_call(tool_call) == "continue_work":
+                        continue_turn_status_ids.add(tool_call_id)
 
-            # finish_turn 调用契约：本「轮」（自最近一次 user 消息以后）必须已经
+            # turn_status 调用契约：本「轮」（自最近一次 user 消息以后）必须已经
             # 出现过非空的 assistant 自然语言文本。情况包括：
-            #   (a) 当前 LLM 调用本身就既输出了总结也调用了 finish_turn；
-            #   (b) 上一次 LLM 调用先产出总结，本次只单独调用 finish_turn。
+            #   (a) 当前 LLM 调用本身就既输出了总结也调用了 turn_status；
+            #   (b) 上一次 LLM 调用先产出总结，本次只单独调用 turn_status。
             # 之前只看 (a) 会把 (b) 误杀，导致模型反复被拒绝。
             has_summary = bool((full_content_accumulator or "").strip())
-            if finish_turn_tool_ids and not has_summary:
+            if turn_status_tool_ids and not has_summary:
                 has_summary = self._has_recent_assistant_summary(messages_input)
-            reject_finish_turn_ids = finish_turn_tool_ids if (finish_turn_tool_ids and not has_summary) else set()
-            accept_finish_turn_ids = finish_turn_tool_ids - reject_finish_turn_ids
+            reject_turn_status_ids = turn_status_tool_ids if (turn_status_tool_ids and not has_summary) else set()
+            accept_turn_status_ids = turn_status_tool_ids - reject_turn_status_ids - continue_turn_status_ids
 
             # 根据环境变量控制 emit_tool_call_message
             # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
@@ -781,28 +999,28 @@ class SimpleAgent(AgentBase):
                 # chunk 是 (messages, is_complete)
                 messages, is_complete = chunk
 
-                # 终止类工具：complete_task / sys_finish_task / 通过校验的 finish_turn → 标记完成
-                if (termination_tool_ids or accept_finish_turn_ids) and not is_complete:
+                # 终止类工具：complete_task / sys_finish_task / 通过校验且非 continue_work 的 turn_status → 标记完成
+                if (termination_tool_ids or accept_turn_status_ids) and not is_complete:
                     for msg in messages:
                         if msg.role == MessageRole.TOOL.value and (
                             msg.tool_call_id in termination_tool_ids
-                            or msg.tool_call_id in accept_finish_turn_ids
+                            or msg.tool_call_id in accept_turn_status_ids
                         ):
                             logger.info(f"SimpleAgent: 终止类工具 {msg.tool_call_id} 执行完成，标记本轮结束")
                             is_complete = True
                             break
 
-                # 未通过总结校验的 finish_turn：把工具结果改写为拒绝消息，并保持未完成
-                if reject_finish_turn_ids and not is_complete:
+                # 未通过总结校验的 turn_status：把工具结果改写为拒绝消息，并保持未完成
+                if reject_turn_status_ids and not is_complete:
                     for msg in messages:
-                        if msg.role == MessageRole.TOOL.value and msg.tool_call_id in reject_finish_turn_ids:
+                        if msg.role == MessageRole.TOOL.value and msg.tool_call_id in reject_turn_status_ids:
                             rejection = (
-                                "finish_turn 调用被拒绝：本轮 assistant 还没有输出任何自然语言总结。"
+                                "turn_status 调用被拒绝：本轮 assistant 还没有输出任何自然语言说明。"
                                 "请先用一段中文/英文文字总结当前进展和结果（包含已完成的事项、关键产物或下一步建议），"
-                                "再调用 finish_turn(reason=...) 工具结束本轮。"
+                                "再调用 turn_status(status=...) 工具报告本轮状态。"
                             )
                             logger.warning(
-                                f"SimpleAgent: finish_turn 调用 {msg.tool_call_id} 缺少前置总结，已改写为拒绝消息"
+                                f"SimpleAgent: turn_status 调用 {msg.tool_call_id} 缺少前置说明，已改写为拒绝消息"
                             )
                             msg.content = rejection
 
@@ -818,6 +1036,28 @@ class SimpleAgent(AgentBase):
                 agent_name=self.agent_name
             )]
             yield (output_messages, False)
+
+    def _classify_error_category(self, error_chunks: List[MessageChunk]) -> str:
+        """
+        根据错误 chunk 内容识别错误类别，用于差异化熔断阈值和日志。
+
+        返回值:
+            "TOOL_REJECTED"  - 模型调用了未提供的工具被拒绝
+            "TURN_STATUS"    - turn_status 相关拒绝
+            "TIMEOUT"        - 工具执行超时
+            "INVALID_ARGS"   - 工具参数非法
+            "OTHER"          - 其他未分类错误
+        """
+        combined = " ".join((c.content or "") for c in error_chunks).lower()
+        if "未提供的工具" in combined or "违规工具" in combined or "tool not provided" in combined:
+            return "TOOL_REJECTED"
+        if "turn_status" in combined:
+            return "TURN_STATUS"
+        if "timeout" in combined or "超时" in combined:
+            return "TIMEOUT"
+        if "参数" in combined or "argument" in combined or "invalid" in combined:
+            return "INVALID_ARGS"
+        return "OTHER"
 
     def _should_stop_execution(self, all_new_response_chunks: List[MessageChunk]) -> bool:
         """
@@ -972,7 +1212,8 @@ class SimpleAgent(AgentBase):
         system_tokens = MessageManager.calculate_messages_token_length(system_messages)
         # 压缩目标：max_model_len 减去 system 消息后，剩余部分的 30%
         budget_limit = int((max_model_len - system_tokens) * 0.3)
-        compressed_messages = MessageManager.compress_messages(extracted_messages, budget_limit)
+        # 强制保护末尾 5 条消息（覆盖当前轮的 user/tool/assistant），避免最新消息被压缩
+        compressed_messages = MessageManager.compress_messages(extracted_messages, budget_limit, recent_messages_count=5)
         new_tokens = MessageManager.calculate_messages_token_length(compressed_messages)
 
         logger.info(f"SimpleAgent: compress_messages 压缩后: {current_tokens} -> {new_tokens} tokens")

@@ -37,12 +37,12 @@ class ToolProxy:
                 logger.warning(f"ToolProxy: 以下工具不存在: {invalid_tools}")
                 self._available_tools -= invalid_tools
 
-            # 强制注入：finish_turn 是 agent 终止协议的一部分，无论上游 availableTools
+            # 强制注入：turn_status 是 agent 状态协议的一部分，无论上游 availableTools
             # 是否勾选都必须可用，否则模型只能退化到旧的 LLM 完成判定。前端列表里隐藏即可。
             import os as _os
-            if _os.environ.get("SAGE_FINISH_TURN_TOOL_ENABLED", "true").lower() != "false":
-                if "finish_turn" in all_tools_names:
-                    self._available_tools.add("finish_turn")
+            if _os.environ.get("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "true").lower() != "false":
+                if "turn_status" in all_tools_names:
+                    self._available_tools.add("turn_status")
 
             # 工具捆绑组：组内任何一个被勾选，组内全部解锁（共享后台任务注册表，缺一个就废）。
             _TOOL_BUNDLES: List[set] = [
