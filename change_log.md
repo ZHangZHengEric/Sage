@@ -1,3 +1,5 @@
+2026-04-26 11:58 工作空间面板新增手动刷新按钮：ResizablePanel 新增 #actions slot，WorkspacePanel 在标题栏注入刷新图标，加载中自动旋转，桌面端和 Web 端同步。
+
 2026-04-26 11:26 修复 turn_status 调用后仍触发 TaskSummaryAgent(final_answer) 的问题：need_summary 条件新增识别 turn_status 协议工具结果，避免 need_user_input/blocked/task_done 后多余生成 final_answer。
 
 2026-04-26 11:12 修复工作空间视频预览：WorkspaceRemoteFilePreview.vue 增加 mp4/webm/mov 等视频格式支持，视频直接使用后端流式 URL 播放（FileResponse 支持 Range 请求）；task.js 新增 getFileStreamUrl 方法；修复文件类型检测图标和标签。

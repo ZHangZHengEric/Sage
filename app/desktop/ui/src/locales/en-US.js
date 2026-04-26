@@ -1239,6 +1239,7 @@ export default {
 
   // Workspace
   'workspace.title': 'Workspace',
+  'workspace.refresh': 'Refresh',
   'workspace.noFiles': 'No files',
   'workspace.path': 'Path:',
   'workspace.download': 'Download',
