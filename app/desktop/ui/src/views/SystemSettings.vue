@@ -142,8 +142,8 @@
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="zhCN">简体中文</SelectItem>
-                  <SelectItem value="enUS">English</SelectItem>
+                  <SelectItem value="zhCN">{{ t('system.languageOptionZhCN') }}</SelectItem>
+                  <SelectItem value="enUS">{{ t('system.languageOptionEnUS') }}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -253,15 +253,15 @@
         <section class="space-y-2">
           <div class="flex items-center gap-2.5">
             <Globe class="h-3.5 w-3.5 text-muted-foreground" />
-            <h2 class="text-[12px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">浏览器集成</h2>
+            <h2 class="text-[12px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{{ t('system.browserIntegration') }}</h2>
           </div>
 
           <div class="overflow-hidden rounded-[18px] border border-border/60 bg-transparent">
-            <div class="flex flex-col gap-2.5 px-4 py-3 md:flex-row md:items-center md:justify-between">
-              <div class="space-y-1">
-                <p class="text-sm font-medium text-foreground">安装 Sage Chrome 插件</p>
+              <div class="flex flex-col gap-2.5 px-4 py-3 md:flex-row md:items-center md:justify-between">
+                <div class="space-y-1">
+                <p class="text-sm font-medium text-foreground">{{ t('system.installBrowserPlugin') }}</p>
                 <p class="text-[12px] leading-5 text-muted-foreground">
-                  点击后会打开 Chrome 扩展页。请在扩展页开启开发者模式，并“加载已解压的扩展程序”指向本地插件目录。
+                  {{ t('system.browserPluginDesc') }}
                 </p>
               </div>
               <div class="flex items-center gap-2">
@@ -271,7 +271,7 @@
                   class="h-8.5 rounded-full border-border/70 bg-background/90 px-3.5 text-[13px] shadow-none hover:bg-muted/30"
                   @click="openChromeExtensionsPage"
                 >
-                  打开扩展页
+                  {{ t('system.openExtensionPage') }}
                 </Button>
                 <Button
                   variant="outline"
@@ -279,7 +279,7 @@
                   class="h-8.5 rounded-full border-border/70 bg-background/90 px-3.5 text-[13px] shadow-none hover:bg-muted/30"
                   @click="openExtensionDirectory"
                 >
-                  打开插件目录
+                  {{ t('system.openExtensionDirectory') }}
                 </Button>
               </div>
             </div>
@@ -288,12 +288,12 @@
 
             <div class="flex flex-col gap-2.5 px-4 py-3 md:flex-row md:items-center md:justify-between">
               <div class="space-y-1">
-                <p class="text-sm font-medium text-foreground">连接状态</p>
+                <p class="text-sm font-medium text-foreground">{{ t('system.connectionStatus') }}</p>
                 <p class="text-[12px] leading-5 text-muted-foreground">
                   {{ browserBridgeStatusText }}
                 </p>
                 <p v-if="browserBridgeLastSeenText" class="text-[11px] text-muted-foreground/80">
-                  最近心跳：{{ browserBridgeLastSeenText }}
+                  {{ t('system.browserLastSeen', { time: browserBridgeLastSeenText }) }}
                 </p>
               </div>
               <Button
@@ -305,7 +305,7 @@
               >
                 <Loader2 v-if="checkingBrowserBridge" class="mr-2 h-4 w-4 animate-spin" />
                 <RefreshCw v-else class="mr-2 h-4 w-4" />
-                重新检测
+                {{ t('system.recheck') }}
               </Button>
             </div>
           </div>
@@ -316,9 +316,9 @@
             <Dialog v-model:open="showEnvDialog">
                 <DialogContent class="max-w-3xl h-[85vh] flex flex-col p-0">
                     <DialogHeader class="px-6 pt-6 pb-4 shrink-0">
-                        <DialogTitle>{{ t('system.envVariables') || '环境变量配置' }}</DialogTitle>
+                        <DialogTitle>{{ t('system.envDialogTitle') }}</DialogTitle>
                         <DialogDescription>
-                            {{ t('system.envVariablesTip') || '管理您的环境变量，配置完成后需要重启 Sage 才能生效' }}
+                            {{ t('system.envDialogDesc') }}
                         </DialogDescription>
                     </DialogHeader>
                     
@@ -327,21 +327,21 @@
                         <!-- Alert for restart requirement -->
                         <Alert variant="warning" class="mb-4">
                             <AlertCircle class="h-4 w-4" />
-                            <AlertTitle>{{ t('system.restartRequired') || '需要重启' }}</AlertTitle>
+                            <AlertTitle>{{ t('system.restartRequiredTitle') }}</AlertTitle>
                             <AlertDescription>
-                                {{ t('system.restartRequiredDesc') || '环境变量修改后需要重启 Sage 才能生效' }}
+                                {{ t('system.restartRequiredDesc') }}
                             </AlertDescription>
                         </Alert>
 
                         <!-- Preset Environment Variables -->
                         <div class="mb-4">
                             <div class="flex items-center justify-between mb-2">
-                                <Label class="text-sm font-medium">{{ t('system.presetEnvVars') || '预设环境变量' }}</Label>
-                                <span class="text-xs text-muted-foreground">{{ t('system.clickToAdd') || '点击快速添加' }}</span>
+                                <Label class="text-sm font-medium">{{ t('system.presetEnvVars') }}</Label>
+                                <span class="text-xs text-muted-foreground">{{ t('system.clickToAdd') }}</span>
                             </div>
                             <div class="flex flex-wrap gap-2">
                                 <Button
-                                    v-for="preset in presetEnvVars"
+                                    v-for="preset in localizedPresetEnvVars"
                                     :key="preset.key"
                                     variant="outline"
                                     size="sm"
@@ -359,8 +359,8 @@
                         <div class="space-y-3 py-2">
                             <div v-if="envVars.length === 0" class="text-center py-8 text-muted-foreground">
                                 <Settings class="w-12 h-12 mx-auto mb-2 opacity-50" />
-                                <p>{{ t('system.noEnvVars') || '暂无环境变量' }}</p>
-                                <p class="text-sm">{{ t('system.addEnvVarHint') || '点击上方预设按钮或手动添加' }}</p>
+                                <p>{{ t('system.noEnvVars') }}</p>
+                                <p class="text-sm">{{ t('system.addEnvVarHint') }}</p>
                             </div>
                             
                             <div
@@ -370,19 +370,19 @@
                             >
                                 <div class="flex-1 grid grid-cols-[1fr,1fr] gap-2">
                                     <div class="space-y-1">
-                                        <Label class="text-xs text-muted-foreground">{{ t('system.envKey') || '变量名' }}</Label>
+                                        <Label class="text-xs text-muted-foreground">{{ t('system.envKey') }}</Label>
                                         <Input
                                             v-model="envVar.key"
-                                            placeholder="KEY_NAME"
+                                            :placeholder="t('system.envKeyPlaceholder')"
                                             class="font-mono text-sm"
                                         />
                                     </div>
                                     <div class="space-y-1">
-                                        <Label class="text-xs text-muted-foreground">{{ t('system.envValue') || '变量值' }}</Label>
+                                        <Label class="text-xs text-muted-foreground">{{ t('system.envValue') }}</Label>
                                         <Input
                                             v-model="envVar.value"
                                             :type="envVar.showValue ? 'text' : 'password'"
-                                            placeholder="value"
+                                            :placeholder="t('system.envValuePlaceholder')"
                                             class="font-mono text-sm"
                                         />
                                     </div>
@@ -393,7 +393,7 @@
                                         size="icon"
                                         class="h-8 w-8"
                                         @click="envVar.showValue = !envVar.showValue"
-                                        :title="envVar.showValue ? (t('system.hide') || '隐藏') : (t('system.show') || '显示')"
+                                        :title="envVar.showValue ? t('system.hide') : t('system.show')"
                                     >
                                         <Eye v-if="envVar.showValue" class="w-4 h-4" />
                                         <EyeOff v-else class="w-4 h-4" />
@@ -403,7 +403,7 @@
                                         size="icon"
                                         class="h-8 w-8 text-destructive hover:text-destructive"
                                         @click="removeEnvVar(index)"
-                                        :title="t('common.delete') || '删除'"
+                                        :title="t('system.delete')"
                                     >
                                         <Trash2 class="w-4 h-4" />
                                     </Button>
@@ -418,16 +418,16 @@
                             @click="addEmptyEnvVar"
                         >
                             <Plus class="w-4 h-4 mr-2" />
-                            {{ t('system.addEnvVar') || '添加环境变量' }}
+                            {{ t('system.addEnvVar') }}
                         </Button>
                     </div>
 
                     <DialogFooter class="px-6 py-4 border-t shrink-0">
                         <Button variant="outline" @click="showEnvDialog = false">
-                            {{ t('common.cancel') || '取消' }}
+                            {{ t('common.cancel') }}
                         </Button>
                         <Button @click="saveEnvContent" :disabled="savingEnv">
-                            {{ savingEnv ? (t('common.saving') || '保存中...') : (t('common.save') || '保存') }}
+                            {{ savingEnv ? t('common.saving') : t('common.save') }}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -437,18 +437,18 @@
             <Dialog v-model:open="showRestartDialog">
                 <DialogContent class="max-w-md">
                     <DialogHeader>
-                        <DialogTitle>{{ t('system.restartConfirmTitle') || '保存成功' }}</DialogTitle>
+                        <DialogTitle>{{ t('system.savedSuccessfully') }}</DialogTitle>
                         <DialogDescription>
-                            {{ t('system.restartConfirmDesc') || '环境变量已保存，需要重启 Sage 才能生效。是否立即重启？' }}
+                            {{ t('system.envVariablesSavedRestart') }}
                         </DialogDescription>
                     </DialogHeader>
                     <DialogFooter class="mt-4">
                         <Button variant="outline" @click="showRestartDialog = false">
-                            {{ t('system.restartLater') || '稍后重启' }}
+                            {{ t('system.restartLater') }}
                         </Button>
                         <Button @click="restartApp" variant="default">
                             <RotateCcw class="w-4 h-4 mr-2" />
-                            {{ t('system.restartNow') || '立即重启' }}
+                            {{ t('system.restartNow') }}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -525,25 +525,30 @@ const browserBridgeLastSeenAt = ref(null)
 // 预设环境变量列表 - 只包含系统实际使用的
 const presetEnvVars = [
     // 搜索引擎 API Keys (MCP Search Server 使用)
-    { key: 'SERPAPI_API_KEY', description: 'SerpApi Google搜索 (searchapi.io)', category: 'search' },
-    { key: 'SERPER_API_KEY', description: 'Serper Google搜索 (serper.dev)', category: 'search' },
-    { key: 'TAVILY_API_KEY', description: 'Tavily搜索 (tavily.com)', category: 'search' },
-    { key: 'BRAVE_API_KEY', description: 'Brave搜索 (brave.com/search/api)', category: 'search' },
-    { key: 'ZHIPU_API_KEY', description: '智谱AI搜索 (bigmodel.cn)', category: 'search' },
-    { key: 'BOCHA_API_KEY', description: '博查搜索 (bochaai.com)', category: 'search' },
-    { key: 'SHUYAN_API_KEY', description: '数眼搜索 (shuyanai.com)', category: 'search' },
+    { key: 'SERPAPI_API_KEY', descriptionKey: 'system.presetEnvVar.search.serpapi', category: 'search' },
+    { key: 'SERPER_API_KEY', descriptionKey: 'system.presetEnvVar.search.serper', category: 'search' },
+    { key: 'TAVILY_API_KEY', descriptionKey: 'system.presetEnvVar.search.tavily', category: 'search' },
+    { key: 'BRAVE_API_KEY', descriptionKey: 'system.presetEnvVar.search.brave', category: 'search' },
+    { key: 'ZHIPU_API_KEY', descriptionKey: 'system.presetEnvVar.search.zhipu', category: 'search' },
+    { key: 'BOCHA_API_KEY', descriptionKey: 'system.presetEnvVar.search.bocha', category: 'search' },
+    { key: 'SHUYAN_API_KEY', descriptionKey: 'system.presetEnvVar.search.shuyan', category: 'search' },
     // 图片生成 API Keys (Unified Image Generation Server 使用)
-    { key: 'MINIMAX_API_KEY', description: 'Minimax(海螺AI)图片生成 API Key (platform.minimaxi.com)', category: 'image' },
-    { key: 'MINIMAX_MODEL', description: 'Minimax图片生成模型 (如: image-01)', category: 'image' },
-    { key: 'QWEN_API_KEY', description: '阿里云百炼图片生成 API Key (bailian.console.aliyun.com)', category: 'image' },
-    { key: 'QWEN_MODEL', description: '阿里云图片生成模型 (如: wanx2.1-t2i-plus)', category: 'image' },
-    { key: 'SEEDREAM_API_KEY', description: '火山引擎Seedream图片生成 API Key (console.volcengine.com/ark)', category: 'image' },
-    { key: 'SEEDREAM_MODEL', description: 'Seedream图片生成模型 (如: doubao-seedream-5.0-lite)', category: 'image' },
+    { key: 'MINIMAX_API_KEY', descriptionKey: 'system.presetEnvVar.image.minimaxApiKey', category: 'image' },
+    { key: 'MINIMAX_MODEL', descriptionKey: 'system.presetEnvVar.image.minimaxModel', category: 'image' },
+    { key: 'QWEN_API_KEY', descriptionKey: 'system.presetEnvVar.image.qwenApiKey', category: 'image' },
+    { key: 'QWEN_MODEL', descriptionKey: 'system.presetEnvVar.image.qwenModel', category: 'image' },
+    { key: 'SEEDREAM_API_KEY', descriptionKey: 'system.presetEnvVar.image.seedreamApiKey', category: 'image' },
+    { key: 'SEEDREAM_MODEL', descriptionKey: 'system.presetEnvVar.image.seedreamModel', category: 'image' },
     // 代理设置 (Tauri 读取用于系统代理配置)
-    { key: 'HTTP_PROXY', description: 'HTTP代理地址 (如: http://127.0.0.1:7890)', category: 'proxy' },
-    { key: 'HTTPS_PROXY', description: 'HTTPS代理地址 (如: http://127.0.0.1:7890)', category: 'proxy' },
-    { key: 'ALL_PROXY', description: '全局代理地址 (SOCKS5 等)', category: 'proxy' },
+    { key: 'HTTP_PROXY', descriptionKey: 'system.presetEnvVar.proxy.http', category: 'proxy' },
+    { key: 'HTTPS_PROXY', descriptionKey: 'system.presetEnvVar.proxy.https', category: 'proxy' },
+    { key: 'ALL_PROXY', descriptionKey: 'system.presetEnvVar.proxy.all', category: 'proxy' },
 ]
+
+const localizedPresetEnvVars = computed(() => presetEnvVars.map((preset) => ({
+  ...preset,
+  description: t(preset.descriptionKey),
+})))
 
 const formatBytes = (bytes, decimals = 2) => {
   if (!+bytes) return '0 B'
@@ -586,7 +591,7 @@ const openEnvEditor = async () => {
     await loadEnvVarsPreview()
     showEnvDialog.value = true
   } catch (error) {
-    toast.error(t('system.loadEnvError') || '加载环境变量失败: ' + error)
+    toast.error(t('system.loadEnvErrorDetail', { message: error.message || error }))
   }
 }
 
@@ -598,7 +603,7 @@ const addPresetEnvVar = (preset) => {
     // 检查是否已存在
     const exists = envVars.value.some(v => v.key === preset.key)
     if (exists) {
-        toast.info(t('system.envVarExists') || '该环境变量已存在')
+        toast.info(t('system.envVarExists'))
         return
     }
     envVars.value.push({ key: preset.key, value: '', showValue: false })
@@ -617,7 +622,7 @@ const saveEnvContent = async () => {
     showEnvDialog.value = false
     showRestartDialog.value = true
   } catch (error) {
-    toast.error(t('system.saveEnvError') || '保存环境变量失败: ' + error)
+    toast.error(t('system.saveEnvErrorDetail', { message: error.message || error }))
   } finally {
     savingEnv.value = false
   }
@@ -627,7 +632,7 @@ const restartApp = async () => {
     try {
         await relaunch()
     } catch (error) {
-        toast.error(t('system.restartError') || '重启失败: ' + error)
+        toast.error(t('system.restartErrorDetail', { message: error.message || error }))
     }
 }
 
@@ -647,24 +652,24 @@ const handleImportOpenclaw = async () => {
         }
       }))
     }
-    const agentName = result?.agent_name || 'openclaw的小龙虾'
+    const agentName = result?.agent_name || t('system.openclawDefaultAgentName')
     const skillCount = result?.linked_skill_count || 0
     if (skillCount > 0) {
       toast.success(
         t('system.importOpenclawSuccessWithSkills', {
           agent: agentName,
           count: skillCount
-        }) || `${agentName} 导入成功，已关联 ${skillCount} 个 skills`
+        })
       )
     } else {
       toast.success(
         t('system.importOpenclawSuccessNoSkills', {
           agent: agentName
-        }) || `${agentName} 导入成功，已导入 workspace，未发现可关联的 skills`
+        })
       )
     }
   } catch (error) {
-    toast.error((t('system.importOpenclawError') || '导入 OpenClaw 失败') + ': ' + (error.message || error))
+    toast.error(`${t('system.importOpenclawError')}: ${error.message || error}`)
   } finally {
     importingOpenclaw.value = false
   }
@@ -677,24 +682,28 @@ const userAvatarUrl = computed(() => {
 
 const envVarsSummary = computed(() => {
   if (envVars.value.length === 0) {
-    return t('system.noEnvVars') || '尚未配置'
+    return t('system.noEnvVars')
   }
-  return `${envVars.value.length} ${t('system.envVariables') || '项已配置'}`
+  return t('system.envVariablesSummary', { count: envVars.value.length })
 })
 
 const browserBridgeStatusText = computed(() => {
-  if (!browserBridgeStatus.value) return '尚未检测浏览器插件状态'
+  if (!browserBridgeStatus.value) return t('system.browserStatusUnknown')
   const connected = !!browserBridgeStatus.value.connected
-  if (!connected) return '未连接：请先在 Chrome 安装并打开 Sage 插件侧边栏'
+  if (!connected) return t('system.browserStatusDisconnected')
   const extensionId = browserBridgeStatus.value.extension_id || 'unknown'
-  return `已连接（扩展 ID: ${extensionId}）`
+  return t('system.browserStatusConnected', { extensionId })
 })
 
 const browserBridgeLastSeenText = computed(() => {
   if (!browserBridgeLastSeenAt.value) return ''
   const date = new Date(Number(browserBridgeLastSeenAt.value) * 1000)
   if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleString()
+  const locale = language.value === 'zhCN' ? 'zh-CN' : 'en-US'
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
 })
 
 const loadEnvVarsPreview = async () => {
@@ -712,12 +721,12 @@ const checkBrowserBridgeStatus = async ({ probe = true } = {}) => {
     browserBridgeStatus.value = data || null
     browserBridgeLastSeenAt.value = data?.last_seen_at || null
     if (probe && data?.probe?.timed_out) {
-      toast.warning('未收到浏览器扩展响应，已标记为离线')
+      toast.warning(t('system.browserBridgeOfflineWarning'))
     }
   } catch (error) {
     browserBridgeStatus.value = null
     browserBridgeLastSeenAt.value = null
-    toast.error('检测浏览器插件状态失败: ' + (error.message || error))
+    toast.error(t('system.browserBridgeCheckError', { message: error.message || error }))
   } finally {
     checkingBrowserBridge.value = false
   }
@@ -727,7 +736,7 @@ const openChromeExtensionsPage = async () => {
   try {
     await invoke('open_chrome_extensions_page')
   } catch (error) {
-    toast.error('打开 Chrome 扩展页失败: ' + (error.message || error))
+    toast.error(t('system.openChromeExtensionsPageError', { message: error.message || error }))
   }
 }
 
@@ -735,12 +744,12 @@ const openExtensionDirectory = async () => {
   try {
     const extensionDir = await invoke('get_chrome_extension_dir')
     if (!extensionDir) {
-      throw new Error('插件目录未找到')
+      throw new Error(t('system.extensionDirectoryNotFound'))
     }
     await open(extensionDir)
-    toast.success(`已打开插件目录：${extensionDir}`)
+    toast.success(t('system.openExtensionDirectorySuccess', { path: extensionDir }))
   } catch (error) {
-    toast.error('打开插件目录失败: ' + (error.message || error))
+    toast.error(t('system.openExtensionDirectoryError', { message: error.message || error }))
   }
 }
 

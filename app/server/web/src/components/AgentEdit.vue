@@ -470,7 +470,7 @@
                   :disabled="!props.agent?.id || syncingWorkspaceSkills || !store.formData.availableSkills?.length"
                 >
                   <RefreshCw class="h-3 w-3 mr-1" :class="{ 'animate-spin': syncingWorkspaceSkills }" />
-                  {{ t('agentEdit.syncWorkspaceSkills') || '更新用户工作空间技能' }}
+                  {{ t('agentEdit.syncWorkspaceSkills') }}
                 </Button>
                 <TooltipProvider>
                   <Tooltip>
@@ -553,7 +553,7 @@
                       :disabled="!props.agent?.id || loadingAgentSkills"
                     >
                       <RefreshCw class="h-3 w-3 mr-1" :class="{ 'animate-spin': loadingAgentSkills }" />
-                      {{ t('agentEdit.refreshSkills') || '刷新' }}
+                      {{ t('agentEdit.refreshSkills') }}
                     </Button>
                   </div>
                 </div>
@@ -597,7 +597,7 @@
                             class="text-[10px] h-5 px-1.5"
                           >
                             <Loader v-if="isSkillSyncing(skill.name || skill)" class="h-3 w-3 mr-1 animate-spin" />
-                            {{ t('agentEdit.skillPendingUpdate') || '待更新' }}
+                            {{ t('agentEdit.skillPendingUpdate') }}
                           </Badge>
                           </div>
                           <p v-if="skill.description" class="text-xs text-muted-foreground line-clamp-2 mt-1">{{ skill.description }}</p>
@@ -612,7 +612,7 @@
                         @click.stop="syncSkill(skill.name || skill)"
                       >
                         <RefreshCw class="h-3 w-3 mr-1" />
-                        {{ t('agentEdit.updateSkill') || '更新' }}
+                        {{ t('agentEdit.updateSkill') }}
                       </Button>
                     </div>
                   </div>
@@ -946,7 +946,7 @@ const validateMaxLoopCount = () => {
 // 同步技能到Agent工作空间
 const syncSkill = async (skillName) => {
   if (!props.agent?.id) {
-    toast.error(t('agentEdit.agentNotSaved') || '请先保存Agent')
+    toast.error(t('agentEdit.agentNotSaved'))
     return
   }
 
@@ -971,7 +971,7 @@ const syncSkill = async (skillName) => {
 
 const syncSelectedSkillsToWorkspaces = async () => {
   if (!props.agent?.id) {
-    toast.error(t('agentEdit.agentNotSaved') || '请先保存Agent')
+    toast.error(t('agentEdit.agentNotSaved'))
     return
   }
 
@@ -990,12 +990,12 @@ const syncSelectedSkillsToWorkspaces = async () => {
     toast.success(
       t('agentEdit.workspaceSkillsSyncSuccess', {
         count: result?.updated_workspace_count ?? 0
-      }) || '用户工作空间技能更新成功'
+      })
     )
   } catch (error) {
     console.error('Failed to sync skills to user workspaces:', error)
     toast.error(
-      t('agentEdit.workspaceSkillsSyncFailed') || '用户工作空间技能更新失败'
+      t('agentEdit.workspaceSkillsSyncFailed')
     )
   } finally {
     syncingWorkspaceSkills.value = false
@@ -1086,7 +1086,7 @@ const loadAgentAvailableSkills = async (agentId) => {
     console.error('[SkillSync] Failed to load agent available skills:', error)
     // 出错时清空列表，不要回退到props.skills（因为props.skills没有need_update字段）
     agentSkills.value = []
-    toast.error(t('agentEdit.loadSkillsFailed') || '加载技能列表失败')
+    toast.error(t('agentEdit.loadSkillsFailed'))
   } finally {
     loadingAgentSkills.value = false
   }

@@ -625,7 +625,7 @@
                       :disabled="!props.agent?.id || loadingAgentSkills"
                     >
                       <RefreshCw class="h-3 w-3 mr-1" :class="{ 'animate-spin': loadingAgentSkills }" />
-                      {{ t('agentEdit.refreshSkills') || '刷新' }}
+                      {{ t('agentEdit.refreshSkills') }}
                     </Button>
                   </div>
                 </div>
@@ -669,7 +669,7 @@
                               class="text-[10px] h-5 px-1.5"
                             >
                               <Loader v-if="isSkillSyncing(skill.name || skill)" class="h-3 w-3 mr-1 animate-spin" />
-                              {{ t('agentEdit.skillPendingUpdate') || '待更新' }}
+                              {{ t('agentEdit.skillPendingUpdate') }}
                             </Badge>
                           </div>
                           <p v-if="skill.description" class="text-xs text-muted-foreground line-clamp-2 mt-1">{{ skill.description }}</p>
@@ -684,7 +684,7 @@
                         @click.stop="syncSkill(skill.name || skill)"
                       >
                         <RefreshCw class="h-3 w-3 mr-1" />
-                        {{ t('agentEdit.updateSkill') || '更新' }}
+                        {{ t('agentEdit.updateSkill') }}
                       </Button>
                     </div>
                   </div>
@@ -1313,7 +1313,7 @@ const loadAgentAvailableSkills = async (agentId) => {
   } catch (error) {
     console.error('[SkillSync] Failed to load agent available skills:', error)
     agentSkills.value = []
-    toast.error(t('agentEdit.loadSkillsFailed') || '加载技能列表失败')
+    toast.error(t('agentEdit.loadSkillsFailed'))
   } finally {
     loadingAgentSkills.value = false
   }
@@ -1328,7 +1328,7 @@ const refreshSkills = async () => {
 // 同步技能到Agent工作空间
 const syncSkill = async (skillName) => {
   if (!props.agent?.id) {
-    toast.error(t('agentEdit.agentNotSaved') || '请先保存Agent')
+    toast.error(t('agentEdit.agentNotSaved'))
     return
   }
 

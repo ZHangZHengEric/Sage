@@ -56,10 +56,17 @@ class Request {
     addDefaultInterceptors() {
         this.requestInterceptors.push((config) => {
             const isFormData = config && config.data && (typeof FormData !== 'undefined') && (config.data instanceof FormData)
+            const savedLanguage = (typeof localStorage !== 'undefined') ? localStorage.getItem('language') : null
+            const preferEn = savedLanguage === 'enUS' || savedLanguage === 'en' || savedLanguage === 'en-US'
+            const preferPt = savedLanguage === 'ptBR' || savedLanguage === 'pt' || savedLanguage === 'pt-BR'
+            const acceptLanguage = preferPt
+                ? 'pt-BR,pt;q=0.9'
+                : (preferEn ? 'en-US,en;q=0.9' : 'zh-CN,zh;q=0.9')
+            const xAcceptLanguage = preferPt ? 'pt' : (preferEn ? 'en' : 'zh')
             const headers = {
                 'Accept': 'application/json, text/plain, */*',
-                'Accept-Language': 'zh-CN,zh;q=0.9',
-                'X-accept-language': 'zh',
+                'Accept-Language': acceptLanguage,
+                'X-accept-language': xAcceptLanguage,
                 ...config.headers
             }
             const token = (typeof localStorage !== 'undefined') ? localStorage.getItem('access_token') : null

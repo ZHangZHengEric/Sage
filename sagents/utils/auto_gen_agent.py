@@ -19,6 +19,7 @@ from datetime import datetime
 
 from sagents.tool import ToolManager, ToolProxy
 from sagents.utils.logger import logger
+from sagents.utils.prompt_manager import PromptManager
 
 
 class AutoGenAgentFunc:
@@ -35,7 +36,8 @@ class AutoGenAgentFunc:
         agent_description: str,
         tool_manager: Union[ToolManager, ToolProxy],
         llm_client,
-        model: str = "gpt-3.5-turbo"
+        model: str = "gpt-3.5-turbo",
+        language: str = "en",
     ) -> Dict[str, Any]:
         """
         根据描述和工具管理器生成完整的Agent配置
@@ -61,7 +63,7 @@ class AutoGenAgentFunc:
             logger.info(f"获取到 {len(available_tools)} 个可用工具")
 
             # 生成基础配置
-            basic_config = await self._generate_basic_config(agent_description, available_tools, llm_client, model)
+            basic_config = await self._generate_basic_config(agent_description, available_tools, llm_client, model, language=language)
             if not basic_config:
                 raise Exception("生成基础配置失败")
 
@@ -72,17 +74,17 @@ class AutoGenAgentFunc:
                 logger.info(f"使用ToolProxy中预选的工具: {selected_tools}")
             else:
                 # 如果是ToolManager，进行工具选择
-                selected_tools = await self._select_tools(basic_config, available_tools, llm_client, model)
+                selected_tools = await self._select_tools(basic_config, available_tools, llm_client, model, language=language)
                 if selected_tools is None:
                     raise Exception("选择工具失败")
 
             # 生成工作流程
-            workflows = await self._generate_workflows(basic_config, selected_tools, llm_client, model)
+            workflows = await self._generate_workflows(basic_config, selected_tools, llm_client, model, language=language)
             if workflows is None:
                 raise Exception("生成工作流程失败")
 
             # 组装完整配置
-            config = self._assemble_config(basic_config, selected_tools, workflows)
+            config = self._assemble_config(basic_config, selected_tools, workflows, language=language)
 
             logger.info("Agent配置生成完成")
             return config
@@ -126,7 +128,7 @@ class AutoGenAgentFunc:
             logger.error(traceback.format_exc())
             return []
 
-    async def _generate_basic_config(self, description: str, available_tools: List[Dict], client, model: str) -> Optional[Dict[str, Any]]:
+    async def _generate_basic_config(self, description: str, available_tools: List[Dict], client, model: str, language: str = "en") -> Optional[Dict[str, Any]]:
         """
         生成基础配置（名称、描述、系统提示词等）
 
@@ -146,50 +148,11 @@ class AutoGenAgentFunc:
                 for tool in available_tools
             ])
 
-            prompt = f"""
-请根据以下Agent描述和可用工具能力，生成Agent的基础配置信息：
-
-Agent描述：{description}
-
-可用工具能力：
-{tools_summary}
-
-请生成以下内容，并以JSON格式返回：
-1. name: Agent的名称（简洁明了，中文）
-2. description: Agent的简要介绍（一句话概括）
-3. systemPrefix: Agent的详细系统提示词，按照以下格式：
-
-# 角色
-关于角色的详细描述
-
-## 目标
-明确描述该Agent要达成的具体目标和使命
-
-## 技能
-基于可用工具能力，详细描述该Agent具备的技能：
-### 技能1: 名称
-技能1的介绍（基于可用工具能力）
-
-### 技能2: 名称
-技能2的介绍（基于可用工具能力）
-
-## 限制
-- 限制1：只能使用已提供的工具能力
-- 限制2：其他相关限制
-
-## 输出形式要求
-- 要求1
-- 要求2
-
-## 其他特殊要求
-- 要求1
-- 要求2
-
-注意：
-1. 技能部分必须基于实际可用的工具能力来描述，不要描述无法实现的功能
-2. 确保Agent的能力与可用工具保持一致
-3. 请确保返回的是有效的JSON格式，包含name、description、systemPrefix三个字段。
-"""
+            prompt = PromptManager().get_prompt(
+                "auto_gen_agent_basic_config_prompt",
+                agent="common_util",
+                language=language,
+            ).format(description=description, tools_summary=tools_summary)
 
             logger.debug("调用大模型生成基础配置")
             response = await self._call_llm(client, prompt, model)
@@ -214,14 +177,14 @@ Agent描述：{description}
                 logger.error(f"原始响应: {response}")
                 logger.error(f"提取的JSON: {json_str if 'json_str' in locals() else 'N/A'}")
                 # 返回默认配置
-                return await self._get_default_basic_config(description)
+                return await self._get_default_basic_config(description, language=language)
 
         except Exception as e:
             logger.error(f"生成基础配置失败: {str(e)}")
             logger.error(traceback.format_exc())
             return None
 
-    async def _select_tools(self, basic_config: Dict, available_tools: List[Dict], client, model: str) -> Optional[List[str]]:
+    async def _select_tools(self, basic_config: Dict, available_tools: List[Dict], client, model: str, language: str = "en") -> Optional[List[str]]:
         """
         根据Agent基础配置选择合适的工具
 
@@ -240,26 +203,16 @@ Agent描述：{description}
                 for tool in available_tools
             ])
 
-            prompt = f"""
-请根据以下Agent配置和可用工具列表，选择最适合的工具：
-
-Agent名称：{basic_config.get('name', '')}
-Agent描述：{basic_config.get('description', '')}
-Agent系统提示词：
-{basic_config.get('systemPrefix', '')}
-
-可用工具列表：
-{tools_summary}
-
-请分析Agent的系统提示词和功能需求，选择最相关和必要的工具。
-请以JSON数组格式返回选中的工具名称，例如：["tool1", "tool2", "tool3"]
-
-注意：
-1. 基于Agent的系统提示词中描述的技能和能力来选择工具
-2. 只选择真正需要的工具，避免选择过多无关工具
-3. 确保选择的工具名称与可用工具列表中的名称完全一致
-4. 返回的必须是有效的JSON数组格式
-"""
+            prompt = PromptManager().get_prompt(
+                "auto_gen_agent_tool_selection_prompt",
+                agent="common_util",
+                language=language,
+            ).format(
+                name=basic_config.get("name", ""),
+                description=basic_config.get("description", ""),
+                systemPrefix=basic_config.get("systemPrefix", ""),
+                tools_summary=tools_summary,
+            )
 
             logger.debug("调用大模型选择工具")
             response = await self._call_llm(client, prompt, model)
@@ -292,7 +245,7 @@ Agent系统提示词：
             logger.error(traceback.format_exc())
             return None
 
-    async def _generate_workflows(self, basic_config: Dict, selected_tools: List[str], client, model: str) -> Optional[Dict[str, List[str]]]:
+    async def _generate_workflows(self, basic_config: Dict, selected_tools: List[str], client, model: str, language: str = "en") -> Optional[Dict[str, List[str]]]:
         """
         生成Agent的工作流程配置
 
@@ -308,41 +261,16 @@ Agent系统提示词：
         try:
             tools_str = ", ".join(selected_tools)
 
-            prompt = f"""
-请根据以下Agent配置和选定的工具，设计3-5个主要的工作流程：
-
-Agent名称：{basic_config.get('name', '')}
-Agent描述：{basic_config.get('description', '')}
-Agent系统提示词：
-{basic_config.get('systemPrefix', '')}
-
-选定的工具：{tools_str}
-
-请基于Agent的系统提示词中描述的技能和能力，为每个工作流程设计详细的执行步骤，每个步骤应该说明：
-1. 具体要做什么
-2. 需要调用哪个工具（如果需要的话）
-3. 如何处理结果
-
-请以JSON格式返回，格式如下：
-{{
-  "工作流程1名称": [
-    "步骤1：具体描述",
-    "步骤2：调用xxx工具获取信息",
-    "步骤3：处理和分析结果"
-  ],
-  "工作流程2名称": [
-    "步骤1：具体描述",
-    "步骤2：具体描述"
-  ]
-}}
-
-注意：
-1. 工作流程要与Agent的系统提示词中描述的技能保持一致
-2. 工作流程名称要简洁明了
-3. 步骤描述要具体可执行
-4. 合理使用选定的工具
-5. 返回有效的JSON格式
-"""
+            prompt = PromptManager().get_prompt(
+                "auto_gen_agent_workflow_generation_prompt",
+                agent="common_util",
+                language=language,
+            ).format(
+                name=basic_config.get("name", ""),
+                description=basic_config.get("description", ""),
+                systemPrefix=basic_config.get("systemPrefix", ""),
+                selected_tools=tools_str,
+            )
 
             logger.debug("调用大模型生成工作流程")
             response = await self._call_llm(client, prompt, model)
@@ -363,14 +291,14 @@ Agent系统提示词：
                 logger.error(f"解析工作流程响应失败: {e}")
                 logger.error(f"原始响应: {response}")
                 logger.error(f"提取的JSON: {json_str if 'json_str' in locals() else 'N/A'}")
-                return self._get_default_workflows()
+                return self._get_default_workflows(language=language)
 
         except Exception as e:
             logger.error(f"生成工作流程失败: {str(e)}")
             logger.error(traceback.format_exc())
             return None
 
-    def _assemble_config(self, basic_config: Dict, selected_tools: List[str], workflows: Dict) -> Dict[str, Any]:
+    def _assemble_config(self, basic_config: Dict, selected_tools: List[str], workflows: Dict, language: str = "en") -> Dict[str, Any]:
         """
         组装完整的Agent配置
 
@@ -389,9 +317,16 @@ Agent系统提示词：
 
             config = {
                 "id": str(int(time.time() * 1000)),  # 使用时间戳作为ID
-                "name": basic_config.get("name", "自动生成Agent"),
-                "description": basic_config.get("description", "自动生成的智能助手"),
-                "systemPrefix": basic_config.get("systemPrefix", "你是一个智能助手。"),
+                "name": basic_config.get("name", "Auto-generated Agent"),
+                "description": basic_config.get("description", "Auto-generated assistant"),
+                "systemPrefix": basic_config.get(
+                    "systemPrefix",
+                    PromptManager().get_prompt(
+                        "auto_gen_agent_default_system_prefix",
+                        agent="common_util",
+                        language=language,
+                    ),
+                ),
                 "deepThinking": False,
                 "multiAgent": False,
                 "moreSupport": False,
@@ -563,37 +498,22 @@ Agent系统提示词：
             logger.error(traceback.format_exc())
             raise
 
-    async def _get_default_basic_config(self, description: str) -> Dict[str, Any]:
+    async def _get_default_basic_config(self, description: str, language: str = "en") -> Dict[str, Any]:
         """获取默认的基础配置"""
+        default_texts = {
+            "zh": ("自动助手", "基于描述自动生成的助手"),
+            "en": ("Auto Assistant", "Auto-generated assistant based on the description"),
+            "pt": ("Assistente Automático", "Assistente gerado automaticamente com base na descrição"),
+        }
+        name, desc = default_texts.get(language, default_texts["en"])
         return {
-            "name": "智能助手",
-            "description": "基于描述自动生成的智能助手",
-            "systemPrefix": f"""# 角色
-你是一个智能助手，根据用户需求提供帮助。
-
-用户需求描述：{description}
-
-## 目标
-根据用户的具体需求描述，提供准确、有效的帮助和解决方案
-
-## 技能
-### 技能1: 信息查询
-能够查询和检索相关信息
-
-### 技能2: 任务执行
-能够执行用户指定的任务
-
-## 限制
-- 确保回答准确可靠
-- 遵循用户的具体要求
-
-## 输出形式要求
-- 回答简洁明了
-- 提供具体可行的建议
-
-## 其他特殊要求
-- 保持友好的交流方式
-- 及时响应用户需求"""
+            "name": name,
+            "description": desc,
+            "systemPrefix": PromptManager().get_prompt(
+                "auto_gen_agent_default_basic_config_system_prefix",
+                agent="common_util",
+                language=language,
+            ),
         }
 
     def _get_default_tools(self) -> List[str]:
@@ -607,24 +527,59 @@ Agent系统提示词：
             "search_image_from_web"
         ]
 
-    def _get_default_workflows(self) -> Dict[str, List[str]]:
+    def _get_default_workflows(self, language: str = "en") -> Dict[str, List[str]]:
         """获取默认工作流程"""
-        return {
-            "信息查询流程": [
-                "接收用户查询请求",
-                "分析查询内容和范围",
-                "使用相关工具获取信息",
-                "整理和总结查询结果",
-                "向用户提供清晰的回答"
-            ],
-            "任务执行流程": [
-                "理解用户任务需求",
-                "制定执行计划",
-                "调用相应工具执行任务",
-                "验证执行结果",
-                "向用户报告完成情况"
-            ]
+        defaults = {
+            "zh": {
+                "信息检索流程": [
+                    "接收用户请求",
+                    "分析查询范围和需求",
+                    "使用相关工具收集信息",
+                    "整理并总结结果",
+                    "向用户给出清晰答案",
+                ],
+                "任务执行流程": [
+                    "理解用户的任务需求",
+                    "制定执行计划",
+                    "调用合适工具完成任务",
+                    "验证执行结果",
+                    "向用户汇报完成情况",
+                ],
+            },
+            "en": {
+                "Information lookup flow": [
+                    "Receive the user's request",
+                    "Analyze the query scope and requirements",
+                    "Use the relevant tools to gather information",
+                    "Organize and summarize the findings",
+                    "Provide a clear answer to the user",
+                ],
+                "Task execution flow": [
+                    "Understand the user's task requirements",
+                    "Draft an execution plan",
+                    "Invoke the appropriate tools to perform the task",
+                    "Verify the execution result",
+                    "Report completion to the user",
+                ],
+            },
+            "pt": {
+                "Fluxo de busca de informações": [
+                    "Receber a solicitação do usuário",
+                    "Analisar o escopo e os requisitos da consulta",
+                    "Usar as ferramentas relevantes para coletar informações",
+                    "Organizar e resumir os resultados",
+                    "Fornecer uma resposta clara ao usuário",
+                ],
+                "Fluxo de execução de tarefas": [
+                    "Entender os requisitos da tarefa do usuário",
+                    "Elaborar um plano de execução",
+                    "Invocar as ferramentas apropriadas para executar a tarefa",
+                    "Verificar o resultado da execução",
+                    "Informar a conclusão ao usuário",
+                ],
+            },
         }
+        return defaults.get(language, defaults["en"])
 
     def save_config_to_file(self, config: Dict[str, Any], file_path: str) -> Optional[str]:
         """

@@ -70,9 +70,9 @@
         <div class="mb-4 rounded-2xl border border-border/60 bg-muted/30 p-3">
           <Bot class="h-7 w-7 text-muted-foreground" />
         </div>
-        <h3 class="text-[15px] font-semibold tracking-tight">{{ t('modelProvider.noProviders') || 'No Providers' }}</h3>
+        <h3 class="text-[15px] font-semibold tracking-tight">{{ t('modelProvider.noProviders') }}</h3>
         <p class="mt-2 max-w-sm text-[12px] leading-5 text-muted-foreground">
-          {{ t('modelProvider.noProvidersDesc') || 'Get started by creating your first model provider.' }}
+          {{ t('modelProvider.noProvidersDesc') }}
         </p>
         <Button class="mt-6 h-9 rounded-xl px-3.5" @click="handleCreate">
           <Plus class="mr-2 h-4 w-4" />
@@ -205,7 +205,7 @@
                       class="h-8 rounded-lg px-2.5 text-[12px]"
                       @click="openProviderWebsite"
                     >
-                      Get API Key
+                      {{ t('modelProvider.getApiKey') }}
                       <ArrowRight class="ml-1 h-3.5 w-3.5" />
                     </Button>
                     <Button
@@ -308,7 +308,7 @@
                       <div v-if="hasRecommendedModels" class="absolute right-1 top-1">
                         <Select :model-value="''" @update:model-value="handleModelQuickPick">
                           <SelectTrigger class="h-8 w-8 rounded-lg border-border/60 px-0">
-                            <span class="sr-only">Select model</span>
+                            <span class="sr-only">{{ t('modelProvider.quickPickModel') }}</span>
                             <ChevronsUpDown class="h-3.5 w-3.5" />
                           </SelectTrigger>
                           <SelectContent align="end" class="min-w-[220px]">
@@ -747,13 +747,13 @@ const handleVerify = async () => {
     form.supportsMultimodal = Boolean(res?.supports_multimodal)
     form.supportsStructuredOutput = Boolean(res?.supports_structured_output)
     if (form.supportsMultimodal && form.supportsStructuredOutput) {
-      toast.success('连接验证成功，已检测到多模态和结构化输出支持')
+      toast.success(t('modelProvider.connectionVerifiedMultimodalStructured'))
     } else if (form.supportsMultimodal) {
       toast.success(t('modelProvider.connectionVerifiedMultimodal'))
     } else if (form.supportsStructuredOutput) {
-      toast.success('连接验证成功，已检测到结构化输出支持')
+      toast.success(t('modelProvider.connectionVerifiedStructuredOutput'))
     } else {
-      toast.success(t('common.verifySuccess') || '验证成功')
+      toast.success(t('common.verifySuccess'))
     }
 
     capabilityChecked.value = true

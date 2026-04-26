@@ -211,54 +211,23 @@ build_python_sidecar() {
     export PYTHONPATH="$ROOT_DIR:${PYTHONPATH:-}"
     cd "$APP_DIR"
 
-    # Optimization: Exclude unnecessary modules to reduce size
+    # Single source of truth: sage-desktop.spec.
+    # All hidden imports / collect_all / excludes / strip live in the spec.
+    # We just pass mode-dependent runtime flags here.
+    export SAGE_PYI_MODE="$MODE"
+
     local PYI_FLAGS=(
       --noconfirm
-      --onedir
       --log-level=WARN
-      --name sage-desktop
-      --hidden-import=aiosqlite
-      --hidden-import=greenlet
-      --hidden-import=sqlalchemy.dialects.sqlite.aiosqlite
-      # SSL certificates for HTTPS requests
-      --hidden-import=certifi
-      --collect-all=certifi
-      # Task scheduler dependencies
-      --hidden-import=croniter
-      --collect-all=croniter
-      # Scrapling and its dependencies for web fetching
-        --hidden-import=scrapling
-        --hidden-import=scrapling.fetchers
-        --hidden-import=apify_fingerprint_datapoints
-        --hidden-import=browserforge
-        --hidden-import=undetected_playwright
-        --collect-all=scrapling
-        --collect-all=apify_fingerprint_datapoints
-        --collect-all=browserforge
-        --collect-all=undetected_playwright
-        # Exclude browserforge's undetected_playwright injector (incompatible with current version)
-        --exclude-module=browserforge.injectors.undetected_playwright
-      # Exclusions
-      --exclude-module=tkinter
-      --exclude-module=unittest
-      --exclude-module=email.test
-      --exclude-module=test
-      --exclude-module=tests
-      # Note: distutils excluded via hook to avoid conflicts with undetected_playwright
-      --exclude-module=setuptools
-      --exclude-module=xmlrpc
-      # Common large unused libs in standard envs
-      --exclude-module=IPython
-      --exclude-module=notebook
+      --distpath "$DIST_DIR"
+      --workpath "$CACHE_DIR/pyi-work"
     )
 
     if [ "$MODE" = "release" ]; then
-      PYI_FLAGS+=(--strip)
-      PYI_FLAGS+=(--noupx)
-      PYI_FLAGS+=(--clean) # 仅 release 清理缓存
+      PYI_FLAGS+=(--clean)
     fi
 
-    pyinstaller "${PYI_FLAGS[@]}" entry.py
+    pyinstaller "${PYI_FLAGS[@]}" sage-desktop.spec
 
     # Clean up pyinstaller output
     echo "[Sidecar] 正在清理分发文件..."

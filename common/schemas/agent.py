@@ -70,11 +70,13 @@ class AgentConfigDTO(BaseModel):
 class AutoGenAgentRequest(BaseModel):
     agent_description: str
     available_tools: Optional[List[str]] = None
+    language: Optional[str] = None
 
 
 class SystemPromptOptimizeRequest(BaseModel):
     original_prompt: str
     optimization_goal: Optional[str] = None
+    language: Optional[str] = None
 
 
 class AsyncTaskResponse(BaseModel):

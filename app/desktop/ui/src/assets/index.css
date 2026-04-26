@@ -112,6 +112,20 @@
   }
 }
 
+/* radix-vue ScrollAreaViewport injects this rule via runtime <style> tag,
+   but Tauri's CSP (no 'unsafe-inline') blocks the injection in release builds,
+   leaving the native macOS overlay scrollbar visible through the viewport.
+   Declaring it here in a regular stylesheet ensures the native scrollbar is
+   always hidden inside any ScrollArea. */
+[data-radix-scroll-area-viewport] {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+[data-radix-scroll-area-viewport]::-webkit-scrollbar {
+  display: none;
+}
+
 /* Custom Scrollbar Styles - Global */
 /* Use html selector for higher specificity in production builds */
 html {

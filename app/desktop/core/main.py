@@ -282,7 +282,9 @@ def main():
         os.environ["SAGE_SESSIONS_PATH"] = str(sessions_dir)
 
         cfg = init_startup_config(mode="desktop")
-        
+        # Ensures CORSMiddleware uses desktop allowlist even if cfg.app_mode were mis-set.
+        os.environ["SAGE_INTERNAL_DESKTOP_PROCESS"] = "1"
+
         # Get port from environment variable SAGE_PORT, or find a free one if not set
         port_env = os.environ.get("SAGE_PORT")
         if port_env:

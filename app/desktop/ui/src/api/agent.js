@@ -26,6 +26,13 @@ const sleep = (ms, signal) => new Promise((resolve, reject) => {
   }
 })
 
+const resolveRequestLanguage = (language) => {
+  const savedLanguage = language || (typeof localStorage !== 'undefined' ? localStorage.getItem('language') : null)
+  if (['ptBR', 'pt', 'pt-BR'].includes(savedLanguage)) return 'pt'
+  if (['enUS', 'en', 'en-US'].includes(savedLanguage)) return 'en'
+  return 'zh'
+}
+
 const pollAgentTask = async (taskId, config = {}) => {
   const pollInterval = config.pollInterval ?? 1200
 
@@ -117,9 +124,11 @@ export const agentAPI = {
   generateAgentConfig: async (description, selectedTools, config = {}) => {
     let taskId = null
     try {
+      const normalizedLanguage = resolveRequestLanguage()
       const task = await request.post('/api/agent/auto-generate/submit', {
         agent_description: description,
-        available_tools: selectedTools
+        available_tools: selectedTools,
+        language: normalizedLanguage
       }, {
         timeout: 1000 * 30,
         ...config
@@ -153,7 +162,11 @@ export const agentAPI = {
   systemPromptOptimize: async (input, config = {}) => {
     let taskId = null
     try {
-      const task = await request.post(`/api/agent/system-prompt/optimize/submit`, input, {
+      const normalizedLanguage = resolveRequestLanguage()
+      const task = await request.post(`/api/agent/system-prompt/optimize/submit`, {
+        ...input,
+        language: normalizedLanguage
+      }, {
         timeout: 1000 * 30,
         ...config
       })
@@ -179,8 +192,10 @@ export const agentAPI = {
    * @param {string} language - 语言代码 (默认 'zh')
    * @returns {Promise<Object>}
    */
-  getDefaultSystemPrompt: async (language = 'zh') => {
-    return await request.get('/api/agent/template/default_system_prompt', { params: { language } })
+  getDefaultSystemPrompt: async (language = null) => {
+    return await request.get('/api/agent/template/default_system_prompt', {
+      params: { language: resolveRequestLanguage(language) }
+    })
   },
 
   /**
@@ -212,8 +227,7 @@ export const agentAPI = {
    * @returns {Promise<AbilityItem[]>}
    */
   getAgentAbilities: async ({ agentId, sessionId, context = {}, language }) => {
-    const savedLanguage = language || (typeof localStorage !== 'undefined' ? localStorage.getItem('language') : null)
-    const normalizedLanguage = ['enUS', 'en', 'en-US'].includes(savedLanguage) ? 'en' : 'zh'
+    const normalizedLanguage = resolveRequestLanguage(language)
     const data = await request.post('/api/agent/abilities', {
       agent_id: agentId,
       session_id: sessionId,

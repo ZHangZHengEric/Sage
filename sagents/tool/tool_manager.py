@@ -385,10 +385,29 @@ class ToolManager:
             if impl_path.exists():
                 self._discover_import_path(path=str(impl_path), root_package="sagents")
             else:
-                try:
-                    import sagents.tool.impl  # noqa: F401
-                except Exception as e:
-                    logger.warning(f"Failed to import tools in impl package: {e}")
+                # Filesystem path not available (e.g. PyInstaller bundle with PYZ archive).
+                # sagents.tool.impl.__init__ uses lazy __getattr__, so a bare package import
+                # does NOT load submodules and the @tool decorators never run.
+                # Explicitly import every known submodule so the decorators fire.
+                import importlib
+                _impl_modules = [
+                    "sagents.tool.impl.execute_command_tool",
+                    "sagents.tool.impl.file_system_tool",
+                    "sagents.tool.impl.memory_tool",
+                    "sagents.tool.impl.web_fetcher_tool",
+                    "sagents.tool.impl.image_understanding_tool",
+                    "sagents.tool.impl.questionnaire_tool",
+                    "sagents.tool.impl.lint_tool",
+                    "sagents.tool.impl.turn_status_tool",
+                    "sagents.tool.impl.codebase_tool",
+                    "sagents.tool.impl.compress_history_tool",
+                    "sagents.tool.impl.todo_tool",
+                ]
+                for _mod in _impl_modules:
+                    try:
+                        importlib.import_module(_mod)
+                    except Exception as e:
+                        logger.warning(f"Failed to import tool module {_mod}: {e}")
 
         count = 0
         for funcs in _DISCOVERED_TOOLS.values():

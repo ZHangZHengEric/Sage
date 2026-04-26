@@ -44,6 +44,8 @@ export const useLanguageStore = defineStore('app-language', () => {
     const savedLanguage = localStorage.getItem('language')
     if (savedLanguage && ['zhCN', 'enUS'].includes(savedLanguage)) {
       language.value = savedLanguage
+    } else if (!savedLanguage) {
+      localStorage.setItem('language', language.value)
     }
   }
 

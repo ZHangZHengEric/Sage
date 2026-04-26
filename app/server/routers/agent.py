@@ -32,6 +32,25 @@ from loguru import logger
 agent_router = APIRouter(prefix="/api/agent", tags=["Agent"])
 
 
+def _resolve_request_language(http_request: Request, language: Optional[str] = None, default: str = "en") -> str:
+    candidate = (language or "").strip()
+    if not candidate:
+        headers = http_request.headers
+        candidate = (
+            headers.get("x-accept-language")
+            or headers.get("accept-language")
+            or ""
+        ).strip()
+    lowered = candidate.lower()
+    if lowered.startswith("pt"):
+        return "pt"
+    if lowered.startswith("en"):
+        return "en"
+    if lowered.startswith("zh") or lowered.startswith("cn"):
+        return "zh"
+    return default
+
+
 @agent_router.get("/list")
 async def list(http_request: Request):
     """
@@ -49,19 +68,20 @@ async def list(http_request: Request):
 
 
 @agent_router.get("/template/default_system_prompt")
-async def get_default_system_prompt(language: str = "zh"):
+async def get_default_system_prompt(http_request: Request, language: str = "en"):
     """
     获取默认的System Prompt模板（用于创建空白Agent时的初始草稿）
 
     Args:
-        language: 语言代码，默认为zh
+        language: 语言代码，默认为en
 
     Returns:
         StandardResponse: 包含默认System Prompt的内容
     """
     try:
+        resolved_language = _resolve_request_language(http_request, language, default="zh")
         result = await agent_router_service.build_default_system_prompt_response(
-            language=language,
+            language=resolved_language,
         )
         return await Response.succ(data=result["data"], message=result["message"])
     except Exception as e:
@@ -161,10 +181,12 @@ async def auto_generate(request: AutoGenAgentRequest, http_request: Request):
 
     """
     user_id = get_request_user_id(http_request)
+    language = _resolve_request_language(http_request, request.language, default="en")
     result = await agent_router_service.build_auto_generate_response(
         agent_description=request.agent_description,
         available_tools=request.available_tools,
         user_id=user_id,
+        language=language,
     )
     return await Response.succ(data=result["data"], message=result["message"])
 
@@ -172,10 +194,12 @@ async def auto_generate(request: AutoGenAgentRequest, http_request: Request):
 @agent_router.post("/auto-generate/submit")
 async def auto_generate_submit(request: AutoGenAgentRequest, http_request: Request):
     user_id = get_request_user_id(http_request)
+    language = _resolve_request_language(http_request, request.language, default="en")
     result = await agent_router_service.submit_auto_generate_task(
         agent_description=request.agent_description,
         available_tools=request.available_tools,
         user_id=user_id,
+        language=language,
     )
     return await Response.succ(data=result["data"], message=result["message"])
 
@@ -192,10 +216,12 @@ async def optimize(request: SystemPromptOptimizeRequest, http_request: Request):
         StandardResponse: 包含优化后的系统提示词的标准响应
     """
     user_id = get_request_user_id(http_request)
+    language = _resolve_request_language(http_request, request.language, default="en")
     result = await agent_router_service.build_system_prompt_optimize_response(
         original_prompt=request.original_prompt,
         optimization_goal=request.optimization_goal,
         user_id=user_id,
+        language=language,
     )
     return await Response.succ(data=result["data"], message=result["message"])
 
@@ -203,10 +229,12 @@ async def optimize(request: SystemPromptOptimizeRequest, http_request: Request):
 @agent_router.post("/system-prompt/optimize/submit")
 async def optimize_submit(request: SystemPromptOptimizeRequest, http_request: Request):
     user_id = get_request_user_id(http_request)
+    language = _resolve_request_language(http_request, request.language, default="en")
     result = await agent_router_service.submit_system_prompt_optimize_task(
         original_prompt=request.original_prompt,
         optimization_goal=request.optimization_goal,
         user_id=user_id,
+        language=language,
     )
     return await Response.succ(data=result["data"], message=result["message"])
 
@@ -214,11 +242,12 @@ async def optimize_submit(request: SystemPromptOptimizeRequest, http_request: Re
 @agent_router.post("/abilities")
 async def get_agent_abilities(req: AgentAbilitiesRequest, http_request: Request):
     user_id = get_request_user_id(http_request)
+    language = _resolve_request_language(http_request, req.language, default="en")
     result = await agent_router_service.build_agent_abilities_response(
         agent_id=req.agent_id,
         session_id=req.session_id,
         context=req.context,
-        language=req.language or "zh",
+        language=language,
         user_id=user_id,
     )
     return await Response.succ(data=result["data"], message=result["message"])

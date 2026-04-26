@@ -81,7 +81,7 @@ class SimpleAgent(AgentBase):
         """
         return _detect_repeat_pattern_util(signatures, max_period=max_period)
 
-    def _build_self_correction_message(self, pattern: Dict[str, int], language: str = 'zh') -> str:
+    def _build_self_correction_message(self, pattern: Dict[str, int], language: str = 'en') -> str:
         template = PromptManager().get_prompt(
             key='repeat_pattern_self_correction_template',
             agent='common',

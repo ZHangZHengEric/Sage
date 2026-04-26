@@ -632,6 +632,7 @@ async def auto_generate_agent(
     agent_description: str,
     available_tools: Optional[List[str]] = None,
     user_id: str = "",
+    language: str = "en",
 ) -> Dict[str, Any]:
     logger.info(f"开始自动生成Agent: {agent_description}")
     from sagents.tool.tool_manager import get_tool_manager
@@ -653,6 +654,7 @@ async def auto_generate_agent(
         tool_manager=tool_manager_or_proxy,
         llm_client=model_client,
         model=model_name,
+        language=language,
     )
     if not agent_config:
         raise SageHTTPException(
@@ -669,6 +671,7 @@ async def optimize_system_prompt(
     original_prompt: str,
     optimization_goal: Optional[str] = None,
     user_id: str = "",
+    language: str = "en",
 ) -> Dict[str, Any]:
     logger.info("开始优化系统提示词")
     from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
@@ -681,6 +684,7 @@ async def optimize_system_prompt(
         optimization_goal=optimization_goal,
         model=model_name,
         llm_client=model_client,
+        language=language,
     )
 
     if not optimized_prompt:

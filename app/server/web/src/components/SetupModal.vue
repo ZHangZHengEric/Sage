@@ -1,6 +1,6 @@
 <template>
   <Dialog :open="visible" @update:open="handleDialogOpenChange">
-    <DialogContent
+      <DialogContent
       class="sm:max-w-[500px] overflow-hidden"
       :show-close="false"
       @escape-key-down="preventDialogClose"
@@ -8,9 +8,9 @@
       @interact-outside="preventDialogClose"
     >
       <DialogHeader>
-        <DialogTitle>完善配置信息</DialogTitle>
+        <DialogTitle>{{ t('setup.title') }}</DialogTitle>
         <DialogDescription>
-          配置模型提供商以激活 AI 能力。配置完成后，系统将自动为您创建一个默认智能体 (Zavix)，助您快速上手。
+          {{ t('setup.description') }}
         </DialogDescription>
       </DialogHeader>
       
@@ -44,14 +44,14 @@
         <div class="grid gap-2">
           <div class="flex items-center justify-between">
             <Label>{{ t('modelProvider.apiKey') }}</Label>
-            <Button 
-              v-if="currentProvider?.website" 
-              variant="link" 
-              size="sm" 
-              class="h-auto p-0 text-primary" 
-              @click="openProviderWebsite"
-            >
-              Get API Key
+              <Button 
+                v-if="currentProvider?.website" 
+                variant="link" 
+                size="sm" 
+                class="h-auto p-0 text-primary" 
+                @click="openProviderWebsite"
+              >
+              {{ t('modelProvider.getApiKey') }}
               <ArrowRight class="ml-1 w-3 h-3" />
             </Button>
           </div>
@@ -65,14 +65,14 @@
         <div class="grid gap-2">
            <div class="flex items-center justify-between">
              <Label>{{ t('modelProvider.model') }}</Label>
-             <Button 
+              <Button 
                v-if="currentProvider?.model_list_url" 
                variant="link" 
                size="sm" 
                class="h-auto p-0 text-primary" 
                @click="openProviderModelList"
              >
-               查看模型列表
+               {{ t('modelProvider.viewModels') }}
                <ArrowRight class="ml-1 w-3 h-3" />
              </Button>
            </div>
@@ -87,7 +87,7 @@
                 <div class="absolute right-0 top-0 h-full">
                    <Select :model-value="''" @update:model-value="(val) => { form.model = val; handleConfigChange() }">
                       <SelectTrigger class="h-full w-8 px-0 border-l-0 rounded-l-none focus:ring-0">
-                        <span class="sr-only">Select model</span>
+                        <span class="sr-only">{{ t('modelProvider.quickPickModel') }}</span>
                       </SelectTrigger>
                       <SelectContent align="end" class="min-w-[200px]">
                         <SelectItem v-for="m in currentProvider.models" :key="m" :value="m">
@@ -106,7 +106,7 @@
         <div class="flex gap-2">
           <Button type="button" variant="secondary" @click="handleVerify" :disabled="verifying">
             <Loader v-if="verifying" class="mr-2 h-4 w-4 animate-spin" />
-            {{ t('common.verify') || '验证' }}
+            {{ t('common.verify') }}
           </Button>
           <Button @click="handleSubmit" :disabled="submitting">
             <Loader v-if="submitting" class="mr-2 h-4 w-4 animate-spin" />
@@ -287,7 +287,7 @@ const handleVerify = async () => {
   const data = buildProviderPayload()
   
   if (!data.name || !data.base_url || !data.api_keys.length || !data.model) {
-     toast.error(t('common.fillRequired') || '请填写必填项')
+     toast.error(t('common.fillRequired'))
      return
   }
   
@@ -296,9 +296,9 @@ const handleVerify = async () => {
     const result = await modelProviderAPI.verifyModelProvider(data)
     form.supportsMultimodal = Boolean(result?.supports_multimodal)
     form.supportsStructuredOutput = Boolean(result?.supports_structured_output)
-    toast.success(t('common.verifySuccess') || '验证成功')
+    toast.success(t('common.verifySuccess'))
   } catch (error) {
-    toast.error(error.message || '验证失败')
+    toast.error(error.message || t('modelProvider.verifyFailed'))
   } finally {
     verifying.value = false
   }
@@ -331,7 +331,7 @@ const createDefaultAgent = async (providerId) => {
     // 3. Construct agent data
     const agentData = {
       name: 'Zavix',
-      description: '默认智能体',
+      description: t('setup.defaultAgentDescription'),
       maxLoopCount: 100,
       memoryType: "session",
       agentMode: "fibre",
@@ -360,11 +360,11 @@ const createDefaultAgent = async (providerId) => {
     
     // 4. Create Agent
     await agentAPI.createAgent(agentData)
-    toast.success('已自动创建默认智能体 Zavix')
+    toast.success(t('setup.defaultAgentCreated', { name: 'Zavix' }))
     
   } catch (error) {
     console.error('Failed to create default agent:', error)
-    toast.error('创建默认智能体失败: ' + error.message)
+    toast.error(t('setup.defaultAgentCreateError', { message: error.message || error }))
   }
 }
 
@@ -375,7 +375,7 @@ const handleSubmit = async () => {
   }
   
   if (!data.name || !data.base_url || !data.api_keys.length || !data.model) {
-     toast.error(t('common.fillRequired') || '请填写必填项')
+     toast.error(t('common.fillRequired'))
      return
   }
 
@@ -386,7 +386,7 @@ const handleSubmit = async () => {
     emit('close')
     await createDefaultAgent(res?.id)
   } catch (error) {
-    toast.error(error.message)
+    toast.error(error.message || t('modelProvider.verifyFailed'))
   } finally {
     submitting.value = false
   }

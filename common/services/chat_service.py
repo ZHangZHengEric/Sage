@@ -133,6 +133,7 @@ async def optimize_user_input(
     session_id: str = "",
     agent_id: str = "",
     user_id: str = "",
+    language: str = "en",
 ) -> Dict[str, Any]:
     logger.info("开始优化用户输入")
     optimizer = UserInputOptimizer()
@@ -150,6 +151,7 @@ async def optimize_user_input(
             history_messages=history_messages,
             llm_client=model_client,
             model=model_name,
+            language=language,
         )
 
         if result.get("success") is True and result.get("status") != "fallback":
@@ -184,6 +186,7 @@ async def optimize_user_input_stream(
     session_id: str = "",
     agent_id: str = "",
     user_id: str = "",
+    language: str = "en",
 ) -> AsyncGenerator[Dict[str, Any], None]:
     logger.info("开始流式优化用户输入")
     optimizer = UserInputOptimizer()
@@ -215,6 +218,7 @@ async def optimize_user_input_stream(
                 history_messages=history_messages,
                 llm_client=model_client,
                 model=model_name,
+                language=language,
             ):
                 optimized_chunks.append(delta)
                 yield {
