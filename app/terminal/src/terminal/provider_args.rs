@@ -6,6 +6,21 @@ pub(crate) fn parse_provider_mutation(
     fields: &[String],
     require_core_fields: bool,
 ) -> Result<ProviderMutation> {
+    parse_provider_mutation_with_options(fields, require_core_fields, false)
+}
+
+pub(crate) fn parse_provider_mutation_allow_empty(
+    fields: &[String],
+    require_core_fields: bool,
+) -> Result<ProviderMutation> {
+    parse_provider_mutation_with_options(fields, require_core_fields, true)
+}
+
+fn parse_provider_mutation_with_options(
+    fields: &[String],
+    require_core_fields: bool,
+    allow_empty: bool,
+) -> Result<ProviderMutation> {
     let mut mutation = ProviderMutation {
         name: None,
         base_url: None,
@@ -60,7 +75,8 @@ pub(crate) fn parse_provider_mutation(
         }
     }
 
-    if !require_core_fields
+    if !allow_empty
+        && !require_core_fields
         && mutation.name.is_none()
         && mutation.model.is_none()
         && mutation.base_url.is_none()

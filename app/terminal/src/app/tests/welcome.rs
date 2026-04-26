@@ -89,3 +89,62 @@ fn help_command_topic_opens_detail_overlay() {
         .flat_map(|section| section.items.iter())
         .any(|item| item.value.contains("/provider create")));
 }
+
+#[test]
+fn doctor_command_returns_doctor_action() {
+    let mut app = App::new();
+    app.input = "/doctor probe-provider".to_string();
+    app.input_cursor = app.input.len();
+
+    let action = app.submit_input();
+    assert!(matches!(
+        action,
+        super::super::SubmitAction::ShowDoctor {
+            probe_provider: true
+        }
+    ));
+}
+
+#[test]
+fn config_init_command_returns_init_action() {
+    let mut app = App::new();
+    app.input = "/config init /tmp/demo.env --force".to_string();
+    app.input_cursor = app.input.len();
+
+    let action = app.submit_input();
+    assert!(matches!(
+        action,
+        super::super::SubmitAction::InitConfig {
+            path: Some(path),
+            force: true
+        } if path == "/tmp/demo.env"
+    ));
+}
+
+#[test]
+fn provider_verify_command_returns_verify_action() {
+    let mut app = App::new();
+    app.input = "/provider verify model=demo-chat".to_string();
+    app.input_cursor = app.input.len();
+
+    let action = app.submit_input();
+    assert!(matches!(
+        action,
+        super::super::SubmitAction::VerifyProvider(fields)
+            if fields == vec!["model=demo-chat".to_string()]
+    ));
+}
+
+#[test]
+fn sessions_inspect_command_returns_show_session_action() {
+    let mut app = App::new();
+    app.input = "/sessions inspect latest".to_string();
+    app.input_cursor = app.input.len();
+
+    let action = app.submit_input();
+    assert!(matches!(
+        action,
+        super::super::SubmitAction::ShowSession(session_id)
+            if session_id == "latest"
+    ));
+}

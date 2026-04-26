@@ -30,9 +30,12 @@ pub(super) fn handle_submit_action(
         SubmitAction::EnableSkill(skill) => skills::enable_skill(app, skill),
         SubmitAction::DisableSkill(skill) => skills::disable_skill(app, &skill),
         SubmitAction::ClearSkills => skills::clear_skills(app),
+        SubmitAction::ShowDoctor { probe_provider } => model::show_doctor(app, probe_provider),
         SubmitAction::ShowConfig => model::show_config(app),
+        SubmitAction::InitConfig { path, force } => model::init_config(app, path.as_deref(), force),
         SubmitAction::ListProviders => providers::list_providers(app),
         SubmitAction::ShowProvider(provider_id) => providers::show_provider(app, &provider_id),
+        SubmitAction::VerifyProvider(fields) => providers::verify_provider(app, &fields),
         SubmitAction::SetDefaultProvider(provider_id) => {
             providers::set_default_provider(app, backend, &provider_id)
         }

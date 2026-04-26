@@ -1,7 +1,10 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::common::{accent_style, card_inner_width, subtle_body_style, truncate_middle, with_border_with_inner_width};
+use super::common::{
+    accent_style, card_inner_width, subtle_body_style, truncate_middle,
+    with_border_with_inner_width,
+};
 
 const SESSION_HEADER_MAX_INNER_WIDTH: usize = 56;
 

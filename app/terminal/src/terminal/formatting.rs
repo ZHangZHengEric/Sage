@@ -1,4 +1,8 @@
-use crate::backend::{ConfigInfo, ProviderInfo, SessionDetail, SkillInfo};
+use serde_json::Value;
+
+use crate::backend::{
+    ConfigInfo, ConfigInitInfo, ProviderInfo, ProviderVerifyInfo, SessionDetail, SkillInfo,
+};
 
 pub(crate) fn format_session_detail(detail: &SessionDetail) -> String {
     let mut lines = vec![format!(
@@ -67,6 +71,21 @@ pub(crate) fn format_config(config: &ConfigInfo, selected_model: &Option<String>
     )
 }
 
+pub(crate) fn format_config_init(result: &ConfigInitInfo) -> String {
+    let mut lines = vec![
+        "config initialized".to_string(),
+        format!("path: {}", result.path),
+        format!("template: {}", result.template),
+        format!("overwritten: {}", result.overwritten),
+    ];
+    if !result.next_steps.is_empty() {
+        lines.push(String::new());
+        lines.push("next steps".to_string());
+        lines.extend(result.next_steps.iter().map(|step| format!("- {step}")));
+    }
+    lines.join("\n")
+}
+
 pub(crate) fn format_providers(providers: &[ProviderInfo]) -> String {
     if providers.is_empty() {
         return "providers: none\n\nTip: provider list is empty in the current CLI state."
@@ -109,4 +128,79 @@ pub(crate) fn format_provider_detail(provider: &ProviderInfo) -> String {
             &provider.api_key_preview
         }
     )
+}
+
+pub(crate) fn format_provider_verify(info: &ProviderVerifyInfo) -> String {
+    let mut lines = vec![
+        format!("status: {}", info.status),
+        format!("message: {}", info.message),
+    ];
+    if !info.sources.is_empty() {
+        lines.push(String::new());
+        lines.push("sources".to_string());
+        for (key, value) in &info.sources {
+            lines.push(format!("{key}: {value}"));
+        }
+    }
+    lines.push(String::new());
+    lines.push(format_provider_detail(&info.provider));
+    lines.join("\n")
+}
+
+pub(crate) fn format_doctor_info(info: &Value) -> String {
+    let mut lines = Vec::new();
+    push_json_lines(&mut lines, None, info, 0);
+    lines.join("\n")
+}
+
+fn push_json_lines(lines: &mut Vec<String>, key: Option<&str>, value: &Value, indent: usize) {
+    let prefix = " ".repeat(indent);
+    match value {
+        Value::Object(map) => {
+            if let Some(key) = key {
+                lines.push(format!("{prefix}{key}:"));
+            }
+            for (child_key, child_value) in map {
+                push_json_lines(lines, Some(child_key), child_value, indent + 2);
+            }
+        }
+        Value::Array(items) => {
+            if let Some(key) = key {
+                lines.push(format!("{prefix}{key}:"));
+            }
+            if items.is_empty() {
+                lines.push(format!("{prefix}  (none)"));
+                return;
+            }
+            for item in items {
+                match item {
+                    Value::Object(_) | Value::Array(_) => {
+                        lines.push(format!("{prefix}  -"));
+                        push_json_lines(lines, None, item, indent + 4);
+                    }
+                    _ => lines.push(format!("{prefix}  - {}", scalar_to_string(item))),
+                }
+            }
+        }
+        _ => {
+            let rendered = scalar_to_string(value);
+            if let Some(key) = key {
+                lines.push(format!("{prefix}{key}: {rendered}"));
+            } else {
+                lines.push(format!("{prefix}{rendered}"));
+            }
+        }
+    }
+}
+
+fn scalar_to_string(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => value.clone(),
+        Value::Array(_) | Value::Object(_) => {
+            unreachable!("composite value passed to scalar renderer")
+        }
+    }
 }

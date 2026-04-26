@@ -30,7 +30,10 @@ pub(super) fn open_session_picker(
             );
         }
         Err(err) => {
-            app.push_message(MessageKind::System, format!("failed to load sessions: {err}"));
+            app.push_message(
+                MessageKind::System,
+                format!("failed to load sessions: {err}"),
+            );
             app.set_status(format!("error  {}", app.session_id));
         }
     }
@@ -71,7 +74,13 @@ pub(super) fn resume_session(app: &mut App, session_id: &str) -> Result<bool> {
 }
 
 pub(super) fn show_session(app: &mut App, session_id: &str) -> Result<bool> {
-    match inspect_session(session_id, &app.user_id) {
+    let detail = if session_id == "latest" {
+        inspect_latest_session(&app.user_id)
+    } else {
+        inspect_session(session_id, &app.user_id)
+    };
+
+    match detail {
         Ok(Some(detail)) => {
             app.push_message(MessageKind::Tool, format_session_detail(&detail));
             app.set_status(format!("session  {}", app.session_id));

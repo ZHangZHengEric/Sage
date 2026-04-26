@@ -6,7 +6,7 @@ pub(crate) struct SlashCommandDef {
     pub(crate) example: &'static str,
 }
 
-const COMMANDS: [SlashCommandDef; 15] = [
+const COMMANDS: [SlashCommandDef; 16] = [
     SlashCommandDef {
         command: "/help",
         description: "Show available commands",
@@ -28,8 +28,8 @@ const COMMANDS: [SlashCommandDef; 15] = [
     SlashCommandDef {
         command: "/sessions",
         description: "List recent local sessions",
-        usage: "/sessions [positive_limit]",
-        example: "/sessions 20",
+        usage: "/sessions [positive_limit] | /sessions inspect <latest|session_id>",
+        example: "/sessions inspect latest",
     },
     SlashCommandDef {
         command: "/resume",
@@ -52,8 +52,14 @@ const COMMANDS: [SlashCommandDef; 15] = [
     SlashCommandDef {
         command: "/config",
         description: "Show effective CLI config",
-        usage: "/config",
-        example: "/config",
+        usage: "/config | /config init [path] [--force]",
+        example: "/config init --force",
+    },
+    SlashCommandDef {
+        command: "/doctor",
+        description: "Show CLI/runtime diagnostics",
+        usage: "/doctor [probe-provider]",
+        example: "/doctor probe-provider",
     },
     SlashCommandDef {
         command: "/providers",
@@ -64,7 +70,7 @@ const COMMANDS: [SlashCommandDef; 15] = [
     SlashCommandDef {
         command: "/provider",
         description: "Inspect or switch the default provider",
-        usage: "/provider | /provider help | /provider inspect <id> | /provider default <id> | /provider create key=value... | /provider update <id> key=value... | /provider delete <id>",
+        usage: "/provider | /provider help | /provider inspect <id> | /provider verify [key=value...] | /provider default <id> | /provider create key=value... | /provider update <id> key=value... | /provider delete <id>",
         example: "/provider create name=openai model=gpt-5 base=https://api.openai.com/v1",
     },
     SlashCommandDef {

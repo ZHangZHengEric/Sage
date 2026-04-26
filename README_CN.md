@@ -207,6 +207,18 @@ cargo run --quiet --offline --manifest-path app/terminal/Cargo.toml
 
 ```bash
 sage-terminal
+sage-terminal run "inspect this repo"
+sage-terminal chat "hello"
+sage-terminal config init
+sage-terminal config init /tmp/.sage_env --force
+sage-terminal doctor
+sage-terminal doctor probe-provider
+sage-terminal provider verify
+sage-terminal provider verify model=deepseek-chat base=https://api.deepseek.com/v1
+sage-terminal sessions
+sage-terminal sessions 25
+sage-terminal sessions inspect latest
+sage-terminal sessions inspect <session_id>
 sage-terminal resume
 sage-terminal resume latest
 sage-terminal resume <session_id>
