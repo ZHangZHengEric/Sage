@@ -96,6 +96,14 @@ const hasVisibleMultimodalContent = (multimodalContent) => {
   })
 }
 
+const normalizeResponseLanguage = (language) => {
+  const value = String(language || '').trim()
+  if (!value || ['enUS', 'en', 'en-US'].includes(value)) return 'en-US'
+  if (['zhCN', 'zh', 'zh-CN'].includes(value)) return 'zh-CN'
+  if (['ptBR', 'pt', 'pt-BR'].includes(value)) return 'pt-BR'
+  return 'en-US'
+}
+
 export const useChatStream = ({
   chatAPI,
   toast,
@@ -123,7 +131,8 @@ export const useChatStream = ({
   clearCurrentStreamViewState,
   loadConversationMessages,
   isHistoryLoading,
-  removeSessionFromCache
+  removeSessionFromCache,
+  language
 }) => {
   const markCompletedAndCleanupCurrentSession = (sessionId) => {
     updateActiveSession(sessionId, false, null, null, true)
@@ -294,7 +303,10 @@ export const useChatStream = ({
         agent_mode: config.agentMode,
         more_suggest: config.moreSuggest,
         max_loop_count: config.maxLoopCount,
-        agent_id: selectedAgent.id
+        agent_id: selectedAgent.id,
+        system_context: {
+          response_language: normalizeResponseLanguage(language?.value)
+        }
       }
       if (config.subAgentSelectionMode === 'manual') {
         requestBody.available_sub_agent_ids = Array.isArray(config.availableSubAgentIds) ? config.availableSubAgentIds : []
@@ -357,7 +369,10 @@ export const useChatStream = ({
         agent_mode: config?.agentMode,
         more_suggest: config?.moreSuggest,
         max_loop_count: config?.maxLoopCount,
-        agent_id: selectedAgent?.id
+        agent_id: selectedAgent?.id,
+        system_context: {
+          response_language: normalizeResponseLanguage(language?.value)
+        }
       }
       if (config?.subAgentSelectionMode === 'manual') {
         requestBody.available_sub_agent_ids = Array.isArray(config?.availableSubAgentIds) ? config.availableSubAgentIds : []

@@ -59,8 +59,11 @@ class Request {
             // 从本地存储获取语言（Pinia store 会同步写入 localStorage）
             const savedLanguage = (typeof localStorage !== 'undefined') ? localStorage.getItem('language') : null
             const preferEn = savedLanguage === 'enUS' || savedLanguage === 'en' || savedLanguage === 'en-US'
-            const acceptLanguage = preferEn ? 'en-US,en;q=0.9' : 'zh-CN,zh;q=0.9'
-            const xAcceptLanguage = preferEn ? 'en' : 'zh'
+            const preferPt = savedLanguage === 'ptBR' || savedLanguage === 'pt' || savedLanguage === 'pt-BR'
+            const acceptLanguage = preferPt
+                ? 'pt-BR,pt;q=0.9'
+                : (preferEn ? 'en-US,en;q=0.9' : 'zh-CN,zh;q=0.9')
+            const xAcceptLanguage = preferPt ? 'pt' : (preferEn ? 'en' : 'zh')
             const headers = {
                 'Accept': 'application/json, text/plain, */*',
                 'Accept-Language': acceptLanguage,

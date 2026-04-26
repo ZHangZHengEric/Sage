@@ -8,7 +8,11 @@ export const knowledgeBaseAPI = {
 
   // 添加知识库
   addKnowledgeBase: async ({ name, type, intro = '', language = '' }) => {
-    return await request.post('/api/knowledge-base/add', { name, type, intro, language })
+    const savedLanguage = language || (typeof localStorage !== 'undefined' ? localStorage.getItem('language') : null)
+    const normalizedLanguage = ['ptBR', 'pt', 'pt-BR'].includes(savedLanguage)
+      ? 'pt'
+      : (['enUS', 'en', 'en-US'].includes(savedLanguage) ? 'en' : 'zh')
+    return await request.post('/api/knowledge-base/add', { name, type, intro, language: normalizedLanguage })
   },
 
   // 获取单个知识库详情

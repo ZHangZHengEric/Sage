@@ -8,6 +8,7 @@ Agent指令管理模块
 
 # 显式导入所有子模块，确保 PyInstaller 能打包它们
 from . import agent_base_prompts
+from . import common_util_prompts
 from . import fibre_agent_prompts
 from . import memory_extraction_prompts
 from . import memory_recall_prompts

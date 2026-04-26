@@ -620,7 +620,7 @@ class SessionContext:
             f"Please save files in the pre-created folders: {', '.join(common_dirs)} and use absolute paths; avoid creating extra directories in the root."
         )
         # 设置响应语言
-        self.system_context['response_language'] = self.system_context.get('response_language', "zh-CN(简体中文)")
+        self.system_context['response_language'] = self.system_context.get('response_language', "en-US")
 
     def _load_persisted_messages(self):
         """
@@ -859,7 +859,7 @@ class SessionContext:
             for alias in aliases:
                 if alias in response_language:
                     return canonical_lang
-        return 'zh'
+        return 'en'
 
     def get_language(self) -> str:
         """获取当前会话的语言设置
@@ -868,11 +868,10 @@ class SessionContext:
         如果包含'zh'或'中文'则返回'zh'，否则返回'en'
 
         Returns:
-            str: 'zh' 或 'en'
+            str: 'zh'、'en' 或 'pt'
         """
         response_language = self.system_context.get('response_language')
-        # return 'zh' if 'zh' in response_language or '中文' in response_language else 'en'
-        return self.match_language(str(response_language or 'zh'))
+        return self.match_language(str(response_language or 'en'))
 
     def _normalize_external_paths(self, external_paths: Any) -> List[str]:
         if external_paths is None:
