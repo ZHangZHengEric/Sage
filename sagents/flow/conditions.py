@@ -66,6 +66,7 @@ def check_self_check_should_retry(session_context, session=None) -> bool:
 @ConditionRegistry.register("need_summary")
 def check_need_summary(session_context, session=None) -> bool:
     """检查是否需要总结（例如最后一条消息是工具调用）"""
+    import json
     from sagents.context.messages.message import MessageChunk, MessageRole
     if not session_context.message_manager.messages:
         return False
@@ -75,7 +76,23 @@ def check_need_summary(session_context, session=None) -> bool:
     
     # 如果强制总结开启，或者最后是工具调用，则需要总结
     force_summary = session_context.audit_status.get("force_summary", False)
-    return force_summary or last_msg_role == MessageRole.TOOL.value
+    if not (force_summary or last_msg_role == MessageRole.TOOL.value):
+        return False
+
+    # turn_status 是协议性工具而非任务执行工具，调用前模型已输出自然语言说明，
+    # 无需再次触发 TaskSummaryAgent，否则会在 need_user_input/blocked/task_done
+    # 之后多余地生成一条 final_answer。force_summary=True 时不受此限制。
+    if last_msg_role == MessageRole.TOOL.value and not force_summary:
+        content = last_msg.content if isinstance(last_msg, MessageChunk) else last_msg.get("content", "")
+        if isinstance(content, str):
+            try:
+                content_dict = json.loads(content)
+                if isinstance(content_dict, dict) and "turn_status" in content_dict:
+                    return False
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    return True
 
 @ConditionRegistry.register("task_not_completed")
 def check_task_not_completed(session_context, session=None) -> bool:

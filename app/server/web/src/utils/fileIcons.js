@@ -125,6 +125,8 @@ export function getFileType(ext) {
   const typeMap = {
     'pdf': 'pdf',
     'png': 'image', 'jpg': 'image', 'jpeg': 'image', 'gif': 'image', 'webp': 'image', 'svg': 'image', 'ico': 'image', 'bmp': 'image',
+    'mp4': 'video', 'webm': 'video', 'mov': 'video', 'mkv': 'video', 'avi': 'video', 'flv': 'video', 'm4v': 'video', 'ogv': 'video',
+    'mp3': 'audio', 'wav': 'audio', 'ogg': 'audio', 'm4a': 'audio', 'aac': 'audio', 'flac': 'audio',
     'html': 'html', 'htm': 'html',
     'md': 'markdown', 'markdown': 'markdown',
     'excalidraw': 'excalidraw',
@@ -183,6 +185,8 @@ export function getFileTypeLabel(ext, officeType = '') {
   const labels = {
     'pdf': 'PDF',
     'image': '图片',
+    'video': '视频',
+    'audio': '音频',
     'html': 'HTML',
     'markdown': 'Markdown',
     'excalidraw': 'Excalidraw',

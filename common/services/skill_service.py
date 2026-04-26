@@ -192,17 +192,45 @@ def _validate_skill_content(skill_name: str, content: str) -> None:
         raise SageHTTPException(status_code=500 if _is_desktop_mode() else 400, detail=detail_msg)
 
 
+def _skill_name_to_dir(name: str) -> str:
+    """将 SKILL.md 的 name 字段规范化为合法目录名。
+
+    只保留字母、数字、连字符、下划线，空格转连字符，去掉其他特殊字符。
+    """
+    import re
+    name = name.strip().replace(" ", "-")
+    name = re.sub(r"[^\w\-]", "", name)
+    return name or "skill"
+
+
 def _extract_skill_from_zip(
     temp_extract_dir: str,
     original_filename: str,
 ) -> Tuple[Optional[str], Optional[str]]:
+    """从解压目录中找到技能结构，并以 SKILL.md 的 name 字段作为目录名返回。
+
+    优先用 SKILL.md 中的 name 字段命名目录，避免 zip 文件名/内部子目录名与
+    SKILL.md name 不一致导致后续路径查找失败。
+    """
+    def _dir_name_from_skill_md(skill_md_path: str, fallback: str) -> str:
+        name = _read_skill_name_from_md(skill_md_path)
+        if name:
+            normalized = _skill_name_to_dir(name)
+            if normalized:
+                return normalized
+        return fallback
+
     if os.path.exists(os.path.join(temp_extract_dir, "SKILL.md")):
-        return os.path.splitext(original_filename)[0], temp_extract_dir
+        fallback = os.path.splitext(original_filename)[0]
+        dir_name = _dir_name_from_skill_md(os.path.join(temp_extract_dir, "SKILL.md"), fallback)
+        return dir_name, temp_extract_dir
 
     for item in os.listdir(temp_extract_dir):
         item_path = os.path.join(temp_extract_dir, item)
         if os.path.isdir(item_path) and os.path.exists(os.path.join(item_path, "SKILL.md")):
-            return item, item_path
+            dir_name = _dir_name_from_skill_md(os.path.join(item_path, "SKILL.md"), item)
+            return dir_name, item_path
+
     return None, None
 
 
@@ -608,13 +636,34 @@ def _find_source_skill_path(
     agent_user_id: str,
     cfg: config.StartupConfig,
 ) -> Optional[str]:
-    """在用户技能和系统技能中查找源技能路径（用户优先）。"""
+    """在用户技能和系统技能中查找源技能路径（用户优先）。
+
+    通过 SkillManager 按 SKILL.md name 查找，避免目录名与 name 不一致的问题。
+    """
     if agent_user_id and os.path.exists(cfg.user_dir):
-        user_skill_path = os.path.join(cfg.user_dir, agent_user_id, "skills", skill_name)
-        if os.path.isdir(user_skill_path):
-            return user_skill_path
+        user_skills_path = os.path.join(cfg.user_dir, agent_user_id, "skills")
+        if os.path.isdir(user_skills_path):
+            try:
+                tm_user = SkillManager(skill_dirs=[user_skills_path], isolated=True)
+                skill_info = _get_skill_info_safe(tm_user, skill_name)
+                if skill_info:
+                    return skill_info.path
+            except Exception as e:
+                logger.warning(f"_find_source_skill_path: SkillManager 查找用户技能失败: {e}")
+        # Fallback: 直接路径匹配
+        direct_path = os.path.join(cfg.user_dir, agent_user_id, "skills", skill_name)
+        if os.path.isdir(direct_path):
+            return direct_path
 
     if os.path.exists(cfg.skill_dir):
+        try:
+            tm_sys = SkillManager(skill_dirs=[cfg.skill_dir], isolated=True)
+            skill_info = _get_skill_info_safe(tm_sys, skill_name)
+            if skill_info:
+                return skill_info.path
+        except Exception as e:
+            logger.warning(f"_find_source_skill_path: SkillManager 查找系统技能失败: {e}")
+        # Fallback: 直接路径匹配
         system_skill_path = os.path.join(cfg.skill_dir, skill_name)
         if os.path.isdir(system_skill_path):
             return system_skill_path
@@ -914,19 +963,43 @@ async def sync_skill_to_agent(
     source_skill_path = None
     source_dimension = None
 
-    # 先查找用户技能
+    # 先查找用户技能：用 SkillManager 按 SKILL.md name 查找，避免目录名与 name 不一致的问题
     if os.path.exists(user_dir) and agent_user_id:
-        user_skill_path = os.path.join(user_dir, agent_user_id, "skills", skill_name)
-        if os.path.isdir(user_skill_path):
-            source_skill_path = user_skill_path
-            source_dimension = "user"
+        user_skills_path = os.path.join(user_dir, agent_user_id, "skills")
+        if os.path.isdir(user_skills_path):
+            try:
+                tm_user = SkillManager(skill_dirs=[user_skills_path], isolated=True)
+                user_skill_info = _get_skill_info_safe(tm_user, skill_name)
+                if user_skill_info:
+                    source_skill_path = user_skill_info.path
+                    source_dimension = "user"
+                    logger.info(f"找到用户技能 '{skill_name}' 路径: {source_skill_path}")
+            except Exception as e:
+                logger.warning(f"通过 SkillManager 查找用户技能失败: {e}")
+        # Fallback: 直接路径匹配（目录名与 skill_name 一致时）
+        if source_skill_path is None:
+            direct_path = os.path.join(user_dir, agent_user_id, "skills", skill_name)
+            if os.path.isdir(direct_path):
+                source_skill_path = direct_path
+                source_dimension = "user"
 
     # 再查找系统技能
     if source_skill_path is None and os.path.exists(skill_dir):
-        system_skill_path = os.path.join(skill_dir, skill_name)
-        if os.path.isdir(system_skill_path):
-            source_skill_path = system_skill_path
-            source_dimension = "system"
+        try:
+            tm_sys = SkillManager(skill_dirs=[skill_dir], isolated=True)
+            sys_skill_info = _get_skill_info_safe(tm_sys, skill_name)
+            if sys_skill_info:
+                source_skill_path = sys_skill_info.path
+                source_dimension = "system"
+                logger.info(f"找到系统技能 '{skill_name}' 路径: {source_skill_path}")
+        except Exception as e:
+            logger.warning(f"通过 SkillManager 查找系统技能失败: {e}")
+        # Fallback: 直接路径匹配
+        if source_skill_path is None:
+            system_skill_path = os.path.join(skill_dir, skill_name)
+            if os.path.isdir(system_skill_path):
+                source_skill_path = system_skill_path
+                source_dimension = "system"
 
     if source_skill_path is None:
         raise SageHTTPException(detail=f"技能 '{skill_name}' 在技能广场中不存在")

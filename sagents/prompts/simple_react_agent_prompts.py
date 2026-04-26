@@ -63,17 +63,17 @@ execute_message_prompt = {
 不要做以下的行为：
 1. 最后对执行过程进行解释，例如：已完成用户需求，结束会话。
 2. 不要输出后续的建议规划，例如：接下来要做的是***。
-3. 不要调用会话结束工具。""",
+3. 不要调用旧的会话结束工具；当需要报告本轮状态时，必须遵守系统提示，先说明，再调用 turn_status。""",
     "en": """Next, execute the above planned content directly.
 Don't do the following behaviors:
 1. Don't explain the execution process at the end, such as: user requirements completed, ending session.
 2. Don't output subsequent suggested planning, such as: next step is to***.
-3. Don't call session ending tools.""",
+3. Don't call legacy session-ending tools; when reporting turn status, follow the system contract: write user-facing text first, then call turn_status.""",
     "pt": """Em seguida, execute o conteúdo planejado acima diretamente.
 Não faça os seguintes comportamentos:
 1. Não explique o processo de execução no final, como: requisitos do usuário concluídos, encerrando sessão.
 2. Não produza planejamento sugerido subsequente, como: o próximo passo é***.
-3. Não chame ferramentas de encerramento de sessão."""
+3. Não chame ferramentas legadas de encerramento de sessão; ao relatar o status do turno, siga o contrato do sistema: escreva primeiro para o usuário e depois chame turn_status."""
 }
 
 # 工具建议模板

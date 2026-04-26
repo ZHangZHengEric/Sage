@@ -1,7 +1,23 @@
 <template>
   <div v-if="shouldRenderMessage" class="flex flex-col gap-1 mb-1">
+    <!-- 循环熔断消息 -->
+    <div v-if="isLoopBreakMessage" class="flex flex-row gap-4 px-4">
+      <div v-if="showAssistantAvatar" class="flex-none">
+        <MessageAvatar messageType="loop_break" role="assistant" :agentId="agentId" />
+      </div>
+      <div v-else class="flex-none w-8" />
+      <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
+        <div class="mb-0.5 ml-1 text-xs font-medium text-amber-500/80">
+          ⚠ {{ getLabel({ role: 'assistant', type: 'loop_break' }) }}
+        </div>
+        <div class="bg-amber-500/8 text-amber-700 dark:text-amber-400 border border-amber-400/20 rounded-[20px] rounded-tl-[4px] px-4 py-2.5 shadow-sm overflow-hidden break-words w-full">
+          <div class="text-sm leading-6 font-medium">{{ message.content }}</div>
+        </div>
+      </div>
+    </div>
+
     <!-- 错误消息 -->
-    <div v-if="isErrorMessage" class="flex flex-row gap-4 px-4">
+    <div v-else-if="isErrorMessage" class="flex flex-row gap-4 px-4">
       <div v-if="showAssistantAvatar" class="flex-none">
         <MessageAvatar messageType="error" role="assistant" :agentId="agentId" />
       </div>
@@ -432,6 +448,10 @@ const isStreaming = computed(() => {
   return props.isLoading && props.messageIndex === props.messages.length - 1
 })
 
+const isLoopBreakMessage = computed(() => {
+  return props.message.type === 'loop_break' || props.message.message_type === 'loop_break'
+})
+
 const isErrorMessage = computed(() => {
   return props.message.type === 'error' || props.message.message_type === 'error'
 })
@@ -445,7 +465,7 @@ const tokenUsageData = computed(() => {
 })
 
 // 协议性内置工具：仅作为 agent 控制信号，不在对话中渲染（数据仍保留在 message 内）
-const HIDDEN_TOOL_NAMES = new Set(['finish_turn'])
+const HIDDEN_TOOL_NAMES = new Set(['turn_status'])
 
 const visibleToolCalls = computed(() => {
   if (!props.message.tool_calls || !Array.isArray(props.message.tool_calls)) return []

@@ -79,7 +79,7 @@ ref: env_vars
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SAGE_FINISH_TURN_TOOL_ENABLED` | `true` | Inject the `finish_turn` tool to give the LLM an explicit stop signal |
+| `SAGE_AGENT_STATUS_PROTOCOL_ENABLED` | `true` | Enable the agent turn-status protocol (inject `turn_status` and require the LLM to report status explicitly) |
 | `SAGE_CLI_MAX_LOOP_COUNT` | — | Max loops per CLI turn |
 | `SAGE_SPLIT_SYSTEM` | `true` | Split the system message into stable / semi_stable / volatile segments to maximise prompt-cache hit rate |
 | `SAGE_STABLE_TOOLS_ORDER` | `true` | Sort the `tools` field by function name to stabilise the cache key |

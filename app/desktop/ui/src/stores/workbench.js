@@ -405,8 +405,8 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     })
 
     // 处理工具调用
-    // 协议性内置工具（如 finish_turn）只是 agent 控制信号，不进入工作台 timeline。
-    const HIDDEN_WORKBENCH_TOOL_NAMES = new Set(['finish_turn'])
+    // 协议性内置工具（如 turn_status）只是 agent 控制信号，不进入工作台 timeline。
+    const HIDDEN_WORKBENCH_TOOL_NAMES = new Set(['turn_status'])
     if (message.tool_calls && message.tool_calls.length > 0) {
       message.tool_calls.forEach((toolCall, idx) => {
         // 跳过无效的 toolCall

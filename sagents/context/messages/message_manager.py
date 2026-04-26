@@ -962,7 +962,7 @@ class MessageManager:
         return groups
 
     @staticmethod
-    def compress_messages(messages: List[MessageChunk], budget_limit: int, time_limit_hours: float = 24.0) -> List[MessageChunk]:
+    def compress_messages(messages: List[MessageChunk], budget_limit: int, time_limit_hours: float = 24.0, recent_messages_count: int = 0) -> List[MessageChunk]:
         """
         根据预算限制压缩消息列表（分层压缩策略）。
 
@@ -970,7 +970,8 @@ class MessageManager:
         Level 0 (保护区):
             - System Message: 永久保留，不做任何处理。
             - User Message Content: User 消息的内容在 Level 1/2 阶段不被修改（受保护内容）。
-            - Recent Messages (最近消息): 从后往前计算，累积 Token 占用不超过总预算 20% 的连续消息组，受到完全保护（不压缩、不丢弃）。
+            - Recent Messages (最近消息): 强制保护消息列表末尾的 recent_messages_count 条消息，
+              不论其 Token 大小，始终不压缩、不截断。默认保护最近 5 条消息。
 
         Level 0.5 (老化策略):
             - 规则: 超过 time_limit_hours (默认24小时) 的非保护区消息。
@@ -989,6 +990,7 @@ class MessageManager:
             messages: 原始消息列表。
             budget_limit: 预算限制 (Token 数)。
             time_limit_hours: 老化时间阈值 (小时)，默认 24.0。
+            recent_messages_count: 末尾强制保护的消息条数，默认 5。设为 0 则不强制保护。
 
         Returns:
             List[MessageChunk]: 压缩后的消息列表副本。
@@ -1028,28 +1030,17 @@ class MessageManager:
             if msg.role == MessageRole.USER.value:
                 protected_indices.add(i)
 
-        # 1.3 近期消息保护 (20% Budget)
-        # 策略：从后往前遍历 Group，只要累积 Token < 20% Budget，则该 Group 及其消息均受保护
-        recent_token_limit = budget_limit * 0.2
-        current_accumulated_tokens = 0
+        # 1.3 近期消息保护 - 按条数强制保护末尾 N 条消息
+        # 策略：从消息列表末尾取最后 recent_messages_count 条，无论 token 大小，全部加入保护区
+        if recent_messages_count > 0:
+            recent_start_idx = max(0, len(working_messages) - recent_messages_count)
+            for i in range(recent_start_idx, len(working_messages)):
+                protected_indices.add(i)
 
-        # 倒序遍历 Groups
-        for gi in range(len(groups) - 1, -1, -1):
-            group_indices = groups[gi]
-            # 计算该组 Token
-            group_msgs = [working_messages[k] for k in group_indices]
-            group_token_count = MessageManager.calculate_messages_token_length(group_msgs)
-
-            if current_accumulated_tokens + group_token_count <= recent_token_limit:
-                # 标记为保护
+        # 同步更新 protected_group_indices（用于日志与分组级操作）
+        for gi, group_indices in enumerate(groups):
+            if any(idx in protected_indices for idx in group_indices):
                 protected_group_indices.add(gi)
-                for idx in group_indices:
-                    protected_indices.add(idx)
-
-                current_accumulated_tokens += group_token_count
-            else:
-                # 一旦超过，就不再继续向前保护了（保持最近的连续性）
-                break
 
         # 调试日志：显示保护信息
         logger.info(f"MessageManager: 总组数={len(groups)}, 受保护组数={len(protected_group_indices)}, 受保护消息数={len(protected_indices)}")
