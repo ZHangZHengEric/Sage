@@ -80,6 +80,25 @@
         :file-content="fileBase64"
       />
 
+      <!-- 视频预览 -->
+      <div v-else-if="fileType === 'video'" class="h-full relative flex items-center justify-center bg-black">
+        <video
+          v-if="videoStreamUrl && !videoError"
+          :src="videoStreamUrl"
+          class="max-w-full max-h-full object-contain"
+          controls
+          preload="metadata"
+          @error="handleVideoError"
+        />
+        <div v-if="videoError" class="flex flex-col items-center justify-center text-white p-6 gap-2">
+          <span class="text-4xl">🎬</span>
+          <p class="text-sm text-white/70 text-center">{{ videoError }}</p>
+        </div>
+        <div v-if="!videoStreamUrl && !videoError" class="flex flex-col items-center justify-center text-white/50">
+          <Loader2 class="w-8 h-8 animate-spin" />
+        </div>
+      </div>
+
       <div v-else class="h-full flex flex-col items-center justify-center text-muted-foreground p-6 bg-muted/20">
         <File class="w-14 h-14 mb-3 opacity-50" />
         <p class="text-sm mb-1">此文件类型暂不支持预览</p>
@@ -100,6 +119,8 @@ import TextRenderer from './workbench/renderers/filerender/TextRenderer.vue'
 import DocxRenderer from './workbench/renderers/filerender/DocxRenderer.vue'
 import XlsxRenderer from './workbench/renderers/filerender/XlsxRenderer.vue'
 
+const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'm4v', 'mkv', 'avi', 'flv', 'ogv']
+
 const props = defineProps({
   item: {
     type: Object,
@@ -119,6 +140,8 @@ const blobUrl = ref('')
 const htmlUrl = ref('')
 const fileContent = ref('')
 const fileBase64 = ref('')
+const videoStreamUrl = ref('')
+const videoError = ref('')
 
 const fileExtension = computed(() => {
   const name = props.item?.name || props.item?.path || ''
@@ -128,6 +151,7 @@ const fileExtension = computed(() => {
 
 const fileType = computed(() => {
   const ext = fileExtension.value
+  if (VIDEO_EXTENSIONS.includes(ext)) return 'video'
   const typeMap = {
     pdf: 'pdf',
     png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', svg: 'image', bmp: 'image',
@@ -147,6 +171,7 @@ const fileTypeLabel = computed(() => {
   const labels = {
     pdf: 'PDF',
     image: '图片',
+    video: '视频',
     html: 'HTML',
     markdown: 'Markdown',
     code: '代码',
@@ -161,6 +186,7 @@ const fileIcon = computed(() => {
   const iconMap = {
     pdf: '📕',
     image: '🖼️',
+    video: '🎬',
     html: '🌐',
     markdown: '📝',
     code: '📜',
@@ -193,6 +219,11 @@ const revokeUrls = () => {
   }
 }
 
+const handleVideoError = (e) => {
+  const msg = e?.target?.error?.message || '格式不支持或文件损坏'
+  videoError.value = `视频播放失败: ${msg}`
+}
+
 const loadContent = async () => {
   if (!props.agentId || !props.item?.path) {
     error.value = '文件信息不完整'
@@ -201,9 +232,18 @@ const loadContent = async () => {
 
   loading.value = true
   error.value = ''
+  videoError.value = ''
   fileContent.value = ''
   fileBase64.value = ''
+  videoStreamUrl.value = ''
   revokeUrls()
+
+  // 视频：直接构造流式 URL，后端 FileResponse 支持 Range 请求，无需下载整个文件
+  if (fileType.value === 'video') {
+    videoStreamUrl.value = taskAPI.getFileStreamUrl(props.agentId, props.item.path)
+    loading.value = false
+    return
+  }
 
   try {
     const blob = await taskAPI.downloadFile(props.agentId, props.item.path)

@@ -706,7 +706,7 @@ export default {
   'tools.fetchWebpage': 'Fetch Webpage',
   'tools.webFetcher': 'Web Fetcher',
   'tools.questionnaire': 'Info Collection',
-  'tools.finishTurn': 'End Turn',
+  'tools.turnStatus': 'Turn Status',
   'tools.readLints': 'Code Lint',
   'tools.awaitShell': 'Await Shell',
   'tools.killShell': 'Kill Shell',
@@ -1208,6 +1208,7 @@ export default {
 
   // Workspace
   'workspace.title': 'Workspace',
+  'workspace.refresh': 'Refresh',
   'workspace.noFiles': 'No files',
   'workspace.dropHere': 'Drop files or folders to upload',
   'workspace.dragHint': 'Drag files or folders here',

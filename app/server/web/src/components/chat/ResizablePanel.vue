@@ -9,14 +9,17 @@
             <h3 class="font-semibold text-sm">{{ title }}</h3>
             <span v-if="badge" class="text-xs text-muted-foreground">({{ badge }})</span>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            @click="emitClose"
-            class="h-8 w-8 p-0"
-          >
-            <X class="w-4 h-4" />
-          </Button>
+          <div class="flex items-center gap-1">
+            <slot name="actions"></slot>
+            <Button
+              variant="ghost"
+              size="sm"
+              @click="emitClose"
+              class="h-8 w-8 p-0"
+            >
+              <X class="w-4 h-4" />
+            </Button>
+          </div>
         </div>
 
         <div class="flex-1 overflow-hidden">
@@ -46,14 +49,17 @@
           <h3 class="font-semibold text-sm">{{ title }}</h3>
           <span v-if="badge" class="text-xs text-muted-foreground">({{ badge }})</span>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          @click="emitClose"
-          class="h-8 w-8 p-0"
-        >
-          <X class="w-4 h-4" />
-        </Button>
+        <div class="flex items-center gap-1">
+          <slot name="actions"></slot>
+          <Button
+            variant="ghost"
+            size="sm"
+            @click="emitClose"
+            class="h-8 w-8 p-0"
+          >
+            <X class="w-4 h-4" />
+          </Button>
+        </div>
       </div>
 
       <div class="flex-1 overflow-hidden">

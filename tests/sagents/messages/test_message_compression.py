@@ -154,5 +154,41 @@ class TestMessageCompression(unittest.TestCase):
         self.assertNotIn("truncated", tool_msg.content)
         self.assertNotIn("omitted", tool_msg.content)
 
+    def test_recent_messages_count_protection(self):
+        """测试 recent_messages_count 按条数强制保护末尾 N 条消息"""
+        # 构造场景：最近的 tool output 非常大，远超 token budget
+        very_long_tool_output = "X" * 5000  # 很长的 tool 输出
+        messages = [
+            self.create_message(MessageRole.SYSTEM.value, "System"),
+            # 旧消息组
+            self.create_message(MessageRole.USER.value, "User 1 (Old)"),
+            self.create_message(MessageRole.ASSISTANT.value, "Asst 1 " * 100),
+            # 最近消息（末尾 2 条）
+            self.create_message(MessageRole.USER.value, "User 2 (Recent)"),
+            self.create_message(MessageRole.TOOL.value, very_long_tool_output),
+        ]
+
+        tiny_budget = 50
+
+        # 不保护（recent_messages_count=0）：最近的大 tool output 会被压缩
+        compressed_no_protect = self.manager.compress_messages(messages, budget_limit=tiny_budget, recent_messages_count=0)
+        self.print_messages("No recent protection", compressed_no_protect)
+        # tool output 应该被截断
+        self.assertIn("omitted", compressed_no_protect[-1].content)
+
+        # 保护末尾 2 条（recent_messages_count=2）：User 2 和 Tool 不被压缩
+        compressed_with_protect = self.manager.compress_messages(messages, budget_limit=tiny_budget, recent_messages_count=2)
+        self.print_messages("With recent_messages_count=2", compressed_with_protect)
+
+        # 验证最近的 tool output 不被截断
+        last_tool_msg = compressed_with_protect[-1]
+        self.assertNotIn("omitted", last_tool_msg.content)
+        self.assertNotIn("truncated", last_tool_msg.content)
+        self.assertEqual(last_tool_msg.content, very_long_tool_output)
+
+        # 验证 User 2（倒数第 2 条）也被保护
+        user2_msg = compressed_with_protect[-2]
+        self.assertEqual(user2_msg.content, "User 2 (Recent)")
+
 if __name__ == '__main__':
     unittest.main()

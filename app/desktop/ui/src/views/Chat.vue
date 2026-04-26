@@ -283,6 +283,7 @@
           @delete-file="handleDeleteFile"
           @quote-path="handleQuotePath"
           @upload-files="handleUploadFiles"
+          @refresh="refreshWorkspace"
           @close="showWorkspace = false"
         />
       </Transition>

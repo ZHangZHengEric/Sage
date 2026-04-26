@@ -803,7 +803,7 @@ export default {
   'tools.questionnaire.workbenchReadonlyHint': '工作台中的问卷仅用于预览，不能直接提交。请回到消息流中的问卷卡片完成提交。',
   'tools.questionnaire.autoSubmitted': '自动提交',
   'tools.questionnaire.manuallySubmitted': '手动提交',
-  'tools.finishTurn': '结束本轮',
+  'tools.turnStatus': '本轮状态',
   'tools.readLints': '代码 Lint',
   'tools.awaitShell': '等待命令',
   'tools.killShell': '终止命令',
@@ -1249,6 +1249,7 @@ export default {
 
   // 工作空间
   'workspace.title': '工作空间',
+  'workspace.refresh': '刷新',
   'workspace.noFiles': '暂无文件',
   'workspace.path': '路径:',
   'workspace.download': '下载文件',
@@ -1547,6 +1548,8 @@ export default {
   'workbench.tool.searchingImages': '搜索图片中...',
   'workbench.tool.noSearchResults': '暂无搜索结果',
   'workbench.tool.noImageResults': '暂无图片结果',
+  'workbench.tool.analyzing': '正在分析图片...',
+  'workbench.tool.analysisResult': '分析结果',
   // Memory Search Tools
   'workbench.tool.searchMemory': '搜索记忆',
   'workbench.tool.memoryQuery': '搜索关键词',

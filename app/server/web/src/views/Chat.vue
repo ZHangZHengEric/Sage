@@ -278,6 +278,7 @@
           @delete-file="handleDeleteFile"
           @quote-path="handleQuotePath"
           @upload-files="handleUploadFiles"
+          @refresh="refreshWorkspace"
           @close="panelStore.closeAll()"
         />
       </Transition>

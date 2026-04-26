@@ -798,7 +798,7 @@ export default {
   'tools.questionnaire.workbenchReadonlyHint': 'The questionnaire in the workbench is preview-only and cannot be submitted there. Please submit it from the questionnaire card in the message list.',
   'tools.questionnaire.autoSubmitted': 'Auto Submitted',
   'tools.questionnaire.manuallySubmitted': 'Manually Submitted',
-  'tools.finishTurn': 'End Turn',
+  'tools.turnStatus': 'Turn Status',
   'tools.readLints': 'Code Lint',
   'tools.awaitShell': 'Await Shell',
   'tools.killShell': 'Kill Shell',
@@ -1239,6 +1239,7 @@ export default {
 
   // Workspace
   'workspace.title': 'Workspace',
+  'workspace.refresh': 'Refresh',
   'workspace.noFiles': 'No files',
   'workspace.path': 'Path:',
   'workspace.download': 'Download',

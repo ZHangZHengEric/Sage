@@ -1,20 +1,60 @@
+2026-04-26 12:20 修复工具执行时间不实时更新问题：chatDisplayItems.js 的 buildToolGroupItem 新增 startTimestampMs 字段；DeliveryCollapsedGroup.vue 检测最后一条消息是否为未完成的 tool_call，若是则启动 setInterval 每秒更新计时器，工具完成后自动切换回静态 durationMs 展示，桌面端和 Web 端同步。
+
+2026-04-26 11:58 工作空间面板新增手动刷新按钮：ResizablePanel 新增 #actions slot，WorkspacePanel 在标题栏注入刷新图标，加载中自动旋转，桌面端和 Web 端同步。
+
+2026-04-26 11:26 修复 turn_status 调用后仍触发 TaskSummaryAgent(final_answer) 的问题：need_summary 条件新增识别 turn_status 协议工具结果，避免 need_user_input/blocked/task_done 后多余生成 final_answer。
+
+2026-04-26 11:12 修复工作空间视频预览：WorkspaceRemoteFilePreview.vue 增加 mp4/webm/mov 等视频格式支持，视频直接使用后端流式 URL 播放（FileResponse 支持 Range 请求）；task.js 新增 getFileStreamUrl 方法；修复文件类型检测图标和标签。
+
+2026-04-26 10:45 重构消息压缩保护区策略：废弃不稳定的百分比保护（budget*20%），改为按条数强制保护末尾 N 条消息（recent_messages_count），默认 0 保持向后兼容；simple_agent 主压缩路径显式传入 5，确保最后 user/tool/assistant 消息始终不被截断。
+
+2026-04-26 11:07 完善循环检测三项改进：① detect_repeat_pattern 阈值从3次降为2次；② 新增 _classify_error_category 错误归类（TOOL_REJECTED/TURN_STATUS/TIMEOUT等），连续2轮同类错误快速熔断；③ 新增 loop_break 消息类型，前端用琥珀色⚠气泡区别于普通错误展示自动暂停原因。
+
+2026-04-26 10:55 增强重复检测：原有哈希签名匹配因LLM温度导致措辞不同而失效；新增连续错误快速熔断，同一错误内容连续2轮即暂停，无需等待哈希命中。
+
+2026-04-26 10:18 修复 turn_status 被拒绝导致文本重复：SAGE_AGENT_STATUS_PROTOCOL_ENABLED=false 时，turn_status 仍加入工具列表并正常接受模型主动调用，只禁止强制 turn_status-only 轮；避免拒绝→错误→循环→同一文本重复出现3-4次的问题。
+
+2026-04-26 04:05 修复阿里云工具约束不遵守：执行层新增 allowed tools 校验，模型返回本次请求未提供的工具时拒绝执行；在 turn_status-only 阶段若模型违规返回行动工具，改写为 `turn_status(status=continue_work)`，表达“不能结束、继续执行”，避免越权执行或死循环。
+
+2026-04-26 03:55 环境变量改为协议级命名：`SAGE_TURN_STATUS_TOOL_ENABLED` 替换为 `SAGE_AGENT_STATUS_PROTOCOL_ENABLED`，避免配置语义绑定具体工具名；同步更新 SimpleAgent、ToolProxy 与中英文 ENV 文档。
+
+2026-04-26 03:48 彻底移除旧收口工具命名：删除旧工具与兼容别名，仅保留 `turn_status(status=...)`；后端强制注入/隐藏、SimpleAgent 状态协议、前后端 label/i18n、ENV 文档与测试全部改为 turn_status。
+
+2026-04-26 03:38 状态工具增加 continue_work，不结束时继续执行；单工具 required 失败则暂停防循环。
+
+2026-04-26 03:33 尝试对象模式指定状态工具，后续因阿里云仅支持字符串 required 已改回。
+
+2026-04-26 03:22 状态收口改为仅开放状态工具：纯文本无工具调用后，不再追加 system，也不再 required 全量工具；下一轮只暴露状态工具并启用 `tool_choice=required`，避免模型继续调用 todo_write 等行动工具造成循环。
+
+2026-04-26 03:15 移除状态工具兜底追加 system，仅保留 tool_choice=required 结构化补调用。
+
+2026-04-26 02:35 强化状态工具描述：提问、确认、等待用户补充时必须 status=need_user_input。
+
+2026-04-26 10:30 工作台视频预览支持：desktop `FileRenderer` 将 `video` 加入早退列表（原来会 readTextFile 导致二进制报错）；`VideoRenderer` 重写为用 `convertFileSrc` 流式播放（不再把整个视频读入内存）；server web `fileIcons.js` 补 video/audio 类型映射、`FileRenderer` 加视频渲染分支和早退、新增 `VideoRenderer.vue`（URL 直接播放）；支持 mp4/webm/mov/mkv/avi 等格式。
+
+2026-04-26 09:58 图片理解工具渲染重构：左侧图片预览（本地路径用 `readFile`+ObjectURL 加载，URL 直接展示，支持点击放大）+右侧 MarkdownRenderer 渲染分析结果；加载/失败/错误三态处理；desktop 与 server web 双端同步。
+
+2026-04-26 02:23 技能上传目录名规范化：`_extract_skill_from_zip` 新增 `_skill_name_to_dir` 辅助函数，上传 ZIP 时统一读取 SKILL.md `name` 字段并规范化为目录名（空格→连字符，去除特殊字符），不再依赖 zip 文件名或内部子目录名；同步修复 `sync_skill_to_agent` 和 `_find_source_skill_path` 改用 SkillManager 按 name 查找实际路径，兼容历史已上传技能；将已存在的 `video_maker` 目录重命名为 `video-maker`。
+
+2026-04-26 01:40 状态工具缺失改为结构化协议兜底：SimpleAgent 不再用正文正则猜测是否完成，纯 assistant 文本且无工具调用时，下一轮追加协议提醒并启用 `tool_choice=required`，由模型在行动工具和状态工具中结构化选择；同步修正 SimpleReact 执行提示中“不要调用会话结束工具”的冲突，并补 3 例单测。
+
 2026-04-25 05:40 修复 TOOL_CATEGORY 不生效：`discover_tools_from_path` 直接走 `_DISCOVERED_TOOLS → register_tool`，会先于 `register_tools_from_object` 把 spec 占住（同优先级保留旧值），导致宿主类 `TOOL_CATEGORY` 永远写不进去；改为在该循环中复用 owner 类查找结果回填 `tool_spec.category`，浏览器组 12 个工具正确归到「浏览器扩展」，基础工具回到 20。
 
-2026-04-25 05:20 finish_turn 总结校验加严 + 工具来源分类机制：`_has_recent_assistant_summary` 改为「碰到 tool 消息或带 tool_calls 的 assistant 立刻 False」，杜绝模型用「我现在去做 X：」过渡话骗过校验后无总结调用 finish_turn；新增 `ToolSpec.category` 字段 + `@tool(category=...)` + 宿主类 `TOOL_CATEGORY` 兜底，`tool_manager` 用 category→source 映射 (`browser → 浏览器扩展`)；前端 6 处 (AgentEdit/ToolList/ToolDetail × web+desktop) 加分组映射与 Globe 图标，4 份 locale 加 `tools.source.browserExtension`；3 例 `test_simple_agent_finish_summary` 新增覆盖故障场景。
+2026-04-25 05:20 状态工具总结校验加严 + 工具来源分类机制：`_has_recent_assistant_summary` 改为「碰到 tool 消息或带 tool_calls 的 assistant 立刻 False」，杜绝模型用「我现在去做 X：」过渡话骗过校验后无总结调用状态工具；新增 `ToolSpec.category` 字段 + `@tool(category=...)` + 宿主类 `TOOL_CATEGORY` 兜底，`tool_manager` 用 category→source 映射 (`browser → 浏览器扩展`)；前端 6 处 (AgentEdit/ToolList/ToolDetail × web+desktop) 加分组映射与 Globe 图标，4 份 locale 加 `tools.source.browserExtension`；3 例 `test_simple_agent_finish_summary` 新增覆盖故障场景。
 
 2026-04-25 04:35 codebase 三件套前端适配：`messageLabels.js` + locales (zh/en) 补 `tools.grep` / `tools.glob` (`list_dir` 已存在)；workbench 新增 `GrepToolRenderer` (按文件分组、行号列、count/files 三模式)、`GlobToolRenderer` (mtime 倒序文件列表)、`ListDirToolRenderer` (mono 树状)；`ToolCallRenderer` 注册 isGrep/isGlob/isListDir 分发；desktop 与 server web 同步双写。
 
 2026-04-25 04:10 codebase 三件套 + prompt cache 多断点：新增 `codebase_tool` (grep/glob/list_dir，rg + 兜底)；`tool_manager`/`tool_proxy` 按 name 排 tools_json；`agent_base` system message 拆 stable/semi/volatile 三段，`prompt_caching` 改多断点策略（Anthropic 上限 4）；新增 `docs/{zh,en}/ENV_VARS.md` 汇总所有 SAGE_* 环境变量；20 例新单测 + 221 例回归全绿。
 
-2026-04-25 03:25 工作台隐藏 finish_turn：`stores/workbench.js`（desktop + server）`extractFromMessage` 增加 `HIDDEN_WORKBENCH_TOOL_NAMES` 过滤，finish_turn 不再进入 workbench timeline，只保留消息数据。
+2026-04-25 03:25 工作台隐藏状态工具：`stores/workbench.js`（desktop + server）`extractFromMessage` 增加 `HIDDEN_WORKBENCH_TOOL_NAMES` 过滤，状态工具不再进入 workbench timeline，只保留消息数据。
 
-2026-04-25 03:10 finish_turn 总结校验放宽：之前只看当前 LLM 调用的 `full_content_accumulator`，把「上一步先输出总结、下一步再单独调 finish_turn」的合理流程误判为缺总结导致死循环。新增 `_has_recent_assistant_summary`，从尾部回扫到最近一条真实 user 消息为界，期间任何非空 assistant 文本都视为总结存在；补 5 例 `test_simple_agent_finish_summary.py`。
+2026-04-25 03:10 状态工具总结校验放宽：之前只看当前 LLM 调用的 `full_content_accumulator`，把「上一步先输出总结、下一步再单独调状态工具」的合理流程误判为缺总结导致死循环。新增 `_has_recent_assistant_summary`，从尾部回扫到最近一条真实 user 消息为界，期间任何非空 assistant 文本都视为总结存在；补 5 例 `test_simple_agent_finish_summary.py`。
 
 2026-04-25 02:50 tokens_usage 补 model 字段：`agent_base._call_llm_streaming` 把已 pop 出去的 `model_name` 重新塞回 `model_config` 并新增顶层 `model`；SessionContext per-call 解析按 request.model > model_config.model > response.model 三级回退，避免之前统计文件里 model 始终为空。
 
 2026-04-25 02:30 Shell 三件套捆绑：ToolProxy 新增 `_TOOL_BUNDLES`，`{execute_shell_command, await_shell, kill_shell}` 任一被勾选即三个全部解锁（共享后台任务注册表，缺一即废）；`/api/tools` 同步隐藏 await_shell / kill_shell，仅以 execute_shell_command 作为入口；新增 4 例 `test_tool_proxy_bundles.py`。
 
-2026-04-25 02:10 finish_turn 强制接入 + 前端隐藏：ToolProxy 在白名单模式下自动注入 finish_turn，使其与上游 availableTools 解耦；SimpleAgent 在 finish_turn 启用时彻底跳过旧的 LLM `_is_task_complete` 判定。`/api/tools` 列表过滤掉 finish_turn，前端 MessageRenderer（desktop + server）按 HIDDEN_TOOL_NAMES 过滤 tool_calls 渲染（数据保留）；新内置工具 finish_turn / read_lints / await_shell / kill_shell 补 i18n。
+2026-04-25 02:10 状态工具强制接入 + 前端隐藏：ToolProxy 在白名单模式下自动注入状态工具，使其与上游 availableTools 解耦；SimpleAgent 在状态工具启用时彻底跳过旧的 LLM `_is_task_complete` 判定。`/api/tools` 列表过滤掉状态工具，前端 MessageRenderer（desktop + server）按 HIDDEN_TOOL_NAMES 过滤 tool_calls 渲染（数据保留）；新内置工具 read_lints / await_shell / kill_shell 补 i18n。
 
 2026-04-25 01:40 Windows 兼容硬化：lifecycle `_ensure_default_anytool_server_ready` 加 `asyncio.wait_for` 超时兜底，避免 streamable_http 注册在 Windows 上无限阻塞；`_get_process_rss_mb` / `_host_process_is_alive` 改 ctypes 走 PSAPI / OpenProcess，去掉对 `ps` 与 POSIX `os.kill(pid,0)` 的依赖；Passthrough/Local 路径映射统一接受 `\` 与 `/`，`to_virtual_path` 始终输出 POSIX 风格；LintTool `_has_command` 在 Windows 用 `where`。
 
@@ -22,7 +62,7 @@
 
 2026-04-25 00:30 修复 execute_shell_command 后台启动在 macOS 失效：`_spawn_background` 改为 `setsid`/`nohup` 自动兜底；新增 9 例真沙箱（passthrough）集成单测，覆盖阻塞/后台/await/kill/safety 全链路。
 
-2026-04-24 23:55 Agent 能力提升一揽子改造：file_update 默认唯一匹配 + replace_all 显式开关；新增 finish_turn / read_lints / await_shell / kill_shell 工具，execute_shell 改两段式后台；统一工具错误码 error_codes；下线中文关键词强制继续；SessionContext 新增 per-request tokens_usage 落盘。补齐对应单测。
+2026-04-24 23:55 Agent 能力提升一揽子改造：file_update 默认唯一匹配 + replace_all 显式开关；新增状态工具 / read_lints / await_shell / kill_shell 工具，execute_shell 改两段式后台；统一工具错误码 error_codes；下线中文关键词强制继续；SessionContext 新增 per-request tokens_usage 落盘。补齐对应单测。
 
 2026-04-24 todo 工具升级三态：status=pending/in_progress/completed，markdown 复选框扩展 `[ ]/[-]/[x]` 三段写入；后端 conditions 与 ObservationAgent 把 in_progress 计入「未完成」；前端 TodoTaskMessage / 渲染器新增进行中视觉与 i18n（statusPending/InProgress/Failed）；旧 `[ ]/[x]` markdown 仍兼容。
 

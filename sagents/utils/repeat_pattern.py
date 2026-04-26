@@ -82,7 +82,9 @@ def detect_repeat_pattern(
     upper_period = min(max_period, n // 2 if n >= 4 else 1)
     for period in range(1, upper_period + 1):
         max_cycles = n // period
-        min_cycles = 3 if period == 1 else 2
+        # period=1（完全相同的连续轮次）：降至2次即触发，提升灵敏度；
+        # 更长周期（ABAB/ABABAB等）仍保持2次作为最低要求。
+        min_cycles = 2
         if max_cycles < min_cycles:
             continue
 

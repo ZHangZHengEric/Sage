@@ -1,7 +1,6 @@
-"""SimpleAgent._has_recent_assistant_summary 单测。
+"""SimpleAgent turn_status 前置文本校验单测。
 
-验证 finish_turn 的「先总结再结束」契约：当 assistant 在前一步已经输出过总结，
-后一步单独发 finish_turn 时不应被误拒。
+验证 turn_status 的「先说明再报告状态」契约。
 """
 import pytest
 
@@ -59,7 +58,7 @@ def test_trailing_tool_result_blocks_summary():
     """末尾是 tool 消息：模型刚跑完工具，还没机会写总结，应判定无总结。
 
     复现实际故障：assistant 输出过渡话 + todo_write tool_calls，tool 返回后模型
-    立刻只调 finish_turn —— 旧规则会把那段过渡话误判为总结。
+    立刻只调 turn_status —— 旧规则会把那段过渡话误判为总结。
     """
     msgs = [
         MessageChunk(role=MessageRole.USER.value, content="跑测试", message_type=MessageType.USER_INPUT.value),
@@ -89,7 +88,7 @@ def test_assistant_with_tool_calls_does_not_count_as_summary():
 
 
 def test_clean_trailing_assistant_text_counts_as_summary():
-    """合法形态 (b)：tool 之后模型先发一条纯文本总结，再下一次 LLM 调用 finish_turn。"""
+    """合法形态：tool 之后模型先发一条纯文本总结，再下一次 LLM 调用 turn_status。"""
     msgs = [
         MessageChunk(role=MessageRole.USER.value, content="干活", message_type=MessageType.USER_INPUT.value),
         MessageChunk(
@@ -106,3 +105,62 @@ def test_clean_trailing_assistant_text_counts_as_summary():
         ),
     ]
     assert _agent()._has_recent_assistant_summary(msgs) is True
+
+
+def test_plain_text_without_tool_call_requests_turn_status_retry():
+    chunks = [
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="任务已经完成，结果如下。",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        )
+    ]
+    tools_json = [{"function": {"name": "turn_status"}}]
+
+    assert _agent()._should_request_turn_status_after_text_response(chunks, tools_json) is True
+
+
+def test_tool_call_response_does_not_request_turn_status_retry():
+    chunks = [
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=None,
+            tool_calls=[{"id": "t1", "type": "function", "function": {"name": "todo_write", "arguments": "{}"}}],
+            message_type=MessageType.TOOL_CALL.value,
+        )
+    ]
+    tools_json = [{"function": {"name": "turn_status"}}]
+
+    assert _agent()._should_request_turn_status_after_text_response(chunks, tools_json) is False
+
+
+def test_missing_turn_status_tool_does_not_request_retry():
+    chunks = [
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="仅文字输出。",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        )
+    ]
+
+    assert _agent()._should_request_turn_status_after_text_response(chunks, []) is False
+
+
+def test_turn_status_tools_only_filters_action_tools():
+    tools_json = [
+        {"function": {"name": "todo_write"}},
+        {"function": {"name": "turn_status"}},
+    ]
+
+    assert _agent()._turn_status_tools_only(tools_json) == [{"function": {"name": "turn_status"}}]
+
+
+def test_turn_status_from_tool_call_reads_continue_work():
+    tool_call = {
+        "function": {
+            "name": "turn_status",
+            "arguments": '{"status": "continue_work", "note": "more"}',
+        }
+    }
+
+    assert _agent()._turn_status_from_tool_call(tool_call) == "continue_work"
