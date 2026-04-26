@@ -78,7 +78,7 @@ ref: env_vars
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `SAGE_FINISH_TURN_TOOL_ENABLED` | `true` | 是否注入 `finish_turn` 工具控制收口 |
+| `SAGE_AGENT_STATUS_PROTOCOL_ENABLED` | `true` | 是否启用 Agent 本轮状态协议（注入 `turn_status` 并要求模型显式报告状态） |
 | `SAGE_CLI_MAX_LOOP_COUNT` | — | CLI 单轮最大循环次数 |
 | `SAGE_SPLIT_SYSTEM` | `true` | 是否把 system message 拆成 stable / semi_stable / volatile 多段以提升 prompt cache 命中 |
 | `SAGE_STABLE_TOOLS_ORDER` | `true` | 是否对 `tools` 字段按 name 字典序排序，稳定 cache key |

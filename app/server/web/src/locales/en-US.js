@@ -706,7 +706,7 @@ export default {
   'tools.fetchWebpage': 'Fetch Webpage',
   'tools.webFetcher': 'Web Fetcher',
   'tools.questionnaire': 'Info Collection',
-  'tools.finishTurn': 'End Turn',
+  'tools.turnStatus': 'Turn Status',
   'tools.readLints': 'Code Lint',
   'tools.awaitShell': 'Await Shell',
   'tools.killShell': 'Kill Shell',

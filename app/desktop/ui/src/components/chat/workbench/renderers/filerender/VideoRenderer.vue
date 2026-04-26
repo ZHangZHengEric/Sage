@@ -1,199 +1,185 @@
 <template>
   <div class="video-renderer h-full flex flex-col bg-black overflow-hidden">
-    <!-- 视频播放器 - 使用 object-fit: contain 保持比例 -->
-    <div class="flex-1 flex items-center justify-center relative overflow-hidden">
+    <!-- 播放器区域 -->
+    <div class="flex-1 flex items-center justify-center relative overflow-hidden min-h-0">
       <video
-        v-if="videoUrl"
+        v-if="videoUrl && !error"
         ref="videoRef"
         :src="videoUrl"
         class="video-element"
         controls
+        preload="metadata"
         @error="handleError"
         @loadedmetadata="handleLoaded"
-      ></video>
+        @waiting="buffering = true"
+        @playing="buffering = false"
+        @canplay="buffering = false"
+      />
 
-      <!-- 加载状态 -->
-      <div v-if="loading" class="absolute inset-0 flex items-center justify-center bg-black/50">
-        <Loader2 class="w-8 h-8 animate-spin text-white" />
+      <!-- 缓冲/加载 -->
+      <div
+        v-if="loading || buffering"
+        class="absolute inset-0 flex items-center justify-center bg-black/60 pointer-events-none"
+      >
+        <Loader2 class="w-8 h-8 animate-spin text-white/80" />
       </div>
 
-      <!-- 错误状态 -->
-      <div v-if="error" class="absolute inset-0 flex flex-col items-center justify-center bg-black/80 text-white p-4">
-        <AlertCircle class="w-12 h-12 mb-2 text-destructive" />
-        <p class="text-sm">{{ error }}</p>
-        <Button
-          variant="outline"
-          size="sm"
-          @click="retryLoad"
-          class="mt-4"
-        >
+      <!-- 错误 -->
+      <div v-if="error" class="absolute inset-0 flex flex-col items-center justify-center bg-black text-white p-6 gap-3">
+        <VideoOff class="w-12 h-12 text-white/40" />
+        <p class="text-sm text-white/70 text-center">{{ error }}</p>
+        <Button variant="outline" size="sm" class="text-white border-white/30 hover:bg-white/10" @click="retryLoad">
           <RefreshCw class="w-4 h-4 mr-1" />
           重试
         </Button>
       </div>
     </div>
 
-    <!-- 视频信息 -->
-    <div class="flex-none px-4 py-2 bg-muted/10 border-t border-border/20 flex items-center justify-between">
-      <div class="flex items-center gap-2 text-xs text-muted-foreground">
-        <Film class="w-4 h-4" />
-        <span>{{ fileName }}</span>
+    <!-- 底部信息栏 -->
+    <div class="flex-none px-4 py-2 bg-black/80 border-t border-white/10 flex items-center justify-between gap-4">
+      <div class="flex items-center gap-2 text-xs text-white/60 min-w-0">
+        <Film class="w-3.5 h-3.5 flex-shrink-0" />
+        <span class="truncate" :title="fileName">{{ fileName }}</span>
+        <Badge variant="outline" class="text-[10px] border-white/20 text-white/50 flex-shrink-0">{{ extLabel }}</Badge>
       </div>
-      <div v-if="duration" class="text-xs text-muted-foreground">
-        {{ formatDuration(duration) }}
-      </div>
+      <div v-if="durationLabel" class="text-xs text-white/50 flex-shrink-0">{{ durationLabel }}</div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Loader2, AlertCircle, RefreshCw, Film } from 'lucide-vue-next'
-import { readFile } from '@tauri-apps/plugin-fs'
+import { Badge } from '@/components/ui/badge'
+import { Loader2, Film, VideoOff, RefreshCw } from 'lucide-vue-next'
 
 const props = defineProps({
-  filePath: {
-    type: String,
-    required: true
-  },
-  fileName: {
-    type: String,
-    default: ''
-  }
+  filePath: { type: String, required: true },
+  fileName: { type: String, default: '' }
 })
 
 const videoRef = ref(null)
 const loading = ref(true)
+const buffering = ref(false)
 const error = ref('')
 const duration = ref(0)
 const videoUrl = ref('')
 
-// 加载视频文件
+// 文件扩展名 → MIME 类型
+const MIME_MAP = {
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  m4v: 'video/mp4',
+  mkv: 'video/x-matroska',
+  avi: 'video/x-msvideo',
+  flv: 'video/x-flv',
+  ogv: 'video/ogg',
+}
+
+const ext = computed(() => {
+  const name = props.filePath || props.fileName || ''
+  return (name.split('.').pop() || '').toLowerCase()
+})
+const extLabel = computed(() => ext.value.toUpperCase() || 'VIDEO')
+const mimeType = computed(() => MIME_MAP[ext.value] || 'video/mp4')
+
+const durationLabel = computed(() => {
+  const s = duration.value
+  if (!s || isNaN(s)) return ''
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = Math.floor(s % 60)
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+  return `${m}:${String(sec).padStart(2, '0')}`
+})
+
+// 用 convertFileSrc 把本地路径转为 asset:// URL，浏览器可直接流式播放
+const buildVideoUrl = async (path) => {
+  if (!path) return ''
+  if (/^https?:\/\//i.test(path)) return path
+  try {
+    const { convertFileSrc } = await import('@tauri-apps/api/core')
+    let clean = path.replace(/^file:\/\//i, '')
+    return convertFileSrc(clean)
+  } catch {
+    // 非 Tauri 环境（server web）：直接返回路径，让浏览器尝试
+    return path
+  }
+}
+
 const loadVideo = async () => {
   if (!props.filePath) return
-
   loading.value = true
   error.value = ''
+  videoUrl.value = ''
 
   try {
-    console.log('[VideoRenderer] Loading video from:', props.filePath)
-
-    // 使用 Tauri 的 readFile 读取视频文件
-    const fileData = await readFile(props.filePath)
-    console.log('[VideoRenderer] File data size:', fileData.length)
-
-    // 创建 Blob 和 URL
-    const blob = new Blob([fileData], { type: 'video/mp4' })
-    const url = URL.createObjectURL(blob)
-    videoUrl.value = url
-
-    console.log('[VideoRenderer] Created blob URL:', url)
+    videoUrl.value = await buildVideoUrl(props.filePath)
   } catch (e) {
-    console.error('[VideoRenderer] Failed to load video:', e)
-    error.value = `视频加载失败: ${e.message || '无法读取文件'}`
+    error.value = `视频加载失败: ${e?.message || '无法读取文件'}`
     loading.value = false
   }
 }
 
-const handleError = (e) => {
-  console.error('[VideoRenderer] Video load error:', e)
-  error.value = `视频加载失败: ${e?.target?.error?.message || '不支持的格式'}`
-  loading.value = false
-}
-
 const handleLoaded = () => {
   loading.value = false
-  if (videoRef.value) {
-    duration.value = videoRef.value.duration
-  }
+  if (videoRef.value) duration.value = videoRef.value.duration
 }
 
-const retryLoad = () => {
-  loadVideo()
+const handleError = (e) => {
+  const msg = e?.target?.error?.message || '不支持的格式或文件损坏'
+  error.value = `视频播放失败: ${msg}`
+  loading.value = false
 }
 
-// 格式化时长
-const formatDuration = (seconds) => {
-  if (!seconds || isNaN(seconds)) return ''
-  const mins = Math.floor(seconds / 60)
-  const secs = Math.floor(seconds % 60)
-  return `${mins}:${secs.toString().padStart(2, '0')}`
-}
+const retryLoad = () => loadVideo()
 
-onMounted(() => {
-  loadVideo()
+onMounted(() => loadVideo())
+
+watch(() => props.filePath, (newPath, oldPath) => {
+  if (newPath && newPath !== oldPath) loadVideo()
 })
 
 onUnmounted(() => {
-  // 清理视频资源
   if (videoRef.value) {
     videoRef.value.pause()
     videoRef.value.src = ''
-  }
-  // 释放 blob URL
-  if (videoUrl.value && videoUrl.value.startsWith('blob:')) {
-    URL.revokeObjectURL(videoUrl.value)
   }
 })
 </script>
 
 <style scoped>
-.video-renderer {
-  min-height: 200px;
-}
-
 .video-element {
-  /* 保持视频比例，自适应容器 */
   max-width: 100%;
   max-height: 100%;
   width: 100%;
   height: 100%;
-  /* 使用 contain 保持比例，确保视频完全可见 */
   object-fit: contain;
   outline: none;
 }
 
-/* 自定义视频控制条样式 - 确保控制条可见 */
-.video-element::-webkit-media-controls {
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.7), transparent) !important;
+/* 控制条渐变背景 */
+.video-element::-webkit-media-controls-enclosure {
+  background: linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 100%);
 }
 
 .video-element::-webkit-media-controls-panel {
-  background: transparent !important;
+  background: transparent;
 }
 
-/* 进度条样式 */
+/* 进度条 */
 .video-element::-webkit-media-controls-timeline {
-  background-color: rgba(255, 255, 255, 0.3);
+  background-color: rgba(255,255,255,0.25);
   border-radius: 4px;
-  height: 4px;
-  margin: 0 10px;
+  height: 3px;
 }
 
-.video-element::-webkit-media-controls-timeline-container {
-  height: 20px;
-}
-
-/* 音量控制 */
-.video-element::-webkit-media-controls-volume-slider {
-  background-color: rgba(255, 255, 255, 0.3);
-  border-radius: 4px;
-  height: 4px;
-}
-
-/* 按钮样式 */
-.video-element::-webkit-media-controls-play-button,
-.video-element::-webkit-media-controls-mute-button,
-.video-element::-webkit-media-controls-fullscreen-button {
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
-}
-
-/* 时间显示 */
+/* 时间文字 */
 .video-element::-webkit-media-controls-current-time-display,
 .video-element::-webkit-media-controls-time-remaining-display {
-  color: white;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-  font-size: 13px;
+  color: #fff;
+  font-size: 12px;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
 }
 </style>
