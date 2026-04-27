@@ -12,6 +12,7 @@ from sagents.context.messages.message_manager import MessageManager
 from sagents.utils.prompt_caching import add_cache_control_to_messages
 from sagents.llm.sage_openai import SageAsyncOpenAI
 from sagents.llm.capabilities import create_chat_completion_with_fallback
+from sagents.llm.model_capabilities import is_openai_reasoning_model, resolve_reasoning_effort
 from sagents.utils.llm_request_utils import (
     format_api_error_details,
     is_unsupported_input_format_error,
@@ -265,22 +266,24 @@ class AgentBase(ABC):
                     "_step_name": step_name # 观察用，记录下当前是哪个步骤的调用
                 }
 
-                # 判断是否为 OpenAI 推理模型
-                is_openai_reasoning_model = (
-                    model_name.startswith("o3-") or
-                    model_name.startswith("o1-") or
-                    "gpt" in model_name.lower() or
-                    "gpt-5.1" in model_name.lower()
-                )
+                # 判断是否为 OpenAI / 兼容三方 reasoning 模型（白名单前缀，避免误伤 gpt-4o 等）
+                is_reasoning_model = is_openai_reasoning_model(model_name)
 
-                if is_openai_reasoning_model:
+                if is_reasoning_model:
                     # OpenAI 推理模型使用 reasoning_effort 参数
                     # low = 最小化推理，medium = 平衡，high = 最大化推理
-                    if final_enable_thinking:
-                        extra_body["reasoning_effort"] = "medium"  # 或者 "high"
-                    else:
-                        extra_body["reasoning_effort"] = "low"  # 最小化推理
-                    logger.debug(f"{self.__class__.__name__} | {step_name}: OpenAI推理模型，reasoning_effort={extra_body['reasoning_effort']}")
+                    # 注：OpenAI Chat Completions 接口对 o-/gpt-5 系不回传 reasoning content，
+                    # 仅在 usage.reasoning_tokens 上报 token 消耗，无法通过该参数关闭。
+                    # SAGE_REASONING_EFFORT_OFF 仅在思考关闭时生效，可切换到 minimal/medium/high。
+                    effort = resolve_reasoning_effort(
+                        enable_thinking=final_enable_thinking,
+                        env_value=os.environ.get("SAGE_REASONING_EFFORT_OFF"),
+                        default_off="low",
+                    )
+                    extra_body["reasoning_effort"] = effort
+                    logger.debug(
+                        f"{self.__class__.__name__} | {step_name}: OpenAI推理模型，reasoning_effort={effort}"
+                    )
                 else:
                     # 其他模型使用 enable_thinking/thinking 参数
                     extra_body["chat_template_kwargs"] = {"enable_thinking": final_enable_thinking}
