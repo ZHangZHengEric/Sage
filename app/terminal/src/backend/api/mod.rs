@@ -1,12 +1,7 @@
-#[path = "api/config.rs"]
 mod config;
-#[path = "api/doctor.rs"]
 mod doctor;
-#[path = "api/providers.rs"]
 mod providers;
-#[path = "api/sessions.rs"]
 mod sessions;
-#[path = "api/skills.rs"]
 mod skills;
 
 pub(crate) use config::{init_config, read_config};

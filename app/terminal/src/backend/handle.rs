@@ -9,10 +9,10 @@ use anyhow::{anyhow, Result};
 
 use crate::app::MessageKind;
 use crate::backend::protocol::{flush_complete_lines, parse_backend_line};
-use crate::backend::types::{BackendEvent, BackendRequest};
-use crate::backend_support::{
+use crate::backend::runtime::{
     apply_state_env, prepare_state_root, resolve_cli_invoker, resolve_runtime_root, CliInvoker,
 };
+use crate::backend::types::{BackendEvent, BackendRequest};
 
 pub struct BackendHandle {
     receiver: Receiver<BackendEvent>,

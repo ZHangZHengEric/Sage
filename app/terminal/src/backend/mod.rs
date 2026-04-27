@@ -1,15 +1,10 @@
-#[path = "backend/api.rs"]
 mod api;
-#[path = "backend/contract.rs"]
-mod contract;
-#[path = "backend/handle.rs"]
+pub(crate) mod contract;
 mod handle;
-#[path = "backend/protocol.rs"]
 mod protocol;
+pub(crate) mod runtime;
 #[cfg(test)]
-#[path = "backend/tests.rs"]
 mod tests;
-#[path = "backend/types.rs"]
 mod types;
 
 pub(crate) use api::{

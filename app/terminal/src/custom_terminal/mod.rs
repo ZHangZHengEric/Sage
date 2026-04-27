@@ -1,6 +1,4 @@
-#[path = "custom_terminal/diff.rs"]
 mod diff;
-#[path = "custom_terminal/draw.rs"]
 mod draw;
 
 use std::io;

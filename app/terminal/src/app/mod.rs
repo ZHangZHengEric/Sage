@@ -3,16 +3,11 @@ use std::time::{Duration, Instant};
 
 use ratatui::text::Line;
 
-#[path = "app/commands.rs"]
 mod commands;
-#[path = "app/input.rs"]
 mod input;
-#[path = "app/runtime.rs"]
 mod runtime;
-#[path = "app/surfaces.rs"]
 mod surfaces;
 #[cfg(test)]
-#[path = "app/tests.rs"]
 mod tests;
 
 #[derive(Debug)]
