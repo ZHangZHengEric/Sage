@@ -16,9 +16,58 @@ _TEST_IMAGE_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAIAAAA
 _COLOR_KEYWORDS = ["red", "红色", "红", "赤", "绯", "朱", "丹", "绛"]
 
 
+_REASONING_MODEL_PREFIXES: tuple[str, ...] = (
+    "o1-",
+    "o3-",
+    "o4-",
+    "gpt-5",  # gpt-5, gpt-5-, gpt-5.x, gpt-5-mini 等 reasoning 系
+)
+_REASONING_MODEL_EXACT: frozenset[str] = frozenset({"o1", "o3", "o4"})
+
+
+_VALID_REASONING_EFFORTS: frozenset[str] = frozenset({"minimal", "low", "medium", "high"})
+
+
+def is_openai_reasoning_model(model_name: str) -> bool:
+    """是否为 OpenAI / 兼容三方的 reasoning 系列模型。
+
+    判定基于显式前缀/精确名单，避免把 ``gpt-4o``/``gpt-4-turbo``/``gpt-3.5`` 这类
+    非 reasoning 模型误判进 reasoning 路径。
+    """
+    if not model_name:
+        return False
+    name = model_name.strip().lower()
+    if not name:
+        return False
+    if name in _REASONING_MODEL_EXACT:
+        return True
+    return any(name.startswith(prefix) for prefix in _REASONING_MODEL_PREFIXES)
+
+
+def resolve_reasoning_effort(
+    enable_thinking: bool,
+    env_value: Optional[str] = None,
+    default_off: str = "low",
+) -> str:
+    """根据是否启用思考与环境变量解析最终的 ``reasoning_effort``。
+
+    - ``enable_thinking=True`` → ``"medium"``
+    - ``enable_thinking=False`` → ``env_value`` 优先（小写），无效或为空时回退 ``default_off``
+    - 合法值：minimal / low / medium / high
+    """
+    if enable_thinking:
+        return "medium"
+    if env_value is None:
+        return default_off
+    candidate = env_value.strip().lower()
+    if candidate and candidate in _VALID_REASONING_EFFORTS:
+        return candidate
+    return default_off
+
+
 def _is_openai_reasoning_model(model_name: str) -> bool:
-    model = (model_name or "").lower()
-    return model.startswith("o3-") or model.startswith("o1-") or "gpt" in model or "gpt-5.1" in model
+    """旧名兼容的 thin wrapper。"""
+    return is_openai_reasoning_model(model_name)
 
 
 def _build_client(api_key: str, base_url: str, timeout: float) -> AsyncOpenAI:

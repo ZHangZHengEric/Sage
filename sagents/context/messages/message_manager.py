@@ -755,6 +755,7 @@ class MessageManager:
             return []
 
         turn_ids: set[str] = set()
+        last_turn_id: Optional[str] = None
         for msg in messages:
             if msg.role != MessageRole.ASSISTANT.value or not msg.tool_calls:
                 continue
@@ -762,6 +763,7 @@ class MessageManager:
                 name, tid = MessageManager._tool_call_entry_name_and_id(tc)
                 if name == TURN_STATUS_TOOL_NAME and tid:
                     turn_ids.add(tid)
+                    last_turn_id = tid
 
         preserved_ids: set[str] = set()
         for msg in messages:
@@ -776,6 +778,11 @@ class MessageManager:
                 )
             ):
                 preserved_ids.add(msg.tool_call_id)
+
+        # 保留最后一条 turn_status pair（无论 status 类型），让 LLM 看到自己上一轮的状态决策，
+        # 避免反复刷 turn_status；历史 turn_status 仍按现策略剔除。
+        if last_turn_id is not None:
+            preserved_ids.add(last_turn_id)
 
         strip_ids = turn_ids - preserved_ids
 
