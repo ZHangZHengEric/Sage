@@ -4,6 +4,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::MutexGuard;
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -13,11 +14,21 @@ use serde_json::json;
 use crate::app::MessageKind;
 use crate::backend::contract::{expect_array_field, parse_stream_event, CliJsonCommand};
 use crate::backend::protocol::parse_backend_line;
-use crate::backend_support::{apply_state_env, prepare_state_root};
+use crate::backend_support::{
+    apply_state_env, prepare_state_root, resolve_cli_invoker, resolve_python_command,
+    resolve_runtime_root_from, CliInvoker,
+};
 
 use super::{BackendEvent, BackendHandle, BackendRequest};
 
 static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn lock_env() -> MutexGuard<'static, ()> {
+    ENV_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 struct EnvVarGuard {
     key: &'static str,
@@ -29,6 +40,14 @@ impl EnvVarGuard {
         let previous = env::var(key).ok();
         unsafe {
             env::set_var(key, value);
+        }
+        Self { key, previous }
+    }
+
+    fn unset(key: &'static str) -> Self {
+        let previous = env::var(key).ok();
+        unsafe {
+            env::remove_var(key);
         }
         Self { key, previous }
     }
@@ -49,10 +68,7 @@ impl Drop for EnvVarGuard {
 
 #[test]
 fn backend_handle_supports_two_round_trips_without_respawn() {
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .expect("env lock poisoned");
+    let _env_lock = lock_env();
     let temp_dir = unique_temp_dir("backend-smoke");
     fs::create_dir_all(&temp_dir).expect("temp dir should be created");
     let script_path = write_fake_backend_script(&temp_dir);
@@ -97,6 +113,7 @@ fn backend_handle_supports_two_round_trips_without_respawn() {
 
 #[test]
 fn prepare_state_root_copies_builtin_skills_into_terminal_workspace() {
+    let _env_lock = lock_env();
     let temp_dir = unique_temp_dir("builtin-skills");
     let builtin_skill = temp_dir.join("app").join("skills").join("demo-skill");
     fs::create_dir_all(builtin_skill.join("references"))
@@ -111,6 +128,11 @@ fn prepare_state_root_copies_builtin_skills_into_terminal_workspace() {
         "demo reference",
     )
     .expect("skill reference should be written");
+    let state_root = temp_dir.join("terminal-state");
+    let _state_root_guard = EnvVarGuard::set(
+        "SAGE_TERMINAL_STATE_ROOT",
+        &state_root.display().to_string(),
+    );
 
     let state_root = prepare_state_root(&temp_dir).expect("state root should be prepared");
     let copied_skill = state_root.join("skills").join("demo-skill");
@@ -123,8 +145,29 @@ fn prepare_state_root_copies_builtin_skills_into_terminal_workspace() {
 }
 
 #[test]
+fn prepare_state_root_uses_home_for_packaged_runtime_layout() {
+    let _env_lock = lock_env();
+    let runtime_root = unique_temp_dir("packaged-runtime");
+    fs::create_dir_all(runtime_root.join("app").join("skills")).expect("runtime root should exist");
+    let home_dir = unique_temp_dir("terminal-home");
+    fs::create_dir_all(&home_dir).expect("home dir should exist");
+    let _home_guard = EnvVarGuard::set("HOME", &home_dir.display().to_string());
+
+    let state_root = prepare_state_root(&runtime_root).expect("state root should be prepared");
+
+    assert_eq!(state_root, home_dir.join(".sage").join("terminal-state"));
+    assert!(state_root.join("logs").is_dir());
+}
+
+#[test]
 fn apply_state_env_keeps_default_sage_session_dir() {
+    let _env_lock = lock_env();
     let temp_dir = unique_temp_dir("state-env");
+    let state_root_path = temp_dir.join("terminal-state");
+    let _state_root_guard = EnvVarGuard::set(
+        "SAGE_TERMINAL_STATE_ROOT",
+        &state_root_path.display().to_string(),
+    );
     let state_root = prepare_state_root(&temp_dir).expect("state root should be prepared");
     let mut command = Command::new("true");
 
@@ -145,8 +188,68 @@ fn apply_state_env_keeps_default_sage_session_dir() {
         key == "SAGE_LOGS_DIR_PATH"
             && value
                 .as_deref()
-                .is_some_and(|value| value.contains(".sage-terminal-state"))
+                .is_some_and(|value| value.ends_with("terminal-state/logs"))
     }));
+}
+
+#[test]
+fn resolve_runtime_root_prefers_explicit_env_override() {
+    let _env_lock = lock_env();
+    let runtime_root = unique_temp_dir("runtime-root");
+    fs::create_dir_all(runtime_root.join("app").join("cli")).expect("runtime cli dir should exist");
+    fs::write(
+        runtime_root.join("app").join("cli").join("main.py"),
+        "# stub",
+    )
+    .expect("runtime entry should exist");
+    let _runtime_guard = EnvVarGuard::set(
+        "SAGE_TERMINAL_RUNTIME_ROOT",
+        &runtime_root.display().to_string(),
+    );
+
+    let resolved = resolve_runtime_root_from(None).expect("runtime root should resolve");
+    assert_eq!(resolved, runtime_root);
+}
+
+#[test]
+fn resolve_python_command_prefers_bundled_runtime_python() {
+    let _env_lock = lock_env();
+    let runtime_root = unique_temp_dir("bundled-python");
+    let python_path = runtime_root.join(".venv").join("bin").join("python3");
+    fs::create_dir_all(python_path.parent().expect("parent should exist"))
+        .expect("python dir should exist");
+    fs::write(&python_path, "").expect("python stub should be written");
+    let _sage_python_guard = EnvVarGuard::unset("SAGE_PYTHON");
+    let _python_guard = EnvVarGuard::unset("PYTHON");
+
+    let resolved = resolve_python_command(&runtime_root);
+    assert_eq!(resolved, python_path);
+}
+
+#[test]
+fn resolve_cli_invoker_prefers_explicit_env_override() {
+    let _env_lock = lock_env();
+    let runtime_root = unique_temp_dir("bundled-cli-env");
+    let _cli_guard = EnvVarGuard::set("SAGE_TERMINAL_CLI", "sage");
+    let _python_guard = EnvVarGuard::set("SAGE_PYTHON", "/tmp/should-not-be-used");
+
+    let resolved = resolve_cli_invoker(&runtime_root);
+    assert_eq!(resolved, CliInvoker::Executable(PathBuf::from("sage")));
+}
+
+#[test]
+fn resolve_cli_invoker_prefers_bundled_sage_over_python_module() {
+    let _env_lock = lock_env();
+    let runtime_root = unique_temp_dir("bundled-cli");
+    let sage_path = runtime_root.join(".venv").join("bin").join("sage");
+    fs::create_dir_all(sage_path.parent().expect("parent should exist"))
+        .expect("sage dir should exist");
+    fs::write(&sage_path, "").expect("sage stub should be written");
+    let _cli_guard = EnvVarGuard::unset("SAGE_TERMINAL_CLI");
+    let _python_guard = EnvVarGuard::set("SAGE_PYTHON", "/tmp/python-fallback");
+
+    let resolved = resolve_cli_invoker(&runtime_root);
+    assert_eq!(resolved, CliInvoker::Executable(sage_path));
 }
 
 #[test]

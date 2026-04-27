@@ -7,6 +7,8 @@ Current status:
 - preview / source-run only
 - no packaged installer yet
 - depends on the local Sage Python CLI/backend from this repository
+- see `BOUNDARY.md` and `CLI_CONTRACT.md` for ownership and integration rules
+- runtime lookup and future bundle assumptions are documented in `DISTRIBUTION.md` and `BUNDLE_LAYOUT.md`
 
 ## What It Uses
 
@@ -97,3 +99,5 @@ Common slash commands:
 - This preview is intended for local development and dogfooding.
 - Packaging and one-command installation are not included yet.
 - The TUI currently relies on the Sage CLI/backend behavior, so CLI runtime configuration must be valid first.
+- Runtime lookup now supports explicit CLI/Python overrides, bundled `sage` / Python fallbacks, and packaged-layout state roots as a first distribution step.
+- The repo now also includes a minimal launcher wrapper at `scripts/run-sage-terminal.sh` and a distribution smoke script at `scripts/smoke-runtime-distribution.sh`.
