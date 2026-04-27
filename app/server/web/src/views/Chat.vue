@@ -124,9 +124,6 @@
         class="flex-1 flex flex-col min-w-0 bg-muted/5 relative transition-all duration-200 dark:bg-[rgba(5,5,6,1)]"
         :class="{ 'mr-0': !anyPanelOpen }"
       >
-        <div v-if="!showAbilityPanel && filteredMessages.length === 0" class="absolute top-5 left-0 right-0 h-[25%] min-h-[100px] max-h-[180px] overflow-hidden pointer-events-none z-10">
-          <AgentUsageDanmaku :agent-id="selectedAgentId" :hide-for-history="isViewingHistorySession" :closed-by-user="danmakuClosedByUser" :reset-trigger="danmakuResetTrigger" @close="onDanmakuClose" />
-        </div>
         <div ref="messagesListRef" class="flex-1 overflow-y-auto p-4 sm:p-6 scroll-smooth" @scroll="handleScroll">
           <div
             v-if="overlayAbilityPanel"
@@ -314,7 +311,6 @@ import WorkbenchPreview from '@/components/chat/WorkbenchPreview.vue'
 import LoadingBubble from '@/components/chat/LoadingBubble.vue'
 import SubSessionPanel from '@/components/chat/SubSessionPanel.vue'
 import AbilityPanel from '@/components/chat/AbilityPanel.vue'
-import AgentUsageDanmaku from '@/components/chat/AgentUsageDanmaku.vue'
 import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 import { Button } from '@/components/ui/button'
 import {
@@ -389,9 +385,6 @@ const {
   abilityPresetInput,
   showAbilityButton,
   hasUsedAbilityEntryInSession,
-  danmakuResetTrigger,
-  isViewingHistorySession,
-  danmakuClosedByUser,
   openAbilityPanel,
   closeAbilityPanel,
   retryAbilityFetch,
@@ -623,10 +616,6 @@ const toggleWorkspace = () => {
 const anyPanelOpen = computed(() => (
   panelStore.showWorkspace || panelStore.showWorkbench
 ))
-
-const onDanmakuClose = () => {
-  danmakuClosedByUser.value = true
-}
 
 const handleClickAbilityButton = () => {
   if (!showAbilityPanel.value) {

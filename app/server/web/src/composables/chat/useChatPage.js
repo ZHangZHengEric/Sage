@@ -58,9 +58,6 @@ export const useChatPage = (props) => {
   const abilityPresetInput = ref('')
   const showAbilityButton = ref(true)
   const hasUsedAbilityEntryInSession = ref(false)
-  const danmakuResetTrigger = ref(0)
-  const isViewingHistorySession = ref(false)
-  const danmakuClosedByUser = ref(false)
 
 
   // 打开工作台（统一方法）
@@ -673,9 +670,6 @@ export const useChatPage = (props) => {
     abilityError.value = null
     hasUsedAbilityEntryInSession.value = false
     showAbilityButton.value = true
-    isViewingHistorySession.value = false
-    danmakuClosedByUser.value = false
-    danmakuResetTrigger.value += 1
     createSession()
   }
 
@@ -690,7 +684,6 @@ export const useChatPage = (props) => {
         showAbilityPanel.value = false
         showAbilityButton.value = false
         hasUsedAbilityEntryInSession.value = true
-        isViewingHistorySession.value = true
       } else {
         if (conversation.agent_id && agents.value.length > 0) {
           const agent = agents.value.find(a => a.id === conversation.agent_id)
@@ -708,7 +701,6 @@ export const useChatPage = (props) => {
           rebuildMessageIdIndexMap()
         }
         currentSessionId.value = sessionId
-        isViewingHistorySession.value = false
         showAbilityButton.value = true
       }
 
@@ -920,9 +912,6 @@ watch(() => currentSessionId.value, (newSessionId, oldSessionId) => {
     abilityPresetInput,
     showAbilityButton,
     hasUsedAbilityEntryInSession,
-    danmakuResetTrigger,
-    isViewingHistorySession,
-    danmakuClosedByUser,
     openAbilityPanel,
     closeAbilityPanel,
     retryAbilityFetch,
