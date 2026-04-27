@@ -87,8 +87,12 @@ def check_need_summary(session_context, session=None) -> bool:
         if isinstance(content, str):
             try:
                 content_dict = json.loads(content)
-                if isinstance(content_dict, dict) and "turn_status" in content_dict:
-                    return False
+                if isinstance(content_dict, dict):
+                    # 旧版成功体含 turn_status；新版仅 {"should_end": bool}。错误体含 success==False，不当作协议成功。
+                    if "turn_status" in content_dict:
+                        return False
+                    if "should_end" in content_dict and content_dict.get("success") is not False:
+                        return False
             except (json.JSONDecodeError, TypeError):
                 pass
 

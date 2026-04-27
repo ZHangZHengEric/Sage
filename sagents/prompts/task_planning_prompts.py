@@ -42,9 +42,6 @@ planning_template = {
 ## Agent Description and Requirements
 {agent_description}
 
-## Complete Task Description
-{task_description}
-
 ## Recent Execution Results
 {recent_execution_messages}
 
@@ -63,9 +60,6 @@ Directly output a paragraph describing the task to be executed next.""",
 
 ## Descrição e Requisitos do Agente
 {agent_description}
-
-## Descrição Completa da Tarefa
-{task_description}
 
 ## Resultados Recentes da Execução
 {recent_execution_messages}

@@ -33,7 +33,8 @@ agent_custom_system_prefix_no_task = {
 3. Ao explicar, use linguagem natural simples para descrever a funcionalidade sem revelar o nome real da ferramenta ou informações de ID.
 4. Verifique cuidadosamente a lista de ferramentas para garantir que os nomes estejam corretos e os parâmetros estejam corretos; não chame ferramentas inexistentes.
 5. Adira ao princípio de "Ação Primeiro": É estritamente proibido pedir opiniões do usuário antes que a tarefa seja concluída. Você deve se esforçar ao máximo para resolver problemas de forma independente, fazendo suposições razoáveis para progredir, se necessário. Somente pergunte ao usuário quando uma lacuna de informações graves tornar a tarefa completamente impossível. Convide a confirmação do usuário apenas após a conclusão da tarefa. Proíba a saída de expressões explícitas como "vou encerrar esta sessão".
-6. Requisito de Saída de Arquivo: Ao gerar caminhos de arquivo ou endereços de arquivo, você DEVE usar o formato de link de arquivo Markdown, por exemplo, [nome_do_arquivo](file:///caminho/absoluto/para/arquivo). Não gere caminhos de arquivo simples."""
+6. Requisito de Saída de Arquivo: Ao gerar caminhos de arquivo ou endereços de arquivo, você DEVE usar o formato de link de arquivo Markdown, por exemplo, [nome_do_arquivo](file:///caminho/absoluto/para/arquivo). Não gere caminhos de arquivo simples e sempre use caminho absoluto de arquivo.
+7. Contrato de status do turno: depois de escrever para o usuário progresso, resultado, pergunta, item de confirmação ou explicação de bloqueio, você DEVE chamar `turn_status(status=task_done|need_user_input|blocked|continue_work)` para relatar o status deste turno. Use `task_done` quando concluir; `need_user_input` ao perguntar ao usuário, pedir confirmação ou aguardar upload/informação adicional; `blocked` quando não puder prosseguir; `continue_work` quando o texto for apenas progresso intermediário e ainda houver trabalho. Proibido chamar apenas `turn_status` sem texto para o usuário."""
 }
 
 # 系统前缀模板 - 完整版本
@@ -63,7 +64,8 @@ agent_custom_system_prefix = {
 4. Verifique cuidadosamente a lista de ferramentas para garantir que os nomes estejam corretos e os parâmetros estejam corretos; não chame ferramentas inexistentes.
 5. Adira ao princípio de "Ação Primeiro": É estritamente proibido pedir opiniões do usuário antes que a tarefa seja concluída. Você deve se esforçar ao máximo para resolver problemas de forma independente, fazendo suposições razoáveis para progredir, se necessário. Somente pergunte ao usuário quando uma lacuna de informações graves tornar a tarefa completamente impossível. Convide a confirmação do usuário apenas após a conclusão da tarefa. Proíba a saída de expressões explícitas como "vou encerrar esta sessão".
 6. Requisitos de Gerenciamento de Tarefas: Ao receber uma tarefa, você deve primeiro usar a ferramenta `todo_write` para criar uma lista de tarefas (novas tarefas têm status=pending por padrão). Antes de começar a trabalhar em uma subtarefa, você deve usar `todo_write` para definir seu status como `in_progress`; quando essa subtarefa for concluída, use `todo_write` novamente para defini-la como `completed` e preencher uma conclusão. A qualquer momento, no máximo uma tarefa pode estar `in_progress`. **Cada chamada de `todo_write` deve incluir APENAS as tarefas que são novas ou que realmente mudam neste turno (para uma atualização, envie apenas o id mais os campos realmente alterados, por exemplo id+status, id+conclusion). Nunca reenvie tarefas inalteradas.**
-7. Requisito de Saída de Arquivo: Ao gerar caminhos de arquivo ou endereços de arquivo, você DEVE usar o formato de link de arquivo Markdown, por exemplo, [nome_do_arquivo](file:///caminho/absoluto/para/arquivo). Não gere caminhos de arquivo simples."""
+7. Requisito de Saída de Arquivo: Ao gerar caminhos de arquivo ou endereços de arquivo, você DEVE usar o formato de link de arquivo Markdown, por exemplo, [nome_do_arquivo](file:///caminho/absoluto/para/arquivo). Não gere caminhos de arquivo simples.
+8. Contrato de status do turno: depois de escrever para o usuário progresso, resultado, pergunta, item de confirmação ou explicação de bloqueio, você DEVE chamar `turn_status(status=task_done|need_user_input|blocked|continue_work)` para relatar o status deste turno. Use `task_done` quando concluir; `need_user_input` ao perguntar ao usuário, pedir confirmação ou aguardar upload/informação adicional; `blocked` quando não puder prosseguir; `continue_work` quando o texto for apenas progresso intermediário e ainda houver trabalho. Proibido chamar apenas `turn_status` sem texto para o usuário."""
 }
 
 
@@ -115,74 +117,94 @@ task_complete_template = {
 }}
 ```
 """,
-    "en": """You need to determine whether to interrupt task execution based on the conversation history and user's request.
+    "en": """You need to decide, based on the conversation history, the user's request, and the agent configuration requirements for how work should be executed, whether it is safe to interrupt task execution now (treat as end of this phase) or whether execution should continue.
 
-## Rules for Interrupting Task Execution
-1. Interrupt task execution:
-  - When you believe the existing responses in the conversation have satisfied the user's request and no further responses or actions are needed.
-  - When you believe an exception occurred during the conversation and after two attempts, the task still cannot continue.
-  - When user confirmation or input is needed during the conversation.
+Note: another layer of objective rules (e.g. last turn is a tool result, clear in-progress phrasing, ends with a colon, etc.) is applied first and may require "must continue." You only make the final semantic judgment when those rules do not apply.
 
-2. Continue task execution:
-  - When you believe the existing responses in the conversation have not yet satisfied the user's request, or when the user's questions or requests need to continue being executed.
-  - When tool calls are completed but the results have not been described in text, continue task execution because users cannot see the tool execution results.
-  - When the Assistant AI expresses in the conversation that it will continue doing other things or continue analyzing other content, such as expressions like (waiting for tool call, please wait, waiting for generation, next, I will call), then continue task execution.
+## Your judgment goals
+1. Accurately tell whether the user's need has been fully satisfied.
+2. Distinguish "interim process narration / progress updates" from "user-facing final delivery."
+3. When uncertain, lean toward continuing (i.e. task_interrupted = false).
 
-## Output Content Consistency Logic
-1. If reason is "waiting for tool call", then task_interrupted is false
-2. If reason indicates "waiting for user confirmation/input", then task_interrupted is true
+## When to interrupt (task_interrupted = true)
+- The Assistant has already given a **complete, clear final answer** in the current turn; the user need not wait for further work.
+- If there were tool calls, their key results are explained in natural language so the user can act on this reply.
+- The reply does not suggest continuation such as "next", "then", "I will", "next step", etc.
+- User confirmation, more input, or a choice is required before continuing—then you must interrupt and wait for the user.
 
-## User's Conversation History and Request Execution Process
+## When to continue (task_interrupted = false)
+- The reply is mainly **process explanation, progress reporting, or listing intermediate artifacts**, not a final user-facing outcome.
+- You believe summarizing, tidying, formatting, or further explanation is still needed for a true deliverable.
+- The reply says a phase is done but, for the overall task, there is clearly more to do.
+
+## Output consistency (mandatory)
+1. If reason indicates waiting for a tool / generation / in progress, then task_interrupted must be false.
+2. If reason indicates waiting for user confirmation / user input / user to supply more, then task_interrupted must be true.
+
+## Agent configuration requirements
+{system_prompt}
+
+## User conversation history and recent execution
 {messages}
 
-Output Format:
+Output format (JSON only):
 ```json
 {{
-    "reason": "Task completed",
+    "reason": "brief reason, max 20 characters",
     "task_interrupted": true
 }}
 ```
 or
 ```json
 {{
-    "reason": "Waiting for tool call",
+    "reason": "brief reason, max 20 characters",
     "task_interrupted": false
 }}
 ```
-reason should be as simple as possible, maximum 20 characters""",
-    "pt": """Você precisa determinar se deve interromper a execução da tarefa com base no histórico de conversas e na solicitação do usuário.
+""",
+    "pt": """Você precisa decidir, com base no histórico da conversa, na solicitação do usuário e nas exigências da configuração do agente sobre como o trabalho deve ser executado, se é seguro interromper a execução da tarefa agora (fim desta fase) ou se a execução deve continuar.
 
-## Regras para Interromper a Execução da Tarefa
-1. Interromper a execução da tarefa:
-  - Quando você acredita que as respostas existentes na conversa já satisfizeram a solicitação do usuário e não são necessárias mais respostas ou ações.
-  - Quando você acredita que ocorreu uma exceção durante a conversa e após duas tentativas, a tarefa ainda não pode continuar.
-  - Quando a confirmação ou entrada do usuário é necessária durante a conversa.
+Nota: outra camada de regras objetivas (por exemplo, a última mensagem é resultado de ferramenta, sinal claro de "em andamento", termina com dois pontos, etc.) tem prioridade e pode exigir "deve continuar." Você só faz o juízo semântico final quando essas regras não se aplicam.
 
-2. Continuar a execução da tarefa:
-  - Quando você acredita que as respostas existentes na conversa ainda não satisfizeram a solicitação do usuário, ou quando as perguntas ou solicitações do usuário precisam continuar sendo executadas.
-  - Quando as chamadas de ferramentas são concluídas, mas os resultados não foram descritos em texto, continue a execução da tarefa porque os usuários não podem ver os resultados da execução da ferramenta.
-  - Quando o Assistente AI expressa na conversa que continuará fazendo outras coisas ou continuará analisando outros conteúdos, como expressões como (aguardando chamada de ferramenta, aguarde, aguardando geração, próximo, vou chamar), então continue a execução da tarefa.
+## Objetivos do seu juízo
+1. Reconhecer com precisão se a necessidade do usuário já foi plenamente atendida.
+2. Distinguir "explicação de processo / relatório de progresso" de "entrega final voltada ao usuário."
+3. Em caso de dúvida, tenda a continuar (ou seja, task_interrupted = false).
 
-## Lógica de Consistência do Conteúdo de Saída
-1. Se o motivo for "aguardando chamada de ferramenta", então task_interrupted é false
-2. Se o motivo indicar "aguardando confirmação/entrada do usuário", então task_interrupted é true
+## Quando interromper (task_interrupted = true)
+- O Assistente já forneceu uma **resposta final completa e clara** no turno atual; o usuário não precisa aguardar mais ações.
+- Se houve chamadas de ferramenta, os resultados essenciais foram explicados em linguagem natural para o usuário poder agir com base nesta resposta.
+- A resposta não sugere continuação (ex.: "em seguida", "então", "vou", "próximo passo", etc.).
+- É necessária confirmação do usuário, informação adicional ou escolha para prosseguir—então deve interromper e aguardar o usuário.
 
-## Histórico de Conversas do Usuário e Processo de Execução da Solicitação
+## Quando continuar (task_interrupted = false)
+- A resposta é sobretudo **explicação de processo, progresso ou listagem de artefatos intermediários**, e não o resultado final para o usuário.
+- Ainda faltam passos como resumir, organizar, formatar ou complementar para uma entrega real.
+- A resposta diz que uma fase foi concluída, mas no conjunto da tarefa ainda há trabalho a fazer.
+
+## Consistência da saída (obrigatório)
+1. Se o motivo indicar aguardar ferramenta / geração / em andamento, task_interrupted deve ser false.
+2. Se o motivo indicar aguardar confirmação do usuário / entrada do usuário / o usuário fornecer mais informação, task_interrupted deve ser true.
+
+## Requisitos da configuração do agente
+{system_prompt}
+
+## Histórico da conversa e execução recente
 {messages}
 
-Formato de Saída:
+Formato de saída (somente JSON):
 ```json
 {{
-    "reason": "Tarefa concluída",
+    "reason": "motivo breve, no máx. 20 caracteres",
     "task_interrupted": true
 }}
 ```
 ou
 ```json
 {{
-    "reason": "Aguardando chamada de ferramenta",
+    "reason": "motivo breve, no máx. 20 caracteres",
     "task_interrupted": false
 }}
 ```
-O motivo deve ser o mais simples possível, no máximo 20 caracteres"""
+"""
 }

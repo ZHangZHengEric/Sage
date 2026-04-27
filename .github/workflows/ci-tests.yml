@@ -65,3 +65,28 @@ jobs:
 
       - name: Run Vitest
         run: npm test -- --run
+
+  desktop-i18n:
+    name: Desktop UI i18n keys
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: app/desktop/ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: app/desktop/ui/package-lock.json
+
+      - name: Install Desktop UI Dependencies
+        run: npm ci
+
+      - name: Check Desktop i18n keys (zh / en)
+        run: npm run check:i18n

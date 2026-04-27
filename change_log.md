@@ -1,3 +1,15 @@
+2026-04-28 00:10 turn_status 成功体补回标准键 success/status，与 should_end 并列。
+
+2026-04-27 23:55 turn_status 成功仅返回 `{"should_end":bool}`；need_summary 兼容新旧 JSON；AgentBase._call_llm_streaming 与 convert_messages_to_str 对纯 MessageChunk 路径也 strip turn_status。
+
+2026-04-27 23:30 MessageManager：新增 strip_turn_status_from_llm_context，从发往 LLM 的请求中剔除 turn_status 的 tool_calls 与对应 tool 消息；messages.json 仍保留；extract_messages_for_inference 与 convert_messages_to_dict_for_request 均应用；补单测。
+
+2026-04-27 23:45 CI：新增 `scripts/check-i18n-keys.mjs`，静态扫描 `t/tr/$t('a.b')` 字面量键须在 zh-CN 与 en-US 同时存在；server web `npm run check:i18n` 串联该脚本；补全 web/desktop 暴露的问卷与 common 等缺失键；desktop 增加 `check:i18n`；GitHub Actions 增加 `desktop-i18n` job。
+
+2026-04-27 23:10 前端 locale：server/web 与 desktop/ui 的 zh-CN / en-US 补全此前仅中文有的已用键（版本 GitHub 导入、工具预览失败、图片理解 workbench 文案、桌面计划任务计数）；删除未引用键（zh：system.version.releaseNotesPlaceholder、agent.settings、system.unknown）。
+
+2026-04-27 22:00 sagents/prompts：未改中文；英/葡 planning_template 去掉 `{task_description}` 与代码一致；SimpleAgent 英/葡 task_complete 对齐中文结构并含 `{system_prompt}`；葡语 agent_custom_system_prefix（含 no_task）补全 turn_status 条款；SimpleReact 英 task_complete 删中文无的两条「继续」规则。
+
 2026-04-27 13:30 sagents 阻塞点治理：将会话恢复/落盘、URL 下载写盘、文件解析与 pypandoc fallback、PIL 图片压缩/base64、远程 sandbox 目录扫描/host 文件读写、本地隔离 pickle/launcher/output 临时文件与后台进程启动等重 I/O 移到 aiofiles 或 asyncio.to_thread；保留 MCP JSON 与 sandbox YAML 小配置文件直接同步读取，避免过度优化；语法检查通过，相关可运行 sagents 测试通过，部分 async/agent 测试受当前环境缺 pytest-asyncio/opentelemetry 阻塞。
 
 2026-04-28 20:00 README / README_CN 恢复「加入社区」：居中、Slack for-the-badge 徽章、微信群 `WeChatGroup.jpg` 图，文末团队署名同区；README_CN 赞助者三列 Logo 与英文对齐。

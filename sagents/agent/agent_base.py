@@ -183,6 +183,10 @@ class AgentBase(ABC):
                 if self.model is None:
                     raise ValueError("Model is not initialized")
 
+                # 纯 MessageChunk 列表：与 convert_messages_to_dict_for_request 一致，剔除 turn_status 协议对
+                if messages and all(isinstance(m, MessageChunk) for m in messages):
+                    messages = MessageManager.strip_turn_status_from_llm_context(list(messages))
+
                 # 发起LLM请求
                 # 将 MessageChunk 对象转换为字典，以便进行 JSON 序列化
                 start_request_time = time.time()
