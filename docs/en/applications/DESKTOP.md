@@ -25,7 +25,7 @@ The **Desktop** app is a Tauri-packaged product: a local HTTP backend on `127.0.
 
 ## Install from release packages
 
-1. Download the package for your OS from [Releases](https://github.com/ZHangZHengEric/Sage/releases) (e.g. `.dmg` for macOS, `.exe` / `.msi` for Windows, `.deb` for Linux).
+1. Download the package for your OS from [Releases](https://github.com/ZHangZHengEric/Sage/releases) (e.g. `.dmg` for macOS, NSIS `.exe` for Windows, `.deb` for Linux).
 2. Run the installer or drag the app as documented on the download page.
 3. Launch Sage from the Start menu, Applications folder, or app grid.
 

@@ -182,35 +182,16 @@ jobs:
         run: |
           $version = "${env:GITHUB_REF}" -replace '^refs/tags/desktop-v', ''
           $nsisDir = "app/desktop/tauri/target/release/bundle/nsis"
-          $msiDir = "app/desktop/tauri/target/release/bundle/msi"
-          
-          # Rename Installer
+          # Windows 仅打 NSIS（.exe）。WiX/light 在 GHA 上常失败，已禁用 MSI。
           if (Test-Path $nsisDir) {
             Get-ChildItem $nsisDir -Filter *.exe | ForEach-Object {
               Move-Item $_.FullName (Join-Path $nsisDir ("Sage-$version-x86_64-setup.exe")) -Force
             }
-            
-            # Rename Updater Bundles (zip & sig)
             Get-ChildItem $nsisDir -Filter *.zip | ForEach-Object {
               Move-Item $_.FullName (Join-Path $nsisDir ("Sage-$version-x86_64-setup.zip")) -Force
             }
             Get-ChildItem $nsisDir -Filter *.zip.sig | ForEach-Object {
               Move-Item $_.FullName (Join-Path $nsisDir ("Sage-$version-x86_64-setup.zip.sig")) -Force
-            }
-          }
-
-          # Rename Installer (MSI)
-          if (Test-Path $msiDir) {
-            Get-ChildItem $msiDir -Filter *.msi | ForEach-Object {
-              Move-Item $_.FullName (Join-Path $msiDir ("Sage-$version-x86_64-setup.msi")) -Force
-            }
-            
-            # Rename Updater Bundles (zip & sig)
-            Get-ChildItem $msiDir -Filter *.zip | ForEach-Object {
-              Move-Item $_.FullName (Join-Path $msiDir ("Sage-$version-x86_64-setup.msi.zip")) -Force
-            }
-            Get-ChildItem $msiDir -Filter *.zip.sig | ForEach-Object {
-              Move-Item $_.FullName (Join-Path $msiDir ("Sage-$version-x86_64-setup.msi.zip.sig")) -Force
             }
           }
 
@@ -231,9 +212,6 @@ jobs:
             app/desktop/tauri/target/release/bundle/nsis/*.exe
             app/desktop/tauri/target/release/bundle/nsis/*.zip
             app/desktop/tauri/target/release/bundle/nsis/*.zip.sig
-            app/desktop/tauri/target/release/bundle/msi/*.msi
-            app/desktop/tauri/target/release/bundle/msi/*.zip
-            app/desktop/tauri/target/release/bundle/msi/*.zip.sig
 
       - name: Collect Linux Release Assets
         if: matrix.platform == 'linux'
