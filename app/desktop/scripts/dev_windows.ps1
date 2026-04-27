@@ -43,15 +43,13 @@ if (-not $CondaExe) {
 Write-Host "Found Conda: $CondaExe" -ForegroundColor Green
 
 # ===============================
-# Initialize Conda
+# Resolve Conda Environment Python
 # ===============================
 $CondaBase = & $CondaExe info --base 2>$null
 if (-not $CondaBase) {
     Write-Host "[ERROR] Failed to get Conda base directory" -ForegroundColor Red
     exit 1
 }
-
-& $CondaExe shell.powershell hook | Out-String | Invoke-Expression
 
 # ===============================
 # Check or Create Conda Environment
@@ -73,26 +71,40 @@ if ($envExists) {
     }
 }
 
-Write-Host "Activating Conda environment '$EnvName'..." -ForegroundColor Cyan
-conda activate $EnvName
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] Failed to activate Conda environment" -ForegroundColor Red
+Write-Host "Resolving Python executable for Conda environment '$EnvName'..." -ForegroundColor Cyan
+$SagePython = Join-Path $CondaBase "envs\$EnvName\python.exe"
+if (-not (Test-Path $SagePython)) {
+    Write-Host "[ERROR] Python not found in Conda environment: $SagePython" -ForegroundColor Red
     exit 1
 }
 
 # ===============================
 # Set Python Path and Install Dependencies
 # ===============================
-$SagePython = (Get-Command python).Source
 $env:SAGE_PYTHON = $SagePython
 Write-Host "Set SAGE_PYTHON: $SagePython" -ForegroundColor Green
 
-Write-Host "Installing Python dependencies..." -ForegroundColor Cyan
-pip install -r "$RootDir\requirements.txt" --index-url https://pypi.org/simple
+$UserBase = & $SagePython -m site --user-base
+$UserScriptsDir = Join-Path $UserBase "Scripts"
+if (Test-Path $UserScriptsDir) {
+    $env:PATH = "$UserScriptsDir;$env:PATH"
+}
 
-if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) {
+Write-Host "Installing Python dependencies..." -ForegroundColor Cyan
+& $SagePython -m pip install --user -r "$RootDir\requirements.txt" --index-url https://pypi.org/simple
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Failed to install Python dependencies" -ForegroundColor Red
+    exit 1
+}
+
+& $SagePython -c "import PyInstaller" 2>$null
+if ($LASTEXITCODE -ne 0) {
     Write-Host "Installing PyInstaller..." -ForegroundColor Cyan
-    pip install pyinstaller --index-url https://pypi.org/simple
+    & $SagePython -m pip install --user pyinstaller --index-url https://pypi.org/simple
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Failed to install PyInstaller" -ForegroundColor Red
+        exit 1
+    }
 }
 
 # ===============================
@@ -128,7 +140,7 @@ try {
 }
 
 # Create Sidecar wrapper
-$PythonExec = python -c "import sys; print(sys.executable)"
+$PythonExec = & $SagePython -c "import sys; print(sys.executable)"
 $SidecarWrapper = "$TauriSidecarDir\sage-desktop.cmd"
 
 $WrapperContent = @"
@@ -153,7 +165,44 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-npm install
+$NodeCmd = Get-Command node -ErrorAction SilentlyContinue
+if (-not $NodeCmd) {
+    Write-Host "[ERROR] node not found. Please install Node.js." -ForegroundColor Red
+    exit 1
+}
+
+$NodeExe = $NodeCmd.Source
+$NodeDir = Split-Path -Parent $NodeExe
+$NpmCli = Join-Path $NodeDir "node_modules\npm\bin\npm-cli.js"
+$NpmCmd = Get-Command npm.cmd -ErrorAction SilentlyContinue
+
+$env:SAGE_NODE_EXECUTABLE = $NodeExe
+$env:PATH = "$NodeDir;$env:PATH"
+Write-Host "Set SAGE_NODE_EXECUTABLE: $NodeExe" -ForegroundColor Green
+
+if (Test-Path $NpmCli) {
+    $env:SAGE_NPM_CLI = $NpmCli
+    Write-Host "Set SAGE_NPM_CLI: $NpmCli" -ForegroundColor Green
+}
+
+$NpmCacheDir = Join-Path $RootDir ".cache\npm"
+New-Item -ItemType Directory -Force -Path $NpmCacheDir | Out-Null
+$env:npm_config_cache = $NpmCacheDir
+Write-Host "Using npm cache: $NpmCacheDir" -ForegroundColor Green
+
+if (Test-Path $NpmCli) {
+    & $NodeExe $NpmCli ci
+} elseif ($NpmCmd) {
+    & $NpmCmd.Source ci
+} else {
+    Write-Host "[ERROR] npm runtime not found. Please reinstall Node.js." -ForegroundColor Red
+    exit 1
+}
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Failed to install frontend dependencies" -ForegroundColor Red
+    exit 1
+}
 Set-Location $RootDir
 
 # ===============================

@@ -49,20 +49,38 @@ class SandboxFileSystem:
         host_first = [(host, virtual) for virtual, host in items]
         return sorted(host_first, key=lambda item: len(item[0]), reverse=True)
 
+    def _normalize_input_path(self, path: str) -> str:
+        """Normalize common local-path variants before mapping."""
+        if not path:
+            return path
+
+        # Windows file:/// URLs may be normalized upstream to `/C:/...`.
+        if os.name == "nt" and path[:1] in {"/", "\\"}:
+            trimmed = path.lstrip("/\\")
+            if os.path.isabs(trimmed):
+                return trimmed
+
+        return path
+
     def to_host_path(self, virtual_path: str) -> str:
         """
         Converts a virtual path to a host path.
         Handles both exact matches and subpaths.
         """
+        normalized_path = self._normalize_input_path(virtual_path)
+
         for mapped_virtual, mapped_host in self._iter_virtual_mappings():
-            if virtual_path == mapped_virtual:
+            if normalized_path == mapped_virtual:
                 return mapped_host
-            if virtual_path.startswith(mapped_virtual + os.sep) or virtual_path.startswith(mapped_virtual + "/"):
-                rel_path = virtual_path[len(mapped_virtual):].lstrip(os.sep).lstrip("/")
+            if normalized_path.startswith(mapped_virtual + os.sep) or normalized_path.startswith(mapped_virtual + "/"):
+                rel_path = normalized_path[len(mapped_virtual):].lstrip(os.sep).lstrip("/")
                 return os.path.join(mapped_host, rel_path)
-        
-        # If it's already a host path or doesn't match virtual path, return as is
-        return virtual_path
+
+        if os.path.isabs(normalized_path):
+            return normalized_path
+
+        # Relative paths are rooted inside the primary workspace mount.
+        return os.path.join(self.host_path, normalized_path)
 
     def to_virtual_path(self, host_path: str) -> str:
         """
