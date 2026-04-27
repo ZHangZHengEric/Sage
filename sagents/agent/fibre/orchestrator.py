@@ -1238,7 +1238,8 @@ class FibreOrchestrator:
         finally:
             # Save state via session_context
             if sub_session.session_context:
-                sub_session.session_context.save(
+                await asyncio.to_thread(
+                    sub_session.session_context.save,
                     session_status=sub_session.get_status(),
                     child_session_ids=list(sub_session.child_session_ids),
                     interrupt_reason=sub_session.interrupt_reason,

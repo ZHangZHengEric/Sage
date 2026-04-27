@@ -131,6 +131,7 @@ class MemoryIndex:
         # Directory mtime cache for incremental updates
         self._dir_mtime_cache: Dict[str, float] = {}
         self._file_process_semaphore = asyncio.Semaphore(self.DEFAULT_FILE_PROCESS_CONCURRENCY)
+        self._fts_write_lock = asyncio.Lock()
 
         # Blacklist
         self.blacklist = self.DEFAULT_BLACKLIST.copy()
@@ -686,14 +687,16 @@ class MemoryIndex:
                     # mtime or size changed, treat as content changed and refresh directly.
                     content = await self._read_file_content(filepath)
                     self._replace_file_documents(filepath, content, mtime, size)
-                    self._sync_file_to_fts(filepath)
+                    async with self._fts_write_lock:
+                        await asyncio.to_thread(self._sync_file_to_fts, filepath)
                     stats["updated"] += 1
                     logger.debug(f"MemoryIndex: Updated file {filepath}")
                 else:
                     # New file, add to index
                     content = await self._read_file_content(filepath)
                     self._replace_file_documents(filepath, content, mtime, size)
-                    self._sync_file_to_fts(filepath)
+                    async with self._fts_write_lock:
+                        await asyncio.to_thread(self._sync_file_to_fts, filepath)
                     stats["added"] += 1
                     logger.debug(f"MemoryIndex: Added file {filepath}")
 
@@ -791,7 +794,8 @@ class MemoryIndex:
                 for doc_id in self.path_to_doc_ids.pop(filepath, []):
                     self.documents.pop(doc_id, None)
                 self._invalidate_path_caches(filepath)
-                self._delete_file_from_fts(filepath)
+                async with self._fts_write_lock:
+                    await asyncio.to_thread(self._delete_file_from_fts, filepath)
                 stats["removed"] += 1
                 logger.debug(f"MemoryIndex: Removed file {filepath}")
             except Exception as e:
@@ -806,11 +810,12 @@ class MemoryIndex:
 
         if has_changes or force:
             if force:
-                self._rebuild_fts_index()
+                async with self._fts_write_lock:
+                    await asyncio.to_thread(self._rebuild_fts_index)
             stats["build_time"] = time.time() - build_start
 
             save_start = time.time()
-            self._save_index()
+            await asyncio.to_thread(self._save_index)
             stats["save_time"] = time.time() - save_start
 
             stats["total_time"] = time.time() - total_start_time
