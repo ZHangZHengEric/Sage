@@ -456,6 +456,9 @@ async def _register_extra_mcp_tools(request: StreamRequest) -> None:
             logger.warning(f"Invalid MCP config for {key}: missing connection parameters")
             continue
 
+        from common.utils.mcp_anytool_url import coalesce_anytool_streamable_url
+
+        value = coalesce_anytool_streamable_url(key, value)
         registered_tools = await tm.register_mcp_server(key, value)
         if not registered_tools:
             logger.warning(f"Failed to register MCP server {key} with tools")

@@ -1,3 +1,7 @@
+2026-04-27 13:10 不修改 sagents/tool_manager：AnyTool 端口由 mcp_service 重写 URL，聊天侧 extra MCP 经 mcp_anytool_url 对齐 SAGE_PORT；英文能力列表「缺少 items」因 prompt 写「JSON 数组」与解析器要 {"items":[]}，于 desktop/server lifecycle 启动时对 PromptManager 做 runtime 文案补丁（zh/en/pt）。
+
+2026-04-27 12:25 修复 AnyTool MCP 502：DB 等存储的 streamable_http_url 残留旧端口与 SAGE_PORT 不一致时，mcp_service 对 kind=anytool 按 _get_backend_port 重写 URL。
+
 2026-04-27 12:05 修复桌面端打包后 fetch 报 CORS：为 Tauri 源增加显式 allow_origins（tauri://localhost、http/https://tauri.localhost）与锚定 fullmatch 正则；main 设置 SAGE_INTERNAL_DESKTOP_PROCESS=1 防止误走 server 空 CORS； abilities 等接口若仍 500 可在修复 CORS 后从响应体看到真实错误。
 
 2026-04-26 23:50 桌面端构建优化两项：(1) PyInstaller 配置统一到 sage-desktop.spec，build.sh 不再传一长串 flags，仅通过 SAGE_PYI_MODE 控制 strip；(2) CSP 收紧，default-src 'self'、script-src 仅 'self'（彻底禁止 inline script），style-src 保留 'unsafe-inline' 兼容 radix-vue 运行时样式，显式声明 img/media/font/connect/worker/object/base-uri/frame-ancestors。
