@@ -196,6 +196,29 @@ def test_strip_keeps_rejected_pair_inside_mixed_tool_calls():
     assert out[2].tool_call_id == "rej_3"
 
 
+def test_strip_keeps_coerced_turn_status_pair():
+    """status-only 补轮里被改写的 turn_status (metadata.coerced_from) 必须保留，让 LLM 看到改写事实。"""
+    assistant = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content=None,
+        tool_calls=[_tc(TURN_STATUS_TOOL_NAME, "coerce_1")],
+        message_type=MessageType.TOOL_CALL.value,
+    )
+    tool_msg = MessageChunk(
+        role=MessageRole.TOOL.value,
+        content='{"success":true,"status":"success","should_end":false}',
+        tool_call_id="coerce_1",
+        message_type=MessageType.TOOL_CALL_RESULT.value,
+        metadata={"coerced_from": "todo_write"},
+    )
+    out = MessageManager.strip_turn_status_from_llm_context([assistant, tool_msg])
+    assert len(out) == 2
+    assert out[0].role == MessageRole.ASSISTANT.value
+    assert out[0].tool_calls and out[0].tool_calls[0]["id"] == "coerce_1"
+    assert out[1].role == MessageRole.TOOL.value
+    assert out[1].tool_call_id == "coerce_1"
+
+
 def test_idempotent():
     m = [
         MessageChunk(

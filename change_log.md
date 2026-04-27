@@ -1,3 +1,5 @@
+2026-04-27 19:00 turn_status-only 补轮 coerce 留痕：被改写的 tool 结果打 metadata.coerced_from，strip 时保留这对 pair 让 LLM 看到事实；改写 note 文案走 PromptManager(zh/en/pt) 并注入原始工具名。
+
 2026-04-27 18:40 turn_status 拒绝文案 i18n：新增 simple_agent_prompts.turn_status_rejection_message（zh/en/pt），SimpleAgent 改写工具结果时按 session 语言通过 PromptManager 取文案，硬编码中文消息移除。
 
 2026-04-27 18:09 ModelProviderList 高级配置：移除 maxTokens/temperature/topP/presencePenalty/maxModelLen 输入框 placeholder，卡片展示的 temperature 兜底改为 '-'，避免清空后视觉上像是没改。

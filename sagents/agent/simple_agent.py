@@ -1,6 +1,6 @@
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
-from typing import Any, Dict, List, Optional, AsyncGenerator, Union, cast
+from typing import Any, Dict, List, Optional, AsyncGenerator, Tuple, Union, cast
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import SessionContext
@@ -384,30 +384,48 @@ class SimpleAgent(AgentBase):
     def _coerce_invalid_status_only_tool_calls(
         self,
         tool_calls: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        language: str = 'en',
+    ) -> Tuple[Dict[str, Any], str, List[str]]:
         """状态补调用阶段，模型若试图调用行动工具，则转成 continue_work 状态。
 
         一些 OpenAI-compatible 后端会在 `tools` 仅包含 turn_status 且
         `tool_choice=required` 时仍返回不在 tools 列表里的旧工具名。这里不执行
-        违规工具，而是把“想继续行动”的意图表达为 turn_status(status=continue_work)。
+        违规工具，而是把"想继续行动"的意图表达为 turn_status(status=continue_work)。
+
+        返回 (改写后的 tool_calls, coerced_turn_status_id, 原始违规工具名列表)。
+        调用方可据此在生成的 tool 结果上打 metadata.coerced_from，并通过
+        strip_turn_status_from_llm_context 让 LLM 下一轮看到这次改写。
         """
+        original_names: List[str] = []
+        seen: set = set()
+        for tc in tool_calls.values():
+            nm = ((tc.get('function') or {}).get('name') or '').strip()
+            if nm and nm not in seen:
+                seen.add(nm)
+                original_names.append(nm)
+
         original_id = next(iter(tool_calls.keys()), None) or f"turn_status_{uuid.uuid4().hex[:8]}"
-        return {
+        note_template = PromptManager().get_agent_prompt_auto(
+            'turn_status_coerced_note', language=language
+        )
+        try:
+            note = note_template.format(tools=", ".join(original_names) or "<unknown>")
+        except (KeyError, IndexError):
+            note = note_template
+        new_tool_calls = {
             original_id: {
                 "id": original_id,
                 "type": "function",
                 "function": {
                     "name": "turn_status",
                     "arguments": json.dumps(
-                        {
-                            "status": "continue_work",
-                            "note": "model attempted an action tool during status-only protocol",
-                        },
+                        {"status": "continue_work", "note": note},
                         ensure_ascii=False,
                     ),
                 },
             }
         }
+        return new_tool_calls, original_id, original_names
 
     def _should_request_turn_status_after_text_response(
         self,
@@ -936,13 +954,19 @@ class SimpleAgent(AgentBase):
                 for tool_call in tool_calls.values()
                 if ((tool_call.get("function") or {}).get("name") or "") not in allowed_tool_names
             }
+            coerced_turn_status_id: Optional[str] = None
+            coerced_from_names: List[str] = []
             if invalid_tool_names:
                 if self._is_turn_status_only_request(tools_json, force_tool_choice_required):
                     logger.warning(
                         f"SimpleAgent: turn_status-only 阶段模型返回了未提供的工具 {sorted(invalid_tool_names)}，"
                         "已改写为 turn_status(status=continue_work)"
                     )
-                    tool_calls = self._coerce_invalid_status_only_tool_calls(tool_calls)
+                    live_ctx_for_coerce = self._get_live_session_context(session_id)
+                    coerce_lang = live_ctx_for_coerce.get_language() if live_ctx_for_coerce is not None else 'en'
+                    tool_calls, coerced_turn_status_id, coerced_from_names = (
+                        self._coerce_invalid_status_only_tool_calls(tool_calls, language=coerce_lang)
+                    )
                 else:
                     logger.warning(
                         f"SimpleAgent: 模型返回未提供的工具 {sorted(invalid_tool_names)}，拒绝执行"
@@ -1026,6 +1050,19 @@ class SimpleAgent(AgentBase):
                             )
                             msg.content = rejection
                             msg.metadata = {**(msg.metadata or {}), 'turn_status_rejected': True}
+
+                # status-only 补轮里被改写的 turn_status：在 tool 结果上打 metadata.coerced_from，
+                # 让 strip_turn_status_from_llm_context 保留这对 pair，模型下一轮就能明白
+                # "上次调 X 被忽略，所以现在 should_end=false"。SSE 侧仍按 tool_call_id 隐藏。
+                if coerced_turn_status_id and not is_complete:
+                    coerced_from_label = ",".join(coerced_from_names) or "<unknown>"
+                    for msg in messages:
+                        if msg.role == MessageRole.TOOL.value and msg.tool_call_id == coerced_turn_status_id:
+                            logger.info(
+                                f"SimpleAgent: 标记 coerced turn_status 工具结果 {msg.tool_call_id} "
+                                f"coerced_from={coerced_from_label}"
+                            )
+                            msg.metadata = {**(msg.metadata or {}), 'coerced_from': coerced_from_label}
 
                 yield (messages, is_complete)
 

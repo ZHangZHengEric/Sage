@@ -155,6 +155,38 @@ def test_turn_status_tools_only_filters_action_tools():
     assert _agent()._turn_status_tools_only(tools_json) == [{"function": {"name": "turn_status"}}]
 
 
+def test_coerce_invalid_status_only_returns_continue_work_with_metadata():
+    """status-only 补轮里改写违规工具：保留原 id、记录原始工具名、note 走 i18n。"""
+    import json
+
+    invalid_calls = {
+        "call_X": {
+            "id": "call_X",
+            "type": "function",
+            "function": {"name": "todo_write", "arguments": "{}"},
+        },
+        "call_Y": {
+            "id": "call_Y",
+            "type": "function",
+            "function": {"name": "load_skill", "arguments": "{}"},
+        },
+    }
+    new_calls, coerced_id, original_names = _agent()._coerce_invalid_status_only_tool_calls(
+        invalid_calls, language="zh"
+    )
+
+    assert coerced_id == "call_X"
+    assert set(original_names) == {"todo_write", "load_skill"}
+    assert list(new_calls.keys()) == ["call_X"]
+    fn = new_calls["call_X"]["function"]
+    assert fn["name"] == "turn_status"
+    args = json.loads(fn["arguments"])
+    assert args["status"] == "continue_work"
+    # 中文文案 + 原始工具名注入到 note
+    assert "todo_write" in args["note"] and "load_skill" in args["note"]
+    assert "turn_status" in args["note"]
+
+
 def test_turn_status_from_tool_call_reads_continue_work():
     tool_call = {
         "function": {
