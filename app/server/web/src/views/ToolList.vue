@@ -99,6 +99,17 @@
           </Button>
 
           <Button
+            v-if="canEditGroup(selectedGroupSource)"
+            variant="outline"
+            size="sm"
+            class="h-8"
+            @click="handleEditMcpTool(selectedGroupSource)"
+          >
+            <Edit class="mr-2 h-3.5 w-3.5" />
+            {{ t('tools.editMcpServer') || 'Edit MCP Server' }}
+          </Button>
+
+          <Button
             v-if="isAnyToolGroup(selectedGroupSource)"
             variant="outline"
             size="sm"
