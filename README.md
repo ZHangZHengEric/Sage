@@ -1,16 +1,16 @@
-
+<div align="center">
 
 # 🌟 **Experience Sage's Power**
 
-cover
+![cover](assets/cover.png)
 
-[English](README.md)
-[简体中文](README_CN.md)
-[License: MIT](LICENSE)
-[Python 3.10+](https://python.org)
-[Version](https://github.com/ZHangZHengEric/Sage)
-[DeepWiki](https://deepwiki.com/ZHangZHengEric/Sage)
-[Slack](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
+[![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
+[![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python)](https://python.org)
+[![Version](https://img.shields.io/badge/Version-1.1.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
+[![DeepWiki](https://img.shields.io/badge/DeepWiki-Learn%20More-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
+[![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
 # 🧠 **Sage Agent Platform**
 
@@ -18,21 +18,32 @@ cover
 
 > 🌟 **A production-ready agent platform for task execution, automation, browser workflows, IM delivery, and enterprise deployment.**
 
-
+</div>
 
 ---
 
 ## 📸 **Product Screenshots**
 
+<div align="center">
 
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/workbench.png" width="100%" alt="Workbench"/>
+      <br/><strong>Visual Workbench</strong>
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/chat.png" width="100%" alt="Chat"/>
+      <br/><strong>Real-time Collaboration</strong>
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/preview.png" width="100%" alt="Preview"/>
+      <br/><strong>Multi-format Support</strong>
+    </td>
+  </tr>
+</table>
 
-
-|                      |                             |                          |
-| -------------------- | --------------------------- | ------------------------ |
-| **Visual Workbench** | **Real-time Collaboration** | **Multi-format Support** |
-
-
-
+</div>
 
 > 📖 **Detailed Documentation**: [https://wiki.sage.zavixai.com/](https://wiki.sage.zavixai.com/)
 
@@ -251,15 +262,32 @@ We welcome contributions! Please see our [GitHub Issues](https://github.com/ZHan
 
 ## 💖 **Sponsors**
 
-
+<div align="center">
 
 We are grateful to our sponsors for their support in making Sage better:
 
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <a href="#" target="_blank">
+        <img src="assets/sponsors/dudubashi_logo.png" height="50" alt="Dudu Bus"/>
+      </a>
+      <br/>
+    </td>
+    <td align="center" width="33%">
+      <a href="#" target="_blank">
+        <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="50" alt="RcrAI"/>
+      </a>
+    </td>
+    <td align="center" width="33%">
+      <a href="#" target="_blank">
+        <img src="assets/sponsors/idata_logo.png" height="50" alt="Data"/>
+      </a>
+    </td>
+  </tr>
+</table>
 
-|     |     |     |
-| --- | --- | --- |
-|     |     |     |
-
+</div>
 
 
 

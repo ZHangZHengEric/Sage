@@ -1,3 +1,7 @@
+2026-04-28 19:00 README / README_CN 恢复文首 cover、shield 徽章、产品截图三列 HTML 表，与 2f2efddc 展示一致，Quick Start 等后续段落保持现状。
+
+2026-04-28 18:00 README / README_CN 恢复赞助者区 HTML 与三处 Logo 引用，修复空表；与 2f2efddc 前结构一致。
+
 2026-04-28 16:00 桌面 Windows 发布：从 bundle 中移除 MSI（仅保留 NSIS .exe），避免 GHA 上 WiX light.exe 失败；release-desktop workflow 同步去掉 msi 重命名与上传；README 说明 Windows 为 NSIS 安装包。
 
 2026-04-28 12:00 修复 CI「sage-desktop.spec not found」：根因是 .gitignore 的 *.spec 忽略未提交该文件；增加 !app/desktop/sage-desktop.spec 例外，需执行 git add app/desktop/sage-desktop.spec 并推送后 Linux/mac/Windows 打包才能找到 spec。
