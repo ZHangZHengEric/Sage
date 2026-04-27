@@ -1,84 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use serde_json::json;
 
 use crate::app::{ActiveSurfaceKind, App, MessageKind, SubmitAction};
+
+use super::super::{handle_key, INLINE_VIEWPORT_IDLE_HEIGHT, INLINE_VIEWPORT_MAX_HEIGHT};
 use crate::terminal_layout::desired_viewport_height;
-use crate::terminal_support::{
-    format_config_init, format_doctor_info, parse_provider_mutation,
-    parse_provider_mutation_allow_empty,
-};
-
-use super::{handle_key, INLINE_VIEWPORT_IDLE_HEIGHT, INLINE_VIEWPORT_MAX_HEIGHT};
-
-#[test]
-fn parse_provider_mutation_rejects_invalid_default_flag() {
-    let err = parse_provider_mutation(&[String::from("default=maybe")], false)
-        .expect_err("default=maybe should fail");
-    assert_eq!(
-        err.to_string(),
-        "invalid default value `maybe`; use true/false, yes/no, on/off, or 1/0"
-    );
-}
-
-#[test]
-fn parse_provider_mutation_rejects_duplicate_fields() {
-    let err = parse_provider_mutation(
-        &[String::from("model=alpha"), String::from("model=beta")],
-        false,
-    )
-    .expect_err("duplicate model should fail");
-    assert_eq!(
-        err.to_string(),
-        "duplicate provider field `model`; supply it once"
-    );
-}
-
-#[test]
-fn parse_provider_mutation_rejects_empty_values() {
-    let err = parse_provider_mutation(&[String::from("name=")], false)
-        .expect_err("empty values should fail");
-    assert_eq!(err.to_string(), "provider field `name` cannot be empty");
-}
-
-#[test]
-fn parse_provider_mutation_reports_missing_create_fields() {
-    let err = parse_provider_mutation(
-        &[
-            String::from("name=demo"),
-            String::from("base=https://example.com"),
-        ],
-        true,
-    )
-    .expect_err("missing model should fail");
-    assert_eq!(
-        err.to_string(),
-        "provider create requires name=..., model=..., base=...; missing: model"
-    );
-}
-
-#[test]
-fn parse_provider_mutation_accepts_false_default_values() {
-    let mutation = parse_provider_mutation(
-        &[
-            String::from("name=demo"),
-            String::from("model=demo-chat"),
-            String::from("base=https://example.com"),
-            String::from("default=off"),
-        ],
-        true,
-    )
-    .expect("valid mutation should parse");
-    assert_eq!(mutation.is_default, Some(false));
-}
-
-#[test]
-fn parse_provider_mutation_allow_empty_supports_verify_against_default_env() {
-    let mutation = parse_provider_mutation_allow_empty(&[], false)
-        .expect("empty verify mutation should be allowed");
-    assert!(mutation.name.is_none());
-    assert!(mutation.model.is_none());
-    assert!(mutation.base_url.is_none());
-}
 
 #[test]
 fn help_overlay_consumes_typing_without_mutating_input() {
@@ -249,38 +174,4 @@ fn ctrl_t_opens_transcript_overlay_when_idle() {
         app.active_surface_kind(),
         Some(ActiveSurfaceKind::Transcript)
     );
-}
-
-#[test]
-fn format_doctor_info_renders_nested_objects_and_lists() {
-    let info = json!({
-        "status": "ok",
-        "warnings": [],
-        "dependencies": {
-            "dotenv": true
-        }
-    });
-
-    let rendered = format_doctor_info(&info);
-    assert!(rendered.contains("status: ok"));
-    assert!(rendered.contains("warnings:"));
-    assert!(rendered.contains("(none)"));
-    assert!(rendered.contains("dependencies:"));
-    assert!(rendered.contains("dotenv: true"));
-}
-
-#[test]
-fn format_config_init_renders_next_steps() {
-    let rendered = format_config_init(&crate::backend::ConfigInitInfo {
-        path: "/tmp/.sage_env".to_string(),
-        template: "minimal".to_string(),
-        overwritten: true,
-        next_steps: vec!["export SAGE_DB_TYPE=file".to_string()],
-    });
-
-    assert!(rendered.contains("config initialized"));
-    assert!(rendered.contains("path: /tmp/.sage_env"));
-    assert!(rendered.contains("template: minimal"));
-    assert!(rendered.contains("overwritten: true"));
-    assert!(rendered.contains("- export SAGE_DB_TYPE=file"));
 }

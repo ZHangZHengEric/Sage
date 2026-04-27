@@ -17,12 +17,9 @@ use crate::terminal_support::sync_contextual_popup_data;
 use crate::ui;
 use crate::wrap::wrap_lines;
 
-#[path = "terminal/actions.rs"]
 mod actions;
-#[path = "terminal/keys.rs"]
 mod keys;
 #[cfg(test)]
-#[path = "terminal/tests.rs"]
 mod tests;
 
 use actions::handle_submit_action;

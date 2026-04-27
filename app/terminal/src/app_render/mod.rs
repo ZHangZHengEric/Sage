@@ -1,10 +1,6 @@
-#[path = "app_render/assistant.rs"]
 mod assistant;
-#[path = "app_render/common.rs"]
 mod common;
-#[path = "app_render/messages.rs"]
 mod messages;
-#[path = "app_render/welcome.rs"]
 mod welcome;
 
 #[cfg(test)]

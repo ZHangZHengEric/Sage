@@ -2,7 +2,6 @@ mod app;
 mod app_preview;
 mod app_render;
 mod backend;
-mod backend_support;
 mod bottom_pane;
 mod custom_terminal;
 mod history;
