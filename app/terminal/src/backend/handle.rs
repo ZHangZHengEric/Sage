@@ -10,7 +10,9 @@ use anyhow::{anyhow, Result};
 use crate::app::MessageKind;
 use crate::backend::protocol::{flush_complete_lines, parse_backend_line};
 use crate::backend::types::{BackendEvent, BackendRequest};
-use crate::backend_support::{apply_state_env, prepare_state_root, repo_root};
+use crate::backend_support::{
+    apply_state_env, prepare_state_root, resolve_cli_invoker, resolve_runtime_root, CliInvoker,
+};
 
 pub struct BackendHandle {
     receiver: Receiver<BackendEvent>,
@@ -32,20 +34,32 @@ struct BackendConfig {
 
 impl BackendHandle {
     pub fn spawn(request: &BackendRequest) -> Result<Self> {
-        let repo_root = repo_root()?;
-        let state_root = prepare_state_root(&repo_root)?;
-        let python = std::env::var("PYTHON").unwrap_or_else(|_| "python3".to_string());
+        let runtime_root = resolve_runtime_root()?;
+        let state_root = prepare_state_root(&runtime_root)?;
+        let cli = resolve_cli_invoker(&runtime_root);
         let workspace = request
             .workspace
             .clone()
-            .unwrap_or_else(|| repo_root.clone());
+            .unwrap_or_else(|| runtime_root.clone());
 
-        let mut command = Command::new(&python);
+        let mut command = match &cli {
+            CliInvoker::Executable(path) => {
+                let mut command = Command::new(path);
+                command.current_dir(&runtime_root);
+                command
+            }
+            CliInvoker::PythonModule(path) => {
+                let mut command = Command::new(path);
+                command
+                    .current_dir(&runtime_root)
+                    .arg("-u")
+                    .arg("-m")
+                    .arg("app.cli.main")
+                    .env("PYTHONUNBUFFERED", "1");
+                command
+            }
+        };
         command
-            .current_dir(&repo_root)
-            .arg("-u")
-            .arg("-m")
-            .arg("app.cli.main")
             .arg("chat")
             .arg("--json")
             .arg("--stats")
@@ -61,8 +75,7 @@ impl BackendHandle {
             .arg(&workspace)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env("PYTHONUNBUFFERED", "1");
+            .stderr(Stdio::piped());
         for skill in &request.skills {
             command.arg("--skill").arg(skill);
         }
@@ -71,9 +84,12 @@ impl BackendHandle {
             command.env("SAGE_DEFAULT_LLM_MODEL_NAME", model);
         }
 
-        let mut child = command
-            .spawn()
-            .map_err(|err| anyhow!("failed to launch Sage CLI backend with {python}: {err}"))?;
+        let mut child = command.spawn().map_err(|err| {
+            anyhow!(
+                "failed to launch Sage CLI backend with {}: {err}",
+                cli.display()
+            )
+        })?;
         let stdout = child
             .stdout
             .take()

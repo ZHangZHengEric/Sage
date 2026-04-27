@@ -3,12 +3,8 @@ use std::path::PathBuf;
 use crate::app::{App, MessageKind};
 use crate::backend::{list_providers, list_skills, SessionDetail};
 
-pub(crate) fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|path| path.parent())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
+pub(crate) fn workspace_root() -> PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
 pub(crate) fn sync_contextual_popup_data(app: &mut App) {
@@ -31,7 +27,7 @@ pub(crate) fn sync_contextual_popup_data(app: &mut App) {
         }
     }
     if app.needs_skill_catalog() {
-        if let Ok(skills) = list_skills(&app.user_id, Some(repo_root().as_path())) {
+        if let Ok(skills) = list_skills(&app.user_id, Some(workspace_root().as_path())) {
             app.set_skill_catalog(
                 skills
                     .into_iter()
