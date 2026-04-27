@@ -12,6 +12,8 @@ ref: getting-started
 
 # Getting Started
 
+**Deeper, app-specific quick starts:** [Web (browser + Docker Compose)](WEB.md) · [Desktop](DESKTOP.md) · [CLI](CLI.md) · [TUI](TUI.md) · [Chrome extension](CHROME_EXTENSION.md)
+
 ## One-Command Startup (Recommended)
 
 **Best for:** Local development, quick testing
@@ -74,7 +76,9 @@ The startup script will automatically create these configuration files:
 
 ## Manual Startup (Advanced)
 
-If you need manual control over the startup process, follow these steps.
+The full **Web** stack (manual processes, Vite, and [Docker Compose](WEB.md#docker-compose-full-stack)) is also documented in [Web Application](WEB.md).
+
+If you need manual control over the development startup process, follow these steps.
 
 ### Prerequisites
 
@@ -234,6 +238,8 @@ streamlit run examples/sage_demo.py -- \
 ---
 
 ## Build Desktop App from Source
+
+For installers, first-launch, and a fuller build walkthrough, see [Desktop Application](DESKTOP.md).
 
 ```bash
 app/desktop/scripts/build.sh release

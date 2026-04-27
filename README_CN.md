@@ -1,16 +1,14 @@
-<div align="center">
-
 # 🌟 **体验 Sage 的强大能力**
 
-![cover](assets/cover.png)
+cover
 
-[![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
-[![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python)](https://python.org)
-[![Version](https://img.shields.io/badge/Version-1.1.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
-[![DeepWiki](https://img.shields.io/badge/DeepWiki-查看文档-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
-[![Slack](https://img.shields.io/badge/Slack-加入社区-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
+[English](README.md)
+[简体中文](README_CN.md)
+[License: MIT](LICENSE)
+[Python 3.10+](https://python.org)
+[Version](https://github.com/ZHangZHengEric/Sage)
+[DeepWiki](https://deepwiki.com/ZHangZHengEric/Sage)
+[Slack](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
 # 🧠 **Sage 智能体平台**
 
@@ -18,32 +16,15 @@
 
 > 🌟 **面向任务执行、自动化调度、浏览器工作流、IM 交付与企业部署的生产级智能体平台。**
 
-</div>
-
 ---
 
 ## 📸 **产品截图**
 
-<div align="center">
 
-<table>
-  <tr>
-    <td align="center" width="33%">
-      <img src="assets/screenshots/workbench.png" width="100%" alt="工作台"/>
-      <br/><strong>可视化工作台</strong>
-    </td>
-    <td align="center" width="33%">
-      <img src="assets/screenshots/chat.png" width="100%" alt="对话"/>
-      <br/><strong>实时协作</strong>
-    </td>
-    <td align="center" width="33%">
-      <img src="assets/screenshots/preview.png" width="100%" alt="预览"/>
-      <br/><strong>多格式支持</strong>
-    </td>
-  </tr>
-</table>
+|            |          |           |
+| ---------- | -------- | --------- |
+| **可视化工作台** | **实时协作** | **多格式支持** |
 
-</div>
 
 > 📖 **详细文档**: [https://wiki.sage.zavixai.com/](https://wiki.sage.zavixai.com/)
 
@@ -64,67 +45,33 @@
 
 ## 🚀 **快速开始**
 
-### 安装
+**环境要求（从源码跑 Web）：** Python 3.10+、Node.js 18+。
+
+### Web（克隆后一键启动）
 
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
-```
-
-### 运行 Sage
-
-**一键启动脚本（推荐本地开发）**：
-
-```bash
-# 1. 可选：先激活你的环境
-# conda activate your-env
-
-# 2. 设置 LLM Key
 export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
 export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
 export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
-
-# 3. 运行启动脚本
 ./scripts/dev-up.sh
 ```
 
-启动脚本会自动：
-- 检查 Python（>= 3.10）和 Node.js（>= 18）
-- 自动创建配置文件（最小模式默认使用 SQLite）
-- 自动安装依赖并启动后端、前端
-- 自动创建 `logs/server.log`
-- 优先使用 `.env` 中的 `SAGE_PORT`
+浏览器打开 [http://localhost:5173](http://localhost:5173)。首次可能提示**最小模式**（SQLite）与**完整模式**等选择，想最快跑通选最小模式即可。可选：`PYTHON_BIN=...` 或 `USE_UV=1 ./scripts/dev-up.sh` 指定解释器或用 [uv](https://github.com/astral-sh/uv) 装依赖。
 
-可选覆盖方式：
+**详细文档：** [Web 应用](docs/zh/applications/WEB.md)（手工起前后端、Docker Compose 全栈、端口等）
 
-```bash
-# 显式指定 Python
-PYTHON_BIN=/path/to/python ./scripts/dev-up.sh
+### 桌面端（安装包）
 
-# 显式使用 uv
-USE_UV=1 ./scripts/dev-up.sh
-```
-
-首次运行时，脚本会提示你选择：
-- **最小模式**：SQLite、无外部依赖，适合快速开始
-- **完整模式**：MySQL + Elasticsearch + RustFS，适合更接近生产的环境
-
-**桌面应用（推荐）**：
-
-桌面版安装包请前往 [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases) 下载最新版本：
-- **macOS**: `.dmg` (Intel & Apple Silicon)
-- **Windows**: `.exe` / `.msi`
-- **Linux**: `.deb` (x86_64 / arm64)
-
-#### 桌面版安装指南
+在 [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases) 下载 `**.dmg`（macOS）**、`**.exe` / `.msi`（Windows）** 或 `**.deb`（Linux）**，按下面安装。
 
 **macOS**
 
-1. 下载对应架构的 `.dmg` 文件并双击打开。
-2. 将 `Sage.app` 拖动到“应用程序”文件夹。
-3. 当前发布包暂未经过 Apple Developer 签名/公证，首次启动如果看到“无法验证开发者”或“Apple 无法检查其是否包含恶意软件”，请在“应用程序”中找到 `Sage.app`，右键选择“打开”，然后在弹窗中再次点击“打开”。
-4. 如果系统仍然拦截，请前往“系统设置 -> 隐私与安全性”，在底部找到 `Sage` 的安全提示后点击“仍要打开”。
-5. 如果 macOS 提示应用“已损坏”或始终无法启动，可在终端执行以下命令后重试：
+1. 打开对应 CPU 架构的 `.dmg`，将 **Sage.app** 拖入 **应用程序**。
+2. 当前安装包**尚未**经 Apple 公证/签名。若提示「无法验证开发者」或「无法检查是否包含恶意软件」：在 **访达 → 应用程序** 中 **右键** `Sage.app` → **打开**，在弹窗中再次点 **打开**（为 Gatekeeper 增加一次性例外）。
+3. 若仍被拦截：**系统设置 → 隐私与安全性**，在页面下方找到与 Sage 相关的提示，点 **仍要打开** 后再启动一次。
+4. 若提示应用**已损坏**或始终无法打开，可在终端清除隔离属性后重试：
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Sage.app
@@ -132,113 +79,48 @@ xattr -dr com.apple.quarantine /Applications/Sage.app
 
 **Windows**
 
-1. 下载 `.exe` 安装包并双击运行。
-2. 按照安装向导完成安装。
-3. 如果系统弹出 SmartScreen 警告，可点击“更多信息”->“仍要运行”继续安装。
+1. 运行 `.exe` 安装程序并按向导完成安装。
+2. 若出现 **SmartScreen**「已保护你的电脑」等提示，可点 **更多信息** → **仍要运行**（具体文案因系统版本可能略有不同）。
 
-**Linux**
+**Linux（Debian / Ubuntu）**
 
-1. 从 [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases) 下载对应架构的 `.deb` 安装包。
-2. 在 Debian / Ubuntu 上可直接双击安装，或执行以下命令安装：
+1. 从 Releases 下载对应架构的 `.deb`。
+2. 在终端安装（请按实际文件名替换）：
 
 ```bash
 sudo apt install ./Sage-<version>-<arch>.deb
 ```
 
-如需自行从源码构建桌面版，可使用下面的命令：
+多数桌面环境也可直接双击 `.deb` 安装。
+
+**详细文档：** [桌面应用](docs/zh/applications/DESKTOP.md)（从源码构建、环境变量、各平台说明）
+
+### CLI
 
 ```bash
-# macOS/Linux
-app/desktop/scripts/build.sh release
-
-# Windows
-./app/desktop/scripts/build_windows.ps1 release
-```
-
-**命令行工具 (CLI)**：
-```bash
-# 先安装为可编辑包
 pip install -e .
-
-# 配置最小运行环境变量
 export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
 export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
 export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 export SAGE_DB_TYPE="file"
-
-# 检查本地运行环境
 sage doctor
-
-# 在 ~/.sage/.sage_env 生成共享的 CLI/Desktop 最小配置
-sage config init
-
-# 快速执行一次任务
-sage run --stats "用一句话介绍你自己"
-
-# 进入交互式对话
-sage chat
+sage run "用一句话打个招呼"
+# 或: sage chat
 ```
 
-完整 CLI 使用说明请看：
-- English: [docs/en/applications/CLI.md](docs/en/applications/CLI.md)
-- 中文: [docs/zh/applications/CLI.md](docs/zh/applications/CLI.md)
+**详细文档：** [CLI 使用指南](docs/zh/applications/CLI.md)
 
-CLI 现在默认和 desktop 共用 `~/.sage/` 本地数据目录。
-默认会先读取 `~/.sage/.sage_env`，开发时如果仓库内存在 `.env`，则会再用本地 `.env` 覆盖。
-启用 `--json` 时，CLI 会输出流式事件，并在结束时附加一个最终的 `cli_stats` 结构化摘要事件。
+### TUI
 
-**终端 UI（TUI 预览）**：
+先 `pip install -e .` 并设置与上相同的 `SAGE_DEFAULT_`* 与 `SAGE_DB_TYPE=file`，再使用 `sage-terminal`（或按文档从 `app/terminal/` 用 `cargo` 运行）。
 
-```bash
-# 先让本地 Sage CLI/backend 可用
-pip install -e .
+**详细文档：** [TUI 使用指南](docs/zh/applications/TUI.md)
 
-# 配置同一套最小运行环境
-export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
-export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
-export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
-export SAGE_DB_TYPE="file"
+### Chrome 扩展
 
-# 从源码运行 Rust TUI
-cargo run --quiet --offline --manifest-path app/terminal/Cargo.toml
-```
+在 `chrome://extensions/` 中开启「开发者模式」，**加载已解压的扩展程序**，选择目录 `app/chrome-extension/`。若本机服务端口与默认探测不一致，在扩展中填写后端地址。
 
-当前支持的启动形式：
-
-```bash
-sage-terminal
-sage-terminal run "inspect this repo"
-sage-terminal chat "hello"
-sage-terminal config init
-sage-terminal config init /tmp/.sage_env --force
-sage-terminal doctor
-sage-terminal doctor probe-provider
-sage-terminal provider verify
-sage-terminal provider verify model=deepseek-chat base=https://api.deepseek.com/v1
-sage-terminal sessions
-sage-terminal sessions 25
-sage-terminal sessions inspect latest
-sage-terminal sessions inspect <session_id>
-sage-terminal resume
-sage-terminal resume latest
-sage-terminal resume <session_id>
-```
-
-完整 TUI 使用说明请看：
-- English: [docs/en/applications/TUI.md](docs/en/applications/TUI.md)
-- 中文: [docs/zh/applications/TUI.md](docs/zh/applications/TUI.md)
-
-**Web 应用 (FastAPI + Vue3)**：
-
-```bash
-# 启动后端
-python -m app.server.main
-
-# 启动前端（在另一个终端）
-cd app/server/web
-npm install
-npm run dev
-```
+**详细文档：** [Chrome 扩展](docs/zh/applications/CHROME_EXTENSION.md)
 
 ---
 
@@ -296,6 +178,8 @@ graph TD
         Runtime -.-> Obs["👁️ 可观测性<br/>OpenTelemetry"]
     end
 ```
+
+
 
 ---
 
@@ -361,53 +245,26 @@ Sage/
 
 ## 💖 **赞助者**
 
-<div align="center">
-
 感谢以下赞助者对 Sage 的支持：
 
-<table>
-  <tr>
-    <td align="center" width="33%">
-      <a href="#" target="_blank">
-        <img src="assets/sponsors/dudubashi_logo.png" height="50" alt="嘟嘟巴士"/>
-      </a>
-      <br/>
-    </td>
-    <td align="center" width="33%">
-      <a href="#" target="_blank">
-        <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="50" alt="循环智能"/>
-      </a>
-    </td>
-    <td align="center" width="33%">
-      <a href="#" target="_blank">
-        <img src="assets/sponsors/idata_logo.png" height="50" alt="Data"/>
-      </a>
-    </td>
-  </tr>
-</table>
 
-</div>
+|     |     |     |
+| --- | --- | --- |
+|     |     |     |
+
 
 ---
 
 ## 🦌 **加入我们的社区**
 
-<div align="center">
-
 ### 💬 与我们交流
 
-[![Slack](https://img.shields.io/badge/Slack-加入社区-4A154B?logo=slack&style=for-the-badge)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
+[Slack](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
 ### 📱 微信群
 
-<img src="assets/WeChatGroup.jpg" width="300" alt="微信群二维码"/>
-
 *扫码加入我们的微信社区 🦌*
-
-</div>
 
 ---
 
-<div align="center">
 Built with ❤️ by the Sage Team 🦌
-</div>
