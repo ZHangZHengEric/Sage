@@ -264,15 +264,32 @@ Sage/
 
 ## 💖 **赞助者**
 
-
+<div align="center">
 
 感谢以下赞助者对 Sage 的支持：
 
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <a href="#" target="_blank">
+        <img src="assets/sponsors/dudubashi_logo.png" height="50" alt="嘟嘟巴士"/>
+      </a>
+      <br/>
+    </td>
+    <td align="center" width="33%">
+      <a href="#" target="_blank">
+        <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="50" alt="循环智能"/>
+      </a>
+    </td>
+    <td align="center" width="33%">
+      <a href="#" target="_blank">
+        <img src="assets/sponsors/idata_logo.png" height="50" alt="Data"/>
+      </a>
+    </td>
+  </tr>
+</table>
 
-|     |     |     |
-| --- | --- | --- |
-|     |     |     |
-
+</div>
 
 
 
@@ -280,14 +297,22 @@ Sage/
 
 ## 🦌 **加入我们的社区**
 
+<div align="center">
+
 ### 💬 与我们交流
 
-[Slack](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
+[![Slack](https://img.shields.io/badge/Slack-加入社区-4A154B?logo=slack&style=for-the-badge)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
 ### 📱 微信群
 
+<img src="assets/WeChatGroup.jpg" width="300" alt="微信群二维码"/>
+
 *扫码加入我们的微信社区 🦌*
+
+</div>
 
 ---
 
+<div align="center">
 Built with ❤️ by the Sage Team 🦌
+</div>
