@@ -9,6 +9,8 @@ import os
 import sys
 import platform
 import asyncio
+import pickle
+import uuid
 from typing import Dict, Any, Optional, List
 from sagents.utils.logger import logger
 from sagents.utils.sandbox.config import VolumeMount
@@ -292,6 +294,86 @@ if __name__ == "__main__":
 """
 
 
+def _prepare_payload_files_sync(
+    sandbox_dir: str,
+    run_id: str,
+    payload: Dict[str, Any],
+    launcher_script: str = LAUNCHER_SCRIPT,
+) -> tuple[str, str, str]:
+    os.makedirs(sandbox_dir, exist_ok=True)
+    input_pkl = os.path.join(sandbox_dir, f"input_{run_id}.pkl")
+    output_pkl = os.path.join(sandbox_dir, f"output_{run_id}.pkl")
+
+    with open(input_pkl, "wb") as f:
+        pickle.dump(payload, f)
+
+    launcher_path = os.path.join(sandbox_dir, "launcher.py")
+    with open(launcher_path, "w") as f:
+        f.write(launcher_script)
+
+    return input_pkl, output_pkl, launcher_path
+
+
+def _load_pickle_output_sync(output_pkl: str) -> Any:
+    if not os.path.exists(output_pkl):
+        raise Exception("No output file generated")
+
+    with open(output_pkl, "rb") as f:
+        return pickle.load(f)
+
+
+def _remove_file_if_exists_sync(path: Optional[str]) -> None:
+    if path and os.path.exists(path):
+        os.remove(path)
+
+
+def _spawn_background_process_sync(
+    command: str,
+    actual_cwd: str,
+    env: Dict[str, str],
+    original_home: str,
+) -> Dict[str, Any]:
+    if platform.system() == "Windows":
+        log_dir = os.path.join(actual_cwd, ".sandbox_logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f"bg_{uuid.uuid4()}.log")
+
+        with open(log_file, "w") as f_log:
+            process = subprocess.Popen(
+                command,
+                cwd=actual_cwd,
+                shell=True,
+                env=env,
+                stdout=f_log,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0,
+            )
+
+        return {
+            "success": True,
+            "process_id": f"bg_{process.pid}",
+            "pid": process.pid,
+            "log_file": log_file,
+        }
+
+    nohup_command = f"nohup env HOME=\"{original_home}\" {command} > /dev/null 2>&1 &"
+    process = subprocess.Popen(
+        nohup_command,
+        cwd=actual_cwd,
+        shell=True,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+    return {
+        "success": True,
+        "process_id": f"bg_{process.pid}",
+        "pid": process.pid,
+    }
+
+
 class SubprocessIsolation:
     """直接执行模式，无文件系统隔离"""
     
@@ -320,9 +402,6 @@ class SubprocessIsolation:
         Returns:
             执行结果
         """
-        import pickle
-        import uuid
-        
         logger.info(f"[SubprocessIsolation] 开始执行")
         logger.info(f"  venv_dir: {self.venv_dir}")
         logger.info(f"  cwd: {cwd}")
@@ -330,22 +409,17 @@ class SubprocessIsolation:
         # 创建临时文件
         run_id = str(uuid.uuid4())
         sandbox_dir = self.sandbox_runtime_dir
-        os.makedirs(sandbox_dir, exist_ok=True)
-        input_pkl = os.path.join(sandbox_dir, f"input_{run_id}.pkl")
-        output_pkl = os.path.join(sandbox_dir, f"output_{run_id}.pkl")
-        
-        with open(input_pkl, "wb") as f:
-            pickle.dump(payload, f)
+        input_pkl, output_pkl, launcher_path = await asyncio.to_thread(
+            _prepare_payload_files_sync,
+            sandbox_dir,
+            run_id,
+            payload,
+        )
         
         # 使用沙箱的 venv Python
         python_bin = os.path.join(self.venv_dir, "bin", "python")
         if platform.system() == "Windows":
              python_bin = os.path.join(self.venv_dir, "Scripts", "python.exe")
-        
-        # 始终覆盖 launcher.py，确保 LAUNCHER_SCRIPT 升级后旧沙箱也能用上新版
-        launcher_path = os.path.join(sandbox_dir, "launcher.py")
-        with open(launcher_path, "w") as f:
-            f.write(LAUNCHER_SCRIPT)
         
         cmd = [python_bin, launcher_path, input_pkl, output_pkl]
         
@@ -388,11 +462,7 @@ class SubprocessIsolation:
                 logger.error(f"[SubprocessIsolation] 执行失败: {result.stderr[:500]}")
                 raise Exception(f"Subprocess execution failed: {result.stderr}")
             
-            if not os.path.exists(output_pkl):
-                raise Exception("No output file generated")
-            
-            with open(output_pkl, "rb") as f:
-                res = pickle.load(f)
+            res = await asyncio.to_thread(_load_pickle_output_sync, output_pkl)
             
             if res['status'] == 'success':
                 logger.info(f"[SubprocessIsolation] 执行成功")
@@ -403,11 +473,10 @@ class SubprocessIsolation:
                 
         finally:
             # 清理临时文件
-            if os.path.exists(input_pkl):
-                try:
-                    os.remove(input_pkl)
-                except:
-                    pass
+            try:
+                await asyncio.to_thread(_remove_file_if_exists_sync, input_pkl)
+            except Exception:
+                pass
                     
     async def execute_background(self, command: str, cwd: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -420,8 +489,6 @@ class SubprocessIsolation:
         Returns:
             包含进程信息的字典
         """
-        import uuid
-        
         logger.info(f"[SubprocessIsolation.execute_background] 开始后台执行")
         logger.info(f"  command: {command}")
         logger.info(f"  cwd: {cwd}")
@@ -434,63 +501,12 @@ class SubprocessIsolation:
         # 保留原来的 HOME 目录
         original_home = os.environ.get("HOME", "")
         
-        if platform.system() == "Windows":
-             log_dir = os.path.join(actual_cwd, ".sandbox_logs")
-             os.makedirs(log_dir, exist_ok=True)
-             log_file = os.path.join(log_dir, f"bg_{uuid.uuid4()}.log")
-             
-             # Windows doesn't support nohup, use start /B or just Popen with proper flags
-             # But here we want to run inside Popen so we can get PID.
-             # Using shell=True and DETACHED_PROCESS might be better.
-             
-             # We simply run the command with stdout redirected.
-             # Note: 'start' is internal to cmd.exe, so we use cmd /c start ...
-             # But subprocess.Popen can launch detached process directly.
-             
-             # Option 1: Direct Popen with DETACHED flags
-             # creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-             
-             with open(log_file, "w") as f_log:
-                 process = subprocess.Popen(
-                    command,
-                    cwd=actual_cwd,
-                    shell=True,
-                    env=env,
-                    stdout=f_log,
-                    stderr=subprocess.STDOUT,
-                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
-                 )
-             
-             logger.info(f"[SubprocessIsolation.execute_background] Windows 进程已启动, PID: {process.pid}")
-             
-             return {
-                "success": True,
-                "process_id": f"bg_{process.pid}",
-                "pid": process.pid,
-                "log_file": log_file
-            }
-        
-        else:
-            # 使用 nohup 包装命令
-            nohup_command = f"nohup env HOME=\"{original_home}\" {command} > /dev/null 2>&1 &"
-            
-            logger.info(f"[SubprocessIsolation.execute_background] nohup 命令: {nohup_command[:100]}...")
-            
-            # 执行
-            process = subprocess.Popen(
-                nohup_command,
-                cwd=actual_cwd,
-                shell=True,
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True
-            )
-            
-            logger.info(f"[SubprocessIsolation.execute_background] 进程已启动, PID: {process.pid}")
-            
-            return {
-                "success": True,
-                "process_id": f"bg_{process.pid}",
-                "pid": process.pid
-            }
+        process_info = await asyncio.to_thread(
+            _spawn_background_process_sync,
+            command,
+            actual_cwd,
+            env,
+            original_home,
+        )
+        logger.info(f"[SubprocessIsolation.execute_background] 进程已启动, PID: {process_info.get('pid')}")
+        return process_info

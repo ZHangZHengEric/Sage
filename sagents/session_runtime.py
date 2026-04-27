@@ -47,6 +47,11 @@ from sagents.utils.message_control_flags import extract_control_flags_from_messa
 _session_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("session_id", default=None)
 
 
+def _load_json_file_sync(file_path: str) -> Optional[Any]:
+    with open(file_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 @contextmanager
 def session_scope(session_id: Optional[str]):
     token = _session_id_var.set(session_id)
@@ -200,8 +205,7 @@ class Session:
             return None
 
         try:
-            with open(context_path, "r", encoding="utf-8") as f:
-                snapshot = json.load(f)
+            snapshot = _load_json_file_sync(context_path)
             if isinstance(snapshot, dict):
                 self._persisted_snapshot = snapshot
                 return snapshot
@@ -221,8 +225,7 @@ class Session:
             return self._persisted_messages
 
         try:
-            with open(messages_path, "r", encoding="utf-8") as f:
-                raw_messages = json.load(f)
+            raw_messages = _load_json_file_sync(messages_path)
             if isinstance(raw_messages, list):
                 self._persisted_messages = [
                     MessageChunk.from_dict(msg)
@@ -412,15 +415,13 @@ class Session:
                 if session_workspace:
                     context_path = os.path.join(session_workspace, "session_context.json")
                     if os.path.exists(context_path):
-                        with open(context_path, "r", encoding="utf-8") as f:
-                            data = json.load(f)
-                            return data.get("system_context")
+                        data = _load_json_file_sync(context_path)
+                        return data.get("system_context") if isinstance(data, dict) else None
                             
             default_path = os.path.join(self.session_root_space, session_id, "session_context.json")
             if os.path.exists(default_path):
-                with open(default_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    return data.get("system_context")
+                data = _load_json_file_sync(default_path)
+                return data.get("system_context") if isinstance(data, dict) else None
                  
         except UnicodeDecodeError:
             logger.warning(f"SessionRuntime: Failed to decode session_context.json for {session_id}, file may be in legacy encoding")
@@ -784,7 +785,7 @@ class Session:
                         request_status = "interrupted"
                     else:
                         request_status = "completed"
-                    session_context.end_request(status=request_status)
+                    await asyncio.to_thread(session_context.end_request, status=request_status)
                 except Exception as exc:
                     logger.warning(f"SAgent: 关闭 per-request tokens 统计失败: {exc}")
 
@@ -1170,8 +1171,7 @@ class SessionManager:
             return []
             
         try:
-            with open(messages_path, "r", encoding="utf-8") as f:
-                raw_messages = json.load(f)
+            raw_messages = _load_json_file_sync(messages_path)
         except json.JSONDecodeError as e:
             logger.error(f"SessionManager: Failed to decode messages.json for session {session_id}: {e}")
             return []

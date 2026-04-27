@@ -10,6 +10,8 @@ import tempfile
 import hashlib
 import time
 import urllib.parse
+import asyncio
+import aiofiles
 import httpx
 import re
 import chardet
@@ -37,6 +39,27 @@ class FileParserError(Exception):
     """文件解析异常"""
 
     pass
+
+
+def _parse_file_sync(parser, file_path: str, is_fallback: bool) -> ParseResult:
+    if is_fallback:
+        return parser.parse(file_path, skip_validation=True)
+    return parser.parse(file_path)
+
+
+def _pandoc_convert_file_sync(file_path: str) -> str:
+    import pypandoc
+
+    return pypandoc.convert_file(file_path, "markdown")
+
+
+def _file_size_if_exists_sync(file_path: str) -> int:
+    return os.path.getsize(file_path) if os.path.exists(file_path) else 0
+
+
+def _unlink_if_exists_sync(file_path: str) -> None:
+    if os.path.exists(file_path):
+        os.unlink(file_path)
 
 
 class FileValidator:
@@ -209,9 +232,9 @@ class FileHandler:
                 async with httpx.AsyncClient(timeout=timeout) as client:
                     async with client.stream('GET', file_path_or_url) as response:
                         response.raise_for_status()
-                        with open(temp_file_path, "wb") as f:
+                        async with aiofiles.open(temp_file_path, "wb") as f:
                             async for chunk in response.aiter_bytes(chunk_size=8192):
-                                f.write(chunk)
+                                await f.write(chunk)
 
                 return temp_file_path
             else:
@@ -533,10 +556,12 @@ class FileParser:
             f"extract_{file_path_or_url}_{time.time()}".encode()
         ).hexdigest()[:8]
         temp_file_path = None
+        is_url = False
 
         try:
             # 验证文件路径或URL
-            validation_result = FileValidator.validate_file_path_or_url(
+            validation_result = await asyncio.to_thread(
+                FileValidator.validate_file_path_or_url,
                 file_path_or_url
             )
             if not validation_result["valid"]:
@@ -557,26 +582,22 @@ class FileParser:
                 temp_file_path = file_path  # 记录临时文件路径用于清理
 
             # 使用智能路由获取解析器
-            parser, is_fallback = self.parser_factory.get_smart_parser(
-                file_path, file_extension
+            parser, is_fallback = await asyncio.to_thread(
+                self.parser_factory.get_smart_parser,
+                file_path,
+                file_extension,
             )
 
             if parser is None:
                 # 如果没有找到任何解析器，尝试使用pandoc
                 try:
-                    import pypandoc
-
-                    extracted_text = pypandoc.convert_file(file_path, "markdown")
+                    extracted_text = await asyncio.to_thread(_pandoc_convert_file_sync, file_path)
                     parse_result = ParseResult(
                         text=extracted_text,
                         metadata={
                             "file_type": "unknown",
                             "parser": "pandoc_fallback",
-                            "file_size": (
-                                os.path.getsize(file_path)
-                                if os.path.exists(file_path)
-                                else 0
-                            ),
+                            "file_size": await asyncio.to_thread(_file_size_if_exists_sync, file_path),
                         },
                         success=True,
                     )
@@ -590,30 +611,25 @@ class FileParser:
                     # 如果是fallback解析器，跳过格式验证
                     if is_fallback:
                         print(f"🔄 使用fallback解析器跳过格式验证: {file_path}")
-                        parse_result = parser.parse(file_path, skip_validation=True)
+                        parse_result = await asyncio.to_thread(_parse_file_sync, parser, file_path, True)
                     else:
-                        parse_result = parser.parse(file_path)
+                        parse_result = await asyncio.to_thread(_parse_file_sync, parser, file_path, False)
 
                     if not parse_result.success:
                         print(f"⚠️ 解析器失败: {parse_result.error}")
                         # 如果所有解析器都失败，尝试pypandoc
                         try:
-                            import pypandoc
-
                             print("🔄 尝试使用pypandoc作为最后的fallback")
-                            extracted_text = pypandoc.convert_file(
-                                file_path, "markdown"
+                            extracted_text = await asyncio.to_thread(
+                                _pandoc_convert_file_sync,
+                                file_path,
                             )
                             parse_result = ParseResult(
                                 text=extracted_text,
                                 metadata={
                                     "file_type": "unknown",
                                     "parser": "pypandoc_emergency_fallback",
-                                    "file_size": (
-                                        os.path.getsize(file_path)
-                                        if os.path.exists(file_path)
-                                        else 0
-                                    ),
+                                    "file_size": await asyncio.to_thread(_file_size_if_exists_sync, file_path),
                                 },
                                 success=True,
                             )
@@ -629,20 +645,14 @@ class FileParser:
 
                     # 智能路由已经处理了文件类型检测，直接尝试pypandoc作为最后的fallback
                     try:
-                        import pypandoc
-
                         print("🔄 尝试使用pypandoc作为最后的fallback")
-                        extracted_text = pypandoc.convert_file(file_path, "markdown")
+                        extracted_text = await asyncio.to_thread(_pandoc_convert_file_sync, file_path)
                         parse_result = ParseResult(
                             text=extracted_text,
                             metadata={
                                 "file_type": "unknown",
                                 "parser": "pypandoc_exception_fallback",
-                                "file_size": (
-                                    os.path.getsize(file_path)
-                                    if os.path.exists(file_path)
-                                    else 0
-                                ),
+                                "file_size": await asyncio.to_thread(_file_size_if_exists_sync, file_path),
                             },
                             success=True,
                         )
@@ -717,9 +727,9 @@ class FileParser:
 
         finally:
             # 清理临时文件
-            if temp_file_path and os.path.exists(temp_file_path):
+            if temp_file_path:
                 try:
-                    os.unlink(temp_file_path)
+                    await asyncio.to_thread(_unlink_if_exists_sync, temp_file_path)
                 except Exception:
                     pass
 

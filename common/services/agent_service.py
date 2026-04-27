@@ -1,3 +1,4 @@
+import asyncio
 import mimetypes
 import os
 import random
@@ -478,10 +479,11 @@ async def update_agent(
             user_id=existing_config.user_id or user_id or "",
             role=role,
         )
-        cleanup_unselected_skills(
+        await asyncio.to_thread(
+            cleanup_unselected_skills,
             agent_id,
             normalized_config,
-            user_id=existing_config.user_id or user_id or ""
+            user_id=existing_config.user_id or user_id or "",
         )
         logger.info(f"Agent {agent_id} 更新成功")
         return orm_obj
@@ -514,10 +516,11 @@ async def update_agent(
         role=role,
     )
 
-    cleanup_unselected_skills(
+    await asyncio.to_thread(
+        cleanup_unselected_skills,
         agent_id,
         normalized_config,
-        user_id=existing_config.user_id or user_id or ""
+        user_id=existing_config.user_id or user_id or "",
     )
 
     logger.info(f"Agent {agent_id} 更新成功")
@@ -620,7 +623,7 @@ async def delete_agent(
     owner_uid = existing_config.user_id or user_id or ""
     await dao.delete_by_id(agent_id)
     try:
-        delete_agent_workspace_on_host(agent_id, owner_uid)
+        await asyncio.to_thread(delete_agent_workspace_on_host, agent_id, owner_uid)
     except Exception as e:
         logger.error(
             f"删除 Agent 工作空间失败: agent_id={agent_id}, error={e}")
@@ -923,6 +926,27 @@ def _sync_agent_skills_to_global(agent_workspace: Path) -> List[str]:
     return synced_skills
 
 
+def _load_openclaw_skill_sources_sync(openclaw_home: Path) -> Tuple[List[Path], Dict[str, Path], List[str]]:
+    skill_dirs = _detect_openclaw_skill_dirs(openclaw_home)
+    skill_sources = _collect_openclaw_skill_sources(skill_dirs)
+    available_skills = sorted(skill_sources.keys())
+    return skill_dirs, skill_sources, available_skills
+
+
+def _import_openclaw_workspace_assets_sync(
+    openclaw_workspace: Path,
+    agent_workspace: Path,
+    skill_dirs: List[Path],
+    skill_sources: Dict[str, Path],
+) -> Tuple[List[str], List[str]]:
+    exclude_names = {"skills"} if (openclaw_workspace / "skills") in skill_dirs else set()
+    _copy_directory_contents(openclaw_workspace, agent_workspace, exclude_names)
+
+    linked_skills = _link_openclaw_skills(agent_workspace, skill_sources)
+    synced_skills = _sync_agent_skills_to_global(agent_workspace)
+    return linked_skills, synced_skills
+
+
 def _cleanup_agent_workspace_skills(
     agent_id: str,
     agent_config: Dict[str, Any],
@@ -959,9 +983,10 @@ async def import_openclaw_agent(user_id: str = "") -> Dict[str, Any]:
         )
 
     llm_provider_id = await _resolve_default_llm_provider_id(user_id=user_id)
-    skill_dirs = _detect_openclaw_skill_dirs(openclaw_home)
-    skill_sources = _collect_openclaw_skill_sources(skill_dirs)
-    available_skills = sorted(skill_sources.keys())
+    skill_dirs, skill_sources, available_skills = await asyncio.to_thread(
+        _load_openclaw_skill_sources_sync,
+        openclaw_home,
+    )
 
     agent_config = _build_openclaw_agent_config(
         llm_provider_id=llm_provider_id,
@@ -979,11 +1004,13 @@ async def import_openclaw_agent(user_id: str = "") -> Dict[str, Any]:
             app_mode="desktop",
             ensure_exists=True,
         )
-        exclude_names = {"skills"} if (openclaw_workspace / "skills") in skill_dirs else set()
-        _copy_directory_contents(openclaw_workspace, agent_workspace, exclude_names)
-
-        linked_skills = _link_openclaw_skills(agent_workspace, skill_sources)
-        synced_skills = _sync_agent_skills_to_global(agent_workspace)
+        linked_skills, synced_skills = await asyncio.to_thread(
+            _import_openclaw_workspace_assets_sync,
+            openclaw_workspace,
+            agent_workspace,
+            skill_dirs,
+            skill_sources,
+        )
 
         logger.info(
             f"OpenClaw 导入完成: agent_id={created_agent.agent_id}, "
@@ -1001,7 +1028,7 @@ async def import_openclaw_agent(user_id: str = "") -> Dict[str, Any]:
         }
     except Exception as e:
         if agent_workspace and agent_workspace.exists():
-            shutil.rmtree(agent_workspace, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, agent_workspace, ignore_errors=True)
 
         if created_agent:
             try:
@@ -1072,7 +1099,11 @@ def get_desktop_agent_workspace_path(agent_id: str) -> Path:
 
 
 async def get_server_file_workspace(agent_id: str, user_id: str) -> Dict[str, Any]:
-    return list_workspace_files(get_server_agent_workspace_path(agent_id, user_id), agent_id)
+    return await asyncio.to_thread(
+        list_workspace_files,
+        get_server_agent_workspace_path(agent_id, user_id),
+        agent_id,
+    )
 
 
 async def download_server_agent_file(
@@ -1080,31 +1111,53 @@ async def download_server_agent_file(
     user_id: str,
     file_path: str,
 ) -> Tuple[str, str, str]:
-    return prepare_workspace_download(
+    return await asyncio.to_thread(
+        prepare_workspace_download,
         get_server_agent_workspace_path(agent_id, user_id),
         file_path,
     )
 
 
 async def delete_server_agent_file(agent_id: str, user_id: str, file_path: str) -> bool:
-    return delete_workspace_entry(get_server_agent_workspace_path(agent_id, user_id), file_path)
+    return await asyncio.to_thread(
+        delete_workspace_entry,
+        get_server_agent_workspace_path(agent_id, user_id),
+        file_path,
+    )
 
 
 async def delete_server_agent_workspace(agent_id: str, user_id: str) -> Dict[str, Any]:
     workspace_path = Path(get_server_agent_workspace_path(agent_id, user_id))
-    return _remove_agent_workspace_directory(workspace_path, agent_id, user_id)
+    return await asyncio.to_thread(
+        _remove_agent_workspace_directory,
+        workspace_path,
+        agent_id,
+        user_id,
+    )
 
 
 async def get_desktop_file_workspace(agent_id: str) -> Dict[str, Any]:
-    return list_workspace_files(get_desktop_agent_workspace_path(agent_id), agent_id)
+    return await asyncio.to_thread(
+        list_workspace_files,
+        get_desktop_agent_workspace_path(agent_id),
+        agent_id,
+    )
 
 
 async def download_desktop_agent_file(agent_id: str, file_path: str) -> Tuple[str, str, str]:
-    return prepare_workspace_download(get_desktop_agent_workspace_path(agent_id), file_path)
+    return await asyncio.to_thread(
+        prepare_workspace_download,
+        get_desktop_agent_workspace_path(agent_id),
+        file_path,
+    )
 
 
 async def delete_desktop_agent_file(agent_id: str, file_path: str) -> bool:
-    return delete_workspace_entry(get_desktop_agent_workspace_path(agent_id), file_path)
+    return await asyncio.to_thread(
+        delete_workspace_entry,
+        get_desktop_agent_workspace_path(agent_id),
+        file_path,
+    )
 
 
 async def generate_agent_abilities(

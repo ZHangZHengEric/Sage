@@ -158,9 +158,7 @@ async def _fetch_url_to_base64(url: str, timeout: float = 10.0) -> Optional[str]
             if not data:
                 logger.warning(f"HTTP fallback fetch returned empty body: url={url}")
                 return None
-            return await asyncio.get_event_loop().run_in_executor(
-                None, _bytes_to_base64_data_url, data
-            )
+            return await asyncio.to_thread(_bytes_to_base64_data_url, data)
     except Exception as exc:
         logger.warning(f"HTTP fallback fetch failed for url={url}, error: {exc}")
         return None
@@ -173,6 +171,10 @@ def _is_localhost_url(url: str) -> bool:
         return parsed.hostname in ("127.0.0.1", "localhost", "0.0.0.0")
     except Exception:
         return False
+
+
+def _path_exists_file_sync(path_obj: Path) -> bool:
+    return path_obj.exists() and path_obj.is_file()
 
 
 async def process_multimodal_content(msg: Dict[str, Any]) -> Dict[str, Any]:
@@ -211,7 +213,7 @@ async def process_multimodal_content(msg: Dict[str, Any]) -> Dict[str, Any]:
 
         # 已是 base64 data URL：解码-压缩-编码
         if url.startswith('data:image/'):
-            compressed = _compress_base64_data_url(url)
+            compressed = await asyncio.to_thread(_compress_base64_data_url, url)
             if compressed is None:
                 new_content.append(item)
             else:
@@ -222,7 +224,7 @@ async def process_multimodal_content(msg: Dict[str, Any]) -> Dict[str, Any]:
         if url.startswith('file://'):
             file_path_str = url[7:]
         elif url.startswith('http://') or url.startswith('https://'):
-            local_path = resolve_local_sage_url(url)
+            local_path = await asyncio.to_thread(resolve_local_sage_url, url)
             if local_path is None:
                 if _is_localhost_url(url):
                     # 是本机地址但反解失败（多半是 HOME 不一致 / 跑在容器里 / 自定义沙箱目录）。
@@ -249,13 +251,13 @@ async def process_multimodal_content(msg: Dict[str, Any]) -> Dict[str, Any]:
             file_path_str = url
 
         path_obj = Path(file_path_str)
-        if not path_obj.exists():
+        if not await asyncio.to_thread(_path_exists_file_sync, path_obj):
             logger.warning(f"Image file not found: {file_path_str}")
             # file:// 或裸路径找不到只能放弃；http(s) 已在上面分支处理
             new_content.append(item)
             continue
 
-        data_url = _file_to_base64_data_url(path_obj)
+        data_url = await asyncio.to_thread(_file_to_base64_data_url, path_obj)
         if data_url is None:
             new_content.append(item)
         else:

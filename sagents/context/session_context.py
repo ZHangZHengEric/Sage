@@ -129,7 +129,7 @@ class SessionContext:
         await self._finalize_system_context()
 
         # 加载已持久化的消息
-        self._load_persisted_messages()
+        await asyncio.to_thread(self._load_persisted_messages)
         
         # 清理过期的待办任务（异步执行，确保 system_context 正确加载）
         try:
@@ -158,6 +158,7 @@ class SessionContext:
         # per-request tokens 累加器（详见 start_request / end_request / add_llm_request）
         self._current_request: Optional[Dict[str, Any]] = None
         self._request_lock = threading.Lock()
+        self._llm_request_save_lock = threading.Lock()
         self.record_timing_event(
             "session_start",
             status=self.status.value,
@@ -641,6 +642,38 @@ class SessionContext:
         except Exception as e:
             logger.warning(f"SessionContext: Failed to load messages.json: {e}")
 
+    def _prepare_llm_request_file_path(self, llm_request: Dict[str, Any]) -> str:
+        llm_request_folder = os.path.join(self.session_workspace, "llm_request")
+        os.makedirs(llm_request_folder, exist_ok=True)
+
+        existing_files = os.listdir(llm_request_folder)
+        max_index = -1
+        for file in existing_files:
+            if file.endswith(".json"):
+                try:
+                    index = int(file.split("_")[0])
+                    max_index = max(max_index, index)
+                except ValueError:
+                    continue
+
+        file_name = (
+            f"{max_index + 1}_{llm_request['request'].get('step_name', 'unknown')}_"
+            f"{time.strftime('%Y%m%d%H%M%S', time.localtime(llm_request['timestamp']))}.json"
+        )
+        return os.path.join(llm_request_folder, file_name)
+
+    def _save_llm_request_sync(self, llm_request: Dict[str, Any]) -> str:
+        with self._llm_request_save_lock:
+            file_path = self._prepare_llm_request_file_path(llm_request)
+            serializable_request = {
+                "request": make_serializable(llm_request['request']),
+                "response": make_serializable(llm_request['response']),
+                "timestamp": llm_request['timestamp']
+            }
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(serializable_request, f, ensure_ascii=False, indent=4)
+            return file_path
+
     async def _cleanup_expired_todo_tasks(self):
         try:
             from sagents.tool.impl.todo_tool import ToDoTool
@@ -1077,32 +1110,7 @@ class SessionContext:
     async def _async_save_llm_request(self, llm_request: Dict[str, Any]):
         """异步保存单个LLM请求到文件"""
         try:
-            llm_request_folder = os.path.join(self.session_workspace, "llm_request")
-            os.makedirs(llm_request_folder, exist_ok=True)
-
-            # 获取当前序号
-            existing_files = os.listdir(llm_request_folder)
-            max_index = -1
-            for file in existing_files:
-                if file.endswith(".json"):
-                    try:
-                        index = int(file.split("_")[0])
-                        max_index = max(max_index, index)
-                    except ValueError:
-                        continue
-
-            file_name = f"{max_index + 1}_{llm_request['request'].get('step_name', 'unknown')}_{time.strftime('%Y%m%d%H%M%S', time.localtime(llm_request['timestamp']))}.json"
-            file_path = os.path.join(llm_request_folder, file_name)
-
-            # 使用 aiofiles 异步写入
-            import aiofiles
-            serializable_request = {
-                "request": make_serializable(llm_request['request']),
-                "response": make_serializable(llm_request['response']),
-                "timestamp": llm_request['timestamp']
-            }
-            async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
-                await f.write(json.dumps(serializable_request, ensure_ascii=False, indent=4))
+            file_path = await asyncio.to_thread(self._save_llm_request_sync, llm_request)
 
             logger.debug(f"SessionContext: Async saved LLM request to {file_path}")
         except Exception as e:

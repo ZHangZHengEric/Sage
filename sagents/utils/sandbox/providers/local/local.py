@@ -23,6 +23,7 @@ import re
 import shutil
 import sys
 import asyncio
+import fnmatch
 from typing import Any, Dict, List, Optional
 
 from ..._stdout_echo import echo_chunk
@@ -467,6 +468,35 @@ class LocalSandboxProvider(ISandboxHandle):
                 shutil.rmtree(actual_path)
             else:
                 os.remove(actual_path)
+
+    def _copy_from_host_path_sync(
+        self,
+        host_source_path: str,
+        host_dest_path: str,
+        ignore_patterns: Optional[List[str]],
+    ) -> bool:
+        if not os.path.exists(host_source_path):
+            return False
+
+        if os.path.isdir(host_source_path):
+            if os.path.exists(host_dest_path):
+                shutil.rmtree(host_dest_path)
+
+            if ignore_patterns:
+                def ignore_filter(_dir, files):
+                    ignored = []
+                    for pattern in ignore_patterns:
+                        ignored.extend([f for f in files if fnmatch.fnmatch(f, pattern)])
+                    return ignored
+
+                shutil.copytree(host_source_path, host_dest_path, ignore=ignore_filter)
+            else:
+                shutil.copytree(host_source_path, host_dest_path)
+            return True
+
+        os.makedirs(os.path.dirname(host_dest_path), exist_ok=True)
+        shutil.copy2(host_source_path, host_dest_path)
+        return True
 
     async def execute_command(
         self,
@@ -983,36 +1013,19 @@ class LocalSandboxProvider(ISandboxHandle):
         """
         await self._ensure_initialized_async()
         
-        if not os.path.exists(host_source_path):
-            logger.warning(f"源路径不存在: {host_source_path}")
-            return False
-        
         # 转换沙箱虚拟路径为宿主机路径
         host_dest_path = self.to_host_path(sandbox_dest_path)
         
         try:
-            if os.path.isdir(host_source_path):
-                # 复制目录
-                if os.path.exists(host_dest_path):
-                    shutil.rmtree(host_dest_path)
-                
-                # 使用 ignore 参数过滤文件
-                if ignore_patterns:
-                    import fnmatch
-
-                    def ignore_filter(dir, files):
-                        ignored = []
-                        for pattern in ignore_patterns:
-                            ignored.extend([f for f in files if fnmatch.fnmatch(f, pattern)])
-                        return ignored
-
-                    await asyncio.to_thread(shutil.copytree, host_source_path, host_dest_path, ignore=ignore_filter)
-                else:
-                    await asyncio.to_thread(shutil.copytree, host_source_path, host_dest_path)
-            else:
-                # 复制单个文件
-                await asyncio.to_thread(os.makedirs, os.path.dirname(host_dest_path), exist_ok=True)
-                await asyncio.to_thread(shutil.copy2, host_source_path, host_dest_path)
+            copied = await asyncio.to_thread(
+                self._copy_from_host_path_sync,
+                host_source_path,
+                host_dest_path,
+                ignore_patterns,
+            )
+            if not copied:
+                logger.warning(f"源路径不存在: {host_source_path}")
+                return False
             
             logger.debug(f"复制成功: {host_source_path} -> {sandbox_dest_path} (实际: {host_dest_path})")
             return True

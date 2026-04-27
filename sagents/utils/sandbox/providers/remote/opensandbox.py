@@ -2,6 +2,7 @@
 OpenSandbox 远程沙箱实现
 """
 
+import asyncio
 import ast
 import base64
 import json
@@ -32,6 +33,19 @@ def _get_max_append_bytes() -> int:
 
 
 MAX_APPEND_BYTES = _get_max_append_bytes()
+
+
+def _read_host_file_bytes_sync(host_path: str) -> bytes:
+    with open(host_path, "rb") as f:
+        return f.read()
+
+
+def _write_host_file_bytes_sync(host_path: str, data: bytes) -> None:
+    host_dir = os.path.dirname(host_path)
+    if host_dir:
+        os.makedirs(host_dir, exist_ok=True)
+    with open(host_path, "wb") as f:
+        f.write(data)
 
 
 class OpenSandboxProvider(RemoteSandboxProvider):
@@ -424,8 +438,7 @@ class OpenSandboxProvider(RemoteSandboxProvider):
         except ImportError:
             raise ImportError("opensandbox package is required")
 
-        with open(host_path, "rb") as f:
-            content = f.read()
+        content = await asyncio.to_thread(_read_host_file_bytes_sync, host_path)
 
         async with self._sdk:
             await self._sdk.files.write_files(
@@ -442,15 +455,9 @@ class OpenSandboxProvider(RemoteSandboxProvider):
         async with self._sdk:
             content = await self._sdk.files.read_file(sandbox_path)
 
-        # 确保目录存在
-        host_dir = os.path.dirname(host_path)
-        if host_dir:
-            os.makedirs(host_dir, exist_ok=True)
-
         data = content.encode("utf-8") if isinstance(content, str) else content
 
-        with open(host_path, "wb") as f:
-            f.write(data)
+        await asyncio.to_thread(_write_host_file_bytes_sync, host_path, data)
 
         logger.debug(f"OpenSandboxProvider: 下载文件 {sandbox_path} -> {host_path}")
 

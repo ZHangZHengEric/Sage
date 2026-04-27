@@ -2,6 +2,7 @@
 图片理解工具 - 使用多模态大模型分析图片内容
 """
 
+import asyncio
 import base64
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -170,6 +171,48 @@ class ImageUnderstandingTool:
             # 压缩失败时返回原始数据
             return image_data
 
+    def _compress_base64_image_sync(self, base64_data: str, max_resolution: int) -> str:
+        """Decode, resize, and re-encode sandbox image data without blocking the event loop."""
+        try:
+            image_data = base64.b64decode(base64_data)
+            compressed_data = self._resize_image_if_needed(image_data, max_resolution)
+            return base64.b64encode(compressed_data).decode('utf-8')
+        except Exception as e:
+            logger.warning(f"图片压缩失败: {e}，使用原始图片")
+            return base64_data
+
+    def _encode_remote_image_sync(
+        self,
+        body: bytes,
+        max_resolution: int,
+        mime_hint: str,
+        image_url: str,
+    ) -> tuple[str, str]:
+        """Validate/compress/encode downloaded image bytes in a worker thread."""
+        if PIL_AVAILABLE:
+            try:
+                img = Image.open(io.BytesIO(body))
+                img.load()
+            except Exception as e:
+                raise ImageUnderstandingError(f"下载内容不是有效图片: {e}") from e
+            try:
+                compressed = self._resize_image_if_needed(body, max_resolution)
+                b64 = base64.b64encode(compressed).decode('utf-8')
+                return b64, 'image/jpeg'
+            except Exception as e:
+                logger.warning(f"远程图片压缩失败: {e}，使用原始数据")
+                b64 = base64.b64encode(body).decode('utf-8')
+                return b64, mime_hint
+
+        if not mime_hint.startswith('image/'):
+            ext = Path(urlparse(image_url).path).suffix.lower()
+            if ext not in self.supported_formats:
+                raise ImageUnderstandingError(
+                    "无法识别为图片：请使用带图片扩展名的 URL，或安装 Pillow"
+                )
+        b64 = base64.b64encode(body).decode('utf-8')
+        return b64, mime_hint
+
     async def _encode_image_to_base64(self, sandbox, image_path: str, max_resolution: int = 512) -> tuple[str, str]:
         """
         将图片文件转换为 base64 编码，并在需要时压缩图片
@@ -192,15 +235,11 @@ class ImageUnderstandingTool:
 
         # 如果需要压缩，先 decode -> resize -> encode
         if PIL_AVAILABLE:
-            try:
-                # 解码为 bytes
-                image_data = base64.b64decode(base64_data)
-                # 压缩
-                compressed_data = self._resize_image_if_needed(image_data, max_resolution)
-                # 重新编码
-                base64_data = base64.b64encode(compressed_data).decode('utf-8')
-            except Exception as e:
-                logger.warning(f"图片压缩失败: {e}，使用原始图片")
+            base64_data = await asyncio.to_thread(
+                self._compress_base64_image_sync,
+                base64_data,
+                max_resolution,
+            )
 
         # 压缩后的图片统一使用 JPEG 格式
         mime_type = 'image/jpeg'
@@ -243,29 +282,13 @@ class ImageUnderstandingTool:
             response.headers.get("content-type"), image_url
         )
 
-        if PIL_AVAILABLE:
-            try:
-                img = Image.open(io.BytesIO(body))
-                img.load()
-            except Exception as e:
-                raise ImageUnderstandingError(f"下载内容不是有效图片: {e}") from e
-            try:
-                compressed = self._resize_image_if_needed(body, max_resolution)
-                b64 = base64.b64encode(compressed).decode('utf-8')
-                return b64, 'image/jpeg'
-            except Exception as e:
-                logger.warning(f"远程图片压缩失败: {e}，使用原始数据")
-                b64 = base64.b64encode(body).decode('utf-8')
-                return b64, mime_hint
-
-        if not mime_hint.startswith('image/'):
-            ext = Path(urlparse(image_url).path).suffix.lower()
-            if ext not in self.supported_formats:
-                raise ImageUnderstandingError(
-                    "无法识别为图片：请使用带图片扩展名的 URL，或安装 Pillow"
-                )
-        b64 = base64.b64encode(body).decode('utf-8')
-        return b64, mime_hint
+        return await asyncio.to_thread(
+            self._encode_remote_image_sync,
+            body,
+            max_resolution,
+            mime_hint,
+            image_url,
+        )
 
     async def _call_llm_with_image(self, messages: list, session_id: Optional[str] = None) -> str:
         """

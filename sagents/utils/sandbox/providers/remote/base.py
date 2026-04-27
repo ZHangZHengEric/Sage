@@ -2,6 +2,7 @@
 远程沙箱提供者基类
 """
 
+import asyncio
 import fnmatch
 import os
 from abc import abstractmethod
@@ -10,6 +11,39 @@ from typing import Dict, List, Optional
 
 from ...interface import ISandboxHandle, SandboxType, CommandResult, ExecutionResult, FileInfo
 from ...config import MountPath
+
+
+def _host_path_state_sync(path: str) -> str:
+    if not os.path.exists(path):
+        return "missing"
+    if os.path.isdir(path):
+        return "dir"
+    return "file"
+
+
+def _walk_upload_files_sync(
+    host_dir: str,
+    sandbox_dir: str,
+    ignore_patterns: Optional[List[str]] = None,
+) -> List[tuple[str, str]]:
+    ignore_patterns = ignore_patterns or []
+    upload_files: List[tuple[str, str]] = []
+
+    for root, dirs, files in os.walk(host_dir):
+        if ignore_patterns:
+            dirs[:] = [
+                d for d in dirs
+                if not any(fnmatch.fnmatch(d, pattern) for pattern in ignore_patterns)
+            ]
+        for file_name in files:
+            if any(fnmatch.fnmatch(file_name, pattern) for pattern in ignore_patterns):
+                continue
+            host_file = os.path.join(root, file_name)
+            rel_path = os.path.relpath(host_file, host_dir)
+            sandbox_file = os.path.join(sandbox_dir, rel_path)
+            upload_files.append((host_file, sandbox_file))
+
+    return upload_files
 
 
 class RemoteSandboxProvider(ISandboxHandle):
@@ -114,12 +148,13 @@ class RemoteSandboxProvider(ISandboxHandle):
             host_dir: 宿主机目录路径
             sandbox_dir: 沙箱内目标目录
         """
-        for root, dirs, files in os.walk(host_dir):
-            for file in files:
-                host_file = os.path.join(root, file)
-                rel_path = os.path.relpath(host_file, host_dir)
-                sandbox_file = os.path.join(sandbox_dir, rel_path)
-                await self.upload_file(host_file, sandbox_file)
+        upload_files = await asyncio.to_thread(
+            _walk_upload_files_sync,
+            host_dir,
+            sandbox_dir,
+        )
+        for host_file, sandbox_file in upload_files:
+            await self.upload_file(host_file, sandbox_file)
 
     async def sync_directory_from_sandbox(self, sandbox_dir: str, host_dir: str) -> None:
         """
@@ -141,21 +176,21 @@ class RemoteSandboxProvider(ISandboxHandle):
         """
         从宿主机复制文件/目录到远程沙箱。
         """
-        if not os.path.exists(host_source_path):
+        path_state = await asyncio.to_thread(_host_path_state_sync, host_source_path)
+        if path_state == "missing":
             return False
 
         ignore_patterns = ignore_patterns or []
 
-        if os.path.isdir(host_source_path):
-            for root, dirs, files in os.walk(host_source_path):
-                dirs[:] = [d for d in dirs if not any(fnmatch.fnmatch(d, pattern) for pattern in ignore_patterns)]
-                for file_name in files:
-                    if any(fnmatch.fnmatch(file_name, pattern) for pattern in ignore_patterns):
-                        continue
-                    source_file = os.path.join(root, file_name)
-                    rel_path = os.path.relpath(source_file, host_source_path)
-                    target_file = os.path.join(sandbox_dest_path, rel_path)
-                    await self.upload_file(source_file, target_file)
+        if path_state == "dir":
+            upload_files = await asyncio.to_thread(
+                _walk_upload_files_sync,
+                host_source_path,
+                sandbox_dest_path,
+                ignore_patterns,
+            )
+            for source_file, target_file in upload_files:
+                await self.upload_file(source_file, target_file)
             return True
 
         await self.upload_file(host_source_path, sandbox_dest_path)

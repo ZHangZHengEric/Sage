@@ -11,6 +11,7 @@ Scrapling 特性：
 import asyncio
 import os
 import aiohttp
+import aiofiles
 from typing import Dict, Any, List, Optional
 from urllib.parse import urlparse, unquote
 from ..tool_base import tool
@@ -42,6 +43,23 @@ class WebFetcherTool:
         '.mp4': 'video', '.avi': 'video', '.mov': 'video', '.mkv': 'video',
         '.exe': 'executable', '.dmg': 'executable', '.pkg': 'executable',
     }
+
+    @staticmethod
+    def _write_html_content_sync(
+        save_path: str,
+        *,
+        url: str,
+        title: str,
+        used_selector: str,
+        full_content: str,
+    ) -> None:
+        with open(save_path, 'w', encoding='utf-8') as f:
+            f.write(f"URL: {url}\n")
+            f.write(f"Title: {title}\n")
+            f.write(f"Selector: {used_selector}\n")
+            f.write(f"Content Length: {len(full_content)}\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(full_content)
 
     @tool(
         description_i18n={
@@ -259,9 +277,9 @@ class WebFetcherTool:
                                 raise Exception(f"文件过大 ({size_mb:.1f}MB)，超过100MB限制")
                         
                         # 下载文件
-                        with open(save_path, 'wb') as f:
+                        async with aiofiles.open(save_path, 'wb') as f:
                             async for chunk in response.content.iter_chunked(8192):
-                                f.write(chunk)
+                                await f.write(chunk)
                 
                 # 获取文件信息
                 file_size = os.path.getsize(save_path)
@@ -416,13 +434,14 @@ class WebFetcherTool:
                     counter += 1
 
                 # 保存完整内容到文件
-                with open(save_path, 'w', encoding='utf-8') as f:
-                    f.write(f"URL: {url}\n")
-                    f.write(f"Title: {title}\n")
-                    f.write(f"Selector: {used_selector}\n")
-                    f.write(f"Content Length: {len(full_content)}\n")
-                    f.write("=" * 80 + "\n\n")
-                    f.write(full_content)
+                await asyncio.to_thread(
+                    self._write_html_content_sync,
+                    save_path,
+                    url=url,
+                    title=title,
+                    used_selector=used_selector,
+                    full_content=full_content,
+                )
 
                 # 准备返回的内容（截断后的）
                 if len(full_content) > max_return_length:

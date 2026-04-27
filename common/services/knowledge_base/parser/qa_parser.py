@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import traceback
@@ -17,6 +18,47 @@ from .base import BaseParser
 
 if TYPE_CHECKING:
     from ..knowledge_base import DocumentInput
+
+
+def _read_local_file_bytes_sync(file_path: str) -> bytes:
+    with open(file_path, "rb") as f:
+        return f.read()
+
+
+def _parse_qa_rows_sync(filename: str, content_bytes: bytes) -> List[List[str]]:
+    rows: List[List[str]] = []
+
+    if filename.endswith(('.xlsx', '.xls')):
+        try:
+            wb = openpyxl.load_workbook(filename=io.BytesIO(content_bytes), read_only=True, data_only=True)
+            ws = wb.active
+            if ws:
+                for row in ws.iter_rows(values_only=True):
+                    cleaned_row = [str(cell) if cell is not None else "" for cell in row]
+                    if any(cleaned_row):
+                        rows.append(cleaned_row)
+            return rows
+        except Exception as e:
+            logger.error(f"[QAParser] Excel解析失败: {e}")
+            return []
+
+    try:
+        content_str = content_bytes.decode('utf-8')
+        f_io = io.StringIO(content_str)
+        reader = csv.reader(f_io)
+        return list(reader)
+    except UnicodeDecodeError:
+        try:
+            content_str = content_bytes.decode('gb18030')
+            f_io = io.StringIO(content_str)
+            reader = csv.reader(f_io)
+            return list(reader)
+        except Exception as e:
+            logger.error(f"[QAParser] CSV解码失败: {e}")
+            return []
+    except Exception as e:
+        logger.error(f"[QAParser] CSV解析失败: {e}")
+        return []
 
 
 class QAParser(BaseParser):
@@ -61,52 +103,14 @@ class QAParser(BaseParser):
                     content_bytes = resp.content
             else:
                 # Assume local file path
-                with open(file_path, "rb") as f:
-                    content_bytes = f.read()
+                content_bytes = await asyncio.to_thread(_read_local_file_bytes_sync, file_path)
         except Exception as e:
             logger.error(f"[QAParser] 读取文件失败: {file.path}, error: {e}, trace: {traceback.format_exc()}")
             raise e
 
         # Parse content based on file extension
-        rows = []
         filename = file.name.lower() if file.name else ""
-        
-        if filename.endswith(('.xlsx', '.xls')):
-            try:
-                # Load workbook from bytes
-                wb = openpyxl.load_workbook(filename=io.BytesIO(content_bytes), read_only=True, data_only=True)
-                ws = wb.active
-                if ws:
-                    for row in ws.iter_rows(values_only=True):
-                        # Convert all cell values to string and filter out None
-                        cleaned_row = [str(cell) if cell is not None else "" for cell in row]
-                        # Skip empty rows
-                        if any(cleaned_row):
-                            rows.append(cleaned_row)
-            except Exception as e:
-                logger.error(f"[QAParser] Excel解析失败: {e}")
-                return []
-        else:
-            # Default to CSV parsing
-            try:
-                # Attempt to decode as utf-8
-                content_str = content_bytes.decode('utf-8')
-                f_io = io.StringIO(content_str)
-                reader = csv.reader(f_io)
-                rows = list(reader)
-            except UnicodeDecodeError:
-                # Try gb18030 for Chinese support if utf-8 fails
-                try:
-                    content_str = content_bytes.decode('gb18030')
-                    f_io = io.StringIO(content_str)
-                    reader = csv.reader(f_io)
-                    rows = list(reader)
-                except Exception as e:
-                    logger.error(f"[QAParser] CSV解码失败: {e}")
-                    return []
-            except Exception as e:
-                logger.error(f"[QAParser] CSV解析失败: {e}")
-                return []
+        rows = await asyncio.to_thread(_parse_qa_rows_sync, filename, content_bytes)
 
         if not rows:
             logger.warning("[QAParser] 内容为空")

@@ -125,11 +125,11 @@ async def persist_session_state(session_id: str) -> None:
     session_manager = get_global_session_manager()
     if session_manager:
         try:
-            session_manager.save_session(session_id)
+            await asyncio.to_thread(session_manager.save_session, session_id)
         except Exception as exc:
             logger.bind(session_id=session_id).warning(f"保存会话快照失败: {exc}")
 
-    messages = _load_session_raw_messages(session_id)
+    messages = await asyncio.to_thread(_load_session_raw_messages, session_id)
     dao = ConversationDao()
     if messages:
         await dao.update_conversation_messages(session_id, messages)
@@ -167,7 +167,7 @@ async def persist_session_state_with_cancel_protection(session_id: str) -> None:
 
 async def get_session_status(session_id: str) -> Dict[str, Any]:
     session_manager = get_global_session_manager()
-    session = session_manager.get(session_id)
+    session = await asyncio.to_thread(session_manager.get, session_id)
     if not session:
         raise SageHTTPException(
             **_conversation_error_kwargs(
@@ -179,7 +179,7 @@ async def get_session_status(session_id: str) -> Dict[str, Any]:
     if _is_desktop_mode():
         tasks_status: Dict[str, Any] = {}
     else:
-        tasks_status = session.get_tasks_status()
+        tasks_status = await asyncio.to_thread(session.get_tasks_status)
 
     logger.bind(session_id=session_id).info(
         f"获取任务数量：{len(tasks_status.get('tasks', []))}"
@@ -521,7 +521,8 @@ async def edit_last_user_message(
     await interrupt_session(session_id, "编辑最后一条用户消息")
     await _get_stream_manager().stop_session(session_id)
 
-    source_messages = _load_session_raw_messages(session_id) or list(conversation.messages or [])
+    source_messages = await asyncio.to_thread(_load_session_raw_messages, session_id)
+    source_messages = source_messages or list(conversation.messages or [])
     truncated_messages, last_user_message = _truncate_messages_after_last_user(
         source_messages,
         cleaned_content,
@@ -535,12 +536,12 @@ async def edit_last_user_message(
 
     await dao.update_conversation_messages(session_id, truncated_messages)
     await dao.update_title(session_id, title_source[:50] + "..." if len(title_source) > 50 else title_source)
-    _write_session_files(session_id, truncated_messages)
+    await asyncio.to_thread(_write_session_files, session_id, truncated_messages)
 
     manager = get_global_session_manager()
     if manager:
         try:
-            manager.close_session(session_id)
+            await asyncio.to_thread(manager.close_session, session_id)
         except Exception:
             manager.remove_session_context(session_id)
 
@@ -578,7 +579,8 @@ async def get_rerun_conversation_payload(
             )
         )
 
-    source_messages = _load_session_raw_messages(session_id) or list(conversation.messages or [])
+    source_messages = await asyncio.to_thread(_load_session_raw_messages, session_id)
+    source_messages = source_messages or list(conversation.messages or [])
     last_user_index = _find_last_user_message_index(source_messages)
     if last_user_index < 0:
         raise SageHTTPException(
@@ -598,22 +600,11 @@ async def get_rerun_conversation_payload(
     }
 
 
-async def get_agent_usage_stats(
-    *,
-    days: int,
-    user_id: Optional[str] = None,
-    agent_id: Optional[str] = None,
+def _load_tools_usage_counts_sync(
+    conversations: List[Conversation],
+    sessions_root: Path,
 ) -> Dict[str, int]:
-    safe_days = max(1, min(int(days or 1), 365))
-    updated_after = get_local_now() - timedelta(days=safe_days)
-    conversations = await ConversationDao().get_recent_conversations(
-        user_id=user_id,
-        updated_after=updated_after,
-        agent_id=agent_id,
-    )
-
     usage_counter: Counter[str] = Counter()
-    sessions_root = Path(get_sessions_root())
 
     for conversation in conversations:
         session_id = str(conversation.session_id or "").strip()
@@ -638,3 +629,21 @@ async def get_agent_usage_stats(
             )
 
     return dict(usage_counter)
+
+
+async def get_agent_usage_stats(
+    *,
+    days: int,
+    user_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+) -> Dict[str, int]:
+    safe_days = max(1, min(int(days or 1), 365))
+    updated_after = get_local_now() - timedelta(days=safe_days)
+    conversations = await ConversationDao().get_recent_conversations(
+        user_id=user_id,
+        updated_after=updated_after,
+        agent_id=agent_id,
+    )
+
+    sessions_root = Path(get_sessions_root())
+    return await asyncio.to_thread(_load_tools_usage_counts_sync, conversations, sessions_root)

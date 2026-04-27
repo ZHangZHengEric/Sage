@@ -1,3 +1,5 @@
+2026-04-27 13:30 sagents 阻塞点治理：将会话恢复/落盘、URL 下载写盘、文件解析与 pypandoc fallback、PIL 图片压缩/base64、远程 sandbox 目录扫描/host 文件读写、本地隔离 pickle/launcher/output 临时文件与后台进程启动等重 I/O 移到 aiofiles 或 asyncio.to_thread；保留 MCP JSON 与 sandbox YAML 小配置文件直接同步读取，避免过度优化；语法检查通过，相关可运行 sagents 测试通过，部分 async/agent 测试受当前环境缺 pytest-asyncio/opentelemetry 阻塞。
+
 2026-04-28 20:00 README / README_CN 恢复「加入社区」：居中、Slack for-the-badge 徽章、微信群 `WeChatGroup.jpg` 图，文末团队署名同区；README_CN 赞助者三列 Logo 与英文对齐。
 
 2026-04-28 19:00 README / README_CN 恢复文首 cover、shield 徽章、产品截图三列 HTML 表，与 2f2efddc 展示一致，Quick Start 等后续段落保持现状。

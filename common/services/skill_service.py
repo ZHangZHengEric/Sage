@@ -1,3 +1,4 @@
+import asyncio
 import os
 import shutil
 import tempfile
@@ -6,7 +7,8 @@ import hashlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests
+import aiofiles
+import httpx
 import yaml
 from fastapi import UploadFile
 from loguru import logger
@@ -401,6 +403,29 @@ def _collect_server_skills() -> List[Any]:
     return all_skills
 
 
+def _list_desktop_skills_sync(current_user_id: str = "") -> List[Dict[str, Any]]:
+    tm = get_skill_manager()
+    if not tm:
+        return []
+    # Disabled temporarily: do not auto-sync agent workspace skills into ~/.sage/skills during desktop skill listing.
+    # _sync_desktop_agent_skills()
+    tm.reload()
+    out: List[Dict[str, Any]] = []
+    for skill in list(tm.list_skill_info()):
+        uid = _desktop_skill_owner_user_id(skill.path, current_user_id)
+        out.append(
+            {
+                "name": skill.name,
+                "description": skill.description,
+                "user_id": uid,
+                "dimension": "user" if uid else "system",
+                "owner_user_id": uid or None,
+                "path": skill.path,
+            }
+        )
+    return out
+
+
 def _find_server_skill_by_name(skill_name: str) -> Optional[Any]:
     for skill in _collect_server_skills():
         if skill.name == skill_name:
@@ -415,28 +440,9 @@ async def list_skills(
     dimension: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     if _is_desktop_mode():
-        tm = get_skill_manager()
-        if not tm:
-            return []
-        # Disabled temporarily: do not auto-sync agent workspace skills into ~/.sage/skills during desktop skill listing.
-        # _sync_desktop_agent_skills()
-        tm.reload()
-        out: List[Dict[str, Any]] = []
-        for skill in list(tm.list_skill_info()):
-            uid = _desktop_skill_owner_user_id(skill.path, current_user_id)
-            out.append(
-                {
-                    "name": skill.name,
-                    "description": skill.description,
-                    "user_id": uid,
-                    "dimension": "user" if uid else "system",
-                    "owner_user_id": uid or None,
-                    "path": skill.path,
-                }
-            )
-        return out
+        return await asyncio.to_thread(_list_desktop_skills_sync, current_user_id)
 
-    all_skills = _collect_server_skills()
+    all_skills = await asyncio.to_thread(_collect_server_skills)
     allowed_skills = None
     if filter_agent_id:
         agent_dao = AgentConfigDao()
@@ -489,39 +495,19 @@ async def list_skills_for_agent(agent_config: Dict[str, Any]) -> List[Dict[str, 
     return [skill for skill in all_skills if skill.get("name") in allowed_set]
 
 
-async def get_agent_available_skills(
+def _get_agent_available_skills_sync(
     agent_id: str,
-    current_user_id: str,
-    role: str = "user",
+    agent_user_id: str,
+    cfg: config.StartupConfig,
 ) -> List[Dict[str, Any]]:
-    """
-    获取Agent可用的技能列表，包含是否需要更新状态。
-
-    只检测技能广场（系统/用户技能）与Agent工作空间中技能的差异。
-    如果Agent工作空间中的技能与广场不一致，则标记为需要更新。
-
-    返回的技能列表中每个技能会包含以下字段：
-    - name: 技能名称
-    - description: 技能描述
-    - source_dimension: 技能来源维度 (system, user)
-    - need_update: 是否需要更新 (bool)
-    - source_path: 源技能路径（用于更新）
-    """
-    cfg = _get_cfg()
     skill_dir = cfg.skill_dir
     user_dir = cfg.user_dir
     agents_dir = cfg.agents_dir
 
-    agent_dao = AgentConfigDao()
-    agent = await agent_dao.get_by_id(agent_id)
-    agent_user_id = agent.user_id if agent and agent.user_id else current_user_id
-
-    # 收集所有源技能（系统 + 用户）
     source_skills: Dict[str, Dict[str, Any]] = {}
 
     logger.info(f"技能广场路径: skill_dir={skill_dir}, user_dir={user_dir}")
 
-    # 1. 加载系统技能
     if os.path.exists(skill_dir):
         try:
             tm = SkillManager(skill_dirs=[skill_dir], isolated=True)
@@ -538,7 +524,6 @@ async def get_agent_available_skills(
         except Exception as e:
             logger.warning(f"加载系统技能失败: {e}")
 
-    # 2. 加载用户技能（优先级高于系统技能，覆盖系统技能）
     if os.path.exists(user_dir) and agent_user_id:
         user_skills_path = os.path.join(user_dir, agent_user_id, "skills")
         logger.info(f"用户技能路径: {user_skills_path}, 存在={os.path.isdir(user_skills_path)}")
@@ -558,11 +543,18 @@ async def get_agent_available_skills(
             except Exception as e:
                 logger.warning(f"加载用户技能失败: {e}")
     else:
-        logger.info(f"用户技能目录不存在或参数不全: user_dir存在={os.path.exists(user_dir) if user_dir else False}, agent_user_id={agent_user_id}")
+        logger.info(
+            "用户技能目录不存在或参数不全: "
+            f"user_dir存在={os.path.exists(user_dir) if user_dir else False}, "
+            f"agent_user_id={agent_user_id}"
+        )
 
-    # 3. 加载Agent工作空间中的技能
     agent_skills: Dict[str, Dict[str, Any]] = {}
-    logger.info(f"检查Agent工作空间: agents_dir={agents_dir}, agent_user_id={agent_user_id}, agent_id={agent_id}, app_mode={cfg.app_mode}")
+    logger.info(
+        "检查Agent工作空间: "
+        f"agents_dir={agents_dir}, agent_user_id={agent_user_id}, "
+        f"agent_id={agent_id}, app_mode={cfg.app_mode}"
+    )
 
     try:
         agent_skills_path = str(
@@ -592,13 +584,13 @@ async def get_agent_available_skills(
         except Exception as e:
             logger.warning(f"加载Agent技能失败: {e}")
     else:
-        logger.info(f"Agent工作空间不存在: {agent_skills_path if 'agent_skills_path' in locals() else '路径未确定'}")
+        logger.info(f"Agent工作空间不存在: {agent_skills_path}")
 
-    # 4. 合并技能列表，检测是否需要更新
-    # 只返回广场中存在的技能，不显示孤立技能
     skills_list: List[Dict[str, Any]] = []
-
-    logger.info(f"get_agent_available_skills: 广场技能={list(source_skills.keys())}, Agent技能={list(agent_skills.keys())}")
+    logger.info(
+        "get_agent_available_skills: "
+        f"广场技能={list(source_skills.keys())}, Agent技能={list(agent_skills.keys())}"
+    )
 
     for skill_name, source_skill in source_skills.items():
         skill_info = {
@@ -608,20 +600,14 @@ async def get_agent_available_skills(
             "source_path": source_skill["path"],
         }
 
-        # 检查Agent工作空间中是否存在该技能
         if skill_name in agent_skills:
             agent_skill = agent_skills[skill_name]
             logger.info(f"检查技能 '{skill_name}': 广场={source_skill['path']}, Agent={agent_skill['path']}")
-            # 使用文件级对比判断是否需要更新
-            # 广场文件不存在于Agent本地，或内容不同 → 需要更新
-            # Agent本地有多余文件 → 忽略（不算需要更新）
             need_update = _is_skill_need_update(source_skill["path"], agent_skill["path"])
             skill_info["need_update"] = need_update
             skill_info["agent_path"] = agent_skill["path"]
             logger.info(f"技能 '{skill_name}' need_update={need_update}")
         else:
-            # Agent工作空间中没有该技能，不需要显示更新状态
-            # 对话时会自动同步
             skill_info["need_update"] = False
             logger.info(f"技能 '{skill_name}' 不在Agent工作空间中")
 
@@ -629,6 +615,38 @@ async def get_agent_available_skills(
 
     skills_list.sort(key=lambda x: x["name"])
     return skills_list
+
+
+async def get_agent_available_skills(
+    agent_id: str,
+    current_user_id: str,
+    role: str = "user",
+) -> List[Dict[str, Any]]:
+    """
+    获取Agent可用的技能列表，包含是否需要更新状态。
+
+    只检测技能广场（系统/用户技能）与Agent工作空间中技能的差异。
+    如果Agent工作空间中的技能与广场不一致，则标记为需要更新。
+
+    返回的技能列表中每个技能会包含以下字段：
+    - name: 技能名称
+    - description: 技能描述
+    - source_dimension: 技能来源维度 (system, user)
+    - need_update: 是否需要更新 (bool)
+    - source_path: 源技能路径（用于更新）
+    """
+    cfg = _get_cfg()
+
+    agent_dao = AgentConfigDao()
+    agent = await agent_dao.get_by_id(agent_id)
+    agent_user_id = agent.user_id if agent and agent.user_id else current_user_id
+
+    return await asyncio.to_thread(
+        _get_agent_available_skills_sync,
+        agent_id,
+        agent_user_id,
+        cfg,
+    )
 
 
 def _find_source_skill_path(
@@ -730,6 +748,16 @@ def _copy_skill_to_workspace(
     return str(target_skill_path)
 
 
+def _list_skill_dir_names_sync(agent_skills_dir: Path) -> set[str]:
+    if not agent_skills_dir.exists():
+        return set()
+    return {p.name for p in agent_skills_dir.iterdir() if p.is_dir()}
+
+
+def _is_target_skill_current_sync(source_path: str, target_path: str) -> bool:
+    return os.path.isdir(target_path) and not _is_skill_need_update(source_path, target_path)
+
+
 async def sync_skill_to_agent_workspaces(
     agent_id: str,
     skill_names: Optional[List[str]] = None,
@@ -753,7 +781,7 @@ async def sync_skill_to_agent_workspaces(
         resolved_skill_names = _resolve_agent_selected_skills({"availableSkills": skill_names})
     else:
         resolved_skill_names = _resolve_agent_selected_skills(agent.config or {})
-    workspaces = _list_existing_agent_workspaces(agent_id, cfg)
+    workspaces = await asyncio.to_thread(_list_existing_agent_workspaces, agent_id, cfg)
 
     result: Dict[str, Any] = {
         "agent_id": agent_id,
@@ -770,7 +798,8 @@ async def sync_skill_to_agent_workspaces(
     source_skill_paths: Dict[str, str] = {}
     missing_source_skills: List[str] = []
     for current_skill_name in resolved_skill_names:
-        source_skill_path = _find_source_skill_path(
+        source_skill_path = await asyncio.to_thread(
+            _find_source_skill_path,
             current_skill_name,
             agent_owner_user_id,
             cfg,
@@ -795,7 +824,8 @@ async def sync_skill_to_agent_workspaces(
 
         for current_skill_name, source_skill_path in source_skill_paths.items():
             try:
-                _copy_skill_to_workspace(
+                await asyncio.to_thread(
+                    _copy_skill_to_workspace,
                     source_skill_path,
                     workspace_path,
                     current_skill_name,
@@ -870,11 +900,7 @@ async def sync_workspace_skills(
     except ValueError:
         raise SageHTTPException(detail="sync_workspace_skills 失败: 缺少 user_id")
 
-    existing_skills: set[str] = set()
-    if agent_skills_dir.exists():
-        for p in agent_skills_dir.iterdir():
-            if p.is_dir():
-                existing_skills.add(p.name)
+    existing_skills = await asyncio.to_thread(_list_skill_dir_names_sync, agent_skills_dir)
 
     synced: List[str] = []
     unchanged: List[str] = []
@@ -882,7 +908,7 @@ async def sync_workspace_skills(
 
     for skill_name in selected_skills:
         try:
-            source_path = _find_source_skill_path(skill_name, agent_user_id, cfg)
+            source_path = await asyncio.to_thread(_find_source_skill_path, skill_name, agent_user_id, cfg)
             if not source_path:
                 logger.warning(f"sync_workspace_skills: 技能 '{skill_name}' 在技能广场中不存在，跳过")
                 unchanged.append(skill_name)
@@ -890,14 +916,16 @@ async def sync_workspace_skills(
 
             target_path = str(agent_skills_dir / skill_name)
 
-            if os.path.isdir(target_path) and not _is_skill_need_update(source_path, target_path):
+            target_exists_and_current = await asyncio.to_thread(
+                _is_target_skill_current_sync,
+                source_path,
+                target_path,
+            )
+            if target_exists_and_current:
                 unchanged.append(skill_name)
                 continue
 
-            if os.path.exists(target_path):
-                shutil.rmtree(target_path)
-            shutil.copytree(source_path, target_path)
-            _set_permissions_recursive(target_path)
+            await asyncio.to_thread(_copy_skill_to_workspace, source_path, str(agent_skills_dir.parent), skill_name)
             synced.append(skill_name)
         except Exception as e:
             logger.warning(f"sync_workspace_skills: skill={skill_name}, error={e}")
@@ -908,7 +936,7 @@ async def sync_workspace_skills(
         for name in existing_skills:
             if name not in selected_set:
                 try:
-                    shutil.rmtree(str(agent_skills_dir / name))
+                    await asyncio.to_thread(shutil.rmtree, str(agent_skills_dir / name))
                     removed.append(name)
                     logger.info(f"sync_workspace_skills: 删除多余 skill '{name}'")
                 except Exception as e:
@@ -943,9 +971,6 @@ async def sync_skill_to_agent(
         Dict: 包含同步结果的信息
     """
     cfg = _get_cfg()
-    skill_dir = cfg.skill_dir
-    user_dir = cfg.user_dir
-    agents_dir = cfg.agents_dir
 
     # 获取Agent信息
     agent_dao = AgentConfigDao()
@@ -960,46 +985,17 @@ async def sync_skill_to_agent(
         raise SageHTTPException(detail="无权同步技能到该Agent")
 
     # 1. 查找源技能（优先从用户技能，然后是系统技能）
-    source_skill_path = None
+    source_skill_path = await asyncio.to_thread(
+        _find_source_skill_path,
+        skill_name,
+        agent_user_id,
+        cfg,
+    )
     source_dimension = None
-
-    # 先查找用户技能：用 SkillManager 按 SKILL.md name 查找，避免目录名与 name 不一致的问题
-    if os.path.exists(user_dir) and agent_user_id:
-        user_skills_path = os.path.join(user_dir, agent_user_id, "skills")
-        if os.path.isdir(user_skills_path):
-            try:
-                tm_user = SkillManager(skill_dirs=[user_skills_path], isolated=True)
-                user_skill_info = _get_skill_info_safe(tm_user, skill_name)
-                if user_skill_info:
-                    source_skill_path = user_skill_info.path
-                    source_dimension = "user"
-                    logger.info(f"找到用户技能 '{skill_name}' 路径: {source_skill_path}")
-            except Exception as e:
-                logger.warning(f"通过 SkillManager 查找用户技能失败: {e}")
-        # Fallback: 直接路径匹配（目录名与 skill_name 一致时）
-        if source_skill_path is None:
-            direct_path = os.path.join(user_dir, agent_user_id, "skills", skill_name)
-            if os.path.isdir(direct_path):
-                source_skill_path = direct_path
-                source_dimension = "user"
-
-    # 再查找系统技能
-    if source_skill_path is None and os.path.exists(skill_dir):
-        try:
-            tm_sys = SkillManager(skill_dirs=[skill_dir], isolated=True)
-            sys_skill_info = _get_skill_info_safe(tm_sys, skill_name)
-            if sys_skill_info:
-                source_skill_path = sys_skill_info.path
-                source_dimension = "system"
-                logger.info(f"找到系统技能 '{skill_name}' 路径: {source_skill_path}")
-        except Exception as e:
-            logger.warning(f"通过 SkillManager 查找系统技能失败: {e}")
-        # Fallback: 直接路径匹配
-        if source_skill_path is None:
-            system_skill_path = os.path.join(skill_dir, skill_name)
-            if os.path.isdir(system_skill_path):
-                source_skill_path = system_skill_path
-                source_dimension = "system"
+    if source_skill_path:
+        dimension_info = await asyncio.to_thread(_get_skill_dimension, source_skill_path)
+        source_dimension = dimension_info.get("dimension")
+        logger.info(f"找到技能 '{skill_name}' 路径: {source_skill_path}")
 
     if source_skill_path is None:
         raise SageHTTPException(detail=f"技能 '{skill_name}' 在技能广场中不存在")
@@ -1019,12 +1015,12 @@ async def sync_skill_to_agent(
 
     try:
         # 如果已存在，先删除
-        if os.path.exists(target_skill_path):
-            shutil.rmtree(target_skill_path)
-
-        # 复制技能文件夹
-        shutil.copytree(source_skill_path, target_skill_path)
-        _set_permissions_recursive(target_skill_path)
+        await asyncio.to_thread(
+            _copy_skill_to_workspace,
+            source_skill_path,
+            os.path.dirname(agent_skills_dir),
+            skill_name,
+        )
 
         logger.info(f"技能 '{skill_name}' 已同步到Agent '{agent_id}' 工作空间")
 
@@ -1059,7 +1055,7 @@ async def delete_skill(
             skill_path = skill_info.path
             if os.path.exists(skill_path):
                 try:
-                    shutil.rmtree(skill_path)
+                    await asyncio.to_thread(shutil.rmtree, skill_path)
                 except (PermissionError, OSError) as e:
                     logger.warning(f"Could not delete skill files for '{skill_name}' (possibly mounted): {e}")
         except Exception as e:
@@ -1081,7 +1077,7 @@ async def delete_skill(
         if not os.path.exists(agent_skills_path):
             raise SageHTTPException(detail=f"Skill '{skill_name}' not found in agent workspace")
         try:
-            shutil.rmtree(agent_skills_path)
+            await asyncio.to_thread(shutil.rmtree, agent_skills_path)
             return
         except (PermissionError, OSError) as e:
             raise SageHTTPException(detail=f"删除技能文件失败: {e}")
@@ -1090,7 +1086,7 @@ async def delete_skill(
         user_skills_path = os.path.join(cfg.user_dir, user_id, "skills", skill_name)
         if os.path.exists(user_skills_path):
             try:
-                shutil.rmtree(user_skills_path)
+                await asyncio.to_thread(shutil.rmtree, user_skills_path)
                 return
             except (PermissionError, OSError) as e:
                 raise SageHTTPException(detail=f"删除技能文件失败: {e}")
@@ -1100,7 +1096,7 @@ async def delete_skill(
         if role != "admin":
             raise SageHTTPException(detail="无权删除系统技能", error_detail="forbidden")
         try:
-            shutil.rmtree(system_skills_path)
+            await asyncio.to_thread(shutil.rmtree, system_skills_path)
             skill_manager = get_skill_manager()
             if skill_manager:
                 skill_manager.reload()
@@ -1118,7 +1114,7 @@ async def get_skill_content(skill_name: str, user_id: str = "", role: str = "use
         if not skill_info:
             raise SageHTTPException(status_code=500, detail=f"Skill '{skill_name}' not found")
     else:
-        skill_info = _find_server_skill_by_name(skill_name)
+        skill_info = await asyncio.to_thread(_find_server_skill_by_name, skill_name)
         if not skill_info:
             raise SageHTTPException(detail=f"Skill '{skill_name}' not found")
         dimension_info = _get_skill_dimension(skill_info.path)
@@ -1149,7 +1145,7 @@ async def update_skill_content(
         if not skill_info:
             raise SageHTTPException(status_code=500, detail=f"Skill '{skill_name}' not found")
     else:
-        skill_info = _find_server_skill_by_name(skill_name)
+        skill_info = await asyncio.to_thread(_find_server_skill_by_name, skill_name)
         if not skill_info:
             raise SageHTTPException(detail=f"Skill '{skill_name}' not found")
         dimension_info = _get_skill_dimension(skill_info.path)
@@ -1187,7 +1183,7 @@ async def update_skill_content(
         raise SageHTTPException(status_code=500 if _is_desktop_mode() else 400, detail=f"Failed to update skill content: {e}")
 
 
-async def _process_server_zip_to_dir(
+def _process_server_zip_to_dir_sync(
     zip_path: str,
     original_filename: str,
     target_dir: str,
@@ -1224,7 +1220,20 @@ async def _process_server_zip_to_dir(
             shutil.rmtree(temp_extract_dir)
 
 
-async def _process_desktop_zip_and_register(
+async def _process_server_zip_to_dir(
+    zip_path: str,
+    original_filename: str,
+    target_dir: str,
+) -> Tuple[bool, str]:
+    return await asyncio.to_thread(
+        _process_server_zip_to_dir_sync,
+        zip_path,
+        original_filename,
+        target_dir,
+    )
+
+
+def _process_desktop_zip_and_register_sync(
     tm: Any, zip_path: str, original_filename: str, user_id: str
 ) -> Tuple[bool, str]:
     temp_extract_dir = tempfile.mkdtemp()
@@ -1264,6 +1273,24 @@ async def _process_desktop_zip_and_register(
             shutil.rmtree(temp_extract_dir)
 
 
+async def _process_desktop_zip_and_register(
+    tm: Any, zip_path: str, original_filename: str, user_id: str
+) -> Tuple[bool, str]:
+    return await asyncio.to_thread(
+        _process_desktop_zip_and_register_sync,
+        tm,
+        zip_path,
+        original_filename,
+        user_id,
+    )
+
+
+def _copy_upload_to_temp_zip_sync(file: UploadFile) -> str:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_file:
+        shutil.copyfileobj(file.file, tmp_file)
+        return tmp_file.name
+
+
 async def import_skill_by_file(
     file: UploadFile,
     user_id: str = "",
@@ -1280,9 +1307,7 @@ async def import_skill_by_file(
 
     tmp_file_path = ""
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_file:
-            shutil.copyfileobj(file.file, tmp_file)
-            tmp_file_path = tmp_file.name
+        tmp_file_path = await asyncio.to_thread(_copy_upload_to_temp_zip_sync, file)
 
         if _is_desktop_mode():
             tm = get_skill_manager()
@@ -1306,7 +1331,7 @@ async def import_skill_by_file(
                 target_dir = cfg.skill_dir
             else:
                 target_dir = os.path.join(cfg.user_dir, user_id, "skills")
-                os.makedirs(target_dir, exist_ok=True)
+                await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
             success, message = await _process_server_zip_to_dir(tmp_file_path, file.filename, target_dir)
 
         if not success:
@@ -1318,7 +1343,7 @@ async def import_skill_by_file(
         raise SageHTTPException(status_code=500 if _is_desktop_mode() else 400, detail=f"导入失败: {str(e)}")
     finally:
         if tmp_file_path and os.path.exists(tmp_file_path):
-            os.unlink(tmp_file_path)
+            await asyncio.to_thread(os.unlink, tmp_file_path)
 
 
 async def import_skill_by_url(
@@ -1334,16 +1359,20 @@ async def import_skill_by_url(
 
     tmp_file_path = ""
     try:
-        response = requests.get(url, stream=True, timeout=30)
-        response.raise_for_status()
         filename = url.split("/")[-1]
         if not filename.endswith(".zip"):
             filename = "downloaded_skill.zip"
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_file:
-            for chunk in response.iter_content(chunk_size=8192):
-                tmp_file.write(chunk)
-            tmp_file_path = tmp_file.name
+        fd, tmp_file_path = tempfile.mkstemp(suffix=".zip")
+        os.close(fd)
+        timeout = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            async with client.stream("GET", url) as response:
+                response.raise_for_status()
+                async with aiofiles.open(tmp_file_path, "wb") as tmp_file:
+                    async for chunk in response.aiter_bytes(chunk_size=8192):
+                        if chunk:
+                            await tmp_file.write(chunk)
 
         if _is_desktop_mode():
             tm = get_skill_manager()
@@ -1367,7 +1396,7 @@ async def import_skill_by_url(
                 target_dir = cfg.skill_dir
             else:
                 target_dir = os.path.join(cfg.user_dir, user_id, "skills")
-                os.makedirs(target_dir, exist_ok=True)
+                await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
             success, message = await _process_server_zip_to_dir(tmp_file_path, filename, target_dir)
 
         if not success:
@@ -1379,4 +1408,4 @@ async def import_skill_by_url(
         raise SageHTTPException(status_code=500 if _is_desktop_mode() else 400, detail=f"导入失败: {str(e)}")
     finally:
         if tmp_file_path and os.path.exists(tmp_file_path):
-            os.unlink(tmp_file_path)
+            await asyncio.to_thread(os.unlink, tmp_file_path)

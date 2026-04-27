@@ -391,7 +391,7 @@ def _copy_docs_to_agent_workspace(agent_workspace: str) -> None:
         logger.warning(f"复制 Docs 文档失败: {e}")
 
 
-async def _copy_sage_usage_docs_to_agent_workspace(
+def _copy_sage_usage_docs_to_agent_workspace_sync(
     agent_id: str,
     agent_workspace_base: str,
 ) -> None:
@@ -425,6 +425,17 @@ async def _copy_sage_usage_docs_to_agent_workspace(
             logger.debug(f"sage_usage_docs 已存在于 agent workspace: {target_dir}")
     except Exception as e:
         logger.warning(f"复制 sage-usage-docs 到 agent workspace 失败: {e}")
+
+
+async def _copy_sage_usage_docs_to_agent_workspace(
+    agent_id: str,
+    agent_workspace_base: str,
+) -> None:
+    await asyncio.to_thread(
+        _copy_sage_usage_docs_to_agent_workspace_sync,
+        agent_id,
+        agent_workspace_base,
+    )
 
 
 async def _register_extra_mcp_tools(request: StreamRequest) -> None:
@@ -715,7 +726,7 @@ async def populate_request_from_agent_config(
                 os.path.join(sage_home, "agents"),
             )
             # 复制项目 docs 到 agent workspace
-            _copy_docs_to_agent_workspace(agent_workspace)
+            await asyncio.to_thread(_copy_docs_to_agent_workspace, agent_workspace)
 
     if not _is_desktop_mode() and request.available_knowledge_bases:
         kdb_dao = KdbDao()
@@ -754,6 +765,7 @@ class SageStreamService:
         if _is_desktop_mode():
             self.sessions_root = Path(get_sessions_root())
             self.sessions_root.mkdir(parents=True, exist_ok=True)
+            self._workspace_existed = True
             self.agent_workspace_root = get_agent_workspace_root(
                 self.runtime_agent_id,
                 app_mode="desktop",
@@ -767,18 +779,10 @@ class SageStreamService:
                 app_mode="server",
                 ensure_exists=False,
             )
-            workspace_existed = workspace_root.exists()
+            self._workspace_existed = workspace_root.exists()
             workspace_root.mkdir(parents=True, exist_ok=True)
             self.agent_workspace_root = workspace_root
             self.agent_workspace = str(self.agent_workspace_root)
-            if (not workspace_existed) and self.request.agent_id:
-                importlib.import_module(
-                    "app.server.services.agent_inherit"
-                ).copy_agent_inherit_to_workspace(
-                    self.request.agent_id,
-                    self.agent_workspace,
-                )
-            _copy_sage_usage_docs_to_workspace(self.agent_workspace)
 
         self.tool_manager = create_tool_proxy(request.available_tools)
         self.skill_manager, self.agent_skill_manager = create_skill_proxy(
@@ -798,6 +802,20 @@ class SageStreamService:
                 session_root_space=self.cfg.session_dir,
                 enable_obs=self.cfg.trace_jaeger_endpoint is not None,
             )
+
+    async def initialize_workspace_assets(self) -> None:
+        if _is_desktop_mode():
+            return
+
+        if (not self._workspace_existed) and self.request.agent_id:
+            inherit_service = importlib.import_module("app.server.services.agent_inherit")
+            await asyncio.to_thread(
+                inherit_service.copy_agent_inherit_to_workspace,
+                self.request.agent_id,
+                self.agent_workspace,
+            )
+
+        await asyncio.to_thread(_copy_sage_usage_docs_to_workspace, self.agent_workspace)
 
     async def process_stream(self):
         session_id = self.request.session_id
@@ -916,7 +934,9 @@ async def prepare_session(request: StreamRequest) -> Tuple[SageStreamService, as
         raise _chat_exception("会话正在清理中，请稍后重试")
 
     try:
-        return SageStreamService(request), lock
+        stream_service = SageStreamService(request)
+        await stream_service.initialize_workspace_assets()
+        return stream_service, lock
     except Exception as e:
         if acquired:
             await safe_release(
@@ -1053,6 +1073,20 @@ async def _persist_token_usage_if_available(
         return False
 
 
+def _load_agent_workspace_skill_names_sync(agent_skills_path: str) -> set[str]:
+    actual_skills: set[str] = set()
+    if os.path.exists(agent_skills_path) and os.path.isdir(agent_skills_path):
+        try:
+            from sagents.skill.skill_manager import SkillManager
+
+            tm = SkillManager(skill_dirs=[agent_skills_path], isolated=True)
+            for skill in tm.list_skill_info():
+                actual_skills.add(skill.name)
+        except Exception as e:
+            logger.warning(f"加载Agent工作空间技能失败: {e}")
+    return actual_skills
+
+
 async def _check_and_update_agent_skills(
     request: StreamRequest,
     original_skills: List[str],
@@ -1068,16 +1102,10 @@ async def _check_and_update_agent_skills(
             )
         )
 
-        actual_skills = set()
-        if os.path.exists(agent_skills_path) and os.path.isdir(agent_skills_path):
-            try:
-                from sagents.skill.skill_manager import SkillManager
-
-                tm = SkillManager(skill_dirs=[agent_skills_path], isolated=True)
-                for skill in tm.list_skill_info():
-                    actual_skills.add(skill.name)
-            except Exception as e:
-                logger.warning(f"加载Agent工作空间技能失败: {e}")
+        actual_skills = await asyncio.to_thread(
+            _load_agent_workspace_skill_names_sync,
+            agent_skills_path,
+        )
 
         added_in_session = actual_skills - set(original_skills or [])
         if not added_in_session:
