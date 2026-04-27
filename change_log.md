@@ -1,3 +1,5 @@
+2026-04-28 20:00 README / README_CN 恢复「加入社区」：居中、Slack for-the-badge 徽章、微信群 `WeChatGroup.jpg` 图，文末团队署名同区；README_CN 赞助者三列 Logo 与英文对齐。
+
 2026-04-28 19:00 README / README_CN 恢复文首 cover、shield 徽章、产品截图三列 HTML 表，与 2f2efddc 展示一致，Quick Start 等后续段落保持现状。
 
 2026-04-28 18:00 README / README_CN 恢复赞助者区 HTML 与三处 Logo 引用，修复空表；与 2f2efddc 前结构一致。
