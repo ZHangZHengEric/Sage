@@ -22,7 +22,7 @@ ref: home
 
 ## 建议先读
 
-1. [应用入口](applications/README.md)：快速开始、CLI 与主应用入口
+1. [应用入口](applications/README.md)：快速开始、Web（含 Docker）、桌面、CLI、TUI 与 Chrome 扩展
 2. [核心概念](CORE_CONCEPTS.md)：运行时模型
 3. [架构](architecture/README.md)：仓库与子系统边界
 4. [配置](CONFIGURATION.md)：环境变量与部署参数
@@ -58,9 +58,12 @@ ref: home
 
 ## 文档地图
 
-- [应用入口](applications/README.md)：快速开始、CLI、示例服务、主服务端与桌面版
+- [应用入口](applications/README.md)：快速开始、Web、桌面、CLI、TUI 与 Chrome 扩展
   - [快速开始](applications/GETTING_STARTED.md)
-  - [CLI 使用指南](applications/CLI.md)
+  - [Web 应用](applications/WEB.md)（手动启动 + **Docker Compose 全栈**）
+  - [桌面应用](applications/DESKTOP.md)
+  - [CLI 使用指南](applications/CLI.md) · [TUI 使用指南](applications/TUI.md)
+  - [Chrome 扩展](applications/CHROME_EXTENSION.md)
 - [核心概念](CORE_CONCEPTS.md)：会话、智能体、工具、技能、流程和沙箱
 - [架构](architecture/README.md)：代码库整体组织方式（含子章节）
   - 应用层：[Server](architecture/ARCHITECTURE_APP_SERVER.md) · [Desktop](architecture/ARCHITECTURE_APP_DESKTOP.md) · [其它入口](architecture/ARCHITECTURE_APP_OTHERS.md)

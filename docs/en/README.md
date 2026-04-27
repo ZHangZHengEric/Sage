@@ -22,7 +22,7 @@ This site documents the current repository as it exists today. It is organized a
 
 ## Start Here
 
-1. [Applications](applications/README.md) for getting started, CLI, and the main entry points
+1. [Applications](applications/README.md) for getting started, Web (incl. Docker), Desktop, CLI, TUI, and Chrome extension
 2. [Core Concepts](CORE_CONCEPTS.md) for the runtime model
 3. [Architecture](architecture/README.md) for repository and subsystem boundaries
 4. [Configuration](CONFIGURATION.md) for environment variables and deployment knobs
@@ -58,9 +58,12 @@ Read:
 
 ## Documentation Map
 
-- [Applications](applications/README.md): getting started, CLI, demo app, main server, and desktop build
+- [Applications](applications/README.md): getting started, Web, Desktop, CLI, TUI, Chrome extension
   - [Getting Started](applications/GETTING_STARTED.md)
-  - [CLI Guide](applications/CLI.md)
+  - [Web Application](applications/WEB.md) (manual stack + **Docker Compose**)
+  - [Desktop](applications/DESKTOP.md)
+  - [CLI Guide](applications/CLI.md) · [TUI Guide](applications/TUI.md)
+  - [Chrome extension](applications/CHROME_EXTENSION.md)
 - [Core Concepts](CORE_CONCEPTS.md): sessions, agents, tools, skills, flows, and sandboxing
 - [Architecture](architecture/README.md): how the codebase is organized (with sub-chapters)
   - App layer: [Server](architecture/ARCHITECTURE_APP_SERVER.md) · [Desktop](architecture/ARCHITECTURE_APP_DESKTOP.md) · [Other entries](architecture/ARCHITECTURE_APP_OTHERS.md)

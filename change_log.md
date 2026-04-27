@@ -1,3 +1,23 @@
+2026-04-28 12:00 修复 CI「sage-desktop.spec not found」：根因是 .gitignore 的 *.spec 忽略未提交该文件；增加 !app/desktop/sage-desktop.spec 例外，需执行 git add app/desktop/sage-desktop.spec 并推送后 Linux/mac/Windows 打包才能找到 spec。
+
+2026-04-27 21:00 GitHub release-desktop workflow：pip 缓存 key 的 hashFiles 从无效的 app/desktop/core/requirements.txt 改为根目录 requirements.txt，与构建脚本实际依赖文件一致、依赖变更时缓存能正确失效。
+
+2026-04-27 20:00 sage-desktop.spec：Windows 在 release 下对侧车使用无控制台 EXE（console=False），避免 Tauri 拉起时出现黑框；SAGE_PYI_MODE=debug 时仍带控制台便于排错；macOS/Linux 行为不变。
+
+2026-04-27 19:30 桌面 Windows：build_windows.ps1 与 build.sh 对齐，PyInstaller 统一走 sage-desktop.spec（SAGE_PYI_MODE、dist/work 路径）；侧车补拷 wiki 与 docs/en、zh；前端构建设 NODE_OPTIONS 防 OOM；tauri Wix 语言改为 en-US 降低 GHA 打包失败率。
+
+2026-04-27 18:00 README / README_CN Quick Start：每种应用单独「详细文档」链到对应 docs 专页，去掉文末「更多」聚合；修正中文桌面段加粗乱码。
+
+2026-04-27 17:00 文档：新增 docs 应用入口下的 WEB（含 docker compose）/ DESKTOP / CHROME_EXTENSION 中英；GETTING 与 applications/README 建索引；README 主链至各专页。
+
+2026-04-27 16:00 README / README_CN 桌面安装包小节扩充：macOS 门闸/右键打开/系统设置仍要打开/xattr；Windows SmartScreen；Linux apt 与从源码构建一句。
+
+2026-04-27 15:00 README / README_CN Quick Start：各入口保留简要安装与用法（环境要求、Web/桌面/CLI/TUI/扩展小节后链文档），避免冗长说明。
+
+2026-04-27 14:20 README / README_CN Quick Start 增补 Web、桌面、CLI、TUI、Chrome 扩展各一行说明，并链到 GETTING_STARTED 与 CLI/TUI 文档。
+
+2026-04-27 14:00 精简 README.md / README_CN.md 的 Quick Start：只保留 clone + 环境变量 + dev-up 与访问地址，详细步骤指向 docs 中 GETTING_STARTED 与 wiki。
+
 2026-04-27 13:10 不修改 sagents/tool_manager：AnyTool 端口由 mcp_service 重写 URL，聊天侧 extra MCP 经 mcp_anytool_url 对齐 SAGE_PORT；英文能力列表「缺少 items」因 prompt 写「JSON 数组」与解析器要 {"items":[]}，于 desktop/server lifecycle 启动时对 PromptManager 做 runtime 文案补丁（zh/en/pt）。
 
 2026-04-27 12:25 修复 AnyTool MCP 502：DB 等存储的 streamable_http_url 残留旧端口与 SAGE_PORT 不一致时，mcp_service 对 kind=anytool 按 _get_backend_port 重写 URL。
