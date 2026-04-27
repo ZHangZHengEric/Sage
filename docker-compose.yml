@@ -50,8 +50,7 @@ services:
       VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
       VITE_SAGE_TRACE_WEB_URL: ${SAGE_TRACE_WEB_URL}
       VITE_SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage/}
-    depends_on:
-      - sage-server
+
 
   sage-wiki:
     restart: always
