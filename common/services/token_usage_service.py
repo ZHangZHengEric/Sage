@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import date, datetime, time
 from typing import Any, Dict, Optional
@@ -27,6 +28,13 @@ def _to_int(value: Any) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _token_usage_to_payload_str(token_usage: Dict[str, Any]) -> str:
+    try:
+        return json.dumps(token_usage, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return "{}"
 
 
 async def record_session_execution(
@@ -93,6 +101,7 @@ async def record_session_execution(
         step_count=step_count,
         started_at=resolved_started_at,
         finished_at=resolved_finished_at,
+        usage_payload=_token_usage_to_payload_str(token_usage),
     )
     await TokenUsageDao().save_usage(record)
     logger.bind(
@@ -155,6 +164,7 @@ async def record_execution_payload(
         step_count=step_count,
         started_at=resolved_started_at,
         finished_at=resolved_finished_at,
+        usage_payload=_token_usage_to_payload_str(token_usage),
     )
     await TokenUsageDao().save_usage(record)
     logger.bind(

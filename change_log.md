@@ -1,3 +1,37 @@
+2026-04-27 18:40 turn_status 拒绝文案 i18n：新增 simple_agent_prompts.turn_status_rejection_message（zh/en/pt），SimpleAgent 改写工具结果时按 session 语言通过 PromptManager 取文案，硬编码中文消息移除。
+
+2026-04-27 18:09 ModelProviderList 高级配置：移除 maxTokens/temperature/topP/presencePenalty/maxModelLen 输入框 placeholder，卡片展示的 temperature 兜底改为 '-'，避免清空后视觉上像是没改。
+
+2026-04-27 18:05 修复采样参数清空不生效：前端置空时显式以 null 下发，后端 update_provider 改用 Pydantic model_fields_set 区分"未提供"与"显式 null"，真正写回 DB；之前用 `is not None` 守卫导致用户清空后 DB 旧值（如 top_p=0.95）残留并继续带入 LLM 请求触发 unsupported_parameter。
+
+2026-04-27 17:55 前后端联动：ModelProviderList 表单将 max_tokens/temperature/top_p/presence_penalty/max_model_len 默认置空，置空字段不下发；LLMProvider 构造默认改 None；sanitize_model_request_kwargs 兜底丢弃空值采样参数；新增对应单测。
+
+2026-04-27 18:30 turn_status reject 让模型可见：SimpleAgent 拒绝时给 tool 结果打 metadata.turn_status_rejected=True；strip_turn_status_from_llm_context 按标记保留这对 pair（含同条 assistant 里的 turn_status tool_call），SSE 仍按 tool_call_id 隐藏。修复 reject 后模型上下文丢失反馈、反复重蹈覆辙的问题。补 4 条单测。
+
+2026-04-27 18:05 隐藏工具过滤抽常量 + 续片鲁棒性：HIDDEN_FROM_STREAM_TOOL_NAMES 移到 sagents/tool/impl/__init__.py；helper 重命名 _redact_hidden_tools_from_chunk 并改用 _HiddenToolStreamState（新增 last_was_hidden 贪心续接，覆盖 id/index 都缺失的兼容场景）；补两条续片单测。
+
+2026-04-27 17:55 SAgent.run_stream 出口最小过滤 turn_status：新增模块级 helper，按流局部 call_ids/index→id 状态识别 tool_call 续片与对应 tool 结果，整体丢弃；落盘与 LLM 上下文剔除均不变。
+
+2026-04-27 17:45 修复 OpenAI BadRequest：从 agent_base extra_body 中移除 top_k=20，OpenAI Chat Completions 不支持该参数（unknown_parameter 400）。
+
+2026-04-27 17:35 回滚 turn_status SSE 过滤：移除 redact_turn_status_for_sse_chunk、_tag_omit_from_sse_for_turn_status、SAgent.run_stream 的 turn_status_ids、agent_base/common_agent/plan_agent process_tool_response 的 tool_name 入参与 metadata.tool_name 注入、workbench.js 的 turn_status 防误写兜底；turn_status 现可正常下发 SSE，仅在 strip_turn_status_from_llm_context 出口对 LLM 请求剔除。
+
+2026-04-27 23:59 LLM：OpenAI GPT-5/o1/o3 等仅接受 max_completion_tokens；sanitize_model_request_kwargs 与 model_capabilities 探测将 max_tokens 自动映射，修复能力验证 400。
+
+2026-04-28 22:45 SSE redact 改为有状态：SAgent.run_stream 维护本会话 turn_status tool_call_id 集合，流式 delta 中后续分片仅有 id/index 时按集合命中过滤；对应工具结果亦命中。修复模型流式调用 turn_status 时前端工作台仍能看到入参（need_user_input/note）的问题。补流式 delta 单测。
+
+2026-04-28 22:30 修复 CommonAgent.process_tool_response 重写未跟随 agent_base 新签名（tool_name 第 3 参），导致 _execute_tool 调用时 TypeError，工具结果走错误分支被吞，前端文字之后第一个非 turn_status 工具结果消失；同时把 metadata.tool_name 写入 CommonAgent 的工具结果，前端兜底过滤一致。
+
+2026-04-28 22:15 MessageChunk.__post_init__：将 role 规范为字符串；修复传入 MessageRole 枚举时 redact/校验与 ".value" 比较不命中导致 turn_status 泄漏。成功体启发式对 content 先 strip 再 json.loads。
+
+2026-04-28 22:00 SSE redact：tool 块 metadata.tool_name=turn_status 一律不下发；单测覆盖。workbench 防误写保留兜底。
+
+2026-04-28 16:00 SSE：SAgent.run_stream 对每块调用 redact_turn_status_for_sse_chunk；turn_status 的 tool 结果打 metadata.omit_from_sse；协议成功 JSON 亦过滤。会话落盘仍含完整消息。
+
+2026-04-28 14:00 agent_base_prompts：补全 common.external_paths_intro（zh/en/pt），修复 Fibre 等带 external_paths 时 prepare_unified_system_messages 的 KeyError。
+
+2026-04-28 12:00 TokenUsage 增加 usage_payload（Text）并在落库时写入完整 JSON，修复本地 SQLite 已存在 NOT NULL 列但 ORM 未插入导致的 IntegrityError；sync_database_schema 为 Text 补列时与 String 相同默认空串。
+
 2026-04-28 00:10 turn_status 成功体补回标准键 success/status，与 should_end 并列。
 
 2026-04-27 23:55 turn_status 成功仅返回 `{"should_end":bool}`；need_summary 兼容新旧 JSON；AgentBase._call_llm_streaming 与 convert_messages_to_str 对纯 MessageChunk 路径也 strip turn_status。

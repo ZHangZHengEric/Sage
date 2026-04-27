@@ -2,15 +2,132 @@ import os
 import time
 import traceback
 import uuid
-from typing import Any, AsyncGenerator, Dict, List, Optional, Union
+from dataclasses import dataclass, field, replace
+from typing import Any, AsyncGenerator, Dict, FrozenSet, List, Optional, Tuple, Union
 
-from sagents.context.messages.message import MessageChunk, MessageType
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.skill import SkillManager, SkillProxy
 from sagents.tool import ToolManager, ToolProxy
+from sagents.tool.impl import HIDDEN_FROM_STREAM_TOOL_NAMES
 from sagents.utils.logger import logger
 from sagents.flow.schema import AgentFlow, SequenceNode, ParallelNode, AgentNode, IfNode, SwitchNode, LoopNode
 from sagents.session_runtime import get_global_session_manager
 from sagents.utils.sandbox.config import VolumeMount
+
+
+@dataclass
+class _HiddenToolStreamState:
+    """SAgent.run_stream 内跟踪需隐藏工具调用流式续片所需的局部状态。
+
+    OpenAI delta 续片可能仅含 ``id`` / ``index`` / ``arguments``；
+    极端兼容场景下三者都缺失，仅 arguments delta，需要靠"上一 entry 是否隐藏"贪心续接。
+    """
+
+    call_ids: set = field(default_factory=set)
+    index_to_id: Dict[int, str] = field(default_factory=dict)
+    last_was_hidden: bool = False
+
+
+def _extract_tool_call_fields(entry: Any) -> Tuple[str, str, Optional[int]]:
+    """从 tool_call entry（dict 或 OpenAI delta Pydantic 对象）中提取 (name, id, index)。
+
+    缺失字段统一返回空串 / None，避免上游因 schema 差异分别处理。
+    """
+    name = ""
+    tc_id = ""
+    tc_index: Optional[int] = None
+
+    if isinstance(entry, dict):
+        tc_id = entry.get("id") or ""
+        idx = entry.get("index")
+        if isinstance(idx, int):
+            tc_index = idx
+        fn = entry.get("function") or {}
+        if isinstance(fn, dict):
+            name = fn.get("name") or ""
+        else:
+            name = getattr(fn, "name", "") or ""
+    else:
+        tc_id = getattr(entry, "id", "") or ""
+        idx = getattr(entry, "index", None)
+        if isinstance(idx, int):
+            tc_index = idx
+        fn = getattr(entry, "function", None)
+        if fn is not None:
+            name = getattr(fn, "name", "") or ""
+
+    return name, tc_id, tc_index
+
+
+def _redact_hidden_tools_from_chunk(
+    chunk: MessageChunk,
+    state: _HiddenToolStreamState,
+    hidden_names: FrozenSet[str] = HIDDEN_FROM_STREAM_TOOL_NAMES,
+) -> Optional[MessageChunk]:
+    """在 SAgent.run_stream 出口处剔除"协议性内部工具"的 tool_call / tool 结果。
+
+    返回 None 表示整块丢弃；否则返回（可能裁剪了 tool_calls 的）新 chunk。
+    ``state`` 是流局部状态，由调用方在整个 run_stream 内复用，用于跟踪流式 delta 续片。
+
+    续片识别按以下优先级：
+      1. ``name`` 命中 ``hidden_names`` → 隐藏，记录 id 与 index→id。
+      2. 续片（无 name）：``id in call_ids`` 或 ``index in index_to_id`` → 隐藏。
+      3. 三者都缺失（仅 arguments delta）→ 沿用 ``state.last_was_hidden`` 贪心续接，
+         覆盖某些后端在多 chunk 续片中丢 id/index 的场景。
+    """
+    if chunk is None:
+        return None
+
+    if (
+        chunk.role == MessageRole.TOOL.value
+        and chunk.tool_call_id
+        and chunk.tool_call_id in state.call_ids
+    ):
+        return None
+
+    if not chunk.tool_calls:
+        return chunk
+
+    kept: List[Any] = []
+    for entry in chunk.tool_calls:
+        name, tc_id, tc_index = _extract_tool_call_fields(entry)
+
+        is_hidden = False
+        if name and name in hidden_names:
+            is_hidden = True
+            if tc_id:
+                state.call_ids.add(tc_id)
+            if tc_index is not None and tc_id:
+                state.index_to_id[tc_index] = tc_id
+        elif name:
+            is_hidden = False
+        else:
+            if tc_id and tc_id in state.call_ids:
+                is_hidden = True
+            elif tc_index is not None and tc_index in state.index_to_id:
+                is_hidden = True
+                if tc_id:
+                    state.call_ids.add(tc_id)
+            elif not tc_id and tc_index is None and state.last_was_hidden:
+                is_hidden = True
+
+        state.last_was_hidden = is_hidden
+
+        if not is_hidden:
+            kept.append(entry)
+
+    if len(kept) == len(chunk.tool_calls):
+        return chunk
+
+    if not kept:
+        has_text = bool(chunk.content) and (
+            not isinstance(chunk.content, str) or chunk.content.strip()
+        )
+        if not has_text:
+            return None
+        return replace(chunk, tool_calls=None)
+
+    return replace(chunk, tool_calls=kept)
 
 
 class SAgent:
@@ -203,6 +320,10 @@ class SAgent:
         message_timings: Dict[str, Dict[str, Any]] = {}
         last_started_stat: Optional[Dict[str, Any]] = None
         message_sequence_index = 0
+        # 协议性内部工具（如 turn_status）不下发给 SSE/前端。
+        # 这里维护流局部状态，覆盖流式 delta 续片仅含 id/index、甚至全部缺失的兼容场景；
+        # 落盘 / LLM 上下文剔除分别由 session.run_stream_safe / strip_turn_status_from_llm_context 负责。
+        hidden_tool_state = _HiddenToolStreamState()
         try:
             async for message_chunks in session.run_stream_safe(
                     input_messages=input_messages,
@@ -279,12 +400,15 @@ class SAgent:
                                 logger.info(f"SAgent: 会话首个可显示内容耗时 {delta_ms} ms")
                         except Exception as e:
                             logger.error(f"SAgent: 统计首个content耗时出错: {e}\n{traceback.format_exc()}")
+                    redacted = _redact_hidden_tools_from_chunk(message_chunk, hidden_tool_state)
+                    if redacted is None:
+                        continue
                     if (
-                        message_chunk.content
-                        or message_chunk.tool_calls
-                        or message_chunk.matches_message_types([MessageType.TOKEN_USAGE.value])
+                        redacted.content
+                        or redacted.tool_calls
+                        or redacted.matches_message_types([MessageType.TOKEN_USAGE.value])
                     ):
-                        yield [message_chunk]
+                        yield [redacted]
         finally:
             total_ms = int((time.time() - start_time) * 1000)
             logger.info(f"SAgent: 会话完整执行耗时 {total_ms} ms", session_id)

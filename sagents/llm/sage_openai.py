@@ -116,6 +116,7 @@ class SageChatCompletions:
             kwargs,
             client=self._sage,
             model_config=self._sage.model_capabilities,
+            model=kwargs.get("model") if isinstance(kwargs.get("model"), str) else None,
         )
         
         # 调用底层客户端

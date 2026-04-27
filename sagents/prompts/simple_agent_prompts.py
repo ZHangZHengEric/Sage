@@ -70,6 +70,26 @@ agent_custom_system_prefix = {
 
 
 
+# turn_status 调用缺少前置说明时的拒绝反馈（写回 tool 结果，下一轮模型可见）
+turn_status_rejection_message = {
+    "zh": (
+        "turn_status 调用被拒绝：本轮 assistant 还没有输出任何自然语言说明。"
+        "请先用一段中文/英文文字总结当前进展和结果（包含已完成的事项、关键产物或下一步建议），"
+        "再调用 turn_status(status=...) 工具报告本轮状态。"
+    ),
+    "en": (
+        "turn_status call rejected: no user-facing assistant text has been produced this turn. "
+        "Please first write a short summary of progress and results (what was done, key artifacts, "
+        "or next-step suggestion), then call turn_status(status=...) to report this turn's status."
+    ),
+    "pt": (
+        "Chamada turn_status rejeitada: nenhum texto do assistente voltado ao usuário foi produzido neste turno. "
+        "Escreva primeiro um breve resumo do progresso e dos resultados (o que foi feito, artefatos principais "
+        "ou próximo passo sugerido) e, em seguida, chame turn_status(status=...) para relatar o status deste turno."
+    ),
+}
+
+
 # 任务完成判断模板
 task_complete_template = {
     "zh": """你要根据历史的对话以及用户的请求，以及 agent 的配置中对于事情的执行要求，判断此刻是否可以安全地中断执行任务（视为阶段结束），还是应该继续执行。

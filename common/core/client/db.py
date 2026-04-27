@@ -6,7 +6,7 @@ from functools import wraps
 from typing import Any, Optional
 
 from loguru import logger
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, inspect, text
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, inspect, text
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -33,7 +33,7 @@ def sync_database_schema(sync_conn, Base):
                     default_clause = ""
 
                     if not col.nullable:
-                        if isinstance(col.type, String):
+                        if isinstance(col.type, (String, Text)):
                             default_clause = " DEFAULT ''"
                         elif isinstance(col.type, Integer):
                             default_clause = " DEFAULT 0"

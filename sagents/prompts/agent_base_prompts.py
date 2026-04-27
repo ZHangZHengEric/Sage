@@ -138,6 +138,13 @@ no_files_message = {
     "pt": "Não há arquivos no espaço de trabalho atual.\n"
 }
 
+# 额外挂载路径（Fibre 子任务工作区等）说明，位于 <external_paths> 内、文件树之前
+external_paths_intro = {
+    "zh": "以下路径为除主工作区外可访问的额外目录（仅供浏览与读写，注意路径隔离）：\n",
+    "en": "The following paths are additional directories you may access besides the main workspace (listings below; mind path isolation):\n",
+    "pt": "Os caminhos abaixo são diretórios adicionais que você pode acessar além do espaço de trabalho principal (listagens a seguir; respeite o isolamento de caminhos):\n",
+}
+
 # 任务管理器相关文本
 task_manager_no_tasks = {
     "zh": "任务管理器中暂无任务",

@@ -15,6 +15,7 @@ MessageManager 优化版消息管理器
 """
 
 import datetime
+import json
 import time
 import re
 import uuid
@@ -741,6 +742,11 @@ class MessageManager:
         """
         从即将发往 LLM 的消息列表中移除 turn_status 工具调用及其 tool 回复。
 
+        例外：被 SimpleAgent 标记 ``metadata.turn_status_rejected=True`` 的 tool 结果
+        必须保留（连同对应 assistant tool_call），让模型下一轮能看到"先写总结再调
+        turn_status"的反馈，避免反复重蹈覆辙；SSE 侧仍由
+        ``_redact_hidden_tools_from_chunk`` 按 tool_call_id 隐藏，前端不会感知。
+
         不影响 message_manager.messages / messages.json 中的原始记录；
         仅在构造 API 请求或 extract_messages_for_inference 出口处使用。
         """
@@ -756,17 +762,33 @@ class MessageManager:
                 if name == TURN_STATUS_TOOL_NAME and tid:
                     turn_ids.add(tid)
 
+        rejected_ids: set[str] = set()
+        for msg in messages:
+            if (
+                msg.role == MessageRole.TOOL.value
+                and msg.tool_call_id
+                and msg.tool_call_id in turn_ids
+                and isinstance(msg.metadata, dict)
+                and msg.metadata.get('turn_status_rejected') is True
+            ):
+                rejected_ids.add(msg.tool_call_id)
+
+        strip_ids = turn_ids - rejected_ids
+
         out: List[MessageChunk] = []
         for msg in messages:
-            if msg.role == MessageRole.TOOL.value and msg.tool_call_id and msg.tool_call_id in turn_ids:
+            if msg.role == MessageRole.TOOL.value and msg.tool_call_id and msg.tool_call_id in strip_ids:
                 continue
 
             if msg.role == MessageRole.ASSISTANT.value and msg.tool_calls:
                 kept: List[Any] = []
                 for tc in msg.tool_calls:
-                    name, _tid = MessageManager._tool_call_entry_name_and_id(tc)
-                    if name != TURN_STATUS_TOOL_NAME:
-                        kept.append(tc)
+                    name, tid = MessageManager._tool_call_entry_name_and_id(tc)
+                    # 仅当这条 turn_status 调用对应的 tool 结果未被标记 rejected 时才剔除；
+                    # rejected 的 pair 整体保留，避免出现孤儿 tool 消息。
+                    if name == TURN_STATUS_TOOL_NAME and tid in strip_ids:
+                        continue
+                    kept.append(tc)
 
                 if not kept:
                     if MessageManager._message_has_non_empty_content(msg):
