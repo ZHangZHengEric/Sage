@@ -16,9 +16,12 @@ ref: applications
 
 ## 当前文档
 
-1. [快速开始](GETTING_STARTED.md)
-2. [CLI 使用指南](CLI.md)
-3. [TUI 使用指南](TUI.md)
+1. [快速开始](GETTING_STARTED.md) — 克隆、一键脚本、公共配置
+2. [Web 应用](WEB.md) — 前后端、手动启动、**Docker Compose 全栈**
+3. [桌面应用](DESKTOP.md) — 安装包、macOS/Windows 首次打开、从源码构建
+4. [CLI 使用指南](CLI.md)
+5. [TUI 使用指南](TUI.md)
+6. [Chrome 扩展](CHROME_EXTENSION.md) — 加载未打包、连接本地服务
 
 ## 该选哪个入口
 

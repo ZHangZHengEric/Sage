@@ -46,6 +46,8 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+# 桌面侧车 spec 为仓库内唯一真源，必须提交；否则 CI 报 Spec file not found
+!app/desktop/sage-desktop.spec
 
 # Installer logs
 pip-log.txt
