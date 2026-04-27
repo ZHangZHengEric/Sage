@@ -90,6 +90,26 @@ turn_status_rejection_message = {
 }
 
 
+# turn_status_only 补轮中模型仍调用了未提供的工具时，将其改写为 continue_work 时的 note 文案。
+# 占位符 {tools} 会被替换为原始违规工具名（逗号分隔）。
+turn_status_coerced_note = {
+    "zh": (
+        "系统检测到本轮只允许调用 turn_status，但模型尝试调用了未提供的工具：{tools}。"
+        "已忽略这些工具调用，并按 continue_work 处理；本轮不会结束，下一轮请先输出面向用户的说明再决定状态。"
+    ),
+    "en": (
+        "System: this turn only allows calling turn_status, but the model attempted unavailable tools: {tools}. "
+        "Those calls were ignored and treated as continue_work; this turn does not end. "
+        "Next turn, write a user-facing summary first, then decide the status."
+    ),
+    "pt": (
+        "Sistema: este turno só permite chamar turn_status, mas o modelo tentou ferramentas indisponíveis: {tools}. "
+        "Essas chamadas foram ignoradas e tratadas como continue_work; este turno não termina. "
+        "No próximo turno, escreva primeiro um resumo voltado ao usuário e depois decida o status."
+    ),
+}
+
+
 # 任务完成判断模板
 task_complete_template = {
     "zh": """你要根据历史的对话以及用户的请求，以及 agent 的配置中对于事情的执行要求，判断此刻是否可以安全地中断执行任务（视为阶段结束），还是应该继续执行。
