@@ -133,9 +133,9 @@ function Install-PythonDeps {
 Install-PythonDeps -RootDirParam $RootDir -CacheDirParam $CacheDir -EnvNameParam $EnvName
 
 function Build-PythonSidecar {
-    param($DistDirParam, $TauriSidecarDirParam, $AppDirParam, $RootDirParam, $ModeParam)
+    param($DistDirParam, $TauriSidecarDirParam, $AppDirParam, $RootDirParam, $ModeParam, $CacheDirParam)
 
-    Write-Host "[Sidecar] Building Python Sidecar..." -ForegroundColor Cyan
+    Write-Host "[Sidecar] Building Python Sidecar (sage-desktop.spec)..." -ForegroundColor Cyan
 
     if ($ModeParam -eq "release") {
         if (Test-Path $DistDirParam) {
@@ -147,54 +147,29 @@ function Build-PythonSidecar {
     }
 
     $env:PYINSTALLER_CONFIG_DIR = Join-Path $RootDirParam ".pyinstaller"
-    $pyPath = "$RootDirParam;$env:PYTHONPATH"
-    $env:PYTHONPATH = $pyPath
+    $env:PYTHONPATH = "$RootDirParam;$($env:PYTHONPATH)"
+    $env:SAGE_PYI_MODE = if ($ModeParam -eq "release") { "release" } else { "debug" }
 
     Set-Location $AppDirParam
 
-    $PyiFlags = @(
+    $workPath = Join-Path $CacheDirParam "pyi-work"
+    if (-not (Test-Path $workPath)) {
+        New-Item -ItemType Directory -Force -Path $workPath | Out-Null
+    }
+    $specPath = Join-Path $AppDirParam "sage-desktop.spec"
+
+    $pyiArgs = @(
         "--noconfirm",
-        "--onedir",
         "--log-level=WARN",
-        "--name", "sage-desktop",
-        "--windowed",
-        "--hidden-import=aiosqlite",
-        "--hidden-import=greenlet",
-        "--hidden-import=sqlalchemy.dialects.sqlite.aiosqlite",
-        # Scrapling and its dependencies for web fetching
-        "--hidden-import=scrapling",
-        "--hidden-import=scrapling.fetchers",
-        "--hidden-import=apify_fingerprint_datapoints",
-        "--hidden-import=browserforge",
-        "--collect-all=scrapling",
-        "--collect-all=apify_fingerprint_datapoints",
-        "--collect-all=browserforge",
-        "--exclude-module=tkinter",
-        "--exclude-module=unittest",
-        "--exclude-module=email.test",
-        "--exclude-module=test",
-        "--exclude-module=tests",
-        "--exclude-module=distutils",
-        "--exclude-module=setuptools",
-        "--exclude-module=xmlrpc",
-        "--exclude-module=IPython",
-        "--exclude-module=notebook"
+        "--distpath", $DistDirParam,
+        "--workpath", $workPath
     )
-
     if ($ModeParam -eq "release") {
-        $PyiFlags += "--noupx"
-        $PyiFlags += "--clean"
+        $pyiArgs += "--clean"
     }
+    $pyiArgs += $specPath
 
-    $entryPath = Join-Path $AppDirParam "entry.py"
-    $pyinstallerCmd = "pyinstaller"
-    foreach ($flag in $PyiFlags) {
-        $pyinstallerCmd += " $flag"
-    }
-    $pyinstallerCmd += " $entryPath"
-
-    Invoke-Expression $pyinstallerCmd
-
+    & pyinstaller @pyiArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] PyInstaller build failed" -ForegroundColor Red
         exit 1
@@ -205,7 +180,7 @@ function Build-PythonSidecar {
     Get-ChildItem -Path $DistDirParam -Recurse -File -Filter "*.pyc" | Remove-Item -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path $DistDirParam -Recurse -File -Filter ".DS_Store" | Remove-Item -Force -ErrorAction SilentlyContinue
 
-    Write-Host "[Sidecar] Copying mcp_servers to dist..." -ForegroundColor Cyan
+    Write-Host "[Sidecar] Resolving onedir root for data copies (_internal)..." -ForegroundColor Cyan
     $targetMcpDir = Join-Path $DistDirParam "sage-desktop"
     if (Test-Path (Join-Path $DistDirParam "sage-desktop\_internal")) {
         $targetMcpDir = Join-Path $DistDirParam "sage-desktop\_internal"
@@ -213,6 +188,7 @@ function Build-PythonSidecar {
 
     $mcpServersSrc = Join-Path $RootDirParam "mcp_servers"
     if (Test-Path $mcpServersSrc) {
+        Write-Host "[Sidecar] Copying mcp_servers to dist..." -ForegroundColor Cyan
         Copy-Item -Path $mcpServersSrc -Destination $targetMcpDir -Recurse -Force
         $mcpPath = Join-Path $targetMcpDir "mcp_servers"
         Get-ChildItem -Path $mcpPath -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
@@ -220,14 +196,38 @@ function Build-PythonSidecar {
         Get-ChildItem -Path $mcpPath -Recurse -File -Filter ".DS_Store" | Remove-Item -Force -ErrorAction SilentlyContinue
     }
 
-    Write-Host "[Sidecar] Copying skills to dist..." -ForegroundColor Cyan
-    $skillsSrc = Join-Path $RootDirParam "app/skills"
+    $skillsSrc = Join-Path $RootDirParam "app\skills"
     if (Test-Path $skillsSrc) {
+        Write-Host "[Sidecar] Copying skills to dist..." -ForegroundColor Cyan
         Copy-Item -Path $skillsSrc -Destination $targetMcpDir -Recurse -Force
         $skillsPath = Join-Path $targetMcpDir "skills"
         Get-ChildItem -Path $skillsPath -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
         Get-ChildItem -Path $skillsPath -Recurse -Directory -Filter ".git" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
         Get-ChildItem -Path $skillsPath -Recurse -File -Filter ".DS_Store" | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+
+    $wikiSrc = Join-Path $RootDirParam "app\wiki"
+    if (Test-Path $wikiSrc) {
+        Write-Host "[Sidecar] Copying wiki to dist..." -ForegroundColor Cyan
+        $wikiDst = Join-Path $targetMcpDir "wiki"
+        if (Test-Path $wikiDst) { Remove-Item -Recurse -Force $wikiDst }
+        Copy-Item -Path $wikiSrc -Destination $wikiDst -Recurse -Force
+        Get-ChildItem -Path $wikiDst -Recurse -Directory -Filter "node_modules" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path $wikiDst -Recurse -Directory -Filter ".vitepress" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path $wikiDst -Recurse -File -Filter ".DS_Store" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+
+    $docsTargetRoot = Join-Path $targetMcpDir "docs"
+    foreach ($lang in @("en", "zh")) {
+        $langSrc = Join-Path $RootDirParam "docs\$lang"
+        if (Test-Path $langSrc) {
+            Write-Host "[Sidecar] Copying docs/$lang to dist..." -ForegroundColor Cyan
+            $langDst = Join-Path $docsTargetRoot $lang
+            New-Item -ItemType Directory -Force -Path $langDst | Out-Null
+            Get-ChildItem -Path $langSrc -Filter "*.md" -File | ForEach-Object {
+                Copy-Item -Path $_.FullName -Destination $langDst -Force
+            }
+        }
     }
 
     Set-Location $RootDirParam
@@ -274,6 +274,7 @@ function Build-Frontend {
         $NewHash | Out-File -FilePath $HashFile -Encoding UTF8
     }
 
+    $env:NODE_OPTIONS = "--max-old-space-size=4096"
     npm run build
     Set-Location $RootDirParam
 }
@@ -345,7 +346,7 @@ function Prepare-BundledNodeRuntime {
 
 Write-Host ">>> Starting build tasks..." -ForegroundColor Cyan
 
-Build-PythonSidecar -DistDirParam $DistDir -TauriSidecarDirParam $TauriSidecarDir -AppDirParam $AppDir -RootDirParam $RootDir -ModeParam $Mode
+Build-PythonSidecar -DistDirParam $DistDir -TauriSidecarDirParam $TauriSidecarDir -AppDirParam $AppDir -RootDirParam $RootDir -ModeParam $Mode -CacheDirParam $CacheDir
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] Sidecar build failed!" -ForegroundColor Red
     exit 1

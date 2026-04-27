@@ -12,6 +12,8 @@ ref: getting-started
 
 # 快速开始
 
+**分入口专题：** [Web（浏览器 + Docker Compose）](WEB.md) · [桌面](DESKTOP.md) · [CLI](CLI.md) · [TUI](TUI.md) · [Chrome 扩展](CHROME_EXTENSION.md)
+
 ## 一键启动（推荐）
 
 **适用场景：** 本地开发、快速体验
@@ -74,7 +76,9 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 
 ## 手动启动（进阶）
 
-如果你需要手动控制启动流程，可以参考以下步骤。
+**Web 专题**（含仅手动起前后端、[Docker Compose 全栈](WEB.md#docker-compose-全栈)）见 [Web 应用](WEB.md)。
+
+如果你需要按步骤手动控制开发环境启动，可参考以下步骤。
 
 ### 前置条件
 
@@ -177,6 +181,8 @@ npm run dev
 ---
 
 ## 桌面版构建
+
+安装包、首次打开、完整构建说明见 [桌面应用](DESKTOP.md)。
 
 从源码构建桌面应用时，可使用：
 

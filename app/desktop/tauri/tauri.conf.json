@@ -96,7 +96,7 @@
       "digestAlgorithm": "sha256",
       "timestampUrl": "",
       "wix": {
-        "language": "zh-CN",
+        "language": "en-US",
         "dialogImagePath": "icons/icon.png"
       },
       "nsis": {

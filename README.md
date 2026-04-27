@@ -1,16 +1,16 @@
-<div align="center">
+
 
 # 🌟 **Experience Sage's Power**
 
-![cover](assets/cover.png)
+cover
 
-[![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
-[![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python)](https://python.org)
-[![Version](https://img.shields.io/badge/Version-1.1.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
-[![DeepWiki](https://img.shields.io/badge/DeepWiki-Learn%20More-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
-[![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
+[English](README.md)
+[简体中文](README_CN.md)
+[License: MIT](LICENSE)
+[Python 3.10+](https://python.org)
+[Version](https://github.com/ZHangZHengEric/Sage)
+[DeepWiki](https://deepwiki.com/ZHangZHengEric/Sage)
+[Slack](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
 # 🧠 **Sage Agent Platform**
 
@@ -18,32 +18,21 @@
 
 > 🌟 **A production-ready agent platform for task execution, automation, browser workflows, IM delivery, and enterprise deployment.**
 
-</div>
+
 
 ---
 
 ## 📸 **Product Screenshots**
 
-<div align="center">
 
-<table>
-  <tr>
-    <td align="center" width="33%">
-      <img src="assets/screenshots/workbench.png" width="100%" alt="Workbench"/>
-      <br/><strong>Visual Workbench</strong>
-    </td>
-    <td align="center" width="33%">
-      <img src="assets/screenshots/chat.png" width="100%" alt="Chat"/>
-      <br/><strong>Real-time Collaboration</strong>
-    </td>
-    <td align="center" width="33%">
-      <img src="assets/screenshots/preview.png" width="100%" alt="Preview"/>
-      <br/><strong>Multi-format Support</strong>
-    </td>
-  </tr>
-</table>
 
-</div>
+
+|                      |                             |                          |
+| -------------------- | --------------------------- | ------------------------ |
+| **Visual Workbench** | **Real-time Collaboration** | **Multi-format Support** |
+
+
+
 
 > 📖 **Detailed Documentation**: [https://wiki.sage.zavixai.com/](https://wiki.sage.zavixai.com/)
 
@@ -64,69 +53,33 @@
 
 ## 🚀 **Quick Start**
 
-### Installation
+**Prerequisites (web from source):** Python 3.10+, Node.js 18+.
+
+### Web (clone and run)
 
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
-```
-
-### Running Sage
-
-**Option 1: One-Command Startup (Recommended for Development)**
-
-```bash
-# 1. Optional: activate your environment first
-# conda activate your-env
-
-# 2. Set your LLM API Key
 export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
 export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
 export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
-
-# 3. Run the startup script
 ./scripts/dev-up.sh
 ```
 
-The script will automatically:
-- Check Python (>= 3.10) and Node.js (>= 18) versions
-- Create configuration files (minimal mode: SQLite, no external dependencies)
-- Install dependencies and start both backend and frontend services
-- Create `logs/server.log` automatically
-- Honor `SAGE_PORT` from `.env` for backend startup and health checks
+Open [http://localhost:5173](http://localhost:5173). The first run may ask for **Minimal** (SQLite) vs **Full** stacks — Minimal is the quickest. Optional: `PYTHON_BIN=...` or `USE_UV=1 ./scripts/dev-up.sh` if you use a custom Python or [uv](https://github.com/astral-sh/uv).
 
-Optional overrides:
+**Detailed documentation:** [Web Application](docs/en/applications/WEB.md) — manual backend + Vite, Docker Compose, and port notes.
 
-```bash
-# Explicitly choose a Python executable
-PYTHON_BIN=/path/to/python ./scripts/dev-up.sh
+### Desktop (installers)
 
-# Use uv instead of python -m pip / python -m ...
-USE_UV=1 ./scripts/dev-up.sh
-```
-
-**First time?** The script will prompt you to choose between:
-- **Minimal mode**: SQLite, no external dependencies (recommended for quick start)
-- **Full mode**: MySQL + Elasticsearch + RustFS (for production-like environment)
-
-After starting, open: http://localhost:5173
-
-**Option 2: Desktop Application (Recommended for Users)**
-
-Download the latest desktop package from [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases):
-- **macOS**: `.dmg` (Intel & Apple Silicon)
-- **Windows**: `.exe` / `.msi`
-- **Linux**: `.deb` (x86_64 / arm64)
-
-#### Desktop Installation Guide
+Download the latest `.dmg` (macOS), `.exe` / `.msi` (Windows), or `.deb` (Linux) from [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases), then install as below.
 
 **macOS**
 
-1. Download the `.dmg` for your CPU architecture and open it.
-2. Drag `Sage.app` into the `Applications` folder.
-3. The current macOS build is not yet signed/notarized by Apple. If you see a warning that the developer cannot be verified or Apple cannot check the app for malicious software, open `Applications`, right-click `Sage.app`, choose `Open`, and then click `Open` again in the dialog.
-4. If macOS still blocks the app, go to `System Settings -> Privacy & Security`, find the Sage warning near the bottom, and click `Open Anyway`.
-5. If macOS says the app is damaged or still refuses to launch, run the following command and try again:
+1. Open the `.dmg` for your CPU (Intel or Apple Silicon), drag **Sage.app** into **Applications**.
+2. The build is **not** currently Apple-notarized. If macOS says the developer cannot be verified or the app cannot be checked for malware: in **Finder → Applications**, **right‑click** `Sage.app` → **Open**, then confirm **Open** in the dialog (this adds a one-time exception for Gatekeeper).
+3. If it is still blocked: **System Settings → Privacy & Security**, scroll to the message about Sage, click **Open Anyway**, then try opening the app again.
+4. If macOS reports the app is **damaged** or will not open, clear the quarantine flag and retry:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Sage.app
@@ -134,113 +87,48 @@ xattr -dr com.apple.quarantine /Applications/Sage.app
 
 **Windows**
 
-1. Download the `.exe` installer and run it.
-2. Follow the setup wizard to finish installation.
-3. If Windows SmartScreen shows a warning, click `More info` -> `Run anyway`.
+1. Run the `.exe` installer and complete the wizard.
+2. If **Windows SmartScreen** warns about an unknown publisher, click **More info** → **Run anyway** (wording may vary by Windows version).
 
-**Linux**
+**Linux (Debian / Ubuntu)**
 
-1. Download the `.deb` package for your architecture from [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases).
-2. On Debian/Ubuntu, you can install it directly by double-clicking it, or by running:
+1. Download the `.deb` for your architecture from Releases.
+2. Install from a terminal (adjust the filename):
 
 ```bash
 sudo apt install ./Sage-<version>-<arch>.deb
 ```
 
-If you prefer to build the desktop app from source, use the commands below.
+You can also double-click the `.deb` in many desktop environments.
+
+**Detailed documentation:** [Desktop Application](docs/en/applications/DESKTOP.md) — build from source, env, and platform notes.
+
+### CLI
 
 ```bash
-# macOS/Linux
-app/desktop/scripts/build.sh release
-
-# Windows
-./app/desktop/scripts/build_windows.ps1 release
-```
-
-**Command Line Interface (CLI)**:
-```bash
-# Install editable package
 pip install -e .
-
-# Configure the minimum runtime variables
 export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
 export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
 export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 export SAGE_DB_TYPE="file"
-
-# Diagnose local runtime config
 sage doctor
-
-# Create a shared local CLI/Desktop config in ~/.sage/.sage_env if needed
-sage config init
-
-# Run a quick task
-sage run --stats "Say hello briefly."
-
-# Start an interactive chat session
-sage chat
+sage run "Say hello briefly."
+# or: sage chat
 ```
 
-Detailed CLI usage is documented here:
-- English: [docs/en/applications/CLI.md](docs/en/applications/CLI.md)
-- 中文: [docs/zh/applications/CLI.md](docs/zh/applications/CLI.md)
+**Detailed documentation:** [CLI Guide](docs/en/applications/CLI.md)
 
-The CLI now defaults to the same local data root as desktop: `~/.sage/`.
-By default it reads `~/.sage/.sage_env` first, and then lets a repository-local `.env` override it for development.
-When `--json` is enabled, the CLI emits stream events and appends a final `cli_stats` event for structured post-run inspection.
+### TUI
 
-**Terminal UI (TUI preview)**:
+After `pip install -e .` and the same `SAGE_DEFAULT_*` + `SAGE_DB_TYPE=file` as above, use `sage-terminal` (or run from `app/terminal/` with `cargo` — see the guide).
 
-```bash
-# Make the local Sage CLI/backend available first
-pip install -e .
+**Detailed documentation:** [TUI Guide](docs/en/applications/TUI.md)
 
-# Configure the same minimum local runtime
-export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
-export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
-export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
-export SAGE_DB_TYPE="file"
+### Chrome extension
 
-# Run the Rust TUI from source
-cargo run --quiet --offline --manifest-path app/terminal/Cargo.toml
-```
+Load the unpacked extension from `app/chrome-extension/` in `chrome://extensions/` (Developer mode). Point the extension at your local Sage backend if the port differs from defaults.
 
-Current startup forms:
-
-```bash
-sage-terminal
-sage-terminal run "inspect this repo"
-sage-terminal chat "hello"
-sage-terminal config init
-sage-terminal config init /tmp/.sage_env --force
-sage-terminal doctor
-sage-terminal doctor probe-provider
-sage-terminal provider verify
-sage-terminal provider verify model=deepseek-chat base=https://api.deepseek.com/v1
-sage-terminal sessions
-sage-terminal sessions 25
-sage-terminal sessions inspect latest
-sage-terminal sessions inspect <session_id>
-sage-terminal resume
-sage-terminal resume latest
-sage-terminal resume <session_id>
-```
-
-Detailed TUI usage is documented here:
-- English: [docs/en/applications/TUI.md](docs/en/applications/TUI.md)
-- 中文: [docs/zh/applications/TUI.md](docs/zh/applications/TUI.md)
-
-**Web Application (FastAPI + Vue3)**:
-
-```bash
-# Start backend
-python -m app.server.main
-
-# Start frontend (in another terminal)
-cd app/server/web
-npm install
-npm run dev
-```
+**Detailed documentation:** [Chrome extension](docs/en/applications/CHROME_EXTENSION.md)
 
 ---
 
@@ -363,53 +251,36 @@ We welcome contributions! Please see our [GitHub Issues](https://github.com/ZHan
 
 ## 💖 **Sponsors**
 
-<div align="center">
+
 
 We are grateful to our sponsors for their support in making Sage better:
 
-<table>
-  <tr>
-    <td align="center" width="33%">
-      <a href="#" target="_blank">
-        <img src="assets/sponsors/dudubashi_logo.png" height="50" alt="Dudu Bus"/>
-      </a>
-      <br/>
-    </td>
-    <td align="center" width="33%">
-      <a href="#" target="_blank">
-        <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="50" alt="RcrAI"/>
-      </a>
-    </td>
-    <td align="center" width="33%">
-      <a href="#" target="_blank">
-        <img src="assets/sponsors/idata_logo.png" height="50" alt="Data"/>
-      </a>
-    </td>
-  </tr>
-</table>
 
-</div>
+|     |     |     |
+| --- | --- | --- |
+|     |     |     |
+
+
+
 
 ---
 
 ## 🦌 **Join Our Community**
 
-<div align="center">
+
 
 ### 💬 Connect with us
 
-[![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack&style=for-the-badge)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
+[Slack](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
 ### 📱 WeChat Group
 
-<img src="assets/WeChatGroup.jpg" width="300" alt="WeChat Group QR Code"/>
+
 
 *Scan to join our WeChat community 🦌*
 
-</div>
+
 
 ---
 
-<div align="center">
 Built with ❤️ by the Sage Team 🦌
-</div>

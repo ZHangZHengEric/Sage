@@ -16,9 +16,12 @@ This section collects the main entry points for using and starting Sage. Read th
 
 ## Current Pages
 
-1. [Getting Started](GETTING_STARTED.md)
-2. [CLI Guide](CLI.md)
-3. [TUI Guide](TUI.md)
+1. [Getting Started](GETTING_STARTED.md) — first clone, `dev-up.sh`, shared config
+2. [Web Application](WEB.md) — Vite + FastAPI, manual split start, **Docker Compose**
+3. [Desktop](DESKTOP.md) — release installers, macOS/Windows first launch, build from source
+4. [CLI Guide](CLI.md)
+5. [TUI Guide](TUI.md)
+6. [Chrome extension](CHROME_EXTENSION.md) — load unpacked, connect to a local API
 
 ## Which Surface Should You Use
 
