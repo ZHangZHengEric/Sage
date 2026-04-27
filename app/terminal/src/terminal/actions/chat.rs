@@ -3,7 +3,7 @@ use anyhow::Result;
 use crate::app::App;
 use crate::backend::{BackendHandle, BackendRequest};
 use crate::terminal::ensure_backend;
-use crate::terminal_support::repo_root;
+use crate::terminal_support::workspace_root;
 
 pub(super) fn run_task(
     app: &mut App,
@@ -15,7 +15,7 @@ pub(super) fn run_task(
         user_id: app.user_id.clone(),
         agent_mode: app.agent_mode.clone(),
         max_loop_count: app.max_loop_count,
-        workspace: Some(repo_root()),
+        workspace: Some(workspace_root()),
         skills: app.selected_skills.clone(),
         model_override: app.selected_model.clone(),
         task,
