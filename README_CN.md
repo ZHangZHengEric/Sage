@@ -64,7 +64,7 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 
 ### 桌面端（安装包）
 
-在 [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases) 下载 `**.dmg`（macOS）**、`**.exe` / `.msi`（Windows）** 或 `**.deb`（Linux）**，按下面安装。
+在 [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases) 下载 `**.dmg`（macOS）**、Windows 的 `**.exe`（NSIS 安装包）** 或 `**.deb`（Linux）**，按下面安装。
 
 **macOS**
 

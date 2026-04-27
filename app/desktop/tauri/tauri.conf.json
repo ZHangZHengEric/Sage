@@ -88,17 +88,12 @@
       "app",
       "dmg",
       "nsis",
-      "msi",
       "deb"
-      ],
+    ],
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
       "timestampUrl": "",
-      "wix": {
-        "language": "en-US",
-        "dialogImagePath": "icons/icon.png"
-      },
       "nsis": {
         "languages": ["SimpChinese"],
         "installerIcon": "icons/icon.ico",
