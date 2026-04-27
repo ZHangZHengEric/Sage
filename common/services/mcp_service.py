@@ -15,6 +15,19 @@ from mcp_servers.anytool.anytool_runtime import (
 DEFAULT_ANYTOOL_SERVER_NAME = "AnyTool"
 
 
+def _anytool_url_path_segment(normalized: Dict[str, Any]) -> str:
+    """Resolve /api/mcp/anytool/<segment> from stored config (URL may have a stale port)."""
+    url = normalized.get("streamable_http_url")
+    if isinstance(url, str) and "/api/mcp/anytool/" in url:
+        seg = url.split("/api/mcp/anytool/", 1)[-1].strip().rstrip("/")
+        if seg:
+            return seg
+    name = normalized.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    return DEFAULT_ANYTOOL_SERVER_NAME
+
+
 def _has_anytool_name_whitespace(name: Any) -> bool:
     return any(ch.isspace() for ch in str(name or ""))
 
@@ -107,9 +120,10 @@ def _normalize_server_config(config_data: Dict[str, Any]) -> Dict[str, Any]:
     normalized.setdefault("kind", "external")
     if normalized.get("kind") == "anytool":
         normalized["protocol"] = "streamable_http"
-        normalized.setdefault(
-            "streamable_http_url",
-            f"http://127.0.0.1:{_get_backend_port()}/api/mcp/anytool/{normalized.get('name', '')}",
+        # Always rewrite URL: DB / mcp_setting may keep an old port (e.g. 18080) after SAGE_PORT moved.
+        path_seg = _anytool_url_path_segment(normalized)
+        normalized["streamable_http_url"] = (
+            f"http://127.0.0.1:{_get_backend_port()}/api/mcp/anytool/{path_seg}"
         )
         normalized["tools"] = normalize_anytool_tools(normalized.get("tools", []))
         simulator = normalized.get("simulator")
