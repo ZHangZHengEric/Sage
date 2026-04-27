@@ -1,0 +1,12 @@
+[package]
+name = "sage-terminal"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+crossterm = "0.28"
+pulldown-cmark = "0.13"
+ratatui = "0.29"
+serde_json = "1.0"
+unicode-width = "0.2"

@@ -18,12 +18,17 @@ This section collects the main entry points for using and starting Sage. Read th
 
 1. [Getting Started](GETTING_STARTED.md)
 2. [CLI Guide](CLI.md)
+3. [TUI Guide](TUI.md)
 
 ## Which Surface Should You Use
 
 ### CLI
 
 Use `sage run`, `sage chat`, and `sage doctor` when you need the fastest development-oriented entry point for local testing, prompt iteration, and runtime diagnostics.
+
+### Terminal TUI
+
+Use `sage-terminal` when you want a terminal-first interactive experience on top of the same local Sage runtime, especially for session resume, slash-command workflows, and transcript browsing.
 
 ### Streamlit demo
 

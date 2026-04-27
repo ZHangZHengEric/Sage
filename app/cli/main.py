@@ -244,6 +244,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
     doctor_parser = subparsers.add_parser("doctor", help="Show local CLI/runtime configuration")
     doctor_parser.add_argument("--probe-provider", action="store_true", help="Run a lightweight connection probe against the default provider")
+    doctor_parser.add_argument("--json", action="store_true", help="Print doctor information as JSON")
     doctor_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
 
     sessions_parser = subparsers.add_parser("sessions", help="List recent CLI sessions")
@@ -285,6 +286,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Path to write the config file (defaults to ~/.sage/.sage_env)",
     )
     config_init_parser.add_argument("--force", action="store_true", help="Overwrite an existing config file")
+    config_init_parser.add_argument("--json", action="store_true", help="Print init result as JSON")
 
     provider_parser = subparsers.add_parser("provider", help="Manage local LLM providers")
     provider_subparsers = provider_parser.add_subparsers(dest="provider_command", required=True)
@@ -875,6 +877,9 @@ async def _doctor_command(args: argparse.Namespace) -> int:
     info = collect_doctor_info()
     if args.probe_provider:
         info["provider_probe"] = await probe_default_provider()
+    if args.json:
+        print(json.dumps(info, ensure_ascii=False, indent=2))
+        return 0
     for key, value in info.items():
         if isinstance(value, dict):
             print(f"{key}:")
@@ -1138,6 +1143,9 @@ def _config_init_command(args: argparse.Namespace) -> int:
     from app.cli.service import write_cli_config_file
 
     result = write_cli_config_file(path=args.path, force=args.force)
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
     print(f"config_file: {result['path']}")
     print(f"template: {result['template']}")
     print(f"overwritten: {result['overwritten']}")

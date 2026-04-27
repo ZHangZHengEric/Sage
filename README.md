@@ -182,12 +182,53 @@ sage chat
 ```
 
 Detailed CLI usage is documented here:
-- English: [docs/en/CLI.md](docs/en/CLI.md)
-- 中文: [docs/zh/CLI.md](docs/zh/CLI.md)
+- English: [docs/en/applications/CLI.md](docs/en/applications/CLI.md)
+- 中文: [docs/zh/applications/CLI.md](docs/zh/applications/CLI.md)
 
 The CLI now defaults to the same local data root as desktop: `~/.sage/`.
 By default it reads `~/.sage/.sage_env` first, and then lets a repository-local `.env` override it for development.
 When `--json` is enabled, the CLI emits stream events and appends a final `cli_stats` event for structured post-run inspection.
+
+**Terminal UI (TUI preview)**:
+
+```bash
+# Make the local Sage CLI/backend available first
+pip install -e .
+
+# Configure the same minimum local runtime
+export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
+export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
+export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
+export SAGE_DB_TYPE="file"
+
+# Run the Rust TUI from source
+cargo run --quiet --offline --manifest-path app/terminal/Cargo.toml
+```
+
+Current startup forms:
+
+```bash
+sage-terminal
+sage-terminal run "inspect this repo"
+sage-terminal chat "hello"
+sage-terminal config init
+sage-terminal config init /tmp/.sage_env --force
+sage-terminal doctor
+sage-terminal doctor probe-provider
+sage-terminal provider verify
+sage-terminal provider verify model=deepseek-chat base=https://api.deepseek.com/v1
+sage-terminal sessions
+sage-terminal sessions 25
+sage-terminal sessions inspect latest
+sage-terminal sessions inspect <session_id>
+sage-terminal resume
+sage-terminal resume latest
+sage-terminal resume <session_id>
+```
+
+Detailed TUI usage is documented here:
+- English: [docs/en/applications/TUI.md](docs/en/applications/TUI.md)
+- 中文: [docs/zh/applications/TUI.md](docs/zh/applications/TUI.md)
 
 **Web Application (FastAPI + Vue3)**:
 

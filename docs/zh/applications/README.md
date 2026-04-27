@@ -18,12 +18,17 @@ ref: applications
 
 1. [快速开始](GETTING_STARTED.md)
 2. [CLI 使用指南](CLI.md)
+3. [TUI 使用指南](TUI.md)
 
 ## 该选哪个入口
 
 ### CLI
 
 当你需要最快的开发测试入口、提示词迭代或运行时诊断时，使用 `sage run`、`sage chat` 和 `sage doctor`。
+
+### Terminal TUI
+
+当你希望在同一套本地 Sage runtime 之上获得终端优先的交互体验，尤其是会话恢复、slash 命令和 transcript 浏览时，使用 `sage-terminal`。
 
 ### Streamlit 演示
 
