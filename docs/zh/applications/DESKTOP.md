@@ -23,7 +23,7 @@ ref: desktop-app
 
 ## 使用发行包安装
 
-1. 在 [Releases](https://github.com/ZHangZHengEric/Sage/releases) 下载对应系统安装包（如 macOS 用 `.dmg`，Windows 用 `.exe` / `.msi`，Linux 用 `.deb`）。
+1. 在 [Releases](https://github.com/ZHangZHengEric/Sage/releases) 下载对应系统安装包（如 macOS 用 `.dmg`，Windows 用 NSIS 的 `.exe`，Linux 用 `.deb`）。
 2. 按安装向导或拖拽到「应用程序」等完成安装。
 3. 从开始菜单、启动台或应用程序文件夹启动 Sage。
 

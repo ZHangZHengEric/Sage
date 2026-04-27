@@ -72,7 +72,7 @@ Open [http://localhost:5173](http://localhost:5173). The first run may ask for *
 
 ### Desktop (installers)
 
-Download the latest `.dmg` (macOS), `.exe` / `.msi` (Windows), or `.deb` (Linux) from [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases), then install as below.
+Download the latest `.dmg` (macOS), `.exe` NSIS installer (Windows), or `.deb` (Linux) from [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases), then install as below.
 
 **macOS**
 
