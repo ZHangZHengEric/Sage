@@ -1,14 +1,16 @@
+<div align="center">
+
 # 🌟 **体验 Sage 的强大能力**
 
-cover
+![cover](assets/cover.png)
 
-[English](README.md)
-[简体中文](README_CN.md)
-[License: MIT](LICENSE)
-[Python 3.10+](https://python.org)
-[Version](https://github.com/ZHangZHengEric/Sage)
-[DeepWiki](https://deepwiki.com/ZHangZHengEric/Sage)
-[Slack](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
+[![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
+[![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python)](https://python.org)
+[![Version](https://img.shields.io/badge/Version-1.1.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
+[![DeepWiki](https://img.shields.io/badge/DeepWiki-查看文档-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
+[![Slack](https://img.shields.io/badge/Slack-加入社区-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
 # 🧠 **Sage 智能体平台**
 
@@ -16,15 +18,32 @@ cover
 
 > 🌟 **面向任务执行、自动化调度、浏览器工作流、IM 交付与企业部署的生产级智能体平台。**
 
+</div>
+
 ---
 
 ## 📸 **产品截图**
 
+<div align="center">
 
-|            |          |           |
-| ---------- | -------- | --------- |
-| **可视化工作台** | **实时协作** | **多格式支持** |
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/workbench.png" width="100%" alt="工作台"/>
+      <br/><strong>可视化工作台</strong>
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/chat.png" width="100%" alt="对话"/>
+      <br/><strong>实时协作</strong>
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/preview.png" width="100%" alt="预览"/>
+      <br/><strong>多格式支持</strong>
+    </td>
+  </tr>
+</table>
 
+</div>
 
 > 📖 **详细文档**: [https://wiki.sage.zavixai.com/](https://wiki.sage.zavixai.com/)
 
@@ -245,12 +264,16 @@ Sage/
 
 ## 💖 **赞助者**
 
+
+
 感谢以下赞助者对 Sage 的支持：
 
 
 |     |     |     |
 | --- | --- | --- |
 |     |     |     |
+
+
 
 
 ---
