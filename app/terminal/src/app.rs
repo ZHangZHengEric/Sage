@@ -238,11 +238,7 @@ impl App {
 }
 
 fn current_workspace_label() -> String {
-    let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|path| path.parent())
-        .map(std::path::Path::to_path_buf);
-    let cwd = repo_root.or_else(|| std::env::current_dir().ok());
+    let cwd = std::env::current_dir().ok();
     let home = std::env::var("HOME").ok();
 
     match (cwd, home) {

@@ -2,10 +2,10 @@ use anyhow::Result;
 
 use crate::app::{App, MessageKind};
 use crate::backend::list_skills as fetch_skills;
-use crate::terminal_support::{format_skills_list, repo_root};
+use crate::terminal_support::{format_skills_list, workspace_root};
 
 pub(super) fn list_skills(app: &mut App) -> Result<bool> {
-    match fetch_skills(&app.user_id, Some(repo_root().as_path())) {
+    match fetch_skills(&app.user_id, Some(workspace_root().as_path())) {
         Ok(skills) => {
             app.set_skill_catalog(
                 skills
@@ -34,7 +34,7 @@ pub(super) fn list_skills(app: &mut App) -> Result<bool> {
 }
 
 pub(super) fn enable_skill(app: &mut App, skill: String) -> Result<bool> {
-    match fetch_skills(&app.user_id, Some(repo_root().as_path())) {
+    match fetch_skills(&app.user_id, Some(workspace_root().as_path())) {
         Ok(skills) => {
             app.set_skill_catalog(
                 skills

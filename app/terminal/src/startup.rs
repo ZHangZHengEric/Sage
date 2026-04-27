@@ -51,11 +51,9 @@ pub(crate) fn parse_startup_action(
                 limit: 10,
             },
         ))),
-        [command, subcommand, target] if command == "sessions" && subcommand == "inspect" => {
-            Ok(StartupBehavior::Run(Some(SubmitAction::ShowSession(
-                target.clone(),
-            ))))
-        }
+        [command, subcommand, target] if command == "sessions" && subcommand == "inspect" => Ok(
+            StartupBehavior::Run(Some(SubmitAction::ShowSession(target.clone()))),
+        ),
         [command, limit] if command == "sessions" => {
             let limit = limit
                 .parse::<usize>()
