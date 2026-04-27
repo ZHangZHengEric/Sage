@@ -1,3 +1,5 @@
+2026-04-28 16:00 桌面 Windows 发布：从 bundle 中移除 MSI（仅保留 NSIS .exe），避免 GHA 上 WiX light.exe 失败；release-desktop workflow 同步去掉 msi 重命名与上传；README 说明 Windows 为 NSIS 安装包。
+
 2026-04-28 12:00 修复 CI「sage-desktop.spec not found」：根因是 .gitignore 的 *.spec 忽略未提交该文件；增加 !app/desktop/sage-desktop.spec 例外，需执行 git add app/desktop/sage-desktop.spec 并推送后 Linux/mac/Windows 打包才能找到 spec。
 
 2026-04-27 21:00 GitHub release-desktop workflow：pip 缓存 key 的 hashFiles 从无效的 app/desktop/core/requirements.txt 改为根目录 requirements.txt，与构建脚本实际依赖文件一致、依赖变更时缓存能正确失效。
