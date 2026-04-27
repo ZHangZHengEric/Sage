@@ -1,0 +1,10 @@
+#[path = "tests/popup.rs"]
+mod popup;
+#[path = "tests/sessions.rs"]
+mod sessions;
+#[path = "tests/surfaces.rs"]
+mod surfaces;
+#[path = "tests/transcript.rs"]
+mod transcript;
+#[path = "tests/welcome.rs"]
+mod welcome;
