@@ -130,7 +130,7 @@ const imgFailed = ref(false)
 const localObjectUrl = ref('')
 const previewOpen = ref(false)
 
-// URL 图片直接使用，本地图片用 readFile 读取
+// URL 图片直接使用；server-web 无法读取用户本机路径
 const displaySrc = computed(() => {
   if (isUrl.value) return imagePath.value
   return localObjectUrl.value
@@ -138,22 +138,12 @@ const displaySrc = computed(() => {
 
 const loadLocalImage = async (path) => {
   if (!path || isUrl.value) return
-  imgLoading.value = true
-  imgFailed.value = false
-  try {
-    // 动态导入 Tauri fs（server 端环境不存在此包）
-    const { readFile } = await import('@tauri-apps/plugin-fs')
-    let cleanPath = path.replace(/^file:\/\//i, '')
-    const fileData = await readFile(cleanPath)
-    // 释放上一个 Object URL
-    if (localObjectUrl.value) URL.revokeObjectURL(localObjectUrl.value)
-    localObjectUrl.value = URL.createObjectURL(new Blob([fileData]))
-  } catch (e) {
-    console.warn('[ImageUnderstandingToolRenderer] 无法加载本地图片:', e)
-    imgFailed.value = true
-  } finally {
-    imgLoading.value = false
+  if (localObjectUrl.value) {
+    URL.revokeObjectURL(localObjectUrl.value)
+    localObjectUrl.value = ''
   }
+  imgLoading.value = false
+  imgFailed.value = true
 }
 
 // 结果到达后才加载图片（避免工具还在运行时浪费请求）
