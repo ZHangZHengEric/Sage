@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest",
-    "check:i18n": "node scripts/check-i18n-literals.mjs"
+    "check:i18n": "node scripts/check-i18n-literals.mjs && node ../../../scripts/check-i18n-keys.mjs --src src --zh src/locales/zh-CN.js --en src/locales/en-US.js"
   },
   "dependencies": {
     "@dicebear/collection": "^9.4.0",

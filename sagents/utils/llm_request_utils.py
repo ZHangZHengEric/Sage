@@ -8,6 +8,33 @@ from openai import APIError
 from .logger import logger
 
 
+def uses_max_completion_tokens(model: Optional[str]) -> bool:
+    """
+    部分 OpenAI 模型（o1/o3、GPT-5 等）的 Chat Completions API 仅接受
+    max_completion_tokens，传入 max_tokens 会返回 unsupported_parameter。
+    """
+    m = (model or "").strip().lower()
+    if not m:
+        return False
+    if m.startswith("o1") or m.startswith("o3"):
+        return True
+    # GPT-5 家族（含 gpt-5.4-mini 等）
+    if "gpt-5" in m:
+        return True
+    return False
+
+
+def _remap_max_tokens_for_model(request_kwargs: Dict[str, Any], model: Optional[str]) -> None:
+    if not uses_max_completion_tokens(model):
+        return
+    if "max_tokens" not in request_kwargs:
+        return
+    mt = request_kwargs.pop("max_tokens")
+    # 若调用方已显式设置 max_completion_tokens，以显式值为准
+    if request_kwargs.get("max_completion_tokens") is None and mt is not None:
+        request_kwargs["max_completion_tokens"] = mt
+
+
 def _extract_bool_flag(source: Any, key: str) -> Optional[bool]:
     if source is None:
         return None
@@ -54,6 +81,7 @@ def sanitize_model_request_kwargs(
     *,
     client: Any = None,
     model_config: Optional[Dict[str, Any]] = None,
+    model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     基于已知能力过滤不支持的请求参数。
@@ -61,11 +89,33 @@ def sanitize_model_request_kwargs(
     当前先处理 structured output / response_format：
     - 如果明确不支持 structured output，则移除 response_format。
     - 如果能力未知，则保留，交给运行时 fallback 兜底。
+
+    另：对仅支持 max_completion_tokens 的模型，将 max_tokens 映射为该参数。
     """
     sanitized = dict(request_kwargs)
     for key in list(sanitized.keys()):
         if str(key).startswith("supports_"):
             sanitized.pop(key, None)
+    # 前端可能将采样参数置空（None / 空串），不应作为请求字段下发到大模型，
+    # 否则部分后端（如 OpenAI）会因为 null 值或多余字段返回 invalid_request_error。
+    _empty_droppable_keys = (
+        "max_tokens",
+        "max_completion_tokens",
+        "temperature",
+        "top_p",
+        "presence_penalty",
+        "frequency_penalty",
+        "max_model_len",
+    )
+    for key in _empty_droppable_keys:
+        if key in sanitized and (sanitized[key] is None or sanitized[key] == ""):
+            sanitized.pop(key, None)
+    resolved_model = model
+    if resolved_model is None:
+        resolved_model = sanitized.get("model")
+        if not isinstance(resolved_model, str):
+            resolved_model = None
+    _remap_max_tokens_for_model(sanitized, resolved_model)
     structured_support = get_structured_output_support(client=client, model_config=model_config)
     if structured_support is False:
         sanitized.pop("response_format", None)
@@ -215,6 +265,7 @@ async def create_chat_completion_with_fallback(
         request_kwargs,
         client=client,
         model_config=model_config,
+        model=model,
     )
 
     logger.info(

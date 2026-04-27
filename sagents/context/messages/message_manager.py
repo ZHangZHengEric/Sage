@@ -15,12 +15,14 @@ MessageManager 优化版消息管理器
 """
 
 import datetime
+import json
 import time
 import re
 import uuid
 import hashlib
-from typing import Dict, List, Optional, Any, Union, Sequence
+from typing import Dict, List, Optional, Any, Union, Sequence, Tuple
 from copy import deepcopy
+from dataclasses import replace
 from sagents.utils.logger import logger
 from sagents.context.messages.context_budget import ContextBudgetManager
 from .message import MessageRole, MessageType, MessageChunk
@@ -29,6 +31,10 @@ from .message import MessageRole, MessageType, MessageChunk
 _global_token_ratio_samples: List[Dict[str, float]] = []  # 存储字符数和token数的样本
 _global_max_ratio_samples = 10  # 最多保留10个样本
 _global_default_token_ratio = 0.4  # 默认比例（中文约0.6，英文约0.25，混合约0.4）
+
+# 协议性状态工具：可持久化在 messages.json，但不参与发往 LLM 的 tool_calls/tool 对（见 strip_turn_status_from_llm_context）
+TURN_STATUS_TOOL_NAME = "turn_status"
+
 
 class MessageManager:
     """
@@ -640,7 +646,9 @@ class MessageManager:
             str: 格式化后的消息字符串
         """
         logger.info(f"AgentBase: 将 {len(messages)} 条消息转换为字符串")
-        
+
+        messages = MessageManager.strip_turn_status_from_llm_context(list(messages))
+
         messages_str_list = []
         
         for msg in messages:
@@ -696,6 +704,109 @@ class MessageManager:
         return False
 
     @staticmethod
+    def _tool_call_entry_name_and_id(tc: Any) -> Tuple[Optional[str], Optional[str]]:
+        """从流式或序列化后的 tool_call 条目中解析工具名与 id。"""
+        tid: Optional[str] = None
+        name: Optional[str] = None
+        if isinstance(tc, dict):
+            tid = tc.get("id")
+            fn = tc.get("function")
+            if isinstance(fn, dict):
+                name = fn.get("name")
+        else:
+            tid = getattr(tc, "id", None)
+            fn = getattr(tc, "function", None)
+            if fn is not None:
+                name = getattr(fn, "name", None)
+        return name, tid
+
+    @staticmethod
+    def _message_has_non_empty_content(msg: MessageChunk) -> bool:
+        """判断 assistant/user 等是否含有可视为「有效正文」的内容（含多模态文本段）。"""
+        content = msg.content
+        if content is None:
+            return False
+        if isinstance(content, str):
+            return bool(content.strip())
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict):
+                    t = part.get("text") or part.get("content")
+                    if isinstance(t, str) and t.strip():
+                        return True
+            return False
+        return bool(content)
+
+    @staticmethod
+    def strip_turn_status_from_llm_context(messages: List[MessageChunk]) -> List[MessageChunk]:
+        """
+        从即将发往 LLM 的消息列表中移除 turn_status 工具调用及其 tool 回复。
+
+        例外：被 SimpleAgent 标记 ``metadata.turn_status_rejected=True`` 的 tool 结果
+        必须保留（连同对应 assistant tool_call），让模型下一轮能看到"先写总结再调
+        turn_status"的反馈，避免反复重蹈覆辙；SSE 侧仍由
+        ``_redact_hidden_tools_from_chunk`` 按 tool_call_id 隐藏，前端不会感知。
+
+        不影响 message_manager.messages / messages.json 中的原始记录；
+        仅在构造 API 请求或 extract_messages_for_inference 出口处使用。
+        """
+        if not messages:
+            return []
+
+        turn_ids: set[str] = set()
+        for msg in messages:
+            if msg.role != MessageRole.ASSISTANT.value or not msg.tool_calls:
+                continue
+            for tc in msg.tool_calls:
+                name, tid = MessageManager._tool_call_entry_name_and_id(tc)
+                if name == TURN_STATUS_TOOL_NAME and tid:
+                    turn_ids.add(tid)
+
+        rejected_ids: set[str] = set()
+        for msg in messages:
+            if (
+                msg.role == MessageRole.TOOL.value
+                and msg.tool_call_id
+                and msg.tool_call_id in turn_ids
+                and isinstance(msg.metadata, dict)
+                and msg.metadata.get('turn_status_rejected') is True
+            ):
+                rejected_ids.add(msg.tool_call_id)
+
+        strip_ids = turn_ids - rejected_ids
+
+        out: List[MessageChunk] = []
+        for msg in messages:
+            if msg.role == MessageRole.TOOL.value and msg.tool_call_id and msg.tool_call_id in strip_ids:
+                continue
+
+            if msg.role == MessageRole.ASSISTANT.value and msg.tool_calls:
+                kept: List[Any] = []
+                for tc in msg.tool_calls:
+                    name, tid = MessageManager._tool_call_entry_name_and_id(tc)
+                    # 仅当这条 turn_status 调用对应的 tool 结果未被标记 rejected 时才剔除；
+                    # rejected 的 pair 整体保留，避免出现孤儿 tool 消息。
+                    if name == TURN_STATUS_TOOL_NAME and tid in strip_ids:
+                        continue
+                    kept.append(tc)
+
+                if not kept:
+                    if MessageManager._message_has_non_empty_content(msg):
+                        out.append(replace(msg, tool_calls=None))
+                    # 既无正文又仅含 turn_status：整段 assist 消息不进入 LLM
+                    continue
+
+                if len(kept) == len(msg.tool_calls):
+                    out.append(msg)
+                else:
+                    out.append(replace(msg, tool_calls=kept))
+                continue
+
+            out.append(msg)
+
+        return out
+
+    @staticmethod
     def extract_messages_for_inference(messages: List[MessageChunk]) -> List[MessageChunk]:
         """
         从消息列表中提取用于推理的消息
@@ -749,17 +860,18 @@ class MessageManager:
             # 注意：如果 User 消息在压缩工具之后（不应该发生），避免重复
             if compression_tool_user_index >= compression_tool_index:
                 # User 消息在压缩工具之后，只返回从 User 开始的消息
-                return system_messages + filtered_messages[compression_tool_user_index:]
+                merged = system_messages + filtered_messages[compression_tool_user_index:]
             else:
                 # 正常情况：User 消息在压缩工具之前
-                return (
+                merged = (
                     system_messages +  # System 消息（保留）
                     [filtered_messages[compression_tool_user_index]] +  # User 消息
                     filtered_messages[compression_tool_index:]  # 最后一个压缩工具及之后
                 )
+            return MessageManager.strip_turn_status_from_llm_context(merged)
 
         # 没找到压缩工具，返回过滤后的所有消息
-        return filtered_messages
+        return MessageManager.strip_turn_status_from_llm_context(filtered_messages)
 
     def extract_all_context_messages(self, recent_turns: int = 0, last_turn_user_only: bool = True, allowed_message_types: Optional[List[str]] = None) -> List[MessageChunk]:
         """
@@ -1145,6 +1257,7 @@ class MessageManager:
         Returns:
             字典列表
         """
+        messages = MessageManager.strip_turn_status_from_llm_context(messages)
         new_messages = []
         for msg in messages:
             # 去掉empty消息

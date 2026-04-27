@@ -1,3 +1,49 @@
+2026-04-27 18:40 turn_status 拒绝文案 i18n：新增 simple_agent_prompts.turn_status_rejection_message（zh/en/pt），SimpleAgent 改写工具结果时按 session 语言通过 PromptManager 取文案，硬编码中文消息移除。
+
+2026-04-27 18:09 ModelProviderList 高级配置：移除 maxTokens/temperature/topP/presencePenalty/maxModelLen 输入框 placeholder，卡片展示的 temperature 兜底改为 '-'，避免清空后视觉上像是没改。
+
+2026-04-27 18:05 修复采样参数清空不生效：前端置空时显式以 null 下发，后端 update_provider 改用 Pydantic model_fields_set 区分"未提供"与"显式 null"，真正写回 DB；之前用 `is not None` 守卫导致用户清空后 DB 旧值（如 top_p=0.95）残留并继续带入 LLM 请求触发 unsupported_parameter。
+
+2026-04-27 17:55 前后端联动：ModelProviderList 表单将 max_tokens/temperature/top_p/presence_penalty/max_model_len 默认置空，置空字段不下发；LLMProvider 构造默认改 None；sanitize_model_request_kwargs 兜底丢弃空值采样参数；新增对应单测。
+
+2026-04-27 18:30 turn_status reject 让模型可见：SimpleAgent 拒绝时给 tool 结果打 metadata.turn_status_rejected=True；strip_turn_status_from_llm_context 按标记保留这对 pair（含同条 assistant 里的 turn_status tool_call），SSE 仍按 tool_call_id 隐藏。修复 reject 后模型上下文丢失反馈、反复重蹈覆辙的问题。补 4 条单测。
+
+2026-04-27 18:05 隐藏工具过滤抽常量 + 续片鲁棒性：HIDDEN_FROM_STREAM_TOOL_NAMES 移到 sagents/tool/impl/__init__.py；helper 重命名 _redact_hidden_tools_from_chunk 并改用 _HiddenToolStreamState（新增 last_was_hidden 贪心续接，覆盖 id/index 都缺失的兼容场景）；补两条续片单测。
+
+2026-04-27 17:55 SAgent.run_stream 出口最小过滤 turn_status：新增模块级 helper，按流局部 call_ids/index→id 状态识别 tool_call 续片与对应 tool 结果，整体丢弃；落盘与 LLM 上下文剔除均不变。
+
+2026-04-27 17:45 修复 OpenAI BadRequest：从 agent_base extra_body 中移除 top_k=20，OpenAI Chat Completions 不支持该参数（unknown_parameter 400）。
+
+2026-04-27 17:35 回滚 turn_status SSE 过滤：移除 redact_turn_status_for_sse_chunk、_tag_omit_from_sse_for_turn_status、SAgent.run_stream 的 turn_status_ids、agent_base/common_agent/plan_agent process_tool_response 的 tool_name 入参与 metadata.tool_name 注入、workbench.js 的 turn_status 防误写兜底；turn_status 现可正常下发 SSE，仅在 strip_turn_status_from_llm_context 出口对 LLM 请求剔除。
+
+2026-04-27 23:59 LLM：OpenAI GPT-5/o1/o3 等仅接受 max_completion_tokens；sanitize_model_request_kwargs 与 model_capabilities 探测将 max_tokens 自动映射，修复能力验证 400。
+
+2026-04-28 22:45 SSE redact 改为有状态：SAgent.run_stream 维护本会话 turn_status tool_call_id 集合，流式 delta 中后续分片仅有 id/index 时按集合命中过滤；对应工具结果亦命中。修复模型流式调用 turn_status 时前端工作台仍能看到入参（need_user_input/note）的问题。补流式 delta 单测。
+
+2026-04-28 22:30 修复 CommonAgent.process_tool_response 重写未跟随 agent_base 新签名（tool_name 第 3 参），导致 _execute_tool 调用时 TypeError，工具结果走错误分支被吞，前端文字之后第一个非 turn_status 工具结果消失；同时把 metadata.tool_name 写入 CommonAgent 的工具结果，前端兜底过滤一致。
+
+2026-04-28 22:15 MessageChunk.__post_init__：将 role 规范为字符串；修复传入 MessageRole 枚举时 redact/校验与 ".value" 比较不命中导致 turn_status 泄漏。成功体启发式对 content 先 strip 再 json.loads。
+
+2026-04-28 22:00 SSE redact：tool 块 metadata.tool_name=turn_status 一律不下发；单测覆盖。workbench 防误写保留兜底。
+
+2026-04-28 16:00 SSE：SAgent.run_stream 对每块调用 redact_turn_status_for_sse_chunk；turn_status 的 tool 结果打 metadata.omit_from_sse；协议成功 JSON 亦过滤。会话落盘仍含完整消息。
+
+2026-04-28 14:00 agent_base_prompts：补全 common.external_paths_intro（zh/en/pt），修复 Fibre 等带 external_paths 时 prepare_unified_system_messages 的 KeyError。
+
+2026-04-28 12:00 TokenUsage 增加 usage_payload（Text）并在落库时写入完整 JSON，修复本地 SQLite 已存在 NOT NULL 列但 ORM 未插入导致的 IntegrityError；sync_database_schema 为 Text 补列时与 String 相同默认空串。
+
+2026-04-28 00:10 turn_status 成功体补回标准键 success/status，与 should_end 并列。
+
+2026-04-27 23:55 turn_status 成功仅返回 `{"should_end":bool}`；need_summary 兼容新旧 JSON；AgentBase._call_llm_streaming 与 convert_messages_to_str 对纯 MessageChunk 路径也 strip turn_status。
+
+2026-04-27 23:30 MessageManager：新增 strip_turn_status_from_llm_context，从发往 LLM 的请求中剔除 turn_status 的 tool_calls 与对应 tool 消息；messages.json 仍保留；extract_messages_for_inference 与 convert_messages_to_dict_for_request 均应用；补单测。
+
+2026-04-27 23:45 CI：新增 `scripts/check-i18n-keys.mjs`，静态扫描 `t/tr/$t('a.b')` 字面量键须在 zh-CN 与 en-US 同时存在；server web `npm run check:i18n` 串联该脚本；补全 web/desktop 暴露的问卷与 common 等缺失键；desktop 增加 `check:i18n`；GitHub Actions 增加 `desktop-i18n` job。
+
+2026-04-27 23:10 前端 locale：server/web 与 desktop/ui 的 zh-CN / en-US 补全此前仅中文有的已用键（版本 GitHub 导入、工具预览失败、图片理解 workbench 文案、桌面计划任务计数）；删除未引用键（zh：system.version.releaseNotesPlaceholder、agent.settings、system.unknown）。
+
+2026-04-27 22:00 sagents/prompts：未改中文；英/葡 planning_template 去掉 `{task_description}` 与代码一致；SimpleAgent 英/葡 task_complete 对齐中文结构并含 `{system_prompt}`；葡语 agent_custom_system_prefix（含 no_task）补全 turn_status 条款；SimpleReact 英 task_complete 删中文无的两条「继续」规则。
+
 2026-04-27 13:30 sagents 阻塞点治理：将会话恢复/落盘、URL 下载写盘、文件解析与 pypandoc fallback、PIL 图片压缩/base64、远程 sandbox 目录扫描/host 文件读写、本地隔离 pickle/launcher/output 临时文件与后台进程启动等重 I/O 移到 aiofiles 或 asyncio.to_thread；保留 MCP JSON 与 sandbox YAML 小配置文件直接同步读取，避免过度优化；语法检查通过，相关可运行 sagents 测试通过，部分 async/agent 测试受当前环境缺 pytest-asyncio/opentelemetry 阻塞。
 
 2026-04-28 20:00 README / README_CN 恢复「加入社区」：居中、Slack for-the-badge 徽章、微信群 `WeChatGroup.jpg` 图，文末团队署名同区；README_CN 赞助者三列 Logo 与英文对齐。

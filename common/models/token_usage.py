@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import DateTime, Index, Integer, String, func, select
+from sqlalchemy import DateTime, Index, Integer, String, Text, func, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from common.models.base import Base, BaseDao, get_local_now
@@ -36,6 +36,8 @@ class TokenUsage(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=get_local_now)
+    #: 完整 token 统计 JSON，与拆列字段同步落库，满足本地库可能存在的 NOT NULL 约束
+    usage_payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
 
     def __init__(
         self,
@@ -56,6 +58,7 @@ class TokenUsage(Base):
         started_at: datetime,
         finished_at: datetime,
         created_at: Optional[datetime] = None,
+        usage_payload: str = "{}",
     ) -> None:
         self.id = id
         self.session_id = session_id
@@ -73,6 +76,7 @@ class TokenUsage(Base):
         self.started_at = started_at
         self.finished_at = finished_at
         self.created_at = created_at or get_local_now()
+        self.usage_payload = usage_payload
 
 
 class TokenUsageDao(BaseDao):

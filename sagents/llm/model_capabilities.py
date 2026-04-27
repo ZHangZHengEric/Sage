@@ -6,7 +6,10 @@ from typing import Any, Awaitable, Dict, Optional
 import httpx
 from loguru import logger
 from openai import AsyncOpenAI
-from sagents.utils.llm_request_utils import summarize_chat_completion_request
+from sagents.utils.llm_request_utils import (
+    summarize_chat_completion_request,
+    uses_max_completion_tokens,
+)
 from sagents.utils.prompt_caching import add_cache_control_to_messages
 
 _TEST_IMAGE_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAIAAAAC64paAAAAG0lEQVR4nGP8z0A+YKJA76jmUc2jmkc1U0EzACKcASc1hNCeAAAAAElFTkSuQmCC"
@@ -86,7 +89,11 @@ async def probe_connection(api_key: str, base_url: str, model: str) -> Dict[str,
     )
     client = _build_client(api_key, base_url, timeout=10.0)
     try:
-        request_kwargs = {"max_tokens": 5}
+        request_kwargs: Dict[str, Any] = (
+            {"max_completion_tokens": 5}
+            if uses_max_completion_tokens(model)
+            else {"max_tokens": 5}
+        )
         logger.info(
             f"[LLM Capability Probe] connection request | summary={summarize_chat_completion_request(model=model, messages=[{'role': 'user', 'content': 'Hi'}], request_kwargs=request_kwargs)}"
         )
@@ -125,7 +132,11 @@ async def probe_multimodal(api_key: str, base_url: str, model: str) -> Dict[str,
                 ],
             }
         ]
-        request_kwargs = {"max_tokens": 50, "temperature": 0.1}
+        request_kwargs = {"temperature": 0.1}
+        if uses_max_completion_tokens(model):
+            request_kwargs["max_completion_tokens"] = 50
+        else:
+            request_kwargs["max_tokens"] = 50
         logger.info(
             f"[LLM Capability Probe] multimodal request | summary={summarize_chat_completion_request(model=model, messages=request_messages, request_kwargs=request_kwargs)}"
         )
@@ -159,9 +170,14 @@ async def probe_structured_output(api_key: str, base_url: str, model: str) -> Di
     try:
         try:
             request_messages = _build_probe_messages()
+            token_kw: Dict[str, Any] = (
+                {"max_completion_tokens": 20}
+                if uses_max_completion_tokens(model)
+                else {"max_tokens": 20}
+            )
             request_kwargs = {
                 "response_format": {"type": "json_object"},
-                "max_tokens": 20,
+                **token_kw,
                 "temperature": 0.0,
                 "stream": True,
                 "extra_body": _build_probe_extra_body(model),
@@ -169,15 +185,16 @@ async def probe_structured_output(api_key: str, base_url: str, model: str) -> Di
             logger.info(
                 f"[LLM Capability Probe] structured_output request | summary={summarize_chat_completion_request(model=model, messages=request_messages, request_kwargs=request_kwargs)}"
             )
-            stream = await client.chat.completions.create(
-                model=model,
-                messages=request_messages,
-                response_format=request_kwargs["response_format"],
-                max_tokens=request_kwargs["max_tokens"],
-                temperature=request_kwargs["temperature"],
-                stream=request_kwargs["stream"],
-                extra_body=request_kwargs["extra_body"],
-            )
+            create_kw: Dict[str, Any] = {
+                "model": model,
+                "messages": request_messages,
+                "response_format": request_kwargs["response_format"],
+                "temperature": request_kwargs["temperature"],
+                "stream": request_kwargs["stream"],
+                "extra_body": request_kwargs["extra_body"],
+            }
+            create_kw.update(token_kw)
+            stream = await client.chat.completions.create(**create_kw)
             content_chunks: list[str] = []
             async for chunk in stream:
                 if not chunk.choices:

@@ -8,16 +8,15 @@ def test_turn_status_accepts_terminal_status():
     tool = TurnStatusTool()
     out = asyncio.run(tool.turn_status(status="task_done", note="ok", session_id="s1"))
     assert out["success"] is True
-    assert out["turn_status"] == "task_done"
+    assert out["status"] == "success"
     assert out["should_end"] is True
-    assert out["note"] == "ok"
 
 
 def test_turn_status_continue_work_does_not_end():
     tool = TurnStatusTool()
     out = asyncio.run(tool.turn_status(status="continue_work", note="more work", session_id="s1"))
     assert out["success"] is True
-    assert out["turn_status"] == "continue_work"
+    assert out["status"] == "success"
     assert out["should_end"] is False
 
 

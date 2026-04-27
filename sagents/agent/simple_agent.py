@@ -1010,19 +1010,22 @@ class SimpleAgent(AgentBase):
                             is_complete = True
                             break
 
-                # 未通过总结校验的 turn_status：把工具结果改写为拒绝消息，并保持未完成
+                # 未通过总结校验的 turn_status：把工具结果改写为拒绝消息，并保持未完成。
+                # metadata.turn_status_rejected 让 strip_turn_status_from_llm_context 放行这对 pair，
+                # 模型在下一轮才能看到拒绝原因；SSE 侧仍按 tool_call_id 隐藏（_redact_hidden_tools_from_chunk）。
                 if reject_turn_status_ids and not is_complete:
+                    live_ctx = self._get_live_session_context(session_id)
+                    rejection_lang = live_ctx.get_language() if live_ctx is not None else 'en'
+                    rejection = PromptManager().get_agent_prompt_auto(
+                        'turn_status_rejection_message', language=rejection_lang
+                    )
                     for msg in messages:
                         if msg.role == MessageRole.TOOL.value and msg.tool_call_id in reject_turn_status_ids:
-                            rejection = (
-                                "turn_status 调用被拒绝：本轮 assistant 还没有输出任何自然语言说明。"
-                                "请先用一段中文/英文文字总结当前进展和结果（包含已完成的事项、关键产物或下一步建议），"
-                                "再调用 turn_status(status=...) 工具报告本轮状态。"
-                            )
                             logger.warning(
                                 f"SimpleAgent: turn_status 调用 {msg.tool_call_id} 缺少前置说明，已改写为拒绝消息"
                             )
                             msg.content = rejection
+                            msg.metadata = {**(msg.metadata or {}), 'turn_status_rejected': True}
 
                 yield (messages, is_complete)
 

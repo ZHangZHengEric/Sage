@@ -80,11 +80,9 @@ class TurnStatusTool:
             )
         should_end = status != "continue_work"
         logger.info(f"TurnStatusTool: turn_status called status={status} should_end={should_end} note={note!r} session={session_id}")
+        # 成功路径：保留标准 success/status，业务字段仅 should_end；入参 status/note 见日志
         return {
             "success": True,
             "status": "success",
-            "turn_status": status,
             "should_end": should_end,
-            "note": note or "",
-            "message": f"turn_status acknowledged: {status}",
         }

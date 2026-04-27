@@ -178,8 +178,6 @@ reason尽可能简单，最多20个字符
 2. Continue task execution:
   - When you believe the existing responses in the conversation have not yet satisfied the user's request, or when the user's questions or requests need to continue being executed.
   - When tool calls are completed but the results have not been described in text, continue task execution because users cannot see the tool execution results.
-  - If the last Assistant message clearly indicates that more work will continue next, such as generating a summary, organizing a final answer, or performing the next action, you must continue execution and must not stop early.
-  - If the Assistant reports that an intermediate artifact has been completed but also states it will further process that artifact, you must continue execution.
 
 ## User's Conversation History and Request Execution Process
 {messages}

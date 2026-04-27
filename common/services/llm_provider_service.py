@@ -170,15 +170,18 @@ async def update_provider(
         provider.api_keys = data.api_keys
     if data.model is not None:
         provider.model = data.model
-    if data.max_tokens is not None:
+    # 采样参数允许显式置空：使用 model_fields_set 区分"未提供"和"显式 null"，
+    # 让用户在前端清空后能真正清掉 DB 中的值，避免下游仍把旧值带进 LLM 请求。
+    fields_set = data.model_fields_set
+    if "max_tokens" in fields_set:
         provider.max_tokens = data.max_tokens
-    if data.temperature is not None:
+    if "temperature" in fields_set:
         provider.temperature = data.temperature
-    if data.top_p is not None:
+    if "top_p" in fields_set:
         provider.top_p = data.top_p
-    if data.presence_penalty is not None:
+    if "presence_penalty" in fields_set:
         provider.presence_penalty = data.presence_penalty
-    if data.max_model_len is not None:
+    if "max_model_len" in fields_set:
         provider.max_model_len = data.max_model_len
     if data.supports_multimodal is not None:
         provider.supports_multimodal = data.supports_multimodal

@@ -143,6 +143,8 @@ class MessageChunk:
             self.message_type = self.type
 
         role = self.role.value if isinstance(self.role, MessageRole) else self.role
+        # 统一为字符串，避免 role 仍为 MessageRole 枚举时与 ".value" 比较恒为 False（SSE redact、LLM strip 等全部失效）
+        self.role = role
 
         # 统一基础文本消息语义，兼容历史 normal。
         if role == MessageRole.USER.value:
@@ -153,7 +155,7 @@ class MessageChunk:
             self.message_type = self.type
         
         # 验证必需字段
-        if self.role == MessageRole.TOOL.value and self.tool_call_id is None:
+        if role == MessageRole.TOOL.value and self.tool_call_id is None:
             raise ValueError("tool角色的消息必须包含tool_call_id字段")
         
         if self.content is None and self.tool_calls is None:

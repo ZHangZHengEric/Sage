@@ -7,7 +7,8 @@
     "dev": "lsof -ti:1420 | xargs kill -9 2>/dev/null; vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest"
+    "test": "vitest",
+    "check:i18n": "node ../../../scripts/check-i18n-keys.mjs --src src --zh src/locales/zh-CN.js --en src/locales/en-US.js"
   },
   "dependencies": {
     "@dicebear/collection": "^9.4.0",

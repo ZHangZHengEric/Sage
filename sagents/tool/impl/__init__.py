@@ -7,7 +7,13 @@ needed for most callers. Use attribute access to load only the requested tool.
 
 from importlib import import_module
 
+# 协议性内部工具：不下发到 SAgent.run_stream（即不进入 SSE/前端）。
+# 这些工具是 agent 控制信号（如 turn_status 报告本轮状态），非用户可见结果。
+# 用作 sagents.sagents._redact_hidden_tools_from_chunk 的过滤白名单。
+HIDDEN_FROM_STREAM_TOOL_NAMES = frozenset({"turn_status"})
+
 __all__ = [
+    "HIDDEN_FROM_STREAM_TOOL_NAMES",
     "ExecuteCommandTool",
     "FileSystemTool",
     "MemoryTool",

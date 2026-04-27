@@ -183,6 +183,10 @@ class AgentBase(ABC):
                 if self.model is None:
                     raise ValueError("Model is not initialized")
 
+                # 纯 MessageChunk 列表：与 convert_messages_to_dict_for_request 一致，剔除 turn_status 协议对
+                if messages and all(isinstance(m, MessageChunk) for m in messages):
+                    messages = MessageManager.strip_turn_status_from_llm_context(list(messages))
+
                 # 发起LLM请求
                 # 将 MessageChunk 对象转换为字典，以便进行 JSON 序列化
                 start_request_time = time.time()
@@ -258,7 +262,6 @@ class AgentBase(ABC):
                 # 对于 OpenAI 推理模型 (o3-mini, GPT-5.2等) 使用 reasoning_effort
                 # 对于其他模型使用 enable_thinking/thinking 参数
                 extra_body = {
-                    "top_k": 20,
                     "_step_name": step_name # 观察用，记录下当前是哪个步骤的调用
                 }
 
