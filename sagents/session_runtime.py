@@ -798,7 +798,8 @@ class Session:
             if session_context:
                 try:
                     logger.debug("SAgent: 会话状态保存")
-                    session_context.save(
+                    await asyncio.to_thread(
+                        session_context.save,
                         session_status=self.status,
                         child_session_ids=list(self.child_session_ids),
                         interrupt_reason=self.interrupt_reason,

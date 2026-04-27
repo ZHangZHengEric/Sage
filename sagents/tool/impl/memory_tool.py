@@ -6,6 +6,7 @@ File memory currently uses a scoped chunk index; session history keeps the
 existing BM25-based retrieval path.
 """
 import json
+import asyncio
 import hashlib
 import os
 import re
@@ -409,7 +410,13 @@ class MemoryTool:
                 return []
             
             session_context = session.session_context
-            return self.session_history_retriever.search(query, top_k, session_id, session_context)
+            return await asyncio.to_thread(
+                self.session_history_retriever.search,
+                query,
+                top_k,
+                session_id,
+                session_context,
+            )
 
         except Exception as e:
             logger.error(f"MemoryTool: Session history search failed: {e}")

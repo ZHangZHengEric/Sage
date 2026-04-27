@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 import time
@@ -20,6 +21,7 @@ class ScopedIndexFileMemoryBackend:
 
     INDEX_REFRESH_INTERVAL_SECONDS = 10.0
     _index_cache: Dict[str, _FileIndexCacheEntry] = {}
+    _scope_locks: Dict[str, asyncio.Lock] = {}
 
     def __init__(self, memory_tool):
         self.memory_tool = memory_tool
@@ -27,6 +29,7 @@ class ScopedIndexFileMemoryBackend:
     @classmethod
     def clear_shared_cache(cls) -> None:
         cls._index_cache.clear()
+        cls._scope_locks.clear()
 
     def clear_cache(self) -> None:
         self.clear_shared_cache()
@@ -61,26 +64,35 @@ class ScopedIndexFileMemoryBackend:
             )
             cache_entry = self._index_cache.get(scope_key)
 
-            if not cache_entry:
-                cache_entry = _FileIndexCacheEntry(
-                    index=MemoryIndex(sandbox, workspace_path, index_path)
+            lock = self._scope_locks.setdefault(scope_key, asyncio.Lock())
+            async with lock:
+                cache_entry = self._index_cache.get(scope_key)
+                if not cache_entry:
+                    cache_entry = _FileIndexCacheEntry(
+                        index=await asyncio.to_thread(
+                            MemoryIndex,
+                            sandbox,
+                            workspace_path,
+                            index_path,
+                        )
+                    )
+                    self._index_cache[scope_key] = cache_entry
+                else:
+                    cache_entry.index.sandbox = sandbox
+                    cache_entry.index.workspace_path = workspace_path.rstrip("/")
+
+                now = time.time()
+                has_search_index = await asyncio.to_thread(cache_entry.index.has_search_index)
+                should_refresh = (
+                    not has_search_index
+                    or (now - cache_entry.last_refresh_at) >= self.INDEX_REFRESH_INTERVAL_SECONDS
                 )
-                self._index_cache[scope_key] = cache_entry
-            else:
-                cache_entry.index.sandbox = sandbox
-                cache_entry.index.workspace_path = workspace_path.rstrip("/")
+                if should_refresh:
+                    stats = await cache_entry.index.update_index()
+                    cache_entry.last_refresh_at = now
+                    logger.info(f"MemoryTool: File memory index update stats: {stats}")
 
-            now = time.time()
-            should_refresh = (
-                not cache_entry.index.has_search_index()
-                or (now - cache_entry.last_refresh_at) >= self.INDEX_REFRESH_INTERVAL_SECONDS
-            )
-            if should_refresh:
-                stats = await cache_entry.index.update_index()
-                cache_entry.last_refresh_at = now
-                logger.info(f"MemoryTool: File memory index update stats: {stats}")
-
-            results = cache_entry.index.search(query, top_k)
+                results = await asyncio.to_thread(cache_entry.index.search, query, top_k)
 
             formatted_results = []
             for result in results:
