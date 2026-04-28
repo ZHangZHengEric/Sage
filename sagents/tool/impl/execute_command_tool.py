@@ -40,21 +40,46 @@ _REMINDER_TAIL_MAX_BYTES = 512
 _BG_TASK_MAX_AGE_S = 12 * 3600
 
 
-def _truncate_tail_for_reminder(text: str, max_bytes: int = _REMINDER_TAIL_MAX_BYTES) -> str:
-    """对 reminder 用 tail 做尾部优先的截断。
+_ERROR_KEYWORDS = re.compile(
+    r'error|exception|traceback|fatal|fail|stderr|critical|abort|killed|oom',
+    re.IGNORECASE,
+)
 
-    优先保留最后若干行；如果末尾仍然太长，按字节截掉头部并加省略标记。
+
+def _truncate_tail_for_reminder(text: str, max_bytes: int = _REMINDER_TAIL_MAX_BYTES) -> str:
+    """对 reminder 用 tail 做尾部优先的截断，尾部全空行时补一条错误行。
+
+    逻辑：
+    1. 从尾部取 max_bytes 字节，保留最后几行（drop 被截断的首行碎片）。
+    2. 若截出来的内容去掉空白后为空（命令无输出），从原始文本中反向搜
+       第一条包含 error/exception/traceback 等关键词的行追加到头部，
+       帮助 agent 快速感知失败原因。
+    3. 不超 max_bytes 时直接返回原文。
     """
     if not text:
         return ""
     raw = text.encode("utf-8", errors="ignore")
     if len(raw) <= max_bytes:
         return text
+
     truncated = raw[-max_bytes:]
     nl = truncated.find(b"\n")
     if 0 <= nl < max_bytes - 1:
         truncated = truncated[nl + 1:]
-    return "...<truncated>...\n" + truncated.decode("utf-8", errors="ignore")
+    tail_str = truncated.decode("utf-8", errors="ignore")
+    result = "...<truncated>...\n" + tail_str
+
+    # 若尾部有效内容为空，补一条错误行（反向搜索原始文本，取最后一条命中行）
+    if not tail_str.strip():
+        error_line = ""
+        for line in reversed(text.splitlines()):
+            if line.strip() and _ERROR_KEYWORDS.search(line):
+                error_line = line.strip()
+                break
+        if error_line:
+            result = f"[key line] {error_line}\n" + result
+
+    return result
 
 # _BG_TASKS 的硬性最长存活时间。任何 task 自 ``started_at`` 起 12 小时未被消费会被
 # 强制 GC（_BG_TASKS / _COMPLETION_EVENTS / sandbox cleanup）。每次 spawn 触发一次扫描。
@@ -720,6 +745,11 @@ class ExecuteCommandTool:
     ) -> Dict[str, Any]:
         if not session_id:
             raise ValueError("ExecuteCommandTool: session_id is required")
+        # 顺带触发一次 GC，确保长期僵尸 task 被清理（spawn 不活跃的会话也能覆盖）
+        try:
+            await self._gc_stale_tasks()
+        except Exception as _gc_exc:
+            logger.debug(f"_gc_stale_tasks 异常（忽略）: {_gc_exc}")
         task_info = self._BG_TASKS.get(task_id)
         if not task_info:
             # task 已不在注册表，可能 watcher 已经写入完成事件并清理，

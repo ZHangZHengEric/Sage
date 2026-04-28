@@ -1,3 +1,5 @@
+2026-04-28 12:00 shell tool 跟进：补提交 test_execute_shell_completion_event（14 条）；reminder 按会话语言 zh/en；await_shell 入口触发 12h GC；tail 空时反向搜错误关键词行。
+
 2026-04-27 23:30 shell tool 进一步优化：await_shell 入口也触发 12h GC；tail 截断加错误行优先逻辑（尾部空行时反向搜 ERROR/Exception 等行置顶）；reminder 文本中英文国际化；补测试共 14 项全绿。
 
 2026-04-27 23:05 shell tool GC + reminder 优化：system_reminder tail 截至 512B 尾部优先 + 提示调 await_shell 拿完整结果；pop_completion_events 不删 _BG_TASKS；加 12h 超期 GC（每次 spawn 触发）；补测试 11 项全绿。
