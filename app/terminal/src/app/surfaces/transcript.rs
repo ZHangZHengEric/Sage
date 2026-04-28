@@ -20,15 +20,20 @@ impl App {
         let lines = self.transcript_lines();
         let line_count = lines.len();
         let max_scroll = max_transcript_scroll_for_lines(&lines, viewport_width);
+        let scroll = overlay.scroll.min(max_scroll);
         Some(transcript_overlay::TranscriptOverlayProps {
             title: "Transcript".to_string(),
             lines,
-            scroll: overlay.scroll.min(max_scroll),
+            scroll,
             footer_hint: "↑/↓ scroll • pgup/pgdn jump • esc close".to_string(),
             status: if line_count == 0 {
                 "empty transcript".to_string()
             } else {
-                format!("{line_count} committed lines")
+                format!(
+                    "{line_count} committed lines  •  position {}/{}",
+                    scroll.saturating_add(1),
+                    max_scroll.saturating_add(1)
+                )
             },
         })
     }

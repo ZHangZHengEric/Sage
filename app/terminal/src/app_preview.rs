@@ -36,11 +36,9 @@ pub(crate) fn session_picker_preview_lines(
         format!("title  {}", truncate_right(&item.title, 64)),
     ];
     if let Some(preview) = &item.preview {
-        lines.push(String::new());
         lines.push("recent".to_string());
-        lines.extend(preview_excerpt_lines(preview, 3, 68));
+        lines.extend(preview_excerpt_lines(preview, 2, 54));
     }
-    lines.push(String::new());
     lines.push(match mode {
         SessionPickerMode::Resume => "enter resumes this session".to_string(),
         SessionPickerMode::Browse => "enter opens this session summary".to_string(),

@@ -1,8 +1,10 @@
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 
-use crate::bottom_pane::{centered_rect, overlay_background_style, overlay_block};
+use crate::bottom_pane::{
+    centered_rect, overlay_accent_style, overlay_background_style, overlay_block,
+    overlay_body_style, overlay_divider, overlay_hint_style, overlay_muted_style,
+};
 use crate::custom_terminal::Frame;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -36,79 +38,63 @@ pub(crate) fn render(frame: &mut Frame, props: &PickerOverlayProps) {
 pub(crate) fn required_height(props: &PickerOverlayProps) -> u16 {
     let item_lines = props.items.len() as u16 * 2;
     let preview_lines = if props.preview_title.is_some() || !props.preview_lines.is_empty() {
-        props.preview_lines.len() as u16 + 2
+        props.preview_lines.len() as u16 + 3
     } else {
         0
     };
-    (item_lines + preview_lines + 4).clamp(8, 18)
+    (item_lines + preview_lines + 7).clamp(8, 24)
 }
 
 fn overlay_lines(props: &PickerOverlayProps) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(vec![
-        Span::styled(
-            "filter: ",
-            Style::default()
-                .fg(Color::Rgb(134, 142, 138))
-                .add_modifier(Modifier::DIM),
-        ),
+        Span::styled("filter: ", overlay_muted_style()),
         Span::styled(
             if props.query.is_empty() {
                 "type to filter".to_string()
             } else {
                 props.query.clone()
             },
-            Style::default().fg(Color::Rgb(226, 231, 224)),
+            overlay_body_style(),
         ),
     ])];
+    lines.push(overlay_divider());
     for item in &props.items {
         let marker = if item.selected { "› " } else { "  " };
         lines.push(Line::from(vec![
             Span::styled(
                 marker,
-                Style::default()
-                    .fg(Color::Rgb(134, 142, 138))
-                    .add_modifier(if item.selected {
-                        Modifier::BOLD
-                    } else {
-                        Modifier::empty()
-                    }),
+                if item.selected {
+                    overlay_accent_style()
+                } else {
+                    overlay_hint_style()
+                },
             ),
-            Span::styled(
-                item.primary.clone(),
-                Style::default()
-                    .fg(Color::Rgb(165, 214, 110))
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(item.primary.clone(), overlay_accent_style()),
         ]));
         lines.push(Line::from(Span::styled(
             format!("  {}", item.secondary),
-            Style::default().fg(Color::Rgb(226, 231, 224)),
+            overlay_body_style(),
         )));
     }
     if props.preview_title.is_some() || !props.preview_lines.is_empty() {
         lines.push(Line::from(""));
+        lines.push(overlay_divider());
         lines.push(Line::from(Span::styled(
             props
                 .preview_title
                 .clone()
                 .unwrap_or_else(|| "Preview".to_string()),
-            Style::default()
-                .fg(Color::Rgb(170, 178, 173))
-                .add_modifier(Modifier::DIM),
+            overlay_muted_style(),
         )));
         for line in &props.preview_lines {
-            lines.push(Line::from(Span::styled(
-                line.clone(),
-                Style::default().fg(Color::Rgb(226, 231, 224)),
-            )));
+            lines.push(Line::from(Span::styled(line.clone(), overlay_body_style())));
         }
     }
     lines.push(Line::from(""));
+    lines.push(overlay_divider());
     lines.push(Line::from(Span::styled(
         props.footer_hint.clone(),
-        Style::default()
-            .fg(Color::Rgb(134, 142, 138))
-            .add_modifier(Modifier::DIM),
+        overlay_hint_style(),
     )));
     lines
 }

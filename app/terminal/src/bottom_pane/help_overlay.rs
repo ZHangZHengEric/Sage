@@ -1,8 +1,10 @@
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 
-use crate::bottom_pane::{centered_rect, overlay_background_style, overlay_block};
+use crate::bottom_pane::{
+    centered_rect, overlay_accent_style, overlay_background_style, overlay_block,
+    overlay_body_style, overlay_divider, overlay_hint_style, overlay_muted_style,
+};
 use crate::custom_terminal::Frame;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -41,7 +43,8 @@ pub(crate) fn required_height(props: &HelpOverlayProps) -> u16 {
         .iter()
         .map(|section| section.items.len() as u16 + 1)
         .sum::<u16>();
-    (content_lines + props.sections.len().saturating_sub(1) as u16 + 3).max(8)
+    let section_dividers = props.sections.len().saturating_sub(1) as u16 * 2;
+    (content_lines + section_dividers + 5).max(8)
 }
 
 fn overlay_lines(props: &HelpOverlayProps) -> Vec<Line<'static>> {
@@ -49,12 +52,11 @@ fn overlay_lines(props: &HelpOverlayProps) -> Vec<Line<'static>> {
     for (section_idx, section) in props.sections.iter().enumerate() {
         if section_idx > 0 {
             lines.push(Line::from(""));
+            lines.push(overlay_divider());
         }
         lines.push(Line::from(Span::styled(
             section.title.clone(),
-            Style::default()
-                .fg(Color::Rgb(170, 178, 173))
-                .add_modifier(Modifier::DIM),
+            overlay_muted_style(),
         )));
         let label_width = section
             .items
@@ -67,30 +69,24 @@ fn overlay_lines(props: &HelpOverlayProps) -> Vec<Line<'static>> {
             if item.label.is_empty() {
                 lines.push(Line::from(Span::styled(
                     item.value.clone(),
-                    Style::default().fg(Color::Rgb(226, 231, 224)),
+                    overlay_body_style(),
                 )));
                 continue;
             }
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("{:<width$}", item.label, width = label_width),
-                    Style::default()
-                        .fg(Color::Rgb(165, 214, 110))
-                        .add_modifier(Modifier::BOLD),
+                    overlay_accent_style(),
                 ),
-                Span::styled(
-                    item.value.clone(),
-                    Style::default().fg(Color::Rgb(226, 231, 224)),
-                ),
+                Span::styled(item.value.clone(), overlay_body_style()),
             ]));
         }
     }
     lines.push(Line::from(""));
+    lines.push(overlay_divider());
     lines.push(Line::from(Span::styled(
         props.footer_hint.clone(),
-        Style::default()
-            .fg(Color::Rgb(134, 142, 138))
-            .add_modifier(Modifier::DIM),
+        overlay_hint_style(),
     )));
     lines
 }

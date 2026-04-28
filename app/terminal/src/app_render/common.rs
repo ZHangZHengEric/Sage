@@ -195,10 +195,20 @@ pub(crate) fn render_labeled_message(
 
 pub(crate) fn indent_message_line(line: Line<'static>) -> Line<'static> {
     if line.spans.is_empty() {
-        return Line::from("");
+        return Line::from(vec![Span::styled(
+            "  │",
+            Style::default()
+                .fg(Color::Rgb(95, 102, 98))
+                .add_modifier(Modifier::DIM),
+        )]);
     }
 
-    let mut spans = vec![Span::raw("  ")];
+    let mut spans = vec![Span::styled(
+        "  │ ",
+        Style::default()
+            .fg(Color::Rgb(95, 102, 98))
+            .add_modifier(Modifier::DIM),
+    )];
     spans.extend(line.spans);
     Line::from(spans)
 }

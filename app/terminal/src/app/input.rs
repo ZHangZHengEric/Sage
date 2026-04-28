@@ -2,10 +2,11 @@ use crate::app::{App, SubmitAction};
 
 impl App {
     pub fn submit_input(&mut self) -> SubmitAction {
-        let text = self.input.trim().to_string();
-        if text.is_empty() {
+        let raw = self.input.clone();
+        if raw.trim().is_empty() {
             return SubmitAction::Noop;
         }
+        let text = raw.trim_end().to_string();
 
         self.clear_input();
 
@@ -41,6 +42,10 @@ impl App {
         self.input.insert_str(self.input_cursor, text);
         self.input_cursor += text.len();
         self.sync_slash_popup_selection();
+    }
+
+    pub fn insert_newline(&mut self) {
+        self.insert_char('\n');
     }
 
     pub fn backspace(&mut self) {
