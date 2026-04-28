@@ -228,20 +228,43 @@ class AgentBase(ABC):
                     except Exception as _e:
                         logger.warning(f"flush shell completion events 失败: {_e}")
                         completion_events = []
+                    if completion_events:
+                        # 取 session 语言，用于 reminder 文本国际化
+                        _reminder_lang = "en"
+                        try:
+                            _sc = self._get_live_session_context(session_id)
+                            if _sc is not None:
+                                _reminder_lang = _sc.get_language()
+                        except Exception:
+                            pass
+                        _is_zh = str(_reminder_lang).lower().startswith("zh")
+
                     for ev in completion_events:
                         tail = ev.get('tail', '') or ''
-                        tail_section = (
-                            f"tail (last few lines):\n{tail}" if tail
-                            else "(no output captured)"
-                        )
+                        if _is_zh:
+                            tail_section = (
+                                f"最后几行输出:\n{tail}" if tail else "（无输出）"
+                            )
+                            note = (
+                                f"注意：这只是完成通知，输出已截断。"
+                                f"如需完整 stdout，请调用 await_shell(task_id=\"{ev.get('task_id')}\")。"
+                            )
+                        else:
+                            tail_section = (
+                                f"tail (last few lines):\n{tail}" if tail
+                                else "(no output captured)"
+                            )
+                            note = (
+                                f"Note: This is a brief notification only. "
+                                f"Call await_shell(task_id=\"{ev.get('task_id')}\") to retrieve the full stdout if needed."
+                            )
                         reminder_text = (
                             "<system_reminder>\n"
                             f"[shell completion] task_id={ev.get('task_id')} "
                             f"exit_code={ev.get('exit_code')} elapsed_ms={ev.get('elapsed_ms')}\n"
                             f"command: {ev.get('command', '')}\n"
                             f"{tail_section}\n"
-                            f"Note: This is a brief notification only. "
-                            f"Call await_shell(task_id=\"{ev.get('task_id')}\") to retrieve the full stdout if needed.\n"
+                            f"{note}\n"
                             "</system_reminder>"
                         )
                         serializable_messages.append({"role": "user", "content": reminder_text})
