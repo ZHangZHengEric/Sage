@@ -4,6 +4,7 @@ use crate::app::{
 };
 use crate::app_preview::session_picker_preview_lines;
 use crate::bottom_pane::picker_overlay;
+use unicode_width::UnicodeWidthStr;
 
 impl App {
     pub fn open_session_picker(&mut self, mode: SessionPickerMode, items: Vec<SessionPickerEntry>) {
@@ -44,8 +45,15 @@ impl App {
             })
             .unwrap_or_else(|| {
                 (
-                    Some("Preview".to_string()),
-                    vec!["No matching sessions.".to_string()],
+                    Some("No Matches".to_string()),
+                    vec![
+                        if picker.filter_query.trim().is_empty() {
+                            "No matching sessions.".to_string()
+                        } else {
+                            format!("No sessions matched \"{}\".", picker.filter_query.trim())
+                        },
+                        "Clear the filter or start a new conversation to create one.".to_string(),
+                    ],
                 )
             });
         Some(picker_overlay::PickerOverlayProps {
@@ -56,15 +64,18 @@ impl App {
                 .into_iter()
                 .map(|(idx, item)| picker_overlay::PickerOverlayItem {
                     primary: item.session_id.clone(),
-                    secondary: format!(
-                        "{}  •  {} msgs  •  {}{}",
-                        item.title,
-                        item.message_count,
-                        item.updated_at,
-                        item.preview
-                            .as_ref()
-                            .map(|preview| format!("  •  {}", preview))
-                            .unwrap_or_default()
+                    secondary: truncate_right(
+                        &format!(
+                            "{}  •  {} msgs  •  {}{}",
+                            item.title,
+                            item.message_count,
+                            item.updated_at,
+                            item.preview
+                                .as_ref()
+                                .map(|preview| format!("  •  {}", preview))
+                                .unwrap_or_default()
+                        ),
+                        66,
                     ),
                     selected: idx == picker.selected,
                 })
@@ -184,4 +195,26 @@ impl App {
             .collect::<Vec<_>>();
         Some(FilteredSessionPicker { items })
     }
+}
+
+fn truncate_right(text: &str, max_width: usize) -> String {
+    if max_width == 0 || UnicodeWidthStr::width(text) <= max_width {
+        return text.to_string();
+    }
+    if max_width == 1 {
+        return "…".to_string();
+    }
+
+    let mut out = String::new();
+    let mut width = 0usize;
+    for ch in text.chars() {
+        let ch_width = UnicodeWidthStr::width(ch.encode_utf8(&mut [0; 4]));
+        if width + ch_width > max_width.saturating_sub(1) {
+            break;
+        }
+        out.push(ch);
+        width += ch_width;
+    }
+    out.push('…');
+    out
 }

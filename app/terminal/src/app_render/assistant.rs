@@ -132,30 +132,56 @@ fn render_code_block(label: &str, code_lines: &[&str]) -> Vec<Line<'static>> {
     } else {
         format!("code {}", label)
     };
-    out.push(Line::from(Span::styled(
-        header,
+    out.push(Line::from(vec![Span::styled(
+        format!("╭─ {header}"),
         Style::default()
             .fg(Color::Rgb(119, 129, 141))
             .add_modifier(Modifier::DIM),
-    )));
+    )]));
 
     for line in code_lines.iter().take(CODE_PREVIEW_LIMIT) {
-        out.push(Line::from(Span::styled(
-            line.to_string(),
-            Style::default()
-                .fg(Color::Rgb(169, 202, 235))
-                .add_modifier(Modifier::DIM),
-        )));
+        out.push(Line::from(vec![
+            Span::styled(
+                "│ ",
+                Style::default()
+                    .fg(Color::Rgb(95, 107, 118))
+                    .add_modifier(Modifier::DIM),
+            ),
+            Span::styled(
+                line.to_string(),
+                Style::default()
+                    .fg(Color::Rgb(169, 202, 235))
+                    .add_modifier(Modifier::DIM),
+            ),
+        ]));
     }
 
     if code_lines.len() > CODE_PREVIEW_LIMIT {
-        out.push(Line::from(Span::styled(
-            format!("… {} more lines", code_lines.len() - CODE_PREVIEW_LIMIT),
-            Style::default()
-                .fg(Color::Rgb(119, 129, 141))
-                .add_modifier(Modifier::DIM),
-        )));
+        out.push(Line::from(vec![
+            Span::styled(
+                "│ ",
+                Style::default()
+                    .fg(Color::Rgb(95, 107, 118))
+                    .add_modifier(Modifier::DIM),
+            ),
+            Span::styled(
+                format!("… {} more lines", code_lines.len() - CODE_PREVIEW_LIMIT),
+                Style::default()
+                    .fg(Color::Rgb(119, 129, 141))
+                    .add_modifier(Modifier::DIM),
+            ),
+        ]));
     }
+
+    out.push(Line::from(Span::styled(
+        format!(
+            "╰─ {} lines shown",
+            code_lines.len().min(CODE_PREVIEW_LIMIT)
+        ),
+        Style::default()
+            .fg(Color::Rgb(95, 107, 118))
+            .add_modifier(Modifier::DIM),
+    )));
 
     out
 }

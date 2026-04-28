@@ -4,6 +4,8 @@ mod draw;
 use std::io;
 use std::io::Write;
 
+use crossterm::execute;
+use crossterm::terminal::ScrollUp;
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect, Size};
@@ -154,11 +156,14 @@ where
         self.viewport_height = viewport_height.max(1);
         let size = self.size()?;
         self.last_known_screen_size = size;
-        self.set_viewport_area(viewport_rect(
-            size,
-            self.viewport_height,
-            self.viewport_area.y,
-        ));
+        let next_area = viewport_rect(size, self.viewport_height, self.viewport_area.y);
+        if self.viewport_height > self.viewport_area.height && next_area.y < self.viewport_area.y {
+            execute!(
+                self.backend,
+                ScrollUp(self.viewport_area.y.saturating_sub(next_area.y))
+            )?;
+        }
+        self.set_viewport_area(next_area);
         self.previous_buffer_mut().reset();
         Ok(())
     }

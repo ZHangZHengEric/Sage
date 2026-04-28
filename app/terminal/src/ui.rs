@@ -1,7 +1,9 @@
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Clear, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 use crate::app::{ActiveSurfaceKind, App};
+use crate::app_render::truncate_middle;
 use crate::bottom_pane::command_popup;
 use crate::bottom_pane::composer::ComposerProps;
 use crate::bottom_pane::footer::FooterProps;
@@ -10,21 +12,25 @@ use crate::bottom_pane::picker_overlay::PickerOverlayProps;
 use crate::bottom_pane::transcript_overlay::TranscriptOverlayProps;
 use crate::bottom_pane::{composer, footer, help_overlay, picker_overlay, transcript_overlay};
 use crate::custom_terminal::Frame;
-use crate::wrap::wrap_lines;
+use crate::wrap::{wrap_lines, wrapped_height};
 
 pub fn render(frame: &mut Frame, app: &App) {
+    let composer_props = composer_props(app);
+    let live_region_height = live_region_height(app, frame.area().width);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(1),
-            Constraint::Length(3),
+            Constraint::Length(live_region_height),
+            Constraint::Length(composer::composer_height(
+                &composer_props,
+                frame.area().width,
+            )),
             Constraint::Length(command_popup_height(app)),
             Constraint::Length(1),
         ])
         .split(frame.area());
 
     render_live_region(frame, chunks[0], app);
-    let composer_props = composer_props(app);
     if let Some(cursor) = composer::render(frame, chunks[1], &composer_props) {
         frame.set_cursor_position(cursor);
     }
@@ -54,6 +60,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 }
 
 fn render_live_region(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
+    frame.render_widget(Clear, area);
     let lines = if app.busy {
         app.rendered_live_lines()
     } else {
@@ -65,6 +72,19 @@ fn render_live_region(frame: &mut Frame, area: ratatui::layout::Rect, app: &App)
     }
 
     frame.render_widget(Paragraph::new(wrap_lines(&lines, area.width.max(1))), area);
+}
+
+fn live_region_height(app: &App, width: u16) -> u16 {
+    let lines = if app.busy {
+        app.rendered_live_lines()
+    } else {
+        app.rendered_idle_lines(width.max(1))
+    };
+    if lines.is_empty() {
+        1
+    } else {
+        wrapped_height(&lines, width.max(1)).max(1)
+    }
 }
 
 fn composer_props(app: &App) -> ComposerProps<'_> {
@@ -100,9 +120,11 @@ fn footer_props(app: &App) -> FooterProps {
 
 fn footer_hint(app: &App) -> String {
     match app.active_surface_kind() {
-        Some(ActiveSurfaceKind::Help) => "esc/enter close help".to_string(),
+        Some(ActiveSurfaceKind::Help) => {
+            "esc/enter close  •  /help <command> for details".to_string()
+        }
         Some(ActiveSurfaceKind::SessionPicker) => {
-            "type filter  •  ↑/↓ pick session  •  esc close".to_string()
+            "type filter  •  ↑/↓ pick  •  enter open  •  esc close".to_string()
         }
         Some(ActiveSurfaceKind::Transcript) => {
             "↑/↓ scroll  •  pgup/pgdn jump  •  esc close".to_string()
@@ -114,14 +136,14 @@ fn footer_hint(app: &App) -> String {
             Some(tool) => format!("running {tool}"),
             None => "working... output is streaming".to_string(),
         },
-        None => "esc quit  •  /help commands  •  enter send".to_string(),
+        None => "shift+enter newline  •  /help commands  •  enter send".to_string(),
     }
 }
 
 fn footer_status_summary(app: &App) -> String {
     let mut parts = vec![
         app.agent_mode.clone(),
-        app.workspace_label.clone(),
+        compact_workspace_label(&app.workspace_label),
         normalize_footer_status(&app.footer_status()),
     ];
     if app.busy && app.active_tool_status().is_none() {
@@ -132,4 +154,12 @@ fn footer_status_summary(app: &App) -> String {
 
 fn normalize_footer_status(status: &str) -> String {
     status.replace("  •  ", " • ")
+}
+
+fn compact_workspace_label(workspace_label: &str) -> String {
+    if UnicodeWidthStr::width(workspace_label) <= 26 {
+        workspace_label.to_string()
+    } else {
+        truncate_middle(workspace_label, 26)
+    }
 }
