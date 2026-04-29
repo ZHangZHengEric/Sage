@@ -23,3 +23,5 @@ These documents are optimized for:
 ## Current Documents
 
 1. [Collections Agent Proposal](COLLECTION_AGENT_SOLUTION.md)
+2. [Sage Platform Multi-Agent Delivery Recommendation](SAGE_PLATFORM_MULTI_AGENT_RECOMMENDATION.md)
+3. [Sage, Amazon Bedrock, and Bedrock Agents](SAGE_BEDROCK_PRIMER.md)
