@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 直通模式沙箱实现 - 直接在本机执行，无隔离
 
@@ -113,6 +115,18 @@ class PassthroughSandboxProvider(ISandboxHandle):
         if sandbox_path in self._dynamic_mounts:
             del self._dynamic_mounts[sandbox_path]
 
+    def _normalize_input_path(self, path: str) -> str:
+        """Normalize common local-path variants before mapping."""
+        if not path:
+            return path
+
+        if os.name == "nt" and path[:1] in {"/", "\\"}:
+            trimmed = path.lstrip("/\\")
+            if os.path.isabs(trimmed):
+                return trimmed
+
+        return path
+
     def to_host_path(self, virtual_path: str) -> str:
         """虚拟路径转宿主机路径，支持动态映射。
 
@@ -120,18 +134,26 @@ class PassthroughSandboxProvider(ISandboxHandle):
         会把宿主机路径直接当虚拟路径传进来；在 Windows 上同时要兼容 ``\\`` 和 ``/``
         作为分隔符，否则子路径匹配会失效。
         """
+        normalized_path = self._normalize_input_path(virtual_path)
+
         for sandbox_path, host_path in self._iter_virtual_mappings():
-            if virtual_path == sandbox_path:
+            if normalized_path == sandbox_path:
                 logger.debug(f"PassthroughSandboxProvider: Path conversion: {virtual_path} -> {host_path}")
                 return host_path
             for sep in ("/", os.sep):
-                if sep and virtual_path.startswith(sandbox_path + sep):
-                    rel_path = virtual_path[len(sandbox_path):].lstrip("/").lstrip(os.sep)
+                if sep and normalized_path.startswith(sandbox_path + sep):
+                    rel_path = normalized_path[len(sandbox_path):].lstrip("/").lstrip(os.sep)
                     result = os.path.join(host_path, rel_path)
                     logger.debug(f"PassthroughSandboxProvider: Path conversion: {virtual_path} -> {result}")
                     return result
 
-        return virtual_path
+        if os.path.isabs(normalized_path):
+            return normalized_path
+
+        workspace_root = os.path.abspath(self.host_workspace_path or self.workspace_path)
+        result = os.path.join(workspace_root, normalized_path)
+        logger.debug(f"PassthroughSandboxProvider: Rooted relative path {virtual_path} -> {result}")
+        return result
 
     def to_virtual_path(self, host_path: str) -> str:
         """宿主机路径转虚拟路径。

@@ -58,6 +58,26 @@ from .lifecycle import (
 from .routers import register_routes as register_chat_routes
 
 
+def _safe_console_write(message: str, *, flush: bool = False) -> None:
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None:
+            continue
+        try:
+            stream.write(message)
+            if flush and hasattr(stream, "flush"):
+                stream.flush()
+            return
+        except (BrokenPipeError, OSError, ValueError):
+            continue
+        except Exception:
+            continue
+
+
+def _safe_print(*args, sep: str = " ", end: str = "\n", flush: bool = False) -> None:
+    message = sep.join(str(arg) for arg in args) + end
+    _safe_console_write(message, flush=flush)
+
+
 @asynccontextmanager
 async def app_lifespan(app: FastAPI):
 
@@ -140,6 +160,11 @@ def start_server(port: int = 8000):
 
 def check_single_instance():
     """Check if another instance is already running using PID file."""
+    if sys.platform == "win32":
+        # Tauri already enforces single-instance behavior on Windows.
+        # Skip the POSIX-only PID file locking path that depends on fcntl.
+        return True
+
     import atexit
     import fcntl
     import signal
@@ -165,7 +190,10 @@ def check_single_instance():
                     try:
                         os.kill(old_pid, 0)
                         # Process exists, kill it
-                        print(f"Warning: Another Sage Desktop instance is running (PID: {old_pid}), terminating it...", flush=True)
+                        _safe_print(
+                            f"Warning: Another Sage Desktop instance is running (PID: {old_pid}), terminating it...",
+                            flush=True,
+                        )
                         try:
                             # Try graceful termination first
                             os.kill(old_pid, signal.SIGTERM)
@@ -176,15 +204,15 @@ def check_single_instance():
                             try:
                                 os.kill(old_pid, 0)
                                 # Still running, force kill
-                                print(f"Force killing process {old_pid}...", flush=True)
+                                _safe_print(f"Force killing process {old_pid}...", flush=True)
                                 os.kill(old_pid, signal.SIGKILL)
                                 time.sleep(1)
                             except (OSError, ProcessLookupError):
                                 # Process terminated successfully
                                 pass
-                            print(f"Old process {old_pid} terminated.", flush=True)
+                            _safe_print(f"Old process {old_pid} terminated.", flush=True)
                         except (OSError, ProcessLookupError) as e:
-                            print(f"Failed to terminate old process: {e}", flush=True)
+                            _safe_print(f"Failed to terminate old process: {e}", flush=True)
                         
                         # Clean up old PID file and retry
                         fcntl.flock(fd, fcntl.LOCK_UN)
@@ -193,7 +221,10 @@ def check_single_instance():
                         return check_single_instance()
                     except (OSError, ProcessLookupError):
                         # Process doesn't exist, stale PID file
-                        print(f"Warning: Stale PID file found (PID {old_pid} not running), removing...", flush=True)
+                        _safe_print(
+                            f"Warning: Stale PID file found (PID {old_pid} not running), removing...",
+                            flush=True,
+                        )
                         fcntl.flock(fd, fcntl.LOCK_UN)
                         os.close(fd)
                         pid_file.unlink(missing_ok=True)
@@ -207,7 +238,7 @@ def check_single_instance():
                     return check_single_instance()
             except (ValueError, OSError) as e:
                 # Invalid PID or other error, remove stale file
-                print(f"Warning: Invalid PID file, removing: {e}", flush=True)
+                _safe_print(f"Warning: Invalid PID file, removing: {e}", flush=True)
                 try:
                     fcntl.flock(fd, fcntl.LOCK_UN)
                     os.close(fd)
@@ -234,7 +265,7 @@ def check_single_instance():
         return True
         
     except Exception as e:
-        print(f"Warning: Could not create PID file lock: {e}", flush=True)
+        _safe_print(f"Warning: Could not create PID file lock: {e}", flush=True)
         return True
 
 
@@ -243,8 +274,12 @@ def main():
         # Check single instance before anything else
         check_single_instance()
         
-        # Force stdout to be unbuffered
-        sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
+        # Force stdout to be unbuffered when the underlying stream supports it.
+        try:
+            if hasattr(sys.stdout, 'reconfigure'):
+                sys.stdout.reconfigure(line_buffering=True, write_through=True)
+        except (OSError, ValueError):
+            pass
         
         # Windows specific event loop policy
         if sys.platform == 'win32':
@@ -290,9 +325,12 @@ def main():
         if port_env:
             try:
                 port = int(port_env)
-                print(f"Using port from environment SAGE_PORT: {port}", flush=True)
+                _safe_print(f"Using port from environment SAGE_PORT: {port}", flush=True)
             except ValueError:
-                print(f"Invalid SAGE_PORT environment variable: {port_env}, finding free port...", flush=True)
+                _safe_print(
+                    f"Invalid SAGE_PORT environment variable: {port_env}, finding free port...",
+                    flush=True,
+                )
                 port = None
         else:
             port = None
@@ -304,15 +342,15 @@ def main():
                 s.listen(1)
                 port = s.getsockname()[1]
             os.environ["SAGE_PORT"] = str(port)
-            print(f"Set SAGE_PORT environment variable to {port}", flush=True)
+            _safe_print(f"Set SAGE_PORT environment variable to {port}", flush=True)
             
-        print(f"Starting Sage Desktop Server on port {port}...", flush=True)
+        _safe_print(f"Starting Sage Desktop Server on port {port}...", flush=True)
         init_logging_base(
             log_name="sage-desktop",
             log_level="INFO",
             log_path=str(logs_dir),
             get_request_id=get_request_id,
-            use_safe_stdout=False,
+            use_safe_stdout=True,
         )
         start_server(port)
         return 0
@@ -324,7 +362,7 @@ def main():
     except Exception:
         import traceback
 
-        traceback.print_exc()
+        _safe_print(traceback.format_exc(), flush=True)
         return 1
 
 

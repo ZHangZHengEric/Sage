@@ -51,6 +51,19 @@ impl App {
                             .collect(),
                     },
                     help_overlay::HelpSection {
+                        title: "Navigation".to_string(),
+                        items: vec![
+                            help_overlay::HelpItem {
+                                label: "popup".to_string(),
+                                value: "↑/↓ select, tab complete, enter apply".to_string(),
+                            },
+                            help_overlay::HelpItem {
+                                label: "overlay".to_string(),
+                                value: "esc closes the current surface".to_string(),
+                            },
+                        ],
+                    },
+                    help_overlay::HelpSection {
                         title: "Tips".to_string(),
                         items: vec![help_overlay::HelpItem {
                             label: String::new(),

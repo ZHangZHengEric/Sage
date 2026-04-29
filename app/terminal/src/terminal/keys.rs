@@ -60,12 +60,19 @@ pub(super) fn handle_key(
     }
 
     match key.code {
+        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            if app.busy {
+                return Ok(false);
+            }
+            app.insert_newline();
+        }
         KeyCode::Enter => {
             if app.busy {
                 return Ok(false);
             }
             if app.active_surface_kind() == Some(ActiveSurfaceKind::Popup) {
-                if let Some(action) = app.submit_active_surface() {
+                if app.input.starts_with('/') {
+                    let action = app.submit_input();
                     return handle_submit_action(app, backend, action);
                 }
             }

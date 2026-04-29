@@ -1,6 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{ActiveSurfaceKind, App, MessageKind, SubmitAction};
+use crate::slash_command;
 
 use super::super::{handle_key, INLINE_VIEWPORT_IDLE_HEIGHT, INLINE_VIEWPORT_MAX_HEIGHT};
 use crate::terminal_layout::desired_viewport_height;
@@ -121,6 +122,7 @@ fn help_popup_submit_escape_and_welcome_flow_stays_consistent() {
     app.input_cursor = app.input.len();
     assert_eq!(app.active_surface_kind(), Some(ActiveSurfaceKind::Popup));
 
+    assert!(app.autocomplete_popup());
     let handled = handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
@@ -174,4 +176,44 @@ fn ctrl_t_opens_transcript_overlay_when_idle() {
         app.active_surface_kind(),
         Some(ActiveSurfaceKind::Transcript)
     );
+}
+
+#[test]
+fn shift_enter_inserts_newline_without_submitting() {
+    let mut app = App::new();
+    app.input = "first line".to_string();
+    app.input_cursor = app.input.len();
+    let mut backend = None;
+
+    let handled = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT),
+        &mut backend,
+    )
+    .expect("shift-enter should not fail");
+
+    assert!(handled);
+    assert_eq!(app.input, "first line\n");
+    assert!(!app.busy);
+}
+
+#[test]
+fn popup_visible_enter_submits_typed_slash_command_instead_of_selected_popup_item() {
+    let mut app = App::new();
+    app.input = "/exit".to_string();
+    app.input_cursor = app.input.len();
+    let mut backend = None;
+
+    assert!(app.popup_props().is_some());
+    assert!(slash_command::find("/exit").is_some());
+
+    let handled = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        &mut backend,
+    )
+    .expect("enter should submit typed slash command");
+
+    assert!(handled);
+    assert!(app.should_quit);
 }

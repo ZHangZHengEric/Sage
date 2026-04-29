@@ -1,9 +1,13 @@
 use std::io;
+use std::io::ErrorKind;
 use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::cursor;
-use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEventKind};
+use crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEventKind,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
 use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use crossterm::terminal::{Clear, ClearType};
@@ -28,6 +32,11 @@ use keys::handle_key;
 pub type AppTerminal = Terminal<BackendImpl>;
 const INLINE_VIEWPORT_IDLE_HEIGHT: u16 = 5;
 const INLINE_VIEWPORT_MAX_HEIGHT: u16 = 14;
+const KEYBOARD_ENHANCEMENT_FLAGS: KeyboardEnhancementFlags =
+    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+        .union(KeyboardEnhancementFlags::REPORT_EVENT_TYPES)
+        .union(KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS)
+        .union(KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES);
 
 pub fn setup_terminal(_app: &App) -> Result<AppTerminal> {
     let startup_cursor = cursor::position()
@@ -35,6 +44,10 @@ pub fn setup_terminal(_app: &App) -> Result<AppTerminal> {
         .map(|(x, y)| ratatui::layout::Position { x, y });
     enable_raw_mode()?;
     execute!(io::stdout(), EnableBracketedPaste)?;
+    ignore_unsupported(execute!(
+        io::stdout(),
+        PushKeyboardEnhancementFlags(KEYBOARD_ENHANCEMENT_FLAGS)
+    ))?;
     let backend = BackendImpl::new(io::stdout());
     Ok(match startup_cursor {
         Some(position) => Terminal::with_viewport_height_and_cursor(
@@ -50,15 +63,16 @@ pub fn restore_terminal(terminal: &mut AppTerminal) -> Result<()> {
     disable_raw_mode()?;
     let viewport = terminal.viewport_area();
     let backend = terminal.backend_mut();
-    execute!(
+    ignore_unsupported(execute!(
         backend,
+        PopKeyboardEnhancementFlags,
         DisableBracketedPaste,
         crossterm::style::ResetColor,
         crossterm::cursor::Show,
         crossterm::cursor::MoveTo(0, viewport.y),
         Clear(ClearType::FromCursorDown),
         crossterm::cursor::MoveTo(0, viewport.y)
-    )?;
+    ))?;
     Ok(())
 }
 
@@ -204,5 +218,13 @@ fn ensure_backend<'a>(
 fn stop_backend(handle: Option<BackendHandle>) {
     if let Some(handle) = handle {
         handle.stop();
+    }
+}
+
+fn ignore_unsupported(result: io::Result<()>) -> io::Result<()> {
+    match result {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == ErrorKind::Unsupported => Ok(()),
+        Err(err) => Err(err),
     }
 }

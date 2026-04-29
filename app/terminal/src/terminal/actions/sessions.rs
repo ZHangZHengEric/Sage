@@ -11,7 +11,10 @@ pub(super) fn open_session_picker(
 ) -> Result<bool> {
     match list_sessions(&app.user_id, limit) {
         Ok(sessions) if sessions.is_empty() => {
-            app.push_message(MessageKind::System, "no saved sessions available");
+            app.push_message(
+                MessageKind::System,
+                "No saved sessions available.\n\nStart a conversation and use /resume or /sessions later.",
+            );
             app.set_status(format!("resume unavailable  {}", app.session_id));
         }
         Ok(sessions) => {
@@ -44,7 +47,10 @@ pub(super) fn resume_latest(app: &mut App) -> Result<bool> {
     match inspect_latest_session(&app.user_id) {
         Ok(Some(detail)) => apply_resumed_session(app, detail),
         Ok(None) => {
-            app.push_message(MessageKind::System, "no saved sessions available");
+            app.push_message(
+                MessageKind::System,
+                "No saved sessions available.\n\nStart a conversation and try again later.",
+            );
             app.set_status(format!("resume unavailable  {}", app.session_id));
         }
         Err(err) => {

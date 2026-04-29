@@ -212,6 +212,68 @@ class AgentBase(ABC):
                 # 只保留model.chat.completions.create 需要的messages的key，移除掉不不要的
                 serializable_messages = [{k: v for k, v in msg.items() if k in ['role', 'content', 'tool_calls', 'tool_call_id']} for msg in serializable_messages]
 
+                # === 注入 shell completion 事件作为 <system_reminder> 消息 ===
+                # 后台 shell 命令完成后，watcher 会把事件写入 ExecuteCommandTool._COMPLETION_EVENTS。
+                # 这里在每次 LLM 请求前 flush 一次，作为 role=user + <system_reminder> 文本注入。
+                # 选 role=user 而非 system 的原因：
+                #   1) Anthropic 不允许中段 system 消息；
+                #   2) 不破坏 OpenAI tool_call 严格交替序列；
+                #   3) 不污染 system prompt cache。
+                # await_shell 显式拿到 completed 时会 consume 对应 task_id 的事件，
+                # 因此被显式消费过的不会在这里重复出现。
+                if session_id:
+                    try:
+                        from sagents.tool.impl.execute_command_tool import ExecuteCommandTool
+                        completion_events = ExecuteCommandTool.pop_completion_events(session_id)
+                    except Exception as _e:
+                        logger.warning(f"flush shell completion events 失败: {_e}")
+                        completion_events = []
+                    if completion_events:
+                        # 取 session 语言，用于 reminder 文本国际化
+                        _reminder_lang = "en"
+                        try:
+                            _sc = self._get_live_session_context(session_id)
+                            if _sc is not None:
+                                _reminder_lang = _sc.get_language()
+                        except Exception:
+                            pass
+                        _is_zh = str(_reminder_lang).lower().startswith("zh")
+
+                    for ev in completion_events:
+                        tail = ev.get('tail', '') or ''
+                        if _is_zh:
+                            tail_section = (
+                                f"最后几行输出:\n{tail}" if tail else "（无输出）"
+                            )
+                            note = (
+                                f"注意：这只是完成通知，输出已截断。"
+                                f"如需完整 stdout，请调用 await_shell(task_id=\"{ev.get('task_id')}\")。"
+                            )
+                        else:
+                            tail_section = (
+                                f"tail (last few lines):\n{tail}" if tail
+                                else "(no output captured)"
+                            )
+                            note = (
+                                f"Note: This is a brief notification only. "
+                                f"Call await_shell(task_id=\"{ev.get('task_id')}\") to retrieve the full stdout if needed."
+                            )
+                        reminder_text = (
+                            "<system_reminder>\n"
+                            f"[shell completion] task_id={ev.get('task_id')} "
+                            f"exit_code={ev.get('exit_code')} elapsed_ms={ev.get('elapsed_ms')}\n"
+                            f"command: {ev.get('command', '')}\n"
+                            f"{tail_section}\n"
+                            f"{note}\n"
+                            "</system_reminder>"
+                        )
+                        serializable_messages.append({"role": "user", "content": reminder_text})
+                        cache_segments.append(None)
+                    if completion_events:
+                        logger.info(
+                            f"{self.__class__.__name__}: 注入 {len(completion_events)} 条 shell completion reminder"
+                        )
+
                 # 为消息添加 prompt caching 支持（Anthropic 格式）
                 # 多段 system 时按 cache_segments 打多个断点；老路径保持单断点回退
                 if serializable_messages:
@@ -566,6 +628,22 @@ class AgentBase(ABC):
                 role_content += f"\n\n{custom_prefix}"
 
             stable_buf += f"<role_definition>\n{role_content}\n</role_definition>\n"
+
+            # system_reminder 标签语义说明：注入到 stable 段以保持高 cache 命中率
+            if language and str(language).lower().startswith("zh"):
+                reminder_hint = (
+                    "当对话中出现 <system_reminder>...</system_reminder> 包裹的内容时，"
+                    "请视为系统级状态通知（非用户输入），仅作为参考信息推进任务即可，"
+                    "不需要回复或感谢这条提醒。典型场景：后台 shell 命令完成事件。"
+                )
+            else:
+                reminder_hint = (
+                    "When you see content wrapped in <system_reminder>...</system_reminder>, "
+                    "treat it as a system-level status notification (not user input). "
+                    "Use it as context to drive the next step; do not reply to or acknowledge the reminder itself. "
+                    "A common case is background shell command completion events."
+                )
+            stable_buf += f"<system_reminder_hint>\n{reminder_hint}\n</system_reminder_hint>\n"
 
         if session_context:
             system_context_info = session_context.system_context.copy()

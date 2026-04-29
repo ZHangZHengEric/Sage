@@ -1,8 +1,10 @@
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 
-use crate::bottom_pane::{centered_rect, overlay_background_style, overlay_block};
+use crate::bottom_pane::{
+    centered_rect, overlay_background_style, overlay_block, overlay_body_style, overlay_divider,
+    overlay_hint_style, overlay_muted_style,
+};
 use crate::custom_terminal::Frame;
 use crate::wrap::wrap_lines;
 
@@ -29,7 +31,7 @@ pub(crate) fn render(frame: &mut Frame, props: &TranscriptOverlayProps) {
 }
 
 pub(crate) fn required_height(props: &TranscriptOverlayProps) -> u16 {
-    let desired = props.lines.len().min(18) as u16 + 4;
+    let desired = props.lines.len().min(18) as u16 + 5;
     desired.clamp(10, 22)
 }
 
@@ -42,25 +44,25 @@ pub(crate) fn wrapped_line_count(props: &TranscriptOverlayProps, width: u16) -> 
 
 fn overlay_lines(props: &TranscriptOverlayProps, width: u16) -> Vec<Line<'static>> {
     let mut lines = if props.lines.is_empty() {
-        vec![Line::from(Span::styled(
-            "No transcript yet. Send a message to start the conversation history.",
-            Style::default().fg(Color::Rgb(170, 178, 173)),
-        ))]
+        vec![
+            Line::from(Span::styled("No transcript yet.", overlay_muted_style())),
+            Line::from(Span::styled(
+                "Send your first message below and the committed history will appear here.",
+                overlay_body_style(),
+            )),
+        ]
     } else {
         wrap_lines(&props.lines, width.max(1))
     };
     lines.push(Line::from(""));
+    lines.push(overlay_divider());
     lines.push(Line::from(Span::styled(
         props.status.clone(),
-        Style::default()
-            .fg(Color::Rgb(134, 142, 138))
-            .add_modifier(Modifier::DIM),
+        overlay_muted_style(),
     )));
     lines.push(Line::from(Span::styled(
         props.footer_hint.clone(),
-        Style::default()
-            .fg(Color::Rgb(134, 142, 138))
-            .add_modifier(Modifier::DIM),
+        overlay_hint_style(),
     )));
     lines
 }

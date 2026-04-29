@@ -59,6 +59,17 @@ pub(crate) fn welcome_lines(
             Span::styled("/new", accent_style()),
             Span::styled(" to reset session", dim),
         ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("next: ", dim),
+            Span::styled("/help", accent_style()),
+            Span::styled("  ", dim),
+            Span::styled("/resume", accent_style()),
+            Span::styled("  ", dim),
+            Span::styled("/sessions", accent_style()),
+            Span::styled("  ", dim),
+            Span::styled("/doctor", accent_style()),
+        ]),
     ];
 
     let mut out = with_border_with_inner_width(lines, inner_width);
@@ -72,7 +83,10 @@ pub(crate) fn welcome_lines(
             ),
             Span::styled("Use ", dim),
             Span::styled("/help", accent_style()),
-            Span::styled(" to list commands, or start typing to chat with Sage.", dim),
+            Span::styled(
+                " to list commands, or start typing below to chat with Sage.",
+                dim,
+            ),
         ]),
         Line::from(""),
     ]);

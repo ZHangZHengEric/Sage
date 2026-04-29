@@ -1,5 +1,13 @@
 2026-04-29 docs/solutions：新增中英文 SAGE_BEDROCK_PRIMER、SAGE_PLATFORM_MULTI_AGENT_RECOMMENDATION，README 列入索引；平台多 Agent 与 Bedrock 对照说明供方案与交付参考。
 
+2026-04-28 12:00 shell tool 跟进：补提交 test_execute_shell_completion_event（14 条）；reminder 按会话语言 zh/en；await_shell 入口触发 12h GC；tail 空时反向搜错误关键词行。
+
+2026-04-27 23:30 shell tool 进一步优化：await_shell 入口也触发 12h GC；tail 截断加错误线优先逻辑（尾部空行时反向搜 ERROR/Exception 等行置顶）；reminder 文本中英文国际化；补测试共 14 项全绿。
+
+2026-04-27 23:05 shell tool GC + reminder 优化：system_reminder tail 截至 512B 尾部优先 + 提示调 await_shell 拿完整结果；pop_completion_events 不删 _BG_TASKS；加 12h 超期 GC（每次 spawn 触发）；补测试 11 项全绿。
+
+2026-04-27 22:15 shell 工具反轮询优化：execute_command_tool 加后台 completion watcher 与 session 级事件字典；_call_llm_streaming 每次请求前 flush 为 <system_reminder> 注入；await_shell 默认 600s + 自适应改写 + 元数据；统一 system prompt 加 reminder 语义说明；新增单元测试。
+
 2026-04-27 20:05 turn_status 上下文裁剪策略升级 + reasoning_effort 修正：strip_turn_status_from_llm_context 新增"保留最后一条 turn_status pair"，避免模型看不到自己上一轮状态决策反复重刷；新增白名单式 is_openai_reasoning_model 替换 agent_base 宽匹配（不再误伤 gpt-4o 等）；抽出 resolve_reasoning_effort，思考关闭时默认仍 low，新增 SAGE_REASONING_EFFORT_OFF 环境变量按需切 minimal/medium/high；补 strip 与 reasoning 判定/effort 单测。
 
 2026-04-27 19:00 turn_status-only 补轮 coerce 留痕：被改写的 tool 结果打 metadata.coerced_from，strip 时保留这对 pair 让 LLM 看到事实；改写 note 文案走 PromptManager(zh/en/pt) 并注入原始工具名。

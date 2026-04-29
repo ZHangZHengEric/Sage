@@ -13,6 +13,7 @@ const POPUP_SELECTED_BG: Color = Color::Rgb(34, 44, 40);
 const POPUP_COMMAND: Color = Color::Rgb(174, 220, 121);
 const POPUP_TEXT: Color = Color::Rgb(205, 211, 207);
 const POPUP_HINT: Color = Color::Rgb(117, 127, 122);
+const POPUP_DIVIDER: Color = Color::Rgb(88, 97, 92);
 
 pub(crate) fn popup_height(props: Option<&CommandPopupProps>) -> u16 {
     props
@@ -25,7 +26,7 @@ pub(crate) fn popup_height(props: Option<&CommandPopupProps>) -> u16 {
                     } else {
                         0
                     }
-            }) + u16::from(props.window_status.is_some())
+            }) + if props.window_status.is_some() { 2 } else { 0 }
         })
         .unwrap_or(0)
 }
@@ -75,7 +76,7 @@ pub(super) fn popup_lines(props: &CommandPopupProps) -> Vec<Line<'static>> {
             if item.selected {
                 for preview in &item.preview_lines {
                     lines.push(Line::from(vec![
-                        Span::styled("  ", Style::default().bg(bg)),
+                        Span::styled("  │ ", Style::default().fg(POPUP_HINT).bg(bg)),
                         Span::styled(preview.clone(), Style::default().fg(POPUP_HINT).bg(bg)),
                     ]));
                 }
@@ -84,9 +85,13 @@ pub(super) fn popup_lines(props: &CommandPopupProps) -> Vec<Line<'static>> {
         })
         .collect::<Vec<_>>();
     if let Some(status) = &props.window_status {
+        lines.push(Line::from(Span::styled(
+            "  ───────────────────────────────",
+            Style::default().fg(POPUP_DIVIDER).bg(POPUP_BG),
+        )));
         lines.push(Line::from(vec![
-            Span::styled("  ", Style::default().bg(POPUP_BG)),
-            Span::styled(status.clone(), Style::default().fg(POPUP_HINT).bg(POPUP_BG)),
+            Span::styled("  results ", Style::default().fg(POPUP_HINT).bg(POPUP_BG)),
+            Span::styled(status.clone(), Style::default().fg(POPUP_TEXT).bg(POPUP_BG)),
         ]));
     }
     lines

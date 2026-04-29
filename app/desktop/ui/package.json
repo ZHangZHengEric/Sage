@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "lsof -ti:1420 | xargs kill -9 2>/dev/null; vite",
+    "dev": "node ./scripts/dev.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest",

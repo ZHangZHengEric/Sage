@@ -70,7 +70,7 @@ fn popup_height_counts_selected_preview_and_status() {
         }],
         window_status: Some("1-1 of 1".to_string()),
     };
-    assert_eq!(popup_height(Some(&props)), 4);
+    assert_eq!(popup_height(Some(&props)), 5);
 }
 
 #[test]

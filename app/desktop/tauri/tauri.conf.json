@@ -4,7 +4,7 @@
   "version": "1.1.0",
   "identifier": "com.sage.desktop",
   "build": {
-    "beforeDevCommand": "cd ui && npm run dev",
+    "beforeDevCommand": "cd ui && node ./scripts/dev.mjs",
     "beforeBuildCommand": "cd ui && npm run build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../ui/dist"
