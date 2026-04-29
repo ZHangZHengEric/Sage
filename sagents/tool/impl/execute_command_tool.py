@@ -35,6 +35,10 @@ _BG_DIR = "~/.sage/bg"
 # await_shell。保持小一些可以避免长会话里 reminder 累积失控。
 _REMINDER_TAIL_MAX_BYTES = 512
 
+# 命令"已完成"分支返回 stdout 的字节上限。<= 此阈值返回完整内容；超过则取尾部 + 截断标记。
+# 1MB 足以容纳绝大多数命令输出，又不至于把 LLM context 撑爆。
+_COMPLETED_STDOUT_MAX_BYTES = 1_000_000
+
 # _BG_TASKS 的硬性最长存活时间。任何 task 自 ``started_at`` 起 12 小时未被消费会被
 # 强制 GC（_BG_TASKS / _COMPLETION_EVENTS / sandbox cleanup）。每次 spawn 触发一次扫描。
 _BG_TASK_MAX_AGE_S = 12 * 3600
@@ -445,6 +449,72 @@ class ExecuteCommandTool:
         ExecuteCommandTool._BG_TASKS[task_id] = task_info
         return task_info
 
+    async def _read_log_size(self, sandbox: Any, task_info: Dict[str, Any]) -> Optional[int]:
+        """读取后台任务日志总字节数；不可用时返回 ``None``。"""
+        if task_info.get("mode") == "native":
+            try:
+                getter = getattr(sandbox, "get_background_output_size", None)
+                if getter is None:
+                    return None
+                return await getter(task_info["task_id"])
+            except Exception as exc:
+                logger.debug(f"get_background_output_size 失败（忽略）: {exc}")
+                return None
+        # shell 兜底模式：通过 wc -c 拿大小
+        path = task_info.get("log_path")
+        if not path:
+            return None
+        rc, out, _ = await self._shell(
+            sandbox, f"wc -c < {shlex.quote(path)} 2>/dev/null || true", timeout=5
+        )
+        text = (out or "").strip()
+        if not text:
+            return None
+        try:
+            return int(text.splitlines()[-1].strip())
+        except Exception:
+            return None
+
+    async def _read_completed_output(
+        self,
+        sandbox: Any,
+        task_info: Dict[str, Any],
+        max_bytes: Optional[int] = None,
+    ) -> Tuple[str, Optional[int], bool]:
+        """读完成命令的输出。
+
+        - 总字节 ``<= max_bytes``：返回完整内容（``truncated=False``）。
+        - 超过：返回尾部 ``max_bytes`` 字节，并在头部加显式截断标记
+          ``...<truncated: showing last N of M bytes>...\\n``。
+        - 取不到 size 时退化为 "返回长度 == max_bytes 即视作截断" 的启发式。
+
+        返回 ``(text, total_bytes_or_None, truncated)``。
+        """
+        if max_bytes is None:
+            # 模块级常量，便于测试 / 配置时动态改写
+            max_bytes = globals().get("_COMPLETED_STDOUT_MAX_BYTES", 1_000_000)
+        total = await self._read_log_size(sandbox, task_info)
+        data = await self._read_tail(sandbox, task_info, max_bytes=max_bytes)
+        if total is not None:
+            truncated = total > max_bytes
+        else:
+            truncated = len(data.encode("utf-8", errors="ignore")) >= max_bytes
+
+        if truncated:
+            shown = len(data.encode("utf-8", errors="ignore"))
+            if total is not None:
+                marker = (
+                    f"...<truncated: showing last {shown} of {total} bytes; "
+                    f"full output at output_file>...\n"
+                )
+            else:
+                marker = (
+                    f"...<truncated: showing last ~{shown} bytes; "
+                    f"full output at output_file>...\n"
+                )
+            data = marker + data
+        return data, total, truncated
+
     async def _read_tail(self, sandbox: Any, task_info: Dict[str, Any], max_bytes: int = 8192) -> str:
         if task_info.get("mode") == "native":
             try:
@@ -654,8 +724,10 @@ class ExecuteCommandTool:
                 }
 
             finished, exit_code = await self._wait_for_finish(sandbox, task_info, block_until_ms)
-            tail = await self._read_tail(sandbox, task_info, max_bytes=8192)
             if finished:
+                stdout_text, total_bytes, truncated = await self._read_completed_output(
+                    sandbox, task_info
+                )
                 # 同步拿到结果，显式消费 watcher 可能已写入的事件，避免重复通知
                 self.consume_completion_event(session_id, task_id)
                 await self._cleanup_task(sandbox, task_id)
@@ -665,10 +737,13 @@ class ExecuteCommandTool:
                     "task_id": task_id,
                     "pid": pid,
                     "exit_code": exit_code,
-                    "stdout": tail,
+                    "stdout": stdout_text,
+                    "stdout_truncated": truncated,
+                    "stdout_total_bytes": total_bytes,
                     "output_file": log_path,
                     "command": command,
                 }
+            tail = await self._read_tail(sandbox, task_info, max_bytes=8192)
             running_ms = int((time.time() - task_info.get("started_at", time.time())) * 1000)
             return {
                 "success": True,
@@ -779,8 +854,10 @@ class ExecuteCommandTool:
 
         sandbox = self._get_sandbox(session_id)
         finished, exit_code = await self._wait_for_finish(sandbox, task_info, block_until_ms, pattern=pattern)
-        tail = await self._read_tail(sandbox, task_info, max_bytes=8192)
         if finished:
+            stdout_text, total_bytes, truncated = await self._read_completed_output(
+                sandbox, task_info
+            )
             self.consume_completion_event(session_id, task_id)
             await self._cleanup_task(sandbox, task_id)
             return {
@@ -788,9 +865,12 @@ class ExecuteCommandTool:
                 "status": "completed",
                 "task_id": task_id,
                 "exit_code": exit_code,
-                "stdout": tail,
+                "stdout": stdout_text,
+                "stdout_truncated": truncated,
+                "stdout_total_bytes": total_bytes,
                 "output_file": task_info.get("log_path"),
             }
+        tail = await self._read_tail(sandbox, task_info, max_bytes=8192)
         running_ms_after = int((time.time() - task_info.get("started_at", time.time())) * 1000)
         return {
             "success": True,

@@ -133,6 +133,14 @@ class ISandboxHandle(ABC):
             f"{self.__class__.__name__} 不支持 read_background_output"
         )
 
+    async def get_background_output_size(self, task_id: str) -> Optional[int]:
+        """返回后台任务日志文件的总字节数；不支持/不存在时返回 ``None``。
+
+        上层用它来判断 ``read_background_output`` 的返回是否被截断，
+        以及向用户/agent 显式给出 "已显示 last N of M bytes" 的提示。
+        """
+        return None
+
     async def is_background_alive(self, task_id: str) -> bool:
         """后台任务是否仍在运行。默认实现 False。"""
         raise NotImplementedError(

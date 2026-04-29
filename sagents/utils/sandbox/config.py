@@ -23,7 +23,9 @@ class VolumeMount:
     def __post_init__(self):
         # 确保路径是绝对路径
         self.host_path = os.path.abspath(self.host_path)
-        if not self.mount_path.startswith('/'):
+        if os.name == "nt" and os.path.isabs(self.mount_path):
+            self.mount_path = os.path.abspath(self.mount_path)
+        elif not self.mount_path.startswith('/'):
             self.mount_path = '/' + self.mount_path
 
     @property
@@ -33,7 +35,10 @@ class VolumeMount:
 
     @sandbox_path.setter
     def sandbox_path(self, value: str) -> None:
-        self.mount_path = value if value.startswith("/") else f"/{value}"
+        if os.name == "nt" and os.path.isabs(value):
+            self.mount_path = os.path.abspath(value)
+        else:
+            self.mount_path = value if value.startswith("/") else f"/{value}"
 
 
 # 向后兼容别名

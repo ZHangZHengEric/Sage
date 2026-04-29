@@ -22,6 +22,7 @@ import rehypeStringify from 'rehype-stringify'
 import { visit } from 'unist-util-visit'
 import { toast } from 'vue-sonner'
 import { setDebugCounter } from '@/utils/memoryDebug'
+import { isAbsoluteLocalPath, isRelativeWorkspacePath, normalizeFileReference, resolveAgentWorkspacePath } from '@/utils/agentWorkspacePath'
 
 // 不使用 prism 默认主题，使用自定义样式
 
@@ -48,6 +49,10 @@ const props = defineProps({
   compact: {
     type: Boolean,
     default: false
+  },
+  agentId: {
+    type: String,
+    default: ''
   }
 })
 
@@ -456,26 +461,7 @@ const windowsAbsolutePathPattern = /^[a-zA-Z]:[\\/]/
 const fileProtocolPattern = /^file:\/\//i
 
 const normalizeLocalPath = (path) => {
-  if (!path) return ''
-  let normalized = String(path).trim()
-  if (fileProtocolPattern.test(normalized)) {
-    normalized = normalized.replace(/^file:\/\/\/?/i, '')
-  }
-  try {
-    normalized = decodeURIComponent(normalized)
-  } catch (error) {
-    normalized = normalized.replace(/%20/g, ' ')
-  }
-  if (/^[a-zA-Z]:\//.test(normalized)) {
-    return normalized
-  }
-  if (/^\/[a-zA-Z]:\//.test(normalized)) {
-    return normalized.slice(1)
-  }
-  if (!normalized.startsWith('/') && unixAbsolutePathPattern.test(`/${normalized}`)) {
-    return `/${normalized}`
-  }
-  return normalized
+  return normalizeFileReference(path)
 }
 
 const isLocalAbsolutePath = (path) => {
@@ -485,7 +471,7 @@ const isLocalAbsolutePath = (path) => {
     return true
   }
   const normalized = normalizeLocalPath(path)
-  return unixAbsolutePathPattern.test(normalized) || windowsAbsolutePathPattern.test(normalized)
+  return isAbsoluteLocalPath(normalized) || unixAbsolutePathPattern.test(normalized) || windowsAbsolutePathPattern.test(normalized)
 }
 
 const toFileUrl = (localPath) => {
@@ -555,7 +541,7 @@ const preprocessContent = (content) => {
     /!\[([^\]]*)\]\((file:\/\/[^)]+|\/(?:[^()]*|\([^)]*\))*)\)/g,
     (match, alt, path) => {
       // 检查是否是本地绝对路径且是图片
-      if (isLocalAbsolutePath(path) && imageExtensions.test(path)) {
+      if ((isLocalAbsolutePath(path) || (props.agentId && isRelativeWorkspacePath(path))) && imageExtensions.test(path)) {
         // 标记为本地图片，稍后异步加载，限制最大高度为 400px
         return `<img data-local-image="${escapeHtml(normalizeLocalPath(path))}" alt="${escapeHtml(alt)}" class="rounded-lg max-w-full max-h-[300px] h-auto block border my-2 object-contain" src="">`
       }
@@ -569,11 +555,12 @@ const preprocessContent = (content) => {
   // 匹配 Markdown 链接 [text](url)，支持 file:// 协议和本地路径
   // 使用非贪婪匹配，避免跨链接匹配
   processed = processed.replace(
-    /\[([^\]]*)\]\((file:\/\/[^\s)]+|\/[^\s)]*)\)/g,
+    /\[([^\]]*)\]\((file:\/\/[^\s)]+|\/[^\s)]*|[A-Za-z0-9_.-]+[\\/][^\s)]*)\)/g,
     (match, text, path) => {
-      console.log('[MarkdownRenderer] Found file link:', { text, path, isLocal: isLocalAbsolutePath(path), isImage: imageExtensions.test(path) })
+      const isWorkspaceRelative = !!props.agentId && isRelativeWorkspacePath(path)
+      console.log('[MarkdownRenderer] Found file link:', { text, path, isLocal: isLocalAbsolutePath(path), isWorkspaceRelative, isImage: imageExtensions.test(path) })
       // 检查是否是本地绝对路径
-      if (isLocalAbsolutePath(path)) {
+      if (isLocalAbsolutePath(path) || isWorkspaceRelative) {
         // 检查是否为图片文件
         if (imageExtensions.test(path)) {
           // 图片文件标记为 data-local-image，稍后异步加载，限制最大高度为 400px
@@ -762,15 +749,16 @@ const loadLocalImages = async () => {
   for (const img of images) {
     const localPath = img.getAttribute('data-local-image')
     if (!localPath) continue
+    const resolvedLocalPath = await resolveAgentWorkspacePath(localPath, props.agentId)
 
     try {
-      console.log('[MarkdownRenderer] Loading image:', localPath)
+      console.log('[MarkdownRenderer] Loading image:', resolvedLocalPath)
 
       // 检查是否为 SVG 文件
-      if (localPath.toLowerCase().endsWith('.svg')) {
+      if (resolvedLocalPath.toLowerCase().endsWith('.svg')) {
         // SVG 文件：读取文本内容并内联渲染
         const { readTextFile } = await import('@tauri-apps/plugin-fs')
-        const svgContent = await readTextFile(localPath)
+        const svgContent = await readTextFile(resolvedLocalPath)
         // 清理 SVG 内容
         const cleanedSvg = svgContent
           .replace(/<\?xml[^?]*\?>/gi, '')
@@ -790,7 +778,7 @@ const loadLocalImages = async () => {
       }
 
       // 其他图片：读取文件内容为 Uint8Array
-      const fileData = await readFile(localPath)
+      const fileData = await readFile(resolvedLocalPath)
       console.log('[MarkdownRenderer] File loaded, size:', fileData.length)
 
       // 转换为 Blob
@@ -806,10 +794,10 @@ const loadLocalImages = async () => {
       img.src = objectUrl
       img.removeAttribute('data-local-image')
     } catch (error) {
-      console.error('[MarkdownRenderer] Failed to load image:', localPath, error)
+      console.error('[MarkdownRenderer] Failed to load image:', resolvedLocalPath, error)
       // 显示错误占位符（检查 img 是否还在 DOM 中）
       if (img && img.parentNode) {
-        img.alt = `加载失败: ${localPath.split('/').pop()}`
+        img.alt = `加载失败: ${resolvedLocalPath.split('/').pop()}`
       }
     }
   }
@@ -844,7 +832,7 @@ const handleMarkdownClick = async (event) => {
   const target = resolveAnchorFromEvent(event)
   if (!target) return
   const localPath = target.getAttribute('data-local-path') || target.getAttribute('href') || ''
-  if (!isLocalAbsolutePath(localPath)) return
+  if (!isLocalAbsolutePath(localPath) && !(props.agentId && isRelativeWorkspacePath(localPath))) return
   event.preventDefault()
   if (typeof window !== 'undefined' && typeof window.openMarkdownLocalPath === 'function') {
     await window.openMarkdownLocalPath(target)
@@ -857,7 +845,7 @@ onMounted(() => {
     window.downloadMarkdownImage = downloadImage
     window.openMarkdownLocalPath = async (element) => {
       const raw = element?.getAttribute('data-local-path') || element?.getAttribute('href') || ''
-      const localPath = normalizeLocalPath(raw)
+      const localPath = await resolveAgentWorkspacePath(raw, props.agentId)
       if (!isLocalAbsolutePath(localPath)) {
         if (raw) window.open(raw, '_blank')
         return

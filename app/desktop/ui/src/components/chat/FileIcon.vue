@@ -15,6 +15,7 @@ import { computed } from 'vue'
 import { ExternalLink } from 'lucide-vue-next'
 import { useWorkbenchStore } from '../../stores/workbench.js'
 import { usePanelStore } from '../../stores/panel.js'
+import { resolveAgentWorkspacePath } from '@/utils/agentWorkspacePath'
 
 const props = defineProps({
   filePath: {
@@ -32,6 +33,10 @@ const props = defineProps({
   },
   // 当前文件链接所在消息ID，用于精确定位对应的工作台项
   messageId: {
+    type: String,
+    default: ''
+  },
+  agentId: {
     type: String,
     default: ''
   },
@@ -124,7 +129,7 @@ const iconSrc = computed(() => {
   return iconMap[ext] || '📎'
 })
 
-const handleClick = () => {
+const handleClick = async () => {
   const normalizePath = (path) => {
     if (!path) return ''
     let normalized = path
@@ -143,7 +148,8 @@ const handleClick = () => {
     return normalized
   }
 
-  const normalizedPath = normalizePath(props.filePath)
+  const resolvedFilePath = await resolveAgentWorkspacePath(props.filePath, props.agentId)
+  const normalizedPath = normalizePath(resolvedFilePath)
   const stableKey = props.messageId
     ? `file:${props.messageId}:${normalizedPath}`
     : `file:${normalizedPath}`

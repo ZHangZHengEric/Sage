@@ -86,6 +86,7 @@ ref: env_vars
 | `SAGE_AUTO_LINT` | `true` | Auto-run ruff/eslint/tsc after `file_write` / `file_update` and inline diagnostics |
 | `SAGE_EMIT_TOOL_CALL_ON_COMPLETE` | `true` | Re-emit tool_call chunks once the LLM stream completes |
 | `SAGE_ECHO_SHELL_OUTPUT` | `false` | Echo background-shell stdout/stderr into the main stream |
+| `SAGE_FORCE_TOOL_CHOICE_REQUIRED` | `false` | Force `tool_choice=required` on every LLM call that carries `tools`. Off by default to avoid `unsupported_parameter` errors on models such as OpenAI o1/o3; enable explicitly with `1/true/yes/on` |
 
 ## 6. Memory
 

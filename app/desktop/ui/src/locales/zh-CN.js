@@ -318,6 +318,8 @@ export default {
   'chat.subSessionTitle': '子会话详情',
   'chat.loadingMessages': '加载消息中...',
   'chat.todoList': '任务清单',
+  'chat.todoListTooltipCollapse': '仅显示本次修改',
+  'chat.todoListTooltipExpand': '显示完整清单',
   'chat.noTasks': '暂无任务',
   'chat.switchToDeliveryFlow': '切换到交付消息流',
   'chat.switchToExecutionFlow': '切换到执行消息流',

@@ -258,6 +258,8 @@ export default {
   'chat.subSessionTitle': 'Sub-Session Details',
   'chat.loadingMessages': 'Loading messages...',
   'chat.todoList': 'Task List',
+  'chat.todoListTooltipCollapse': 'Show only tasks changed in this call',
+  'chat.todoListTooltipExpand': 'Show full task list',
   'chat.currentAgent': 'Current Agent',
   'chat.unknownAgent': 'Unknown Agent',
   'chat.taskCompleted': 'Task Completed',

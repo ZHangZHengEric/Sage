@@ -1305,9 +1305,11 @@ Entrada atual do usuário:
 }
 
 agent_abilities_user_prompt = {
-    "zh": """你是一个“Agent 能力卡片生成助手”。
+    "zh": """你是一个「Agent 能力卡片」生成助手。
 
-请根据以下信息，生成该 Agent 可以直接展示给用户的能力列表。
+请根据以下信息，生成该 Agent 在界面里展示的能力卡片：每张卡片对应一项用户可一键发起的真实任务（用户点击卡片后，会把其中一段文字直接填入聊天输入框发送给 Agent）。
+
+数量：**必须恰好 {abilities_count} 条**；`items` 数组长度必须等于 {abilities_count}，不得多也不得少。
 
 Agent 语言：{language}
 Agent 名称：{agent_name}
@@ -1325,18 +1327,35 @@ Agent 描述：{agent_description}
 上下文信息：
 {context_summary}
 
-要求：
-1. 只生成真实、可执行、与当前 Agent 能力一致的能力项，不要夸大或编造。
-2. 能力项要简洁、明确、可直接展示给用户。
-3. 输出必须是严格 JSON 数组。
-4. 每一项必须包含 id、title、description、promptText 四个字段。
-5. id 使用 kebab-case，确保稳定且唯一。
-6. title、description、promptText 的语言应与 Agent 语言一致。
+字段含义与约束：
+1. 能力项须与上述工具/技能/工作流一致，真实可执行；勿夸大或编造。
+2. id：kebab-case，稳定且在列表内唯一。
+3. title：卡片上的短标题（几个词），概括「做什么」。
+4. description：1～2 句，仅用于卡片展示——写「价值 + 适用场景」，可用第二人称「帮你…」；**不要**写成输入框要发的全文。**必须与 promptText 明显不同**：不得共用同一段长句或仅换说法复述；promptText **禁止**照抄、扩写 description 的主干。
+5. promptText：**必须**是终端用户口吻的**一整段可直接发送**的自然语言（可用「请…」「帮我…」或直述任务）。除下列约束外，单独发送即可让 Agent 有明确下一步。
+   - **可执行 / 不悬空指代**：默认用户**只发这一条**、且未在界面里额外选文件。涉及具体文件/表格时，须写清如何取得（上传、粘贴路径、工作区路径，或「若本会话里已有打开文件则用之，否则提示我上传」等**可操作**说法）。禁止单独使用「这个/该」文件却无来源。
+   - **一键开局（预设能力）**：这是「点一下就把全文发出去」的场景；应让 Agent **带合理默认立刻开工**（如调研默认可用公开资料、通用时间口径；具体默认值可写进一句内）。**禁止**以「请先向我确认主题/范围/地区/时段…再开始」「若需要我补充…请先问我」等**把球踢回用户**为主收尾；**禁止**半句主要篇幅用来索要用户先答填空。确需信息时，用**句内默认**（如「先按××领域做桌面调研」）或允许执行中再简短追问，勿把「先确认」当成第一步。
+   - **单一主线**：一个清晰目标；避免无数据出处的并列清单。多产出用一句可执行流程串联。
+   - **具体性硬性清单**：promptText 必须像一份「现成订单」，**至少**包含下列 4 类槽位，且**全部以具体名词出现**（不是空类别、不是「某个/特定」等占位词）：
+       (a) **对象**——具体的网址（含 https://…、或站点名 + 关键路径）/ 文件名 + 后缀（如 `Q3-销售.xlsx`）/ 行业 + 细分赛道 + 公司名 / 收件人或邮件主题片段，等等；
+       (b) **范围与口径**——版本/页面/工作表/字段/账号；时间窗口写出**具体年份、季度或月份**（如「2024 全年」「近 90 天」），不要只写「最近」；地域写出**国家/省份/城市**；
+       (c) **要执行的动作链**——3～6 个明确动词步骤（打开 → 登录 → 提取 → 比对 → 汇总 → 反馈），步骤之间不留空白等待；
+       (d) **交付物形态**——例如「输出 Markdown 表格，列：A/B/C」「写 200 字结论 + 3 条行动建议」「Top-10 异常行 + 原因猜测」「中文回复邮件草稿，不超过 150 字」。
+     若 Agent 描述/工具/上下文已暗示了真实对象（账号、网址、文件、领域），**必须**写入；否则你**必须**直接编出一个**与能力一致、合理且足够具体**的默认例题（如「打开 https://www.bilibili.com/ 搜索『AI 数字人』并抓取首屏前 10 条视频的标题/UP 主/播放量到 Markdown 表」），不要把决定权交回用户。
+   - **禁忌写法**（出现任一即视为不合格，需要换写法）：
+       · 「围绕一个我接下来/稍后会提供的主题」「某个目标网站」「目标文件」「相关数据」「关键信息」作为主语；
+       · 通篇只有方法论（「先梳理框架，再整理结论…」）而不点名做什么；
+       · 「请先与我确认/补充范围、地区、时段、目标网址、文件…再开始」当主收尾；
+       · 与 title/description 高度同义复述、缺槽位 (a)(b)(c)(d) 任何一项。
+   - **长度**：80～180 个汉字（中文）或 60～140 词（英/葡），力求紧凑、信息密度高，**不要**铺垫客套。
+   - 不得只是功能名、标签；不得出现「生成能力列表」「你是助手」等元指令。
+6. title、description、promptText 均使用与 Agent 语言一致。
+7. 仅输出一个 JSON 对象：顶层只含键 items，其值长度恰好为 {abilities_count} 的对象数组；每项含 id、title、description、promptText。不要使用 Markdown 代码围栏，不要输出解释或其它文字。""",
+    "en": """You generate "Agent ability cards" for a product UI.
 
-请只返回 JSON 数组，不要输出解释或额外文本。""",
-    "en": """You are an "Agent ability card generation assistant".
+From the information below, produce ability cards this Agent can show in the app. Each card is one real task a user can start with one click (the user sends one field’s text straight into the chat input).
 
-Based on the information below, generate a list of capabilities that the Agent can display directly to users.
+Count: output **exactly** {abilities_count} cards — the `items` array length must be {abilities_count}, neither more nor fewer.
 
 Agent language: {language}
 Agent name: {agent_name}
@@ -1351,21 +1370,38 @@ Available skills:
 Available workflows:
 {workflows_line}
 
-Context information:
+Context:
 {context_summary}
 
-Requirements:
-1. Only generate real, executable ability items that are consistent with the Agent's actual capabilities. Do not exaggerate or invent.
-2. Keep each ability item concise, clear, and directly displayable to users.
-3. The output must be a strict JSON array.
-4. Each item must contain the fields id, title, description, and promptText.
-5. Use kebab-case for id, and make it stable and unique.
-6. title, description, and promptText should match the Agent language.
+Field meanings and rules:
+1. Items must match the tools/skills/workflows above and be honestly executable; do not invent.
+2. id: kebab-case, stable and unique within the list.
+3. title: short headline for the card (a few words) — what the user gets done.
+4. description: one or two sentences **only for the card** — value + when to use it; may use "we help you ...". **Must differ clearly from promptText**: not the same paragraph rephrased; promptText must not expand description verbatim.
+5. promptText: **must** be one ready-to-send user message (imperative or "Please ..."). The Agent must get a **clear next step** from this alone, plus the rules below.
+   - **Actionable / no dangling references**: User sends **only** this line and has **not** picked a file. For spreadsheets, say how data is obtained (upload, path, workspace, or "use an open file in this session if any, else tell me to upload") — never bare "this file" with no source.
+   - **One-shot preset**: This text is pasted and sent in one click; the Agent should **start immediately** with sensible defaults (e.g. research from public sources; state defaults in the message if needed). **Do not** end by demanding the user **first** confirm scope/topic/region/timeframe, or "ask me before you start", or "if you need X from me, check with me first" as the main clause. Do not make "please confirm with me" the first step. Prefer in-message defaults ("start with an overview of …") or brief follow-up only if blocked mid-run.
+   - **Single through-line**: one goal; avoid unfocused comma lists; chain outputs in one fluent instruction.
+   - **Specificity checklist (mandatory)**: promptText must read like a finished work order and contain **at least all four** slots, each filled with concrete nouns (no placeholders like "a topic / some site / the relevant data"):
+       (a) **Object** — explicit URL (include `https://…` or site + path), filename + extension (e.g. `Q3-sales.xlsx`), industry + sub-market + named company, recipient or mail subject snippet, etc.;
+       (b) **Scope / qualifiers** — version, page, sheet, field, account; time window with **named year/quarter/month** (e.g. "2024 full year", "last 90 days") not just "recent"; region as **country/province/city**;
+       (c) **Action chain** — 3–6 concrete verbs in order (open → log in → extract → compare → summarize → reply), no gaps that wait for the user;
+       (d) **Deliverable shape** — e.g. "Markdown table, columns A/B/C", "200-word conclusion + 3 actions", "top-10 anomalous rows with likely causes", "draft Chinese reply email under 150 chars".
+     If the Agent description / tools / context imply a real object (account, URL, file, domain), **use it**. Otherwise you **must** invent a plausible, concrete default order yourself (e.g. "Open https://www.bilibili.com/ , search 『AI 数字人』, extract title/uploader/views of the top 10 results into a Markdown table"). Do not bounce the decision back to the user.
+   - **Forbidden patterns** (any of these makes the item invalid — rewrite):
+       · "around a topic I will provide later", "the target site", "the target file", "the relevant data", "key information" used as the subject;
+       · methodology-only text ("first build a framework, then summarize…") without naming what is analyzed;
+       · ending with "please confirm with me the scope / region / period / target URL / file before starting" as the main clause;
+       · near-paraphrase of title/description, or missing any of slots (a)(b)(c)(d).
+   - **Length**: 60–140 words (English / Portuguese), 80–180 Chinese characters; dense and direct, no pleasantries.
+   - No bare labels; no meta chat about cards or the assistant.
+6. title, description, and promptText must follow the Agent language.
+7. Output one JSON object only: top-level key `items` whose value is an array of **exactly** {abilities_count} objects, each with keys id, title, description, promptText. No markdown fences, no prose before or after.""",
+    "pt": """Você gera "cartões de capacidade" do Agent para a interface.
 
-Return JSON only, without explanations or extra text.""",
-    "pt": """Você é um "assistente de geração de cartões de capacidades do Agent".
+Com as informações abaixo, produza cartões que o Agent possa exibir: cada cartão é uma tarefa real que o usuário inicia com um clique (um campo vira o texto enviado no chat).
 
-Com base nas informações abaixo, gere uma lista de capacidades que o Agent possa exibir diretamente aos usuários.
+Quantidade: gere **exatamente** {abilities_count} cartões — o array `items` deve ter comprimento {abilities_count}, nem mais nem menos.
 
 Idioma do Agent: {language}
 Nome do Agent: {agent_name}
@@ -1380,16 +1416,31 @@ Habilidades disponíveis:
 Fluxos de trabalho disponíveis:
 {workflows_line}
 
-Informações de contexto:
+Contexto:
 {context_summary}
 
-Requisitos:
-1. Gere apenas itens de capacidade reais, executáveis e consistentes com as capacidades reais do Agent. Não exagere nem invente.
-2. Cada item deve ser conciso, claro e pronto para exibição ao usuário.
-3. A saída deve ser um array JSON estrito.
-4. Cada item deve conter os campos id, title, description e promptText.
-5. Use kebab-case para id, garantindo que seja estável e único.
-6. title, description e promptText devem corresponder ao idioma do Agent.
-
-Retorne apenas JSON, sem explicações ou texto extra.""",
+Significado dos campos e regras:
+1. Itens devem ser coerentes com ferramentas/habilidades/fluxos acima e executáveis; não invente.
+2. id: kebab-case, estável e único na lista.
+3. title: título curto no cartão (poucas palavras) — o que o usuário faz.
+4. description: uma ou duas frases **só no cartão** — valor + quando usar; **deve** ser claramente diferente do promptText (não o mesmo parágrafo reescrito).
+5. promptText: **deve** ser uma única mensagem pronta para enviar (imperativo ou "Por favor ..."). O Agent precisa de um **próximo passo claro** só com ela.
+   - **Executável / sem referências vagas**: o usuário envia **só** essa linha e não escolheu arquivo. Para planilhas: diga como obter dados (upload, caminho, workspace, ou arquivo já aberto na sessão); nunca "este arquivo" sem fonte.
+   - **Preset de um clique**: o Agent deve **começar na hora** com padrões razoáveis (pesquisa com fontes públicas; defaults podem ir na própria frase). **Proibido** terminar exigindo que o usuário **primeiro** confirme escopo/tema/região/prazo, ou "pergunte-me antes de começar" como ideia principal. Prefira defaults na mensagem ou pergunta curta só se travar no meio.
+   - **Um fio condutor**: um objetivo; evite listas soltas; encadeie numa frase fluente.
+   - **Checklist de especificidade (obrigatório)**: promptText deve parecer uma ordem pronta com **as quatro** lacunas preenchidas com substantivos concretos (nada de "um tema/algum site/os dados relevantes"):
+       (a) **Objeto** — URL explícita (com `https://…` ou site + caminho), nome de arquivo + extensão (ex.: `Q3-vendas.xlsx`), setor + submercado + empresa nomeada, destinatário ou assunto de e-mail;
+       (b) **Escopo/qualificadores** — versão, página, planilha, campo, conta; janela temporal com **ano/trimestre/mês explícito** (ex.: "2024 completo", "últimos 90 dias"); região como **país/estado/cidade**;
+       (c) **Cadeia de ações** — 3 a 6 verbos em ordem (abrir → entrar → extrair → comparar → resumir → responder), sem buracos que esperam o usuário;
+       (d) **Forma da entrega** — ex.: "tabela Markdown com colunas A/B/C", "conclusão de 200 palavras + 3 ações", "top-10 linhas anômalas com causa provável", "rascunho de e-mail em chinês até 150 caracteres".
+     Se a descrição/ferramentas/contexto do Agent sugerirem objeto real (conta, URL, arquivo, domínio), **use-o**. Senão **invente** uma ordem plausível e concreta você mesmo (ex.: "Abra https://www.bilibili.com/ , pesquise 『AI 数字人』 e extraia título/UP/visualizações dos 10 primeiros vídeos para uma tabela Markdown"). Não devolva a decisão ao usuário.
+   - **Padrões proibidos** (qualquer um invalida — reescreva):
+       · "em torno de um tema que vou fornecer", "o site alvo", "o arquivo alvo", "os dados relevantes" como sujeito principal;
+       · só metodologia ("primeiro estruture um quadro, depois resuma…") sem nomear o que analisar;
+       · terminar com "antes de começar, confirme comigo escopo/região/período/URL/arquivo" como cláusula principal;
+       · paráfrase próxima de title/description, ou falta de qualquer lacuna (a)(b)(c)(d).
+   - **Tamanho**: 60–140 palavras; denso e direto, sem cortesias.
+   - Sem rótulos; sem meta-instruções.
+6. title, description e promptText no idioma do Agent.
+7. Saída: apenas um objeto JSON com a chave de topo `items` contendo **exatamente** {abilities_count} objetos (cada um com id, title, description, promptText). Sem cercas markdown, sem texto extra.""",
 }
