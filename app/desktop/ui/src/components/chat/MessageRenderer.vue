@@ -198,6 +198,7 @@
             <MarkdownRendererWithPreview
               :content="formatMessageContent(getTextContent(message.content))"
               :message-id="message.message_id || message.id"
+              :agent-id="agentId"
             />
           </div>
           <!-- 兜底：没有 markdown 引用的孤立 image_url -->
@@ -311,6 +312,7 @@ import QuestionnaireCard from './tools/QuestionnaireCard.vue'
 import { useWorkbenchStore } from '../../stores/workbench.js'
 import { textHasMarkdownImageRefForUrl } from '../../utils/multimodalContent.js'
 import { open } from '@tauri-apps/plugin-shell'
+import { isAbsoluteLocalPath, isRelativeWorkspacePath, normalizeFileReference, resolveAgentWorkspacePath } from '@/utils/agentWorkspacePath'
 
 // Custom Tools
 const TOOL_COMPONENT_MAP = {
@@ -760,7 +762,7 @@ const isCustomTool = (toolName) => {
 }
 
 // 发送工作台事件
-onMounted(() => {
+onMounted(async () => {
   const messageId = props.message.message_id || props.message.id
   const sessionId = props.message.session_id
 
@@ -821,7 +823,7 @@ onMounted(() => {
   }
 
   // 发送文件引用事件
-  const fileMatches = extractFileReferences(props.message.content)
+  const fileMatches = await extractFileReferences(props.message.content, props.agentId)
   fileMatches.forEach((file) => {
     const existingFileItem = workbenchStore.items.find(item =>
       item.messageId === messageId &&
@@ -869,7 +871,7 @@ onMounted(() => {
 })
 
 // 监听消息变化，更新工具结果、文件引用、代码块（用于实时消息流）
-watch(() => props.message, (newMessage, oldMessage) => {
+watch(() => props.message, async (newMessage, oldMessage) => {
   console.log('[MessageRenderer] Watch triggered, message:', newMessage?.message_id, 'tool_calls:', newMessage?.tool_calls?.length)
 
   const messageId = newMessage?.message_id || newMessage?.id
@@ -917,7 +919,7 @@ watch(() => props.message, (newMessage, oldMessage) => {
 
   // 2. 处理文件引用（实时流中文件引用可能在消息更新时出现）
   if (newMessage?.content && newMessage.content !== oldMessage?.content) {
-    const fileMatches = extractFileReferences(newMessage.content)
+    const fileMatches = await extractFileReferences(newMessage.content, props.agentId)
     console.log('[MessageRenderer] Watch found file references:', fileMatches.length)
     fileMatches.forEach((file) => {
       // 检查该文件是否已经在该消息中添加过
@@ -980,24 +982,24 @@ watch(isEditingThisUserMessage, (isEditing) => {
 })
 
 // 辅助函数：提取文件引用
-function extractFileReferences(content) {
+async function extractFileReferences(content, agentId = '') {
   if (!content) return []
   const files = []
   const markdownRegex = /\[([^\]]+)\]\(([^)]+)\)/g
   let match
 
   while ((match = markdownRegex.exec(content)) !== null) {
-    let path = match[2]
+    let path = normalizeFileReference(match[2])
     const fileName = match[1]
 
-    if (path.startsWith('file://')) {
-      path = path.replace(/^file:\/\/\/?/i, '/')
-    }
-
     // 过滤掉文件夹路径（以 / 结尾的路径）
-    if (path.startsWith('/') && !path.endsWith('/')) {
+    const isWorkspaceRelative = !!agentId && isRelativeWorkspacePath(path)
+    if ((isAbsoluteLocalPath(path) || isWorkspaceRelative) && !path.endsWith('/')) {
       // 判断是否为图片文件
       const imageExtensions = /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)$/i
+      if (isWorkspaceRelative) {
+        path = await resolveAgentWorkspacePath(path, agentId)
+      }
       const isImage = imageExtensions.test(path)
 
       files.push({
