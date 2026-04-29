@@ -23,3 +23,5 @@ ref: solution-playbooks
 ## 当前文档
 
 1. [催收 Agent 售前方案](COLLECTION_AGENT_SOLUTION.md)
+2. [Sage 平台视角下的多 Agent 落地建议](SAGE_PLATFORM_MULTI_AGENT_RECOMMENDATION.md)
+3. [Sage、Amazon Bedrock 与 Bedrock Agents](SAGE_BEDROCK_PRIMER.md)
