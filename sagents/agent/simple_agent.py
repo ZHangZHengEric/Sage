@@ -854,8 +854,8 @@ class SimpleAgent(AgentBase):
 
         if len(tools_json) > 0:
             model_config_override['tools'] = tools_json
-            if force_tool_choice_required:
-                model_config_override['tool_choice'] = 'required'
+            # if force_tool_choice_required:
+            model_config_override['tool_choice'] = 'required'
 
         response = self._call_llm_streaming(
             messages=cast(List[Union[MessageChunk, Dict[str, Any]]], clean_message_input),
