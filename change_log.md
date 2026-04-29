@@ -1,3 +1,5 @@
+2026-04-29 docs/solutions：新增中英文 SAGE_BEDROCK_PRIMER、SAGE_PLATFORM_MULTI_AGENT_RECOMMENDATION，README 列入索引；平台多 Agent 与 Bedrock 对照说明供方案与交付参考。
+
 2026-04-27 20:05 turn_status 上下文裁剪策略升级 + reasoning_effort 修正：strip_turn_status_from_llm_context 新增"保留最后一条 turn_status pair"，避免模型看不到自己上一轮状态决策反复重刷；新增白名单式 is_openai_reasoning_model 替换 agent_base 宽匹配（不再误伤 gpt-4o 等）；抽出 resolve_reasoning_effort，思考关闭时默认仍 low，新增 SAGE_REASONING_EFFORT_OFF 环境变量按需切 minimal/medium/high；补 strip 与 reasoning 判定/effort 单测。
 
 2026-04-27 19:00 turn_status-only 补轮 coerce 留痕：被改写的 tool 结果打 metadata.coerced_from，strip 时保留这对 pair 让 LLM 看到事实；改写 note 文案走 PromptManager(zh/en/pt) 并注入原始工具名。
