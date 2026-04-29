@@ -41,11 +41,6 @@ def _setup_memory_root_path():
 
 async def initialize_system():
     logger.info("sage-desktop：开始初始化")
-    from common.runtime_patches.agent_abilities_prompt import (
-        apply_agent_abilities_items_object_prompt_fix,
-    )
-
-    apply_agent_abilities_items_object_prompt_fix()
     _setup_memory_root_path()
     _start_host_watchdog()
     await initialize_observability()

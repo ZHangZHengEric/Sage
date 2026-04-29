@@ -14,6 +14,7 @@ import { useChatWorkspace } from '@/composables/chat/useChatWorkspace.js'
 import { useWorkbenchStore } from '@/stores/workbench.js'
 import { usePanelStore } from '@/stores/panel.js'
 import { isToolResultMessage } from '@/utils/messageLabels.js'
+import { mergeToolFunctionArguments } from '@/utils/mergeToolFunctionArguments.js'
 
 // 全局按 Agent 缓存能力结果，在整个应用生命周期内共享
 const abilityCacheByAgentGlobal = ref({})
@@ -279,31 +280,8 @@ export const useChatPage = (props) => {
     if (existingFn.name && !incomingFn.name) mergedFn.name = existingFn.name
     if (incomingFn.name) mergedFn.name = incomingFn.name
 
-    const existingArgs = existingFn.arguments
-    const incomingArgs = incomingFn.arguments
-    if (incomingArgs !== undefined && incomingArgs !== null && incomingArgs !== '') {
-      if (typeof incomingArgs === 'object') {
-        mergedFn.arguments = incomingArgs
-      } else if (typeof existingArgs === 'object' && existingArgs !== null) {
-        mergedFn.arguments = existingArgs
-      } else {
-        const existingText = typeof existingArgs === 'string' ? existingArgs : ''
-        const incomingText = typeof incomingArgs === 'string' ? incomingArgs : String(incomingArgs)
-        if (!existingText) {
-          mergedFn.arguments = incomingText
-        } else if (!incomingText) {
-          mergedFn.arguments = existingText
-        } else if (incomingText.startsWith(existingText)) {
-          mergedFn.arguments = incomingText
-        } else if (existingText.startsWith(incomingText)) {
-          mergedFn.arguments = existingText
-        } else {
-          mergedFn.arguments = `${existingText}${incomingText}`
-        }
-      }
-    } else if (existingArgs !== undefined && existingArgs !== null) {
-      mergedFn.arguments = existingArgs
-    }
+    // 与 sagents agent_base / stream_merger / fibre backend 一致：字符串增量拼接，禁止用 {} 覆盖已累计参数
+    mergedFn.arguments = mergeToolFunctionArguments(existingFn.arguments, incomingFn.arguments)
 
     const mergedToolCall = {
       ...existingToolCall,

@@ -203,6 +203,9 @@ class PassthroughSandboxProvider(ISandboxHandle):
     async def read_background_output(self, task_id: str, max_bytes: int = 8192) -> str:
         return self._bg_runner.read_tail(task_id, max_bytes=max_bytes)
 
+    async def get_background_output_size(self, task_id: str) -> Optional[int]:
+        return self._bg_runner.get_log_size(task_id)
+
     async def is_background_alive(self, task_id: str) -> bool:
         return self._bg_runner.is_alive(task_id)
 

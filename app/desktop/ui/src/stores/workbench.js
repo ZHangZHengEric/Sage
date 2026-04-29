@@ -1,6 +1,8 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 
+import { mergeToolFunctionArguments } from '@/utils/mergeToolFunctionArguments.js'
+
 export const useWorkbenchStore = defineStore('workbench', () => {
   // State
   const items = ref([])
@@ -103,31 +105,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     if (existingFn.name && !incomingFn.name) mergedFn.name = existingFn.name
     if (incomingFn.name) mergedFn.name = incomingFn.name
 
-    const existingArgs = existingFn.arguments
-    const incomingArgs = incomingFn.arguments
-    if (incomingArgs !== undefined && incomingArgs !== null && incomingArgs !== '') {
-      if (typeof incomingArgs === 'object') {
-        mergedFn.arguments = incomingArgs
-      } else if (typeof existingArgs === 'object' && existingArgs !== null) {
-        mergedFn.arguments = existingArgs
-      } else {
-        const existingText = typeof existingArgs === 'string' ? existingArgs : ''
-        const incomingText = typeof incomingArgs === 'string' ? incomingArgs : String(incomingArgs)
-        if (!existingText) {
-          mergedFn.arguments = incomingText
-        } else if (!incomingText) {
-          mergedFn.arguments = existingText
-        } else if (incomingText.startsWith(existingText)) {
-          mergedFn.arguments = incomingText
-        } else if (existingText.startsWith(incomingText)) {
-          mergedFn.arguments = existingText
-        } else {
-          mergedFn.arguments = `${existingText}${incomingText}`
-        }
-      }
-    } else if (existingArgs !== undefined && existingArgs !== null) {
-      mergedFn.arguments = existingArgs
-    }
+    mergedFn.arguments = mergeToolFunctionArguments(existingFn.arguments, incomingFn.arguments)
 
     const mergedData = {
       ...existingData,

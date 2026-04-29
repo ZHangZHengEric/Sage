@@ -318,6 +318,8 @@ export default {
   'chat.subSessionTitle': 'Sub-Session Details',
   'chat.loadingMessages': 'Loading messages...',
   'chat.todoList': 'Task List',
+  'chat.todoListTooltipCollapse': 'Show only tasks changed in this call',
+  'chat.todoListTooltipExpand': 'Show full task list',
   'chat.noTasks': 'No tasks',
   'chat.switchToDeliveryFlow': 'Switch to delivery stream',
   'chat.switchToExecutionFlow': 'Switch to execution stream',

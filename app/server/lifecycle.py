@@ -30,11 +30,6 @@ async def _require_initialized(name: str, initializer_result):
 
 async def initialize_system(cfg: StartupConfig):
     logger.info("Sage开始初始化")
-    from common.runtime_patches.agent_abilities_prompt import (
-        apply_agent_abilities_items_object_prompt_fix,
-    )
-
-    apply_agent_abilities_items_object_prompt_fix()
 
     # 1. 优先初始化数据库和数据
     await _require_initialized("db connection", initialize_db_connection(cfg))

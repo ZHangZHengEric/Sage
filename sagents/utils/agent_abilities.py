@@ -24,6 +24,10 @@ class AgentAbilitiesGenerationError(Exception):
     """在生成 Agent 能力列表时出现的受控异常."""
 
 
+# 能力与 prompt `agent_abilities_user_prompt` 中的 {abilities_count} 保持一致
+AGENT_ABILITIES_TARGET_COUNT = 4
+
+
 def _build_no_thinking_extra_body(model: str) -> Dict[str, Any]:
     model_name = (model or "").lower()
     is_openai_reasoning_model = (
@@ -192,6 +196,7 @@ async def generate_agent_abilities_from_config(
         skills_line=skills_line,
         workflows_line=workflows_line,
         context_summary=context_summary,
+        abilities_count=AGENT_ABILITIES_TARGET_COUNT,
     )
 
     try:
@@ -285,15 +290,17 @@ async def generate_agent_abilities_from_config(
             }
         )
 
-        if len(results) >= 8:
+        if len(results) >= AGENT_ABILITIES_TARGET_COUNT:
             break
 
     if not results:
         raise AgentAbilitiesGenerationError("未生成任何有效的能力项")
 
-    if len(results) < 4:
+    if len(results) < AGENT_ABILITIES_TARGET_COUNT:
         logger.warning(
-            "生成的能力项少于预期数量: {} 条".format(len(results))
+            "生成的能力项少于预期数量: {} 条（预期 {}）".format(
+                len(results), AGENT_ABILITIES_TARGET_COUNT
+            )
         )
 
     logger.info(

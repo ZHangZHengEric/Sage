@@ -8,20 +8,31 @@
         </div>
         <span class="font-medium text-sm">{{ t('chat.todoList') || '任务清单' }}</span>
       </div>
+      <button
+        v-if="canCollapse"
+        type="button"
+        class="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 cursor-pointer shrink-0"
+        :title="expanded ? (t('chat.todoListTooltipCollapse') || '仅显示本次修改') : (t('chat.todoListTooltipExpand') || '显示完整清单')"
+        :aria-expanded="expanded"
+        @click="expanded = !expanded"
+      >
+        <ChevronUp v-if="expanded" class="w-4 h-4" />
+        <ChevronDown v-else class="w-4 h-4" />
+      </button>
     </div>
 
     <!-- Content Section -->
     <div class="p-4 space-y-4">
       <!-- Summary -->
-      <div v-if="summary" class="text-sm text-muted-foreground bg-muted/30 p-3 rounded-md">
+      <div v-if="summary && showSummary" class="text-sm text-muted-foreground bg-muted/30 p-3 rounded-md">
         {{ summary }}
       </div>
 
       <!-- Tasks List -->
-      <div v-if="tasks.length > 0" class="space-y-2">
+      <div v-if="visibleTasks.length > 0" class="space-y-2">
         <div
-          v-for="(task, index) in tasks"
-          :key="index"
+          v-for="(task, index) in visibleTasks"
+          :key="task.id || index"
           class="flex items-start gap-3 p-2 rounded-md transition-colors hover:bg-muted/40"
           :class="{'opacity-60': task.status === 'completed'}"
         >
@@ -57,7 +68,7 @@
           </span>
         </div>
       </div>
-      
+
       <div v-else class="text-center text-muted-foreground text-sm py-2">
         {{ t('chat.noTasks') || '暂无任务' }}
       </div>
@@ -66,8 +77,8 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { ListTodo, Check, Loader2 } from 'lucide-vue-next'
+import { computed, ref } from 'vue'
+import { ListTodo, Check, Loader2, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { useLanguage } from '@/utils/i18n.js'
 
 const props = defineProps({
@@ -87,14 +98,43 @@ const props = defineProps({
 
 const { t } = useLanguage()
 
+const expanded = ref(false)
+
+const parsedToolArgs = computed(() => {
+  const raw = props.toolCall?.function?.arguments
+  if (raw == null) return {}
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw)
+    } catch {
+      return {}
+    }
+  }
+  return typeof raw === 'object' ? raw : {}
+})
+
+const touchedIdsOrdered = computed(() => {
+  const list = parsedToolArgs.value?.tasks
+  if (!Array.isArray(list)) return []
+  const out = []
+  const seen = new Set()
+  for (const item of list) {
+    if (!item || item.id == null || item.id === '') continue
+    const id = String(item.id)
+    if (seen.has(id)) continue
+    seen.add(id)
+    out.push(id)
+  }
+  return out
+})
+
 const parsedContent = computed(() => {
   if (!props.toolResult) return {}
-  
-  let content = props.toolResult.content || props.toolResult // 兼容直接传 content 的情况
-  
+
+  let content = props.toolResult.content || props.toolResult
+
   if (typeof content === 'string') {
     try {
-      // 尝试解析 JSON
       if (content.trim().startsWith('{') || content.trim().startsWith('[')) {
         return JSON.parse(content)
       }
@@ -103,11 +143,49 @@ const parsedContent = computed(() => {
       return {}
     }
   }
-  
+
   return content || {}
 })
 
 const summary = computed(() => parsedContent.value.summary || '')
 const tasks = computed(() => parsedContent.value.tasks || [])
+
+const collapsedTasks = computed(() => {
+  const full = tasks.value
+  if (!touchedIdsOrdered.value.length) return full
+  const byId = new Map(full.map((t) => [String(t.id), t]))
+  const argList = Array.isArray(parsedToolArgs.value?.tasks) ? parsedToolArgs.value.tasks : []
+  const out = []
+  for (const id of touchedIdsOrdered.value) {
+    const row = byId.get(id)
+    if (row) {
+      out.push(row)
+      continue
+    }
+    const arg = argList.find((x) => x && String(x.id) === id)
+    if (arg) {
+      out.push({
+        id,
+        name: arg.content || arg.name || id,
+        status: arg.status || 'pending'
+      })
+    }
+  }
+  return out.length ? out : full
+})
+
+const canCollapse = computed(() => {
+  const full = tasks.value
+  const sub = collapsedTasks.value
+  return sub.length > 0 && full.length > sub.length
+})
+
+const visibleTasks = computed(() => {
+  if (!canCollapse.value || expanded.value) return tasks.value
+  return collapsedTasks.value
+})
+
+/** 折叠为「仅本次变更」时隐藏长 summary，展开后与现网一致 */
+const showSummary = computed(() => !canCollapse.value || expanded.value)
 
 </script>
