@@ -349,23 +349,23 @@
                     <div class="grid gap-4 md:grid-cols-2">
                       <div class="grid gap-2">
                         <Label>{{ t('agent.maxTokens') }}</Label>
-                        <Input type="number" v-model.number="form.maxTokens" class="h-10 rounded-xl" placeholder="4096" />
+                        <Input type="number" v-model.number="form.maxTokens" class="h-10 rounded-xl" />
                       </div>
                       <div class="grid gap-2">
                         <Label>{{ t('agent.temperature') }}</Label>
-                        <Input type="number" v-model.number="form.temperature" class="h-10 rounded-xl" step="0.1" placeholder="0.7" />
+                        <Input type="number" v-model.number="form.temperature" class="h-10 rounded-xl" step="0.1" />
                       </div>
                       <div class="grid gap-2">
                         <Label>{{ t('agent.topP') }}</Label>
-                        <Input type="number" v-model.number="form.topP" class="h-10 rounded-xl" step="0.1" placeholder="0.9" />
+                        <Input type="number" v-model.number="form.topP" class="h-10 rounded-xl" step="0.1" />
                       </div>
                       <div class="grid gap-2">
                         <Label>{{ t('agent.presencePenalty') }}</Label>
-                        <Input type="number" v-model.number="form.presencePenalty" class="h-10 rounded-xl" step="0.1" placeholder="0.0" />
+                        <Input type="number" v-model.number="form.presencePenalty" class="h-10 rounded-xl" step="0.1" />
                       </div>
                       <div class="grid gap-2 md:col-span-2">
                         <Label>{{ t('agent.maxModelLen') }}</Label>
-                        <Input type="number" v-model.number="form.maxModelLen" class="h-10 rounded-xl" placeholder="64000" />
+                        <Input type="number" v-model.number="form.maxModelLen" class="h-10 rounded-xl" />
                       </div>
                     </div>
                   </div>
@@ -460,10 +460,10 @@ const form = reactive({
   api_keys_str: '',
   model: '',
   maxTokens: null,
-  temperature: 0.7,
-  topP: 0.95,
-  presencePenalty: 0,
-  maxModelLen: 64000,
+  temperature: null,
+  topP: null,
+  presencePenalty: null,
+  maxModelLen: null,
   supportsMultimodal: false,
   supportsStructuredOutput: false
 })
@@ -547,12 +547,15 @@ const verifyButtonLabel = computed(() => {
   return capabilityChecked.value ? t('modelProvider.reverifyCapabilities') : t('modelProvider.verifyCapabilities')
 })
 
-const buildApiKeys = () => {
-  return form.api_keys_str
-    .trim()
-    .split(/[\n,]+/)
-    .map((key) => key.trim())
-    .filter(Boolean)
+const buildApiKeys = () => form.api_keys_str.trim().split(/[\n,]+/).map(k => k.trim()).filter(Boolean)
+
+// 输入为有效数字则下发，置空（null/''/NaN）显式以 null 形式下发，
+// 让后端 update 流程可以区分"未提供"和"用户主动清空"，从而把 DB 中的旧值清掉。
+// 同时后端 sanitize_model_request_kwargs 会把 None 字段从 OpenAI SDK 调用里丢弃。
+const optionalNumber = (value) => {
+  if (value === null || value === undefined || value === '') return null
+  const num = Number(value)
+  return Number.isFinite(num) ? num : null
 }
 
 const buildProviderPayload = () => ({
@@ -560,14 +563,11 @@ const buildProviderPayload = () => ({
   base_url: form.base_url,
   api_keys: buildApiKeys(),
   model: form.model,
-  ...(() => {
-    const maxTokensValue = Number(form.maxTokens)
-    return Number.isFinite(maxTokensValue) ? { max_tokens: maxTokensValue } : {}
-  })(),
-  temperature: form.temperature,
-  top_p: form.topP,
-  presence_penalty: form.presencePenalty,
-  max_model_len: form.maxModelLen,
+  max_tokens: optionalNumber(form.maxTokens),
+  temperature: optionalNumber(form.temperature),
+  top_p: optionalNumber(form.topP),
+  presence_penalty: optionalNumber(form.presencePenalty),
+  max_model_len: optionalNumber(form.maxModelLen),
   supports_multimodal: form.supportsMultimodal,
   supports_structured_output: form.supportsStructuredOutput
 })
@@ -658,10 +658,10 @@ const handleCreate = () => {
   form.api_keys_str = ''
   form.model = ''
   form.maxTokens = null
-  form.temperature = 0.7
-  form.topP = 0.95
-  form.presencePenalty = 0
-  form.maxModelLen = 64000
+  form.temperature = null
+  form.topP = null
+  form.presencePenalty = null
+  form.maxModelLen = null
   form.supportsMultimodal = false
   form.supportsStructuredOutput = false
   verified.value = false
@@ -698,10 +698,10 @@ const handleEdit = (provider) => {
   form.api_keys_str = keys.join(',')
   form.model = provider.model
   form.maxTokens = provider.max_tokens ?? null
-  form.temperature = provider.temperature ?? 0.7
-  form.topP = provider.top_p ?? 0.9
-  form.presencePenalty = provider.presence_penalty ?? 0.0
-  form.maxModelLen = provider.max_model_len ?? 64000
+  form.temperature = provider.temperature ?? null
+  form.topP = provider.top_p ?? null
+  form.presencePenalty = provider.presence_penalty ?? null
+  form.maxModelLen = provider.max_model_len ?? null
   form.supportsMultimodal = provider.supports_multimodal ?? false
   form.supportsStructuredOutput = provider.supports_structured_output ?? false
 

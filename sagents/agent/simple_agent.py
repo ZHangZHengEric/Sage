@@ -854,9 +854,12 @@ class SimpleAgent(AgentBase):
 
         if len(tools_json) > 0:
             model_config_override['tools'] = tools_json
-            if force_tool_choice_required:
+            # 通过环境变量 SAGE_FORCE_TOOL_CHOICE_REQUIRED 控制是否强制 tool_choice=required。
+            # 默认关闭：部分模型（如 OpenAI o1/o3、部分国产模型）不支持 tool_choice=required，
+            # 显式启用后才下发给 LLM。调用方传入的 force_tool_choice_required 仍优先生效。
+            env_force_required = os.getenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "").strip().lower() in ("1", "true", "yes", "on")
+            if force_tool_choice_required or env_force_required:
                 model_config_override['tool_choice'] = 'required'
-
         response = self._call_llm_streaming(
             messages=cast(List[Union[MessageChunk, Dict[str, Any]]], clean_message_input),
             session_id=session_id,
