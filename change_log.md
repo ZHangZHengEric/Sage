@@ -1,3 +1,7 @@
+2026-04-29 SimpleAgent tool_choice=required 改为环境变量 SAGE_FORCE_TOOL_CHOICE_REQUIRED 控制（默认关闭，避免不支持的模型报错），调用方传入参数仍优先生效。
+
+2026-04-29 server web ModelProviderList 与 desktop 对齐：采样参数（temperature/top_p/presence_penalty/max_tokens/max_model_len）默认 null，提交走 optionalNumber 显式 null 下发；后端 sanitize_model_request_kwargs 会丢弃 None 字段，OpenAI SDK 不会收到空值。
+
 2026-04-29 单测覆盖 completed stdout 改造：bg_runner read_tail 截断丢首行 + get_log_size、_read_completed_output 完整/截断/shell-mode 兜底/启发式四分支、execute_shell_command + await_shell 完成态字段端到端验证（共 17 个新用例）。
 
 2026-04-29 execute_shell completed 分支返回完整 stdout：阈值 1MB 内整文件返回，超过取尾部并加显式截断标记 `...<truncated: showing last N of M bytes>...` + `stdout_truncated/stdout_total_bytes` 字段；新增 sandbox `get_background_output_size` + `_bg_runner.read_tail` 截断时丢首行碎片。

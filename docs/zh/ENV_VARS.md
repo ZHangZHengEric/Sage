@@ -85,6 +85,7 @@ ref: env_vars
 | `SAGE_AUTO_LINT` | `true` | `file_write/file_update` 完成后是否自动 lint 并 inline 返回诊断 |
 | `SAGE_EMIT_TOOL_CALL_ON_COMPLETE` | `true` | LLM 完整产出后是否补发 tool_call chunk |
 | `SAGE_ECHO_SHELL_OUTPUT` | `false` | 后台 shell 输出是否回显到主流 |
+| `SAGE_FORCE_TOOL_CHOICE_REQUIRED` | `false` | 是否对所有带 tools 的 LLM 调用强制 `tool_choice=required`。默认关闭，避免 OpenAI o1/o3 等不支持该参数的模型报错；显式设为 `1/true/yes/on` 后启用 |
 
 ## 6. Memory
 
