@@ -82,6 +82,8 @@ cargo build --release
 
 ```bash
 sage-terminal
+sage-terminal --agent-id agent_demo
+sage-terminal --agent-id agent_demo --agent-mode fibre
 sage-terminal run "inspect this repo"
 sage-terminal chat "hello"
 sage-terminal config init
@@ -111,6 +113,8 @@ cargo run --quiet --offline -- resume
 当前这版预览主要包含这些命令：
 
 - `/help`
+- `/agent`
+- `/mode`
 - `/new`
 - `/sessions`
 - `/resume`
@@ -125,6 +129,24 @@ cargo run --quiet --offline -- resume
 - `/transcript`
 - `/welcome`
 - `/exit`
+
+## Agent 选择
+
+TUI 现在可以覆盖运行时使用的 agent，但不会自己接管 agent 配置管理。
+
+目前支持：
+
+- 启动参数：
+  - `--agent-id <id>`
+  - `--agent-mode <simple|multi|fibre>`
+- TUI 内命令：
+  - `/agent`
+  - `/agent set <agent_id>`
+  - `/agent clear`
+  - `/mode`
+  - `/mode set <simple|multi|fibre>`
+
+真正的 agent 定义、工具、skills 和行为仍然来自 Sage runtime 已保存的 agent 配置。
 
 ## 当前定位
 

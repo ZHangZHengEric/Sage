@@ -4,6 +4,9 @@ use crate::slash_command;
 
 impl App {
     pub fn popup_matches(&self) -> Vec<command_popup::CommandMatch> {
+        if let Some((mode, query)) = self.agent_popup_context() {
+            return self.agent_popup_matches(mode, query);
+        }
         if let Some((mode, query)) = self.provider_popup_context() {
             return self.provider_popup_matches(mode, query);
         }
@@ -23,6 +26,10 @@ impl App {
 
     pub fn needs_provider_catalog(&self) -> bool {
         self.provider_popup_context().is_some() && self.provider_catalog.is_none()
+    }
+
+    pub fn needs_agent_catalog(&self) -> bool {
+        self.agent_popup_context().is_some() && self.agent_catalog.is_none()
     }
 
     pub fn needs_skill_catalog(&self) -> bool {

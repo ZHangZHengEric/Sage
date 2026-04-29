@@ -1,7 +1,8 @@
 use serde_json::Value;
 
 use crate::backend::{
-    ConfigInfo, ConfigInitInfo, ProviderInfo, ProviderVerifyInfo, SessionDetail, SkillInfo,
+    AgentInfo, ConfigInfo, ConfigInitInfo, ProviderInfo, ProviderVerifyInfo, SessionDetail,
+    SkillInfo,
 };
 
 pub(crate) fn format_session_detail(detail: &SessionDetail) -> String {
@@ -44,6 +45,36 @@ pub(crate) fn format_skills_list(skills: &[SkillInfo], active_skills: &[String])
         lines.push(format!("{}  [{}]", skill.name, skill.source));
         if !skill.description.trim().is_empty() {
             lines.push(format!("  {}", skill.description.trim()));
+        }
+    }
+
+    lines.join("\n")
+}
+
+pub(crate) fn format_agents_list(agents: &[AgentInfo], selected_agent_id: Option<&str>) -> String {
+    let active_agent = selected_agent_id.unwrap_or("(default)");
+    if agents.is_empty() {
+        return format!(
+            "selected agent: {active_agent}\nvisible agents: none\n\nTip: this CLI state currently exposes no saved agents."
+        );
+    }
+
+    let mut lines = vec![
+        format!("selected agent: {active_agent}"),
+        String::new(),
+        "visible agents".to_string(),
+    ];
+
+    for agent in agents {
+        lines.push(format!(
+            "{}{}  [{}]",
+            agent.name,
+            if agent.is_default { "  [default]" } else { "" },
+            agent.agent_mode,
+        ));
+        lines.push(format!("  id: {}", agent.agent_id));
+        if !agent.updated_at.trim().is_empty() {
+            lines.push(format!("  updated: {}", agent.updated_at));
         }
     }
 

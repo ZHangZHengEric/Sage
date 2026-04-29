@@ -1,3 +1,5 @@
+#[path = "actions/agents.rs"]
+mod agents;
 #[path = "actions/chat.rs"]
 mod chat;
 #[path = "actions/model.rs"]
@@ -26,6 +28,7 @@ pub(super) fn handle_submit_action(
         SubmitAction::OpenSessionPicker { mode, limit } => {
             sessions::open_session_picker(app, mode, limit)
         }
+        SubmitAction::ListAgents => agents::list_agents(app),
         SubmitAction::ListSkills => skills::list_skills(app),
         SubmitAction::EnableSkill(skill) => skills::enable_skill(app, skill),
         SubmitAction::DisableSkill(skill) => skills::disable_skill(app, &skill),

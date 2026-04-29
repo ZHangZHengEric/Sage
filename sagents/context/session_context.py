@@ -296,6 +296,220 @@ class SessionContext:
             "flow_node_timings": flow_node_timings,
         }
 
+    def _build_tool_step_summary(self) -> List[Dict[str, Any]]:
+        timing_by_message_id = {
+            str(item.get("message_id")): item
+            for item in self._message_timing.values()
+            if item.get("message_id")
+        }
+
+        steps: List[Dict[str, Any]] = []
+        active_steps: Dict[str, Dict[str, Any]] = {}
+        step_seq = 0
+
+        for message in self.message_manager.messages:
+            role = getattr(message, "role", None)
+            message_id = getattr(message, "message_id", None)
+            timing = timing_by_message_id.get(str(message_id)) if message_id else None
+
+            if role == "assistant" and getattr(message, "tool_calls", None):
+                for tool_call in message.tool_calls or []:
+                    if not isinstance(tool_call, dict):
+                        continue
+                    function = tool_call.get("function") or {}
+                    tool_name = str(function.get("name") or "").strip() or "unknown"
+                    tool_call_id = str(tool_call.get("id") or "").strip() or None
+                    key = tool_call_id or f"synthetic-step-{step_seq + 1}"
+                    if key in active_steps:
+                        continue
+
+                    step_seq += 1
+                    step = {
+                        "step": step_seq,
+                        "tool_name": tool_name,
+                        "tool_call_id": tool_call_id,
+                        "status": "running",
+                        "started_at": timing.get("start_ts") if timing else None,
+                        "finished_at": None,
+                        "duration_ms": None,
+                        "start_message_id": message_id,
+                        "finish_message_id": None,
+                    }
+                    steps.append(step)
+                    active_steps[key] = step
+
+            if role == "tool":
+                tool_call_id = str(getattr(message, "tool_call_id", "") or "").strip() or None
+                if not tool_call_id:
+                    continue
+
+                step = active_steps.get(tool_call_id)
+                if step is None:
+                    step_seq += 1
+                    step = {
+                        "step": step_seq,
+                        "tool_name": "unknown",
+                        "tool_call_id": tool_call_id,
+                        "status": "running",
+                        "started_at": timing.get("start_ts") if timing else None,
+                        "finished_at": None,
+                        "duration_ms": None,
+                        "start_message_id": None,
+                        "finish_message_id": None,
+                    }
+                    steps.append(step)
+                    active_steps[tool_call_id] = step
+
+                finished_at = timing.get("end_ts") if timing else None
+                if finished_at is None and timing:
+                    finished_at = timing.get("start_ts")
+                started_at = step.get("started_at")
+                step["status"] = "completed"
+                step["finished_at"] = finished_at
+                step["finish_message_id"] = message_id
+                if started_at is not None and finished_at is not None:
+                    step["duration_ms"] = round(
+                        max(0.0, (float(finished_at) - float(started_at)) * 1000.0),
+                        3,
+                    )
+
+        return steps
+
+    def _build_phase_timing_summary(self) -> List[Dict[str, Any]]:
+        events = sorted(
+            self.execution_timeline_events,
+            key=lambda item: (
+                float(item.get("perf_ms") or 0.0),
+                float(item.get("timestamp") or 0.0),
+            ),
+        )
+
+        phase_totals: Dict[str, Dict[str, Any]] = {}
+        phase_order: List[str] = []
+        active_segments: Dict[str, Dict[str, Any]] = {}
+        last_timestamp = None
+        last_perf_ms = None
+
+        for event in events:
+            event_type = str(event.get("event_type") or "").strip()
+            phase_name = str(event.get("phase_name") or event.get("phase") or "").strip()
+            timestamp = event.get("timestamp")
+            perf_ms = event.get("perf_ms")
+
+            if isinstance(timestamp, (int, float)):
+                last_timestamp = float(timestamp)
+            if isinstance(perf_ms, (int, float)):
+                last_perf_ms = float(perf_ms)
+
+            if not phase_name:
+                continue
+
+            if event_type == "agent_phase_start":
+                active_segments[phase_name] = {
+                    "started_at": float(timestamp) if isinstance(timestamp, (int, float)) else None,
+                    "started_perf_ms": float(perf_ms) if isinstance(perf_ms, (int, float)) else None,
+                }
+                if phase_name not in phase_totals:
+                    phase_totals[phase_name] = {
+                        "phase": phase_name,
+                        "started_at": None,
+                        "finished_at": None,
+                        "duration_ms": 0.0,
+                        "segment_count": 0,
+                    }
+                    phase_order.append(phase_name)
+                continue
+
+            if event_type != "agent_phase_end":
+                continue
+
+            totals = phase_totals.setdefault(
+                phase_name,
+                {
+                    "phase": phase_name,
+                    "started_at": None,
+                    "finished_at": None,
+                    "duration_ms": 0.0,
+                    "segment_count": 0,
+                },
+            )
+            if phase_name not in phase_order:
+                phase_order.append(phase_name)
+
+            segment = active_segments.pop(phase_name, None) or {}
+            started_at = segment.get("started_at")
+            started_perf_ms = segment.get("started_perf_ms")
+            finished_at = float(timestamp) if isinstance(timestamp, (int, float)) else started_at
+            finished_perf_ms = (
+                float(perf_ms) if isinstance(perf_ms, (int, float)) else started_perf_ms
+            )
+
+            duration_ms = 0.0
+            if isinstance(started_perf_ms, (int, float)) and isinstance(finished_perf_ms, (int, float)):
+                duration_ms = max(0.0, float(finished_perf_ms) - float(started_perf_ms))
+            elif isinstance(started_at, (int, float)) and isinstance(finished_at, (int, float)):
+                duration_ms = max(0.0, (float(finished_at) - float(started_at)) * 1000.0)
+
+            if isinstance(started_at, (int, float)):
+                totals["started_at"] = (
+                    float(started_at)
+                    if totals["started_at"] is None
+                    else min(float(totals["started_at"]), float(started_at))
+                )
+            if isinstance(finished_at, (int, float)):
+                totals["finished_at"] = (
+                    float(finished_at)
+                    if totals["finished_at"] is None
+                    else max(float(totals["finished_at"]), float(finished_at))
+                )
+
+            totals["duration_ms"] = round(float(totals.get("duration_ms") or 0.0) + duration_ms, 3)
+            totals["segment_count"] = int(totals.get("segment_count") or 0) + 1
+
+        for phase_name, segment in active_segments.items():
+            totals = phase_totals.setdefault(
+                phase_name,
+                {
+                    "phase": phase_name,
+                    "started_at": None,
+                    "finished_at": None,
+                    "duration_ms": 0.0,
+                    "segment_count": 0,
+                },
+            )
+            if phase_name not in phase_order:
+                phase_order.append(phase_name)
+
+            started_at = segment.get("started_at")
+            started_perf_ms = segment.get("started_perf_ms")
+            finished_at = last_timestamp if isinstance(last_timestamp, (int, float)) else started_at
+            finished_perf_ms = (
+                last_perf_ms if isinstance(last_perf_ms, (int, float)) else started_perf_ms
+            )
+            duration_ms = 0.0
+            if isinstance(started_perf_ms, (int, float)) and isinstance(finished_perf_ms, (int, float)):
+                duration_ms = max(0.0, float(finished_perf_ms) - float(started_perf_ms))
+            elif isinstance(started_at, (int, float)) and isinstance(finished_at, (int, float)):
+                duration_ms = max(0.0, (float(finished_at) - float(started_at)) * 1000.0)
+
+            if isinstance(started_at, (int, float)):
+                totals["started_at"] = (
+                    float(started_at)
+                    if totals["started_at"] is None
+                    else min(float(totals["started_at"]), float(started_at))
+                )
+            if isinstance(finished_at, (int, float)):
+                totals["finished_at"] = (
+                    float(finished_at)
+                    if totals["finished_at"] is None
+                    else max(float(totals["finished_at"]), float(finished_at))
+                )
+
+            totals["duration_ms"] = round(float(totals.get("duration_ms") or 0.0) + duration_ms, 3)
+            totals["segment_count"] = int(totals.get("segment_count") or 0) + 1
+
+        return [phase_totals[phase_name] for phase_name in phase_order]
+
     def add_messages(self, messages: Union[MessageChunk, List[MessageChunk], List[Dict[str, Any]]]) -> None:
         """
         Add messages to the message manager with session_id validation.

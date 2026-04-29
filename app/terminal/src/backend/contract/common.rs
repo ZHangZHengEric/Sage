@@ -47,6 +47,10 @@ pub(crate) fn optional_u64_field(value: &Value, key: &str) -> u64 {
     value.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
+pub(crate) fn optional_f64_field(value: &Value, key: &str) -> Option<f64> {
+    value.get(key).and_then(Value::as_f64)
+}
+
 pub(crate) fn optional_bool_field(value: &Value, key: &str) -> bool {
     value.get(key).and_then(Value::as_bool).unwrap_or(false)
 }

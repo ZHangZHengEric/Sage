@@ -2,7 +2,8 @@ use std::time::{Duration, Instant};
 
 use ratatui::text::Line;
 
-use crate::app::{App, MessageKind};
+use crate::app::{ActiveToolRecord, App, MessageKind};
+use crate::backend::{BackendStats, BackendToolStep};
 use crate::app_render::{format_message, format_message_continuation, welcome_lines};
 
 impl App {
@@ -23,25 +24,82 @@ impl App {
         self.status = status.into();
     }
 
+    pub fn set_active_phase(&mut self, phase: impl Into<String>) {
+        let phase = phase.into();
+        let normalized = normalize_phase_label(&phase);
+        if normalized.is_empty() {
+            return;
+        }
+        self.active_phase = Some(normalized.clone());
+    }
+
     pub fn complete_request(&mut self) {
         self.busy = false;
-        self.last_request_duration = self.request_started_at.map(|started| started.elapsed());
-        self.last_first_output_latency = self.first_output_latency;
+        let backend_stats = self.pending_backend_stats.take();
+        self.last_request_duration = backend_stats
+            .as_ref()
+            .and_then(|stats| duration_from_seconds(stats.elapsed_seconds))
+            .or_else(|| self.request_started_at.map(|started| started.elapsed()));
+        self.last_first_output_latency = backend_stats
+            .as_ref()
+            .and_then(|stats| duration_from_seconds(stats.first_output_seconds))
+            .or(self.first_output_latency);
+        let completion_summary = request_timing_summary(
+            self.last_request_duration,
+            self.last_first_output_latency,
+            backend_stats.as_ref(),
+        );
         self.request_started_at = None;
         self.first_output_latency = None;
+        self.active_phase = None;
         self.active_tools.clear();
         self.flush_live_message();
+        if let Some(stats) = backend_stats.as_ref() {
+            if let Some(tool_summary) = backend_tool_step_summary(&stats.tool_steps) {
+                self.queue_message(MessageKind::Tool, tool_summary);
+            }
+            if let Some(phase_summary) = backend_phase_timing_summary(&stats.phase_timings) {
+                self.queue_message(MessageKind::Process, phase_summary);
+            }
+        }
+        if let Some(summary) = completion_summary {
+            self.queue_message(MessageKind::Process, format!("completed  {summary}"));
+        }
         self.status = format!("ready  {}", self.session_id);
     }
 
     pub fn fail_request(&mut self, message: impl Into<String>) {
         self.busy = false;
-        self.last_request_duration = self.request_started_at.map(|started| started.elapsed());
-        self.last_first_output_latency = self.first_output_latency;
+        let backend_stats = self.pending_backend_stats.take();
+        self.last_request_duration = backend_stats
+            .as_ref()
+            .and_then(|stats| duration_from_seconds(stats.elapsed_seconds))
+            .or_else(|| self.request_started_at.map(|started| started.elapsed()));
+        self.last_first_output_latency = backend_stats
+            .as_ref()
+            .and_then(|stats| duration_from_seconds(stats.first_output_seconds))
+            .or(self.first_output_latency);
+        let completion_summary = request_timing_summary(
+            self.last_request_duration,
+            self.last_first_output_latency,
+            backend_stats.as_ref(),
+        );
         self.request_started_at = None;
         self.first_output_latency = None;
+        self.active_phase = None;
         self.active_tools.clear();
         self.flush_live_message();
+        if let Some(stats) = backend_stats.as_ref() {
+            if let Some(tool_summary) = backend_tool_step_summary(&stats.tool_steps) {
+                self.queue_message(MessageKind::Tool, tool_summary);
+            }
+            if let Some(phase_summary) = backend_phase_timing_summary(&stats.phase_timings) {
+                self.queue_message(MessageKind::Process, phase_summary);
+            }
+        }
+        if let Some(summary) = completion_summary {
+            self.queue_message(MessageKind::Process, format!("failed  {summary}"));
+        }
         self.queue_message(MessageKind::System, message.into());
         self.status = format!("error  {}", self.session_id);
     }
@@ -68,6 +126,7 @@ impl App {
         welcome_lines(
             width,
             &self.session_id,
+            self.selected_agent_id.as_deref(),
             &self.agent_mode,
             self.max_loop_count,
             &self.workspace_label,
@@ -120,30 +179,58 @@ impl App {
     }
 
     pub fn active_tool_status(&self) -> Option<String> {
-        let (name, started) = self.active_tools.iter().next()?;
-        let elapsed = format_duration(started.elapsed());
+        let (name, record) = self.active_tools.iter().next()?;
+        let elapsed = format_duration(record.started_at.elapsed());
         if self.active_tools.len() == 1 {
-            Some(format!("{name}  {elapsed}"))
+            Some(format!("#{} {name}  {elapsed}", record.step))
         } else {
             Some(format!(
-                "{name} +{}  {elapsed}",
+                "#{} {name} +{}  {elapsed}",
+                record.step,
                 self.active_tools.len().saturating_sub(1)
             ))
         }
     }
 
+    pub fn active_phase_label(&self) -> Option<&str> {
+        self.active_phase.as_deref()
+    }
+
     pub fn start_tool(&mut self, name: String) {
-        self.active_tools.insert(name.clone(), Instant::now());
-        self.queue_message(MessageKind::Tool, format!("running {}", name));
+        self.tool_step_seq = self.tool_step_seq.saturating_add(1);
+        let step = self.tool_step_seq;
+        let started_at = Instant::now();
+        self.active_tools.insert(
+            name.clone(),
+            ActiveToolRecord {
+                step,
+                started_at,
+            },
+        );
+        let since_request = self
+            .request_started_at
+            .map(|started| format!(" • +{}", format_duration(started.elapsed())))
+            .unwrap_or_default();
+        self.queue_message(
+            MessageKind::Tool,
+            format!("step {step}  running {name}{since_request}"),
+        );
     }
 
     pub fn finish_tool(&mut self, name: String) {
-        let elapsed = self
+        let detail = self
             .active_tools
             .remove(&name)
-            .map(|started| format!(" ({})", format_duration(started.elapsed())))
-            .unwrap_or_default();
-        self.queue_message(MessageKind::Tool, format!("completed {name}{elapsed}"));
+            .map(|record| {
+                format!(
+                    "step {}  completed {} • {}",
+                    record.step,
+                    name,
+                    format_duration(record.started_at.elapsed())
+                )
+            })
+            .unwrap_or_else(|| format!("completed {name}"));
+        self.queue_message(MessageKind::Tool, detail);
     }
 
     pub(crate) fn materialize_pending_ui(&mut self, width: u16) {
@@ -154,6 +241,7 @@ impl App {
         let mut lines = welcome_lines(
             width,
             &self.session_id,
+            self.selected_agent_id.as_deref(),
             &self.agent_mode,
             self.max_loop_count,
             &self.workspace_label,
@@ -232,6 +320,10 @@ impl App {
             self.first_output_latency = Some(started.elapsed());
         }
     }
+
+    pub fn apply_backend_stats(&mut self, stats: crate::backend::BackendStats) {
+        self.pending_backend_stats = Some(stats);
+    }
 }
 
 fn format_duration(duration: Duration) -> String {
@@ -246,6 +338,34 @@ fn format_duration(duration: Duration) -> String {
     } else {
         format!("{}ms", duration.as_millis())
     }
+}
+
+fn request_timing_summary(
+    total: Option<Duration>,
+    ttft: Option<Duration>,
+    backend_stats: Option<&BackendStats>,
+) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(total) = total {
+        parts.push(format!("total {}", format_duration(total)));
+    }
+    if let Some(ttft) = ttft {
+        parts.push(format!("ttft {}", format_duration(ttft)));
+    }
+    if let Some(total_tokens) = backend_stats.and_then(|stats| stats.total_tokens) {
+        parts.push(format!("tokens {total_tokens}"));
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" • "))
+    }
+}
+
+fn duration_from_seconds(value: Option<f64>) -> Option<Duration> {
+    value
+        .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+        .map(Duration::from_secs_f64)
 }
 
 fn flush_completed_live_lines(
@@ -272,4 +392,66 @@ fn flush_completed_live_lines(
 
     *text = remainder;
     !completed.trim().is_empty()
+}
+
+fn backend_tool_step_summary(tool_steps: &[BackendToolStep]) -> Option<String> {
+    if tool_steps.is_empty() {
+        return None;
+    }
+
+    let mut lines = Vec::with_capacity(tool_steps.len() + 1);
+    lines.push("tool steps".to_string());
+    for step in tool_steps {
+        let mut detail = format!(
+            "step {}  {} {}",
+            step.step,
+            normalize_tool_status(&step.status),
+            step.tool_name
+        );
+        if let Some(duration_ms) = duration_from_millis(step.duration_ms) {
+            detail.push_str(&format!(" • {}", format_duration(duration_ms)));
+        }
+        lines.push(detail);
+    }
+    Some(lines.join("\n"))
+}
+
+fn backend_phase_timing_summary(phase_timings: &[crate::backend::BackendPhaseTiming]) -> Option<String> {
+    if phase_timings.is_empty() {
+        return None;
+    }
+
+    let mut lines = Vec::with_capacity(phase_timings.len() + 1);
+    lines.push("phase timings".to_string());
+    for phase in phase_timings {
+        let mut detail = phase.phase.replace('_', " ");
+        if let Some(duration_ms) = duration_from_millis(phase.duration_ms) {
+            detail.push_str(&format!(" • {}", format_duration(duration_ms)));
+        }
+        if phase.segment_count > 1 {
+            detail.push_str(&format!(" • {} segments", phase.segment_count));
+        }
+        lines.push(detail);
+    }
+    Some(lines.join("\n"))
+}
+
+fn normalize_tool_status(status: &str) -> &str {
+    match status {
+        "completed" => "completed",
+        "running" => "running",
+        "failed" => "failed",
+        other if other.trim().is_empty() => "completed",
+        other => other,
+    }
+}
+
+fn normalize_phase_label(phase: &str) -> String {
+    phase.trim().replace('_', " ")
+}
+
+fn duration_from_millis(value: Option<f64>) -> Option<Duration> {
+    value
+        .filter(|millis| millis.is_finite() && *millis >= 0.0)
+        .map(|millis| Duration::from_secs_f64(millis / 1000.0))
 }

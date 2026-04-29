@@ -1,3 +1,4 @@
+mod agents;
 mod common;
 mod config;
 mod doctor;
@@ -13,8 +14,8 @@ use std::path::Path;
 use crate::backend::runtime::run_cli_json_owned;
 use crate::backend::ProviderMutation;
 pub(crate) use common::{
-    expect_array_field, expect_object_field, optional_bool_field, optional_str_field,
-    optional_u64_field, required_str_field,
+    expect_array_field, expect_object_field, optional_bool_field, optional_f64_field,
+    optional_str_field, optional_u64_field, required_str_field,
 };
 pub(crate) use stream::{parse_stream_event, CliStreamEvent};
 
@@ -29,14 +30,20 @@ pub(crate) enum CliJsonCommand<'a> {
     },
     SessionsList {
         user_id: &'a str,
+        agent_id: Option<&'a str>,
         limit: usize,
+    },
+    AgentsList {
+        user_id: &'a str,
     },
     SessionInspect {
         session_id: &'a str,
         user_id: &'a str,
+        agent_id: Option<&'a str>,
     },
     SkillsList {
         user_id: &'a str,
+        agent_id: Option<&'a str>,
         workspace: Option<&'a Path>,
     },
     ProvidersList {
@@ -75,6 +82,7 @@ impl CliJsonCommand<'_> {
             Self::ConfigInit { .. } => "config.init",
             Self::Doctor { .. } => "doctor",
             Self::SessionsList { .. } => "sessions.list",
+            Self::AgentsList { .. } => "agents.list",
             Self::SessionInspect { .. } => "sessions.inspect",
             Self::SkillsList { .. } => "skills.list",
             Self::ProvidersList { .. } => "provider.list",
@@ -92,13 +100,23 @@ impl CliJsonCommand<'_> {
             Self::ConfigShow => config::config_show_args(),
             Self::ConfigInit { path, force } => config::config_init_args(*path, *force),
             Self::Doctor { probe_provider } => doctor::doctor_args(*probe_provider),
-            Self::SessionsList { user_id, limit } => sessions::sessions_list_args(user_id, *limit),
+            Self::SessionsList {
+                user_id,
+                agent_id,
+                limit,
+            } => sessions::sessions_list_args(user_id, *agent_id, *limit),
+            Self::AgentsList { user_id } => agents::agents_list_args(user_id),
             Self::SessionInspect {
                 session_id,
                 user_id,
-            } => sessions::session_inspect_args(session_id, user_id),
-            Self::SkillsList { user_id, workspace } => {
-                skills::skills_list_args(user_id, *workspace)
+                agent_id,
+            } => sessions::session_inspect_args(session_id, user_id, *agent_id),
+            Self::SkillsList {
+                user_id,
+                agent_id,
+                workspace,
+            } => {
+                skills::skills_list_args(user_id, *agent_id, *workspace)
             }
             Self::ProvidersList { user_id } => providers::providers_list_args(user_id),
             Self::ProviderInspect {

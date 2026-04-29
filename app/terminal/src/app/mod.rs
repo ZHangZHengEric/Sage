@@ -3,12 +3,16 @@ use std::time::{Duration, Instant};
 
 use ratatui::text::Line;
 
+use crate::backend::BackendStats;
+
 mod commands;
 mod input;
 mod runtime;
 mod surfaces;
 #[cfg(test)]
 mod tests;
+
+pub(crate) use commands::agent::normalize_agent_mode;
 
 #[derive(Debug)]
 pub enum SubmitAction {
@@ -22,6 +26,7 @@ pub enum SubmitAction {
     ResumeLatest,
     ResumeSession(String),
     ShowSession(String),
+    ListAgents,
     ListSkills,
     EnableSkill(String),
     DisableSkill(String),
@@ -99,6 +104,20 @@ struct ProviderCandidate {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AgentPopupMode {
+    Set,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AgentCandidate {
+    id: String,
+    name: String,
+    agent_mode: String,
+    is_default: bool,
+    updated_at: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ProviderPopupMode {
     Inspect,
     Default,
@@ -132,6 +151,7 @@ pub struct App {
     pub session_seq: u32,
     pub session_id: String,
     pub user_id: String,
+    pub selected_agent_id: Option<String>,
     pub agent_mode: String,
     pub max_loop_count: u32,
     pub workspace_label: String,
@@ -148,7 +168,10 @@ pub struct App {
     first_output_latency: Option<Duration>,
     last_request_duration: Option<Duration>,
     last_first_output_latency: Option<Duration>,
-    active_tools: BTreeMap<String, Instant>,
+    pending_backend_stats: Option<BackendStats>,
+    active_phase: Option<String>,
+    active_tools: BTreeMap<String, ActiveToolRecord>,
+    tool_step_seq: u32,
     pending_welcome_banner: bool,
     clear_requested: bool,
     backend_restart_requested: bool,
@@ -157,8 +180,15 @@ pub struct App {
     help_overlay_topic: Option<String>,
     session_picker: Option<SessionPickerState>,
     transcript_overlay: Option<TranscriptOverlayState>,
+    agent_catalog: Option<Vec<AgentCandidate>>,
     provider_catalog: Option<Vec<ProviderCandidate>>,
     skill_catalog: Option<Vec<SkillCandidate>>,
+}
+
+#[derive(Clone, Debug)]
+struct ActiveToolRecord {
+    step: u32,
+    started_at: Instant,
 }
 
 impl App {
@@ -169,6 +199,7 @@ impl App {
             session_seq: 1,
             session_id: String::new(),
             user_id: "default_user".to_string(),
+            selected_agent_id: None,
             agent_mode: "simple".to_string(),
             max_loop_count: 50,
             workspace_label: current_workspace_label(),
@@ -185,7 +216,10 @@ impl App {
             first_output_latency: None,
             last_request_duration: None,
             last_first_output_latency: None,
+            pending_backend_stats: None,
+            active_phase: None,
             active_tools: BTreeMap::new(),
+            tool_step_seq: 0,
             pending_welcome_banner: false,
             clear_requested: false,
             backend_restart_requested: false,
@@ -194,6 +228,7 @@ impl App {
             help_overlay_topic: None,
             session_picker: None,
             transcript_overlay: None,
+            agent_catalog: None,
             provider_catalog: None,
             skill_catalog: None,
         };
@@ -214,7 +249,10 @@ impl App {
         self.first_output_latency = None;
         self.last_request_duration = None;
         self.last_first_output_latency = None;
+        self.pending_backend_stats = None;
+        self.active_phase = None;
         self.active_tools.clear();
+        self.tool_step_seq = 0;
         self.pending_history_lines.clear();
         self.committed_history_lines.clear();
         self.pending_welcome_banner = false;
@@ -225,6 +263,7 @@ impl App {
         self.help_overlay_topic = None;
         self.session_picker = None;
         self.transcript_overlay = None;
+        self.agent_catalog = None;
         self.provider_catalog = None;
         self.skill_catalog = None;
         self.status = format!("ready  {}", self.session_id);

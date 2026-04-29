@@ -82,6 +82,8 @@ Currently supported startup forms:
 
 ```bash
 sage-terminal
+sage-terminal --agent-id agent_demo
+sage-terminal --agent-id agent_demo --agent-mode fibre
 sage-terminal run "inspect this repo"
 sage-terminal chat "hello"
 sage-terminal config init
@@ -111,6 +113,8 @@ cargo run --quiet --offline -- resume
 The current TUI preview includes these core commands:
 
 - `/help`
+- `/agent`
+- `/mode`
 - `/new`
 - `/sessions`
 - `/resume`
@@ -125,6 +129,24 @@ The current TUI preview includes these core commands:
 - `/transcript`
 - `/welcome`
 - `/exit`
+
+## Agent Selection
+
+The TUI can override the runtime agent without taking over agent configuration management.
+
+Supported entrypoints:
+
+- startup flags:
+  - `--agent-id <id>`
+  - `--agent-mode <simple|multi|fibre>`
+- in-app commands:
+  - `/agent`
+  - `/agent set <agent_id>`
+  - `/agent clear`
+  - `/mode`
+  - `/mode set <simple|multi|fibre>`
+
+The actual agent definition, tools, skills, and behavior still come from the Sage runtime's stored agent configuration.
 
 ## Current Scope
 

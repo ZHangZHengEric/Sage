@@ -25,6 +25,7 @@ pub struct BackendHandle {
 struct BackendConfig {
     session_id: String,
     user_id: String,
+    agent_id: Option<String>,
     agent_mode: String,
     max_loop_count: u32,
     workspace: PathBuf,
@@ -67,8 +68,6 @@ impl BackendHandle {
             .arg(&request.session_id)
             .arg("--user-id")
             .arg(&request.user_id)
-            .arg("--agent-mode")
-            .arg(&request.agent_mode)
             .arg("--max-loop-count")
             .arg(request.max_loop_count.to_string())
             .arg("--workspace")
@@ -76,6 +75,10 @@ impl BackendHandle {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(agent_id) = &request.agent_id {
+            command.arg("--agent-id").arg(agent_id);
+        }
+        command.arg("--agent-mode").arg(&request.agent_mode);
         for skill in &request.skills {
             command.arg("--skill").arg(skill);
         }
@@ -185,6 +188,7 @@ impl BackendHandle {
             config: BackendConfig {
                 session_id: request.session_id.clone(),
                 user_id: request.user_id.clone(),
+                agent_id: request.agent_id.clone(),
                 agent_mode: request.agent_mode.clone(),
                 max_loop_count: request.max_loop_count,
                 workspace,
@@ -227,6 +231,7 @@ impl BackendHandle {
     pub fn matches(&self, request: &BackendRequest) -> bool {
         self.config.session_id == request.session_id
             && self.config.user_id == request.user_id
+            && self.config.agent_id == request.agent_id
             && self.config.agent_mode == request.agent_mode
             && self.config.max_loop_count == request.max_loop_count
             && self.config.workspace

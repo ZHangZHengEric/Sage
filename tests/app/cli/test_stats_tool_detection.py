@@ -13,6 +13,7 @@ from app.cli.main import (
     _emit_stream_idle_notice_for_state,
     _empty_render_state,
     _empty_stats,
+    _finalize_stats,
     _stream_request,
     _print_plain_event,
     _record_stats_event,
@@ -77,6 +78,218 @@ class TestStatsToolDetection(unittest.TestCase):
         _record_stats_event(stats, second_event, 0.0)
 
         self.assertEqual(stats["tools"], ["search_memory"])
+
+    def test_records_structured_tool_steps_from_tool_events(self):
+        stats = _empty_stats(
+            request=type(
+                "Request",
+                (),
+                {
+                    "session_id": None,
+                    "user_id": None,
+                    "agent_id": None,
+                    "agent_mode": "simple",
+                    "available_skills": [],
+                    "max_loop_count": 50,
+                },
+            )(),
+            workspace=None,
+        )
+
+        _record_stats_event(
+            stats,
+            {
+                "type": "tool_call",
+                "timestamp": 10.0,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": "{\"path\":\"/tmp/demo.txt\"}",
+                        },
+                    }
+                ],
+            },
+            0.0,
+        )
+        _record_stats_event(
+            stats,
+            {
+                "type": "tool_result",
+                "role": "tool",
+                "timestamp": 10.12,
+                "tool_call_id": "call_1",
+                "metadata": {"tool_name": "read_file"},
+            },
+            0.0,
+        )
+
+        self.assertEqual(len(stats["tool_steps"]), 1)
+        self.assertEqual(stats["tool_steps"][0]["step"], 1)
+        self.assertEqual(stats["tool_steps"][0]["tool_name"], "read_file")
+        self.assertEqual(stats["tool_steps"][0]["status"], "completed")
+        self.assertEqual(stats["tool_steps"][0]["started_at"], 10.0)
+        self.assertEqual(stats["tool_steps"][0]["finished_at"], 10.12)
+        self.assertAlmostEqual(stats["tool_steps"][0]["duration_ms"], 120.0)
+
+    def test_token_usage_tool_steps_override_local_inference(self):
+        stats = _empty_stats(
+            request=type(
+                "Request",
+                (),
+                {
+                    "session_id": None,
+                    "user_id": None,
+                    "agent_id": None,
+                    "agent_mode": "simple",
+                    "available_skills": [],
+                    "max_loop_count": 50,
+                },
+            )(),
+            workspace=None,
+        )
+
+        _record_stats_event(
+            stats,
+            {
+                "type": "tool_call",
+                "timestamp": 10.0,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    }
+                ],
+            },
+            0.0,
+        )
+        _record_stats_event(
+            stats,
+            {
+                "type": "token_usage",
+                "metadata": {
+                    "token_usage": {
+                        "total_info": {
+                            "prompt_tokens": 10,
+                            "completion_tokens": 20,
+                            "total_tokens": 30,
+                        }
+                    },
+                    "tool_steps": [
+                        {
+                            "step": 7,
+                            "tool_name": "grep",
+                            "tool_call_id": "call_7",
+                            "status": "completed",
+                            "started_at": 11.0,
+                            "finished_at": 11.08,
+                            "duration_ms": 80.0,
+                        }
+                    ],
+                },
+            },
+            0.0,
+        )
+
+        self.assertEqual(stats["prompt_tokens"], 10)
+        self.assertEqual(stats["completion_tokens"], 20)
+        self.assertEqual(stats["total_tokens"], 30)
+        self.assertEqual(stats["tool_steps"][0]["step"], 7)
+        self.assertEqual(stats["tool_steps"][0]["tool_name"], "grep")
+
+    def test_records_phase_timings_across_planning_tool_and_assistant_output(self):
+        stats = _empty_stats(
+            request=type(
+                "Request",
+                (),
+                {
+                    "session_id": None,
+                    "user_id": None,
+                    "agent_id": None,
+                    "agent_mode": "simple",
+                    "available_skills": [],
+                    "max_loop_count": 50,
+                },
+            )(),
+            workspace=None,
+        )
+
+        _record_stats_event(
+            stats,
+            {"type": "analysis", "role": "assistant", "content": "先分析一下。", "timestamp": 10.0},
+            0.0,
+        )
+        _record_stats_event(
+            stats,
+            {
+                "type": "tool_call",
+                "timestamp": 10.3,
+                "tool_calls": [{"id": "call_1", "function": {"name": "read_file", "arguments": "{}"}}],
+            },
+            0.0,
+        )
+        _record_stats_event(
+            stats,
+            {"type": "text", "role": "assistant", "content": "处理完成。", "timestamp": 11.1},
+            0.0,
+        )
+        _finalize_stats(stats, finished_at=11.5)
+
+        self.assertEqual([item["phase"] for item in stats["phase_timings"]], [
+            "planning",
+            "tool",
+            "assistant_text",
+        ])
+        self.assertAlmostEqual(stats["phase_timings"][0]["duration_ms"], 300.0)
+        self.assertAlmostEqual(stats["phase_timings"][1]["duration_ms"], 800.0)
+        self.assertAlmostEqual(stats["phase_timings"][2]["duration_ms"], 400.0)
+
+    def test_token_usage_phase_timings_override_local_inference(self):
+        stats = _empty_stats(
+            request=type(
+                "Request",
+                (),
+                {
+                    "session_id": None,
+                    "user_id": None,
+                    "agent_id": None,
+                    "agent_mode": "simple",
+                    "available_skills": [],
+                    "max_loop_count": 50,
+                },
+            )(),
+            workspace=None,
+        )
+
+        _record_stats_event(
+            stats,
+            {"type": "analysis", "role": "assistant", "content": "先分析一下。", "timestamp": 10.0},
+            0.0,
+        )
+        _record_stats_event(
+            stats,
+            {
+                "type": "token_usage",
+                "metadata": {
+                    "phase_timings": [
+                        {
+                            "phase": "planning",
+                            "started_at": 9.9,
+                            "finished_at": 10.6,
+                            "duration_ms": 700.0,
+                            "segment_count": 1,
+                        }
+                    ]
+                },
+            },
+            0.0,
+        )
+        _finalize_stats(stats, finished_at=11.0)
+
+        self.assertEqual(len(stats["phase_timings"]), 1)
+        self.assertEqual(stats["phase_timings"][0]["phase"], "planning")
+        self.assertEqual(stats["phase_timings"][0]["duration_ms"], 700.0)
 
     def test_render_assistant_content_hides_split_skill_markup(self):
         render_state = _empty_render_state()
@@ -278,6 +491,127 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, 0)
         self.assertIn("hello", stdout.getvalue())
+
+    async def test_stream_request_emits_cli_phase_events_in_json_mode(self):
+        async def fake_run_request_stream(_request, workspace=None):
+            del workspace
+            yield {
+                "type": "analysis",
+                "role": "assistant",
+                "content": "先分析一下",
+            }
+            yield {
+                "type": "assistant",
+                "role": "assistant",
+                "content": "开始回答",
+            }
+            yield {
+                "type": "stream_end",
+            }
+
+        request = type(
+            "Request",
+            (),
+            {
+                "session_id": "session-test",
+                "user_id": "user-test",
+                "agent_id": None,
+                "agent_mode": "simple",
+                "available_skills": [],
+                "max_loop_count": 50,
+            },
+        )()
+
+        from io import StringIO
+        import json
+
+        stdout = StringIO()
+        stderr = StringIO()
+        with (
+            patch("app.cli.service.run_request_stream", fake_run_request_stream),
+            patch("sys.stdout", stdout),
+            patch("sys.stderr", stderr),
+        ):
+            result = await _stream_request(request, json_output=True, stats_output=False, workspace=None)
+
+        self.assertEqual(result, 0)
+        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip()]
+        self.assertEqual(events[0], {"type": "cli_phase", "phase": "planning"})
+        self.assertEqual(events[1]["type"], "analysis")
+        self.assertEqual(events[2], {"type": "cli_phase", "phase": "assistant_text"})
+        self.assertEqual(events[3]["type"], "assistant")
+
+    async def test_stream_request_emits_cli_tool_events_in_json_mode(self):
+        async def fake_run_request_stream(_request, workspace=None):
+            del workspace
+            yield {
+                "type": "tool_call",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    }
+                ],
+            }
+            yield {
+                "type": "tool_result",
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "metadata": {"tool_name": "read_file"},
+            }
+            yield {
+                "type": "stream_end",
+            }
+
+        request = type(
+            "Request",
+            (),
+            {
+                "session_id": "session-test",
+                "user_id": "user-test",
+                "agent_id": None,
+                "agent_mode": "simple",
+                "available_skills": [],
+                "max_loop_count": 50,
+            },
+        )()
+
+        from io import StringIO
+        import json
+
+        stdout = StringIO()
+        stderr = StringIO()
+        with (
+            patch("app.cli.service.run_request_stream", fake_run_request_stream),
+            patch("sys.stdout", stdout),
+            patch("sys.stderr", stderr),
+        ):
+            result = await _stream_request(request, json_output=True, stats_output=False, workspace=None)
+
+        self.assertEqual(result, 0)
+        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip()]
+        cli_tool_events = [event for event in events if event.get("type") == "cli_tool"]
+        self.assertEqual(
+            cli_tool_events,
+            [
+                {
+                    "type": "cli_tool",
+                    "action": "started",
+                    "step": 1,
+                    "tool_name": "read_file",
+                    "tool_call_id": "call_1",
+                    "status": "running",
+                },
+                {
+                    "type": "cli_tool",
+                    "action": "finished",
+                    "step": 1,
+                    "tool_name": "read_file",
+                    "tool_call_id": "call_1",
+                    "status": "completed",
+                },
+            ],
+        )
 
 
 if __name__ == "__main__":

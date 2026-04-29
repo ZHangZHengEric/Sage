@@ -1,0 +1,11 @@
+{"type":"cli_phase","phase":"planning"}
+{"type":"analysis","role":"assistant","content":"Plan the work first."}
+{"type":"cli_phase","phase":"tool"}
+{"type":"cli_tool","action":"started","step":1,"tool_name":"read_file","tool_call_id":"call_1","status":"running"}
+{"type":"tool_call","tool_calls":[{"id":"call_1","function":{"name":"read_file","arguments":"{\"path\":\"README.md\"}"}}],"content":"running read_file"}
+{"type":"tool_result","role":"tool","tool_call_id":"call_1","metadata":{"tool_name":"read_file"},"content":"completed read_file"}
+{"type":"cli_tool","action":"finished","step":1,"tool_name":"read_file","tool_call_id":"call_1","status":"completed"}
+{"type":"cli_phase","phase":"assistant_text"}
+{"type":"assistant","role":"assistant","content":"Here is the answer."}
+{"type":"stream_end"}
+{"type":"cli_stats","elapsed_seconds":1.25,"first_output_seconds":0.18,"prompt_tokens":10,"completion_tokens":20,"total_tokens":30,"tool_steps":[{"step":1,"tool_name":"read_file","tool_call_id":"call_1","status":"completed","started_at":10.0,"finished_at":10.12,"duration_ms":120.0}],"phase_timings":[{"phase":"planning","started_at":9.8,"finished_at":10.0,"duration_ms":200.0,"segment_count":1},{"phase":"tool","started_at":10.0,"finished_at":10.12,"duration_ms":120.0,"segment_count":1},{"phase":"assistant_text","started_at":10.12,"finished_at":10.3,"duration_ms":180.0,"segment_count":1}]}
