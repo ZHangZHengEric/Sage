@@ -4,17 +4,18 @@
       <MarkdownRenderer
         :content="content"
         :compact="compact"
+        :agent-id="agentId"
       />
     </div>
-    <!-- 文件图标区域 - 显示检测到的文件链接为图标 -->
     <div v-if="fileIcons.length > 0" class="file-icons-container flex flex-wrap gap-2 mt-3">
       <FileIcon
-        v-for="(fileInfo, index) in fileIcons"
+        v-for="fileInfo in fileIcons"
         :key="fileInfo.id"
         :file-path="fileInfo.path"
         :file-name="fileInfo.name"
         :message-id="messageId"
         :is-directory="fileInfo.isDirectory"
+        :agent-id="agentId"
         class="my-1"
       />
     </div>
@@ -22,9 +23,10 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import FileIcon from './FileIcon.vue'
+import { isAbsoluteLocalPath, isRelativeWorkspacePath, normalizeFileReference, resolveAgentWorkspacePath } from '@/utils/agentWorkspacePath'
 
 const props = defineProps({
   content: {
@@ -38,54 +40,62 @@ const props = defineProps({
   messageId: {
     type: String,
     default: ''
+  },
+  agentId: {
+    type: String,
+    default: ''
   }
 })
 
-// 检测内容中的文件链接
-const fileIcons = computed(() => {
-  if (!props.content) return []
+const markdownRef = ref(null)
+const resolvedFileIcons = ref([])
+const fileIcons = computed(() => resolvedFileIcons.value)
+
+const collectFileIcons = async () => {
+  if (!props.content) {
+    resolvedFileIcons.value = []
+    return
+  }
 
   const files = []
   const seenPaths = new Set()
-
-  // 辅助函数：规范化路径
-  const normalizePath = (path) => {
-    let normalizedPath = path
-    // 支持 file:// 协议的路径
-    if (normalizedPath.startsWith('file://')) {
-      normalizedPath = normalizedPath.replace(/^file:\/\/\/?/i, '/')
-    }
-    try {
-      normalizedPath = decodeURIComponent(normalizedPath)
-    } catch (e) {}
-    return normalizedPath
-  }
-
-  // 匹配 Markdown 格式的本地文件链接 [text](path)
   const markdownRegex = /\[([^\]]+)\]\(([^)]+)\)/g
   let match
   let counter = 0
 
   while ((match = markdownRegex.exec(props.content)) !== null) {
-    let path = match[2]
     const name = match[1]
-    path = normalizePath(path)
+    const rawPath = normalizeFileReference(match[2])
+    const isWorkspaceRelative = !!props.agentId && isRelativeWorkspacePath(rawPath)
 
-    // 检查是否是本地绝对路径，且不是文件夹
-    if (path.startsWith('/') && !seenPaths.has(path) && !path.endsWith('/')) {
-      seenPaths.add(path)
-      files.push({
-        id: `file-${counter++}-${path}`,
-        path: path,
-        name: name
-      })
+    if ((!isAbsoluteLocalPath(rawPath) && !isWorkspaceRelative) || rawPath.endsWith('/')) {
+      continue
     }
+
+    const resolvedPath = isWorkspaceRelative
+      ? await resolveAgentWorkspacePath(rawPath, props.agentId)
+      : rawPath
+
+    if (!resolvedPath || seenPaths.has(resolvedPath)) continue
+
+    seenPaths.add(resolvedPath)
+    files.push({
+      id: `file-${counter++}-${resolvedPath}`,
+      path: resolvedPath,
+      name
+    })
   }
 
-  return files
-})
+  resolvedFileIcons.value = files
+}
 
-const markdownRef = ref(null)
+watch(
+  () => [props.content, props.agentId],
+  () => {
+    collectFileIcons()
+  },
+  { immediate: true }
+)
 </script>
 
 <style scoped>

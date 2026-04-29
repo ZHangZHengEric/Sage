@@ -176,6 +176,10 @@ class SelfCheckAgent(AgentBase):
         if path.startswith("file://"):
             path = re.sub(r"^file:///?", "/", path)
         path = unquote(path)
+        if os.name == "nt" and path[:1] in {"/", "\\"}:
+            trimmed = path.lstrip("/\\")
+            if os.path.isabs(trimmed):
+                path = trimmed
         return path
 
     def _is_absolute_file_reference(self, file_path: str) -> bool:
