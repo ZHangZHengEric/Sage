@@ -131,19 +131,42 @@ class HostBackgroundRunner:
                 try:
                     f.seek(0, os.SEEK_END)
                     size = f.tell()
-                    if size > max_bytes:
+                    truncated = size > max_bytes
+                    if truncated:
                         f.seek(size - max_bytes)
                     else:
                         f.seek(0)
                     data = f.read()
                 except Exception:
                     data = b""
+                    truncated = False
+            # 截断时丢掉可能不完整的首行碎片，避免半行污染
+            if truncated:
+                nl = data.find(b"\n")
+                if 0 <= nl < min(len(data), 4096):
+                    data = data[nl + 1:]
             return data.decode("utf-8", errors="replace")
         except FileNotFoundError:
             return ""
         except Exception as exc:
             logger.warning(f"HostBackgroundRunner: 读取日志失败 {path}: {exc}")
             return ""
+
+    def get_log_size(self, task_id: str) -> Optional[int]:
+        """返回日志文件总字节数；task 不存在或文件不存在返回 ``None``。"""
+        info = self._tasks.get(task_id)
+        if not info:
+            return None
+        path = info.get("log_path")
+        if not path:
+            return None
+        try:
+            return os.path.getsize(path)
+        except FileNotFoundError:
+            return None
+        except Exception as exc:
+            logger.warning(f"HostBackgroundRunner: 读取日志大小失败 {path}: {exc}")
+            return None
 
     def is_alive(self, task_id: str) -> bool:
         info = self._tasks.get(task_id)
