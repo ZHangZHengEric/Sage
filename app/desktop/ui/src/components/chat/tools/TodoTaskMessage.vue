@@ -95,6 +95,7 @@
 import { computed, ref } from 'vue'
 import { ListTodo, Check, Plus, RefreshCw, Circle, Loader2, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { useLanguage } from '@/utils/i18n.js'
+import { parseTodoWriteToolCallArguments } from '@/utils/parseTodoWriteToolArguments.js'
 
 const props = defineProps({
   toolCall: {
@@ -121,34 +122,12 @@ const { t } = useLanguage()
 
 const expanded = ref(false)
 
-const parsedToolArgs = computed(() => {
-  const raw = props.toolCall?.function?.arguments
-  if (raw == null) return {}
-  if (typeof raw === 'string') {
-    try {
-      return JSON.parse(raw)
-    } catch {
-      return {}
-    }
-  }
-  return typeof raw === 'object' ? raw : {}
-})
+/** 流式下 arguments 可能为未闭合 JSON；解析失败时仍从片段中提取 tasks[].id */
+const parsedToolArgs = computed(() =>
+  parseTodoWriteToolCallArguments(props.toolCall?.function?.arguments)
+)
 
-/** 本次工具入参中的任务 id 顺序（增量写入，与后端约定一致） */
-const touchedIdsOrdered = computed(() => {
-  const list = parsedToolArgs.value?.tasks
-  if (!Array.isArray(list)) return []
-  const out = []
-  const seen = new Set()
-  for (const item of list) {
-    if (!item || item.id == null || item.id === '') continue
-    const id = String(item.id)
-    if (seen.has(id)) continue
-    seen.add(id)
-    out.push(id)
-  }
-  return out
-})
+const touchedIdsOrdered = computed(() => parsedToolArgs.value.taskIdsOrdered)
 
 const parsedContent = computed(() => {
   if (!props.toolResult) return {}
@@ -177,7 +156,7 @@ const collapsedTasks = computed(() => {
   const full = tasks.value
   if (!touchedIdsOrdered.value.length) return full
   const byId = new Map(full.map((t) => [String(t.id), t]))
-  const argList = Array.isArray(parsedToolArgs.value?.tasks) ? parsedToolArgs.value.tasks : []
+  const argList = Array.isArray(parsedToolArgs.value.tasks) ? parsedToolArgs.value.tasks : []
   const out = []
   for (const id of touchedIdsOrdered.value) {
     const row = byId.get(id)

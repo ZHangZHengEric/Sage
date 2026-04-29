@@ -1,8 +1,12 @@
+2026-04-29 todo_write 流式显示：parseTodoWriteToolArguments 在未闭合 JSON 下从 tasks 段提取 id，折叠与增量条与实时结果对齐（desktop/server TodoTaskMessage）。
+
 2026-04-29 单测覆盖 completed stdout 改造：bg_runner read_tail 截断丢首行 + get_log_size、_read_completed_output 完整/截断/shell-mode 兜底/启发式四分支、execute_shell_command + await_shell 完成态字段端到端验证（共 17 个新用例）。
 
 2026-04-29 execute_shell completed 分支返回完整 stdout：阈值 1MB 内整文件返回，超过取尾部并加显式截断标记 `...<truncated: showing last N of M bytes>...` + `stdout_truncated/stdout_total_bytes` 字段；新增 sandbox `get_background_output_size` + `_bg_runner.read_tail` 截断时丢首行碎片。
 
 2026-04-29 todo_write 卡片默认折叠：新建与历史会话进入时均为「仅本次变更」，点击展开见完整输出。
+
+2026-04-29 撤销 todo_write changed_task_ids 及前端优先读该字段；折叠仅依据 tool 入参 tasks。
 
 2026-04-29 前端 tool_calls 合并对齐 sagents/agent_base：`mergeToolFunctionArguments` 抽取至 utils；字符串增量与同 fibre 语义，禁止空 `{}` 覆盖已拼接参数（useChatPage + workbench，desktop/server 双端）。
 
