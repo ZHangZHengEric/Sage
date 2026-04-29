@@ -11,30 +11,43 @@
         </div>
         <span class="font-medium text-xs">{{ t('chat.todoList') || '任务清单' }}</span>
       </div>
-      <!-- Summary Icons -->
-      <div v-if="hasSummary" class="flex items-center gap-2 text-[10px] text-muted-foreground">
-        <div v-if="addedCount > 0" class="flex items-center gap-0.5 text-green-600">
-          <Plus class="w-2.5 h-2.5" />
-          <span>{{ addedCount }}</span>
+      <div class="flex items-center gap-1.5">
+        <!-- Summary Icons -->
+        <div v-if="hasSummary" class="flex items-center gap-2 text-[10px] text-muted-foreground">
+          <div v-if="addedCount > 0" class="flex items-center gap-0.5 text-green-600">
+            <Plus class="w-2.5 h-2.5" />
+            <span>{{ addedCount }}</span>
+          </div>
+          <div v-if="updatedCount > 0" class="flex items-center gap-0.5 text-blue-600">
+            <RefreshCw class="w-2.5 h-2.5" />
+            <span>{{ updatedCount }}</span>
+          </div>
+          <div v-if="pendingCount > 0" class="flex items-center gap-0.5 text-orange-600">
+            <Circle class="w-2.5 h-2.5" />
+            <span>{{ pendingCount }}</span>
+          </div>
         </div>
-        <div v-if="updatedCount > 0" class="flex items-center gap-0.5 text-blue-600">
-          <RefreshCw class="w-2.5 h-2.5" />
-          <span>{{ updatedCount }}</span>
-        </div>
-        <div v-if="pendingCount > 0" class="flex items-center gap-0.5 text-orange-600">
-          <Circle class="w-2.5 h-2.5" />
-          <span>{{ pendingCount }}</span>
-        </div>
+        <button
+          v-if="canCollapse"
+          type="button"
+          class="p-0.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 cursor-pointer"
+          :title="expanded ? (t('chat.todoListTooltipCollapse') || '仅显示本次修改') : (t('chat.todoListTooltipExpand') || '显示完整清单')"
+          :aria-expanded="expanded"
+          @click.stop="expanded = !expanded"
+        >
+          <ChevronUp v-if="expanded" class="w-3.5 h-3.5" />
+          <ChevronDown v-else class="w-3.5 h-3.5" />
+        </button>
       </div>
     </div>
 
     <!-- Content Section -->
     <div class="px-2.5 py-2 space-y-2">
       <!-- Tasks List -->
-      <div v-if="tasks.length > 0" class="space-y-1 max-h-[200px] overflow-y-auto pr-0.5">
+      <div v-if="visibleTasks.length > 0" class="space-y-1 max-h-[200px] overflow-y-auto pr-0.5">
         <div
-          v-for="(task, index) in tasks"
-          :key="index"
+          v-for="(task, index) in visibleTasks"
+          :key="task.id || index"
           class="flex items-start gap-2 px-1.5 py-1 rounded transition-colors hover:bg-muted/40"
           :class="{'opacity-50': task.status === 'completed'}"
         >
@@ -79,8 +92,8 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { ListTodo, Check, Plus, RefreshCw, Circle, Loader2 } from 'lucide-vue-next'
+import { computed, ref } from 'vue'
+import { ListTodo, Check, Plus, RefreshCw, Circle, Loader2, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { useLanguage } from '@/utils/i18n.js'
 
 const props = defineProps({
@@ -106,6 +119,37 @@ const emit = defineEmits(['click'])
 
 const { t } = useLanguage()
 
+const expanded = ref(false)
+
+const parsedToolArgs = computed(() => {
+  const raw = props.toolCall?.function?.arguments
+  if (raw == null) return {}
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw)
+    } catch {
+      return {}
+    }
+  }
+  return typeof raw === 'object' ? raw : {}
+})
+
+/** 本次工具入参中的任务 id 顺序（增量写入，与后端约定一致） */
+const touchedIdsOrdered = computed(() => {
+  const list = parsedToolArgs.value?.tasks
+  if (!Array.isArray(list)) return []
+  const out = []
+  const seen = new Set()
+  for (const item of list) {
+    if (!item || item.id == null || item.id === '') continue
+    const id = String(item.id)
+    if (seen.has(id)) continue
+    seen.add(id)
+    out.push(id)
+  }
+  return out
+})
+
 const parsedContent = computed(() => {
   if (!props.toolResult) return {}
   
@@ -127,6 +171,42 @@ const parsedContent = computed(() => {
 })
 
 const tasks = computed(() => parsedContent.value.tasks || [])
+
+/** 折叠视图：按入参 id 顺序，优先用工具结果中的完整字段，缺失时从入参补一行 */
+const collapsedTasks = computed(() => {
+  const full = tasks.value
+  if (!touchedIdsOrdered.value.length) return full
+  const byId = new Map(full.map((t) => [String(t.id), t]))
+  const argList = Array.isArray(parsedToolArgs.value?.tasks) ? parsedToolArgs.value.tasks : []
+  const out = []
+  for (const id of touchedIdsOrdered.value) {
+    const row = byId.get(id)
+    if (row) {
+      out.push(row)
+      continue
+    }
+    const arg = argList.find((x) => x && String(x.id) === id)
+    if (arg) {
+      out.push({
+        id,
+        name: arg.content || arg.name || id,
+        status: arg.status || 'pending'
+      })
+    }
+  }
+  return out.length ? out : full
+})
+
+const canCollapse = computed(() => {
+  const full = tasks.value
+  const sub = collapsedTasks.value
+  return sub.length > 0 && full.length > sub.length
+})
+
+const visibleTasks = computed(() => {
+  if (!canCollapse.value || expanded.value) return tasks.value
+  return collapsedTasks.value
+})
 
 // 解析 summary 信息
 const summaryInfo = computed(() => {

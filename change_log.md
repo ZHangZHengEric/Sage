@@ -1,3 +1,23 @@
+2026-04-29 todo_write 卡片默认折叠：新建与历史会话进入时均为「仅本次变更」，点击展开见完整输出。
+
+2026-04-29 前端 tool_calls 合并对齐 sagents/agent_base：`mergeToolFunctionArguments` 抽取至 utils；字符串增量与同 fibre 语义，禁止空 `{}` 覆盖已拼接参数（useChatPage + workbench，desktop/server 双端）。
+
+2026-04-29 对话流 todo_write 卡片：解析工具入参 tasks 为「本次变更」；支持折叠仅看变更行、展开为完整工具输出（desktop/server 双端 TodoTaskMessage + i18n）。
+
+2026-04-29 Agent 能力 promptText：引入硬性槽位清单 (a)对象/(b)范围/(c)动作链/(d)交付物，列禁忌写法与长度上限，要求模型自造具体默认例题（zh/en/pt）。
+
+2026-04-29 Agent 能力 promptText：加强「高具体度、少留白」——须命名分析对象/默认例题，禁「随后提供主题」式主干（zh/en/pt）。
+
+2026-04-29 Agent 能力：强制 description≠promptText；预设一键发送禁止「先确认再开始」类收尾；可接受句内默认与文件获取指引（zh/en/pt）。
+
+2026-04-29 Agent 能力 promptText：约束「仅一条消息、无预选对像」下可执行；禁止悬空「这个表格」；单一主线、多产出需串成可跟进流程（zh/en/pt）。
+
+2026-04-29 Agent 能力条数：prompt 写明恰好 abilities_count（默认 4）条，代码 AGENT_ABILITIES_TARGET_COUNT 注入并与截断一致。
+
+2026-04-29 Agent 能力 prompt 迁入 sagents：明确 promptText 为可一键发送的用户全文，区分 title/description；输出约定 items JSON；删除 runtime patch 与 lifecycle 调用。
+
+2026-04-29 修复 agent abilities 运行时 patch：中文示例 `{"items"}` 对后续 str.format 转义为 `{{"items"}}`，避免 KeyError 与 /api/agent/abilities 500。
+
 2026-04-29 docs/solutions：新增中英文 SAGE_BEDROCK_PRIMER、SAGE_PLATFORM_MULTI_AGENT_RECOMMENDATION，README 列入索引；平台多 Agent 与 Bedrock 对照说明供方案与交付参考。
 
 2026-04-28 12:00 shell tool 跟进：补提交 test_execute_shell_completion_event（14 条）；reminder 按会话语言 zh/en；await_shell 入口触发 12h GC；tail 空时反向搜错误关键词行。
