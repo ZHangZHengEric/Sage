@@ -21,6 +21,7 @@ impl App {
         self.request_started_at = Some(std::time::Instant::now());
         self.first_output_latency = None;
         self.last_request_duration = None;
+        self.active_phase = None;
         self.active_tools.clear();
         self.status = format!("running  {}", self.session_id);
         SubmitAction::RunTask(text)

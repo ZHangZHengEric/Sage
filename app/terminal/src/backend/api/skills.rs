@@ -7,8 +7,16 @@ use crate::backend::contract::{
 };
 use crate::backend::SkillInfo;
 
-pub(crate) fn list_skills(user_id: &str, workspace: Option<&Path>) -> Result<Vec<SkillInfo>> {
-    let value = run_cli_command(CliJsonCommand::SkillsList { user_id, workspace })?;
+pub(crate) fn list_skills(
+    user_id: &str,
+    agent_id: Option<&str>,
+    workspace: Option<&Path>,
+) -> Result<Vec<SkillInfo>> {
+    let value = run_cli_command(CliJsonCommand::SkillsList {
+        user_id,
+        agent_id,
+        workspace,
+    })?;
     let items = expect_array_field(&value, "list", "skills.list")?;
 
     Ok(items

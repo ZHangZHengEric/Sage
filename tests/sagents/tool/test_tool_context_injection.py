@@ -11,6 +11,7 @@ from sagents.tool.tool_schema import (
     SageMcpToolSpec,
     StreamableHttpServerParameters,
     ToolSpec,
+    convert_spec_to_openai_format,
 )
 
 
@@ -161,6 +162,28 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_kwargs["foo"], "bar")
         self.assertEqual(call_kwargs["session_id"], "session-4")
         self.assertEqual(call_kwargs["user_id"], "user-4")
+
+    def test_auto_injected_params_are_hidden_from_openai_schema(self):
+        tool = McpToolSpec(
+            name="remote_echo",
+            description="echo",
+            description_i18n={},
+            func=None,
+            parameters={
+                "foo": {"type": "string"},
+                "session_id": {"type": "string"},
+                "user_id": {"type": "string"},
+            },
+            required=["foo"],
+            server_name="remote",
+            server_params=StreamableHttpServerParameters(url="http://example.invalid"),
+        )
+
+        openai_tool = convert_spec_to_openai_format(tool)
+        params = openai_tool["function"]["parameters"]
+
+        self.assertEqual(set(params["properties"].keys()), {"foo"})
+        self.assertEqual(params["required"], ["foo"])
 
     async def test_tool_service_passes_user_id_to_tool_manager(self):
         fake_manager = type("FakeManager", (), {})()

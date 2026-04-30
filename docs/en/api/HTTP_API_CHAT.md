@@ -41,6 +41,26 @@ Shared validation: `messages` must be non-empty. `user_id` can be injected from 
 - `POST /api/conversations/{session_id}/rerun-stream`: does not require `messages` in the request body. The server loads the last user turn and re-runs the stream. Optional `RerunStreamRequest` fields override `agent_id`, sub-agents, mode, etc. Same `text/plain` stream shape as `web-stream`.
 - `POST /api/conversations/{session_id}/edit-last-user-message` updates the stored last **user** message; call `rerun-stream` after if you need a new model response.
 
+## `tool_progress` events in the stream
+
+In addition to regular `message` events, the NDJSON stream from any of the three
+endpoints above may also contain `tool_progress` events that carry incremental
+output from a tool while it is still running:
+
+```json
+{"type":"tool_progress","tool_call_id":"call_abc","text":"...","stream":"stdout","closed":false,"ts":1761700000.123}
+```
+
+- UI-only. These events **never** enter session history / MessageManager / the
+  LLM context.
+- Clients aggregate by `tool_call_id` into the corresponding tool card;
+  `closed: true` marks the end of the live stream.
+- Downstream consumers that don't care can simply ignore lines with
+  `type=tool_progress`; the existing protocol is fully preserved.
+- To disable: set `SAGE_TOOL_PROGRESS_ENABLED=false` on the server.
+
+See [Architecture · §12 Tool live-progress channel](../architecture/ARCHITECTURE_SAGENTS_TOOL_SKILL.md#12-tool-live-progress-channel-tool_progress).
+
 ## Interrupt
 
 `POST /api/sessions/{session_id}/interrupt` stops a running session at the engine level. That is different from the automatic stop inside `web-stream` / `rerun-stream` when the same session is replaced.

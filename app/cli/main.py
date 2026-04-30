@@ -269,6 +269,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
     sessions_inspect_parser.add_argument("--json", action="store_true", help="Print session details as JSON")
     sessions_inspect_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
 
+    agents_parser = subparsers.add_parser("agents", help="List visible CLI agents")
+    agents_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
+    agents_parser.add_argument("--json", action="store_true", help="Print agents as JSON")
+    agents_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
+
     skills_parser = subparsers.add_parser("skills", help="List available CLI skills")
     skills_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
     skills_parser.add_argument("--agent-id", dest="agent_id", help="Show the skills currently available to a specific agent")
@@ -457,7 +462,16 @@ def _empty_stats(*, request, workspace: Optional[str]) -> Dict[str, Any]:
         "completion_tokens": None,
         "total_tokens": None,
         "per_step_info": [],
+        "tool_steps": [],
+        "phase_timings": [],
+        "_active_tool_steps": {},
+        "_next_tool_step": 1,
         "_tool_tag_buffer": "",
+        "_phase_totals": {},
+        "_phase_order": [],
+        "_active_phase": None,
+        "_active_phase_started_at": None,
+        "_last_event_timestamp": None,
     }
 
 
@@ -545,6 +559,128 @@ def _collect_event_file_paths(event: Dict[str, Any], *, content_buffer: str = ""
 
 
 def _record_stats_event(stats: Dict[str, Any], event: Dict[str, Any], start_time: float) -> None:
+    def _event_timestamp() -> float:
+        timestamp = event.get("timestamp")
+        if isinstance(timestamp, (int, float)):
+            return float(timestamp)
+        return round(time.time(), 3)
+
+    def _finalize_active_phase(until_timestamp: float) -> None:
+        phase = stats.get("_active_phase")
+        started_at = stats.get("_active_phase_started_at")
+        if not phase or not isinstance(started_at, (int, float)):
+            return
+
+        totals = stats["_phase_totals"].setdefault(
+            phase,
+            {
+                "phase": phase,
+                "started_at": float(started_at),
+                "finished_at": float(until_timestamp),
+                "duration_ms": 0.0,
+                "segment_count": 0,
+            },
+        )
+        totals["started_at"] = min(float(totals.get("started_at") or started_at), float(started_at))
+        totals["finished_at"] = max(
+            float(totals.get("finished_at") or until_timestamp),
+            float(until_timestamp),
+        )
+        totals["duration_ms"] = float(totals.get("duration_ms") or 0.0) + max(
+            0.0,
+            (float(until_timestamp) - float(started_at)) * 1000.0,
+        )
+        totals["segment_count"] = int(totals.get("segment_count") or 0) + 1
+        stats["_active_phase"] = None
+        stats["_active_phase_started_at"] = None
+
+    def _start_phase(phase: str, timestamp: float) -> None:
+        if stats.get("_active_phase") == phase:
+            return
+        _finalize_active_phase(timestamp)
+        stats["_active_phase"] = phase
+        stats["_active_phase_started_at"] = timestamp
+        if phase not in stats["_phase_totals"]:
+            stats["_phase_totals"][phase] = {
+                "phase": phase,
+                "started_at": timestamp,
+                "finished_at": timestamp,
+                "duration_ms": 0.0,
+                "segment_count": 0,
+            }
+            stats["_phase_order"].append(phase)
+
+    def _start_tool_step(tool_name: str, tool_call_id: Optional[str]) -> None:
+        key = tool_call_id or f"synthetic:{tool_name}:{stats['_next_tool_step']}"
+        if key in stats["_active_tool_steps"]:
+            return
+        step = {
+            "step": stats["_next_tool_step"],
+            "tool_name": tool_name or "unknown",
+            "tool_call_id": tool_call_id,
+            "status": "running",
+            "started_at": _event_timestamp(),
+            "finished_at": None,
+            "duration_ms": None,
+        }
+        stats["_next_tool_step"] += 1
+        stats["_active_tool_steps"][key] = step
+        stats["tool_steps"].append(step)
+
+    def _finish_tool_step(tool_call_id: Optional[str], tool_name: Optional[str]) -> None:
+        key = tool_call_id or ""
+        step = stats["_active_tool_steps"].get(key) if key else None
+        if step is None and tool_name:
+            for candidate in reversed(stats["tool_steps"]):
+                if candidate.get("tool_name") == tool_name and candidate.get("status") == "running":
+                    step = candidate
+                    break
+        if step is None:
+            _start_tool_step(tool_name or "unknown", tool_call_id)
+            step = stats["tool_steps"][-1]
+        finished_at = _event_timestamp()
+        step["status"] = "completed"
+        step["finished_at"] = finished_at
+        started_at = step.get("started_at")
+        if isinstance(started_at, (int, float)):
+            step["duration_ms"] = max(0.0, (finished_at - float(started_at)) * 1000.0)
+        if key:
+            stats["_active_tool_steps"].pop(key, None)
+
+    def _event_phase(tool_names: List[str]) -> Optional[str]:
+        event_type = str(event.get("type") or "").strip()
+        role = str(event.get("role") or "").strip()
+        content = event.get("content")
+
+        if event_type in {"token_usage", "stream_end", "start", "done", "cli_stats"}:
+            return None
+        if event_type in {
+            "thinking",
+            "reasoning_content",
+            "task_analysis",
+            "analysis",
+            "plan",
+            "observation",
+        }:
+            return "planning"
+        if event_type in {"tool_call", "tool_result"} or role == "tool" or tool_names:
+            return "tool"
+        if (
+            content
+            and isinstance(content, str)
+            and (
+                event_type in {"text", "assistant", "message", "do_subtask_result"}
+                or role in {"assistant", "agent"}
+            )
+        ):
+            return "assistant_text"
+        if event_type in {"error", "cli_error"}:
+            return "error"
+        return None
+
+    event_timestamp = _event_timestamp()
+    stats["_last_event_timestamp"] = event_timestamp
+
     session_id = event.get("session_id")
     if session_id and not stats["session_id"]:
         stats["session_id"] = session_id
@@ -573,12 +709,92 @@ def _record_stats_event(stats: Dict[str, Any], event: Dict[str, Any], start_time
     if has_visible_output and stats["first_output_seconds"] is None:
         stats["first_output_seconds"] = round(time.monotonic() - start_time, 3)
 
+    phase = _event_phase(tool_names)
+    if phase:
+        _start_phase(phase, event_timestamp)
+
+    if event.get("type") == "tool_call":
+        for tool_call in event.get("tool_calls") or []:
+            if not isinstance(tool_call, dict):
+                continue
+            function = tool_call.get("function") or {}
+            tool_name = function.get("name")
+            tool_call_id = tool_call.get("id")
+            if isinstance(tool_name, str) and tool_name.strip():
+                _start_tool_step(tool_name.strip(), str(tool_call_id).strip() or None)
+
+    event_type = event.get("type")
+    role = event.get("role")
+    if event_type == "tool_result" or role == "tool":
+        tool_call_id = event.get("tool_call_id")
+        tool_name = None
+        metadata = event.get("metadata") or {}
+        if isinstance(metadata.get("tool_name"), str):
+            tool_name = metadata.get("tool_name")
+        if not tool_name and isinstance(event.get("tool_name"), str):
+            tool_name = event.get("tool_name")
+        _finish_tool_step(
+            str(tool_call_id).strip() or None if tool_call_id else None,
+            str(tool_name).strip() if isinstance(tool_name, str) and tool_name.strip() else None,
+        )
+
     if event.get("type") == "token_usage":
-        token_usage = (event.get("metadata") or {}).get("token_usage") or {}
-        stats["prompt_tokens"] = token_usage.get("prompt_tokens")
-        stats["completion_tokens"] = token_usage.get("completion_tokens")
-        stats["total_tokens"] = token_usage.get("total_tokens")
+        metadata = event.get("metadata") or {}
+        token_usage = metadata.get("token_usage") or {}
+        total_info = token_usage.get("total_info") or {}
+        stats["prompt_tokens"] = total_info.get("prompt_tokens")
+        stats["completion_tokens"] = total_info.get("completion_tokens")
+        stats["total_tokens"] = total_info.get("total_tokens")
         stats["per_step_info"] = token_usage.get("per_step_info") or []
+        tool_steps = metadata.get("tool_steps") or []
+        if isinstance(tool_steps, list) and tool_steps:
+            stats["tool_steps"] = tool_steps
+        phase_timings = metadata.get("phase_timings") or []
+        if isinstance(phase_timings, list) and phase_timings:
+            stats["phase_timings"] = phase_timings
+
+
+def _finalize_stats(stats: Dict[str, Any], finished_at: Optional[float] = None) -> None:
+    active_phase = stats.get("_active_phase")
+    active_started_at = stats.get("_active_phase_started_at")
+    if active_phase and isinstance(active_started_at, (int, float)):
+        last_event_timestamp = stats.get("_last_event_timestamp")
+        end_timestamp = finished_at
+        if not isinstance(end_timestamp, (int, float)):
+            end_timestamp = last_event_timestamp
+        if isinstance(end_timestamp, (int, float)):
+            totals = stats["_phase_totals"].setdefault(
+                active_phase,
+                {
+                    "phase": active_phase,
+                    "started_at": float(active_started_at),
+                    "finished_at": float(end_timestamp),
+                    "duration_ms": 0.0,
+                    "segment_count": 0,
+                },
+            )
+            totals["started_at"] = min(
+                float(totals.get("started_at") or active_started_at),
+                float(active_started_at),
+            )
+            totals["finished_at"] = max(
+                float(totals.get("finished_at") or end_timestamp),
+                float(end_timestamp),
+            )
+            totals["duration_ms"] = float(totals.get("duration_ms") or 0.0) + max(
+                0.0,
+                (float(end_timestamp) - float(active_started_at)) * 1000.0,
+            )
+            totals["segment_count"] = int(totals.get("segment_count") or 0) + 1
+            stats["_active_phase"] = None
+            stats["_active_phase_started_at"] = None
+
+    if not stats.get("phase_timings"):
+        stats["phase_timings"] = [
+            stats["_phase_totals"][phase]
+            for phase in stats.get("_phase_order") or []
+            if phase in stats["_phase_totals"]
+        ]
 
 
 def _print_stats(stats: Dict[str, Any], *, json_output: bool) -> None:
@@ -601,6 +817,8 @@ def _print_stats(stats: Dict[str, Any], *, json_output: bool) -> None:
                     "completion_tokens": stats.get("completion_tokens"),
                     "total_tokens": stats.get("total_tokens"),
                     "per_step_info": stats.get("per_step_info") or [],
+                    "tool_steps": stats.get("tool_steps") or [],
+                    "phase_timings": stats.get("phase_timings") or [],
                 },
                 ensure_ascii=False,
             )
@@ -653,8 +871,90 @@ def _print_stats(stats: Dict[str, Any], *, json_output: bool) -> None:
                 f"total={usage.get('total_tokens')}"
             )
 
+    tool_steps = stats.get("tool_steps") or []
+    if tool_steps:
+        output_lines.append("tool_steps:")
+        for step in tool_steps:
+            duration_ms = step.get("duration_ms")
+            duration_text = (
+                f"{duration_ms:.0f}ms"
+                if isinstance(duration_ms, (int, float))
+                else str(step.get("status") or "unknown")
+            )
+            output_lines.append(
+                "  - "
+                f"#{step.get('step')} {step.get('tool_name')} ({duration_text})"
+            )
+
+    phase_timings = stats.get("phase_timings") or []
+    if phase_timings:
+        output_lines.append("phase_timings:")
+        for phase in phase_timings:
+            duration_ms = phase.get("duration_ms")
+            duration_text = (
+                f"{duration_ms:.0f}ms"
+                if isinstance(duration_ms, (int, float))
+                else "unknown"
+            )
+            output_lines.append(
+                "  - "
+                f"{phase.get('phase')} ({duration_text}, segments={phase.get('segment_count', 0)})"
+            )
+
     sys.stdout.write("\n".join(output_lines) + "\n")
     sys.stdout.flush()
+
+
+def _tool_step_event_key(step: Dict[str, Any]) -> str:
+    tool_call_id = step.get("tool_call_id")
+    if isinstance(tool_call_id, str) and tool_call_id.strip():
+        return tool_call_id.strip()
+    return f"step:{step.get('step')}"
+
+
+def _snapshot_tool_steps(stats: Dict[str, Any]) -> Dict[str, str]:
+    snapshot: Dict[str, str] = {}
+    for step in stats.get("tool_steps") or []:
+        if not isinstance(step, dict):
+            continue
+        snapshot[_tool_step_event_key(step)] = str(step.get("status") or "")
+    return snapshot
+
+
+def _emit_json_tool_events(
+    previous_steps: Dict[str, str],
+    current_steps: List[Dict[str, Any]],
+) -> None:
+    for step in current_steps:
+        if not isinstance(step, dict):
+            continue
+        key = _tool_step_event_key(step)
+        previous_status = previous_steps.get(key)
+        current_status = str(step.get("status") or "")
+        if current_status == previous_status:
+            continue
+
+        action = None
+        if current_status == "running" and previous_status is None:
+            action = "started"
+        elif previous_status == "running" and current_status in {"completed", "failed"}:
+            action = "finished"
+        if not action:
+            continue
+
+        print(
+            json.dumps(
+                {
+                    "type": "cli_tool",
+                    "action": action,
+                    "step": step.get("step"),
+                    "tool_name": step.get("tool_name"),
+                    "tool_call_id": step.get("tool_call_id"),
+                    "status": current_status,
+                },
+                ensure_ascii=False,
+            )
+        )
 
 
 def _emit_stream_idle_notice(idle_seconds: float) -> None:
@@ -751,8 +1051,26 @@ async def _stream_request(request, json_output: bool, stats_output: bool, worksp
 
             last_event_time = time.monotonic()
             last_notice_time = None
+            previous_phase = stats.get("_active_phase")
+            previous_tool_steps = _snapshot_tool_steps(stats)
             _record_stats_event(stats, event, start_time)
             if json_output:
+                next_phase = stats.get("_active_phase")
+                if (
+                    isinstance(next_phase, str)
+                    and next_phase
+                    and next_phase != previous_phase
+                ):
+                    print(
+                        json.dumps(
+                            {
+                                "type": "cli_phase",
+                                "phase": next_phase,
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
+                _emit_json_tool_events(previous_tool_steps, stats.get("tool_steps") or [])
                 print(json.dumps(event, ensure_ascii=False))
             else:
                 _print_plain_event(event, render_state)
@@ -762,6 +1080,7 @@ async def _stream_request(request, json_output: bool, stats_output: bool, worksp
         with suppress(asyncio.CancelledError):
             await producer_task
     stats["elapsed_seconds"] = round(time.monotonic() - start_time, 3)
+    _finalize_stats(stats)
     if stats_output:
         _print_stats(stats, json_output=json_output)
     return 0
@@ -1121,6 +1440,35 @@ async def _skills_command(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _agents_command(args: argparse.Namespace) -> int:
+    from app.cli.service import cli_db_runtime, list_cli_agents
+
+    async with cli_db_runtime(verbose=args.verbose):
+        result = await list_cli_agents(user_id=args.user_id)
+
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    print(f"user_id: {result['user_id']}")
+    print(f"total: {result['total']}")
+    agents = result.get("list") or []
+    if not agents:
+        print("agents:\n  (none)")
+        return 0
+
+    print("agents:")
+    for item in agents:
+        print(
+            f"  - {item.get('agent_id')} | {item.get('name')} | "
+            f"mode={item.get('agent_mode')} | default={item.get('is_default')}"
+        )
+        updated_at = item.get("updated_at")
+        if updated_at:
+            print(f"    updated_at: {updated_at}")
+    return 0
+
+
 def _config_show_command(args: argparse.Namespace) -> int:
     from app.cli.service import collect_config_info
 
@@ -1280,6 +1628,8 @@ async def _main_async(args: argparse.Namespace) -> int:
             return await _doctor_command(args)
         if args.command == "sessions":
             return await _sessions_command(args)
+        if args.command == "agents":
+            return await _agents_command(args)
         if args.command == "skills":
             return await _skills_command(args)
         if args.command == "config" and args.config_command == "show":

@@ -1,3 +1,7 @@
+2026-04-29 21:00 tool_progress 节流：emit_tool_progress 默认按 (tool_call_id, stream) 做 50ms 时间窗 / 16KB 字节阈值合并；closed 与 unregister 强制 flush / cancel pending；新增 5 条合并单测，全套 23/23 绿；docs ENV_VARS + 架构 §12 同步。
+
+2026-04-28 19:30 工具流式过程通道（v4 · Codex 风格）：新增 sagents/tool/tool_progress.py 与 emit_tool_progress；AgentBase._execute_tool 用 contextvars 绑定 session_id/tool_call_id；ChatService 在 NDJSON 通道并入新事件 type=tool_progress；execute_shell_command 阻塞等待时按 tail 增量推送 stdout/stderr；前端 useChatPage 识别后追加到 ToolCallRenderer 的 live area；不进 MessageManager / 不喂 LLM；总开关 SAGE_TOOL_PROGRESS_ENABLED；新增 18 条单测全绿。
+
 2026-04-29 SimpleAgent tool_choice=required 改为环境变量 SAGE_FORCE_TOOL_CHOICE_REQUIRED 控制（默认关闭，避免不支持的模型报错），调用方传入参数仍优先生效。
 
 2026-04-29 server web ModelProviderList 与 desktop 对齐：采样参数（temperature/top_p/presence_penalty/max_tokens/max_model_len）默认 null，提交走 optionalNumber 显式 null 下发；后端 sanitize_model_request_kwargs 会丢弃 None 字段，OpenAI SDK 不会收到空值。
@@ -38,7 +42,7 @@
 
 2026-04-27 23:05 shell tool GC + reminder 优化：system_reminder tail 截至 512B 尾部优先 + 提示调 await_shell 拿完整结果；pop_completion_events 不删 _BG_TASKS；加 12h 超期 GC（每次 spawn 触发）；补测试 11 项全绿。
 
-2026-04-27 22:15 shell 工具反轮询优化：execute_command_tool 加后台 completion watcher 与 session 级事件字典；_call_llm_streaming 每次请求前 flush 为 <system_reminder> 注入；await_shell 默认 600s + 自适应改写 + 元数据；统一 system prompt 加 reminder 语义说明；新增单元测试。
+2026-04-27 22:15 shell 工具反轮询优化：execute_command_tool 加后台 completion watcher 与 session 级事件字典；_call_llm_streaming 每次请求前 flush 为  注入；await_shell 默认 600s + 自适应改写 + 元数据；统一 system prompt 加 reminder 语义说明；新增单元测试。
 
 2026-04-27 20:05 turn_status 上下文裁剪策略升级 + reasoning_effort 修正：strip_turn_status_from_llm_context 新增"保留最后一条 turn_status pair"，避免模型看不到自己上一轮状态决策反复重刷；新增白名单式 is_openai_reasoning_model 替换 agent_base 宽匹配（不再误伤 gpt-4o 等）；抽出 resolve_reasoning_effort，思考关闭时默认仍 low，新增 SAGE_REASONING_EFFORT_OFF 环境变量按需切 minimal/medium/high；补 strip 与 reasoning 判定/effort 单测。
 
@@ -54,7 +58,7 @@
 
 2026-04-27 18:30 turn_status reject 让模型可见：SimpleAgent 拒绝时给 tool 结果打 metadata.turn_status_rejected=True；strip_turn_status_from_llm_context 按标记保留这对 pair（含同条 assistant 里的 turn_status tool_call），SSE 仍按 tool_call_id 隐藏。修复 reject 后模型上下文丢失反馈、反复重蹈覆辙的问题。补 4 条单测。
 
-2026-04-27 18:05 隐藏工具过滤抽常量 + 续片鲁棒性：HIDDEN_FROM_STREAM_TOOL_NAMES 移到 sagents/tool/impl/__init__.py；helper 重命名 _redact_hidden_tools_from_chunk 并改用 _HiddenToolStreamState（新增 last_was_hidden 贪心续接，覆盖 id/index 都缺失的兼容场景）；补两条续片单测。
+2026-04-27 18:05 隐藏工具过滤抽常量 + 续片鲁棒性：HIDDEN_FROM_STREAM_TOOL_NAMES 移到 sagents/tool/impl/**init**.py；helper 重命名 _redact_hidden_tools_from_chunk 并改用 _HiddenToolStreamState（新增 last_was_hidden 贪心续接，覆盖 id/index 都缺失的兼容场景）；补两条续片单测。
 
 2026-04-27 17:55 SAgent.run_stream 出口最小过滤 turn_status：新增模块级 helper，按流局部 call_ids/index→id 状态识别 tool_call 续片与对应 tool 结果，整体丢弃；落盘与 LLM 上下文剔除均不变。
 
@@ -68,7 +72,7 @@
 
 2026-04-28 22:30 修复 CommonAgent.process_tool_response 重写未跟随 agent_base 新签名（tool_name 第 3 参），导致 _execute_tool 调用时 TypeError，工具结果走错误分支被吞，前端文字之后第一个非 turn_status 工具结果消失；同时把 metadata.tool_name 写入 CommonAgent 的工具结果，前端兜底过滤一致。
 
-2026-04-28 22:15 MessageChunk.__post_init__：将 role 规范为字符串；修复传入 MessageRole 枚举时 redact/校验与 ".value" 比较不命中导致 turn_status 泄漏。成功体启发式对 content 先 strip 再 json.loads。
+2026-04-28 22:15 MessageChunk.**post_init**：将 role 规范为字符串；修复传入 MessageRole 枚举时 redact/校验与 ".value" 比较不命中导致 turn_status 泄漏。成功体启发式对 content 先 strip 再 json.loads。
 
 2026-04-28 22:00 SSE redact：tool 块 metadata.tool_name=turn_status 一律不下发；单测覆盖。workbench 防误写保留兜底。
 
@@ -124,11 +128,11 @@
 
 2026-04-27 12:25 修复 AnyTool MCP 502：DB 等存储的 streamable_http_url 残留旧端口与 SAGE_PORT 不一致时，mcp_service 对 kind=anytool 按 _get_backend_port 重写 URL。
 
-2026-04-27 12:05 修复桌面端打包后 fetch 报 CORS：为 Tauri 源增加显式 allow_origins（tauri://localhost、http/https://tauri.localhost）与锚定 fullmatch 正则；main 设置 SAGE_INTERNAL_DESKTOP_PROCESS=1 防止误走 server 空 CORS； abilities 等接口若仍 500 可在修复 CORS 后从响应体看到真实错误。
+2026-04-27 12:05 修复桌面端打包后 fetch 报 CORS：为 Tauri 源增加显式 allow_origins（tauri://localhost、http/[https://tauri.localhost）与锚定](https://tauri.localhost）与锚定) fullmatch 正则；main 设置 SAGE_INTERNAL_DESKTOP_PROCESS=1 防止误走 server 空 CORS； abilities 等接口若仍 500 可在修复 CORS 后从响应体看到真实错误。
 
 2026-04-26 23:50 桌面端构建优化两项：(1) PyInstaller 配置统一到 sage-desktop.spec，build.sh 不再传一长串 flags，仅通过 SAGE_PYI_MODE 控制 strip；(2) CSP 收紧，default-src 'self'、script-src 仅 'self'（彻底禁止 inline script），style-src 保留 'unsafe-inline' 兼容 radix-vue 运行时样式，显式声明 img/media/font/connect/worker/object/base-uri/frame-ancestors。
 
-2026-04-26 23:30 修复桌面端打包后白色滚动条问题：根因是 Tauri CSP 未含 'unsafe-inline'，拦截了 radix-vue 运行时注入的隐藏原生滚动条 <style>，导致 macOS native overlay scrollbar 漏出。index.css 显式声明 [data-radix-scroll-area-viewport] 隐藏原生滚动条规则；tauri.conf.json CSP 增加 style-src 'unsafe-inline' 与 img-src/media-src 放行 asset/blob/data。
+2026-04-26 23:30 修复桌面端打包后白色滚动条问题：根因是 Tauri CSP 未含 'unsafe-inline'，拦截了 radix-vue 运行时注入的隐藏原生滚动条 ，导致 macOS native overlay scrollbar 漏出。index.css 显式声明 [data-radix-scroll-area-viewport] 隐藏原生滚动条规则；tauri.conf.json CSP 增加 style-src 'unsafe-inline' 与 img-src/media-src 放行 asset/blob/data。
 
 2026-04-26 22:55 桌面端切断对 server/web 的跨项目引用：McpServerAdd/AnyToolToolEditor 直接复制源码至 desktop，并新建 AnyToolSchemaFieldEditor，导入路径全部改为 @/ 别名；移除 vite.config 的 lucide-vue-next/pinia alias 与 tailwind.config 中 server/web 内容路径；build.sh 增加 --collect-submodules=sagents 修复 PyInstaller 漏打包基础工具。
 
@@ -266,7 +270,7 @@
 
 2026-04-21 22:30 修复 sage 上传图片两个问题：1) 输入框 markdown alt 与最终 URL 文件名不一致（原 png/被压成 jpg + 时间戳后缀）——oss.uploadFile 改返回 {url, filename}，MessageInput/ChipInput 在上传完成后用服务端文件名刷新 chip 与 file.name，buildOrderedMultimodalContent 直接取 URL 末段作为 alt，desktop+server-web 同步；2) image_url 没转 base64 导致 dashscope 报 InvalidParameter——multimodal_image.process_multimodal_content 增加本机地址 HTTP 抓取兜底（httpx 已在 requirements），Path.home 反解失败时再走 GET URL→压缩→data:image/jpeg;base64 分支，加 warning/error 日志便于排查。
 
-2026-04-21 21:30 server 端登录页：当 allow_registration=false 时新增显眼提示——告知当前网页不允许创建新用户，推荐下载桌面版 https://zavixai.com/html/sage.html，或自行从 GitHub 部署 Web 版，并附微信联系方式 cfyz0814 / zhangzheng-thu。新增 zh/en 文案和 2 条 Login 单测，全部通过。
+2026-04-21 21:30 server 端登录页：当 allow_registration=false 时新增显眼提示——告知当前网页不允许创建新用户，推荐下载桌面版 [https://zavixai.com/html/sage.html，或自行从](https://zavixai.com/html/sage.html，或自行从) GitHub 部署 Web 版，并附微信联系方式 cfyz0814 / zhangzheng-thu。新增 zh/en 文案和 2 条 Login 单测，全部通过。
 
 2026-04-21 17:10 限制 Fibre 专属工具仅在 fibre 模式下可选：AgentEdit.vue 增加 isFibreOnlyToolUnavailable，非 fibre 模式下 sys_spawn_agent / sys_delegate_task / sys_finish_task 复选框禁用并打「仅 Fibre 模式」徽章 + 提示；模式切出 fibre 时自动从 availableTools 移除；后端 chat router 新增 _sync_fibre_only_tools 兜底，非 fibre 请求强制剔除这三个工具。
 
@@ -278,7 +282,7 @@
 
 2026-04-21 11:35 修复未装/离线浏览器扩展时仍把 12 个 browser_* 工具注入到 chat 请求的问题：browser_capability.get_browser_tool_sync_state 在扩展从未连接时把 supported_tools 默认成全集且不按 online 过滤，被 chat router 当成 online_browser_tools 全部 append。改为仅在 online 时返回 supported_tools，否则返回 [] ；_sync_browser_tools_for_request 离线时无条件清空所有浏览器工具，并补充日志便于排查。
 
-2026-04-21 11:20 修复 desktop 启动后 impl/ 下多数工具丢失问题：commit 4f9ff693 将 sagents/tool/impl/__init__.py 改为懒加载 __getattr__，导致 ToolManager.discover_tools_from_path 仅 `import sagents.tool.impl` 时不再触发子模块加载，@tool 装饰器未执行。改为默认调用 _discover_import_path 扫描 impl 目录，工具注册数从个位数恢复到 19。
+2026-04-21 11:20 修复 desktop 启动后 impl/ 下多数工具丢失问题：commit 4f9ff693 将 sagents/tool/impl/**init**.py 改为懒加载 **getattr**，导致 ToolManager.discover_tools_from_path 仅 `import sagents.tool.impl` 时不再触发子模块加载，@tool 装饰器未执行。改为默认调用 _discover_import_path 扫描 impl 目录，工具注册数从个位数恢复到 19。
 
 2026-04-21 文档站侧边栏真正根因：`docs/_includes/components/sidebar.html` 自定义实现里对 `nav_pages` 单层 for 循环输出链接，未调用主题自带的 `components/nav/pages.html`（parent 分组 + 递归子菜单），故无论 front matter 是否正确，左侧始终为扁平列表；已改为 `where` 过滤语言后 `include components/nav/pages.html`，恢复「架构」下二级菜单。
 
@@ -298,7 +302,7 @@
 
 2026-04-18 sandbox/_stdout_echo 增加 48 条单测（test_stdout_echo.py），覆盖 echo 开关全部取值、空/None/异常 stdout 兜底、header 截断、footer 各种 rc、流式 helper 的 stdout/stderr 隔离/cwd/env/大输出/非 UTF-8/实时性断言/超时；测试中发现 timeout 路径会被持有 pipe 的子孙进程（如 sleep）阻塞 drain 线程~4s 的回归，顺手修：Popen 加 start_new_session，超时改成 killpg(SIGKILL) 干掉整个进程组，并去掉 raise 前重复的 join。
 
-2026-04-18 ExecuteCommandTool/沙箱命令实时回显：新增 sandbox/_stdout_echo（含 echo_chunk/header/footer 与 run_with_streaming_stdout helper），LocalSandboxProvider 直接路径在 read_output 里增量写 sys.stdout；Seatbelt/Bwrap parent 改用流式 helper 转发 stdout、stderr 单独捕获用于报错；launcher.py shell mode 也从 subprocess.run 换成 Popen+双线程 drain，命令 stdout 实时透传到外层；三处 isolation 始终覆盖 launcher.py 让升级生效；ExecuteCommandTool 加 $ <cmd> / ↪ rc=N 头尾分隔。受 SAGE_ECHO_SHELL_OUTPUT 控制，默认开启，0/false/no/off/空 关闭。
+2026-04-18 ExecuteCommandTool/沙箱命令实时回显：新增 sandbox/_stdout_echo（含 echo_chunk/header/footer 与 run_with_streaming_stdout helper），LocalSandboxProvider 直接路径在 read_output 里增量写 sys.stdout；Seatbelt/Bwrap parent 改用流式 helper 转发 stdout、stderr 单独捕获用于报错；launcher.py shell mode 也从 subprocess.run 换成 Popen+双线程 drain，命令 stdout 实时透传到外层；三处 isolation 始终覆盖 launcher.py 让升级生效；ExecuteCommandTool 加 $  / ↪ rc=N 头尾分隔。受 SAGE_ECHO_SHELL_OUTPUT 控制，默认开启，0/false/no/off/空 关闭。
 
 2026-04-18 放开 todo 子任务"≤10"硬上限：task_decompose_prompts 三语全删掉 10 条上限，改成按复杂度自适应（trivial 1-3 / 常规 5-15 / 复杂多阶段 15-40+），并要求带"和/然后"或跨多文件的步骤必须继续拆；同步在 todo_write 工具描述里补上同样的颗粒度指导，让不走 task_decompose 的 SimpleAgent 也能拿到信号。
 
@@ -375,7 +379,7 @@
 2026-03-06 20:30:00 完善 Orchestrator 子会话创建流程：适配 `AgentFlow` 执行简单子 Agent，修正 `_get_or_create_sub_session` 和 `delegate_task` 的调用逻辑，确保路径、上下文及 Orchestrator 引用正确传递。
 2026-03-06 20:40:00 规范化 Session 空间变量名：将 `session_space` 全局重构为 `session_root_space`，明确其作为根目录的语义，避免与具体 Session 工作区混淆。修正 Orchestrator 中的异步调用遗漏。
 2026-03-06 20:50:00 优化 Session 持久化与发现机制：SessionContext.save() 现统一保存为 `session_context.json`（包含上下文、状态、配置概要），移除旧的 agent_config/session_status 文件；SessionManager 新增 `_scan_sessions` 自动建立路径索引，实现对任意嵌套深度会话的 O(1) 访问。
-2026-03-06 21:00:00 清理旧版配置文件加载逻辑：SessionRuntime._load_saved_system_context 已完全移除对 session_status_*.json 的读取，仅支持标准的 session_context.json；SessionContext._load_persisted_messages 仅保留从 messages.json 加载消息，确保不再读取已废弃的旧格式文件。
+2026-03-06 21:00:00 清理旧版配置文件加载逻辑：SessionRuntime.*load_saved_system_context 已完全移除对 session_status**.json 的读取，仅支持标准的 session_context.json；SessionContext._load_persisted_messages 仅保留从 messages.json 加载消息，确保不再读取已废弃的旧格式文件。
 2026-03-06 21:10:00 Agent 接口全面重构：简化 `AgentBase.run_stream` 签名，移除冗余的 `tool_manager` 和 `session_id` 参数，统一通过 `SessionContext` 传递上下文。同步更新所有 Agent 实现、SessionRuntime、FlowExecutor 及 Orchestrator 中的调用逻辑。
 2026-03-06 21:30:00 适配应用层调用：更新 `sage_cli.py` 和 `app/server` 中的 `SAgent` 调用，适配新的 `session_root_space` 参数和 `run_stream` 接口；修复构建脚本 `build_simple.py` 以包含新引入的 `sagents/flow` 模块。
 2026-03-06 21:40:00 适配演示与服务层：更新 `sage_demo.py` 和 `sage_server.py` 以适配 `SAgent` 新接口，并显式配置 `app/server` 启用沙箱。重构了 `run_stream` 的调用逻辑，确保与底层的 Session 机制变更保持一致。

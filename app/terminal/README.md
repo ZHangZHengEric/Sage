@@ -56,6 +56,8 @@ Currently supported startup forms:
 
 ```bash
 sage-terminal
+sage-terminal --agent-id agent_demo
+sage-terminal --agent-id agent_demo --agent-mode fibre
 sage-terminal run "inspect this repo"
 sage-terminal chat "hello"
 sage-terminal config init
@@ -79,6 +81,8 @@ sage-terminal --help
 Common slash commands:
 
 - `/help`
+- `/agent`
+- `/mode`
 - `/new`
 - `/sessions`
 - `/resume`
@@ -99,5 +103,6 @@ Common slash commands:
 - This preview is intended for local development and dogfooding.
 - Packaging and one-command installation are not included yet.
 - The TUI currently relies on the Sage CLI/backend behavior, so CLI runtime configuration must be valid first.
+- Agent selection is still lightweight: the TUI can override `agent_id` and `agent_mode`, but the actual agent configuration remains owned by the Sage CLI/runtime and its stored agent config.
 - Runtime lookup now supports explicit CLI/Python overrides, bundled `sage` / Python fallbacks, and packaged-layout state roots as a first distribution step.
 - The repo now also includes a minimal launcher wrapper at `scripts/run-sage-terminal.sh` and a distribution smoke script at `scripts/smoke-runtime-distribution.sh`.

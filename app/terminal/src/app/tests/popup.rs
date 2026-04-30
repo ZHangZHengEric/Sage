@@ -126,6 +126,38 @@ fn provider_popup_matches_catalog_entries() {
 }
 
 #[test]
+fn agent_popup_matches_catalog_entries() {
+    let mut app = App::new();
+    app.set_agent_catalog(vec![
+        (
+            "agent-123".to_string(),
+            "Research Agent".to_string(),
+            "fibre".to_string(),
+            true,
+            "2026-04-28T10:00:00".to_string(),
+        ),
+        (
+            "agent-456".to_string(),
+            "Ops Agent".to_string(),
+            "simple".to_string(),
+            false,
+            "2026-04-27T09:00:00".to_string(),
+        ),
+    ]);
+    app.input = "/agent set agent".to_string();
+    app.input_cursor = app.input.len();
+
+    let matches = app.popup_matches();
+    assert_eq!(matches[0].command, "agent-123");
+    assert!(matches[0].description.contains("fibre"));
+    assert!(matches[0].description.contains("default"));
+    assert!(matches[0]
+        .preview_lines
+        .iter()
+        .any(|line| line.contains("updated: 2026-04-28T10:00:00")));
+}
+
+#[test]
 fn skill_add_popup_matches_catalog_entries() {
     let mut app = App::new();
     app.set_skill_catalog(vec![
@@ -217,4 +249,22 @@ fn submit_selected_skill_popup_returns_skill_action() {
         action,
         Some(super::super::SubmitAction::EnableSkill(skill)) if skill == "github"
     ));
+}
+
+#[test]
+fn submit_selected_agent_popup_executes_agent_command() {
+    let mut app = App::new();
+    app.set_agent_catalog(vec![(
+        "agent-123".to_string(),
+        "Research Agent".to_string(),
+        "multi".to_string(),
+        false,
+        "2026-04-28T10:00:00".to_string(),
+    )]);
+    app.input = "/agent set ag".to_string();
+    app.input_cursor = app.input.len();
+
+    let action = app.submit_selected_popup();
+    assert!(matches!(action, Some(super::super::SubmitAction::Handled)));
+    assert_eq!(app.selected_agent_id.as_deref(), Some("agent-123"));
 }

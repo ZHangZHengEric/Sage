@@ -1,13 +1,31 @@
 use std::path::PathBuf;
 
 use crate::app::{App, MessageKind};
-use crate::backend::{list_providers, list_skills, SessionDetail};
+use crate::backend::{list_agents, list_providers, list_skills, SessionDetail};
 
 pub(crate) fn workspace_root() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
 pub(crate) fn sync_contextual_popup_data(app: &mut App) {
+    if app.needs_agent_catalog() {
+        if let Ok(agents) = list_agents(&app.user_id) {
+            app.set_agent_catalog(
+                agents
+                    .into_iter()
+                    .map(|agent| {
+                        (
+                            agent.agent_id,
+                            agent.name,
+                            agent.agent_mode,
+                            agent.is_default,
+                            agent.updated_at,
+                        )
+                    })
+                    .collect(),
+            );
+        }
+    }
     if app.needs_provider_catalog() {
         if let Ok(providers) = list_providers(&app.user_id) {
             app.set_provider_catalog(
@@ -27,7 +45,11 @@ pub(crate) fn sync_contextual_popup_data(app: &mut App) {
         }
     }
     if app.needs_skill_catalog() {
-        if let Ok(skills) = list_skills(&app.user_id, Some(workspace_root().as_path())) {
+        if let Ok(skills) = list_skills(
+            &app.user_id,
+            app.selected_agent_id.as_deref(),
+            Some(workspace_root().as_path()),
+        ) {
             app.set_skill_catalog(
                 skills
                     .into_iter()

@@ -845,12 +845,32 @@ class Session:
             logger.info(f"SAgent: {phase_name} 阶段被中断，会话ID: {session_id}")
             return
 
-        async for chunk in agent.run_stream(session_context):
-            # 在每个块之间检查中断
-            if session.should_interrupt():
-                logger.info(f"SAgent: {phase_name} 阶段在块处理中被中断，会话ID: {session_id}")
-                return
-            yield chunk
+        phase_status = "completed"
+        session_context.record_timing_event(
+            "agent_phase_start",
+            session_id=session_id,
+            phase_name=phase_name,
+            agent_name=agent.agent_name,
+        )
+        try:
+            async for chunk in agent.run_stream(session_context):
+                # 在每个块之间检查中断
+                if session.should_interrupt():
+                    phase_status = "interrupted"
+                    logger.info(f"SAgent: {phase_name} 阶段在块处理中被中断，会话ID: {session_id}")
+                    return
+                yield chunk
+        except Exception:
+            phase_status = "error"
+            raise
+        finally:
+            session_context.record_timing_event(
+                "agent_phase_end",
+                session_id=session_id,
+                phase_name=phase_name,
+                agent_name=agent.agent_name,
+                status=phase_status,
+            )
 
         logger.info(f"SAgent: {phase_name} 阶段完成")
 
@@ -903,6 +923,16 @@ class Session:
             f"model={primary_model} steps={len(token_usage['per_step_info'])} "
             f"total={token_usage['total_info']}"
         )
+        tool_steps: List[Dict[str, Any]] = []
+        try:
+            tool_steps = session_context._build_tool_step_summary()
+        except Exception as e:
+            logger.warning(f"SAgent: 生成 tool_steps 失败，会话 {session_id}: {e}")
+        phase_timings: List[Dict[str, Any]] = []
+        try:
+            phase_timings = session_context._build_phase_timing_summary()
+        except Exception as e:
+            logger.warning(f"SAgent: 生成 phase_timings 失败，会话 {session_id}: {e}")
 
         return [
             MessageChunk(
@@ -913,6 +943,8 @@ class Session:
                     "token_usage": token_usage,
                     "model": primary_model,
                     "models": list(token_usage.get("models") or []),
+                    "tool_steps": tool_steps,
+                    "phase_timings": phase_timings,
                     "session_id": session_id,
                 },
             )

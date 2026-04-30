@@ -389,6 +389,20 @@ The current summary includes:
 
 Prints structured stream events instead of plain text.
 
+The JSON stream now has three layers:
+
+- raw runtime events such as `assistant`, `analysis`, `tool_call`, and `tool_result`
+- CLI control events such as `cli_phase` and `cli_tool`
+- a final `cli_stats` event when `--stats` is enabled
+
+The intended contract is:
+
+- `cli_phase`: emitted when the CLI detects a phase transition such as `planning`, `tool`, or `assistant_text`
+- `cli_tool`: emitted when a tool step starts or finishes; includes `action`, `step`, `tool_name`, `tool_call_id`, and `status`
+- `cli_stats`: emitted once at the end; includes final `tool_steps`, `phase_timings`, timing summary, and token summary
+
+Consumers should treat `cli_phase` and `cli_tool` as the preferred real-time UI contract, and treat raw `tool_call` / `tool_result` lines as compatibility input rather than the primary surface.
+
 When used together with `--stats`, the CLI appends a final `cli_stats` JSON event for post-run analysis:
 
 ```bash
@@ -401,6 +415,8 @@ This is useful for:
 - comparing runs
 - extracting token usage
 - checking whether tools or skills were actually used
+
+For a concrete end-to-end sample, see `tests/app/cli/fixtures/stream_contract_round_trip.jsonl`.
 
 ## Workspace Usage
 
@@ -435,6 +451,7 @@ Then verify:
 - config values look correct
 - skills output matches what is visible locally
 - stats include the expected user/workspace/skill context
+- JSON mode emits `cli_phase` / `cli_tool` during the run
 - JSON mode ends with a `cli_stats` event
 
 ## Maintainer Validation

@@ -11,6 +11,7 @@ const SESSION_HEADER_MAX_INNER_WIDTH: usize = 56;
 pub(crate) fn welcome_lines(
     width: u16,
     session_id: &str,
+    agent_id: Option<&str>,
     agent_mode: &str,
     max_loop_count: u32,
     workspace_label: &str,
@@ -40,6 +41,12 @@ pub(crate) fn welcome_lines(
             Span::styled(
                 agent_mode.to_string(),
                 Style::default().fg(Color::Rgb(236, 240, 231)),
+            ),
+            Span::raw("   "),
+            Span::styled("agent: ", dim),
+            Span::styled(
+                truncate_middle(agent_id.unwrap_or("(default)"), 18),
+                accent_style(),
             ),
             Span::raw("   "),
             Span::styled("session: ", dim),
