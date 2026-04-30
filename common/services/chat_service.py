@@ -952,6 +952,12 @@ async def execute_chat_session(
     mode: Optional[str] = None,
     **kwargs: Any,
 ):
+    from sagents.tool.tool_progress import (
+        register_progress_queue,
+        unregister_progress_queue,
+    )
+    from common.utils.stream_merge import interleave_message_and_progress
+
     session_id = stream_service.request.session_id
     request = stream_service.request
     original_skills = (
@@ -964,8 +970,14 @@ async def execute_chat_session(
     last_activity_time = time.time()
     token_usage_persisted = False
     token_usage_payload: Optional[Dict[str, Any]] = None
+
+    progress_queue: asyncio.Queue = asyncio.Queue()
+    register_progress_queue(session_id, progress_queue)
+
     try:
-        async for result in stream_service.process_stream():
+        async for kind, payload in interleave_message_and_progress(
+            stream_service.process_stream(), progress_queue
+        ):
             stream_counter += 1
             current_time = time.time()
             if stream_counter % 100 == 0:
@@ -976,6 +988,12 @@ async def execute_chat_session(
                     f"📊 流处理状态 - 计数: {stream_counter}, 间隔: {time_since_last:.3f}s"
                 )
 
+            if kind == "tool_progress":
+                # progress 事件不进 token usage、不进 MessageManager；直接下发
+                yield json.dumps(payload, ensure_ascii=False) + "\n"
+                continue
+
+            result = payload
             token_usage_payload = _extract_token_usage_payload(result) or token_usage_payload
 
             yield_result = result.copy()
@@ -1000,12 +1018,15 @@ async def execute_chat_session(
             ensure_ascii=False,
         ) + "\n"
     finally:
+        unregister_progress_queue(session_id)
         if not token_usage_persisted:
             await _persist_token_usage_if_available(
                 stream_service,
                 token_usage_payload=token_usage_payload,
             )
         await _finalize_session_end(request, original_skills)
+
+
 
 
 async def _finalize_session_end(

@@ -86,6 +86,9 @@ ref: env_vars
 | `SAGE_EMIT_TOOL_CALL_ON_COMPLETE` | `true` | LLM 完整产出后是否补发 tool_call chunk |
 | `SAGE_ECHO_SHELL_OUTPUT` | `false` | 后台 shell 输出是否回显到主流 |
 | `SAGE_FORCE_TOOL_CHOICE_REQUIRED` | `false` | 是否对所有带 tools 的 LLM 调用强制 `tool_choice=required`。默认关闭，避免 OpenAI o1/o3 等不支持该参数的模型报错；显式设为 `1/true/yes/on` 后启用 |
+| `SAGE_TOOL_PROGRESS_ENABLED` | `true` | 是否启用工具实时过程通道（NDJSON `type=tool_progress` 事件，仅给前端 UI，不进 MessageManager / 不喂 LLM） |
+| `SAGE_TOOL_PROGRESS_FLUSH_INTERVAL_MS` | `50` | 工具过程合并时间窗（毫秒）。同 `(tool_call, stream)` 维度下窗口内的多次 emit 合并成一条事件下发；设 `0` 关闭合并立即推送 |
+| `SAGE_TOOL_PROGRESS_FLUSH_BYTES` | `16384` | 单 stream 累计字节阈值，达到即立即 flush（防极快产生输出的命令挤爆通道） |
 
 ## 6. Memory
 

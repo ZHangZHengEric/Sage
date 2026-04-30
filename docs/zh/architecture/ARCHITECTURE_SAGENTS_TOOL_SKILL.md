@@ -294,3 +294,90 @@ skill_manager.add_skill_dir("/path/to/skills_root")
 ```
 
 之后通过 `SkillProxy(skill_manager, available_skills=["my_skill"])` 限定本次会话能看到的技能子集，再传给 `SAgent.run_stream`。
+
+---
+
+## 12. 工具实时过程通道（tool_progress）
+
+长耗时工具（典型如 `execute_shell_command` 阻塞执行）希望在工具完全结束之前
+就把过程输出推到前端 UI，但又不能污染最终给 LLM 的 tool message。Sage 采用
+Codex App Server / Claude Code 的"双 event type"做法：
+
+- **`message` 事件**：保持原状。工具一次性返回的完整结果（含 `exit_code`、
+  `stdout`、`stderr` 等结构化字段）写入 MessageManager / 落盘 / 喂 LLM。
+- **`tool_progress` 事件**：新增的纯过程通道，仅用于前端 UI 实时展示，
+  **不进 MessageManager、不落盘、不喂 LLM**。
+
+### 后端工具如何推送
+
+```python
+from sagents.tool import emit_tool_progress
+
+@tool(name="my_long_tool", description="...")
+async def my_long_tool(...):
+    async for chunk in some_stream():
+        await emit_tool_progress(chunk, stream="stdout")  # 静默 no-op 安全
+    return {"content": "...final structured result..."}
+```
+
+- `emit_tool_progress(text, stream="stdout"|"stderr"|"info")` 是单方向、
+  零受影响 API：未在 chat 上下文中（如 CLI / 单测 / 旧调用方）会静默 no-op。
+- 工具签名/返回值 **不需要任何变化**；MCP 工具不受影响。
+
+### 协议形态
+
+进程内 NDJSON 流里新增一种事件：
+
+```json
+{
+  "type": "tool_progress",
+  "tool_call_id": "call_abc",
+  "text": "...incremental output...",
+  "stream": "stdout",
+  "closed": false,
+  "ts": 1761700000.123
+}
+```
+
+- `tool_call_id` 关联到对应的 assistant tool_call，前端按它聚合。
+- `closed: true` 表示当前工具的过程通道结束，UI 可收起 spinner。
+- 老的 `message` 事件结构完全兼容，不依赖此协议的下游应用无感知。
+
+### 节流 / 合并
+
+`emit_tool_progress` 默认按 `(tool_call_id, stream)` 维度做时间窗合并，避免
+高频小增量挤爆通道：
+
+| 触发条件 | 行为 |
+| --- | --- |
+| 同 stream 距上次 emit < 50ms | 新增文本累积进 buffer，不立刻入队 |
+| 50ms 时间窗到期 | buffer 内容合并成一条 `tool_progress` 事件入队 |
+| 单 stream 累计字节 ≥ 16KB | 立即 flush（即便时间窗未到） |
+| `emit_tool_progress_closed()` | 强制 flush 当前 tool_call 下所有 stream 的残余，再下发 `closed=True` |
+| `unregister_progress_queue()`（chat 结束） | 取消挂起的 flush task，丢弃残余 |
+
+可调环境变量：
+
+- `SAGE_TOOL_PROGRESS_FLUSH_INTERVAL_MS`：默认 `50`。设 `0` 关闭合并、立即推送。
+- `SAGE_TOOL_PROGRESS_FLUSH_BYTES`：默认 `16384`。
+
+合并是无锁、单事件循环内安全的：`flush_task` 用 `asyncio.create_task` 调度，
+新一波 emit 复用同一个 task；超阈值或 closed 时同步 flush 并 cancel task，
+不会出现重复入队。
+
+### 关闭
+
+设环境变量 `SAGE_TOOL_PROGRESS_ENABLED=false`，`emit_tool_progress` 全部
+no-op，不再产生 `tool_progress` 事件。此时前端只能在工具返回后看到完整结果，
+其余功能不变。
+
+### 关键文件
+
+| 模块 | 说明 |
+| --- | --- |
+| `sagents/tool/tool_progress.py` | 协议常量、`contextvars` 绑定、`emit_tool_progress` |
+| `sagents/agent/agent_base.py` | `_execute_tool` 进入工具前 `bind_tool_progress_context` |
+| `common/utils/stream_merge.py` | `interleave_message_and_progress` 把两路事件合到 NDJSON |
+| `common/services/chat_service.py` | 注册 / 注销 progress 队列，下发 `tool_progress` |
+| `app/server/web/src/composables/chat/useChatPage.js` | 前端识别 `type=tool_progress` 累加到 workbench |
+| `app/server/web/src/components/chat/workbench/renderers/toolcall/ShellCommandToolRenderer.vue` | live output 区域按 stream 分栏渲染 |
