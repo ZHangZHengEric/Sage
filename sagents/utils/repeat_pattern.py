@@ -76,7 +76,7 @@ def detect_repeat_pattern(
     - AABBAABB (period=4)
     """
     n = len(signatures)
-    if n < 3:
+    if n < 2:
         return None
 
     upper_period = min(max_period, n // 2 if n >= 4 else 1)
@@ -96,6 +96,8 @@ def detect_repeat_pattern(
             idx -= period
 
         if cycles >= min_cycles:
+            if period == 1 and cycles == 2 and idx > 0:
+                continue
             return {
                 "period": period,
                 "cycles": cycles,
@@ -110,4 +112,3 @@ def build_self_correction_message(pattern: Dict[str, int]) -> str:
         "从下一步开始禁止复用同一路径；必须改变执行策略："
         "优先尝试不同工具或参数；若仍无法推进，先明确阻塞点并提出最小必要澄清问题。"
     )
-
