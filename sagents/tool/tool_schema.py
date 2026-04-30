@@ -173,8 +173,8 @@ def convert_spec_to_openai_format(
 
     # In strict mode, ALL properties must be in required, and every nested object
     # must also have additionalProperties: false with a complete required array.
-    # session_id at the top level is always auto-injected and must not be exposed to the LLM.
-    _AUTO_INJECT_PARAMS = {"session_id"}
+    # These top-level context fields are auto-injected and must not be exposed to the LLM.
+    _AUTO_INJECT_PARAMS = {"session_id", "user_id"}
 
     def _enforce_strict_schema(node: Any) -> None:
         """Recursively enforce OpenAI strict-mode constraints on all nested object schemas.

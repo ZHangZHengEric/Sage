@@ -5,6 +5,10 @@ import uuid
 import asyncio
 from sagents.utils.logger import logger
 from sagents.tool.tool_manager import ToolManager
+from sagents.tool.tool_progress import (
+    bind_tool_progress_context as _bind_tool_progress_context,
+    emit_tool_progress_closed as _emit_tool_progress_closed,
+)
 from sagents.context.session_context import SessionContext
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.utils.prompt_manager import prompt_manager
@@ -1196,11 +1200,18 @@ class AgentBase(ABC):
             # 如果 arguments 中有 session_id，移除它（因为会作为显式参数传递）
             call_kwargs.pop('session_id', None)
 
-            tool_response = await tool_manager.run_tool_async(
-                tool_name,
-                session_id=session_id,
-                **call_kwargs
-            )
+            with _bind_tool_progress_context(session_id, tool_call['id']):
+                try:
+                    tool_response = await tool_manager.run_tool_async(
+                        tool_name,
+                        session_id=session_id,
+                        **call_kwargs
+                    )
+                finally:
+                    try:
+                        await _emit_tool_progress_closed()
+                    except Exception:
+                        pass
 
             # 检查是否为流式响应
             if hasattr(tool_response, '__iter__') and not isinstance(tool_response, (str, bytes)):

@@ -74,6 +74,9 @@
         <ShellCommandToolRenderer
           :tool-args="toolArgs"
           :tool-result="toolResult"
+          :live-output="item?.liveOutput || ''"
+          :live-segments="item?.liveSegments || []"
+          :live="item?.live === true"
         />
       </template>
 

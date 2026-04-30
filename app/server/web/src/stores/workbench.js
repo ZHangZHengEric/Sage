@@ -227,6 +227,20 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       console.log('[Workbench] Auto-jump to index:', currentIndex.value)
     }
 
+    // tool_call item 落地后，把可能先到的 progress 缓存灌进去
+    if (newItem.type === 'tool_call') {
+      const tcId = newItem.data?.id || newItem.data?.tool_call_id
+      if (tcId && pendingToolProgress.value.has(tcId)) {
+        const buf = pendingToolProgress.value.get(tcId)
+        pendingToolProgress.value.delete(tcId)
+        if (buf.liveOutput) {
+          newItem.liveOutput = buf.liveOutput
+          newItem.liveSegments = buf.liveSegments
+        }
+        newItem.live = buf.live
+      }
+    }
+
     return newItem
   }
 
@@ -456,6 +470,60 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     }
   }
 
+  // tool_call_id 还没匹配到 workbench item 时缓存的 progress 文本
+  // 一旦对应的 tool_call item 被 addItem 创建，flushPendingToolProgress 会把缓存灌进去
+  const pendingToolProgress = ref(new Map())
+
+  // 从工具实时执行通道追加增量文本（stdout/stderr）。
+  // - 同一 tool_call_id 的所有 progress 累加到 item.liveOutput；
+  // - 按 stream 字段保留分段信息以便前端按通道渲染（item.liveSegments）；
+  // - closed=true 表示该 tool 的 progress 流结束，前端可收起 spinner。
+  // 不影响 item.toolResult（最终工具结果由现有 updateToolResult 写入）。
+  const appendToolProgress = ({ toolCallId, text = '', stream = 'stdout', closed = false, ts = null }) => {
+    if (!toolCallId) return false
+    const item = items.value.find(i =>
+      i.type === 'tool_call' && (i.data.id === toolCallId || i.data.tool_call_id === toolCallId)
+    )
+    if (!item) {
+      // 工具卡片还没创建（极少数情况：progress 事件先于 tool_call 消息到达）
+      const buf = pendingToolProgress.value.get(toolCallId) || { liveOutput: '', liveSegments: [], live: true }
+      if (text) {
+        buf.liveOutput += text
+        buf.liveSegments.push({ stream, text, ts })
+      }
+      if (closed) buf.live = false
+      pendingToolProgress.value.set(toolCallId, buf)
+      return false
+    }
+    if (text) {
+      item.liveOutput = (item.liveOutput || '') + text
+      if (!Array.isArray(item.liveSegments)) item.liveSegments = []
+      item.liveSegments.push({ stream, text, ts })
+    }
+    if (closed) {
+      item.live = false
+    } else {
+      item.live = true
+    }
+    return true
+  }
+
+  const flushPendingToolProgress = (toolCallId) => {
+    const buf = pendingToolProgress.value.get(toolCallId)
+    if (!buf) return
+    pendingToolProgress.value.delete(toolCallId)
+    const item = items.value.find(i =>
+      i.type === 'tool_call' && (i.data.id === toolCallId || i.data.tool_call_id === toolCallId)
+    )
+    if (!item) return
+    if (buf.liveOutput) {
+      item.liveOutput = (item.liveOutput || '') + buf.liveOutput
+      if (!Array.isArray(item.liveSegments)) item.liveSegments = []
+      item.liveSegments.push(...buf.liveSegments)
+    }
+    item.live = buf.live
+  }
+
   return {
     // State
     items,
@@ -486,7 +554,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     toggleListView,
     setListView,
     extractFromMessage,
-    updateToolResult
+    updateToolResult,
+    appendToolProgress,
+    flushPendingToolProgress,
+    pendingToolProgress
   }
 })
 

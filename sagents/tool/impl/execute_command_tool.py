@@ -23,6 +23,8 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..tool_base import tool
+from ..tool_progress import emit_tool_progress
+from .._progress_diff import diff_tail_for_progress as _diff_tail_for_progress
 from ..error_codes import ToolErrorCode, make_tool_error
 from sagents.utils.logger import logger
 from sagents.utils.sandbox._stdout_echo import echo_header, echo_footer
@@ -566,8 +568,16 @@ class ExecuteCommandTool:
         task_info: Dict[str, Any],
         block_until_ms: int,
         pattern: Optional[str] = None,
+        emit_progress: bool = False,
     ) -> Tuple[bool, Optional[int]]:
-        """轮询直到命令结束 / 超时 / 命中 pattern。返回 (finished, exit_code)。"""
+        """轮询直到命令结束 / 超时 / 命中 pattern。返回 (finished, exit_code)。
+
+        Args:
+            emit_progress: 若为 True，每次轮询新增的 tail 输出会通过
+                ``emit_tool_progress`` 推送到前端 UI 实时显示。整体
+                ``stdout`` 由调用方在结束时再读取一次返回，progress 推送
+                只是"过程展示"，不影响最终给 LLM 的工具结果。
+        """
         deadline = time.time() + max(0, block_until_ms) / 1000.0
         compiled = None
         if pattern:
@@ -577,9 +587,26 @@ class ExecuteCommandTool:
                 logger.warning(f"await_shell pattern 编译失败，忽略: {exc}")
                 compiled = None
 
+        # progress 推送状态：以 "已发出的字节长度" 作为偏移
+        # 沙箱 read_background_output 仅返回 tail（不一定从头读），所以这里
+        # 用"上次完整 tail 长度"做差分。注意：read_background_output 有
+        # max_bytes 上限，对超过上限的输出我们只能近似处理（取 tail 增量）。
+        emitted_tail: str = ""
+
         sleep_s = 0.2
         while True:
             exit_code = await self._read_exit(sandbox, task_info)
+
+            if emit_progress:
+                try:
+                    cur_tail = await self._read_tail(sandbox, task_info, max_bytes=65536)
+                    delta = _diff_tail_for_progress(emitted_tail, cur_tail or "")
+                    if delta:
+                        await emit_tool_progress(delta, stream="stdout")
+                        emitted_tail = cur_tail or ""
+                except Exception as exc:
+                    logger.debug(f"emit progress 失败（忽略）: {exc}")
+
             if exit_code is not None:
                 return True, exit_code
 
@@ -723,7 +750,9 @@ class ExecuteCommandTool:
                     "message": f"已在后台启动，task_id={task_id}",
                 }
 
-            finished, exit_code = await self._wait_for_finish(sandbox, task_info, block_until_ms)
+            finished, exit_code = await self._wait_for_finish(
+                sandbox, task_info, block_until_ms, emit_progress=True
+            )
             if finished:
                 stdout_text, total_bytes, truncated = await self._read_completed_output(
                     sandbox, task_info
@@ -853,7 +882,9 @@ class ExecuteCommandTool:
             block_until_ms = 300_000
 
         sandbox = self._get_sandbox(session_id)
-        finished, exit_code = await self._wait_for_finish(sandbox, task_info, block_until_ms, pattern=pattern)
+        finished, exit_code = await self._wait_for_finish(
+            sandbox, task_info, block_until_ms, pattern=pattern, emit_progress=True
+        )
         if finished:
             stdout_text, total_bytes, truncated = await self._read_completed_output(
                 sandbox, task_info

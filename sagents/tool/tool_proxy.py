@@ -63,6 +63,16 @@ class ToolProxy:
             
         if tool_name not in self._available_tools:
             raise ValueError(f"工具 '{tool_name}' 不在可用工具列表中")
+
+    def allow_tools(self, tool_names: List[str]) -> None:
+        """
+        将工具加入白名单。
+
+        若当前未启用白名单（所有工具默认可用），此方法为 no-op，避免对 None 调用 .add()。
+        """
+        if self._available_tools is None:
+            return
+        self._available_tools.update(tool_names)
     
     # ToolManager 兼容接口
     

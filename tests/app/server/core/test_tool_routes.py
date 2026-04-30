@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from app.server.routers.mcp import mcp_router
 from app.server.routers.tool import tool_router
 from common.services.tool_service import _normalize_tool_result
+from mcp_servers.anytool.anytool_server import _build_tool_schema
 from mcp_servers.anytool.anytool_runtime import generate_anytool_result
 from mcp_servers.anytool.anytool_http import resolve_anytool_server_name
 
@@ -31,6 +32,31 @@ class TestToolRoutes(unittest.TestCase):
         self.assertEqual(normalized["parsed"], {"value": 1})
         self.assertIn('"value": 1', normalized["formatted_text"])
         self.assertEqual(normalized["content"], {"value": 1})
+
+    def test_anytool_schema_adds_hidden_context_params(self):
+        tool = _build_tool_schema(
+            {
+                "name": "customer_send_message_whatsapp",
+                "description": "Send WhatsApp message",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "phone": {"type": "string"},
+                        "message": {"type": "string"},
+                    },
+                    "required": ["phone", "message"],
+                    "additionalProperties": False,
+                },
+            }
+        )
+
+        properties = tool.inputSchema["properties"]
+        self.assertIn("phone", properties)
+        self.assertIn("message", properties)
+        self.assertIn("session_id", properties)
+        self.assertIn("user_id", properties)
+        self.assertEqual(tool.inputSchema["required"], ["phone", "message"])
+        self.assertFalse(tool.inputSchema["additionalProperties"])
 
     def test_exec_tool_route_uses_shared_tool_execution_api(self):
         app = _build_app()

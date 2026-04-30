@@ -398,6 +398,21 @@ export const useChatPage = (props) => {
 
   const handleMessage = (messageData) => {
     if (messageData.type === 'stream_end') return
+    if (messageData.type === 'tool_progress') {
+      // 工具执行过程实时片段：不进 messages 列表、不进历史，仅追加到对应 tool 卡片的 live area
+      try {
+        workbenchStore.appendToolProgress({
+          toolCallId: messageData.tool_call_id,
+          text: messageData.text,
+          stream: messageData.stream,
+          closed: !!messageData.closed,
+          ts: messageData.ts
+        })
+      } catch (e) {
+        console.warn('[Chat] handle tool_progress failed:', e)
+      }
+      return
+    }
     const messageId = messageData.message_id
     const extractWorkbenchFromMessage = (message) => {
       if (!message) return
