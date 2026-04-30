@@ -5,7 +5,11 @@ use crate::backend::list_skills as fetch_skills;
 use crate::terminal_support::{format_skills_list, workspace_root};
 
 pub(super) fn list_skills(app: &mut App) -> Result<bool> {
-    match fetch_skills(&app.user_id, Some(workspace_root().as_path())) {
+    match fetch_skills(
+        &app.user_id,
+        app.selected_agent_id.as_deref(),
+        Some(workspace_root().as_path()),
+    ) {
         Ok(skills) => {
             app.set_skill_catalog(
                 skills
@@ -34,7 +38,11 @@ pub(super) fn list_skills(app: &mut App) -> Result<bool> {
 }
 
 pub(super) fn enable_skill(app: &mut App, skill: String) -> Result<bool> {
-    match fetch_skills(&app.user_id, Some(workspace_root().as_path())) {
+    match fetch_skills(
+        &app.user_id,
+        app.selected_agent_id.as_deref(),
+        Some(workspace_root().as_path()),
+    ) {
         Ok(skills) => {
             app.set_skill_catalog(
                 skills

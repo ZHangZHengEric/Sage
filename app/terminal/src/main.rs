@@ -22,14 +22,15 @@ use startup::{parse_startup_action, print_usage, StartupBehavior};
 use terminal::{restore_terminal, run, run_with_startup_action, setup_terminal};
 
 fn main() -> Result<()> {
-    let startup_action = match parse_startup_action(env::args().skip(1))? {
-        StartupBehavior::Run(action) => action,
+    let (startup_action, startup_options) = match parse_startup_action(env::args().skip(1))? {
+        StartupBehavior::Run { action, options } => (action, options),
         StartupBehavior::PrintHelp => {
             print_usage();
             return Ok(());
         }
     };
     let mut app = App::new();
+    app.apply_startup_agent_options(startup_options.agent_id, startup_options.agent_mode);
     let mut terminal = setup_terminal(&app)?;
     let result = match startup_action {
         Some(action) => run_with_startup_action(&mut terminal, &mut app, Some(action)),

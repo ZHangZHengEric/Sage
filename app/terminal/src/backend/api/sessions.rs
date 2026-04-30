@@ -7,24 +7,44 @@ use crate::backend::contract::{
 };
 use crate::backend::{SessionDetail, SessionMessage, SessionSummary};
 
-pub(crate) fn list_sessions(user_id: &str, limit: usize) -> Result<Vec<SessionSummary>> {
-    let value = run_cli_command(CliJsonCommand::SessionsList { user_id, limit })?;
+pub(crate) fn list_sessions(
+    user_id: &str,
+    agent_id: Option<&str>,
+    limit: usize,
+) -> Result<Vec<SessionSummary>> {
+    let value = run_cli_command(CliJsonCommand::SessionsList {
+        user_id,
+        agent_id,
+        limit,
+    })?;
     let items = expect_array_field(&value, "list", "sessions.list")?;
     Ok(items.iter().map(parse_session_summary).collect::<Vec<_>>())
 }
 
-pub(crate) fn inspect_latest_session(user_id: &str) -> Result<Option<SessionDetail>> {
-    inspect_session_impl("latest", user_id)
+pub(crate) fn inspect_latest_session(
+    user_id: &str,
+    agent_id: Option<&str>,
+) -> Result<Option<SessionDetail>> {
+    inspect_session_impl("latest", user_id, agent_id)
 }
 
-pub(crate) fn inspect_session(session_id: &str, user_id: &str) -> Result<Option<SessionDetail>> {
-    inspect_session_impl(session_id, user_id)
+pub(crate) fn inspect_session(
+    session_id: &str,
+    user_id: &str,
+    agent_id: Option<&str>,
+) -> Result<Option<SessionDetail>> {
+    inspect_session_impl(session_id, user_id, agent_id)
 }
 
-fn inspect_session_impl(session_id: &str, user_id: &str) -> Result<Option<SessionDetail>> {
+fn inspect_session_impl(
+    session_id: &str,
+    user_id: &str,
+    agent_id: Option<&str>,
+) -> Result<Option<SessionDetail>> {
     let value = run_cli_command(CliJsonCommand::SessionInspect {
         session_id,
         user_id,
+        agent_id,
     })?;
 
     if value.is_null() {

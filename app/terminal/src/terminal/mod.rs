@@ -32,11 +32,13 @@ use keys::handle_key;
 pub type AppTerminal = Terminal<BackendImpl>;
 const INLINE_VIEWPORT_IDLE_HEIGHT: u16 = 5;
 const INLINE_VIEWPORT_MAX_HEIGHT: u16 = 14;
+// Keep keyboard enhancement mode minimal.
+//
+// `DISAMBIGUATE_ESCAPE_CODES` is enough to let capable terminals distinguish
+// modified Enter keys such as Shift+Enter. The broader reporting modes caused
+// real-world IME regressions, especially for Chinese input methods.
 const KEYBOARD_ENHANCEMENT_FLAGS: KeyboardEnhancementFlags =
-    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-        .union(KeyboardEnhancementFlags::REPORT_EVENT_TYPES)
-        .union(KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS)
-        .union(KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES);
+    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES;
 
 pub fn setup_terminal(_app: &App) -> Result<AppTerminal> {
     let startup_cursor = cursor::position()
@@ -173,8 +175,10 @@ fn drain_backend(app: &mut App, backend: &mut Option<BackendHandle>) -> bool {
                 },
                 BackendEvent::Message(kind, message) => app.push_message(kind, message),
                 BackendEvent::Status(status) => app.set_status(status),
+                BackendEvent::PhaseChanged(phase) => app.set_active_phase(phase),
                 BackendEvent::ToolStarted(name) => app.start_tool(name),
                 BackendEvent::ToolFinished(name) => app.finish_tool(name),
+                BackendEvent::Stats(stats) => app.apply_backend_stats(stats),
                 BackendEvent::Error(message) => app.fail_request(message),
                 BackendEvent::Finished => {
                     app.complete_request();

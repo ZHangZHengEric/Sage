@@ -1,3 +1,5 @@
+#[path = "popup/agent.rs"]
+mod agent;
 #[path = "popup/core.rs"]
 mod core;
 #[path = "popup/provider.rs"]

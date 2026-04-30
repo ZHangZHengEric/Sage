@@ -2,6 +2,8 @@ use crate::app::{App, MessageKind, SubmitAction};
 use crate::app_preview::provider_help_text;
 use crate::slash_command;
 
+use super::agent::normalize_agent_mode;
+
 impl App {
     pub(crate) fn handle_command(&mut self, command: &str) -> SubmitAction {
         let mut parts = command.split_whitespace();
@@ -216,13 +218,71 @@ impl App {
                     SubmitAction::Handled
                 }
             },
+            "/agent" => match (parts.next(), parts.next(), parts.next()) {
+                (None, None, None) | (Some("show"), None, None) => {
+                    self.queue_agent_status();
+                    SubmitAction::Handled
+                }
+                (Some("list"), None, None) => SubmitAction::ListAgents,
+                (Some("set"), Some(agent_id), None) => {
+                    self.set_selected_agent_id(agent_id.to_string());
+                    SubmitAction::Handled
+                }
+                (Some("clear"), None, None) => {
+                    self.clear_selected_agent_id();
+                    SubmitAction::Handled
+                }
+                _ => {
+                    self.queue_message(
+                        MessageKind::System,
+                        "Usage: /agent | /agent show | /agent list | /agent set <agent_id> | /agent clear",
+                    );
+                    self.status = format!("invalid command  {}", self.session_id);
+                    SubmitAction::Handled
+                }
+            },
+            "/mode" => match (parts.next(), parts.next(), parts.next()) {
+                (None, None, None) | (Some("show"), None, None) => {
+                    self.queue_message(
+                        MessageKind::System,
+                        format!("agent_mode: {}", self.agent_mode),
+                    );
+                    self.status = format!("mode  {}", self.session_id);
+                    SubmitAction::Handled
+                }
+                (Some("set"), Some(mode), None) => match normalize_agent_mode(mode) {
+                    Some(mode) => {
+                        self.set_agent_mode_selection(mode);
+                        SubmitAction::Handled
+                    }
+                    None => {
+                        self.queue_message(
+                            MessageKind::System,
+                            "Usage: /mode | /mode show | /mode set <simple|multi|fibre>",
+                        );
+                        self.status = format!("invalid command  {}", self.session_id);
+                        SubmitAction::Handled
+                    }
+                },
+                _ => {
+                    self.queue_message(
+                        MessageKind::System,
+                        "Usage: /mode | /mode show | /mode set <simple|multi|fibre>",
+                    );
+                    self.status = format!("invalid command  {}", self.session_id);
+                    SubmitAction::Handled
+                }
+            },
             "/status" => {
                 self.queue_message(
                     MessageKind::System,
                     format!(
-                        "session: {}\nbusy: {}\nagent_mode: {}\nmax_loop_count: {}\nskills: {}\nmodel_override: {}\ninput: {} chars",
+                        "session: {}\nbusy: {}\nagent_id: {}\nagent_mode: {}\nmax_loop_count: {}\nskills: {}\nmodel_override: {}\ninput: {} chars",
                         self.session_id,
                         self.busy,
+                        self.selected_agent_id
+                            .clone()
+                            .unwrap_or_else(|| "(default)".to_string()),
                         self.agent_mode,
                         self.max_loop_count,
                         if self.selected_skills.is_empty() {

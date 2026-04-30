@@ -134,18 +134,27 @@ fn footer_hint(app: &App) -> String {
         }
         None if app.busy => match app.active_tool_status() {
             Some(tool) => format!("running {tool}"),
-            None => "working... output is streaming".to_string(),
+            None => match app.active_phase_label() {
+                Some(phase) => format!("{phase}... output is streaming"),
+                None => "working... output is streaming".to_string(),
+            },
         },
         None => "shift+enter newline  •  /help commands  •  enter send".to_string(),
     }
 }
 
 fn footer_status_summary(app: &App) -> String {
-    let mut parts = vec![
-        app.agent_mode.clone(),
-        compact_workspace_label(&app.workspace_label),
-        normalize_footer_status(&app.footer_status()),
-    ];
+    let mut parts = vec![app.agent_mode.clone()];
+    if let Some(agent_id) = app.selected_agent_id.as_deref() {
+        parts.push(format!("agent {}", truncate_middle(agent_id, 18)));
+    }
+    parts.push(compact_workspace_label(&app.workspace_label));
+    if app.busy {
+        if let Some(phase) = app.active_phase_label() {
+            parts.push(format!("phase {phase}"));
+        }
+    }
+    parts.push(normalize_footer_status(&app.footer_status()));
     if app.busy && app.active_tool_status().is_none() {
         parts.push(app.session_id.clone());
     }
@@ -161,5 +170,54 @@ fn compact_workspace_label(workspace_label: &str) -> String {
         workspace_label.to_string()
     } else {
         truncate_middle(workspace_label, 26)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{footer_hint, footer_status_summary};
+    use crate::app::App;
+
+    #[test]
+    fn busy_footer_hint_prefers_active_phase() {
+        let mut app = App::new();
+        app.input = "explain repo".to_string();
+        let _ = app.submit_input();
+        app.set_active_phase("planning");
+
+        assert_eq!(footer_hint(&app), "planning... output is streaming");
+    }
+
+    #[test]
+    fn busy_footer_summary_includes_active_phase() {
+        let mut app = App::new();
+        app.input = "explain repo".to_string();
+        let _ = app.submit_input();
+        app.set_active_phase("assistant_text");
+
+        let summary = footer_status_summary(&app);
+        assert!(summary.contains("phase assistant text"));
+    }
+
+    #[test]
+    fn busy_footer_hint_prefers_active_tool_over_phase() {
+        let mut app = App::new();
+        app.input = "explain repo".to_string();
+        let _ = app.submit_input();
+        app.set_active_phase("planning");
+        app.start_tool("read_file".to_string());
+
+        let hint = footer_hint(&app);
+        assert!(hint.contains("running #1 read_file"));
+        assert!(!hint.contains("planning..."));
+    }
+
+    #[test]
+    fn busy_footer_hint_falls_back_without_phase_or_tool() {
+        let mut app = App::new();
+        app.input = "explain repo".to_string();
+        let _ = app.submit_input();
+
+        assert_eq!(footer_hint(&app), "working... output is streaming");
     }
 }

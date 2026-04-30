@@ -19,6 +19,7 @@ fn backend_handle_supports_two_round_trips_without_respawn() {
     let request = BackendRequest {
         session_id: "local-0001".to_string(),
         user_id: "terminal-test".to_string(),
+        agent_id: None,
         agent_mode: "simple".to_string(),
         max_loop_count: 3,
         workspace: Some(temp_dir.clone()),

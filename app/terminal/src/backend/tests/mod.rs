@@ -76,7 +76,9 @@ pub(super) fn collect_round_trip(handle: &BackendHandle) -> Vec<String> {
             Some(BackendEvent::LiveChunk(_, _))
             | Some(BackendEvent::Message(_, _))
             | Some(BackendEvent::Status(_))
+            | Some(BackendEvent::PhaseChanged(_))
             | Some(BackendEvent::ToolStarted(_))
+            | Some(BackendEvent::Stats(_))
             | Some(BackendEvent::ToolFinished(_)) => {}
             Some(BackendEvent::Finished) => return assistant_chunks,
             Some(BackendEvent::Error(message)) => {
@@ -121,11 +123,23 @@ for raw in sys.stdin:
         with open(log_path, "a", encoding="utf-8") as handle:
             handle.write(prompt + "\n")
     print(json.dumps({
+        "type": "cli_phase",
+        "phase": "planning",
+    }), flush=True)
+    print(json.dumps({
         "type": "assistant",
         "role": "assistant",
         "content": f"round {count}: {prompt}",
     }), flush=True)
     print(json.dumps({"type": "stream_end"}), flush=True)
+    print(json.dumps({
+        "type": "cli_stats",
+        "elapsed_seconds": 0.001,
+        "first_output_seconds": 0.001,
+        "prompt_tokens": 1,
+        "completion_tokens": 1,
+        "total_tokens": 2,
+    }), flush=True)
 "#,
     )
     .expect("script should be written");

@@ -1,9 +1,11 @@
+mod agents;
 mod config;
 mod doctor;
 mod providers;
 mod sessions;
 mod skills;
 
+pub(crate) use agents::list_agents;
 pub(crate) use config::{init_config, read_config};
 pub(crate) use doctor::read_doctor_info;
 pub(crate) use providers::{

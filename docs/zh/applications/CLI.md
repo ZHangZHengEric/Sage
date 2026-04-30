@@ -386,6 +386,20 @@ sage chat --skill my_skill
 
 以结构化流事件的方式输出，而不是仅输出纯文本。
 
+现在的 JSON 流可以分成三层：
+
+- 原始运行时事件，例如 `assistant`、`analysis`、`tool_call`、`tool_result`
+- CLI 控制事件，例如 `cli_phase` 和 `cli_tool`
+- 如果启用了 `--stats`，结尾追加一个 `cli_stats` 事件
+
+建议按下面这套 contract 来消费：
+
+- `cli_phase`：CLI 检测到阶段切换时发出，例如 `planning`、`tool`、`assistant_text`
+- `cli_tool`：工具 step 开始或结束时发出，包含 `action`、`step`、`tool_name`、`tool_call_id`、`status`
+- `cli_stats`：只在结束时发出一次，包含最终 `tool_steps`、`phase_timings`、时延摘要和 token 摘要
+
+对前端消费者来说，`cli_phase` 和 `cli_tool` 应该作为首选的实时 UI contract；原始 `tool_call` / `tool_result` 更适合作为兼容输入，而不是主要展示协议。
+
 当和 `--stats` 一起使用时，CLI 会在结尾追加一个 `cli_stats` JSON 事件：
 
 ```bash
@@ -398,6 +412,8 @@ sage run --json --stats "用一句话介绍你自己。"
 - 对比不同运行结果
 - 抽取 token usage
 - 判断 tool/skill 是否真的生效
+
+如果想看一份完整的端到端示例，可以参考 `tests/app/cli/fixtures/stream_contract_round_trip.jsonl`。
 
 ## Workspace 用法
 
@@ -432,6 +448,7 @@ sage run --json --stats "用一句话介绍你自己。"
 - config 是否和你的预期一致
 - skills 是否反映当前本地可见 skill
 - stats 是否带上了正确的 user/workspace/skill 上下文
+- JSON 模式运行中是否发出了 `cli_phase` / `cli_tool`
 - JSON 模式最后是否有 `cli_stats` 事件
 
 ## 维护者验证

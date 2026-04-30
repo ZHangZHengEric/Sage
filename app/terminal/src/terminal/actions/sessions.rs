@@ -9,7 +9,7 @@ pub(super) fn open_session_picker(
     mode: SessionPickerMode,
     limit: usize,
 ) -> Result<bool> {
-    match list_sessions(&app.user_id, limit) {
+    match list_sessions(&app.user_id, app.selected_agent_id.as_deref(), limit) {
         Ok(sessions) if sessions.is_empty() => {
             app.push_message(
                 MessageKind::System,
@@ -44,7 +44,7 @@ pub(super) fn open_session_picker(
 }
 
 pub(super) fn resume_latest(app: &mut App) -> Result<bool> {
-    match inspect_latest_session(&app.user_id) {
+    match inspect_latest_session(&app.user_id, app.selected_agent_id.as_deref()) {
         Ok(Some(detail)) => apply_resumed_session(app, detail),
         Ok(None) => {
             app.push_message(
@@ -62,7 +62,7 @@ pub(super) fn resume_latest(app: &mut App) -> Result<bool> {
 }
 
 pub(super) fn resume_session(app: &mut App, session_id: &str) -> Result<bool> {
-    match inspect_session(session_id, &app.user_id) {
+    match inspect_session(session_id, &app.user_id, app.selected_agent_id.as_deref()) {
         Ok(Some(detail)) => apply_resumed_session(app, detail),
         Ok(None) => {
             app.push_message(
@@ -81,9 +81,9 @@ pub(super) fn resume_session(app: &mut App, session_id: &str) -> Result<bool> {
 
 pub(super) fn show_session(app: &mut App, session_id: &str) -> Result<bool> {
     let detail = if session_id == "latest" {
-        inspect_latest_session(&app.user_id)
+        inspect_latest_session(&app.user_id, app.selected_agent_id.as_deref())
     } else {
-        inspect_session(session_id, &app.user_id)
+        inspect_session(session_id, &app.user_id, app.selected_agent_id.as_deref())
     };
 
     match detail {

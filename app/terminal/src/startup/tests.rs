@@ -13,10 +13,10 @@ fn parse_startup_action_supports_resume_picker() {
     let action = parse_startup_action(vec!["resume".to_string()]).expect("parse");
     assert!(matches!(
         action,
-        StartupBehavior::Run(Some(SubmitAction::OpenSessionPicker {
+        StartupBehavior::Run { action: Some(SubmitAction::OpenSessionPicker {
             mode: SessionPickerMode::Resume,
             limit: 10
-        }))
+        }), .. }
     ));
 }
 
@@ -30,7 +30,7 @@ fn parse_startup_action_supports_run_and_chat_prompts() {
     .expect("parse");
     assert!(matches!(
         run_action,
-        StartupBehavior::Run(Some(SubmitAction::RunTask(prompt)))
+        StartupBehavior::Run { action: Some(SubmitAction::RunTask(prompt)), .. }
             if prompt == "inspect repo"
     ));
 
@@ -38,7 +38,7 @@ fn parse_startup_action_supports_run_and_chat_prompts() {
         parse_startup_action(vec!["chat".to_string(), "hello".to_string()]).expect("parse");
     assert!(matches!(
         chat_action,
-        StartupBehavior::Run(Some(SubmitAction::RunTask(prompt)))
+        StartupBehavior::Run { action: Some(SubmitAction::RunTask(prompt)), .. }
             if prompt == "hello"
     ));
 }
@@ -48,27 +48,27 @@ fn parse_startup_action_supports_doctor() {
     let action = parse_startup_action(vec!["doctor".to_string()]).expect("parse");
     assert!(matches!(
         action,
-        StartupBehavior::Run(Some(SubmitAction::ShowDoctor {
+        StartupBehavior::Run { action: Some(SubmitAction::ShowDoctor {
             probe_provider: false
-        }))
+        }), .. }
     ));
 
     let action = parse_startup_action(vec!["doctor".to_string(), "probe-provider".to_string()])
         .expect("parse");
     assert!(matches!(
         action,
-        StartupBehavior::Run(Some(SubmitAction::ShowDoctor {
+        StartupBehavior::Run { action: Some(SubmitAction::ShowDoctor {
             probe_provider: true
-        }))
+        }), .. }
     ));
 
     let action = parse_startup_action(vec!["doctor".to_string(), "--probe-provider".to_string()])
         .expect("parse");
     assert!(matches!(
         action,
-        StartupBehavior::Run(Some(SubmitAction::ShowDoctor {
+        StartupBehavior::Run { action: Some(SubmitAction::ShowDoctor {
             probe_provider: true
-        }))
+        }), .. }
     ));
 }
 
@@ -78,10 +78,10 @@ fn parse_startup_action_supports_config_init() {
         parse_startup_action(vec!["config".to_string(), "init".to_string()]).expect("parse");
     assert!(matches!(
         action,
-        StartupBehavior::Run(Some(SubmitAction::InitConfig {
+        StartupBehavior::Run { action: Some(SubmitAction::InitConfig {
             path: None,
             force: false
-        }))
+        }), .. }
     ));
 
     let action = parse_startup_action(vec![
@@ -93,10 +93,10 @@ fn parse_startup_action_supports_config_init() {
     .expect("parse");
     assert!(matches!(
         action,
-        StartupBehavior::Run(Some(SubmitAction::InitConfig {
+        StartupBehavior::Run { action: Some(SubmitAction::InitConfig {
             path: Some(path),
             force: true
-        })) if path == "/tmp/demo.env"
+        }), .. } if path == "/tmp/demo.env"
     ));
 }
 
@@ -111,7 +111,7 @@ fn parse_startup_action_supports_provider_verify() {
     .expect("parse");
     assert!(matches!(
         action,
-        StartupBehavior::Run(Some(SubmitAction::VerifyProvider(fields)))
+        StartupBehavior::Run { action: Some(SubmitAction::VerifyProvider(fields)), .. }
             if fields == vec!["name=demo".to_string(), "model=demo-chat".to_string()]
     ));
 }
@@ -121,20 +121,20 @@ fn parse_startup_action_supports_sessions_picker() {
     let action = parse_startup_action(vec!["sessions".to_string()]).expect("parse");
     assert!(matches!(
         action,
-        StartupBehavior::Run(Some(SubmitAction::OpenSessionPicker {
+        StartupBehavior::Run { action: Some(SubmitAction::OpenSessionPicker {
             mode: SessionPickerMode::Browse,
             limit: 10
-        }))
+        }), .. }
     ));
 
     let action =
         parse_startup_action(vec!["sessions".to_string(), "25".to_string()]).expect("parse");
     assert!(matches!(
         action,
-        StartupBehavior::Run(Some(SubmitAction::OpenSessionPicker {
+        StartupBehavior::Run { action: Some(SubmitAction::OpenSessionPicker {
             mode: SessionPickerMode::Browse,
             limit: 25
-        }))
+        }), .. }
     ));
 }
 
@@ -148,7 +148,7 @@ fn parse_startup_action_supports_sessions_inspect() {
     .expect("parse");
     assert!(matches!(
         latest,
-        StartupBehavior::Run(Some(SubmitAction::ShowSession(session_id)))
+        StartupBehavior::Run { action: Some(SubmitAction::ShowSession(session_id)), .. }
             if session_id == "latest"
     ));
 
@@ -160,7 +160,7 @@ fn parse_startup_action_supports_sessions_inspect() {
     .expect("parse");
     assert!(matches!(
         specific,
-        StartupBehavior::Run(Some(SubmitAction::ShowSession(session_id)))
+        StartupBehavior::Run { action: Some(SubmitAction::ShowSession(session_id)), .. }
             if session_id == "local-000123"
     ));
 }
@@ -171,16 +171,46 @@ fn parse_startup_action_supports_resume_targets() {
         parse_startup_action(vec!["resume".to_string(), "latest".to_string()]).expect("parse");
     assert!(matches!(
         latest,
-        StartupBehavior::Run(Some(SubmitAction::ResumeLatest))
+        StartupBehavior::Run { action: Some(SubmitAction::ResumeLatest), .. }
     ));
 
     let specific = parse_startup_action(vec!["resume".to_string(), "local-000123".to_string()])
         .expect("parse");
     assert!(matches!(
         specific,
-        StartupBehavior::Run(Some(SubmitAction::ResumeSession(session_id)))
+        StartupBehavior::Run { action: Some(SubmitAction::ResumeSession(session_id)), .. }
             if session_id == "local-000123"
     ));
+}
+
+#[test]
+fn parse_startup_action_supports_agent_options() {
+    let action = parse_startup_action(vec![
+        "--agent-id".to_string(),
+        "agent_demo".to_string(),
+        "--agent-mode".to_string(),
+        "fibre".to_string(),
+        "run".to_string(),
+        "inspect".to_string(),
+    ])
+    .expect("parse");
+    assert!(matches!(
+        action,
+        StartupBehavior::Run { action: Some(SubmitAction::RunTask(prompt)), options }
+            if prompt == "inspect"
+            && options.agent_id.as_deref() == Some("agent_demo")
+            && options.agent_mode.as_deref() == Some("fibre")
+    ));
+}
+
+#[test]
+fn parse_startup_action_rejects_invalid_agent_mode() {
+    let err = parse_startup_action(vec![
+        "--agent-mode".to_string(),
+        "weird".to_string(),
+    ])
+    .expect_err("should fail");
+    assert!(err.to_string().contains("simple, multi, fibre"));
 }
 
 #[test]
@@ -210,6 +240,6 @@ fn parse_startup_action_supports_help_flag() {
 
 impl StartupBehavior {
     fn matches_run_none(&self) -> bool {
-        matches!(self, StartupBehavior::Run(None))
+        matches!(self, StartupBehavior::Run { action: None, .. })
     }
 }

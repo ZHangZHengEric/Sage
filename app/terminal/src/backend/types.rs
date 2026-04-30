@@ -29,6 +29,14 @@ pub struct SkillInfo {
     pub source: String,
 }
 
+pub struct AgentInfo {
+    pub agent_id: String,
+    pub name: String,
+    pub agent_mode: String,
+    pub is_default: bool,
+    pub updated_at: String,
+}
+
 pub struct ConfigInfo {
     pub default_model_name: String,
     pub default_api_base_url: String,
@@ -71,6 +79,7 @@ pub struct ProviderMutation {
 pub struct BackendRequest {
     pub session_id: String,
     pub user_id: String,
+    pub agent_id: Option<String>,
     pub agent_mode: String,
     pub max_loop_count: u32,
     pub workspace: Option<PathBuf>,
@@ -79,12 +88,45 @@ pub struct BackendRequest {
     pub task: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct BackendStats {
+    pub elapsed_seconds: Option<f64>,
+    pub first_output_seconds: Option<f64>,
+    pub prompt_tokens: Option<u64>,
+    pub completion_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
+    pub tool_steps: Vec<BackendToolStep>,
+    pub phase_timings: Vec<BackendPhaseTiming>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BackendToolStep {
+    pub step: u64,
+    pub tool_name: String,
+    pub tool_call_id: Option<String>,
+    pub status: String,
+    pub started_at: Option<f64>,
+    pub finished_at: Option<f64>,
+    pub duration_ms: Option<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BackendPhaseTiming {
+    pub phase: String,
+    pub started_at: Option<f64>,
+    pub finished_at: Option<f64>,
+    pub duration_ms: Option<f64>,
+    pub segment_count: u64,
+}
+
 pub enum BackendEvent {
     LiveChunk(MessageKind, String),
     Message(MessageKind, String),
     Status(String),
+    PhaseChanged(String),
     ToolStarted(String),
     ToolFinished(String),
+    Stats(BackendStats),
     Error(String),
     Finished,
     Exited,

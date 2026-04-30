@@ -2,6 +2,7 @@
 import asyncio
 import io
 import json
+from pathlib import Path
 import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
@@ -11,6 +12,28 @@ import app.cli.service as cli_service
 
 
 class TestCliJsonContracts(unittest.TestCase):
+    def test_stream_contract_fixture_uses_supported_event_types(self):
+        fixture_path = (
+            Path(__file__).resolve().parent / "fixtures" / "stream_contract_round_trip.jsonl"
+        )
+        events = [
+            json.loads(line)
+            for line in fixture_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+        self.assertEqual(events[0], {"type": "cli_phase", "phase": "planning"})
+        self.assertEqual(events[1]["type"], "analysis")
+        self.assertEqual(events[2], {"type": "cli_phase", "phase": "tool"})
+        self.assertEqual(events[3]["type"], "cli_tool")
+        self.assertEqual(events[3]["action"], "started")
+        self.assertEqual(events[6]["type"], "cli_tool")
+        self.assertEqual(events[6]["action"], "finished")
+        self.assertEqual(events[7], {"type": "cli_phase", "phase": "assistant_text"})
+        self.assertEqual(events[-1]["type"], "cli_stats")
+        self.assertEqual(events[-1]["tool_steps"][0]["tool_name"], "read_file")
+        self.assertEqual(events[-1]["phase_timings"][0]["phase"], "planning")
+
     def test_doctor_command_json_outputs_structured_payload(self):
         args = cli_main.build_argument_parser().parse_args(["doctor", "--json"])
         fake_info = {

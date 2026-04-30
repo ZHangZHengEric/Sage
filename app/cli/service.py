@@ -1044,6 +1044,52 @@ async def list_sessions(
     }
 
 
+def _resolve_agent_mode_from_config(agent_config: Dict[str, Any]) -> str:
+    raw_value = str(
+        agent_config.get("agentMode")
+        or agent_config.get("agent_mode")
+        or ""
+    ).strip().lower()
+    if raw_value in {"simple", "multi", "fibre"}:
+        return raw_value
+    return "simple"
+
+
+async def list_cli_agents(
+    *,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    from common.services.agent_service import list_agents
+
+    resolved_user_id = user_id or get_default_cli_user_id()
+    agents = await list_agents(user_id=resolved_user_id)
+    items: List[Dict[str, Any]] = []
+    for agent in agents:
+        agent_config = agent.config if isinstance(agent.config, dict) else {}
+        items.append(
+            {
+                "agent_id": agent.agent_id,
+                "name": agent.name,
+                "agent_mode": _resolve_agent_mode_from_config(agent_config),
+                "is_default": bool(agent.is_default),
+                "updated_at": agent.updated_at.isoformat() if agent.updated_at else "",
+            }
+        )
+
+    items.sort(
+        key=lambda item: (
+            not bool(item.get("is_default")),
+            item.get("name") or "",
+            item.get("agent_id") or "",
+        )
+    )
+    return {
+        "user_id": resolved_user_id,
+        "total": len(items),
+        "list": items,
+    }
+
+
 async def list_available_skills(
     *,
     user_id: Optional[str] = None,

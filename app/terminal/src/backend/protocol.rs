@@ -2,6 +2,7 @@ use std::sync::mpsc;
 
 use crate::app::MessageKind;
 use crate::backend::contract::{parse_stream_event, CliStreamEvent};
+use crate::backend::{BackendPhaseTiming, BackendStats, BackendToolStep};
 
 use super::BackendEvent;
 
@@ -33,20 +34,56 @@ pub(crate) fn parse_backend_line(line: &str) -> Vec<BackendEvent> {
     let event_type = event.event_type.as_str();
     let role = event.role.as_str();
     let tool_names = collect_tool_names(&event);
-    let content = event.content;
+    let content = event.content.clone();
 
     if event_type == "cli_stats" {
+        events.push(BackendEvent::Stats(BackendStats {
+            elapsed_seconds: event.elapsed_seconds,
+            first_output_seconds: event.first_output_seconds,
+            prompt_tokens: event.prompt_tokens,
+            completion_tokens: event.completion_tokens,
+            total_tokens: event.total_tokens,
+            tool_steps: event
+                .tool_steps
+                .into_iter()
+                .map(|step| BackendToolStep {
+                    step: step.step,
+                    tool_name: step.tool_name,
+                    tool_call_id: step.tool_call_id,
+                    status: step.status,
+                    started_at: step.started_at,
+                    finished_at: step.finished_at,
+                    duration_ms: step.duration_ms,
+                })
+                .collect(),
+            phase_timings: event
+                .phase_timings
+                .into_iter()
+                .map(|phase| BackendPhaseTiming {
+                    phase: phase.phase,
+                    started_at: phase.started_at,
+                    finished_at: phase.finished_at,
+                    duration_ms: phase.duration_ms,
+                    segment_count: phase.segment_count,
+                })
+                .collect(),
+        }));
         events.push(BackendEvent::Finished);
+    } else if event_type == "cli_phase" {
+        if let Some(phase) = event.phase.filter(|value| !value.trim().is_empty()) {
+            events.push(BackendEvent::PhaseChanged(phase));
+        }
+    } else if event_type == "cli_tool" {
+        let tool_name = collect_tool_names(&event).into_iter().next();
+        if let Some(tool_name) = tool_name {
+            match event.action.as_deref() {
+                Some("started") => events.push(BackendEvent::ToolStarted(tool_name)),
+                Some("finished") => events.push(BackendEvent::ToolFinished(tool_name)),
+                _ => {}
+            }
+        }
     } else if let Some(kind) = live_message_kind(event_type, role, &content) {
         events.push(BackendEvent::LiveChunk(kind, content));
-    } else if matches!(event_type, "tool_call" | "tool_result") && !tool_names.is_empty() {
-        for name in &tool_names {
-            events.push(if event_type == "tool_call" {
-                BackendEvent::ToolStarted(name.clone())
-            } else {
-                BackendEvent::ToolFinished(name.clone())
-            });
-        }
     } else if !content.is_empty() {
         match event_type {
             "tool_call" => events.push(BackendEvent::Message(
@@ -58,7 +95,7 @@ pub(crate) fn parse_backend_line(line: &str) -> Vec<BackendEvent> {
                 format!("completed {}", summarize_tool_event(&tool_names, &content)),
             )),
             "error" | "cli_error" => events.push(BackendEvent::Error(content)),
-            "cli_stats" | "token_usage" | "start" | "done" => {}
+            "cli_stats" | "cli_phase" | "cli_tool" | "token_usage" | "start" | "done" => {}
             _ => events.push(BackendEvent::Message(
                 MessageKind::Process,
                 truncate(&clean_single_line(&content), 180),
@@ -68,10 +105,6 @@ pub(crate) fn parse_backend_line(line: &str) -> Vec<BackendEvent> {
 
     for name in tool_names {
         events.push(BackendEvent::Status(format!("tool  {}", name)));
-    }
-
-    if event_type == "stream_end" {
-        events.push(BackendEvent::Finished);
     }
 
     events
@@ -89,6 +122,8 @@ fn live_message_kind(event_type: &str, role: &str, content: &str) -> Option<Mess
             | "tool_call"
             | "tool_result"
             | "cli_stats"
+            | "cli_phase"
+            | "cli_tool"
             | "token_usage"
             | "start"
             | "done"

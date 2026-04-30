@@ -13,6 +13,7 @@ pub(super) fn run_task(
     let request = BackendRequest {
         session_id: app.session_id.clone(),
         user_id: app.user_id.clone(),
+        agent_id: app.selected_agent_id.clone(),
         agent_mode: app.agent_mode.clone(),
         max_loop_count: app.max_loop_count,
         workspace: Some(workspace_root()),
