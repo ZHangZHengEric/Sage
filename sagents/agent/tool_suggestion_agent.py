@@ -104,9 +104,11 @@ class ToolSuggestionAgent(AgentBase):
             # 如果是 ToolProxy 且处于 fibre 模式，动态添加 fibre 特有工具
             if isinstance(session_context.tool_manager, ToolProxy):
                 if session_context.agent_config.get("agent_mode", "fibre") == "fibre":
-                    session_context.tool_manager._available_tools.add("sys_spawn_agent")
-                    session_context.tool_manager._available_tools.add("sys_delegate_task")
-                    session_context.tool_manager._available_tools.add("sys_finish_task")
+                    session_context.tool_manager.allow_tools([
+                        "sys_spawn_agent",
+                        "sys_delegate_task",
+                        "sys_finish_task",
+                    ])
 
             available_tools = session_context.tool_manager.list_tools_simplified(lang=session_context.get_language())
             # 准备工具列表字符串，包含ID和名称，以及描述的前100个字符
