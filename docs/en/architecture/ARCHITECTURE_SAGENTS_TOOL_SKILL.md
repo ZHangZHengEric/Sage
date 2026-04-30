@@ -316,3 +316,100 @@ skill_manager.add_skill_dir("/path/to/skills_root")
 ```
 
 For a given session, scope the visible skills with `SkillProxy(skill_manager, available_skills=["my_skill"])` and pass it into `SAgent.run_stream`.
+
+---
+
+## 12. Tool live-progress channel (tool_progress)
+
+Long-running tools (notably blocking `execute_shell_command`) often need to
+push intermediate output to the UI before the tool finishes, without polluting
+the final tool message that goes to the LLM. Sage adopts the same "two event
+types" approach as Codex App Server / Claude Code:
+
+- **`message` events**: unchanged. The complete tool result (with structured
+  fields like `exit_code`, `stdout`, `stderr`) is appended to MessageManager,
+  persisted, and fed back to the LLM.
+- **`tool_progress` events**: a new pure-progress channel **for the UI only**.
+  These events never enter MessageManager, are not persisted, and are not sent
+  to the LLM.
+
+### How a tool emits progress
+
+```python
+from sagents.tool import emit_tool_progress
+
+@tool(name="my_long_tool", description="...")
+async def my_long_tool(...):
+    async for chunk in some_stream():
+        await emit_tool_progress(chunk, stream="stdout")  # safe no-op when not in a chat session
+    return {"content": "...final structured result..."}
+```
+
+- `emit_tool_progress(text, stream="stdout"|"stderr"|"info")` is a fire-and-
+  forget API. Outside a chat context (CLI / unit tests / legacy callers) it
+  silently no-ops, so the tool's behaviour is unchanged.
+- Tool signature and return value require **no changes**; MCP tools are
+  unaffected.
+
+### Wire format
+
+A new event type is added to the NDJSON stream:
+
+```json
+{
+  "type": "tool_progress",
+  "tool_call_id": "call_abc",
+  "text": "...incremental output...",
+  "stream": "stdout",
+  "closed": false,
+  "ts": 1761700000.123
+}
+```
+
+- `tool_call_id` ties each chunk back to the originating assistant tool_call;
+  the frontend aggregates by this key.
+- `closed: true` marks the end of the progress stream so the UI can drop the
+  spinner.
+- The existing `message` event shape is fully preserved; downstream consumers
+  that don't care about `tool_progress` can simply ignore it.
+
+### Coalescing / throttling
+
+`emit_tool_progress` coalesces by `(tool_call_id, stream)` using a time window
+to prevent high-frequency small writes from saturating the channel:
+
+| Trigger | Behaviour |
+| --- | --- |
+| Another emit on the same stream < 50ms after the previous one | Append to in-memory buffer, do not enqueue yet |
+| Time window elapses (default 50ms) | Buffer is merged into a single `tool_progress` event and enqueued |
+| Per-stream accumulated bytes ≥ 16KB | Flush immediately, even if the window hasn't elapsed |
+| `emit_tool_progress_closed()` | Force-flush all pending streams under the current `tool_call_id`, then emit `closed=True` |
+| `unregister_progress_queue()` (chat ends) | Cancel pending flush tasks; remaining buffer is discarded |
+
+Tunables:
+
+- `SAGE_TOOL_PROGRESS_FLUSH_INTERVAL_MS` (default `50`). Set to `0` to disable
+  coalescing and emit immediately.
+- `SAGE_TOOL_PROGRESS_FLUSH_BYTES` (default `16384`).
+
+Coalescing is lock-free and safe within a single event loop: the `flush_task`
+is scheduled with `asyncio.create_task`, subsequent emits reuse the same task,
+and a synchronous flush (byte threshold or close) cancels the task—so an event
+is never enqueued twice.
+
+### Disabling
+
+Set `SAGE_TOOL_PROGRESS_ENABLED=false` to make `emit_tool_progress` a global
+no-op. The UI then only sees the final result once the tool returns; all other
+behaviour is unchanged.
+
+### Key modules
+
+| Module | Purpose |
+| --- | --- |
+| `sagents/tool/tool_progress.py` | protocol constants, `contextvars` binding, `emit_tool_progress` |
+| `sagents/agent/agent_base.py` | binds `tool_progress` context inside `_execute_tool` |
+| `common/utils/stream_merge.py` | `interleave_message_and_progress` merges both event streams into NDJSON |
+| `common/services/chat_service.py` | registers / unregisters progress queues, forwards `tool_progress` |
+| `app/server/web/src/composables/chat/useChatPage.js` | frontend dispatcher for `type=tool_progress` into the workbench |
+| `app/server/web/src/components/chat/workbench/renderers/toolcall/ShellCommandToolRenderer.vue` | live-output area rendered per stream |

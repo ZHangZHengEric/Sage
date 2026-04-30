@@ -43,6 +43,22 @@ ref: http-api-chat
 - `POST /api/conversations/{session_id}/rerun-stream`：不依赖本次请求里的 `messages`。服务端用 `get_rerun_conversation_payload` 取出「最后用户消息」与历史 agent 绑定，并构造 `StreamRequest`（`system_context` 中标记重跑来源）。`RerunStreamRequest` 中字段均可选，用于覆盖 `agent_id`、子 Agent 列表、模式等。响应与 `web-stream` 一样走 `StreamManager` 的 `text/plain` 流。
 - `POST /api/conversations/{session_id}/edit-last-user-message`：只更新存储中的最后一条 **用户** 消息；若之后要重跑模型输出，可再调 `rerun-stream`。
 
+## 流中的 `tool_progress` 事件
+
+三种流式入口下发的 NDJSON 中除了常规 `message` 事件，还可能包含 `tool_progress`
+事件，用于工具执行过程的实时增量推送：
+
+```json
+{"type":"tool_progress","tool_call_id":"call_abc","text":"...","stream":"stdout","closed":false,"ts":1761700000.123}
+```
+
+- 仅用于 UI 实时展示，**不会**进入会话历史 / MessageManager / LLM 上下文。
+- 客户端按 `tool_call_id` 聚合到对应工具卡片；`closed: true` 表示流结束。
+- 不关心实时过程的下游应用直接忽略 `type=tool_progress` 即可，老协议完全兼容。
+- 关闭：服务端设 `SAGE_TOOL_PROGRESS_ENABLED=false`，不再产生此类事件。
+
+详见 [架构文档 · §12 工具实时过程通道](../architecture/ARCHITECTURE_SAGENTS_TOOL_SKILL.md#12-工具实时过程通道tool_progress)。
+
 ## 与 `/api/sessions/.../interrupt` 的关系
 
 `interrupt` 会尝试停止正在运行的 sagents 会话；与 `web-stream` / `rerun-stream` 里「同会话重入先停旧流」是两条路径：前者是显式用户中断，后者是自动替换流。

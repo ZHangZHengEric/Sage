@@ -87,6 +87,9 @@ ref: env_vars
 | `SAGE_EMIT_TOOL_CALL_ON_COMPLETE` | `true` | Re-emit tool_call chunks once the LLM stream completes |
 | `SAGE_ECHO_SHELL_OUTPUT` | `false` | Echo background-shell stdout/stderr into the main stream |
 | `SAGE_FORCE_TOOL_CHOICE_REQUIRED` | `false` | Force `tool_choice=required` on every LLM call that carries `tools`. Off by default to avoid `unsupported_parameter` errors on models such as OpenAI o1/o3; enable explicitly with `1/true/yes/on` |
+| `SAGE_TOOL_PROGRESS_ENABLED` | `true` | Enable the tool live-progress channel (NDJSON `type=tool_progress` events for the UI only; never sent to MessageManager or the LLM) |
+| `SAGE_TOOL_PROGRESS_FLUSH_INTERVAL_MS` | `50` | Coalesce window (ms). Multiple `emit_tool_progress` calls within the window for the same `(tool_call, stream)` are merged into one event. Set to `0` to disable coalescing and emit immediately |
+| `SAGE_TOOL_PROGRESS_FLUSH_BYTES` | `16384` | Per-stream byte threshold; once accumulated text reaches it, flush immediately (prevents fast-producing commands from saturating the channel) |
 
 ## 6. Memory
 
