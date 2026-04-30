@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Dict, List
 
 from mcp import types
 from mcp.server import Server
 
 from .anytool_runtime import generate_anytool_result, normalize_anytool_tools
+
+
+_HIDDEN_CONTEXT_PARAM_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "session_id": {
+        "type": "string",
+        "description": "Hidden Sage session id. Auto-injected by the backend.",
+    },
+    "user_id": {
+        "type": "string",
+        "description": "Hidden Sage user id. Auto-injected by the backend.",
+    },
+}
 
 
 def _ensure_object_schema(schema: Any, *, allow_any_properties: bool = False) -> Dict[str, Any]:
@@ -30,6 +43,15 @@ def _ensure_object_schema(schema: Any, *, allow_any_properties: bool = False) ->
     if not isinstance(normalized.get("required"), list):
         normalized["required"] = []
     normalized.setdefault("additionalProperties", allow_any_properties if not normalized["properties"] else False)
+    return normalized
+
+
+def _ensure_anytool_input_schema(schema: Any) -> Dict[str, Any]:
+    """Build the runtime AnyTool input schema with hidden Sage context fields."""
+    normalized = _ensure_object_schema(deepcopy(schema), allow_any_properties=True)
+    properties = normalized.setdefault("properties", {})
+    for key, param_schema in _HIDDEN_CONTEXT_PARAM_SCHEMAS.items():
+        properties.setdefault(key, dict(param_schema))
     return normalized
 
 
@@ -58,7 +80,7 @@ def _build_tool_schema(tool_def: Dict[str, Any]) -> types.Tool:
         name=str(tool_def.get("name", "")).strip(),
         title=str(tool_def.get("title", "")).strip() or None,
         description=str(tool_def.get("description", "")).strip() or None,
-        inputSchema=_ensure_object_schema(tool_def.get("parameters"), allow_any_properties=True),
+        inputSchema=_ensure_anytool_input_schema(tool_def.get("parameters")),
         outputSchema=output_schema,
     )
 
