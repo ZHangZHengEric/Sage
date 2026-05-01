@@ -200,6 +200,24 @@ fn parse_startup_action_supports_agent_options() {
             if prompt == "inspect"
             && options.agent_id.as_deref() == Some("agent_demo")
             && options.agent_mode.as_deref() == Some("fibre")
+            && options.workspace.is_none()
+    ));
+}
+
+#[test]
+fn parse_startup_action_supports_workspace_option() {
+    let action = parse_startup_action(vec![
+        "--workspace".to_string(),
+        "/tmp/demo-workspace".to_string(),
+        "run".to_string(),
+        "inspect".to_string(),
+    ])
+    .expect("parse");
+    assert!(matches!(
+        action,
+        StartupBehavior::Run { action: Some(SubmitAction::RunTask(prompt)), options }
+            if prompt == "inspect"
+            && options.workspace.as_deref() == Some("/tmp/demo-workspace")
     ));
 }
 

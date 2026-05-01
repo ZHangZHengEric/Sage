@@ -134,6 +134,13 @@ fn parse_global_options(args: &[String]) -> Result<(StartupOptions, Vec<String>)
                 );
                 idx += 2;
             }
+            "--workspace" => {
+                let value = args
+                    .get(idx + 1)
+                    .ok_or_else(|| anyhow!("--workspace requires a value"))?;
+                options.workspace = Some(value.clone());
+                idx += 2;
+            }
             _ => break,
         }
     }

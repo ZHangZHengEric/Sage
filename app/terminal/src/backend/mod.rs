@@ -2,6 +2,7 @@ mod api;
 pub(crate) mod contract;
 mod handle;
 mod protocol;
+mod protocol_support;
 pub(crate) mod runtime;
 #[cfg(test)]
 mod tests;

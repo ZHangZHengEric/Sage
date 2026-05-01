@@ -115,6 +115,7 @@ import sys
 
 count = 0
 log_path = os.environ.get("TEST_BACKEND_LOG")
+args_path = os.environ.get("TEST_BACKEND_ARGS_LOG")
 
 for raw in sys.stdin:
     prompt = raw.rstrip("\n")
@@ -122,6 +123,9 @@ for raw in sys.stdin:
     if log_path:
         with open(log_path, "a", encoding="utf-8") as handle:
             handle.write(prompt + "\n")
+    if args_path:
+        with open(args_path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(sys.argv[1:]))
     print(json.dumps({
         "type": "cli_phase",
         "phase": "planning",

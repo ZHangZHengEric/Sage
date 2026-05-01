@@ -28,7 +28,7 @@ struct BackendConfig {
     agent_id: Option<String>,
     agent_mode: String,
     max_loop_count: u32,
-    workspace: PathBuf,
+    workspace: Option<PathBuf>,
     skills: Vec<String>,
     model_override: Option<String>,
 }
@@ -38,10 +38,7 @@ impl BackendHandle {
         let runtime_root = resolve_runtime_root()?;
         let state_root = prepare_state_root(&runtime_root)?;
         let cli = resolve_cli_invoker(&runtime_root);
-        let workspace = request
-            .workspace
-            .clone()
-            .unwrap_or_else(|| runtime_root.clone());
+        let workspace = request.workspace.clone();
 
         let mut command = match &cli {
             CliInvoker::Executable(path) => {
@@ -70,11 +67,12 @@ impl BackendHandle {
             .arg(&request.user_id)
             .arg("--max-loop-count")
             .arg(request.max_loop_count.to_string())
-            .arg("--workspace")
-            .arg(&workspace)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(workspace) = &workspace {
+            command.arg("--workspace").arg(workspace);
+        }
         if let Some(agent_id) = &request.agent_id {
             command.arg("--agent-id").arg(agent_id);
         }
@@ -234,11 +232,7 @@ impl BackendHandle {
             && self.config.agent_id == request.agent_id
             && self.config.agent_mode == request.agent_mode
             && self.config.max_loop_count == request.max_loop_count
-            && self.config.workspace
-                == request
-                    .workspace
-                    .clone()
-                    .unwrap_or_else(|| self.config.workspace.clone())
+            && self.config.workspace == request.workspace
             && self.config.skills == request.skills
             && self.config.model_override == request.model_override
     }

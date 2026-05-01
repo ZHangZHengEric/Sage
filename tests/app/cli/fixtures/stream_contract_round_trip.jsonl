@@ -1,3 +1,4 @@
+{"type":"cli_session","command_mode":"run","session_state":"new","session_id":"session-demo","user_id":"default_user","agent_id":"agent-demo","agent_mode":"simple","workspace":"/tmp/demo-workspace","workspace_source":"explicit","requested_skills":["search_memory"],"max_loop_count":50,"has_prior_messages":false,"prior_message_count":0,"session_summary":null}
 {"type":"cli_phase","phase":"planning"}
 {"type":"analysis","role":"assistant","content":"Plan the work first."}
 {"type":"cli_phase","phase":"tool"}

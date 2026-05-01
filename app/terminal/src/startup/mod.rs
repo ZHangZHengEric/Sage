@@ -7,6 +7,7 @@ mod tests;
 pub(crate) struct StartupOptions {
     pub(crate) agent_id: Option<String>,
     pub(crate) agent_mode: Option<String>,
+    pub(crate) workspace: Option<String>,
 }
 
 #[derive(Debug)]

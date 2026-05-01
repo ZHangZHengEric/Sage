@@ -389,19 +389,21 @@ The current summary includes:
 
 Prints structured stream events instead of plain text.
 
-The JSON stream now has three layers:
+The JSON stream now has four layers:
 
+- a session envelope event: `cli_session`
 - raw runtime events such as `assistant`, `analysis`, `tool_call`, and `tool_result`
 - CLI control events such as `cli_phase` and `cli_tool`
 - a final `cli_stats` event when `--stats` is enabled
 
 The intended contract is:
 
+- `cli_session`: emitted before streamed runtime output; includes the resolved `session_id`, `command_mode`, `session_state`, `user_id`, `agent_id`, `agent_mode`, `workspace`, `workspace_source`, requested skills, `max_loop_count`, `has_prior_messages`, `prior_message_count`, and optional `session_summary` for resume hydration
 - `cli_phase`: emitted when the CLI detects a phase transition such as `planning`, `tool`, or `assistant_text`
 - `cli_tool`: emitted when a tool step starts or finishes; includes `action`, `step`, `tool_name`, `tool_call_id`, and `status`
 - `cli_stats`: emitted once at the end; includes final `tool_steps`, `phase_timings`, timing summary, and token summary
 
-Consumers should treat `cli_phase` and `cli_tool` as the preferred real-time UI contract, and treat raw `tool_call` / `tool_result` lines as compatibility input rather than the primary surface.
+Consumers should treat `cli_session`, `cli_phase`, and `cli_tool` as the preferred UI contract, and treat raw `tool_call` / `tool_result` lines as compatibility input rather than the primary surface. `cli_session.session_id` is intended to be stable from the first event onward, including requests that did not receive an explicit `--session-id`. `session_state`, `has_prior_messages`, and `prior_message_count` are provided so frontends can hydrate new-vs-existing session state without re-deriving it from `command_mode` and `session_summary`. When `--workspace` is provided, the emitted workspace path is the normalized absolute path that the backend actually uses.
 
 When used together with `--stats`, the CLI appends a final `cli_stats` JSON event for post-run analysis:
 
@@ -414,6 +416,7 @@ This is useful for:
 - shell scripting
 - comparing runs
 - extracting token usage
+- hydrating UI state before the first assistant chunk arrives
 - checking whether tools or skills were actually used
 
 For a concrete end-to-end sample, see `tests/app/cli/fixtures/stream_contract_round_trip.jsonl`.
@@ -451,7 +454,7 @@ Then verify:
 - config values look correct
 - skills output matches what is visible locally
 - stats include the expected user/workspace/skill context
-- JSON mode emits `cli_phase` / `cli_tool` during the run
+- JSON mode emits `cli_session` first, then `cli_phase` / `cli_tool` during the run
 - JSON mode ends with a `cli_stats` event
 
 ## Maintainer Validation

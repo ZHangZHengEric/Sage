@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import asyncio
 import unittest
+from contextlib import asynccontextmanager
 from unittest.mock import patch
 
+import app.cli.main as cli_main
 from app.cli.main import (
     CHAT_INPUT_PROMPT,
     CHAT_COMMAND_HELP,
@@ -453,6 +455,236 @@ class TestStatsToolDetection(unittest.TestCase):
 
 
 class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
+    async def test_stream_request_emits_cli_session_event_in_json_mode(self):
+        async def fake_run_request_stream(_request, workspace=None):
+            del workspace
+            yield {
+                "type": "assistant",
+                "role": "assistant",
+                "content": "hello",
+            }
+            yield {
+                "type": "stream_end",
+            }
+
+        request = type(
+            "Request",
+            (),
+            {
+                "session_id": "session-test",
+                "user_id": "user-test",
+                "agent_id": "agent-demo",
+                "agent_mode": "simple",
+                "available_skills": ["search_memory"],
+                "max_loop_count": 50,
+            },
+        )()
+
+        from io import StringIO
+        import json
+
+        stdout = StringIO()
+        stderr = StringIO()
+        with (
+            patch("app.cli.service.run_request_stream", fake_run_request_stream),
+            patch("sys.stdout", stdout),
+            patch("sys.stderr", stderr),
+        ):
+            result = await _stream_request(
+                request,
+                json_output=True,
+                stats_output=False,
+                workspace="/tmp/demo-workspace",
+                command_mode="resume",
+                session_summary={
+                    "session_id": "session-test",
+                    "title": "Demo session",
+                    "message_count": 4,
+                },
+            )
+
+        self.assertEqual(result, 0)
+        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip()]
+        self.assertEqual(
+            events[0],
+            {
+                "type": "cli_session",
+                "command_mode": "resume",
+                "session_state": "existing",
+                "session_id": "session-test",
+                "user_id": "user-test",
+                "agent_id": "agent-demo",
+                "agent_mode": "simple",
+                "workspace": "/tmp/demo-workspace",
+                "workspace_source": "explicit",
+                "requested_skills": ["search_memory"],
+                "max_loop_count": 50,
+                "has_prior_messages": True,
+                "prior_message_count": 4,
+                "session_summary": {
+                    "session_id": "session-test",
+                    "title": "Demo session",
+                    "message_count": 4,
+                },
+            },
+        )
+        self.assertEqual(events[1], {"type": "cli_phase", "phase": "assistant_text"})
+        self.assertEqual(events[2]["type"], "assistant")
+
+    async def test_stream_request_generates_session_id_before_cli_session_event(self):
+        async def fake_run_request_stream(_request, workspace=None):
+            del workspace
+            yield {
+                "type": "assistant",
+                "role": "assistant",
+                "content": "hello",
+                "session_id": _request.session_id,
+            }
+            yield {
+                "type": "stream_end",
+            }
+
+        request = type(
+            "Request",
+            (),
+            {
+                "session_id": None,
+                "user_id": "user-test",
+                "agent_id": None,
+                "agent_mode": "simple",
+                "available_skills": [],
+                "max_loop_count": 50,
+            },
+        )()
+
+        from io import StringIO
+        import json
+
+        stdout = StringIO()
+        stderr = StringIO()
+        with (
+            patch("app.cli.service.run_request_stream", fake_run_request_stream),
+            patch("sys.stdout", stdout),
+            patch("sys.stderr", stderr),
+        ):
+            result = await _stream_request(
+                request,
+                json_output=True,
+                stats_output=True,
+                workspace=None,
+                command_mode="run",
+            )
+
+        self.assertEqual(result, 0)
+        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip()]
+        self.assertEqual(events[0]["type"], "cli_session")
+        self.assertEqual(events[0]["command_mode"], "run")
+        self.assertEqual(events[0]["session_state"], "new")
+        self.assertEqual(events[0]["workspace_source"], "default")
+        self.assertEqual(events[0]["has_prior_messages"], False)
+        self.assertEqual(events[0]["prior_message_count"], 0)
+        self.assertIsNone(events[0]["session_summary"])
+        self.assertIsInstance(events[0]["session_id"], str)
+        self.assertTrue(events[0]["session_id"])
+        self.assertEqual(request.session_id, events[0]["session_id"])
+        self.assertEqual(events[-1]["type"], "cli_stats")
+        self.assertEqual(events[-1]["session_id"], events[0]["session_id"])
+
+    async def test_run_command_normalizes_workspace_before_stream_request(self):
+        args = cli_main.build_argument_parser().parse_args(["run", "--workspace", "./demo", "hello"])
+        captured = {}
+
+        @asynccontextmanager
+        async def fake_cli_runtime(*, verbose=False):
+            del verbose
+            yield object()
+
+        async def fake_build_request(_args, task):
+            captured["build_workspace"] = _args.workspace
+            captured["task"] = task
+            return type(
+                "Request",
+                (),
+                {
+                    "session_id": "session-test",
+                    "user_id": "user-test",
+                    "agent_id": None,
+                    "agent_mode": "simple",
+                    "available_skills": [],
+                    "max_loop_count": 50,
+                },
+            )()
+
+        async def fake_stream_request(request, json_output, stats_output, workspace=None, *, command_mode="run", session_summary=None):
+            del request, json_output, stats_output, session_summary
+            captured["stream_workspace"] = workspace
+            captured["command_mode"] = command_mode
+            return 0
+
+        with (
+            patch("app.cli.service.validate_cli_runtime_requirements"),
+            patch("app.cli.service.validate_cli_request_options", return_value="/tmp/demo"),
+            patch("app.cli.service.cli_runtime", fake_cli_runtime),
+            patch("app.cli.main._build_request", fake_build_request),
+            patch("app.cli.main._stream_request", fake_stream_request),
+        ):
+            result = await cli_main._run_command(args)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(args.workspace, "/tmp/demo")
+        self.assertEqual(captured["build_workspace"], "/tmp/demo")
+        self.assertEqual(captured["stream_workspace"], "/tmp/demo")
+        self.assertEqual(captured["command_mode"], "run")
+
+    async def test_chat_command_normalizes_workspace_before_stream_request(self):
+        args = cli_main.build_argument_parser().parse_args(["chat", "--workspace", "./demo", "--json"])
+        captured = {}
+
+        @asynccontextmanager
+        async def fake_cli_runtime(*, verbose=False):
+            del verbose
+            yield object()
+
+        async def fake_build_request(_args, task):
+            captured["build_workspace"] = _args.workspace
+            captured["task"] = task
+            return type(
+                "Request",
+                (),
+                {
+                    "session_id": _args.session_id,
+                    "user_id": "user-test",
+                    "agent_id": None,
+                    "agent_mode": "simple",
+                    "available_skills": [],
+                    "max_loop_count": 50,
+                },
+            )()
+
+        async def fake_stream_request(request, json_output, stats_output, workspace=None, *, command_mode="chat", session_summary=None):
+            del request, json_output, stats_output
+            captured["stream_workspace"] = workspace
+            captured["command_mode"] = command_mode
+            captured["session_summary"] = session_summary
+            return 0
+
+        with (
+            patch("app.cli.service.validate_cli_runtime_requirements"),
+            patch("app.cli.service.validate_cli_request_options", return_value="/tmp/demo"),
+            patch("app.cli.service.cli_runtime", fake_cli_runtime),
+            patch("app.cli.main._build_request", fake_build_request),
+            patch("app.cli.main._stream_request", fake_stream_request),
+            patch("app.cli.main._read_chat_prompt", side_effect=["hello", "/exit"]),
+        ):
+            result = await cli_main._chat_command(args, command_mode="chat")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(args.workspace, "/tmp/demo")
+        self.assertEqual(captured["build_workspace"], "/tmp/demo")
+        self.assertEqual(captured["stream_workspace"], "/tmp/demo")
+        self.assertEqual(captured["command_mode"], "chat")
+        self.assertIsNone(captured["session_summary"])
+
     async def test_stream_request_does_not_cancel_slow_stream_on_idle_poll(self):
         async def fake_run_request_stream(_request, workspace=None):
             del workspace
@@ -532,14 +764,26 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             patch("sys.stdout", stdout),
             patch("sys.stderr", stderr),
         ):
-            result = await _stream_request(request, json_output=True, stats_output=False, workspace=None)
+            result = await _stream_request(
+                request,
+                json_output=True,
+                stats_output=False,
+                workspace=None,
+                command_mode="chat",
+            )
 
         self.assertEqual(result, 0)
         events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip()]
-        self.assertEqual(events[0], {"type": "cli_phase", "phase": "planning"})
-        self.assertEqual(events[1]["type"], "analysis")
-        self.assertEqual(events[2], {"type": "cli_phase", "phase": "assistant_text"})
-        self.assertEqual(events[3]["type"], "assistant")
+        self.assertEqual(events[0]["type"], "cli_session")
+        self.assertEqual(events[0]["command_mode"], "chat")
+        self.assertEqual(events[0]["session_state"], "new")
+        self.assertEqual(events[0]["has_prior_messages"], False)
+        self.assertEqual(events[0]["prior_message_count"], 0)
+        self.assertIsNone(events[0]["session_summary"])
+        self.assertEqual(events[1], {"type": "cli_phase", "phase": "planning"})
+        self.assertEqual(events[2]["type"], "analysis")
+        self.assertEqual(events[3], {"type": "cli_phase", "phase": "assistant_text"})
+        self.assertEqual(events[4]["type"], "assistant")
 
     async def test_stream_request_emits_cli_tool_events_in_json_mode(self):
         async def fake_run_request_stream(_request, workspace=None):
@@ -586,11 +830,22 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             patch("sys.stdout", stdout),
             patch("sys.stderr", stderr),
         ):
-            result = await _stream_request(request, json_output=True, stats_output=False, workspace=None)
+            result = await _stream_request(
+                request,
+                json_output=True,
+                stats_output=False,
+                workspace=None,
+                command_mode="run",
+            )
 
         self.assertEqual(result, 0)
         events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip()]
         cli_tool_events = [event for event in events if event.get("type") == "cli_tool"]
+        self.assertEqual(events[0]["type"], "cli_session")
+        self.assertEqual(events[0]["command_mode"], "run")
+        self.assertEqual(events[0]["session_state"], "new")
+        self.assertEqual(events[0]["has_prior_messages"], False)
+        self.assertEqual(events[0]["prior_message_count"], 0)
         self.assertEqual(
             cli_tool_events,
             [
