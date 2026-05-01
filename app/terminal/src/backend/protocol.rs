@@ -3,11 +3,7 @@ use std::sync::mpsc;
 use crate::app::MessageKind;
 use crate::backend::contract::parse_stream_event;
 use crate::backend::protocol_support::{
-    backend_stats_from_event,
-    collect_tool_names,
-    live_message_kind,
-    summarize_tool_event,
-    truncate,
+    backend_stats_from_event, collect_tool_names, live_message_kind, summarize_tool_event, truncate,
 };
 
 use super::BackendEvent;
@@ -74,7 +70,10 @@ pub(crate) fn parse_backend_line(line: &str) -> Vec<BackendEvent> {
             "cli_stats" | "cli_phase" | "cli_tool" | "token_usage" | "start" | "done" => {}
             _ => events.push(BackendEvent::Message(
                 MessageKind::Process,
-                truncate(&content.split_whitespace().collect::<Vec<_>>().join(" "), 180),
+                truncate(
+                    &content.split_whitespace().collect::<Vec<_>>().join(" "),
+                    180,
+                ),
             )),
         }
     }

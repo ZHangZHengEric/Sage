@@ -2,7 +2,6 @@ use crate::app::MessageKind;
 use crate::backend::contract::CliStreamEvent;
 use crate::backend::{BackendPhaseTiming, BackendStats, BackendToolStep};
 
-
 pub(super) fn backend_stats_from_event(event: CliStreamEvent) -> BackendStats {
     BackendStats {
         elapsed_seconds: event.elapsed_seconds,
@@ -37,7 +36,11 @@ pub(super) fn backend_stats_from_event(event: CliStreamEvent) -> BackendStats {
     }
 }
 
-pub(super) fn live_message_kind(event_type: &str, role: &str, content: &str) -> Option<MessageKind> {
+pub(super) fn live_message_kind(
+    event_type: &str,
+    role: &str,
+    content: &str,
+) -> Option<MessageKind> {
     if content.is_empty() {
         return None;
     }
@@ -123,4 +126,3 @@ pub(super) fn truncate(text: &str, max_len: usize) -> String {
 fn clean_single_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
-

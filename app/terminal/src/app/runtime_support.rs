@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use ratatui::text::Line;
@@ -5,7 +6,6 @@ use ratatui::text::Line;
 use crate::app::MessageKind;
 use crate::app_render::{format_message, format_message_continuation};
 use crate::backend::{BackendPhaseTiming, BackendStats, BackendToolStep};
-
 
 pub(super) fn format_duration(duration: Duration) -> String {
     let secs = duration.as_secs();
@@ -80,20 +80,64 @@ pub(super) fn backend_tool_step_summary(tool_steps: &[BackendToolStep]) -> Optio
         return None;
     }
 
-    let mut lines = Vec::with_capacity(tool_steps.len() + 1);
-    lines.push("tool steps".to_string());
-    for step in tool_steps {
-        let mut detail = format!(
-            "step {}  {} {}",
-            step.step,
-            normalize_tool_status(&step.status),
-            step.tool_name
-        );
-        if let Some(duration_ms) = duration_from_millis(step.duration_ms) {
-            detail.push_str(&format!(" • {}", format_duration(duration_ms)));
+    if tool_steps.len() <= 4 {
+        let mut lines = Vec::with_capacity(tool_steps.len() + 1);
+        lines.push("tool steps".to_string());
+        for step in tool_steps {
+            let mut detail = format!(
+                "step {}  {} {}",
+                step.step,
+                normalize_tool_status(&step.status),
+                step.tool_name
+            );
+            if let Some(duration_ms) = duration_from_millis(step.duration_ms) {
+                detail.push_str(&format!(" • {}", format_duration(duration_ms)));
+            }
+            lines.push(detail);
         }
-        lines.push(detail);
+        return Some(lines.join("\n"));
     }
+
+    let mut counts = BTreeMap::<String, usize>::new();
+    for step in tool_steps {
+        *counts.entry(step.tool_name.clone()).or_default() += 1;
+    }
+    let mut aggregated = counts.into_iter().collect::<Vec<_>>();
+    aggregated.sort_by(|(left_name, left_count), (right_name, right_count)| {
+        right_count
+            .cmp(left_count)
+            .then_with(|| left_name.cmp(right_name))
+    });
+
+    let summary = aggregated
+        .iter()
+        .take(4)
+        .map(|(name, count)| format!("{name} ×{count}"))
+        .collect::<Vec<_>>()
+        .join(" • ");
+    let remaining = aggregated.len().saturating_sub(4);
+
+    let mut lines = vec![format!("tool steps • {} total", tool_steps.len())];
+    if remaining > 0 {
+        lines.push(format!("{summary} • +{remaining} more"));
+    } else {
+        lines.push(summary);
+    }
+
+    if let Some(slowest) = tool_steps
+        .iter()
+        .filter_map(|step| step.duration_ms.map(|duration_ms| (step, duration_ms)))
+        .max_by(|(_, left), (_, right)| left.total_cmp(right))
+    {
+        let (step, duration_ms) = slowest;
+        lines.push(format!(
+            "slowest • step {} {} {}",
+            step.step,
+            step.tool_name,
+            format_duration(Duration::from_secs_f64(duration_ms / 1000.0))
+        ));
+    }
+
     Some(lines.join("\n"))
 }
 
@@ -102,19 +146,28 @@ pub(super) fn backend_phase_timing_summary(phase_timings: &[BackendPhaseTiming])
         return None;
     }
 
-    let mut lines = Vec::with_capacity(phase_timings.len() + 1);
-    lines.push("phase timings".to_string());
-    for phase in phase_timings {
-        let mut detail = phase.phase.replace('_', " ");
-        if let Some(duration_ms) = duration_from_millis(phase.duration_ms) {
-            detail.push_str(&format!(" • {}", format_duration(duration_ms)));
-        }
-        if phase.segment_count > 1 {
-            detail.push_str(&format!(" • {} segments", phase.segment_count));
-        }
-        lines.push(detail);
+    let details = phase_timings
+        .iter()
+        .map(|phase| {
+            let mut detail = phase.phase.replace('_', " ");
+            if let Some(duration_ms) = duration_from_millis(phase.duration_ms) {
+                detail.push_str(&format!(" {}", format_duration(duration_ms)));
+            }
+            if phase.segment_count > 1 {
+                detail.push_str(&format!(" • {} segments", phase.segment_count));
+            }
+            detail
+        })
+        .collect::<Vec<_>>();
+
+    if details.len() <= 3 {
+        Some(format!("phase timings • {}", details.join(" • ")))
+    } else {
+        let mut lines = Vec::with_capacity(details.len() + 1);
+        lines.push("phase timings".to_string());
+        lines.extend(details);
+        Some(lines.join("\n"))
     }
-    Some(lines.join("\n"))
 }
 
 pub(super) fn normalize_phase_label(phase: &str) -> String {
@@ -136,4 +189,3 @@ fn duration_from_millis(value: Option<f64>) -> Option<Duration> {
         .filter(|millis| millis.is_finite() && *millis >= 0.0)
         .map(|millis| Duration::from_secs_f64(millis / 1000.0))
 }
-

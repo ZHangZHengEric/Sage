@@ -6,7 +6,6 @@ use ratatui::text::Line;
 
 use crate::backend::BackendStats;
 
-
 #[derive(Debug)]
 pub enum SubmitAction {
     Noop,
@@ -304,4 +303,3 @@ fn format_workspace_label(path: &Path) -> String {
         None => display,
     }
 }
-

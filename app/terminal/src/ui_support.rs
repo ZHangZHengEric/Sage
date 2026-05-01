@@ -13,7 +13,6 @@ use crate::bottom_pane::transcript_overlay::TranscriptOverlayProps;
 use crate::custom_terminal::Frame;
 use crate::wrap::{wrap_lines, wrapped_height};
 
-
 pub(crate) fn render_live_region(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Clear, area);
     let lines = if app.busy {
@@ -127,4 +126,3 @@ fn compact_workspace_label(workspace_label: &str) -> String {
         truncate_middle(workspace_label, 26)
     }
 }
-

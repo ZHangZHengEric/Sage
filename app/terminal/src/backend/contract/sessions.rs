@@ -1,4 +1,8 @@
-pub(super) fn sessions_list_args(user_id: &str, agent_id: Option<&str>, limit: usize) -> Vec<String> {
+pub(super) fn sessions_list_args(
+    user_id: &str,
+    agent_id: Option<&str>,
+    limit: usize,
+) -> Vec<String> {
     let mut args = vec![
         "sessions".into(),
         "--json".into(),

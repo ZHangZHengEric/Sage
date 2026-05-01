@@ -130,7 +130,10 @@ pub(crate) fn parse_stream_event(line: &str) -> Option<CliStreamEvent> {
                     started_at: item.get("started_at").and_then(Value::as_f64),
                     finished_at: item.get("finished_at").and_then(Value::as_f64),
                     duration_ms: item.get("duration_ms").and_then(Value::as_f64),
-                    segment_count: item.get("segment_count").and_then(Value::as_u64).unwrap_or(0),
+                    segment_count: item
+                        .get("segment_count")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0),
                 })
                 .collect::<Vec<_>>()
         })

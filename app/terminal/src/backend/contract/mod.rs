@@ -115,9 +115,7 @@ impl CliJsonCommand<'_> {
                 user_id,
                 agent_id,
                 workspace,
-            } => {
-                skills::skills_list_args(user_id, *agent_id, *workspace)
-            }
+            } => skills::skills_list_args(user_id, *agent_id, *workspace),
             Self::ProvidersList { user_id } => providers::providers_list_args(user_id),
             Self::ProviderInspect {
                 user_id,

@@ -2,17 +2,12 @@ use std::time::Instant;
 
 use ratatui::text::Line;
 
+use crate::app::runtime_support::{
+    backend_phase_timing_summary, backend_tool_step_summary, duration_from_seconds,
+    flush_completed_live_lines, format_duration, normalize_phase_label, request_timing_summary,
+};
 use crate::app::{ActiveToolRecord, App, MessageKind};
 use crate::app_render::{format_message, format_message_continuation, welcome_lines};
-use crate::app::runtime_support::{
-    backend_phase_timing_summary,
-    backend_tool_step_summary,
-    duration_from_seconds,
-    flush_completed_live_lines,
-    format_duration,
-    normalize_phase_label,
-    request_timing_summary,
-};
 
 impl App {
     pub fn append_assistant_chunk(&mut self, chunk: &str) {
@@ -208,13 +203,8 @@ impl App {
         self.tool_step_seq = self.tool_step_seq.saturating_add(1);
         let step = self.tool_step_seq;
         let started_at = Instant::now();
-        self.active_tools.insert(
-            name.clone(),
-            ActiveToolRecord {
-                step,
-                started_at,
-            },
-        );
+        self.active_tools
+            .insert(name.clone(), ActiveToolRecord { step, started_at });
         let since_request = self
             .request_started_at
             .map(|started| format!(" • +{}", format_duration(started.elapsed())))

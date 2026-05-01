@@ -9,20 +9,8 @@ mod tests;
 
 pub(crate) use commands::agent::normalize_agent_mode;
 pub(crate) use state::{
-    ActiveToolRecord,
-    ActiveSurfaceKind,
-    AgentCandidate,
-    AgentPopupMode,
-    App,
-    FilteredSessionPicker,
-    MessageKind,
-    ProviderCandidate,
-    ProviderPopupMode,
-    SessionPickerEntry,
-    SessionPickerMode,
-    SessionPickerState,
-    SkillCandidate,
-    SkillPopupMode,
-    SubmitAction,
+    ActiveSurfaceKind, ActiveToolRecord, AgentCandidate, AgentPopupMode, App,
+    FilteredSessionPicker, MessageKind, ProviderCandidate, ProviderPopupMode, SessionPickerEntry,
+    SessionPickerMode, SessionPickerState, SkillCandidate, SkillPopupMode, SubmitAction,
     TranscriptOverlayState,
 };
