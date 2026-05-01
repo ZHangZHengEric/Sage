@@ -299,6 +299,8 @@ import {
   getRenderableContentItems,
   extractAttachmentName
 } from '@/utils/multimodalContent.js'
+import { parseToolJsonValue } from '@/utils/safeParseToolJson.js'
+import { buildClipboardTextFromMessageContent, normalizeMessageContentForComposer } from '@/utils/composerFromMessageFlatten.js'
 
 // Custom Tools
 const TOOL_COMPONENT_MAP = {
@@ -520,9 +522,7 @@ const formatMessageContent = (content) => {
 // 从多模态内容中提取文本
 const getTextContent = (content) => {
   if (!content) return ''
-  // 如果是字符串，直接返回
   if (typeof content === 'string') return content
-  // 如果是数组，提取所有文本类型的内容
   if (Array.isArray(content)) {
     const textParts = content
       .filter(item => item.type === 'text' && item.text)
@@ -689,20 +689,15 @@ const getParsedToolResult = (toolCall) => {
   const result = getToolResult(toolCall)
   if (!result) return null
 
-  // If content is string, try to parse it
-  if (result.content && typeof result.content === 'string') {
-    try {
-      // Check if it looks like JSON
-      if (result.content.trim().startsWith('{') || result.content.trim().startsWith('[')) {
-        return {
-          ...result,
-          content: JSON.parse(result.content)
-        }
+  if (result.content != null && typeof result.content === 'string') {
+    const parsed = parseToolJsonValue(result.content)
+    if (parsed !== null) {
+      return {
+        ...result,
+        content: parsed
       }
-    } catch (e) {
-      console.warn('Failed to parse tool result content:', e)
-      return result
     }
+    return result
   }
   return result
 }
@@ -739,41 +734,53 @@ const isCustomToolMessage = computed(() => {
 
 const copied = ref(false)
 
-const handleCopy = async () => {
-  const textToCopy = getTextContent(props.message.content)
-  if (!textToCopy) return
+const markCopiedBriefly = () => {
+  copied.value = true
+  setTimeout(() => {
+    copied.value = false
+  }, 2000)
+}
+
+const copyPlainTextFallback = async (textToCopy) => {
+  if (!textToCopy) return false
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(textToCopy)
-      copied.value = true
-      setTimeout(() => {
-        copied.value = false
-      }, 2000)
-    } else {
-      // Fallback for browsers/environments where clipboard API is not available (e.g. non-secure context)
-      const textArea = document.createElement('textarea')
-      textArea.value = textToCopy
-      textArea.style.position = 'fixed'
-      textArea.style.left = '-9999px'
-      document.body.appendChild(textArea)
-      textArea.focus()
-      textArea.select()
-
-      const successful = document.execCommand('copy')
-      document.body.removeChild(textArea)
-
-      if (successful) {
-        copied.value = true
-        setTimeout(() => {
-          copied.value = false
-        }, 2000)
-      } else {
-        console.error('Fallback copy method failed')
-      }
+      return true
     }
   } catch (err) {
-    console.error('Failed to copy text: ', err)
+    console.warn('navigator.clipboard.writeText failed:', err)
   }
+  try {
+    const textArea = document.createElement('textarea')
+    textArea.value = textToCopy
+    textArea.style.position = 'fixed'
+    textArea.style.left = '-9999px'
+    document.body.appendChild(textArea)
+    textArea.focus()
+    textArea.select()
+
+    const successful = document.execCommand('copy')
+    document.body.removeChild(textArea)
+    return successful
+  } catch (err) {
+    console.error('Fallback copy method failed:', err)
+    return false
+  }
+}
+
+const handleCopy = async () => {
+  const contentNorm = normalizeMessageContentForComposer(props.message.content)
+  const clip =
+    buildClipboardTextFromMessageContent(contentNorm) ||
+    getTextContent(contentNorm)
+  if (!clip) return
+  const ok = await copyPlainTextFallback(clip)
+  if (!ok) {
+    console.error('Failed to copy text')
+    return
+  }
+  markCopiedBriefly()
 }
 
 const getToolComponent = (toolName) => {

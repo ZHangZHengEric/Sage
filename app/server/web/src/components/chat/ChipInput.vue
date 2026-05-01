@@ -580,6 +580,7 @@ const handlePaste = (e) => {
   const cd = e.clipboardData
   emit('paste', e)
   if (clipboardHasFileItems(cd)) return
+  if (e.defaultPrevented) return
   e.preventDefault()
   insertText(clipboardPlainText(cd))
 }

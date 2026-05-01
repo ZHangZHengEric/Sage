@@ -396,6 +396,24 @@ export const useChatPage = (props) => {
     return res
   }
 
+  /** 流式合并：助手增量拼字符串；用户气泡整段替换（编辑后重跑会再推同 message_id，避免正文翻倍）。 */
+  const mergeStreamedMessageContentForUpdate = (existing, messageData) => {
+    const inc = messageData.content
+    const isUserBubble =
+      existing?.role === 'user' ||
+      existing?.message_type === 'user_input' ||
+      existing?.type === 'user_input'
+    if (isUserBubble) {
+      return inc !== undefined && inc !== null ? inc : existing.content
+    }
+    const ex = existing.content
+    if (typeof ex === 'string' && typeof inc === 'string') {
+      return (ex || '') + (inc || '')
+    }
+    if (inc !== undefined && inc !== null) return inc
+    return ex
+  }
+
   const handleMessage = (messageData) => {
     if (messageData.type === 'stream_end') return
     if (messageData.type === 'tool_progress') {
@@ -453,7 +471,7 @@ export const useChatPage = (props) => {
         nextMessage = {
           ...existing,
           ...messageData,
-          content: (existing.content || '') + (messageData.content || ''),
+          content: mergeStreamedMessageContentForUpdate(existing, messageData),
           timestamp: messageData.timestamp || Date.now()
         }
         if (messageData.tool_calls || existing.tool_calls) {

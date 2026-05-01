@@ -1,7 +1,5 @@
 """
-多模态图片处理工具：将消息 content 中的本地/远端 image_url 统一压缩并转 base64。
-
-从 AgentBase 抽取，便于复用与单测。所有函数无状态，依赖只有 PIL 与项目内 logger。
+多模态图片处理工具：将消息 content 中的本地/远端 image_url 统一压缩并转 base64；对 ``role=user`` 的列表内容在**请求 LLM 前**注入「图片地址」说明行（见 ``augment_multimodal_content_list_for_llm``），不写入持久化消息。
 """
 
 from __future__ import annotations
@@ -9,8 +7,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import re
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import unquote, urlparse
 
 from PIL import Image
@@ -32,6 +31,12 @@ _MIME_TYPES: Dict[str, str] = {
 _MAX_IMAGE_EDGE = 512
 # JPEG 质量
 _JPEG_QUALITY = 85
+
+# 仅发往 LLM：user 多模态中 image_url 后若紧跟「仅一条 markdown 图片」的 text，在请求前插入此行；
+# 落库与前端展示不存此行，见 augment_multimodal_content_list_for_llm。
+MULTIMODAL_IMAGE_ADDRESS_HINT_ZH = "以上图片引用地址！\n"
+
+_STANDALONE_MARKDOWN_IMAGE = re.compile(r"^\s*!\[[^\]]*\]\([^)]+\)\s*$", re.DOTALL)
 
 
 def get_mime_type(file_extension: str) -> str:
@@ -177,13 +182,52 @@ def _path_exists_file_sync(path_obj: Path) -> bool:
     return path_obj.exists() and path_obj.is_file()
 
 
+def augment_multimodal_content_list_for_llm(content: List[Any]) -> List[Any]:
+    """在发往 LLM 前为 user 多模态补一行说明：紧跟在 ``image_url`` 后的 text 若仅为 ``![](url)``，则前置 ``MULTIMODAL_IMAGE_ADDRESS_HINT_ZH``。
+
+    - 持久化与前端消息列表不写入该前缀，避免气泡/历史污染；
+    - 若 text 已以此前缀开头（旧会话或客户端已写入），不重复插入。
+    """
+    if not isinstance(content, list) or len(content) < 2:
+        return content
+    out: List[Any] = []
+    i = 0
+    while i < len(content):
+        cur = content[i]
+        if (
+            i + 1 < len(content)
+            and isinstance(cur, dict)
+            and cur.get("type") == "image_url"
+        ):
+            nxt = content[i + 1]
+            if isinstance(nxt, dict) and nxt.get("type") == "text":
+                text_raw = nxt.get("text") or ""
+                if text_raw.startswith(MULTIMODAL_IMAGE_ADDRESS_HINT_ZH):
+                    out.append(cur)
+                    out.append(nxt)
+                    i += 2
+                    continue
+                stripped = text_raw.strip()
+                if stripped and _STANDALONE_MARKDOWN_IMAGE.fullmatch(stripped):
+                    nxt = dict(nxt)
+                    nxt["text"] = MULTIMODAL_IMAGE_ADDRESS_HINT_ZH + stripped
+                    out.append(cur)
+                    out.append(nxt)
+                    i += 2
+                    continue
+        out.append(cur)
+        i += 1
+    return out
+
+
 async def process_multimodal_content(msg: Dict[str, Any]) -> Dict[str, Any]:
     """处理多模态消息内容，将本地图片路径转换为 base64，远程 URL 保持不变。
 
     - ``data:image/...`` 已是 base64 → 解码后压缩重编码；
     - ``file://`` 与裸路径 → 读本地文件压缩后编码；
     - ``http(s)://127.0.0.1...`` 桌面端 sidecar URL → 反解为本地路径再走本地分支；
-    - 其他 ``http(s)://`` → 视为远端，原样保留。
+    - 其他 ``http(s)://`` → 视为远端，原样保留；
+    - ``role=user`` 且 content 为 list 时，在请求 LLM 前对「image_url + 纯 markdown 图链」注入 ``MULTIMODAL_IMAGE_ADDRESS_HINT_ZH``（不落库）。
 
     无 list content 的消息原样返回。
     """
@@ -263,5 +307,8 @@ async def process_multimodal_content(msg: Dict[str, Any]) -> Dict[str, Any]:
         else:
             new_content.append({'type': 'image_url', 'image_url': {'url': data_url}})
 
+    role = msg.get("role")
+    if role == "user":
+        new_content = augment_multimodal_content_list_for_llm(new_content)
     msg['content'] = new_content
     return msg

@@ -160,6 +160,22 @@ def _truncate_text(value: str, limit: int = 160) -> str:
     return value[: limit - 3] + "..."
 
 
+def redact_base64_data_urls_in_value(value: Any) -> Any:
+    """用于日志/追踪：将 ``data:*;base64,...`` 整段替换为占位符，避免泄露图片载荷。"""
+    if isinstance(value, str):
+        if value.startswith("data:") and ";base64," in value:
+            comma = value.find(",")
+            b64_len = (len(value) - comma - 1) if comma >= 0 else 0
+            return f"<redacted data URL; base64_len={b64_len}>"
+        return value
+    if isinstance(value, Mapping):
+        return {k: redact_base64_data_urls_in_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        seq = [redact_base64_data_urls_in_value(v) for v in value]
+        return type(value)(seq)
+    return value
+
+
 def _sanitize_for_log(value: Any, *, max_depth: int = 2, max_items: int = 8) -> Any:
     if max_depth < 0:
         return f"<{type(value).__name__}>"
@@ -168,6 +184,8 @@ def _sanitize_for_log(value: Any, *, max_depth: int = 2, max_items: int = 8) -> 
         return value
 
     if isinstance(value, str):
+        if value.startswith("data:") and ";base64," in value:
+            return redact_base64_data_urls_in_value(value)
         return _truncate_text(value)
 
     if isinstance(value, Mapping):

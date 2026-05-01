@@ -15,9 +15,26 @@ async function upload(file, path) {
     return request.post('/api/oss/upload', formData)
 }
 
+async function importFromUrl(remoteUrl, agentId = null) {
+    const body = { url: remoteUrl }
+    if (agentId != null && String(agentId) !== '') {
+        body.agent_id = String(agentId)
+    }
+    return request.post('/api/oss/import_url', body)
+}
+
+async function importSandboxUpload(agentId, filename) {
+    return request.post('/api/oss/import_sandbox_upload', {
+        agent_id: String(agentId),
+        filename: String(filename),
+    })
+}
+
 export const ossAPI = {
     upload,
-    uploadFile: upload // Keep alias for compatibility if needed
+    uploadFile: upload,
+    importFromUrl,
+    importSandboxUpload,
 }
 
 // Keep backward compatibility for other components using ossApi

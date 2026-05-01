@@ -3,12 +3,15 @@
  *
  * - 输入框中以 markdown 图片语法 `![name](attachment://<id>)` 作为占位符；
  *   图片文件用此语法，其他文件可使用 `[name](attachment://<id>)`（无前导 `!`）。
- * - 提交时按出现位置切片成有序的 multimodal content 数组：
- *   `[{type:'text'}, {type:'image_url'}, {type:'text'}, ...]`
- * - 气泡渲染按数组顺序逐项展示。
+ * - 提交时按出现位置切片成有序的 multimodal content 数组。
+ * - 多模态开启时，每个图片为：先 `image_url`，再紧跟 `![name](url)`；「以上图片引用…」由 sagents 仅在请求 LLM 时注入，不写入存盘。
+ * - 气泡渲染按数组顺序逐项展示；`getRenderableContentItems` 仍按 URL 去重 image_url。
  */
 
 const ATTACHMENT_PLACEHOLDER_RE = /(!?)\[([^\]]*)\]\(attachment:\/\/([^)]+)\)/g
+
+/** 转义正则中的特殊字符。 */
+const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /** 清理 OSS 自动追加的时间戳后缀，让附件文件名更可读。 */
 export const cleanupAttachmentName = (name) => {
@@ -26,9 +29,6 @@ export const buildAttachmentPlaceholder = (file) => {
   const prefix = file.type === 'image' ? '!' : ''
   return `${prefix}[${name}](attachment://${file.id})`
 }
-
-/** 转义正则中的特殊字符。 */
-const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /** 从一个完整 URL 中取出最后一段文件名（用作 markdown alt，确保与 URL 末段完全一致）。 */
 const extractUrlTailName = (url) => {
@@ -121,14 +121,14 @@ export const buildOrderedMultimodalContent = (rawText, files = [], options = {})
 
       if (file.type === 'image') {
         if (multimodalEnabled) {
-          // 同时给 LLM 文本引用（含路径/URL）+ 视觉 image_url，
-          // 这样模型既能看图又能拿到资源位置。前端渲染会自动去重。
-          pushText(realImage)
+          // image_url 在前；说明行由 sagents 在请求 LLM 前注入，不写入存盘 content。
           items.push({ type: 'image_url', image_url: { url: file.url } })
+          pushText(realImage)
+          plainText += realImage
         } else {
           pushText(realImage)
+          plainText += realImage
         }
-        plainText += realImage
       } else {
         pushText(realLink)
         plainText += realLink
@@ -163,28 +163,29 @@ export const buildOrderedMultimodalContent = (rawText, files = [], options = {})
     }
   }
   if (orphans.length > 0) {
-    const trailingTextPieces = []
+    const sep = plainText && !plainText.endsWith('\n') ? '\n\n' : ''
+    let firstOrphan = true
     for (const f of orphans) {
-      const cleanName = extractUrlTailName(f.url) || f.name || cleanupAttachmentName(f.name)
+      const cleanName = extractUrlTailName(f.url) || f.name || cleanupAttachmentName(f.name || '')
+      const lead = firstOrphan ? sep : '\n'
+      firstOrphan = false
       if (f.type === 'image') {
+        const realImage = `![${cleanName}](${f.url})`
         if (multimodalEnabled) {
           items.push({ type: 'image_url', image_url: { url: f.url } })
+          const t = `${lead}${realImage}`
+          pushText(t)
+          plainText += t
         } else {
-          trailingTextPieces.push(`![${cleanName}](${f.url})`)
+          const t = `${lead}${realImage}`
+          pushText(t)
+          plainText += t
         }
-        // plainText 仍然保留 markdown 引用，方便非多模态展示
-        trailingTextPieces.push(`![${cleanName}](${f.url})`)
       } else {
-        trailingTextPieces.push(`[${cleanName}](${f.url})`)
+        const t = `${lead}[${cleanName}](${f.url})`
+        pushText(t)
+        plainText += t
       }
-    }
-    const sep = plainText && !plainText.endsWith('\n') ? '\n\n' : ''
-    if (trailingTextPieces.length > 0) {
-      const trailingText = sep + trailingTextPieces.join('\n')
-      // 同步把 markdown 引用写入 items（包括图片）：让 LLM 知道资源路径，
-      // 渲染层会根据 image_url 去重，避免气泡里重复出现整张大图。
-      pushText(trailingText)
-      plainText += trailingText
     }
   }
 
@@ -212,9 +213,9 @@ export const textHasMarkdownImageRefForUrl = (text, url) => {
  *   { type: 'image_url', url }
  *
  * 渲染策略：
- * - 提交给 LLM 的 content 同时包含 `![](url)` 文本引用与 `image_url` 视觉 part；
+ * - 全文拼接后若某 URL 已有对应 markdown 图片语法，则渲染时省略重复的 image_url 网格；
  * - 前端渲染走 MarkdownRenderer：它本身已支持本地路径/http 图片，
- *   因此当某个 image_url 的 url 已被相邻 text 中的 markdown 图片引用覆盖时，
+ *   因此当某个 image_url 的 url 已被 text 中的 markdown 图片引用覆盖时，
  *   渲染层直接丢弃该 image_url part（避免重复显示，也免去自己再做 asset:// 转换）。
  * - 没有对应 markdown 引用的孤立 image_url 才保留，作为兜底渲染。
  */
