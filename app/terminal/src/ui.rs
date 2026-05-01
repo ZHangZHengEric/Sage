@@ -6,9 +6,7 @@ use crate::custom_terminal::Frame;
 use crate::ui_support::{
     command_popup_height,
     composer_props,
-    footer_hint,
     footer_props,
-    footer_status_summary,
     help_overlay_props,
     live_region_height,
     picker_overlay_props,
@@ -63,8 +61,8 @@ pub fn render(frame: &mut Frame, app: &App) {
 
 #[cfg(test)]
 mod tests {
-    use super::{footer_hint, footer_status_summary};
     use crate::app::App;
+    use crate::ui_support::{footer_hint, footer_status_summary};
 
     #[test]
     fn busy_footer_hint_prefers_active_phase() {
