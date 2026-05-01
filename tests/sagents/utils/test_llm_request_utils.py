@@ -1,6 +1,7 @@
 import pytest
 
 from sagents.utils.llm_request_utils import (
+    redact_base64_data_urls_in_value,
     sanitize_model_request_kwargs,
     uses_max_completion_tokens,
 )
@@ -63,6 +64,26 @@ def test_sanitize_drops_empty_sampling_params() -> None:
         model="gpt-4o",
     )
     assert out == {}
+
+
+def test_redact_base64_data_url_replaces_payload() -> None:
+    raw = "data:image/jpeg;base64," + ("x" * 100)
+    out = redact_base64_data_urls_in_value(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "hi"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": raw},
+                    },
+                ],
+            }
+        ]
+    )
+    assert "xxxx" not in str(out)
+    assert "base64_len=100" in out[0]["content"][1]["image_url"]["url"]
 
 
 def test_sanitize_keeps_zero_sampling_values() -> None:

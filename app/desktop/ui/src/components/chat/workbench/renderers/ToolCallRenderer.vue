@@ -80,6 +80,7 @@
       <template v-if="isShellCommand">
         <ShellCommandToolRenderer
           :tool-args="toolArgs"
+          :arguments-raw="toolArgumentsRaw"
           :tool-result="toolResult"
         />
       </template>
@@ -326,6 +327,12 @@ import { skillAPI } from '@/api/skill.js'
 import { agentAPI } from '@/api/agent.js'
 import { useLanguage } from '@/utils/i18n'
 import { getToolLabel } from '@/utils/messageLabels.js'
+import { parseTodoWriteToolCallArguments } from '@/utils/parseTodoWriteToolArguments.js'
+import {
+  parseToolJsonValue,
+  stringifyToolContentPretty,
+  parseToolJsonObjectRecord
+} from '@/utils/safeParseToolJson.js'
 
 const { t } = useLanguage()
 
@@ -364,15 +371,10 @@ const toolResult = computed(() => {
 // 提取工具结果数据（用于传递给子组件）
 const toolResultData = computed(() => {
   if (!toolResult.value) return null
-  
-  let result = toolResult.value.content
-  if (typeof result === 'string') {
-    try {
-      result = JSON.parse(result)
-    } catch {
-      return result
-    }
-  }
+  const parsed = parseToolJsonValue(toolResult.value.content)
+  if (parsed !== null) return parsed
+  const result = toolResult.value.content
+  if (typeof result === 'string') return result
   return result
 })
 
@@ -393,14 +395,19 @@ watch(() => props.item.toolResult, (newVal, oldVal) => {
 
 const toolArgs = computed(() => {
   const args = toolCall.value.function?.arguments
-  try {
-    if (typeof args === 'string') {
+  if (typeof args === 'object' && args !== null && !Array.isArray(args)) return args
+  if (typeof args === 'string') {
+    try {
       return JSON.parse(args)
+    } catch {
+      if (toolName.value === 'todo_write') {
+        const { tasks } = parseTodoWriteToolCallArguments(args)
+        if (Array.isArray(tasks) && tasks.length > 0) return { tasks }
+      }
+      return {}
     }
-    return args || {}
-  } catch {
-    return {}
   }
+  return {}
 })
 
 const toolArgumentsRaw = computed(() => {
@@ -673,7 +680,11 @@ const executionError = computed(() => {
 })
 
 // ============ 6. 其他工具 ============
-const hasArguments = computed(() => Object.keys(toolArgs.value).length > 0)
+const hasArguments = computed(() => {
+  const raw = toolArgumentsRaw.value
+  if (raw && String(raw).trim()) return true
+  return Object.keys(toolArgs.value).length > 0
+})
 const hasResult = computed(() => !!toolResult.value)
 const isErrorResult = computed(() => toolResult.value?.is_error)
 const errorMessage = computed(() => {
@@ -747,45 +758,42 @@ const formatTime = (timestamp) => {
 }
 
 const formattedArguments = computed(() => {
-  if (!toolArgumentsComplete.value) return toolArgumentsRaw.value || t('workbench.tool.argumentsStreaming')
-  return JSON.stringify(toolArgs.value, null, 2)
+  const raw = toolArgumentsRaw.value
+  if (!toolArgumentsComplete.value) return raw || t('workbench.tool.argumentsStreaming')
+  const args = toolCall.value.function?.arguments
+  if (typeof args === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(args), null, 2)
+    } catch {
+      return String(raw).trim() ? raw : '{}'
+    }
+  }
+  if (args && typeof args === 'object') {
+    try {
+      return JSON.stringify(args, null, 2)
+    } catch {
+      return raw || '{}'
+    }
+  }
+  return '{}'
 })
 
 const formattedResult = computed(() => {
   if (!toolResult.value) return ''
-  const content = toolResult.value.content
-  if (typeof content === 'object') {
-    return JSON.stringify(content, null, 2)
-  }
-  try {
-    const parsed = JSON.parse(content)
-    return JSON.stringify(parsed, null, 2)
-  } catch {
-    return content
-  }
+  return stringifyToolContentPretty(toolResult.value.content)
 })
 
 // ============ 7. Todo Write ============
 const todoSummary = computed(() => {
   if (!toolResult.value) return ''
-  const content = toolResult.value.content
-  try {
-    const parsed = typeof content === 'string' ? JSON.parse(content) : content
-    return parsed.summary || ''
-  } catch {
-    return ''
-  }
+  const o = parseToolJsonObjectRecord(toolResult.value.content)
+  return o.summary || ''
 })
 
 const todoTasks = computed(() => {
   if (!toolResult.value) return []
-  const content = toolResult.value.content
-  try {
-    const parsed = typeof content === 'string' ? JSON.parse(content) : content
-    return parsed.tasks || []
-  } catch {
-    return []
-  }
+  const o = parseToolJsonObjectRecord(toolResult.value.content)
+  return Array.isArray(o.tasks) ? o.tasks : []
 })
 
 const getTodoTaskClass = (status) => {

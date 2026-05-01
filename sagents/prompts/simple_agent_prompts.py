@@ -74,18 +74,18 @@ agent_custom_system_prefix = {
 turn_status_rejection_message = {
     "zh": (
         "turn_status 调用被拒绝：本轮 assistant 还没有输出任何自然语言说明。"
-        "请先用一段中文/英文文字总结当前进展和结果（包含已完成的事项、关键产物或下一步建议），"
-        "再调用 turn_status(status=...) 工具报告本轮状态。"
+        "请在本轮同一条 assistant 回复里同时输出面向用户的中文/英文说明（总结当前进展与结果，含已完成事项、关键产物或下一步建议），"
+        "并同时调用 turn_status(status=...) 报告本轮状态；不要先发纯工具调用再单独补文字。"
     ),
     "en": (
-        "turn_status call rejected: no user-facing assistant text has been produced this turn. "
-        "Please first write a short summary of progress and results (what was done, key artifacts, "
-        "or next-step suggestion), then call turn_status(status=...) to report this turn's status."
+        "turn_status call rejected: no user-facing assistant text accompanies this tool call in the same reply. "
+        "In ONE assistant response, emit the user-facing summary (progress, artifacts, next steps) and call "
+        "turn_status(status=...) together with that text—not a tools-only message followed by text later."
     ),
     "pt": (
-        "Chamada turn_status rejeitada: nenhum texto do assistente voltado ao usuário foi produzido neste turno. "
-        "Escreva primeiro um breve resumo do progresso e dos resultados (o que foi feito, artefatos principais "
-        "ou próximo passo sugerido) e, em seguida, chame turn_status(status=...) para relatar o status deste turno."
+        "Chamada turn_status rejeitada: falta texto do assistente voltado ao usuário na mesma resposta da chamada. "
+        "Numa única resposta do assistente, inclua um resumo para o usuário (progresso, artefatos, próximo passo) "
+        "e chame turn_status(status=...) em conjunto—não envie só a ferramenta e corrija o texto depois."
     ),
 }
 

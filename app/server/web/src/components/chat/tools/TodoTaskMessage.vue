@@ -81,6 +81,7 @@ import { computed, ref } from 'vue'
 import { ListTodo, Check, Loader2, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { useLanguage } from '@/utils/i18n.js'
 import { parseTodoWriteToolCallArguments } from '@/utils/parseTodoWriteToolArguments.js'
+import { parseToolJsonObjectRecord } from '@/utils/safeParseToolJson.js'
 
 const props = defineProps({
   toolCall: {
@@ -109,21 +110,8 @@ const touchedIdsOrdered = computed(() => parsedToolArgs.value.taskIdsOrdered)
 
 const parsedContent = computed(() => {
   if (!props.toolResult) return {}
-
-  let content = props.toolResult.content || props.toolResult
-
-  if (typeof content === 'string') {
-    try {
-      if (content.trim().startsWith('{') || content.trim().startsWith('[')) {
-        return JSON.parse(content)
-      }
-    } catch (e) {
-      console.warn('Failed to parse todo content:', e)
-      return {}
-    }
-  }
-
-  return content || {}
+  const content = props.toolResult.content ?? props.toolResult
+  return parseToolJsonObjectRecord(content)
 })
 
 const summary = computed(() => parsedContent.value.summary || '')

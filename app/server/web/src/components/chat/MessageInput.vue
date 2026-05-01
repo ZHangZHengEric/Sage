@@ -208,8 +208,11 @@ import ChipInput from './ChipInput.vue'
 import {
   removeAttachmentPlaceholder,
   textHasAttachmentPlaceholder,
-  buildOrderedMultimodalContent
+  buildOrderedMultimodalContent,
+  cleanupAttachmentName,
+  extractAttachmentName,
 } from '../../utils/multimodalContent.js'
+import { flattenMessageForComposerRebuild } from '../../utils/composerFromMessageFlatten.js'
 
 const props = defineProps({
   isLoading: {
@@ -297,11 +300,69 @@ const sendButtonTitle = computed(() => {
   return t('messageInput.sendTitle')
 })
 
+const normalizedSkillsKey = (names) =>
+  [...(names || [])].map((s) => String(s || '').trim()).filter(Boolean).sort().join('\u0001')
+
+// 来自能力预设：第二次 Enter 才发送；点此发送不受影响（快照与剥离头部 <skill> 后的正文及 chips 对齐）
+const guidedPresetFirstEnterPending = ref(false)
+const guidedPresetSnapshot = ref('')
+const guidedPresetSkillsKey = ref('')
+
+const clearGuidedPresetGate = () => {
+  guidedPresetFirstEnterPending.value = false
+  guidedPresetSnapshot.value = ''
+  guidedPresetSkillsKey.value = ''
+}
+
+watch(
+  [inputValue, uploadedFiles, currentSkills],
+  () => {
+    if (!guidedPresetFirstEnterPending.value) return
+    const snap = guidedPresetSnapshot.value
+    const skillSnap = guidedPresetSkillsKey.value
+    if (
+      inputValue.value.trim() !== snap ||
+      uploadedFiles.value.length > 0 ||
+      normalizedSkillsKey(currentSkills.value) !== skillSnap
+    ) {
+      clearGuidedPresetGate()
+    }
+  },
+  { deep: true },
+)
+
+const tryConsumeGuidedPresetFirstEnter = () => {
+  if (!guidedPresetFirstEnterPending.value || props.isLoading) return false
+  const snap = guidedPresetSnapshot.value
+  const skillSnap = guidedPresetSkillsKey.value
+  const textOk = inputValue.value.trim() === snap
+  const skillsOk = normalizedSkillsKey(currentSkills.value) === skillSnap
+  if (
+    uploadedFiles.value.length > 0 ||
+    !textOk ||
+    !skillsOk ||
+    (!snap && !skillSnap)
+  ) {
+    return false
+  }
+  guidedPresetFirstEnterPending.value = false
+  toast.message(t('messageInput.guidedPresetPressEnterAgain'))
+  return true
+}
+
 watch(() => props.presetText, async (newVal) => {
-  if (typeof newVal !== 'string' || !newVal) return
+  if (typeof newVal !== 'string' || !newVal) {
+    clearGuidedPresetGate()
+    return
+  }
   if (newVal === inputValue.value) return
   inputValue.value = newVal
   await nextTick()
+  guidedPresetSnapshot.value = inputValue.value.trim()
+  guidedPresetSkillsKey.value = normalizedSkillsKey(currentSkills.value)
+  guidedPresetFirstEnterPending.value = Boolean(
+    guidedPresetSnapshot.value || guidedPresetSkillsKey.value,
+  )
   editorRef.value?.focus(true)
 })
 
@@ -561,6 +622,7 @@ const dispatchSubmit = (needInterrupt) => {
 const handleSubmit = (e) => {
   e.preventDefault()
   cancelOptimizeInput()
+  clearGuidedPresetGate()
   if (props.isLoading) {
     if (hasSubmittableInput()) {
       dispatchSubmit(true)
@@ -610,6 +672,7 @@ const handleKeyDown = (e) => {
 
   if (e.key === 'Enter' && !e.shiftKey && !composing) {
     e.preventDefault()
+    if (!props.isLoading && tryConsumeGuidedPresetFirstEnter()) return
     handleSubmit(e)
   }
 }
@@ -622,40 +685,170 @@ const handleCompositionEnd = () => {
   isComposing.value = false
 }
 
+const unwrapOssImportPayload = (res) => (res?.data ?? res)
+
+const urlKeyForDedup = (u) => {
+  try {
+    const x = new URL(String(u))
+    x.hash = ''
+    return x.href
+  } catch {
+    return String(u || '').trim()
+  }
+}
+
+const clipboardPlainFromData = (clipboardData) => {
+  if (!clipboardData) return ''
+  const plain = clipboardData.getData('text/plain')
+  if (plain) return plain
+  const html = clipboardData.getData('text/html')
+  if (!html) return ''
+  const div = document.createElement('div')
+  div.innerHTML = html
+  return div.innerText || div.textContent || ''
+}
+
+const pasteMarkdownRemoteImagesIntoEditor = async (segments) => {
+  const inflightMirrors = new Map()
+
+  const mirrorOnce = (remoteUrl) => {
+    const k = urlKeyForDedup(remoteUrl)
+    if (!inflightMirrors.has(k)) {
+      inflightMirrors.set(k, ossApi.importFromUrl(remoteUrl, null).then(unwrapOssImportPayload))
+    }
+    return inflightMirrors.get(k)
+  }
+
+  const mirrorSandboxOnce = (agentId, filename) => {
+    const k = `sandbox:${String(agentId)}:${String(filename)}`
+    if (!inflightMirrors.has(k)) {
+      inflightMirrors.set(k, ossApi.importSandboxUpload(agentId, filename).then(unwrapOssImportPayload))
+    }
+    return inflightMirrors.get(k)
+  }
+
+  for (const seg of segments) {
+    if (seg.kind === 'text') {
+      const txt = seg.text ?? ''
+      if (txt) {
+        editorRef.value?.insertText(txt)
+      }
+      continue
+    }
+
+    if (seg.kind !== 'remoteImage' && seg.kind !== 'sageSandboxImage') continue
+
+    let mirrorPromise
+    let previewSeed = ''
+    if (seg.kind === 'remoteImage') {
+      previewSeed = /^https?:\/\//i.test(seg.url) ? seg.url : ''
+      mirrorPromise = mirrorOnce(seg.url)
+    } else {
+      mirrorPromise = mirrorSandboxOnce(seg.agentId, seg.filename)
+    }
+
+    const id = allocateAttachmentId()
+    const nameHint = cleanupAttachmentName(seg.preferredName || '图片')
+    const fileItem = {
+      id,
+      file: null,
+      preview: previewSeed,
+      type: 'image',
+      name: nameHint,
+      uploading: true,
+      url: null,
+    }
+
+    uploadedFiles.value.push(fileItem)
+    await insertChipForFile(fileItem)
+
+    try {
+      const payload = await mirrorPromise
+
+      if (uploadedFiles.value.indexOf(fileItem) < 0) {
+        continue
+      }
+
+      fileItem.url = payload?.url || (typeof payload === 'string' ? payload : '')
+      const serverFilename = (payload && typeof payload === 'object') ? payload.filename : ''
+      if (serverFilename) {
+        fileItem.name = cleanupAttachmentName(serverFilename)
+        try {
+          editorRef.value?.updateChipName?.(fileItem.id, serverFilename)
+        } catch (_) { /* noop */ }
+      }
+      fileItem.uploading = false
+      if (/^https?:\/\//i.test(fileItem.preview) && /^https?:\/\//i.test(fileItem.url)) {
+        fileItem.preview = fileItem.url
+      }
+      if ((payload && typeof payload === 'object') && payload.http_url && !/^https?:\/\//i.test(String(fileItem.url || ''))) {
+        fileItem.preview = payload.http_url
+      }
+      if (/^https?:\/\//i.test(String(fileItem.url || '')) && (!fileItem.preview || !/^https?:\/\//i.test(String(fileItem.preview)))) {
+        fileItem.preview = fileItem.url
+      }
+    } catch (err) {
+      const index = uploadedFiles.value.indexOf(fileItem)
+      if (index > -1) {
+        uploadedFiles.value.splice(index, 1)
+      }
+      inputValue.value = removeAttachmentPlaceholder(inputValue.value, fileItem.id)
+      console.error('[MessageInput] import_url paste failed:', err)
+      throw err
+    }
+  }
+
+  await nextTick()
+  editorRef.value?.focus(false)
+}
+
 const handlePaste = async (e) => {
   const clipboardData = e.clipboardData || e.originalEvent?.clipboardData
   if (!clipboardData) return
 
-  const items = clipboardData.items
-  if (!items || items.length === 0) return
-
   let hasFiles = false
+  const items = clipboardData.items
 
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i]
+  if (items && items.length > 0) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
 
-    if (item.type.startsWith('image/')) {
-      e.preventDefault()
-      hasFiles = true
-      const blob = item.getAsFile()
-      if (blob) {
-        const ext = item.type.split('/')[1] || 'png'
-        const filename = `pasted_image_${Date.now()}.${ext}`
-        const file = new File([blob], filename, { type: item.type })
-        await processFile(file)
-      }
-    } else if (item.kind === 'file') {
-      e.preventDefault()
-      hasFiles = true
-      const file = item.getAsFile()
-      if (file) {
-        await processFile(file)
+      if (item.type.startsWith('image/')) {
+        e.preventDefault()
+        hasFiles = true
+        const blob = item.getAsFile()
+        if (blob) {
+          const ext = item.type.split('/')[1] || 'png'
+          const filename = `pasted_image_${Date.now()}.${ext}`
+          const file = new File([blob], filename, { type: item.type })
+          await processFile(file)
+        }
+      } else if (item.kind === 'file') {
+        e.preventDefault()
+        hasFiles = true
+        const file = item.getAsFile()
+        if (file) {
+          await processFile(file)
+        }
       }
     }
   }
 
-  if (!hasFiles) {
+  if (hasFiles) {
     return
+  }
+
+  const plain = clipboardPlainFromData(clipboardData)
+  const segments = flattenMessageForComposerRebuild(plain || '')
+  if (!segments.some((s) => s.kind === 'remoteImage' || s.kind === 'sageSandboxImage')) {
+    return
+  }
+
+  e.preventDefault()
+  try {
+    await pasteMarkdownRemoteImagesIntoEditor(segments)
+  } catch {
+    toast.error(t('messageInput.pasteUploadFailed'))
   }
 }
 
@@ -829,8 +1022,10 @@ const processFile = async (file) => {
 const removeFile = (index) => {
   const file = uploadedFiles.value[index]
   if (!file) return
-  if (file.preview) {
-    URL.revokeObjectURL(file.preview)
+  if (file.preview && typeof file.preview === 'string' && file.preview.startsWith('blob:')) {
+    try {
+      URL.revokeObjectURL(file.preview)
+    } catch (_) { /* noop */ }
   }
   if (file.id != null) {
     inputValue.value = removeAttachmentPlaceholder(inputValue.value, file.id)
@@ -850,7 +1045,11 @@ watch(inputValue, (text) => {
   }
   if (stale.length === 0) return
   for (const f of stale) {
-    if (f.preview) URL.revokeObjectURL(f.preview)
+    if (f.preview && typeof f.preview === 'string' && f.preview.startsWith('blob:')) {
+      try {
+        URL.revokeObjectURL(f.preview)
+      } catch (_) { /* noop */ }
+    }
     const idx = uploadedFiles.value.indexOf(f)
     if (idx > -1) uploadedFiles.value.splice(idx, 1)
   }

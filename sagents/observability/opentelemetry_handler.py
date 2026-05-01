@@ -9,6 +9,7 @@ from opentelemetry.trace import Status, StatusCode
 
 from .base import BaseTraceHandler
 from sagents.utils.logger import logger
+from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 
 # ContextVar to hold the stack of (span, token) for the current task.
 # We use an immutable tuple to ensure safety across async tasks (copy-on-write).
@@ -261,7 +262,9 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         span.set_attribute("llm.system", llm_system)
         span.set_attribute("llm.model", model_name)
         try:
-            messages_str = json.dumps(messages, ensure_ascii=False)
+            messages_str = json.dumps(
+                redact_base64_data_urls_in_value(messages), ensure_ascii=False
+            )
             span.set_attribute("llm.messages", messages_str)
         except Exception as e:
             logger.error(f"Error setting llm.messages attribute: {e}")

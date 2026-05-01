@@ -1,9 +1,32 @@
 /**
- * Align with sagents/agent_base._handle_tool_calls_chunk and stream_merger.merge_chat_completion_chunks:
- * - tool function arguments are streamed as string fragments concatenated with +=
- * - fibre backend_client merges same id by appending when existing arguments is truthy
- * - never clobber accumulated JSON string with an empty object {}
+ * 与 sagents stream_merger / agent_base 一致：增量合并 tool function.arguments。
+ * - 流式大多为「字符串片段」首尾覆盖或首尾拼接；
+ * - 禁止用空的 {} 抹掉已累计内容；
+ * - 若混入「对象快照」或非空对象，会先序列化后再与存量字符串做同上合并，避免出现
+ *   “已有字符串 + 新到字符串却因存量为 object 而整段丢弃” 或 “非空对象整段顶替已拼半的 JSON” 的错乱。
  */
+
+function snapshotArgumentsString (args) {
+  if (args == null || args === '') return ''
+  if (typeof args === 'string') return args
+  if (typeof args === 'object' && !Array.isArray(args)) {
+    try {
+      return JSON.stringify(args)
+    } catch {
+      return ''
+    }
+  }
+  return String(args)
+}
+
+function mergeSnapshots (aSnap, bSnap) {
+  if (!aSnap) return bSnap
+  if (!bSnap) return aSnap
+  if (bSnap.startsWith(aSnap)) return bSnap
+  if (aSnap.startsWith(bSnap)) return aSnap
+  return `${aSnap}${bSnap}`
+}
+
 export function mergeToolFunctionArguments (existingArgs, incomingArgs) {
   if (incomingArgs === undefined) {
     return existingArgs
@@ -19,23 +42,19 @@ export function mergeToolFunctionArguments (existingArgs, incomingArgs) {
     if (Object.keys(incomingArgs).length === 0) {
       return existingArgs !== undefined && existingArgs !== null ? existingArgs : incomingArgs
     }
-    return incomingArgs
   }
 
-  if (typeof incomingArgs === 'string') {
-    if (typeof existingArgs === 'object' && existingArgs !== null && !Array.isArray(existingArgs)) {
-      if (Object.keys(existingArgs).length > 0) {
-        return existingArgs
-      }
-    }
-    const existingText = typeof existingArgs === 'string' ? existingArgs : ''
-    const incomingText = incomingArgs
-    if (!existingText) return incomingText
-    if (!incomingText) return existingText
-    if (incomingText.startsWith(existingText)) return incomingText
-    if (existingText.startsWith(incomingText)) return existingText
-    return `${existingText}${incomingText}`
+  const hasExisting =
+    existingArgs !== undefined && existingArgs !== null && existingArgs !== ''
+
+  if (!hasExisting) {
+    return typeof incomingArgs === 'object' && !Array.isArray(incomingArgs)
+      ? incomingArgs
+      : snapshotArgumentsString(incomingArgs)
   }
 
-  return incomingArgs
+  const left = snapshotArgumentsString(existingArgs)
+  const right = snapshotArgumentsString(incomingArgs)
+
+  return mergeSnapshots(left, right)
 }

@@ -1,6 +1,7 @@
 import asyncio
 from typing import Any, Dict, List, Optional, Union
 from sagents.observability.manager import ObservabilityManager
+from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 from sagents.tool import tool_manager
 from sagents.tool.tool_manager import ToolManager
 from sagents.context.session_context import SessionContext
@@ -113,7 +114,10 @@ class ObservableCompletions:
             llm_system = "default_endpoint"
         
         if session_id:
-            self.observability_manager.on_llm_start(session_id, model_name, messages, llm_system=llm_system, step_name=step_name)
+            messages_for_obs = redact_base64_data_urls_in_value(messages)
+            self.observability_manager.on_llm_start(
+                session_id, model_name, messages_for_obs, llm_system=llm_system, step_name=step_name
+            )
         
         try:
             response = await self._completions.create(**kwargs)

@@ -437,6 +437,8 @@ const editableUserMessageId = computed(() => {
   return null
 })
 
+const messageInputRef = ref(null)
+
 const getMessageTextForInputOptimization = (message) => {
   const content = message?.content
   if (typeof content === 'string') return content.trim()
@@ -651,9 +653,6 @@ const handleSendMessageWithAbilityClear = (content, options) => {
 
 // 确认对话框引用
 const confirmDialogRef = ref(null)
-
-// 消息输入框引用
-const messageInputRef = ref(null)
 
 // 处理删除文件 - 带确认对话框
 const handleDeleteFile = async (item) => {

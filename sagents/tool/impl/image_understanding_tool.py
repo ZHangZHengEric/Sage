@@ -92,7 +92,10 @@ class ImageUnderstandingTool:
             logger.info(f"命令执行结果: success={result.success}, return_code={result.return_code}, stdout长度={len(result.stdout) if result.stdout else 0}, stderr={result.stderr}")
 
             if not result.success:
-                raise ImageUnderstandingError(f"读取图片命令失败: return_code={result.return_code}, stderr={result.stderr}, stdout={result.stdout[:200] if result.stdout else 'empty'}")
+                out_len = len(result.stdout) if result.stdout else 0
+                raise ImageUnderstandingError(
+                    f"读取图片命令失败: return_code={result.return_code}, stderr={result.stderr}, stdout_bytes={out_len}"
+                )
 
             if not result.stdout or not result.stdout.strip():
                 raise ImageUnderstandingError(f"读取图片命令返回空数据: return_code={result.return_code}, stderr={result.stderr}")
