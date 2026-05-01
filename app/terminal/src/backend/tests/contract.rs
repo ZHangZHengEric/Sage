@@ -99,6 +99,19 @@ fn parse_backend_line_turns_cli_tool_into_tool_events() {
 }
 
 #[test]
+fn parse_backend_line_hides_internal_tool_messages_and_statuses() {
+    let events = parse_backend_line(
+        r#"{
+            "type":"tool_call",
+            "tool_calls":[{"function":{"name":"search_memory"}}],
+            "content":"running memory lookup"
+        }"#,
+    );
+
+    assert!(events.is_empty());
+}
+
+#[test]
 fn parse_stream_contract_fixture_round_trip_sequence() {
     let fixture =
         include_str!("../../../../../tests/app/cli/fixtures/stream_contract_round_trip.jsonl");

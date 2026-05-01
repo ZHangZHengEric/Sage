@@ -1,5 +1,7 @@
 #[path = "tests/agent.rs"]
 mod agent;
+#[path = "tests/display.rs"]
+mod display;
 #[path = "tests/popup.rs"]
 mod popup;
 #[path = "tests/sessions.rs"]

@@ -5,6 +5,7 @@ use crate::backend::contract::parse_stream_event;
 use crate::backend::protocol_support::{
     backend_stats_from_event, collect_tool_names, live_message_kind, summarize_tool_event, truncate,
 };
+use crate::display_policy::{is_visible_tool, DisplayMode};
 
 use super::BackendEvent;
 
@@ -58,14 +59,22 @@ pub(crate) fn parse_backend_line(line: &str) -> Vec<BackendEvent> {
         events.push(BackendEvent::LiveChunk(kind, content));
     } else if !content.is_empty() {
         match event_type {
-            "tool_call" => events.push(BackendEvent::Message(
-                MessageKind::Tool,
-                format!("running {}", summarize_tool_event(&tool_names, &content)),
-            )),
-            "tool_result" => events.push(BackendEvent::Message(
-                MessageKind::Tool,
-                format!("completed {}", summarize_tool_event(&tool_names, &content)),
-            )),
+            "tool_call" => {
+                if let Some(summary) = summarize_tool_event(&tool_names, &content) {
+                    events.push(BackendEvent::Message(
+                        MessageKind::Tool,
+                        format!("running {summary}"),
+                    ));
+                }
+            }
+            "tool_result" => {
+                if let Some(summary) = summarize_tool_event(&tool_names, &content) {
+                    events.push(BackendEvent::Message(
+                        MessageKind::Tool,
+                        format!("completed {summary}"),
+                    ));
+                }
+            }
             "error" | "cli_error" => events.push(BackendEvent::Error(content)),
             "cli_stats" | "cli_phase" | "cli_tool" | "token_usage" | "start" | "done" => {}
             _ => events.push(BackendEvent::Message(
@@ -79,7 +88,9 @@ pub(crate) fn parse_backend_line(line: &str) -> Vec<BackendEvent> {
     }
 
     for name in tool_names {
-        events.push(BackendEvent::Status(format!("tool  {}", name)));
+        if is_visible_tool(DisplayMode::Compact, &name) {
+            events.push(BackendEvent::Status(format!("tool  {}", name)));
+        }
     }
 
     events

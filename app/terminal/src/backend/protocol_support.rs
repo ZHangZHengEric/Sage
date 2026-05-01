@@ -1,6 +1,7 @@
 use crate::app::MessageKind;
 use crate::backend::contract::CliStreamEvent;
 use crate::backend::{BackendPhaseTiming, BackendStats, BackendToolStep};
+use crate::display_policy::{internal_tool_count, visible_tool_names, DisplayMode};
 
 pub(super) fn backend_stats_from_event(event: CliStreamEvent) -> BackendStats {
     BackendStats {
@@ -80,12 +81,16 @@ pub(super) fn live_message_kind(
     None
 }
 
-pub(super) fn summarize_tool_event(names: &[String], content: &str) -> String {
-    if !names.is_empty() {
-        return names.join(", ");
+pub(super) fn summarize_tool_event(names: &[String], content: &str) -> Option<String> {
+    let visible = visible_tool_names(DisplayMode::Compact, names);
+    if !visible.is_empty() {
+        return Some(visible.join(", "));
+    }
+    if internal_tool_count(names) > 0 {
+        return None;
     }
 
-    truncate(&clean_single_line(content), 140)
+    Some(truncate(&clean_single_line(content), 140))
 }
 
 pub(super) fn collect_tool_names(event: &CliStreamEvent) -> Vec<String> {

@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use ratatui::text::Line;
 
 use crate::backend::BackendStats;
+use crate::display_policy::DisplayMode;
 
 #[derive(Debug)]
 pub enum SubmitAction {
@@ -153,6 +154,7 @@ pub struct App {
     pub should_quit: bool,
     pub selected_skills: Vec<String>,
     pub selected_model: Option<String>,
+    pub display_mode: DisplayMode,
     pub pending_history_lines: Vec<Line<'static>>,
     pub(crate) committed_history_lines: Vec<Line<'static>>,
     pub live_message: Option<(MessageKind, String)>,
@@ -202,6 +204,7 @@ impl App {
             should_quit: false,
             selected_skills: Vec::new(),
             selected_model: None,
+            display_mode: DisplayMode::Compact,
             pending_history_lines: Vec::new(),
             committed_history_lines: Vec::new(),
             live_message: None,
