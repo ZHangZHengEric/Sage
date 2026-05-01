@@ -2,20 +2,19 @@ use crate::app::{AgentCandidate, AgentPopupMode, App};
 use crate::bottom_pane::command_popup;
 
 impl App {
-    pub fn set_agent_catalog(
-        &mut self,
-        agents: Vec<(String, String, String, bool, String)>,
-    ) {
+    pub fn set_agent_catalog(&mut self, agents: Vec<(String, String, String, bool, String)>) {
         self.agent_catalog = Some(
             agents
                 .into_iter()
-                .map(|(id, name, agent_mode, is_default, updated_at)| AgentCandidate {
-                    id,
-                    name,
-                    agent_mode,
-                    is_default,
-                    updated_at,
-                })
+                .map(
+                    |(id, name, agent_mode, is_default, updated_at)| AgentCandidate {
+                        id,
+                        name,
+                        agent_mode,
+                        is_default,
+                        updated_at,
+                    },
+                )
                 .collect(),
         );
         self.sync_slash_popup_selection();
@@ -76,7 +75,11 @@ impl App {
                     "{}  •  {}{}",
                     agent.name,
                     agent.agent_mode,
-                    if agent.is_default { "  •  default" } else { "" }
+                    if agent.is_default {
+                        "  •  default"
+                    } else {
+                        ""
+                    }
                 ),
                 preview_lines: vec![
                     format!("name: {}", agent.name),

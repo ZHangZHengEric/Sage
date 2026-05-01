@@ -13,10 +13,13 @@ fn parse_startup_action_supports_resume_picker() {
     let action = parse_startup_action(vec!["resume".to_string()]).expect("parse");
     assert!(matches!(
         action,
-        StartupBehavior::Run { action: Some(SubmitAction::OpenSessionPicker {
-            mode: SessionPickerMode::Resume,
-            limit: 10
-        }), .. }
+        StartupBehavior::Run {
+            action: Some(SubmitAction::OpenSessionPicker {
+                mode: SessionPickerMode::Resume,
+                limit: 10
+            }),
+            ..
+        }
     ));
 }
 
@@ -48,27 +51,36 @@ fn parse_startup_action_supports_doctor() {
     let action = parse_startup_action(vec!["doctor".to_string()]).expect("parse");
     assert!(matches!(
         action,
-        StartupBehavior::Run { action: Some(SubmitAction::ShowDoctor {
-            probe_provider: false
-        }), .. }
+        StartupBehavior::Run {
+            action: Some(SubmitAction::ShowDoctor {
+                probe_provider: false
+            }),
+            ..
+        }
     ));
 
     let action = parse_startup_action(vec!["doctor".to_string(), "probe-provider".to_string()])
         .expect("parse");
     assert!(matches!(
         action,
-        StartupBehavior::Run { action: Some(SubmitAction::ShowDoctor {
-            probe_provider: true
-        }), .. }
+        StartupBehavior::Run {
+            action: Some(SubmitAction::ShowDoctor {
+                probe_provider: true
+            }),
+            ..
+        }
     ));
 
     let action = parse_startup_action(vec!["doctor".to_string(), "--probe-provider".to_string()])
         .expect("parse");
     assert!(matches!(
         action,
-        StartupBehavior::Run { action: Some(SubmitAction::ShowDoctor {
-            probe_provider: true
-        }), .. }
+        StartupBehavior::Run {
+            action: Some(SubmitAction::ShowDoctor {
+                probe_provider: true
+            }),
+            ..
+        }
     ));
 }
 
@@ -78,10 +90,13 @@ fn parse_startup_action_supports_config_init() {
         parse_startup_action(vec!["config".to_string(), "init".to_string()]).expect("parse");
     assert!(matches!(
         action,
-        StartupBehavior::Run { action: Some(SubmitAction::InitConfig {
-            path: None,
-            force: false
-        }), .. }
+        StartupBehavior::Run {
+            action: Some(SubmitAction::InitConfig {
+                path: None,
+                force: false
+            }),
+            ..
+        }
     ));
 
     let action = parse_startup_action(vec![
@@ -121,20 +136,26 @@ fn parse_startup_action_supports_sessions_picker() {
     let action = parse_startup_action(vec!["sessions".to_string()]).expect("parse");
     assert!(matches!(
         action,
-        StartupBehavior::Run { action: Some(SubmitAction::OpenSessionPicker {
-            mode: SessionPickerMode::Browse,
-            limit: 10
-        }), .. }
+        StartupBehavior::Run {
+            action: Some(SubmitAction::OpenSessionPicker {
+                mode: SessionPickerMode::Browse,
+                limit: 10
+            }),
+            ..
+        }
     ));
 
     let action =
         parse_startup_action(vec!["sessions".to_string(), "25".to_string()]).expect("parse");
     assert!(matches!(
         action,
-        StartupBehavior::Run { action: Some(SubmitAction::OpenSessionPicker {
-            mode: SessionPickerMode::Browse,
-            limit: 25
-        }), .. }
+        StartupBehavior::Run {
+            action: Some(SubmitAction::OpenSessionPicker {
+                mode: SessionPickerMode::Browse,
+                limit: 25
+            }),
+            ..
+        }
     ));
 }
 
@@ -171,7 +192,10 @@ fn parse_startup_action_supports_resume_targets() {
         parse_startup_action(vec!["resume".to_string(), "latest".to_string()]).expect("parse");
     assert!(matches!(
         latest,
-        StartupBehavior::Run { action: Some(SubmitAction::ResumeLatest), .. }
+        StartupBehavior::Run {
+            action: Some(SubmitAction::ResumeLatest),
+            ..
+        }
     ));
 
     let specific = parse_startup_action(vec!["resume".to_string(), "local-000123".to_string()])
@@ -200,16 +224,31 @@ fn parse_startup_action_supports_agent_options() {
             if prompt == "inspect"
             && options.agent_id.as_deref() == Some("agent_demo")
             && options.agent_mode.as_deref() == Some("fibre")
+            && options.workspace.is_none()
+    ));
+}
+
+#[test]
+fn parse_startup_action_supports_workspace_option() {
+    let action = parse_startup_action(vec![
+        "--workspace".to_string(),
+        "/tmp/demo-workspace".to_string(),
+        "run".to_string(),
+        "inspect".to_string(),
+    ])
+    .expect("parse");
+    assert!(matches!(
+        action,
+        StartupBehavior::Run { action: Some(SubmitAction::RunTask(prompt)), options }
+            if prompt == "inspect"
+            && options.workspace.as_deref() == Some("/tmp/demo-workspace")
     ));
 }
 
 #[test]
 fn parse_startup_action_rejects_invalid_agent_mode() {
-    let err = parse_startup_action(vec![
-        "--agent-mode".to_string(),
-        "weird".to_string(),
-    ])
-    .expect_err("should fail");
+    let err = parse_startup_action(vec!["--agent-mode".to_string(), "weird".to_string()])
+        .expect_err("should fail");
     assert!(err.to_string().contains("simple, multi, fibre"));
 }
 

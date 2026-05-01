@@ -7,11 +7,13 @@ impl App {
         &mut self,
         agent_id: Option<String>,
         agent_mode: Option<String>,
+        workspace: Option<std::path::PathBuf>,
     ) {
         self.selected_agent_id = agent_id.filter(|value| !value.trim().is_empty());
         if let Some(mode) = agent_mode {
             self.agent_mode = mode;
         }
+        self.set_workspace_override(workspace);
     }
 
     pub fn set_selected_agent_id(&mut self, agent_id: String) {

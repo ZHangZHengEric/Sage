@@ -2,9 +2,9 @@ use anyhow::{anyhow, Result};
 
 use crate::app::{normalize_agent_mode, SessionPickerMode, SubmitAction};
 
-use super::StartupOptions;
 use super::help::usage_text;
 use super::StartupBehavior;
+use super::StartupOptions;
 
 pub(crate) fn parse_startup_action(
     args: impl IntoIterator<Item = String>,
@@ -59,12 +59,12 @@ pub(crate) fn parse_startup_action(
             }),
             options,
         }),
-        [command, subcommand, target] if command == "sessions" && subcommand == "inspect" => Ok(
-            StartupBehavior::Run {
+        [command, subcommand, target] if command == "sessions" && subcommand == "inspect" => {
+            Ok(StartupBehavior::Run {
                 action: Some(SubmitAction::ShowSession(target.clone())),
                 options,
-            },
-        ),
+            })
+        }
         [command, limit] if command == "sessions" => {
             let limit = limit
                 .parse::<usize>()
@@ -127,11 +127,17 @@ fn parse_global_options(args: &[String]) -> Result<(StartupOptions, Vec<String>)
                 let value = args
                     .get(idx + 1)
                     .ok_or_else(|| anyhow!("--agent-mode requires a value"))?;
-                options.agent_mode = Some(
-                    normalize_agent_mode(value).ok_or_else(|| {
+                options.agent_mode =
+                    Some(normalize_agent_mode(value).ok_or_else(|| {
                         anyhow!("--agent-mode must be one of: simple, multi, fibre")
-                    })?,
-                );
+                    })?);
+                idx += 2;
+            }
+            "--workspace" => {
+                let value = args
+                    .get(idx + 1)
+                    .ok_or_else(|| anyhow!("--workspace requires a value"))?;
+                options.workspace = Some(value.clone());
                 idx += 2;
             }
             _ => break,

@@ -100,7 +100,8 @@ fn parse_backend_line_turns_cli_tool_into_tool_events() {
 
 #[test]
 fn parse_stream_contract_fixture_round_trip_sequence() {
-    let fixture = include_str!("../../../../../tests/app/cli/fixtures/stream_contract_round_trip.jsonl");
+    let fixture =
+        include_str!("../../../../../tests/app/cli/fixtures/stream_contract_round_trip.jsonl");
     let mut saw_phase = false;
     let mut saw_tool_started = false;
     let mut saw_tool_finished = false;

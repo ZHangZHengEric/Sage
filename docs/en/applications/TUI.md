@@ -23,6 +23,7 @@ The TUI is a frontend shell over the existing Sage runtime:
 - Rust handles terminal rendering and interaction
 - the local Sage Python CLI/backend handles runtime execution
 - session data is shared with the normal Sage CLI under `~/.sage/`
+- runtime workspace also defaults to the normal Sage CLI location under `~/.sage/...`
 
 That means you should treat the TUI as another local Sage entry surface, not as a separate agent stack.
 
@@ -84,7 +85,9 @@ Currently supported startup forms:
 sage-terminal
 sage-terminal --agent-id agent_demo
 sage-terminal --agent-id agent_demo --agent-mode fibre
+sage-terminal --workspace /path/to/project
 sage-terminal run "inspect this repo"
+sage-terminal --workspace /path/to/project run "inspect this repo"
 sage-terminal chat "hello"
 sage-terminal config init
 sage-terminal config init /tmp/.sage_env --force
@@ -147,6 +150,17 @@ Supported entrypoints:
   - `/mode set <simple|multi|fibre>`
 
 The actual agent definition, tools, skills, and behavior still come from the Sage runtime's stored agent configuration.
+
+## Workspace Behavior
+
+By default, `sage-terminal` does not force the current repository into `--workspace`.
+
+That means:
+
+- normal terminal sessions keep using the default Sage workspace under `~/.sage/...`
+- files such as `AGENT.md`, `MEMORY.md`, and `.sage-docs` are only created inside a repository when you explicitly pass `--workspace <path>`
+
+Use `--workspace` when you intentionally want repo-local file access and workspace-local skill discovery.
 
 ## Current Scope
 

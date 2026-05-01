@@ -257,8 +257,86 @@ fn completed_request_renders_backend_tool_step_summary() {
     assert!(rendered.contains("step 2  completed grep"));
     assert!(rendered.contains("120ms"));
     assert!(rendered.contains("84ms"));
-    assert!(rendered.contains("phase timings"));
-    assert!(rendered.contains("planning"));
-    assert!(rendered.contains("assistant text"));
-    assert!(rendered.contains("2 segments"));
+    assert!(rendered.contains("phase timings • planning 500ms"));
+    assert!(rendered.contains("assistant text 400ms • 2 segments"));
+}
+
+#[test]
+fn completed_request_compacts_large_backend_tool_step_summary() {
+    let mut app = App::new();
+    app.busy = true;
+    app.apply_backend_stats(BackendStats {
+        elapsed_seconds: Some(1.25),
+        first_output_seconds: Some(0.18),
+        prompt_tokens: Some(10),
+        completion_tokens: Some(20),
+        total_tokens: Some(30),
+        tool_steps: vec![
+            BackendToolStep {
+                step: 1,
+                tool_name: "search_memory".to_string(),
+                tool_call_id: Some("call_1".to_string()),
+                status: "completed".to_string(),
+                started_at: Some(10.0),
+                finished_at: Some(10.02),
+                duration_ms: Some(20.0),
+            },
+            BackendToolStep {
+                step: 2,
+                tool_name: "turn_status".to_string(),
+                tool_call_id: Some("call_2".to_string()),
+                status: "completed".to_string(),
+                started_at: Some(10.02),
+                finished_at: Some(10.62),
+                duration_ms: Some(600.0),
+            },
+            BackendToolStep {
+                step: 3,
+                tool_name: "search_memory".to_string(),
+                tool_call_id: Some("call_3".to_string()),
+                status: "completed".to_string(),
+                started_at: Some(10.62),
+                finished_at: Some(10.64),
+                duration_ms: Some(20.0),
+            },
+            BackendToolStep {
+                step: 4,
+                tool_name: "turn_status".to_string(),
+                tool_call_id: Some("call_4".to_string()),
+                status: "completed".to_string(),
+                started_at: Some(10.64),
+                finished_at: Some(11.24),
+                duration_ms: Some(600.0),
+            },
+            BackendToolStep {
+                step: 5,
+                tool_name: "execute_shell_command".to_string(),
+                tool_call_id: Some("call_5".to_string()),
+                status: "completed".to_string(),
+                started_at: Some(11.24),
+                finished_at: Some(11.30),
+                duration_ms: Some(60.0),
+            },
+        ],
+        phase_timings: Vec::new(),
+    });
+    app.complete_request();
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("tool steps • 5 total"));
+    assert!(rendered.contains("search_memory ×2"));
+    assert!(rendered.contains("turn_status ×2"));
+    assert!(rendered.contains("execute_shell_command ×1"));
+    assert!(rendered.contains("slowest • step 4 turn_status 600ms"));
+    assert!(!rendered.contains("step 1  completed search_memory"));
 }
