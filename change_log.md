@@ -1,3 +1,5 @@
+2026-05-01 撤回未合并的「会话生成中引导候选区」（interruptStaging）本地改动：`MessageInput.vue` 与四语 locale 恢复为 HEAD；行为回到生成中首次提交即 `needInterrupt` 发送。
+
 2026-05-01 能力预设引导门槛：`presetText` 写入后经 `<skill>` 剥离的正文与技能 chips 才写入快照；门控不再因「已有技能 chip」误判而立刻解除，首击 Enter 仍先 toast、二次 Enter 发送（desktop/server `MessageInput.vue`）。
 
 2026-05-01 编辑已发用户消息并重跑：`handleMessage` 合并同 message_id 时用户气泡改为用流式载荷整段替换 `content`，不再与本地历史拼接，消除正文重复一遍（desktop/server `useChatPage.js`）。

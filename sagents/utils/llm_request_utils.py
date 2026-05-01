@@ -8,6 +8,27 @@ from openai import APIError
 from .logger import logger
 
 
+_REASONING_MODEL_PREFIXES: tuple[str, ...] = (
+    "o1-",
+    "o3-",
+    "o4-",
+    "gpt-5",
+)
+_REASONING_MODEL_EXACT: frozenset[str] = frozenset({"o1", "o3", "o4"})
+
+
+def _is_openai_reasoning_model_name(model: Optional[str]) -> bool:
+    """与 ``sagents.llm.model_capabilities.is_openai_reasoning_model`` 判定一致（避免循环/包初始化副作用）。"""
+    if not model:
+        return False
+    name = model.strip().lower()
+    if not name:
+        return False
+    if name in _REASONING_MODEL_EXACT:
+        return True
+    return any(name.startswith(p) for p in _REASONING_MODEL_PREFIXES)
+
+
 def uses_max_completion_tokens(model: Optional[str]) -> bool:
     """
     部分 OpenAI 模型（o1/o3、GPT-5 等）的 Chat Completions API 仅接受
@@ -76,6 +97,62 @@ def get_structured_output_support(
     return None
 
 
+def _tool_choice_is_required(tool_choice: Any) -> bool:
+    if isinstance(tool_choice, str):
+        return tool_choice.strip().lower() == "required"
+    return False
+
+
+def _drop_reasoning_effort_when_tool_choice_required(sanitized: Dict[str, Any]) -> None:
+    """
+    OpenAI：gpt-5.4 等在 chat/completions 上 function tools + tool_choice=required
+    与 extra_body.reasoning_effort 互斥，会返回 invalid_request_error。
+    """
+    if not _tool_choice_is_required(sanitized.get("tool_choice")):
+        return
+    eb = sanitized.get("extra_body")
+    if not isinstance(eb, dict) or "reasoning_effort" not in eb:
+        return
+    sanitized["extra_body"] = {k: v for k, v in eb.items() if k != "reasoning_effort"}
+    logger.debug(
+        "sanitize_model_request_kwargs: dropped reasoning_effort from extra_body "
+        "(tool_choice=required, chat/completions compatibility)"
+    )
+
+
+def _drop_sampling_params_when_reasoning_effort_active(
+    sanitized: Dict[str, Any],
+    model: Optional[str],
+) -> None:
+    """
+    OpenAI / Azure reasoning：extra_body 中显式带上非 none 的 reasoning_effort 时，
+    自定义 temperature 等采样参数常返回 unsupported_value（仅允许默认）。
+
+    须在 ``_drop_reasoning_effort_when_tool_choice_required`` 之后调用，以便
+    tool_choice=required 路径已去掉 reasoning_effort 时仍保留用户配置的 temperature。
+    """
+    if not model or not _is_openai_reasoning_model_name(model):
+        return
+    eb = sanitized.get("extra_body")
+    if not isinstance(eb, dict) or "reasoning_effort" not in eb:
+        return
+    effort = eb.get("reasoning_effort")
+    if effort is None:
+        return
+    if str(effort).strip().lower() in ("none", ""):
+        return
+    dropped = []
+    for key in ("temperature", "top_p", "presence_penalty", "frequency_penalty"):
+        if key in sanitized:
+            sanitized.pop(key, None)
+            dropped.append(key)
+    if dropped:
+        logger.debug(
+            f"sanitize_model_request_kwargs: dropped {dropped} "
+            f"(OpenAI reasoning model with reasoning_effort={effort!r})"
+        )
+
+
 def sanitize_model_request_kwargs(
     request_kwargs: Dict[str, Any],
     *,
@@ -91,6 +168,12 @@ def sanitize_model_request_kwargs(
     - 如果能力未知，则保留，交给运行时 fallback 兜底。
 
     另：对仅支持 max_completion_tokens 的模型，将 max_tokens 映射为该参数。
+
+    当 tool_choice 为 ``required`` 时，从 ``extra_body`` 移除 ``reasoning_effort``，
+    避免部分 OpenAI 推理模型在 chat/completions 上报错。
+
+    当仍携带非 ``none`` 的 ``extra_body.reasoning_effort`` 时，移除 ``temperature`` 等采样参数，
+    与 OpenAI/Azure reasoning 模型约束一致。
     """
     sanitized = dict(request_kwargs)
     for key in list(sanitized.keys()):
@@ -119,6 +202,8 @@ def sanitize_model_request_kwargs(
     structured_support = get_structured_output_support(client=client, model_config=model_config)
     if structured_support is False:
         sanitized.pop("response_format", None)
+    _drop_reasoning_effort_when_tool_choice_required(sanitized)
+    _drop_sampling_params_when_reasoning_effort_active(sanitized, resolved_model)
     return sanitized
 
 
