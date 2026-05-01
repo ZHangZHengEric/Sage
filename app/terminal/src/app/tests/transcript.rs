@@ -1,4 +1,5 @@
 use crate::app_render::render_assistant_body;
+use crate::display_policy::DisplayMode;
 use std::time::{Duration, Instant};
 
 use super::super::{App, MessageKind};
@@ -129,8 +130,55 @@ fn tool_messages_include_step_number_and_duration() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("step 1  running read_file"));
-    assert!(rendered.contains("step 1  completed read_file"));
+    assert!(rendered.contains("running read_file"));
+    assert!(rendered.contains("completed read_file"));
+    assert!(!rendered.contains("step 1"));
+}
+
+#[test]
+fn internal_tool_messages_are_hidden_from_transcript() {
+    let mut app = App::new();
+    app.request_started_at = Some(Instant::now() - Duration::from_secs(2));
+    app.start_tool("search_memory".to_string());
+    std::thread::sleep(Duration::from_millis(5));
+    app.finish_tool("search_memory".to_string());
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!rendered.contains("search_memory"));
+}
+
+#[test]
+fn verbose_mode_shows_internal_tool_messages() {
+    let mut app = App::new();
+    app.display_mode = DisplayMode::Verbose;
+    app.request_started_at = Some(Instant::now() - Duration::from_secs(2));
+    app.start_tool("search_memory".to_string());
+    std::thread::sleep(Duration::from_millis(5));
+    app.finish_tool("search_memory".to_string());
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("step 1  running search_memory"));
+    assert!(rendered.contains("step 1  completed search_memory"));
 }
 
 #[test]
@@ -154,6 +202,7 @@ fn completed_request_queues_timing_summary_into_transcript() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(rendered.contains("completed"));
+    assert!(rendered.contains("completed •"));
     assert!(rendered.contains("total 1.5s"));
     assert!(rendered.contains("ttft 320ms"));
 }
@@ -252,13 +301,16 @@ fn completed_request_renders_backend_tool_step_summary() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("tool steps"));
-    assert!(rendered.contains("step 1  completed read_file"));
-    assert!(rendered.contains("step 2  completed grep"));
+    assert_eq!(rendered.matches("Process").count(), 1);
+    assert_eq!(rendered.matches("Tool").count(), 0);
+    assert!(rendered.contains("tools"));
+    assert!(rendered.contains("read_file 120ms"));
+    assert!(rendered.contains("grep 84ms"));
+    assert!(!rendered.contains("completed read_file"));
     assert!(rendered.contains("120ms"));
     assert!(rendered.contains("84ms"));
-    assert!(rendered.contains("phase timings • planning 500ms"));
-    assert!(rendered.contains("assistant text 400ms • 2 segments"));
+    assert!(rendered.contains("phases • planning 500ms"));
+    assert!(rendered.contains("response 400ms • 2 segments"));
 }
 
 #[test]
@@ -333,10 +385,154 @@ fn completed_request_compacts_large_backend_tool_step_summary() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("tool steps • 5 total"));
-    assert!(rendered.contains("search_memory ×2"));
-    assert!(rendered.contains("turn_status ×2"));
-    assert!(rendered.contains("execute_shell_command ×1"));
-    assert!(rendered.contains("slowest • step 4 turn_status 600ms"));
+    assert_eq!(rendered.matches("Process").count(), 1);
+    assert_eq!(rendered.matches("Tool").count(), 0);
+    assert!(rendered.contains("tools • execute_shell_command • 60ms • internal tools ×4"));
+    assert!(rendered.contains("execute_shell_command"));
+    assert!(rendered.contains("internal tools ×4"));
+    assert!(!rendered.contains("slowest"));
     assert!(!rendered.contains("step 1  completed search_memory"));
+    assert!(!rendered.contains("turn_status ×2"));
+}
+
+#[test]
+fn completed_request_omits_tool_summary_when_only_internal_tools_ran() {
+    let mut app = App::new();
+    app.busy = true;
+    app.apply_backend_stats(BackendStats {
+        elapsed_seconds: Some(1.25),
+        first_output_seconds: Some(0.18),
+        prompt_tokens: Some(10),
+        completion_tokens: Some(20),
+        total_tokens: Some(30),
+        tool_steps: vec![
+            BackendToolStep {
+                step: 1,
+                tool_name: "search_memory".to_string(),
+                tool_call_id: Some("call_1".to_string()),
+                status: "completed".to_string(),
+                started_at: Some(10.0),
+                finished_at: Some(10.02),
+                duration_ms: Some(20.0),
+            },
+            BackendToolStep {
+                step: 2,
+                tool_name: "turn_status".to_string(),
+                tool_call_id: Some("call_2".to_string()),
+                status: "completed".to_string(),
+                started_at: Some(10.02),
+                finished_at: Some(10.62),
+                duration_ms: Some(600.0),
+            },
+        ],
+        phase_timings: Vec::new(),
+    });
+    app.complete_request();
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!rendered.contains("tools"));
+    assert!(!rendered.contains("search_memory"));
+    assert!(!rendered.contains("turn_status"));
+}
+
+#[test]
+fn completed_request_maps_internal_phase_names_to_user_labels() {
+    let mut app = App::new();
+    app.busy = true;
+    app.apply_backend_stats(BackendStats {
+        elapsed_seconds: Some(1.25),
+        first_output_seconds: Some(0.18),
+        prompt_tokens: Some(10),
+        completion_tokens: Some(20),
+        total_tokens: Some(30),
+        tool_steps: Vec::new(),
+        phase_timings: vec![
+            BackendPhaseTiming {
+                phase: "ToolSuggestionAgent".to_string(),
+                started_at: Some(9.8),
+                finished_at: Some(10.3),
+                duration_ms: Some(500.0),
+                segment_count: 1,
+            },
+            BackendPhaseTiming {
+                phase: "MemoryRecallAgent".to_string(),
+                started_at: Some(10.3),
+                finished_at: Some(10.8),
+                duration_ms: Some(500.0),
+                segment_count: 1,
+            },
+            BackendPhaseTiming {
+                phase: "SimpleAgent".to_string(),
+                started_at: Some(10.8),
+                finished_at: Some(11.5),
+                duration_ms: Some(700.0),
+                segment_count: 1,
+            },
+        ],
+    });
+    app.complete_request();
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("phases • planning 500ms"));
+    assert!(rendered.contains("memory 500ms"));
+    assert!(rendered.contains("response 700ms"));
+    assert!(!rendered.contains("SimpleAgent"));
+    assert!(!rendered.contains("MemoryRecallAgent"));
+}
+
+#[test]
+fn completed_request_keeps_raw_phase_names_in_verbose_mode() {
+    let mut app = App::new();
+    app.display_mode = DisplayMode::Verbose;
+    app.busy = true;
+    app.apply_backend_stats(BackendStats {
+        elapsed_seconds: Some(1.25),
+        first_output_seconds: Some(0.18),
+        prompt_tokens: Some(10),
+        completion_tokens: Some(20),
+        total_tokens: Some(30),
+        tool_steps: Vec::new(),
+        phase_timings: vec![BackendPhaseTiming {
+            phase: "MemoryRecallAgent".to_string(),
+            started_at: Some(10.3),
+            finished_at: Some(10.8),
+            duration_ms: Some(500.0),
+            segment_count: 1,
+        }],
+    });
+    app.complete_request();
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("phase • MemoryRecallAgent 500ms"));
+    assert!(!rendered.contains("phase • memory 500ms"));
 }

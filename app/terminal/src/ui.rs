@@ -56,6 +56,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 #[cfg(test)]
 mod tests {
     use crate::app::App;
+    use crate::display_policy::DisplayMode;
     use crate::ui_support::{footer_hint, footer_status_summary};
 
     #[test]
@@ -76,7 +77,7 @@ mod tests {
         app.set_active_phase("assistant_text");
 
         let summary = footer_status_summary(&app);
-        assert!(summary.contains("phase assistant text"));
+        assert!(summary.contains("phase response"));
     }
 
     #[test]
@@ -88,8 +89,30 @@ mod tests {
         app.start_tool("read_file".to_string());
 
         let hint = footer_hint(&app);
-        assert!(hint.contains("running #1 read_file"));
+        assert!(hint.contains("running read_file"));
         assert!(!hint.contains("planning..."));
+    }
+
+    #[test]
+    fn busy_footer_hint_keeps_phase_when_only_internal_tool_is_running() {
+        let mut app = App::new();
+        app.input = "explain repo".to_string();
+        let _ = app.submit_input();
+        app.set_active_phase("planning");
+        app.start_tool("search_memory".to_string());
+
+        assert_eq!(footer_hint(&app), "planning... output is streaming");
+    }
+
+    #[test]
+    fn verbose_mode_keeps_raw_phase_name_in_footer() {
+        let mut app = App::new();
+        app.display_mode = DisplayMode::Verbose;
+        app.input = "explain repo".to_string();
+        let _ = app.submit_input();
+        app.set_active_phase("assistant_text");
+
+        assert_eq!(footer_hint(&app), "assistant text... output is streaming");
     }
 
     #[test]

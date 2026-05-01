@@ -8,6 +8,7 @@ use crate::app::runtime_support::{
 };
 use crate::app::{ActiveToolRecord, App, MessageKind};
 use crate::app_render::{format_message, format_message_continuation, welcome_lines};
+use crate::display_policy::{is_visible_tool, DisplayMode};
 
 impl App {
     pub fn append_assistant_chunk(&mut self, chunk: &str) {
@@ -29,7 +30,7 @@ impl App {
 
     pub fn set_active_phase(&mut self, phase: impl Into<String>) {
         let phase = phase.into();
-        let normalized = normalize_phase_label(&phase);
+        let normalized = normalize_phase_label(self.display_mode, &phase);
         if normalized.is_empty() {
             return;
         }
@@ -57,16 +58,24 @@ impl App {
         self.active_phase = None;
         self.active_tools.clear();
         self.flush_live_message();
+        let mut completion_lines = Vec::new();
         if let Some(stats) = backend_stats.as_ref() {
-            if let Some(tool_summary) = backend_tool_step_summary(&stats.tool_steps) {
-                self.queue_message(MessageKind::Tool, tool_summary);
+            if let Some(tool_summary) =
+                backend_tool_step_summary(&stats.tool_steps, self.display_mode)
+            {
+                completion_lines.push(tool_summary);
             }
-            if let Some(phase_summary) = backend_phase_timing_summary(&stats.phase_timings) {
-                self.queue_message(MessageKind::Process, phase_summary);
+            if let Some(phase_summary) =
+                backend_phase_timing_summary(&stats.phase_timings, self.display_mode)
+            {
+                completion_lines.push(phase_summary);
             }
         }
         if let Some(summary) = completion_summary {
-            self.queue_message(MessageKind::Process, format!("completed  {summary}"));
+            completion_lines.push(format!("completed • {summary}"));
+        }
+        if !completion_lines.is_empty() {
+            self.queue_message(MessageKind::Process, completion_lines.join("\n"));
         }
         self.status = format!("ready  {}", self.session_id);
     }
@@ -92,16 +101,24 @@ impl App {
         self.active_phase = None;
         self.active_tools.clear();
         self.flush_live_message();
+        let mut completion_lines = Vec::new();
         if let Some(stats) = backend_stats.as_ref() {
-            if let Some(tool_summary) = backend_tool_step_summary(&stats.tool_steps) {
-                self.queue_message(MessageKind::Tool, tool_summary);
+            if let Some(tool_summary) =
+                backend_tool_step_summary(&stats.tool_steps, self.display_mode)
+            {
+                completion_lines.push(tool_summary);
             }
-            if let Some(phase_summary) = backend_phase_timing_summary(&stats.phase_timings) {
-                self.queue_message(MessageKind::Process, phase_summary);
+            if let Some(phase_summary) =
+                backend_phase_timing_summary(&stats.phase_timings, self.display_mode)
+            {
+                completion_lines.push(phase_summary);
             }
         }
         if let Some(summary) = completion_summary {
-            self.queue_message(MessageKind::Process, format!("failed  {summary}"));
+            completion_lines.push(format!("failed • {summary}"));
+        }
+        if !completion_lines.is_empty() {
+            self.queue_message(MessageKind::Process, completion_lines.join("\n"));
         }
         self.queue_message(MessageKind::System, message.into());
         self.status = format!("error  {}", self.session_id);
@@ -182,16 +199,32 @@ impl App {
     }
 
     pub fn active_tool_status(&self) -> Option<String> {
-        let (name, record) = self.active_tools.iter().next()?;
+        let visible_tools = self
+            .active_tools
+            .iter()
+            .filter(|(name, _)| is_visible_tool(self.display_mode, name))
+            .collect::<Vec<_>>();
+        let (name, record) = visible_tools.first().copied()?;
         let elapsed = format_duration(record.started_at.elapsed());
-        if self.active_tools.len() == 1 {
-            Some(format!("#{} {name}  {elapsed}", record.step))
+        if visible_tools.len() == 1 {
+            if matches!(self.display_mode, DisplayMode::Verbose) {
+                Some(format!("#{} {name}  {elapsed}", record.step))
+            } else {
+                Some(format!("{name}  {elapsed}"))
+            }
         } else {
-            Some(format!(
-                "#{} {name} +{}  {elapsed}",
-                record.step,
-                self.active_tools.len().saturating_sub(1)
-            ))
+            if matches!(self.display_mode, DisplayMode::Verbose) {
+                Some(format!(
+                    "#{} {name} +{}  {elapsed}",
+                    record.step,
+                    visible_tools.len().saturating_sub(1)
+                ))
+            } else {
+                Some(format!(
+                    "{name} +{}  {elapsed}",
+                    visible_tools.len().saturating_sub(1)
+                ))
+            }
         }
     }
 
@@ -200,34 +233,52 @@ impl App {
     }
 
     pub fn start_tool(&mut self, name: String) {
+        let show_detail = is_visible_tool(self.display_mode, &name);
         self.tool_step_seq = self.tool_step_seq.saturating_add(1);
         let step = self.tool_step_seq;
         let started_at = Instant::now();
         self.active_tools
             .insert(name.clone(), ActiveToolRecord { step, started_at });
+        if !show_detail {
+            return;
+        }
         let since_request = self
             .request_started_at
             .map(|started| format!(" • +{}", format_duration(started.elapsed())))
             .unwrap_or_default();
-        self.queue_message(
-            MessageKind::Tool,
-            format!("step {step}  running {name}{since_request}"),
-        );
+        let detail = if matches!(self.display_mode, DisplayMode::Verbose) {
+            format!("step {}  running {name}{since_request}", self.tool_step_seq)
+        } else {
+            format!("running {name}{since_request}")
+        };
+        self.queue_message(MessageKind::Tool, detail);
     }
 
     pub fn finish_tool(&mut self, name: String) {
+        let show_detail = is_visible_tool(self.display_mode, &name);
         let detail = self
             .active_tools
             .remove(&name)
             .map(|record| {
-                format!(
-                    "step {}  completed {} • {}",
-                    record.step,
-                    name,
-                    format_duration(record.started_at.elapsed())
-                )
+                if matches!(self.display_mode, DisplayMode::Verbose) {
+                    format!(
+                        "step {}  completed {} • {}",
+                        record.step,
+                        name,
+                        format_duration(record.started_at.elapsed())
+                    )
+                } else {
+                    format!(
+                        "completed {} • {}",
+                        name,
+                        format_duration(record.started_at.elapsed())
+                    )
+                }
             })
             .unwrap_or_else(|| format!("completed {name}"));
+        if !show_detail {
+            return;
+        }
         self.queue_message(MessageKind::Tool, detail);
     }
 

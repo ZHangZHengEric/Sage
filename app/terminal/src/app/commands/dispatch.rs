@@ -3,6 +3,7 @@ use crate::app_preview::provider_help_text;
 use crate::slash_command;
 
 use super::agent::normalize_agent_mode;
+use super::display::parse_display_mode;
 
 impl App {
     pub(crate) fn handle_command(&mut self, command: &str) -> SubmitAction {
@@ -273,17 +274,46 @@ impl App {
                     SubmitAction::Handled
                 }
             },
+            "/display" => match (parts.next(), parts.next(), parts.next()) {
+                (None, None, None) | (Some("show"), None, None) => {
+                    self.queue_display_status();
+                    SubmitAction::Handled
+                }
+                (Some("set"), Some(mode), None) => match parse_display_mode(mode) {
+                    Some(mode) => {
+                        self.set_display_mode(mode);
+                        SubmitAction::Handled
+                    }
+                    None => {
+                        self.queue_message(
+                            MessageKind::System,
+                            "Usage: /display | /display show | /display set <compact|verbose>",
+                        );
+                        self.status = format!("invalid command  {}", self.session_id);
+                        SubmitAction::Handled
+                    }
+                },
+                _ => {
+                    self.queue_message(
+                        MessageKind::System,
+                        "Usage: /display | /display show | /display set <compact|verbose>",
+                    );
+                    self.status = format!("invalid command  {}", self.session_id);
+                    SubmitAction::Handled
+                }
+            },
             "/status" => {
                 self.queue_message(
                     MessageKind::System,
                     format!(
-                        "session: {}\nbusy: {}\nagent_id: {}\nagent_mode: {}\nmax_loop_count: {}\nskills: {}\nmodel_override: {}\ninput: {} chars",
+                        "session: {}\nbusy: {}\nagent_id: {}\nagent_mode: {}\ndisplay_mode: {}\nmax_loop_count: {}\nskills: {}\nmodel_override: {}\ninput: {} chars",
                         self.session_id,
                         self.busy,
                         self.selected_agent_id
                             .clone()
                             .unwrap_or_else(|| "(default)".to_string()),
                         self.agent_mode,
+                        super::display::display_mode_name(self.display_mode),
                         self.max_loop_count,
                         if self.selected_skills.is_empty() {
                             "(none)".to_string()

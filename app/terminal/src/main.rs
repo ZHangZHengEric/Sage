@@ -4,6 +4,7 @@ mod app_render;
 mod backend;
 mod bottom_pane;
 mod custom_terminal;
+mod display_policy;
 mod history;
 mod markdown;
 mod slash_command;
