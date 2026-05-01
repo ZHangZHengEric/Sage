@@ -196,3 +196,121 @@ def test_turn_status_from_tool_call_reads_continue_work():
     }
 
     assert _agent()._turn_status_from_tool_call(tool_call) == "continue_work"
+
+
+def test_env_force_required_keeps_required_without_escape(monkeypatch):
+    monkeypatch.setenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "true")
+
+    assert _agent()._resolve_tool_choice(
+        tools_json=[{"function": {"name": "todo_read"}}],
+        force_tool_choice_required=False,
+        force_tool_choice_auto=False,
+    ) == "required"
+
+
+def test_normal_path_omits_tool_choice_without_env_or_escape(monkeypatch):
+    monkeypatch.delenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", raising=False)
+
+    assert _agent()._resolve_tool_choice(
+        tools_json=[{"function": {"name": "todo_read"}}],
+        force_tool_choice_required=False,
+        force_tool_choice_auto=False,
+    ) is None
+
+
+def test_escape_auto_overrides_env_required_once(monkeypatch):
+    monkeypatch.setenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "true")
+
+    assert _agent()._resolve_tool_choice(
+        tools_json=[{"function": {"name": "todo_read"}}],
+        force_tool_choice_required=False,
+        force_tool_choice_auto=True,
+    ) == "auto"
+
+
+def test_required_protocol_turn_overrides_escape_auto(monkeypatch):
+    monkeypatch.setenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "true")
+
+    assert _agent()._resolve_tool_choice(
+        tools_json=[{"function": {"name": "turn_status"}}],
+        force_tool_choice_required=True,
+        force_tool_choice_auto=True,
+    ) == "required"
+
+
+def test_turn_status_rejection_requests_required_escape():
+    chunks = [
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content="turn_status call rejected",
+            tool_call_id="call_1",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+            metadata={"turn_status_rejected": True},
+        )
+    ]
+
+    assert _agent()._should_escape_required_next_turn(chunks, pattern=None) is True
+
+
+def test_repeat_pattern_requests_required_escape():
+    chunks = [
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content="same result",
+            tool_call_id="call_1",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        )
+    ]
+
+    assert _agent()._should_escape_required_next_turn(
+        chunks,
+        pattern={"period": 1, "cycles": 2, "span": 2},
+    ) is True
+
+
+def test_historical_repeat_signature_requests_required_escape():
+    agent = _agent()
+    chunks = [
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=None,
+            tool_calls=[
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "todo_read",
+                        "arguments": '{"session_id":"s1"}',
+                    },
+                }
+            ],
+            message_type=MessageType.TOOL_CALL.value,
+        ),
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content="当前未完成任务清单:\n- [进行中] t12",
+            tool_call_id="call_1",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+            metadata={"tool_name": "todo_read"},
+        ),
+    ]
+    historical_signature = agent._build_loop_signature(chunks)
+    current_signature = agent._build_loop_signature(chunks)
+
+    pattern = agent._detect_repeat_pattern([historical_signature, current_signature])
+
+    assert pattern == {"period": 1, "cycles": 2, "span": 2}
+    assert agent._should_escape_required_next_turn(chunks, pattern=pattern) is True
+
+
+def test_normal_tool_result_does_not_request_required_escape():
+    chunks = [
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content='{"success":true}',
+            tool_call_id="call_1",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        )
+    ]
+
+    assert _agent()._should_escape_required_next_turn(chunks, pattern=None) is False
