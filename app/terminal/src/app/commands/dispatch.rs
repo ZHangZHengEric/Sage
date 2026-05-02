@@ -303,6 +303,22 @@ impl App {
                     SubmitAction::Handled
                 }
             },
+            "/interrupt" => match (parts.next(), parts.next()) {
+                (None, None) => SubmitAction::Interrupt,
+                _ => {
+                    self.queue_message(MessageKind::System, "Usage: /interrupt");
+                    self.status = format!("invalid command  {}", self.session_id);
+                    SubmitAction::Handled
+                }
+            },
+            "/retry" => match (parts.next(), parts.next()) {
+                (None, None) => SubmitAction::RetryLastTask,
+                _ => {
+                    self.queue_message(MessageKind::System, "Usage: /retry");
+                    self.status = format!("invalid command  {}", self.session_id);
+                    SubmitAction::Handled
+                }
+            },
             "/status" => {
                 self.queue_message(
                     MessageKind::System,

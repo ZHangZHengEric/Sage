@@ -24,3 +24,43 @@ pub(super) fn run_task(
     handle.send_prompt(&request.task)?;
     Ok(true)
 }
+
+pub(super) fn interrupt_task(app: &mut App, backend: &mut Option<BackendHandle>) -> Result<bool> {
+    if !app.busy {
+        app.push_message(
+            crate::app::MessageKind::System,
+            "no active request to interrupt",
+        );
+        app.set_status(format!("ready  {}", app.session_id));
+        return Ok(true);
+    }
+
+    if let Some(handle) = backend.take() {
+        handle.stop();
+    }
+    app.interrupt_request();
+    Ok(true)
+}
+
+pub(super) fn retry_last_task(app: &mut App, backend: &mut Option<BackendHandle>) -> Result<bool> {
+    if app.busy {
+        app.push_message(
+            crate::app::MessageKind::System,
+            "request still running; use /interrupt before /retry",
+        );
+        app.set_status(format!("busy  {}", app.session_id));
+        return Ok(true);
+    }
+
+    let Some(task) = app.last_submitted_task.clone() else {
+        app.push_message(
+            crate::app::MessageKind::System,
+            "no previous task available to retry",
+        );
+        app.set_status(format!("retry unavailable  {}", app.session_id));
+        return Ok(true);
+    };
+
+    app.begin_task_submission(task.clone(), true);
+    run_task(app, backend, task)
+}

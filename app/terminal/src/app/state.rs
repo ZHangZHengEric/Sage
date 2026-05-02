@@ -12,6 +12,8 @@ pub enum SubmitAction {
     Noop,
     Handled,
     RunTask(String),
+    Interrupt,
+    RetryLastTask,
     OpenSessionPicker {
         mode: SessionPickerMode,
         limit: usize,
@@ -155,6 +157,8 @@ pub struct App {
     pub selected_skills: Vec<String>,
     pub selected_model: Option<String>,
     pub display_mode: DisplayMode,
+    pub(crate) last_submitted_task: Option<String>,
+    pub(crate) current_task: Option<String>,
     pub pending_history_lines: Vec<Line<'static>>,
     pub(crate) committed_history_lines: Vec<Line<'static>>,
     pub live_message: Option<(MessageKind, String)>,
@@ -205,6 +209,8 @@ impl App {
             selected_skills: Vec::new(),
             selected_model: None,
             display_mode: DisplayMode::Compact,
+            last_submitted_task: None,
+            current_task: None,
             pending_history_lines: Vec::new(),
             committed_history_lines: Vec::new(),
             live_message: None,
@@ -248,6 +254,8 @@ impl App {
         self.pending_backend_stats = None;
         self.active_phase = None;
         self.active_tools.clear();
+        self.last_submitted_task = None;
+        self.current_task = None;
         self.tool_step_seq = 0;
         self.pending_history_lines.clear();
         self.committed_history_lines.clear();

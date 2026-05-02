@@ -39,6 +39,7 @@ impl App {
 
     pub fn complete_request(&mut self) {
         self.busy = false;
+        self.current_task = None;
         let backend_stats = self.pending_backend_stats.take();
         self.last_request_duration = backend_stats
             .as_ref()
@@ -82,6 +83,7 @@ impl App {
 
     pub fn fail_request(&mut self, message: impl Into<String>) {
         self.busy = false;
+        self.current_task = None;
         let backend_stats = self.pending_backend_stats.take();
         self.last_request_duration = backend_stats
             .as_ref()
@@ -122,6 +124,56 @@ impl App {
         }
         self.queue_message(MessageKind::System, message.into());
         self.status = format!("error  {}", self.session_id);
+    }
+
+    pub fn interrupt_request(&mut self) {
+        if !self.busy {
+            return;
+        }
+
+        let had_partial_output = self
+            .live_message
+            .as_ref()
+            .map(|(_, text)| !text.trim().is_empty())
+            .unwrap_or(false);
+        let had_visible_output = had_partial_output
+            || self.live_message_had_history
+            || self.first_output_latency.is_some();
+        let backend_stats = self.pending_backend_stats.take();
+        self.last_request_duration = backend_stats
+            .as_ref()
+            .and_then(|stats| duration_from_seconds(stats.elapsed_seconds))
+            .or_else(|| self.request_started_at.map(|started| started.elapsed()));
+        self.last_first_output_latency = backend_stats
+            .as_ref()
+            .and_then(|stats| duration_from_seconds(stats.first_output_seconds))
+            .or(self.first_output_latency);
+        let completion_summary = request_timing_summary(
+            self.last_request_duration,
+            self.last_first_output_latency,
+            backend_stats.as_ref(),
+        );
+        self.busy = false;
+        self.current_task = None;
+        self.request_started_at = None;
+        self.first_output_latency = None;
+        self.active_phase = None;
+        self.active_tools.clear();
+        self.flush_live_message();
+
+        let mut lines = Vec::new();
+        if let Some(summary) = completion_summary {
+            lines.push(format!("interrupted • {summary}"));
+        } else {
+            lines.push("interrupted".to_string());
+        }
+        if had_visible_output {
+            lines.push("partial output preserved • /retry available".to_string());
+        } else {
+            lines.push("/retry available".to_string());
+        }
+        self.queue_message(MessageKind::Process, lines.join("\n"));
+        self.status = format!("interrupted  {}", self.session_id);
     }
 
     pub fn rendered_live_lines(&self) -> Vec<Line<'static>> {
