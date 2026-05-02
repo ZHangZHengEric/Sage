@@ -33,9 +33,10 @@ fn main() -> Result<()> {
         }
     };
     let mut app = App::new();
-    app.apply_startup_agent_options(
+    app.apply_startup_options(
         startup_options.agent_id,
         startup_options.agent_mode,
+        startup_options.display_mode,
         startup_options.workspace.map(PathBuf::from),
     );
     let mut terminal = setup_terminal(&app)?;

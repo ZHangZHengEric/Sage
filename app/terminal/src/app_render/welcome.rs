@@ -1,6 +1,8 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
+use crate::display_policy::{display_mode_name, DisplayMode};
+
 use super::common::{
     accent_style, card_inner_width, subtle_body_style, truncate_middle,
     with_border_with_inner_width,
@@ -13,6 +15,7 @@ pub(crate) fn welcome_lines(
     session_id: &str,
     agent_id: Option<&str>,
     agent_mode: &str,
+    display_mode: DisplayMode,
     max_loop_count: u32,
     workspace_label: &str,
 ) -> Vec<Line<'static>> {
@@ -42,6 +45,9 @@ pub(crate) fn welcome_lines(
                 agent_mode.to_string(),
                 Style::default().fg(Color::Rgb(236, 240, 231)),
             ),
+            Span::raw("   "),
+            Span::styled("display: ", dim),
+            Span::styled(display_mode_name(display_mode), accent_style()),
             Span::raw("   "),
             Span::styled("agent: ", dim),
             Span::styled(

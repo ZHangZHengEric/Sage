@@ -1,5 +1,6 @@
 use crate::app::{App, MessageKind, SubmitAction};
 use crate::app_preview::provider_help_text;
+use crate::display_policy::display_mode_name;
 use crate::slash_command;
 
 use super::agent::normalize_agent_mode;
@@ -313,7 +314,7 @@ impl App {
                             .clone()
                             .unwrap_or_else(|| "(default)".to_string()),
                         self.agent_mode,
-                        super::display::display_mode_name(self.display_mode),
+                        display_mode_name(self.display_mode),
                         self.max_loop_count,
                         if self.selected_skills.is_empty() {
                             "(none)".to_string()

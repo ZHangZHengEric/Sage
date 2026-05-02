@@ -1,5 +1,5 @@
 use crate::app::{App, MessageKind};
-use crate::display_policy::DisplayMode;
+use crate::display_policy::{display_mode_name, DisplayMode};
 
 impl App {
     pub fn set_display_mode(&mut self, mode: DisplayMode) {
@@ -25,12 +25,5 @@ pub(crate) fn parse_display_mode(value: &str) -> Option<DisplayMode> {
         "compact" => Some(DisplayMode::Compact),
         "verbose" => Some(DisplayMode::Verbose),
         _ => None,
-    }
-}
-
-pub(crate) fn display_mode_name(mode: DisplayMode) -> &'static str {
-    match mode {
-        DisplayMode::Compact => "compact",
-        DisplayMode::Verbose => "verbose",
     }
 }

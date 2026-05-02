@@ -1,4 +1,5 @@
 use crate::app::{App, SubmitAction};
+use crate::display_policy::DisplayMode;
 use std::path::PathBuf;
 
 #[test]
@@ -36,32 +37,36 @@ fn mode_command_updates_agent_mode_and_requests_restart() {
 }
 
 #[test]
-fn startup_agent_options_apply_without_emitting_messages() {
+fn startup_options_apply_without_emitting_messages() {
     let mut app = App::new();
 
-    app.apply_startup_agent_options(
+    app.apply_startup_options(
         Some("agent_demo".to_string()),
         Some("multi".to_string()),
+        Some(DisplayMode::Verbose),
         None,
     );
 
     assert_eq!(app.selected_agent_id.as_deref(), Some("agent_demo"));
     assert_eq!(app.agent_mode, "multi");
+    assert_eq!(app.display_mode, DisplayMode::Verbose);
     assert_eq!(app.workspace_label, "~/.sage");
 }
 
 #[test]
-fn startup_agent_options_apply_explicit_workspace_override() {
+fn startup_options_apply_explicit_workspace_override() {
     let mut app = App::new();
 
-    app.apply_startup_agent_options(
+    app.apply_startup_options(
         Some("agent_demo".to_string()),
         Some("multi".to_string()),
+        Some(DisplayMode::Compact),
         Some(PathBuf::from("/tmp/demo-workspace")),
     );
 
     assert_eq!(app.selected_agent_id.as_deref(), Some("agent_demo"));
     assert_eq!(app.agent_mode, "multi");
+    assert_eq!(app.display_mode, DisplayMode::Compact);
     assert_eq!(
         app.workspace_override_path(),
         Some(PathBuf::from("/tmp/demo-workspace").as_path())

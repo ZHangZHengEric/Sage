@@ -13,6 +13,8 @@ fn welcome_banner_renders_in_idle_region_before_transcript() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(rendered.contains("Sage Terminal"));
+    assert!(rendered.contains("display: "));
+    assert!(rendered.contains("compact"));
     assert!(rendered.contains("Tip: "));
 }
 

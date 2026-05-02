@@ -1,17 +1,22 @@
 use crate::app::{App, MessageKind};
+use crate::display_policy::DisplayMode;
 
 const VALID_AGENT_MODES: &[&str] = &["simple", "multi", "fibre"];
 
 impl App {
-    pub fn apply_startup_agent_options(
+    pub fn apply_startup_options(
         &mut self,
         agent_id: Option<String>,
         agent_mode: Option<String>,
+        display_mode: Option<DisplayMode>,
         workspace: Option<std::path::PathBuf>,
     ) {
         self.selected_agent_id = agent_id.filter(|value| !value.trim().is_empty());
         if let Some(mode) = agent_mode {
             self.agent_mode = mode;
+        }
+        if let Some(display_mode) = display_mode {
+            self.display_mode = display_mode;
         }
         self.set_workspace_override(workspace);
     }
