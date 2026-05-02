@@ -10,3 +10,5 @@ mod model;
 mod session;
 #[path = "commands/skills.rs"]
 mod skills;
+#[path = "commands/workspace.rs"]
+mod workspace;

@@ -121,6 +121,7 @@ cargo run --quiet --offline -- resume
 - `/agent`
 - `/mode`
 - `/display`
+- `/workspace`
 - `/interrupt`
 - `/retry`
 - `/new`
@@ -159,6 +160,25 @@ TUI 现在可以覆盖运行时使用的 agent，但不会自己接管 agent 配
 
 真正的 agent 定义、工具、skills 和行为仍然来自 Sage runtime 已保存的 agent 配置。
 
+## 持久化默认值
+
+Terminal 现在会跨启动记住这些本地默认值：
+
+- 当前选择的 `agent_id`
+- 当前选择的 `agent_mode`
+- 当前选择的 `display` 模式
+- 当前选择的 `workspace` override
+
+像 `/agent set`、`/mode set`、`/display set`、`/workspace set` 这类运行时命令，会同时更新保存下来的默认值。
+
+启动参数仍然优先于已保存默认值。比如你已经保存了 `verbose`，但这次执行：
+
+```bash
+sage-terminal --display compact
+```
+
+则只会在当前这次启动里使用 `compact`。
+
 ## Display 模式
 
 Terminal transcript 现在支持两种展示模式：
@@ -175,6 +195,17 @@ sage-terminal --display verbose
 ```text
 /display set compact
 /display set verbose
+```
+
+## Workspace 控制
+
+你现在可以直接在 TUI 内查看或切换当前 workspace：
+
+```text
+/workspace
+/workspace show
+/workspace set /path/to/project
+/workspace clear
 ```
 
 ## 运行控制

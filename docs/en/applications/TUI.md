@@ -121,6 +121,7 @@ The current TUI preview includes these core commands:
 - `/agent`
 - `/mode`
 - `/display`
+- `/workspace`
 - `/interrupt`
 - `/retry`
 - `/new`
@@ -159,6 +160,25 @@ Supported entrypoints:
 
 The actual agent definition, tools, skills, and behavior still come from the Sage runtime's stored agent configuration.
 
+## Persistent Defaults
+
+The terminal now remembers these local defaults across launches:
+
+- selected `agent_id`
+- selected `agent_mode`
+- selected `display` mode
+- selected `workspace` override
+
+Runtime commands such as `/agent set`, `/mode set`, `/display set`, and `/workspace set` update those saved defaults.
+
+Startup flags still win for the current launch. For example, if you have a saved verbose display mode, running:
+
+```bash
+sage-terminal --display compact
+```
+
+will use `compact` only for that invocation.
+
 ## Display Modes
 
 Terminal transcript rendering supports two presentation modes:
@@ -175,6 +195,17 @@ sage-terminal --display verbose
 ```text
 /display set compact
 /display set verbose
+```
+
+## Workspace Control
+
+You can inspect or change the current terminal workspace from inside the TUI:
+
+```text
+/workspace
+/workspace show
+/workspace set /path/to/project
+/workspace clear
 ```
 
 ## Run Control
