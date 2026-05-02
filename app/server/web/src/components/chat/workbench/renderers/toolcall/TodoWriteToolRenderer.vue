@@ -46,6 +46,7 @@ import { computed } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { CheckCircle2, Circle, Loader2, XCircle, HelpCircle, ListTodo } from 'lucide-vue-next'
 import { useLanguage } from '@/utils/i18n'
+import { parseToolJsonObjectRecord } from '@/utils/safeParseToolJson.js'
 
 const { t } = useLanguage()
 
@@ -56,21 +57,13 @@ const props = defineProps({
 
 const todoSummary = computed(() => {
   if (!props.toolResult) return ''
-  try {
-    const parsed = typeof props.toolResult.content === 'string' ? JSON.parse(props.toolResult.content) : props.toolResult.content
-    return parsed.summary || ''
-  } catch {
-    return ''
-  }
+  const o = parseToolJsonObjectRecord(props.toolResult.content)
+  return o.summary || ''
 })
 const todoTasks = computed(() => {
   if (!props.toolResult) return []
-  try {
-    const parsed = typeof props.toolResult.content === 'string' ? JSON.parse(props.toolResult.content) : props.toolResult.content
-    return parsed.tasks || []
-  } catch {
-    return []
-  }
+  const o = parseToolJsonObjectRecord(props.toolResult.content)
+  return Array.isArray(o.tasks) ? o.tasks : []
 })
 const getTodoTaskClass = (status) => ({
   completed: 'bg-green-500/10 border-green-500/30',

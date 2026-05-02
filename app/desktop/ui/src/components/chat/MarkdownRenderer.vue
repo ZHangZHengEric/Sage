@@ -1,5 +1,6 @@
 <template>
   <div
+    ref="markdownRootEl"
     class="prose prose-xs dark:prose-invert max-w-none break-words"
     :class="props.compact ? 'text-[11px] leading-5' : 'text-sm'"
     v-html="renderedContent"
@@ -85,6 +86,7 @@ const mermaidList = [] // 存放所有 mermaid 图表
 const excalidrawList = [] // 存放所有 excalidraw 图表
 const chartInstances = ref([])
 const localImageObjectUrls = ref([])
+const markdownRootEl = ref(null)
 const renderer = new marked.Renderer()
 
 // 修改 renderer.code，不再使用 Prism，只返回基础 HTML
@@ -332,7 +334,7 @@ const addImageDownloadButton = (html) => {
     if (isLocal) {
       const pathToCopy = localImagePath || src
       return `<div class="relative group inline-block max-w-full my-2">
-        <img${attrs} class="rounded-lg max-w-full h-auto block border">
+        <img${attrs}>
         <button class="absolute top-2 right-2 p-1.5 bg-background/80 backdrop-blur-sm rounded-md shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-background text-foreground border" onclick="window.copyLocalImageToDownloads('${pathToCopy}', '${filename}')" title="复制到下载目录">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -345,7 +347,7 @@ const addImageDownloadButton = (html) => {
     
     // 在线图片：显示下载按钮
     return `<div class="relative group inline-block max-w-full my-2">
-      <img${attrs} class="rounded-lg max-w-full h-auto block border">
+      <img${attrs}>
       <button class="absolute top-2 right-2 p-1.5 bg-background/80 backdrop-blur-sm rounded-md shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-background text-foreground border" onclick="window.downloadMarkdownImage('${src}', '${filename}')" title="下载图片">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -543,7 +545,7 @@ const preprocessContent = (content) => {
       // 检查是否是本地绝对路径且是图片
       if ((isLocalAbsolutePath(path) || (props.agentId && isRelativeWorkspacePath(path))) && imageExtensions.test(path)) {
         // 标记为本地图片，稍后异步加载，限制最大高度为 400px
-        return `<img data-local-image="${escapeHtml(normalizeLocalPath(path))}" alt="${escapeHtml(alt)}" class="rounded-lg max-w-full max-h-[300px] h-auto block border my-2 object-contain" src="">`
+        return `<img data-local-image="${escapeHtml(normalizeLocalPath(path))}" alt="${escapeHtml(alt)}" class="rounded-lg max-w-full max-h-[300px] min-h-16 bg-muted/20 h-auto block border my-2 object-contain" src="">`
       }
       return match
     }
@@ -566,7 +568,7 @@ const preprocessContent = (content) => {
           // 图片文件标记为 data-local-image，稍后异步加载，限制最大高度为 400px
           const alt = text.trim() || path.split('/').pop() || 'image'
           console.log('[MarkdownRenderer] Marking as local image:', path)
-          return `<img data-local-image="${escapeHtml(normalizeLocalPath(path))}" alt="${escapeHtml(alt)}" class="rounded-lg max-w-full max-h-[200px] h-auto block border my-2 object-contain" src="">`
+          return `<img data-local-image="${escapeHtml(normalizeLocalPath(path))}" alt="${escapeHtml(alt)}" class="rounded-lg max-w-full max-h-[200px] min-h-16 bg-muted/20 h-auto block border my-2 object-contain" src="">`
         }
         // 非图片文件显示为文件链接
         const icon = getFileIcon(path.split('/').pop() || 'file')
@@ -652,6 +654,7 @@ const renderedContent = computed(() => {
         'href', 'src', 'alt', 'title', 'class', 'id',
         'target', 'rel', 'controls', 'type', 'onclick',
         'data-local-path',
+        'data-local-image',
         'width', 'height', 'viewBox', 'fill', 'stroke', 'stroke-width',
         'stroke-linecap', 'stroke-linejoin',
         'points', 'x1', 'y1', 'x2', 'y2', 'd', 'x', 'y', 'rx', 'ry',
@@ -742,8 +745,13 @@ const loadLocalImages = async () => {
 
   revokeLocalImageObjectUrls()
 
-  // 查找所有带有 data-local-image 属性的 img 标签
-  const images = document.querySelectorAll('img[data-local-image]')
+  // 只处理本气泡内的占位图（document 级查询会误判其它消息的 img，blob revoke 后会互相打断）
+  const root = markdownRootEl.value
+  if (!root) {
+    return
+  }
+
+  const images = root.querySelectorAll('img[data-local-image]')
   console.log('[MarkdownRenderer] Found local images:', images.length)
 
   for (const img of images) {

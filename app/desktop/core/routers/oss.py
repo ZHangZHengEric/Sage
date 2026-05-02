@@ -1,17 +1,27 @@
 import os
-import shutil
 import io
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request
 from fastapi.responses import FileResponse
 from common.utils.file import split_file_name
 from PIL import Image
 from loguru import logger
+from common.utils.safe_remote_fetch import SafeRemoteFetchError, fetch_http_url_bytes_bounded
 
 oss_router = APIRouter(prefix="/api/oss", tags=["OSS"])
 
+
+class OssImportBody(BaseModel):
+    url: str = Field(..., min_length=4)
+    agent_id: Optional[str] = None
+
+
+class OssSandboxUploadBody(BaseModel):
+    agent_id: str = Field(..., min_length=1, max_length=240)
+    filename: str = Field(..., min_length=1, max_length=480)
 
 def _resolve_upload_root(agent_id: Optional[str]) -> Path:
     """根据 agent_id 解析上传文件根目录。"""
@@ -92,6 +102,56 @@ def is_image_file(filename: str) -> bool:
     return ext in image_extensions
 
 
+def _persist_upload_bytes(
+    *,
+    request: Request,
+    agent_id: Optional[str],
+    filename_str: str,
+    content: bytes,
+) -> dict:
+    sage_files_dir = _resolve_upload_root(agent_id)
+    sage_files_dir.mkdir(parents=True, exist_ok=True)
+
+    fn = filename_str or "unknown_file"
+    origin, ext = split_file_name(fn)
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    if ext and not ext.startswith("."):
+        ext = "." + ext
+
+    if is_image_file(fn):
+        try:
+            logger.info(f"Original file size (import/upload): {len(content)} bytes, start compress")
+            image = Image.open(io.BytesIO(content))
+            compressed_data = compress_image_to_target_size(image, target_size_bytes=1 * 1024 * 1024)
+            ext = ".jpg"
+            final_filename = f"{origin}_{timestamp}{ext}"
+            file_path = sage_files_dir / final_filename
+            with open(file_path, "wb") as buffer:
+                buffer.write(compressed_data)
+        except Exception:
+            final_filename = f"{origin}_{timestamp}{ext}"
+            file_path = sage_files_dir / final_filename
+            with open(file_path, "wb") as buffer:
+                buffer.write(content)
+    else:
+        final_filename = f"{origin}_{timestamp}{ext}"
+        file_path = sage_files_dir / final_filename
+        with open(file_path, "wb") as buffer:
+            buffer.write(content)
+
+    local_path = str(file_path.resolve())
+    public_url = _build_public_url(request, agent_id, final_filename)
+    payload = {
+        "url": local_path,
+        "local_path": local_path,
+        "http_url": public_url,
+        "filename": final_filename,
+    }
+    if agent_id:
+        payload["agent_id"] = agent_id
+    return payload
+
+
 @oss_router.post("/upload")
 async def upload_file(
     request: Request,
@@ -106,78 +166,76 @@ async def upload_file(
         agent_id: 可选的 Agent ID，如果提供，文件将保存到该 Agent 沙箱的 upload_files 文件夹
     """
     try:
-        sage_files_dir = _resolve_upload_root(agent_id)
         if agent_id:
-            logger.info(f"Uploading file to agent sandbox: {agent_id}, path: {sage_files_dir}")
+            logger.info(f"Uploading file to agent sandbox: {agent_id}")
         else:
-            logger.info(f"Uploading file to default location: {sage_files_dir}")
-
-        # 确保目录存在
-        sage_files_dir.mkdir(parents=True, exist_ok=True)
+            logger.info("Uploading file to default location")
 
         filename_str = file.filename or "unknown_file"
-        origin, ext = split_file_name(filename_str)
+        content = await file.read()
 
-        # Use a timestamp to avoid name collision
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        # Ensure ext starts with dot if not empty
-        if ext and not ext.startswith("."):
-            ext = "." + ext
-
-        # Check if it's an image file and needs compression
-        if is_image_file(filename_str):
-            try:
-                # Read file content
-                content = await file.read()
-                logger.info(f"Original file size: {len(content)} bytes, start compress")
-                # Open image
-                image = Image.open(io.BytesIO(content))
-
-                # Compress image to 1MB
-                compressed_data = compress_image_to_target_size(image, target_size_bytes=1 * 1024 * 1024)
-
-                # Update extension to .jpg for compressed images
-                ext = ".jpg"
-                final_filename = f"{origin}_{timestamp}{ext}"
-                file_path = sage_files_dir / final_filename
-
-                # Save compressed image
-                with open(file_path, "wb") as buffer:
-                    buffer.write(compressed_data)
-
-            except Exception as img_error:
-                # If image processing fails, fall back to original file
-                final_filename = f"{origin}_{timestamp}{ext}"
-                file_path = sage_files_dir / final_filename
-                file.file.seek(0)
-                with open(file_path, "wb") as buffer:
-                    shutil.copyfileobj(file.file, buffer)
-        else:
-            # Non-image file, save as-is
-            final_filename = f"{origin}_{timestamp}{ext}"
-            file_path = sage_files_dir / final_filename
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-
-        # 桌面端 sidecar 与 agent 跑在同一台机器上，直接把"本地绝对路径"作为 url 返回：
-        # - markdown 引用 / image_url part 都用本地路径，agent 不再需要走 HTTP 抓回来或反解 localhost URL；
-        # - 前端 MarkdownRenderer 已有 `convertFileSrc / data-local-image` 分支，能直接渲染本地路径；
-        # - http_url 字段仍然保留（指向 sidecar 的 GET /api/oss/file/...），便于以后调试 / 在浏览器中打开。
-        local_path = str(file_path.resolve())
-        public_url = _build_public_url(request, agent_id, final_filename)
-        payload = {
-            "url": local_path,
-            "local_path": local_path,
-            "http_url": public_url,
-            "filename": final_filename,
-        }
-        if agent_id:
-            payload["agent_id"] = agent_id
-        return payload
+        # 桌面端 sidecar：返回本地路径 + HTTP 预览 URL。
+        return _persist_upload_bytes(
+            request=request,
+            agent_id=agent_id,
+            filename_str=filename_str,
+            content=content,
+        )
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@oss_router.post("/import_url")
+async def import_url(request: Request, body: OssImportBody):
+    try:
+        data, _, suggested_name = await fetch_http_url_bytes_bounded(body.url.strip())
+        return _persist_upload_bytes(
+            request=request,
+            agent_id=body.agent_id,
+            filename_str=suggested_name or "import.bin",
+            content=data,
+        )
+    except SafeRemoteFetchError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@oss_router.post("/import_sandbox_upload")
+async def import_sandbox_upload(request: Request, body: OssSandboxUploadBody):
+    """复用 ~/.sage/agents/<agent_id>/upload_files 下既有文件，供粘贴 markdown 绑定附件。"""
+    aid = body.agent_id.strip()
+    fn = body.filename.strip()
+    if not aid:
+        raise HTTPException(status_code=400, detail="invalid agent_id")
+    if ".." in aid or "/" in aid or "\\" in aid:
+        raise HTTPException(status_code=400, detail="invalid agent_id")
+    if ".." in fn or "/" in fn or "\\" in fn:
+        raise HTTPException(status_code=400, detail="invalid filename")
+
+    base = _resolve_upload_root(aid).resolve()
+    file_path = (base / fn).resolve()
+    try:
+        file_path.relative_to(base)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="path traversal not allowed")
+
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+
+    local_path = str(file_path)
+    public_url = _build_public_url(request, aid, fn)
+    return {
+        "url": local_path,
+        "local_path": local_path,
+        "http_url": public_url,
+        "filename": fn,
+        "agent_id": aid,
+    }
 
 
 @oss_router.get("/file/{agent_id}/{filename}")

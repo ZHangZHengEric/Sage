@@ -181,7 +181,11 @@ def test_strip_keeps_rejected_turn_status_pair():
     )
     rejected_tool = MessageChunk(
         role=MessageRole.TOOL.value,
-        content="turn_status 调用被拒绝：本轮 assistant 还没有输出任何自然语言说明。",
+        content=(
+            "turn_status 调用被拒绝：本轮 assistant 还没有输出任何自然语言说明。"
+            "请在本轮同一条 assistant 回复里同时输出面向用户的中文/英文说明（总结当前进展与结果，含已完成事项、关键产物或下一步建议），"
+            "并同时调用 turn_status(status=...) 报告本轮状态；不要先发纯工具调用再单独补文字。"
+        ),
         tool_call_id="rej_1",
         message_type=MessageType.TOOL_CALL_RESULT.value,
         metadata={"turn_status_rejected": True},
@@ -267,7 +271,11 @@ def test_strip_keeps_rejected_pair_inside_mixed_tool_calls():
     )
     tool_rej = MessageChunk(
         role=MessageRole.TOOL.value,
-        content="turn_status 调用被拒绝：本轮 assistant 还没有输出任何自然语言说明。",
+        content=(
+            "turn_status 调用被拒绝：本轮 assistant 还没有输出任何自然语言说明。"
+            "请在本轮同一条 assistant 回复里同时输出面向用户的中文/英文说明（总结当前进展与结果，含已完成事项、关键产物或下一步建议），"
+            "并同时调用 turn_status(status=...) 报告本轮状态；不要先发纯工具调用再单独补文字。"
+        ),
         tool_call_id="rej_3",
         message_type=MessageType.TOOL_CALL_RESULT.value,
         metadata={"turn_status_rejected": True},

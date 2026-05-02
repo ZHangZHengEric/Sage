@@ -1,3 +1,35 @@
+2026-05-01 撤回未合并的「会话生成中引导候选区」（interruptStaging）本地改动：`MessageInput.vue` 与四语 locale 恢复为 HEAD；行为回到生成中首次提交即 `needInterrupt` 发送。
+
+2026-05-01 能力预设引导门槛：`presetText` 写入后经 `<skill>` 剥离的正文与技能 chips 才写入快照；门控不再因「已有技能 chip」误判而立刻解除，首击 Enter 仍先 toast、二次 Enter 发送（desktop/server `MessageInput.vue`）。
+
+2026-05-01 编辑已发用户消息并重跑：`handleMessage` 合并同 message_id 时用户气泡改为用流式载荷整段替换 `content`，不再与本地历史拼接，消除正文重复一遍（desktop/server `useChatPage.js`）。
+
+2026-05-01 复制/粘贴会话含图消息：`normalizeMessageContentForComposer` 将 JSON 串形式的多模态 content 还原为数组；`image_url` 兼容顶层 `url`；剪贴板导出沙箱图无 `rawHref` 时写合成 `file:///.sage/...`；`parseSageSandboxUploadHref` 支持百分号解码文件名；气泡复制先 normalize（desktop/server）。
+
+2026-05-01 能力卡片 `presetText`：首按 Enter 只解除「待发确认」（toast）、二次 Enter 才提交；发送按钮仍可一次发出；改写/加附件/技能则取消两道门槛（desktop/server `MessageInput.vue`）。
+
+2026-05-01 粘贴图片重复占位：`flattenMessageForComposerRebuild` 对同一 HTTP URL / 沙箱 upload_files 文件名全局去重，避免正文里两行相同 `![](...)` 触发两次 import/upload；Vitest `composerFromMessageFlatten.spec.js`。
+
+2026-05-01 桌面 Markdown：`loadLocalImages` 改为仅在当前消息根节点查询 `img[data-local-image]`，避免多气泡互相 revoke blob；占位图增加 `min-h-16`/浅底以免空 src 零高度；“下载”包装层去掉重复 `class` 避免不规范 DOM。
+
+2026-05-01 粘贴沙箱路径 `…/.sage/agents/<agent>/upload_files/<文件>`：`sageSandboxImage` + `POST /api/oss/import_sandbox_upload`；web 读本机文件写 OSS，desktop 复用 sidecar；composer 与输入框粘贴联动。
+
+
+2026-05-01 粘贴 `![](http)`（无剪贴文件）走 `importFromUrl` + chip，`ChipInput` 若父组件已 `preventDefault` 则不再自插正文；增补 `messageInput.pasteUploadFailed`（web/desktop 中英文）。
+
+2026-05-01 气泡「复制」仅写剪贴板：`buildClipboardTextFromMessageContent` 按正文顺序追加 `![](url)`，不再填充输入框；移除 `provide/import_url`/`safe_remote_fetch` 链路。
+
+
+2026-05-01 修复流式 tool arguments 合并：`mergeToolFunctionArguments` 对 object/string 混用统一快照后与片段首尾合并，避免半包 JSON 时丢增量；shell 工作台从原始参数串预览 `command`（`streamingJsonStringFields.js`）。
+
+2026-05-01 todo 工具 JSON：新增 `safeParseToolJson.js`（BOM、双包字符串、字符串内非法换行修复）；工作台参数在结果已返回但 arguments 解析失败时展示原始串；Todo/Task 与 MessageRenderer 统一使用该解析（server/desktop 双端）+ Vitest。
+
+2026-05-01 图片理解/可观测：`llm_request_utils.redact_base64_data_urls_in_value` 用于 LLM 追踪与 `_sanitize_for_log`；`ObservableCompletions`/`opentelemetry_handler` 记录 messages 前脱敏；`image_understanding` 失败信息不再附带 stdout 片段；单测 `test_redact_base64_data_url_replaces_payload`。
+
+2026-05-01 多模态：LLM 专用说明行仅 sagents（`MULTIMODAL_IMAGE_ADDRESS_HINT_ZH` + `test_multimodal_augment.py`）；前端存盘为 `image_url` 与 `![](url)`，`MessageRenderer` 不再做 strip；`multimodalContent.js` 去掉展示剥离工具。
+
+2026-05-01 skill ZIP 导入后可执行权限：解压时应用 Unix external_attr；`_set_permissions_recursive` 不再对所有文件强制 644，保留执行位并对 shebang、`.sh`/`.bash`、路径 `.../bin/` 下文件启发式 `755`（`common/services/skill_service.py`）。
+
 2026-04-29 21:00 tool_progress 节流：emit_tool_progress 默认按 (tool_call_id, stream) 做 50ms 时间窗 / 16KB 字节阈值合并；closed 与 unregister 强制 flush / cancel pending；新增 5 条合并单测，全套 23/23 绿；docs ENV_VARS + 架构 §12 同步。
 
 2026-04-28 19:30 工具流式过程通道（v4 · Codex 风格）：新增 sagents/tool/tool_progress.py 与 emit_tool_progress；AgentBase._execute_tool 用 contextvars 绑定 session_id/tool_call_id；ChatService 在 NDJSON 通道并入新事件 type=tool_progress；execute_shell_command 阻塞等待时按 tail 增量推送 stdout/stderr；前端 useChatPage 识别后追加到 ToolCallRenderer 的 live area；不进 MessageManager / 不喂 LLM；总开关 SAGE_TOOL_PROGRESS_ENABLED；新增 18 条单测全绿。

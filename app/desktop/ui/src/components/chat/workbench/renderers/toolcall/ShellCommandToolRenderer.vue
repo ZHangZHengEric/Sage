@@ -8,13 +8,20 @@
 
 <script setup>
 import { computed } from 'vue'
+import { extractIncompleteJsonStringField } from '@/utils/streamingJsonStringFields.js'
 
 const props = defineProps({
   toolArgs: { type: Object, default: () => ({}) },
+  /** JSON 未完成时仍可从中抠出 command 用于流式预览 */
+  argumentsRaw: { type: String, default: '' },
   toolResult: { type: Object, default: null }
 })
 
-const shellCommand = computed(() => props.toolArgs.command || props.toolArgs.cmd || '')
+const shellCommand = computed(() => {
+  const parsed = props.toolArgs.command || props.toolArgs.cmd
+  if (parsed) return parsed
+  return extractIncompleteJsonStringField(props.argumentsRaw || '', ['command', 'cmd'])
+})
 
 const shellOutput = computed(() => {
   if (!props.toolResult) return ''

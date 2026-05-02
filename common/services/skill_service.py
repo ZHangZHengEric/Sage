@@ -1,6 +1,7 @@
 import asyncio
 import os
 import shutil
+import stat
 import tempfile
 import zipfile
 import hashlib
@@ -155,7 +156,53 @@ def _desktop_skill_owner_user_id(skill_path: str, current_user_id: str) -> str:
     return ""
 
 
+def _skill_file_should_be_executable(file_path: str) -> bool:
+    """Heuristic: shell / shebang scripts and files under .../bin/ often need +x after ZIP import."""
+    low = file_path.lower()
+    if low.endswith((".sh", ".bash", ".zsh", ".command")):
+        return True
+    norm = file_path.replace("\\", "/").rstrip("/")
+    parts = norm.split("/")
+    if len(parts) >= 2 and parts[-2] == "bin":
+        return True
+    try:
+        with open(file_path, "rb") as f:
+            head = f.read(128)
+        if head.startswith(b"#!"):
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def _extract_zip_with_unix_modes(zip_path: str, dest_dir: str) -> None:
+    """
+    Extract ZIP and apply Unix mode bits when present (external_attr >> 16).
+    Windows-created zips often omit this; downstream _set_permissions_recursive adds heuristics.
+    """
+    dest_dir = os.path.realpath(dest_dir)
+    os.makedirs(dest_dir, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for info in zf.infolist():
+            zf.extract(info, dest_dir)
+            out_path = os.path.realpath(os.path.join(dest_dir, info.filename))
+            if out_path != dest_dir and not out_path.startswith(dest_dir + os.sep):
+                raise ValueError(f"Unsafe path in zip: {info.filename!r}")
+            unix_st = info.external_attr >> 16
+            if not unix_st or os.name == "nt":
+                continue
+            try:
+                mode = stat.S_IMODE(unix_st)
+                os.chmod(out_path, mode)
+            except OSError as e:
+                logger.debug(f"chmod after zip extract failed for {out_path}: {e}")
+
+
 def _set_permissions_recursive(path: str, dir_mode: int = 0o755, file_mode: int = 0o644) -> None:
+    """
+    Normalize skill directory permissions: dirs 755, files 644 by default.
+    Preserves execute bits already set (e.g. from Unix ZIP), and sets +x for common script layouts.
+    """
     try:
         if os.path.isdir(path):
             os.chmod(path, dir_mode)
@@ -163,7 +210,17 @@ def _set_permissions_recursive(path: str, dir_mode: int = 0o755, file_mode: int 
             for d in dirs:
                 os.chmod(os.path.join(root, d), dir_mode)
             for f in files:
-                os.chmod(os.path.join(root, f), file_mode)
+                fp = os.path.join(root, f)
+                mode = file_mode
+                try:
+                    cur = stat.S_IMODE(os.stat(fp).st_mode)
+                    if cur & 0o111:
+                        mode = file_mode | (cur & 0o111)
+                    elif _skill_file_should_be_executable(fp):
+                        mode = 0o755
+                except OSError:
+                    pass
+                os.chmod(fp, mode)
     except Exception as e:
         logger.warning(f"Failed to set permissions for {path}: {e}")
 
@@ -1190,8 +1247,7 @@ def _process_server_zip_to_dir_sync(
 ) -> Tuple[bool, str]:
     temp_extract_dir = tempfile.mkdtemp()
     try:
-        with zipfile.ZipFile(zip_path, "r") as zip_ref:
-            zip_ref.extractall(temp_extract_dir)
+        _extract_zip_with_unix_modes(zip_path, temp_extract_dir)
 
         skill_dir_name, source_dir = _extract_skill_from_zip(temp_extract_dir, original_filename)
         if not skill_dir_name or not source_dir:
@@ -1238,8 +1294,7 @@ def _process_desktop_zip_and_register_sync(
 ) -> Tuple[bool, str]:
     temp_extract_dir = tempfile.mkdtemp()
     try:
-        with zipfile.ZipFile(zip_path, "r") as zip_ref:
-            zip_ref.extractall(temp_extract_dir)
+        _extract_zip_with_unix_modes(zip_path, temp_extract_dir)
 
         skill_dir_name, source_dir = _extract_skill_from_zip(temp_extract_dir, original_filename)
         if not skill_dir_name or not source_dir:
