@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sage-jaeger-config
+  labels:
+    app.kubernetes.io/name: sage-jaeger
+    app.kubernetes.io/part-of: sage
+data:
+  config.yaml: |
+    service:
+      extensions: [jaeger_query, jaeger_storage, healthcheckv2]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [jaeger_storage_exporter]
+
+    extensions:
+      healthcheckv2:
+        use_v2: true
+        http:
+          endpoint: 0.0.0.0:13133
+
+      jaeger_query:
+        base_path: /jaeger
+        http:
+          endpoint: 0.0.0.0:16686
+        storage:
+          traces: in_memory
+
+      jaeger_storage:
+        backends:
+          in_memory:
+            memory:
+              max_traces: 100000
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      batch: {}
+
+    exporters:
+      jaeger_storage_exporter:
+        trace_storage: in_memory

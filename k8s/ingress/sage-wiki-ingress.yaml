@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sage-wiki
+  labels:
+    app.kubernetes.io/name: sage-wiki
+    app.kubernetes.io/part-of: sage
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$$2
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+spec:
+  ${INGRESS_CLASS_LINE}
+  ${TLS_BLOCK}
+  rules:
+    - host: ${SAGE_HOST}
+      http:
+        paths:
+          - path: /wiki(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: sage-wiki
+                port:
+                  name: http

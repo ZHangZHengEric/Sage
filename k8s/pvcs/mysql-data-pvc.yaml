@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sage-mysql-data
+  labels:
+    app.kubernetes.io/name: sage-mysql
+    app.kubernetes.io/part-of: sage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  ${PVC_STORAGE_CLASS}
+  resources:
+    requests:
+      storage: 20Gi

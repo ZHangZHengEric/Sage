@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sage-rustfs
+  labels:
+    app.kubernetes.io/name: sage-rustfs
+    app.kubernetes.io/part-of: sage
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: sage-rustfs
+  ports:
+    - name: api
+      port: 9000
+      targetPort: api
+    - name: console
+      port: 9001
+      targetPort: console

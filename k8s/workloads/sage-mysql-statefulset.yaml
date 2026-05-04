@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sage-mysql
+  labels:
+    app.kubernetes.io/name: sage-mysql
+    app.kubernetes.io/part-of: sage
+spec:
+  serviceName: sage-mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sage-mysql
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sage-mysql
+        app.kubernetes.io/part-of: sage
+    spec:
+      containers:
+        - name: sage-mysql
+          image: docker.m.daocloud.io/mysql:8.4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: mysql
+              containerPort: 3306
+          env:
+            - name: TZ
+              value: Asia/Shanghai
+            - name: MYSQL_ROOT_HOST
+              value: "%"
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sage-secrets
+                  key: MYSQL_ROOT_PASSWORD
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            tcpSocket:
+              port: mysql
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: mysql
+            initialDelaySeconds: 90
+            periodSeconds: 30
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+            - name: mysql-conf
+              mountPath: /etc/mysql/conf.d
+      volumes:
+        - name: mysql-data
+          persistentVolumeClaim:
+            claimName: sage-mysql-data
+        - name: mysql-conf
+          persistentVolumeClaim:
+            claimName: sage-mysql-conf
