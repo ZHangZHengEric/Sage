@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 
 use crate::app::{normalize_agent_mode, SessionPickerMode, SubmitAction};
+use crate::display_policy::DisplayMode;
 
 use super::help::usage_text;
 use super::StartupBehavior;
@@ -140,10 +141,25 @@ fn parse_global_options(args: &[String]) -> Result<(StartupOptions, Vec<String>)
                 options.workspace = Some(value.clone());
                 idx += 2;
             }
+            "--display" => {
+                let value = args
+                    .get(idx + 1)
+                    .ok_or_else(|| anyhow!("--display requires a value"))?;
+                options.display_mode = Some(parse_display_mode(value)?);
+                idx += 2;
+            }
             _ => break,
         }
     }
     Ok((options, args[idx..].to_vec()))
+}
+
+fn parse_display_mode(value: &str) -> Result<DisplayMode> {
+    match value.trim().to_lowercase().as_str() {
+        "compact" => Ok(DisplayMode::Compact),
+        "verbose" => Ok(DisplayMode::Verbose),
+        _ => Err(anyhow!("--display must be one of: compact, verbose")),
+    }
 }
 
 fn parse_config_init_args(args: &[String]) -> Result<(Option<String>, bool)> {

@@ -1,5 +1,6 @@
 use super::{parse_startup_action, StartupBehavior};
 use crate::app::{SessionPickerMode, SubmitAction};
+use crate::display_policy::DisplayMode;
 
 #[test]
 fn parse_startup_action_defaults_to_plain_tui() {
@@ -214,6 +215,8 @@ fn parse_startup_action_supports_agent_options() {
         "agent_demo".to_string(),
         "--agent-mode".to_string(),
         "fibre".to_string(),
+        "--display".to_string(),
+        "verbose".to_string(),
         "run".to_string(),
         "inspect".to_string(),
     ])
@@ -224,6 +227,7 @@ fn parse_startup_action_supports_agent_options() {
             if prompt == "inspect"
             && options.agent_id.as_deref() == Some("agent_demo")
             && options.agent_mode.as_deref() == Some("fibre")
+            && options.display_mode == Some(DisplayMode::Verbose)
             && options.workspace.is_none()
     ));
 }
@@ -246,10 +250,34 @@ fn parse_startup_action_supports_workspace_option() {
 }
 
 #[test]
+fn parse_startup_action_supports_display_option() {
+    let action = parse_startup_action(vec![
+        "--display".to_string(),
+        "compact".to_string(),
+        "run".to_string(),
+        "inspect".to_string(),
+    ])
+    .expect("parse");
+    assert!(matches!(
+        action,
+        StartupBehavior::Run { action: Some(SubmitAction::RunTask(prompt)), options }
+            if prompt == "inspect"
+            && options.display_mode == Some(DisplayMode::Compact)
+    ));
+}
+
+#[test]
 fn parse_startup_action_rejects_invalid_agent_mode() {
     let err = parse_startup_action(vec!["--agent-mode".to_string(), "weird".to_string()])
         .expect_err("should fail");
     assert!(err.to_string().contains("simple, multi, fibre"));
+}
+
+#[test]
+fn parse_startup_action_rejects_invalid_display_mode() {
+    let err = parse_startup_action(vec!["--display".to_string(), "loud".to_string()])
+        .expect_err("should fail");
+    assert!(err.to_string().contains("compact, verbose"));
 }
 
 #[test]

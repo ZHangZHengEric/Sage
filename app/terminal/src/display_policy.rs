@@ -4,6 +4,13 @@ pub(crate) enum DisplayMode {
     Verbose,
 }
 
+pub(crate) fn display_mode_name(mode: DisplayMode) -> &'static str {
+    match mode {
+        DisplayMode::Compact => "compact",
+        DisplayMode::Verbose => "verbose",
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ToolDisplayClass {
     UserFacing,

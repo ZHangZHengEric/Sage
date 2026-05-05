@@ -1,3 +1,5 @@
+use crate::display_policy::DisplayMode;
+
 mod help;
 mod parse;
 #[cfg(test)]
@@ -7,6 +9,7 @@ mod tests;
 pub(crate) struct StartupOptions {
     pub(crate) agent_id: Option<String>,
     pub(crate) agent_mode: Option<String>,
+    pub(crate) display_mode: Option<DisplayMode>,
     pub(crate) workspace: Option<String>,
 }
 

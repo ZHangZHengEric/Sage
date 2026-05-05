@@ -148,6 +148,7 @@ impl App {
             &self.session_id,
             self.selected_agent_id.as_deref(),
             &self.agent_mode,
+            self.display_mode,
             self.max_loop_count,
             &self.workspace_label,
         )
@@ -292,6 +293,7 @@ impl App {
             &self.session_id,
             self.selected_agent_id.as_deref(),
             &self.agent_mode,
+            self.display_mode,
             self.max_loop_count,
             &self.workspace_label,
         );

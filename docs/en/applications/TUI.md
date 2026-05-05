@@ -83,6 +83,8 @@ Currently supported startup forms:
 
 ```bash
 sage-terminal
+sage-terminal --display compact
+sage-terminal --display verbose
 sage-terminal --agent-id agent_demo
 sage-terminal --agent-id agent_demo --agent-mode fibre
 sage-terminal --workspace /path/to/project
@@ -118,6 +120,7 @@ The current TUI preview includes these core commands:
 - `/help`
 - `/agent`
 - `/mode`
+- `/display`
 - `/new`
 - `/sessions`
 - `/resume`
@@ -142,14 +145,35 @@ Supported entrypoints:
 - startup flags:
   - `--agent-id <id>`
   - `--agent-mode <simple|multi|fibre>`
+  - `--display <compact|verbose>`
 - in-app commands:
   - `/agent`
   - `/agent set <agent_id>`
   - `/agent clear`
   - `/mode`
   - `/mode set <simple|multi|fibre>`
+  - `/display`
+  - `/display set <compact|verbose>`
 
 The actual agent definition, tools, skills, and behavior still come from the Sage runtime's stored agent configuration.
+
+## Display Modes
+
+Terminal transcript rendering supports two presentation modes:
+
+- `compact`: the default. Internal tool chatter is hidden, summaries are collapsed, and phase names are mapped to shorter user-facing labels.
+- `verbose`: restores internal tool steps, step numbers, and raw phase names for debugging.
+
+You can choose the mode either at startup or inside the TUI:
+
+```bash
+sage-terminal --display verbose
+```
+
+```text
+/display set compact
+/display set verbose
+```
 
 ## Workspace Behavior
 

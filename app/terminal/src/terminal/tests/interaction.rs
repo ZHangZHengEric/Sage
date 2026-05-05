@@ -217,3 +217,17 @@ fn popup_visible_enter_submits_typed_slash_command_instead_of_selected_popup_ite
     assert!(handled);
     assert!(app.should_quit);
 }
+
+#[test]
+fn display_command_switches_mode_through_normal_input_flow() {
+    let mut app = App::new();
+    app.input = "/display set verbose".to_string();
+    app.input_cursor = app.input.len();
+
+    let action = app.submit_input();
+    assert!(matches!(action, SubmitAction::Handled));
+    assert_eq!(
+        app.display_mode,
+        crate::display_policy::DisplayMode::Verbose
+    );
+}

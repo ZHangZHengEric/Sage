@@ -83,6 +83,8 @@ cargo build --release
 
 ```bash
 sage-terminal
+sage-terminal --display compact
+sage-terminal --display verbose
 sage-terminal --agent-id agent_demo
 sage-terminal --agent-id agent_demo --agent-mode fibre
 sage-terminal --workspace /path/to/project
@@ -118,6 +120,7 @@ cargo run --quiet --offline -- resume
 - `/help`
 - `/agent`
 - `/mode`
+- `/display`
 - `/new`
 - `/sessions`
 - `/resume`
@@ -142,14 +145,35 @@ TUI 现在可以覆盖运行时使用的 agent，但不会自己接管 agent 配
 - 启动参数：
   - `--agent-id <id>`
   - `--agent-mode <simple|multi|fibre>`
+  - `--display <compact|verbose>`
 - TUI 内命令：
   - `/agent`
   - `/agent set <agent_id>`
   - `/agent clear`
   - `/mode`
   - `/mode set <simple|multi|fibre>`
+  - `/display`
+  - `/display set <compact|verbose>`
 
 真正的 agent 定义、工具、skills 和行为仍然来自 Sage runtime 已保存的 agent 配置。
+
+## Display 模式
+
+Terminal transcript 现在支持两种展示模式：
+
+- `compact`：默认模式。隐藏内部工具噪音、压缩摘要，并把 phase 名映射成更短的用户视角标签。
+- `verbose`：用于排查问题。会恢复内部工具步骤、step 编号和原始 phase 名。
+
+你可以在启动时指定，也可以在 TUI 内切换：
+
+```bash
+sage-terminal --display verbose
+```
+
+```text
+/display set compact
+/display set verbose
+```
 
 ## Workspace 行为
 
