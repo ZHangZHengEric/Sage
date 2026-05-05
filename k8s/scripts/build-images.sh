@@ -36,6 +36,104 @@ SAGE_WEB_BASE_PATH="${SAGE_WEB_BASE_PATH:-/sage}"
 SAGE_TRACE_WEB_URL="${SAGE_TRACE_WEB_URL:-${SAGE_PUBLIC_URL}/jaeger/}"
 K8S_IMAGE_TARGET="${K8S_IMAGE_TARGET:-ctr}"
 SAGE_WEB_BUILD_BASE="${SAGE_WEB_BASE_PATH%/}/"
+SELECTED_IMAGE_KEYS=()
+
+usage() {
+  cat <<'EOF'
+Usage: k8s/scripts/build-images.sh [IMAGE...]
+
+Build and import Sage Kubernetes images into containerd.
+
+Images:
+  all                 Build and import all Sage images (default)
+  server, sage-server Build and import only sage-server
+  web, sage-web       Build and import only sage-web
+  wiki, sage-wiki     Build and import only sage-wiki
+
+Options:
+  -i, --image IMAGE   Add one image to build and import
+  -h, --help          Show this help
+EOF
+}
+
+add_image_key() {
+  local image="$1"
+  local key existing
+
+  image="${image##*/}"
+
+  case "$image" in
+    all)
+      SELECTED_IMAGE_KEYS=(server web wiki)
+      return 0
+      ;;
+    server|sage-server|sage-server:latest)
+      key="server"
+      ;;
+    web|sage-web|sage-web:latest)
+      key="web"
+      ;;
+    wiki|sage-wiki|sage-wiki:latest)
+      key="wiki"
+      ;;
+    *)
+      echo "Unsupported image '$image'. Expected one of: all, server, web, wiki, sage-server, sage-web, sage-wiki." >&2
+      exit 1
+      ;;
+  esac
+
+  for existing in "${SELECTED_IMAGE_KEYS[@]}"; do
+    [ "$existing" = "$key" ] && return 0
+  done
+  SELECTED_IMAGE_KEYS+=("$key")
+}
+
+parse_args() {
+  local arg
+
+  if [ "$#" -eq 0 ]; then
+    add_image_key all
+    return 0
+  fi
+
+  while [ "$#" -gt 0 ]; do
+    arg="$1"
+    case "$arg" in
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      -i|--image)
+        shift
+        if [ "$#" -eq 0 ]; then
+          echo "$arg requires an image name." >&2
+          exit 1
+        fi
+        add_image_key "$1"
+        ;;
+      --image=*)
+        add_image_key "${arg#*=}"
+        ;;
+      --)
+        shift
+        while [ "$#" -gt 0 ]; do
+          add_image_key "$1"
+          shift
+        done
+        return 0
+        ;;
+      -*)
+        echo "Unknown option '$arg'." >&2
+        usage >&2
+        exit 1
+        ;;
+      *)
+        add_image_key "$arg"
+        ;;
+    esac
+    shift
+  done
+}
 
 normalize_image_target() {
   local target="$K8S_IMAGE_TARGET"
@@ -134,27 +232,63 @@ publish_images() {
   esac
 }
 
+select_images() {
+  local key
+  SAGE_IMAGES=()
+
+  for key in "${SELECTED_IMAGE_KEYS[@]}"; do
+    case "$key" in
+      server)
+        SAGE_IMAGES+=("$SAGE_SERVER_IMAGE")
+        ;;
+      web)
+        SAGE_IMAGES+=("$SAGE_WEB_IMAGE")
+        ;;
+      wiki)
+        SAGE_IMAGES+=("$SAGE_WIKI_IMAGE")
+        ;;
+    esac
+  done
+
+  SAGE_CONTAINERD_IMAGES=("${SAGE_IMAGES[@]}")
+}
+
+build_images() {
+  local key
+
+  for key in "${SELECTED_IMAGE_KEYS[@]}"; do
+    case "$key" in
+      server)
+        docker build -f docker/Dockerfile.server -t "$SAGE_SERVER_IMAGE" .
+        ;;
+      web)
+        docker build \
+          -f docker/Dockerfile.web \
+          --build-arg "VITE_SAGE_API_BASE_URL=$SAGE_PUBLIC_URL" \
+          --build-arg "VITE_SAGE_TRACE_WEB_URL=$SAGE_TRACE_WEB_URL" \
+          --build-arg "VITE_SAGE_WEB_BASE_PATH=$SAGE_WEB_BUILD_BASE" \
+          -t "$SAGE_WEB_IMAGE" .
+        ;;
+      wiki)
+        docker build \
+          -f docker/Dockerfile.wiki \
+          --build-arg "VITE_SAGE_API_BASE_URL=$SAGE_PUBLIC_URL" \
+          -t "$SAGE_WIKI_IMAGE" .
+        ;;
+    esac
+  done
+}
+
 cd "$ROOT_DIR"
 
+parse_args "$@"
 normalize_image_target
 
 SAGE_SERVER_IMAGE="$(image_name sage-server)"
 SAGE_WEB_IMAGE="$(image_name sage-web)"
 SAGE_WIKI_IMAGE="$(image_name sage-wiki)"
-SAGE_IMAGES=("$SAGE_SERVER_IMAGE" "$SAGE_WEB_IMAGE" "$SAGE_WIKI_IMAGE")
-SAGE_CONTAINERD_IMAGES=("${SAGE_IMAGES[@]}")
-
-docker build -f docker/Dockerfile.server -t "$SAGE_SERVER_IMAGE" .
-docker build \
-  -f docker/Dockerfile.web \
-  --build-arg "VITE_SAGE_API_BASE_URL=$SAGE_PUBLIC_URL" \
-  --build-arg "VITE_SAGE_TRACE_WEB_URL=$SAGE_TRACE_WEB_URL" \
-  --build-arg "VITE_SAGE_WEB_BASE_PATH=$SAGE_WEB_BUILD_BASE" \
-  -t "$SAGE_WEB_IMAGE" .
-docker build \
-  -f docker/Dockerfile.wiki \
-  --build-arg "VITE_SAGE_API_BASE_URL=$SAGE_PUBLIC_URL" \
-  -t "$SAGE_WIKI_IMAGE" .
+select_images
+build_images
 
 publish_images
 
