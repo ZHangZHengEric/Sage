@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
         - name: sage-mysql
-          image: docker.m.daocloud.io/mysql:8.4
+          image: "${SAGE_MYSQL_IMAGE}"
           imagePullPolicy: IfNotPresent
           ports:
             - name: mysql

@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: sage-rustfs
-          image: docker.m.daocloud.io/rustfs/rustfs:latest
+          image: "${SAGE_RUSTFS_IMAGE}"
           imagePullPolicy: IfNotPresent
           ports:
             - name: api

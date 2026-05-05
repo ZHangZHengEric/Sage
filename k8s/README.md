@@ -52,39 +52,50 @@ cp k8s/.env.example k8s/.env
 
 如果 `SAGE_HOST` 是 IP 地址且 Web Service 使用 NodePort，`SAGE_PUBLIC_URL` 留空时会默认使用 `http://<IP>:${SAGE_WEB_NODE_PORT}`；如果是域名，则默认使用 `https://<域名>`。
 
-## 构建并导入镜像
+## 镜像准备与部署
 
-构建镜像，并通过 `ctr` 导入到 Kubernetes 节点使用的 containerd namespace：
-
-```bash
-k8s/scripts/build-images.sh
-```
-
-只构建并导入单个镜像：
+`deploy.sh` 会先准备所选服务需要的镜像，再部署 Kubernetes 资源：
 
 ```bash
-k8s/scripts/build-images.sh server
-k8s/scripts/build-images.sh web
-k8s/scripts/build-images.sh wiki
+k8s/scripts/deploy.sh
 ```
 
-也可以使用完整镜像短名：
+镜像准备规则：
 
-```bash
-k8s/scripts/build-images.sh sage-web
-```
-
-默认行为：
-
+- `server` / `web` / `wiki`: 先本地 `docker build`，再用 `docker save` 和 `ctr -n k8s.io images import` 导入 containerd。
+- `mysql` / `rustfs` / `jaeger`: 先用 `ctr -n k8s.io images pull` 拉取外部镜像，再部署。
+- 默认 `K8S_IMAGE_TARGET=ctr`、`CTR_NAMESPACE=k8s.io`，可通过 `.env` 或环境变量覆盖。
 - Sage 自有镜像固定显式打 `latest` tag，不通过 `.env` 或环境变量配置。
 - 脚本只支持 `ctr` / `containerd` / `cri` 导入，不会 `docker push`，也不会导入到 Docker Desktop、kind、minikube 或 k3d。
-- 脚本会用 `docker save` 和 `ctr -n k8s.io images import` 将 Sage 自有镜像导入到 kubelet 使用的 containerd namespace，导入后可通过 `crictl images` 查看。
+- 未设置 `IMAGE_REGISTRY` 时，containerd 可能以规范名显示镜像，例如 `docker.io/library/sage-web:latest`；Kubernetes 中仍可使用 `sage-web:latest`。
+
+部署一个或多个指定服务：
+
+```bash
+k8s/scripts/deploy.sh server
+k8s/scripts/deploy.sh web wiki
+k8s/scripts/deploy.sh --service mysql --service rustfs
+k8s/scripts/deploy.sh sage-server sage-web
+```
+
+销毁所选服务后重新构建/拉取镜像并部署：
+
+```bash
+k8s/scripts/deploy.sh --recreate web
+k8s/scripts/deploy.sh --redeploy
+```
+
+默认保留 PVC；如需同时清理持久化数据：
+
+```bash
+DELETE_PVCS=true k8s/scripts/deploy.sh --recreate mysql rustfs server
+```
 
 如果需要镜像名前缀，可设置 `IMAGE_REGISTRY`；它只改变镜像名，不会 push：
 
 ```bash
-IMAGE_REGISTRY=registry.example.com/sage k8s/scripts/build-images.sh
-IMAGE_REGISTRY=registry.example.com/sage k8s/scripts/build-images.sh web
+IMAGE_REGISTRY=registry.example.com/sage k8s/scripts/deploy.sh
+IMAGE_REGISTRY=registry.example.com/sage k8s/scripts/deploy.sh web
 ```
 
 全量模式会构建：
@@ -93,31 +104,7 @@ IMAGE_REGISTRY=registry.example.com/sage k8s/scripts/build-images.sh web
 - `sage-web:latest`
 - `sage-wiki:latest`
 
-当 `IMAGE_REGISTRY` 非空时，镜像名会变为 `${IMAGE_REGISTRY}/sage-server:latest` 等，并同样通过 `ctr` 导入。
-
-可用 `K8S_IMAGE_TARGET` 显式指定 containerd 导入别名：
-
-```bash
-K8S_IMAGE_TARGET=containerd k8s/scripts/build-images.sh
-K8S_IMAGE_TARGET=ctr CTR_NAMESPACE=sage k8s/scripts/build-images.sh
-```
-
-containerd 导入默认使用 `ctr` 和 `k8s.io` namespace，可通过 `CTR_BIN` 与 `CTR_NAMESPACE` 覆盖。`crictl images` 通常对应 `k8s.io`；如果只想让 `ctr -n sage images list` 能看到镜像，可设置 `CTR_NAMESPACE=sage`，但 kubelet 是否能直接使用取决于节点实际 CRI namespace。
-
-## 部署
-
-```bash
-k8s/scripts/deploy.sh
-```
-
-也可以只部署一个或多个指定服务：
-
-```bash
-k8s/scripts/deploy.sh server
-k8s/scripts/deploy.sh web wiki
-k8s/scripts/deploy.sh --service mysql --service rustfs
-k8s/scripts/deploy.sh sage-server sage-web
-```
+当 `IMAGE_REGISTRY` 非空时，镜像名会变为 `${IMAGE_REGISTRY}/sage-server:latest` 等，并同样通过 `ctr` 导入。`crictl images` 通常对应 `k8s.io`；如果只想让 `ctr -n sage images list` 能看到镜像，可设置 `CTR_NAMESPACE=sage`，但 kubelet 是否能直接使用取决于节点实际 CRI namespace。
 
 可用服务名：
 
@@ -133,11 +120,12 @@ k8s/scripts/deploy.sh sage-server sage-web
 
 全量部署时，脚本会按顺序创建：
 
-1. Namespace
-2. ConfigMap 和 Secret
-3. Service
-4. StatefulSet 和 Deployment
-5. Ingress（仅 `ENABLE_INGRESS=true` 时）
+1. 准备镜像：自有镜像构建并导入 containerd，外部镜像拉取到 containerd
+2. Namespace
+3. ConfigMap 和 Secret
+4. Service
+5. StatefulSet 和 Deployment
+6. Ingress（仅 `ENABLE_INGRESS=true` 时）
 
 部署完成后脚本会等待 MySQL StatefulSet 和所有 Deployment rollout，并输出 `pods,svc` 状态。
 
