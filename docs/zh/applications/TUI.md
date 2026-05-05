@@ -140,6 +140,16 @@ cargo run --quiet --offline -- resume
 - `/welcome`
 - `/exit`
 
+## Session 行为
+
+Terminal 现在不会在启动瞬间就立刻占用一个本地 `local-000xxx` session。
+
+- welcome 卡片初始显示的是 `session: new`
+- 只有真正提交第一条任务时，才会 materialize 一个本地 session id
+- 执行 `/new` 后，也会回到这个待创建的 `new` 状态，直到下一条任务真正提交
+
+这样会更接近 Sage 的 workspace-first 行为，而不是一启动就抢占一个本地 session 编号。
+
 ## Agent 选择
 
 TUI 现在可以覆盖运行时使用的 agent，但不会自己接管 agent 配置管理。
@@ -215,6 +225,7 @@ Terminal 现在可以携带共享 Sage runtime 的 session goal contract。
 
 ```text
 /goal
+/goal <objective>
 /goal show
 /goal set <objective>
 /goal clear
@@ -224,6 +235,18 @@ Terminal 现在可以携带共享 Sage runtime 的 session goal contract。
 `/goal <objective>` 会设置当前会话目标，并立即把同一句 objective 作为下一条任务提交，行为上对齐 Codex 风格。
 
 `/goal set` 仍然只会把目标排入当前 session 的下一次请求，本身不会立刻开始执行；等 backend 再次回传会话初始化事件后，terminal 会显示 runtime 最终解析出来的 goal 状态。
+
+## 输入历史与 Slash Popup
+
+Terminal 输入框现在支持类似 shell 的历史回溯：
+
+- `Up`：回看上一条已提交输入
+- `Down`：向前移动，或者恢复当前草稿
+
+Slash 命令 popup 的回车行为也做了收紧：
+
+- 如果 popup 可见，且当前输入还只是命令前缀，`Enter` 会先补全当前选中的命令
+- 如果当前输入已经是完整命令，例如 `/interrupt`，`Enter` 会直接执行，而不是再次补全
 
 ## 运行控制
 

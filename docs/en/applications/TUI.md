@@ -140,6 +140,16 @@ The current TUI preview includes these core commands:
 - `/welcome`
 - `/exit`
 
+## Session Behavior
+
+The terminal no longer materializes a local `local-000xxx` session immediately on startup.
+
+- the welcome card starts with `session: new`
+- the first real task submission materializes a local session id
+- `/new` returns the terminal to that pending `new` state until the next task is submitted
+
+This keeps the TUI closer to Sage's workspace-first behavior instead of eagerly consuming a local session id at launch.
+
 ## Agent Selection
 
 The TUI can override the runtime agent without taking over agent configuration management.
@@ -225,6 +235,18 @@ The terminal can carry a session goal through the shared Sage runtime contract.
 `/goal <objective>` sets the session goal and immediately submits the same objective as the next task, matching the Codex-style flow.
 
 `/goal set` still queues the goal without running anything yet. Once the backend hydrates the session again, the terminal shows the resolved goal state from the runtime.
+
+## Composer History And Slash Popup
+
+The terminal composer now supports shell-like input recall:
+
+- `Up`: recall the previous submitted input
+- `Down`: move forward in input history or restore the current draft
+
+Slash command popup behavior is also tighter now:
+
+- when a slash popup is visible and the current input is only a prefix, `Enter` first autocompletes the selected command
+- when the current input is already a complete command such as `/interrupt`, `Enter` executes it directly
 
 ## Run Control
 
