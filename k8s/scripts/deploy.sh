@@ -26,6 +26,12 @@ SAGE_HOST="${SAGE_HOST:-}"
 SAGE_PUBLIC_URL="${SAGE_PUBLIC_URL:-}"
 IMAGE_REGISTRY="${IMAGE_REGISTRY:-}"
 IMAGE_PULL_POLICY="${IMAGE_PULL_POLICY:-}"
+K8S_IMAGE_TARGET="${K8S_IMAGE_TARGET:-ctr}"
+CTR_NAMESPACE="${CTR_NAMESPACE:-k8s.io}"
+CTR_BIN="${CTR_BIN:-ctr}"
+RECREATE="${RECREATE:-false}"
+DELETE_PVCS="${DELETE_PVCS:-false}"
+SKIP_IMAGE_PREPARE="${SKIP_IMAGE_PREPARE:-false}"
 STORAGE_CLASS="${STORAGE_CLASS:-}"
 INGRESS_CLASS_NAME="${INGRESS_CLASS_NAME:-nginx}"
 TLS_SECRET_NAME="${TLS_SECRET_NAME:-}"
@@ -53,6 +59,9 @@ Services:
 
 Options:
   -s, --service SERVICE Add one service to deploy
+  -r, --recreate        Delete selected resources before deploying them again
+      --redeploy        Alias for --recreate
+      --skip-images     Skip image build/pull/import preparation
   -h, --help            Show this help
 EOF
 }
@@ -90,9 +99,11 @@ add_service_key() {
       ;;
   esac
 
-  for existing in "${SELECTED_SERVICE_KEYS[@]}"; do
-    [ "$existing" = "$key" ] && return 0
-  done
+  if [ "${#SELECTED_SERVICE_KEYS[@]}" -gt 0 ]; then
+    for existing in "${SELECTED_SERVICE_KEYS[@]}"; do
+      [ "$existing" = "$key" ] && return 0
+    done
+  fi
   SELECTED_SERVICE_KEYS+=("$key")
 }
 
@@ -122,6 +133,12 @@ parse_args() {
       --service=*)
         add_service_key "${arg#*=}"
         ;;
+      -r|--recreate|--redeploy)
+        RECREATE="true"
+        ;;
+      --skip-images)
+        SKIP_IMAGE_PREPARE="true"
+        ;;
       --)
         shift
         while [ "$#" -gt 0 ]; do
@@ -147,13 +164,19 @@ selected_has() {
   local wanted="$1"
   local existing
 
-  for existing in "${SELECTED_SERVICE_KEYS[@]}"; do
-    [ "$existing" = "$wanted" ] && return 0
-  done
+  if [ "${#SELECTED_SERVICE_KEYS[@]}" -gt 0 ]; then
+    for existing in "${SELECTED_SERVICE_KEYS[@]}"; do
+      [ "$existing" = "$wanted" ] && return 0
+    done
+  fi
   return 1
 }
 
 parse_args "$@"
+
+if [ "${#SELECTED_SERVICE_KEYS[@]}" -eq 0 ]; then
+  add_service_key all
+fi
 
 if [ -z "$SAGE_HOST" ] && [ -z "$SAGE_PUBLIC_URL" ] && selected_has server; then
   echo "SAGE_HOST or SAGE_PUBLIC_URL is required when deploying sage-server. Set it in k8s/.env or pass SAGE_HOST=example.com." >&2
@@ -269,9 +292,202 @@ image_name() {
   fi
 }
 
+canonical_image_name() {
+  local image="$1"
+  if [[ "$image" != */* ]]; then
+    printf 'docker.io/library/%s' "$image"
+  else
+    printf '%s' "$image"
+  fi
+}
+
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+normalize_image_target() {
+  local target="$K8S_IMAGE_TARGET"
+
+  if [ "$target" = "auto" ]; then
+    target="ctr"
+  fi
+
+  case "$target" in
+    containerd|cri|ctr)
+      K8S_IMAGE_TARGET="$target"
+      ;;
+    *)
+      echo "Unsupported K8S_IMAGE_TARGET '$target'. Kubernetes image deployment only supports ctr/containerd/cri." >&2
+      exit 1
+      ;;
+  esac
+}
+
+containerd_image_exists() {
+  local image="$1"
+
+  "$CTR_BIN" -n "$CTR_NAMESPACE" images get "$image" >/dev/null 2>&1
+}
+
+containerd_image_exists_any() {
+  local image="$1"
+  local canonical_image
+
+  containerd_image_exists "$image" && return 0
+
+  canonical_image="$(canonical_image_name "$image")"
+  if [ "$canonical_image" != "$image" ]; then
+    containerd_image_exists "$canonical_image" && return 0
+  fi
+
+  return 1
+}
+
+add_unique_image() {
+  local image="$1"
+  local existing
+
+  if [ "${#SAGE_EXTERNAL_IMAGES[@]}" -gt 0 ]; then
+    for existing in "${SAGE_EXTERNAL_IMAGES[@]}"; do
+      [ "$existing" = "$image" ] && return 0
+    done
+  fi
+  SAGE_EXTERNAL_IMAGES+=("$image")
+}
+
 export SAGE_SERVER_IMAGE="${SAGE_SERVER_IMAGE:-$(image_name sage-server)}"
 export SAGE_WEB_IMAGE="${SAGE_WEB_IMAGE:-$(image_name sage-web)}"
 export SAGE_WIKI_IMAGE="${SAGE_WIKI_IMAGE:-$(image_name sage-wiki)}"
+export SAGE_MYSQL_IMAGE="${SAGE_MYSQL_IMAGE:-docker.m.daocloud.io/mysql:8.4}"
+export SAGE_RUSTFS_IMAGE="${SAGE_RUSTFS_IMAGE:-docker.m.daocloud.io/rustfs/rustfs:latest}"
+export SAGE_JAEGER_IMAGE="${SAGE_JAEGER_IMAGE:-docker.m.daocloud.io/jaegertracing/jaeger:2.16.0}"
+
+select_images() {
+  local service
+  SAGE_IMAGES=()
+  SAGE_CONTAINERD_IMAGES=()
+  SAGE_EXTERNAL_IMAGES=()
+
+  for service in "${SELECTED_SERVICE_KEYS[@]}"; do
+    case "$service" in
+      server)
+        SAGE_IMAGES+=("$SAGE_SERVER_IMAGE")
+        ;;
+      web)
+        SAGE_IMAGES+=("$SAGE_WEB_IMAGE")
+        ;;
+      wiki)
+        SAGE_IMAGES+=("$SAGE_WIKI_IMAGE")
+        ;;
+      mysql)
+        add_unique_image "$SAGE_MYSQL_IMAGE"
+        ;;
+      rustfs)
+        add_unique_image "$SAGE_RUSTFS_IMAGE"
+        ;;
+      jaeger)
+        add_unique_image "$SAGE_JAEGER_IMAGE"
+        ;;
+    esac
+  done
+
+  if [ "${#SAGE_IMAGES[@]}" -gt 0 ]; then
+    SAGE_CONTAINERD_IMAGES=("${SAGE_IMAGES[@]}")
+  fi
+}
+
+build_images() {
+  local service
+
+  for service in "${SELECTED_SERVICE_KEYS[@]}"; do
+    case "$service" in
+      server)
+        docker build -f docker/Dockerfile.server -t "$SAGE_SERVER_IMAGE" .
+        ;;
+      web)
+        docker build \
+          -f docker/Dockerfile.web \
+          --build-arg "VITE_SAGE_API_BASE_URL=$SAGE_PUBLIC_URL" \
+          --build-arg "VITE_SAGE_TRACE_WEB_URL=$SAGE_TRACE_WEB_URL" \
+          --build-arg "VITE_SAGE_WEB_BASE_PATH=${SAGE_WEB_BASE_PATH%/}/" \
+          -t "$SAGE_WEB_IMAGE" .
+        ;;
+      wiki)
+        docker build \
+          -f docker/Dockerfile.wiki \
+          --build-arg "VITE_SAGE_API_BASE_URL=$SAGE_PUBLIC_URL" \
+          -t "$SAGE_WIKI_IMAGE" .
+        ;;
+    esac
+  done
+}
+
+import_built_images_to_containerd() {
+  local archive image canonical_image
+
+  [ "${#SAGE_CONTAINERD_IMAGES[@]}" -gt 0 ] || return 0
+
+  if [ -z "$IMAGE_REGISTRY" ]; then
+    SAGE_CONTAINERD_IMAGES=()
+    for image in "${SAGE_IMAGES[@]}"; do
+      canonical_image="$(canonical_image_name "$image")"
+      docker tag "$image" "$canonical_image"
+      SAGE_CONTAINERD_IMAGES+=("$image" "$canonical_image")
+    done
+  fi
+
+  archive="$(mktemp "${TMPDIR:-/tmp}/sage-images.XXXXXX")"
+  (
+    trap 'rm -f "$archive"' EXIT
+    docker save -o "$archive" "${SAGE_CONTAINERD_IMAGES[@]}"
+    echo "Importing built Sage images into containerd namespace '$CTR_NAMESPACE' with $CTR_BIN."
+    "$CTR_BIN" -n "$CTR_NAMESPACE" images import "$archive"
+  )
+  rm -f "$archive"
+
+  for image in "${SAGE_CONTAINERD_IMAGES[@]}"; do
+    if ! containerd_image_exists_any "$image"; then
+      echo "Image '$image' was not found in containerd namespace '$CTR_NAMESPACE' after import." >&2
+      echo "Check with: $CTR_BIN -n $CTR_NAMESPACE images get '$(canonical_image_name "$image")'" >&2
+      exit 1
+    fi
+  done
+}
+
+pull_external_images_to_containerd() {
+  local image
+
+  [ "${#SAGE_EXTERNAL_IMAGES[@]}" -gt 0 ] || return 0
+
+  for image in "${SAGE_EXTERNAL_IMAGES[@]}"; do
+    if containerd_image_exists_any "$image"; then
+      echo "External image already exists in containerd: $image"
+      continue
+    fi
+    echo "Pulling external image into containerd: $image"
+    "$CTR_BIN" -n "$CTR_NAMESPACE" images pull "$image"
+  done
+}
+
+prepare_images() {
+  if [ "$SKIP_IMAGE_PREPARE" = "true" ]; then
+    echo "Skipping image preparation because SKIP_IMAGE_PREPARE=true or --skip-images was set."
+    return 0
+  fi
+
+  normalize_image_target
+  select_images
+  if [ "${#SAGE_IMAGES[@]}" -gt 0 ]; then
+    command_exists docker || { echo "docker is required to build Sage images." >&2; exit 1; }
+  fi
+  if [ "${#SAGE_IMAGES[@]}" -gt 0 ] || [ "${#SAGE_EXTERNAL_IMAGES[@]}" -gt 0 ]; then
+    command_exists "$CTR_BIN" || { echo "$CTR_BIN is required when K8S_IMAGE_TARGET=containerd/ctr." >&2; exit 1; }
+  fi
+
+  build_images
+  import_built_images_to_containerd
+  pull_external_images_to_containerd
+}
 
 if [ -z "$IMAGE_PULL_POLICY" ]; then
   if [ -n "$IMAGE_REGISTRY" ]; then
@@ -327,6 +543,80 @@ elif [ -z "${TLS_BLOCK:-}" ]; then
   export TLS_BLOCK=""
 fi
 
+ensure_namespace() {
+  if [ "$NAMESPACE" = "sage" ]; then
+    kubectl apply -f "$K8S_DIR/namespace.yaml"
+  else
+    kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+  fi
+}
+
+delete_selected_resources() {
+  local service
+
+  echo "Deleting selected resources before redeploy: ${SELECTED_SERVICE_KEYS[*]}"
+
+  if selected_has web; then
+    kubectl -n "$NAMESPACE" delete ingress sage --ignore-not-found
+  fi
+  if selected_has wiki; then
+    kubectl -n "$NAMESPACE" delete ingress sage-wiki --ignore-not-found
+  fi
+
+  for service in "${SELECTED_SERVICE_KEYS[@]}"; do
+    case "$service" in
+      mysql)
+        kubectl -n "$NAMESPACE" delete statefulset sage-mysql --ignore-not-found
+        ;;
+      *)
+        kubectl -n "$NAMESPACE" delete deployment "sage-$service" --ignore-not-found
+        ;;
+    esac
+  done
+
+  for service in "${SELECTED_SERVICE_KEYS[@]}"; do
+    kubectl -n "$NAMESPACE" delete service "sage-$service" --ignore-not-found
+  done
+
+  if selected_has server; then
+    kubectl -n "$NAMESPACE" delete configmap sage-config --ignore-not-found
+  fi
+  if selected_has jaeger; then
+    kubectl -n "$NAMESPACE" delete configmap sage-jaeger-config --ignore-not-found
+  fi
+  if selected_has server || selected_has mysql || selected_has rustfs; then
+    kubectl -n "$NAMESPACE" delete secret sage-secrets --ignore-not-found
+  fi
+
+  if [ "$DELETE_PVCS" = "true" ]; then
+    if selected_has server; then
+      kubectl -n "$NAMESPACE" delete pvc \
+        sage-server-sessions \
+        sage-server-agents \
+        sage-server-logs \
+        sage-server-data \
+        sage-server-skills \
+        sage-server-users \
+        --ignore-not-found
+    fi
+    if selected_has mysql; then
+      kubectl -n "$NAMESPACE" delete pvc sage-mysql-data sage-mysql-conf --ignore-not-found
+    fi
+    if selected_has rustfs; then
+      kubectl -n "$NAMESPACE" delete pvc sage-rustfs-data --ignore-not-found
+    fi
+  else
+    echo "PVCs were preserved. Re-run with DELETE_PVCS=true to delete persistent data."
+  fi
+}
+
+prepare_images
+
+if [ "$RECREATE" = "true" ]; then
+  ensure_namespace
+  delete_selected_resources
+fi
+
 RENDERED_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sage-k8s.XXXXXX")"
 trap 'rm -rf "$RENDERED_DIR"' EXIT
 
@@ -357,11 +647,7 @@ for path in src.rglob("*"):
         shutil.copy2(path, out)
 PY
 
-if [ "$NAMESPACE" = "sage" ]; then
-  kubectl apply -f "$RENDERED_DIR/namespace.yaml"
-else
-  kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
-fi
+ensure_namespace
 
 echo "Deploying services: ${SELECTED_SERVICE_KEYS[*]}"
 
