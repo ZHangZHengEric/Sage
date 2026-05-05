@@ -139,7 +139,6 @@ pub fn run_with_startup_action(
         if event::poll(Duration::from_millis(16))? {
             match event::read()? {
                 Event::Key(key) if should_handle_key_event(key.kind) => {
-                    emit_key_debug_if_enabled(&key);
                     dirty |= handle_key(app, key, &mut backend)?
                 }
                 Event::Paste(text) => {
@@ -164,17 +163,6 @@ pub fn run_with_startup_action(
 
 fn should_handle_key_event(kind: KeyEventKind) -> bool {
     !matches!(kind, KeyEventKind::Release)
-}
-
-fn emit_key_debug_if_enabled(key: &crossterm::event::KeyEvent) {
-    if std::env::var("SAGE_TERMINAL_DEBUG_KEYS").ok().as_deref() != Some("1") {
-        return;
-    }
-
-    eprintln!(
-        "[sage-terminal key] kind={:?} code={:?} modifiers={:?}",
-        key.kind, key.code, key.modifiers
-    );
 }
 
 fn drain_backend(app: &mut App, backend: &mut Option<BackendHandle>) -> bool {

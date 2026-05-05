@@ -20,15 +20,6 @@ fn terminal_loop_accepts_repeat_key_events_for_submission() {
 }
 
 #[test]
-fn key_debug_toggle_defaults_to_disabled() {
-    std::env::remove_var("SAGE_TERMINAL_DEBUG_KEYS");
-    super::super::emit_key_debug_if_enabled(&KeyEvent::new(
-        KeyCode::Enter,
-        KeyModifiers::NONE,
-    ));
-}
-
-#[test]
 fn help_overlay_consumes_typing_without_mutating_input() {
     let mut app = App::new();
     app.input = "/help".to_string();
