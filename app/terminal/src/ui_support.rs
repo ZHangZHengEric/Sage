@@ -113,7 +113,7 @@ pub(crate) fn footer_status_summary(app: &App) -> String {
     }
     parts.push(normalize_footer_status(&app.footer_status()));
     if app.busy && app.active_tool_status().is_none() {
-        parts.push(app.session_id.clone());
+        parts.push(app.session_label().to_string());
     }
     parts.join(" • ")
 }

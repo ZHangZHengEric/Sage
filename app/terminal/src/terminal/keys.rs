@@ -87,6 +87,8 @@ pub(super) fn handle_key(
         {
             return Ok(app.select_next_active_surface_item());
         }
+        KeyCode::Up => return Ok(app.select_previous_input_history()),
+        KeyCode::Down => return Ok(app.select_next_input_history()),
         KeyCode::Backspace => app.backspace(),
         KeyCode::Delete => app.delete(),
         KeyCode::Left => app.move_cursor_left(),

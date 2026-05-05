@@ -16,7 +16,22 @@ fn welcome_banner_renders_in_idle_region_before_transcript() {
     assert!(rendered.contains("display: "));
     assert!(rendered.contains("compact"));
     assert!(rendered.contains("goal: "));
+    assert!(rendered.contains("session: "));
+    assert!(rendered.contains("new"));
     assert!(rendered.contains("Tip: "));
+}
+
+#[test]
+fn first_task_materializes_local_session_id() {
+    let mut app = App::new();
+    assert_eq!(app.session_label(), "new");
+
+    app.input = "hello".to_string();
+    app.input_cursor = app.input.len();
+    let _ = app.submit_input();
+
+    assert_ne!(app.session_label(), "new");
+    assert!(app.session_id.starts_with("local-"));
 }
 
 #[test]

@@ -192,6 +192,9 @@ pub struct App {
     pub(crate) agent_catalog: Option<Vec<AgentCandidate>>,
     pub(crate) provider_catalog: Option<Vec<ProviderCandidate>>,
     pub(crate) skill_catalog: Option<Vec<SkillCandidate>>,
+    pub(crate) input_history: Vec<String>,
+    pub(crate) input_history_index: Option<usize>,
+    pub(crate) input_history_draft: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -252,6 +255,9 @@ impl App {
             agent_catalog: None,
             provider_catalog: None,
             skill_catalog: None,
+            input_history: Vec::new(),
+            input_history_index: None,
+            input_history_draft: None,
         };
         app.reset_session();
         app.clear_requested = false;
@@ -259,8 +265,7 @@ impl App {
     }
 
     pub fn reset_session(&mut self) {
-        self.session_id = format!("local-{:#06}", self.session_seq).replace("0x", "");
-        self.session_seq += 1;
+        self.session_id = pending_session_label().to_string();
         self.clear_input();
         self.busy = false;
         self.current_goal = None;
@@ -291,8 +296,28 @@ impl App {
         self.agent_catalog = None;
         self.provider_catalog = None;
         self.skill_catalog = None;
-        self.status = format!("ready  {}", self.session_id);
+        self.status = format!("ready  {}", self.session_label());
         self.queue_welcome_banner();
+    }
+
+    pub fn session_label(&self) -> &str {
+        if self.session_id.is_empty() || self.session_id == pending_session_label() {
+            pending_session_label()
+        } else {
+            &self.session_id
+        }
+    }
+
+    pub fn has_materialized_session(&self) -> bool {
+        !(self.session_id.is_empty() || self.session_id == pending_session_label())
+    }
+
+    pub fn ensure_local_session(&mut self) {
+        if self.has_materialized_session() {
+            return;
+        }
+        self.session_id = format!("local-{:#06}", self.session_seq).replace("0x", "");
+        self.session_seq += 1;
     }
 
     pub fn set_workspace_override(&mut self, workspace: Option<PathBuf>) {
@@ -421,6 +446,10 @@ fn normalize_workspace_path(path: PathBuf) -> PathBuf {
 
 fn default_workspace_label() -> String {
     "~/.sage".to_string()
+}
+
+fn pending_session_label() -> &'static str {
+    "new"
 }
 
 fn format_workspace_label(path: &Path) -> String {

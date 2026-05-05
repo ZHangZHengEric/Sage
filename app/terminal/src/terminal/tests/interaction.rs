@@ -211,6 +211,77 @@ fn shift_enter_inserts_newline_without_submitting() {
 }
 
 #[test]
+fn up_and_down_navigate_input_history_in_normal_mode() {
+    let mut app = App::new();
+    let mut backend = None;
+
+    app.input = "first".to_string();
+    app.input_cursor = app.input.len();
+    let _ = app.submit_input();
+    app.complete_request();
+
+    app.input = "second".to_string();
+    app.input_cursor = app.input.len();
+    let _ = app.submit_input();
+    app.complete_request();
+
+    let handled = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+        &mut backend,
+    )
+    .expect("history up should not fail");
+    assert!(handled);
+    assert_eq!(app.input, "second");
+
+    let handled = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+        &mut backend,
+    )
+    .expect("history up should not fail");
+    assert!(handled);
+    assert_eq!(app.input, "first");
+
+    let handled = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+        &mut backend,
+    )
+    .expect("history down should not fail");
+    assert!(handled);
+    assert_eq!(app.input, "second");
+
+    let handled = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+        &mut backend,
+    )
+    .expect("history down should not fail");
+    assert!(handled);
+    assert_eq!(app.input, "");
+}
+
+#[test]
+fn popup_navigation_still_wins_over_input_history_for_slash_commands() {
+    let mut app = App::new();
+    app.input = "/g".to_string();
+    app.input_cursor = app.input.len();
+    let mut backend = None;
+
+    assert_eq!(app.active_surface_kind(), Some(ActiveSurfaceKind::Popup));
+    let handled = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+        &mut backend,
+    )
+    .expect("popup down should not fail");
+
+    assert!(handled);
+    assert_eq!(app.input, "/g");
+}
+
+#[test]
 fn popup_visible_enter_submits_typed_slash_command_instead_of_selected_popup_item() {
     let mut app = App::new();
     app.input = "/exit".to_string();

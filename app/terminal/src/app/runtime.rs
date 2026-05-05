@@ -101,7 +101,7 @@ impl App {
         if !completion_lines.is_empty() {
             self.queue_message(MessageKind::Process, completion_lines.join("\n"));
         }
-        self.status = format!("ready  {}", self.session_id);
+        self.status = format!("ready  {}", self.session_label());
     }
 
     pub fn fail_request(&mut self, message: impl Into<String>) {
@@ -146,7 +146,7 @@ impl App {
             self.queue_message(MessageKind::Process, completion_lines.join("\n"));
         }
         self.queue_message(MessageKind::System, message.into());
-        self.status = format!("error  {}", self.session_id);
+        self.status = format!("error  {}", self.session_label());
     }
 
     pub fn interrupt_request(&mut self) {
@@ -196,7 +196,7 @@ impl App {
             lines.push("/retry available".to_string());
         }
         self.queue_message(MessageKind::Process, lines.join("\n"));
-        self.status = format!("interrupted  {}", self.session_id);
+        self.status = format!("interrupted  {}", self.session_label());
     }
 
     pub fn rendered_live_lines(&self) -> Vec<Line<'static>> {
@@ -236,7 +236,7 @@ impl App {
 
         welcome_lines(
             width,
-            &self.session_id,
+            self.session_label(),
             self.selected_agent_id.as_deref(),
             &self.agent_mode,
             self.display_mode,
