@@ -1,5 +1,4 @@
-import test from 'node:test'
-import assert from 'node:assert/strict'
+import { describe, expect, it } from 'vitest'
 
 import {
   extractGoalPayloadFromStreamEvent,
@@ -8,69 +7,61 @@ import {
   normalizeSessionGoal,
 } from '../goalSync.js'
 
-test('web goal helper extracts payload from goal-carrying stream events', () => {
-  assert.deepEqual(
+describe('web goalSync helpers', () => {
+  it('extracts payload from goal-carrying stream events', () => {
+    expect(
     extractGoalPayloadFromStreamEvent({
       type: 'tool_result',
       goal: { objective: 'ship runtime goal contract', status: 'completed' },
     }),
-    { objective: 'ship runtime goal contract', status: 'completed' },
-  )
-  assert.equal(
-    extractGoalPayloadFromStreamEvent({ type: 'assistant', content: 'done' }),
-    undefined,
-  )
-  assert.equal(
-    extractGoalPayloadFromStreamEvent({ type: 'stream_end', goal: null }),
-    null,
-  )
-  assert.deepEqual(
-    extractGoalTransitionFromStreamEvent({
-      type: 'stream_end',
-      goal_transition: { type: 'completed', objective: 'ship runtime goal contract' },
-    }),
-    { type: 'completed', objective: 'ship runtime goal contract' },
-  )
-  assert.equal(extractGoalTransitionFromStreamEvent({ type: 'assistant' }), undefined)
-})
+    ).toEqual({ objective: 'ship runtime goal contract', status: 'completed' })
+    expect(extractGoalPayloadFromStreamEvent({ type: 'assistant', content: 'done' })).toBeUndefined()
+    expect(extractGoalPayloadFromStreamEvent({ type: 'stream_end', goal: null })).toBeNull()
+    expect(
+      extractGoalTransitionFromStreamEvent({
+        type: 'stream_end',
+        goal_transition: { type: 'completed', objective: 'ship runtime goal contract' },
+      }),
+    ).toEqual({ type: 'completed', objective: 'ship runtime goal contract' })
+    expect(extractGoalTransitionFromStreamEvent({ type: 'assistant' })).toBeUndefined()
+  })
 
-test('web goal helper normalizes session goal payloads', () => {
-  assert.deepEqual(
-    normalizeSessionGoal({
-      objective: 'ship runtime goal contract',
-      status: 'paused',
-      created_at: 1,
-      updated_at: 2,
-      paused_reason: 'blocked',
-    }),
-    {
+  it('normalizes session goal payloads', () => {
+    expect(
+      normalizeSessionGoal({
+        objective: 'ship runtime goal contract',
+        status: 'paused',
+        created_at: 1,
+        updated_at: 2,
+        paused_reason: 'blocked',
+      }),
+    ).toEqual({
       objective: 'ship runtime goal contract',
       status: 'paused',
       created_at: 1,
       updated_at: 2,
       completed_at: null,
       paused_reason: 'blocked',
-    },
-  )
-  assert.equal(normalizeSessionGoal(null), null)
-})
+    })
+    expect(normalizeSessionGoal(null)).toBeNull()
+  })
 
-test('web goal helper normalizes goal transitions and tolerates legacy payloads', () => {
-  assert.deepEqual(
-    normalizeGoalTransition({
-      type: 'replaced',
-      objective: 'ship runtime goal contract',
-      previous_objective: 'draft the PR plan',
-      previous_status: 'active',
-    }),
-    {
+  it('normalizes goal transitions and tolerates legacy payloads', () => {
+    expect(
+      normalizeGoalTransition({
+        type: 'replaced',
+        objective: 'ship runtime goal contract',
+        previous_objective: 'draft the PR plan',
+        previous_status: 'active',
+      }),
+    ).toEqual({
       type: 'replaced',
       objective: 'ship runtime goal contract',
       status: null,
       previous_objective: 'draft the PR plan',
       previous_status: 'active',
-    },
-  )
-  assert.equal(normalizeGoalTransition(null), null)
-  assert.equal(normalizeGoalTransition({}), null)
+    })
+    expect(normalizeGoalTransition(null)).toBeNull()
+    expect(normalizeGoalTransition({})).toBeNull()
+  })
 })
