@@ -135,13 +135,22 @@ fn help_popup_submit_escape_and_welcome_flow_stays_consistent() {
     app.input_cursor = app.input.len();
     assert_eq!(app.active_surface_kind(), Some(ActiveSurfaceKind::Popup));
 
-    assert!(app.autocomplete_popup());
     let handled = handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
         &mut backend,
     )
-    .expect("popup submit should not fail");
+    .expect("popup autocomplete should not fail");
+    assert!(handled);
+    assert_eq!(app.input, "/help ");
+    assert_eq!(app.active_surface_kind(), None);
+
+    let handled = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        &mut backend,
+    )
+    .expect("help submit should not fail");
     assert!(handled);
     assert!(app.help_overlay_props().is_some());
 
@@ -282,24 +291,25 @@ fn popup_navigation_still_wins_over_input_history_for_slash_commands() {
 }
 
 #[test]
-fn popup_visible_enter_submits_typed_slash_command_instead_of_selected_popup_item() {
+fn popup_visible_enter_autocompletes_selected_popup_item_before_submit() {
     let mut app = App::new();
-    app.input = "/exit".to_string();
+    app.input = "/he".to_string();
     app.input_cursor = app.input.len();
     let mut backend = None;
 
     assert!(app.popup_props().is_some());
-    assert!(slash_command::find("/exit").is_some());
+    assert!(slash_command::find("/help").is_some());
 
     let handled = handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
         &mut backend,
     )
-    .expect("enter should submit typed slash command");
+    .expect("enter should autocomplete selected slash command");
 
     assert!(handled);
-    assert!(app.should_quit);
+    assert_eq!(app.input, "/help ");
+    assert!(!app.should_quit);
 }
 
 #[test]

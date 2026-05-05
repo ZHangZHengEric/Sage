@@ -71,9 +71,10 @@ pub(super) fn handle_key(
                 return Ok(false);
             }
             if app.active_surface_kind() == Some(ActiveSurfaceKind::Popup) {
-                if app.input.starts_with('/') {
-                    let action = app.submit_input();
-                    return handle_submit_action(app, backend, action);
+                let exact_slash_command = app.input.starts_with('/')
+                    && crate::slash_command::find(app.input.trim_end()).is_some();
+                if app.input.starts_with('/') && !exact_slash_command && app.autocomplete_popup() {
+                    return Ok(true);
                 }
             }
             let action = app.submit_input();
