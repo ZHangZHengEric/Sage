@@ -19,7 +19,7 @@ spec:
       containers:
         - name: sage-web
           image: "${SAGE_WEB_IMAGE}"
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: ${IMAGE_PULL_POLICY}
           ports:
             - name: http
               containerPort: 80

@@ -17,8 +17,6 @@ spec:
       labels:
         app.kubernetes.io/name: sage-server
         app.kubernetes.io/part-of: sage
-      annotations:
-        container.apparmor.security.beta.kubernetes.io/sage-server: unconfined
     spec:
       securityContext:
         seccompProfile:
@@ -26,7 +24,7 @@ spec:
       containers:
         - name: sage-server
           image: "${SAGE_SERVER_IMAGE}"
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: ${IMAGE_PULL_POLICY}
           ports:
             - name: http
               containerPort: 8080
@@ -37,6 +35,8 @@ spec:
                 name: sage-secrets
           securityContext:
             allowPrivilegeEscalation: true
+            appArmorProfile:
+              type: Unconfined
             capabilities:
               add:
                 - SYS_ADMIN

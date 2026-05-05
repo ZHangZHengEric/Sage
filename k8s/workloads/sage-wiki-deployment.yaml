@@ -19,7 +19,7 @@ spec:
       containers:
         - name: sage-wiki
           image: "${SAGE_WIKI_IMAGE}"
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: ${IMAGE_PULL_POLICY}
           ports:
             - name: http
               containerPort: 80

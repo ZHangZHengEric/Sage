@@ -15,7 +15,7 @@ spec:
   ${INGRESS_CLASS_LINE}
   ${TLS_BLOCK}
   rules:
-    - host: ${SAGE_HOST}
+    - ${INGRESS_HOST_LINE}
       http:
         paths:
           - path: /prod-api/api

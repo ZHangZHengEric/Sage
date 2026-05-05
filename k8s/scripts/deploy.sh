@@ -26,17 +26,35 @@ SAGE_HOST="${SAGE_HOST:-}"
 SAGE_PUBLIC_URL="${SAGE_PUBLIC_URL:-}"
 IMAGE_REGISTRY="${IMAGE_REGISTRY:-}"
 IMAGE_TAG="${IMAGE_TAG:-v1.0}"
+IMAGE_PULL_POLICY="${IMAGE_PULL_POLICY:-}"
 STORAGE_CLASS="${STORAGE_CLASS:-}"
 INGRESS_CLASS_NAME="${INGRESS_CLASS_NAME:-nginx}"
 TLS_SECRET_NAME="${TLS_SECRET_NAME:-}"
+ENABLE_INGRESS="${ENABLE_INGRESS:-false}"
+SAGE_WEB_SERVICE_TYPE="${SAGE_WEB_SERVICE_TYPE:-NodePort}"
+SAGE_WIKI_SERVICE_TYPE="${SAGE_WIKI_SERVICE_TYPE:-NodePort}"
+SAGE_WEB_NODE_PORT="${SAGE_WEB_NODE_PORT:-30080}"
+SAGE_WIKI_NODE_PORT="${SAGE_WIKI_NODE_PORT:-30081}"
 
 if [ -z "$SAGE_HOST" ]; then
   echo "SAGE_HOST is required. Set it in k8s/.env or pass SAGE_HOST=example.com." >&2
   exit 1
 fi
 
+is_ip_address() {
+  [[ "$1" =~ ^[0-9]+(\.[0-9]+){3}$ ]] || [[ "$1" == *:* ]]
+}
+
 if [ -z "$SAGE_PUBLIC_URL" ]; then
-  SAGE_PUBLIC_URL="https://$SAGE_HOST"
+  if is_ip_address "$SAGE_HOST"; then
+    if [ "$SAGE_WEB_SERVICE_TYPE" = "NodePort" ]; then
+      SAGE_PUBLIC_URL="http://$SAGE_HOST:$SAGE_WEB_NODE_PORT"
+    else
+      SAGE_PUBLIC_URL="http://$SAGE_HOST"
+    fi
+  else
+    SAGE_PUBLIC_URL="https://$SAGE_HOST"
+  fi
   export SAGE_PUBLIC_URL
 fi
 
@@ -101,7 +119,7 @@ export SAGE_MYSQL_PORT="${SAGE_MYSQL_PORT:-3306}"
 export SAGE_MYSQL_DATABASE="${SAGE_MYSQL_DATABASE:-sage}"
 export SAGE_MYSQL_USER="${SAGE_MYSQL_USER:-root}"
 export SAGE_MYSQL_PASSWORD="${SAGE_MYSQL_PASSWORD:-change_this_mysql_password}"
-export SAGE_ELASTICSEARCH_URL="${SAGE_ELASTICSEARCH_URL:-http://sage-es:9200}"
+export SAGE_ELASTICSEARCH_URL="${SAGE_ELASTICSEARCH_URL:-}"
 export SAGE_ELASTICSEARCH_PORT="${SAGE_ELASTICSEARCH_PORT:-9200}"
 export SAGE_ELASTICSEARCH_USERNAME="${SAGE_ELASTICSEARCH_USERNAME:-elastic}"
 export SAGE_ELASTICSEARCH_PASSWORD="${SAGE_ELASTICSEARCH_PASSWORD:-change_this_elasticsearch_password}"
@@ -128,7 +146,29 @@ image_name() {
 export SAGE_SERVER_IMAGE="${SAGE_SERVER_IMAGE:-$(image_name sage-server)}"
 export SAGE_WEB_IMAGE="${SAGE_WEB_IMAGE:-$(image_name sage-web)}"
 export SAGE_WIKI_IMAGE="${SAGE_WIKI_IMAGE:-$(image_name sage-wiki)}"
-export SAGE_ES_IMAGE="${SAGE_ES_IMAGE:-$(image_name sage-es)}"
+
+if [ -z "$IMAGE_PULL_POLICY" ]; then
+  if [ -n "$IMAGE_REGISTRY" ]; then
+    IMAGE_PULL_POLICY="IfNotPresent"
+  else
+    IMAGE_PULL_POLICY="Never"
+  fi
+fi
+export IMAGE_PULL_POLICY
+export SAGE_WEB_SERVICE_TYPE
+export SAGE_WIKI_SERVICE_TYPE
+
+if [ "$SAGE_WEB_SERVICE_TYPE" = "NodePort" ]; then
+  export SAGE_WEB_NODE_PORT_LINE="nodePort: $SAGE_WEB_NODE_PORT"
+else
+  export SAGE_WEB_NODE_PORT_LINE=""
+fi
+
+if [ "$SAGE_WIKI_SERVICE_TYPE" = "NodePort" ]; then
+  export SAGE_WIKI_NODE_PORT_LINE="nodePort: $SAGE_WIKI_NODE_PORT"
+else
+  export SAGE_WIKI_NODE_PORT_LINE=""
+fi
 
 if [ -n "$STORAGE_CLASS" ]; then
   export PVC_STORAGE_CLASS="storageClassName: $STORAGE_CLASS"
@@ -142,12 +182,22 @@ else
   export INGRESS_CLASS_LINE=""
 fi
 
-if [ -n "$TLS_SECRET_NAME" ]; then
+if is_ip_address "$SAGE_HOST"; then
+  export INGRESS_HOST_LINE=""
+  if [ -n "$TLS_SECRET_NAME" ]; then
+    echo "SAGE_HOST is an IP address; skipping Ingress TLS host because Kubernetes Ingress hosts must be DNS names." >&2
+  fi
+  export TLS_BLOCK=""
+else
+  export INGRESS_HOST_LINE="host: $SAGE_HOST"
+fi
+
+if [ -n "$TLS_SECRET_NAME" ] && [ -n "$INGRESS_HOST_LINE" ]; then
   export TLS_BLOCK="tls:
   - hosts:
       - $SAGE_HOST
     secretName: $TLS_SECRET_NAME"
-else
+elif [ -z "${TLS_BLOCK:-}" ]; then
   export TLS_BLOCK=""
 fi
 
@@ -187,16 +237,23 @@ else
   kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 fi
 
+kubectl -n "$NAMESPACE" delete deployment sage-es --ignore-not-found
+kubectl -n "$NAMESPACE" delete service sage-es --ignore-not-found
+
 kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/configmaps"
 kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/secrets"
 kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/services"
 kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/workloads"
-kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/ingress"
+if [ "$ENABLE_INGRESS" = "true" ]; then
+  kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/ingress"
+else
+  echo "Skipping Ingress because ENABLE_INGRESS=false. Use the sage-web NodePort service instead."
+fi
 
 kubectl -n "$NAMESPACE" rollout status statefulset/sage-mysql --timeout=10m
 
-for deployment in sage-es sage-rustfs sage-jaeger sage-server sage-web sage-wiki; do
+for deployment in sage-rustfs sage-jaeger sage-server sage-web sage-wiki; do
   kubectl -n "$NAMESPACE" rollout status "deployment/$deployment" --timeout=10m
 done
 
-kubectl -n "$NAMESPACE" get pods,svc,ingress
+kubectl -n "$NAMESPACE" get pods,svc
