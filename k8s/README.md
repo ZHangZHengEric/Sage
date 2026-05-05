@@ -65,7 +65,7 @@ k8s/scripts/build-images.sh
 
 - 如果设置了 `IMAGE_REGISTRY`，脚本会在构建后 `docker push` 到该仓库。
 - 如果未设置 `IMAGE_REGISTRY`，脚本会按当前 `kubectl` context 自动识别 `kind`、`minikube`、`k3d` 或 Docker Desktop Kubernetes，并把镜像导入本地集群。
-- 对普通 containerd/CRI 节点，可显式设置 `K8S_IMAGE_TARGET=containerd` 或 `K8S_IMAGE_TARGET=ctr`，脚本会用 `docker save` 和 `ctr -n k8s.io images import` 将 Sage 自有镜像和 Kubernetes 依赖镜像导入到 kubelet 使用的 containerd namespace，导入后可通过 `crictl images` 查看。
+- 对普通 containerd/CRI 节点，可显式设置 `K8S_IMAGE_TARGET=containerd` 或 `K8S_IMAGE_TARGET=ctr`，脚本会用 `docker save` 和 `ctr -n k8s.io images import` 将 Sage 自有镜像导入到 kubelet 使用的 containerd namespace，导入后可通过 `crictl images` 查看。
 
 推送到私有镜像仓库：
 
@@ -78,12 +78,6 @@ IMAGE_REGISTRY=registry.example.com/sage k8s/scripts/build-images.sh
 - `sage-server:${IMAGE_TAG}`
 - `sage-web:${IMAGE_TAG}`
 - `sage-wiki:${IMAGE_TAG}`
-
-脚本会为本地集群导入以下 Kubernetes 依赖镜像：
-
-- `docker.m.daocloud.io/mysql:8.4`
-- `docker.m.daocloud.io/rustfs/rustfs:latest`
-- `docker.m.daocloud.io/jaegertracing/jaeger:2.16.0`
 
 当 `IMAGE_REGISTRY` 非空时，镜像名会变为 `${IMAGE_REGISTRY}/sage-server:${IMAGE_TAG}` 等。
 

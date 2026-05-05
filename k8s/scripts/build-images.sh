@@ -50,12 +50,6 @@ SAGE_SERVER_IMAGE="$(image_name sage-server)"
 SAGE_WEB_IMAGE="$(image_name sage-web)"
 SAGE_WIKI_IMAGE="$(image_name sage-wiki)"
 SAGE_IMAGES=("$SAGE_SERVER_IMAGE" "$SAGE_WEB_IMAGE" "$SAGE_WIKI_IMAGE")
-K8S_DEPENDENCY_IMAGES=(
-  "docker.m.daocloud.io/mysql:8.4"
-  "docker.m.daocloud.io/rustfs/rustfs:latest"
-  "docker.m.daocloud.io/jaegertracing/jaeger:2.16.0"
-)
-K8S_IMAGES=("${SAGE_IMAGES[@]}" "${K8S_DEPENDENCY_IMAGES[@]}")
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
@@ -65,13 +59,6 @@ current_kubectl_context() {
   kubectl config current-context 2>/dev/null || true
 }
 
-pull_dependency_images() {
-  local image
-  for image in "${K8S_DEPENDENCY_IMAGES[@]}"; do
-    docker pull "$image"
-  done
-}
-
 load_images_to_kind() {
   local context cluster
   context="$(current_kubectl_context)"
@@ -79,14 +66,14 @@ load_images_to_kind() {
   if [ -z "$cluster" ] || [ "$cluster" = "$context" ]; then
     cluster="${KIND_CLUSTER_NAME:-kind}"
   fi
-  kind load docker-image "${K8S_IMAGES[@]}" --name "$cluster"
+  kind load docker-image "${SAGE_IMAGES[@]}" --name "$cluster"
 }
 
 load_images_to_minikube() {
   local profile
   profile="${MINIKUBE_PROFILE:-$(current_kubectl_context)}"
   [ -n "$profile" ] || profile="minikube"
-  minikube image load "${K8S_IMAGES[@]}" --profile "$profile"
+  minikube image load "${SAGE_IMAGES[@]}" --profile "$profile"
 }
 
 load_images_to_k3d() {
@@ -97,7 +84,7 @@ load_images_to_k3d() {
     echo "K3D_CLUSTER_NAME is required when the current kubectl context is not k3d-<cluster>." >&2
     exit 1
   fi
-  k3d image import "${K8S_IMAGES[@]}" --cluster "$cluster"
+  k3d image import "${SAGE_IMAGES[@]}" --cluster "$cluster"
 }
 
 load_images_to_containerd() {
@@ -111,7 +98,7 @@ load_images_to_containerd() {
 
   (
     trap 'rm -f "$archive"' EXIT
-    docker save -o "$archive" "${K8S_IMAGES[@]}"
+    docker save -o "$archive" "${SAGE_IMAGES[@]}"
     "$ctr_bin" -n "$namespace" images import "$archive"
   )
   rm -f "$archive"
@@ -152,25 +139,20 @@ publish_images() {
       ;;
     kind)
       command_exists kind || { echo "kind is required when K8S_IMAGE_TARGET=kind." >&2; exit 1; }
-      pull_dependency_images
       load_images_to_kind
       ;;
     minikube)
       command_exists minikube || { echo "minikube is required when K8S_IMAGE_TARGET=minikube." >&2; exit 1; }
-      pull_dependency_images
       load_images_to_minikube
       ;;
     k3d)
       command_exists k3d || { echo "k3d is required when K8S_IMAGE_TARGET=k3d." >&2; exit 1; }
-      pull_dependency_images
       load_images_to_k3d
       ;;
     docker)
-      pull_dependency_images
       echo "Using Docker Desktop Kubernetes; locally built Docker images are available to the cluster."
       ;;
     containerd|cri|ctr)
-      pull_dependency_images
       load_images_to_containerd
       ;;
     none)
@@ -203,5 +185,3 @@ fi
 
 printf 'Built Sage images:\n'
 printf '  %s\n' "${SAGE_IMAGES[@]}"
-printf 'Kubernetes dependency images:\n'
-printf '  %s\n' "${K8S_DEPENDENCY_IMAGES[@]}"
