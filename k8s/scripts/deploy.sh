@@ -425,16 +425,19 @@ build_images() {
 }
 
 import_built_images_to_containerd() {
-  local archive image canonical_image
+  local archive image verify_images
 
   [ "${#SAGE_CONTAINERD_IMAGES[@]}" -gt 0 ] || return 0
+  verify_images=("${SAGE_CONTAINERD_IMAGES[@]}")
 
   if [ -z "$IMAGE_REGISTRY" ]; then
     SAGE_CONTAINERD_IMAGES=()
+    verify_images=()
     for image in "${SAGE_IMAGES[@]}"; do
-      canonical_image="$(canonical_image_name "$image")"
-      docker tag "$image" "$canonical_image"
-      SAGE_CONTAINERD_IMAGES+=("$image" "$canonical_image")
+      image="$(canonical_image_name "$image")"
+      docker tag "${image#docker.io/library/}" "$image"
+      SAGE_CONTAINERD_IMAGES+=("$image")
+      verify_images+=("$image")
     done
   fi
 
@@ -447,10 +450,10 @@ import_built_images_to_containerd() {
   )
   rm -f "$archive"
 
-  for image in "${SAGE_CONTAINERD_IMAGES[@]}"; do
-    if ! containerd_image_exists_any "$image"; then
+  for image in "${verify_images[@]}"; do
+    if ! containerd_image_exists "$image"; then
       echo "Image '$image' was not found in containerd namespace '$CTR_NAMESPACE' after import." >&2
-      echo "Check with: $CTR_BIN -n $CTR_NAMESPACE images get '$(canonical_image_name "$image")'" >&2
+      echo "Check with: $CTR_BIN -n $CTR_NAMESPACE images get '$image'" >&2
       exit 1
     fi
   done
