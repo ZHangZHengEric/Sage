@@ -7,6 +7,7 @@ from argparse import Namespace
 from unittest.mock import patch
 
 import app.cli.main as cli_main
+import app.cli.service as cli_service
 from common.schemas.goal import GoalMutation
 from app.cli.commands.session import _handle_goal_command
 from app.cli.main import (
@@ -30,6 +31,11 @@ from app.cli.main import (
 class TestStatsToolDetection(unittest.TestCase):
     def test_chat_input_prompt_uses_sage_branding(self):
         self.assertEqual(CHAT_INPUT_PROMPT, "Sage> ")
+
+    def test_build_run_request_defaults_response_language_to_chinese(self):
+        request = cli_service.build_run_request(task="hello")
+        self.assertIsNotNone(request.system_context)
+        self.assertEqual(request.system_context.get("response_language"), "zh-CN")
 
     def test_chat_help_mentions_resume_and_history_commands(self):
         self.assertIn("sage resume <session_id>", CHAT_COMMAND_HELP)

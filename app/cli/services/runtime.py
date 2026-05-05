@@ -242,6 +242,7 @@ def build_run_request(
         available_skills=available_skills,
         max_loop_count=max_loop_count,
         goal=goal,
+        system_context={"response_language": "zh-CN"},
     )
 
 
@@ -330,4 +331,3 @@ def validate_cli_runtime_requirements() -> config.StartupConfig:
             next_steps=issues["next_steps"],
         )
     return cfg
-
