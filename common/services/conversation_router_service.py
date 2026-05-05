@@ -44,6 +44,7 @@ async def build_list_conversations_response(
     search: Optional[str],
     agent_id: Optional[str],
     sort_by: Optional[str],
+    goal_status: Optional[str] = None,
     include_user_id: bool = False,
     context_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -54,6 +55,7 @@ async def build_list_conversations_response(
         search=search,
         agent_id=agent_id,
         sort_by=sort_by or "date",
+        goal_status=goal_status,
     )
     return conversation_service.build_conversation_list_result(
         conversations=conversations,
@@ -78,4 +80,67 @@ async def build_delete_response(
     return {
         "message": f"会话 {session_id} 已删除",
         "data": {"session_id": session_id_res},
+    }
+
+
+async def build_goal_status_response(
+    session_id: str,
+    *,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    data = await conversation_service.get_session_goal(session_id, user_id=user_id)
+    if user_id:
+        data = {**data, "user_id": user_id}
+    return {
+        "message": f"会话 {session_id} 目标获取成功",
+        "data": data,
+    }
+
+
+async def build_goal_set_response(
+    session_id: str,
+    *,
+    objective: str,
+    status,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    data = await conversation_service.set_session_goal(
+        session_id,
+        objective=objective,
+        status=status,
+        user_id=user_id,
+    )
+    if user_id:
+        data = {**data, "user_id": user_id}
+    return {
+        "message": f"会话 {session_id} 目标已更新",
+        "data": data,
+    }
+
+
+async def build_goal_clear_response(
+    session_id: str,
+    *,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    data = await conversation_service.clear_session_goal(session_id, user_id=user_id)
+    if user_id:
+        data = {**data, "user_id": user_id}
+    return {
+        "message": f"会话 {session_id} 目标已清除",
+        "data": data,
+    }
+
+
+async def build_goal_complete_response(
+    session_id: str,
+    *,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    data = await conversation_service.complete_session_goal(session_id, user_id=user_id)
+    if user_id:
+        data = {**data, "user_id": user_id}
+    return {
+        "message": f"会话 {session_id} 目标已完成",
+        "data": data,
     }

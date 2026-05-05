@@ -138,6 +138,7 @@ def configure_cli_logging(*, verbose: bool) -> config.StartupConfig:
         return cfg
 
     quiet_level = logging.ERROR
+    sage_stream_level = logging.WARNING
     logging.getLogger().setLevel(quiet_level)
     logging.getLogger("TaskScheduler").setLevel(quiet_level)
 
@@ -161,7 +162,12 @@ def configure_cli_logging(*, verbose: bool) -> config.StartupConfig:
 
         for handler in sage_logger.logger.handlers:
             if isinstance(handler, logging.StreamHandler):
-                handler.setLevel(quiet_level)
+                handler.setLevel(sage_stream_level)
+                try:
+                    if getattr(handler, "stream", None) is sys.stdout:
+                        handler.setStream(sys.stderr)
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -226,6 +232,7 @@ def build_run_request(
     agent_mode: Optional[str] = None,
     available_skills: Optional[List[str]] = None,
     max_loop_count: Optional[int] = None,
+    goal: Optional[Dict[str, Any]] = None,
 ) -> StreamRequest:
     return StreamRequest(
         messages=[Message(role="user", content=task)],
@@ -235,6 +242,7 @@ def build_run_request(
         agent_mode=agent_mode,
         available_skills=available_skills,
         max_loop_count=max_loop_count,
+        goal=goal,
     )
 
 
@@ -1234,6 +1242,10 @@ async def get_session_summary(
     user_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     from common.models.conversation import ConversationDao
+    from common.services.conversation_service import (
+        _load_session_goal,
+        _load_session_goal_transition,
+    )
 
     dao = ConversationDao()
     conversation = await dao.get_by_session_id(session_id)
@@ -1244,6 +1256,8 @@ async def get_session_summary(
         return None
 
     counts = conversation.get_message_count()
+    goal = _load_session_goal(session_id)
+    goal_transition = _load_session_goal_transition(session_id)
     return {
         "session_id": conversation.session_id,
         "user_id": conversation.user_id,
@@ -1255,6 +1269,8 @@ async def get_session_summary(
         "agent_count": counts.get("agent_count", 0),
         "created_at": conversation.created_at.isoformat() if conversation.created_at else "",
         "updated_at": conversation.updated_at.isoformat() if conversation.updated_at else "",
+        "goal": goal.model_dump(mode="json") if goal else None,
+        "goal_transition": goal_transition.model_dump(mode="json") if goal_transition else None,
     }
 
 

@@ -76,6 +76,73 @@ def _merge_dict(request: StreamRequest, field: str, value: Dict[str, Any]) -> No
         setattr(request, field, merged)
 
 
+def _extract_goal_from_tool_result_payload(payload: Any) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    current = payload
+    for _ in range(4):
+        if isinstance(current, dict):
+            if "goal" in current:
+                goal = current.get("goal")
+                return True, goal if isinstance(goal, dict) else None
+            if "content" in current:
+                current = current.get("content")
+                continue
+            return False, None
+        if isinstance(current, str):
+            text = current.strip()
+            if not text:
+                return False, None
+            try:
+                current = json.loads(text)
+            except Exception:
+                return False, None
+            continue
+        return False, None
+    return False, None
+
+
+def _extract_goal_from_stream_result(result: Dict[str, Any]) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    if not isinstance(result, dict):
+        return False, None
+    if "goal" in result:
+        goal = result.get("goal")
+        return True, goal if isinstance(goal, dict) else None
+    if result.get("type") != "tool_result":
+        return False, None
+    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+    tool_name = str(metadata.get("tool_name") or "").strip()
+    if tool_name != "turn_status":
+        return False, None
+    return _extract_goal_from_tool_result_payload(result.get("content"))
+
+
+def _extract_goal_outcome_from_stream_result(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not isinstance(result, dict):
+        return None
+    if result.get("type") != "tool_result":
+        return None
+    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+    tool_name = str(metadata.get("tool_name") or "").strip()
+    if tool_name != "turn_status":
+        return None
+
+    current = result.get("content")
+    for _ in range(4):
+        if isinstance(current, dict):
+            goal_outcome = current.get("goal_outcome")
+            return goal_outcome if isinstance(goal_outcome, dict) else None
+        if isinstance(current, str):
+            text = current.strip()
+            if not text:
+                return None
+            try:
+                current = json.loads(text)
+            except Exception:
+                return None
+            continue
+        return None
+    return None
+
+
 def _get_provider_api_key(provider: Any) -> Optional[str]:
     if _is_desktop_mode():
         api_keys = getattr(provider, "api_keys", None) or []
@@ -852,6 +919,7 @@ class SageStreamService:
                 "max_loop_count": self.request.max_loop_count,
                 "agent_mode": self.request.agent_mode,
                 "system_context": self.request.system_context,
+                "goal": self.request.goal,
                 "available_workflows": self.request.available_workflows,
                 "context_budget_config": self.request.context_budget_config,
             }
@@ -970,6 +1038,7 @@ async def execute_chat_session(
     last_activity_time = time.time()
     token_usage_persisted = False
     token_usage_payload: Optional[Dict[str, Any]] = None
+    session_list_metadata_synced = False
 
     progress_queue: asyncio.Queue = asyncio.Queue()
     register_progress_queue(session_id, progress_queue)
@@ -996,17 +1065,55 @@ async def execute_chat_session(
             result = payload
             token_usage_payload = _extract_token_usage_payload(result) or token_usage_payload
 
+            if not session_list_metadata_synced:
+                try:
+                    from common.services.chat_stream_manager import StreamManager as CommonStreamManager
+
+                    await CommonStreamManager.get_instance().notify_session_list_changed()
+                except Exception as sync_exc:
+                    logger.bind(session_id=session_id).debug(
+                        f"同步 active session metadata 失败: {sync_exc}"
+                    )
+                session_list_metadata_synced = True
+
             yield_result = result.copy()
             yield_result.pop("message_type", None)
             yield_result.pop("is_final", None)
             yield_result.pop("is_chunk", None)
             yield_result.pop("chunk_id", None)
+            has_goal_update, goal_update = _extract_goal_from_stream_result(result)
+            if has_goal_update:
+                yield_result["goal"] = goal_update
+                try:
+                    session_manager = get_global_session_manager()
+                    if session_manager:
+                        goal_transition = session_manager.get_goal_transition(session_id)
+                        if goal_transition:
+                            yield_result["goal_transition"] = goal_transition
+                except Exception as goal_exc:
+                    logger.bind(session_id=session_id).debug(
+                        f"读取流事件 goal_transition 失败: {goal_exc}"
+                    )
+            goal_outcome = _extract_goal_outcome_from_stream_result(result)
+            if goal_outcome:
+                yield_result["goal_outcome"] = goal_outcome
             yield json.dumps(yield_result, ensure_ascii=False) + "\n"
 
         token_usage_persisted = await _persist_token_usage_if_available(
             stream_service,
             token_usage_payload=token_usage_payload,
         )
+        live_goal = None
+        live_goal_transition = None
+        try:
+            session_manager = get_global_session_manager()
+            if session_manager:
+                goal = session_manager.get_goal(session_id)
+                if goal:
+                    live_goal = goal.model_dump(mode="json")
+                live_goal_transition = session_manager.get_goal_transition(session_id)
+        except Exception as goal_exc:
+            logger.bind(session_id=session_id).debug(f"读取流结束 goal 失败: {goal_exc}")
 
         yield json.dumps(
             {
@@ -1014,6 +1121,8 @@ async def execute_chat_session(
                 "session_id": session_id,
                 "timestamp": time.time(),
                 "total_stream_count": stream_counter,
+                "goal": live_goal,
+                "goal_transition": live_goal_transition,
             },
             ensure_ascii=False,
         ) + "\n"

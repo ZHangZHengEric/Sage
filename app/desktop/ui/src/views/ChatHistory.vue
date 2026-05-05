@@ -32,6 +32,19 @@
               </SelectContent>
             </Select>
 
+            <Select v-model="filterGoalStatus">
+              <SelectTrigger class="h-8 w-[118px] rounded-xl border-border/50 bg-background/60 text-[12px] shadow-none dark:bg-background/20">
+                <SelectValue :placeholder="t('history.goalStatusAll')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{{ t('history.goalStatusAll') }}</SelectItem>
+                <SelectItem value="active">{{ t('chat.goalStatus.active') }}</SelectItem>
+                <SelectItem value="paused">{{ t('chat.goalStatus.paused') }}</SelectItem>
+                <SelectItem value="completed">{{ t('chat.goalStatus.completed') }}</SelectItem>
+                <SelectItem value="none">{{ t('history.goalStatusNone') }}</SelectItem>
+              </SelectContent>
+            </Select>
+
             <Select v-model="sortBy">
               <SelectTrigger class="h-8 w-[92px] rounded-xl border-border/50 bg-background/60 text-[12px] shadow-none dark:bg-background/20">
                 <SelectValue :placeholder="t('history.sortByDate')" />
@@ -71,6 +84,19 @@
               <SelectItem v-for="agent in agents" :key="agent.id" :value="agent.id">
                 {{ agent.name }}
               </SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select v-model="filterGoalStatus">
+            <SelectTrigger class="h-8.5 w-[118px] rounded-xl border-border/50 bg-background/60 text-[12px] shadow-none dark:bg-background/20">
+              <SelectValue :placeholder="t('history.goalStatusAll')" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{{ t('history.goalStatusAll') }}</SelectItem>
+              <SelectItem value="active">{{ t('chat.goalStatus.active') }}</SelectItem>
+              <SelectItem value="paused">{{ t('chat.goalStatus.paused') }}</SelectItem>
+              <SelectItem value="completed">{{ t('chat.goalStatus.completed') }}</SelectItem>
+              <SelectItem value="none">{{ t('history.goalStatusNone') }}</SelectItem>
             </SelectContent>
           </Select>
           
@@ -120,6 +146,13 @@
                 <h3 class="min-w-0 flex-1 truncate text-[14px] font-semibold tracking-tight text-foreground">
                   {{ conversation.display_title || conversation.title }}
                 </h3>
+                <Badge
+                  v-if="conversation.goal?.status"
+                  variant="outline"
+                  class="hidden h-5 shrink-0 rounded-full px-2 text-[10px] lg:inline-flex"
+                >
+                  {{ t(`chat.goalStatus.${conversation.goal.status}`) || conversation.goal.status }}
+                </Badge>
                 <div class="hidden shrink-0 items-center gap-2 overflow-hidden text-[11px] text-muted-foreground lg:flex">
                   <div class="flex min-w-0 items-center gap-1.5 rounded-full bg-muted/18 px-1.5 py-0.5 ring-1 ring-border/20">
                     <Bot class="h-3 w-3 text-primary/80" />
@@ -174,7 +207,21 @@
                 </div>
               </div>
 
+              <div
+                v-if="conversation.goal?.objective"
+                class="mt-1 truncate text-[11px] text-muted-foreground/85"
+              >
+                {{ t('chat.currentGoal') }} · {{ conversation.goal.objective }}
+              </div>
+
               <div class="mt-0.5 flex items-center gap-2 overflow-hidden text-[11px] text-muted-foreground lg:hidden">
+                <Badge
+                  v-if="conversation.goal?.status"
+                  variant="outline"
+                  class="h-5 shrink-0 rounded-full px-2 text-[10px]"
+                >
+                  {{ t(`chat.goalStatus.${conversation.goal.status}`) || conversation.goal.status }}
+                </Badge>
                 <div class="flex min-w-0 items-center gap-1.5 rounded-full bg-muted/18 px-1.5 py-0.5 ring-1 ring-border/20">
                   <Bot class="h-3 w-3 text-primary/80" />
                   <span class="truncate font-medium text-foreground/85">{{ getAgentName(conversation.agent_id) }}</span>
@@ -382,6 +429,7 @@ import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 // UI Components
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import {
   Select,
   SelectContent,
@@ -417,6 +465,7 @@ const { t, language } = useLanguage()
 // State
 const searchTerm = ref(route.query.search || '')
 const filterAgent = ref(route.query.agent_id || 'all')
+const filterGoalStatus = ref(route.query.goal_status || 'all')
 const sortBy = ref(route.query.sort_by || 'date')
 const selectedConversations = ref(new Set())
 const showShareModal = ref(false)
@@ -461,6 +510,7 @@ const loadConversationsPaginated = async () => {
       page_size: pageSize.value,
       search: searchTerm.value || undefined,
       agent_id: filterAgent.value !== 'all' ? filterAgent.value : undefined,
+      goal_status: filterGoalStatus.value !== 'all' ? filterGoalStatus.value : undefined,
       sort_by: sortBy.value,
     }
     const response = await chatAPI.getConversationsPaginated(params)
@@ -672,6 +722,7 @@ const updateUrlParams = () => {
       ...route.query,
       search: searchTerm.value || undefined,
       agent_id: filterAgent.value !== 'all' ? filterAgent.value : undefined,
+      goal_status: filterGoalStatus.value !== 'all' ? filterGoalStatus.value : undefined,
       sort_by: sortBy.value,
       page: currentPage.value > 1 ? String(currentPage.value) : undefined
     }
@@ -679,7 +730,7 @@ const updateUrlParams = () => {
 }
 
 // 监听搜索、过滤和排序条件的变化
-watch([searchTerm, filterAgent, sortBy], () => {
+watch([searchTerm, filterAgent, filterGoalStatus, sortBy], () => {
   if (currentPage.value !== 1) {
     currentPage.value = 1 // 会触发 watch(currentPage)
   } else {

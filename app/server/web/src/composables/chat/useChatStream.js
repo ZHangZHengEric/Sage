@@ -1,4 +1,5 @@
 import { normalizeAgentMode } from '@/utils/agentMode.js'
+import { extractGoalPayloadFromStreamEvent, extractGoalTransitionFromStreamEvent } from './goalSync.js'
 
 const ENABLE_PLAN_TAG_RE = /^\s*<enable_plan>\s*(true|false)\s*<\/enable_plan>\s*/i
 const ENABLE_DEEP_THINKING_TAG_RE = /^\s*<enable_deep_thinking>\s*(true|false)\s*<\/enable_deep_thinking>\s*/i
@@ -134,8 +135,21 @@ export const useChatStream = ({
   loadConversationMessages,
   isHistoryLoading,
   removeSessionFromCache,
-  language
+  language,
+  onSessionGoal,
+  onSessionGoalTransition
 }) => {
+  const syncGoalFromEvent = (data, sessionId) => {
+    const goal = extractGoalPayloadFromStreamEvent(data)
+    if (typeof onSessionGoal === 'function' && goal !== undefined) {
+      onSessionGoal(goal, sessionId)
+    }
+    const goalTransition = extractGoalTransitionFromStreamEvent(data)
+    if (typeof onSessionGoalTransition === 'function' && goalTransition !== undefined) {
+      onSessionGoalTransition(goalTransition, sessionId)
+    }
+  }
+
   const markCompletedAndCleanupCurrentSession = (sessionId) => {
     updateActiveSession(sessionId, false, null, null, false)
     if (currentSessionId.value === sessionId) {
@@ -194,6 +208,7 @@ export const useChatStream = ({
           resumeLastIndex += 1
           updateActiveSessionLastIndex(sessionId, resumeLastIndex)
           if (resumeLastIndex % 20 === 0) updateActiveSessionLastIndex(sessionId, resumeLastIndex, true)
+          syncGoalFromEvent(data, sessionId)
           if (data.type === 'stream_end') {
             updateActiveSessionLastIndex(sessionId, resumeLastIndex, true)
             resumedAndCompleted = true
@@ -307,6 +322,7 @@ export const useChatStream = ({
           streamLastIndex += 1
           updateActiveSessionLastIndex(sessionId, streamLastIndex)
           if (streamLastIndex % 20 === 0) updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
+          syncGoalFromEvent(data, sessionId)
           if (data.type === 'stream_end') {
             updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
             markCompletedAndCleanupCurrentSession(sessionId)
@@ -368,6 +384,7 @@ export const useChatStream = ({
           streamLastIndex += 1
           updateActiveSessionLastIndex(sessionId, streamLastIndex)
           if (streamLastIndex % 20 === 0) updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
+          syncGoalFromEvent(data, sessionId)
           if (data.type === 'stream_end') {
             updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
             markCompletedAndCleanupCurrentSession(sessionId)
@@ -482,6 +499,14 @@ export const useChatStream = ({
           markSessionInterrupted(sessionId, '用户请求中断', true)
         }
         await chatAPI.interruptSession(sessionId, '用户请求中断')
+        if (typeof onSessionGoal === 'function') {
+          try {
+            const result = await chatAPI.getSessionGoal(sessionId)
+            onSessionGoal(result?.goal || null, sessionId)
+          } catch (goalError) {
+            console.warn('[ChatStream] Failed to refresh goal after interrupt:', goalError)
+          }
+        }
       }
     } catch (error) {
       console.error('Error interrupting session:', error)

@@ -19,6 +19,29 @@ impl App {
         self.append_live_chunk(MessageKind::Process, chunk);
     }
 
+    pub fn set_live_notice(&mut self, kind: MessageKind, text: &str) {
+        if text.trim().is_empty() {
+            return;
+        }
+        self.record_first_output();
+        match self.live_message.as_mut() {
+            Some((current_kind, current)) if *current_kind == kind => {
+                current.clear();
+                current.push_str(text);
+                self.live_message_had_history = false;
+            }
+            Some(_) => {
+                self.flush_live_message();
+                self.live_message = Some((kind, text.to_string()));
+                self.live_message_had_history = false;
+            }
+            None => {
+                self.live_message = Some((kind, text.to_string()));
+                self.live_message_had_history = false;
+            }
+        }
+    }
+
     pub fn push_message(&mut self, kind: MessageKind, text: impl Into<String>) {
         self.flush_live_message();
         self.queue_message(kind, text.into());
@@ -183,7 +206,23 @@ impl App {
 
         match &self.live_message {
             Some((kind, text)) if !text.trim().is_empty() => format_message(*kind, text, false),
-            _ => format_message(MessageKind::Process, "working...", false),
+            _ => {
+                if let Some(tool) = self.active_tool_status() {
+                    format_message_continuation(
+                        MessageKind::Tool,
+                        &format!("running {tool}"),
+                        false,
+                    )
+                } else if let Some(phase) = self.active_phase_label() {
+                    format_message_continuation(
+                        MessageKind::Process,
+                        &format!("{phase}..."),
+                        false,
+                    )
+                } else {
+                    format_message_continuation(MessageKind::Process, "working...", false)
+                }
+            }
         }
     }
 
@@ -203,6 +242,9 @@ impl App {
             self.display_mode,
             self.max_loop_count,
             &self.workspace_label,
+            self.current_goal
+                .as_ref()
+                .map(|goal| (goal.objective.as_str(), goal.status.as_str())),
         )
     }
 
@@ -348,6 +390,9 @@ impl App {
             self.display_mode,
             self.max_loop_count,
             &self.workspace_label,
+            self.current_goal
+                .as_ref()
+                .map(|goal| (goal.objective.as_str(), goal.status.as_str())),
         );
         lines.append(&mut self.pending_history_lines);
         self.pending_history_lines = lines;

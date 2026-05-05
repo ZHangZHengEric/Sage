@@ -15,7 +15,7 @@ pub(crate) use api::{
 };
 pub(crate) use handle::BackendHandle;
 pub use types::{
-    AgentInfo, BackendEvent, BackendPhaseTiming, BackendRequest, BackendStats, BackendToolStep,
-    ConfigInfo, ConfigInitInfo, ProviderInfo, ProviderMutation, ProviderVerifyInfo, SessionDetail,
-    SessionMessage, SessionSummary, SkillInfo,
+    AgentInfo, BackendEvent, BackendGoal, BackendGoalTransition, BackendPhaseTiming, BackendRequest, BackendSessionMeta,
+    BackendStats, BackendToolStep, ConfigInfo, ConfigInitInfo, ProviderInfo, ProviderMutation,
+    ProviderVerifyInfo, SessionDetail, SessionMessage, SessionSummary, SkillInfo,
 };

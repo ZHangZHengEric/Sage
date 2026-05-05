@@ -193,6 +193,9 @@ sage run --workspace /path/to/project --stats "简单分析一下这个仓库。
 - `--user-id`
 - `--agent-id`
 - `--agent-mode`
+- `--goal`
+- `--goal-status`
+- `--clear-goal`
 - `--workspace`
 - `--skill`（可重复）
 - `--max-loop-count`
@@ -215,12 +218,18 @@ sage chat
 sage chat --stats
 sage chat --workspace /path/to/project
 sage chat --skill my_skill
+sage chat --goal "完成 runtime goal contract"
 ```
 
 内置命令：
 
 - `/help`：查看内置命令帮助
 - `/session`：输出当前 session id
+- `/goal`：查看当前 session goal
+- `/goal <objective>`：设置当前 goal，并立即提交同一句任务
+- `/goal set <objective>`：为下一次请求设置或替换 goal
+- `/goal clear`：为下一次请求清除 goal
+- `/goal done`：将当前 goal 标记为完成
 - `/exit`：退出会话
 - `/quit`：退出会话的兼容别名
 
@@ -386,9 +395,10 @@ sage chat --skill my_skill
 
 以结构化流事件的方式输出，而不是仅输出纯文本。
 
-现在的 JSON 流可以分成四层：
+现在的 JSON 流可以分成五层：
 
 - 会话初始化事件：`cli_session`
+- 目标状态事件：`cli_goal`
 - 原始运行时事件，例如 `assistant`、`analysis`、`tool_call`、`tool_result`
 - CLI 控制事件，例如 `cli_phase` 和 `cli_tool`
 - 如果启用了 `--stats`，结尾追加一个 `cli_stats` 事件
@@ -396,11 +406,12 @@ sage chat --skill my_skill
 建议按下面这套 contract 来消费：
 
 - `cli_session`：在流式运行输出前先发出，包含最终解析后的 `session_id`、`command_mode`、`session_state`、`user_id`、`agent_id`、`agent_mode`、`workspace`、`workspace_source`、requested skills、`max_loop_count`、`has_prior_messages`、`prior_message_count`，以及用于 resume hydration 的可选 `session_summary`
+- `cli_goal`：当 CLI 需要把 session goal 作为一等 UI 事件暴露出来时发出，包含最终解析后的 `session_id`、`command_mode`、`session_state`、`source`，以及可用的 `goal`、`goal_transition`、`goal_outcome`
 - `cli_phase`：CLI 检测到阶段切换时发出，例如 `planning`、`tool`、`assistant_text`
 - `cli_tool`：工具 step 开始或结束时发出，包含 `action`、`step`、`tool_name`、`tool_call_id`、`status`
 - `cli_stats`：只在结束时发出一次，包含最终 `tool_steps`、`phase_timings`、时延摘要和 token 摘要
 
-对前端消费者来说，`cli_session`、`cli_phase` 和 `cli_tool` 应该作为首选的 UI contract；原始 `tool_call` / `tool_result` 更适合作为兼容输入，而不是主要展示协议。`cli_session.session_id` 从首个事件开始就应该是稳定的，即使这次请求没有显式传 `--session-id` 也是如此。`session_state`、`has_prior_messages` 和 `prior_message_count` 用来让前端直接判断这是新会话还是接在已有会话上，而不必自己再从 `command_mode` 和 `session_summary` 里推断。如果传了 `--workspace`，事件里输出的 `workspace` 也应该是 backend 实际使用的规范化绝对路径。
+对前端消费者来说，`cli_session`、`cli_goal`、`cli_phase` 和 `cli_tool` 应该作为首选的 UI contract；原始 `tool_call` / `tool_result` 更适合作为兼容输入，而不是主要展示协议。`cli_session.session_id` 从首个事件开始就应该是稳定的，即使这次请求没有显式传 `--session-id` 也是如此。`session_state`、`has_prior_messages` 和 `prior_message_count` 用来让前端直接判断这是新会话还是接在已有会话上，而不必自己再从 `command_mode` 和 `session_summary` 里推断。`cli_goal` 的存在，是为了让目标更新不必只从通用 runtime 事件里反推。如果传了 `--workspace`，事件里输出的 `workspace` 也应该是 backend 实际使用的规范化绝对路径。
 
 当和 `--stats` 一起使用时，CLI 会在结尾追加一个 `cli_stats` JSON 事件：
 

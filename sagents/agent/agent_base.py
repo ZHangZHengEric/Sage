@@ -37,6 +37,10 @@ from sagents.utils.agent_session_helper import (
     get_live_session_context as _get_live_session_context_util,
     should_abort_due_to_session as _should_abort_due_to_session_util,
 )
+from sagents.agent.lightweight_intent import (
+    extract_latest_user_text_from_any,
+    should_skip_preflight_for_lightweight_prompt,
+)
 import traceback
 import time
 import os
@@ -149,6 +153,7 @@ class AgentBase(ABC):
         """
         logger.debug(f"{self.__class__.__name__}: 调用语言模型进行流式生成, session_id={session_id}")
 
+        session = None
         if session_id:
             session = self._get_live_session(session_id)
             if session is None:
@@ -177,11 +182,20 @@ class AgentBase(ABC):
             final_config.pop('model_type', None)
         all_chunks = []
 
-        # 重试配置 - 增加重试次数以应对网络不稳定情况
-        max_retries = 8
+        # 重试配置 - 默认允许较充分的网络重试；对明显轻量的直答请求收紧预算，
+        # 避免 "hello" 之类的小请求被指数退避拖到几十秒。
+        latest_user_text = extract_latest_user_text_from_any(messages)
+        is_lightweight_prompt = should_skip_preflight_for_lightweight_prompt(latest_user_text)
+        fast_retry_mode = step_name == "direct_execution" and is_lightweight_prompt
+        max_retries = 3 if fast_retry_mode else 8
         retry_count = 0
         last_exception = None
         structured_output_fallback_used = False
+        if fast_retry_mode:
+            logger.info(
+                f"{self.__class__.__name__}: 轻量请求命中快速重试策略，"
+                f"latest_user_text={latest_user_text}, max_retries={max_retries}"
+            )
 
         while retry_count < max_retries:
             try:
@@ -422,6 +436,8 @@ class AgentBase(ABC):
                         wait_time = min(wait_time, 10)  # 超时错误最多等待10秒
                     else:
                         error_type = "网络连接"
+                    if fast_retry_mode:
+                        wait_time = min(wait_time, 2)
                     logger.warning(f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time} 秒后重试 ({retry_count}/{max_retries}): {e}")
                     await asyncio.sleep(wait_time)
                 elif is_token_limit_error:
@@ -476,6 +492,8 @@ class AgentBase(ABC):
                     import random
                     wait_time = min(2 ** retry_count + random.uniform(0, 1), 30)  # 最大30秒
                     error_type = "HTTP超时" if is_httpx_error else "网络"
+                    if fast_retry_mode:
+                        wait_time = min(wait_time, 2)
                     logger.warning(f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time:.1f} 秒后重试 ({retry_count}/{max_retries}): {e}")
                     await asyncio.sleep(wait_time)
                     continue  # 继续重试循环
@@ -652,6 +670,10 @@ class AgentBase(ABC):
         if session_context:
             system_context_info = session_context.system_context.copy()
             logger.debug(f"{self.__class__.__name__}: 添加运行时system_context到系统消息")
+            active_goal = system_context_info.pop("active_goal", None)
+            goal_continuation_policy = system_context_info.pop("goal_continuation_policy", None)
+            goal_resume_hint = system_context_info.pop("goal_resume_hint", None)
+            goal_transition = system_context_info.pop("goal_transition", None)
             use_claw_mode = os.environ.get("SAGE_USE_CLAW_MODE", "true").lower() == "true"
             if 'use_claw_mode' in system_context_info:
                 use_claw_mode = system_context_info.get("use_claw_mode", use_claw_mode)
@@ -827,6 +849,115 @@ class AgentBase(ABC):
                         )
                         if skills_hint:
                             semi_buf += f"<skill_usage>\n{skills_hint}\n</skill_usage>\n"
+
+            if 'system_context' in include_sections and isinstance(active_goal, dict):
+                goal_status = str(active_goal.get("status") or "").strip().lower()
+                if goal_resume_hint and not active_goal.get("resume_hint"):
+                    active_goal = {**active_goal, "resume_hint": goal_resume_hint}
+
+                is_zh = bool(language and str(language).lower().startswith("zh"))
+                if goal_status == "completed":
+                    goal_guidance = (
+                        "这个会话目标已经完成。除非用户明确重新开启或替换它，否则请将其视为已收口。"
+                        if is_zh else
+                        "This session goal has already been completed. Treat it as closed "
+                        "unless the user explicitly reopens or replaces it."
+                    )
+                elif goal_status == "paused":
+                    goal_guidance = (
+                        "这个会话目标当前处于暂停状态。如果用户恢复工作，请基于当前进展继续推进，而不是重新开始。"
+                        if is_zh else
+                        "This session goal is paused. If the user resumes work, continue "
+                        "from the current state instead of restarting from scratch."
+                    )
+                else:
+                    goal_guidance = (
+                        "这是当前会话的活跃目标。请在本次会话中持续围绕它推进，直到目标被完成、清除或替换。"
+                        if is_zh else
+                        "This is the active session goal. Continue pursuing it across the "
+                        "current session until it is completed, cleared, or replaced."
+                    )
+
+                volatile_buf += "<active_goal>\n"
+                volatile_buf += json.dumps(active_goal, ensure_ascii=False, indent=2)
+                volatile_buf += "\n</active_goal>\n"
+                volatile_buf += f"<active_goal_guidance>\n{goal_guidance}\n</active_goal_guidance>\n"
+
+            if 'system_context' in include_sections and isinstance(goal_continuation_policy, dict):
+                policy_mode = str(goal_continuation_policy.get("mode") or "").strip().lower()
+                is_zh = bool(language and str(language).lower().startswith("zh"))
+                if policy_mode == "closed":
+                    policy_guidance = (
+                        "当前目标已关闭。除非用户明确重新开启或替换目标，否则不要继续沿着它推进。"
+                        if is_zh else
+                        "The current goal is closed. Do not continue it unless the user explicitly reopens or replaces it."
+                    )
+                elif policy_mode == "await_resume":
+                    policy_guidance = (
+                        "当前目标处于暂停等待状态。除非用户恢复或提供新指令，否则不要继续执行它。"
+                        if is_zh else
+                        "The current goal is paused and awaiting resume. Do not continue it until the user resumes it or provides new direction."
+                    )
+                elif policy_mode == "resume_active_goal":
+                    policy_guidance = (
+                        "这是一次恢复后的目标继续执行。请承接已有进展继续推进，不要重新从头规划。"
+                        if is_zh else
+                        "This is a resumed goal continuation. Build on prior progress and continue forward without restarting the plan from scratch."
+                    )
+                else:
+                    policy_guidance = (
+                        "请继续围绕当前活跃目标推进，并在每一轮显式收口它的状态。"
+                        if is_zh else
+                        "Continue pursuing the active goal and make its status explicit as the session progresses."
+                    )
+
+                volatile_buf += "<goal_continuation_policy>\n"
+                volatile_buf += json.dumps(goal_continuation_policy, ensure_ascii=False, indent=2)
+                volatile_buf += "\n</goal_continuation_policy>\n"
+                volatile_buf += f"<goal_continuation_guidance>\n{policy_guidance}\n</goal_continuation_guidance>\n"
+
+            if 'system_context' in include_sections and isinstance(goal_transition, dict):
+                transition_type = str(goal_transition.get("type") or "").strip().lower()
+                is_zh = bool(language and str(language).lower().startswith("zh"))
+                if transition_type == "completed":
+                    transition_guidance = (
+                        "上一轮会话目标已明确完成。除非用户重新开启或替换目标，否则不要继续沿着该目标推进。"
+                        if is_zh else
+                        "The previous session goal has been explicitly completed. Do not continue "
+                        "pursuing it unless the user reopens or replaces that goal."
+                    )
+                elif transition_type == "cleared":
+                    transition_guidance = (
+                        "上一轮会话目标已被清除。不要默认延续旧目标，只有当用户重新提出时才恢复推进。"
+                        if is_zh else
+                        "The previous session goal has been cleared. Do not implicitly continue "
+                        "the old goal unless the user reintroduces it."
+                    )
+                elif transition_type == "replaced":
+                    transition_guidance = (
+                        "上一轮会话目标已被替换。请忽略旧目标，围绕新的活跃目标继续推进。"
+                        if is_zh else
+                        "The previous session goal has been replaced. Ignore the old goal and "
+                        "continue from the newly active one."
+                    )
+                elif transition_type == "resumed":
+                    transition_guidance = (
+                        "这是一次恢复后的继续执行。请承接已有进展推进当前目标，而不是从头开始。"
+                        if is_zh else
+                        "This is a resumed continuation. Build on prior progress for the current goal "
+                        "instead of restarting from scratch."
+                    )
+                else:
+                    transition_guidance = (
+                        "请根据当前的目标状态变化继续推进任务。"
+                        if is_zh else
+                        "Use the current goal transition as guidance for the next step."
+                    )
+
+                volatile_buf += "<goal_transition>\n"
+                volatile_buf += json.dumps(goal_transition, ensure_ascii=False, indent=2)
+                volatile_buf += "\n</goal_transition>\n"
+                volatile_buf += f"<goal_transition_guidance>\n{transition_guidance}\n</goal_transition_guidance>\n"
 
         # 兼容已有局部变量名（避免上游 logger 行依赖）
         system_prefix = stable_buf + semi_buf + volatile_buf

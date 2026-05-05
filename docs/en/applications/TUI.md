@@ -122,6 +122,7 @@ The current TUI preview includes these core commands:
 - `/mode`
 - `/display`
 - `/workspace`
+- `/goal`
 - `/interrupt`
 - `/retry`
 - `/new`
@@ -207,6 +208,23 @@ You can inspect or change the current terminal workspace from inside the TUI:
 /workspace set /path/to/project
 /workspace clear
 ```
+
+## Goal Control
+
+The terminal can carry a session goal through the shared Sage runtime contract.
+
+```text
+/goal
+/goal <objective>
+/goal show
+/goal set <objective>
+/goal clear
+/goal done
+```
+
+`/goal <objective>` sets the session goal and immediately submits the same objective as the next task, matching the Codex-style flow.
+
+`/goal set` still queues the goal without running anything yet. Once the backend hydrates the session again, the terminal shows the resolved goal state from the runtime.
 
 ## Run Control
 

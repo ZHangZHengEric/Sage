@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional, List, Union
 from enum import Enum
 from concurrent.futures import ThreadPoolExecutor
 
-from sagents.context.messages.message import MessageChunk
+from sagents.context.messages.message import MessageChunk, MessageRole
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_memory import create_session_memory_manager
 from sagents.skill import SkillProxy, SkillManager
@@ -26,6 +26,7 @@ import pytz
 from sagents.utils.sandbox import SandboxProviderFactory, SandboxConfig, SandboxType
 from sagents.utils.sandbox.config import VolumeMount
 from sagents.utils.common_utils import detect_machine_environment
+from common.schemas.goal import GoalStatus, SessionGoal
 
 _session_context_file_io_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="session-context-io")
 
@@ -150,6 +151,7 @@ class SessionContext:
         self.audit_status: Dict[str, Any] = {}
         self.session_memory_manager = create_session_memory_manager()
         self.agent_config: Dict[str, Any] = {}
+        self.goal: Optional[SessionGoal] = None
         self.custom_sub_agents: List[Dict[str, Any]] = []
         self.orchestrator: Optional[Any] = None
         self.child_session_ids: List[str] = []
@@ -537,6 +539,12 @@ class SessionContext:
             for msg in valid_messages:
                 self._record_message_timing(msg)
             self.message_manager.add_messages(valid_messages)
+            if self.audit_status.get("goal_transition") and any(
+                isinstance(msg, MessageChunk) and msg.role == MessageRole.ASSISTANT.value
+                for msg in valid_messages
+            ):
+                self.audit_status.pop("goal_transition", None)
+                self._sync_goal_runtime_context()
 
     def get_messages(self) -> List[MessageChunk]:
         """
@@ -546,6 +554,195 @@ class SessionContext:
             List[MessageChunk]: 消息列表
         """
         return self.message_manager.messages
+
+    def get_goal(self) -> Optional[SessionGoal]:
+        return self.goal
+
+    def _build_goal_continuation_policy(self) -> Optional[Dict[str, Any]]:
+        if not self.goal:
+            return None
+
+        policy: Dict[str, Any] = {
+            "objective": self.goal.objective,
+            "status": self.goal.status.value,
+        }
+        transition = self.audit_status.get("goal_transition")
+        if isinstance(transition, dict):
+            policy["transition"] = transition
+
+        if self.goal.status == GoalStatus.COMPLETED:
+            policy["mode"] = "closed"
+            policy["instruction"] = (
+                "Treat this goal as closed. Do not continue it unless the user explicitly reopens or replaces it."
+            )
+            return policy
+
+        if self.goal.status == GoalStatus.PAUSED:
+            policy["mode"] = "await_resume"
+            if self.goal.paused_reason:
+                policy["paused_reason"] = self.goal.paused_reason
+                policy["instruction"] = (
+                    f"This goal is paused ({self.goal.paused_reason}). Wait for resume or new user direction before continuing."
+                )
+            else:
+                policy["instruction"] = (
+                    "This goal is paused. Wait for resume or new user direction before continuing."
+                )
+            return policy
+
+        resume_hint = self.audit_status.get("goal_resume_hint")
+        if isinstance(resume_hint, str) and resume_hint.strip():
+            policy["mode"] = "resume_active_goal"
+            policy["resume_hint"] = resume_hint.strip()
+            policy["instruction"] = (
+                "Continue the active goal from prior progress after resume. Do not restart from scratch."
+            )
+        else:
+            policy["mode"] = "continue_active_goal"
+            policy["instruction"] = (
+                "Continue pursuing the active goal across turns until it is completed, cleared, or replaced."
+            )
+        return policy
+
+    def _sync_goal_runtime_context(self) -> None:
+        self.system_context.pop("active_goal", None)
+        self.system_context.pop("goal_resume_hint", None)
+        self.system_context.pop("goal_transition", None)
+        self.system_context.pop("goal_continuation_policy", None)
+
+        transition = self.audit_status.get("goal_transition")
+        if isinstance(transition, dict):
+            self.system_context["goal_transition"] = transition
+
+        if not self.goal:
+            return
+
+        payload: Dict[str, Any] = {
+            "objective": self.goal.objective,
+            "status": self.goal.status.value,
+            "created_at": self.goal.created_at,
+            "updated_at": self.goal.updated_at,
+        }
+        if self.goal.completed_at is not None:
+            payload["completed_at"] = self.goal.completed_at
+        if self.goal.paused_reason:
+            payload["paused_reason"] = self.goal.paused_reason
+
+        resume_hint = self.audit_status.get("goal_resume_hint")
+        if isinstance(resume_hint, str) and resume_hint.strip():
+            payload["resume_hint"] = resume_hint.strip()
+            self.system_context["goal_resume_hint"] = resume_hint.strip()
+
+        self.system_context["active_goal"] = payload
+        continuation_policy = self._build_goal_continuation_policy()
+        if continuation_policy:
+            self.system_context["goal_continuation_policy"] = continuation_policy
+
+    def set_goal(self, objective: str, status: GoalStatus = GoalStatus.ACTIVE) -> SessionGoal:
+        now = time.time()
+        previous_goal = self.goal
+        completed_at = now if status == GoalStatus.COMPLETED else None
+        paused_reason = self.goal.paused_reason if self.goal and status == GoalStatus.PAUSED else None
+        self.goal = SessionGoal(
+            objective=objective.strip(),
+            status=status,
+            created_at=self.goal.created_at if self.goal else now,
+            updated_at=now,
+            completed_at=completed_at,
+            paused_reason=paused_reason,
+        )
+        self.audit_status.pop("goal_resume_hint", None)
+        if previous_goal and previous_goal.objective.strip() != self.goal.objective:
+            self.audit_status["goal_transition"] = {
+                "type": "replaced",
+                "previous_objective": previous_goal.objective,
+                "previous_status": previous_goal.status.value,
+                "objective": self.goal.objective,
+                "status": self.goal.status.value,
+            }
+        else:
+            self.audit_status.pop("goal_transition", None)
+        self.audit_status["goal_status"] = self.goal.status.value
+        self.audit_status["goal_objective"] = self.goal.objective
+        self._sync_goal_runtime_context()
+        return self.goal
+
+    def clear_goal(self) -> None:
+        previous_goal = self.goal
+        self.goal = None
+        self.audit_status.pop("goal_status", None)
+        self.audit_status.pop("goal_objective", None)
+        self.audit_status.pop("goal_resume_hint", None)
+        if previous_goal:
+            self.audit_status["goal_transition"] = {
+                "type": "cleared",
+                "previous_objective": previous_goal.objective,
+                "previous_status": previous_goal.status.value,
+            }
+        else:
+            self.audit_status.pop("goal_transition", None)
+        self._sync_goal_runtime_context()
+
+    def pause_goal(self, reason: Optional[str] = None) -> Optional[SessionGoal]:
+        if not self.goal or self.goal.status == GoalStatus.COMPLETED:
+            return self.goal
+        self.goal.status = GoalStatus.PAUSED
+        self.goal.updated_at = time.time()
+        self.goal.paused_reason = reason
+        self.goal.completed_at = None
+        self.audit_status["goal_status"] = self.goal.status.value
+        self.audit_status["goal_objective"] = self.goal.objective
+        self.audit_status.pop("goal_resume_hint", None)
+        self.audit_status.pop("goal_transition", None)
+        self._sync_goal_runtime_context()
+        return self.goal
+
+    def activate_goal(self) -> Optional[SessionGoal]:
+        if not self.goal or self.goal.status == GoalStatus.COMPLETED:
+            return self.goal
+        was_paused = self.goal.status == GoalStatus.PAUSED
+        paused_reason = self.goal.paused_reason
+        self.goal.status = GoalStatus.ACTIVE
+        self.goal.updated_at = time.time()
+        self.goal.paused_reason = None
+        self.goal.completed_at = None
+        self.audit_status["goal_status"] = self.goal.status.value
+        self.audit_status["goal_objective"] = self.goal.objective
+        if was_paused:
+            if paused_reason:
+                self.audit_status["goal_resume_hint"] = (
+                    f"Continue the active goal after resume. Previous pause reason: {paused_reason}"
+                )
+            else:
+                self.audit_status["goal_resume_hint"] = "Continue the active goal after resume."
+            self.audit_status["goal_transition"] = {
+                "type": "resumed",
+                "objective": self.goal.objective,
+            }
+        else:
+            self.audit_status.pop("goal_resume_hint", None)
+            self.audit_status.pop("goal_transition", None)
+        self._sync_goal_runtime_context()
+        return self.goal
+
+    def complete_goal(self) -> Optional[SessionGoal]:
+        if not self.goal:
+            return None
+        now = time.time()
+        self.goal.status = GoalStatus.COMPLETED
+        self.goal.updated_at = now
+        self.goal.completed_at = now
+        self.goal.paused_reason = None
+        self.audit_status["goal_status"] = self.goal.status.value
+        self.audit_status["goal_objective"] = self.goal.objective
+        self.audit_status.pop("goal_resume_hint", None)
+        self.audit_status["goal_transition"] = {
+            "type": "completed",
+            "objective": self.goal.objective,
+            "status": self.goal.status.value,
+        }
+        self._sync_goal_runtime_context()
+        return self.goal
 
     def _write_default_md_file(self, file_path: str, prompt_key: str, file_label: str):
         """
@@ -1466,6 +1663,7 @@ class SessionContext:
                 "system_context": make_serializable(self.system_context),
                 "audit_status": make_serializable(self.audit_status),
                 "tokens_usage_info": self.get_tokens_usage_info(),
+                "goal": make_serializable(self.goal.model_dump(mode="json")) if self.goal else None,
 
                 # Agent 配置
                 "agent_config": make_serializable(self.agent_config)

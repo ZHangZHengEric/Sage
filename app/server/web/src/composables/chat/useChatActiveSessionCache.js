@@ -60,6 +60,33 @@ const deriveSessionTitle = (content = '') => {
   return normalized.length > 50 ? `${normalized.slice(0, 50)}...` : normalized
 }
 
+const normalizeGoalPayload = (goal) => {
+  if (!goal || typeof goal !== 'object') return null
+  const objective = String(goal.objective || '').trim()
+  if (!objective) return null
+  return {
+    objective,
+    status: String(goal.status || '').trim() || 'active',
+    created_at: goal.created_at || null,
+    updated_at: goal.updated_at || null,
+    completed_at: goal.completed_at || null,
+    paused_reason: goal.paused_reason || null
+  }
+}
+
+const normalizeGoalTransitionPayload = (transition) => {
+  if (!transition || typeof transition !== 'object') return null
+  const transitionType = String(transition.type || '').trim()
+  if (!transitionType) return null
+  return {
+    type: transitionType,
+    objective: transition.objective || null,
+    status: transition.status || null,
+    previous_objective: transition.previous_objective || null,
+    previous_status: transition.previous_status || null
+  }
+}
+
 const syncSessionOffsetsFromActiveSessions = () => {
   const nextOffsets = {}
   Object.entries(activeSessions.value || {}).forEach(([sid, meta]) => {
@@ -89,6 +116,8 @@ const updateLocalCacheFromRemote = (remoteSessions) => {
       title: queryText,
       user_input: queryText,
       status: nextStatus,
+      goal: normalizeGoalPayload(session.goal),
+      goal_transition: normalizeGoalTransitionPayload(session.goal_transition),
       include_in_sidebar: true,
       last_index: existing.last_index || 0
     }

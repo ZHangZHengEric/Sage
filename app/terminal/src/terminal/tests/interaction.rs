@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,6 +11,22 @@ use crate::slash_command;
 
 use super::super::{handle_key, INLINE_VIEWPORT_IDLE_HEIGHT, INLINE_VIEWPORT_MAX_HEIGHT};
 use crate::terminal_layout::desired_viewport_height;
+
+#[test]
+fn terminal_loop_accepts_repeat_key_events_for_submission() {
+    assert!(super::super::should_handle_key_event(KeyEventKind::Press));
+    assert!(super::super::should_handle_key_event(KeyEventKind::Repeat));
+    assert!(!super::super::should_handle_key_event(KeyEventKind::Release));
+}
+
+#[test]
+fn key_debug_toggle_defaults_to_disabled() {
+    std::env::remove_var("SAGE_TERMINAL_DEBUG_KEYS");
+    super::super::emit_key_debug_if_enabled(&KeyEvent::new(
+        KeyCode::Enter,
+        KeyModifiers::NONE,
+    ));
+}
 
 #[test]
 fn help_overlay_consumes_typing_without_mutating_input() {

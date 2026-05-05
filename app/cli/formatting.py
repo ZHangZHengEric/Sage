@@ -14,6 +14,13 @@ def _print_session_summary(summary: Dict[str, Any], *, prefix: str = "session") 
     print(f"agent_name: {summary.get('agent_name')}")
     print(f"updated_at: {summary.get('updated_at')}")
     print(f"message_count: {summary.get('message_count')}")
+    goal = summary.get("goal") or {}
+    if isinstance(goal, dict) and goal.get("objective"):
+        print(f"goal: {_truncate(goal.get('objective'), 120)}")
+        print(f"goal_status: {goal.get('status')}")
+    transition = summary.get("goal_transition") or {}
+    if isinstance(transition, dict) and transition.get("type"):
+        print(f"goal_transition: {transition.get('type')}")
 
 
 def _print_message_preview(message: Optional[Dict[str, Any]], *, label: str) -> None:
@@ -43,4 +50,3 @@ def _print_provider_summary(provider: Optional[Dict[str, Any]], *, prefix: str =
         print(f"created_at: {provider.get('created_at')}")
     if provider.get("updated_at"):
         print(f"updated_at: {provider.get('updated_at')}")
-

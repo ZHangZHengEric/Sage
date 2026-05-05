@@ -12,6 +12,10 @@ import uuid
 from typing import Any, Dict, List, Optional, AsyncGenerator
 
 from sagents.agent.agent_base import AgentBase
+from sagents.agent.lightweight_intent import (
+    extract_latest_user_text,
+    should_skip_preflight_for_lightweight_prompt,
+)
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_context import SessionContext
@@ -60,6 +64,15 @@ class ToolSuggestionAgent(AgentBase):
         language = session_context.get_language()
 
         history_messages = message_manager.extract_all_context_messages(recent_turns=1)
+        latest_user_text = extract_latest_user_text(history_messages)
+        if should_skip_preflight_for_lightweight_prompt(latest_user_text):
+            logger.info(
+                "ToolSuggestionAgent: 跳过轻量请求的工具推荐，latest_user_text=%s",
+                latest_user_text,
+            )
+            session_context.audit_status['suggested_tools'] = []
+            yield []
+            return
         # 根据 active_budget 压缩消息
         budget_info = message_manager.context_budget_manager.budget_info
         if budget_info:

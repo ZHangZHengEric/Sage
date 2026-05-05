@@ -11,6 +11,10 @@ import uuid
 from typing import Any, Dict, List, Optional, AsyncGenerator
 
 from sagents.agent.agent_base import AgentBase
+from sagents.agent.lightweight_intent import (
+    extract_latest_user_text,
+    should_skip_preflight_for_lightweight_prompt,
+)
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_context import SessionContext
@@ -89,6 +93,15 @@ class MemoryRecallAgent(AgentBase):
         session_id = session_context.session_id
         message_manager = session_context.message_manager
         tool_manager = session_context.tool_manager
+        lightweight_messages = message_manager.extract_all_context_messages(recent_turns=1)
+        latest_user_text = extract_latest_user_text(lightweight_messages)
+        if should_skip_preflight_for_lightweight_prompt(latest_user_text):
+            logger.info(
+                "MemoryRecallAgent: 跳过轻量请求的记忆召回，latest_user_text=%s",
+                latest_user_text,
+            )
+            yield []
+            return
         # 如果 search_memory 不可用，则不进行记忆召回
         if 'search_memory' not in tool_manager.list_all_tools_name():
             logger.warning("MemoryRecallAgent: search_memory 工具不可用，无法进行记忆召回")

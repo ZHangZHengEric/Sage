@@ -152,7 +152,10 @@ class PromptManager:
                 if agent_name not in self.agent_prompts_pt:
                     self.agent_prompts_pt[agent_name] = {}
                 self.agent_prompts_pt[agent_name].update(module_content)
-        print(f"Agent prompt加载完成: 中文{len(self.agent_prompts_zh)}个, 英文{len(self.agent_prompts_en)}个, 葡萄牙语{len(self.agent_prompts_pt)}个")
+        logger.debug(
+            f"Agent prompt加载完成: 中文{len(self.agent_prompts_zh)}个, "
+            f"英文{len(self.agent_prompts_en)}个, 葡萄牙语{len(self.agent_prompts_pt)}个"
+        )
     
     
     def get_prompt(self, key: str, default: Optional[str] = None, agent: Optional[str] = None, language: str = 'en') -> str:

@@ -79,6 +79,22 @@ export const chatAPI = {
     })
   },
 
+  getSessionGoal: async (sessionId) => {
+    return await request.get(`/api/sessions/${sessionId}/goal`)
+  },
+
+  setSessionGoal: async (sessionId, payload) => {
+    return await request.post(`/api/sessions/${sessionId}/goal`, payload)
+  },
+
+  clearSessionGoal: async (sessionId) => {
+    return await request.delete(`/api/sessions/${sessionId}/goal`)
+  },
+
+  completeSessionGoal: async (sessionId) => {
+    return await request.post(`/api/sessions/${sessionId}/goal/complete`, {})
+  },
+
   resumeStream: async (sessionId, lastIndex = 0, abortController = null) => {
     return await request.getStream(`/api/stream/resume/${sessionId}?last_index=${lastIndex}`, {
       signal: abortController

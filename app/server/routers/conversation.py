@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from common.core.request_identity import get_request_role, get_request_user_id
 from common.core.render import Response
+from common.schemas.goal import GoalSetRequest
 from common.services import conversation_router_service, conversation_service
 
 # 创建路由器
@@ -36,6 +37,44 @@ class UpdateTitleRequest(BaseModel):
 
 class EditLastUserMessageRequest(BaseModel):
     content: str
+
+
+@conversation_router.get("/api/sessions/{session_id}/goal")
+async def get_goal(session_id: str, request: Request):
+    result = await conversation_router_service.build_goal_status_response(
+        session_id,
+        user_id=get_request_user_id(request),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
+
+
+@conversation_router.post("/api/sessions/{session_id}/goal")
+async def set_goal(session_id: str, request: Request, body: GoalSetRequest):
+    result = await conversation_router_service.build_goal_set_response(
+        session_id,
+        objective=body.objective,
+        status=body.status,
+        user_id=get_request_user_id(request),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
+
+
+@conversation_router.delete("/api/sessions/{session_id}/goal")
+async def clear_goal(session_id: str, request: Request):
+    result = await conversation_router_service.build_goal_clear_response(
+        session_id,
+        user_id=get_request_user_id(request),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
+
+
+@conversation_router.post("/api/sessions/{session_id}/goal/complete")
+async def complete_goal(session_id: str, request: Request):
+    result = await conversation_router_service.build_goal_complete_response(
+        session_id,
+        user_id=get_request_user_id(request),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
 
 
 @conversation_router.post("/api/conversations/{session_id}/title")
@@ -78,6 +117,7 @@ async def list_conversations(
     search: Optional[str] = Query(None, description="搜索关键词"),
     agent_id: Optional[str] = Query(None, description="Agent ID过滤"),
     sort_by: Optional[str] = Query("date", description="排序方式: date, title, messages"),
+    goal_status: Optional[str] = Query(None, description="目标状态过滤: active, paused, completed, none"),
 ):
     current_user_id = get_request_user_id(request, user_id or "")
     role = get_request_role(request)
@@ -93,6 +133,7 @@ async def list_conversations(
         search=search,
         agent_id=agent_id,
         sort_by=sort_by,
+        goal_status=goal_status,
         include_user_id=True,
         context_user_id=current_user_id,
     )

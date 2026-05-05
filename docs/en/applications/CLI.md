@@ -196,6 +196,9 @@ Useful options:
 - `--user-id`
 - `--agent-id`
 - `--agent-mode`
+- `--goal`
+- `--goal-status`
+- `--clear-goal`
 - `--workspace`
 - `--skill` (repeatable)
 - `--max-loop-count`
@@ -218,7 +221,23 @@ sage chat
 sage chat --stats
 sage chat --workspace /path/to/project
 sage chat --skill my_skill
+sage chat --goal "Ship the runtime goal contract"
 ```
+
+Interactive chat also supports lightweight built-in goal commands:
+
+```text
+/goal
+/goal <objective>
+/goal show
+/goal set <objective>
+/goal clear
+/goal done
+```
+
+`/goal <objective>` sets the session goal and immediately submits the same objective as the next task, matching the Codex-style flow.
+
+`/goal set` still mutates the shared session goal contract for the next request without submitting a task immediately.
 
 Built-in chat commands:
 
@@ -389,9 +408,10 @@ The current summary includes:
 
 Prints structured stream events instead of plain text.
 
-The JSON stream now has four layers:
+The JSON stream now has five layers:
 
 - a session envelope event: `cli_session`
+- a goal lifecycle event: `cli_goal`
 - raw runtime events such as `assistant`, `analysis`, `tool_call`, and `tool_result`
 - CLI control events such as `cli_phase` and `cli_tool`
 - a final `cli_stats` event when `--stats` is enabled
@@ -399,11 +419,12 @@ The JSON stream now has four layers:
 The intended contract is:
 
 - `cli_session`: emitted before streamed runtime output; includes the resolved `session_id`, `command_mode`, `session_state`, `user_id`, `agent_id`, `agent_mode`, `workspace`, `workspace_source`, requested skills, `max_loop_count`, `has_prior_messages`, `prior_message_count`, and optional `session_summary` for resume hydration
+- `cli_goal`: emitted when the CLI wants to surface session-goal state as a first-class UI event; includes the resolved `session_id`, `command_mode`, `session_state`, `source`, and any available `goal`, `goal_transition`, or `goal_outcome`
 - `cli_phase`: emitted when the CLI detects a phase transition such as `planning`, `tool`, or `assistant_text`
 - `cli_tool`: emitted when a tool step starts or finishes; includes `action`, `step`, `tool_name`, `tool_call_id`, and `status`
 - `cli_stats`: emitted once at the end; includes final `tool_steps`, `phase_timings`, timing summary, and token summary
 
-Consumers should treat `cli_session`, `cli_phase`, and `cli_tool` as the preferred UI contract, and treat raw `tool_call` / `tool_result` lines as compatibility input rather than the primary surface. `cli_session.session_id` is intended to be stable from the first event onward, including requests that did not receive an explicit `--session-id`. `session_state`, `has_prior_messages`, and `prior_message_count` are provided so frontends can hydrate new-vs-existing session state without re-deriving it from `command_mode` and `session_summary`. When `--workspace` is provided, the emitted workspace path is the normalized absolute path that the backend actually uses.
+Consumers should treat `cli_session`, `cli_goal`, `cli_phase`, and `cli_tool` as the preferred UI contract, and treat raw `tool_call` / `tool_result` lines as compatibility input rather than the primary surface. `cli_session.session_id` is intended to be stable from the first event onward, including requests that did not receive an explicit `--session-id`. `session_state`, `has_prior_messages`, and `prior_message_count` are provided so frontends can hydrate new-vs-existing session state without re-deriving it from `command_mode` and `session_summary`. `cli_goal` exists so goal updates do not have to be inferred only from generic runtime events. When `--workspace` is provided, the emitted workspace path is the normalized absolute path that the backend actually uses.
 
 When used together with `--stats`, the CLI appends a final `cli_stats` JSON event for post-run analysis:
 

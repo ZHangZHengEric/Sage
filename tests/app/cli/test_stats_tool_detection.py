@@ -2,9 +2,13 @@
 import asyncio
 import unittest
 from contextlib import asynccontextmanager
+from io import StringIO
+from argparse import Namespace
 from unittest.mock import patch
 
 import app.cli.main as cli_main
+from common.schemas.goal import GoalMutation
+from app.cli.commands.session import _handle_goal_command
 from app.cli.main import (
     CHAT_INPUT_PROMPT,
     CHAT_COMMAND_HELP,
@@ -31,6 +35,26 @@ class TestStatsToolDetection(unittest.TestCase):
         self.assertIn("sage resume <session_id>", CHAT_COMMAND_HELP)
         self.assertIn("sage sessions", CHAT_COMMAND_HELP)
         self.assertIn("sage sessions inspect latest", CHAT_COMMAND_HELP)
+
+    def test_goal_command_shorthand_sets_goal_objective_and_returns_task(self):
+        args = Namespace(
+            goal_objective=None,
+            goal_status=None,
+            clear_goal=False,
+        )
+
+        with patch("sys.stdout", new=StringIO()) as stdout:
+            task = _handle_goal_command(
+                "/goal ship the runtime goal contract",
+                args,
+                session_summary=None,
+            )
+
+        self.assertEqual(task, "ship the runtime goal contract")
+        self.assertEqual(args.goal_objective, "ship the runtime goal contract")
+        self.assertEqual(args.goal_status, "active")
+        self.assertFalse(args.clear_goal)
+        self.assertIn("goal set: ship the runtime goal contract", stdout.getvalue())
 
     def test_collects_tool_name_from_skill_tag(self):
         event = {
@@ -504,7 +528,7 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result, 0)
-        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip()]
+        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip().startswith("{")]
         self.assertEqual(
             events[0],
             {
@@ -519,6 +543,8 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
                 "workspace_source": "explicit",
                 "requested_skills": ["search_memory"],
                 "max_loop_count": 50,
+                "goal": None,
+                "goal_transition": None,
                 "has_prior_messages": True,
                 "prior_message_count": 4,
                 "session_summary": {
@@ -576,7 +602,7 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result, 0)
-        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip()]
+        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip().startswith("{")]
         self.assertEqual(events[0]["type"], "cli_session")
         self.assertEqual(events[0]["command_mode"], "run")
         self.assertEqual(events[0]["session_state"], "new")
@@ -584,11 +610,349 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[0]["has_prior_messages"], False)
         self.assertEqual(events[0]["prior_message_count"], 0)
         self.assertIsNone(events[0]["session_summary"])
+        self.assertIsNone(events[0]["goal"])
+        self.assertIsNone(events[0]["goal_transition"])
         self.assertIsInstance(events[0]["session_id"], str)
         self.assertTrue(events[0]["session_id"])
         self.assertEqual(request.session_id, events[0]["session_id"])
         self.assertEqual(events[-1]["type"], "cli_stats")
         self.assertEqual(events[-1]["session_id"], events[0]["session_id"])
+
+    async def test_stream_request_emits_goal_payload_in_cli_session_event(self):
+        async def fake_run_request_stream(_request, workspace=None):
+            del workspace
+            yield {
+                "type": "assistant",
+                "role": "assistant",
+                "content": "working",
+            }
+            yield {"type": "stream_end"}
+
+        request = type(
+            "Request",
+            (),
+            {
+                "session_id": "session-goal",
+                "user_id": "user-test",
+                "agent_id": None,
+                "agent_mode": "simple",
+                "available_skills": [],
+                "max_loop_count": 50,
+                "goal": GoalMutation(
+                    objective="Ship the runtime goal contract",
+                    status="active",
+                ),
+            },
+        )()
+
+        from io import StringIO
+        import json
+
+        stdout = StringIO()
+        with (
+            patch("app.cli.service.run_request_stream", fake_run_request_stream),
+            patch("sys.stdout", stdout),
+            patch("sys.stderr", StringIO()),
+            patch("app.cli.runtime.stream.STREAM_IDLE_NOTICE_SECONDS", 0.5),
+            patch("app.cli.runtime.stream.STREAM_IDLE_REPEAT_SECONDS", 0.5),
+        ):
+            result = await _stream_request(
+                request,
+                json_output=True,
+                stats_output=False,
+                workspace=None,
+                command_mode="run",
+            )
+
+        self.assertEqual(result, 0)
+        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip().startswith("{")]
+        self.assertEqual(
+            events[0]["goal"],
+            {
+                "objective": "Ship the runtime goal contract",
+                "status": "active",
+            },
+        )
+        self.assertIsNone(events[0]["goal_transition"])
+        self.assertEqual(events[1]["type"], "cli_goal")
+        self.assertEqual(events[1]["source"], "session_start")
+        self.assertEqual(events[1]["goal"]["status"], "active")
+
+    async def test_stream_request_emits_cli_notice_when_json_stream_is_idle(self):
+        async def fake_run_request_stream(_request, workspace=None):
+            del workspace
+            await asyncio.sleep(0.01)
+            yield {
+                "type": "assistant",
+                "role": "assistant",
+                "content": "hello",
+            }
+            yield {"type": "stream_end"}
+
+        request = type(
+            "Request",
+            (),
+            {
+                "session_id": "session-idle-notice",
+                "user_id": "user-test",
+                "agent_id": None,
+                "agent_mode": "simple",
+                "available_skills": [],
+                "max_loop_count": 50,
+                "goal": None,
+            },
+        )()
+
+        from io import StringIO
+        import json
+        original_wait_for = asyncio.wait_for
+        first_poll = {"value": True}
+
+        async def fake_wait_for(awaitable, timeout):
+            if first_poll["value"]:
+                first_poll["value"] = False
+                raise asyncio.TimeoutError
+            return await original_wait_for(awaitable, timeout)
+
+        stdout = StringIO()
+        with (
+            patch("app.cli.service.run_request_stream", fake_run_request_stream),
+            patch("sys.stdout", stdout),
+            patch("sys.stderr", StringIO()),
+            patch("app.cli.runtime.stream.asyncio.wait_for", fake_wait_for),
+            patch("app.cli.runtime.stream.STREAM_IDLE_NOTICE_SECONDS", 0.0),
+            patch("app.cli.runtime.stream.STREAM_IDLE_REPEAT_SECONDS", 0.0),
+        ):
+            result = await _stream_request(
+                request,
+                json_output=True,
+                stats_output=False,
+                workspace=None,
+                command_mode="run",
+            )
+
+        self.assertEqual(result, 0)
+        payload = stdout.getvalue()
+        self.assertIn('"type": "cli_notice"', payload)
+        events = [json.loads(line) for line in payload.splitlines() if line.strip().startswith("{")]
+        notice_event = next((event for event in events if event.get("type") == "cli_notice"), None)
+        self.assertIsNotNone(notice_event)
+        notice_event = notice_event
+        self.assertEqual(notice_event["session_id"], "session-idle-notice")
+        self.assertEqual(notice_event["source"], "idle_poll")
+        self.assertIn("[working]", notice_event["content"])
+
+    async def test_stream_request_emits_refreshed_cli_session_after_completion(self):
+        async def fake_run_request_stream(_request, workspace=None):
+            del workspace
+            yield {
+                "type": "assistant",
+                "role": "assistant",
+                "content": "done",
+            }
+            yield {"type": "stream_end"}
+
+        request = type(
+            "Request",
+            (),
+            {
+                "session_id": "session-goal-refresh",
+                "user_id": "user-test",
+                "agent_id": "agent-demo",
+                "agent_mode": "simple",
+                "available_skills": [],
+                "max_loop_count": 50,
+                "goal": GoalMutation(
+                    objective="Ship the runtime goal contract",
+                    status="active",
+                ),
+            },
+        )()
+
+        from io import StringIO
+        import json
+
+        stdout = StringIO()
+        with (
+            patch("app.cli.service.run_request_stream", fake_run_request_stream),
+            patch(
+                "app.cli.service.get_session_summary",
+                return_value={
+                    "session_id": "session-goal-refresh",
+                    "title": "Goal refresh demo",
+                    "message_count": 2,
+                    "goal": {
+                        "objective": "Ship the runtime goal contract",
+                        "status": "completed",
+                    },
+                    "goal_transition": {
+                        "type": "completed",
+                        "objective": "Ship the runtime goal contract",
+                        "status": "completed",
+                    },
+                },
+            ),
+            patch("sys.stdout", stdout),
+            patch("sys.stderr", StringIO()),
+        ):
+            result = await _stream_request(
+                request,
+                json_output=True,
+                stats_output=False,
+                workspace=None,
+                command_mode="run",
+            )
+
+        self.assertEqual(result, 0)
+        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip().startswith("{")]
+        session_events = [event for event in events if event.get("type") == "cli_session"]
+        goal_events = [event for event in events if event.get("type") == "cli_goal"]
+        self.assertEqual(len(session_events), 2)
+        self.assertEqual(len(goal_events), 2)
+        self.assertEqual(session_events[0]["session_state"], "new")
+        self.assertEqual(session_events[0]["goal"]["status"], "active")
+        self.assertEqual(session_events[1]["session_state"], "existing")
+        self.assertEqual(session_events[1]["goal"]["status"], "completed")
+        self.assertEqual(session_events[1]["goal_transition"]["type"], "completed")
+        self.assertEqual(session_events[1]["prior_message_count"], 2)
+        self.assertEqual(goal_events[-1]["source"], "session_refresh")
+        self.assertEqual(goal_events[-1]["goal"]["status"], "completed")
+        self.assertEqual(goal_events[-1]["goal_transition"]["type"], "completed")
+
+    async def test_stream_request_emits_dedicated_cli_goal_event_for_runtime_goal_updates(self):
+        async def fake_run_request_stream(_request, workspace=None):
+            del workspace
+            yield {
+                "type": "tool_result",
+                "metadata": {"tool_name": "turn_status"},
+                "content": "completed turn_status",
+                "goal": {
+                    "objective": "Ship the runtime goal contract",
+                    "status": "completed",
+                },
+                "goal_transition": {
+                    "type": "completed",
+                    "objective": "Ship the runtime goal contract",
+                    "status": "completed",
+                },
+                "goal_outcome": {
+                    "action": "completed",
+                    "objective": "Ship the runtime goal contract",
+                    "reason": "ok",
+                },
+            }
+            yield {"type": "stream_end"}
+
+        request = type(
+            "Request",
+            (),
+            {
+                "session_id": "session-goal-event",
+                "user_id": "user-test",
+                "agent_id": None,
+                "agent_mode": "simple",
+                "available_skills": [],
+                "max_loop_count": 50,
+                "goal": None,
+            },
+        )()
+
+        from io import StringIO
+        import json
+
+        stdout = StringIO()
+        with (
+            patch("app.cli.service.run_request_stream", fake_run_request_stream),
+            patch("sys.stdout", stdout),
+            patch("sys.stderr", StringIO()),
+        ):
+            result = await _stream_request(
+                request,
+                json_output=True,
+                stats_output=False,
+                workspace=None,
+                command_mode="run",
+            )
+
+        self.assertEqual(result, 0)
+        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip().startswith("{")]
+        goal_events = [event for event in events if event.get("type") == "cli_goal"]
+        runtime_goal_event = next(
+            event for event in goal_events if event.get("source") == "tool_result"
+        )
+        self.assertEqual(runtime_goal_event["goal"]["status"], "completed")
+        self.assertEqual(runtime_goal_event["goal_transition"]["type"], "completed")
+        self.assertEqual(runtime_goal_event["goal_outcome"]["action"], "completed")
+
+    async def test_stream_request_idle_notice_prefers_recent_session_warning(self):
+        async def fake_run_request_stream(_request, workspace=None):
+            del workspace
+            await asyncio.sleep(0.01)
+            yield {"type": "stream_end"}
+
+        request = type(
+            "Request",
+            (),
+            {
+                "session_id": "session-warning-notice",
+                "user_id": "user-test",
+                "agent_id": None,
+                "agent_mode": "simple",
+                "available_skills": [],
+                "max_loop_count": 50,
+                "goal": None,
+            },
+        )()
+
+        from datetime import datetime
+        from io import StringIO
+        import json
+        import os
+        import tempfile
+
+        original_wait_for = asyncio.wait_for
+        first_poll = {"value": True}
+
+        async def fake_wait_for(awaitable, timeout):
+            if first_poll["value"]:
+                first_poll["value"] = False
+                raise asyncio.TimeoutError
+            return await original_wait_for(awaitable, timeout)
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            session_dir = os.path.join(tempdir, request.session_id)
+            os.makedirs(session_dir, exist_ok=True)
+            session_log = os.path.join(session_dir, f"session_{request.session_id}.log")
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+            with open(session_log, "w", encoding="utf-8") as handle:
+                handle.write(
+                    f"{timestamp} - WARNING - [agent/agent_base.py:425] - ToolSuggestionAgent: 遇到网络连接错误，等待 2 秒后重试 (1/8): Connection error.\n"
+                )
+
+            stdout = StringIO()
+            with (
+                patch("app.cli.service.run_request_stream", fake_run_request_stream),
+                patch("sys.stdout", stdout),
+                patch("sys.stderr", StringIO()),
+                patch("app.cli.runtime.stream.asyncio.wait_for", fake_wait_for),
+                patch("app.cli.runtime.stream.STREAM_IDLE_NOTICE_SECONDS", 0.0),
+                patch("app.cli.runtime.stream.STREAM_IDLE_REPEAT_SECONDS", 0.0),
+                patch.dict("os.environ", {"SAGE_SESSION_DIR": tempdir}, clear=False),
+            ):
+                result = await _stream_request(
+                    request,
+                    json_output=True,
+                    stats_output=False,
+                    workspace=None,
+                    command_mode="chat",
+                )
+
+        self.assertEqual(result, 0)
+        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip().startswith("{")]
+        notice_event = next((event for event in events if event.get("type") == "cli_notice"), None)
+        self.assertIsNotNone(notice_event)
+        self.assertIn("ToolSuggestionAgent", notice_event["content"])
+        self.assertIn("Connection error.", notice_event["content"])
 
     async def test_run_command_normalizes_workspace_before_stream_request(self):
         args = cli_main.build_argument_parser().parse_args(["run", "--workspace", "./demo", "hello"])
@@ -685,6 +1049,187 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["command_mode"], "chat")
         self.assertIsNone(captured["session_summary"])
 
+    async def test_chat_command_suppresses_prompt_text_in_json_mode(self):
+        args = cli_main.build_argument_parser().parse_args(["chat", "--json"])
+        prompt_calls = []
+
+        @asynccontextmanager
+        async def fake_cli_runtime(*, verbose=False):
+            del verbose
+            yield object()
+
+        def fake_read_chat_prompt(prompt_text):
+            prompt_calls.append(prompt_text)
+            return "/exit"
+
+        async def fake_stream_request(
+            request,
+            json_output,
+            stats_output,
+            workspace=None,
+            *,
+            command_mode="chat",
+            session_summary=None,
+        ):
+            del request, json_output, stats_output, workspace, command_mode, session_summary
+            return 0
+
+        with (
+            patch("app.cli.service.validate_cli_runtime_requirements"),
+            patch("app.cli.service.validate_cli_request_options", return_value=None),
+            patch("app.cli.service.cli_runtime", fake_cli_runtime),
+        ):
+            result = await cli_main._chat_command_impl(
+                args,
+                command_mode="chat",
+                build_request_fn=cli_main._build_request,
+                stream_request_fn=fake_stream_request,
+                read_chat_prompt_fn=fake_read_chat_prompt,
+                emit_chat_exit_summary_fn=cli_main._emit_chat_exit_summary,
+                print_session_summary_fn=cli_main._print_session_summary,
+                chat_command_help=cli_main.CHAT_COMMAND_HELP,
+                chat_input_prompt=cli_main.CHAT_INPUT_PROMPT,
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(prompt_calls, [""])
+
+    async def test_chat_command_goal_command_queues_one_shot_goal_mutation(self):
+        args = cli_main.build_argument_parser().parse_args(["chat", "--json"])
+        captured = {}
+
+        @asynccontextmanager
+        async def fake_cli_runtime(*, verbose=False):
+            del verbose
+            yield object()
+
+        async def fake_build_request(_args, task):
+            captured["goal_objective"] = getattr(_args, "goal_objective", None)
+            captured["goal_status"] = getattr(_args, "goal_status", None)
+            captured["task"] = task
+            return type(
+                "Request",
+                (),
+                {
+                    "session_id": _args.session_id,
+                    "user_id": "user-test",
+                    "agent_id": None,
+                    "agent_mode": "simple",
+                    "available_skills": [],
+                    "max_loop_count": 50,
+                },
+            )()
+
+        async def fake_stream_request(request, json_output, stats_output, workspace=None, *, command_mode="chat", session_summary=None):
+            del request, json_output, stats_output, workspace, command_mode, session_summary
+            return 0
+
+        with (
+            patch("app.cli.service.validate_cli_runtime_requirements"),
+            patch("app.cli.service.validate_cli_request_options", return_value=None),
+            patch("app.cli.service.cli_runtime", fake_cli_runtime),
+            patch("app.cli.main._build_request", fake_build_request),
+            patch("app.cli.main._stream_request", fake_stream_request),
+            patch("app.cli.main._read_chat_prompt", side_effect=["/goal set ship the runtime goal contract", "hello", "/exit"]),
+        ):
+            result = await cli_main._chat_command(args, command_mode="chat")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(captured["task"], "hello")
+        self.assertEqual(captured["goal_objective"], "ship the runtime goal contract")
+        self.assertEqual(captured["goal_status"], "active")
+        self.assertIsNone(args.goal_objective)
+        self.assertIsNone(args.goal_status)
+        self.assertFalse(args.clear_goal)
+
+    async def test_chat_command_fetches_session_summary_inside_cli_runtime(self):
+        args = cli_main.build_argument_parser().parse_args(
+            ["chat", "--json", "--session-id", "local-000001"]
+        )
+        runtime_active = {"value": False}
+        summary_calls = []
+
+        @asynccontextmanager
+        async def fake_cli_runtime(*, verbose=False):
+            del verbose
+            runtime_active["value"] = True
+            try:
+                yield object()
+            finally:
+                runtime_active["value"] = False
+
+        async def fake_get_session_summary(*, session_id, user_id=None):
+            summary_calls.append((session_id, user_id, runtime_active["value"]))
+            return None
+
+        def fake_read_chat_prompt(_prompt_text):
+            return "/exit"
+
+        with (
+            patch("app.cli.service.validate_cli_runtime_requirements"),
+            patch("app.cli.service.validate_cli_request_options", return_value=None),
+            patch("app.cli.service.cli_runtime", fake_cli_runtime),
+            patch("app.cli.service.get_session_summary", fake_get_session_summary),
+        ):
+            result = await cli_main._chat_command_impl(
+                args,
+                command_mode="chat",
+                build_request_fn=cli_main._build_request,
+                stream_request_fn=cli_main._stream_request,
+                read_chat_prompt_fn=fake_read_chat_prompt,
+                emit_chat_exit_summary_fn=cli_main._emit_chat_exit_summary,
+                print_session_summary_fn=cli_main._print_session_summary,
+                chat_command_help=cli_main.CHAT_COMMAND_HELP,
+                chat_input_prompt=cli_main.CHAT_INPUT_PROMPT,
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(summary_calls, [("local-000001", "default_user", True)])
+
+    def test_resume_chat_prints_continuing_goal_hint(self):
+        args = cli_main.build_argument_parser().parse_args(["resume", "session-123"])
+
+        @asynccontextmanager
+        async def fake_cli_runtime(*, verbose=False):
+            del verbose
+            yield object()
+
+        @asynccontextmanager
+        async def fake_cli_db_runtime(*, verbose=False):
+            del verbose
+            yield object()
+
+        async def _run():
+            stdout = StringIO()
+            stderr = StringIO()
+            with (
+                patch("app.cli.service.validate_cli_runtime_requirements"),
+                patch("app.cli.service.validate_cli_request_options", return_value=None),
+                patch("app.cli.service.cli_runtime", fake_cli_runtime),
+                patch("app.cli.service.cli_db_runtime", fake_cli_db_runtime),
+                patch(
+                    "app.cli.service.get_session_summary",
+                    return_value={
+                        "session_id": "session-123",
+                        "title": "resume demo",
+                        "message_count": 4,
+                        "goal": {
+                            "objective": "ship the runtime goal contract",
+                            "status": "paused",
+                        },
+                    },
+                ),
+                patch("app.cli.main._read_chat_prompt", side_effect=["/exit"]),
+                patch("sys.stdout", stdout),
+                patch("sys.stderr", stderr),
+            ):
+                result = await cli_main._resume_command(args)
+            return result, stdout.getvalue()
+
+        result, output = asyncio.run(_run())
+        self.assertEqual(result, 0)
+        self.assertIn("continuing goal: ship the runtime goal contract (paused)", output)
+
     async def test_stream_request_does_not_cancel_slow_stream_on_idle_poll(self):
         async def fake_run_request_stream(_request, workspace=None):
             del workspace
@@ -773,7 +1318,7 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result, 0)
-        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip()]
+        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip().startswith("{")]
         self.assertEqual(events[0]["type"], "cli_session")
         self.assertEqual(events[0]["command_mode"], "chat")
         self.assertEqual(events[0]["session_state"], "new")
@@ -839,7 +1384,7 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result, 0)
-        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip()]
+        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip().startswith("{")]
         cli_tool_events = [event for event in events if event.get("type") == "cli_tool"]
         self.assertEqual(events[0]["type"], "cli_session")
         self.assertEqual(events[0]["command_mode"], "run")

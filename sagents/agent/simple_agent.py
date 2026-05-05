@@ -17,6 +17,10 @@ from sagents.utils.repeat_pattern import (
     detect_repeat_pattern as _detect_repeat_pattern_util,
     build_self_correction_message as _build_self_correction_message_util,
 )
+from .lightweight_intent import (
+    extract_latest_user_text,
+    should_skip_preflight_for_lightweight_prompt,
+)
 
 
 def _get_system_prefix(tool_manager: Optional[ToolManager], language: str) -> str:
@@ -61,6 +65,35 @@ class SimpleAgent(AgentBase):
         self.agent_name = "SimpleAgent"
         self.agent_description = """SimpleAgent: 简单智能体，负责无推理策略的直接任务执行，比ReAct策略更快速。适用于不需要推理或早期处理的任务。"""
         logger.debug("SimpleAgent 初始化完成")
+
+    def _lightweight_system_sections(self) -> List[str]:
+        return ["role_definition", "system_context"]
+
+    def _lightweight_tools(self, tool_manager: Optional[Any], session_context: SessionContext) -> List[Dict[str, Any]]:
+        """轻量请求只保留 turn_status，用于协议性收口。
+
+        不能返回空工具集，否则简单问候在第一轮纯文本后没有状态工具可补，
+        会继续进入下一轮 LLM 文本生成，造成重复 greeting / 自我纠偏循环。
+        """
+        if not tool_manager:
+            return []
+
+        tools_json = tool_manager.get_openai_tools(
+            lang=session_context.get_language(),
+            fallback_chain=["en"],
+        )
+        turn_status_only = [
+            tool
+            for tool in tools_json
+            if ((tool.get("function") or {}).get("name") or "") == "turn_status"
+        ]
+        if os.environ.get("SAGE_STABLE_TOOLS_ORDER", "true").lower() != "false":
+            turn_status_only.sort(key=lambda t: ((t.get("function") or {}).get("name") or ""))
+        return turn_status_only
+
+    def _should_use_lightweight_chat_path(self, history_messages: List[MessageChunk]) -> bool:
+        latest_user_text = extract_latest_user_text(history_messages)
+        return should_skip_preflight_for_lightweight_prompt(latest_user_text)
 
     def _build_loop_signature(self, chunks: List[MessageChunk]) -> str:
         """
@@ -113,6 +146,10 @@ class SimpleAgent(AgentBase):
         message_manager = session_context.message_manager
         # 从消息管理实例中，获取满足context 长度限制的消息
         history_messages = message_manager.extract_all_context_messages(recent_turns=20, last_turn_user_only=False)
+        use_lightweight_path = self._should_use_lightweight_chat_path(history_messages)
+        system_sections = self._lightweight_system_sections() if use_lightweight_path else None
+        if use_lightweight_path:
+            logger.info("SimpleAgent: 轻量请求命中简化 system/tools 路径")
         
         # 获取后续可能使用到的工具建议
         # 如果 audit_status 中有建议的工具，使用建议的工具；否则使用所有可用工具
@@ -127,14 +164,18 @@ class SimpleAgent(AgentBase):
                     suggested_tools = []
         else:
             suggested_tools = []
-        # 准备工具列表
-        tools_json = self._prepare_tools(tool_manager, suggested_tools, session_context)
+        if use_lightweight_path:
+            tools_json = self._lightweight_tools(tool_manager, session_context)
+        else:
+            # 准备工具列表
+            tools_json = self._prepare_tools(tool_manager, suggested_tools, session_context)
         # 将 system message 拆成多段（stable / semi_stable / volatile）前置到 history，
         # 配合 add_cache_control_to_messages 的多断点策略最大化 prompt cache 命中。
         system_messages = await self.prepare_unified_system_messages(
             session_id,
             custom_prefix=current_system_prefix,
             language=session_context.get_language(),
+            include_sections=system_sections,
         )
         history_messages = list(system_messages) + list(history_messages)
         async for chunks in self._execute_loop(
@@ -142,7 +183,8 @@ class SimpleAgent(AgentBase):
             tools_json=tools_json,
             tool_manager=tool_manager,
             session_id=session_id or "",
-            session_context=session_context
+            session_context=session_context,
+            system_sections=system_sections,
         ):
             for chunk in chunks:
                 chunk.session_id = session_id
@@ -638,7 +680,8 @@ class SimpleAgent(AgentBase):
                             tools_json: List[Dict[str, Any]],
                             tool_manager: Optional[ToolManager],
                             session_id: str,
-                            session_context: SessionContext) -> AsyncGenerator[List[MessageChunk], None]:
+                            session_context: SessionContext,
+                            system_sections: Optional[List[str]] = None) -> AsyncGenerator[List[MessageChunk], None]:
         """
         执行主循环
 
@@ -702,6 +745,7 @@ class SimpleAgent(AgentBase):
                     session_id,
                     custom_prefix=current_system_prefix,
                     language=session_context.get_language(),
+                    include_sections=system_sections,
                 )
                 messages_input = list(new_system_messages) + list(messages_input[head:])
 

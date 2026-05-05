@@ -18,6 +18,7 @@ pub(crate) fn welcome_lines(
     display_mode: DisplayMode,
     max_loop_count: u32,
     workspace_label: &str,
+    goal: Option<(&str, &str)>,
 ) -> Vec<Line<'static>> {
     let Some(inner_width) = card_inner_width(width, SESSION_HEADER_MAX_INNER_WIDTH) else {
         return Vec::new();
@@ -62,6 +63,20 @@ pub(crate) fn welcome_lines(
             Span::styled("directory: ", dim),
             Span::styled(
                 truncate_middle(workspace_label, inner_width.saturating_sub(11)),
+                Style::default().fg(Color::Rgb(236, 240, 231)),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("goal: ", dim),
+            Span::styled(
+                goal.map(|(objective, status)| {
+                    format!(
+                        "{} ({})",
+                        truncate_middle(objective, inner_width.saturating_sub(14)),
+                        status
+                    )
+                })
+                .unwrap_or_else(|| "(none)".to_string()),
                 Style::default().fg(Color::Rgb(236, 240, 231)),
             ),
         ]),

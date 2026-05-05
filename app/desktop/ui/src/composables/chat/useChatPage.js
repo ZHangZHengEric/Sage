@@ -5,6 +5,7 @@ import SparkMD5 from 'spark-md5'
 import { useLanguage } from '@/utils/i18n.js'
 import { chatAPI } from '@/api/chat.js'
 import { agentAPI } from '@/api/agent.js'
+import { normalizeGoalTransition, normalizeSessionGoal } from '@/composables/chat/goalSync.js'
 import { useChatActiveSessionCache } from '@/composables/chat/useChatActiveSessionCache.js'
 import { useChatScroll } from '@/composables/chat/useChatScroll.js'
 import { useChatStream } from '@/composables/chat/useChatStream.js'
@@ -56,6 +57,9 @@ export const useChatPage = (props) => {
 
   const showSettings = ref(false)
   const currentTraceId = ref(null)
+  const currentGoal = ref(null)
+  const currentGoalTransition = ref(null)
+  const isGoalMutating = ref(false)
 
   // 能力面板相关状态
   const abilityItems = ref([])
@@ -75,6 +79,52 @@ export const useChatPage = (props) => {
   const abilityButtonVisibleBeforeHistory = ref(true)
   /** 进入历史会话前能力面板是否打开（含加载中），从历史回新会话时恢复，避免「点你能做什么→加载中→进历史→回来」动画/结果丢失 */
   const abilityPanelOpenBeforeHistory = ref(false)
+
+  const syncCurrentGoal = (goal, sessionId = currentSessionId.value) => {
+    const normalizedGoal = normalizeSessionGoal(goal)
+
+    if (!sessionId || sessionId === currentSessionId.value) {
+      currentGoal.value = normalizedGoal
+    }
+
+    if (sessionId && activeSessions.value?.[sessionId]) {
+      const cached = activeSessions.value[sessionId]
+      updateActiveSession(
+        sessionId,
+        cached.status === 'running',
+        null,
+        null,
+        false,
+        {
+          status: cached.status,
+          goal: normalizedGoal
+        }
+      )
+    }
+  }
+
+  const syncCurrentGoalTransition = (transition, sessionId = currentSessionId.value) => {
+    const normalizedTransition = normalizeGoalTransition(transition)
+
+    if (!sessionId || sessionId === currentSessionId.value) {
+      currentGoalTransition.value = normalizedTransition
+    }
+
+    if (sessionId && activeSessions.value?.[sessionId]) {
+      const cached = activeSessions.value[sessionId]
+      updateActiveSession(
+        sessionId,
+        cached.status === 'running',
+        null,
+        null,
+        false,
+        {
+          status: cached.status,
+          goal_transition: normalizedTransition
+        }
+      )
+    }
+  }
 
   // 打开工作台（统一方法）
   const openWorkbench = (options = {}) => {
@@ -379,6 +429,8 @@ export const useChatPage = (props) => {
 
     const res = await chatAPI.getConversationMessages(sessionId)
     if (!res) return null
+    syncCurrentGoal(res.conversation_info?.goal || null)
+    syncCurrentGoalTransition(res.conversation_info?.goal_transition || null)
     const normalizedMessages = (res.messages || []).map(msg => ({
       ...msg,
       session_id: msg.session_id || sessionId
@@ -692,7 +744,9 @@ export const useChatPage = (props) => {
     loadConversationMessages,
     isHistoryLoading,
     removeSessionFromCache,
-    language
+    language,
+    onSessionGoal: syncCurrentGoal,
+    onSessionGoalTransition: syncCurrentGoalTransition
   })
 
   const submitEditedLastUserMessage = async (content) => {
@@ -797,6 +851,8 @@ export const useChatPage = (props) => {
     isViewingHistorySession.value = false
     danmakuClosedByUser.value = false
     danmakuResetTrigger.value += 1
+    syncCurrentGoal(null)
+    syncCurrentGoalTransition(null)
     createSession()
     void refreshAgentDataForNewSession()
   }
@@ -815,6 +871,8 @@ export const useChatPage = (props) => {
     if (!danmakuClosedByUser.value) danmakuResetTrigger.value += 1
     // 若进历史前能力面板是打开的（含加载中），回来时重新打开，避免加载动画/结果丢失
     showAbilityPanel.value = abilityPanelOpenBeforeHistory.value
+    syncCurrentGoal(null)
+    syncCurrentGoalTransition(null)
     createSession()
     void refreshAgentDataForNewSession()
   }
@@ -827,7 +885,10 @@ export const useChatPage = (props) => {
       if (sessionId) {
         currentSessionId.value = sessionId
         await loadConversationMessages(sessionId)
+        syncCurrentGoalTransition(conversation.goal_transition || null)
       } else {
+        syncCurrentGoal(conversation.goal || null)
+        syncCurrentGoalTransition(conversation.goal_transition || null)
         if (conversation.agent_id && agents.value.length > 0) {
           const agent = agents.value.find(a => a.id === conversation.agent_id)
           if (agent) {
@@ -855,6 +916,73 @@ export const useChatPage = (props) => {
       })
     } catch (error) {
       toast.error(t('chat.loadConversationError'))
+    }
+  }
+
+  const ensureGoalMutableSession = () => {
+    if (!currentSessionId.value || (!currentGoal.value && messages.value.length === 0)) {
+      toast.error(t('chat.goalSessionRequired'))
+      return false
+    }
+    return true
+  }
+
+  const saveSessionGoal = async (objective) => {
+    if (!ensureGoalMutableSession()) return false
+    const cleanedObjective = String(objective || '').trim()
+    if (!cleanedObjective) {
+      toast.error(t('chat.goalEmpty'))
+      return false
+    }
+    try {
+      isGoalMutating.value = true
+      const result = await chatAPI.setSessionGoal(currentSessionId.value, {
+        objective: cleanedObjective,
+        status: 'active'
+      })
+      syncCurrentGoal(result?.goal || null)
+      syncCurrentGoalTransition(result?.goal_transition || null)
+      toast.success(t('chat.goalSaved'))
+      return true
+    } catch (error) {
+      toast.error(error?.message || t('chat.goalSaveError'))
+      return false
+    } finally {
+      isGoalMutating.value = false
+    }
+  }
+
+  const clearSessionGoal = async () => {
+    if (!ensureGoalMutableSession() || !currentGoal.value) return false
+    try {
+      isGoalMutating.value = true
+      const result = await chatAPI.clearSessionGoal(currentSessionId.value)
+      syncCurrentGoal(null)
+      syncCurrentGoalTransition(result?.goal_transition || null)
+      toast.success(t('chat.goalCleared'))
+      return true
+    } catch (error) {
+      toast.error(error?.message || t('chat.goalClearError'))
+      return false
+    } finally {
+      isGoalMutating.value = false
+    }
+  }
+
+  const completeSessionGoal = async () => {
+    if (!ensureGoalMutableSession() || !currentGoal.value) return false
+    try {
+      isGoalMutating.value = true
+      const result = await chatAPI.completeSessionGoal(currentSessionId.value)
+      syncCurrentGoal(result?.goal || null)
+      syncCurrentGoalTransition(result?.goal_transition || null)
+      toast.success(t('chat.goalCompletedToast'))
+      return true
+    } catch (error) {
+      toast.error(error?.message || t('chat.goalCompleteError'))
+      return false
+    } finally {
+      isGoalMutating.value = false
     }
   }
 
@@ -1029,6 +1157,8 @@ export const useChatPage = (props) => {
       workbenchStore.resetState()
       // 如果 session id 为 null，关闭工作台弹窗
       if (!newSessionId) {
+        syncCurrentGoal(null)
+        syncCurrentGoalTransition(null)
         panelStore.closeAll()
         console.log('[ChatPage] Session ID is null, closed workbench')
       }
@@ -1055,6 +1185,9 @@ export const useChatPage = (props) => {
     showSettings,
     showLoadingBubble,
     filteredMessages,
+    currentGoal,
+    currentGoalTransition,
+    isGoalMutating,
     isLoading,
     isCurrentSessionLoading,
     handleAgentChange,
@@ -1093,6 +1226,9 @@ export const useChatPage = (props) => {
     retryAbilityFetch,
     onAbilityCardClick,
     submitEditedLastUserMessage,
+    saveSessionGoal,
+    clearSessionGoal,
+    completeSessionGoal,
     // pending 工具调用相关
     pendingToolCalls,
     clearPendingToolCalls

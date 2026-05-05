@@ -138,7 +138,8 @@ pub fn run_with_startup_action(
 
         if event::poll(Duration::from_millis(16))? {
             match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                Event::Key(key) if should_handle_key_event(key.kind) => {
+                    emit_key_debug_if_enabled(&key);
                     dirty |= handle_key(app, key, &mut backend)?
                 }
                 Event::Paste(text) => {
@@ -161,6 +162,21 @@ pub fn run_with_startup_action(
     Ok(())
 }
 
+fn should_handle_key_event(kind: KeyEventKind) -> bool {
+    !matches!(kind, KeyEventKind::Release)
+}
+
+fn emit_key_debug_if_enabled(key: &crossterm::event::KeyEvent) {
+    if std::env::var("SAGE_TERMINAL_DEBUG_KEYS").ok().as_deref() != Some("1") {
+        return;
+    }
+
+    eprintln!(
+        "[sage-terminal key] kind={:?} code={:?} modifiers={:?}",
+        key.kind, key.code, key.modifiers
+    );
+}
+
 fn drain_backend(app: &mut App, backend: &mut Option<BackendHandle>) -> bool {
     let mut changed = false;
 
@@ -168,12 +184,23 @@ fn drain_backend(app: &mut App, backend: &mut Option<BackendHandle>) -> bool {
         while let Some(event) = handle.try_next() {
             changed = true;
             match event {
+                BackendEvent::SessionHydrated(meta) => app.apply_session_meta(meta),
                 BackendEvent::LiveChunk(kind, chunk) => match kind {
                     MessageKind::Assistant => app.append_assistant_chunk(&chunk),
                     MessageKind::Process => app.append_process_chunk(&chunk),
                     other => app.push_message(other, chunk),
                 },
-                BackendEvent::Message(kind, message) => app.push_message(kind, message),
+                BackendEvent::Message(kind, message) => {
+                    if app.busy
+                        && matches!(kind, MessageKind::Process | MessageKind::System)
+                        && (message.starts_with("[working]")
+                            || message.starts_with("backend ·"))
+                    {
+                        app.set_live_notice(kind, &message);
+                    } else {
+                        app.push_message(kind, message);
+                    }
+                }
                 BackendEvent::Status(status) => app.set_status(status),
                 BackendEvent::PhaseChanged(phase) => app.set_active_phase(phase),
                 BackendEvent::ToolStarted(name) => app.start_tool(name),

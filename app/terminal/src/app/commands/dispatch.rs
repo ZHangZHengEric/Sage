@@ -329,6 +329,52 @@ impl App {
                     }
                 }
             }
+            "/goal" => {
+                let subcommand = parts.next();
+                let rest = parts.map(ToString::to_string).collect::<Vec<_>>();
+                match subcommand {
+                    None | Some("show") if rest.is_empty() => {
+                        self.queue_goal_status();
+                        SubmitAction::Handled
+                    }
+                    Some("set") if !rest.is_empty() => {
+                        self.set_goal_selection(rest.join(" "));
+                        SubmitAction::Handled
+                    }
+                    Some("clear") if rest.is_empty() => {
+                        self.clear_goal_selection();
+                        SubmitAction::Handled
+                    }
+                    Some("done") if rest.is_empty() => {
+                        self.complete_goal_selection();
+                        SubmitAction::Handled
+                    }
+                    Some(objective) => {
+                        let mut objective_parts = vec![objective.to_string()];
+                        objective_parts.extend(rest);
+                        let objective = objective_parts.join(" ").trim().to_string();
+                        if objective.is_empty() {
+                            self.queue_message(
+                                MessageKind::System,
+                                "Usage: /goal | /goal <objective> | /goal show | /goal set <objective> | /goal clear | /goal done",
+                            );
+                            self.status = format!("invalid command  {}", self.session_id);
+                            return SubmitAction::Handled;
+                        }
+                        self.set_goal_selection(objective.clone());
+                        self.begin_task_submission(objective.clone(), true);
+                        SubmitAction::RunTask(objective)
+                    }
+                    _ => {
+                        self.queue_message(
+                            MessageKind::System,
+                            "Usage: /goal | /goal <objective> | /goal show | /goal set <objective> | /goal clear | /goal done",
+                        );
+                        self.status = format!("invalid command  {}", self.session_id);
+                        SubmitAction::Handled
+                    }
+                }
+            }
             "/interrupt" => match (parts.next(), parts.next()) {
                 (None, None) => SubmitAction::Interrupt,
                 _ => {
@@ -349,7 +395,7 @@ impl App {
                 self.queue_message(
                     MessageKind::System,
                     format!(
-                        "session: {}\nbusy: {}\nagent_id: {}\nagent_mode: {}\ndisplay_mode: {}\nworkspace: {}\nmax_loop_count: {}\nskills: {}\nmodel_override: {}\ninput: {} chars",
+                        "session: {}\nbusy: {}\nagent_id: {}\nagent_mode: {}\ndisplay_mode: {}\nworkspace: {}\ngoal: {}\ngoal_status: {}\ngoal_pending: {}\nmax_loop_count: {}\nskills: {}\nmodel_override: {}\ninput: {} chars",
                         self.session_id,
                         self.busy,
                         self.selected_agent_id
@@ -358,6 +404,33 @@ impl App {
                         self.agent_mode,
                         display_mode_name(self.display_mode),
                         self.workspace_label,
+                        self.current_goal
+                            .as_ref()
+                            .map(|goal| goal.objective.clone())
+                            .unwrap_or_else(|| "(none)".to_string()),
+                        self.current_goal
+                            .as_ref()
+                            .map(|goal| goal.status.clone())
+                            .unwrap_or_else(|| "(none)".to_string()),
+                        self.pending_goal_mutation
+                            .as_ref()
+                            .map(|pending| {
+                                if pending.clear {
+                                    "clear".to_string()
+                                } else if let Some(objective) = &pending.objective {
+                                    format!(
+                                        "set:{} ({})",
+                                        objective,
+                                        pending
+                                            .status
+                                            .clone()
+                                            .unwrap_or_else(|| "active".to_string())
+                                    )
+                                } else {
+                                    pending.status.clone().unwrap_or_else(|| "(none)".to_string())
+                                }
+                            })
+                            .unwrap_or_else(|| "(none)".to_string()),
                         self.max_loop_count,
                         if self.selected_skills.is_empty() {
                             "(none)".to_string()

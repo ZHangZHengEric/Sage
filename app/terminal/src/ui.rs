@@ -81,6 +81,16 @@ mod tests {
     }
 
     #[test]
+    fn footer_summary_includes_goal_status_when_present() {
+        let mut app = App::new();
+        app.set_goal_selection("ship the runtime goal contract".to_string());
+        app.pending_goal_mutation = None;
+
+        let summary = footer_status_summary(&app);
+        assert!(summary.contains("goal active"));
+    }
+
+    #[test]
     fn busy_footer_hint_prefers_active_tool_over_phase() {
         let mut app = App::new();
         app.input = "explain repo".to_string();

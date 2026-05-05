@@ -10,6 +10,30 @@ pub struct SessionSummary {
     pub last_preview: Option<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BackendGoal {
+    pub objective: String,
+    pub status: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BackendGoalTransition {
+    pub transition_type: String,
+    pub objective: Option<String>,
+    pub status: Option<String>,
+    pub previous_objective: Option<String>,
+    pub previous_status: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BackendSessionMeta {
+    pub session_id: String,
+    pub command_mode: Option<String>,
+    pub session_state: Option<String>,
+    pub goal: Option<BackendGoal>,
+    pub goal_transition: Option<BackendGoalTransition>,
+}
+
 pub struct SessionDetail {
     pub session_id: String,
     pub title: String,
@@ -85,6 +109,9 @@ pub struct BackendRequest {
     pub workspace: Option<PathBuf>,
     pub skills: Vec<String>,
     pub model_override: Option<String>,
+    pub goal_objective: Option<String>,
+    pub goal_status: Option<String>,
+    pub clear_goal: bool,
     pub task: String,
 }
 
@@ -120,6 +147,7 @@ pub struct BackendPhaseTiming {
 }
 
 pub enum BackendEvent {
+    SessionHydrated(BackendSessionMeta),
     LiveChunk(MessageKind, String),
     Message(MessageKind, String),
     Status(String),

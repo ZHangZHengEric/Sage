@@ -117,6 +117,22 @@ export const chatAPI = {
     })
   },
 
+  getSessionGoal: async (sessionId) => {
+    return await request.get(`/api/sessions/${sessionId}/goal`)
+  },
+
+  setSessionGoal: async (sessionId, payload) => {
+    return await request.post(`/api/sessions/${sessionId}/goal`, payload)
+  },
+
+  clearSessionGoal: async (sessionId) => {
+    return await request.delete(`/api/sessions/${sessionId}/goal`)
+  },
+
+  completeSessionGoal: async (sessionId) => {
+    return await request.post(`/api/sessions/${sessionId}/goal/complete`, {})
+  },
+
   /**
    * 恢复流式聊天
    * @param {string} sessionId - 会话ID

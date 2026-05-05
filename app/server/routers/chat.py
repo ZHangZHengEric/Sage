@@ -154,7 +154,7 @@ async def stream_with_manager(session_id: str, last_index: int = 0, resume: bool
     if has_stream_data:
         return
     try:
-        await conversation_service.get_conversation_messages(session_id)
+        conversation_data = await conversation_service.get_conversation_messages(session_id)
     except Exception:
         return
     yield json.dumps(
@@ -163,6 +163,8 @@ async def stream_with_manager(session_id: str, last_index: int = 0, resume: bool
             "session_id": session_id,
             "timestamp": time.time(),
             "resume_fallback": True,
+            "goal": (conversation_data.get("conversation_info") or {}).get("goal"),
+            "goal_transition": (conversation_data.get("conversation_info") or {}).get("goal_transition"),
         },
         ensure_ascii=False,
     ) + "\n"

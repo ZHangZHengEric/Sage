@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Set
 
 from loguru import logger
 from sagents.context.session_context import delete_session_run_lock
+from sagents.session_runtime import get_global_session_manager
 from sagents.utils.lock_manager import safe_release
 
 
@@ -51,6 +52,9 @@ class StreamManager:
         sessions = self.get_active_sessions()
         for queue in list(self._session_list_subscribers):
             await queue.put(sessions)
+
+    async def notify_session_list_changed(self):
+        await self._notify_session_list_changed()
 
     async def subscribe_active_sessions(self):
         queue = asyncio.Queue()
@@ -245,6 +249,7 @@ class StreamManager:
     def get_active_sessions(self):
         if not self._sessions:
             return []
+        session_manager = get_global_session_manager()
         return [
             {
                 "session_id": session.session_id,
@@ -253,6 +258,16 @@ class StreamManager:
                 "status": session.status,
                 "last_activity": session.last_activity,
                 "query": session.query,
+                "goal": (
+                    goal.model_dump(mode="json")
+                    if (goal := session_manager.get_goal(session.session_id))
+                    else None
+                ),
+                "goal_transition": (
+                    session_manager.get_goal_transition(session.session_id)
+                    if session_manager
+                    else None
+                ),
             }
             for session in self._sessions.values()
             if not session.is_completed

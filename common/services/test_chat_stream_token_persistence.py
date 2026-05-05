@@ -59,7 +59,9 @@ if "opentelemetry" not in sys.modules:
     sys.modules["opentelemetry.context"] = context_module
 
 from common.services import chat_service
+from common.services import chat_stream_manager
 from common.services.chat_stream_manager import StreamManager
+from common.schemas.goal import GoalStatus, SessionGoal
 
 
 class _FakeStreamService:
@@ -100,7 +102,38 @@ class _FakeStreamService:
                 }
             },
         }
-        await asyncio.sleep(10)
+        return
+
+
+class _FakeGoalToolStreamService(_FakeStreamService):
+    async def process_stream(self):
+        yield {
+            "type": "tool_result",
+            "role": "tool",
+            "tool_call_id": "call-turn-status",
+            "session_id": "session-web-stream",
+            "metadata": {"tool_name": "turn_status"},
+            "content": {
+                "success": True,
+                "status": "success",
+                "should_end": True,
+                "goal": {
+                    "objective": "Ship the runtime goal contract",
+                    "status": "completed",
+                    "created_at": 1.0,
+                    "updated_at": 2.0,
+                    "completed_at": 3.0,
+                    "paused_reason": None,
+                },
+                "goal_outcome": {
+                    "action": "completed",
+                    "objective": "Ship the runtime goal contract",
+                    "status": "completed",
+                    "reason": "task_done",
+                },
+            },
+        }
+        return
 
 
 def test_execute_chat_session_persists_token_usage_when_generator_closes_early(monkeypatch):
@@ -154,3 +187,109 @@ def test_stream_manager_stop_session_closes_background_generator():
     asyncio.run(_run())
 
     assert closed is True
+
+
+def test_execute_chat_session_emits_stream_end_with_goal_payload(monkeypatch):
+    notifications = []
+
+    class _FakeGoalManager:
+        def get_goal(self, session_id):
+            assert session_id == "session-web-stream"
+            return SessionGoal(
+                objective="Ship the runtime goal contract",
+                status=GoalStatus.ACTIVE,
+                created_at=1.0,
+                updated_at=2.0,
+            )
+
+        def get_goal_transition(self, session_id):
+            assert session_id == "session-web-stream"
+            return {
+                "type": "resumed",
+                "objective": "Ship the runtime goal contract",
+                "status": "active",
+            }
+
+    class _FakeStreamManager:
+        async def notify_session_list_changed(self):
+            notifications.append("notified")
+
+    async def _fake_persist(stream_service, *, token_usage_payload=None):
+        del stream_service, token_usage_payload
+        return True
+
+    async def _fake_finalize(request, original_skills):
+        del request, original_skills
+
+    monkeypatch.setattr(chat_service, "_persist_token_usage_if_available", _fake_persist)
+    monkeypatch.setattr(chat_service, "_finalize_session_end", _fake_finalize)
+    monkeypatch.setattr(chat_service, "get_global_session_manager", lambda: _FakeGoalManager())
+    monkeypatch.setattr(
+        chat_stream_manager.StreamManager,
+        "get_instance",
+        classmethod(lambda cls: _FakeStreamManager()),
+    )
+
+    async def _run():
+        chunks = []
+        async for chunk in chat_service.execute_chat_session(_FakeStreamService()):
+            chunks.append(chunk)
+            if '"type": "stream_end"' in chunk:
+                break
+        return chunks
+
+    chunks = asyncio.run(_run())
+
+    assert notifications == ["notified"]
+    stream_end = chunks[-1]
+    assert '"type": "stream_end"' in stream_end
+    assert '"objective": "Ship the runtime goal contract"' in stream_end
+    assert '"status": "active"' in stream_end
+    assert '"goal_transition"' in stream_end
+    assert '"type": "resumed"' in stream_end
+
+
+def test_execute_chat_session_promotes_turn_status_goal_to_top_level_stream_event(monkeypatch):
+    async def _fake_persist(stream_service, *, token_usage_payload=None):
+        del stream_service, token_usage_payload
+        return True
+
+    async def _fake_finalize(request, original_skills):
+        del request, original_skills
+
+    class _FakeStreamManager:
+        async def notify_session_list_changed(self):
+            return None
+
+    class _FakeGoalManager:
+        def get_goal_transition(self, session_id):
+            assert session_id == "session-web-stream"
+            return {
+                "type": "completed",
+                "objective": "Ship the runtime goal contract",
+                "status": "completed",
+            }
+
+    monkeypatch.setattr(chat_service, "_persist_token_usage_if_available", _fake_persist)
+    monkeypatch.setattr(chat_service, "_finalize_session_end", _fake_finalize)
+    monkeypatch.setattr(chat_service, "get_global_session_manager", lambda: _FakeGoalManager())
+    monkeypatch.setattr(
+        chat_stream_manager.StreamManager,
+        "get_instance",
+        classmethod(lambda cls: _FakeStreamManager()),
+    )
+
+    async def _run():
+        generator = chat_service.execute_chat_session(_FakeGoalToolStreamService())
+        chunk = await generator.__anext__()
+        await generator.aclose()
+        return chunk
+
+    chunk = asyncio.run(_run())
+
+    assert '"type": "tool_result"' in chunk
+    assert '"goal": {' in chunk
+    assert '"objective": "Ship the runtime goal contract"' in chunk
+    assert '"status": "completed"' in chunk
+    assert '"goal_transition"' in chunk
+    assert '"goal_outcome"' in chunk

@@ -17,6 +17,7 @@ from sagents.session_runtime import (
     build_conversation_messages_view,
     get_global_session_manager,
 )
+from common.schemas.goal import GoalStatus, GoalTransition, SessionGoal
 
 from common.core import config
 from common.core.exceptions import SageHTTPException
@@ -68,6 +69,235 @@ def _build_session_trace_url(session_id: str) -> Optional[str]:
         return f"{base}/trace/{trace_id}"
 
     return f"/jaeger/trace/{trace_id}"
+
+
+def _load_session_goal(session_id: str) -> Optional[SessionGoal]:
+    session_manager = get_global_session_manager()
+    if not session_manager:
+        return None
+    try:
+        return session_manager.get_goal(session_id)
+    except Exception as exc:
+        logger.bind(session_id=session_id).warning(f"读取会话 goal 失败: {exc}")
+        return None
+
+
+def _load_session_goal_transition(session_id: str) -> Optional[GoalTransition]:
+    session_manager = get_global_session_manager()
+    if not session_manager:
+        return None
+    try:
+        transition = session_manager.get_goal_transition(session_id)
+    except Exception as exc:
+        logger.bind(session_id=session_id).warning(f"读取会话 goal_transition 失败: {exc}")
+        return None
+
+    if not isinstance(transition, dict):
+        return None
+
+    try:
+        return GoalTransition.model_validate(transition)
+    except Exception as exc:
+        logger.bind(session_id=session_id).debug(f"解析会话 goal_transition 失败: {exc}")
+        return None
+
+
+def _normalize_goal_status_filter(goal_status: Optional[str]) -> Optional[str]:
+    value = str(goal_status or "").strip().lower()
+    if not value or value == "all":
+        return None
+    if value == "none":
+        return "none"
+    valid_statuses = {status.value for status in GoalStatus}
+    return value if value in valid_statuses else None
+
+
+def _conversation_matches_goal_status(
+    conversation: Conversation,
+    goal_status: str,
+) -> bool:
+    goal = _load_session_goal(conversation.session_id)
+    if goal_status == "none":
+        return goal is None
+    if goal is None:
+        return False
+    return goal.status.value == goal_status
+
+
+async def _get_authorized_conversation(
+    session_id: str,
+    *,
+    user_id: Optional[str] = None,
+    forbidden_detail: str = "无权访问该会话",
+    forbidden_error_detail: str = "forbidden",
+) -> Conversation:
+    dao = ConversationDao()
+    conversation = await dao.get_by_session_id(session_id)
+    if not conversation:
+        raise SageHTTPException(
+            **_conversation_error_kwargs(
+                detail=f"会话 {session_id} 不存在",
+                error_detail=f"Conversation '{session_id}' not found",
+            )
+        )
+
+    if user_id and conversation.user_id and conversation.user_id != user_id:
+        raise SageHTTPException(
+            **_conversation_error_kwargs(
+                detail=forbidden_detail,
+                error_detail=forbidden_error_detail,
+            )
+        )
+
+    return conversation
+
+
+async def _get_restorable_session(session_id: str):
+    session_manager = get_global_session_manager()
+    if not session_manager:
+        raise SageHTTPException(
+            **_conversation_error_kwargs(
+                detail="会话运行时未初始化",
+                error_detail="Session runtime unavailable",
+            )
+        )
+
+    session = await asyncio.to_thread(session_manager.get, session_id)
+    if not session:
+        raise SageHTTPException(
+            **_conversation_error_kwargs(
+                detail=f"会话 {session_id} 不存在",
+                error_detail=f"Session '{session_id}' not found",
+            )
+        )
+    if not session.has_context():
+        raise SageHTTPException(
+            **_conversation_error_kwargs(
+                detail=f"会话 {session_id} 无可恢复上下文",
+                error_detail=f"Session '{session_id}' has no restorable context",
+            )
+        )
+    return session
+
+
+def _goal_payload(goal: Optional[SessionGoal]) -> Optional[Dict[str, Any]]:
+    return goal.model_dump(mode="json") if goal else None
+
+
+def _goal_transition_payload(goal_transition: Optional[GoalTransition]) -> Optional[Dict[str, Any]]:
+    return goal_transition.model_dump(mode="json") if goal_transition else None
+
+
+async def _persist_goal_update(session_id: str) -> None:
+    await persist_session_state(session_id)
+
+
+async def get_session_goal(
+    session_id: str,
+    *,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    await _get_authorized_conversation(
+        session_id,
+        user_id=user_id,
+        forbidden_detail="无权查看该会话目标",
+    )
+    goal = await asyncio.to_thread(_load_session_goal, session_id)
+    goal_transition = await asyncio.to_thread(_load_session_goal_transition, session_id)
+    return {
+        "session_id": session_id,
+        "goal": _goal_payload(goal),
+        "goal_transition": _goal_transition_payload(goal_transition),
+    }
+
+
+async def set_session_goal(
+    session_id: str,
+    *,
+    objective: str,
+    status: GoalStatus = GoalStatus.ACTIVE,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    await _get_authorized_conversation(
+        session_id,
+        user_id=user_id,
+        forbidden_detail="无权修改该会话目标",
+    )
+    cleaned_objective = str(objective or "").strip()
+    if not cleaned_objective:
+        raise SageHTTPException(
+            **_conversation_error_kwargs(
+                detail="目标内容不能为空",
+                error_detail="Goal objective cannot be empty",
+            )
+        )
+
+    session = await _get_restorable_session(session_id)
+    goal = await asyncio.to_thread(session.set_goal, cleaned_objective, status)
+    await _persist_goal_update(session_id)
+    goal_transition = await asyncio.to_thread(session.get_goal_transition)
+    return {
+        "session_id": session_id,
+        "goal": _goal_payload(goal),
+        "goal_transition": _goal_transition_payload(
+            GoalTransition.model_validate(goal_transition) if isinstance(goal_transition, dict) else None
+        ),
+    }
+
+
+async def clear_session_goal(
+    session_id: str,
+    *,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    await _get_authorized_conversation(
+        session_id,
+        user_id=user_id,
+        forbidden_detail="无权清除该会话目标",
+    )
+    session = await _get_restorable_session(session_id)
+    await asyncio.to_thread(session.clear_goal)
+    await _persist_goal_update(session_id)
+    goal_transition = await asyncio.to_thread(session.get_goal_transition)
+    return {
+        "session_id": session_id,
+        "goal": None,
+        "goal_transition": _goal_transition_payload(
+            GoalTransition.model_validate(goal_transition) if isinstance(goal_transition, dict) else None
+        ),
+    }
+
+
+async def complete_session_goal(
+    session_id: str,
+    *,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    await _get_authorized_conversation(
+        session_id,
+        user_id=user_id,
+        forbidden_detail="无权完成该会话目标",
+    )
+    session = await _get_restorable_session(session_id)
+    existing_goal = await asyncio.to_thread(session.get_goal)
+    if not existing_goal:
+        raise SageHTTPException(
+            **_conversation_error_kwargs(
+                detail="当前会话没有可完成的目标",
+                error_detail="No active goal to complete",
+            )
+        )
+
+    goal = await asyncio.to_thread(session.complete_goal)
+    await _persist_goal_update(session_id)
+    goal_transition = await asyncio.to_thread(session.get_goal_transition)
+    return {
+        "session_id": session_id,
+        "goal": _goal_payload(goal),
+        "goal_transition": _goal_transition_payload(
+            GoalTransition.model_validate(goal_transition) if isinstance(goal_transition, dict) else None
+        ),
+    }
 
 
 async def interrupt_session(
@@ -180,11 +410,18 @@ async def get_session_status(session_id: str) -> Dict[str, Any]:
         tasks_status: Dict[str, Any] = {}
     else:
         tasks_status = await asyncio.to_thread(session.get_tasks_status)
+    goal = await asyncio.to_thread(_load_session_goal, session_id)
+    goal_transition = await asyncio.to_thread(_load_session_goal_transition, session_id)
 
     logger.bind(session_id=session_id).info(
         f"获取任务数量：{len(tasks_status.get('tasks', []))}"
     )
-    return {"session_id": session_id, "tasks_status": tasks_status}
+    return {
+        "session_id": session_id,
+        "tasks_status": tasks_status,
+        "goal": goal.model_dump(mode="json") if goal else None,
+        "goal_transition": goal_transition.model_dump(mode="json") if goal_transition else None,
+    }
 
 
 async def get_conversations_paginated(
@@ -194,16 +431,37 @@ async def get_conversations_paginated(
     search: Optional[str] = None,
     agent_id: Optional[str] = None,
     sort_by: str = "date",
+    goal_status: Optional[str] = None,
 ) -> Tuple[List[Conversation], int]:
     dao = ConversationDao()
-    return await dao.get_conversations_paginated(
-        page=page,
-        page_size=page_size,
+    normalized_goal_status = _normalize_goal_status_filter(goal_status)
+    if not normalized_goal_status:
+        return await dao.get_conversations_paginated(
+            page=page,
+            page_size=page_size,
+            user_id=user_id,
+            search=search,
+            agent_id=agent_id,
+            sort_by=sort_by or "date",
+        )
+
+    conversations = await dao.get_conversations_filtered(
         user_id=user_id,
         search=search,
         agent_id=agent_id,
         sort_by=sort_by or "date",
     )
+    filtered = await asyncio.to_thread(
+        lambda: [
+            conv
+            for conv in conversations
+            if _conversation_matches_goal_status(conv, normalized_goal_status)
+        ]
+    )
+    total = len(filtered)
+    start = max(page - 1, 0) * page_size
+    end = start + page_size
+    return filtered[start:end], total
 
 
 def build_conversation_list_result(
@@ -220,6 +478,8 @@ def build_conversation_list_result(
         message_count = conv.get_message_count()
         trace_id = _build_session_trace_id(conv.session_id)
         trace_url = _build_session_trace_url(conv.session_id)
+        goal = _load_session_goal(conv.session_id)
+        goal_transition = _load_session_goal_transition(conv.session_id)
         conversation_items.append(
             ConversationInfo(
                 session_id=conv.session_id,
@@ -234,6 +494,8 @@ def build_conversation_list_result(
                 updated_at=conv.updated_at.isoformat() if conv.updated_at else "",
                 trace_id=trace_id,
                 trace_url=trace_url,
+                goal=goal,
+                goal_transition=goal_transition,
             )
         )
 
@@ -278,6 +540,8 @@ async def get_conversation_messages(
         messages.append(ContentProcessor.clean_content(message))
 
     next_stream_index = stream_manager.get_instance().get_history_length(session_id)
+    goal = await asyncio.to_thread(_load_session_goal, session_id)
+    goal_transition = await asyncio.to_thread(_load_session_goal_transition, session_id)
     return {
         "conversation_id": session_id,
         "messages": messages,
@@ -290,6 +554,8 @@ async def get_conversation_messages(
             "title": conversation.title,
             "created_at": conversation.created_at,
             "updated_at": conversation.updated_at,
+            "goal": goal.model_dump(mode="json") if goal else None,
+            "goal_transition": goal_transition.model_dump(mode="json") if goal_transition else None,
         },
     }
 

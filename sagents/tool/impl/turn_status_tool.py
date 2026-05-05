@@ -19,10 +19,97 @@ from typing import Any, Dict, Optional
 
 from ..tool_base import tool
 from ..error_codes import ToolErrorCode, make_tool_error
+from common.schemas.goal import SessionGoal
+from sagents.session_runtime import get_global_session_manager
 from sagents.utils.logger import logger
 
 
 _VALID_STATUSES = {"task_done", "need_user_input", "blocked", "continue_work"}
+
+
+def _goal_payload(goal: Optional[SessionGoal]) -> Optional[Dict[str, Any]]:
+    if not goal:
+        return None
+    return {
+        "objective": goal.objective,
+        "status": goal.status.value,
+        "created_at": goal.created_at,
+        "updated_at": goal.updated_at,
+        "completed_at": goal.completed_at,
+        "paused_reason": goal.paused_reason,
+    }
+
+
+def _goal_outcome_payload(
+    *,
+    goal: Optional[SessionGoal],
+    status: str,
+    note: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    if not goal:
+        return None
+
+    reason = (note or "").strip() or None
+    if status == "task_done":
+        return {
+            "action": "completed",
+            "objective": goal.objective,
+            "status": goal.status.value,
+            "reason": reason or "task_done",
+        }
+    if status == "continue_work":
+        return {
+            "action": "continued",
+            "objective": goal.objective,
+            "status": goal.status.value,
+            "reason": reason or "continue_work",
+        }
+    if status == "need_user_input":
+        return {
+            "action": "paused",
+            "objective": goal.objective,
+            "status": goal.status.value,
+            "reason": reason or "waiting_for_user_input",
+        }
+    if status == "blocked":
+        return {
+            "action": "paused",
+            "objective": goal.objective,
+            "status": goal.status.value,
+            "reason": reason or "blocked",
+        }
+    return None
+
+
+def _apply_goal_status_policy(
+    *,
+    session_id: Optional[str],
+    status: str,
+    note: Optional[str],
+) -> Optional[SessionGoal]:
+    if not session_id:
+        return None
+    try:
+        manager = get_global_session_manager()
+    except ValueError:
+        return None
+    session = manager.get_live_session(session_id) if manager else None
+    if not session:
+        return None
+
+    goal = session.get_goal()
+    if not goal:
+        return None
+
+    if status == "task_done":
+        return session.complete_goal()
+    if status == "continue_work":
+        return session.activate_goal()
+    if status == "need_user_input":
+        return session.pause_goal(note or "waiting_for_user_input")
+    if status == "blocked":
+        return session.pause_goal(note or "blocked")
+    return goal
 
 
 class TurnStatusTool:
@@ -79,10 +166,13 @@ class TurnStatusTool:
                 hint="改为 task_done / need_user_input / blocked / continue_work 之一后重试",
             )
         should_end = status != "continue_work"
+        goal = _apply_goal_status_policy(session_id=session_id, status=status, note=note)
         logger.info(f"TurnStatusTool: turn_status called status={status} should_end={should_end} note={note!r} session={session_id}")
         # 成功路径：保留标准 success/status，业务字段仅 should_end；入参 status/note 见日志
         return {
             "success": True,
             "status": "success",
             "should_end": should_end,
+            "goal": _goal_payload(goal),
+            "goal_outcome": _goal_outcome_payload(goal=goal, status=status, note=note),
         }

@@ -1,5 +1,6 @@
 import pytest
 import os
+import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
 
 from sagents.agent.common_agent import CommonAgent
@@ -112,3 +113,94 @@ class TestCommonAgent:
         assert len(result) == 1
         assert result[0].content == tool_response
         # assert result[0].show_content == '\n' + tool_response + '\n'
+
+    def test_build_system_segments_includes_active_goal_context(self, common_agent):
+        mock_context = MagicMock()
+        mock_context.system_context = {
+            "active_goal": {
+                "objective": "Ship the runtime goal contract",
+                "status": "active",
+            },
+            "goal_continuation_policy": {
+                "mode": "continue_active_goal",
+                "objective": "Ship the runtime goal contract",
+                "status": "active",
+                "instruction": "Continue pursuing the active goal across turns until it is completed, cleared, or replaced.",
+            },
+            "goal_resume_hint": "Continue the active goal after resume.",
+        }
+        mock_context.sandbox = None
+        mock_context.effective_skill_manager = None
+
+        with patch.object(common_agent, "_get_live_session_context", return_value=mock_context):
+            segments = asyncio.run(
+                common_agent._build_system_segments(
+                    session_id="test_session",
+                    language="en",
+                    include_sections=["system_context"],
+                )
+            )
+
+        assert "<active_goal>" in segments["volatile"]
+        assert "Ship the runtime goal contract" in segments["volatile"]
+        assert "Continue pursuing it across the current session" in segments["volatile"]
+        assert "\"resume_hint\": \"Continue the active goal after resume.\"" in segments["volatile"]
+        assert "<goal_continuation_policy>" in segments["volatile"]
+        assert "Continue pursuing the active goal and make its status explicit as the session progresses." in segments["volatile"]
+
+    def test_build_system_segments_includes_goal_transition_guidance(self, common_agent):
+        mock_context = MagicMock()
+        mock_context.system_context = {
+            "goal_transition": {
+                "type": "cleared",
+                "previous_objective": "Ship the runtime goal contract",
+                "previous_status": "active",
+            }
+        }
+        mock_context.sandbox = None
+        mock_context.effective_skill_manager = None
+
+        with patch.object(common_agent, "_get_live_session_context", return_value=mock_context):
+            segments = asyncio.run(
+                common_agent._build_system_segments(
+                    session_id="test_session",
+                    language="en",
+                    include_sections=["system_context"],
+                )
+            )
+
+        assert "<goal_transition>" in segments["volatile"]
+        assert "Ship the runtime goal contract" in segments["volatile"]
+        assert "Do not implicitly continue the old goal unless the user reintroduces it." in segments["volatile"]
+
+    def test_build_system_segments_includes_resume_goal_continuation_guidance(self, common_agent):
+        mock_context = MagicMock()
+        mock_context.system_context = {
+            "active_goal": {
+                "objective": "Ship the runtime goal contract",
+                "status": "active",
+                "resume_hint": "Continue the active goal after resume. Previous pause reason: blocked",
+            },
+            "goal_continuation_policy": {
+                "mode": "resume_active_goal",
+                "objective": "Ship the runtime goal contract",
+                "status": "active",
+                "resume_hint": "Continue the active goal after resume. Previous pause reason: blocked",
+                "instruction": "Continue the active goal from prior progress after resume. Do not restart from scratch.",
+            },
+        }
+        mock_context.sandbox = None
+        mock_context.effective_skill_manager = None
+
+        with patch.object(common_agent, "_get_live_session_context", return_value=mock_context):
+            segments = asyncio.run(
+                common_agent._build_system_segments(
+                    session_id="test_session",
+                    language="en",
+                    include_sections=["system_context"],
+                )
+            )
+
+        assert "<goal_continuation_policy>" in segments["volatile"]
+        assert "\"mode\": \"resume_active_goal\"" in segments["volatile"]
+        assert "Build on prior progress and continue forward without restarting the plan from scratch." in segments["volatile"]

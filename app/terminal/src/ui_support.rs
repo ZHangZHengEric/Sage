@@ -102,6 +102,9 @@ pub(crate) fn footer_status_summary(app: &App) -> String {
     if let Some(agent_id) = app.selected_agent_id.as_deref() {
         parts.push(format!("agent {}", truncate_middle(agent_id, 18)));
     }
+    if let Some(goal) = app.current_goal.as_ref() {
+        parts.push(format!("goal {}", goal.status));
+    }
     parts.push(compact_workspace_label(&app.workspace_label));
     if app.busy {
         if let Some(phase) = app.active_phase_label() {

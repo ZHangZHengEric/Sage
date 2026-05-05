@@ -206,11 +206,14 @@ class Logger:
                         total_size_deleted += file_size
 
                         # 使用logger记录删除操作（避免循环调用）
-                        print(f"[LOG CLEANUP] Deleted old log file: {log_file} (size: {file_size} bytes, modified: {file_mtime.strftime('%Y-%m-%d %H:%M:%S')})")
+                        self._write_stderr(
+                            f"[LOG CLEANUP] Deleted old log file: {log_file} "
+                            f"(size: {file_size} bytes, modified: {file_mtime.strftime('%Y-%m-%d %H:%M:%S')})"
+                        )
 
                 except Exception as e:
                     # 删除单个文件失败不影响整体功能
-                    print(f"[LOG CLEANUP] Failed to delete log file {log_file}: {e}")
+                    self._write_stderr(f"[LOG CLEANUP] Failed to delete log file {log_file}: {e}")
 
         except Exception:
             # 清理失败不影响logger的主要功能
@@ -230,14 +233,16 @@ class Logger:
             self._cleanup_timer.start()
 
         except Exception as e:
-            print(f"[LOG CLEANUP] Failed to start periodic cleanup: {e}")
+            self._write_stderr(f"[LOG CLEANUP] Failed to start periodic cleanup: {e}")
             import traceback
             traceback.print_exc()
 
     def _periodic_cleanup_task(self):
         """定期清理任务"""
         try:
-            print(f"[LOG CLEANUP] Starting periodic cleanup task at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            self._write_stderr(
+                f"[LOG CLEANUP] Starting periodic cleanup task at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            )
 
             # 执行清理
             self._cleanup_old_logs()
@@ -246,7 +251,7 @@ class Logger:
             self._start_periodic_cleanup()
 
         except Exception as e:
-            print(f"[LOG CLEANUP] Periodic cleanup task failed: {e}")
+            self._write_stderr(f"[LOG CLEANUP] Periodic cleanup task failed: {e}")
             import traceback
             traceback.print_exc()
 
@@ -254,7 +259,7 @@ class Logger:
             try:
                 self._start_periodic_cleanup()
             except Exception as restart_error:
-                print(f"[LOG CLEANUP] Failed to restart periodic cleanup: {restart_error}")
+                self._write_stderr(f"[LOG CLEANUP] Failed to restart periodic cleanup: {restart_error}")
 
     def stop_periodic_cleanup(self):
         """停止定期清理（用于测试或手动控制）"""
@@ -327,9 +332,17 @@ class Logger:
                         session_logger.addHandler(session_file_handler)
             except Exception as e:
                 # 如果无法创建session专用日志文件，记录错误但不影响主要功能
-                print(f"Warning: Failed to create session log file for {session_id}: {e}")
+                self._write_stderr(f"Warning: Failed to create session log file for {session_id}: {e}")
 
         return session_logger
+
+    @staticmethod
+    def _write_stderr(message: str) -> None:
+        try:
+            sys.stderr.write(f"{message}\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
 
     def _log(self, level, message, explicit_session_id: Optional[str] = None, **kwargs):
         # Get caller frame info to include filename and line number

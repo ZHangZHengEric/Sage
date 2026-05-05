@@ -6,6 +6,7 @@ import { useLanguage } from '@/utils/i18n.js'
 import { useLanguageStore } from '@/utils/i18n.js'
 import { chatAPI } from '@/api/chat.js'
 import { agentAPI } from '@/api/agent.js'
+import { normalizeGoalTransition, normalizeSessionGoal } from '@/composables/chat/goalSync.js'
 import { useChatActiveSessionCache } from '@/composables/chat/useChatActiveSessionCache.js'
 import { useChatScroll } from '@/composables/chat/useChatScroll.js'
 import { useChatStream } from '@/composables/chat/useChatStream.js'
@@ -208,6 +209,55 @@ export const useChatPage = (props) => {
   const currentSessionId = ref(null)
   const activeSubSessionId = ref(null)
   const isHistoryLoading = ref(false)
+  const currentGoal = ref(null)
+  const currentGoalTransition = ref(null)
+  const isGoalMutating = ref(false)
+
+  const syncCurrentGoal = (goal, sessionId = currentSessionId.value) => {
+    const normalizedGoal = normalizeSessionGoal(goal)
+
+    if (!sessionId || sessionId === currentSessionId.value) {
+      currentGoal.value = normalizedGoal
+    }
+
+    if (sessionId && activeSessions.value?.[sessionId]) {
+      const cached = activeSessions.value[sessionId]
+      updateActiveSession(
+        sessionId,
+        cached.status === 'running',
+        null,
+        null,
+        false,
+        {
+          status: cached.status,
+          goal: normalizedGoal
+        }
+      )
+    }
+  }
+
+  const syncCurrentGoalTransition = (transition, sessionId = currentSessionId.value) => {
+    const normalizedTransition = normalizeGoalTransition(transition)
+
+    if (!sessionId || sessionId === currentSessionId.value) {
+      currentGoalTransition.value = normalizedTransition
+    }
+
+    if (sessionId && activeSessions.value?.[sessionId]) {
+      const cached = activeSessions.value[sessionId]
+      updateActiveSession(
+        sessionId,
+        cached.status === 'running',
+        null,
+        null,
+        false,
+        {
+          status: cached.status,
+          goal_transition: normalizedTransition
+        }
+      )
+    }
+  }
 
   const filteredMessages = computed(() => {
     if (!messages.value) return []
@@ -356,6 +406,8 @@ export const useChatPage = (props) => {
     const res = await chatAPI.getConversationMessages(sessionId)
     if (!res) return null
     const conversationAgentId = res.conversation_info?.agent_id || null
+    syncCurrentGoal(res.conversation_info?.goal || null)
+    syncCurrentGoalTransition(res.conversation_info?.goal_transition || null)
 
     if (conversationAgentId) {
       const agent = agents.value.find(a => a.id === conversationAgentId)
@@ -601,7 +653,9 @@ export const useChatPage = (props) => {
     loadConversationMessages,
     isHistoryLoading,
     removeSessionFromCache,
-    language
+    language,
+    onSessionGoal: syncCurrentGoal,
+    onSessionGoalTransition: syncCurrentGoalTransition
   })
 
   const submitEditedLastUserMessage = async (content) => {
@@ -665,6 +719,73 @@ export const useChatPage = (props) => {
 
   const showLoadingBubble = computed(() => !!isLoading.value)
 
+  const ensureGoalMutableSession = () => {
+    if (!currentSessionId.value || (!currentGoal.value && messages.value.length === 0)) {
+      toast.error(t('chat.goalSessionRequired'))
+      return false
+    }
+    return true
+  }
+
+  const saveSessionGoal = async (objective) => {
+    if (!ensureGoalMutableSession()) return false
+    const cleanedObjective = String(objective || '').trim()
+    if (!cleanedObjective) {
+      toast.error(t('chat.goalEmpty'))
+      return false
+    }
+    try {
+      isGoalMutating.value = true
+      const result = await chatAPI.setSessionGoal(currentSessionId.value, {
+        objective: cleanedObjective,
+        status: 'active'
+      })
+      syncCurrentGoal(result?.goal || null)
+      syncCurrentGoalTransition(result?.goal_transition || null)
+      toast.success(t('chat.goalSaved'))
+      return true
+    } catch (error) {
+      toast.error(error?.message || t('chat.goalSaveError'))
+      return false
+    } finally {
+      isGoalMutating.value = false
+    }
+  }
+
+  const clearSessionGoal = async () => {
+    if (!ensureGoalMutableSession() || !currentGoal.value) return false
+    try {
+      isGoalMutating.value = true
+      const result = await chatAPI.clearSessionGoal(currentSessionId.value)
+      syncCurrentGoal(null)
+      syncCurrentGoalTransition(result?.goal_transition || null)
+      toast.success(t('chat.goalCleared'))
+      return true
+    } catch (error) {
+      toast.error(error?.message || t('chat.goalClearError'))
+      return false
+    } finally {
+      isGoalMutating.value = false
+    }
+  }
+
+  const completeSessionGoal = async () => {
+    if (!ensureGoalMutableSession() || !currentGoal.value) return false
+    try {
+      isGoalMutating.value = true
+      const result = await chatAPI.completeSessionGoal(currentSessionId.value)
+      syncCurrentGoal(result?.goal || null)
+      syncCurrentGoalTransition(result?.goal_transition || null)
+      toast.success(t('chat.goalCompletedToast'))
+      return true
+    } catch (error) {
+      toast.error(error?.message || t('chat.goalCompleteError'))
+      return false
+    } finally {
+      isGoalMutating.value = false
+    }
+  }
+
   const resetChat = () => {
     persistRunningSessionOnLeaveChat()
     clearCurrentStreamViewState()
@@ -681,6 +802,8 @@ export const useChatPage = (props) => {
     abilityError.value = null
     hasUsedAbilityEntryInSession.value = false
     showAbilityButton.value = true
+    syncCurrentGoal(null)
+    syncCurrentGoalTransition(null)
     createSession()
   }
 
@@ -692,10 +815,13 @@ export const useChatPage = (props) => {
       if (sessionId) {
         currentSessionId.value = sessionId
         await loadConversationMessages(sessionId)
+        syncCurrentGoalTransition(conversation.goal_transition || null)
         showAbilityPanel.value = false
         showAbilityButton.value = false
         hasUsedAbilityEntryInSession.value = true
       } else {
+        syncCurrentGoal(conversation.goal || null)
+        syncCurrentGoalTransition(conversation.goal_transition || null)
         if (conversation.agent_id && agents.value.length > 0) {
           const agent = agents.value.find(a => a.id === conversation.agent_id)
           if (agent) {
@@ -873,6 +999,8 @@ watch(() => currentSessionId.value, (newSessionId, oldSessionId) => {
     }
     // 如果 session id 为 null，关闭工作台弹窗
     if (!newSessionId) {
+      syncCurrentGoal(null)
+      syncCurrentGoalTransition(null)
       panelStore.closeAll()
       console.log('[ChatPage] Session ID is null, closed workbench')
     }
@@ -895,6 +1023,9 @@ watch(() => currentSessionId.value, (newSessionId, oldSessionId) => {
     showWorkspace,
     showLoadingBubble,
     filteredMessages,
+    currentGoal,
+    currentGoalTransition,
+    isGoalMutating,
     isLoading,
     isCurrentSessionLoading,
     currentSessionId,
@@ -927,6 +1058,9 @@ watch(() => currentSessionId.value, (newSessionId, oldSessionId) => {
     closeAbilityPanel,
     retryAbilityFetch,
     onAbilityCardClick,
-    submitEditedLastUserMessage
+    submitEditedLastUserMessage,
+    saveSessionGoal,
+    clearSessionGoal,
+    completeSessionGoal
   }
 }

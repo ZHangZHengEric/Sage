@@ -182,6 +182,41 @@ class ConversationDao(BaseDao):
             items.sort(key=lambda x: order_index.get(x.session_id, len(order_index)))
             return items, total
 
+    async def get_conversations_filtered(
+        self,
+        *,
+        user_id: Optional[str] = None,
+        search: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        sort_by: str = "date",
+    ) -> List[Conversation]:
+        where = []
+        if user_id:
+            where.append(Conversation.user_id == user_id)
+        if agent_id:
+            where.append(Conversation.agent_id == agent_id)
+        if search:
+            like = f"%{search}%"
+            where.append(Conversation.title.like(like))
+
+        if sort_by == "title":
+            order = Conversation.title.asc()
+        elif sort_by == "messages":
+            order = func.length(Conversation.messages).desc()
+        else:
+            order = Conversation.updated_at.desc()
+
+        db = await self._get_db()
+        async with db.get_session() as session:  # type: ignore[attr-defined]
+            stmt = select(Conversation)
+            if where:
+                for cond in where:
+                    stmt = stmt.where(cond)
+            if order is not None:
+                stmt = stmt.order_by(order)
+            res = await session.execute(stmt)
+            return list(res.scalars().all())
+
     async def delete_conversation(self, session_id: str) -> bool:
         return await BaseDao.delete_by_id(self, Conversation, session_id)
 
@@ -237,4 +272,3 @@ class ConversationDao(BaseDao):
             agent_id=agent_id,
             sort_by=sort_by,
         )
-

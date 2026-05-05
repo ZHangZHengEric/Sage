@@ -152,6 +152,18 @@
               @select="onAbilityCardClick"
             />
 
+            <div v-if="currentSessionId" class="mx-auto w-full max-w-4xl">
+              <SessionGoalCard
+                :goal="currentGoal"
+                :goal-transition="currentGoalTransition"
+                :busy="isGoalMutating"
+                :can-edit="!!currentGoal || normalizedMessages.length > 0"
+                @save-goal="saveSessionGoal"
+                @clear-goal="clearSessionGoal"
+                @complete-goal="completeSessionGoal"
+              />
+            </div>
+
             <div
               v-if="!filteredMessages || filteredMessages.length === 0"
               class="flex flex-col items-center justify-center text-center p-8 h-full text-muted-foreground animate-in fade-in zoom-in duration-500"
@@ -311,6 +323,7 @@ import WorkbenchPreview from '@/components/chat/WorkbenchPreview.vue'
 import LoadingBubble from '@/components/chat/LoadingBubble.vue'
 import SubSessionPanel from '@/components/chat/SubSessionPanel.vue'
 import AbilityPanel from '@/components/chat/AbilityPanel.vue'
+import SessionGoalCard from '@/components/chat/SessionGoalCard.vue'
 import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 import { Button } from '@/components/ui/button'
 import {
@@ -356,6 +369,9 @@ const {
   config,
   showLoadingBubble,
   filteredMessages,
+  currentGoal,
+  currentGoalTransition,
+  isGoalMutating,
   isLoading,
   isCurrentSessionLoading,
   currentSessionId,
@@ -389,7 +405,10 @@ const {
   closeAbilityPanel,
   retryAbilityFetch,
   onAbilityCardClick,
-  submitEditedLastUserMessage
+  submitEditedLastUserMessage,
+  saveSessionGoal,
+  clearSessionGoal,
+  completeSessionGoal
 } = useChatPage(props)
 
 const workbenchStore = useWorkbenchStore()

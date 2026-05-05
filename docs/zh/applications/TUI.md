@@ -122,6 +122,7 @@ cargo run --quiet --offline -- resume
 - `/mode`
 - `/display`
 - `/workspace`
+- `/goal`
 - `/interrupt`
 - `/retry`
 - `/new`
@@ -207,6 +208,22 @@ sage-terminal --display verbose
 /workspace set /path/to/project
 /workspace clear
 ```
+
+## Goal 控制
+
+Terminal 现在可以携带共享 Sage runtime 的 session goal contract。
+
+```text
+/goal
+/goal show
+/goal set <objective>
+/goal clear
+/goal done
+```
+
+`/goal <objective>` 会设置当前会话目标，并立即把同一句 objective 作为下一条任务提交，行为上对齐 Codex 风格。
+
+`/goal set` 仍然只会把目标排入当前 session 的下一次请求，本身不会立刻开始执行；等 backend 再次回传会话初始化事件后，terminal 会显示 runtime 最终解析出来的 goal 状态。
 
 ## 运行控制
 

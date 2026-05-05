@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::text::Line;
 
-use crate::backend::BackendStats;
+use crate::backend::{BackendGoal, BackendSessionMeta, BackendStats};
 use crate::display_policy::DisplayMode;
 
 #[derive(Debug)]
@@ -112,6 +112,13 @@ pub(crate) struct AgentCandidate {
     pub(crate) updated_at: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingGoalMutation {
+    pub objective: Option<String>,
+    pub status: Option<String>,
+    pub clear: bool,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProviderPopupMode {
     Inspect,
@@ -151,6 +158,9 @@ pub struct App {
     pub max_loop_count: u32,
     pub workspace_label: String,
     pub(crate) workspace_override: Option<PathBuf>,
+    pub current_goal: Option<BackendGoal>,
+    pub pending_goal_mutation: Option<PendingGoalMutation>,
+    pub(crate) last_goal_transition_signature: Option<String>,
     pub status: String,
     pub busy: bool,
     pub should_quit: bool,
@@ -191,11 +201,16 @@ pub(crate) struct ActiveToolRecord {
 }
 
 impl App {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new() -> Self {
+        Self::new_with_session_seq(1)
+    }
+
+    pub fn new_with_session_seq(session_seq: u32) -> Self {
         let mut app = Self {
             input: String::new(),
             input_cursor: 0,
-            session_seq: 1,
+            session_seq: session_seq.max(1),
             session_id: String::new(),
             user_id: "default_user".to_string(),
             selected_agent_id: None,
@@ -203,6 +218,9 @@ impl App {
             max_loop_count: 50,
             workspace_label: default_workspace_label(),
             workspace_override: None,
+            current_goal: None,
+            pending_goal_mutation: None,
+            last_goal_transition_signature: None,
             status: String::new(),
             busy: false,
             should_quit: false,
@@ -245,6 +263,9 @@ impl App {
         self.session_seq += 1;
         self.clear_input();
         self.busy = false;
+        self.current_goal = None;
+        self.pending_goal_mutation = None;
+        self.last_goal_transition_signature = None;
         self.live_message = None;
         self.live_message_had_history = false;
         self.request_started_at = None;
@@ -285,6 +306,106 @@ impl App {
 
     pub fn workspace_override_path(&self) -> Option<&Path> {
         self.workspace_override.as_deref()
+    }
+
+    pub fn apply_session_meta(&mut self, meta: BackendSessionMeta) {
+        let previous_session_id = self.session_id.clone();
+        let previous_goal = self.current_goal.clone();
+        let goal_transition = meta.goal_transition.clone();
+        self.session_id = meta.session_id;
+        self.current_goal = meta.goal;
+        self.pending_goal_mutation = None;
+        self.status = if meta.command_mode.as_deref() == Some("resume") {
+            format!("resumed  {}", self.session_id)
+        } else {
+            format!("ready  {}", self.session_id)
+        };
+
+        if meta.command_mode.as_deref() == Some("resume")
+            && previous_session_id != self.session_id
+        {
+            if let Some(goal) = self.current_goal.as_ref() {
+                self.queue_message(
+                    MessageKind::Process,
+                    format!("continuing goal • {} ({})", goal.objective, goal.status),
+                );
+            }
+        }
+
+        if let Some(transition) = goal_transition {
+            let signature = format!(
+                "{}|{}|{}|{}|{}|{}",
+                self.session_id,
+                transition.transition_type,
+                transition.objective.as_deref().unwrap_or(""),
+                transition.status.as_deref().unwrap_or(""),
+                transition.previous_objective.as_deref().unwrap_or(""),
+                transition.previous_status.as_deref().unwrap_or(""),
+            );
+            if self.last_goal_transition_signature.as_deref() == Some(signature.as_str()) {
+                return;
+            }
+            self.last_goal_transition_signature = Some(signature);
+            match transition.transition_type.as_str() {
+                "completed" => {
+                    if let Some(objective) = transition.objective.or_else(|| {
+                        self.current_goal
+                            .as_ref()
+                            .map(|goal| goal.objective.clone())
+                    }) {
+                        self.queue_message(
+                            MessageKind::Process,
+                            format!("goal completed • {}", objective),
+                        );
+                    } else {
+                        self.queue_message(MessageKind::Process, "goal completed");
+                    }
+                }
+                "cleared" => {
+                    self.queue_message(MessageKind::Process, "goal cleared");
+                }
+                "replaced" => {
+                    let next_goal = transition
+                        .objective
+                        .or_else(|| self.current_goal.as_ref().map(|goal| goal.objective.clone()));
+                    if let Some(objective) = next_goal {
+                        self.queue_message(
+                            MessageKind::Process,
+                            format!("goal updated • {}", objective),
+                        );
+                    }
+                }
+                "resumed" => {
+                    if let Some(objective) = transition
+                        .objective
+                        .or_else(|| self.current_goal.as_ref().map(|goal| goal.objective.clone()))
+                    {
+                        self.queue_message(
+                            MessageKind::Process,
+                            format!("continuing goal • {}", objective),
+                        );
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            match (previous_goal.as_ref(), self.current_goal.as_ref()) {
+                (Some(_), None) => {
+                    self.queue_message(MessageKind::Process, "goal cleared");
+                }
+                (Some(previous), Some(current))
+                    if previous.objective == current.objective
+                        && previous.status != current.status
+                        && current.status == "completed" =>
+                {
+                    self.queue_message(
+                        MessageKind::Process,
+                        format!("goal completed • {}", current.objective),
+                    );
+                }
+                _ => {}
+            }
+        }
     }
 }
 

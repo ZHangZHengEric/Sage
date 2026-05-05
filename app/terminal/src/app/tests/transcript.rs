@@ -26,6 +26,98 @@ fn transcript_messages_render_with_role_headers() {
 }
 
 #[test]
+fn process_messages_render_in_transcript() {
+    let mut app = App::new();
+    app.push_message(MessageKind::Process, "[working] still running (3.0s since last event)");
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("Process"));
+    assert!(rendered.contains("working"));
+    assert!(rendered.contains("still running"));
+}
+
+#[test]
+fn process_notice_replaces_busy_placeholder_with_visible_transcript_message() {
+    let mut app = App::new();
+    app.begin_task_submission("abc".to_string(), true);
+
+    let live_before = app
+        .rendered_live_lines()
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(live_before.contains("working"));
+
+    app.push_message(
+        MessageKind::Process,
+        "[working] MemoryRecallAgent: 遇到网络连接错误，等待 2 秒后重试 (1/8): Connection error.",
+    );
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("Process"));
+    assert!(rendered.contains("MemoryRecallAgent"));
+    assert!(rendered.contains("Connection error."));
+}
+
+#[test]
+fn process_notice_replaces_live_busy_placeholder() {
+    let mut app = App::new();
+    app.begin_task_submission("abc".to_string(), true);
+
+    app.set_live_notice(
+        MessageKind::Process,
+        "[working] MemoryRecallAgent: 遇到网络连接错误，等待 2 秒后重试 (1/8): Connection error.",
+    );
+
+    let live = app
+        .rendered_live_lines()
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(live.contains("MemoryRecallAgent"));
+    assert!(live.contains("Connection error."));
+    assert!(!live.contains("output is streaming"));
+}
+
+#[test]
+fn backend_system_notice_replaces_live_busy_placeholder() {
+    let mut app = App::new();
+    app.begin_task_submission("abc".to_string(), true);
+
+    app.set_live_notice(
+        MessageKind::System,
+        "backend · ToolSuggestionAgent: 遇到网络连接错误，等待 2 秒后重试 (1/8): Connection error.",
+    );
+
+    let live = app
+        .rendered_live_lines()
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(live.contains("backend"));
+    assert!(live.contains("ToolSuggestionAgent"));
+    assert!(live.contains("Connection error."));
+}
+
+#[test]
 fn assistant_tables_render_as_grid_lines() {
     let lines = render_assistant_body(
         "| name | value |\n| ---- | ----- |\n| mode | simple |\n| loops | 50 |",
@@ -535,4 +627,45 @@ fn completed_request_keeps_raw_phase_names_in_verbose_mode() {
         .join("\n");
     assert!(rendered.contains("phase • MemoryRecallAgent 500ms"));
     assert!(!rendered.contains("phase • memory 500ms"));
+}
+
+#[test]
+fn busy_state_without_live_chunks_does_not_render_default_working_message() {
+    let mut app = App::new();
+    app.input = "hello".to_string();
+    app.input_cursor = app.input.len();
+
+    let _ = app.submit_input();
+
+    let rendered = app
+        .rendered_live_lines()
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("working..."));
+    assert!(!rendered.contains("Process"));
+}
+
+#[test]
+fn busy_state_without_live_chunks_renders_active_phase_hint() {
+    let mut app = App::new();
+    app.input = "hello".to_string();
+    app.input_cursor = app.input.len();
+
+    let _ = app.submit_input();
+    app.set_active_phase("planning");
+
+    let rendered = app
+        .rendered_live_lines()
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("planning..."));
+    assert!(!rendered.contains("Process"));
 }
