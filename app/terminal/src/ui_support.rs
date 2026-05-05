@@ -4,7 +4,6 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::app::{ActiveSurfaceKind, App};
 use crate::app_render::truncate_middle;
-use crate::bottom_pane::command_popup;
 use crate::bottom_pane::composer::ComposerProps;
 use crate::bottom_pane::footer::FooterProps;
 use crate::bottom_pane::help_overlay::HelpOverlayProps;
@@ -47,10 +46,6 @@ pub(crate) fn composer_props(app: &App) -> ComposerProps<'_> {
         input_cursor: app.input_cursor,
         busy: app.busy,
     }
-}
-
-pub(crate) fn command_popup_height(app: &App) -> u16 {
-    command_popup::popup_height(app.popup_props().as_ref())
 }
 
 pub(crate) fn help_overlay_props(app: &App) -> Option<HelpOverlayProps> {
