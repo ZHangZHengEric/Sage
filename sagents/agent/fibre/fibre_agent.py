@@ -10,7 +10,6 @@ from sagents.tool import ToolManager, ToolProxy
 from sagents.agent.fibre.orchestrator import FibreOrchestrator
 from sagents.observability import ObservabilityManager, OpenTelemetryTraceHandler, ObservableAsyncOpenAI
 from sagents.agent.agent_base import AgentBase
-from sagents.utils.prompt_manager import PromptManager
 from sagents.utils.logger import logger
 
 class FibreAgent(AgentBase):
@@ -23,12 +22,6 @@ class FibreAgent(AgentBase):
     """
 
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", enable_obs: bool = True):
-        if not system_prefix:
-            try:
-                system_prefix = PromptManager().get_prompt("fibre_agent_description", agent="FibreAgent", language="en")
-            except Exception as e:
-                logger.warning(f"Failed to load default system prefix: {e}")
-        
         super().__init__(model, model_config, system_prefix)
         # self.workspace = workspace
             

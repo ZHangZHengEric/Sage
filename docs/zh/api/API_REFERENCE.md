@@ -107,6 +107,38 @@ async for chunks in agent.run_stream(
 - `interrupt_session(session_id, message=...)`
 - `get_tasks_status(session_id)`
 
+### 运行中引导消息 helper
+
+这些方法允许宿主代码在不中断会话的情况下，向 live session 追加用户引导。消息先进入 `SessionContext.pending_user_injections`；agent 在下一次请求 LLM 前 drain 队列，将其作为普通用户消息写入历史，并在流中带 `metadata.guidance_id` 回送。
+
+| 方法 | 返回 | 说明 |
+| --- | --- | --- |
+| `inject_user_message(session_id, content, guidance_id=None, metadata=None)` | `str` | 排队一条引导消息，返回实际生效的 `guidance_id`。 |
+| `list_pending_user_injections(session_id)` | `List[dict]` | 快照查询尚未消费的 pending 引导消息。 |
+| `update_pending_user_injection(session_id, guidance_id, content)` | `bool` | 修改 pending 内容；`False` 表示不存在或已被消费。 |
+| `delete_pending_user_injection(session_id, guidance_id)` | `bool` | 删除 pending 消息；`False` 表示不存在或已被消费。 |
+
+示例：
+
+```python
+guidance_id = agent.inject_user_message(
+    session_id="sess_123",
+    content="请优先检查测试失败原因",
+    guidance_id="ui-guidance-1",
+    metadata={"source_ui": "guidance_area"},
+)
+
+pending = agent.list_pending_user_injections("sess_123")
+agent.update_pending_user_injection(
+    "sess_123",
+    guidance_id,
+    "请优先检查测试失败原因，并总结修复点",
+)
+agent.delete_pending_user_injection("sess_123", guidance_id)
+```
+
+`inject_user_message` 在目标会话不在线时抛 `LookupError`，在 `content` 为空时抛 `ValueError`。编辑/删除只作用于 pending 消息；一旦被消费，它就是正式持久化的用户消息。
+
 ## 4. 默认执行图与 `agent_mode`
 
 未传 `custom_flow` 时，由 `_build_default_flow` 使用 `sagents/flow/schema.py` 中的 `SequenceNode`、`SwitchNode`、`LoopNode`、`IfNode` 等拼装（含深度思考分支、`agent_mode` 分岔、`query_suggest` 等）。概念说明见 [核心概念](CORE_CONCEPTS.md) 与 [Agent / Flow 架构](ARCHITECTURE_SAGENTS_AGENT_FLOW.md)。

@@ -845,32 +845,12 @@ class Session:
             logger.info(f"SAgent: {phase_name} 阶段被中断，会话ID: {session_id}")
             return
 
-        phase_status = "completed"
-        session_context.record_timing_event(
-            "agent_phase_start",
-            session_id=session_id,
-            phase_name=phase_name,
-            agent_name=agent.agent_name,
-        )
-        try:
-            async for chunk in agent.run_stream(session_context):
-                # 在每个块之间检查中断
-                if session.should_interrupt():
-                    phase_status = "interrupted"
-                    logger.info(f"SAgent: {phase_name} 阶段在块处理中被中断，会话ID: {session_id}")
-                    return
-                yield chunk
-        except Exception:
-            phase_status = "error"
-            raise
-        finally:
-            session_context.record_timing_event(
-                "agent_phase_end",
-                session_id=session_id,
-                phase_name=phase_name,
-                agent_name=agent.agent_name,
-                status=phase_status,
-            )
+        async for chunk in agent.run_stream(session_context):
+            # 在每个块之间检查中断
+            if session.should_interrupt():
+                logger.info(f"SAgent: {phase_name} 阶段在块处理中被中断，会话ID: {session_id}")
+                return
+            yield chunk
 
         logger.info(f"SAgent: {phase_name} 阶段完成")
 
@@ -923,16 +903,6 @@ class Session:
             f"model={primary_model} steps={len(token_usage['per_step_info'])} "
             f"total={token_usage['total_info']}"
         )
-        tool_steps: List[Dict[str, Any]] = []
-        try:
-            tool_steps = session_context._build_tool_step_summary()
-        except Exception as e:
-            logger.warning(f"SAgent: 生成 tool_steps 失败，会话 {session_id}: {e}")
-        phase_timings: List[Dict[str, Any]] = []
-        try:
-            phase_timings = session_context._build_phase_timing_summary()
-        except Exception as e:
-            logger.warning(f"SAgent: 生成 phase_timings 失败，会话 {session_id}: {e}")
 
         return [
             MessageChunk(
@@ -943,8 +913,6 @@ class Session:
                     "token_usage": token_usage,
                     "model": primary_model,
                     "models": list(token_usage.get("models") or []),
-                    "tool_steps": tool_steps,
-                    "phase_timings": phase_timings,
                     "session_id": session_id,
                 },
             )
@@ -1345,3 +1313,58 @@ def get_global_session_manager(session_root_space: Optional[str] = None, enable_
             raise ValueError("session_root_space is required for first initialization")
         _global_session_manager = SessionManager(session_root_space, enable_obs)
     return _global_session_manager
+
+
+def _resolve_live_session_context(session_manager: SessionManager, session_id: str):
+    """供 SAgent guidance 系列方法定位 live session_context；找不到/非 live 抛 LookupError。"""
+    session = session_manager.get_live_session(session_id)
+    if session is None:
+        raise LookupError(f"session {session_id} not live")
+    if session.is_interrupted():
+        raise LookupError(f"session {session_id} already interrupted")
+    ctx = session.get_context()
+    if ctx is None:
+        raise LookupError(f"session {session_id} has no context bound")
+    return ctx
+
+
+def _inject_user_message_via_manager(
+    session_manager: SessionManager,
+    session_id: str,
+    content: str,
+    *,
+    guidance_id: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> str:
+    """实现细节：定位 live session 并 enqueue 一条引导用户消息。
+
+    供 ``SAgent.inject_user_message`` 调用；其它代码不要直接调用，请走 ``SAgent``。
+    """
+    ctx = _resolve_live_session_context(session_manager, session_id)
+    return ctx.enqueue_user_injection(content, guidance_id=guidance_id, extra_metadata=metadata)
+
+
+def _list_pending_user_injections_via_manager(
+    session_manager: SessionManager, session_id: str
+) -> List[Dict[str, Any]]:
+    ctx = _resolve_live_session_context(session_manager, session_id)
+    return ctx.list_user_injections()
+
+
+def _update_pending_user_injection_via_manager(
+    session_manager: SessionManager,
+    session_id: str,
+    guidance_id: str,
+    content: str,
+) -> bool:
+    ctx = _resolve_live_session_context(session_manager, session_id)
+    return ctx.update_user_injection(guidance_id, content)
+
+
+def _delete_pending_user_injection_via_manager(
+    session_manager: SessionManager,
+    session_id: str,
+    guidance_id: str,
+) -> bool:
+    ctx = _resolve_live_session_context(session_manager, session_id)
+    return ctx.delete_user_injection(guidance_id)

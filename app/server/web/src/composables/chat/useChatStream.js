@@ -340,6 +340,8 @@ export const useChatStream = ({
     sessionId,
     selectedAgent,
     config,
+    guidanceContent = null,
+    guidanceId = null,
     onMessage,
     onError,
     onComplete
@@ -358,6 +360,10 @@ export const useChatStream = ({
         system_context: {
           response_language: normalizeResponseLanguage(language?.value)
         }
+      }
+      if (guidanceContent && String(guidanceContent).trim()) {
+        requestBody.guidance_content = String(guidanceContent).trim()
+        if (guidanceId) requestBody.guidance_id = guidanceId
       }
 
       const response = await chatAPI.rerunConversationStream(sessionId, requestBody, abortControllerRef?.value)

@@ -70,6 +70,124 @@ def _build_session_trace_url(session_id: str) -> Optional[str]:
     return f"/jaeger/trace/{trace_id}"
 
 
+def inject_user_message(
+    session_id: str,
+    content: str,
+    *,
+    guidance_id: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """向运行中的 session 注入引导用户消息（统一通过 SAgent 入口）。
+
+    Returns:
+        {"session_id": ..., "guidance_id": ..., "accepted": True}
+
+    Raises:
+        SageHTTPException: session 不存在/已结束/已中断；或 content 为空。
+    """
+    from sagents import SAgent
+
+    if not content or not str(content).strip():
+        raise SageHTTPException(detail="content 不能为空")
+    sage_engine = SAgent(session_root_space=str(get_sessions_root()))
+    try:
+        gid = sage_engine.inject_user_message(
+            session_id=session_id,
+            content=content,
+            guidance_id=guidance_id,
+            metadata=metadata,
+        )
+    except LookupError as exc:
+        logger.bind(session_id=session_id).info(f"注入引导消息失败: {exc}")
+        raise SageHTTPException(
+            **_conversation_error_kwargs(
+                detail="会话不存在或已结束，无法注入引导消息",
+                error_detail=str(exc),
+            )
+        )
+    except ValueError as exc:
+        raise SageHTTPException(detail=str(exc))
+    logger.bind(session_id=session_id).info(
+        f"已注入引导消息 guidance_id={gid} content_len={len(content)}"
+    )
+    return {"session_id": session_id, "guidance_id": gid, "accepted": True}
+
+
+def _build_inject_sage_engine():
+    from sagents import SAgent
+    return SAgent(session_root_space=str(get_sessions_root()))
+
+
+def _raise_inject_lookup_error(session_id: str, exc: Exception) -> None:
+    logger.bind(session_id=session_id).info(f"引导消息操作失败: {exc}")
+    raise SageHTTPException(
+        **_conversation_error_kwargs(
+            detail="会话不存在或已结束，无法操作引导消息",
+            error_detail=str(exc),
+        )
+    )
+
+
+def list_pending_user_injections(session_id: str) -> Dict[str, Any]:
+    """列出当前活跃 session 上的 pending 引导消息。"""
+    sage_engine = _build_inject_sage_engine()
+    try:
+        items = sage_engine.list_pending_user_injections(session_id=session_id)
+    except LookupError as exc:
+        _raise_inject_lookup_error(session_id, exc)
+    return {"session_id": session_id, "items": items}
+
+
+def update_pending_user_injection(
+    session_id: str,
+    guidance_id: str,
+    content: str,
+) -> Dict[str, Any]:
+    """编辑指定 pending 引导消息。"""
+    if not guidance_id:
+        raise SageHTTPException(detail="guidance_id 不能为空")
+    if not content or not str(content).strip():
+        raise SageHTTPException(detail="content 不能为空")
+    sage_engine = _build_inject_sage_engine()
+    try:
+        hit = sage_engine.update_pending_user_injection(
+            session_id=session_id,
+            guidance_id=guidance_id,
+            content=content,
+        )
+    except LookupError as exc:
+        _raise_inject_lookup_error(session_id, exc)
+    except ValueError as exc:
+        raise SageHTTPException(detail=str(exc))
+    if not hit:
+        raise SageHTTPException(
+            detail=f"未找到 guidance_id={guidance_id} 的 pending 引导消息（可能已被消费或已删除）"
+        )
+    return {"session_id": session_id, "guidance_id": guidance_id, "updated": True}
+
+
+def delete_pending_user_injection(
+    session_id: str,
+    guidance_id: str,
+) -> Dict[str, Any]:
+    """删除指定 pending 引导消息。"""
+    if not guidance_id:
+        raise SageHTTPException(detail="guidance_id 不能为空")
+    sage_engine = _build_inject_sage_engine()
+    try:
+        hit = sage_engine.delete_pending_user_injection(
+            session_id=session_id,
+            guidance_id=guidance_id,
+        )
+    except LookupError as exc:
+        _raise_inject_lookup_error(session_id, exc)
+    if not hit:
+        raise SageHTTPException(
+            detail=f"未找到 guidance_id={guidance_id} 的 pending 引导消息（可能已被消费或已删除）"
+        )
+    return {"session_id": session_id, "guidance_id": guidance_id, "deleted": True}
+
+
 async def interrupt_session(
     session_id: str,
     message: str = "用户请求中断",

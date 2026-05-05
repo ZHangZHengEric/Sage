@@ -6,7 +6,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional, Tuple
 from enum import Enum
 
 
@@ -140,6 +140,25 @@ class ISandboxHandle(ABC):
         以及向用户/agent 显式给出 "已显示 last N of M bytes" 的提示。
         """
         return None
+
+    async def read_background_output_range(
+        self, task_id: str, offset: int = 0, max_bytes: int = 1 << 20
+    ) -> Tuple[str, int]:
+        """从 ``offset`` 字节起向后读到末尾（最多 ``max_bytes`` 字节），返回 ``(text, new_offset)``。
+
+        语义：
+        - 用于工具实时过程通道（``tool_progress``）做"零重复、零丢失"的纯增量推送。
+        - 调用方维护 ``offset``：第一次传 0，之后用上次返回的 ``new_offset``。
+        - 没有新输出（``offset >= size``）返回 ``("", offset)``。
+
+        默认实现 ``raise NotImplementedError``：
+        上层调用方（如 ``execute_command_tool._wait_for_finish``）应捕获异常，
+        回退到 ``read_background_output`` 的 tail diff 模式。
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} 不支持 read_background_output_range；"
+            "上层将回退到 tail diff 模式"
+        )
 
     async def is_background_alive(self, task_id: str) -> bool:
         """后台任务是否仍在运行。默认实现 False。"""

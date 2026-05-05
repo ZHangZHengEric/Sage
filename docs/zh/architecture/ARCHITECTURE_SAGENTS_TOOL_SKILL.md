@@ -343,6 +343,21 @@ async def my_long_tool(...):
 - `closed: true` 表示当前工具的过程通道结束，UI 可收起 spinner。
 - 老的 `message` 事件结构完全兼容，不依赖此协议的下游应用无感知。
 
+### 后端推送：byte-offset 精确增量
+
+`execute_shell_command` / `await_shell` 阻塞等待时，`_wait_for_finish` 用
+**沙箱日志的字节偏移**做增量推送，保证零重复、零丢失：
+
+1. 维护 `emitted_offset`（初始 0）。
+2. 每次 poll 调 `sandbox.read_background_output_range(task_id, offset=emitted_offset, max_bytes=1MB)`，
+   返回 `(delta_text, new_offset)`，把 `delta_text` 通过 `emit_tool_progress` 推到前端，
+   并把 `emitted_offset` 推进到 `new_offset`。
+3. 沙箱不支持 `read_background_output_range`（默认实现 `raise NotImplementedError`）
+   时，自动**回退**到老的 tail diff 模式（`read_background_output` + `diff_tail_for_progress`）。
+
+local / passthrough 沙箱已实现该接口；其它（如 bwrap、远程）会走兜底路径，
+仍能看到大致实时输出，只是在 tail 截断的极少数边界场景下可能重复一段。
+
 ### 节流 / 合并
 
 `emit_tool_progress` 默认按 `(tool_call_id, stream)` 维度做时间窗合并，避免
