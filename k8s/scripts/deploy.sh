@@ -325,8 +325,16 @@ normalize_image_target() {
 
 containerd_image_exists() {
   local image="$1"
+  local existing
 
-  "$CTR_BIN" -n "$CTR_NAMESPACE" images get "$image" >/dev/null 2>&1
+  while IFS= read -r existing; do
+    [ "$existing" = "$image" ] && return 0
+  done < <(
+    "$CTR_BIN" -n "$CTR_NAMESPACE" images ls -q 2>/dev/null || \
+    "$CTR_BIN" -n "$CTR_NAMESPACE" images ls 2>/dev/null | awk 'NR > 1 {print $1}'
+  )
+
+  return 1
 }
 
 containerd_image_exists_any() {
@@ -453,7 +461,7 @@ import_built_images_to_containerd() {
   for image in "${verify_images[@]}"; do
     if ! containerd_image_exists "$image"; then
       echo "Image '$image' was not found in containerd namespace '$CTR_NAMESPACE' after import." >&2
-      echo "Check with: $CTR_BIN -n $CTR_NAMESPACE images get '$image'" >&2
+      echo "Check with: $CTR_BIN -n $CTR_NAMESPACE images ls | grep '$image'" >&2
       exit 1
     fi
   done
