@@ -34,9 +34,134 @@ SAGE_WEB_SERVICE_TYPE="${SAGE_WEB_SERVICE_TYPE:-NodePort}"
 SAGE_WIKI_SERVICE_TYPE="${SAGE_WIKI_SERVICE_TYPE:-NodePort}"
 SAGE_WEB_NODE_PORT="${SAGE_WEB_NODE_PORT:-30080}"
 SAGE_WIKI_NODE_PORT="${SAGE_WIKI_NODE_PORT:-30081}"
+SELECTED_SERVICE_KEYS=()
 
-if [ -z "$SAGE_HOST" ]; then
-  echo "SAGE_HOST is required. Set it in k8s/.env or pass SAGE_HOST=example.com." >&2
+usage() {
+  cat <<'EOF'
+Usage: k8s/scripts/deploy.sh [SERVICE...]
+
+Deploy Sage Kubernetes resources.
+
+Services:
+  all                   Deploy all Sage services (default)
+  server, sage-server   Deploy only sage-server resources
+  web, sage-web         Deploy only sage-web resources
+  wiki, sage-wiki       Deploy only sage-wiki resources
+  mysql, sage-mysql     Deploy only sage-mysql resources
+  rustfs, sage-rustfs   Deploy only sage-rustfs resources
+  jaeger, sage-jaeger   Deploy only sage-jaeger resources
+
+Options:
+  -s, --service SERVICE Add one service to deploy
+  -h, --help            Show this help
+EOF
+}
+
+add_service_key() {
+  local service="$1"
+  local key existing
+
+  case "$service" in
+    all)
+      SELECTED_SERVICE_KEYS=(mysql rustfs jaeger server web wiki)
+      return 0
+      ;;
+    server|sage-server)
+      key="server"
+      ;;
+    web|sage-web)
+      key="web"
+      ;;
+    wiki|sage-wiki)
+      key="wiki"
+      ;;
+    mysql|sage-mysql)
+      key="mysql"
+      ;;
+    rustfs|sage-rustfs)
+      key="rustfs"
+      ;;
+    jaeger|sage-jaeger)
+      key="jaeger"
+      ;;
+    *)
+      echo "Unsupported service '$service'. Expected one of: all, server, web, wiki, mysql, rustfs, jaeger, sage-server, sage-web, sage-wiki, sage-mysql, sage-rustfs, sage-jaeger." >&2
+      exit 1
+      ;;
+  esac
+
+  for existing in "${SELECTED_SERVICE_KEYS[@]}"; do
+    [ "$existing" = "$key" ] && return 0
+  done
+  SELECTED_SERVICE_KEYS+=("$key")
+}
+
+parse_args() {
+  local arg
+
+  if [ "$#" -eq 0 ]; then
+    add_service_key all
+    return 0
+  fi
+
+  while [ "$#" -gt 0 ]; do
+    arg="$1"
+    case "$arg" in
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      -s|--service)
+        shift
+        if [ "$#" -eq 0 ]; then
+          echo "$arg requires a service name." >&2
+          exit 1
+        fi
+        add_service_key "$1"
+        ;;
+      --service=*)
+        add_service_key "${arg#*=}"
+        ;;
+      --)
+        shift
+        while [ "$#" -gt 0 ]; do
+          add_service_key "$1"
+          shift
+        done
+        return 0
+        ;;
+      -*)
+        echo "Unknown option '$arg'." >&2
+        usage >&2
+        exit 1
+        ;;
+      *)
+        add_service_key "$arg"
+        ;;
+    esac
+    shift
+  done
+}
+
+selected_has() {
+  local wanted="$1"
+  local existing
+
+  for existing in "${SELECTED_SERVICE_KEYS[@]}"; do
+    [ "$existing" = "$wanted" ] && return 0
+  done
+  return 1
+}
+
+parse_args "$@"
+
+if [ -z "$SAGE_HOST" ] && [ -z "$SAGE_PUBLIC_URL" ] && selected_has server; then
+  echo "SAGE_HOST or SAGE_PUBLIC_URL is required when deploying sage-server. Set it in k8s/.env or pass SAGE_HOST=example.com." >&2
+  exit 1
+fi
+
+if [ -z "$SAGE_HOST" ] && [ "$ENABLE_INGRESS" = "true" ] && { selected_has web || selected_has wiki; }; then
+  echo "SAGE_HOST is required when ENABLE_INGRESS=true and deploying sage-web or sage-wiki." >&2
   exit 1
 fi
 
@@ -45,7 +170,9 @@ is_ip_address() {
 }
 
 if [ -z "$SAGE_PUBLIC_URL" ]; then
-  if is_ip_address "$SAGE_HOST"; then
+  if [ -z "$SAGE_HOST" ]; then
+    SAGE_PUBLIC_URL="http://sage.example.com"
+  elif is_ip_address "$SAGE_HOST"; then
     if [ "$SAGE_WEB_SERVICE_TYPE" = "NodePort" ]; then
       SAGE_PUBLIC_URL="http://$SAGE_HOST:$SAGE_WEB_NODE_PORT"
     else
@@ -236,23 +363,55 @@ else
   kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 fi
 
-kubectl -n "$NAMESPACE" delete deployment sage-es --ignore-not-found
-kubectl -n "$NAMESPACE" delete service sage-es --ignore-not-found
+echo "Deploying services: ${SELECTED_SERVICE_KEYS[*]}"
 
-kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/configmaps"
-kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/secrets"
-kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/services"
-kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/workloads"
-if [ "$ENABLE_INGRESS" = "true" ]; then
-  kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/ingress"
-else
-  echo "Skipping Ingress because ENABLE_INGRESS=false. Use the sage-web NodePort service instead."
+if selected_has server; then
+  kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/configmaps/sage-config.yaml"
 fi
 
-kubectl -n "$NAMESPACE" rollout status statefulset/sage-mysql --timeout=10m
+if selected_has jaeger; then
+  kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/configmaps/jaeger-config.yaml"
+fi
 
-for deployment in sage-rustfs sage-jaeger sage-server sage-web sage-wiki; do
-  kubectl -n "$NAMESPACE" rollout status "deployment/$deployment" --timeout=10m
+if selected_has server || selected_has mysql || selected_has rustfs; then
+  kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/secrets/sage-secrets.yaml"
+fi
+
+for service in "${SELECTED_SERVICE_KEYS[@]}"; do
+  kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/services/sage-$service-service.yaml"
+done
+
+for service in "${SELECTED_SERVICE_KEYS[@]}"; do
+  case "$service" in
+    mysql)
+      kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/workloads/sage-mysql-statefulset.yaml"
+      ;;
+    *)
+      kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/workloads/sage-$service-deployment.yaml"
+      ;;
+  esac
+done
+
+if [ "$ENABLE_INGRESS" = "true" ]; then
+  if selected_has web; then
+    kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/ingress/sage-ingress.yaml"
+  fi
+  if selected_has wiki; then
+    kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/ingress/sage-wiki-ingress.yaml"
+  fi
+elif selected_has web || selected_has wiki; then
+  echo "Skipping Ingress because ENABLE_INGRESS=false. Use the sage-web/sage-wiki NodePort service instead."
+fi
+
+for service in "${SELECTED_SERVICE_KEYS[@]}"; do
+  case "$service" in
+    mysql)
+      kubectl -n "$NAMESPACE" rollout status statefulset/sage-mysql --timeout=10m
+      ;;
+    *)
+      kubectl -n "$NAMESPACE" rollout status "deployment/sage-$service" --timeout=10m
+      ;;
+  esac
 done
 
 kubectl -n "$NAMESPACE" get pods,svc

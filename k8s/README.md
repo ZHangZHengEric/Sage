@@ -60,6 +60,20 @@ cp k8s/.env.example k8s/.env
 k8s/scripts/build-images.sh
 ```
 
+只构建并导入单个镜像：
+
+```bash
+k8s/scripts/build-images.sh server
+k8s/scripts/build-images.sh web
+k8s/scripts/build-images.sh wiki
+```
+
+也可以使用完整镜像短名：
+
+```bash
+k8s/scripts/build-images.sh sage-web
+```
+
 默认行为：
 
 - Sage 自有镜像固定显式打 `latest` tag，不通过 `.env` 或环境变量配置。
@@ -70,9 +84,10 @@ k8s/scripts/build-images.sh
 
 ```bash
 IMAGE_REGISTRY=registry.example.com/sage k8s/scripts/build-images.sh
+IMAGE_REGISTRY=registry.example.com/sage k8s/scripts/build-images.sh web
 ```
 
-脚本会构建：
+全量模式会构建：
 
 - `sage-server:latest`
 - `sage-web:latest`
@@ -95,7 +110,28 @@ containerd 导入默认使用 `ctr` 和 `k8s.io` namespace，可通过 `CTR_BIN`
 k8s/scripts/deploy.sh
 ```
 
-脚本会按顺序创建：
+也可以只部署一个或多个指定服务：
+
+```bash
+k8s/scripts/deploy.sh server
+k8s/scripts/deploy.sh web wiki
+k8s/scripts/deploy.sh --service mysql --service rustfs
+k8s/scripts/deploy.sh sage-server sage-web
+```
+
+可用服务名：
+
+- `server` / `sage-server`
+- `web` / `sage-web`
+- `wiki` / `sage-wiki`
+- `mysql` / `sage-mysql`
+- `rustfs` / `sage-rustfs`
+- `jaeger` / `sage-jaeger`
+- `all`，默认值，部署全部服务
+
+指定服务部署时，脚本不会自动部署其它业务服务依赖；例如 `k8s/scripts/deploy.sh server` 只会部署 `sage-server` 及其必需的 ConfigMap、Secret、Service 和 Deployment，不会自动部署 MySQL、RustFS、Jaeger、Web 或 Wiki。
+
+全量部署时，脚本会按顺序创建：
 
 1. Namespace
 2. ConfigMap 和 Secret
@@ -141,7 +177,7 @@ DELETE_PVCS=true k8s/scripts/delete.sh
 DELETE_PVCS=true DELETE_NAMESPACE=true k8s/scripts/delete.sh
 ```
 
-默认保留 PVC，避免误删 MySQL、Elasticsearch、RustFS 和 Sage 工作数据。
+默认保留 PVC，避免误删 MySQL、RustFS 和 Sage 工作数据。
 
 ## 静态校验
 

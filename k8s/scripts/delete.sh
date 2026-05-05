@@ -27,8 +27,8 @@ DELETE_NAMESPACE="${DELETE_NAMESPACE:-false}"
 
 kubectl -n "$NAMESPACE" delete ingress sage sage-wiki --ignore-not-found
 kubectl -n "$NAMESPACE" delete statefulset sage-mysql --ignore-not-found
-kubectl -n "$NAMESPACE" delete deployment sage-server sage-web sage-wiki sage-es sage-rustfs sage-jaeger --ignore-not-found
-kubectl -n "$NAMESPACE" delete service sage-server sage-web sage-wiki sage-mysql sage-es sage-rustfs sage-jaeger --ignore-not-found
+kubectl -n "$NAMESPACE" delete deployment sage-server sage-web sage-wiki sage-rustfs sage-jaeger --ignore-not-found
+kubectl -n "$NAMESPACE" delete service sage-server sage-web sage-wiki sage-mysql sage-rustfs sage-jaeger --ignore-not-found
 kubectl -n "$NAMESPACE" delete configmap sage-config sage-jaeger-config --ignore-not-found
 kubectl -n "$NAMESPACE" delete secret sage-secrets --ignore-not-found
 
@@ -42,7 +42,6 @@ if [ "$DELETE_PVCS" = "true" ]; then
     sage-server-users \
     sage-mysql-data \
     sage-mysql-conf \
-    sage-es-data \
     sage-rustfs-data \
     --ignore-not-found
 else
