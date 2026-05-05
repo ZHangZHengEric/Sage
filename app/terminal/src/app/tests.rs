@@ -16,3 +16,5 @@ mod surfaces;
 mod transcript;
 #[path = "tests/welcome.rs"]
 mod welcome;
+#[path = "tests/workspace.rs"]
+mod workspace;

@@ -303,6 +303,32 @@ impl App {
                     SubmitAction::Handled
                 }
             },
+            "/workspace" => {
+                let subcommand = parts.next();
+                let rest = parts.map(ToString::to_string).collect::<Vec<_>>();
+                match subcommand {
+                    None | Some("show") if rest.is_empty() => {
+                        self.queue_workspace_status();
+                        SubmitAction::Handled
+                    }
+                    Some("set") if !rest.is_empty() => {
+                        self.set_workspace_selection(rest.join(" "));
+                        SubmitAction::Handled
+                    }
+                    Some("clear") if rest.is_empty() => {
+                        self.clear_workspace_override_selection();
+                        SubmitAction::Handled
+                    }
+                    _ => {
+                        self.queue_message(
+                            MessageKind::System,
+                            "Usage: /workspace | /workspace show | /workspace set <path> | /workspace clear",
+                        );
+                        self.status = format!("invalid command  {}", self.session_id);
+                        SubmitAction::Handled
+                    }
+                }
+            }
             "/interrupt" => match (parts.next(), parts.next()) {
                 (None, None) => SubmitAction::Interrupt,
                 _ => {
@@ -323,7 +349,7 @@ impl App {
                 self.queue_message(
                     MessageKind::System,
                     format!(
-                        "session: {}\nbusy: {}\nagent_id: {}\nagent_mode: {}\ndisplay_mode: {}\nmax_loop_count: {}\nskills: {}\nmodel_override: {}\ninput: {} chars",
+                        "session: {}\nbusy: {}\nagent_id: {}\nagent_mode: {}\ndisplay_mode: {}\nworkspace: {}\nmax_loop_count: {}\nskills: {}\nmodel_override: {}\ninput: {} chars",
                         self.session_id,
                         self.busy,
                         self.selected_agent_id
@@ -331,6 +357,7 @@ impl App {
                             .unwrap_or_else(|| "(default)".to_string()),
                         self.agent_mode,
                         display_mode_name(self.display_mode),
+                        self.workspace_label,
                         self.max_loop_count,
                         if self.selected_skills.is_empty() {
                             "(none)".to_string()

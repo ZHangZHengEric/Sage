@@ -1,5 +1,6 @@
 use crate::app::{App, MessageKind};
 use crate::display_policy::DisplayMode;
+use crate::preferences::persist_app_preferences_notice;
 
 const VALID_AGENT_MODES: &[&str] = &["simple", "multi", "fibre"];
 
@@ -27,6 +28,7 @@ impl App {
         self.clear_agent_catalog();
         self.skill_catalog = None;
         self.backend_restart_requested = true;
+        persist_app_preferences_notice(self);
         self.queue_message(MessageKind::Tool, format!("agent set: {normalized}"));
         self.status = format!("agent  {}", self.session_id);
     }
@@ -37,6 +39,7 @@ impl App {
                 self.clear_agent_catalog();
                 self.skill_catalog = None;
                 self.backend_restart_requested = true;
+                persist_app_preferences_notice(self);
                 self.queue_message(MessageKind::Tool, format!("cleared agent: {agent_id}"));
             }
             None => {
@@ -49,6 +52,7 @@ impl App {
     pub fn set_agent_mode_selection(&mut self, mode: String) {
         self.agent_mode = mode.clone();
         self.backend_restart_requested = true;
+        persist_app_preferences_notice(self);
         self.queue_message(MessageKind::Tool, format!("agent mode set: {mode}"));
         self.status = format!("mode  {}", self.session_id);
     }
@@ -57,11 +61,12 @@ impl App {
         self.queue_message(
             MessageKind::System,
             format!(
-                "agent_id: {}\nagent_mode: {}",
+                "agent_id: {}\nagent_mode: {}\nworkspace: {}",
                 self.selected_agent_id
                     .clone()
                     .unwrap_or_else(|| "(default)".to_string()),
-                self.agent_mode
+                self.agent_mode,
+                self.workspace_label
             ),
         );
         self.status = format!("agent  {}", self.session_id);

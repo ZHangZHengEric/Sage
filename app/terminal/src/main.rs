@@ -7,6 +7,7 @@ mod custom_terminal;
 mod display_policy;
 mod history;
 mod markdown;
+mod preferences;
 mod slash_command;
 mod startup;
 mod terminal;
@@ -21,6 +22,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use app::App;
+use preferences::load_startup_preferences;
 use startup::{parse_startup_action, print_usage, StartupBehavior};
 use terminal::{restore_terminal, run, run_with_startup_action, setup_terminal};
 
@@ -32,6 +34,11 @@ fn main() -> Result<()> {
             return Ok(());
         }
     };
+    let startup_options =
+        startup_options.with_fallbacks(load_startup_preferences().unwrap_or_else(|err| {
+            eprintln!("warning: failed to load terminal preferences: {err}");
+            startup::StartupOptions::default()
+        }));
     let mut app = App::new();
     app.apply_startup_options(
         startup_options.agent_id,
