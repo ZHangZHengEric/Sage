@@ -14,7 +14,9 @@ load_env_file() {
     local key="${line%%=*}"
     local value="${line#*=}"
     [ "$key" = "$line" ] && continue
-    export "$key=$value"
+    if [ -z "${!key+x}" ]; then
+      export "$key=$value"
+    fi
   done < "$env_file"
 }
 
@@ -88,7 +90,7 @@ load_images_to_k3d() {
 }
 
 load_images_to_containerd() {
-  local ctr_bin namespace archive
+  local ctr_bin namespace archive image
   ctr_bin="${CTR_BIN:-ctr}"
   namespace="${CTR_NAMESPACE:-k8s.io}"
 
@@ -99,9 +101,18 @@ load_images_to_containerd() {
   (
     trap 'rm -f "$archive"' EXIT
     docker save -o "$archive" "${SAGE_IMAGES[@]}"
+    echo "Importing Sage images into containerd namespace '$namespace' with $ctr_bin."
     "$ctr_bin" -n "$namespace" images import "$archive"
   )
   rm -f "$archive"
+
+  for image in "${SAGE_IMAGES[@]}"; do
+    if ! "$ctr_bin" -n "$namespace" images list "name==$image" | grep -Fq "$image"; then
+      echo "Image '$image' was not found in containerd namespace '$namespace' after import." >&2
+      echo "Check with: $ctr_bin -n $namespace images list | grep sage" >&2
+      exit 1
+    fi
+  done
 }
 
 publish_images() {
