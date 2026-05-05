@@ -420,41 +420,6 @@ class SimpleAgent(AgentBase):
             if ((tool.get("function") or {}).get("name") or "")
         }
 
-    def _resolve_tool_choice(
-        self,
-        tools_json: List[Dict[str, Any]],
-        force_tool_choice_required: bool = False,
-        force_tool_choice_auto: bool = False,
-    ) -> Optional[str]:
-        if not tools_json:
-            return None
-        if force_tool_choice_required:
-            return "required"
-        if force_tool_choice_auto:
-            return "auto"
-
-        env_force_required = os.getenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "").strip().lower()
-        if env_force_required in ("1", "true", "yes", "on"):
-            return "required"
-        return None
-
-    def _should_escape_required_next_turn(
-        self,
-        chunks: List[MessageChunk],
-        pattern: Optional[Dict[str, int]],
-    ) -> bool:
-        if pattern:
-            return True
-
-        for chunk in chunks or []:
-            if (
-                chunk.role == MessageRole.TOOL.value
-                and isinstance(chunk.metadata, dict)
-                and chunk.metadata.get("turn_status_rejected") is True
-            ):
-                return True
-        return False
-
     def _is_turn_status_only_request(self, tools_json: List[Dict[str, Any]], force_tool_choice_required: bool) -> bool:
         return force_tool_choice_required and self._allowed_tool_names(tools_json) == {"turn_status"}
 
@@ -715,7 +680,6 @@ class SimpleAgent(AgentBase):
         recent_signatures: List[str] = message_manager.get_recent_loop_signatures()
         logger.debug(f"SimpleAgent: 加载历史签名 {len(recent_signatures)} 个")
         turn_status_only_next = False
-        force_auto_next_turn = False
         while True:
             if self._should_abort_due_to_session(session_context):
                 break
@@ -726,6 +690,13 @@ class SimpleAgent(AgentBase):
                 logger.warning(f"SimpleAgent: 循环次数超过 {max_loop_count}，终止循环")
                 yield [MessageChunk(role=MessageRole.ASSISTANT.value, content=f"Agent执行次数超过最大循环次数：{max_loop_count}, 任务暂停，是否需要继续执行？", type=MessageType.ASSISTANT_TEXT.value)]
                 break
+
+            # Drain "运行期注入的引导用户消息"：在本轮 LLM 请求之前消费掉。
+            # flush 已写入 message_manager；这里把它合并到 messages_input、yield 给 SSE。
+            injected = self._consume_user_injections(session_context)
+            if injected:
+                messages_input = list(messages_input) + list(injected)
+                yield injected
 
             # 合并消息
             messages_input = MessageManager.merge_new_messages_to_old_messages(
@@ -753,10 +724,6 @@ class SimpleAgent(AgentBase):
             turn_status_only_next = False
             if current_turn_status_only:
                 logger.info("SimpleAgent: 上一轮纯文本无工具调用，本轮仅开放 turn_status 并启用 tool_choice=required")
-            current_force_auto = force_auto_next_turn and not current_turn_status_only
-            force_auto_next_turn = False
-            if current_force_auto:
-                logger.info("SimpleAgent: 上一轮检测到工具循环风险，本轮临时释放 tool_choice=auto")
 
             # 调用LLM
             should_break = False
@@ -767,7 +734,6 @@ class SimpleAgent(AgentBase):
                 tool_manager=tool_manager,
                 session_id=session_id,
                 force_tool_choice_required=current_turn_status_only,
-                force_tool_choice_auto=current_force_auto,
             ):
                 non_empty_chunks = [c for c in chunks if (c.message_type != MessageType.EMPTY.value)]
                 if len(non_empty_chunks) > 0:
@@ -850,9 +816,6 @@ class SimpleAgent(AgentBase):
                 recent_signatures = recent_signatures[-24:]
 
             pattern = self._detect_repeat_pattern(recent_signatures)
-            if self._should_escape_required_next_turn(all_new_response_chunks, pattern):
-                force_auto_next_turn = True
-
             if pattern:
                 repeat_pattern_hits += 1
                 correction_message = self._build_self_correction_message(
@@ -916,7 +879,6 @@ class SimpleAgent(AgentBase):
                                              tool_manager: Optional[ToolManager],
                                              session_id: str,
                                              force_tool_choice_required: bool = False,
-                                             force_tool_choice_auto: bool = False,
                                              ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
 
         # 准备消息：提取可用消息 -> 检查压缩 -> 执行压缩
@@ -943,13 +905,12 @@ class SimpleAgent(AgentBase):
 
         if len(tools_json) > 0:
             model_config_override['tools'] = tools_json
-            tool_choice = self._resolve_tool_choice(
-                tools_json=tools_json,
-                force_tool_choice_required=force_tool_choice_required,
-                force_tool_choice_auto=force_tool_choice_auto,
-            )
-            if tool_choice:
-                model_config_override['tool_choice'] = tool_choice
+            # 通过环境变量 SAGE_FORCE_TOOL_CHOICE_REQUIRED 控制是否强制 tool_choice=required。
+            # 默认关闭：部分模型（如 OpenAI o1/o3、部分国产模型）不支持 tool_choice=required，
+            # 显式启用后才下发给 LLM。调用方传入的 force_tool_choice_required 仍优先生效。
+            env_force_required = os.getenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "").strip().lower() in ("1", "true", "yes", "on")
+            if force_tool_choice_required or env_force_required:
+                model_config_override['tool_choice'] = 'required'
         response = self._call_llm_streaming(
             messages=cast(List[Union[MessageChunk, Dict[str, Any]]], clean_message_input),
             session_id=session_id,

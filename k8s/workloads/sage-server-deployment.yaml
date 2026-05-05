@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sage-server
+  labels:
+    app.kubernetes.io/name: sage-server
+    app.kubernetes.io/part-of: sage
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sage-server
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sage-server
+        app.kubernetes.io/part-of: sage
+      annotations:
+        container.apparmor.security.beta.kubernetes.io/sage-server: unconfined
+    spec:
+      securityContext:
+        seccompProfile:
+          type: Unconfined
+      containers:
+        - name: sage-server
+          image: "${SAGE_SERVER_IMAGE}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: sage-config
+            - secretRef:
+                name: sage-secrets
+          securityContext:
+            allowPrivilegeEscalation: true
+            capabilities:
+              add:
+                - SYS_ADMIN
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "4"
+              memory: 16Gi
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /active
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          volumeMounts:
+            - name: sessions
+              mountPath: /app/sessions
+            - name: agents
+              mountPath: /app/agents
+            - name: logs
+              mountPath: /app/logs
+            - name: data
+              mountPath: /app/data
+            - name: skills
+              mountPath: /app/skills
+            - name: users
+              mountPath: /app/users
+      volumes:
+        - name: sessions
+          persistentVolumeClaim:
+            claimName: sage-server-sessions
+        - name: agents
+          persistentVolumeClaim:
+            claimName: sage-server-agents
+        - name: logs
+          persistentVolumeClaim:
+            claimName: sage-server-logs
+        - name: data
+          persistentVolumeClaim:
+            claimName: sage-server-data
+        - name: skills
+          persistentVolumeClaim:
+            claimName: sage-server-skills
+        - name: users
+          persistentVolumeClaim:
+            claimName: sage-server-users

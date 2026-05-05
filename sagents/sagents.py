@@ -532,3 +532,59 @@ class SAgent:
 
     def get_tasks_status(self, session_id: str) -> Optional[Dict[str, Any]]:
         return self.session_manager.get_tasks_status(session_id)
+
+    def inject_user_message(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        guidance_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """向运行中的 session 注入一条 user 引导消息（非阻塞）。
+
+        消息进入 ``SessionContext.pending_user_injections``，由对应 agent 在下次
+        调用 LLM 之前 drain：写入 message_manager + 进入本轮 LLM 请求 + 经 SSE 通道
+        以普通 user MessageChunk 回送，前端按 ``metadata.guidance_id`` 对账消费。
+
+        Args:
+            session_id: 目标 session id；必须是当前 live session。
+            content: 注入的文本内容，非空。
+            guidance_id: 可选；不传自动生成 uuid，便于前端引导区按 id 移除 chip。
+            metadata: 透传到 MessageChunk.metadata 的额外字段；
+                与默认的 ``injected/guidance_id/source`` 共存。
+
+        Returns:
+            实际生效的 ``guidance_id``。
+
+        Raises:
+            LookupError: 找不到对应活跃 session、已中断或上下文未绑定。
+            ValueError: content 为空。
+        """
+        from sagents.session_runtime import _inject_user_message_via_manager
+        return _inject_user_message_via_manager(
+            self.session_manager,
+            session_id,
+            content,
+            guidance_id=guidance_id,
+            metadata=metadata,
+        )
+
+    def list_pending_user_injections(self, session_id: str) -> List[Dict[str, Any]]:
+        """列出当前 session 尚未被消费的 pending 引导消息（快照，不修改状态）。"""
+        from sagents.session_runtime import _list_pending_user_injections_via_manager
+        return _list_pending_user_injections_via_manager(self.session_manager, session_id)
+
+    def update_pending_user_injection(self, session_id: str, guidance_id: str, content: str) -> bool:
+        """修改尚未被消费的 pending 引导消息内容。返回 True 命中、False 未命中。"""
+        from sagents.session_runtime import _update_pending_user_injection_via_manager
+        return _update_pending_user_injection_via_manager(
+            self.session_manager, session_id, guidance_id, content
+        )
+
+    def delete_pending_user_injection(self, session_id: str, guidance_id: str) -> bool:
+        """删除尚未被消费的 pending 引导消息。返回 True 命中、False 未命中。"""
+        from sagents.session_runtime import _delete_pending_user_injection_via_manager
+        return _delete_pending_user_injection_via_manager(
+            self.session_manager, session_id, guidance_id
+        )

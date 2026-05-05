@@ -133,6 +133,28 @@ export const chatAPI = {
     return await request.post(`/api/sessions/${sessionId}/goal/complete`, {})
   },
 
+  injectUserMessage: async (sessionId, content, guidanceId, metadata) => {
+    return await request.post(`/api/sessions/${sessionId}/inject-user-message`, {
+      content,
+      guidance_id: guidanceId,
+      metadata: metadata || null,
+    })
+  },
+
+  listPendingUserInjections: async (sessionId) => {
+    return await request.get(`/api/sessions/${sessionId}/inject-user-message`)
+  },
+
+  updatePendingUserInjection: async (sessionId, guidanceId, content) => {
+    return await request.patch(`/api/sessions/${sessionId}/inject-user-message/${guidanceId}`, {
+      content,
+    })
+  },
+
+  deletePendingUserInjection: async (sessionId, guidanceId) => {
+    return await request.delete(`/api/sessions/${sessionId}/inject-user-message/${guidanceId}`)
+  },
+
   /**
    * 恢复流式聊天
    * @param {string} sessionId - 会话ID

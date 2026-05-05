@@ -147,6 +147,9 @@ class SessionContext:
         self.end_time = None
         self._status = SessionStatus.IDLE
         self.message_manager = MessageManager(context_budget_config=context_budget_config)
+        # pending_user_injections：运行中等待被下一次 LLM 请求消费的"引导用户消息"。
+        # 不进入持久化快照，会话销毁即释放。
+        self.pending_user_injections: List[MessageChunk] = []
         self.workflow_manager = WorkflowManager()
         self.audit_status: Dict[str, Any] = {}
         self.session_memory_manager = create_session_memory_manager()
@@ -297,220 +300,6 @@ class SessionContext:
             "message_intervals": message_intervals,
             "flow_node_timings": flow_node_timings,
         }
-
-    def _build_tool_step_summary(self) -> List[Dict[str, Any]]:
-        timing_by_message_id = {
-            str(item.get("message_id")): item
-            for item in self._message_timing.values()
-            if item.get("message_id")
-        }
-
-        steps: List[Dict[str, Any]] = []
-        active_steps: Dict[str, Dict[str, Any]] = {}
-        step_seq = 0
-
-        for message in self.message_manager.messages:
-            role = getattr(message, "role", None)
-            message_id = getattr(message, "message_id", None)
-            timing = timing_by_message_id.get(str(message_id)) if message_id else None
-
-            if role == "assistant" and getattr(message, "tool_calls", None):
-                for tool_call in message.tool_calls or []:
-                    if not isinstance(tool_call, dict):
-                        continue
-                    function = tool_call.get("function") or {}
-                    tool_name = str(function.get("name") or "").strip() or "unknown"
-                    tool_call_id = str(tool_call.get("id") or "").strip() or None
-                    key = tool_call_id or f"synthetic-step-{step_seq + 1}"
-                    if key in active_steps:
-                        continue
-
-                    step_seq += 1
-                    step = {
-                        "step": step_seq,
-                        "tool_name": tool_name,
-                        "tool_call_id": tool_call_id,
-                        "status": "running",
-                        "started_at": timing.get("start_ts") if timing else None,
-                        "finished_at": None,
-                        "duration_ms": None,
-                        "start_message_id": message_id,
-                        "finish_message_id": None,
-                    }
-                    steps.append(step)
-                    active_steps[key] = step
-
-            if role == "tool":
-                tool_call_id = str(getattr(message, "tool_call_id", "") or "").strip() or None
-                if not tool_call_id:
-                    continue
-
-                step = active_steps.get(tool_call_id)
-                if step is None:
-                    step_seq += 1
-                    step = {
-                        "step": step_seq,
-                        "tool_name": "unknown",
-                        "tool_call_id": tool_call_id,
-                        "status": "running",
-                        "started_at": timing.get("start_ts") if timing else None,
-                        "finished_at": None,
-                        "duration_ms": None,
-                        "start_message_id": None,
-                        "finish_message_id": None,
-                    }
-                    steps.append(step)
-                    active_steps[tool_call_id] = step
-
-                finished_at = timing.get("end_ts") if timing else None
-                if finished_at is None and timing:
-                    finished_at = timing.get("start_ts")
-                started_at = step.get("started_at")
-                step["status"] = "completed"
-                step["finished_at"] = finished_at
-                step["finish_message_id"] = message_id
-                if started_at is not None and finished_at is not None:
-                    step["duration_ms"] = round(
-                        max(0.0, (float(finished_at) - float(started_at)) * 1000.0),
-                        3,
-                    )
-
-        return steps
-
-    def _build_phase_timing_summary(self) -> List[Dict[str, Any]]:
-        events = sorted(
-            self.execution_timeline_events,
-            key=lambda item: (
-                float(item.get("perf_ms") or 0.0),
-                float(item.get("timestamp") or 0.0),
-            ),
-        )
-
-        phase_totals: Dict[str, Dict[str, Any]] = {}
-        phase_order: List[str] = []
-        active_segments: Dict[str, Dict[str, Any]] = {}
-        last_timestamp = None
-        last_perf_ms = None
-
-        for event in events:
-            event_type = str(event.get("event_type") or "").strip()
-            phase_name = str(event.get("phase_name") or event.get("phase") or "").strip()
-            timestamp = event.get("timestamp")
-            perf_ms = event.get("perf_ms")
-
-            if isinstance(timestamp, (int, float)):
-                last_timestamp = float(timestamp)
-            if isinstance(perf_ms, (int, float)):
-                last_perf_ms = float(perf_ms)
-
-            if not phase_name:
-                continue
-
-            if event_type == "agent_phase_start":
-                active_segments[phase_name] = {
-                    "started_at": float(timestamp) if isinstance(timestamp, (int, float)) else None,
-                    "started_perf_ms": float(perf_ms) if isinstance(perf_ms, (int, float)) else None,
-                }
-                if phase_name not in phase_totals:
-                    phase_totals[phase_name] = {
-                        "phase": phase_name,
-                        "started_at": None,
-                        "finished_at": None,
-                        "duration_ms": 0.0,
-                        "segment_count": 0,
-                    }
-                    phase_order.append(phase_name)
-                continue
-
-            if event_type != "agent_phase_end":
-                continue
-
-            totals = phase_totals.setdefault(
-                phase_name,
-                {
-                    "phase": phase_name,
-                    "started_at": None,
-                    "finished_at": None,
-                    "duration_ms": 0.0,
-                    "segment_count": 0,
-                },
-            )
-            if phase_name not in phase_order:
-                phase_order.append(phase_name)
-
-            segment = active_segments.pop(phase_name, None) or {}
-            started_at = segment.get("started_at")
-            started_perf_ms = segment.get("started_perf_ms")
-            finished_at = float(timestamp) if isinstance(timestamp, (int, float)) else started_at
-            finished_perf_ms = (
-                float(perf_ms) if isinstance(perf_ms, (int, float)) else started_perf_ms
-            )
-
-            duration_ms = 0.0
-            if isinstance(started_perf_ms, (int, float)) and isinstance(finished_perf_ms, (int, float)):
-                duration_ms = max(0.0, float(finished_perf_ms) - float(started_perf_ms))
-            elif isinstance(started_at, (int, float)) and isinstance(finished_at, (int, float)):
-                duration_ms = max(0.0, (float(finished_at) - float(started_at)) * 1000.0)
-
-            if isinstance(started_at, (int, float)):
-                totals["started_at"] = (
-                    float(started_at)
-                    if totals["started_at"] is None
-                    else min(float(totals["started_at"]), float(started_at))
-                )
-            if isinstance(finished_at, (int, float)):
-                totals["finished_at"] = (
-                    float(finished_at)
-                    if totals["finished_at"] is None
-                    else max(float(totals["finished_at"]), float(finished_at))
-                )
-
-            totals["duration_ms"] = round(float(totals.get("duration_ms") or 0.0) + duration_ms, 3)
-            totals["segment_count"] = int(totals.get("segment_count") or 0) + 1
-
-        for phase_name, segment in active_segments.items():
-            totals = phase_totals.setdefault(
-                phase_name,
-                {
-                    "phase": phase_name,
-                    "started_at": None,
-                    "finished_at": None,
-                    "duration_ms": 0.0,
-                    "segment_count": 0,
-                },
-            )
-            if phase_name not in phase_order:
-                phase_order.append(phase_name)
-
-            started_at = segment.get("started_at")
-            started_perf_ms = segment.get("started_perf_ms")
-            finished_at = last_timestamp if isinstance(last_timestamp, (int, float)) else started_at
-            finished_perf_ms = (
-                last_perf_ms if isinstance(last_perf_ms, (int, float)) else started_perf_ms
-            )
-            duration_ms = 0.0
-            if isinstance(started_perf_ms, (int, float)) and isinstance(finished_perf_ms, (int, float)):
-                duration_ms = max(0.0, float(finished_perf_ms) - float(started_perf_ms))
-            elif isinstance(started_at, (int, float)) and isinstance(finished_at, (int, float)):
-                duration_ms = max(0.0, (float(finished_at) - float(started_at)) * 1000.0)
-
-            if isinstance(started_at, (int, float)):
-                totals["started_at"] = (
-                    float(started_at)
-                    if totals["started_at"] is None
-                    else min(float(totals["started_at"]), float(started_at))
-                )
-            if isinstance(finished_at, (int, float)):
-                totals["finished_at"] = (
-                    float(finished_at)
-                    if totals["finished_at"] is None
-                    else max(float(totals["finished_at"]), float(finished_at))
-                )
-
-            totals["duration_ms"] = round(float(totals.get("duration_ms") or 0.0) + duration_ms, 3)
-            totals["segment_count"] = int(totals.get("segment_count") or 0) + 1
-
-        return [phase_totals[phase_name] for phase_name in phase_order]
 
     def add_messages(self, messages: Union[MessageChunk, List[MessageChunk], List[Dict[str, Any]]]) -> None:
         """
@@ -743,6 +532,106 @@ class SessionContext:
         }
         self._sync_goal_runtime_context()
         return self.goal
+
+    def enqueue_user_injection(
+        self,
+        content: str,
+        *,
+        guidance_id: Optional[str] = None,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """运行期向当前会话注入一条 user 引导消息，等待下一次 LLM 请求前被消费。
+
+        消费时机：agent 在调用 ``_call_llm_streaming`` 之前调用 ``flush_user_injections``，
+        将 pending 消息写入 ``message_manager``、追加到本轮请求 messages、并 yield 给 SSE。
+
+        Args:
+            content: 注入的文本内容。
+            guidance_id: 客户端可生成；不传则自动生成 uuid，便于前端引导区按 id 对账消费。
+            extra_metadata: 透传到 MessageChunk.metadata 的额外字段。
+
+        Returns:
+            str: 实际生效的 ``guidance_id``。
+        """
+        if not content or not str(content).strip():
+            raise ValueError("inject 内容不能为空")
+        gid = guidance_id or str(uuid.uuid4())
+        metadata: Dict[str, Any] = {
+            "injected": True,
+            "guidance_id": gid,
+            "source": "guidance",
+        }
+        if extra_metadata:
+            metadata.update(extra_metadata)
+        chunk = MessageChunk(
+            role="user",
+            content=str(content),
+            session_id=self.session_id,
+            metadata=metadata,
+        )
+        self.pending_user_injections.append(chunk)
+        logger.info(
+            f"SessionContext: enqueue user injection session={self.session_id} guidance_id={gid} "
+            f"pending_total={len(self.pending_user_injections)}"
+        )
+        return gid
+
+    def flush_user_injections(self) -> List[MessageChunk]:
+        """pop 全部 pending 引导消息：写入 message_manager，并返回供 yield 给 SSE 的列表。"""
+        if not self.pending_user_injections:
+            return []
+        drained = self.pending_user_injections
+        self.pending_user_injections = []
+        self.add_messages(drained)
+        logger.info(
+            f"SessionContext: flush user injections session={self.session_id} count={len(drained)}"
+        )
+        return drained
+
+    def list_user_injections(self) -> List[Dict[str, Any]]:
+        """快照当前 pending 引导消息列表（仅用于查询/调试，不修改状态）。"""
+        snapshot: List[Dict[str, Any]] = []
+        for chunk in self.pending_user_injections:
+            md = chunk.metadata or {}
+            snapshot.append({
+                "guidance_id": md.get("guidance_id"),
+                "content": chunk.content if isinstance(chunk.content, str) else "",
+                "metadata": dict(md),
+                "timestamp": chunk.timestamp,
+            })
+        return snapshot
+
+    def update_user_injection(self, guidance_id: str, content: str) -> bool:
+        """修改尚未被消费的 pending 引导消息内容。返回是否命中。"""
+        if not guidance_id:
+            return False
+        if not content or not str(content).strip():
+            raise ValueError("content 不能为空")
+        for chunk in self.pending_user_injections:
+            md = chunk.metadata or {}
+            if md.get("guidance_id") == guidance_id:
+                chunk.content = str(content)
+                logger.info(
+                    f"SessionContext: update user injection session={self.session_id} guidance_id={guidance_id}"
+                )
+                return True
+        return False
+
+    def delete_user_injection(self, guidance_id: str) -> bool:
+        """删除尚未被消费的 pending 引导消息。返回是否命中。"""
+        if not guidance_id:
+            return False
+        before = len(self.pending_user_injections)
+        self.pending_user_injections = [
+            c for c in self.pending_user_injections
+            if (c.metadata or {}).get("guidance_id") != guidance_id
+        ]
+        hit = len(self.pending_user_injections) != before
+        if hit:
+            logger.info(
+                f"SessionContext: delete user injection session={self.session_id} guidance_id={guidance_id}"
+            )
+        return hit
 
     def _write_default_md_file(self, file_path: str, prompt_key: str, file_label: str):
         """

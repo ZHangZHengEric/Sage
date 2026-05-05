@@ -266,6 +266,11 @@
                 {{ t('quickHelp.cta') }}
               </Button>
             </div>
+            <GuidanceArea
+              v-if="currentSessionId"
+              :session-id="currentSessionId"
+              :apply-now-handler="applyGuidanceNow"
+            />
             <MessageInput
               ref="messageInputRef"
               :agent-id="selectedAgentId"
@@ -337,6 +342,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
 import DeliveryCollapsedGroup from '@/components/chat/DeliveryCollapsedGroup.vue'
 import MessageInput from '@/components/chat/MessageInput.vue'
+import GuidanceArea from '@/components/chat/GuidanceArea.vue'
 import WorkspacePanel from '@/components/chat/WorkspacePanel.vue'
 import LoadingBubble from '@/components/chat/LoadingBubble.vue'
 import SubSessionPanel from '@/components/chat/SubSessionPanel.vue'
@@ -358,10 +364,12 @@ import {
 } from 'radix-vue'
 import { useChatPage } from '@/composables/chat/useChatPage.js'
 import { usePanelStore } from '@/stores/panel.js'
+import { useWorkbenchStore } from '@/stores/workbench.js'
 import { storeToRefs } from 'pinia'
 import { useLanguage } from '@/utils/i18n.js'
 import { getMessageLabel } from '@/utils/messageLabels'
 import { taskAPI } from '@/api/task.js'
+import { chatAPI } from '@/api/chat.js'
 import { toast } from 'vue-sonner'
 import {
   CHAT_DISPLAY_MODES,
@@ -389,6 +397,7 @@ const DISPLAY_MODE_STORAGE_KEY = 'chatDisplayModePreference'
 
 const panelStore = usePanelStore()
 const { showWorkbench, showWorkspace } = storeToRefs(panelStore)
+const workbenchStore = useWorkbenchStore()
 
 const {
   agents,
@@ -442,6 +451,7 @@ const {
   saveSessionGoal,
   clearSessionGoal,
   completeSessionGoal
+  applyGuidanceNow
 } = useChatPage(props)
 
 const normalizedMessages = computed(() => normalizeChatMessages(filteredMessages.value))
@@ -455,8 +465,6 @@ const editableUserMessageId = computed(() => {
   }
   return null
 })
-
-const messageInputRef = ref(null)
 
 const getMessageTextForInputOptimization = (message) => {
   const content = message?.content
@@ -665,13 +673,32 @@ const handleClickAbilityButton = () => {
 }
 
 // 发送消息后清空能力预置输入
-const handleSendMessageWithAbilityClear = (content, options) => {
+const handleSendMessageWithAbilityClear = async (content, options) => {
+  if (isCurrentSessionLoading.value && currentSessionId.value && typeof content === 'string' && content.trim()) {
+    abilityPresetInput.value = ''
+    const guidanceId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `g-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const sid = currentSessionId.value
+    workbenchStore.addGuidance(sid, { guidanceId, content })
+    try {
+      await chatAPI.injectUserMessage(sid, content, guidanceId)
+    } catch (e) {
+      console.warn('[Chat] injectUserMessage failed:', e)
+      workbenchStore.removeGuidance(sid, guidanceId)
+      toast.error(t('guidance.injectFailed') || '加入引导失败')
+    }
+    return
+  }
   handleSendMessage(content, options)
   abilityPresetInput.value = ''
 }
 
 // 确认对话框引用
 const confirmDialogRef = ref(null)
+
+// 消息输入框引用
+const messageInputRef = ref(null)
 
 // 处理删除文件 - 带确认对话框
 const handleDeleteFile = async (item) => {

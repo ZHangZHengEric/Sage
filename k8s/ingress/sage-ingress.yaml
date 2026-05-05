@@ -1,0 +1,55 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sage
+  labels:
+    app.kubernetes.io/name: sage
+    app.kubernetes.io/part-of: sage
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "512m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ${INGRESS_CLASS_LINE}
+  ${TLS_BLOCK}
+  rules:
+    - host: ${SAGE_HOST}
+      http:
+        paths:
+          - path: /prod-api/api
+            pathType: Prefix
+            backend:
+              service:
+                name: sage-web
+                port:
+                  name: http
+          - path: /api/user/oauth
+            pathType: Prefix
+            backend:
+              service:
+                name: sage-web
+                port:
+                  name: http
+          - path: /jaeger
+            pathType: Prefix
+            backend:
+              service:
+                name: sage-web
+                port:
+                  name: http
+          - path: /sage
+            pathType: Prefix
+            backend:
+              service:
+                name: sage-web
+                port:
+                  name: http
+          - path: /
+            pathType: Exact
+            backend:
+              service:
+                name: sage-web
+                port:
+                  name: http

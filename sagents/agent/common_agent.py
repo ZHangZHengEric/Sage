@@ -34,6 +34,13 @@ class CommonAgent(AgentBase):
         session_id = session_context.session_id
         if self._should_abort_due_to_session(session_context):
             return
+
+        # Drain "运行期注入的引导用户消息"：写入 message_manager 后立即 yield 给 SSE，
+        # 紧接着的 extract_all_context_messages 会自然把它带进本轮 LLM 请求。
+        injected = self._consume_user_injections(session_context)
+        if injected:
+            yield injected
+
         message_manager = session_context.message_manager
         all_messages = message_manager.extract_all_context_messages(recent_turns=10, max_length=self.max_history_context_length, last_turn_user_only=False)
 

@@ -53,6 +53,8 @@ class RerunStreamRequest(BaseModel):
     more_suggest: bool | None = None
     max_loop_count: int | None = None
     available_sub_agent_ids: list[str] | None = None
+    guidance_content: str | None = None
+    guidance_id: str | None = None
 
 
 def _build_current_time_with_weekday() -> str:
@@ -355,13 +357,23 @@ async def rerun_conversation_stream(
         user_id=user_id,
     )
 
+    guidance_content = (rerun_request.guidance_content or "").strip()
+    rerun_messages = []
+    if guidance_content:
+        rerun_messages.append({
+            "message_id": rerun_request.guidance_id or str(uuid.uuid4()),
+            "role": "user",
+            "content": guidance_content,
+        })
+
     request = StreamRequest(
-        messages=[],
+        messages=rerun_messages,
         session_id=session_id,
         user_id=payload["user_id"] or user_id,
         system_context={
             "current_time": _build_current_time_with_weekday(),
             "rerun_from_edit_last_user_message": True,
+            "rerun_from_guidance": bool(guidance_content),
         },
         agent_id=rerun_request.agent_id or payload["agent_id"],
         agent_mode=rerun_request.agent_mode,
@@ -379,5 +391,5 @@ async def rerun_conversation_stream(
         request,
         manager=manager,
         interrupt_message="重新执行最后一条用户消息，先中断旧会话",
-        query=payload["query"] or "",
+        query=guidance_content or payload["query"] or "",
     )

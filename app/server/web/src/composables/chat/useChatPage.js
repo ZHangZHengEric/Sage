@@ -60,6 +60,7 @@ export const useChatPage = (props) => {
   const abilityPresetInput = ref('')
   const showAbilityButton = ref(true)
   const hasUsedAbilityEntryInSession = ref(false)
+  const autoSendingGuidanceSessionId = ref(null)
 
 
   // 打开工作台（统一方法）
@@ -448,26 +449,19 @@ export const useChatPage = (props) => {
     return res
   }
 
-  /** 流式合并：助手增量拼字符串；用户气泡整段替换（编辑后重跑会再推同 message_id，避免正文翻倍）。 */
-  const mergeStreamedMessageContentForUpdate = (existing, messageData) => {
-    const inc = messageData.content
-    const isUserBubble =
-      existing?.role === 'user' ||
-      existing?.message_type === 'user_input' ||
-      existing?.type === 'user_input'
-    if (isUserBubble) {
-      return inc !== undefined && inc !== null ? inc : existing.content
-    }
-    const ex = existing.content
-    if (typeof ex === 'string' && typeof inc === 'string') {
-      return (ex || '') + (inc || '')
-    }
-    if (inc !== undefined && inc !== null) return inc
-    return ex
-  }
-
   const handleMessage = (messageData) => {
     if (messageData.type === 'stream_end') return
+    // 注入的"引导用户消息"：后端在下一次 LLM 请求前 drain 后会以普通 user MessageChunk 回送，
+    // metadata.guidance_id 用于跟前端引导区的 chip 对账消费，让 chip 自动消失。
+    try {
+      const gid = messageData?.metadata?.guidance_id
+      if (gid && messageData.role === 'user') {
+        const sid = messageData.session_id || currentSessionId.value
+        if (sid) workbenchStore.consumeGuidance(sid, gid)
+      }
+    } catch (e) {
+      console.warn('[Chat] consume guidance failed:', e)
+    }
     if (messageData.type === 'tool_progress') {
       // 工具执行过程实时片段：不进 messages 列表、不进历史，仅追加到对应 tool 卡片的 live area
       try {
@@ -523,7 +517,7 @@ export const useChatPage = (props) => {
         nextMessage = {
           ...existing,
           ...messageData,
-          content: mergeStreamedMessageContentForUpdate(existing, messageData),
+          content: (existing.content || '') + (messageData.content || ''),
           timestamp: messageData.timestamp || Date.now()
         }
         if (messageData.tool_calls || existing.tool_calls) {
@@ -547,7 +541,7 @@ export const useChatPage = (props) => {
     nextTick(() => scrollToBottom(true))
   }
 
-  const addUserMessage = (content, sessionId, multimodalContent = null, enableMultimodal = false) => {
+  const addUserMessage = (content, sessionId, multimodalContent = null, enableMultimodal = false, messageId = null) => {
     // 根据 enableMultimodal 决定是否使用多模态格式
     // 只有当 enableMultimodal 为 true 且有多模态内容时，才使用数组格式
     console.log('enableMultimodal:', enableMultimodal)
@@ -559,7 +553,7 @@ export const useChatPage = (props) => {
     const userMessage = {
       role: 'user',
       content: messageContent,
-      message_id: Date.now().toString(),
+      message_id: messageId || Date.now().toString(),
       type: 'user_input',
       message_type: 'user_input',
       session_id: sessionId,
@@ -714,6 +708,97 @@ export const useChatPage = (props) => {
       isLoading.value = false
       loadingSessionId.value = null
       return false
+    }
+  }
+
+  const applyGuidanceNow = async (guidance) => {
+    const sessionId = currentSessionId.value
+    const content = String(guidance?.content || '').trim()
+    const guidanceId = guidance?.guidanceId
+    if (!sessionId || !selectedAgent.value || !content) return false
+
+    try {
+      if (guidanceId) {
+        try {
+          await chatAPI.deletePendingUserInjection(sessionId, guidanceId)
+        } catch (e) {
+          console.warn('[Chat] delete pending guidance before apply-now failed:', e)
+        }
+      }
+
+      if (isLoading.value) {
+        await stopGeneration()
+        await new Promise(resolve => setTimeout(resolve, 300))
+      }
+
+      workbenchStore.removeGuidance(sessionId, guidanceId)
+      addUserMessage(content, sessionId, null, false, guidanceId)
+      updateActiveSession(sessionId, true, deriveSessionTitle(content), content, false)
+
+      isLoading.value = true
+      loadingSessionId.value = sessionId
+      shouldAutoScroll.value = true
+      scrollToBottom(true)
+
+      await rerunSession({
+        sessionId,
+        selectedAgent: selectedAgent.value,
+        config: config.value,
+        guidanceContent: content,
+        guidanceId,
+        onMessage: (data) => {
+          if (data.type === 'trace_info') {
+            currentTraceId.value = data.trace_id
+            return
+          }
+          handleMessage(data)
+        },
+        onComplete: () => {
+          scrollToBottom()
+          isLoading.value = false
+          loadingSessionId.value = null
+        },
+        onError: (error) => {
+          addErrorMessage(error)
+          isLoading.value = false
+          loadingSessionId.value = null
+        }
+      })
+      return true
+    } catch (error) {
+      console.warn('[Chat] apply guidance now failed:', error)
+      toast.error(t('guidance.applyNowFailed') || '立即应用引导失败')
+      isLoading.value = false
+      loadingSessionId.value = null
+      return false
+    }
+  }
+
+  const sendPendingGuidancesAfterCompletion = async (sessionId) => {
+    if (!sessionId || autoSendingGuidanceSessionId.value === sessionId || !selectedAgent.value) return
+    if (currentSessionId.value !== sessionId || isLoading.value) return
+    const pending = [...workbenchStore.getGuidances(sessionId)]
+      .filter(g => g?.guidanceId && String(g.content || '').trim())
+    if (pending.length === 0) return
+
+    autoSendingGuidanceSessionId.value = sessionId
+    try {
+      for (const g of pending) {
+        try {
+          await chatAPI.deletePendingUserInjection(sessionId, g.guidanceId)
+        } catch (e) {
+          console.warn('[Chat] delete pending guidance before auto-send failed:', e)
+        }
+      }
+      pending.forEach(g => workbenchStore.removeGuidance(sessionId, g.guidanceId))
+      const content = pending.map(g => String(g.content || '').trim()).join('\n\n')
+      await handleSendMessage(content)
+    } catch (error) {
+      console.warn('[Chat] auto-send pending guidance failed:', error)
+      toast.error(t('guidance.applyNowFailed') || '立即应用引导失败')
+      pending.forEach(g => workbenchStore.addGuidance(sessionId, g))
+    } finally {
+      autoSendingGuidanceSessionId.value = null
     }
   }
 
@@ -1011,6 +1096,14 @@ watch(() => currentSessionId.value, (newSessionId, oldSessionId) => {
     showAbilityPanel.value = false
   })
 
+  watch(isCurrentSessionLoading, (next, prev) => {
+    if (prev && !next && currentSessionId.value) {
+      const sessionId = currentSessionId.value
+      setTimeout(() => {
+        sendPendingGuidancesAfterCompletion(sessionId)
+      }, 0)
+    }
+  })
 
   return {
     t,
@@ -1062,5 +1155,6 @@ watch(() => currentSessionId.value, (newSessionId, oldSessionId) => {
     saveSessionGoal,
     clearSessionGoal,
     completeSessionGoal
+    applyGuidanceNow
   }
 }

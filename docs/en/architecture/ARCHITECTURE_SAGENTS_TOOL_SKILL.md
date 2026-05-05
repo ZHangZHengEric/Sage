@@ -373,6 +373,24 @@ A new event type is added to the NDJSON stream:
 - The existing `message` event shape is fully preserved; downstream consumers
   that don't care about `tool_progress` can simply ignore it.
 
+### Backend pushing: byte-offset precise increments
+
+While `execute_shell_command` / `await_shell` block waiting on a task,
+`_wait_for_finish` pushes increments based on the **sandbox log byte offset**,
+which guarantees zero duplication and zero loss:
+
+1. Track `emitted_offset` (starts at 0).
+2. Each poll calls `sandbox.read_background_output_range(task_id, offset=emitted_offset, max_bytes=1MB)`,
+   gets `(delta_text, new_offset)`, sends `delta_text` to the UI via
+   `emit_tool_progress`, and advances `emitted_offset` to `new_offset`.
+3. If the sandbox does not implement `read_background_output_range`
+   (default impl raises `NotImplementedError`), automatically **fall back** to
+   the legacy tail-diff mode (`read_background_output` + `diff_tail_for_progress`).
+
+`local` / `passthrough` sandboxes implement this; others (bwrap, remote) take
+the fallback path and still see near-real-time output—just with a small chance
+of duplicating a chunk in the rare tail-truncation edge case.
+
 ### Coalescing / throttling
 
 `emit_tool_progress` coalesces by `(tool_call_id, stream)` using a time window

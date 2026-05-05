@@ -62,12 +62,77 @@ async def complete_goal(session_id: str, request: Request):
     return await Response.succ(message=result["message"], data=result["data"])
 
 
+class InjectUserMessageRequest(BaseModel):
+    content: str
+    guidance_id: Optional[str] = None
+    metadata: Optional[dict] = None
+
+
 @conversation_router.post("/api/sessions/{session_id}/interrupt")
 async def interrupt(session_id: str, request: Request, body: InterruptRequest = None):
     """中断指定会话"""
     result = await conversation_router_service.build_interrupt_response(
         session_id,
         message=body.message if body else "用户请求中断",
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
+
+
+@conversation_router.post("/api/sessions/{session_id}/inject-user-message")
+async def inject_user_message(session_id: str, request: Request, body: InjectUserMessageRequest):
+    """向运行中的会话注入一条引导用户消息（非阻塞）。"""
+    result = conversation_router_service.build_inject_user_message_response(
+        session_id,
+        content=body.content,
+        guidance_id=body.guidance_id,
+        metadata=body.metadata,
+        user_id=get_desktop_user_id(request),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
+
+
+class UpdateInjectUserMessageRequest(BaseModel):
+    content: str
+
+
+@conversation_router.get("/api/sessions/{session_id}/inject-user-message")
+async def list_pending_user_injections(session_id: str, request: Request):
+    """列出 pending 引导消息。"""
+    result = conversation_router_service.build_list_pending_user_injections_response(
+        session_id,
+        user_id=get_desktop_user_id(request),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
+
+
+@conversation_router.patch("/api/sessions/{session_id}/inject-user-message/{guidance_id}")
+async def update_pending_user_injection(
+    session_id: str,
+    guidance_id: str,
+    request: Request,
+    body: UpdateInjectUserMessageRequest,
+):
+    """编辑一条 pending 引导消息。"""
+    result = conversation_router_service.build_update_pending_user_injection_response(
+        session_id,
+        guidance_id,
+        content=body.content,
+        user_id=get_desktop_user_id(request),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
+
+
+@conversation_router.delete("/api/sessions/{session_id}/inject-user-message/{guidance_id}")
+async def delete_pending_user_injection(
+    session_id: str,
+    guidance_id: str,
+    request: Request,
+):
+    """删除一条 pending 引导消息。"""
+    result = conversation_router_service.build_delete_pending_user_injection_response(
+        session_id,
+        guidance_id,
+        user_id=get_desktop_user_id(request),
     )
     return await Response.succ(message=result["message"], data=result["data"])
 

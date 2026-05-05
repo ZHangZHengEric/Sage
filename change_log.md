@@ -1,34 +1,18 @@
-2026-05-01 撤回未合并的「会话生成中引导候选区」（interruptStaging）本地改动：`MessageInput.vue` 与四语 locale 恢复为 HEAD；行为回到生成中首次提交即 `needInterrupt` 发送。
+2026-05-06 12:08 补全 MessageInput 词条：guidedPresetPressEnterAgain、pasteUploadFailed，server-web 与 desktop 中英 locales，修复 CI check:i18n。
 
-2026-05-01 能力预设引导门槛：`presetText` 写入后经 `<skill>` 剥离的正文与技能 chips 才写入快照；门控不再因「已有技能 chip」误判而立刻解除，首击 Enter 仍先 toast、二次 Enter 发送（desktop/server `MessageInput.vue`）。
+2026-05-05 10:35 引导功能PR：运行中注入与消费回执、rerun-stream guidance、流结束自动发送；desktop/server-web 引导区与文档；会话与 SAgent 对齐。
 
-2026-05-01 编辑已发用户消息并重跑：`handleMessage` 合并同 message_id 时用户气泡改为用流式载荷整段替换 `content`，不再与本地历史拼接，消除正文重复一遍（desktop/server `useChatPage.js`）。
+2026-04-30 10:03 引导自动续发：流结束后若当前会话仍有未消费引导，前端自动合并为下一轮用户消息发送，并失败回填引导区。
 
-2026-05-01 复制/粘贴会话含图消息：`normalizeMessageContentForComposer` 将 JSON 串形式的多模态 content 还原为数组；`image_url` 兼容顶层 `url`；剪贴板导出沙箱图无 `rawHref` 时写合成 `file:///.sage/...`；`parseSageSandboxUploadHref` 支持百分号解码文件名；气泡复制先 normalize（desktop/server）。
+2026-04-30 09:34 引导立即应用：引导区新增立即应用按钮，走删除 pending + interrupt + rerun-stream(guidance_content)；修复 Fibre 默认 system prompt 固定英文导致中英混杂。
 
-2026-05-01 能力卡片 `presetText`：首按 Enter 只解除「待发确认」（toast）、二次 Enter 才提交；发送按钮仍可一次发出；改写/加附件/技能则取消两道门槛（desktop/server `MessageInput.vue`）。
+2026-04-30 08:52 引导文档补充：HTTP API 写明注入/查询/编辑/删除端点、响应与客户端消费语义；Python API 增 SAgent 引导 helper 用法。
 
-2026-05-01 粘贴图片重复占位：`flattenMessageForComposerRebuild` 对同一 HTTP URL / 沙箱 upload_files 文件名全局去重，避免正文里两行相同 `![](...)` 触发两次 import/upload；Vitest `composerFromMessageFlatten.spec.js`。
+2026-04-30 08:49 引导区补 i18n：双端移除 Queued/to Send 硬编码，修正 server web i18n 引入，新增组件单测。
 
-2026-05-01 桌面 Markdown：`loadLocalImages` 改为仅在当前消息根节点查询 `img[data-local-image]`，避免多气泡互相 revoke blob；占位图增加 `min-h-16`/浅底以免空 src 零高度；“下载”包装层去掉重复 `class` 避免不规范 DOM。
+2026-04-29 22:55 tool_progress byte-offset 精确增量：沙箱 _bg_runner 加 read_range_bytes(offset)；interface / local / passthrough 暴露 read_background_output_range；_wait_for_finish 优先按 offset 拉新增字节，零重复零丢失，不支持时安全回退老 tail diff；新增 8 条 read_range 单测，全套 31/31 绿；docs 同步。
 
-2026-05-01 粘贴沙箱路径 `…/.sage/agents/<agent>/upload_files/<文件>`：`sageSandboxImage` + `POST /api/oss/import_sandbox_upload`；web 读本机文件写 OSS，desktop 复用 sidecar；composer 与输入框粘贴联动。
-
-
-2026-05-01 粘贴 `![](http)`（无剪贴文件）走 `importFromUrl` + chip，`ChipInput` 若父组件已 `preventDefault` 则不再自插正文；增补 `messageInput.pasteUploadFailed`（web/desktop 中英文）。
-
-2026-05-01 气泡「复制」仅写剪贴板：`buildClipboardTextFromMessageContent` 按正文顺序追加 `![](url)`，不再填充输入框；移除 `provide/import_url`/`safe_remote_fetch` 链路。
-
-
-2026-05-01 修复流式 tool arguments 合并：`mergeToolFunctionArguments` 对 object/string 混用统一快照后与片段首尾合并，避免半包 JSON 时丢增量；shell 工作台从原始参数串预览 `command`（`streamingJsonStringFields.js`）。
-
-2026-05-01 todo 工具 JSON：新增 `safeParseToolJson.js`（BOM、双包字符串、字符串内非法换行修复）；工作台参数在结果已返回但 arguments 解析失败时展示原始串；Todo/Task 与 MessageRenderer 统一使用该解析（server/desktop 双端）+ Vitest。
-
-2026-05-01 图片理解/可观测：`llm_request_utils.redact_base64_data_urls_in_value` 用于 LLM 追踪与 `_sanitize_for_log`；`ObservableCompletions`/`opentelemetry_handler` 记录 messages 前脱敏；`image_understanding` 失败信息不再附带 stdout 片段；单测 `test_redact_base64_data_url_replaces_payload`。
-
-2026-05-01 多模态：LLM 专用说明行仅 sagents（`MULTIMODAL_IMAGE_ADDRESS_HINT_ZH` + `test_multimodal_augment.py`）；前端存盘为 `image_url` 与 `![](url)`，`MessageRenderer` 不再做 strip；`multimodalContent.js` 去掉展示剥离工具。
-
-2026-05-01 skill ZIP 导入后可执行权限：解压时应用 Unix external_attr；`_set_permissions_recursive` 不再对所有文件强制 644，保留执行位并对 shebang、`.sh`/`.bash`、路径 `.../bin/` 下文件启发式 `755`（`common/services/skill_service.py`）。
+2026-04-29 22:30 tool_progress 桌面端补齐：app/desktop 同步 server-web 的 4 件套（workbench.js 增 appendToolProgress + pendingToolProgress；useChatPage 识别 type=tool_progress；ToolCallRenderer 把 live-output/segments/live 透传；ShellCommandToolRenderer 增 live area + auto scroll + exit_code 行）；事件按 tool_call_id 匹配 workbench item，工具卡片晚到也走 pending 缓冲。
 
 2026-04-29 21:00 tool_progress 节流：emit_tool_progress 默认按 (tool_call_id, stream) 做 50ms 时间窗 / 16KB 字节阈值合并；closed 与 unregister 强制 flush / cancel pending；新增 5 条合并单测，全套 23/23 绿；docs ENV_VARS + 架构 §12 同步。
 
@@ -427,3 +411,4 @@
 2026-04-23 17:43:00 服务端会话分享：在历史会话列表新增分享按钮，复制 /share/{sessionId} 公开免登链接；重写 SharedChat 页面以匹配对话样式，支持执行流/交付流切换，工具点击查看输入输出，仅展示对话不含侧边栏。
 2026-04-26 13:38:00 修复桌面端视频播放失败：将 VideoRenderer.vue 中的 readFile+Blob 方式替换为 convertFileSrc，使用 asset:// 协议流式加载视频，解决大文件无法播放及 H.265 格式在 WKWebView 中播放失败问题。
 2026-04-26 13:46:00 合并 main 分支（4 commits），解决 VideoRenderer.vue 冲突，保留 main 版本的重构实现。新增桌面端 /api/agent/{id}/file_workspace/stream 接口，支持 HTTP Range 请求；VideoRenderer.vue 改为通过后端 stream 接口流式播放，不再直接访问文件系统。
+2026-04-29 23:45:00 新增运行中会话引导区消息注入、编辑、删除与 SSE 消费回执能力。
