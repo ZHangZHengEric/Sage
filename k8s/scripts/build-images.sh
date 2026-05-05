@@ -22,7 +22,6 @@ load_env_file() {
 
 load_env_file "$K8S_DIR/.env"
 
-IMAGE_TAG="${IMAGE_TAG:-v1.0}"
 IMAGE_REGISTRY="${IMAGE_REGISTRY:-}"
 SAGE_WEB_SERVICE_TYPE="${SAGE_WEB_SERVICE_TYPE:-NodePort}"
 SAGE_WEB_NODE_PORT="${SAGE_WEB_NODE_PORT:-30080}"
@@ -35,24 +34,35 @@ if [ -z "${SAGE_PUBLIC_URL:-}" ]; then
 fi
 SAGE_WEB_BASE_PATH="${SAGE_WEB_BASE_PATH:-/sage}"
 SAGE_TRACE_WEB_URL="${SAGE_TRACE_WEB_URL:-${SAGE_PUBLIC_URL}/jaeger/}"
-K8S_IMAGE_TARGET="${K8S_IMAGE_TARGET:-auto}"
-PUSH_IMAGES="${PUSH_IMAGES:-auto}"
+K8S_IMAGE_TARGET="${K8S_IMAGE_TARGET:-ctr}"
 SAGE_WEB_BUILD_BASE="${SAGE_WEB_BASE_PATH%/}/"
+
+normalize_image_target() {
+  local target="$K8S_IMAGE_TARGET"
+
+  if [ "$target" = "auto" ]; then
+    target="ctr"
+  fi
+
+  case "$target" in
+    containerd|cri|ctr)
+      K8S_IMAGE_TARGET="$target"
+      ;;
+    *)
+      echo "Unsupported K8S_IMAGE_TARGET '$target'. Kubernetes image deployment only supports ctr/containerd/cri; registry push, Docker Desktop, kind, minikube, and k3d are intentionally disabled." >&2
+      exit 1
+      ;;
+  esac
+}
 
 image_name() {
   local name="$1"
   if [ -n "$IMAGE_REGISTRY" ]; then
-    printf '%s/%s:%s' "${IMAGE_REGISTRY%/}" "$name" "$IMAGE_TAG"
+    printf '%s/%s:latest' "${IMAGE_REGISTRY%/}" "$name"
   else
-    printf '%s:%s' "$name" "$IMAGE_TAG"
+    printf '%s:latest' "$name"
   fi
 }
-
-SAGE_SERVER_IMAGE="$(image_name sage-server)"
-SAGE_WEB_IMAGE="$(image_name sage-web)"
-SAGE_WIKI_IMAGE="$(image_name sage-wiki)"
-SAGE_IMAGES=("$SAGE_SERVER_IMAGE" "$SAGE_WEB_IMAGE" "$SAGE_WIKI_IMAGE")
-SAGE_CONTAINERD_IMAGES=("${SAGE_IMAGES[@]}")
 
 canonical_image_name() {
   local image="$1"
@@ -67,36 +77,12 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-current_kubectl_context() {
-  kubectl config current-context 2>/dev/null || true
-}
+containerd_image_exists() {
+  local ctr_bin="$1"
+  local namespace="$2"
+  local image="$3"
 
-load_images_to_kind() {
-  local context cluster
-  context="$(current_kubectl_context)"
-  cluster="${KIND_CLUSTER_NAME:-${context#kind-}}"
-  if [ -z "$cluster" ] || [ "$cluster" = "$context" ]; then
-    cluster="${KIND_CLUSTER_NAME:-kind}"
-  fi
-  kind load docker-image "${SAGE_IMAGES[@]}" --name "$cluster"
-}
-
-load_images_to_minikube() {
-  local profile
-  profile="${MINIKUBE_PROFILE:-$(current_kubectl_context)}"
-  [ -n "$profile" ] || profile="minikube"
-  minikube image load "${SAGE_IMAGES[@]}" --profile "$profile"
-}
-
-load_images_to_k3d() {
-  local context cluster
-  context="$(current_kubectl_context)"
-  cluster="${K3D_CLUSTER_NAME:-${context#k3d-}}"
-  if [ -z "$cluster" ] || [ "$cluster" = "$context" ]; then
-    echo "K3D_CLUSTER_NAME is required when the current kubectl context is not k3d-<cluster>." >&2
-    exit 1
-  fi
-  k3d image import "${SAGE_IMAGES[@]}" --cluster "$cluster"
+  "$ctr_bin" -n "$namespace" images get "$image" >/dev/null 2>&1
 }
 
 load_images_to_containerd() {
@@ -125,13 +111,10 @@ load_images_to_containerd() {
   )
   rm -f "$archive"
 
-  for image in "${SAGE_IMAGES[@]}"; do
-    canonical_image="$(canonical_image_name "$image")"
-
-    if ! "$ctr_bin" -n "$namespace" images list | grep -F -e "$image" -e "$canonical_image"; then
+  for image in "${SAGE_CONTAINERD_IMAGES[@]}"; do
+    if ! containerd_image_exists "$ctr_bin" "$namespace" "$image"; then
       echo "Image '$image' was not found in containerd namespace '$namespace' after import." >&2
-      echo "Also checked canonical name '$canonical_image'." >&2
-      echo "Check with: $ctr_bin -n $namespace images list | grep sage" >&2
+      echo "Check with: $ctr_bin -n $namespace images get '$image'" >&2
       exit 1
     fi
   done
@@ -140,65 +123,26 @@ load_images_to_containerd() {
 publish_images() {
   local target="$K8S_IMAGE_TARGET"
 
-  if [ "$target" = "auto" ]; then
-    if [ -n "$IMAGE_REGISTRY" ]; then
-      target="registry"
-    else
-      local context
-      context="$(current_kubectl_context)"
-      case "$context" in
-        kind-*) target="kind" ;;
-        minikube) target="minikube" ;;
-        k3d-*) target="k3d" ;;
-        docker-desktop) target="docker" ;;
-        *)
-          echo "Cannot auto-detect where to publish images for kubectl context '$context'." >&2
-          echo "Set IMAGE_REGISTRY for a private registry, or set K8S_IMAGE_TARGET=kind|minikube|k3d|docker|containerd|ctr|none." >&2
-          exit 1
-          ;;
-      esac
-    fi
-  fi
-
   case "$target" in
-    registry)
-      if [ -z "$IMAGE_REGISTRY" ]; then
-        echo "IMAGE_REGISTRY is required when K8S_IMAGE_TARGET=registry." >&2
-        exit 1
-      fi
-      docker push "$SAGE_SERVER_IMAGE"
-      docker push "$SAGE_WEB_IMAGE"
-      docker push "$SAGE_WIKI_IMAGE"
-      ;;
-    kind)
-      command_exists kind || { echo "kind is required when K8S_IMAGE_TARGET=kind." >&2; exit 1; }
-      load_images_to_kind
-      ;;
-    minikube)
-      command_exists minikube || { echo "minikube is required when K8S_IMAGE_TARGET=minikube." >&2; exit 1; }
-      load_images_to_minikube
-      ;;
-    k3d)
-      command_exists k3d || { echo "k3d is required when K8S_IMAGE_TARGET=k3d." >&2; exit 1; }
-      load_images_to_k3d
-      ;;
-    docker)
-      echo "Using Docker Desktop Kubernetes; locally built Docker images are available to the cluster."
-      ;;
     containerd|cri|ctr)
       load_images_to_containerd
       ;;
-    none)
-      echo "Skipping image publish/load because K8S_IMAGE_TARGET=none."
-      ;;
     *)
-      echo "Unsupported K8S_IMAGE_TARGET '$target'. Use auto, registry, kind, minikube, k3d, docker, containerd, ctr, cri, or none." >&2
+      echo "Unsupported K8S_IMAGE_TARGET '$target'. Kubernetes image deployment only supports ctr/containerd/cri; registry push, Docker Desktop, kind, minikube, and k3d are intentionally disabled." >&2
       exit 1
       ;;
   esac
 }
 
 cd "$ROOT_DIR"
+
+normalize_image_target
+
+SAGE_SERVER_IMAGE="$(image_name sage-server)"
+SAGE_WEB_IMAGE="$(image_name sage-web)"
+SAGE_WIKI_IMAGE="$(image_name sage-wiki)"
+SAGE_IMAGES=("$SAGE_SERVER_IMAGE" "$SAGE_WEB_IMAGE" "$SAGE_WIKI_IMAGE")
+SAGE_CONTAINERD_IMAGES=("${SAGE_IMAGES[@]}")
 
 docker build -f docker/Dockerfile.server -t "$SAGE_SERVER_IMAGE" .
 docker build \
@@ -212,9 +156,7 @@ docker build \
   --build-arg "VITE_SAGE_API_BASE_URL=$SAGE_PUBLIC_URL" \
   -t "$SAGE_WIKI_IMAGE" .
 
-if [ "$PUSH_IMAGES" != "false" ]; then
-  publish_images
-fi
+publish_images
 
 printf 'Built Sage images:\n'
 printf '  %s\n' "${SAGE_IMAGES[@]}"

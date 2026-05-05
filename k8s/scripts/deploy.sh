@@ -25,7 +25,6 @@ NAMESPACE="${NAMESPACE:-sage}"
 SAGE_HOST="${SAGE_HOST:-}"
 SAGE_PUBLIC_URL="${SAGE_PUBLIC_URL:-}"
 IMAGE_REGISTRY="${IMAGE_REGISTRY:-}"
-IMAGE_TAG="${IMAGE_TAG:-v1.0}"
 IMAGE_PULL_POLICY="${IMAGE_PULL_POLICY:-}"
 STORAGE_CLASS="${STORAGE_CLASS:-}"
 INGRESS_CLASS_NAME="${INGRESS_CLASS_NAME:-nginx}"
@@ -137,9 +136,9 @@ export SAGE_EMBEDDING_DIMS="${SAGE_EMBEDDING_DIMS:-1024}"
 image_name() {
   local name="$1"
   if [ -n "$IMAGE_REGISTRY" ]; then
-    printf '%s/%s:%s' "${IMAGE_REGISTRY%/}" "$name" "$IMAGE_TAG"
+    printf '%s/%s:latest' "${IMAGE_REGISTRY%/}" "$name"
   else
-    printf '%s:%s' "$name" "$IMAGE_TAG"
+    printf '%s:latest' "$name"
   fi
 }
 
