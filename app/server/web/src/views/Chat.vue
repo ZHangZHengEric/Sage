@@ -235,6 +235,11 @@
                 {{ t('quickHelp.cta') }}
               </Button>
             </div>
+            <GuidanceArea
+              v-if="currentSessionId"
+              :session-id="currentSessionId"
+              :apply-now-handler="applyGuidanceNow"
+            />
             <MessageInput
               ref="messageInputRef"
               :agent-id="selectedAgentId"
@@ -306,6 +311,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
 import DeliveryCollapsedGroup from '@/components/chat/DeliveryCollapsedGroup.vue'
 import MessageInput from '@/components/chat/MessageInput.vue'
+import GuidanceArea from '@/components/chat/GuidanceArea.vue'
 import WorkspacePanel from '@/components/chat/WorkspacePanel.vue'
 import WorkbenchPreview from '@/components/chat/WorkbenchPreview.vue'
 import LoadingBubble from '@/components/chat/LoadingBubble.vue'
@@ -328,6 +334,7 @@ import { useWorkbenchStore } from '@/stores/workbench'
 import { usePanelStore } from '@/stores/panel'
 import { getMessageLabel } from '@/utils/messageLabels'
 import { taskAPI } from '@/api/task.js'
+import { chatAPI } from '@/api/chat.js'
 import { toast } from 'vue-sonner'
 import {
   CHAT_DISPLAY_MODES,
@@ -389,7 +396,8 @@ const {
   closeAbilityPanel,
   retryAbilityFetch,
   onAbilityCardClick,
-  submitEditedLastUserMessage
+  submitEditedLastUserMessage,
+  applyGuidanceNow
 } = useChatPage(props)
 
 const workbenchStore = useWorkbenchStore()
@@ -625,7 +633,25 @@ const handleClickAbilityButton = () => {
   hasUsedAbilityEntryInSession.value = true
 }
 
-const handleSendMessageWithAbilityClear = (content, options) => {
+const handleSendMessageWithAbilityClear = async (content, options) => {
+  // session 正在运行：将内容作为"引导消息"注入到运行中的 session，而不是开新轮次。
+  // 引导消息会在下一次 LLM 请求前被 agent 消费，前端的引导区按 guidance_id 对账消失。
+  if (isCurrentSessionLoading.value && currentSessionId.value && typeof content === 'string' && content.trim()) {
+    abilityPresetInput.value = ''
+    const guidanceId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `g-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const sid = currentSessionId.value
+    workbenchStore.addGuidance(sid, { guidanceId, content })
+    try {
+      await chatAPI.injectUserMessage(sid, content, guidanceId)
+    } catch (e) {
+      console.warn('[Chat] injectUserMessage failed:', e)
+      workbenchStore.removeGuidance(sid, guidanceId)
+      toast.error(t('guidance.injectFailed') || '加入引导失败')
+    }
+    return
+  }
   handleSendMessage(content, options)
   abilityPresetInput.value = ''
 }

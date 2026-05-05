@@ -100,6 +100,38 @@ Thin wrappers on the global session manager (`sagents/session_runtime.py`):
 
 - `get_session_status`, `list_active_sessions`, `cleanup_session`, `save_session`, `interrupt_session`, `get_tasks_status`
 
+### Runtime guidance helpers
+
+These helpers let host code add user guidance to a live session without interrupting it. The message is queued on `SessionContext.pending_user_injections`; the agent drains that queue before the next LLM request, persists the drained items as normal user messages, and yields them back in the stream with `metadata.guidance_id`.
+
+| Method | Return | Notes |
+| --- | --- | --- |
+| `inject_user_message(session_id, content, guidance_id=None, metadata=None)` | `str` | Queues one guidance message and returns the effective `guidance_id`. |
+| `list_pending_user_injections(session_id)` | `List[dict]` | Snapshot of queued, not-yet-consumed guidance messages. |
+| `update_pending_user_injection(session_id, guidance_id, content)` | `bool` | Updates queued content; `False` means missing or already consumed. |
+| `delete_pending_user_injection(session_id, guidance_id)` | `bool` | Deletes a queued message; `False` means missing or already consumed. |
+
+Example:
+
+```python
+guidance_id = agent.inject_user_message(
+    session_id="sess_123",
+    content="Please prioritize the failing test first",
+    guidance_id="ui-guidance-1",
+    metadata={"source_ui": "guidance_area"},
+)
+
+pending = agent.list_pending_user_injections("sess_123")
+agent.update_pending_user_injection(
+    "sess_123",
+    guidance_id,
+    "Please prioritize the failing test and summarize the fix",
+)
+agent.delete_pending_user_injection("sess_123", guidance_id)
+```
+
+`inject_user_message` raises `LookupError` if the target session is not live and `ValueError` if `content` is empty. The update/delete helpers operate only on pending messages; after consumption, the guidance is a normal persisted user message.
+
 ## 4. Default flow and `agent_mode`
 
 If `custom_flow` is omitted, `_build_default_flow` builds a graph with `sagents/flow/schema.py` node types. High-level behavior is described in [Core Concepts](CORE_CONCEPTS.md) and [ARCHITECTURE_SAGENTS_AGENT_FLOW.md](ARCHITECTURE_SAGENTS_AGENT_FLOW.md).

@@ -82,6 +82,21 @@ class AgentBase(ABC):
     def _get_live_session_context(self, session_id: Optional[str]):
         return _get_live_session_context_util(session_id, log_prefix=self.__class__.__name__)
 
+    def _consume_user_injections(self, session_context: Optional[SessionContext]) -> List[MessageChunk]:
+        """Drain SessionContext 上的 pending 引导消息。
+
+        - flush 已经把消息写入 ``message_manager``，因此返回值仅用于上层 yield 给 SSE 通道，
+          以及当次 LLM 请求的 ``messages_input.extend(...)``。
+        - 任何异常都吞掉，避免影响主流程。
+        """
+        if session_context is None:
+            return []
+        try:
+            return session_context.flush_user_injections()
+        except Exception as exc:
+            logger.warning(f"{self.__class__.__name__}: flush user injections 失败: {exc}")
+            return []
+
     @abstractmethod
     async def run_stream(self,
                          session_context: SessionContext,

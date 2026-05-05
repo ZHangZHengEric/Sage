@@ -11,6 +11,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const isListView = ref(false)
   const currentSessionId = ref(null) // 当前会话ID
   const pendingToolResults = ref(new Map()) // 待处理的工具结果
+  const pendingGuidances = ref(new Map()) // sessionId -> pending guidance chips
   let itemIdCounter = 0 // 用于生成唯一 item id 的计数器
 
   // Getters
@@ -273,6 +274,20 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       console.log('[Workbench] Auto-jump to index:', currentIndex.value)
     }
 
+    // tool_call item 落地后，把可能先到的 progress 缓存灌进去
+    if (newItem.type === 'tool_call') {
+      const tcId = newItem.data?.id || newItem.data?.tool_call_id
+      if (tcId && pendingToolProgress.value.has(tcId)) {
+        const buf = pendingToolProgress.value.get(tcId)
+        pendingToolProgress.value.delete(tcId)
+        if (buf.liveOutput) {
+          newItem.liveOutput = buf.liveOutput
+          newItem.liveSegments = buf.liveSegments
+        }
+        newItem.live = buf.live
+      }
+    }
+
     return newItem
   }
 
@@ -291,6 +306,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     isListView.value = false
     currentSessionId.value = null
     pendingToolResults.value.clear()
+    pendingGuidances.value.clear()
   }
 
   // 清除当前会话的 items
@@ -461,6 +477,85 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     }
   }
 
+  // tool_call_id 还没匹配到 workbench item 时缓存的 progress 文本
+  // 一旦对应的 tool_call item 被 addItem 创建，会在 addItem 中把缓存灌进去
+  const pendingToolProgress = ref(new Map())
+
+  // 从工具实时执行通道追加增量文本（stdout/stderr）。
+  // - 同一 tool_call_id 的所有 progress 累加到 item.liveOutput；
+  // - 按 stream 字段保留分段信息以便前端按通道渲染（item.liveSegments）；
+  // - closed=true 表示该 tool 的 progress 流结束，前端可收起 spinner。
+  // 不影响 item.toolResult（最终工具结果由现有 updateToolResult 写入）。
+  const appendToolProgress = ({ toolCallId, text = '', stream = 'stdout', closed = false, ts = null }) => {
+    if (!toolCallId) return false
+    const item = items.value.find(i =>
+      i.type === 'tool_call' && (i.data.id === toolCallId || i.data.tool_call_id === toolCallId)
+    )
+    if (!item) {
+      const buf = pendingToolProgress.value.get(toolCallId) || { liveOutput: '', liveSegments: [], live: true }
+      if (text) {
+        buf.liveOutput += text
+        buf.liveSegments.push({ stream, text, ts })
+      }
+      if (closed) buf.live = false
+      pendingToolProgress.value.set(toolCallId, buf)
+      return false
+    }
+    if (text) {
+      item.liveOutput = (item.liveOutput || '') + text
+      if (!Array.isArray(item.liveSegments)) item.liveSegments = []
+      item.liveSegments.push({ stream, text, ts })
+    }
+    item.live = !closed
+    return true
+  }
+
+  const getGuidances = (sessionId) => {
+    if (!sessionId) return []
+    return pendingGuidances.value.get(sessionId) || []
+  }
+
+  const addGuidance = (sessionId, guidance) => {
+    if (!sessionId || !guidance?.guidanceId) return
+    const list = pendingGuidances.value.get(sessionId) || []
+    list.push({
+      guidanceId: guidance.guidanceId,
+      content: guidance.content || '',
+      status: 'pending',
+      createdAt: Date.now()
+    })
+    pendingGuidances.value.set(sessionId, list)
+  }
+
+  const consumeGuidance = (sessionId, guidanceId) => {
+    if (!sessionId || !guidanceId) return false
+    const list = pendingGuidances.value.get(sessionId)
+    if (!list || list.length === 0) return false
+    const next = list.filter(g => g.guidanceId !== guidanceId)
+    if (next.length === list.length) return false
+    if (next.length === 0) pendingGuidances.value.delete(sessionId)
+    else pendingGuidances.value.set(sessionId, next)
+    return true
+  }
+
+  const removeGuidance = consumeGuidance
+
+  const updateGuidance = (sessionId, guidanceId, content) => {
+    if (!sessionId || !guidanceId) return false
+    const list = pendingGuidances.value.get(sessionId)
+    if (!list) return false
+    const target = list.find(g => g.guidanceId === guidanceId)
+    if (!target) return false
+    target.content = content || ''
+    pendingGuidances.value.set(sessionId, [...list])
+    return true
+  }
+
+  const clearGuidances = (sessionId) => {
+    if (!sessionId) return
+    pendingGuidances.value.delete(sessionId)
+  }
+
   return {
     // State
     items,
@@ -469,6 +564,8 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     isListView,
     currentSessionId,
     pendingToolResults,
+    pendingToolProgress,
+    pendingGuidances,
     // Getters
     filteredItems,
     totalItems,
@@ -491,7 +588,14 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     toggleListView,
     setListView,
     extractFromMessage,
-    updateToolResult
+    updateToolResult,
+    appendToolProgress,
+    getGuidances,
+    addGuidance,
+    consumeGuidance,
+    removeGuidance,
+    updateGuidance,
+    clearGuidances
   }
 })
 

@@ -355,8 +355,21 @@ class FibreOrchestrator:
         # Load prompt parts (must exist, will raise error if not found)
         pm = PromptManager()
 
-        # 1. Base Description (custom_system_prompt)
-        base_desc = custom_system_prompt or ""
+        localized_desc = pm.get_prompt(
+            'fibre_agent_description',
+            agent='FibreAgent',
+            language=lang,
+        )
+        known_default_descs = {
+            pm.get_prompt('fibre_agent_description', agent='FibreAgent', language=known_lang).strip()
+            for known_lang in ('zh', 'en', 'pt')
+        }
+
+        # 1. Base Description. When the Agent does not provide a custom prompt,
+        # or still carries an old built-in default in another language, use the
+        # Fibre description in the current session language.
+        custom_prompt = (custom_system_prompt or "").strip()
+        base_desc = localized_desc if not custom_prompt or custom_prompt in known_default_descs else custom_system_prompt
 
         # 2. System Mechanics (Shared) - only include if requested
         if include_system_mechanics:

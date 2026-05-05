@@ -20,6 +20,80 @@ async def build_interrupt_response(
     }
 
 
+def build_inject_user_message_response(
+    session_id: str,
+    *,
+    content: str,
+    guidance_id: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    data = conversation_service.inject_user_message(
+        session_id=session_id,
+        content=content,
+        guidance_id=guidance_id,
+        metadata=metadata,
+    )
+    if user_id:
+        data = {**data, "user_id": user_id}
+    return {
+        "message": f"会话 {session_id} 引导消息已注入",
+        "data": data,
+    }
+
+
+def build_list_pending_user_injections_response(
+    session_id: str,
+    *,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    data = conversation_service.list_pending_user_injections(session_id=session_id)
+    if user_id:
+        data = {**data, "user_id": user_id}
+    return {
+        "message": f"会话 {session_id} 引导消息列表",
+        "data": data,
+    }
+
+
+def build_update_pending_user_injection_response(
+    session_id: str,
+    guidance_id: str,
+    *,
+    content: str,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    data = conversation_service.update_pending_user_injection(
+        session_id=session_id,
+        guidance_id=guidance_id,
+        content=content,
+    )
+    if user_id:
+        data = {**data, "user_id": user_id}
+    return {
+        "message": f"会话 {session_id} 引导消息已更新",
+        "data": data,
+    }
+
+
+def build_delete_pending_user_injection_response(
+    session_id: str,
+    guidance_id: str,
+    *,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    data = conversation_service.delete_pending_user_injection(
+        session_id=session_id,
+        guidance_id=guidance_id,
+    )
+    if user_id:
+        data = {**data, "user_id": user_id}
+    return {
+        "message": f"会话 {session_id} 引导消息已删除",
+        "data": data,
+    }
+
+
 async def build_status_response(
     session_id: str,
     *,

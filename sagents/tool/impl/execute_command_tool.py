@@ -587,11 +587,16 @@ class ExecuteCommandTool:
                 logger.warning(f"await_shell pattern 编译失败，忽略: {exc}")
                 compiled = None
 
-        # progress 推送状态：以 "已发出的字节长度" 作为偏移
-        # 沙箱 read_background_output 仅返回 tail（不一定从头读），所以这里
-        # 用"上次完整 tail 长度"做差分。注意：read_background_output 有
-        # max_bytes 上限，对超过上限的输出我们只能近似处理（取 tail 增量）。
+        # progress 推送状态。
+        # 优先策略（byte-offset，零重复零丢失）：
+        #   - 沙箱实现了 read_background_output_range(offset)：维护本地
+        #     emitted_offset，每次只取 (offset, EOF] 区间作为 delta。
+        #   - 任意一次返回 ("", same_offset) 视为暂无新字节。
+        # 兜底策略：沙箱不支持 range 读取（返回 ("", offset) 但 size 在涨）时，
+        #   退回到 read_background_output 的 tail diff 模式，与原行为一致。
+        emitted_offset: int = 0
         emitted_tail: str = ""
+        use_range = True
 
         sleep_s = 0.2
         while True:
@@ -599,11 +604,35 @@ class ExecuteCommandTool:
 
             if emit_progress:
                 try:
-                    cur_tail = await self._read_tail(sandbox, task_info, max_bytes=65536)
-                    delta = _diff_tail_for_progress(emitted_tail, cur_tail or "")
-                    if delta:
-                        await emit_tool_progress(delta, stream="stdout")
-                        emitted_tail = cur_tail or ""
+                    pushed = False
+                    if use_range and task_info.get("mode") == "native":
+                        reader = getattr(sandbox, "read_background_output_range", None)
+                        if reader is not None:
+                            try:
+                                delta_text, new_offset = await reader(
+                                    task_info["task_id"],
+                                    offset=emitted_offset,
+                                    max_bytes=1 << 20,  # 1MB / 次
+                                )
+                            except Exception as range_exc:
+                                logger.debug(f"read_range fallback to tail-diff: {range_exc}")
+                                use_range = False
+                                delta_text, new_offset = "", emitted_offset
+                            if delta_text:
+                                await emit_tool_progress(delta_text, stream="stdout")
+                                emitted_offset = new_offset
+                                pushed = True
+                            elif new_offset > emitted_offset:
+                                emitted_offset = new_offset
+                                pushed = True
+                        else:
+                            use_range = False
+                    if not pushed and not use_range:
+                        cur_tail = await self._read_tail(sandbox, task_info, max_bytes=65536)
+                        delta = _diff_tail_for_progress(emitted_tail, cur_tail or "")
+                        if delta:
+                            await emit_tool_progress(delta, stream="stdout")
+                            emitted_tail = cur_tail or ""
                 except Exception as exc:
                     logger.debug(f"emit progress 失败（忽略）: {exc}")
 

@@ -18,7 +18,7 @@ import os
 import subprocess
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from sagents.utils.logger import logger
 
@@ -151,6 +151,44 @@ class HostBackgroundRunner:
         except Exception as exc:
             logger.warning(f"HostBackgroundRunner: 读取日志失败 {path}: {exc}")
             return ""
+
+    def read_range_bytes(self, task_id: str, offset: int = 0, max_bytes: int = 1 << 20) -> Tuple[str, int]:
+        """从 ``offset`` 字节起向后读到末尾，返回 ``(text, new_offset)``。
+
+        用于 progress 通道做"零重复、零丢失"的纯增量推送：
+        - ``new_offset`` 是本次读完后下一次应当传入的 offset（即 ``offset + 实际读到的字节数``）。
+        - 单次最多读 ``max_bytes`` 字节，超出部分留到下一次（保证一次 emit 不会过大）。
+        - 在 utf-8 多字节字符末尾被截开时用 ``errors='replace'`` 安全降级。
+        - task / 文件不存在或异常时返回 ``("", offset)``。
+        """
+        info = self._tasks.get(task_id)
+        if not info:
+            return "", offset
+        path = info.get("log_path")
+        if not path:
+            return "", offset
+        try:
+            size = os.path.getsize(path)
+        except FileNotFoundError:
+            return "", offset
+        except Exception as exc:
+            logger.warning(f"HostBackgroundRunner: 读取日志大小失败 {path}: {exc}")
+            return "", offset
+        if offset < 0:
+            offset = 0
+        if offset >= size:
+            return "", offset
+        read_to = min(size, offset + max(0, max_bytes))
+        try:
+            with open(path, "rb") as f:
+                f.seek(offset)
+                data = f.read(read_to - offset)
+        except FileNotFoundError:
+            return "", offset
+        except Exception as exc:
+            logger.warning(f"HostBackgroundRunner: 读取日志区间失败 {path}: {exc}")
+            return "", offset
+        return data.decode("utf-8", errors="replace"), offset + len(data)
 
     def get_log_size(self, task_id: str) -> Optional[int]:
         """返回日志文件总字节数；task 不存在或文件不存在返回 ``None``。"""
