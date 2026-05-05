@@ -52,6 +52,16 @@ SAGE_SERVER_IMAGE="$(image_name sage-server)"
 SAGE_WEB_IMAGE="$(image_name sage-web)"
 SAGE_WIKI_IMAGE="$(image_name sage-wiki)"
 SAGE_IMAGES=("$SAGE_SERVER_IMAGE" "$SAGE_WEB_IMAGE" "$SAGE_WIKI_IMAGE")
+SAGE_CONTAINERD_IMAGES=("${SAGE_IMAGES[@]}")
+
+canonical_image_name() {
+  local image="$1"
+  if [[ "$image" != */* ]]; then
+    printf 'docker.io/library/%s' "$image"
+  else
+    printf '%s' "$image"
+  fi
+}
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
@@ -90,25 +100,37 @@ load_images_to_k3d() {
 }
 
 load_images_to_containerd() {
-  local ctr_bin namespace archive image
+  local ctr_bin namespace archive image canonical_image
   ctr_bin="${CTR_BIN:-ctr}"
   namespace="${CTR_NAMESPACE:-k8s.io}"
 
   command_exists "$ctr_bin" || { echo "$ctr_bin is required when K8S_IMAGE_TARGET=containerd/ctr." >&2; exit 1; }
 
+  if [ -z "$IMAGE_REGISTRY" ]; then
+    SAGE_CONTAINERD_IMAGES=()
+    for image in "${SAGE_IMAGES[@]}"; do
+      canonical_image="$(canonical_image_name "$image")"
+      docker tag "$image" "$canonical_image"
+      SAGE_CONTAINERD_IMAGES+=("$image" "$canonical_image")
+    done
+  fi
+
   archive="$(mktemp "${TMPDIR:-/tmp}/sage-images.XXXXXX")"
 
   (
     trap 'rm -f "$archive"' EXIT
-    docker save -o "$archive" "${SAGE_IMAGES[@]}"
+    docker save -o "$archive" "${SAGE_CONTAINERD_IMAGES[@]}"
     echo "Importing Sage images into containerd namespace '$namespace' with $ctr_bin."
     "$ctr_bin" -n "$namespace" images import "$archive"
   )
   rm -f "$archive"
 
   for image in "${SAGE_IMAGES[@]}"; do
-    if ! "$ctr_bin" -n "$namespace" images list "name==$image" | grep -Fq "$image"; then
+    canonical_image="$(canonical_image_name "$image")"
+
+    if ! "$ctr_bin" -n "$namespace" images list | grep -F -e "$image" -e "$canonical_image"; then
       echo "Image '$image' was not found in containerd namespace '$namespace' after import." >&2
+      echo "Also checked canonical name '$canonical_image'." >&2
       echo "Check with: $ctr_bin -n $namespace images list | grep sage" >&2
       exit 1
     fi
