@@ -402,21 +402,23 @@ build_images() {
   for service in "${SELECTED_SERVICE_KEYS[@]}"; do
     case "$service" in
       server)
-        docker build -f docker/Dockerfile.server -t "$SAGE_SERVER_IMAGE" .
+        docker build -f "$ROOT_DIR/docker/Dockerfile.server" -t "$SAGE_SERVER_IMAGE" "$ROOT_DIR"
         ;;
       web)
         docker build \
-          -f docker/Dockerfile.web \
+          -f "$ROOT_DIR/docker/Dockerfile.web" \
           --build-arg "VITE_SAGE_API_BASE_URL=$SAGE_PUBLIC_URL" \
           --build-arg "VITE_SAGE_TRACE_WEB_URL=$SAGE_TRACE_WEB_URL" \
           --build-arg "VITE_SAGE_WEB_BASE_PATH=${SAGE_WEB_BASE_PATH%/}/" \
-          -t "$SAGE_WEB_IMAGE" .
+          -t "$SAGE_WEB_IMAGE" \
+          "$ROOT_DIR"
         ;;
       wiki)
         docker build \
-          -f docker/Dockerfile.wiki \
+          -f "$ROOT_DIR/docker/Dockerfile.wiki" \
           --build-arg "VITE_SAGE_API_BASE_URL=$SAGE_PUBLIC_URL" \
-          -t "$SAGE_WIKI_IMAGE" .
+          -t "$SAGE_WIKI_IMAGE" \
+          "$ROOT_DIR"
         ;;
     esac
   done
