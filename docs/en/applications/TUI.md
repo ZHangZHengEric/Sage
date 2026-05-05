@@ -121,6 +121,8 @@ The current TUI preview includes these core commands:
 - `/agent`
 - `/mode`
 - `/display`
+- `/interrupt`
+- `/retry`
 - `/new`
 - `/sessions`
 - `/resume`
@@ -174,6 +176,16 @@ sage-terminal --display verbose
 /display set compact
 /display set verbose
 ```
+
+## Run Control
+
+The terminal now supports basic in-session run control:
+
+- `/interrupt`: stop the active request without quitting the TUI
+- `/retry`: replay the last submitted task in the current session
+- `Ctrl+C` while a request is running: interrupt the request instead of exiting
+
+When an interruption happens, the transcript keeps any partial output that already arrived and adds a retry hint so the current turn can be resumed manually.
 
 ## Workspace Behavior
 

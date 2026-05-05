@@ -14,21 +14,32 @@ impl App {
             return self.handle_command(&text);
         }
 
-        self.queue_message(crate::app::MessageKind::User, text.clone());
+        self.begin_task_submission(text.clone(), true);
+        SubmitAction::RunTask(text)
+    }
+
+    pub(crate) fn begin_task_submission(&mut self, task: String, queue_user_message: bool) {
+        if queue_user_message {
+            self.queue_message(crate::app::MessageKind::User, task.clone());
+        }
+        self.last_submitted_task = Some(task.clone());
+        self.current_task = Some(task);
         self.busy = true;
         self.live_message = None;
         self.live_message_had_history = false;
         self.request_started_at = Some(std::time::Instant::now());
         self.first_output_latency = None;
         self.last_request_duration = None;
+        self.last_first_output_latency = None;
+        self.pending_backend_stats = None;
         self.active_phase = None;
         self.active_tools.clear();
+        self.tool_step_seq = 0;
         self.status = format!("running  {}", self.session_id);
-        SubmitAction::RunTask(text)
     }
 
     pub fn insert_char(&mut self, ch: char) {
-        if self.busy {
+        if self.busy && !(self.input.starts_with('/') || ch == '/') {
             return;
         }
         self.input.insert(self.input_cursor, ch);
@@ -37,7 +48,10 @@ impl App {
     }
 
     pub fn insert_text(&mut self, text: &str) {
-        if self.busy || text.is_empty() {
+        if text.is_empty() {
+            return;
+        }
+        if self.busy && !(self.input.starts_with('/') || text.starts_with('/')) {
             return;
         }
         self.input.insert_str(self.input_cursor, text);
@@ -50,7 +64,7 @@ impl App {
     }
 
     pub fn backspace(&mut self) {
-        if self.busy || self.input_cursor == 0 {
+        if (self.busy && !self.input.starts_with('/')) || self.input_cursor == 0 {
             return;
         }
         let prev = previous_boundary(&self.input, self.input_cursor);
@@ -60,7 +74,7 @@ impl App {
     }
 
     pub fn delete(&mut self) {
-        if self.busy || self.input_cursor >= self.input.len() {
+        if (self.busy && !self.input.starts_with('/')) || self.input_cursor >= self.input.len() {
             return;
         }
         let next = next_boundary(&self.input, self.input_cursor);
@@ -69,18 +83,30 @@ impl App {
     }
 
     pub fn move_cursor_left(&mut self) {
+        if self.busy && !self.input.starts_with('/') {
+            return;
+        }
         self.input_cursor = previous_boundary(&self.input, self.input_cursor);
     }
 
     pub fn move_cursor_right(&mut self) {
+        if self.busy && !self.input.starts_with('/') {
+            return;
+        }
         self.input_cursor = next_boundary(&self.input, self.input_cursor);
     }
 
     pub fn move_cursor_home(&mut self) {
+        if self.busy && !self.input.starts_with('/') {
+            return;
+        }
         self.input_cursor = 0;
     }
 
     pub fn move_cursor_end(&mut self) {
+        if self.busy && !self.input.starts_with('/') {
+            return;
+        }
         self.input_cursor = self.input.len();
     }
 

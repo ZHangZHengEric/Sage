@@ -67,7 +67,7 @@ pub(super) fn handle_key(
             app.insert_newline();
         }
         KeyCode::Enter => {
-            if app.busy {
+            if app.busy && !app.input.starts_with('/') {
                 return Ok(false);
             }
             if app.active_surface_kind() == Some(ActiveSurfaceKind::Popup) {
@@ -113,6 +113,9 @@ pub(super) fn handle_key(
             }
         }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if app.busy {
+                return handle_submit_action(app, backend, crate::app::SubmitAction::Interrupt);
+            }
             app.should_quit = true
         }
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => app.clear_input(),
@@ -122,7 +125,7 @@ pub(super) fn handle_key(
         _ => return Ok(false),
     }
 
-    if !app.busy {
+    if !app.busy || app.input.starts_with('/') {
         sync_contextual_popup_data(app);
     }
     Ok(true)

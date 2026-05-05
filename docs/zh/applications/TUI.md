@@ -121,6 +121,8 @@ cargo run --quiet --offline -- resume
 - `/agent`
 - `/mode`
 - `/display`
+- `/interrupt`
+- `/retry`
 - `/new`
 - `/sessions`
 - `/resume`
@@ -174,6 +176,16 @@ sage-terminal --display verbose
 /display set compact
 /display set verbose
 ```
+
+## 运行控制
+
+现在 terminal 已经支持基础的会话内运行控制：
+
+- `/interrupt`：中断当前正在运行的请求，但不退出 TUI
+- `/retry`：在当前 session 里重新执行上一次提交的任务
+- 请求运行过程中按 `Ctrl+C`：中断当前请求，而不是直接退出程序
+
+发生中断时，transcript 会尽量保留已经收到的部分输出，并附带 retry 提示，方便继续当前轮次。
 
 ## Workspace 行为
 

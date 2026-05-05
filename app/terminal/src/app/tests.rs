@@ -6,6 +6,8 @@ mod display;
 mod golden;
 #[path = "tests/popup.rs"]
 mod popup;
+#[path = "tests/run_control.rs"]
+mod run_control;
 #[path = "tests/sessions.rs"]
 mod sessions;
 #[path = "tests/surfaces.rs"]

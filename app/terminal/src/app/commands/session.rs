@@ -16,6 +16,8 @@ impl App {
         self.first_output_latency = None;
         self.last_request_duration = None;
         self.last_first_output_latency = None;
+        self.last_submitted_task = None;
+        self.current_task = None;
         self.active_tools.clear();
         self.pending_history_lines.clear();
         self.committed_history_lines.clear();
