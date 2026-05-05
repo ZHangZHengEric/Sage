@@ -54,15 +54,3 @@ spec:
               port: mysql
             initialDelaySeconds: 90
             periodSeconds: 30
-          volumeMounts:
-            - name: mysql-data
-              mountPath: /var/lib/mysql
-            - name: mysql-conf
-              mountPath: /etc/mysql/conf.d
-      volumes:
-        - name: mysql-data
-          persistentVolumeClaim:
-            claimName: sage-mysql-data
-        - name: mysql-conf
-          persistentVolumeClaim:
-            claimName: sage-mysql-conf

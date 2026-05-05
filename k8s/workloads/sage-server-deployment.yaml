@@ -63,35 +63,3 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 6
-          volumeMounts:
-            - name: sessions
-              mountPath: /app/sessions
-            - name: agents
-              mountPath: /app/agents
-            - name: logs
-              mountPath: /app/logs
-            - name: data
-              mountPath: /app/data
-            - name: skills
-              mountPath: /app/skills
-            - name: users
-              mountPath: /app/users
-      volumes:
-        - name: sessions
-          persistentVolumeClaim:
-            claimName: sage-server-sessions
-        - name: agents
-          persistentVolumeClaim:
-            claimName: sage-server-agents
-        - name: logs
-          persistentVolumeClaim:
-            claimName: sage-server-logs
-        - name: data
-          persistentVolumeClaim:
-            claimName: sage-server-data
-        - name: skills
-          persistentVolumeClaim:
-            claimName: sage-server-skills
-        - name: users
-          persistentVolumeClaim:
-            claimName: sage-server-users

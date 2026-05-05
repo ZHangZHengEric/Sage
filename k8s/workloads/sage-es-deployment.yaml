@@ -71,10 +71,3 @@ spec:
               port: http
             initialDelaySeconds: 120
             periodSeconds: 30
-          volumeMounts:
-            - name: es-data
-              mountPath: /usr/share/elasticsearch/data
-      volumes:
-        - name: es-data
-          persistentVolumeClaim:
-            claimName: sage-es-data

@@ -49,18 +49,23 @@ cp k8s/.env.example k8s/.env
 
 如果 `STORAGE_CLASS` 留空，PVC 使用集群默认 StorageClass。
 
-## 构建镜像
+## 构建并发布镜像
 
-构建本地镜像：
+构建镜像，并自动发布到当前 `kubectl` 指向的集群可见的位置：
 
 ```bash
 k8s/scripts/build-images.sh
 ```
 
-构建并推送到镜像仓库：
+默认行为：
+
+- 如果设置了 `IMAGE_REGISTRY`，脚本会在构建后 `docker push` 到该仓库。
+- 如果未设置 `IMAGE_REGISTRY`，脚本会按当前 `kubectl` context 自动识别 `kind`、`minikube`、`k3d` 或 Docker Desktop Kubernetes，并把镜像导入本地集群。
+
+推送到私有镜像仓库：
 
 ```bash
-IMAGE_REGISTRY=registry.example.com/sage PUSH_IMAGES=true k8s/scripts/build-images.sh
+IMAGE_REGISTRY=registry.example.com/sage k8s/scripts/build-images.sh
 ```
 
 脚本会构建：
@@ -71,6 +76,22 @@ IMAGE_REGISTRY=registry.example.com/sage PUSH_IMAGES=true k8s/scripts/build-imag
 - `sage-es:${IMAGE_TAG}`
 
 当 `IMAGE_REGISTRY` 非空时，镜像名会变为 `${IMAGE_REGISTRY}/sage-server:${IMAGE_TAG}` 等。
+
+可用 `K8S_IMAGE_TARGET` 显式指定发布方式：
+
+```bash
+K8S_IMAGE_TARGET=registry IMAGE_REGISTRY=registry.example.com/sage k8s/scripts/build-images.sh
+K8S_IMAGE_TARGET=kind k8s/scripts/build-images.sh
+K8S_IMAGE_TARGET=minikube k8s/scripts/build-images.sh
+K8S_IMAGE_TARGET=k3d K3D_CLUSTER_NAME=sage k8s/scripts/build-images.sh
+K8S_IMAGE_TARGET=none k8s/scripts/build-images.sh
+```
+
+如果只想构建本地镜像、不发布或导入集群：
+
+```bash
+PUSH_IMAGES=false k8s/scripts/build-images.sh
+```
 
 ## 部署
 

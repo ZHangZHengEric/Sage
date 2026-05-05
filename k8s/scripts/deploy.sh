@@ -189,7 +189,6 @@ fi
 
 kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/configmaps"
 kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/secrets"
-kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/pvcs"
 kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/services"
 kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/workloads"
 kubectl -n "$NAMESPACE" apply -f "$RENDERED_DIR/ingress"
@@ -200,4 +199,4 @@ for deployment in sage-es sage-rustfs sage-jaeger sage-server sage-web sage-wiki
   kubectl -n "$NAMESPACE" rollout status "deployment/$deployment" --timeout=10m
 done
 
-kubectl -n "$NAMESPACE" get pods,pvc,svc,ingress
+kubectl -n "$NAMESPACE" get pods,svc,ingress

@@ -69,10 +69,3 @@ spec:
               port: api
             initialDelaySeconds: 90
             periodSeconds: 30
-          volumeMounts:
-            - name: rustfs-data
-              mountPath: /data
-      volumes:
-        - name: rustfs-data
-          persistentVolumeClaim:
-            claimName: sage-rustfs-data
