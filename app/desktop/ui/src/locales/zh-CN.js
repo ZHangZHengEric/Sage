@@ -1244,6 +1244,8 @@ export default {
   'messageInput.removeFile': '移除文件',
   'messageInput.planMode': '启用计划模式',
   'messageInput.planModeLabel': 'Plan',
+  'messageInput.guidedPresetPressEnterAgain': '预设内容就绪：再按一次 Enter 发送',
+  'messageInput.pasteUploadFailed': '粘贴中的图片上传失败，请重试',
 
   // 配置面板
   'config.title': '配置设置',

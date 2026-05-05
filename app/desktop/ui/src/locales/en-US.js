@@ -1242,6 +1242,8 @@ export default {
   'messageInput.removeFile': 'Remove',
   'messageInput.planMode': 'Enable planning mode',
   'messageInput.planModeLabel': 'Plan',
+  'messageInput.guidedPresetPressEnterAgain': 'Preset ready — press Enter again to send.',
+  'messageInput.pasteUploadFailed': 'Failed to upload pasted images. Please try again.',
 
   // Config Panel
   'config.title': 'Config',

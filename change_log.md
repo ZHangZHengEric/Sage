@@ -1,3 +1,5 @@
+2026-05-06 12:08 补全 MessageInput 词条：guidedPresetPressEnterAgain、pasteUploadFailed，server-web 与 desktop 中英 locales，修复 CI check:i18n。
+
 2026-05-05 10:35 引导功能PR：运行中注入与消费回执、rerun-stream guidance、流结束自动发送；desktop/server-web 引导区与文档；会话与 SAgent 对齐。
 
 2026-04-30 10:03 引导自动续发：流结束后若当前会话仍有未消费引导，前端自动合并为下一轮用户消息发送，并失败回填引导区。
