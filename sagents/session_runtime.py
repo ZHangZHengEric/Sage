@@ -379,10 +379,10 @@ class Session:
         self.volume_mounts = volume_mounts or []
         self.sandbox_id = sandbox_id
 
-        logger.info(f"SessionRuntime: configure_runtime "
-                   f"sandbox_agent_workspace={self.sandbox_agent_workspace}, "
-                   f"volume_mounts_count={len(self.volume_mounts)}, "
-                   f"sandbox_id={self.sandbox_id}")
+        logger.debug(f"SessionRuntime: configure_runtime "
+                    f"sandbox_agent_workspace={self.sandbox_agent_workspace}, "
+                    f"volume_mounts_count={len(self.volume_mounts)}, "
+                    f"sandbox_id={self.sandbox_id}")
 
         # agent_id 为 None 时生成随机 UUID
         self.agent_id = agent_id or str(uuid.uuid4())
@@ -476,10 +476,10 @@ class Session:
         #         logger.info(f"SessionContext: Using saved system_context for session {session_id}")
 
         # 调试：检查 workspace 配置
-        logger.info(f"SessionRuntime: 创建 SessionContext，"
-                   f"sandbox_agent_workspace={self.sandbox_agent_workspace}, "
-                   f"volume_mounts_count={len(self.volume_mounts or [])}, "
-                   f"sandbox_id={self.sandbox_id}")
+        logger.debug(f"SessionRuntime: 创建 SessionContext，"
+                    f"sandbox_agent_workspace={self.sandbox_agent_workspace}, "
+                    f"volume_mounts_count={len(self.volume_mounts or [])}, "
+                    f"sandbox_id={self.sandbox_id}")
 
         self.session_context = SessionContext(
             session_id=session_id,

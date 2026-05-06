@@ -922,8 +922,8 @@ class ToolManager:
     ) -> Any:
         """Execute a tool by name with provided arguments (async version)"""
         execution_start = time.time()
-        logger.info(f"[Tool Execution] START | tool={tool_name} | session={session_id or 'NO_SESSION'}")
-        logger.info(f"[Tool Execution] Arguments: {json.dumps(kwargs, ensure_ascii=False, default=str)[:500]}")
+        logger.debug(f"[Tool Execution] START | tool={tool_name} | session={session_id or 'NO_SESSION'}")
+        logger.debug(f"[Tool Execution] Arguments: {json.dumps(kwargs, ensure_ascii=False, default=str)[:500]}")
         session_context = _resolve_session_context(session_id)
         resolved_user_id = user_id or getattr(session_context, "user_id", None)
         
@@ -1232,7 +1232,7 @@ class ToolManager:
 
     async def _execute_standard_tool_async(self, tool: ToolSpec, session_id: str = "", **kwargs) -> str:
         """Execute standard tool and format result (async version)"""
-        logger.info(f"[_execute_standard_tool_async] START | tool={tool.name} | session={session_id or 'NO_SESSION'}")
+        logger.debug(f"[_execute_standard_tool_async] START | tool={tool.name} | session={session_id or 'NO_SESSION'}")
         execute_start = time.perf_counter()
 
         try:
@@ -1268,7 +1268,7 @@ class ToolManager:
                 logger.debug(f"[_execute_standard_tool_async] Injected session_id for tool: {tool.name}")
 
             # Execute the tool function
-            logger.info(f"[_execute_standard_tool_async] Executing | tool={tool.name} | is_async={asyncio.iscoroutinefunction(tool.func)}")
+            logger.debug(f"[_execute_standard_tool_async] Executing | tool={tool.name} | is_async={asyncio.iscoroutinefunction(tool.func)}")
             func_start = time.perf_counter()
             
             if hasattr(tool.func, "__self__"):
@@ -1304,14 +1304,14 @@ class ToolManager:
                         result = await asyncio.to_thread(tool.func, **kwargs)
 
             func_cost = time.perf_counter() - func_start
-            logger.info(f"[_execute_standard_tool_async] Function executed | tool={tool.name} | time={func_cost:.3f}s")
+            logger.debug(f"[_execute_standard_tool_async] Function executed | tool={tool.name} | time={func_cost:.3f}s")
 
             # Format result - 避免双重JSON序列化
             execute_cost = time.perf_counter() - execute_start
-            if execute_cost > 0.2:
+            if execute_cost > 2.0:
                 logger.warning(f"[_execute_standard_tool_async] SLOW | tool={tool.name} | total_time={execute_cost:.3f}s")
             else:
-                logger.info(f"[_execute_standard_tool_async] SUCCESS | tool={tool.name} | total_time={execute_cost:.3f}s")
+                logger.debug(f"[_execute_standard_tool_async] SUCCESS | tool={tool.name} | total_time={execute_cost:.3f}s")
             return json.dumps({"content": make_serializable(result)}, ensure_ascii=False, indent=2)
 
         except Exception as e:
