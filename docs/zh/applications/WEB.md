@@ -71,7 +71,7 @@ npm run dev
 
 ## Docker Compose 全栈
 
-仓库根目录 [`docker-compose.yml`](https://github.com/ZHangZHengEric/Sage/blob/main/docker-compose.yml) 会拉起 **完整** 依赖：`sage-server`、静态资源 `sage-web`、可选 `sage-wiki`，以及 MySQL、Elasticsearch、RustFS（S3 兼容）、Jaeger 等。偏 **类生产/整合演示**；若只是一般本地开发，更轻量的是「一键脚本 + 最小模式」。
+[`deploy/prod/docker-compose.yml`](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/prod/docker-compose.yml) 会拉起 **完整** 依赖：`sage-server`、静态资源 `sage-web`、可选 `sage-wiki`，以及 MySQL、Elasticsearch、RustFS（S3 兼容）、Jaeger 等。偏 **类生产/整合演示**；若只是一般本地开发，更轻量的是「一键脚本 + 最小模式」。
 
 **与 compose 中常见端口（映射到宿主机）对应关系：**
 
@@ -87,8 +87,8 @@ npm run dev
 ### 前置条件
 
 - 已安装 **Docker** 与 **Compose v2**（`docker compose`）
-- 宿主机资源充足（`docker-compose.yml` 中对 `sage-server` 等设了较大内存限制，可按需调小）
-- 在仓库根目录提供 **`.env`**（`docker compose` 使用 `env_file: .env`）。可复制 [`.env.example`](https://github.com/ZHangZHengEric/Sage/blob/main/.env.example) 后修改，至少配置 **LLM** 与 **数据库/ES/对象存储** 等；示例中服务主机名为集群内名：`sage-mysql`、`sage-es`、`sage-rustfs` 等。
+- 宿主机资源充足（`deploy/prod/docker-compose.yml` 中对 `sage-server` 等设了较大内存限制，可按需调小）
+- 为目标环境提供 `.env`，例如 `deploy/prod/.env`。可复制 `deploy/prod/.env.example` 后修改，至少配置 **LLM** 与 **数据库/ES/对象存储** 等；示例中服务主机名为集群内名：`sage-mysql`、`sage-es`、`sage-rustfs` 等。
 
 `SAGE_ROOT` 指向宿主机上用于**持久化卷**的目录（MySQL 数据、会话/日志、ES 数据、RustFS 等）。
 
@@ -96,17 +96,16 @@ npm run dev
 
 ```bash
 cd /path/to/Sage
-export SAGE_ROOT=/path/to/sage-data   # 或例如 $(pwd)/data
-cp .env.example .env
-# 编辑 .env：SAGE_DEFAULT_LLM_API_KEY、各类密码、SAGE_MYSQL_PASSWORD、SAGE_ELASTICSEARCH_PASSWORD、SAGE_S3_* 等
-docker compose up -d --build
+cp deploy/prod/.env.example deploy/prod/.env
+# 编辑 deploy/prod/.env：SAGE_DEFAULT_LLM_API_KEY、各类密码、SAGE_MYSQL_PASSWORD、SAGE_ELASTICSEARCH_PASSWORD、SAGE_S3_* 等
+deploy/compose.sh prod up -d --build
 ```
 
 **查看日志：**
 
 ```bash
-docker compose logs -f sage-server
-docker compose logs -f sage-web
+deploy/compose.sh prod logs -f sage-server
+deploy/compose.sh prod logs -f sage-web
 ```
 
 **健康检查：**
@@ -122,10 +121,10 @@ curl -sS http://127.0.0.1:30050/api/health
 ### 停止
 
 ```bash
-docker compose down
+deploy/compose.sh prod down
 ```
 
-**端口冲突：** 若 30050–30057 等被占用，可改 `docker-compose.yml` 的 `ports:`，并同步修改 `.env` 中的公网/浏览器可达 URL 与 `SAGE_API_BASE_URL`。
+**端口冲突：** 若 30050–30057 等被占用，可改 `deploy/prod/.env` 中的宿主机端口变量，并同步修改公网/浏览器可达 URL 与 `SAGE_API_BASE_URL`。
 
 ## 延伸阅读
 
