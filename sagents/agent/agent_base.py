@@ -559,32 +559,19 @@ class AgentBase(ABC):
                             # 更新动态 token 比例
                             logger.debug(f"{self.__class__.__name__}: 检查 token 比例更新条件: llm_response={llm_response is not None}, usage={llm_response.usage if llm_response else None}")
                             if llm_response and llm_response.usage:
-                                # 计算总字符数（输入+输出）
-                                # 处理 MessageChunk 对象和字典两种类型
-                                def get_content_length(m):
-                                    if isinstance(m, MessageChunk):
-                                        content = m.content
-                                        if isinstance(content, str):
-                                            return len(content)
-                                        elif isinstance(content, list):
-                                            return len(str(content))
-                                        return 0
-                                    else:
-                                        # 字典类型
-                                        content = m.get('content', '')
-                                        return len(str(content))
-                                
-                                input_chars = sum(get_content_length(m) for m in messages)
-                                output_content = llm_response.choices[0].message.content or ''
-                                output_chars = len(output_content)
-                                total_chars = input_chars + output_chars
+                                components = MessageManager.calculate_message_token_components(messages)
+                                input_chars = components['text_chars']
+                                image_tokens = components['image_tokens']
+                                actual_tokens = llm_response.usage.prompt_tokens
 
-                                # 获取实际 token 数
-                                actual_tokens = llm_response.usage.total_tokens
-
-                                # 更新 token 比例（message_manager 内部会处理中英文比例）
-                                session_context.message_manager.update_token_ratio(total_chars, actual_tokens)
-                                logger.debug(f"{self.__class__.__name__}: 更新 token 比例，字符数={total_chars}，token数={actual_tokens}，比例={actual_tokens/total_chars:.4f}")
+                                session_context.message_manager.update_token_ratio(
+                                    input_chars,
+                                    actual_tokens,
+                                    image_token_count=image_tokens,
+                                )
+                                if input_chars > 0:
+                                    text_tokens = max(0, actual_tokens - image_tokens)
+                                    logger.debug(f"{self.__class__.__name__}: 更新 token 比例，文本字符数={input_chars}，prompt_tokens={actual_tokens}，图片估算tokens={image_tokens}，文本比例={text_tokens/input_chars:.4f}")
                         else:
                             logger.warning(f"{self.__class__.__name__}: session_context is None for session_id={session_id}, skip add_llm_request")
 
