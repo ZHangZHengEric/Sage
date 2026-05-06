@@ -9,7 +9,10 @@ usage() {
   cat <<'EOF'
 Usage: deploy/compose.sh [dev|prod|test] [docker compose args...]
 
+Default environment: prod
+
 Examples:
+  deploy/compose.sh up -d
   deploy/compose.sh dev up -d
   deploy/compose.sh prod pull
   deploy/compose.sh test down
