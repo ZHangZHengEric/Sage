@@ -781,7 +781,7 @@ class SageStreamService:
         else:
             workspace_root = get_agent_workspace_root(
                 self.runtime_agent_id,
-                user_id=self.skill_owner_user_id,
+                user_id=self.runtime_user_id,
                 app_mode="server",
                 ensure_exists=False,
             )
