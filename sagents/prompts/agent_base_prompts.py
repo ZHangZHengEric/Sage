@@ -9,6 +9,25 @@ AgentBase通用指令定义
 # Agent标识符 - 标识这个prompt文件对应的agent类型
 AGENT_IDENTIFIER = "common"
 
+# IDENTITY.md 作为额外身份扩展注入时的说明
+agent_identity_extension_hint = {
+    "zh": (
+        "以下内容是对 <role_definition> 的补充身份设定，"
+        "用于补充 agent 的人格、背景、工作方式或偏好；"
+        "它不替代主角色定义。"
+    ),
+    "en": (
+        "The following content supplements <role_definition> with additional "
+        "agent identity, personality, background, working style, or preferences; "
+        "it does not replace the primary role definition."
+    ),
+    "pt": (
+        "O conteúdo a seguir complementa <role_definition> com identidade, "
+        "personalidade, contexto, estilo de trabalho ou preferências adicionais do agente; "
+        "ele não substitui a definição principal de função."
+    ),
+}
+
 # 智能体介绍模板
 agent_intro_template = {
     "zh": """

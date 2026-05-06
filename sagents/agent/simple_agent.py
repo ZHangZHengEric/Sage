@@ -7,6 +7,7 @@ from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.prompt_manager import PromptManager
 from sagents.utils.content_saver import save_agent_response_content
+from sagents.tool.tool_baseline import augment_with_baseline_tools
 import json
 import uuid
 from copy import deepcopy
@@ -171,17 +172,17 @@ class SimpleAgent(AgentBase):
         # 获取所有工具
         tools_json = tool_manager.get_openai_tools(lang=session_context.get_language(), fallback_chain=["en"])
 
-        # 根据建议过滤工具
-        # 强制包含 todo / 终止工具 / 记忆工具，如果它们存在于可用工具中
+        # 根据建议过滤工具，并补齐基础工作台工具（仅限当前工具管理器真实可用的工具）。
         # turn_status 始终包含：即使协议被禁用，模型仍可能因提示词而调用它；
         # 若不包含则调用会被拒绝并触发错误→循环，导致相同文本重复出现。
         # SAGE_AGENT_STATUS_PROTOCOL_ENABLED=false 只控制"强制 turn_status_only 轮"的触发，
         # 而不应阻止模型主动调用该工具来终止本轮。
-        always_include = ['todo_write', 'search_memory', 'turn_status']
+        available_tool_names = [tool['function']['name'] for tool in tools_json]
+        selected_tools = set(augment_with_baseline_tools(suggested_tools, available_tool_names))
         
         tools_suggest_json = [
             tool for tool in tools_json
-            if tool['function']['name'] in suggested_tools or tool['function']['name'] in always_include
+            if tool['function']['name'] in selected_tools
         ]
         
         if tools_suggest_json:
