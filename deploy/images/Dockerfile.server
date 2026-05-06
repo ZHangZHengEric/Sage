@@ -5,10 +5,7 @@ ENV TZ=Asia/Shanghai \
     PYTHONPATH=/app \
     PIP_CACHE_DIR=/root/.cache/pip \
     NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
-    npm_config_registry=https://registry.npmmirror.com \
-    BUN_INSTALL=/root/.bun \
-    PUPPETEER_SKIP_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    npm_config_registry=https://registry.npmmirror.com
 
 WORKDIR /app
 
@@ -18,28 +15,15 @@ RUN sed -i 's@deb.debian.org@mirrors.aliyun.com@g' /etc/apt/sources.list.d/debia
 # 安装系统依赖
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    git curl ca-certificates tzdata gnupg unzip \
+    git curl ca-certificates tzdata gnupg \
     build-essential \
-    lsof tree file \
+    file \
     pandoc \
     libreoffice \
     bubblewrap \
-    upx \
     fonts-noto-cjk \
     fonts-dejavu-core \
     fonts-wqy-microhei \
-    chromium \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libdrm2 \
-    libxkbcommon0 \
-    libgbm1 \
-    libasound2 \
-    libatspi2.0-0 \
-    libxshmfence1 \
-    libnss3 \
-    libx11-xcb1 \
-    libxcb-dri3-0 \
     libpango-1.0-0 \
     libpangoft2-1.0-0 \
     libpangocairo-1.0-0 \
@@ -52,9 +36,6 @@ RUN apt-get update && \
     libfreetype6-dev \
     libffi-dev \
     shared-mime-info \
-    texlive-xetex \
-    texlive-lang-chinese \
-    latexmk \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -65,25 +46,8 @@ RUN apt-get update && \
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get update \
     && apt-get install -y nodejs \
-    && npm install -g npm@latest puppeteer --unsafe-perm \
+    && npm install -g npm@latest --unsafe-perm \
     && rm -rf /var/lib/apt/lists/*
-
-# -------------------------
-# 安装 Bun
-# -------------------------
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then BUN_ARCH="linux-x64"; \
-    elif [ "$ARCH" = "aarch64" ]; then BUN_ARCH="linux-aarch64"; \
-    else echo "Unsupported arch: $ARCH"; exit 1; fi && \
-    BUN_VERSION=$(npm view bun dist-tags.latest) && \
-    curl -fsSL https://npmmirror.com/mirrors/bun/bun-v${BUN_VERSION}/bun-${BUN_ARCH}.zip -o bun.zip && \
-    unzip bun.zip && \
-    mkdir -p $BUN_INSTALL/bin && \
-    mv bun-${BUN_ARCH}/bun $BUN_INSTALL/bin/bun && \
-    chmod +x $BUN_INSTALL/bin/bun && \
-    rm -rf bun.zip bun-${BUN_ARCH}
-
-ENV PATH="$BUN_INSTALL/bin:$PATH"
 
 # -------------------------
 # pip 国内源
@@ -92,14 +56,29 @@ RUN mkdir -p /etc/pip \
     && printf "[global]\nindex-url = https://mirrors.aliyun.com/pypi/simple\ntrusted-host = mirrors.aliyun.com\n" > /etc/pip.conf
 
 # -------------------------
+# 定制化安装服务端专有依赖
+# -------------------------
+RUN pip install --no-cache-dir \
+    "PyJWT>=2.9.0" \
+    "itsdangerous>=2.2.0" \
+    "Authlib>=1.6.0" \
+    alibabacloud_dm20151123 \
+    alibabacloud_credentials \
+    alibabacloud_tea_openapi \
+    alibabacloud_tea_util \
+    elasticsearch==8.19.0 \
+    "minio>=7.2.0" \
+    "apscheduler>=3.10.4" \
+    opensandbox \
+    opensandbox-code-interpreter
+
+# -------------------------
 # 安装 Python 依赖（缓存优化）
 # -------------------------
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir -r requirements.txt
-
-# 定制化安装 opensandbox 和opensandbox-code-interpreter
-RUN pip install --no-cache-dir opensandbox opensandbox-code-interpreter
+RUN grep -Eiv '^[[:space:]]*(requests|tqdm|markdownify|lxml|pymupdf|markdown|unstructured|pytest-shutil|pytest-asyncio|pytest-timeout|fastmcp|nest-asyncio|undetected-playwright|chromadb|streamlit|weasyprint|pyinstaller)([[:space:]]|[][<>=!~]|$)' requirements.txt > requirements.server.txt \
+    && pip install --no-cache-dir -r requirements.server.txt
 
 # 复制代码
 COPY . .
