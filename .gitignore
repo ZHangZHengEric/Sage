@@ -3,6 +3,7 @@ mcp_server/hub/*
 mcp_servers/standard_search/*
 */workspace/*
 node_modules/
+/package-lock.json
 sage_demo_workspace/
 app/fastapi_react_demo/backend/config.yaml
 mcp_servers/mcp_setting.json
@@ -197,8 +198,10 @@ cython_debug/
 *.db
 agent_workspace
 .conda
+.claude/settings.local.json
 .idea
-data
+/data/
+deploy/data/
 .trae
 skills/*
 
