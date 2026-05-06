@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-K8S_DIR="$ROOT_DIR/k8s"
-ENV_FILE="${ENV_FILE:-$K8S_DIR/.env}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+DEPLOY_DIR="$ROOT_DIR/deploy"
+DEPLOY_ENV="${DEPLOY_ENV:-prod}"
+ENV_DIR="$DEPLOY_DIR/$DEPLOY_ENV"
+ENV_FILE="${ENV_FILE:-$ENV_DIR/.env}"
 
 load_env_file() {
   local env_file="$1"
