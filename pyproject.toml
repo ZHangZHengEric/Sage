@@ -39,6 +39,7 @@ dependencies = [
   "httpx>=0.24.0",
   "pdfplumber",
   "html2text",
+  "pandas>=2.2.0",
   "openpyxl",
   "pypandoc",
   "python-docx",
