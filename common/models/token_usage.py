@@ -33,9 +33,11 @@ class TokenUsage(Base):
     prompt_audio_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     completion_audio_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     step_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    step_model_names: Mapped[str] = mapped_column(String(2048), nullable=False, default="{}")
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=get_local_now)
+
     def __init__(
         self,
         *,
@@ -52,6 +54,7 @@ class TokenUsage(Base):
         prompt_audio_tokens: int,
         completion_audio_tokens: int,
         step_count: int,
+        step_model_names: str = "{}",
         started_at: datetime,
         finished_at: datetime,
         created_at: Optional[datetime] = None,
@@ -69,6 +72,7 @@ class TokenUsage(Base):
         self.prompt_audio_tokens = prompt_audio_tokens
         self.completion_audio_tokens = completion_audio_tokens
         self.step_count = step_count
+        self.step_model_names = step_model_names
         self.started_at = started_at
         self.finished_at = finished_at
         self.created_at = created_at or get_local_now()
