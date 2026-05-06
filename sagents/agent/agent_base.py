@@ -45,6 +45,14 @@ import httpx
 from openai.types.chat import chat_completion_chunk
 
 
+class PartialStreamConsumedError(RuntimeError):
+    """Raised when a streamed LLM response fails after chunks were yielded."""
+
+    def __init__(self, message: str, original_error: Exception):
+        super().__init__(message)
+        self.original_error = original_error
+
+
 class AgentBase(ABC):
     """
     智能体基类
@@ -201,6 +209,7 @@ class AgentBase(ABC):
         partial_stream_aborted = False
 
         while retry_count < max_retries:
+            attempt_yielded_chunks = False
             try:
                 attempt_chunks = []
                 first_token_time = None
@@ -398,6 +407,7 @@ class AgentBase(ABC):
                     # 显式让出控制权，确保在高吞吐量时不会饿死事件循环（如心跳检测）
                     await asyncio.sleep(0)
                     
+                    attempt_yielded_chunks = True
                     yield chunk
 
                 # 成功完成，跳出重试循环
@@ -433,6 +443,14 @@ class AgentBase(ABC):
                 is_read_error = isinstance(e, httpx.ReadError) or "read error" in error_message
                 # 检查是否是 token 超限错误
                 is_token_limit_error = "range of input length" in error_message or "token" in error_message and "exceed" in error_message
+
+                if attempt_yielded_chunks:
+                    message = (
+                        f"{self.__class__.__name__}: 流式响应已向上游输出部分 chunk，"
+                        f"遇到{('超时' if is_timeout else '网络/读取')}错误后不再透明重试，避免污染工具调用参数: {e}"
+                    )
+                    logger.warning(message)
+                    raise PartialStreamConsumedError(message, e) from e
 
                 if retry_count < max_retries and (is_rate_limit or is_connection_error or is_timeout or is_read_error):
                     wait_time = 2 ** retry_count  # 指数退避: 2, 4, 8 秒
@@ -498,6 +516,14 @@ class AgentBase(ABC):
                 ])
                 # 检查是否是 httpx 特定的超时或读取错误
                 is_httpx_error = isinstance(e, (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ReadError, httpx.ConnectError))
+
+                if attempt_yielded_chunks:
+                    message = (
+                        f"{self.__class__.__name__}: 流式响应已向上游输出部分 chunk，"
+                        f"遇到网络异常后不再透明重试，避免污染工具调用参数: {e}"
+                    )
+                    logger.warning(message)
+                    raise PartialStreamConsumedError(message, e) from e
 
                 if (is_network_error or is_httpx_error) and retry_count < max_retries:
                     # 使用指数退避 + 随机抖动，避免同时重试
