@@ -191,15 +191,20 @@ class AgentBase(ABC):
         if not isinstance(self.model, SageAsyncOpenAI):
             final_config.pop('model_type', None)
         all_chunks = []
+        attempt_chunks = []
 
         # 重试配置 - 增加重试次数以应对网络不稳定情况
         max_retries = 8
         retry_count = 0
         last_exception = None
         structured_output_fallback_used = False
+        partial_stream_aborted = False
 
         while retry_count < max_retries:
             try:
+                attempt_chunks = []
+                first_token_time = None
+                partial_stream_aborted = False
                 if self.model is None:
                     raise ValueError("Model is not initialized")
 
@@ -388,7 +393,7 @@ class AgentBase(ABC):
                     # 记录首token时间
                     if first_token_time is None:
                         first_token_time = time.time()
-                    all_chunks.append(chunk)
+                    attempt_chunks.append(chunk)
                     
                     # 显式让出控制权，确保在高吞吐量时不会饿死事件循环（如心跳检测）
                     await asyncio.sleep(0)
@@ -396,6 +401,7 @@ class AgentBase(ABC):
                     yield chunk
 
                 # 成功完成，跳出重试循环
+                all_chunks = attempt_chunks
                 break
 
             except (RateLimitError, APIError, APIConnectionError, httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ReadError) as e:
@@ -437,6 +443,13 @@ class AgentBase(ABC):
                         wait_time = min(wait_time, 10)  # 超时错误最多等待10秒
                     else:
                         error_type = "网络连接"
+                    if attempt_chunks:
+                        logger.warning(
+                            f"{self.__class__.__name__}: 流式响应已输出 {len(attempt_chunks)} 个chunk后遇到{error_type}错误，"
+                            "停止本次请求避免 retry 拼接半截 tool_call"
+                        )
+                        partial_stream_aborted = True
+                        break
                     logger.warning(f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time} 秒后重试 ({retry_count}/{max_retries}): {e}")
                     await asyncio.sleep(wait_time)
                 elif is_token_limit_error:
@@ -491,6 +504,13 @@ class AgentBase(ABC):
                     import random
                     wait_time = min(2 ** retry_count + random.uniform(0, 1), 30)  # 最大30秒
                     error_type = "HTTP超时" if is_httpx_error else "网络"
+                    if attempt_chunks:
+                        logger.warning(
+                            f"{self.__class__.__name__}: 流式响应已输出 {len(attempt_chunks)} 个chunk后遇到{error_type}错误，"
+                            "停止本次请求避免 retry 拼接半截 tool_call"
+                        )
+                        partial_stream_aborted = True
+                        break
                     logger.warning(f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time:.1f} 秒后重试 ({retry_count}/{max_retries}): {e}")
                     await asyncio.sleep(wait_time)
                     continue  # 继续重试循环
@@ -529,7 +549,8 @@ class AgentBase(ABC):
                     total_time = time.time() - start_request_time
                     first_token_latency = first_token_time - start_request_time if first_token_time else None
                     first_token_str = f"{first_token_latency:.3f}s" if first_token_latency else "N/A"
-                    logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成，总耗时: {total_time:.3f}s, 首token延迟: {first_token_str}, 返回{len(all_chunks)}个chunk")
+                    chunks_for_record = [] if partial_stream_aborted else (all_chunks or attempt_chunks)
+                    logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成，总耗时: {total_time:.3f}s, 首token延迟: {first_token_str}, 返回{len(chunks_for_record)}个chunk")
                     if session_id:
                         session_context = self._get_live_session_context(session_id)
 
@@ -548,7 +569,7 @@ class AgentBase(ABC):
                         }
                         # 将流式的chunk，进行合并成非流式的response，保存下chunk所有的记录
                         try:
-                            llm_response = self.merge_stream_response_to_non_stream_response(all_chunks)
+                            llm_response = self.merge_stream_response_to_non_stream_response(chunks_for_record)
                         except Exception:
                             logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {traceback.format_exc()}")
                             logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {all_chunks}")
