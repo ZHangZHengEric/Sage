@@ -17,6 +17,7 @@ from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_proxy import ToolProxy
+from sagents.tool.tool_baseline import augment_with_baseline_tools
 from sagents.utils.logger import logger
 from sagents.utils.prompt_manager import PromptManager
 
@@ -187,6 +188,11 @@ class ToolSuggestionAgent(AgentBase):
                         if tool['name'] == tool_name:
                             suggested_tool_names.append(tool_name)
                             break
+
+            suggested_tool_names = augment_with_baseline_tools(
+                suggested_tool_names,
+                [tool['name'] for tool in available_tools]
+            )
 
             # 移除complete_task工具
             if 'complete_task' in suggested_tool_names:

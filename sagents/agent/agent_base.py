@@ -717,7 +717,17 @@ class AgentBase(ABC):
                         if identity_content:
                             if len(identity_content) > 300:
                                 identity_content = identity_content[:300]+"……"
-                            stable_buf += f"<identity>\n{identity_content}\n</identity>\n"
+                            identity_hint = prompt_manager.get_prompt(
+                                "agent_identity_extension_hint",
+                                agent="common",
+                                language=language or "en",
+                            )
+                            stable_buf += (
+                                "<agent_identity_extension>\n"
+                                f"{identity_hint}\n\n"
+                                f"{identity_content}\n"
+                                "</agent_identity_extension>\n"
+                            )
                     except Exception as e:
                         logger.debug(f"AgentBase: IDENTITY.md not found or error reading: {e}")
 
