@@ -277,9 +277,9 @@ class SAgent:
             if not sandbox_agent_workspace:
                 raise ValueError("passthrough 沙箱模式需要提供 sandbox_agent_workspace 参数")
 
-        logger.info(f"run_stream: sandbox_type={effective_sandbox_type}, "
-                   f"sandbox_id={sandbox_id}, "
-                   f"volume_mounts_count={len(volume_mounts)}")
+        logger.debug(f"run_stream: sandbox_type={effective_sandbox_type}, "
+                    f"sandbox_id={sandbox_id}, "
+                    f"volume_mounts_count={len(volume_mounts)}")
         start_time = time.time()
         first_show_time = None
 

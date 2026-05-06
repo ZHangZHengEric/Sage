@@ -373,7 +373,7 @@ async def create_chat_completion_with_fallback(
         model=model,
     )
 
-    logger.info(
+    logger.debug(
         f"[LLM Request] chat.completions.create | summary={summarize_chat_completion_request(model=model, messages=messages, request_kwargs=request_kwargs, model_config=model_config)}"
     )
 
@@ -390,7 +390,7 @@ async def create_chat_completion_with_fallback(
             )
             retry_kwargs = dict(request_kwargs)
             retry_kwargs.pop("response_format", None)
-            logger.info(
+            logger.debug(
                 f"[LLM Request] chat.completions.create retry_without_response_format | summary={summarize_chat_completion_request(model=model, messages=messages, request_kwargs=retry_kwargs, model_config=model_config)}"
             )
             return await client.chat.completions.create(

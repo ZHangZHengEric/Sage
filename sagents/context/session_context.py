@@ -644,7 +644,7 @@ class SessionContext:
         if sandbox_mode == SandboxType.REMOTE:
             self.sandbox_agent_workspace = self.sandbox.workspace_path
 
-        logger.info(f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s")
+        logger.debug(f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s")
         
 
     async def _register_and_prepare_skills(self):
@@ -738,7 +738,7 @@ class SessionContext:
                     messages_data = json.load(f)
                     if isinstance(messages_data, list):
                         self.message_manager.messages = [MessageChunk.from_dict(msg) for msg in messages_data]
-                        logger.info(f"SessionContext: Loaded {len(self.message_manager.messages)} messages from messages.json")
+                        logger.debug(f"SessionContext: Loaded {len(self.message_manager.messages)} messages from messages.json")
                         return
         except UnicodeDecodeError:
             logger.warning(f"SessionContext: messages.json decode failed, file may be in legacy encoding, will start with empty messages")
