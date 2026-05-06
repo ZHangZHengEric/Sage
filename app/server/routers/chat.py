@@ -27,6 +27,10 @@ from ..services.chat.stream_manager import StreamManager
 # 创建路由器
 chat_router = APIRouter()
 
+SERVER_STREAM_FILTERED_TYPES = {
+    "tool_progress",
+}
+
 
 def _resolve_request_language(http_request: Request, language: str | None = None, default: str = "zh") -> str:
     candidate = (language or "").strip()
@@ -68,6 +72,7 @@ async def _start_web_stream_session(
     manager: StreamManager,
     interrupt_message: str,
     query: str,
+    filter_stream_types: bool = False,
 ):
     session_id = request.session_id
 
@@ -87,12 +92,11 @@ async def _start_web_stream_session(
     )
     stream_service, lock = await chat_service.prepare_session(request)
     session_id = request.session_id
-    await manager.start_session(
-        session_id,
-        query,
-        chat_service.execute_chat_session(stream_service=stream_service),
-        lock,
-    )
+    generator = chat_service.execute_chat_session(stream_service=stream_service)
+    if filter_stream_types:
+        generator = _filter_stream_chunks(generator)
+
+    await manager.start_session(session_id, query, generator, lock)
 
     return StreamingResponse(
         stream_with_manager(session_id, last_index=0, resume=False),
@@ -168,6 +172,25 @@ async def stream_with_manager(session_id: str, last_index: int = 0, resume: bool
         },
         ensure_ascii=False,
     ) + "\n"
+
+
+def _should_filter_stream_chunk(chunk: str) -> bool:
+    try:
+        payload = json.loads(chunk)
+    except Exception:
+        return False
+    return isinstance(payload, dict) and payload.get("type") in SERVER_STREAM_FILTERED_TYPES
+
+
+async def _filter_stream_chunks(generator):
+    try:
+        async for chunk in generator:
+            if _should_filter_stream_chunk(chunk):
+                continue
+            yield chunk
+    finally:
+        if hasattr(generator, "aclose"):
+            await generator.aclose()
 
 
 async def stream_api_with_disconnect_check(generator, request: Request, lock: asyncio.Lock, session_id: str):
@@ -252,8 +275,10 @@ async def chat(request: ChatRequest, http_request: Request):
     session_id = inner_request.session_id
     return StreamingResponse(
         stream_api_with_disconnect_check(
-            chat_service.execute_chat_session(
-                stream_service=stream_service,
+            _filter_stream_chunks(
+                chat_service.execute_chat_session(
+                    stream_service=stream_service,
+                ),
             ),
             http_request,
             lock,
@@ -302,6 +327,7 @@ async def stream_chat_web(request: StreamRequest, http_request: Request):
         manager=manager,
         interrupt_message="同会话重入，先中断旧会话",
         query=query,
+        filter_stream_types=True,
     )
 
 
