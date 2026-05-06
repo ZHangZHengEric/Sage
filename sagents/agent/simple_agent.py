@@ -82,6 +82,41 @@ class SimpleAgent(AgentBase):
         """
         return _detect_repeat_pattern_util(signatures, max_period=max_period)
 
+    def _resolve_tool_choice(
+        self,
+        tools_json: List[Dict[str, Any]],
+        *,
+        force_tool_choice_required: bool = False,
+        force_tool_choice_auto: bool = False,
+    ) -> Optional[str]:
+        if not tools_json:
+            return None
+        if force_tool_choice_required:
+            return "required"
+        if force_tool_choice_auto:
+            return "auto"
+        env_force_required = os.getenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "").strip().lower() in ("1", "true", "yes", "on")
+        return "required" if env_force_required else None
+
+    def _should_escape_required_next_turn(
+        self,
+        chunks: List[MessageChunk],
+        *,
+        pattern: Optional[Dict[str, int]] = None,
+    ) -> bool:
+        if pattern:
+            return True
+        for chunk in chunks or []:
+            if getattr(chunk, "role", None) != MessageRole.TOOL.value:
+                continue
+            metadata = getattr(chunk, "metadata", None)
+            if isinstance(metadata, dict) and metadata.get("turn_status_rejected") is True:
+                return True
+            content = str(getattr(chunk, "content", "") or "").lower()
+            if "turn_status" in content and ("rejected" in content or "拒绝" in content):
+                return True
+        return False
+
     def _build_self_correction_message(self, pattern: Dict[str, int], language: str = 'en') -> str:
         template = PromptManager().get_prompt(
             key='repeat_pattern_self_correction_template',
@@ -637,6 +672,7 @@ class SimpleAgent(AgentBase):
         message_manager = session_context.message_manager
         recent_signatures: List[str] = message_manager.get_recent_loop_signatures()
         logger.debug(f"SimpleAgent: 加载历史签名 {len(recent_signatures)} 个")
+        force_tool_choice_auto_next = False
         turn_status_only_next = False
         while True:
             if self._should_abort_due_to_session(session_context):
@@ -691,6 +727,7 @@ class SimpleAgent(AgentBase):
                 tool_manager=tool_manager,
                 session_id=session_id,
                 force_tool_choice_required=current_turn_status_only,
+                force_tool_choice_auto=force_tool_choice_auto_next,
             ):
                 non_empty_chunks = [c for c in chunks if (c.message_type != MessageType.EMPTY.value)]
                 if len(non_empty_chunks) > 0:
@@ -699,6 +736,8 @@ class SimpleAgent(AgentBase):
                 if is_complete:
                     should_break = True
                     break
+
+            force_tool_choice_auto_next = False
 
             if should_break:
                 break
@@ -775,6 +814,10 @@ class SimpleAgent(AgentBase):
             pattern = self._detect_repeat_pattern(recent_signatures)
             if pattern:
                 repeat_pattern_hits += 1
+                force_tool_choice_auto_next = self._should_escape_required_next_turn(
+                    all_new_response_chunks,
+                    pattern=pattern,
+                )
                 correction_message = self._build_self_correction_message(
                     pattern,
                     language=session_context.get_language(),
@@ -836,6 +879,7 @@ class SimpleAgent(AgentBase):
                                              tool_manager: Optional[ToolManager],
                                              session_id: str,
                                              force_tool_choice_required: bool = False,
+                                             force_tool_choice_auto: bool = False,
                                              ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
 
         # 准备消息：提取可用消息 -> 检查压缩 -> 执行压缩
@@ -862,12 +906,17 @@ class SimpleAgent(AgentBase):
 
         if len(tools_json) > 0:
             model_config_override['tools'] = tools_json
-            # 通过环境变量 SAGE_FORCE_TOOL_CHOICE_REQUIRED 控制是否强制 tool_choice=required。
-            # 默认关闭：部分模型（如 OpenAI o1/o3、部分国产模型）不支持 tool_choice=required，
-            # 显式启用后才下发给 LLM。调用方传入的 force_tool_choice_required 仍优先生效。
-            env_force_required = os.getenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "").strip().lower() in ("1", "true", "yes", "on")
-            if force_tool_choice_required or env_force_required:
-                model_config_override['tool_choice'] = 'required'
+            force_tool_choice_auto = force_tool_choice_auto or self._should_escape_required_next_turn(
+                messages_input,
+                pattern=None,
+            )
+            tool_choice = self._resolve_tool_choice(
+                tools_json,
+                force_tool_choice_required=force_tool_choice_required,
+                force_tool_choice_auto=force_tool_choice_auto,
+            )
+            if tool_choice:
+                model_config_override['tool_choice'] = tool_choice
         response = self._call_llm_streaming(
             messages=cast(List[Union[MessageChunk, Dict[str, Any]]], clean_message_input),
             session_id=session_id,
@@ -1247,7 +1296,7 @@ class SimpleAgent(AgentBase):
 
         # 2. 检查是否需要压缩
         max_model_len = self.model_config.get('max_model_len', 64000)
-        max_new_tokens = self.model_config.get('max_tokens', 20000)
+        max_new_tokens = self.model_config.get('max_tokens') or self.model_config.get('max_completion_tokens') or 20000
         should_compress, current_tokens, max_model_len = MessageManager.should_compress_messages(
             extracted_messages, max_model_len, max_new_tokens
         )
