@@ -1,5 +1,5 @@
 from sagents.context.messages.message_manager import MessageManager
-from .agent_base import AgentBase
+from .agent_base import AgentBase, PartialStreamConsumedError
 from typing import Any, Dict, List, Optional, AsyncGenerator, Tuple, Union, cast
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
@@ -930,75 +930,112 @@ class SimpleAgent(AgentBase):
         last_tool_call_id = None
         full_content_accumulator = ""
         tool_calls_messages_id = str(uuid.uuid4())
+        emitted_tool_call_stream = False
         # 处理流式响应块
-        async for chunk in response:
-            # print(chunk)
-            if chunk is None:
-                logger.warning(f"Received None chunk from LLM response, skipping... chunk: {chunk}")
-                continue
-            if chunk.choices is None:
-                logger.warning(f"Received chunk with None choices from LLM response, skipping... chunk: {chunk}")
-                continue
-            if len(chunk.choices) == 0:
-                continue
-            
-            # 由于 AgentBase._call_llm_streaming 已经处理了 asyncio.sleep(0) 的让权
-            # 这里不需要重复让权，减少不必要的调度开销
+        try:
+            async for chunk in response:
+                # print(chunk)
+                if chunk is None:
+                    logger.warning(f"Received None chunk from LLM response, skipping... chunk: {chunk}")
+                    continue
+                if chunk.choices is None:
+                    logger.warning(f"Received chunk with None choices, skipping... chunk: {chunk}")
+                    continue
+                if len(chunk.choices) == 0:
+                    continue
 
-            if chunk.choices[0].delta.tool_calls:
-                self._handle_tool_calls_chunk(chunk, tool_calls, last_tool_call_id or "")
-                # 更新last_tool_call_id
-                for tool_call in chunk.choices[0].delta.tool_calls:
-                    if tool_call.id is not None and len(tool_call.id) > 0:
-                        last_tool_call_id = tool_call.id
+                # 由于 AgentBase._call_llm_streaming 已经处理了 asyncio.sleep(0) 的让权
+                # 这里不需要重复让权，减少不必要的调度开销
 
-                # 根据环境变量控制是否流式返回工具调用消息
-                # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
-                emit_on_complete = os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
-                if not emit_on_complete:
-                    # 流式返回工具调用消息
-                    output_messages = [MessageChunk(
-                        role=MessageRole.ASSISTANT.value,
-                        tool_calls=chunk.choices[0].delta.tool_calls,
-                        message_id=tool_calls_messages_id,
-                        message_type=MessageType.TOOL_CALL.value,
-                        agent_name=self.agent_name
-                    )]
-                    yield (output_messages, False)
+                if chunk.choices[0].delta.tool_calls:
+                    self._handle_tool_calls_chunk(chunk, tool_calls, last_tool_call_id or "")
+                    # 更新last_tool_call_id
+                    for tool_call in chunk.choices[0].delta.tool_calls:
+                        if tool_call.id is not None and len(tool_call.id) > 0:
+                            last_tool_call_id = tool_call.id
+
+                    # 根据环境变量控制是否流式返回工具调用消息
+                    # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
+                    emit_on_complete = os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
+                    if not emit_on_complete:
+                        emitted_tool_call_stream = True
+                        # 流式返回工具调用消息
+                        output_messages = [MessageChunk(
+                            role=MessageRole.ASSISTANT.value,
+                            tool_calls=chunk.choices[0].delta.tool_calls,
+                            message_id=tool_calls_messages_id,
+                            message_type=MessageType.TOOL_CALL.value,
+                            agent_name=self.agent_name
+                        )]
+                        yield (output_messages, False)
+                    else:
+                        # yield 一个空的消息块以避免生成器卡住
+                        output_messages = [MessageChunk(
+                            role=MessageRole.ASSISTANT.value,
+                            content="",
+                            message_id=content_response_message_id,
+                            message_type=MessageType.EMPTY.value
+                        )]
+                        yield (output_messages, False)
+
+                elif chunk.choices[0].delta.content:
+                    if len(chunk.choices[0].delta.content) > 0:
+                        content_piece = chunk.choices[0].delta.content
+                        full_content_accumulator += content_piece
+                        output_messages = [MessageChunk(
+                            role='assistant',
+                            content=content_piece,
+                            message_id=content_response_message_id,
+                            message_type=MessageType.DO_SUBTASK_RESULT.value,
+                            agent_name=self.agent_name
+                        )]
+                        yield (output_messages, False)
                 else:
-                    # yield 一个空的消息块以避免生成器卡住
-                    output_messages = [MessageChunk(
-                        role=MessageRole.ASSISTANT.value,
-                        content="",
-                        message_id=content_response_message_id,
-                        message_type=MessageType.EMPTY.value
-                    )]
-                    yield (output_messages, False)
+                    # 先判断chunk.choices[0].delta 是否有reasoning_content 这个变量，并且不是none
+                    if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content is not None:
+                        output_messages = [MessageChunk(
+                            role='assistant',
+                            content=chunk.choices[0].delta.reasoning_content,
+                            message_id=reasoning_content_response_message_id,
+                            message_type=MessageType.REASONING_CONTENT.value,
+                            agent_name=self.agent_name
+                        )]
+                        yield (output_messages, False)
+        except PartialStreamConsumedError as exc:
+            recovery_messages: List[MessageChunk] = []
+            if emitted_tool_call_stream:
+                for tool_call_id, tool_call in tool_calls.items():
+                    real_tool_call_id = tool_call.get('id') or tool_call_id
+                    if not real_tool_call_id or real_tool_call_id.startswith("__tool_call_index_"):
+                        continue
+                    tool_name = (tool_call.get('function') or {}).get('name') or ""
+                    recovery_messages.append(MessageChunk(
+                        role=MessageRole.TOOL.value,
+                        content=json.dumps({
+                            "success": False,
+                            "status": "discarded",
+                            "error": "Partial streamed tool call discarded because the LLM stream ended before a complete response.",
+                        }, ensure_ascii=False),
+                        tool_call_id=real_tool_call_id,
+                        tool_name=tool_name,
+                        message_type=MessageType.TOOL_CALL_RESULT.value,
+                        agent_name=self.agent_name,
+                        metadata={"tool_name": tool_name, "partial_stream_discarded": True},
+                    ))
+            recovery_messages.append(MessageChunk(
+                role=MessageRole.ASSISTANT.value,
+                content=(
+                    "The model stream was interrupted while generating a tool call. "
+                    "The incomplete tool call was discarded to avoid corrupting the conversation history. "
+                    "Please retry the current operation."
+                ),
+                message_type=MessageType.ERROR.value,
+                agent_name=self.agent_name,
+                metadata={"partial_stream_discarded": True, "error": str(exc)},
+            ))
+            yield (recovery_messages, True)
+            return
 
-            elif chunk.choices[0].delta.content:
-                if len(chunk.choices[0].delta.content) > 0:
-                    content_piece = chunk.choices[0].delta.content
-                    full_content_accumulator += content_piece
-                    output_messages = [MessageChunk(
-                        role='assistant',
-                        content=content_piece,
-                        message_id=content_response_message_id,
-                        message_type=MessageType.DO_SUBTASK_RESULT.value,
-                        agent_name=self.agent_name
-                    )]
-                    yield (output_messages, False)
-            else:
-                # 先判断chunk.choices[0].delta 是否有reasoning_content 这个变量，并且不是none
-                if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content is not None:
-                    output_messages = [MessageChunk(
-                        role='assistant',
-                        content=chunk.choices[0].delta.reasoning_content,
-                        message_id=reasoning_content_response_message_id,
-                        message_type=MessageType.REASONING_CONTENT.value,
-                        agent_name=self.agent_name
-                    )]
-                    yield (output_messages, False)
-        
         # 处理完所有chunk后，尝试保存内容
         if full_content_accumulator:
              try:
