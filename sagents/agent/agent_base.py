@@ -717,18 +717,11 @@ class AgentBase(ABC):
                         if identity_content:
                             if len(identity_content) > 300:
                                 identity_content = identity_content[:300]+"……"
-                            if language and str(language).lower().startswith("zh"):
-                                identity_hint = (
-                                    "以下内容是对 <role_definition> 的补充身份设定，"
-                                    "用于补充 agent 的人格、背景、工作方式或偏好；"
-                                    "它不替代主角色定义。"
-                                )
-                            else:
-                                identity_hint = (
-                                    "The following content supplements <role_definition> with additional "
-                                    "agent identity, personality, background, working style, or preferences; "
-                                    "it does not replace the primary role definition."
-                                )
+                            identity_hint = prompt_manager.get_prompt(
+                                "agent_identity_extension_hint",
+                                agent="common",
+                                language=language or "en",
+                            )
                             stable_buf += (
                                 "<agent_identity_extension>\n"
                                 f"{identity_hint}\n\n"
