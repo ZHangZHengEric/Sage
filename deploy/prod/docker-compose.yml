@@ -5,7 +5,7 @@ services:
       context: ../..
       dockerfile: deploy/images/Dockerfile.server
     image: sage-server:v1.0
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage-prod}-server
+    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-server
     volumes:
       - ${SAGE_ROOT}/sage-server/sessions:/app/sessions
       - ${SAGE_ROOT}/sage-server/agents:/app/agents
@@ -43,7 +43,7 @@ services:
         VITE_SAGE_TRACE_WEB_URL: ${SAGE_TRACE_WEB_URL}
         VITE_SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage/}
     image: sage-web:v1.0
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage-prod}-web
+    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-web
     ports:
       - ${SAGE_WEB_PORT:-30051}:80
     environment:
@@ -62,7 +62,7 @@ services:
         NGINX_CONF: deploy/prod/nginx/nginx_wiki.conf
         VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
     image: sage-wiki:v1.0
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage-prod}-wiki
+    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-wiki
     ports:
       - ${SAGE_WIKI_PORT:-30057}:80
     environment:
@@ -76,7 +76,7 @@ services:
   sage-mysql:
     restart: always
     image: docker.m.daocloud.io/mysql:8.4
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage-prod}-mysql
+    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-mysql
     ports:
       - ${SAGE_MYSQL_PUBLISHED_PORT:-30052}:3306
     environment:
@@ -98,7 +98,7 @@ services:
       context: ../..
       dockerfile: deploy/images/Dockerfile.es
     image: sage-es:v1.0
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage-prod}-es
+    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-es
     ports:
       - ${SAGE_ELASTICSEARCH_PUBLISHED_PORT:-30053}:9200
     environment:
@@ -123,7 +123,7 @@ services:
       - ${SAGE_RUSTFS_CONSOLE_PORT:-30055}:9001
     volumes:
       - ${SAGE_ROOT}/rustfs/data:/data
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage-prod}-rustfs
+    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-rustfs
     restart: always
     environment:
       - RUSTFS_ADDRESS=0.0.0.0:9000
@@ -149,7 +149,7 @@ services:
     cpus: 0.5
   sage-jaeger:
     image: docker.m.daocloud.io/jaegertracing/jaeger:2.16.0
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage-prod}-jaeger
+    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-jaeger
     restart: always
     command:
       - --config
