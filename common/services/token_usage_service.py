@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import date, datetime, time
 from typing import Any, Dict, Optional
@@ -27,6 +28,32 @@ def _to_int(value: Any) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _extract_step_model_names(token_usage: Dict[str, Any]) -> Dict[str, list[str]]:
+    per_step_info = token_usage.get("per_step_info") or []
+    if not isinstance(per_step_info, list):
+        return {}
+
+    step_models: Dict[str, list[str]] = {}
+    for step in per_step_info:
+        if not isinstance(step, dict):
+            continue
+        step_name = str(step.get("step_name") or "").strip()
+        model_name = str(step.get("model") or "").strip()
+        if not step_name or not model_name:
+            continue
+        models = step_models.setdefault(step_name, [])
+        if model_name not in models:
+            models.append(model_name)
+    return step_models
+
+
+def _step_model_names_to_str(token_usage: Dict[str, Any]) -> str:
+    step_models = _extract_step_model_names(token_usage)
+    if not step_models:
+        return "{}"
+    return json.dumps(step_models, ensure_ascii=False, separators=(",", ":"))
 
 
 async def record_session_execution(
@@ -91,6 +118,7 @@ async def record_session_execution(
         prompt_audio_tokens=_to_int(total_info.get("prompt_audio_tokens")),
         completion_audio_tokens=_to_int(total_info.get("completion_audio_tokens")),
         step_count=step_count,
+        step_model_names=_step_model_names_to_str(token_usage),
         started_at=resolved_started_at,
         finished_at=resolved_finished_at,
     )
@@ -153,6 +181,7 @@ async def record_execution_payload(
         prompt_audio_tokens=_to_int(total_info.get("prompt_audio_tokens")),
         completion_audio_tokens=_to_int(total_info.get("completion_audio_tokens")),
         step_count=step_count,
+        step_model_names=_step_model_names_to_str(token_usage),
         started_at=resolved_started_at,
         finished_at=resolved_finished_at,
     )
