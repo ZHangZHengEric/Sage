@@ -2,23 +2,6 @@
 Router module that exports all routers for the agent platform server.
 """
 
-from .agent import agent_router
-from .auth import auth_router
-from .chat import chat_router
-from .conversation import conversation_router
-from .kdb import kdb_router
-from .mcp import mcp_router
-from .observability import observability_router
-from .oss import oss_router
-from .oauth2 import oauth2_router
-from .skill import skill_router
-from .system import system_router
-from .task import task_router
-from .tool import tool_router
-from .user import user_router
-from .version import version_router as version_router
-from .llm_provider import router as llm_provider_router
-
 # Export all routers for easy import
 __all__ = [
     "register_routes",
@@ -26,6 +9,23 @@ __all__ = [
 
 
 def register_routes(app):
+    from .agent import agent_router
+    from .auth import auth_router
+    from .chat import chat_router
+    from .conversation import conversation_router
+    from .kdb import kdb_router
+    from .llm_provider import router as llm_provider_router
+    from .mcp import mcp_router
+    from .observability import observability_router
+    from .oauth2 import oauth2_router
+    from .oss import oss_router
+    from .skill import skill_router
+    from .system import system_router
+    from .task import task_router
+    from .tool import tool_router
+    from .user import user_router
+    from .version import version_router as version_router
+
     app.include_router(mcp_router)
     app.include_router(auth_router)
     app.include_router(agent_router)

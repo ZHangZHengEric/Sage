@@ -1,6 +1,6 @@
 # Sage Kubernetes 部署
 
-此目录提供一套与根目录 `docker-compose.yml` 对齐的 Kubernetes 全栈部署清单。资源从独立 Namespace 开始创建，所有持久化目录均使用单独 PVC，外部访问通过 Ingress 暴露。
+此目录提供一套与 `deploy/prod/docker-compose.yml` 对齐的 Kubernetes 全栈部署清单。资源从独立 Namespace 开始创建，所有持久化目录均使用单独 PVC，外部访问通过 Ingress 暴露。
 
 ## 组件
 
@@ -18,18 +18,22 @@ Elasticsearch 不再由这套 Kubernetes 清单内置部署。需要知识库检
 - 可用 Kubernetes 集群
 - `kubectl` 已配置到目标集群
 - 可用 Ingress Controller，默认按 nginx ingress 生成注解
-- 可用默认 StorageClass，或在 `.env` 中设置 `STORAGE_CLASS`
+- 可用默认 StorageClass，或在目标环境 `.env` 中设置 `STORAGE_CLASS`
 - 本地或 CI 环境有 Docker，用于构建 Sage 自有镜像
 
 `sage-server` 沿用 compose 中的沙箱能力要求，Deployment 默认添加 `SYS_ADMIN` capability、unconfined seccomp 和 AppArmor 注解。若集群启用了严格 Pod Security Admission，需要为 `sage` namespace 配置例外，或改用远程沙箱配置。
 
 ## 配置
 
-复制环境变量模板：
+复制目标环境的变量模板：
 
 ```bash
-cp k8s/.env.example k8s/.env
+cp deploy/dev/.env.example deploy/dev/.env
+cp deploy/prod/.env.example deploy/prod/.env
+cp deploy/test/.env.example deploy/test/.env
 ```
+
+部署脚本默认读取 `deploy/prod/.env`。通过 `DEPLOY_ENV=dev|prod|test` 可切换环境，也可以用 `ENV_FILE=/path/to/.env` 显式指定配置文件。
 
 至少修改：
 
@@ -57,7 +61,7 @@ cp k8s/.env.example k8s/.env
 `deploy.sh` 会先准备所选服务需要的镜像，再部署 Kubernetes 资源：
 
 ```bash
-k8s/scripts/deploy.sh
+DEPLOY_ENV=prod deploy/k8s/scripts/deploy.sh
 ```
 
 镜像准备规则：
@@ -72,30 +76,30 @@ k8s/scripts/deploy.sh
 部署一个或多个指定服务：
 
 ```bash
-k8s/scripts/deploy.sh server
-k8s/scripts/deploy.sh web wiki
-k8s/scripts/deploy.sh --service mysql --service rustfs
-k8s/scripts/deploy.sh sage-server sage-web
+DEPLOY_ENV=dev deploy/k8s/scripts/deploy.sh server
+DEPLOY_ENV=dev deploy/k8s/scripts/deploy.sh web wiki
+DEPLOY_ENV=dev deploy/k8s/scripts/deploy.sh --service mysql --service rustfs
+DEPLOY_ENV=dev deploy/k8s/scripts/deploy.sh sage-server sage-web
 ```
 
 销毁所选服务后重新构建/拉取镜像并部署：
 
 ```bash
-k8s/scripts/deploy.sh --recreate web
-k8s/scripts/deploy.sh --redeploy
+DEPLOY_ENV=dev deploy/k8s/scripts/deploy.sh --recreate web
+DEPLOY_ENV=dev deploy/k8s/scripts/deploy.sh --redeploy
 ```
 
 默认保留 PVC；如需同时清理持久化数据：
 
 ```bash
-DELETE_PVCS=true k8s/scripts/deploy.sh --recreate mysql rustfs server
+DELETE_PVCS=true DEPLOY_ENV=dev deploy/k8s/scripts/deploy.sh --recreate mysql rustfs server
 ```
 
 如果需要镜像名前缀，可设置 `IMAGE_REGISTRY`；它只改变镜像名，不会 push：
 
 ```bash
-IMAGE_REGISTRY=registry.example.com/sage k8s/scripts/deploy.sh
-IMAGE_REGISTRY=registry.example.com/sage k8s/scripts/deploy.sh web
+IMAGE_REGISTRY=registry.example.com/sage DEPLOY_ENV=prod deploy/k8s/scripts/deploy.sh
+IMAGE_REGISTRY=registry.example.com/sage DEPLOY_ENV=prod deploy/k8s/scripts/deploy.sh web
 ```
 
 全量模式会构建：
@@ -116,7 +120,7 @@ IMAGE_REGISTRY=registry.example.com/sage k8s/scripts/deploy.sh web
 - `jaeger` / `sage-jaeger`
 - `all`，默认值，部署全部服务
 
-指定服务部署时，脚本不会自动部署其它业务服务依赖；例如 `k8s/scripts/deploy.sh server` 只会部署 `sage-server` 及其必需的 ConfigMap、Secret、Service 和 Deployment，不会自动部署 MySQL、RustFS、Jaeger、Web 或 Wiki。
+指定服务部署时，脚本不会自动部署其它业务服务依赖；例如 `DEPLOY_ENV=dev deploy/k8s/scripts/deploy.sh server` 只会部署 `sage-server` 及其必需的 ConfigMap、Secret、Service 和 Deployment，不会自动部署 MySQL、RustFS、Jaeger、Web 或 Wiki。
 
 全量部署时，脚本会按顺序创建：
 
@@ -150,19 +154,19 @@ kubectl -n "${NAMESPACE:-sage}" logs -f deployment/sage-server
 删除工作负载、服务、Ingress、ConfigMap 和 Secret，保留 PVC：
 
 ```bash
-k8s/scripts/delete.sh
+DEPLOY_ENV=dev deploy/k8s/scripts/delete.sh
 ```
 
 同时删除 PVC：
 
 ```bash
-DELETE_PVCS=true k8s/scripts/delete.sh
+DELETE_PVCS=true DEPLOY_ENV=dev deploy/k8s/scripts/delete.sh
 ```
 
 同时删除 Namespace：
 
 ```bash
-DELETE_PVCS=true DELETE_NAMESPACE=true k8s/scripts/delete.sh
+DELETE_PVCS=true DELETE_NAMESPACE=true DEPLOY_ENV=dev deploy/k8s/scripts/delete.sh
 ```
 
 默认保留 PVC，避免误删 MySQL、RustFS 和 Sage 工作数据。
@@ -172,14 +176,14 @@ DELETE_PVCS=true DELETE_NAMESPACE=true k8s/scripts/delete.sh
 默认命名空间文件可直接校验：
 
 ```bash
-kubectl apply --dry-run=client -f k8s/namespace.yaml
+kubectl apply --dry-run=client -f deploy/k8s/namespace.yaml
 ```
 
 完整模板需要通过脚本渲染环境变量后应用。可先在测试集群运行：
 
 ```bash
-k8s/scripts/deploy.sh
-kubectl -n sage get pods,svc
+DEPLOY_ENV=dev deploy/k8s/scripts/deploy.sh
+kubectl -n "${NAMESPACE:-sage-dev}" get pods,svc
 ```
 
 ## 注意事项

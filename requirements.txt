@@ -19,6 +19,7 @@ lxml>=4.9.0
 pdfplumber>=0.10.0
 PyMuPDF>=1.23.0
 markdown>=3.5.0
+pandas>=2.2.0
 openpyxl>=3.1.0
 pypandoc>=1.13
 python-docx>=1.0.0
@@ -33,7 +34,6 @@ pytest-timeout>=2.3.0
 fastapi>=0.104.0
 uvicorn[standard]>=0.38.0
 pydantic>=2.5.0
-itsdangerous>=2.2.0
 
 ##############################
 # 多模型协同（MCP + 工具）
@@ -63,14 +63,6 @@ dingtalk-stream
 python-socks>=2.0.0  # Required for Lark WebSocket connections through proxy
 
 ##############################
-# 邮件 / 通知
-##############################
-alibabacloud_dm20151123
-alibabacloud_credentials
-alibabacloud_tea_openapi
-alibabacloud_tea_util
-
-##############################
 # ORM / 数据库
 ##############################
 SQLAlchemy>=2.0.0
@@ -81,21 +73,16 @@ aiomysql>=0.2.0
 ##############################
 # 授权 / 安全
 ##############################
-PyJWT>=2.9.0
 argon2-cffi>=23.1.0
-Authlib>=1.6.0
 pytz
 ##############################
 # 搜索 / 文件存储 / 向量数据库
 ##############################
-elasticsearch==8.19.0
-minio>=7.2.0
 chromadb>=0.4.22
 
 ##############################
 # 任务 / 调度
 ##############################
-apscheduler>=3.10.4
 croniter>=2.0.0
 
 ##############################

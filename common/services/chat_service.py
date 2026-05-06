@@ -76,6 +76,52 @@ def _merge_dict(request: StreamRequest, field: str, value: Dict[str, Any]) -> No
         setattr(request, field, merged)
 
 
+def _summarize_chat_request(request: StreamRequest) -> Dict[str, Any]:
+    llm_config = request.llm_model_config or {}
+    messages = request.messages or []
+    roles: List[str] = []
+    text_chars = 0
+    has_images = False
+
+    for message in messages:
+        roles.append(message.role)
+        content = message.content
+        if isinstance(content, str):
+            text_chars += len(content)
+        elif isinstance(content, list):
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "text":
+                    text_chars += len(str(item.get("text") or ""))
+                elif item.get("type") == "image_url":
+                    has_images = True
+
+    return {
+        "session_id": request.session_id,
+        "user_id": request.user_id,
+        "agent_id": request.agent_id,
+        "agent_name": request.agent_name,
+        "agent_mode": request.agent_mode,
+        "message_count": len(messages),
+        "message_roles": roles,
+        "message_text_chars": text_chars,
+        "has_images": has_images,
+        "model": llm_config.get("model"),
+        "fast_model": llm_config.get("fast_model_name"),
+        "max_model_len": llm_config.get("max_model_len"),
+        "max_loop_count": request.max_loop_count,
+        "multi_agent": request.multi_agent,
+        "available_tools_count": len(request.available_tools or []),
+        "available_skills": request.available_skills or [],
+        "available_knowledge_bases_count": len(request.available_knowledge_bases or []),
+        "available_sub_agent_ids_count": len(request.available_sub_agent_ids or []),
+        "custom_sub_agents_count": len(request.custom_sub_agents or []),
+        "memory_type": request.memory_type,
+        "force_summary": request.force_summary,
+    }
+
+
 def _get_provider_api_key(provider: Any) -> Optional[str]:
     if _is_desktop_mode():
         api_keys = getattr(provider, "api_keys", None) or []
@@ -918,7 +964,9 @@ class SageStreamService:
 async def prepare_session(request: StreamRequest) -> Tuple[SageStreamService, asyncio.Lock]:
     session_id = request.session_id or str(uuid.uuid4())
     request.session_id = session_id
-    logger.bind(session_id=session_id).info(f"Chat request - 「{request.model_dump()}」")
+    logger.bind(session_id=session_id).info(
+        f"Chat request - {json.dumps(_summarize_chat_request(request), ensure_ascii=False)}"
+    )
 
     lock = get_session_run_lock(session_id)
     acquired = False

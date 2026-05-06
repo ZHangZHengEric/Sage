@@ -295,7 +295,7 @@ class MessageManager:
                                 base64_data = url.split(',')[-1] if ',' in url else url
                                 total_chars += len(base64_data)
         
-        logger.info(f"[TokenCalc] 静态计算: chars={total_chars}, tokens={token_length}, msg_count={len(messages)}, images={image_count}")
+        logger.debug(f"[TokenCalc] 静态计算: chars={total_chars}, tokens={token_length}, msg_count={len(messages)}, images={image_count}")
         return token_length
 
     @staticmethod
@@ -505,7 +505,10 @@ class MessageManager:
         if len(_global_token_ratio_samples) > _global_max_ratio_samples:
             _global_token_ratio_samples.pop(0)
 
-        logger.info(f"[TokenRatio] 更新 token 比例样本: text_chars={char_count}, text_tokens={text_token_count}, image_tokens={image_token_count}, ratio={ratio:.4f}, 总样本数={len(_global_token_ratio_samples)}")
+        logger.debug(
+            f"[TokenRatio] 更新 token 比例样本: text_chars={char_count}, text_tokens={text_token_count}, "
+            f"image_tokens={image_token_count}, ratio={ratio:.4f}, 总样本数={len(_global_token_ratio_samples)}"
+        )
 
     @staticmethod
     def get_dynamic_token_ratio() -> float:
@@ -550,7 +553,7 @@ class MessageManager:
         # 文本使用动态比例，图片使用固定估算
         text_tokens = int(text_chars * ratio)
         estimated_tokens = text_tokens + image_tokens
-        logger.info(f"[TokenCalc] 动态计算: text_chars={text_chars}, image_tokens={image_tokens}, ratio={ratio:.4f}, estimated_tokens={estimated_tokens}, msg_count={len(messages)}, images={image_count}")
+        logger.debug(f"[TokenCalc] 动态计算: text_chars={text_chars}, image_tokens={image_tokens}, ratio={ratio:.4f}, estimated_tokens={estimated_tokens}, msg_count={len(messages)}, images={image_count}")
         return estimated_tokens
 
     @staticmethod
@@ -1004,7 +1007,7 @@ class MessageManager:
         result_messages = all_context_messages[::-1]
         # 打印提取结果的统计信息
         total_tokens = MessageManager.calculate_messages_token_length(result_messages)
-        logger.info(f"MessageManager: 提取所有上下文消息完成，最近轮数：{recent_turns}，是否只提取最后一个对话轮的用户消息：{last_turn_user_only}，消息数量：{len(result_messages)}，总token长度：{total_tokens}")
+        logger.debug(f"MessageManager: 提取所有上下文消息完成，最近轮数：{recent_turns}，是否只提取最后一个对话轮的用户消息：{last_turn_user_only}，消息数量：{len(result_messages)}，总token长度：{total_tokens}")
         return result_messages
 
     @staticmethod
@@ -1146,7 +1149,7 @@ class MessageManager:
             return MessageManager.calculate_messages_token_length(working_messages)
 
         current_tokens = current_usage()
-        logger.info(f"MessageManager: compress_messages 初始token长度为{current_tokens}, budget_limit={budget_limit}")
+        logger.debug(f"MessageManager: compress_messages 初始token长度为{current_tokens}, budget_limit={budget_limit}")
         if current_tokens <= budget_limit:
             return working_messages
 
@@ -1183,8 +1186,8 @@ class MessageManager:
                 protected_group_indices.add(gi)
 
         # 调试日志：显示保护信息
-        logger.info(f"MessageManager: 总组数={len(groups)}, 受保护组数={len(protected_group_indices)}, 受保护消息数={len(protected_indices)}")
-        logger.info(f"MessageManager: 受保护组索引={sorted(protected_group_indices)}, 可压缩组索引={sorted(set(range(len(groups))) - protected_group_indices)}")
+        logger.debug(f"MessageManager: 总组数={len(groups)}, 受保护组数={len(protected_group_indices)}, 受保护消息数={len(protected_indices)}")
+        logger.debug(f"MessageManager: 受保护组索引={sorted(protected_group_indices)}, 可压缩组索引={sorted(set(range(len(groups))) - protected_group_indices)}")
 
         # --- Level 0.5 & 1 & 2: 消息级压缩 ---
         now = time.time()
@@ -1216,25 +1219,25 @@ class MessageManager:
         # 应用 Level 0.5 (老化)
         apply_levels(0.5)
         current_tokens = current_usage()
-        logger.info(f"MessageManager: compress_messages 应用Level 0.5后的token长度为{current_tokens}")
+        logger.debug(f"MessageManager: compress_messages 应用Level 0.5后的token长度为{current_tokens}")
         if current_tokens <= budget_limit:
             return working_messages
 
         # 应用 Level 1 (轻度)
         apply_levels(1)
         current_tokens = current_usage()
-        logger.info(f"MessageManager: compress_messages 应用Level 1后的token长度为{current_tokens}")
+        logger.debug(f"MessageManager: compress_messages 应用Level 1后的token长度为{current_tokens}")
         if current_tokens <= budget_limit:
             return working_messages
 
         # 应用 Level 2 (强力)
         apply_levels(2)
         current_tokens = current_usage()
-        logger.info(f"MessageManager: compress_messages 应用Level 2后的token长度为{current_tokens}")
+        logger.debug(f"MessageManager: compress_messages 应用Level 2后的token长度为{current_tokens}")
 
         # 返回压缩后的消息（不再进行 Level 3 丢弃）
         final_tokens = MessageManager.calculate_messages_token_length(working_messages)
-        logger.info(f"MessageManager: compress_messages 完成，最终token长度={final_tokens}, 消息数={len(working_messages)}")
+        logger.debug(f"MessageManager: compress_messages 完成，最终token长度={final_tokens}, 消息数={len(working_messages)}")
 
         return working_messages
 
