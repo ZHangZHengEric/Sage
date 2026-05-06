@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import json
-from sqlalchemy import JSON, String, Text, func, select
+from sqlalchemy import JSON, String, Text, func, select, update
 from sqlalchemy.orm import Mapped, mapped_column
 
 from common.models.base import Base, BaseDao, get_local_now
@@ -190,35 +190,36 @@ class ConversationDao(BaseDao):
     ) -> bool:
         db = await self._get_db()
         async with db.get_session() as session:  # type: ignore[attr-defined]
-            conversation = await session.get(Conversation, session_id)
-            if not conversation:
-                return False
-            conversation.messages = messages or []
-            conversation.updated_at = get_local_now()
-            await session.merge(conversation)
-            return True
+            stmt = (
+                update(Conversation)
+                .where(Conversation.session_id == session_id)
+                .values(messages=messages or [], updated_at=get_local_now())
+            )
+            result = await session.execute(stmt)
+            return bool(result.rowcount)
 
     async def update_title(self, session_id: str, title: str) -> bool:
         db = await self._get_db()
         async with db.get_session() as session:  # type: ignore[attr-defined]
-            conversation = await session.get(Conversation, session_id)
-            if not conversation:
-                return False
-            conversation.title = title
-            conversation.updated_at = get_local_now()
-            await session.merge(conversation)
-            return True
+            stmt = (
+                update(Conversation)
+                .where(Conversation.session_id == session_id)
+                .values(title=title, updated_at=get_local_now())
+            )
+            result = await session.execute(stmt)
+            return bool(result.rowcount)
 
     async def update_timestamp(self, session_id: str) -> bool:
         """仅更新会话的 updated_at 时间戳。"""
         db = await self._get_db()
         async with db.get_session() as session:  # type: ignore[attr-defined]
-            conversation = await session.get(Conversation, session_id)
-            if not conversation:
-                return False
-            conversation.updated_at = get_local_now()
-            await session.merge(conversation)
-            return True
+            stmt = (
+                update(Conversation)
+                .where(Conversation.session_id == session_id)
+                .values(updated_at=get_local_now())
+            )
+            result = await session.execute(stmt)
+            return bool(result.rowcount)
 
     # Desktop 端兼容方法：不带 user_id 的分页查询（保持原签名）
     async def get_conversations_paginated_desktop(
@@ -237,4 +238,3 @@ class ConversationDao(BaseDao):
             agent_id=agent_id,
             sort_by=sort_by,
         )
-
