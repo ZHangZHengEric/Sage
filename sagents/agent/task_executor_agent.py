@@ -7,6 +7,7 @@ from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.prompt_manager import PromptManager
 from sagents.utils.content_saver import save_agent_response_content
+from sagents.tool.tool_baseline import augment_with_baseline_tools
 import uuid
 import os
 
@@ -253,6 +254,8 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         if suggested_tools and sm and sm.list_skills():
             if 'load_skill' not in suggested_tools:
                 suggested_tools.append('load_skill')
+
+        suggested_tools = augment_with_baseline_tools(suggested_tools, available_tool_names)
         
         if suggested_tools:
             tools_suggest_json = [
