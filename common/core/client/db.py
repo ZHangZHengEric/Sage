@@ -302,6 +302,8 @@ class SessionManager:
                 await asyncio.shield(close_task)
             except asyncio.CancelledError:
                 logger.debug("当前请求已取消，Session close 将在后台继续完成")
+            except Exception:
+                pass
 
 
 DB_MANAGER: Optional[SessionManager] = None
