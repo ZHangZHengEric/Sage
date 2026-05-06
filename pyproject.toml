@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sage"
+version = "1.1.0"
+description = "A production-ready, modular, and intelligent multi-agent orchestration framework for complex problem solving."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Eric ZZ" },
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "gradio>=4.0.0",
+  "openai>=1.0.0",
+  "requests>=2.31.0",
+  "python-dotenv>=1.0.0",
+  "pyyaml>=6.0",
+  "aiofiles>=0.8.0",
+  "fastapi>=0.104.0",
+  "uvicorn[standard]>=0.24.0",
+  "pydantic>=2.5.0",
+  "Authlib>=1.6.0",
+  "alibabacloud_dm20151123",
+  "alibabacloud_credentials",
+  "alibabacloud_tea_openapi",
+  "alibabacloud_tea_util",
+  "mcp>=1.9.2",
+  "fastmcp>=0.9.0",
+  "docstring_parser>=0.16",
+  "chardet>=5.0.0",
+  "httpx>=0.24.0",
+  "pdfplumber",
+  "html2text",
+  "openpyxl",
+  "pypandoc",
+  "python-docx",
+  "markdown",
+  "python-pptx",
+  "PyMuPDF",
+  "tqdm",
+  "unstructured",
+  "loguru>=0.7.0",
+  "rank-bm25>=0.2.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/ZHangZHengEric/Sage"
+
+[project.scripts]
+sage = "app.cli.main:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["sagents*", "common*", "app*"]
+exclude = ["tests*", "app.desktop*", "app.skills*", "app.wiki*", "assets*", "logs*"]
+
+[tool.setuptools.data-files]
+"share/sage/docs/en" = ["docs/en/*.md"]
+"share/sage/docs/zh" = ["docs/zh/*.md"]
