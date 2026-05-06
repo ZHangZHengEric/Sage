@@ -1,3 +1,5 @@
+2026-05-06 14:45 新增 tool_baseline：按可用列表补齐基线工具；IDENTITY.md 改用 agent_identity_extension 与中英提示；接入 simple/task/tool suggestion；单测 3 条。
+
 2026-05-06 12:08 补全 MessageInput 词条：guidedPresetPressEnterAgain、pasteUploadFailed，server-web 与 desktop 中英 locales，修复 CI check:i18n。
 
 2026-05-05 10:35 引导功能PR：运行中注入与消费回执、rerun-stream guidance、流结束自动发送；desktop/server-web 引导区与文档；会话与 SAgent 对齐。

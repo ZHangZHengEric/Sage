@@ -717,7 +717,24 @@ class AgentBase(ABC):
                         if identity_content:
                             if len(identity_content) > 300:
                                 identity_content = identity_content[:300]+"……"
-                            stable_buf += f"<identity>\n{identity_content}\n</identity>\n"
+                            if language and str(language).lower().startswith("zh"):
+                                identity_hint = (
+                                    "以下内容是对 <role_definition> 的补充身份设定，"
+                                    "用于补充 agent 的人格、背景、工作方式或偏好；"
+                                    "它不替代主角色定义。"
+                                )
+                            else:
+                                identity_hint = (
+                                    "The following content supplements <role_definition> with additional "
+                                    "agent identity, personality, background, working style, or preferences; "
+                                    "it does not replace the primary role definition."
+                                )
+                            stable_buf += (
+                                "<agent_identity_extension>\n"
+                                f"{identity_hint}\n\n"
+                                f"{identity_content}\n"
+                                "</agent_identity_extension>\n"
+                            )
                     except Exception as e:
                         logger.debug(f"AgentBase: IDENTITY.md not found or error reading: {e}")
 
