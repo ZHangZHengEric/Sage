@@ -1,5 +1,4 @@
 import asyncio
-import json
 from datetime import date, datetime, timedelta
 
 from pydantic import ValidationError
@@ -98,9 +97,7 @@ def test_record_session_execution_persists_valid_usage():
         assert records[0].cached_tokens == 15
         assert records[0].reasoning_tokens == 8
         assert records[0].step_count == 2
-        assert "usage_payload" in TokenUsage.__table__.columns
-        assert isinstance(records[0].usage_payload, str)
-        assert "total_info" in json.loads(records[0].usage_payload)
+        assert "usage_payload" not in TokenUsage.__table__.columns
 
         await close_db_client()
 
@@ -111,7 +108,7 @@ def test_session_stats_aggregate_multiple_executions_without_time_range():
     async def _run():
         await _reset_test_db()
         base_time = datetime(2026, 4, 23, 9, 0, 0)
-        usage_payload = {
+        usage_info = {
             "total_info": {
                 "prompt_tokens": 100,
                 "completion_tokens": 40,
@@ -124,7 +121,7 @@ def test_session_stats_aggregate_multiple_executions_without_time_range():
 
         for offset in (0, 5):
             ctx = _FakeSessionContext(
-                usage=usage_payload,
+                usage=usage_info,
                 session_id="session-agg",
                 user_id="user-agg",
                 agent_id="agent-agg",
