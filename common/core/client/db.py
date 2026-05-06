@@ -10,6 +10,27 @@ from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, inspect,
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+_PENDING_SESSION_CLOSE_TASKS: set[asyncio.Task] = set()
+
+
+def _track_session_close_task(task: asyncio.Task) -> None:
+    _PENDING_SESSION_CLOSE_TASKS.add(task)
+
+    def _consume_result(done_task: asyncio.Task) -> None:
+        _PENDING_SESSION_CLOSE_TASKS.discard(done_task)
+        try:
+            done_task.result()
+        except asyncio.CancelledError:
+            logger.warning("关闭 Session 的后台任务被取消")
+        except (OperationalError, InterfaceError) as e:
+            if "Cancelled during execution" not in str(e):
+                logger.error(f"关闭 Session 失败 (DB Error): {e}")
+        except Exception as e:
+            logger.error(f"关闭 Session 失败: {e}")
+
+    task.add_done_callback(_consume_result)
+
+
 def sync_database_schema(sync_conn, Base):
     inspector = inspect(sync_conn)
     existing_tables = set(inspector.get_table_names())
@@ -275,15 +296,12 @@ class SessionManager:
             raise RuntimeError(f"数据库操作失败: {e}")
 
         finally:
+            close_task = asyncio.create_task(session.close())
+            _track_session_close_task(close_task)
             try:
-                await asyncio.shield(session.close())
+                await asyncio.shield(close_task)
             except asyncio.CancelledError:
-                pass
-            except (OperationalError, InterfaceError) as e:
-                if "Cancelled during execution" not in str(e):
-                    logger.error(f"关闭 Session 失败 (DB Error): {e}")
-            except Exception as e:
-                logger.error(f"关闭 Session 失败: {e}")
+                logger.debug("当前请求已取消，Session close 将在后台继续完成")
 
 
 DB_MANAGER: Optional[SessionManager] = None
