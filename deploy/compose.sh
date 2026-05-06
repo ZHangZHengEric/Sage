@@ -16,6 +16,8 @@ Examples:
 
 The script runs:
   docker compose --env-file deploy/<env>/.env -f deploy/<env>/docker-compose.yml ...
+
+If deploy/<env>/.env is missing, it falls back to .env in the repo root.
 EOF
 }
 
@@ -31,7 +33,13 @@ case "${1:-}" in
 esac
 
 COMPOSE_FILE="$DEPLOY_DIR/$DEPLOY_ENV/docker-compose.yml"
-ENV_FILE="${ENV_FILE:-$DEPLOY_DIR/$DEPLOY_ENV/.env}"
+
+if [ -z "${ENV_FILE:-}" ]; then
+  ENV_FILE="$DEPLOY_DIR/$DEPLOY_ENV/.env"
+  if [ ! -f "$ENV_FILE" ]; then
+    ENV_FILE="$ROOT_DIR/.env"
+  fi
+fi
 
 if [ ! -f "$COMPOSE_FILE" ]; then
   echo "Compose file not found: $COMPOSE_FILE" >&2
@@ -40,8 +48,8 @@ fi
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "Env file not found: $ENV_FILE" >&2
-  echo "Create it from: $DEPLOY_DIR/$DEPLOY_ENV/.env.example" >&2
+  echo "Create it from: $DEPLOY_DIR/$DEPLOY_ENV/.env.example or $ROOT_DIR/.env.example" >&2
   exit 1
 fi
 
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+SAGE_COMPOSE_ENV_FILE="$ENV_FILE" docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"

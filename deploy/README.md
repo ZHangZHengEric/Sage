@@ -28,6 +28,8 @@ deploy/compose.sh prod up -d
 deploy/compose.sh test up -d
 ```
 
+`deploy/compose.sh` 默认优先读取 `deploy/<env>/.env`；如果该文件不存在，则回退读取仓库根目录 `.env`。也可以通过 `ENV_FILE=/path/to/.env` 显式指定配置文件。
+
 也可以直接指定对应 compose 文件：
 
 ```bash

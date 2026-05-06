@@ -16,7 +16,7 @@ services:
     ports:
       - 30150:8080
     env_file:
-      - .env
+      - ${SAGE_COMPOSE_ENV_FILE:-.env}
     environment:
       SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage}
       SAGE_TRACE_JAEGER_UI_URL: ${SAGE_TRACE_JAEGER_UI_URL:-http://sage-jaeger-dev:16686/jaeger}
