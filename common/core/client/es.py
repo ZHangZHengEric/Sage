@@ -1,14 +1,21 @@
+from __future__ import annotations
+
 from typing import Any, Dict, List, Optional
 
-from elasticsearch import AsyncElasticsearch, helpers
 from loguru import logger
 
 from common.core.config import StartupConfig, get_startup_config
 
-ES_CLIENT: Optional[AsyncElasticsearch] = None
+try:
+    from elasticsearch import AsyncElasticsearch, helpers
+except ImportError:
+    AsyncElasticsearch = None  # type: ignore[assignment]
+    helpers = None  # type: ignore[assignment]
+
+ES_CLIENT: Optional["AsyncElasticsearch"] = None
 
 
-def get_es_client() -> AsyncElasticsearch:
+def get_es_client() -> "AsyncElasticsearch":
     global ES_CLIENT
     if ES_CLIENT is None:
         raise RuntimeError("ES 客户端未初始化，请先调用 init_es_client()")
@@ -17,10 +24,13 @@ def get_es_client() -> AsyncElasticsearch:
 
 async def init_es_client(
     cfg: Optional[StartupConfig] = None,
-) -> Optional[AsyncElasticsearch]:
+) -> Optional["AsyncElasticsearch"]:
     global ES_CLIENT
     if ES_CLIENT is not None:
         return ES_CLIENT
+    if AsyncElasticsearch is None:
+        logger.warning("Elasticsearch SDK 未安装，跳过初始化")
+        return None
     if cfg is None:
         raise RuntimeError("StartupConfig is required to initialize ES client")
 
@@ -70,7 +80,7 @@ def dims() -> int:
         return 1024
 
 
-async def _index_exists(client: AsyncElasticsearch, index_name: str) -> bool:
+async def _index_exists(client: "AsyncElasticsearch", index_name: str) -> bool:
     try:
         return await client.indices.exists(index=index_name, ignore=[404, 400])
     except Exception as e:

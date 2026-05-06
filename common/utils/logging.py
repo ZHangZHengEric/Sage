@@ -149,7 +149,7 @@ def init_logging_base(
             payload["requestId"] = request_id
         session_id = extra.get("session_id")
         if session_id:
-            payload["seesion_id"] = session_id
+            payload["session_id"] = session_id
         if record.get("exception"):
             payload["exception"] = str(record["exception"])
         return json.dumps(payload, ensure_ascii=False)
@@ -166,9 +166,7 @@ def init_logging_base(
             file_path = record["file"].path
         try:
             rel_path = os.path.relpath(file_path, os.getcwd())
-            parts = rel_path.split(os.sep)
-            if len(parts) > 2:
-                rel_path = os.path.join(*parts[-2:])
+            rel_path = os.path.basename(rel_path)
         except Exception:
             rel_path = os.path.basename(file_path)
         record["extra"]["rel_path"] = rel_path

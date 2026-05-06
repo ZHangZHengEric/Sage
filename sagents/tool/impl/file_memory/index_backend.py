@@ -90,7 +90,7 @@ class ScopedIndexFileMemoryBackend:
                 if should_refresh:
                     stats = await cache_entry.index.update_index()
                     cache_entry.last_refresh_at = now
-                    logger.info(f"MemoryTool: File memory index update stats: {stats}")
+                    logger.debug(f"MemoryTool: File memory index update stats: {stats}")
 
                 results = await asyncio.to_thread(cache_entry.index.search, query, top_k)
 

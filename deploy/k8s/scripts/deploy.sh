@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-K8S_DIR="$ROOT_DIR/k8s"
-ENV_FILE="${ENV_FILE:-$K8S_DIR/.env}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+DEPLOY_DIR="$ROOT_DIR/deploy"
+K8S_DIR="$DEPLOY_DIR/k8s"
+DEPLOY_ENV="${DEPLOY_ENV:-prod}"
+ENV_DIR="$DEPLOY_DIR/$DEPLOY_ENV"
+ENV_FILE="${ENV_FILE:-$ENV_DIR/.env}"
 
 load_env_file() {
   local env_file="$1"
@@ -44,9 +47,13 @@ SELECTED_SERVICE_KEYS=()
 
 usage() {
   cat <<'EOF'
-Usage: k8s/scripts/deploy.sh [SERVICE...]
+Usage: deploy/k8s/scripts/deploy.sh [SERVICE...]
 
 Deploy Sage Kubernetes resources.
+
+Environment:
+  DEPLOY_ENV=dev|prod|test Select deploy/<env>/.env (default: prod)
+  ENV_FILE=path           Override the env file path
 
 Services:
   all                   Deploy all Sage services (default)
@@ -178,8 +185,13 @@ if [ "${#SELECTED_SERVICE_KEYS[@]}" -eq 0 ]; then
   add_service_key all
 fi
 
+if { selected_has web || selected_has wiki; } && [ ! -d "$ENV_DIR/nginx" ]; then
+  echo "Environment nginx config directory not found: $ENV_DIR/nginx" >&2
+  exit 1
+fi
+
 if [ -z "$SAGE_HOST" ] && [ -z "$SAGE_PUBLIC_URL" ] && selected_has server; then
-  echo "SAGE_HOST or SAGE_PUBLIC_URL is required when deploying sage-server. Set it in k8s/.env or pass SAGE_HOST=example.com." >&2
+  echo "SAGE_HOST or SAGE_PUBLIC_URL is required when deploying sage-server. Set it in $ENV_FILE or pass SAGE_HOST=example.com." >&2
   exit 1
 fi
 
@@ -410,11 +422,12 @@ build_images() {
   for service in "${SELECTED_SERVICE_KEYS[@]}"; do
     case "$service" in
       server)
-        docker build -f "$ROOT_DIR/docker/Dockerfile.server" -t "$SAGE_SERVER_IMAGE" "$ROOT_DIR"
+        docker build -f "$DEPLOY_DIR/images/Dockerfile.server" -t "$SAGE_SERVER_IMAGE" "$ROOT_DIR"
         ;;
       web)
         docker build \
-          -f "$ROOT_DIR/docker/Dockerfile.web" \
+          -f "$DEPLOY_DIR/images/Dockerfile.web" \
+          --build-arg "NGINX_CONF=deploy/$DEPLOY_ENV/nginx/nginx.conf" \
           --build-arg "VITE_SAGE_API_BASE_URL=$SAGE_PUBLIC_URL" \
           --build-arg "VITE_SAGE_TRACE_WEB_URL=$SAGE_TRACE_WEB_URL" \
           --build-arg "VITE_SAGE_WEB_BASE_PATH=${SAGE_WEB_BASE_PATH%/}/" \
@@ -423,7 +436,8 @@ build_images() {
         ;;
       wiki)
         docker build \
-          -f "$ROOT_DIR/docker/Dockerfile.wiki" \
+          -f "$DEPLOY_DIR/images/Dockerfile.wiki" \
+          --build-arg "NGINX_CONF=deploy/$DEPLOY_ENV/nginx/nginx_wiki.conf" \
           --build-arg "VITE_SAGE_API_BASE_URL=$SAGE_PUBLIC_URL" \
           -t "$SAGE_WIKI_IMAGE" \
           "$ROOT_DIR"

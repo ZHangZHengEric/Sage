@@ -1292,7 +1292,7 @@ class SimpleAgent(AgentBase):
         """
         # 1. 提取可用消息（检测压缩工具）
         extracted_messages = MessageManager.extract_messages_for_inference(messages_input)
-        logger.info(f"SimpleAgent: 提取后消息数量: {len(extracted_messages)}")
+        logger.debug(f"SimpleAgent: 提取后消息数量: {len(extracted_messages)}")
 
         # 2. 检查是否需要压缩
         max_model_len = self.model_config.get('max_model_len', 64000)
@@ -1302,7 +1302,7 @@ class SimpleAgent(AgentBase):
         )
 
         if not should_compress:
-            logger.info(f"SimpleAgent: 消息长度符合要求 ({current_tokens} tokens)，无需压缩")
+            logger.debug(f"SimpleAgent: 消息长度符合要求 ({current_tokens} tokens)，无需压缩")
             yield (extracted_messages, True)
             return
 
