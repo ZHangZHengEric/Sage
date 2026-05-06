@@ -575,6 +575,8 @@ async def populate_request_from_agent_config(
             agent = None
         else:
             request.agent_name = agent.name or "Sage Assistant"
+            if not _is_desktop_mode():
+                request.agent_owner_user_id = agent.user_id or request.user_id
 
     agent_config = agent.config if agent and agent.config else None
 
@@ -758,6 +760,10 @@ class SageStreamService:
         self.cfg = _get_cfg()
 
         self.runtime_user_id = self.request.user_id or "default_user"
+        self.skill_owner_user_id = (
+            self.request.agent_owner_user_id
+            or self.runtime_user_id
+        )
         self.runtime_agent_id = self.request.agent_id or "".join(
             random.choices(string.ascii_letters, k=8)
         )
@@ -775,7 +781,7 @@ class SageStreamService:
         else:
             workspace_root = get_agent_workspace_root(
                 self.runtime_agent_id,
-                user_id=self.runtime_user_id,
+                user_id=self.skill_owner_user_id,
                 app_mode="server",
                 ensure_exists=False,
             )
@@ -787,7 +793,7 @@ class SageStreamService:
         self.tool_manager = create_tool_proxy(request.available_tools)
         self.skill_manager, self.agent_skill_manager = create_skill_proxy(
             request.available_skills,
-            user_id=self.request.user_id,
+            user_id=self.skill_owner_user_id,
             agent_workspace=self.agent_workspace,
         )
         self.model_client = create_model_client(request.llm_model_config)
