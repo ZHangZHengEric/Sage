@@ -192,13 +192,20 @@ class PassthroughSandboxProvider(ISandboxHandle):
         command: str,
         workdir: Optional[str] = None,
         env_vars: Optional[Dict[str, str]] = None,
+        log_dir: Optional[str] = None,
     ) -> Dict[str, Any]:
         # 路径转换 + workdir 落到宿主机
         converted = self._convert_paths_in_command(command)
         host_workdir = self.to_host_path(workdir) if workdir else self.to_host_path(
             self._sandbox_agent_workspace
         )
-        return self._bg_runner.start(converted, workdir=host_workdir, env_vars=env_vars)
+        host_log_dir = self.to_host_path(log_dir) if log_dir else None
+        return self._bg_runner.start(
+            converted,
+            workdir=host_workdir,
+            env_vars=env_vars,
+            log_dir=host_log_dir,
+        )
 
     async def read_background_output(self, task_id: str, max_bytes: int = 8192) -> str:
         return self._bg_runner.read_tail(task_id, max_bytes=max_bytes)
