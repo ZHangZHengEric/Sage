@@ -130,6 +130,13 @@ const iconSrc = computed(() => {
 })
 
 const handleClick = async () => {
+  /** @type {(item: any) => string} */
+  const workbenchFileLikePath = (item) => {
+    const d = item?.data || {}
+    if (item?.type === 'image') return d.src || d.filePath || d.path || ''
+    return d.filePath || d.path || d.src || ''
+  }
+
   const normalizePath = (path) => {
     if (!path) return ''
     let normalized = path
@@ -188,10 +195,10 @@ const handleClick = async () => {
     }
   }
 
-  // 兜底：当前会话中按路径匹配
+  // 兜底：当前会话中按路径匹配（含助手写入的 image 类工作台项，数据在 data.src）
   let index = (workbenchStore.filteredItems || []).findIndex(item =>
-    item?.type === 'file' &&
-    normalizePath(item?.data?.filePath || item?.data?.path) === normalizedPath
+    (item?.type === 'file' || item?.type === 'image') &&
+    normalizePath(workbenchFileLikePath(item)) === normalizedPath
   )
   if (index !== -1) {
     workbenchStore.setCurrentIndex(index)
@@ -202,8 +209,8 @@ const handleClick = async () => {
   const globalSamePath = [...(workbenchStore.items || [])]
     .reverse()
     .find(item =>
-      item?.type === 'file' &&
-      normalizePath(item?.data?.filePath || item?.data?.path) === normalizedPath
+      (item?.type === 'file' || item?.type === 'image') &&
+      normalizePath(workbenchFileLikePath(item)) === normalizedPath
     )
   if (globalSamePath?.sessionId) {
     workbenchStore.setSessionId(globalSamePath.sessionId, { autoJumpToLast: false })

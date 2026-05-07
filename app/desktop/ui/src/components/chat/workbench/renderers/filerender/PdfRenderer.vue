@@ -23,7 +23,7 @@
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { FileText, ExternalLink } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
-import { readFile } from '@tauri-apps/plugin-fs'
+import { readLocalOrWorkspaceUint8Array } from '@/utils/agentWorkspaceBackend.js'
 import { useLanguage } from '@/utils/i18n'
 
 const { t } = useLanguage()
@@ -55,7 +55,7 @@ const loadPdfPreview = async () => {
   }
 
   try {
-    const fileData = await readFile(props.filePath)
+    const fileData = await readLocalOrWorkspaceUint8Array(props.filePath)
     if (!fileData || fileData.length < 8) {
       error.value = t('workbench.pdf.errorEmpty')
       return

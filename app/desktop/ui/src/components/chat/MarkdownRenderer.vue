@@ -15,7 +15,6 @@ import DOMPurify from 'dompurify'
 import * as echarts from 'echarts'
 import mermaid from 'mermaid'
 import { open } from '@tauri-apps/plugin-shell'
-import { readFile } from '@tauri-apps/plugin-fs'
 import { unified } from 'unified'
 import rehypeParse from 'rehype-parse'
 import rehypePrism from 'rehype-prism-plus'
@@ -24,6 +23,7 @@ import { visit } from 'unist-util-visit'
 import { toast } from 'vue-sonner'
 import { setDebugCounter } from '@/utils/memoryDebug'
 import { isAbsoluteLocalPath, isRelativeWorkspacePath, normalizeFileReference, resolveAgentWorkspacePath } from '@/utils/agentWorkspacePath'
+import { readLocalOrWorkspaceUint8Array, readLocalOrWorkspaceText } from '@/utils/agentWorkspaceBackend.js'
 
 // 不使用 prism 默认主题，使用自定义样式
 
@@ -764,9 +764,7 @@ const loadLocalImages = async () => {
 
       // 检查是否为 SVG 文件
       if (resolvedLocalPath.toLowerCase().endsWith('.svg')) {
-        // SVG 文件：读取文本内容并内联渲染
-        const { readTextFile } = await import('@tauri-apps/plugin-fs')
-        const svgContent = await readTextFile(resolvedLocalPath)
+        const svgContent = await readLocalOrWorkspaceText(resolvedLocalPath)
         // 清理 SVG 内容
         const cleanedSvg = svgContent
           .replace(/<\?xml[^?]*\?>/gi, '')
@@ -786,7 +784,7 @@ const loadLocalImages = async () => {
       }
 
       // 其他图片：读取文件内容为 Uint8Array
-      const fileData = await readFile(resolvedLocalPath)
+      const fileData = await readLocalOrWorkspaceUint8Array(resolvedLocalPath)
       console.log('[MarkdownRenderer] File loaded, size:', fileData.length)
 
       // 转换为 Blob
@@ -875,11 +873,9 @@ onMounted(() => {
     // 复制本地图片到下载目录
     window.copyLocalImageToDownloads = async (localPath, filename) => {
       try {
-        const { readFile } = await import('@tauri-apps/plugin-fs')
         const { save } = await import('@tauri-apps/plugin-dialog')
-        
-        // 读取文件内容
-        const fileData = await readFile(localPath)
+
+        const fileData = await readLocalOrWorkspaceUint8Array(localPath)
         
         // 弹出保存对话框
         const savePath = await save({

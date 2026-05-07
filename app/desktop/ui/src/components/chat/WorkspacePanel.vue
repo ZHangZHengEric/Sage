@@ -160,11 +160,11 @@ const handleTauriFiles = async (filePaths) => {
   for (const filePath of filePaths) {
     try {
       // 使用Tauri的fs API读取文件
-      const { readFile } = await import('@tauri-apps/plugin-fs')
       const { basename } = await import('@tauri-apps/api/path')
-      
+      const { readLocalOrWorkspaceUint8Array } = await import('@/utils/agentWorkspaceBackend.js')
+
       const fileName = await basename(filePath)
-      const fileData = await readFile(filePath)
+      const fileData = await readLocalOrWorkspaceUint8Array(filePath)
       
       // 创建File对象
       const file = new File([fileData], fileName, { type: 'application/octet-stream' })
