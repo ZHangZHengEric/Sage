@@ -17,7 +17,16 @@ export const normalizeFileReference = (input) => {
   }
 
   if (FILE_PROTOCOL_PATTERN.test(normalized)) {
-    normalized = normalized.replace(/^file:\/\/\/?/i, '')
+    try {
+      const u = new URL(normalized)
+      if (u.protocol === 'file:') {
+        // file:///abs/path → pathname 为 /abs/path；切勿用正则整块删掉 file://，否则会丢掉首字符 /
+        normalized = u.pathname || ''
+      }
+    } catch (error) {
+      // 非标准 file URL 时兜底：与 workbench 一致，保留绝对路径前的 /
+      normalized = normalized.replace(/^file:\/\/\/?/i, '/')
+    }
   }
 
   try {
