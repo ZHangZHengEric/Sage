@@ -106,6 +106,10 @@ async def test_background_then_await_completes(shell_env):
     assert started["status"] == "running"
     task_id = started["task_id"]
     assert task_id in ExecuteCommandTool._BG_TASKS
+    assert started["next_action"]["if_result_required"] == "call await_shell immediately"
+    assert started["next_action"]["await_shell_args"]["task_id"] == task_id
+    assert started["next_action"]["await_shell_args"]["block_until_ms"] >= 60000
+    assert started["next_action"]["do_not"] == "do not answer with waiting/progress text only"
 
     awaited = await tool.await_shell(task_id=task_id, block_until_ms=5000, session_id="s1")
     assert awaited["status"] == "completed"
@@ -142,6 +146,10 @@ async def test_blocking_deadline_returns_running_then_kill(shell_env):
     )
     assert out["status"] == "running"
     assert out["task_id"] in ExecuteCommandTool._BG_TASKS
+    assert out["next_action"]["if_result_required"] == "call await_shell immediately"
+    assert out["next_action"]["await_shell_args"]["task_id"] == out["task_id"]
+    assert out["next_action"]["await_shell_args"]["block_until_ms"] >= 60000
+    assert out["next_action"]["do_not"] == "do not answer with waiting/progress text only"
 
     killed = await tool.kill_shell(task_id=out["task_id"], session_id="s1")
     assert killed["success"] is True

@@ -126,7 +126,7 @@ async def test_await_shell_adaptive_rewrite_under_30s_block(shell_env, monkeypat
 
     captured: dict = {}
 
-    async def fake_wait(self, sandbox, info, block_until_ms, pattern=None):
+    async def fake_wait(self, sandbox, info, block_until_ms, pattern=None, emit_progress=False):
         captured["block_until_ms"] = block_until_ms
         return False, None  # 强制 running
 
@@ -144,6 +144,10 @@ async def test_await_shell_adaptive_rewrite_under_30s_block(shell_env, monkeypat
     assert captured["block_until_ms"] == 60_000
     assert out["running_for_ms"] >= 35_000
     assert out["suggested_next_block_ms"] >= 30_000
+    assert out["next_action"]["if_result_required"] == "call await_shell again"
+    assert out["next_action"]["await_shell_args"]["task_id"] == task_id
+    assert out["next_action"]["await_shell_args"]["block_until_ms"] == out["suggested_next_block_ms"]
+    assert out["next_action"]["do_not"] == "do not answer with waiting/progress text only"
 
     await tool.kill_shell(task_id=task_id, session_id="sid_A")
 
