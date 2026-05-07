@@ -655,17 +655,20 @@ class ExecuteCommandTool:
                 "在沙箱中执行 Shell 命令；支持两段式执行。"
                 "block_until_ms=0 立即放后台并返回 task_id；>0 阻塞至命令结束或到点（默认 30000）。"
                 "若到点未结束，返回 task_id + tail_output；命令最终完成时系统会通过 "
-                "<system_reminder> 主动通知，你不需要轮询，起完命令请优先去做下一步工作。"
-                "若必须等待，可用 await_shell 并传入较大的 block_until_ms（>=60000），"
-                "或用 kill_shell 终止。"
+                "<system_reminder> 主动通知。若还有不依赖该命令结果的工作，起完命令后请先做下一步。"
+                "若当前用户请求必须等这个命令结果才能完成，必须立即调用 await_shell，"
+                "不要只回复“正在等待/稍后检查”。await_shell 请传入较大的 block_until_ms（>=60000），"
+                "必要时用 kill_shell 终止。"
             ),
             "en": (
                 "Execute a shell command in sandbox with two-stage support. "
                 "block_until_ms=0 backgrounds the command and returns immediately with a task_id. "
                 ">0 blocks until completion or deadline (default 30000). On deadline, returns task_id + tail_output. "
-                "Eventual completion is pushed via <system_reminder>; you do NOT need to poll. "
-                "After spawning, prefer to do the next step rather than waiting. "
-                "If you must wait, use await_shell with a generous block_until_ms (>=60000), or kill_shell to terminate."
+                "Eventual completion is pushed via <system_reminder>. "
+                "If there is independent work, do that after spawning. "
+                "If the current user request depends on this command's result, you MUST call await_shell immediately; "
+                "do not merely say you are waiting or will check later. "
+                "Use await_shell with a generous block_until_ms (>=60000), or kill_shell to terminate."
             ),
         },
         param_description_i18n={
@@ -776,7 +779,17 @@ class ExecuteCommandTool:
                     "output_file": log_path,
                     "tail_output": tail,
                     "command": command,
-                    "message": f"已在后台启动，task_id={task_id}",
+                    "message": (
+                        f"Started in the background with task_id={task_id}; the command is still running."
+                    ),
+                    "next_action": {
+                        "if_result_required": "call await_shell immediately",
+                        "await_shell_args": {
+                            "task_id": task_id,
+                            "block_until_ms": max(60000, _suggest_next_block_ms(0)),
+                        },
+                        "do_not": "do not answer with waiting/progress text only",
+                    },
                 }
 
             finished, exit_code = await self._wait_for_finish(
@@ -814,10 +827,16 @@ class ExecuteCommandTool:
                 "suggested_next_block_ms": _suggest_next_block_ms(running_ms),
                 "command": command,
                 "message": (
-                    f"达到 block_until_ms={block_until_ms}，命令仍在运行。"
-                    "完成时会通过 <system_reminder> 主动通知，无需轮询；"
-                    "如必须等待，可用 await_shell 并传入较大 block_until_ms。"
+                    f"The command is still running after block_until_ms={block_until_ms}."
                 ),
+                "next_action": {
+                    "if_result_required": "call await_shell immediately",
+                    "await_shell_args": {
+                        "task_id": task_id,
+                        "block_until_ms": max(60000, _suggest_next_block_ms(running_ms)),
+                    },
+                    "do_not": "do not answer with waiting/progress text only",
+                },
             }
         finally:
             echo_footer(None)
@@ -932,6 +951,7 @@ class ExecuteCommandTool:
             }
         tail = await self._read_tail(sandbox, task_info, max_bytes=8192)
         running_ms_after = int((time.time() - task_info.get("started_at", time.time())) * 1000)
+        next_block_ms = _suggest_next_block_ms(running_ms_after)
         return {
             "success": True,
             "status": "running",
@@ -940,9 +960,20 @@ class ExecuteCommandTool:
             "output_file": task_info.get("log_path"),
             "matched_pattern": bool(pattern),
             "running_for_ms": running_ms_after,
-            "suggested_next_block_ms": _suggest_next_block_ms(running_ms_after),
+            "suggested_next_block_ms": next_block_ms,
             "block_until_ms_requested": requested_block_until_ms,
             "block_until_ms_used": block_until_ms,
+            "message": (
+                f"The task is still running after await_shell waited block_until_ms={block_until_ms}."
+            ),
+            "next_action": {
+                "if_result_required": "call await_shell again",
+                "await_shell_args": {
+                    "task_id": task_id,
+                    "block_until_ms": next_block_ms,
+                },
+                "do_not": "do not answer with waiting/progress text only",
+            },
         }
 
     @tool(
