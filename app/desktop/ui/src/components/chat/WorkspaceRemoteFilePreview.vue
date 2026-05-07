@@ -90,9 +90,19 @@
           preload="metadata"
           @error="handleVideoError"
         />
-        <div v-if="videoError" class="flex flex-col items-center justify-center text-white p-6 gap-2">
+        <div v-if="videoError" class="flex flex-col items-center justify-center text-white p-6 gap-3">
           <span class="text-4xl">🎬</span>
           <p class="text-sm text-white/70 text-center">{{ videoError }}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            class="!border-white/40 !bg-white/15 !text-white hover:!bg-white/25 hover:!text-white"
+            @click="loadContent"
+          >
+            <RefreshCw class="w-4 h-4 mr-1 shrink-0" />
+            重试
+          </Button>
         </div>
         <div v-if="!videoStreamUrl && !videoError" class="flex flex-col items-center justify-center text-white/50">
           <Loader2 class="w-8 h-8 animate-spin" />
@@ -113,6 +123,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { AlertCircle, Download, File, Loader2, RefreshCw, X } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { taskAPI } from '@/api/task.js'
+import { describeHtmlMediaElementError } from '@/utils/htmlMediaError.js'
 import CodeRenderer from './workbench/renderers/filerender/CodeRenderer.vue'
 import MarkdownRenderer from './workbench/renderers/filerender/MarkdownRenderer.vue'
 import TextRenderer from './workbench/renderers/filerender/TextRenderer.vue'
@@ -220,8 +231,10 @@ const revokeUrls = () => {
 }
 
 const handleVideoError = (e) => {
-  const msg = e?.target?.error?.message || '格式不支持或文件损坏'
-  videoError.value = `视频播放失败: ${msg}`
+  const el = e?.target
+  const detail =
+    el instanceof HTMLVideoElement ? describeHtmlMediaElementError(el) : '格式不支持或文件损坏'
+  videoError.value = `视频播放失败: ${detail}`
 }
 
 const loadContent = async () => {
@@ -273,7 +286,11 @@ const loadContent = async () => {
     fileContent.value = await blob.text()
   } catch (err) {
     console.error('加载工作空间文件失败:', err)
-    error.value = err?.message || '加载失败'
+    const detail =
+      (typeof err?.message === 'string' && err.message.trim()) ||
+      (typeof err === 'string' ? err.trim() : '') ||
+      '请稍后重试'
+    error.value = `加载失败: ${detail}`
   } finally {
     loading.value = false
   }

@@ -559,11 +559,11 @@ onUnmounted(() => {
 const processTauriFile = async (filePath) => {
   try {
     // 使用 Tauri 的 fs API 读取文件
-    const { readFile } = await import('@tauri-apps/plugin-fs')
+    const { readLocalOrWorkspaceUint8Array } = await import('@/utils/agentWorkspaceBackend.js')
     const { basename } = await import('@tauri-apps/api/path')
     
     const fileName = await basename(filePath)
-    const fileData = await readFile(filePath)
+    const fileData = await readLocalOrWorkspaceUint8Array(filePath)
     
     // 创建 File 对象
     const file = new File([fileData], fileName, { type: 'application/octet-stream' })
@@ -1074,7 +1074,7 @@ const triggerFileInput = async () => {
   if (window.__TAURI__) {
     try {
       const { open } = await import('@tauri-apps/plugin-dialog')
-      const { readFile } = await import('@tauri-apps/plugin-fs')
+      const { readLocalOrWorkspaceUint8Array } = await import('@/utils/agentWorkspaceBackend.js')
 
       const selected = await open({
         multiple: true
@@ -1084,7 +1084,7 @@ const triggerFileInput = async () => {
         const paths = Array.isArray(selected) ? selected : [selected]
         for (const path of paths) {
           try {
-            const contents = await readFile(path)
+            const contents = await readLocalOrWorkspaceUint8Array(path)
             // Extract filename from path (handles both Windows and Unix separators)
             const filename = path.split(/[\\/]/).pop()
             const mimeType = getMimeType(filename)
