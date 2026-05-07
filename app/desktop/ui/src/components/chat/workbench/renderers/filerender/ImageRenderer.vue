@@ -1,53 +1,61 @@
 <template>
   <div class="h-full flex items-center justify-center bg-muted/20 overflow-hidden relative group">
-    <!-- 加载中 -->
-    <div v-if="loading" class="text-muted-foreground flex flex-col items-center">
-      <Loader2 class="w-8 h-8 animate-spin text-primary mb-2" />
-      <p class="text-sm">{{ t('workbench.image.loading') }}</p>
-    </div>
-    
-    <!-- 错误状态 -->
-    <div v-else-if="error" class="text-muted-foreground flex flex-col items-center">
+    <!-- 错误 -->
+    <div v-if="error" class="text-muted-foreground flex flex-col items-center">
       <ImageIcon class="w-16 h-16 mb-3 opacity-50" />
       <p class="text-sm mb-1">{{ t('workbench.image.loadError') }}</p>
       <p class="text-xs text-muted-foreground/60 mb-4">{{ fileName }}</p>
     </div>
-    
-    <!-- SVG 内容直接渲染 -->
-    <div 
-      v-else-if="isSvg" 
-      class="max-w-full max-h-full overflow-auto flex items-center justify-center"
+
+    <!-- SVG -->
+    <div
+      v-else-if="isSvg"
+      class="relative max-w-full max-h-full w-full h-full overflow-auto flex items-center justify-center"
     >
-      <div 
-        v-if="svgContent" 
+      <div
+        v-if="svgBusy"
+        class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-muted/30 text-muted-foreground"
+      >
+        <Loader2 class="w-8 h-8 animate-spin text-primary mb-2" />
+        <p class="text-sm">{{ t('workbench.image.loading') }}</p>
+      </div>
+      <div
+        v-if="svgContent"
         class="svg-container"
         v-html="svgContent"
       />
-      <div v-else-if="error" class="text-muted-foreground flex flex-col items-center">
+    </div>
+
+    <!-- 栅格图：img 与加载叠层分离，避免 loading 阻挡挂载导致永远不触发 load -->
+    <div
+      v-else
+      class="relative flex-1 min-h-0 w-full h-full flex items-center justify-center"
+    >
+      <img
+        v-if="rasterSrc"
+        :src="rasterSrc"
+        :alt="fileName"
+        class="max-w-full max-h-full object-contain relative z-0"
+        @error="handleImageError"
+      />
+      <div
+        v-if="rasterBusy"
+        class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-muted/40 text-muted-foreground"
+      >
+        <Loader2 class="w-8 h-8 animate-spin text-primary mb-2" />
+        <p class="text-sm">{{ t('workbench.image.loading') }}</p>
+      </div>
+      <div
+        v-if="!rasterBusy && !rasterSrc"
+        class="text-muted-foreground flex flex-col items-center relative z-0"
+      >
         <ImageIcon class="w-16 h-16 mb-3 opacity-50" />
         <p class="text-sm mb-1">{{ t('workbench.image.loadError') }}</p>
         <p class="text-xs text-muted-foreground/60 mb-4">{{ fileName }}</p>
       </div>
     </div>
-    
-    <!-- 普通图片 -->
-    <img 
-      v-else-if="imageUrl" 
-      :src="imageUrl" 
-      :alt="fileName" 
-      class="max-w-full max-h-full object-contain"
-      @load="loading = false"
-      @error="handleImageError"
-    />
-    
-    <!-- 无法加载 -->
-    <div v-else class="text-muted-foreground flex flex-col items-center">
-      <ImageIcon class="w-16 h-16 mb-3 opacity-50" />
-      <p class="text-sm mb-1">{{ t('workbench.image.loadError') }}</p>
-      <p class="text-xs text-muted-foreground/60 mb-4">{{ fileName }}</p>
-    </div>
-    
-    <div class="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+
+    <div class="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity z-20">
       <Button variant="secondary" size="sm" @click="openFile">
         <ExternalLink class="w-4 h-4 mr-1" />
         {{ t('workbench.image.open') }}
@@ -57,12 +65,17 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { ImageIcon, ExternalLink, Loader2 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { readTextFile } from '@tauri-apps/plugin-fs'
 import { useLanguage } from '@/utils/i18n'
+import {
+  parseAgentWorkspaceAbsolutePath,
+  createWorkspaceBlobUrlViaBackend,
+  readWorkspaceTextViaBackend,
+} from '@/utils/agentWorkspaceBackend.js'
 
 const { t } = useLanguage()
 
@@ -77,80 +90,94 @@ const props = defineProps({
   }
 })
 
-const loading = ref(true)
 const error = ref(false)
+const svgBusy = ref(false)
+const rasterBusy = ref(false)
 const svgContent = ref('')
+const rasterSrc = ref('')
+/** @type {string[]} */
+const blobUrlsToRevoke = []
 
-// 判断是否为 SVG 文件
-const isSvg = computed(() => {
-  // 从 filePath 提取文件名（移除路径和查询参数）
-  const path = props.filePath || ''
-  const fileNameFromPath = path.split('/').pop()?.split('?')[0] || ''
-  const name = props.fileName || fileNameFromPath
-  const result = name.toLowerCase().endsWith('.svg')
-  console.log('[ImageRenderer] isSvg check:', { 
-    fileName: props.fileName, 
-    filePath: props.filePath, 
-    fileNameFromPath,
-    name, 
-    result,
-    lastChars: name.slice(-10)
+const revokeRasterBlobs = () => {
+  blobUrlsToRevoke.forEach((u) => {
+    try {
+      URL.revokeObjectURL(u)
+    } catch (_) { /* noop */ }
   })
-  return result
+  blobUrlsToRevoke.length = 0
+}
+
+/** 优先用路径上的扩展名（链接文案常常没有后缀，误判 SVG 会走后端读文本卡死） */
+const isSvg = computed(() => {
+  const raw = props.filePath || ''
+  const fromPath = raw.split(/[/\\]/).pop()?.split('?')[0] || ''
+  if (fromPath.toLowerCase().endsWith('.svg')) return true
+  if (fromPath.includes('.')) return false
+  const title = (props.fileName || '').trim()
+  return title.toLowerCase().endsWith('.svg')
 })
 
-const imageUrl = computed(() => {
-  if (!props.filePath) return ''
-  if (props.filePath.startsWith('asset://') || props.filePath.startsWith('http://') || props.filePath.startsWith('https://') || props.filePath.startsWith('data:') || props.filePath.startsWith('blob:')) {
-    return props.filePath
-  }
-  let cleanPath = props.filePath
-  if (props.filePath.startsWith('file://')) {
-    cleanPath = props.filePath.replace(/^file:\/\//i, '')
-  }
-  // 保留绝对路径开头的 `/`，convertFileSrc 会编码为 %2F，
-  // Tauri 的 asset handler 解码后才能定位文件。
-  return convertFileSrc(cleanPath)
-})
-
-// 加载 SVG 内容
 const loadSvgContent = async () => {
-  if (!isSvg.value) {
-    loading.value = false
-    return
-  }
-  
+  if (!isSvg.value) return
+
+  svgBusy.value = true
+  error.value = false
+  svgContent.value = ''
+
   try {
-    loading.value = true
-    error.value = false
-    
-    // 获取文件路径（去掉 file:// 前缀）
-    let filePath = props.filePath
-    if (filePath.startsWith('file://')) {
-      filePath = filePath.replace(/^file:\/\//i, '')
-    }
-    
-    // 读取 SVG 文件内容
-    const content = await readTextFile(filePath)
-    
-    // 清理 SVG 内容，确保可以安全渲染
-    // 移除可能存在的 XML 声明和 DOCTYPE
-    let cleanedContent = content
+    let diskPath = props.filePath.replace(/^file:\/\//i, '')
+    const parsed = parseAgentWorkspaceAbsolutePath(diskPath)
+    const content = parsed
+      ? await readWorkspaceTextViaBackend(parsed.agentId, parsed.relativePath)
+      : await readTextFile(diskPath)
+
+    svgContent.value = content
       .replace(/<\?xml[^?]*\?>/gi, '')
       .replace(/<!DOCTYPE[^>]*>/gi, '')
       .trim()
-    
-    svgContent.value = cleanedContent
-    loading.value = false
   } catch (err) {
     console.error('加载 SVG 失败:', err)
     error.value = true
-    loading.value = false
+  } finally {
+    svgBusy.value = false
   }
 }
 
+const loadRaster = async () => {
+  revokeRasterBlobs()
+  rasterSrc.value = ''
+  rasterBusy.value = false
+  error.value = false
+
+  const fp = props.filePath
+  if (!fp) return
+
+  if (/^(asset:|https?:|data:|blob:)/i.test(fp)) {
+    rasterSrc.value = fp
+    return
+  }
+
+  const cleanPath = fp.replace(/^file:\/\//i, '')
+  const parsed = parseAgentWorkspaceAbsolutePath(cleanPath)
+  if (parsed) {
+    rasterBusy.value = true
+    try {
+      const url = await createWorkspaceBlobUrlViaBackend(parsed.agentId, parsed.relativePath)
+      blobUrlsToRevoke.push(url)
+      rasterSrc.value = url
+    } catch (err) {
+      console.error('工作台图片经后端加载失败:', err)
+      error.value = true
+    } finally {
+      rasterBusy.value = false
+    }
+    return
+  }
+
+  rasterSrc.value = convertFileSrc(cleanPath)
+}
+
 const handleImageError = () => {
-  loading.value = false
   error.value = true
 }
 
@@ -160,12 +187,36 @@ const openFile = () => {
   }
 }
 
-onMounted(() => {
-  console.log('[ImageRenderer] onMounted, fileName:', props.fileName, 'filePath:', props.filePath, 'isSvg:', isSvg.value)
+const loadPreview = async () => {
+  error.value = false
+  svgContent.value = ''
+  svgBusy.value = false
+  rasterBusy.value = false
+  revokeRasterBlobs()
+  rasterSrc.value = ''
+
+  if (!props.filePath) return
+
   if (isSvg.value) {
-    loadSvgContent()
+    await loadSvgContent()
   } else {
-    loading.value = false
+    await loadRaster()
   }
+}
+
+onMounted(() => {
+  loadPreview()
+})
+
+watch(
+  () => props.filePath,
+  (next, prev) => {
+    if (next === prev) return
+    loadPreview()
+  }
+)
+
+onUnmounted(() => {
+  revokeRasterBlobs()
 })
 </script>

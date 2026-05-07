@@ -65,7 +65,8 @@ class TaskAPI {
     if (filePath.startsWith('http://') || filePath.startsWith('https://')) return filePath
     let apiPrefix = this.request.baseURL || ''
     if (apiPrefix.endsWith('/')) apiPrefix = apiPrefix.slice(0, -1)
-    return `${apiPrefix}/api/agent/${agentId}/file_workspace/download?file_path=${encodeURIComponent(filePath)}`
+    // 与 VideoRenderer 一致：stream 支持 Range，便于视频拖拽进度条播放
+    return `${apiPrefix}/api/agent/${agentId}/file_workspace/stream?file_path=${encodeURIComponent(filePath)}`
   }
 
   /**
@@ -87,16 +88,16 @@ class TaskAPI {
       return response.blob()
     }
 
-    let apiPrefix = this.request.baseURL;
+    let apiPrefix = this.request.baseURL || ''
     // remove trailing slash
     if (apiPrefix.endsWith('/')) {
-      apiPrefix = apiPrefix.slice(0, -1);
+      apiPrefix = apiPrefix.slice(0, -1)
     }
     const url = `${apiPrefix}/api/agent/${agentId}/file_workspace/download?file_path=${encodeURIComponent(filePath)}`
 
     // 准备请求头
     const headers = {
-      'Accept': 'application/json',
+      'Accept': '*/*',
     }
 
     // 添加认证Token

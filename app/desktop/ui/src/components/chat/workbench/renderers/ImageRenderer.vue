@@ -62,7 +62,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
-import { readFile, readTextFile } from '@tauri-apps/plugin-fs'
+import { readLocalOrWorkspaceUint8Array, readLocalOrWorkspaceText } from '@/utils/agentWorkspaceBackend.js'
 import { save } from '@tauri-apps/plugin-dialog'
 import { Download } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
@@ -98,7 +98,7 @@ const loadLocalImage = async (localPath) => {
     console.log('[ImageRenderer] Loading image from:', cleanPath)
     
     // 读取文件内容为 Uint8Array
-    const fileData = await readFile(cleanPath)
+    const fileData = await readLocalOrWorkspaceUint8Array(cleanPath)
     console.log('[ImageRenderer] File loaded, size:', fileData.length)
     
     // 转换为 Blob
@@ -140,7 +140,7 @@ const loadSvgContent = async (localPath) => {
     console.log('[ImageRenderer] Loading SVG from:', cleanPath)
 
     // 读取 SVG 文件内容
-    const content = await readTextFile(cleanPath)
+    const content = await readLocalOrWorkspaceText(cleanPath)
     console.log('[ImageRenderer] SVG loaded, size:', content.length)
 
     // 清理 SVG 内容
@@ -224,7 +224,7 @@ const downloadFile = async () => {
     console.log('[ImageRenderer] Download file from:', cleanPath)
 
     // 读取文件内容
-    const fileData = await readFile(cleanPath)
+    const fileData = await readLocalOrWorkspaceUint8Array(cleanPath)
     console.log('[ImageRenderer] File loaded, size:', fileData.length)
 
     // 提取原始文件扩展名

@@ -28,8 +28,14 @@
       <div v-if="error" class="absolute inset-0 flex flex-col items-center justify-center bg-black text-white p-6 gap-3">
         <VideoOff class="w-12 h-12 text-white/40" />
         <p class="text-sm text-white/70 text-center">{{ error }}</p>
-        <Button variant="outline" size="sm" class="text-white border-white/30 hover:bg-white/10" @click="retryLoad">
-          <RefreshCw class="w-4 h-4 mr-1" />
+        <Button
+          variant="outline"
+          size="sm"
+          type="button"
+          class="!border-white/40 !bg-white/15 !text-white hover:!bg-white/25 hover:!text-white"
+          @click="retryLoad"
+        >
+          <RefreshCw class="w-4 h-4 mr-1 shrink-0" />
           重试
         </Button>
       </div>
@@ -53,6 +59,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, Film, VideoOff, RefreshCw } from 'lucide-vue-next'
 import request from '@/utils/request.js'
+import { describeHtmlMediaElementError } from '@/utils/htmlMediaError.js'
 
 const props = defineProps({
   filePath: { type: String, required: true },
@@ -146,12 +153,18 @@ const handleLoaded = () => {
 }
 
 const handleError = (e) => {
-  const msg = e?.target?.error?.message || '不支持的格式或文件损坏'
-  error.value = `视频播放失败: ${msg}`
+  const el = e?.target
+  const detail =
+    el instanceof HTMLVideoElement ? describeHtmlMediaElementError(el) : '不支持的格式或文件损坏'
+  error.value = `视频播放失败: ${detail}`
   loading.value = false
+  buffering.value = false
 }
 
-const retryLoad = () => loadVideo()
+const retryLoad = () => {
+  buffering.value = false
+  loadVideo()
+}
 
 onMounted(() => loadVideo())
 
