@@ -217,7 +217,7 @@
                 <span>{{ formatRelativeTime(conversation.updated_at) }}</span>
               </div>
 
-              <TooltipProvider>
+              <TooltipProvider v-if="canDownloadSessionFolder()">
                 <Tooltip>
                   <TooltipTrigger as-child>
                     <Button
@@ -479,6 +479,10 @@ const canDelete = (conversation) => {
   return currentUser.value.id === conversation.user_id || currentUser.value.userid === conversation.user_id
 }
 
+const canDownloadSessionFolder = () => {
+  return currentUser.value?.role === 'admin'
+}
+
 const handleDeleteConversation = async (conversation) => {
   const confirmed = await confirmDialogRef.value?.confirm(
     t('history.deleteConfirm'),
@@ -503,7 +507,7 @@ const isSessionDownloading = (conversation) => {
 
 const handleDownloadSessionFolder = async (conversation) => {
   const sessionId = conversation?.session_id
-  if (!sessionId || isSessionDownloading(conversation)) return
+  if (!sessionId || isSessionDownloading(conversation) || !canDownloadSessionFolder()) return
 
   downloadingSessionIds.value = new Set([...downloadingSessionIds.value, sessionId])
   try {

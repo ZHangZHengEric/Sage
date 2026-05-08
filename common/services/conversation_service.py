@@ -513,9 +513,15 @@ def _build_session_archive_sync(session_dir: Path, session_id: str) -> str:
 async def prepare_session_folder_download(
     session_id: str,
     *,
-    user_id: Optional[str] = None,
     is_admin: bool = False,
 ) -> Tuple[str, str, str]:
+    if not is_admin:
+        raise SageHTTPException(
+            status_code=403,
+            detail="仅管理员可以下载会话文件夹",
+            error_detail="admin_required",
+        )
+
     dao = ConversationDao()
     conversation = await dao.get_by_session_id(session_id)
     if not conversation:
@@ -524,20 +530,6 @@ async def prepare_session_folder_download(
             detail=f"会话 {session_id} 不存在",
             error_detail=f"Conversation '{session_id}' not found",
         )
-
-    if not is_admin:
-        if not user_id:
-            raise SageHTTPException(
-                status_code=403,
-                detail="无权下载该会话文件夹",
-                error_detail="Missing user identity",
-            )
-        if conversation.user_id and conversation.user_id != user_id:
-            raise SageHTTPException(
-                status_code=403,
-                detail="无权下载该会话文件夹",
-                error_detail="forbidden",
-            )
 
     session_dir = _resolve_session_directory(session_id)
     archive_path = await asyncio.to_thread(_build_session_archive_sync, session_dir, session_id)

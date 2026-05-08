@@ -190,10 +190,8 @@ async def get_messages(session_id: str, request: Request):
 async def download_session_folder(session_id: str, request: Request):
     """下载 session root 下指定 session 的完整文件夹压缩包。"""
     role = get_request_role(request)
-    user_id = get_request_user_id(request)
     path, filename, media_type = await conversation_service.prepare_session_folder_download(
         session_id,
-        user_id=user_id,
         is_admin=role == "admin",
     )
     return FileResponse(
