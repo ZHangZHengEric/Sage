@@ -1,0 +1,15 @@
+*
+
+!app/
+!app/server/
+!app/server/web/
+!app/server/web/**
+
+app/server/web/node_modules
+app/server/web/dist
+app/server/web/.vite
+app/server/web/.DS_Store
+app/server/web/npm-debug.log*
+
+!deploy/
+!deploy/**
