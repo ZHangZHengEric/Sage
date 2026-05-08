@@ -30,7 +30,7 @@ def _get_system_prefix(tool_manager: Optional[ToolManager], language: str) -> st
         language: 语言
         
     Returns:
-        str: 合适的 system prefix 模板名称
+        str: 拼接后的 system prefix
     """
     tool_names = []
     if tool_manager:
@@ -39,12 +39,35 @@ def _get_system_prefix(tool_manager: Optional[ToolManager], language: str) -> st
         # tools_json = tool_manager.get_openai_tools(lang=language, fallback_chain=["en"])
         # tool_names = [tool['function']['name'] for tool in tools_json]
     
-    # 如果有 todo_write 工具，使用完整版本
+    turn_status_enabled = os.environ.get("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "true").lower() != "false"
+    prompt_manager = PromptManager()
+    parts = [
+        prompt_manager.get_agent_prompt(
+            "SimpleAgent",
+            "agent_custom_system_base_requirements",
+            language=language,
+        )
+    ]
+
     if 'todo_write' in tool_names:
-        return "agent_custom_system_prefix"
-    
-    # 没有 todo_write 工具，使用无任务管理版本
-    return "agent_custom_system_prefix_no_task"
+        parts.append(
+            prompt_manager.get_agent_prompt(
+                "SimpleAgent",
+                "agent_custom_system_task_requirement",
+                language=language,
+            )
+        )
+
+    if turn_status_enabled:
+        parts.append(
+            prompt_manager.get_agent_prompt(
+                "SimpleAgent",
+                "agent_custom_system_turn_status_requirement",
+                language=language,
+            )
+        )
+
+    return "\n".join(parts)
 
 
 class SimpleAgent(AgentBase):
@@ -142,9 +165,7 @@ class SimpleAgent(AgentBase):
         tool_manager = session_context.tool_manager
 
         # 重新获取agent_custom_system_prefix以支持动态语言切换
-        current_system_prefix = PromptManager().get_agent_prompt_auto(
-            _get_system_prefix(tool_manager, session_context.get_language()), language=session_context.get_language()
-        )
+        current_system_prefix = _get_system_prefix(tool_manager, session_context.get_language())
 
         # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
@@ -209,10 +230,8 @@ class SimpleAgent(AgentBase):
         tools_json = tool_manager.get_openai_tools(lang=session_context.get_language(), fallback_chain=["en"])
 
         # 根据建议过滤工具，并补齐基础工作台工具（仅限当前工具管理器真实可用的工具）。
-        # turn_status 始终包含：即使协议被禁用，模型仍可能因提示词而调用它；
-        # 若不包含则调用会被拒绝并触发错误→循环，导致相同文本重复出现。
-        # SAGE_AGENT_STATUS_PROTOCOL_ENABLED=false 只控制"强制 turn_status_only 轮"的触发，
-        # 而不应阻止模型主动调用该工具来终止本轮。
+        # 当状态协议启用时，ToolProxy 会把 turn_status 纳入可用工具；协议禁用时，
+        # system prefix 也会同步移除 turn_status 契约，避免模型调用未提供的协议工具。
         available_tool_names = [tool['function']['name'] for tool in tools_json]
         selected_tools = set(augment_with_baseline_tools(suggested_tools, available_tool_names))
         if should_expose_tool_expansion(suggested_tools, selected_tools, available_tool_names):
@@ -701,7 +720,7 @@ class SimpleAgent(AgentBase):
                 cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input)
             )
             all_new_response_chunks = []
-            current_system_prefix = PromptManager().get_agent_prompt_auto(_get_system_prefix(tool_manager, session_context.get_language()), language=session_context.get_language())
+            current_system_prefix = _get_system_prefix(tool_manager, session_context.get_language())
 
             # 更新system message，确保包含最新的子智能体列表等上下文信息
             if messages_input and messages_input[0].role == MessageRole.SYSTEM.value:
