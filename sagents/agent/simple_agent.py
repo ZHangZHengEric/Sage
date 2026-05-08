@@ -1086,9 +1086,11 @@ class SimpleAgent(AgentBase):
                         f"SimpleAgent: 模型返回未提供的工具 {sorted(invalid_tool_names)}，拒绝执行"
                     )
                     unavailable_tools_label = ', '.join(sorted(name for name in invalid_tool_names if name))
+                    live_ctx_for_rejection = self._get_live_session_context(session_id)
+                    rejection_lang = live_ctx_for_rejection.get_language() if live_ctx_for_rejection is not None else 'en'
                     rejection_template = PromptManager().get_agent_prompt_auto(
                         'unavailable_tool_expansion_message',
-                        language=session_context.get_language(),
+                        language=rejection_lang,
                     )
                     yield ([MessageChunk(
                         role=MessageRole.ASSISTANT.value,
