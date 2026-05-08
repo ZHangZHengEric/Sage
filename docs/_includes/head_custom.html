@@ -1,4 +1,8 @@
 <!-- Mermaid Support -->
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b1020" media="(prefers-color-scheme: dark)">
+
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.0/dist/mermaid.min.js"></script>
 <script>
   window.SAGE_DOC_TRANSLATIONS = {
@@ -59,8 +63,8 @@
 <style>
   .mermaid {
     text-align: center;
-    background: white;
-    border: 1px solid #e1e4e8;
+    background: var(--sage-surface-color, white);
+    border: 1px solid var(--sage-border-color, #e1e4e8);
     border-radius: 6px;
     padding: 16px;
     margin: 16px 0;
@@ -104,13 +108,13 @@
     gap: 16px;
     margin: 0 0 24px;
     padding: 14px 16px;
-    background: #f6f8fa;
-    border: 1px solid #d8dee4;
+    background: var(--sage-muted-surface-color, #f6f8fa);
+    border: 1px solid var(--sage-border-color, #d8dee4);
     border-radius: 10px;
   }
 
   .sage-lang-switcher__label {
-    color: #24292f;
+    color: var(--sage-text-color, #24292f);
     font-size: 13px;
     font-weight: 700;
     letter-spacing: 0.02em;
@@ -125,11 +129,11 @@
   }
 
   .sage-lang-switcher__link {
-    border: 1px solid #d0d7de;
+    border: 1px solid var(--sage-border-color, #d0d7de);
     border-radius: 999px;
     padding: 6px 12px;
-    color: #57606a;
-    background: #fff;
+    color: var(--sage-muted-text-color, #57606a);
+    background: var(--sage-surface-color, #fff);
     font-size: 13px;
     font-weight: 600;
     line-height: 1.2;
