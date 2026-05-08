@@ -1,5 +1,6 @@
 from typing import List, Dict, Any, Optional, Union
 from .tool_manager import ToolManager
+from .tool_expansion import TOOL_EXPAND_TOOLS
 from sagents.utils.logger import logger
 
 class ToolProxy:
@@ -43,6 +44,11 @@ class ToolProxy:
             if _os.environ.get("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "true").lower() != "false":
                 if "turn_status" in all_tools_names:
                     self._available_tools.add("turn_status")
+
+            # 协议性工具：tool_expand_tools 只用于恢复 tool suggestion 二次筛选遗漏的工具。
+            # 它必须在入口白名单内可见，真正是否下发给模型由执行层按"是否被二次收窄"判断。
+            if TOOL_EXPAND_TOOLS in all_tools_names:
+                self._available_tools.add(TOOL_EXPAND_TOOLS)
 
             # 工具捆绑组：组内任何一个被勾选，组内全部解锁（共享后台任务注册表，缺一个就废）。
             _TOOL_BUNDLES: List[set] = [

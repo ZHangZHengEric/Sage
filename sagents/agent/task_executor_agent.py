@@ -8,6 +8,7 @@ from sagents.tool.tool_manager import ToolManager
 from sagents.utils.prompt_manager import PromptManager
 from sagents.utils.content_saver import save_agent_response_content
 from sagents.tool.tool_baseline import augment_with_baseline_tools
+from sagents.tool.tool_expansion import TOOL_EXPAND_TOOLS, should_expose_tool_expansion
 import uuid
 import os
 
@@ -189,6 +190,34 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
 
         # 处理工具调用
         if len(tool_calls) > 0:
+            allowed_tool_names = {
+                (tool.get('function') or {}).get('name') or ""
+                for tool in tools_json
+            }
+            invalid_tool_names = {
+                (tool_call.get("function") or {}).get("name") or ""
+                for tool_call in tool_calls.values()
+                if ((tool_call.get("function") or {}).get("name") or "") not in allowed_tool_names
+            }
+            if invalid_tool_names:
+                logger.warning(
+                    f"TaskExecutorAgent: 模型返回未提供的工具 {sorted(invalid_tool_names)}，拒绝执行"
+                )
+                live_ctx = self._get_live_session_context(session_id)
+                language = live_ctx.get_language() if live_ctx is not None else "en"
+                unavailable_tools_label = ', '.join(sorted(name for name in invalid_tool_names if name))
+                rejection_template = PromptManager().get_agent_prompt_auto(
+                    'unavailable_tool_expansion_message',
+                    language=language,
+                )
+                yield [MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content=rejection_template.format(tools=unavailable_tools_label),
+                    message_type=MessageType.ERROR.value,
+                    agent_name=self.agent_name,
+                )]
+                return
+
             # 根据环境变量控制 emit_tool_call_message
             # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
             emit_on_complete = os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
@@ -255,7 +284,10 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             if 'load_skill' not in suggested_tools:
                 suggested_tools.append('load_skill')
 
+        has_effective_suggestions = bool(suggested_tools)
         suggested_tools = augment_with_baseline_tools(suggested_tools, available_tool_names)
+        if has_effective_suggestions and should_expose_tool_expansion(suggested_tools, suggested_tools, available_tool_names):
+            suggested_tools.append(TOOL_EXPAND_TOOLS)
         
         if suggested_tools:
             tools_suggest_json = [

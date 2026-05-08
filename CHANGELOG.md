@@ -1,3 +1,5 @@
+2026-05-08 12:15 新增通用 tool_expand_tools：仅恢复 tool_suggestion 二次筛选遗漏，不突破 ToolProxy/agent_mode 边界；Simple/TaskExecutor 未提供工具拒绝提示走 PromptManager，并返回 available_expandable_tools；补单测与中英文架构文档。
+
 2026-05-06 16:25 助手非空串才拼接；token 扣图后回灌 ratio 取末次；重复/拒绝下轮 auto；压缩兼容 max_completion_tokens。
 
 2026-05-06 14:45 新增 tool_baseline：按可用列表补齐基线工具；IDENTITY.md 改用 agent_identity_extension 与中英提示；接入 simple/task/tool suggestion；单测 3 条。
