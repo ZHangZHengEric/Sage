@@ -1,9 +1,28 @@
 // Custom styles for Sage Multi-Agent Framework Documentation
+:root {
+  --sage-background-color: #ffffff;
+  --sage-surface-color: #ffffff;
+  --sage-muted-surface-color: #f6f8fa;
+  --sage-note-background-color: #f1f8ff;
+  --sage-highlight-background-color: #f0fff4;
+  --sage-code-background-color: #f6f8fa;
+  --sage-border-color: #d8dee4;
+  --sage-soft-border-color: #e1e4e8;
+  --sage-text-color: #24292f;
+  --sage-muted-text-color: #57606a;
+  --sage-blockquote-color: #6a737d;
+  --sage-link-color: #0969da;
+  --sage-accent-color: #0366d6;
+  --sage-success-color: #28a745;
+  color-scheme: light;
+}
 
 // Chinese font improvements
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
   line-height: 1.6;
+  background-color: var(--sage-background-color);
+  color: var(--sage-text-color);
 }
 
 // Improve Chinese text rendering
@@ -27,18 +46,18 @@ table {
   
   th, td {
     padding: 0.75rem;
-    border: 1px solid #e1e4e8;
+    border: 1px solid var(--sage-soft-border-color);
     text-align: left;
     vertical-align: top;
   }
   
   th {
-    background-color: #f6f8fa;
+    background-color: var(--sage-muted-surface-color);
     font-weight: 600;
   }
   
   tr:nth-child(even) {
-    background-color: #f9f9f9;
+    background-color: var(--sage-code-background-color);
   }
   
   // Ensure tables are responsive
@@ -60,20 +79,20 @@ table {
   
   .language-option {
     padding: 0.5rem 1rem;
-    border: 2px solid #0366d6;
+    border: 2px solid var(--sage-accent-color);
     border-radius: 4px;
     text-decoration: none;
-    color: #0366d6;
+    color: var(--sage-accent-color);
     font-weight: 500;
     transition: all 0.2s ease;
     
     &:hover {
-      background-color: #0366d6;
+      background-color: var(--sage-accent-color);
       color: white;
     }
     
     &.active {
-      background-color: #0366d6;
+      background-color: var(--sage-accent-color);
       color: white;
     }
   }
@@ -101,8 +120,8 @@ h1, h2, h3, h4, h5, h6 {
 .note {
   padding: 1rem !important;
   margin: 1rem 0 !important;
-  border-left: 4px solid #0366d6 !important;
-  background-color: #f1f8ff !important;
+  border-left: 4px solid var(--sage-accent-color) !important;
+  background-color: var(--sage-note-background-color) !important;
   border-radius: 0 4px 4px 0 !important;
   
   > p:first-child {
@@ -125,8 +144,8 @@ h1, h2, h3, h4, h5, h6 {
 .highlight {
   padding: 1rem !important;
   margin: 1rem 0 !important;
-  border-left: 4px solid #28a745 !important;
-  background-color: #f0fff4 !important;
+  border-left: 4px solid var(--sage-success-color) !important;
+  background-color: var(--sage-highlight-background-color) !important;
   border-radius: 0 4px 4px 0 !important;
 }
 
@@ -193,9 +212,9 @@ h1, h2, h3, h4, h5, h6 {
 
 // Improve blockquote styling
 blockquote {
-  border-left: 4px solid #dfe2e5;
+  border-left: 4px solid var(--sage-border-color);
   padding-left: 1rem;
-  color: #6a737d;
+  color: var(--sage-blockquote-color);
   font-style: italic;
   margin: 1rem 0;
 }
@@ -203,4 +222,103 @@ blockquote {
 // Better button styling for any buttons
 .btn {
   font-family: inherit;
-} 
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --body-background-color: #0b1020;
+    --body-heading-color: #f4f7fb;
+    --body-text-color: #d8dee9;
+    --link-color: #7db7ff;
+    --nav-child-link-color: #b8c7dd;
+    --sidebar-color: #111827;
+    --base-button-color: #1f2937;
+    --btn-primary-color: #579dff;
+    --code-background-color: #161b22;
+    --border-color: #30363d;
+    --table-background-color: #0f172a;
+    --search-background-color: #161b22;
+    --search-result-preview-color: #9ca3af;
+
+    --sage-background-color: #0b1020;
+    --sage-surface-color: #111827;
+    --sage-muted-surface-color: #161b22;
+    --sage-note-background-color: #10233f;
+    --sage-highlight-background-color: #10281d;
+    --sage-code-background-color: #0f172a;
+    --sage-border-color: #30363d;
+    --sage-soft-border-color: #263241;
+    --sage-text-color: #d8dee9;
+    --sage-muted-text-color: #9ca3af;
+    --sage-blockquote-color: #a9b4c3;
+    --sage-link-color: #7db7ff;
+    --sage-accent-color: #579dff;
+    --sage-success-color: #56d364;
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  .main,
+  .main-content,
+  .side-bar,
+  .site-header,
+  .site-footer {
+    background-color: var(--sage-background-color);
+    color: var(--sage-text-color);
+  }
+
+  .side-bar,
+  .site-header,
+  .search,
+  .search-input,
+  .search-results {
+    background-color: var(--sage-surface-color);
+    border-color: var(--sage-border-color);
+  }
+
+  .main-content {
+    a {
+      color: var(--sage-link-color);
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+      color: var(--body-heading-color);
+    }
+  }
+
+  .nav-list .nav-list-item .nav-list-link,
+  .site-title,
+  .site-button,
+  .search-input {
+    color: var(--sage-text-color);
+  }
+
+  .nav-list .nav-list-item .nav-list-link:hover,
+  .nav-list .nav-list-item .nav-list-link.active {
+    background-image: linear-gradient(
+      -90deg,
+      rgba(87, 157, 255, 0.18) 0%,
+      rgba(87, 157, 255, 0.08) 80%,
+      rgba(87, 157, 255, 0) 100%
+    );
+  }
+
+  table {
+    th, td {
+      border-color: var(--sage-border-color);
+    }
+  }
+
+  pre,
+  code,
+  .highlight {
+    background-color: var(--sage-code-background-color) !important;
+    color: var(--sage-text-color);
+  }
+
+  .mermaid {
+    background: var(--sage-surface-color);
+    border-color: var(--sage-border-color);
+  }
+}

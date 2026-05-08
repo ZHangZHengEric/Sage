@@ -89,6 +89,7 @@ instance/
 # Sphinx documentation
 docs/_build/
 docs/.bundle/
+docs/Gemfile.lock
 docs/_site/
 docs/vendor/
 
