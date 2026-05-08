@@ -260,7 +260,9 @@ blockquote {
   html,
   body,
   .main,
+  .main-header,
   .main-content,
+  .main-content-wrap,
   .side-bar,
   .site-header,
   .site-footer {
@@ -269,9 +271,15 @@ blockquote {
   }
 
   .side-bar,
+  .side-bar + .main .main-header,
   .site-header,
+  .aux-nav,
+  .aux-nav .aux-nav-list,
+  .aux-nav .aux-nav-list-item,
+  .aux-nav .site-button,
   .search,
   .search-input,
+  .search-input-wrap,
   .search-results {
     background-color: var(--sage-surface-color);
     border-color: var(--sage-border-color);
@@ -290,8 +298,19 @@ blockquote {
   .nav-list .nav-list-item .nav-list-link,
   .site-title,
   .site-button,
+  .aux-nav .site-button,
   .search-input {
     color: var(--sage-text-color);
+  }
+
+  .site-title:hover,
+  .site-button:hover,
+  .aux-nav .site-button:hover {
+    background-image: linear-gradient(
+      -90deg,
+      rgba(87, 157, 255, 0.18) 0%,
+      rgba(87, 157, 255, 0.08) 100%
+    );
   }
 
   .nav-list .nav-list-item .nav-list-link:hover,
