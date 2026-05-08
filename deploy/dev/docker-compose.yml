@@ -19,9 +19,6 @@ services:
       - ${SAGE_COMPOSE_ENV_FILE:-.env}
     environment:
       SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage}
-      SAGE_TRACE_JAEGER_UI_URL: ${SAGE_TRACE_JAEGER_UI_URL:-http://sage-jaeger-dev:16686/jaeger}
-      SAGE_TRACE_JAEGER_PUBLIC_URL: ${SAGE_TRACE_JAEGER_PUBLIC_URL:-http://127.0.0.1:30151/jaeger}
-      SAGE_TRACE_JAEGER_BASE_PATH: ${SAGE_TRACE_JAEGER_BASE_PATH:-/api/observability/jaeger}
       SAGE_SESSION_DIR: /app/sessions
       SAGE_LOCAL_LINUX_ISOLATION: bwrap
     cap_add:
