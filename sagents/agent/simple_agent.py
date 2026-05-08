@@ -608,9 +608,7 @@ class SimpleAgent(AgentBase):
         task_complete_template = PromptManager().get_agent_prompt_auto('task_complete_template', language=session_context.get_language())
         system_msg = await self.prepare_unified_system_message(
             session_id,
-            custom_prefix=PromptManager().get_agent_prompt_auto(
-                _get_system_prefix(tool_manager, session_context.get_language()), language=session_context.get_language()
-            ),
+            custom_prefix=_get_system_prefix(tool_manager, session_context.get_language()),
             language=session_context.get_language(),
         )
         prompt = task_complete_template.format(

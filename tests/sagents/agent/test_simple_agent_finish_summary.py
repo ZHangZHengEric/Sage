@@ -2,7 +2,9 @@
 
 验证 turn_status 的「先说明再报告状态」契约。
 """
+import asyncio
 import pytest
+from types import SimpleNamespace
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.agent.simple_agent import SimpleAgent, _get_system_prefix
@@ -171,6 +173,64 @@ def test_system_prefix_includes_turn_status_contract_when_protocol_enabled(monke
     assert "turn_status" in prompt
     assert "Task Management Requirements" in prompt
 
+
+def test_task_complete_judge_uses_composed_system_prefix_when_protocol_disabled(monkeypatch):
+    monkeypatch.setenv("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "false")
+    agent = _agent()
+    captured = {}
+
+    async def _never_must_continue(messages):
+        return False
+
+    async def _fake_system_message(session_id, custom_prefix, language):
+        captured["custom_prefix"] = custom_prefix
+        return custom_prefix
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        captured["llm_messages"] = kwargs["messages"]
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content='{"task_interrupted": true, "reason": "done"}')
+                )
+            ]
+        )
+
+    monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
+    monkeypatch.setattr(agent, "prepare_unified_system_message", _fake_system_message)
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+
+    msg_manager = SimpleNamespace(
+        context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000}),
+    )
+    session_context = SimpleNamespace(
+        message_manager=msg_manager,
+        get_language=lambda: "en",
+    )
+    tool_manager = _ToolNameManager(["dudu_generate_route_scheme"])
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="start",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="done",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+    ]
+
+    assert asyncio.run(
+        agent._is_task_complete(
+            messages_input=messages,
+            session_id="s1",
+            tool_manager=tool_manager,
+            session_context=session_context,
+        )
+    ) is True
+    assert "turn_status" not in captured["custom_prefix"]
+    assert "找不到prompt" not in captured["llm_messages"][0]["content"]
 
 def test_turn_status_tools_only_filters_action_tools():
     tools_json = [
