@@ -224,6 +224,34 @@ flowchart LR
 
 The tool/skill layer answers "what is available"; suggestion Agents answer "what should we use this turn", so we don't have to stuff every schema into the context.
 
+### 3.1 Runtime Tool Expansion
+
+`tool_suggestion` only narrows the tool schemas sent to the model for the current turn. It does not change the session-level `ToolProxy` permission boundary. If the model tries to call a tool that was not provided in the current LLM request but is still within the current Agent's allowed tools, the execution layer rejects that call and instructs the model to call the protocol tool `tool_expand_tools` first.
+
+`tool_expand_tools` accepts exact tool names only:
+
+```json
+{
+  "tool_names": ["file_read", "search_memory"]
+}
+```
+
+Expansion is validated against `session_context.tool_manager.list_all_tools_name()`, which is the current Agent's allowed tool set. It does not consult the global base `ToolManager` directly and cannot bypass entry `available_tools`, the `ToolProxy` whitelist, or `agent_mode` restrictions.
+
+Tool result shape:
+
+```json
+{
+  "success": true,
+  "expanded_tools": ["file_read"],
+  "invalid_tools": ["unknown_tool"],
+  "already_selected_tools": ["search_memory"],
+  "available_expandable_tools": ["file_write"]
+}
+```
+
+The policy is partial success: valid tools are added to `audit_status.suggested_tools` immediately and `audit_status.tools_expanded = true` is set; the next execution loop refreshes the tool schemas. Invalid tools are not added, and the model can use `available_expandable_tools` to choose another currently expandable tool.
+
 ## 4. Startup vs Runtime
 
 ```mermaid

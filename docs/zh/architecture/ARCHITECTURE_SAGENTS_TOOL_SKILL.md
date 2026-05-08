@@ -204,6 +204,34 @@ flowchart LR
 
 工具/技能层负责“有什么”，建议 Agent 负责“这次用什么”。这样不用一次把全部 schema 塞进上下文。
 
+### 3.1 运行期工具扩展（Tool Expansion）
+
+`tool_suggestion` 只会缩小本轮下发给模型的工具 schema，不会改变会话级 `ToolProxy` 权限边界。若模型尝试调用一个当前 LLM 请求未提供、但仍属于当前 Agent 允许范围的工具，执行层会拒绝本次越权调用，并提示模型先调用协议工具 `tool_expand_tools`。
+
+`tool_expand_tools` 只接受准确工具名：
+
+```json
+{
+  "tool_names": ["file_read", "search_memory"]
+}
+```
+
+扩展校验基于 `session_context.tool_manager.list_all_tools_name()`，即当前 Agent 已被允许使用的工具全集；它不会访问底层全局 `ToolManager`，也不能突破入口 `available_tools`、`ToolProxy` 白名单或 `agent_mode` 限制。
+
+工具返回结构：
+
+```json
+{
+  "success": true,
+  "expanded_tools": ["file_read"],
+  "invalid_tools": ["unknown_tool"],
+  "already_selected_tools": ["search_memory"],
+  "available_expandable_tools": ["file_write"]
+}
+```
+
+策略是“部分成功”：合法工具会立即加入 `audit_status.suggested_tools`，并设置 `audit_status.tools_expanded = true`；下一轮执行 Agent 会刷新本轮工具 schema。非法工具不会加入，模型可根据 `available_expandable_tools` 选择其他当前仍可扩展的工具。
+
 ## 4. 启动期 vs 运行期
 
 ```mermaid
