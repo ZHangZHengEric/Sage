@@ -19,6 +19,10 @@ services:
       - ${SAGE_COMPOSE_ENV_FILE:-.env}
     environment:
       SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage}
+      SAGE_TRACE_JAEGER_URL: ${SAGE_TRACE_JAEGER_URL:-http://sage-jaeger-dev:4317}
+      SAGE_TRACE_JAEGER_UI_URL: ${SAGE_TRACE_JAEGER_UI_URL:-http://sage-jaeger-dev:16686/jaeger}
+      SAGE_TRACE_JAEGER_PUBLIC_URL: ${SAGE_TRACE_JAEGER_PUBLIC_URL:-http://127.0.0.1:30151/jaeger}
+      SAGE_TRACE_JAEGER_BASE_PATH: ${SAGE_TRACE_JAEGER_BASE_PATH:-/api/observability/jaeger}
       SAGE_SESSION_DIR: /app/sessions
       SAGE_LOCAL_LINUX_ISOLATION: bwrap
     cap_add:
@@ -121,5 +125,22 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    mem_limit: 1g
+    cpus: 0.5
+  sage-jaeger-dev:
+    image: docker.m.daocloud.io/jaegertracing/jaeger:2.16.0
+    container_name: sage-jaeger-dev
+    restart: always
+    command:
+      - --config
+      - /etc/jaeger/config.yaml
+    volumes:
+      - ../images/jaeger/config.yaml:/etc/jaeger/config.yaml:ro
+    ports:
+      - "${SAGE_JAEGER_OTLP_GRPC_PORT:-31417}:4317"   # OTLP gRPC
+      - "${SAGE_JAEGER_OTLP_HTTP_PORT:-31418}:4318"   # OTLP HTTP
+    expose:
+      - "16686"
+      - "13133"
     mem_limit: 1g
     cpus: 0.5
