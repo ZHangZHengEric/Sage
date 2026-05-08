@@ -89,7 +89,7 @@ ref: env_vars
 
 | 变量                                             | 默认值     | 说明                                                                                                                                                                           |
 | ---------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SAGE_AGENT_STATUS_PROTOCOL_ENABLED`           | `true`  | 是否启用 Agent 本轮状态协议（注入 `turn_status` 并要求模型显式报告状态）                                                                                                                     |
+| `SAGE_AGENT_STATUS_PROTOCOL_ENABLED`           | `true`  | 是否启用 Agent 本轮状态协议。启用时注入 `turn_status`，任务完成由模型调用该工具报告（`task_done` / `need_user_input` / `blocked` / `continue_work`）；设为 `false` 时，SimpleAgent 回退到旧的“规则优先 + LLM `task_complete_judge`”完成判断。 |
 | `SAGE_CLI_MAX_LOOP_COUNT`                      | —       | CLI 单轮最大循环次数                                                                                                                                                                 |
 | `SAGE_SPLIT_SYSTEM`                            | `true`  | 是否把 system message 拆成 stable / semi_stable / volatile 多段以提升 prompt cache 命中                                                                                              |
 | `SAGE_STABLE_TOOLS_ORDER`                      | `true`  | 是否对 `tools` 字段按 name 字典序排序，稳定 cache key                                                                                                                                      |
