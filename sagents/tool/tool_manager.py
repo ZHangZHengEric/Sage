@@ -399,6 +399,7 @@ class ToolManager:
                     "sagents.tool.impl.questionnaire_tool",
                     "sagents.tool.impl.lint_tool",
                     "sagents.tool.impl.turn_status_tool",
+                    "sagents.tool.impl.tool_expansion_tool",
                     "sagents.tool.impl.codebase_tool",
                     "sagents.tool.impl.compress_history_tool",
                     "sagents.tool.impl.todo_tool",
