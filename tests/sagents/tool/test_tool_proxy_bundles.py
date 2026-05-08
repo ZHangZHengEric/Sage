@@ -35,10 +35,18 @@ class _StubTurnStatus:
         return status
 
 
+class _StubToolExpansion:
+    @tool()
+    def tool_expand_tools(self, tool_names: list[str] = None):
+        """expand"""
+        return tool_names or []
+
+
 def _build_proxy(available):
     tm = ToolManager(isolated=True, is_auto_discover=False)
     tm.register_tools_from_object(_StubShellTools())
     tm.register_tools_from_object(_StubTurnStatus())
+    tm.register_tools_from_object(_StubToolExpansion())
     return ToolProxy(tool_managers=[tm], available_tools=available)
 
 
@@ -46,6 +54,12 @@ def test_turn_status_force_injected_when_whitelist_set():
     proxy = _build_proxy(available=["execute_shell_command"])
     names = {t["name"] for t in proxy.list_tools()}
     assert "turn_status" in names
+
+
+def test_tool_expand_tools_force_injected_when_whitelist_set():
+    proxy = _build_proxy(available=["execute_shell_command"])
+    names = {t["name"] for t in proxy.list_tools()}
+    assert "tool_expand_tools" in names
 
 
 def test_shell_bundle_unlocks_all_three_when_only_one_selected():
