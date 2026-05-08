@@ -8,6 +8,7 @@ from sagents.tool.tool_manager import ToolManager
 from sagents.utils.prompt_manager import PromptManager
 from sagents.utils.content_saver import save_agent_response_content
 from sagents.tool.tool_baseline import augment_with_baseline_tools
+from sagents.tool.tool_expansion import TOOL_EXPAND_TOOLS, should_expose_tool_expansion
 import json
 import uuid
 from copy import deepcopy
@@ -214,6 +215,8 @@ class SimpleAgent(AgentBase):
         # 而不应阻止模型主动调用该工具来终止本轮。
         available_tool_names = [tool['function']['name'] for tool in tools_json]
         selected_tools = set(augment_with_baseline_tools(suggested_tools, available_tool_names))
+        if should_expose_tool_expansion(suggested_tools, selected_tools, available_tool_names):
+            selected_tools.add(TOOL_EXPAND_TOOLS)
         
         tools_suggest_json = [
             tool for tool in tools_json
@@ -718,6 +721,20 @@ class SimpleAgent(AgentBase):
             if current_turn_status_only:
                 logger.info("SimpleAgent: 上一轮纯文本无工具调用，本轮仅开放 turn_status 并启用 tool_choice=required")
 
+            if session_context.audit_status.pop("tools_expanded", False) and tool_manager:
+                refreshed_suggested_tools = session_context.audit_status.get('suggested_tools', [])
+                if not refreshed_suggested_tools:
+                    try:
+                        tools_list = tool_manager.list_tools_simplified()
+                        refreshed_suggested_tools = [t.get('name', '') for t in tools_list if t.get('name')]
+                    except Exception:
+                        refreshed_suggested_tools = []
+                tools_json = self._prepare_tools(tool_manager, refreshed_suggested_tools, session_context)
+                logger.info(
+                    "SimpleAgent: 工具扩展后已刷新本轮工具列表: "
+                    f"{[tool['function']['name'] for tool in tools_json]}"
+                )
+
             # 调用LLM
             should_break = False
             current_tools_json = self._turn_status_tools_only(tools_json) if current_turn_status_only else tools_json
@@ -1068,12 +1085,14 @@ class SimpleAgent(AgentBase):
                     logger.warning(
                         f"SimpleAgent: 模型返回未提供的工具 {sorted(invalid_tool_names)}，拒绝执行"
                     )
+                    unavailable_tools_label = ', '.join(sorted(name for name in invalid_tool_names if name))
+                    rejection_template = PromptManager().get_agent_prompt_auto(
+                        'unavailable_tool_expansion_message',
+                        language=session_context.get_language(),
+                    )
                     yield ([MessageChunk(
                         role=MessageRole.ASSISTANT.value,
-                        content=(
-                            "模型尝试调用当前请求未提供的工具，已拒绝执行以避免越权或循环。"
-                            f"违规工具：{', '.join(sorted(name for name in invalid_tool_names if name))}"
-                        ),
+                        content=rejection_template.format(tools=unavailable_tools_label),
                         type=MessageType.ERROR.value,
                         agent_name=self.agent_name,
                     )], False)
