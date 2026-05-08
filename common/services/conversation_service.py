@@ -3,9 +3,11 @@ Conversation shared service-layer entry points for server and desktop routers.
 """
 
 import asyncio
+import hashlib
 import json
 import os
-import hashlib
+import tempfile
+import zipfile
 from collections import Counter
 from datetime import timedelta
 from pathlib import Path
@@ -447,6 +449,99 @@ async def delete_conversation(
         )
     logger.bind(session_id=conversation_id).info("会话删除成功")
     return conversation_id
+
+
+def _resolve_session_directory(session_id: str) -> Path:
+    safe_session_id = str(session_id or "").strip()
+    if not safe_session_id or Path(safe_session_id).name != safe_session_id:
+        raise SageHTTPException(
+            status_code=400,
+            detail="session_id 不合法",
+            error_detail="Invalid session_id",
+        )
+
+    sessions_root = Path(get_sessions_root()).resolve()
+    session_dir = (sessions_root / safe_session_id).resolve()
+    try:
+        session_dir.relative_to(sessions_root)
+    except ValueError:
+        raise SageHTTPException(
+            status_code=400,
+            detail="session_id 不合法",
+            error_detail="Session path escapes sessions root",
+        )
+
+    if not session_dir.is_dir():
+        raise SageHTTPException(
+            status_code=404,
+            detail=f"会话文件夹 {safe_session_id} 不存在",
+            error_detail=f"Session directory '{safe_session_id}' not found",
+        )
+    return session_dir
+
+
+def _build_session_archive_sync(session_dir: Path, session_id: str) -> str:
+    tmp_file = tempfile.NamedTemporaryFile(
+        prefix=f"sage-session-{session_id}-",
+        suffix=".zip",
+        delete=False,
+    )
+    tmp_file.close()
+    zip_path = tmp_file.name
+
+    try:
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(session_dir, followlinks=False):
+                root_path = Path(root)
+                dirs[:] = [name for name in dirs if not (root_path / name).is_symlink()]
+                for file_name in files:
+                    file_path = root_path / file_name
+                    if file_path.is_symlink() or not file_path.is_file():
+                        continue
+                    arcname = Path(session_id) / file_path.relative_to(session_dir)
+                    zipf.write(file_path, arcname.as_posix())
+    except Exception:
+        try:
+            os.unlink(zip_path)
+        except OSError:
+            pass
+        raise
+
+    return zip_path
+
+
+async def prepare_session_folder_download(
+    session_id: str,
+    *,
+    user_id: Optional[str] = None,
+    is_admin: bool = False,
+) -> Tuple[str, str, str]:
+    dao = ConversationDao()
+    conversation = await dao.get_by_session_id(session_id)
+    if not conversation:
+        raise SageHTTPException(
+            status_code=404,
+            detail=f"会话 {session_id} 不存在",
+            error_detail=f"Conversation '{session_id}' not found",
+        )
+
+    if not is_admin:
+        if not user_id:
+            raise SageHTTPException(
+                status_code=403,
+                detail="无权下载该会话文件夹",
+                error_detail="Missing user identity",
+            )
+        if conversation.user_id and conversation.user_id != user_id:
+            raise SageHTTPException(
+                status_code=403,
+                detail="无权下载该会话文件夹",
+                error_detail="forbidden",
+            )
+
+    session_dir = _resolve_session_directory(session_id)
+    archive_path = await asyncio.to_thread(_build_session_archive_sync, session_dir, session_id)
+    return archive_path, f"{session_id}.zip", "application/zip"
 
 
 async def update_server_conversation_title(
