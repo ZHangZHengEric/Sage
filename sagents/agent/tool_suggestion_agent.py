@@ -60,11 +60,18 @@ class ToolSuggestionAgent(AgentBase):
         logger.info(f"ToolSuggestionAgent: 开始为会话 {session_id} 分析工具推荐")
         language = session_context.get_language()
 
-        history_messages = message_manager.extract_all_context_messages(recent_turns=1)
+        history_messages = message_manager.extract_all_context_messages(
+            recent_turns=5,
+            last_turn_user_only=False,
+        )
         # 根据 active_budget 压缩消息
         budget_info = message_manager.context_budget_manager.budget_info
         if budget_info:
-            history_messages = MessageManager.compress_messages(history_messages, max(budget_info.get('active_budget', 8000),2000))
+            history_messages = MessageManager.compress_messages(
+                history_messages,
+                max(budget_info.get('active_budget', 8000), 3000),
+                recent_messages_count=8,
+            )
         available_tools = tool_manager.list_tools_simplified(lang=language)
 
             
