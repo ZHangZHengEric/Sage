@@ -230,6 +230,7 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
             new_entry = pool._entries["server"]
 
             self.assertIsNot(new_entry, old_entry)
+            self.assertTrue(old_entry.draining)
             self.assertIn(old_connection, closed_connections)
             self.assertTrue(old_connection.closed)
             self.assertNotIn(old_connection, new_entry.connections)
