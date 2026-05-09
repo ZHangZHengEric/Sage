@@ -18,12 +18,12 @@ async def initialize_db_connection():
         if db_client is not None:
             logger.info("数据库客户端已初始化")
             from common.models.base import Base
-            from common.models.token_usage import TokenUsage  # noqa: F401
+            from .db_schema import ensure_desktop_models_registered, sync_database_schema
+            ensure_desktop_models_registered()
             async with db_client._engine.begin() as conn:
                 # Create all tables
                 await conn.run_sync(Base.metadata.create_all)
                 # Check and update schema for existing tables
-                from .db_schema import sync_database_schema
                 await conn.run_sync(sync_database_schema)
 
             await migrate_desktop_default_user_id()
