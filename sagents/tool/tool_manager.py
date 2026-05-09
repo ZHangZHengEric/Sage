@@ -272,6 +272,7 @@ class ToolManager:
         self.tools: Dict[str, Union[ToolSpec, McpToolSpec, SageMcpToolSpec]] = {}
         self._tool_instances: Dict[type, Any] = {}  # 缓存工具实例
         self._mcp_setting_path = None
+        self._mcp_proxy = McpProxy(isolated=isolated)
 
         if is_auto_discover:
             self.discover_tools_from_path()
@@ -573,12 +574,13 @@ class ToolManager:
         logger.debug(f"Successfully registered new tool: {tool_spec.name} ({tool_type})")
         return True
 
-    async def remove_tool_by_mcp(self, server_name: str) -> bool:
+    async def remove_tool_by_mcp(self, server_name: str, close_pool: bool = True) -> bool:
         """
         Remove all tools registered from a specific MCP server.
 
         Args:
             server_name: Name of the server to remove
+            close_pool: Whether to close pooled connections for this server
 
         Returns:
             bool: True if any tools were removed, False otherwise
@@ -605,6 +607,8 @@ class ToolManager:
                     f"No MCP tools found for server '{server_name}' to remove"
                 )
                 removed = True
+            if close_pool:
+                await self._mcp_proxy.close_server(server_name, drain=True)
             return removed
         except Exception as e:
             logger.error(f"Failed to remove MCP server '{server_name}': {e}")
@@ -631,10 +635,15 @@ class ToolManager:
                 logger.debug(f"Removed MCP tool '{tool_name}'")
 
             logger.info(f"Cleared {removed_count} MCP tools")
+            await self._mcp_proxy.close_all(drain=True)
             return removed_count
         except Exception as e:
             logger.error(f"Failed to clear MCP tools: {e}")
             return 0
+
+    async def shutdown(self) -> None:
+        """Release pooled MCP connections held by this tool manager."""
+        await self._mcp_proxy.close_all(drain=True)
 
     async def _discover_mcp_tools(self, mcp_setting_path: Optional[str] = None):
         bool_registered = False
@@ -657,7 +666,7 @@ class ToolManager:
             return bool_registered
         return bool_registered
 
-    async def register_mcp_server(self, server_name: str, config: dict):
+    async def register_mcp_server(self, server_name: str, config: dict, force: bool = False):
         """Register an MCP server directly with configuration
 
         Args:
@@ -697,7 +706,8 @@ class ToolManager:
                     logger.warning(f"Invalid URL for server {server_name}: {url_val}")
                     return False
                 server_params = StreamableHttpServerParameters(
-                    url=url_val
+                    url=url_val,
+                    api_key=config.get("api_key", None),
                 )
             else:
                 # stdio protocol
@@ -740,8 +750,25 @@ class ToolManager:
                     args=args,
                     env=env,
                 )
-            mcp_proxy = McpProxy()
-            mcp_tools = await mcp_proxy.get_mcp_tools(server_name, server_params)
+            cached_tools = None
+            if not force:
+                cached_tools = self._mcp_proxy.get_cached_tools(
+                    server_name,
+                    server_params,
+                    config=config,
+                )
+            if cached_tools is not None:
+                registered_tools.extend(cached_tools)
+                logger.info(f"MCP server {server_name} unchanged, reused cached tools")
+                return registered_tools
+
+            mcp_tools = await self._mcp_proxy.get_mcp_tools(
+                server_name,
+                server_params,
+                config=config,
+                force=force,
+            )
+            await self.remove_tool_by_mcp(server_name, close_pool=False)
             for mcp_tool in mcp_tools:
                 await self._register_mcp_tool(server_name, mcp_tool, server_params)
                 registered_tools.append(mcp_tool)
@@ -1198,9 +1225,8 @@ class ToolManager:
     ) -> str:
         """Execute MCP tool and format result"""
         logger.info(f"Executing MCP tool: {tool.name} on server: {tool.server_name}")
-        mcp_proxy = McpProxy()
         try:
-            result = await mcp_proxy.run_mcp_tool(
+            result = await self._mcp_proxy.run_mcp_tool(
                 tool,
                 session_id,
                 user_id=user_id,
