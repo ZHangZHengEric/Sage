@@ -233,6 +233,18 @@ def build_run_request(
     max_loop_count: Optional[int] = None,
     goal: Optional[Dict[str, Any]] = None,
 ) -> StreamRequest:
+    system_context: Dict[str, Any] = {"response_language": "zh-CN"}
+    if isinstance(goal, dict) and not goal.get("clear"):
+        objective = str(goal.get("objective") or "").strip()
+        status = str(goal.get("status") or "active").strip() or "active"
+        if objective:
+            system_context.update(
+                {
+                    "goal_mode": "true",
+                    "active_goal": objective,
+                    "goal_status": status,
+                }
+            )
     return StreamRequest(
         messages=[Message(role="user", content=task)],
         session_id=session_id,
@@ -241,8 +253,7 @@ def build_run_request(
         agent_mode=agent_mode,
         available_skills=available_skills,
         max_loop_count=max_loop_count,
-        goal=goal,
-        system_context={"response_language": "zh-CN"},
+        system_context=system_context,
     )
 
 

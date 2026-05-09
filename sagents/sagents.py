@@ -339,7 +339,6 @@ class SAgent:
                     more_suggest=more_suggest,
                     force_summary=force_summary,
                     system_context=system_context,
-                    goal=goal,
                     available_workflows=available_workflows or {},
                     context_budget_config=context_budget_config,
                     custom_sub_agents=custom_sub_agents,

@@ -3,7 +3,6 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from app.cli.runtime.stats import _tool_step_event_key
-from common.schemas.goal import GoalMutation, GoalStatus
 
 
 def _resolve_session_goal_fields(
@@ -26,19 +25,15 @@ def _resolve_session_goal_fields(
         if isinstance(raw_transition, dict):
             goal_transition = raw_transition
     if include_request_goal_overlay:
-        request_goal = getattr(request, "goal", None)
-        if isinstance(request_goal, GoalMutation):
-            if request_goal.clear:
-                goal_payload = None
-            elif request_goal.objective:
+        request_system_context = getattr(request, "system_context", None)
+        if isinstance(request_system_context, dict):
+            objective = str(request_system_context.get("active_goal") or "").strip()
+            status = str(request_system_context.get("goal_status") or "active").strip() or "active"
+            goal_mode = str(request_system_context.get("goal_mode") or "").strip().lower()
+            if goal_mode == "true" and objective:
                 goal_payload = {
-                    "objective": request_goal.objective,
-                    "status": (request_goal.status or GoalStatus.ACTIVE).value,
-                }
-            elif request_goal.status == GoalStatus.COMPLETED and goal_payload:
-                goal_payload = {
-                    **goal_payload,
-                    "status": GoalStatus.COMPLETED.value,
+                    "objective": objective,
+                    "status": status,
                 }
     return goal_payload, goal_transition, prior_message_count
 
