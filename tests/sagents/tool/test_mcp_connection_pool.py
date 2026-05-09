@@ -2,6 +2,8 @@ import asyncio
 import unittest
 from unittest.mock import patch
 
+import anyio
+
 from sagents.tool.mcp_connection_pool import McpConnectionPool, McpPooledConnection
 from sagents.tool.tool_schema import StreamableHttpServerParameters
 
@@ -167,7 +169,7 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pool._entries["server"].per_connection_concurrency, 2)
         await pool.close_all(drain=False)
 
-    async def test_list_tools_retries_closed_connection_during_refresh(self):
+    async def test_list_tools_retries_closed_connection_when_cache_missing(self):
         pool = McpConnectionPool()
         server_params = StreamableHttpServerParameters(url="http://mcp.example")
         open_count = 0
@@ -191,11 +193,49 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(McpPooledConnection, "open", fake_open):
             await pool.list_tools("server", server_params)
-            await pool.list_tools("server", server_params, force=True)
+            pool._entries["server"].tools_cache = None
+            await pool.list_tools("server", server_params)
 
         self.assertEqual(open_count, 2)
         self.assertEqual(len(pool._entries["server"].connections), 1)
         await pool.close_all(drain=False)
+
+    async def test_force_list_tools_replaces_pool_and_closes_existing_connections(self):
+        pool = McpConnectionPool()
+        server_params = StreamableHttpServerParameters(url="http://mcp.example")
+        opened_connections = []
+        closed_connections = []
+
+        class FakeSession:
+            async def list_tools(self):
+                return _FakeListToolsResponse()
+
+        async def fake_open(self):
+            opened_connections.append(self)
+            self.session = FakeSession()
+            return self
+
+        async def fake_close(self):
+            self.closed = True
+            closed_connections.append(self)
+
+        with patch.object(McpPooledConnection, "open", fake_open), patch.object(
+            McpPooledConnection, "close", fake_close
+        ):
+            await pool.list_tools("server", server_params)
+            old_entry = pool._entries["server"]
+            old_connection = opened_connections[0]
+
+            await pool.list_tools("server", server_params, force=True)
+            new_entry = pool._entries["server"]
+
+            self.assertIsNot(new_entry, old_entry)
+            self.assertIn(old_connection, closed_connections)
+            self.assertTrue(old_connection.closed)
+            self.assertNotIn(old_connection, new_entry.connections)
+            self.assertEqual(len(new_entry.connections), 1)
+
+            await pool.close_all(drain=False)
 
     async def test_call_tool_times_out_and_discards_connection(self):
         pool = McpConnectionPool()
@@ -225,6 +265,34 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(open_count, 1)
         self.assertEqual(len(pool._entries["server"].connections), 0)
+        await pool.close_all(drain=False)
+
+    async def test_call_tool_retries_anyio_closed_resource_error(self):
+        pool = McpConnectionPool()
+        server_params = StreamableHttpServerParameters(url="http://mcp.example")
+        open_count = 0
+
+        class FakeSession:
+            def __init__(self, fail=False):
+                self.fail = fail
+
+            async def call_tool(self, name, arguments):
+                if self.fail:
+                    raise anyio.ClosedResourceError()
+                return _FakeResult()
+
+        async def fake_open(self):
+            nonlocal open_count
+            open_count += 1
+            self.session = FakeSession(fail=open_count == 1)
+            return self
+
+        with patch.object(McpPooledConnection, "open", fake_open):
+            result = await pool.call_tool("server", server_params, "echo", {})
+
+        self.assertIsInstance(result, _FakeResult)
+        self.assertEqual(open_count, 2)
+        self.assertEqual(len(pool._entries["server"].connections), 1)
         await pool.close_all(drain=False)
 
 
