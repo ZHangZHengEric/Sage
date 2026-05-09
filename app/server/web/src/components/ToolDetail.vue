@@ -130,7 +130,7 @@
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <pre class="rounded-lg bg-muted p-4 overflow-x-auto text-sm font-mono text-muted-foreground">{{ JSON.stringify(tool.parameters, null, 2) }}</pre>
+            <pre class="rounded-lg bg-muted p-4 overflow-x-auto text-sm font-mono text-muted-foreground">{{ JSON.stringify(rawConfig, null, 2) }}</pre>
           </CardContent>
         </Card>
 
@@ -261,21 +261,47 @@ const canEditAnyTool = computed(() => {
 })
 
 // Computed
+const inputSchema = computed(() => {
+  const schema = props.tool?.input_schema
+  if (schema && typeof schema === 'object') {
+    return schema
+  }
+  return {
+    type: 'object',
+    properties: props.tool?.parameters || {},
+    required: props.tool?.required || [],
+  }
+})
+
+const schemaProperties = computed(() => {
+  const properties = inputSchema.value?.properties
+  if (properties && typeof properties === 'object') {
+    return properties
+  }
+  return props.tool?.parameters || {}
+})
+
+const schemaRequired = computed(() => {
+  return Array.isArray(inputSchema.value?.required) ? inputSchema.value.required : (props.tool?.required || [])
+})
+
+const rawConfig = computed(() => inputSchema.value)
+
 const formattedParams = computed(() => {
-  if (!props.tool || !props.tool.parameters) {
+  if (!props.tool || !schemaProperties.value) {
     return []
   }
-  return formatParameters(props.tool.parameters, props.tool.required)
+  return formatParameters(schemaProperties.value, schemaRequired.value)
 })
 
 const previewFields = computed(() => {
-  if (!props.tool || !props.tool.parameters || typeof props.tool.parameters !== 'object') {
+  if (!props.tool || !schemaProperties.value || typeof schemaProperties.value !== 'object') {
     return []
   }
 
-  return Object.entries(props.tool.parameters).map(([name, schema]) => {
-    const normalized = schema && typeof schema === 'object' ? schema : {}
-    const type = normalized.type || 'string'
+  return Object.entries(schemaProperties.value).map(([name, schema]) => {
+    const normalized = normalizeSchema(schema)
+    const type = getSchemaType(normalized)
     const enumValues = Array.isArray(normalized.enum) ? normalized.enum : []
     const kind = enumValues.length > 0
       ? 'enum'
@@ -491,6 +517,37 @@ const getToolTypeBadgeVariant = (type) => {
   }
 }
 
+const getSchemaVariant = (schema) => {
+  if (!schema || typeof schema !== 'object') {
+    return {}
+  }
+
+  const variants = Array.isArray(schema.anyOf)
+    ? schema.anyOf
+    : Array.isArray(schema.oneOf)
+      ? schema.oneOf
+      : []
+  return variants.find((item) => item && typeof item === 'object' && item.type !== 'null') || schema
+}
+
+const normalizeSchema = (schema) => {
+  const variant = getSchemaVariant(schema)
+  return {
+    ...(variant && typeof variant === 'object' ? variant : {}),
+    ...(schema && typeof schema === 'object' ? schema : {}),
+    anyOf: undefined,
+    oneOf: undefined,
+  }
+}
+
+const getSchemaType = (schema) => {
+  const variant = getSchemaVariant(schema)
+  if (Array.isArray(variant.type)) {
+    return variant.type.filter((item) => item !== 'null').join(' | ') || 'unknown'
+  }
+  return variant.type || 'unknown'
+}
+
 const formatParameters = (parameters, requiredNames = []) => {
   if (!parameters || typeof parameters !== 'object') {
     return []
@@ -498,11 +555,12 @@ const formatParameters = (parameters, requiredNames = []) => {
 
   const requiredSet = new Set(Array.isArray(requiredNames) ? requiredNames : [])
   return Object.entries(parameters).map(([key, value]) => {
+    const normalized = normalizeSchema(value)
     return {
       name: key,
-      type: value.type || 'unknown',
-      description: value.description || t('tools.noDescription'),
-      required: requiredSet.has(key) || value.required === true
+      type: getSchemaType(value),
+      description: normalized.description || t('tools.noDescription'),
+      required: requiredSet.has(key) || value?.required === true
     }
   })
 }

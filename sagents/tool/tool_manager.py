@@ -17,6 +17,7 @@ from pathlib import Path
 import json
 import asyncio
 import re
+import copy
 from mcp import StdioServerParameters
 from mcp import Tool
 import traceback
@@ -35,6 +36,32 @@ MAX_TOOL_RESULT_TOKENS = 12000
 _CATEGORY_SOURCE_LABELS: Dict[str, str] = {
     "browser": "浏览器扩展",
 }
+
+
+def _copy_json_like(value: Any, fallback: Any) -> Any:
+    try:
+        return copy.deepcopy(value)
+    except Exception:
+        return fallback
+
+
+def _get_display_input_schema(tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec]) -> Dict[str, Any]:
+    input_schema = getattr(tool, "input_schema", None)
+    if isinstance(input_schema, dict):
+        schema = _copy_json_like(input_schema, {})
+        if isinstance(schema, dict):
+            schema.setdefault("type", "object")
+            schema.setdefault("properties", {})
+            schema.setdefault("required", [])
+            return schema
+
+    parameters = getattr(tool, "parameters", {}) or {}
+    required = getattr(tool, "required", []) or []
+    return {
+        "type": "object",
+        "properties": _copy_json_like(parameters, {}),
+        "required": list(required) if isinstance(required, list) else [],
+    }
 
 
 def _truncate_result(result: str, max_tokens: int = MAX_TOOL_RESULT_TOKENS) -> str:
@@ -838,6 +865,7 @@ class ToolManager:
             required=input_schema.get("required", []),
             server_name=server_name,
             server_params=server_params,
+            input_schema=input_schema,
         )
         registered = self.register_tool(tool_spec)
         logger.debug(f"MCP tool {tool_info['name']} registration result: {registered}")
@@ -855,12 +883,14 @@ class ToolManager:
         for tool in self.tools.values():
             spec = convert_spec_to_openai_format(tool, lang=lang, fallback_chain=fallback_chain)
             fn = spec.get("function", {})
-            params = fn.get("parameters", {})
+            input_schema = _get_display_input_schema(tool)
+            params = input_schema.get("properties", {})
             tools_list.append({
                 "name": fn.get("name", getattr(tool, "name", "")),
                 "description": fn.get("description", getattr(tool, "description", "")),
-                "parameters": params.get("properties", {}),
-                "required": params.get("required", getattr(tool, "required", [])),
+                "parameters": params if isinstance(params, dict) else {},
+                "required": input_schema.get("required", getattr(tool, "required", [])),
+                "input_schema": input_schema,
             })
         return tools_list
 
@@ -911,13 +941,15 @@ class ToolManager:
 
             spec = convert_spec_to_openai_format(tool, lang=lang, fallback_chain=fallback_chain)
             fn = spec.get("function", {})
-            params = fn.get("parameters", {})
+            input_schema = _get_display_input_schema(tool)
+            params = input_schema.get("properties", {})
 
             tools_with_type.append({
                 "name": fn.get("name", getattr(tool, "name", "")),
                 "description": fn.get("description", getattr(tool, "description", "")),
-                "parameters": params.get("properties", {}),
-                "required": params.get("required", getattr(tool, "required", [])),
+                "parameters": params if isinstance(params, dict) else {},
+                "required": input_schema.get("required", getattr(tool, "required", [])),
+                "input_schema": input_schema,
                 "type": tool_type,
                 "source": source,
             })
