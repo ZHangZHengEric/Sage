@@ -919,7 +919,6 @@ class SageStreamService:
                 "max_loop_count": self.request.max_loop_count,
                 "agent_mode": self.request.agent_mode,
                 "system_context": self.request.system_context,
-                "goal": self.request.goal,
                 "available_workflows": self.request.available_workflows,
                 "context_budget_config": self.request.context_budget_config,
             }

@@ -117,17 +117,9 @@ class TestCommonAgent:
     def test_build_system_segments_includes_active_goal_context(self, common_agent):
         mock_context = MagicMock()
         mock_context.system_context = {
-            "active_goal": {
-                "objective": "Ship the runtime goal contract",
-                "status": "active",
-            },
-            "goal_continuation_policy": {
-                "mode": "continue_active_goal",
-                "objective": "Ship the runtime goal contract",
-                "status": "active",
-                "instruction": "Continue pursuing the active goal across turns until it is completed, cleared, or replaced.",
-            },
-            "goal_resume_hint": "Continue the active goal after resume.",
+            "goal_mode": "true",
+            "active_goal": "Ship the runtime goal contract",
+            "goal_status": "active",
         }
         mock_context.sandbox = None
         mock_context.effective_skill_manager = None
@@ -141,21 +133,17 @@ class TestCommonAgent:
                 )
             )
 
-        assert "<active_goal>" in segments["volatile"]
+        assert "<goal_mode>true</goal_mode>" in segments["volatile"]
+        assert "<active_goal>Ship the runtime goal contract</active_goal>" in segments["volatile"]
+        assert "<goal_status>active</goal_status>" in segments["volatile"]
         assert "Ship the runtime goal contract" in segments["volatile"]
-        assert "Continue pursuing it across the current session" in segments["volatile"]
-        assert "\"resume_hint\": \"Continue the active goal after resume.\"" in segments["volatile"]
-        assert "<goal_continuation_policy>" in segments["volatile"]
-        assert "Continue pursuing the active goal and make its status explicit as the session progresses." in segments["volatile"]
 
     def test_build_system_segments_includes_goal_transition_guidance(self, common_agent):
         mock_context = MagicMock()
         mock_context.system_context = {
-            "goal_transition": {
-                "type": "cleared",
-                "previous_objective": "Ship the runtime goal contract",
-                "previous_status": "active",
-            }
+            "goal_mode": "true",
+            "active_goal": "Ship the runtime goal contract",
+            "goal_status": "completed",
         }
         mock_context.sandbox = None
         mock_context.effective_skill_manager = None
@@ -169,25 +157,17 @@ class TestCommonAgent:
                 )
             )
 
-        assert "<goal_transition>" in segments["volatile"]
+        assert "<goal_mode>true</goal_mode>" in segments["volatile"]
+        assert "<active_goal>Ship the runtime goal contract</active_goal>" in segments["volatile"]
+        assert "<goal_status>completed</goal_status>" in segments["volatile"]
         assert "Ship the runtime goal contract" in segments["volatile"]
-        assert "Do not implicitly continue the old goal unless the user reintroduces it." in segments["volatile"]
 
     def test_build_system_segments_includes_resume_goal_continuation_guidance(self, common_agent):
         mock_context = MagicMock()
         mock_context.system_context = {
-            "active_goal": {
-                "objective": "Ship the runtime goal contract",
-                "status": "active",
-                "resume_hint": "Continue the active goal after resume. Previous pause reason: blocked",
-            },
-            "goal_continuation_policy": {
-                "mode": "resume_active_goal",
-                "objective": "Ship the runtime goal contract",
-                "status": "active",
-                "resume_hint": "Continue the active goal after resume. Previous pause reason: blocked",
-                "instruction": "Continue the active goal from prior progress after resume. Do not restart from scratch.",
-            },
+            "goal_mode": "true",
+            "active_goal": "Ship the runtime goal contract",
+            "goal_status": "active",
         }
         mock_context.sandbox = None
         mock_context.effective_skill_manager = None
@@ -201,6 +181,6 @@ class TestCommonAgent:
                 )
             )
 
-        assert "<goal_continuation_policy>" in segments["volatile"]
-        assert "\"mode\": \"resume_active_goal\"" in segments["volatile"]
-        assert "Build on prior progress and continue forward without restarting the plan from scratch." in segments["volatile"]
+        assert "<goal_mode>true</goal_mode>" in segments["volatile"]
+        assert "<active_goal>Ship the runtime goal contract</active_goal>" in segments["volatile"]
+        assert "<goal_status>active</goal_status>" in segments["volatile"]

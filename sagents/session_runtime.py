@@ -31,7 +31,6 @@ from sagents.context.session_context import (
     SessionContext,
     SessionStatus,
 )
-from common.schemas.goal import GoalMutation, GoalStatus, SessionGoal
 
 from sagents.observability import AgentRuntime, ObservabilityManager, OpenTelemetryTraceHandler, ObservableAsyncOpenAI
 from sagents.skill import SkillManager, SkillProxy
@@ -145,8 +144,6 @@ class Session:
         self.status = status
         if status == SessionStatus.INTERRUPTED:
             self.interrupt_event.set()
-            if self.session_context:
-                self.session_context.pause_goal(self.interrupt_reason)
         elif status == SessionStatus.RUNNING:
             # 进入新的运行周期，清掉历史中断状态（可能来自上一轮被中断后持久化的状态）
             if self.interrupt_event.is_set() or self.interrupt_reason:
@@ -158,8 +155,6 @@ class Session:
             self.interrupt_reason = None
             if self.session_context and isinstance(getattr(self.session_context, "audit_status", None), dict):
                 self.session_context.audit_status.pop("interrupt_reason", None)
-            if self.session_context:
-                self.session_context.activate_goal()
         if self.session_context:
             self.session_context.end_time = time.time() if status in {SessionStatus.COMPLETED, SessionStatus.ERROR, SessionStatus.INTERRUPTED} else self.session_context.end_time
         if status in {SessionStatus.COMPLETED, SessionStatus.ERROR, SessionStatus.INTERRUPTED}:
@@ -283,13 +278,6 @@ class Session:
                 self.session_context.audit_status = snapshot.get("audit_status") or {}
                 if isinstance(agent_config, dict):
                     self.session_context.agent_config = agent_config
-                raw_goal = snapshot.get("goal")
-                if isinstance(raw_goal, dict):
-                    try:
-                        self.session_context.goal = SessionGoal.model_validate(raw_goal)
-                        self.session_context._sync_goal_runtime_context()
-                    except Exception as goal_exc:
-                        logger.warning(f"SessionRuntime: 恢复 session {self.session_id} goal 失败: {goal_exc}")
                 self.session_context.message_manager.messages = self._load_persisted_messages()
                 # 注意：这里不再根据持久化的 INTERRUPTED 状态去 set interrupt_event。
                 # interrupt_event 是用于"当前运行周期"的中断信号，磁盘里的 INTERRUPTED 仅是上一轮
@@ -343,72 +331,14 @@ class Session:
             logger.warning(f"SessionRuntime: 获取 session {self.session_id} 任务状态失败: {exc}")
             return {"tasks": []}
 
-    def get_goal(self) -> Optional[SessionGoal]:
-        if self.session_context:
-            return self.session_context.get_goal()
-        snapshot = self._load_persisted_snapshot()
-        if not isinstance(snapshot, dict):
-            return None
-        raw_goal = snapshot.get("goal")
-        if not isinstance(raw_goal, dict):
-            return None
-        try:
-            return SessionGoal.model_validate(raw_goal)
-        except Exception as exc:
-            logger.debug(f"SessionRuntime: 解析 session {self.session_id} goal 失败: {exc}")
-            return None
-
-    def get_goal_transition(self) -> Optional[Dict[str, Any]]:
-        if self.session_context:
-            transition = getattr(self.session_context, "audit_status", {}).get("goal_transition")
-            return dict(transition) if isinstance(transition, dict) else None
-
-        snapshot = self._load_persisted_snapshot()
-        if not isinstance(snapshot, dict):
-            return None
-        audit_status = snapshot.get("audit_status")
-        if not isinstance(audit_status, dict):
-            return None
-        transition = audit_status.get("goal_transition")
-        return dict(transition) if isinstance(transition, dict) else None
-
-    def get_goal_resume_hint(self) -> Optional[str]:
-        if self.session_context:
-            resume_hint = getattr(self.session_context, "audit_status", {}).get("goal_resume_hint")
-        else:
-            snapshot = self._load_persisted_snapshot()
-            audit_status = snapshot.get("audit_status") if isinstance(snapshot, dict) else None
-            resume_hint = audit_status.get("goal_resume_hint") if isinstance(audit_status, dict) else None
-
-        if isinstance(resume_hint, str) and resume_hint.strip():
-            return resume_hint.strip()
+    def get_goal(self) -> None:
         return None
 
-    def set_goal(self, objective: str, status: GoalStatus = GoalStatus.ACTIVE) -> Optional[SessionGoal]:
-        if not self.session_context:
-            return None
-        return self.session_context.set_goal(objective, status=status)
+    def get_goal_transition(self) -> Optional[Dict[str, Any]]:
+        return None
 
-    def clear_goal(self) -> bool:
-        if not self.session_context:
-            return False
-        self.session_context.clear_goal()
-        return True
-
-    def pause_goal(self, reason: Optional[str] = None) -> Optional[SessionGoal]:
-        if not self.session_context:
-            return None
-        return self.session_context.pause_goal(reason)
-
-    def activate_goal(self) -> Optional[SessionGoal]:
-        if not self.session_context:
-            return None
-        return self.session_context.activate_goal()
-
-    def complete_goal(self) -> Optional[SessionGoal]:
-        if not self.session_context:
-            return None
-        return self.session_context.complete_goal()
+    def get_goal_resume_hint(self) -> Optional[str]:
+        return None
 
     def request_interrupt(self, message: str = "用户请求中断", cascade: bool = True) -> bool:
         if not self.session_context:
@@ -618,7 +548,6 @@ class Session:
         context_budget_config: Optional[Dict[str, Any]] = None,
         custom_sub_agents: Optional[List[Dict[str, Any]]] = None,
         parent_session_id: Optional[str] = None,
-        goal: Optional[Union[GoalMutation, Dict[str, Any]]] = None,
     ) -> AsyncGenerator[List[MessageChunk], None]:
         available_workflows = available_workflows or {}
         merged_system_context = dict(system_context or {})
@@ -637,30 +566,6 @@ class Session:
             )
             logger.info("SAgent: 会话开始")
             self.session_context = session_context
-
-            goal_mutation: Optional[GoalMutation] = None
-            if isinstance(goal, GoalMutation):
-                goal_mutation = goal
-            elif isinstance(goal, dict):
-                try:
-                    goal_mutation = GoalMutation.model_validate(goal)
-                except Exception as goal_exc:
-                    logger.warning(f"SAgent: 忽略非法 goal mutation: {goal_exc}")
-
-            if goal_mutation:
-                if goal_mutation.clear:
-                    session_context.clear_goal()
-                elif goal_mutation.objective:
-                    session_context.set_goal(
-                        goal_mutation.objective,
-                        status=goal_mutation.status or GoalStatus.ACTIVE,
-                    )
-                elif goal_mutation.status == GoalStatus.COMPLETED:
-                    session_context.complete_goal()
-                elif goal_mutation.status == GoalStatus.PAUSED:
-                    session_context.pause_goal()
-                elif goal_mutation.status == GoalStatus.ACTIVE:
-                    session_context.activate_goal()
 
             if custom_sub_agents:
                 session_context.custom_sub_agents = custom_sub_agents
@@ -1310,7 +1215,7 @@ class SessionManager:
             return None
         return session.get_tasks_status()
 
-    def get_goal(self, session_id: str) -> Optional[SessionGoal]:
+    def get_goal(self, session_id: str) -> None:
         session = self.get(session_id)
         if not session:
             return None
