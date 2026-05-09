@@ -1,7 +1,7 @@
 
 from loguru import logger
 from sagents.skill import SkillManager, set_skill_manager
-from sagents.tool.tool_manager import ToolManager, set_tool_manager
+from sagents.tool.tool_manager import ToolManager, get_tool_manager, set_tool_manager
 from sagents.session_runtime import initialize_global_session_manager
 
 from common.core.client.chat import close_chat_client, init_chat_client
@@ -72,7 +72,12 @@ async def initialize_tool_manager():
 
 async def close_tool_manager():
     """关闭工具管理器"""
-    set_tool_manager(None)
+    tool_manager = get_tool_manager()
+    try:
+        if tool_manager:
+            await tool_manager.shutdown()
+    finally:
+        set_tool_manager(None)
 
 
 async def initialize_skill_manager():

@@ -148,9 +148,14 @@ async def initialize_tool_manager():
 
 async def close_tool_manager():
     """关闭工具管理器"""
-    from sagents.tool.tool_manager import set_tool_manager
+    from sagents.tool.tool_manager import get_tool_manager, set_tool_manager
 
-    set_tool_manager(None)
+    tool_manager = get_tool_manager()
+    try:
+        if tool_manager:
+            await tool_manager.shutdown()
+    finally:
+        set_tool_manager(None)
 
 
 async def initialize_skill_manager(cfg: StartupConfig):

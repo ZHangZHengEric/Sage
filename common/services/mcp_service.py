@@ -171,23 +171,20 @@ async def ensure_default_anytool_server(
         return existing_server
 
     server_config = _build_default_anytool_config()
-    runtime_config = _build_runtime_server_config(server_config, "")
-    if register_tool_manager:
-        tm = get_tool_manager()
-        success = await tm.register_mcp_server(DEFAULT_ANYTOOL_SERVER_NAME, runtime_config)
-        if not success:
-            logger.warning("默认 AnyTool MCP server 注册失败")
-            return await dao.save_mcp_server(
-                name=DEFAULT_ANYTOOL_SERVER_NAME,
-                config=server_config,
-                user_id="",
-            )
-
-    return await dao.save_mcp_server(
+    saved_server = await dao.save_mcp_server(
         name=DEFAULT_ANYTOOL_SERVER_NAME,
         config=server_config,
         user_id="",
     )
+    if register_tool_manager:
+        tm = get_tool_manager()
+        runtime_config = _build_runtime_server_config(server_config, "")
+        success = await tm.register_mcp_server(DEFAULT_ANYTOOL_SERVER_NAME, runtime_config, force=True)
+        if not success:
+            logger.warning("默认 AnyTool MCP server 注册失败")
+            return saved_server
+
+    return saved_server
 
 
 async def add_mcp_server(
@@ -238,8 +235,31 @@ async def add_mcp_server(
         description=description,
     )
 
-    tm = get_tool_manager()
     runtime_config = _build_runtime_server_config(server_config, user_id)
+    tm = get_tool_manager()
+    if kind == "anytool":
+        old_config = dict(existing_server.config or {}) if existing_server else None
+        old_user_id = existing_server.user_id if existing_server else ""
+        await dao.save_mcp_server(name=target_name, config=server_config, user_id=user_id)
+        success = await tm.register_mcp_server(target_name, runtime_config, force=True)
+        if not success:
+            if old_config is not None:
+                await dao.save_mcp_server(name=target_name, config=old_config, user_id=old_user_id)
+                await tm.register_mcp_server(
+                    target_name,
+                    _build_runtime_server_config(old_config, old_user_id),
+                    force=True,
+                )
+            else:
+                await dao.delete_by_name(target_name)
+                await tm.remove_tool_by_mcp(target_name)
+            raise SageHTTPException(
+                status_code=500,
+                detail=f"MCP server {target_name} 注册失败",
+                error_detail="Tool manager registration failed",
+            )
+        return target_name
+
     success = await tm.register_mcp_server(target_name, runtime_config)
     if not success:
         raise SageHTTPException(
@@ -289,15 +309,21 @@ async def update_mcp_server(
             error_detail="Permission denied",
         )
 
-    target_name = server_name.strip()
     requested_name = (name or server_name).strip()
+    target_name = DEFAULT_ANYTOOL_SERVER_NAME if kind == "anytool" else requested_name
+    if not target_name:
+        raise SageHTTPException(
+            status_code=400,
+            detail="MCP服务器名称不能为空",
+            error_detail="MCP server name is required",
+        )
     if kind == "anytool" and requested_name not in {target_name, DEFAULT_ANYTOOL_SERVER_NAME}:
         raise SageHTTPException(
             status_code=400,
             detail="AnyTool 不支持重命名",
             error_detail="AnyTool server name is fixed",
         )
-    if target_name != server_name:
+    if target_name != server_name.strip():
         duplicate = await dao.get_by_name(target_name)
         if duplicate:
             raise SageHTTPException(
@@ -324,24 +350,47 @@ async def update_mcp_server(
     tm = get_tool_manager()
     old_config = dict(existing_server.config or {})
     try:
-        await tm.remove_tool_by_mcp(server_name)
         runtime_config = _build_runtime_server_config(server_config, user_id)
-        success = await tm.register_mcp_server(target_name, runtime_config)
-        if not success and not server_config.get("disabled", False):
+        if server_config.get("disabled", False):
+            await tm.remove_tool_by_mcp(server_name)
+            await dao.save_mcp_server(name=target_name, config=server_config, user_id=user_id)
+            if target_name != server_name:
+                await dao.delete_by_name(server_name)
+            return target_name
+
+        if server_config.get("kind") == "anytool":
+            await dao.save_mcp_server(name=target_name, config=server_config, user_id=user_id)
+            success = await tm.register_mcp_server(target_name, runtime_config, force=True)
+        else:
+            success = await tm.register_mcp_server(target_name, runtime_config, force=True)
+            if success:
+                await dao.save_mcp_server(name=target_name, config=server_config, user_id=user_id)
+
+        if not success:
             raise SageHTTPException(
                 status_code=500,
                 detail=f"MCP server {target_name} 更新失败",
                 error_detail="Tool manager registration failed",
             )
 
-        await dao.save_mcp_server(name=target_name, config=server_config, user_id=user_id)
-        if target_name != server_name:
+        if target_name != server_name.strip():
+            await tm.remove_tool_by_mcp(server_name)
             await dao.delete_by_name(server_name)
         return target_name
     except Exception:
         if old_config and not old_config.get("disabled", False):
             try:
-                await tm.register_mcp_server(server_name, _build_runtime_server_config(old_config, existing_server.user_id))
+                if server_config.get("kind") == "anytool":
+                    await dao.save_mcp_server(
+                        name=server_name,
+                        config=old_config,
+                        user_id=existing_server.user_id,
+                    )
+                await tm.register_mcp_server(
+                    server_name,
+                    _build_runtime_server_config(old_config, existing_server.user_id),
+                    force=True,
+                )
             except Exception as restore_error:
                 logger.error(f"回滚旧 MCP server 失败: {server_name}, {restore_error}")
         raise
@@ -612,21 +661,6 @@ async def upsert_anytool_tool(
         role=role,
     )
 
-    # 同 delete：DB 写入后再强制重注册一次，避免首次 list 拿到旧工具
-    try:
-        tm = get_tool_manager()
-        await tm.remove_tool_by_mcp(server_name)
-        latest = await dao.get_by_name(server_name)
-        if latest:
-            runtime_config = _build_runtime_server_config(
-                _normalize_server_config(latest.config or {}),
-                latest.user_id,
-            )
-            if not runtime_config.get("disabled", False):
-                await tm.register_mcp_server(server_name, runtime_config)
-    except Exception as exc:
-        logger.warning(f"[AnyTool] post-upsert refresh failed: {exc}")
-
     return {
         "server_name": server_name,
         "tool_name": next_name,
@@ -704,22 +738,6 @@ async def delete_anytool_tool(
         role=role,
     )
 
-    # update_mcp_server 内部 register → save 顺序导致首次注册时 AnyTool HTTP 仍读到旧 DB 工具，
-    # 这里在 DB 已写入后再强制清理并重注册一次，确保 tool_manager 立即反映最新工具列表
-    try:
-        tm = get_tool_manager()
-        await tm.remove_tool_by_mcp(server_name)
-        latest = await dao.get_by_name(server_name)
-        if latest:
-            runtime_config = _build_runtime_server_config(
-                _normalize_server_config(latest.config or {}),
-                latest.user_id,
-            )
-            if not runtime_config.get("disabled", False):
-                await tm.register_mcp_server(server_name, runtime_config)
-    except Exception as exc:
-        logger.warning(f"[AnyTool] post-delete refresh failed: {exc}")
-
     return {"server_name": server_name, "tool_name": target}
 
 
@@ -735,7 +753,7 @@ async def reload_all_mcp_tools() -> None:
             logger.info(f"[MCP Reload] 跳过内置 AnyTool 的常规注册: {server.name}")
             continue
         try:
-            success = await tm.register_mcp_server(server.name, _build_runtime_server_config(server.config or {}, server.user_id))
+            success = await tm.register_mcp_server(server.name, _build_runtime_server_config(server.config or {}, server.user_id), force=True)
             if success:
                 logger.info(f"[MCP Reload] 成功注册 MCP Server: {server.name}")
             else:
@@ -771,7 +789,7 @@ async def toggle_mcp_server(server_name: str, user_id: Optional[str] = None) -> 
         if new_disabled:
             await tm.remove_tool_by_mcp(server_name)
         else:
-            success = await tm.register_mcp_server(server_name, _build_runtime_server_config(server_config, existing_server.user_id))
+            success = await tm.register_mcp_server(server_name, _build_runtime_server_config(server_config, existing_server.user_id), force=True)
             if not success:
                 raise SageHTTPException(
                     detail=f"MCP服务器 '{server_name}' 启用失败",
@@ -806,17 +824,14 @@ async def refresh_mcp_server(
             error_detail="Permission denied",
         )
 
-    await tm.remove_tool_by_mcp(server_name)
     server_config = existing_server.config
     server_config["disabled"] = False
-    success = await tm.register_mcp_server(server_name, _build_runtime_server_config(server_config, existing_server.user_id))
+    success = await tm.register_mcp_server(server_name, _build_runtime_server_config(server_config, existing_server.user_id), force=True)
     if success:
         logger.info(f"MCP server {server_name} 刷新成功")
         server_config["disabled"] = False
         await dao.save_mcp_server(name=server_name, config=server_config)
         return "refreshed"
 
-    logger.warning(f"MCP server {server_name} 刷新失败，将其设置为禁用状态")
-    server_config["disabled"] = True
-    await dao.save_mcp_server(name=server_name, config=server_config)
-    return "disabled"
+    logger.warning(f"MCP server {server_name} 刷新失败，保留旧 MCP 工具和连接")
+    return "failed"
