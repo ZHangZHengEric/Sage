@@ -87,7 +87,7 @@ class LocalSandboxProvider(ISandboxHandle):
         if self._file_system is None:
             from .filesystem import SandboxFileSystem
 
-            logger.info(f"LocalSandboxProvider: Initializing with workspace={self._sandbox_agent_workspace}")
+            logger.debug(f"LocalSandboxProvider: Initializing with workspace={self._sandbox_agent_workspace}")
 
             # 显式传入 volume_mounts 时以其为准；否则用 sandbox_agent_workspace 作 1:1 宿主机映射
             if self._volume_mounts:

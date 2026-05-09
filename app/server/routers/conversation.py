@@ -2,10 +2,13 @@
 会话管理接口路由模块
 """
 
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Query, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 from common.core.request_identity import get_request_role, get_request_user_id
 from common.core.render import Response
@@ -14,6 +17,14 @@ from common.services import conversation_router_service, conversation_service
 
 # 创建路由器
 conversation_router = APIRouter()
+
+
+def _cleanup_file(path: str) -> None:
+    try:
+        if os.path.exists(path):
+            os.unlink(path)
+    except OSError:
+        pass
 
 
 class InterruptRequest(BaseModel):
@@ -214,6 +225,22 @@ async def get_messages(session_id: str, request: Request):
     """获取指定对话的所有消息"""
     data = await conversation_service.get_conversation_messages(session_id)
     return await Response.succ(data=data, message="获取消息成功")
+
+
+@conversation_router.get("/api/sessions/{session_id}/download")
+async def download_session_folder(session_id: str, request: Request):
+    """下载 session root 下指定 session 的完整文件夹压缩包。"""
+    role = get_request_role(request)
+    path, filename, media_type = await conversation_service.prepare_session_folder_download(
+        session_id,
+        is_admin=role == "admin",
+    )
+    return FileResponse(
+        path=path,
+        filename=filename,
+        media_type=media_type,
+        background=BackgroundTask(_cleanup_file, path),
+    )
 
 
 @conversation_router.get("/api/share/conversations/{session_id}/messages")

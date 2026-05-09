@@ -1,0 +1,14 @@
+*
+
+!app/
+!app/wiki/
+!app/wiki/**
+
+app/wiki/node_modules
+app/wiki/.vitepress/cache
+app/wiki/.vitepress/dist
+app/wiki/.DS_Store
+app/wiki/npm-debug.log*
+
+!deploy/
+!deploy/**

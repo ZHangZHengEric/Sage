@@ -119,7 +119,7 @@ class MemoryIndex:
         self.index_path = Path(index_path)
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
         self.fts_index_path = self.index_path.with_suffix(".sqlite3")
-        logger.info(f"MemoryIndex: Index path created: {self.index_path},workspace_path: {self.workspace_path}")
+        logger.debug(f"MemoryIndex: Index path created: {self.index_path},workspace_path: {self.workspace_path}")
         # In-memory data
         self.bm25 = None
         self.documents: Dict[int, FileDocument] = {}
@@ -224,7 +224,7 @@ class MemoryIndex:
                 pickle.dump(data, f)
 
             elapsed = time.time() - start_time
-            logger.info(f"MemoryIndex: Index saved to {self.index_path} in {elapsed:.3f}s")
+            logger.debug(f"MemoryIndex: Index saved to {self.index_path} in {elapsed:.3f}s")
             return True
         except Exception as e:
             logger.error(f"MemoryIndex: Failed to save index: {e}")
@@ -775,7 +775,7 @@ class MemoryIndex:
             self._dir_mtime_cache = {}
 
         # Start recursive scan from workspace root
-        logger.info(f"MemoryIndex: Starting scan from workspace: {self.workspace_path}")
+        logger.debug(f"MemoryIndex: Starting scan from workspace: {self.workspace_path}")
         await self._scan_directory_recursive(
             self.workspace_path,
             file_extensions,
@@ -819,10 +819,10 @@ class MemoryIndex:
             stats["save_time"] = time.time() - save_start
 
             stats["total_time"] = time.time() - total_start_time
-            logger.info(f"MemoryIndex: Index updated - added:{stats['added']}, updated:{stats['updated']}, removed:{stats['removed']}, unchanged:{stats['unchanged']}, scan:{stats['scan_time']:.3f}s, build:{stats['build_time']:.3f}s, save:{stats['save_time']:.3f}s, total:{stats['total_time']:.3f}s")
+            logger.debug(f"MemoryIndex: Index updated - added:{stats['added']}, updated:{stats['updated']}, removed:{stats['removed']}, unchanged:{stats['unchanged']}, scan:{stats['scan_time']:.3f}s, build:{stats['build_time']:.3f}s, save:{stats['save_time']:.3f}s, total:{stats['total_time']:.3f}s")
         else:
             stats["total_time"] = time.time() - total_start_time
-            logger.info(f"MemoryIndex: No file changes, unchanged:{stats['unchanged']}, scan:{stats['scan_time']:.3f}s, total:{stats['total_time']:.3f}s")
+            logger.debug(f"MemoryIndex: No file changes, unchanged:{stats['unchanged']}, scan:{stats['scan_time']:.3f}s, total:{stats['total_time']:.3f}s")
 
         return stats
 

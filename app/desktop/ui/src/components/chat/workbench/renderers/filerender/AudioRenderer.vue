@@ -119,7 +119,7 @@ import {
   AlertCircle,
   RefreshCw
 } from 'lucide-vue-next'
-import { readFile } from '@tauri-apps/plugin-fs'
+import { readLocalOrWorkspaceUint8Array } from '@/utils/agentWorkspaceBackend.js'
 
 const props = defineProps({
   filePath: {
@@ -159,8 +159,8 @@ const loadAudio = async () => {
   try {
     console.log('[AudioRenderer] Loading audio from:', props.filePath)
 
-    // 使用 Tauri 的 readFile 读取音频文件
-    const fileData = await readFile(props.filePath)
+    // Agent 工作区文件走后端拉取后再解码播放
+    const fileData = await readLocalOrWorkspaceUint8Array(props.filePath)
     console.log('[AudioRenderer] File data size:', fileData.length)
 
     // 根据文件扩展名确定 MIME 类型

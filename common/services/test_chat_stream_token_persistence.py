@@ -61,7 +61,6 @@ if "opentelemetry" not in sys.modules:
 from common.services import chat_service
 from common.services import chat_stream_manager
 from common.services.chat_stream_manager import StreamManager
-from common.schemas.goal import GoalStatus, SessionGoal
 
 
 class _FakeStreamService:
@@ -192,24 +191,6 @@ def test_stream_manager_stop_session_closes_background_generator():
 def test_execute_chat_session_emits_stream_end_with_goal_payload(monkeypatch):
     notifications = []
 
-    class _FakeGoalManager:
-        def get_goal(self, session_id):
-            assert session_id == "session-web-stream"
-            return SessionGoal(
-                objective="Ship the runtime goal contract",
-                status=GoalStatus.ACTIVE,
-                created_at=1.0,
-                updated_at=2.0,
-            )
-
-        def get_goal_transition(self, session_id):
-            assert session_id == "session-web-stream"
-            return {
-                "type": "resumed",
-                "objective": "Ship the runtime goal contract",
-                "status": "active",
-            }
-
     class _FakeStreamManager:
         async def notify_session_list_changed(self):
             notifications.append("notified")
@@ -223,7 +204,6 @@ def test_execute_chat_session_emits_stream_end_with_goal_payload(monkeypatch):
 
     monkeypatch.setattr(chat_service, "_persist_token_usage_if_available", _fake_persist)
     monkeypatch.setattr(chat_service, "_finalize_session_end", _fake_finalize)
-    monkeypatch.setattr(chat_service, "get_global_session_manager", lambda: _FakeGoalManager())
     monkeypatch.setattr(
         chat_stream_manager.StreamManager,
         "get_instance",
@@ -243,10 +223,8 @@ def test_execute_chat_session_emits_stream_end_with_goal_payload(monkeypatch):
     assert notifications == ["notified"]
     stream_end = chunks[-1]
     assert '"type": "stream_end"' in stream_end
-    assert '"objective": "Ship the runtime goal contract"' in stream_end
-    assert '"status": "active"' in stream_end
-    assert '"goal_transition"' in stream_end
-    assert '"type": "resumed"' in stream_end
+    assert '"goal"' not in stream_end
+    assert '"goal_transition"' not in stream_end
 
 
 def test_execute_chat_session_promotes_turn_status_goal_to_top_level_stream_event(monkeypatch):
@@ -261,18 +239,8 @@ def test_execute_chat_session_promotes_turn_status_goal_to_top_level_stream_even
         async def notify_session_list_changed(self):
             return None
 
-    class _FakeGoalManager:
-        def get_goal_transition(self, session_id):
-            assert session_id == "session-web-stream"
-            return {
-                "type": "completed",
-                "objective": "Ship the runtime goal contract",
-                "status": "completed",
-            }
-
     monkeypatch.setattr(chat_service, "_persist_token_usage_if_available", _fake_persist)
     monkeypatch.setattr(chat_service, "_finalize_session_end", _fake_finalize)
-    monkeypatch.setattr(chat_service, "get_global_session_manager", lambda: _FakeGoalManager())
     monkeypatch.setattr(
         chat_stream_manager.StreamManager,
         "get_instance",
@@ -291,5 +259,5 @@ def test_execute_chat_session_promotes_turn_status_goal_to_top_level_stream_even
     assert '"goal": {' in chunk
     assert '"objective": "Ship the runtime goal contract"' in chunk
     assert '"status": "completed"' in chunk
-    assert '"goal_transition"' in chunk
+    assert '"goal_transition"' not in chunk
     assert '"goal_outcome"' in chunk

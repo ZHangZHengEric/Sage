@@ -73,7 +73,7 @@ npm run dev
 
 ## Docker Compose (full stack)
 
-The root `[docker-compose.yml](https://github.com/ZHangZHengEric/Sage/blob/main/docker-compose.yml)` starts a **full** platform profile: `sage-server`, static `sage-web`, optional `sage-wiki`, MySQL, Elasticsearch, RustFS (S3-compatible), and Jaeger. It is intended for **production-like** or integrated demos, not the lightest dev loop (for that, prefer `./scripts/dev-up.sh` in Minimal mode).
+`[deploy/prod/docker-compose.yml](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/prod/docker-compose.yml)` starts a **full** platform profile: `sage-server`, static `sage-web`, optional `sage-wiki`, MySQL, Elasticsearch, RustFS (S3-compatible), and Jaeger. It is intended for **production-like** or integrated demos, not the lightest dev loop (for that, prefer `./scripts/dev-up.sh` in Minimal mode).
 
 **What gets exposed (defaults in the compose file):**
 
@@ -91,8 +91,8 @@ The root `[docker-compose.yml](https://github.com/ZHangZHengEric/Sage/blob/main/
 ### Prerequisites
 
 - Docker with **Compose v2** (`docker compose`)
-- Sufficient host resources (the compose file sets a **16G** memory limit on `sage-server`; adjust in `docker-compose.yml` if needed)
-- A valid `.env` at the **repository root** (Compose reads `env_file: .env`). Copy from `[.env.example](https://github.com/ZHangZHengEric/Sage/blob/main/.env.example)` and set at least **LLM** and **DB/ES/S3**-related variables. The example file is aligned with **in-cluster** hostnames: `sage-mysql`, `sage-es`, `sage-rustfs`, etc.
+- Sufficient host resources (the compose file sets a **16G** memory limit on `sage-server`; adjust in `deploy/prod/docker-compose.yml` if needed)
+- A valid env file for the target environment, for example `deploy/prod/.env`. Copy from `deploy/prod/.env.example` and set at least **LLM** and **DB/ES/S3**-related variables. The example file is aligned with **in-cluster** hostnames: `sage-mysql`, `sage-es`, `sage-rustfs`, etc.
 
 `SAGE_ROOT` must point to a directory on the host used for **persistent volumes** (MySQL data, `sage-server` sessions/agents/logs, ES data, RustFS data, etc.).
 
@@ -100,17 +100,16 @@ The root `[docker-compose.yml](https://github.com/ZHangZHengEric/Sage/blob/main/
 
 ```bash
 cd /path/to/Sage
-export SAGE_ROOT=/path/to/sage-data   # or e.g. $(pwd)/data
-cp .env.example .env
-# edit .env: SAGE_DEFAULT_LLM_API_KEY, secrets, SAGE_MYSQL_PASSWORD, SAGE_ELASTICSEARCH_PASSWORD, SAGE_S3_* as needed
-docker compose up -d --build
+cp deploy/prod/.env.example deploy/prod/.env
+# edit deploy/prod/.env: SAGE_DEFAULT_LLM_API_KEY, secrets, SAGE_MYSQL_PASSWORD, SAGE_ELASTICSEARCH_PASSWORD, SAGE_S3_* as needed
+deploy/compose.sh prod up -d --build
 ```
 
 **Logs:**
 
 ```bash
-docker compose logs -f sage-server
-docker compose logs -f sage-web
+deploy/compose.sh prod logs -f sage-server
+deploy/compose.sh prod logs -f sage-web
 ```
 
 **Health check (API):**
@@ -128,10 +127,10 @@ curl -sS http://127.0.0.1:30050/api/health
 ### Stop
 
 ```bash
-docker compose down
+deploy/compose.sh prod down
 ```
 
-**Port conflicts:** If another process uses 30050–30057, change the `ports:` mappings in `docker-compose.yml` and update `.env` so API URLs and `SAGE_API_BASE_URL` stay consistent.
+**Port conflicts:** If another process uses 30050–30057, change the published port variables in `deploy/prod/.env` and update API URLs such as `SAGE_API_BASE_URL` consistently.
 
 ## See also
 
@@ -139,4 +138,3 @@ docker compose down
 - [Server architecture](../architecture/ARCHITECTURE_APP_SERVER.md)
 - [Configuration](../CONFIGURATION.md) · [Environment variables](../ENV_VARS.md)
 - [Troubleshooting](../TROUBLESHOOTING.md)
-

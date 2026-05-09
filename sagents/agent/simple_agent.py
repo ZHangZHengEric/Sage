@@ -1,5 +1,5 @@
 from sagents.context.messages.message_manager import MessageManager
-from .agent_base import AgentBase
+from .agent_base import AgentBase, PartialStreamConsumedError
 from typing import Any, Dict, List, Optional, AsyncGenerator, Tuple, Union, cast
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
@@ -7,6 +7,8 @@ from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.prompt_manager import PromptManager
 from sagents.utils.content_saver import save_agent_response_content
+from sagents.tool.tool_baseline import augment_with_baseline_tools
+from sagents.tool.tool_expansion import TOOL_EXPAND_TOOLS, should_expose_tool_expansion
 import json
 import uuid
 from copy import deepcopy
@@ -32,7 +34,7 @@ def _get_system_prefix(tool_manager: Optional[ToolManager], language: str) -> st
         language: 语言
         
     Returns:
-        str: 合适的 system prefix 模板名称
+        str: 拼接后的 system prefix
     """
     tool_names = []
     if tool_manager:
@@ -41,12 +43,35 @@ def _get_system_prefix(tool_manager: Optional[ToolManager], language: str) -> st
         # tools_json = tool_manager.get_openai_tools(lang=language, fallback_chain=["en"])
         # tool_names = [tool['function']['name'] for tool in tools_json]
     
-    # 如果有 todo_write 工具，使用完整版本
+    turn_status_enabled = os.environ.get("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "true").lower() != "false"
+    prompt_manager = PromptManager()
+    parts = [
+        prompt_manager.get_agent_prompt(
+            "SimpleAgent",
+            "agent_custom_system_base_requirements",
+            language=language,
+        )
+    ]
+
     if 'todo_write' in tool_names:
-        return "agent_custom_system_prefix"
-    
-    # 没有 todo_write 工具，使用无任务管理版本
-    return "agent_custom_system_prefix_no_task"
+        parts.append(
+            prompt_manager.get_agent_prompt(
+                "SimpleAgent",
+                "agent_custom_system_task_requirement",
+                language=language,
+            )
+        )
+
+    if turn_status_enabled:
+        parts.append(
+            prompt_manager.get_agent_prompt(
+                "SimpleAgent",
+                "agent_custom_system_turn_status_requirement",
+                language=language,
+            )
+        )
+
+    return "\n".join(parts)
 
 
 class SimpleAgent(AgentBase):
@@ -114,6 +139,41 @@ class SimpleAgent(AgentBase):
         """
         return _detect_repeat_pattern_util(signatures, max_period=max_period)
 
+    def _resolve_tool_choice(
+        self,
+        tools_json: List[Dict[str, Any]],
+        *,
+        force_tool_choice_required: bool = False,
+        force_tool_choice_auto: bool = False,
+    ) -> Optional[str]:
+        if not tools_json:
+            return None
+        if force_tool_choice_required:
+            return "required"
+        if force_tool_choice_auto:
+            return "auto"
+        env_force_required = os.getenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "").strip().lower() in ("1", "true", "yes", "on")
+        return "required" if env_force_required else None
+
+    def _should_escape_required_next_turn(
+        self,
+        chunks: List[MessageChunk],
+        *,
+        pattern: Optional[Dict[str, int]] = None,
+    ) -> bool:
+        if pattern:
+            return True
+        for chunk in chunks or []:
+            if getattr(chunk, "role", None) != MessageRole.TOOL.value:
+                continue
+            metadata = getattr(chunk, "metadata", None)
+            if isinstance(metadata, dict) and metadata.get("turn_status_rejected") is True:
+                return True
+            content = str(getattr(chunk, "content", "") or "").lower()
+            if "turn_status" in content and ("rejected" in content or "拒绝" in content):
+                return True
+        return False
+
     def _build_self_correction_message(self, pattern: Dict[str, int], language: str = 'en') -> str:
         template = PromptManager().get_prompt(
             key='repeat_pattern_self_correction_template',
@@ -138,9 +198,7 @@ class SimpleAgent(AgentBase):
         tool_manager = session_context.tool_manager
 
         # 重新获取agent_custom_system_prefix以支持动态语言切换
-        current_system_prefix = PromptManager().get_agent_prompt_auto(
-            _get_system_prefix(tool_manager, session_context.get_language()), language=session_context.get_language()
-        )
+        current_system_prefix = _get_system_prefix(tool_manager, session_context.get_language())
 
         # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
@@ -213,17 +271,17 @@ class SimpleAgent(AgentBase):
         # 获取所有工具
         tools_json = tool_manager.get_openai_tools(lang=session_context.get_language(), fallback_chain=["en"])
 
-        # 根据建议过滤工具
-        # 强制包含 todo / 终止工具 / 记忆工具，如果它们存在于可用工具中
-        # turn_status 始终包含：即使协议被禁用，模型仍可能因提示词而调用它；
-        # 若不包含则调用会被拒绝并触发错误→循环，导致相同文本重复出现。
-        # SAGE_AGENT_STATUS_PROTOCOL_ENABLED=false 只控制"强制 turn_status_only 轮"的触发，
-        # 而不应阻止模型主动调用该工具来终止本轮。
-        always_include = ['todo_write', 'search_memory', 'turn_status']
+        # 根据建议过滤工具，并补齐基础工作台工具（仅限当前工具管理器真实可用的工具）。
+        # 当状态协议启用时，ToolProxy 会把 turn_status 纳入可用工具；协议禁用时，
+        # system prefix 也会同步移除 turn_status 契约，避免模型调用未提供的协议工具。
+        available_tool_names = [tool['function']['name'] for tool in tools_json]
+        selected_tools = set(augment_with_baseline_tools(suggested_tools, available_tool_names))
+        if should_expose_tool_expansion(suggested_tools, selected_tools, available_tool_names):
+            selected_tools.add(TOOL_EXPAND_TOOLS)
         
         tools_suggest_json = [
             tool for tool in tools_json
-            if tool['function']['name'] in suggested_tools or tool['function']['name'] in always_include
+            if tool['function']['name'] in selected_tools
         ]
         
         if tools_suggest_json:
@@ -679,6 +737,7 @@ class SimpleAgent(AgentBase):
         message_manager = session_context.message_manager
         recent_signatures: List[str] = message_manager.get_recent_loop_signatures()
         logger.debug(f"SimpleAgent: 加载历史签名 {len(recent_signatures)} 个")
+        force_tool_choice_auto_next = False
         turn_status_only_next = False
         while True:
             if self._should_abort_due_to_session(session_context):
@@ -704,7 +763,7 @@ class SimpleAgent(AgentBase):
                 cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input)
             )
             all_new_response_chunks = []
-            current_system_prefix = PromptManager().get_agent_prompt_auto(_get_system_prefix(tool_manager, session_context.get_language()), language=session_context.get_language())
+            current_system_prefix = _get_system_prefix(tool_manager, session_context.get_language())
 
             # 更新system message，确保包含最新的子智能体列表等上下文信息
             if messages_input and messages_input[0].role == MessageRole.SYSTEM.value:
@@ -725,6 +784,20 @@ class SimpleAgent(AgentBase):
             if current_turn_status_only:
                 logger.info("SimpleAgent: 上一轮纯文本无工具调用，本轮仅开放 turn_status 并启用 tool_choice=required")
 
+            if session_context.audit_status.pop("tools_expanded", False) and tool_manager:
+                refreshed_suggested_tools = session_context.audit_status.get('suggested_tools', [])
+                if not refreshed_suggested_tools:
+                    try:
+                        tools_list = tool_manager.list_tools_simplified()
+                        refreshed_suggested_tools = [t.get('name', '') for t in tools_list if t.get('name')]
+                    except Exception:
+                        refreshed_suggested_tools = []
+                tools_json = self._prepare_tools(tool_manager, refreshed_suggested_tools, session_context)
+                logger.info(
+                    "SimpleAgent: 工具扩展后已刷新本轮工具列表: "
+                    f"{[tool['function']['name'] for tool in tools_json]}"
+                )
+
             # 调用LLM
             should_break = False
             current_tools_json = self._turn_status_tools_only(tools_json) if current_turn_status_only else tools_json
@@ -734,6 +807,7 @@ class SimpleAgent(AgentBase):
                 tool_manager=tool_manager,
                 session_id=session_id,
                 force_tool_choice_required=current_turn_status_only,
+                force_tool_choice_auto=force_tool_choice_auto_next,
             ):
                 non_empty_chunks = [c for c in chunks if (c.message_type != MessageType.EMPTY.value)]
                 if len(non_empty_chunks) > 0:
@@ -742,6 +816,8 @@ class SimpleAgent(AgentBase):
                 if is_complete:
                     should_break = True
                     break
+
+            force_tool_choice_auto_next = False
 
             if should_break:
                 break
@@ -818,6 +894,10 @@ class SimpleAgent(AgentBase):
             pattern = self._detect_repeat_pattern(recent_signatures)
             if pattern:
                 repeat_pattern_hits += 1
+                force_tool_choice_auto_next = self._should_escape_required_next_turn(
+                    all_new_response_chunks,
+                    pattern=pattern,
+                )
                 correction_message = self._build_self_correction_message(
                     pattern,
                     language=session_context.get_language(),
@@ -879,6 +959,7 @@ class SimpleAgent(AgentBase):
                                              tool_manager: Optional[ToolManager],
                                              session_id: str,
                                              force_tool_choice_required: bool = False,
+                                             force_tool_choice_auto: bool = False,
                                              ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
 
         # 准备消息：提取可用消息 -> 检查压缩 -> 执行压缩
@@ -905,12 +986,17 @@ class SimpleAgent(AgentBase):
 
         if len(tools_json) > 0:
             model_config_override['tools'] = tools_json
-            # 通过环境变量 SAGE_FORCE_TOOL_CHOICE_REQUIRED 控制是否强制 tool_choice=required。
-            # 默认关闭：部分模型（如 OpenAI o1/o3、部分国产模型）不支持 tool_choice=required，
-            # 显式启用后才下发给 LLM。调用方传入的 force_tool_choice_required 仍优先生效。
-            env_force_required = os.getenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "").strip().lower() in ("1", "true", "yes", "on")
-            if force_tool_choice_required or env_force_required:
-                model_config_override['tool_choice'] = 'required'
+            force_tool_choice_auto = force_tool_choice_auto or self._should_escape_required_next_turn(
+                messages_input,
+                pattern=None,
+            )
+            tool_choice = self._resolve_tool_choice(
+                tools_json,
+                force_tool_choice_required=force_tool_choice_required,
+                force_tool_choice_auto=force_tool_choice_auto,
+            )
+            if tool_choice:
+                model_config_override['tool_choice'] = tool_choice
         response = self._call_llm_streaming(
             messages=cast(List[Union[MessageChunk, Dict[str, Any]]], clean_message_input),
             session_id=session_id,
@@ -924,75 +1010,112 @@ class SimpleAgent(AgentBase):
         last_tool_call_id = None
         full_content_accumulator = ""
         tool_calls_messages_id = str(uuid.uuid4())
+        emitted_tool_call_stream = False
         # 处理流式响应块
-        async for chunk in response:
-            # print(chunk)
-            if chunk is None:
-                logger.warning(f"Received None chunk from LLM response, skipping... chunk: {chunk}")
-                continue
-            if chunk.choices is None:
-                logger.warning(f"Received chunk with None choices from LLM response, skipping... chunk: {chunk}")
-                continue
-            if len(chunk.choices) == 0:
-                continue
-            
-            # 由于 AgentBase._call_llm_streaming 已经处理了 asyncio.sleep(0) 的让权
-            # 这里不需要重复让权，减少不必要的调度开销
+        try:
+            async for chunk in response:
+                # print(chunk)
+                if chunk is None:
+                    logger.warning(f"Received None chunk from LLM response, skipping... chunk: {chunk}")
+                    continue
+                if chunk.choices is None:
+                    logger.warning(f"Received chunk with None choices, skipping... chunk: {chunk}")
+                    continue
+                if len(chunk.choices) == 0:
+                    continue
 
-            if chunk.choices[0].delta.tool_calls:
-                self._handle_tool_calls_chunk(chunk, tool_calls, last_tool_call_id or "")
-                # 更新last_tool_call_id
-                for tool_call in chunk.choices[0].delta.tool_calls:
-                    if tool_call.id is not None and len(tool_call.id) > 0:
-                        last_tool_call_id = tool_call.id
+                # 由于 AgentBase._call_llm_streaming 已经处理了 asyncio.sleep(0) 的让权
+                # 这里不需要重复让权，减少不必要的调度开销
 
-                # 根据环境变量控制是否流式返回工具调用消息
-                # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
-                emit_on_complete = os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
-                if not emit_on_complete:
-                    # 流式返回工具调用消息
-                    output_messages = [MessageChunk(
-                        role=MessageRole.ASSISTANT.value,
-                        tool_calls=chunk.choices[0].delta.tool_calls,
-                        message_id=tool_calls_messages_id,
-                        message_type=MessageType.TOOL_CALL.value,
-                        agent_name=self.agent_name
-                    )]
-                    yield (output_messages, False)
+                if chunk.choices[0].delta.tool_calls:
+                    self._handle_tool_calls_chunk(chunk, tool_calls, last_tool_call_id or "")
+                    # 更新last_tool_call_id
+                    for tool_call in chunk.choices[0].delta.tool_calls:
+                        if tool_call.id is not None and len(tool_call.id) > 0:
+                            last_tool_call_id = tool_call.id
+
+                    # 根据环境变量控制是否流式返回工具调用消息
+                    # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
+                    emit_on_complete = os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
+                    if not emit_on_complete:
+                        emitted_tool_call_stream = True
+                        # 流式返回工具调用消息
+                        output_messages = [MessageChunk(
+                            role=MessageRole.ASSISTANT.value,
+                            tool_calls=chunk.choices[0].delta.tool_calls,
+                            message_id=tool_calls_messages_id,
+                            message_type=MessageType.TOOL_CALL.value,
+                            agent_name=self.agent_name
+                        )]
+                        yield (output_messages, False)
+                    else:
+                        # yield 一个空的消息块以避免生成器卡住
+                        output_messages = [MessageChunk(
+                            role=MessageRole.ASSISTANT.value,
+                            content="",
+                            message_id=content_response_message_id,
+                            message_type=MessageType.EMPTY.value
+                        )]
+                        yield (output_messages, False)
+
+                elif chunk.choices[0].delta.content:
+                    if len(chunk.choices[0].delta.content) > 0:
+                        content_piece = chunk.choices[0].delta.content
+                        full_content_accumulator += content_piece
+                        output_messages = [MessageChunk(
+                            role='assistant',
+                            content=content_piece,
+                            message_id=content_response_message_id,
+                            message_type=MessageType.DO_SUBTASK_RESULT.value,
+                            agent_name=self.agent_name
+                        )]
+                        yield (output_messages, False)
                 else:
-                    # yield 一个空的消息块以避免生成器卡住
-                    output_messages = [MessageChunk(
-                        role=MessageRole.ASSISTANT.value,
-                        content="",
-                        message_id=content_response_message_id,
-                        message_type=MessageType.EMPTY.value
-                    )]
-                    yield (output_messages, False)
+                    # 先判断chunk.choices[0].delta 是否有reasoning_content 这个变量，并且不是none
+                    if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content is not None:
+                        output_messages = [MessageChunk(
+                            role='assistant',
+                            content=chunk.choices[0].delta.reasoning_content,
+                            message_id=reasoning_content_response_message_id,
+                            message_type=MessageType.REASONING_CONTENT.value,
+                            agent_name=self.agent_name
+                        )]
+                        yield (output_messages, False)
+        except PartialStreamConsumedError as exc:
+            recovery_messages: List[MessageChunk] = []
+            if emitted_tool_call_stream:
+                for tool_call_id, tool_call in tool_calls.items():
+                    real_tool_call_id = tool_call.get('id') or tool_call_id
+                    if not real_tool_call_id or real_tool_call_id.startswith("__tool_call_index_"):
+                        continue
+                    tool_name = (tool_call.get('function') or {}).get('name') or ""
+                    recovery_messages.append(MessageChunk(
+                        role=MessageRole.TOOL.value,
+                        content=json.dumps({
+                            "success": False,
+                            "status": "discarded",
+                            "error": "Partial streamed tool call discarded because the LLM stream ended before a complete response.",
+                        }, ensure_ascii=False),
+                        tool_call_id=real_tool_call_id,
+                        tool_name=tool_name,
+                        message_type=MessageType.TOOL_CALL_RESULT.value,
+                        agent_name=self.agent_name,
+                        metadata={"tool_name": tool_name, "partial_stream_discarded": True},
+                    ))
+            recovery_messages.append(MessageChunk(
+                role=MessageRole.ASSISTANT.value,
+                content=(
+                    "The model stream was interrupted while generating a tool call. "
+                    "The incomplete tool call was discarded to avoid corrupting the conversation history. "
+                    "Please retry the current operation."
+                ),
+                message_type=MessageType.ERROR.value,
+                agent_name=self.agent_name,
+                metadata={"partial_stream_discarded": True, "error": str(exc)},
+            ))
+            yield (recovery_messages, True)
+            return
 
-            elif chunk.choices[0].delta.content:
-                if len(chunk.choices[0].delta.content) > 0:
-                    content_piece = chunk.choices[0].delta.content
-                    full_content_accumulator += content_piece
-                    output_messages = [MessageChunk(
-                        role='assistant',
-                        content=content_piece,
-                        message_id=content_response_message_id,
-                        message_type=MessageType.DO_SUBTASK_RESULT.value,
-                        agent_name=self.agent_name
-                    )]
-                    yield (output_messages, False)
-            else:
-                # 先判断chunk.choices[0].delta 是否有reasoning_content 这个变量，并且不是none
-                if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content is not None:
-                    output_messages = [MessageChunk(
-                        role='assistant',
-                        content=chunk.choices[0].delta.reasoning_content,
-                        message_id=reasoning_content_response_message_id,
-                        message_type=MessageType.REASONING_CONTENT.value,
-                        agent_name=self.agent_name
-                    )]
-                    yield (output_messages, False)
-        
         # 处理完所有chunk后，尝试保存内容
         if full_content_accumulator:
              try:
@@ -1025,12 +1148,16 @@ class SimpleAgent(AgentBase):
                     logger.warning(
                         f"SimpleAgent: 模型返回未提供的工具 {sorted(invalid_tool_names)}，拒绝执行"
                     )
+                    unavailable_tools_label = ', '.join(sorted(name for name in invalid_tool_names if name))
+                    live_ctx_for_rejection = self._get_live_session_context(session_id)
+                    rejection_lang = live_ctx_for_rejection.get_language() if live_ctx_for_rejection is not None else 'en'
+                    rejection_template = PromptManager().get_agent_prompt_auto(
+                        'unavailable_tool_expansion_message',
+                        language=rejection_lang,
+                    )
                     yield ([MessageChunk(
                         role=MessageRole.ASSISTANT.value,
-                        content=(
-                            "模型尝试调用当前请求未提供的工具，已拒绝执行以避免越权或循环。"
-                            f"违规工具：{', '.join(sorted(name for name in invalid_tool_names if name))}"
-                        ),
+                        content=rejection_template.format(tools=unavailable_tools_label),
                         type=MessageType.ERROR.value,
                         agent_name=self.agent_name,
                     )], False)
@@ -1286,17 +1413,17 @@ class SimpleAgent(AgentBase):
         """
         # 1. 提取可用消息（检测压缩工具）
         extracted_messages = MessageManager.extract_messages_for_inference(messages_input)
-        logger.info(f"SimpleAgent: 提取后消息数量: {len(extracted_messages)}")
+        logger.debug(f"SimpleAgent: 提取后消息数量: {len(extracted_messages)}")
 
         # 2. 检查是否需要压缩
         max_model_len = self.model_config.get('max_model_len', 64000)
-        max_new_tokens = self.model_config.get('max_tokens', 20000)
+        max_new_tokens = self.model_config.get('max_tokens') or self.model_config.get('max_completion_tokens') or 20000
         should_compress, current_tokens, max_model_len = MessageManager.should_compress_messages(
             extracted_messages, max_model_len, max_new_tokens
         )
 
         if not should_compress:
-            logger.info(f"SimpleAgent: 消息长度符合要求 ({current_tokens} tokens)，无需压缩")
+            logger.debug(f"SimpleAgent: 消息长度符合要求 ({current_tokens} tokens)，无需压缩")
             yield (extracted_messages, True)
             return
 

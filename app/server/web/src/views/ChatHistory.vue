@@ -264,7 +264,7 @@
                 <span>{{ formatRelativeTime(conversation.updated_at) }}</span>
               </div>
 
-              <TooltipProvider>
+              <TooltipProvider v-if="canDownloadSessionFolder()">
                 <Tooltip>
                   <TooltipTrigger as-child>
                     <Button
@@ -278,6 +278,26 @@
                   </TooltipTrigger>
                   <TooltipContent side="left">
                     <p>{{ t('history.export') }}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="h-7.5 w-7.5 rounded-full text-muted-foreground/75 opacity-0 transition-all hover:bg-primary/10 hover:text-primary disabled:pointer-events-none group-hover:opacity-100"
+                      :disabled="isSessionDownloading(conversation)"
+                      @click.stop="handleDownloadSessionFolder(conversation)"
+                    >
+                      <Loader v-if="isSessionDownloading(conversation)" class="h-3.5 w-3.5 animate-spin" />
+                      <Download v-else class="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">
+                    <p>{{ t('history.downloadSessionFolder') }}</p>
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
@@ -442,6 +462,7 @@ const selectedConversations = ref(new Set())
 const showShareModal = ref(false)
 const shareConversation = ref(null)
 const currentUser = ref(null)
+const downloadingSessionIds = ref(new Set())
 
 // 确认对话框引用
 const confirmDialogRef = ref(null)
@@ -508,6 +529,10 @@ const canDelete = (conversation) => {
   return currentUser.value.id === conversation.user_id || currentUser.value.userid === conversation.user_id
 }
 
+const canDownloadSessionFolder = () => {
+  return currentUser.value?.role === 'admin'
+}
+
 const handleDeleteConversation = async (conversation) => {
   const confirmed = await confirmDialogRef.value?.confirm(
     t('history.deleteConfirm'),
@@ -522,6 +547,37 @@ const handleDeleteConversation = async (conversation) => {
   } catch (error) {
     console.error('Failed to delete conversation:', error)
     toast.error(t('history.deleteError'))
+  }
+}
+
+const isSessionDownloading = (conversation) => {
+  const sessionId = conversation?.session_id
+  return Boolean(sessionId && downloadingSessionIds.value.has(sessionId))
+}
+
+const handleDownloadSessionFolder = async (conversation) => {
+  const sessionId = conversation?.session_id
+  if (!sessionId || isSessionDownloading(conversation) || !canDownloadSessionFolder()) return
+
+  downloadingSessionIds.value = new Set([...downloadingSessionIds.value, sessionId])
+  try {
+    const { blob, filename } = await chatAPI.downloadSessionFolder(sessionId)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename || `${sessionId}.zip`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    toast.success(t('history.sessionFolderDownloadStarted'))
+  } catch (error) {
+    console.error('Failed to download session folder:', error)
+    toast.error(error?.message || t('history.sessionFolderDownloadFailed'))
+  } finally {
+    const next = new Set(downloadingSessionIds.value)
+    next.delete(sessionId)
+    downloadingSessionIds.value = next
   }
 }
 

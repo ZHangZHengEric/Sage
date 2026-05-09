@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sage-wiki
+  labels:
+    app.kubernetes.io/name: sage-wiki
+    app.kubernetes.io/part-of: sage
+spec:
+  type: ${SAGE_WIKI_SERVICE_TYPE}
+  selector:
+    app.kubernetes.io/name: sage-wiki
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      ${SAGE_WIKI_NODE_PORT_LINE}

@@ -21,6 +21,7 @@ from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_proxy import ToolProxy
+from sagents.tool.tool_baseline import augment_with_baseline_tools
 from sagents.utils.logger import logger
 from sagents.utils.prompt_manager import PromptManager
 
@@ -63,7 +64,10 @@ class ToolSuggestionAgent(AgentBase):
         logger.info(f"ToolSuggestionAgent: 开始为会话 {session_id} 分析工具推荐")
         language = session_context.get_language()
 
-        history_messages = message_manager.extract_all_context_messages(recent_turns=1)
+        history_messages = message_manager.extract_all_context_messages(
+            recent_turns=5,
+            last_turn_user_only=False,
+        )
         latest_user_text = extract_latest_user_text(history_messages)
         if should_skip_preflight_for_lightweight_prompt(latest_user_text):
             logger.info(
@@ -76,7 +80,11 @@ class ToolSuggestionAgent(AgentBase):
         # 根据 active_budget 压缩消息
         budget_info = message_manager.context_budget_manager.budget_info
         if budget_info:
-            history_messages = MessageManager.compress_messages(history_messages, max(budget_info.get('active_budget', 8000),2000))
+            history_messages = MessageManager.compress_messages(
+                history_messages,
+                max(budget_info.get('active_budget', 8000), 3000),
+                recent_messages_count=8,
+            )
         available_tools = tool_manager.list_tools_simplified(lang=language)
 
             
@@ -200,6 +208,11 @@ class ToolSuggestionAgent(AgentBase):
                         if tool['name'] == tool_name:
                             suggested_tool_names.append(tool_name)
                             break
+
+            suggested_tool_names = augment_with_baseline_tools(
+                suggested_tool_names,
+                [tool['name'] for tool in available_tools]
+            )
 
             # 移除complete_task工具
             if 'complete_task' in suggested_tool_names:

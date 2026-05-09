@@ -25,6 +25,39 @@ export const chatAPI = {
     return await request.delete(`/api/conversations/${conversationId}`)
   },
 
+  downloadSessionFolder: async (sessionId) => {
+    const apiPrefix = import.meta.env.VITE_BACKEND_API_PREFIX || ''
+    const url = `${apiPrefix}/api/sessions/${encodeURIComponent(sessionId)}/download`
+    const headers = {
+      Accept: 'application/zip',
+    }
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('access_token') : null
+    if (token) {
+      headers.Authorization = `Bearer ${token}`
+    }
+
+    const response = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+      headers,
+    })
+
+    if (!response.ok) {
+      let message = `下载 session 文件夹失败: ${response.status}`
+      try {
+        const errorData = await response.json()
+        message = errorData.detail || errorData.message || message
+      } catch (_) {}
+      throw new Error(message)
+    }
+
+    const blob = await response.blob()
+    return {
+      blob,
+      filename: `${sessionId}.zip`,
+    }
+  },
+
   editLastUserMessage: async (conversationId, payload) => {
     return await request.post(`/api/conversations/${conversationId}/edit-last-user-message`, payload)
   },

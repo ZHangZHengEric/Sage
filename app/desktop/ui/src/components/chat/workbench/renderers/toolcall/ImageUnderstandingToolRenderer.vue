@@ -83,6 +83,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Globe, FileImage, Loader2, AlertCircle, ScanText, ImageOff } from 'lucide-vue-next'
 import { useLanguage } from '@/utils/i18n'
 import MarkdownRenderer from '@/components/chat/MarkdownRenderer.vue'
+import { readLocalOrWorkspaceUint8Array } from '@/utils/agentWorkspaceBackend.js'
 
 const { t } = useLanguage()
 
@@ -130,7 +131,7 @@ const imgFailed = ref(false)
 const localObjectUrl = ref('')
 const previewOpen = ref(false)
 
-// URL 图片直接使用，本地图片用 readFile 读取
+// URL 图片直接使用；工作区内本地路径走后端拉取再 blob URL
 const displaySrc = computed(() => {
   if (isUrl.value) return imagePath.value
   return localObjectUrl.value
@@ -142,9 +143,8 @@ const loadLocalImage = async (path) => {
   imgFailed.value = false
   try {
     // 动态导入 Tauri fs（server 端环境不存在此包）
-    const { readFile } = await import('@tauri-apps/plugin-fs')
-    let cleanPath = path.replace(/^file:\/\//i, '')
-    const fileData = await readFile(cleanPath)
+    const cleanPath = path.replace(/^file:\/\//i, '')
+    const fileData = await readLocalOrWorkspaceUint8Array(cleanPath)
     // 释放上一个 Object URL
     if (localObjectUrl.value) URL.revokeObjectURL(localObjectUrl.value)
     localObjectUrl.value = URL.createObjectURL(new Blob([fileData]))

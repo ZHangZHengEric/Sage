@@ -49,6 +49,14 @@ import httpx
 from openai.types.chat import chat_completion_chunk
 
 
+class PartialStreamConsumedError(RuntimeError):
+    """Raised when a streamed LLM response fails after chunks were yielded."""
+
+    def __init__(self, message: str, original_error: Exception):
+        super().__init__(message)
+        self.original_error = original_error
+
+
 class AgentBase(ABC):
     """
     智能体基类
@@ -196,6 +204,7 @@ class AgentBase(ABC):
         if not isinstance(self.model, SageAsyncOpenAI):
             final_config.pop('model_type', None)
         all_chunks = []
+        attempt_chunks = []
 
         # 重试配置 - 默认允许较充分的网络重试；对明显轻量的直答请求收紧预算，
         # 避免 "hello" 之类的小请求被指数退避拖到几十秒。
@@ -211,9 +220,14 @@ class AgentBase(ABC):
                 f"{self.__class__.__name__}: 轻量请求命中快速重试策略，"
                 f"latest_user_text={latest_user_text}, max_retries={max_retries}"
             )
+        partial_stream_aborted = False
 
         while retry_count < max_retries:
+            attempt_yielded_chunks = False
             try:
+                attempt_chunks = []
+                first_token_time = None
+                partial_stream_aborted = False
                 if self.model is None:
                     raise ValueError("Model is not initialized")
 
@@ -402,14 +416,16 @@ class AgentBase(ABC):
                     # 记录首token时间
                     if first_token_time is None:
                         first_token_time = time.time()
-                    all_chunks.append(chunk)
+                    attempt_chunks.append(chunk)
                     
                     # 显式让出控制权，确保在高吞吐量时不会饿死事件循环（如心跳检测）
                     await asyncio.sleep(0)
                     
+                    attempt_yielded_chunks = True
                     yield chunk
 
                 # 成功完成，跳出重试循环
+                all_chunks = attempt_chunks
                 break
 
             except (RateLimitError, APIError, APIConnectionError, httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ReadError) as e:
@@ -442,6 +458,14 @@ class AgentBase(ABC):
                 # 检查是否是 token 超限错误
                 is_token_limit_error = "range of input length" in error_message or "token" in error_message and "exceed" in error_message
 
+                if attempt_yielded_chunks:
+                    message = (
+                        f"{self.__class__.__name__}: 流式响应已向上游输出部分 chunk，"
+                        f"遇到{('超时' if is_timeout else '网络/读取')}错误后不再透明重试，避免污染工具调用参数: {e}"
+                    )
+                    logger.warning(message)
+                    raise PartialStreamConsumedError(message, e) from e
+
                 if retry_count < max_retries and (is_rate_limit or is_connection_error or is_timeout or is_read_error):
                     wait_time = 2 ** retry_count  # 指数退避: 2, 4, 8 秒
                     if is_rate_limit:
@@ -451,6 +475,15 @@ class AgentBase(ABC):
                         wait_time = min(wait_time, 10)  # 超时错误最多等待10秒
                     else:
                         error_type = "网络连接"
+                    if fast_retry_mode:
+                        wait_time = min(wait_time, 2)
+                    if attempt_chunks:
+                        logger.warning(
+                            f"{self.__class__.__name__}: 流式响应已输出 {len(attempt_chunks)} 个chunk后遇到{error_type}错误，"
+                            "停止本次请求避免 retry 拼接半截 tool_call"
+                        )
+                        partial_stream_aborted = True
+                        break
                     if fast_retry_mode:
                         wait_time = min(wait_time, 2)
                     logger.warning(f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time} 秒后重试 ({retry_count}/{max_retries}): {e}")
@@ -502,11 +535,28 @@ class AgentBase(ABC):
                 # 检查是否是 httpx 特定的超时或读取错误
                 is_httpx_error = isinstance(e, (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ReadError, httpx.ConnectError))
 
+                if attempt_yielded_chunks:
+                    message = (
+                        f"{self.__class__.__name__}: 流式响应已向上游输出部分 chunk，"
+                        f"遇到网络异常后不再透明重试，避免污染工具调用参数: {e}"
+                    )
+                    logger.warning(message)
+                    raise PartialStreamConsumedError(message, e) from e
+
                 if (is_network_error or is_httpx_error) and retry_count < max_retries:
                     # 使用指数退避 + 随机抖动，避免同时重试
                     import random
                     wait_time = min(2 ** retry_count + random.uniform(0, 1), 30)  # 最大30秒
                     error_type = "HTTP超时" if is_httpx_error else "网络"
+                    if fast_retry_mode:
+                        wait_time = min(wait_time, 2)
+                    if attempt_chunks:
+                        logger.warning(
+                            f"{self.__class__.__name__}: 流式响应已输出 {len(attempt_chunks)} 个chunk后遇到{error_type}错误，"
+                            "停止本次请求避免 retry 拼接半截 tool_call"
+                        )
+                        partial_stream_aborted = True
+                        break
                     if fast_retry_mode:
                         wait_time = min(wait_time, 2)
                     logger.warning(f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time:.1f} 秒后重试 ({retry_count}/{max_retries}): {e}")
@@ -547,7 +597,8 @@ class AgentBase(ABC):
                     total_time = time.time() - start_request_time
                     first_token_latency = first_token_time - start_request_time if first_token_time else None
                     first_token_str = f"{first_token_latency:.3f}s" if first_token_latency else "N/A"
-                    logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成，总耗时: {total_time:.3f}s, 首token延迟: {first_token_str}, 返回{len(all_chunks)}个chunk")
+                    chunks_for_record = [] if partial_stream_aborted else (all_chunks or attempt_chunks)
+                    logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成，总耗时: {total_time:.3f}s, 首token延迟: {first_token_str}, 返回{len(chunks_for_record)}个chunk")
                     if session_id:
                         session_context = self._get_live_session_context(session_id)
 
@@ -566,7 +617,7 @@ class AgentBase(ABC):
                         }
                         # 将流式的chunk，进行合并成非流式的response，保存下chunk所有的记录
                         try:
-                            llm_response = self.merge_stream_response_to_non_stream_response(all_chunks)
+                            llm_response = self.merge_stream_response_to_non_stream_response(chunks_for_record)
                         except Exception:
                             logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {traceback.format_exc()}")
                             logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {all_chunks}")
@@ -577,32 +628,19 @@ class AgentBase(ABC):
                             # 更新动态 token 比例
                             logger.debug(f"{self.__class__.__name__}: 检查 token 比例更新条件: llm_response={llm_response is not None}, usage={llm_response.usage if llm_response else None}")
                             if llm_response and llm_response.usage:
-                                # 计算总字符数（输入+输出）
-                                # 处理 MessageChunk 对象和字典两种类型
-                                def get_content_length(m):
-                                    if isinstance(m, MessageChunk):
-                                        content = m.content
-                                        if isinstance(content, str):
-                                            return len(content)
-                                        elif isinstance(content, list):
-                                            return len(str(content))
-                                        return 0
-                                    else:
-                                        # 字典类型
-                                        content = m.get('content', '')
-                                        return len(str(content))
-                                
-                                input_chars = sum(get_content_length(m) for m in messages)
-                                output_content = llm_response.choices[0].message.content or ''
-                                output_chars = len(output_content)
-                                total_chars = input_chars + output_chars
+                                components = MessageManager.calculate_message_token_components(messages)
+                                input_chars = components['text_chars']
+                                image_tokens = components['image_tokens']
+                                actual_tokens = llm_response.usage.prompt_tokens
 
-                                # 获取实际 token 数
-                                actual_tokens = llm_response.usage.total_tokens
-
-                                # 更新 token 比例（message_manager 内部会处理中英文比例）
-                                session_context.message_manager.update_token_ratio(total_chars, actual_tokens)
-                                logger.debug(f"{self.__class__.__name__}: 更新 token 比例，字符数={total_chars}，token数={actual_tokens}，比例={actual_tokens/total_chars:.4f}")
+                                session_context.message_manager.update_token_ratio(
+                                    input_chars,
+                                    actual_tokens,
+                                    image_token_count=image_tokens,
+                                )
+                                if input_chars > 0:
+                                    text_tokens = max(0, actual_tokens - image_tokens)
+                                    logger.debug(f"{self.__class__.__name__}: 更新 token 比例，文本字符数={input_chars}，prompt_tokens={actual_tokens}，图片估算tokens={image_tokens}，文本比例={text_tokens/input_chars:.4f}")
                         else:
                             logger.warning(f"{self.__class__.__name__}: session_context is None for session_id={session_id}, skip add_llm_request")
 
@@ -735,7 +773,17 @@ class AgentBase(ABC):
                         if identity_content:
                             if len(identity_content) > 300:
                                 identity_content = identity_content[:300]+"……"
-                            stable_buf += f"<identity>\n{identity_content}\n</identity>\n"
+                            identity_hint = prompt_manager.get_prompt(
+                                "agent_identity_extension_hint",
+                                agent="common",
+                                language=language or "en",
+                            )
+                            stable_buf += (
+                                "<agent_identity_extension>\n"
+                                f"{identity_hint}\n\n"
+                                f"{identity_content}\n"
+                                "</agent_identity_extension>\n"
+                            )
                     except Exception as e:
                         logger.debug(f"AgentBase: IDENTITY.md not found or error reading: {e}")
 
@@ -1286,7 +1334,7 @@ class AgentBase(ABC):
             else:
                 # 处理非流式响应
                 logger.debug(f"{self.agent_name}: 收到非流式工具响应，正在处理")
-                logger.info(f"{self.agent_name}: 工具响应 {tool_response}")
+                logger.debug(f"{self.agent_name}: 工具响应 {tool_response}")
                 processed_response = self.process_tool_response(tool_response, tool_call['id'])
                 yield processed_response
 
@@ -1394,7 +1442,7 @@ class AgentBase(ABC):
             tool_name = tool_call['function']['name']
             raw_arguments = tool_call['function']['arguments']
             logger.info(f"{self.agent_name}: 执行工具 {tool_name}")
-            logger.info(f"{self.agent_name}: 参数 {raw_arguments}")
+            logger.debug(f"{self.agent_name}: 参数 {raw_arguments}")
 
             # 验证工具参数是否为有效的JSON
             # 将复杂的解析逻辑放到线程池中执行

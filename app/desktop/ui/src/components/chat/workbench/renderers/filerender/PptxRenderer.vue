@@ -41,7 +41,7 @@ import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { Loader2, FileText, ExternalLink } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { init as initPptxPreview } from 'pptx-preview'
-import { readFile } from '@tauri-apps/plugin-fs'
+import { readLocalOrWorkspaceUint8Array } from '@/utils/agentWorkspaceBackend.js'
 
 const props = defineProps({
   filePath: {
@@ -78,7 +78,7 @@ const loadPptx = async () => {
     await nextTick()
 
     // 读取文件为二进制
-    const fileData = await readFile(props.filePath)
+    const fileData = await readLocalOrWorkspaceUint8Array(props.filePath)
     const arrayBuffer = new Uint8Array(fileData).buffer
 
     // 确保容器可见且有尺寸

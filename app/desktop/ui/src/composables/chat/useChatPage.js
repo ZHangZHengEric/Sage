@@ -578,6 +578,13 @@ export const useChatPage = (props) => {
         rebuildMessageIdIndexMap()
         return
       }
+      const shouldAppendContent =
+        existing.role === 'assistant' &&
+        messageData.role === 'assistant' &&
+        typeof existing.content === 'string' &&
+        typeof messageData.content === 'string' &&
+        messageData.content.length > 0
+
       let nextMessage
       if (isToolResultMessage(messageData)) {
         nextMessage = {
@@ -588,7 +595,9 @@ export const useChatPage = (props) => {
         nextMessage = {
           ...existing,
           ...messageData,
-          content: (existing.content || '') + (messageData.content || ''),
+          content: shouldAppendContent
+            ? (existing.content || '') + messageData.content
+            : (messageData.content !== undefined ? messageData.content : existing.content),
           timestamp: messageData.timestamp || Date.now()
         }
         if (messageData.tool_calls || existing.tool_calls) {
