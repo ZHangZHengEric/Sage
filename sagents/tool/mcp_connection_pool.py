@@ -161,7 +161,7 @@ def _is_connection_error(exc: BaseException) -> bool:
     if isinstance(exc, httpx.TransportError):
         return True
     module = type(exc).__module__
-    if module.startswith("anyio."):
+    if module == "anyio" or module.startswith("anyio."):
         return True
     text = str(exc).lower()
     return any(
@@ -484,11 +484,19 @@ class McpConnectionPool:
         fingerprint = config_fingerprint(key, server_params, config)
         current = self._entries.get(key)
 
+        if force:
+            candidate = McpServerPoolEntry(key, server_params, fingerprint, config)
+            async with self._lock:
+                old = self._entries.get(key)
+                self._entries[key] = candidate
+            if old is not None and old is not candidate:
+                await old.close(drain=False)
+            return await candidate.list_tools()
+
         if (
             current is not None
             and current.fingerprint == fingerprint
             and current.tools_cache is not None
-            and not force
         ):
             return current.tools_cache
 
