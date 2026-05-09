@@ -488,6 +488,8 @@ class McpConnectionPool:
             candidate = McpServerPoolEntry(key, server_params, fingerprint, config)
             async with self._lock:
                 old = self._entries.get(key)
+                if old is not None and old is not candidate:
+                    old.draining = True
                 self._entries[key] = candidate
             if old is not None and old is not candidate:
                 await old.close(drain=False)
@@ -531,9 +533,6 @@ class McpConnectionPool:
     ) -> McpServerPoolEntry:
         key = server_name.strip()
         fingerprint = config_fingerprint(key, server_params, config)
-        entry = self._entries.get(key)
-        if entry is not None and (config is None or entry.fingerprint == fingerprint):
-            return entry
 
         async with self._lock:
             entry = self._entries.get(key)
