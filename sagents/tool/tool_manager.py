@@ -1159,7 +1159,7 @@ class ToolManager:
                 lowered = value.strip().lower()
                 if lowered in {"true", "false"}:
                     normalized[key] = lowered == "true"
-                    logger.info(
+                    logger.debug(
                         f"Normalized tool argument '{key}' to boolean for tool '{tool_name}'"
                     )
                     continue
@@ -1169,7 +1169,7 @@ class ToolManager:
                 if re.fullmatch(r"[+-]?\d+", raw):
                     try:
                         normalized[key] = int(raw)
-                        logger.info(
+                        logger.debug(
                             f"Normalized tool argument '{key}' to integer for tool '{tool_name}'"
                         )
                         continue
@@ -1180,7 +1180,7 @@ class ToolManager:
                 raw = value.strip()
                 try:
                     normalized[key] = float(raw)
-                    logger.info(
+                    logger.debug(
                         f"Normalized tool argument '{key}' to number for tool '{tool_name}'"
                     )
                     continue
@@ -1205,12 +1205,12 @@ class ToolManager:
 
                 if "object" in expected_types and isinstance(parsed, dict):
                     normalized[key] = parsed
-                    logger.info(
+                    logger.debug(
                         f"Normalized tool argument '{key}' to object for tool '{tool_name}'"
                     )
                 elif "array" in expected_types and isinstance(parsed, list):
                     normalized[key] = parsed
-                    logger.info(
+                    logger.debug(
                         f"Normalized tool argument '{key}' to array for tool '{tool_name}'"
                     )
 
