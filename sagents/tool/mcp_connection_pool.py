@@ -284,23 +284,44 @@ class McpServerPoolEntry:
         self._lock = asyncio.Lock()
 
     async def list_tools(self) -> List[Tool]:
-        connection: Optional[McpPooledConnection] = None
-        try:
-            async with self.checkout() as checked_out:
-                connection = checked_out
-                assert connection.session is not None
-                response = await connection.session.list_tools()
-                tools = response.tools
-                self.tools_cache = tools
-                return tools
-        except Exception as exc:
-            if connection is not None and _is_connection_error(exc):
-                await self.discard_connection(connection)
-            raise
-        except BaseExceptionGroup as exc:
-            if connection is not None:
-                await self.discard_connection(connection)
-            raise
+        retry_enabled = _env_bool("SAGE_MCP_LIST_TOOLS_RETRY_ON_CONNECTION_ERROR", True)
+        attempts = 2 if retry_enabled else 1
+        last_error: Optional[BaseException] = None
+        for attempt in range(attempts):
+            connection: Optional[McpPooledConnection] = None
+            try:
+                async with self.checkout() as checked_out:
+                    connection = checked_out
+                    assert connection.session is not None
+                    response = await connection.session.list_tools()
+                    tools = response.tools
+                    self.tools_cache = tools
+                    return tools
+            except Exception as exc:
+                last_error = exc
+                if connection is not None and _is_connection_error(exc):
+                    await self.discard_connection(connection)
+                    if attempt + 1 < attempts:
+                        logger.warning(
+                            f"MCP list_tools connection failed, retrying once: "
+                            f"server={self.server_name}, error={exc}"
+                        )
+                        continue
+                raise
+            except BaseExceptionGroup as exc:
+                last_error = exc
+                if connection is not None:
+                    await self.discard_connection(connection)
+                    if attempt + 1 < attempts:
+                        logger.warning(
+                            f"MCP list_tools exception group, retrying once: "
+                            f"server={self.server_name}, error={exc}"
+                        )
+                        continue
+                raise
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError(f"MCP list_tools failed: server={self.server_name}")
 
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
         retry_enabled = _env_bool("SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR", True)

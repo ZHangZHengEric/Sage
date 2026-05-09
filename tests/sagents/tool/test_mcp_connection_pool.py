@@ -167,6 +167,36 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pool._entries["server"].per_connection_concurrency, 2)
         await pool.close_all(drain=False)
 
+    async def test_list_tools_retries_closed_connection_during_refresh(self):
+        pool = McpConnectionPool()
+        server_params = StreamableHttpServerParameters(url="http://mcp.example")
+        open_count = 0
+
+        class FakeSession:
+            def __init__(self, fail_after_first_success=False):
+                self.fail_after_first_success = fail_after_first_success
+                self.list_tools_count = 0
+
+            async def list_tools(self):
+                self.list_tools_count += 1
+                if self.fail_after_first_success and self.list_tools_count > 1:
+                    raise BrokenPipeError("closed stream")
+                return _FakeListToolsResponse()
+
+        async def fake_open(self):
+            nonlocal open_count
+            open_count += 1
+            self.session = FakeSession(fail_after_first_success=open_count == 1)
+            return self
+
+        with patch.object(McpPooledConnection, "open", fake_open):
+            await pool.list_tools("server", server_params)
+            await pool.list_tools("server", server_params, force=True)
+
+        self.assertEqual(open_count, 2)
+        self.assertEqual(len(pool._entries["server"].connections), 1)
+        await pool.close_all(drain=False)
+
     async def test_call_tool_times_out_and_discards_connection(self):
         pool = McpConnectionPool()
         server_params = StreamableHttpServerParameters(url="http://mcp.example")
