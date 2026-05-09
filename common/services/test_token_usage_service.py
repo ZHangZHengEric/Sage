@@ -73,8 +73,9 @@ def test_record_session_execution_persists_valid_usage():
                     "reasoning_tokens": 8,
                 },
                 "per_step_info": [
-                    {"step_name": "direct_execution", "usage": {"total_tokens": 100}},
-                    {"step_name": "task_complete_judge", "usage": {"total_tokens": 50}},
+                    {"step_name": "direct_execution", "model": "gpt-4.1", "usage": {"total_tokens": 60}},
+                    {"step_name": "direct_execution", "model": "gpt-4.1", "usage": {"total_tokens": 40}},
+                    {"step_name": "task_complete_judge", "model": "gpt-4.1-mini", "usage": {"total_tokens": 50}},
                 ],
             },
             start_time=started_at.timestamp(),
@@ -97,10 +98,12 @@ def test_record_session_execution_persists_valid_usage():
         assert records[0].total_tokens == 150
         assert records[0].cached_tokens == 15
         assert records[0].reasoning_tokens == 8
-        assert records[0].step_count == 2
-        assert "usage_payload" in TokenUsage.__table__.columns
-        assert isinstance(records[0].usage_payload, str)
-        assert "total_info" in json.loads(records[0].usage_payload)
+        assert records[0].step_count == 3
+        assert json.loads(records[0].step_model_names) == {
+            "direct_execution": ["gpt-4.1"],
+            "task_complete_judge": ["gpt-4.1-mini"],
+        }
+        assert "usage_payload" not in TokenUsage.__table__.columns
 
         await close_db_client()
 
@@ -111,7 +114,7 @@ def test_session_stats_aggregate_multiple_executions_without_time_range():
     async def _run():
         await _reset_test_db()
         base_time = datetime(2026, 4, 23, 9, 0, 0)
-        usage_payload = {
+        usage_info = {
             "total_info": {
                 "prompt_tokens": 100,
                 "completion_tokens": 40,
@@ -124,7 +127,7 @@ def test_session_stats_aggregate_multiple_executions_without_time_range():
 
         for offset in (0, 5):
             ctx = _FakeSessionContext(
-                usage=usage_payload,
+                usage=usage_info,
                 session_id="session-agg",
                 user_id="user-agg",
                 agent_id="agent-agg",

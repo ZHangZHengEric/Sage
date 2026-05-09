@@ -80,6 +80,7 @@ class StreamRequest(BaseChatRequest):
     # 内部使用：标记本次执行来源与开始时间，不参与外部序列化
     request_source: Optional[str] = Field(default=None, exclude=True)
     execution_started_at: Optional[datetime] = Field(default=None, exclude=True)
+    agent_owner_user_id: Optional[str] = Field(default=None, exclude=True)
 
 
 class ChatRequest(BaseChatRequest):

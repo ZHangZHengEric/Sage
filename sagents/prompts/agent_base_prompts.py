@@ -9,6 +9,55 @@ AgentBase通用指令定义
 # Agent标识符 - 标识这个prompt文件对应的agent类型
 AGENT_IDENTIFIER = "common"
 
+# IDENTITY.md 作为额外身份扩展注入时的说明
+agent_identity_extension_hint = {
+    "zh": (
+        "以下内容是对 <role_definition> 的补充身份设定，"
+        "用于补充 agent 的人格、背景、工作方式或偏好；"
+        "它不替代主角色定义。"
+    ),
+    "en": (
+        "The following content supplements <role_definition> with additional "
+        "agent identity, personality, background, working style, or preferences; "
+        "it does not replace the primary role definition."
+    ),
+    "pt": (
+        "O conteúdo a seguir complementa <role_definition> com identidade, "
+        "personalidade, contexto, estilo de trabalho ou preferências adicionais do agente; "
+        "ele não substitui a definição principal de função."
+    ),
+}
+
+
+# 模型调用了本轮未提供的工具时的可恢复反馈。
+# 占位符 {tools} 会被替换为违规工具名（逗号分隔）。
+unavailable_tool_expansion_message = {
+    "zh": (
+        "模型尝试调用当前请求未提供的工具，已拒绝执行以避免越权或循环。"
+        "违规工具：{tools}。"
+        "如果这些工具确实属于当前任务所需，请先调用 "
+        "tool_expand_tools({{\"tool_names\": [...]}}) 扩展准确工具名，"
+        "扩展成功后再重新调用原工具；如果扩展返回 invalid_tools，"
+        "说明这些工具不在当前 Agent 允许范围内，请改用已有工具或向用户说明受限。"
+    ),
+    "en": (
+        "The model attempted to call tools that were not provided for the current request, "
+        "so execution was rejected to avoid privilege bypass or loops. Unavailable tools: {tools}. "
+        "If these tools are truly needed for the task, first call "
+        "tool_expand_tools({{\"tool_names\": [...]}}) with exact tool names, then retry the original tool call "
+        "after expansion succeeds. If expansion returns invalid_tools, those tools are outside the current "
+        "agent's allowed tool boundary; use available tools instead or explain the limitation to the user."
+    ),
+    "pt": (
+        "O modelo tentou chamar ferramentas que não foram fornecidas para a solicitação atual, "
+        "então a execução foi rejeitada para evitar desvio de permissões ou loops. Ferramentas indisponíveis: {tools}. "
+        "Se essas ferramentas forem realmente necessárias para a tarefa, primeiro chame "
+        "tool_expand_tools({{\"tool_names\": [...]}}) com nomes exatos de ferramentas e, após a expansão ter sucesso, "
+        "tente novamente a chamada original. Se a expansão retornar invalid_tools, essas ferramentas estão fora "
+        "do limite permitido para o Agent atual; use ferramentas disponíveis ou explique a limitação ao usuário."
+    ),
+}
+
 # 智能体介绍模板
 agent_intro_template = {
     "zh": """

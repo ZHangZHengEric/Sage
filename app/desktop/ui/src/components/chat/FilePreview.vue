@@ -225,7 +225,7 @@ import {
   Image as ImageIcon
 } from 'lucide-vue-next'
 import { open } from '@tauri-apps/plugin-shell'
-import { readTextFile } from '@tauri-apps/plugin-fs'
+import { readLocalOrWorkspaceText } from '@/utils/agentWorkspaceBackend.js'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -464,7 +464,7 @@ const loadContent = async () => {
 
     // SVG 文件特殊处理：读取并渲染
     if (isSvg.value) {
-      const content = await readTextFile(props.filePath)
+      const content = await readLocalOrWorkspaceText(props.filePath)
       // 清理 SVG 内容
       svgContent.value = content
         .replace(/<\?xml[^?]*\?>/gi, '')
@@ -481,7 +481,7 @@ const loadContent = async () => {
     }
 
     // 使用 Tauri FS API 读取文本内容
-    fileContent.value = await readTextFile(props.filePath)
+    fileContent.value = await readLocalOrWorkspaceText(props.filePath)
 
     // 解析 Excalidraw 数据
     if (fileType.value === 'excalidraw') {
@@ -509,7 +509,11 @@ const loadContent = async () => {
     loading.value = false
   } catch (err) {
     console.error('加载文件失败:', err)
-    error.value = `加载失败: ${err.message}`
+    const detail =
+      (typeof err?.message === 'string' && err.message.trim()) ||
+      (typeof err === 'string' ? err.trim() : '') ||
+      '未知错误'
+    error.value = `加载失败: ${detail}`
     loading.value = false
   }
 }

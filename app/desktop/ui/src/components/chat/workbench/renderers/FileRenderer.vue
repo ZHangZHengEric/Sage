@@ -123,7 +123,12 @@
       <PdfRenderer v-else-if="fileType === 'pdf'" :file-path="filePath" @open-file="openFile" />
 
       <!-- 图片预览 -->
-      <ImageRenderer v-else-if="fileType === 'image'" :file-path="filePath" :file-name="displayFileName" />
+      <ImageRenderer
+        v-else-if="fileType === 'image'"
+        :key="`${filePath || ''}:${refreshVersion}`"
+        :file-path="filePath"
+        :file-name="displayFileName"
+      />
 
       <!-- 视频预览 -->
       <VideoRenderer v-else-if="fileType === 'video'" :file-path="filePath" :file-name="displayFileName" />
@@ -225,7 +230,8 @@ import {
   Eye
 } from 'lucide-vue-next'
 import { open } from '@tauri-apps/plugin-shell'
-import { readTextFile, readFile, exists, readDir } from '@tauri-apps/plugin-fs'
+import { exists, readDir } from '@tauri-apps/plugin-fs'
+import { readLocalOrWorkspaceUint8Array, readLocalOrWorkspaceText } from '@/utils/agentWorkspaceBackend.js'
 import { save } from '@tauri-apps/plugin-dialog'
 import { toast } from 'vue-sonner'
 import { marked } from 'marked'
@@ -685,7 +691,11 @@ const loadDirectory = async () => {
     loading.value = false
   } catch (err) {
     console.error('加载文件夹失败:', err)
-    error.value = `加载文件夹失败: ${err.message}`
+    const detail =
+      (typeof err?.message === 'string' && err.message.trim()) ||
+      (typeof err === 'string' ? err.trim() : '') ||
+      '未知错误'
+    error.value = `加载文件夹失败: ${detail}`
     loading.value = false
   }
 }
@@ -736,7 +746,7 @@ const loadContent = async () => {
     // Office 文件使用二进制读取，其他使用文本读取
     if (fileType.value === 'office') {
       // 读取二进制文件并转换为 base64
-      const fileData = await readFile(props.filePath)
+      const fileData = await readLocalOrWorkspaceUint8Array(props.filePath)
       const base64 = btoa(String.fromCharCode(...new Uint8Array(fileData)))
       fileContent.value = base64
     } else {
@@ -744,13 +754,13 @@ const loadContent = async () => {
       let fileArrayBufferValue = null
 
       if (shouldTryBinaryForDrawio) {
-        const fileData = await readFile(props.filePath)
+        const fileData = await readLocalOrWorkspaceUint8Array(props.filePath)
         fileArrayBufferValue = new Uint8Array(fileData).buffer
         drawioOpenUrl.value = createDrawioPreviewUrl({ arrayBuffer: fileArrayBufferValue })
       }
 
       if (!drawioOpenUrl.value || fileType.value === 'drawio' || ['html', 'markdown', 'code', 'text'].includes(fileType.value)) {
-        fileContent.value = await readTextFile(props.filePath)
+        fileContent.value = await readLocalOrWorkspaceText(props.filePath)
         if (!drawioOpenUrl.value) {
           drawioOpenUrl.value = createDrawioPreviewUrl({ textContent: fileContent.value })
         }
@@ -818,7 +828,11 @@ const loadContent = async () => {
     loading.value = false
   } catch (err) {
     console.error('加载文件失败:', err)
-    error.value = `加载失败: ${err.message}`
+    const detail =
+      (typeof err?.message === 'string' && err.message.trim()) ||
+      (typeof err === 'string' ? err.trim() : '') ||
+      '未知错误'
+    error.value = `加载失败: ${detail}`
     loading.value = false
   }
 }
@@ -853,7 +867,7 @@ const openFile = async () => {
 
 const quickValidatePdf = async (path) => {
   try {
-    const fileData = await readFile(path)
+    const fileData = await readLocalOrWorkspaceUint8Array(path)
     if (!fileData || fileData.length < 8) {
       return { ok: false, reason: t('workbench.pdf.checkEmpty') }
     }
@@ -882,7 +896,7 @@ const quickValidatePdf = async (path) => {
 const downloadFile = async () => {
   try {
     // 读取文件内容
-    const fileData = await readFile(props.filePath)
+    const fileData = await readLocalOrWorkspaceUint8Array(props.filePath)
     console.log('[FileRenderer] Download file, size:', fileData.length, 'name:', displayFileName.value)
 
     // 提取文件扩展名
@@ -945,7 +959,7 @@ const copyContent = async () => {
 const parseDocx = async (filePath) => {
   try {
     // 读取文件为二进制
-    const fileData = await readFile(filePath)
+    const fileData = await readLocalOrWorkspaceUint8Array(filePath)
     const arrayBuffer = new Uint8Array(fileData).buffer
 
     // 使用 mammoth 解析
@@ -961,7 +975,7 @@ const parseDocx = async (filePath) => {
 const parseXlsx = async (filePath) => {
   try {
     // 读取文件为二进制
-    const fileData = await readFile(filePath)
+    const fileData = await readLocalOrWorkspaceUint8Array(filePath)
     const arrayBuffer = new Uint8Array(fileData).buffer
 
     // 使用 xlsx 解析
@@ -989,7 +1003,7 @@ const parsePptx = async (filePath) => {
     console.log('[FileRenderer] Starting PPTX parse:', filePath)
 
     // 读取文件为二进制
-    const fileData = await readFile(filePath)
+    const fileData = await readLocalOrWorkspaceUint8Array(filePath)
     console.log('[FileRenderer] File data length:', fileData.length)
 
     const arrayBuffer = new Uint8Array(fileData).buffer
@@ -1176,7 +1190,7 @@ const loadPptxPreview = async (retryCount = 0) => {
     })
 
     // 读取文件为二进制
-    const fileData = await readFile(props.filePath)
+    const fileData = await readLocalOrWorkspaceUint8Array(props.filePath)
     console.log('[FileRenderer] File data loaded, size:', fileData.length)
 
     // 存储文件数据用于重新渲染

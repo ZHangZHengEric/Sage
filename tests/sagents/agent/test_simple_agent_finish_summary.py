@@ -5,7 +5,7 @@
 import pytest
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.agent.simple_agent import SimpleAgent
+from sagents.agent.simple_agent import SimpleAgent, _get_system_prefix
 
 
 class _DummyModel:
@@ -144,6 +144,32 @@ def test_missing_turn_status_tool_does_not_request_retry():
     ]
 
     assert _agent()._should_request_turn_status_after_text_response(chunks, []) is False
+
+
+class _ToolNameManager:
+    def __init__(self, names):
+        self._names = names
+
+    def list_all_tools_name(self):
+        return self._names
+
+
+def test_system_prefix_omits_turn_status_contract_when_protocol_disabled(monkeypatch):
+    monkeypatch.setenv("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "false")
+
+    prompt = _get_system_prefix(_ToolNameManager(["dudu_generate_route_scheme"]), "en")
+
+    assert "turn_status" not in prompt
+    assert "Task Management Requirements" not in prompt
+
+
+def test_system_prefix_includes_turn_status_contract_when_protocol_enabled(monkeypatch):
+    monkeypatch.setenv("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "true")
+
+    prompt = _get_system_prefix(_ToolNameManager(["todo_write"]), "en")
+
+    assert "turn_status" in prompt
+    assert "Task Management Requirements" in prompt
 
 
 def test_turn_status_tools_only_filters_action_tools():

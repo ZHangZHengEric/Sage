@@ -1,89 +1,127 @@
+# =========================
+# Git
+# =========================
+.git
+.gitignore
+.github
+
+# =========================
 # Python
-**/__pycache__/
+# =========================
+__pycache__/
 *.py[cod]
-*.egg-info/
+*.so
 *.egg
+*.egg-info/
 .eggs/
 *.whl
+
+.venv/
+venv/
+.conda/
+
 .tox/
 .nox/
 .pytest_cache/
 .mypy_cache/
-**/.venv/
-**/venv/
-**/.conda/
+.ruff_cache/
+
 coverage/
-*.log
-.ruff_cache
+htmlcov/
 
-# Node / Frontend
-**/node_modules/
-**/dist/
-**/build/
-.vite/
-.nuxt/
-npm-debug.log
-yarn-error.log
-pnpm-debug.log
+# =========================
+# Node.js
+# =========================
+node_modules
+**/node_modules
+
+dist
+build
+.next
+.nuxt
+.vite
+
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
 .pnpm-store
+.npm
 
-# OS
-**/.DS_Store
+# =========================
+# Rust
+# =========================
+target
+**/target
 
-# Data & Assets
-data/
-tests/
-assets/
-docs/
-
-# IDEs
-**/.vscode/
-**/.idea/
-**/.trae/
-
-# Environment Variables (Secrets)
-**/.env
-**/.env.local
-**/.env.*.local
-# Keep example files
-!.env.example
-!.env.sample
-
-# Docker
-Dockerfile
-docker-compose*.yml
-
-# Git
-**/.git/
-**/.github/
-**/.gitignore
-
-
-# Temporary
-tmp/
-
-assets/
-docs/
-release_notes/
-
-# Nuitka build artifacts
-app/desktop/build/
-app/desktop/dist/
+# =========================
+# Tauri / Desktop
+# =========================
 .nuitka_cache/
 *.build/
 *.dist/
 *.onefile-build/
-sidecar
+
+app/desktop/build/
+app/desktop/dist/
 app/desktop/tauri/sidecar/
 
-# Rust build artifacts
-**/target/
+# =========================
+# IDE
+# =========================
+.vscode
+.idea
+.trae
 
-# Workspaces
+# =========================
+# OS
+# =========================
+.DS_Store
+
+# =========================
+# Logs / Temp
+# =========================
+*.log
+tmp/
+temp/
+
+# =========================
+# Env
+# =========================
+.env
+.env.local
+.env.*.local
+
+!.env.example
+!.env.sample
+
+# =========================
+# Build Cache
+# =========================
+.cache/
+.parcel-cache/
+
+# =========================
+# Docker
+# =========================
+docker-compose*.yml
+
+# 不要忽略 Dockerfile
+# Dockerfile
+
+# =========================
+# Workspace
+# =========================
 sage_demo_workspace/
 agent_workspace/
 
-# Certificates
-app/desktop/scripts/certs
+# =========================
+# Large Data
+# =========================
+data/
 
-.pyinstaller
+# =========================
+# Binary / Release
+# =========================
+release_notes/
+sidecar

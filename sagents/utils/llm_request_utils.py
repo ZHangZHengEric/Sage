@@ -103,12 +103,14 @@ def _tool_choice_is_required(tool_choice: Any) -> bool:
     return False
 
 
-def _drop_reasoning_effort_when_tool_choice_required(sanitized: Dict[str, Any]) -> None:
+def _drop_reasoning_effort_when_tools_present(sanitized: Dict[str, Any]) -> None:
     """
-    OpenAI：gpt-5.4 等在 chat/completions 上 function tools + tool_choice=required
-    与 extra_body.reasoning_effort 互斥，会返回 invalid_request_error。
+    OpenAI：gpt-5.4 等在 chat/completions 上，只要请求携带 tools，
+    extra_body.reasoning_effort 就会触发 invalid_request_error，与 tool_choice 无关。
     """
-    if not _tool_choice_is_required(sanitized.get("tool_choice")):
+    tools = sanitized.get("tools")
+    has_tools = isinstance(tools, (list, tuple)) and len(tools) > 0
+    if not has_tools:
         return
     eb = sanitized.get("extra_body")
     if not isinstance(eb, dict) or "reasoning_effort" not in eb:
@@ -116,7 +118,7 @@ def _drop_reasoning_effort_when_tool_choice_required(sanitized: Dict[str, Any]) 
     sanitized["extra_body"] = {k: v for k, v in eb.items() if k != "reasoning_effort"}
     logger.debug(
         "sanitize_model_request_kwargs: dropped reasoning_effort from extra_body "
-        "(tool_choice=required, chat/completions compatibility)"
+        "(tools present, chat/completions compatibility)"
     )
 
 
@@ -128,8 +130,8 @@ def _drop_sampling_params_when_reasoning_effort_active(
     OpenAI / Azure reasoning：extra_body 中显式带上非 none 的 reasoning_effort 时，
     自定义 temperature 等采样参数常返回 unsupported_value（仅允许默认）。
 
-    须在 ``_drop_reasoning_effort_when_tool_choice_required`` 之后调用，以便
-    tool_choice=required 路径已去掉 reasoning_effort 时仍保留用户配置的 temperature。
+    须在 ``_drop_reasoning_effort_when_tools_present`` 之后调用，以便
+    tools 存在路径已去掉 reasoning_effort 时仍保留用户配置的 temperature。
     """
     if not model or not _is_openai_reasoning_model_name(model):
         return
@@ -169,7 +171,7 @@ def sanitize_model_request_kwargs(
 
     另：对仅支持 max_completion_tokens 的模型，将 max_tokens 映射为该参数。
 
-    当 tool_choice 为 ``required`` 时，从 ``extra_body`` 移除 ``reasoning_effort``，
+    当请求携带 ``tools`` 时，从 ``extra_body`` 移除 ``reasoning_effort``，
     避免部分 OpenAI 推理模型在 chat/completions 上报错。
 
     当仍携带非 ``none`` 的 ``extra_body.reasoning_effort`` 时，移除 ``temperature`` 等采样参数，
@@ -202,7 +204,7 @@ def sanitize_model_request_kwargs(
     structured_support = get_structured_output_support(client=client, model_config=model_config)
     if structured_support is False:
         sanitized.pop("response_format", None)
-    _drop_reasoning_effort_when_tool_choice_required(sanitized)
+    _drop_reasoning_effort_when_tools_present(sanitized)
     _drop_sampling_params_when_reasoning_effort_active(sanitized, resolved_model)
     return sanitized
 
@@ -371,7 +373,7 @@ async def create_chat_completion_with_fallback(
         model=model,
     )
 
-    logger.info(
+    logger.debug(
         f"[LLM Request] chat.completions.create | summary={summarize_chat_completion_request(model=model, messages=messages, request_kwargs=request_kwargs, model_config=model_config)}"
     )
 
@@ -388,7 +390,7 @@ async def create_chat_completion_with_fallback(
             )
             retry_kwargs = dict(request_kwargs)
             retry_kwargs.pop("response_format", None)
-            logger.info(
+            logger.debug(
                 f"[LLM Request] chat.completions.create retry_without_response_format | summary={summarize_chat_completion_request(model=model, messages=messages, request_kwargs=retry_kwargs, model_config=model_config)}"
             )
             return await client.chat.completions.create(

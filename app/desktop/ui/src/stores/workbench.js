@@ -682,6 +682,14 @@ function buildStableKey(item) {
     return `file:${path}`
   }
 
+  // 助手消息里的图片工作台项使用 type: image + data.src，需与同消息的 FileIcon stableKey（file:messageId:path）对齐
+  if (item.type === 'image') {
+    const path = normalizeFilePathForStableKey(item.data?.src || item.data?.filePath || item.data?.path || '')
+    if (!path) return null
+    if (messageId) return `file:${messageId}:${path}`
+    return `file:${path}`
+  }
+
   if (item.type === 'code' && messageId && item.data?.code) {
     return `code:${messageId}:${item.data.code}`
   }

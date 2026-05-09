@@ -76,71 +76,50 @@ def _merge_dict(request: StreamRequest, field: str, value: Dict[str, Any]) -> No
         setattr(request, field, merged)
 
 
-def _extract_goal_from_tool_result_payload(payload: Any) -> Tuple[bool, Optional[Dict[str, Any]]]:
-    current = payload
-    for _ in range(4):
-        if isinstance(current, dict):
-            if "goal" in current:
-                goal = current.get("goal")
-                return True, goal if isinstance(goal, dict) else None
-            if "content" in current:
-                current = current.get("content")
-                continue
-            return False, None
-        if isinstance(current, str):
-            text = current.strip()
-            if not text:
-                return False, None
-            try:
-                current = json.loads(text)
-            except Exception:
-                return False, None
-            continue
-        return False, None
-    return False, None
+def _summarize_chat_request(request: StreamRequest) -> Dict[str, Any]:
+    llm_config = request.llm_model_config or {}
+    messages = request.messages or []
+    roles: List[str] = []
+    text_chars = 0
+    has_images = False
 
+    for message in messages:
+        roles.append(message.role)
+        content = message.content
+        if isinstance(content, str):
+            text_chars += len(content)
+        elif isinstance(content, list):
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "text":
+                    text_chars += len(str(item.get("text") or ""))
+                elif item.get("type") == "image_url":
+                    has_images = True
 
-def _extract_goal_from_stream_result(result: Dict[str, Any]) -> Tuple[bool, Optional[Dict[str, Any]]]:
-    if not isinstance(result, dict):
-        return False, None
-    if "goal" in result:
-        goal = result.get("goal")
-        return True, goal if isinstance(goal, dict) else None
-    if result.get("type") != "tool_result":
-        return False, None
-    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
-    tool_name = str(metadata.get("tool_name") or "").strip()
-    if tool_name != "turn_status":
-        return False, None
-    return _extract_goal_from_tool_result_payload(result.get("content"))
-
-
-def _extract_goal_outcome_from_stream_result(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    if not isinstance(result, dict):
-        return None
-    if result.get("type") != "tool_result":
-        return None
-    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
-    tool_name = str(metadata.get("tool_name") or "").strip()
-    if tool_name != "turn_status":
-        return None
-
-    current = result.get("content")
-    for _ in range(4):
-        if isinstance(current, dict):
-            goal_outcome = current.get("goal_outcome")
-            return goal_outcome if isinstance(goal_outcome, dict) else None
-        if isinstance(current, str):
-            text = current.strip()
-            if not text:
-                return None
-            try:
-                current = json.loads(text)
-            except Exception:
-                return None
-            continue
-        return None
-    return None
+    return {
+        "session_id": request.session_id,
+        "user_id": request.user_id,
+        "agent_id": request.agent_id,
+        "agent_name": request.agent_name,
+        "agent_mode": request.agent_mode,
+        "message_count": len(messages),
+        "message_roles": roles,
+        "message_text_chars": text_chars,
+        "has_images": has_images,
+        "model": llm_config.get("model"),
+        "fast_model": llm_config.get("fast_model_name"),
+        "max_model_len": llm_config.get("max_model_len"),
+        "max_loop_count": request.max_loop_count,
+        "multi_agent": request.multi_agent,
+        "available_tools_count": len(request.available_tools or []),
+        "available_skills": request.available_skills or [],
+        "available_knowledge_bases_count": len(request.available_knowledge_bases or []),
+        "available_sub_agent_ids_count": len(request.available_sub_agent_ids or []),
+        "custom_sub_agents_count": len(request.custom_sub_agents or []),
+        "memory_type": request.memory_type,
+        "force_summary": request.force_summary,
+    }
 
 
 def _get_provider_api_key(provider: Any) -> Optional[str]:
@@ -642,6 +621,8 @@ async def populate_request_from_agent_config(
             agent = None
         else:
             request.agent_name = agent.name or "Sage Assistant"
+            if not _is_desktop_mode():
+                request.agent_owner_user_id = agent.user_id or request.user_id
 
     agent_config = agent.config if agent and agent.config else None
 
@@ -825,6 +806,10 @@ class SageStreamService:
         self.cfg = _get_cfg()
 
         self.runtime_user_id = self.request.user_id or "default_user"
+        self.skill_owner_user_id = (
+            self.request.agent_owner_user_id
+            or self.runtime_user_id
+        )
         self.runtime_agent_id = self.request.agent_id or "".join(
             random.choices(string.ascii_letters, k=8)
         )
@@ -854,7 +839,7 @@ class SageStreamService:
         self.tool_manager = create_tool_proxy(request.available_tools)
         self.skill_manager, self.agent_skill_manager = create_skill_proxy(
             request.available_skills,
-            user_id=self.request.user_id,
+            user_id=self.skill_owner_user_id,
             agent_workspace=self.agent_workspace,
         )
         self.model_client = create_model_client(request.llm_model_config)
@@ -979,7 +964,9 @@ class SageStreamService:
 async def prepare_session(request: StreamRequest) -> Tuple[SageStreamService, asyncio.Lock]:
     session_id = request.session_id or str(uuid.uuid4())
     request.session_id = session_id
-    logger.bind(session_id=session_id).info(f"Chat request - 「{request.model_dump()}」")
+    logger.bind(session_id=session_id).info(
+        f"Chat request - {json.dumps(_summarize_chat_request(request), ensure_ascii=False)}"
+    )
 
     lock = get_session_run_lock(session_id)
     acquired = False
@@ -1080,48 +1067,18 @@ async def execute_chat_session(
             yield_result.pop("is_final", None)
             yield_result.pop("is_chunk", None)
             yield_result.pop("chunk_id", None)
-            has_goal_update, goal_update = _extract_goal_from_stream_result(result)
-            if has_goal_update:
-                yield_result["goal"] = goal_update
-                try:
-                    session_manager = get_global_session_manager()
-                    if session_manager:
-                        goal_transition = session_manager.get_goal_transition(session_id)
-                        if goal_transition:
-                            yield_result["goal_transition"] = goal_transition
-                except Exception as goal_exc:
-                    logger.bind(session_id=session_id).debug(
-                        f"读取流事件 goal_transition 失败: {goal_exc}"
-                    )
-            goal_outcome = _extract_goal_outcome_from_stream_result(result)
-            if goal_outcome:
-                yield_result["goal_outcome"] = goal_outcome
             yield json.dumps(yield_result, ensure_ascii=False) + "\n"
 
         token_usage_persisted = await _persist_token_usage_if_available(
             stream_service,
             token_usage_payload=token_usage_payload,
         )
-        live_goal = None
-        live_goal_transition = None
-        try:
-            session_manager = get_global_session_manager()
-            if session_manager:
-                goal = session_manager.get_goal(session_id)
-                if goal:
-                    live_goal = goal.model_dump(mode="json")
-                live_goal_transition = session_manager.get_goal_transition(session_id)
-        except Exception as goal_exc:
-            logger.bind(session_id=session_id).debug(f"读取流结束 goal 失败: {goal_exc}")
-
         yield json.dumps(
             {
                 "type": "stream_end",
                 "session_id": session_id,
                 "timestamp": time.time(),
                 "total_stream_count": stream_counter,
-                "goal": live_goal,
-                "goal_transition": live_goal_transition,
             },
             ensure_ascii=False,
         ) + "\n"

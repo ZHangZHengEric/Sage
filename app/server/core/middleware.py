@@ -8,7 +8,7 @@ from typing import Tuple
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
-from starlette.middleware.sessions import SessionMiddleware
+from loguru import logger
 
 from common.core import config
 from common.core.exceptions import SageHTTPException
@@ -153,6 +153,12 @@ def register_middlewares(app):
     register_request_logging_middleware(app)
 
     # SessionMiddleware 必须包在鉴权中间件外层，才能在鉴权阶段读取 session claims。
+    try:
+        from starlette.middleware.sessions import SessionMiddleware
+    except ImportError:
+        logger.warning("SessionMiddleware 依赖未安装，跳过 session 中间件初始化")
+        return
+
     app.add_middleware(
         SessionMiddleware,
         secret_key=cfg.session_secret or cfg.jwt_key,

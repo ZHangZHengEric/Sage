@@ -295,8 +295,53 @@ class MessageManager:
                                 base64_data = url.split(',')[-1] if ',' in url else url
                                 total_chars += len(base64_data)
         
-        logger.info(f"[TokenCalc] 静态计算: chars={total_chars}, tokens={token_length}, msg_count={len(messages)}, images={image_count}")
+        logger.debug(f"[TokenCalc] 静态计算: chars={total_chars}, tokens={token_length}, msg_count={len(messages)}, images={image_count}")
         return token_length
+
+    @staticmethod
+    def calculate_message_token_components(messages: Sequence[Union[MessageChunk, Dict]]) -> Dict[str, int]:
+        """
+        使用与动态 token 估算一致的口径统计消息文本字符数和图片 token。
+
+        这个函数同时用于预估和真实 usage 回灌，避免 ratio 更新和下一轮估算使用
+        不同的字符统计口径。
+        """
+        text_chars = 0
+        image_tokens = 0
+        image_count = 0
+
+        for message in messages:
+            if isinstance(message, dict):
+                message = MessageChunk.from_dict(message)
+            content = message.get_content()
+
+            if isinstance(content, str):
+                text_chars += len(content)
+            elif isinstance(content, list):
+                for item in content:
+                    if not isinstance(item, dict):
+                        continue
+                    if item.get('type') == 'text':
+                        text_chars += len(item.get('text', ''))
+                    elif item.get('type') == 'image_url':
+                        image_count += 1
+                        image_url = item.get('image_url', {})
+                        if isinstance(image_url, dict):
+                            url = image_url.get('url', '')
+                        else:
+                            url = str(image_url)
+                        if url.startswith('data:'):
+                            base64_data = url.split(',')[-1] if ',' in url else url
+                            estimated = max(500, int(len(base64_data) * 0.2))
+                            image_tokens += min(estimated, 2000)
+                        else:
+                            image_tokens += 1000
+
+        return {
+            'text_chars': text_chars,
+            'image_tokens': image_tokens,
+            'image_count': image_count,
+        }
 
     @staticmethod
     def _calculate_str_token_length_static(content: str) -> int:
@@ -429,24 +474,29 @@ class MessageManager:
         # 否则使用静态规则
         return MessageManager._calculate_str_token_length_static(text_str)
 
-    def update_token_ratio(self, char_count: int, actual_token_count: int) -> None:
+    def update_token_ratio(self, char_count: int, actual_token_count: int, image_token_count: int = 0) -> None:
         """
         根据实际的 LLM 响应更新 token 比例
         
         Args:
             char_count: 字符数（输入+输出的总字符数）
-            actual_token_count: 实际的 token 数（从 LLM 响应中获取）
+            actual_token_count: 实际的 prompt token 数（从 LLM 响应中获取）
+            image_token_count: 用同一估算口径得到的图片 token，用于从 prompt token 中扣除
         """
         if char_count <= 0 or actual_token_count <= 0:
             return
 
-        ratio = actual_token_count / char_count
+        text_token_count = max(0, actual_token_count - max(0, image_token_count))
+        if text_token_count <= 0:
+            return
+
+        ratio = text_token_count / char_count
 
         # 添加到全局样本列表
         global _global_token_ratio_samples
         _global_token_ratio_samples.append({
             'char_count': char_count,
-            'token_count': actual_token_count,
+            'token_count': text_token_count,
             'ratio': ratio,
             'timestamp': time.time()
         })
@@ -455,7 +505,10 @@ class MessageManager:
         if len(_global_token_ratio_samples) > _global_max_ratio_samples:
             _global_token_ratio_samples.pop(0)
 
-        logger.info(f"[TokenRatio] 更新 token 比例样本: chars={char_count}, tokens={actual_token_count}, ratio={ratio:.4f}, 总样本数={len(_global_token_ratio_samples)}")
+        logger.debug(
+            f"[TokenRatio] 更新 token 比例样本: text_chars={char_count}, text_tokens={text_token_count}, "
+            f"image_tokens={image_token_count}, ratio={ratio:.4f}, 总样本数={len(_global_token_ratio_samples)}"
+        )
 
     @staticmethod
     def get_dynamic_token_ratio() -> float:
@@ -470,16 +523,9 @@ class MessageManager:
         if not _global_token_ratio_samples:
             return _global_default_token_ratio
 
-        # 计算加权平均（最近的样本权重更高）
-        total_weight = 0
-        weighted_sum = 0
-
-        for i, sample in enumerate(_global_token_ratio_samples):
-            weight = i + 1  # 越新的样本权重越高
-            weighted_sum += sample['ratio'] * weight
-            total_weight += weight
-
-        avg_ratio = weighted_sum / total_weight if total_weight > 0 else _global_default_token_ratio
+        # 使用最后一次真实请求的比例。prompt usage 是最可信来源，
+        # 加权平均会把旧样本带入下一轮，导致长上下文场景收敛过慢。
+        avg_ratio = _global_token_ratio_samples[-1]['ratio']
 
         # 限制在合理范围内（防止异常值）
         avg_ratio = max(0.1, min(1.0, avg_ratio))
@@ -499,41 +545,15 @@ class MessageManager:
             int: 估算的 token 长度
         """
         ratio = MessageManager.get_dynamic_token_ratio()
-        text_chars = 0
-        image_tokens = 0
-        image_count = 0
-
-        for message in messages:
-            if isinstance(message, dict):
-                message = MessageChunk.from_dict(message)
-            content = message.get_content()
-
-            if isinstance(content, str):
-                text_chars += len(content)
-            elif isinstance(content, list):
-                for item in content:
-                    if isinstance(item, dict):
-                        if item.get('type') == 'text':
-                            text_chars += len(item.get('text', ''))
-                        elif item.get('type') == 'image_url':
-                            image_count += 1
-                            # 图片使用固定估算（与静态计算一致）
-                            image_url = item.get('image_url', {})
-                            if isinstance(image_url, dict):
-                                url = image_url.get('url', '')
-                            else:
-                                url = str(image_url)
-                            if url.startswith('data:'):
-                                base64_data = url.split(',')[-1] if ',' in url else url
-                                estimated = max(500, int(len(base64_data) * 0.2))
-                                image_tokens += min(estimated, 2000)
-                            else:
-                                image_tokens += 1000
+        components = MessageManager.calculate_message_token_components(messages)
+        text_chars = components['text_chars']
+        image_tokens = components['image_tokens']
+        image_count = components['image_count']
 
         # 文本使用动态比例，图片使用固定估算
         text_tokens = int(text_chars * ratio)
         estimated_tokens = text_tokens + image_tokens
-        logger.info(f"[TokenCalc] 动态计算: text_chars={text_chars}, image_tokens={image_tokens}, ratio={ratio:.4f}, estimated_tokens={estimated_tokens}, msg_count={len(messages)}, images={image_count}")
+        logger.debug(f"[TokenCalc] 动态计算: text_chars={text_chars}, image_tokens={image_tokens}, ratio={ratio:.4f}, estimated_tokens={estimated_tokens}, msg_count={len(messages)}, images={image_count}")
         return estimated_tokens
 
     @staticmethod
@@ -987,7 +1007,7 @@ class MessageManager:
         result_messages = all_context_messages[::-1]
         # 打印提取结果的统计信息
         total_tokens = MessageManager.calculate_messages_token_length(result_messages)
-        logger.info(f"MessageManager: 提取所有上下文消息完成，最近轮数：{recent_turns}，是否只提取最后一个对话轮的用户消息：{last_turn_user_only}，消息数量：{len(result_messages)}，总token长度：{total_tokens}")
+        logger.debug(f"MessageManager: 提取所有上下文消息完成，最近轮数：{recent_turns}，是否只提取最后一个对话轮的用户消息：{last_turn_user_only}，消息数量：{len(result_messages)}，总token长度：{total_tokens}")
         return result_messages
 
     @staticmethod
@@ -1129,7 +1149,7 @@ class MessageManager:
             return MessageManager.calculate_messages_token_length(working_messages)
 
         current_tokens = current_usage()
-        logger.info(f"MessageManager: compress_messages 初始token长度为{current_tokens}, budget_limit={budget_limit}")
+        logger.debug(f"MessageManager: compress_messages 初始token长度为{current_tokens}, budget_limit={budget_limit}")
         if current_tokens <= budget_limit:
             return working_messages
 
@@ -1166,8 +1186,8 @@ class MessageManager:
                 protected_group_indices.add(gi)
 
         # 调试日志：显示保护信息
-        logger.info(f"MessageManager: 总组数={len(groups)}, 受保护组数={len(protected_group_indices)}, 受保护消息数={len(protected_indices)}")
-        logger.info(f"MessageManager: 受保护组索引={sorted(protected_group_indices)}, 可压缩组索引={sorted(set(range(len(groups))) - protected_group_indices)}")
+        logger.debug(f"MessageManager: 总组数={len(groups)}, 受保护组数={len(protected_group_indices)}, 受保护消息数={len(protected_indices)}")
+        logger.debug(f"MessageManager: 受保护组索引={sorted(protected_group_indices)}, 可压缩组索引={sorted(set(range(len(groups))) - protected_group_indices)}")
 
         # --- Level 0.5 & 1 & 2: 消息级压缩 ---
         now = time.time()
@@ -1199,25 +1219,25 @@ class MessageManager:
         # 应用 Level 0.5 (老化)
         apply_levels(0.5)
         current_tokens = current_usage()
-        logger.info(f"MessageManager: compress_messages 应用Level 0.5后的token长度为{current_tokens}")
+        logger.debug(f"MessageManager: compress_messages 应用Level 0.5后的token长度为{current_tokens}")
         if current_tokens <= budget_limit:
             return working_messages
 
         # 应用 Level 1 (轻度)
         apply_levels(1)
         current_tokens = current_usage()
-        logger.info(f"MessageManager: compress_messages 应用Level 1后的token长度为{current_tokens}")
+        logger.debug(f"MessageManager: compress_messages 应用Level 1后的token长度为{current_tokens}")
         if current_tokens <= budget_limit:
             return working_messages
 
         # 应用 Level 2 (强力)
         apply_levels(2)
         current_tokens = current_usage()
-        logger.info(f"MessageManager: compress_messages 应用Level 2后的token长度为{current_tokens}")
+        logger.debug(f"MessageManager: compress_messages 应用Level 2后的token长度为{current_tokens}")
 
         # 返回压缩后的消息（不再进行 Level 3 丢弃）
         final_tokens = MessageManager.calculate_messages_token_length(working_messages)
-        logger.info(f"MessageManager: compress_messages 完成，最终token长度={final_tokens}, 消息数={len(working_messages)}")
+        logger.debug(f"MessageManager: compress_messages 完成，最终token长度={final_tokens}, 消息数={len(working_messages)}")
 
         return working_messages
 
@@ -1248,7 +1268,7 @@ class MessageManager:
         should_compress = remaining_tokens < threshold_ratio or remaining_tokens < max_new_tokens
 
         if should_compress:
-            logger.info(f"MessageManager: 上下文空间不足 (剩余 {remaining_tokens}, 当前 {current_tokens}), 需要压缩")
+            logger.info(f"MessageManager: 上下文空间不足 (剩余 {remaining_tokens}, 当前 {current_tokens}, 20%阈值 {threshold_ratio}, max_new_tokens {max_new_tokens}), 需要压缩")
 
         return should_compress, current_tokens, max_model_len
 
