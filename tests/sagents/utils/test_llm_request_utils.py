@@ -97,6 +97,9 @@ def test_sanitize_keeps_zero_sampling_values() -> None:
 def test_sanitize_strips_reasoning_effort_when_tool_choice_required() -> None:
     out = sanitize_model_request_kwargs(
         {
+            "tools": [
+                {"type": "function", "function": {"name": "do_work"}},
+            ],
             "tool_choice": "required",
             "extra_body": {
                 "reasoning_effort": "low",
@@ -113,6 +116,9 @@ def test_sanitize_strips_reasoning_effort_when_tool_choice_required() -> None:
 def test_sanitize_strips_reasoning_effort_tool_choice_required_case_insensitive() -> None:
     out = sanitize_model_request_kwargs(
         {
+            "tools": [
+                {"type": "function", "function": {"name": "do_work"}},
+            ],
             "tool_choice": "  Required ",
             "extra_body": {"reasoning_effort": "minimal"},
         },
@@ -165,6 +171,9 @@ def test_sanitize_keeps_temperature_when_reasoning_effort_none() -> None:
 def test_sanitize_keeps_temperature_after_tool_choice_strips_reasoning() -> None:
     out = sanitize_model_request_kwargs(
         {
+            "tools": [
+                {"type": "function", "function": {"name": "do_work"}},
+            ],
             "temperature": 0.7,
             "tool_choice": "required",
             "extra_body": {"reasoning_effort": "low"},
