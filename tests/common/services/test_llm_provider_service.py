@@ -41,6 +41,27 @@ class StubLLMProviderUpdate:
     supports_structured_output: bool | None = None
     is_default: bool | None = None
 
+    @property
+    def model_fields_set(self):
+        return {
+            field_name
+            for field_name in (
+                "name",
+                "base_url",
+                "api_keys",
+                "model",
+                "max_tokens",
+                "temperature",
+                "top_p",
+                "presence_penalty",
+                "max_model_len",
+                "supports_multimodal",
+                "supports_structured_output",
+                "is_default",
+            )
+            if getattr(self, field_name) is not None
+        }
+
 
 class StubLLMProvider:
     def __init__(

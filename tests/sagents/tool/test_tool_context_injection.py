@@ -199,7 +199,9 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
                 role="user",
             )
 
-        self.assertEqual(result, '{"content":"ok"}')
+        self.assertEqual(result["raw_text"], '{"content":"ok"}')
+        self.assertEqual(result["parsed"], {"content": "ok"})
+        self.assertEqual(result["content"], {"content": "ok"})
         fake_manager.run_tool_async.assert_awaited_once()
         call_kwargs = fake_manager.run_tool_async.await_args.kwargs
         self.assertEqual(call_kwargs["user_id"], "user-5")
