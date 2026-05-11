@@ -34,9 +34,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Core Backend Regression Suite
+      - name: Run Root Test Suite
         run: |
-          python -m pytest tests/app/server -v
+          python -m pytest tests -v
 
   web-tests:
     name: Web Vitest
