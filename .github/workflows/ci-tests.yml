@@ -14,9 +14,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  server-tests:
-    name: Server Pytest
+  python-tests:
+    name: Pytest (${{ matrix.suite }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: app
+            path: tests/app
+          - suite: common
+            path: tests/common
+          - suite: sagents
+            path: tests/sagents
 
     steps:
       - name: Checkout
@@ -34,9 +44,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Root Test Suite
-        run: |
-          python -m pytest tests -v
+      - name: Run Pytest Suite
+        run: python -m pytest ${{ matrix.path }} -v
 
   web-tests:
     name: Web Vitest
