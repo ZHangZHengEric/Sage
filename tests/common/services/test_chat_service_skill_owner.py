@@ -23,7 +23,7 @@ def _server_cfg(tmp_path: Path) -> config.StartupConfig:
     return cfg
 
 
-def test_sage_stream_service_uses_agent_owner_for_server_skill_paths(tmp_path, monkeypatch):
+def test_sage_stream_service_uses_caller_workspace_and_agent_owner_skills(tmp_path, monkeypatch):
     cfg = _server_cfg(tmp_path)
     monkeypatch.setattr(config, "_GLOBAL_STARTUP_CONFIG", cfg, raising=False)
 
@@ -54,7 +54,7 @@ def test_sage_stream_service_uses_agent_owner_for_server_skill_paths(tmp_path, m
 
     service = chat_service.SageStreamService(request)
 
-    expected_workspace = Path(cfg.agents_dir) / "owner_user" / "agent_1"
+    expected_workspace = Path(cfg.agents_dir) / "caller_user" / "agent_1"
     assert Path(service.agent_workspace) == expected_workspace
     assert recorded == {
         "available_skills": ["schedule-management"],

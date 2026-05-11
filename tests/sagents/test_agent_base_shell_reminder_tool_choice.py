@@ -37,7 +37,7 @@ def _message_text(message):
 
 
 @pytest.mark.asyncio
-async def test_shell_completion_reminder_forces_tool_choice_required_for_one_call(monkeypatch):
+async def test_shell_completion_reminder_preserves_tool_choice_auto(monkeypatch):
     calls = []
 
     async def fake_create_chat_completion_with_fallback(
@@ -109,8 +109,8 @@ async def test_shell_completion_reminder_forces_tool_choice_required_for_one_cal
     async for _ in agent._call_llm_streaming(messages, session_id="sid", enable_thinking=False):
         pass
 
-    assert calls[0]["model_config"]["tool_choice"] == "required"
-    assert calls[0]["kwargs"]["tool_choice"] == "required"
+    assert calls[0]["model_config"]["tool_choice"] == "auto"
+    assert calls[0]["kwargs"]["tool_choice"] == "auto"
     assert "<system_reminder>" in _message_text(calls[0]["messages"][-1])
     assert "shtask_1" in _message_text(calls[0]["messages"][-1])
 

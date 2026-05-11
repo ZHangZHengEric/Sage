@@ -1051,7 +1051,6 @@ class SimpleAgent(AgentBase):
                             "error": "Partial streamed tool call discarded because the LLM stream ended before a complete response.",
                         }, ensure_ascii=False),
                         tool_call_id=real_tool_call_id,
-                        tool_name=tool_name,
                         message_type=MessageType.TOOL_CALL_RESULT.value,
                         agent_name=self.agent_name,
                         metadata={"tool_name": tool_name, "partial_stream_discarded": True},
