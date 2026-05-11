@@ -644,13 +644,6 @@ async def populate_request_from_agent_config(
         if agent_config.get("systemContext") is not None:
             agent_system_context = agent_config.get("systemContext")
             _merge_dict(request, "system_context", agent_system_context)
-            if (
-                isinstance(agent_system_context, dict)
-                and agent_system_context.get("response_language") is not None
-            ):
-                if request.system_context is None:
-                    request.system_context = {}
-                request.system_context["response_language"] = agent_system_context["response_language"]
         if agent_config.get("systemPrefix") is not None:
             request.system_prefix = agent_config.get("systemPrefix")
         if agent_config.get("memoryType") is not None:
