@@ -117,7 +117,7 @@ def test_populate_request_records_agent_owner_user_id(tmp_path, monkeypatch):
     assert request.available_skills == ["schedule-management"]
 
 
-def test_populate_request_keeps_request_response_language(tmp_path, monkeypatch):
+def test_populate_request_prefers_agent_response_language_over_request(tmp_path, monkeypatch):
     cfg = _server_cfg(tmp_path)
     monkeypatch.setattr(config, "_GLOBAL_STARTUP_CONFIG", cfg, raising=False)
 
@@ -173,7 +173,7 @@ def test_populate_request_keeps_request_response_language(tmp_path, monkeypatch)
 
     asyncio.run(chat_service.populate_request_from_agent_config(request))
 
-    assert request.system_context["response_language"] == "en-US"
+    assert request.system_context["response_language"] == "zh-CN"
     assert request.system_context["business_key"] == "request_value"
 
 
