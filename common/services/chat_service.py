@@ -807,6 +807,8 @@ class SageStreamService:
         self.cfg = _get_cfg()
 
         self.runtime_user_id = self.request.user_id or "default_user"
+        # Server runtime workspaces are caller-scoped ("who uses it, owns the run files"),
+        # while skills still resolve from the Agent owner.
         self.skill_owner_user_id = (
             self.request.agent_owner_user_id
             or self.runtime_user_id
