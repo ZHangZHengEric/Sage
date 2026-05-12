@@ -80,12 +80,28 @@ def _context_budget_config_from_model(
     effective_config = dict(context_budget_config or {})
     if "max_model_len" not in effective_config and effective_config.get("maxModelLen"):
         effective_config["max_model_len"] = effective_config.get("maxModelLen")
+        logger.debug(
+            f"SessionRuntime: normalized context_budget_config maxModelLen="
+            f"{effective_config['max_model_len']}"
+        )
     if "max_model_len" not in effective_config:
         max_model_len = None
         if isinstance(model_config, dict):
             max_model_len = model_config.get("max_model_len") or model_config.get("maxModelLen")
         if max_model_len:
             effective_config["max_model_len"] = max_model_len
+            logger.debug(
+                f"SessionRuntime: derived context_budget_config from model_config, "
+                f"max_model_len={max_model_len}"
+            )
+    elif isinstance(model_config, dict):
+        model_max_model_len = model_config.get("max_model_len") or model_config.get("maxModelLen")
+        if model_max_model_len and model_max_model_len != effective_config.get("max_model_len"):
+            logger.debug(
+                f"SessionRuntime: using explicit context_budget_config, "
+                f"max_model_len={effective_config.get('max_model_len')}, "
+                f"model_config_max_model_len={model_max_model_len}"
+            )
     return effective_config or None
 
 
@@ -271,10 +287,18 @@ class Session:
                 system_context = snapshot.get("system_context") or {}
                 context_budget_config = snapshot.get("context_budget_config")
                 llm_config = agent_config.get("llm_config") if isinstance(agent_config, dict) else {}
+                has_persisted_budget_config = isinstance(context_budget_config, dict)
                 context_budget_config = _context_budget_config_from_model(
                     context_budget_config if isinstance(context_budget_config, dict) else None,
                     llm_config if isinstance(llm_config, dict) else None,
                 )
+                if context_budget_config:
+                    restore_source = "context_budget_config" if has_persisted_budget_config else "legacy llm_config"
+                    logger.info(
+                        f"SessionRuntime: restored context_budget_config from {restore_source}, "
+                        f"session_id={self.session_id}, "
+                        f"max_model_len={context_budget_config.get('max_model_len')}"
+                    )
                 self.session_context = SessionContext(
                     session_id=str(snapshot.get("session_id") or self.session_id),
                     user_id=str(snapshot.get("user_id") or ""),
