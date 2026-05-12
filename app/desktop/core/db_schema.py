@@ -2,13 +2,35 @@
 Database schema management - handles table structure changes
 """
 
-from typing import Dict, List, Set
-
-from sqlalchemy import inspect, text, String, Integer, Boolean, DateTime, Float
-from common.models.base import Base
 import logging
+from importlib import import_module
+
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, inspect, text
+
+from common.models.base import Base
 
 logger = logging.getLogger(__name__)
+
+_DESKTOP_MODEL_MODULES = (
+    "common.models.agent",
+    "common.models.conversation",
+    "common.models.file",
+    "common.models.im_channel",
+    "common.models.kdb",
+    "common.models.llm_provider",
+    "common.models.mcp_server",
+    "common.models.oauth2",
+    "common.models.questionnaire",
+    "common.models.system",
+    "common.models.task",
+    "common.models.token_usage",
+    "common.models.user",
+)
+
+
+def ensure_desktop_models_registered():
+    for module_name in _DESKTOP_MODEL_MODULES:
+        import_module(module_name)
 
 
 def _migrate_agent_is_default(sync_conn):
@@ -46,12 +68,31 @@ def _migrate_agent_is_default(sync_conn):
         logger.error(f"[DB] 迁移 is_default 字段失败: {e}")
 
 
+def _drop_unused_sqlite_columns(sync_conn, table_name, unused_columns):
+    if sync_conn.dialect.name != "sqlite":
+        return
+
+    preparer = sync_conn.dialect.identifier_preparer
+    quoted_table = preparer.quote(table_name)
+
+    for col_name in sorted(unused_columns):
+        quoted_col = preparer.quote(col_name)
+        try:
+            sql = f"ALTER TABLE {quoted_table} DROP COLUMN {quoted_col}"
+            logger.info(f"[DB] 清理无用列: {sql}")
+            sync_conn.execute(text(sql))
+            logger.info(f"[DB] 已清理表 '{table_name}' 的无用列 '{col_name}'")
+        except Exception as e:
+            logger.error(f"[DB] 无法自动清理表 '{table_name}' 的无用列 '{col_name}': {e}")
+
+
 def sync_database_schema(sync_conn):
     """
     Check all registered tables and update schema if outdated.
-    Tries to ALTER TABLE ADD COLUMN first.
-    If that fails, it logs an error (does NOT drop table automatically to prevent data loss).
+    Tries to ALTER TABLE ADD COLUMN for missing fields, and drops unused
+    SQLite fields that are no longer present in ORM models.
     """
+    ensure_desktop_models_registered()
     inspector = inspect(sync_conn)
     existing_tables = set(inspector.get_table_names())
 
@@ -81,7 +122,7 @@ def sync_database_schema(sync_conn):
 
                     # Handle NOT NULL constraints by adding a default value
                     if not col.nullable:
-                        if isinstance(col.type, String):
+                        if isinstance(col.type, (String, Text)):
                             default_clause = " DEFAULT ''"
                         elif isinstance(col.type, Integer):
                             default_clause = " DEFAULT 0"
@@ -115,3 +156,8 @@ def sync_database_schema(sync_conn):
                     # The user can manually drop if needed.
         else:
             logger.debug(f"[DB] 表 '{table_name}' 结构正常")
+
+        unused_columns = actual_columns - expected_columns
+        if sync_conn.dialect.name == "sqlite" and unused_columns:
+            logger.info(f"[DB] 检测到表 '{table_name}' 存在无用列: {unused_columns}")
+            _drop_unused_sqlite_columns(sync_conn, table_name, unused_columns)

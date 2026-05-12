@@ -13,6 +13,7 @@ import tempfile
 import pytest
 
 from sagents.tool.impl.execute_command_tool import ExecuteCommandTool
+from sagents.utils.sandbox.config import VolumeMount
 from sagents.utils.sandbox.providers.passthrough.passthrough import PassthroughSandboxProvider
 
 
@@ -135,6 +136,104 @@ async def test_await_shell_pattern_returns_early(shell_env):
     # 收尾：杀掉
     killed = await tool.kill_shell(task_id=task_id, session_id="s1")
     assert killed["success"] is True
+
+
+async def test_await_shell_reads_running_task_tail_from_agent_workspace_bg_log(shell_env):
+    tool, _, tmpdir = shell_env
+    started = await tool.execute_shell_command(
+        command="printf 'phase1\\n'; sleep 5; printf 'phase2\\n'",
+        block_until_ms=0,
+        session_id="s1",
+    )
+    task_id = started["task_id"]
+    expected_output_file = os.path.join(tmpdir, "bg", f"{task_id}.log")
+    assert started["status"] == "running"
+    assert started["output_file"] == expected_output_file
+    assert os.path.exists(expected_output_file)
+
+    monitored = await tool.await_shell(
+        task_id=task_id,
+        block_until_ms=5000,
+        pattern="phase1",
+        session_id="s1",
+    )
+    assert monitored["status"] == "running"
+    assert monitored["output_file"] == expected_output_file
+    assert "phase1" in monitored["tail_output"]
+    assert "phase2" not in monitored["tail_output"]
+
+    killed = await tool.kill_shell(task_id=task_id, session_id="s1")
+    assert killed["success"] is True
+
+
+async def test_await_shell_reads_completed_stdout_from_agent_workspace_bg_log(shell_env):
+    tool, _, tmpdir = shell_env
+    started = await tool.execute_shell_command(
+        command="printf 'phase1\\n'; sleep 0.2; printf 'phase2\\n'",
+        block_until_ms=0,
+        session_id="s1",
+    )
+    task_id = started["task_id"]
+    expected_output_file = os.path.join(tmpdir, "bg", f"{task_id}.log")
+    assert started["status"] == "running"
+    assert started["output_file"] == expected_output_file
+
+    completed = await tool.await_shell(
+        task_id=task_id,
+        block_until_ms=5000,
+        session_id="s1",
+    )
+    final_output_file = completed["output_file"]
+    assert completed["status"] == "completed"
+    assert completed["exit_code"] == 0
+    assert final_output_file == expected_output_file
+    assert os.path.isabs(final_output_file)
+    assert os.path.dirname(final_output_file) == os.path.join(tmpdir, "bg")
+    assert os.path.basename(final_output_file) == f"{task_id}.log"
+    assert "phase1" in completed["stdout"]
+    assert "phase2" in completed["stdout"]
+    with open(final_output_file, encoding="utf-8") as log_file:
+        final_log_output = log_file.read()
+    assert "phase1" in final_log_output
+    assert "phase2" in final_log_output
+    assert task_id not in ExecuteCommandTool._BG_TASKS
+
+
+async def test_background_log_dir_virtual_workspace_is_restored_to_host_path(monkeypatch):
+    host_tmpdir = tempfile.mkdtemp(prefix="sage_shell_host_workspace_")
+    sandbox_workspace = "/sandbox-agent-workspace"
+    sandbox = PassthroughSandboxProvider(
+        sandbox_id="test",
+        sandbox_agent_workspace=sandbox_workspace,
+        volume_mounts=[VolumeMount(host_tmpdir, sandbox_workspace)],
+    )
+    tool = ExecuteCommandTool()
+    monkeypatch.setattr(tool, "_get_sandbox", lambda session_id: sandbox)
+    monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
+    try:
+        started = await tool.execute_shell_command(
+            command="printf 'mapped-log\\n'",
+            block_until_ms=0,
+            session_id="s1",
+        )
+        task_id = started["task_id"]
+        expected_host_output_file = os.path.join(host_tmpdir, "bg", f"{task_id}.log")
+
+        assert started["output_file"] == expected_host_output_file
+        assert os.path.dirname(started["output_file"]) == os.path.join(host_tmpdir, "bg")
+        assert not started["output_file"].startswith(sandbox_workspace)
+
+        completed = await tool.await_shell(
+            task_id=task_id,
+            block_until_ms=5000,
+            session_id="s1",
+        )
+        assert completed["status"] == "completed"
+        assert completed["output_file"] == expected_host_output_file
+        with open(completed["output_file"], encoding="utf-8") as log_file:
+            assert "mapped-log" in log_file.read()
+    finally:
+        shutil.rmtree(host_tmpdir, ignore_errors=True)
 
 
 async def test_blocking_deadline_returns_running_then_kill(shell_env):

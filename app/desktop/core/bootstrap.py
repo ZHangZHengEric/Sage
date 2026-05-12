@@ -1,7 +1,7 @@
 
 from loguru import logger
 from sagents.skill import SkillManager, set_skill_manager
-from sagents.tool.tool_manager import ToolManager, set_tool_manager
+from sagents.tool.tool_manager import ToolManager, get_tool_manager, set_tool_manager
 from sagents.session_runtime import initialize_global_session_manager
 
 from common.core.client.chat import close_chat_client, init_chat_client
@@ -18,12 +18,12 @@ async def initialize_db_connection():
         if db_client is not None:
             logger.info("数据库客户端已初始化")
             from common.models.base import Base
-            from common.models.token_usage import TokenUsage  # noqa: F401
+            from .db_schema import ensure_desktop_models_registered, sync_database_schema
+            ensure_desktop_models_registered()
             async with db_client._engine.begin() as conn:
                 # Create all tables
                 await conn.run_sync(Base.metadata.create_all)
                 # Check and update schema for existing tables
-                from .db_schema import sync_database_schema
                 await conn.run_sync(sync_database_schema)
 
             await migrate_desktop_default_user_id()
@@ -72,7 +72,12 @@ async def initialize_tool_manager():
 
 async def close_tool_manager():
     """关闭工具管理器"""
-    set_tool_manager(None)
+    tool_manager = get_tool_manager()
+    try:
+        if tool_manager:
+            await tool_manager.shutdown()
+    finally:
+        set_tool_manager(None)
 
 
 async def initialize_skill_manager():

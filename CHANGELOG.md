@@ -1,3 +1,7 @@
+2026-05-09 10:22 MCP 工具调用增加默认 30 分钟超时，超时后丢弃对应长连接；示例环境变量补齐 MCP 连接池与调用超时配置。
+
+2026-05-09 10:20 MCP 长连接池优化：新增 McpProxy 内部连接池封装，每条长链默认承载 100 并发，满载后扩容新长链而非排队；ToolManager 不感知池实现；MCP 添加/更新/刷新失败保留旧工具与旧连接，AnyTool 改为 DB-first 注册；补充连接池与服务注册回归单测。
+
 2026-05-08 12:15 新增通用 tool_expand_tools：仅恢复 tool_suggestion 二次筛选遗漏，不突破 ToolProxy/agent_mode 边界；Simple/TaskExecutor 未提供工具拒绝提示走 PromptManager，并返回 available_expandable_tools；补单测与中英文架构文档。
 
 2026-05-06 16:25 助手非空串才拼接；token 扣图后回灌 ratio 取末次；重复/拒绝下轮 auto；压缩兼容 max_completion_tokens。

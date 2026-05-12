@@ -642,7 +642,15 @@ async def populate_request_from_agent_config(
         if agent_config.get("moreSuggest") is not None and request.more_suggest is None:
             request.more_suggest = agent_config.get("moreSuggest")
         if agent_config.get("systemContext") is not None:
-            _merge_dict(request, "system_context", agent_config.get("systemContext"))
+            agent_system_context = agent_config.get("systemContext")
+            _merge_dict(request, "system_context", agent_system_context)
+            if (
+                isinstance(agent_system_context, dict)
+                and agent_system_context.get("response_language") is not None
+            ):
+                if request.system_context is None:
+                    request.system_context = {}
+                request.system_context["response_language"] = agent_system_context["response_language"]
         if agent_config.get("systemPrefix") is not None:
             request.system_prefix = agent_config.get("systemPrefix")
         if agent_config.get("memoryType") is not None:
@@ -806,6 +814,8 @@ class SageStreamService:
         self.cfg = _get_cfg()
 
         self.runtime_user_id = self.request.user_id or "default_user"
+        # Server runtime workspaces are caller-scoped ("who uses it, owns the run files"),
+        # while skills still resolve from the Agent owner.
         self.skill_owner_user_id = (
             self.request.agent_owner_user_id
             or self.runtime_user_id

@@ -54,9 +54,12 @@ class HostBackgroundRunner:
         command: str,
         workdir: Optional[str] = None,
         env_vars: Optional[Dict[str, str]] = None,
+        log_dir: Optional[str] = None,
     ) -> Dict[str, Any]:
         task_id = _gen_task_id()
-        log_path = os.path.join(self._log_dir, f"{task_id}.log")
+        effective_log_dir = log_dir or self._log_dir
+        os.makedirs(effective_log_dir, exist_ok=True)
+        log_path = os.path.join(effective_log_dir, f"{task_id}.log")
         log_fh = open(log_path, "wb")
 
         env = os.environ.copy()

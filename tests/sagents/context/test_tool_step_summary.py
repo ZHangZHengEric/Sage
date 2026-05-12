@@ -1,3 +1,5 @@
+import pytest
+
 from sagents.context.messages.message import MessageChunk
 from sagents.context.session_context import SessionContext
 
@@ -11,7 +13,7 @@ def _make_session(tmp_path):
     )
 
 
-def test_build_tool_step_summary_pairs_tool_call_and_result(tmp_path):
+def test_build_execution_timing_summary_records_tool_call_messages(tmp_path):
     ctx = _make_session(tmp_path)
     assistant = MessageChunk(
         role="assistant",
@@ -37,90 +39,62 @@ def test_build_tool_step_summary_pairs_tool_call_and_result(tmp_path):
     ctx._message_timing = {
         "assistant-tool-call": {
             "message_id": "assistant-tool-call",
+            "role": "assistant",
+            "message_type": "tool_call",
             "start_ts": 10.0,
             "end_ts": 10.1,
         },
         "tool-result": {
             "message_id": "tool-result",
+            "role": "tool",
+            "message_type": "tool_call_result",
+            "tool_call_id": "call_1",
             "start_ts": 10.2,
             "end_ts": 10.6,
         },
     }
 
-    steps = ctx._build_tool_step_summary()
+    summary = ctx._build_execution_timing_summary()
 
-    assert len(steps) == 1
-    assert steps[0]["step"] == 1
-    assert steps[0]["tool_name"] == "read_file"
-    assert steps[0]["tool_call_id"] == "call_1"
-    assert steps[0]["status"] == "completed"
-    assert steps[0]["started_at"] == 10.0
-    assert steps[0]["finished_at"] == 10.6
-    assert steps[0]["duration_ms"] == 600.0
+    assert summary["message_count"] == 2
+    assert summary["message_timings"][0]["message_id"] == "assistant-tool-call"
+    assert summary["message_timings"][0]["message_type"] == "tool_call"
+    assert summary["message_timings"][0]["duration_ms"] == pytest.approx(100.0)
+    assert summary["message_timings"][1]["message_id"] == "tool-result"
+    assert summary["message_timings"][1]["tool_call_id"] == "call_1"
+    assert summary["message_timings"][1]["duration_ms"] == pytest.approx(400.0)
+    assert summary["message_intervals"][0]["from_message_id"] == "assistant-tool-call"
+    assert summary["message_intervals"][0]["to_message_id"] == "tool-result"
+    assert summary["message_intervals"][0]["prev_end_to_cur_start_gap_ms"] == pytest.approx(100.0)
 
 
-def test_build_phase_timing_summary_aggregates_segments(tmp_path):
+def test_build_execution_timing_summary_includes_flow_node_end_events(tmp_path):
     ctx = _make_session(tmp_path)
     ctx.execution_timeline_events = [
         {
-            "event_type": "agent_phase_start",
-            "phase_name": "planning",
+            "event_type": "flow_node_start",
+            "node_name": "planning",
             "timestamp": 10.0,
             "perf_ms": 100.0,
         },
         {
-            "event_type": "agent_phase_end",
-            "phase_name": "planning",
+            "event_type": "flow_node_end",
+            "node_name": "planning",
             "timestamp": 10.3,
             "perf_ms": 400.0,
         },
         {
-            "event_type": "agent_phase_start",
-            "phase_name": "tool",
+            "event_type": "flow_node_end",
+            "node_name": "tool",
             "timestamp": 10.5,
             "perf_ms": 500.0,
         },
-        {
-            "event_type": "agent_phase_end",
-            "phase_name": "tool",
-            "timestamp": 11.0,
-            "perf_ms": 1000.0,
-        },
-        {
-            "event_type": "agent_phase_start",
-            "phase_name": "assistant_text",
-            "timestamp": 11.1,
-            "perf_ms": 1100.0,
-        },
-        {
-            "event_type": "agent_phase_end",
-            "phase_name": "assistant_text",
-            "timestamp": 11.3,
-            "perf_ms": 1300.0,
-        },
-        {
-            "event_type": "agent_phase_start",
-            "phase_name": "assistant_text",
-            "timestamp": 11.4,
-            "perf_ms": 1400.0,
-        },
-        {
-            "event_type": "agent_phase_end",
-            "phase_name": "assistant_text",
-            "timestamp": 11.6,
-            "perf_ms": 1600.0,
-        },
     ]
 
-    phases = ctx._build_phase_timing_summary()
+    summary = ctx._build_execution_timing_summary()
 
-    assert [item["phase"] for item in phases] == ["planning", "tool", "assistant_text"]
-    assert phases[0]["started_at"] == 10.0
-    assert phases[0]["finished_at"] == 10.3
-    assert phases[0]["duration_ms"] == 300.0
-    assert phases[0]["segment_count"] == 1
-    assert phases[1]["duration_ms"] == 500.0
-    assert phases[2]["started_at"] == 11.1
-    assert phases[2]["finished_at"] == 11.6
-    assert phases[2]["duration_ms"] == 400.0
-    assert phases[2]["segment_count"] == 2
+    assert summary["total_timeline_events"] == 3
+    assert [item["node_name"] for item in summary["flow_node_timings"]] == [
+        "planning",
+        "tool",
+    ]

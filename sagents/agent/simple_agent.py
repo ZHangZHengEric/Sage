@@ -642,7 +642,8 @@ class SimpleAgent(AgentBase):
             messages_for_complete = messages_input
 
         # 压缩消息，避免 token 超限
-        budget = min(session_context.message_manager.context_budget_manager.budget_info.get('active_budget', 3000), 3000)
+        budget_info = session_context.message_manager.context_budget_manager.budget_info or {}
+        budget = min(budget_info.get('active_budget', 3000), 3000)
         messages_for_complete = MessageManager.compress_messages(messages_for_complete, budget)
 
         clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_for_complete)
@@ -650,9 +651,7 @@ class SimpleAgent(AgentBase):
         task_complete_template = PromptManager().get_agent_prompt_auto('task_complete_template', language=session_context.get_language())
         system_msg = await self.prepare_unified_system_message(
             session_id,
-            custom_prefix=PromptManager().get_agent_prompt_auto(
-                _get_system_prefix(tool_manager, session_context.get_language()), language=session_context.get_language()
-            ),
+            custom_prefix=_get_system_prefix(tool_manager, session_context.get_language()),
             language=session_context.get_language(),
         )
         prompt = task_complete_template.format(
@@ -1097,7 +1096,6 @@ class SimpleAgent(AgentBase):
                             "error": "Partial streamed tool call discarded because the LLM stream ended before a complete response.",
                         }, ensure_ascii=False),
                         tool_call_id=real_tool_call_id,
-                        tool_name=tool_name,
                         message_type=MessageType.TOOL_CALL_RESULT.value,
                         agent_name=self.agent_name,
                         metadata={"tool_name": tool_name, "partial_stream_discarded": True},

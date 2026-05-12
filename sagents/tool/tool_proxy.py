@@ -199,7 +199,7 @@ class ToolProxy:
 
         raise ValueError(f"Tool {tool_name} not found")
 
-    async def register_mcp_server(self, server_name: str, config: dict) -> Any:
+    async def register_mcp_server(self, server_name: str, config: dict, force: bool = False) -> Any:
         """
         注册 MCP Server 到优先级最高的 ToolManager
         
@@ -217,7 +217,7 @@ class ToolProxy:
         # 注册到优先级最高的 manager (index 0)
         target_tm = self.tool_managers[0]
         logger.info(f"ToolProxy: Registering MCP server '{server_name}' to highest priority manager")
-        return await target_tm.register_mcp_server(server_name, config)
+        return await target_tm.register_mcp_server(server_name, config, force=force)
 
     def add_tool_manager(self, tool_manager: ToolManager) -> None:
         """
