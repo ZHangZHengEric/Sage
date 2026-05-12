@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json as _json
+import os
 import re
 import shlex
 import time
@@ -260,6 +261,24 @@ class ExecuteCommandTool:
         return _get_session_sandbox_util(session_id, log_prefix="ExecuteCommandTool")
 
     @staticmethod
+    def _get_agent_workspace_log_dir(sandbox: Any, fallback_workdir: Optional[str] = None) -> Optional[str]:
+        """Return the current session agent workspace log directory.
+
+        This intentionally uses the sandbox-visible workspace path. Providers
+        that execute on the host are responsible for translating it back to
+        their concrete host path before touching the filesystem.
+        """
+        try:
+            workspace = getattr(sandbox, "workspace_path", None)
+        except Exception:
+            workspace = None
+        if workspace:
+            return os.path.join(str(workspace), "bg")
+        if fallback_workdir:
+            return os.path.join(str(fallback_workdir), "bg")
+        return None
+
+    @staticmethod
     def _parse_env_vars(env_vars: Any) -> Optional[Dict[str, str]]:
         if env_vars is None:
             return None
@@ -382,6 +401,7 @@ class ExecuteCommandTool:
         command: str,
         workdir: Optional[str],
         env_vars: Optional[Dict[str, str]],
+        session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """在沙箱内后台启动命令。
 
@@ -393,7 +413,13 @@ class ExecuteCommandTool:
         """
         # === 1) 原生路径（跨平台） ===
         if self._sandbox_supports_native_bg(sandbox):
-            info = await sandbox.start_background(command, workdir=workdir, env_vars=env_vars)
+            log_dir = self._get_agent_workspace_log_dir(sandbox, fallback_workdir=workdir)
+            info = await sandbox.start_background(
+                command,
+                workdir=workdir,
+                env_vars=env_vars,
+                log_dir=log_dir,
+            )
             task_id = info["task_id"]
             task_info = {
                 "task_id": task_id,
@@ -410,15 +436,16 @@ class ExecuteCommandTool:
         # === 2) 兜底：bash 包装（仅 POSIX；Windows 主机会到不了这里，
         #     因为 PassthroughSandbox 已经走 native 了） ===
         task_id = _gen_task_id()
-        log_path = f"{_BG_DIR}/{task_id}.log"
-        exit_path = f"{_BG_DIR}/{task_id}.exit"
+        bg_dir_path = self._get_agent_workspace_log_dir(sandbox, fallback_workdir=workdir) or _BG_DIR
+        log_path = f"{bg_dir_path}/{task_id}.log"
+        exit_path = f"{bg_dir_path}/{task_id}.exit"
 
         env_prefix = ""
         if env_vars:
             env_prefix = " ".join(f"{shlex.quote(k)}={shlex.quote(v)}" for k, v in env_vars.items()) + " "
 
         cd_prefix = f"cd {shlex.quote(workdir)} && " if workdir else ""
-        bg_dir = shlex.quote(_BG_DIR)
+        bg_dir = shlex.quote(bg_dir_path)
         log_q = shlex.quote(log_path)
         exit_q = shlex.quote(exit_path)
         cmd_q = shlex.quote(command)
@@ -738,7 +765,7 @@ class ExecuteCommandTool:
         echo_header(command)
         try:
             task_info = await self._spawn_background(
-                sandbox, command, workdir, parsed_env_vars
+                sandbox, command, workdir, parsed_env_vars or None, session_id=session_id
             )
         except Exception as exc:
             echo_footer(None)

@@ -17,6 +17,7 @@ from pathlib import Path
 import json
 import asyncio
 import re
+import copy
 from mcp import StdioServerParameters
 from mcp import Tool
 import traceback
@@ -35,6 +36,32 @@ MAX_TOOL_RESULT_TOKENS = 12000
 _CATEGORY_SOURCE_LABELS: Dict[str, str] = {
     "browser": "浏览器扩展",
 }
+
+
+def _copy_json_like(value: Any, fallback: Any) -> Any:
+    try:
+        return copy.deepcopy(value)
+    except Exception:
+        return fallback
+
+
+def _get_display_input_schema(tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec]) -> Dict[str, Any]:
+    input_schema = getattr(tool, "input_schema", None)
+    if isinstance(input_schema, dict):
+        schema = _copy_json_like(input_schema, {})
+        if isinstance(schema, dict):
+            schema.setdefault("type", "object")
+            schema.setdefault("properties", {})
+            schema.setdefault("required", [])
+            return schema
+
+    parameters = getattr(tool, "parameters", {}) or {}
+    required = getattr(tool, "required", []) or []
+    return {
+        "type": "object",
+        "properties": _copy_json_like(parameters, {}),
+        "required": list(required) if isinstance(required, list) else [],
+    }
 
 
 def _truncate_result(result: str, max_tokens: int = MAX_TOOL_RESULT_TOKENS) -> str:
@@ -272,6 +299,7 @@ class ToolManager:
         self.tools: Dict[str, Union[ToolSpec, McpToolSpec, SageMcpToolSpec]] = {}
         self._tool_instances: Dict[type, Any] = {}  # 缓存工具实例
         self._mcp_setting_path = None
+        self._mcp_proxy = McpProxy(isolated=isolated)
 
         if is_auto_discover:
             self.discover_tools_from_path()
@@ -573,12 +601,13 @@ class ToolManager:
         logger.debug(f"Successfully registered new tool: {tool_spec.name} ({tool_type})")
         return True
 
-    async def remove_tool_by_mcp(self, server_name: str) -> bool:
+    async def remove_tool_by_mcp(self, server_name: str, close_pool: bool = True) -> bool:
         """
         Remove all tools registered from a specific MCP server.
 
         Args:
             server_name: Name of the server to remove
+            close_pool: Whether to close pooled connections for this server
 
         Returns:
             bool: True if any tools were removed, False otherwise
@@ -605,6 +634,8 @@ class ToolManager:
                     f"No MCP tools found for server '{server_name}' to remove"
                 )
                 removed = True
+            if close_pool:
+                await self._mcp_proxy.close_server(server_name, drain=True)
             return removed
         except Exception as e:
             logger.error(f"Failed to remove MCP server '{server_name}': {e}")
@@ -631,10 +662,15 @@ class ToolManager:
                 logger.debug(f"Removed MCP tool '{tool_name}'")
 
             logger.info(f"Cleared {removed_count} MCP tools")
+            await self._mcp_proxy.close_all(drain=True)
             return removed_count
         except Exception as e:
             logger.error(f"Failed to clear MCP tools: {e}")
             return 0
+
+    async def shutdown(self) -> None:
+        """Release pooled MCP connections held by this tool manager."""
+        await self._mcp_proxy.close_all(drain=True)
 
     async def _discover_mcp_tools(self, mcp_setting_path: Optional[str] = None):
         bool_registered = False
@@ -657,7 +693,7 @@ class ToolManager:
             return bool_registered
         return bool_registered
 
-    async def register_mcp_server(self, server_name: str, config: dict):
+    async def register_mcp_server(self, server_name: str, config: dict, force: bool = False):
         """Register an MCP server directly with configuration
 
         Args:
@@ -697,7 +733,8 @@ class ToolManager:
                     logger.warning(f"Invalid URL for server {server_name}: {url_val}")
                     return False
                 server_params = StreamableHttpServerParameters(
-                    url=url_val
+                    url=url_val,
+                    api_key=config.get("api_key", None),
                 )
             else:
                 # stdio protocol
@@ -740,8 +777,25 @@ class ToolManager:
                     args=args,
                     env=env,
                 )
-            mcp_proxy = McpProxy()
-            mcp_tools = await mcp_proxy.get_mcp_tools(server_name, server_params)
+            cached_tools = None
+            if not force:
+                cached_tools = self._mcp_proxy.get_cached_tools(
+                    server_name,
+                    server_params,
+                    config=config,
+                )
+            if cached_tools is not None:
+                registered_tools.extend(cached_tools)
+                logger.info(f"MCP server {server_name} unchanged, reused cached tools")
+                return registered_tools
+
+            mcp_tools = await self._mcp_proxy.get_mcp_tools(
+                server_name,
+                server_params,
+                config=config,
+                force=force,
+            )
+            await self.remove_tool_by_mcp(server_name, close_pool=False)
             for mcp_tool in mcp_tools:
                 await self._register_mcp_tool(server_name, mcp_tool, server_params)
                 registered_tools.append(mcp_tool)
@@ -811,6 +865,7 @@ class ToolManager:
             required=input_schema.get("required", []),
             server_name=server_name,
             server_params=server_params,
+            input_schema=input_schema,
         )
         registered = self.register_tool(tool_spec)
         logger.debug(f"MCP tool {tool_info['name']} registration result: {registered}")
@@ -828,12 +883,14 @@ class ToolManager:
         for tool in self.tools.values():
             spec = convert_spec_to_openai_format(tool, lang=lang, fallback_chain=fallback_chain)
             fn = spec.get("function", {})
-            params = fn.get("parameters", {})
+            input_schema = _get_display_input_schema(tool)
+            params = input_schema.get("properties", {})
             tools_list.append({
                 "name": fn.get("name", getattr(tool, "name", "")),
                 "description": fn.get("description", getattr(tool, "description", "")),
-                "parameters": params.get("properties", {}),
-                "required": params.get("required", getattr(tool, "required", [])),
+                "parameters": params if isinstance(params, dict) else {},
+                "required": input_schema.get("required", getattr(tool, "required", [])),
+                "input_schema": input_schema,
             })
         return tools_list
 
@@ -884,13 +941,15 @@ class ToolManager:
 
             spec = convert_spec_to_openai_format(tool, lang=lang, fallback_chain=fallback_chain)
             fn = spec.get("function", {})
-            params = fn.get("parameters", {})
+            input_schema = _get_display_input_schema(tool)
+            params = input_schema.get("properties", {})
 
             tools_with_type.append({
                 "name": fn.get("name", getattr(tool, "name", "")),
                 "description": fn.get("description", getattr(tool, "description", "")),
-                "parameters": params.get("properties", {}),
-                "required": params.get("required", getattr(tool, "required", [])),
+                "parameters": params if isinstance(params, dict) else {},
+                "required": input_schema.get("required", getattr(tool, "required", [])),
+                "input_schema": input_schema,
                 "type": tool_type,
                 "source": source,
             })
@@ -1132,7 +1191,7 @@ class ToolManager:
                 lowered = value.strip().lower()
                 if lowered in {"true", "false"}:
                     normalized[key] = lowered == "true"
-                    logger.info(
+                    logger.debug(
                         f"Normalized tool argument '{key}' to boolean for tool '{tool_name}'"
                     )
                     continue
@@ -1142,7 +1201,7 @@ class ToolManager:
                 if re.fullmatch(r"[+-]?\d+", raw):
                     try:
                         normalized[key] = int(raw)
-                        logger.info(
+                        logger.debug(
                             f"Normalized tool argument '{key}' to integer for tool '{tool_name}'"
                         )
                         continue
@@ -1153,7 +1212,7 @@ class ToolManager:
                 raw = value.strip()
                 try:
                     normalized[key] = float(raw)
-                    logger.info(
+                    logger.debug(
                         f"Normalized tool argument '{key}' to number for tool '{tool_name}'"
                     )
                     continue
@@ -1178,12 +1237,12 @@ class ToolManager:
 
                 if "object" in expected_types and isinstance(parsed, dict):
                     normalized[key] = parsed
-                    logger.info(
+                    logger.debug(
                         f"Normalized tool argument '{key}' to object for tool '{tool_name}'"
                     )
                 elif "array" in expected_types and isinstance(parsed, list):
                     normalized[key] = parsed
-                    logger.info(
+                    logger.debug(
                         f"Normalized tool argument '{key}' to array for tool '{tool_name}'"
                     )
 
@@ -1198,9 +1257,8 @@ class ToolManager:
     ) -> str:
         """Execute MCP tool and format result"""
         logger.info(f"Executing MCP tool: {tool.name} on server: {tool.server_name}")
-        mcp_proxy = McpProxy()
         try:
-            result = await mcp_proxy.run_mcp_tool(
+            result = await self._mcp_proxy.run_mcp_tool(
                 tool,
                 session_id,
                 user_id=user_id,

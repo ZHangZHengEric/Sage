@@ -23,7 +23,7 @@ def _server_cfg(tmp_path: Path) -> config.StartupConfig:
     return cfg
 
 
-def test_sage_stream_service_uses_agent_owner_for_server_skill_paths(tmp_path, monkeypatch):
+def test_sage_stream_service_uses_caller_workspace_and_agent_owner_skills(tmp_path, monkeypatch):
     cfg = _server_cfg(tmp_path)
     monkeypatch.setattr(config, "_GLOBAL_STARTUP_CONFIG", cfg, raising=False)
 
@@ -54,7 +54,7 @@ def test_sage_stream_service_uses_agent_owner_for_server_skill_paths(tmp_path, m
 
     service = chat_service.SageStreamService(request)
 
-    expected_workspace = Path(cfg.agents_dir) / "owner_user" / "agent_1"
+    expected_workspace = Path(cfg.agents_dir) / "caller_user" / "agent_1"
     assert Path(service.agent_workspace) == expected_workspace
     assert recorded == {
         "available_skills": ["schedule-management"],
@@ -115,3 +115,122 @@ def test_populate_request_records_agent_owner_user_id(tmp_path, monkeypatch):
     assert request.agent_owner_user_id == "owner_user"
     assert request.user_id == "caller_user"
     assert request.available_skills == ["schedule-management"]
+
+
+def test_populate_request_prefers_agent_response_language_over_request(tmp_path, monkeypatch):
+    cfg = _server_cfg(tmp_path)
+    monkeypatch.setattr(config, "_GLOBAL_STARTUP_CONFIG", cfg, raising=False)
+
+    agent = SimpleNamespace(
+        name="Ling",
+        user_id="owner_user",
+        config={
+            "availableTools": [],
+            "maxLoopCount": 3,
+            "systemContext": {
+                "response_language": "zh-CN",
+                "business_key": "agent_value",
+            },
+        },
+    )
+    provider = SimpleNamespace(
+        base_url="http://model.local",
+        api_key="key",
+        model="model",
+        max_tokens=None,
+        temperature=0.3,
+        top_p=0.9,
+        presence_penalty=0.0,
+        max_model_len=64000,
+        supports_multimodal=True,
+        supports_structured_output=False,
+    )
+
+    class FakeAgentConfigDao:
+        async def get_by_id(self, agent_id):
+            return agent
+
+    class FakeLLMProviderDao:
+        async def get_default(self):
+            return provider
+
+    async def fake_register_extra_mcp_tools(request):
+        return None
+
+    monkeypatch.setattr(chat_service, "AgentConfigDao", FakeAgentConfigDao)
+    monkeypatch.setattr(chat_service, "LLMProviderDao", FakeLLMProviderDao)
+    monkeypatch.setattr(chat_service, "_register_extra_mcp_tools", fake_register_extra_mcp_tools)
+
+    request = StreamRequest(
+        messages=[Message(role="user", content="hi")],
+        user_id="caller_user",
+        agent_id="agent_1",
+        system_context={
+            "response_language": "en-US",
+            "business_key": "request_value",
+        },
+    )
+
+    asyncio.run(chat_service.populate_request_from_agent_config(request))
+
+    assert request.system_context["response_language"] == "zh-CN"
+    assert request.system_context["business_key"] == "request_value"
+
+
+def test_populate_request_uses_agent_response_language_when_request_omits_it(tmp_path, monkeypatch):
+    cfg = _server_cfg(tmp_path)
+    monkeypatch.setattr(config, "_GLOBAL_STARTUP_CONFIG", cfg, raising=False)
+
+    agent = SimpleNamespace(
+        name="Ling",
+        user_id="owner_user",
+        config={
+            "availableTools": [],
+            "maxLoopCount": 3,
+            "systemContext": {
+                "response_language": "zh-CN",
+                "business_key": "agent_value",
+            },
+        },
+    )
+    provider = SimpleNamespace(
+        base_url="http://model.local",
+        api_key="key",
+        model="model",
+        max_tokens=None,
+        temperature=0.3,
+        top_p=0.9,
+        presence_penalty=0.0,
+        max_model_len=64000,
+        supports_multimodal=True,
+        supports_structured_output=False,
+    )
+
+    class FakeAgentConfigDao:
+        async def get_by_id(self, agent_id):
+            return agent
+
+    class FakeLLMProviderDao:
+        async def get_default(self):
+            return provider
+
+    async def fake_register_extra_mcp_tools(request):
+        return None
+
+    monkeypatch.setattr(chat_service, "AgentConfigDao", FakeAgentConfigDao)
+    monkeypatch.setattr(chat_service, "LLMProviderDao", FakeLLMProviderDao)
+    monkeypatch.setattr(chat_service, "_register_extra_mcp_tools", fake_register_extra_mcp_tools)
+
+    request = StreamRequest(
+        messages=[Message(role="user", content="hi")],
+        user_id="caller_user",
+        agent_id="agent_1",
+        system_context={
+            "business_key": "request_value",
+        },
+    )
+
+    asyncio.run(chat_service.populate_request_from_agent_config(request))
+
+    assert request.system_context["response_language"] == "zh-CN"
+    assert request.system_context["business_key"] == "request_value"

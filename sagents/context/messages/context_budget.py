@@ -95,7 +95,7 @@ class ContextBudgetManager:
                 f"ContextBudgetManager: agent_config过长({agent_config_tokens}), "
                 f"超过模型最大长度({self.max_model_len})"
             )
-            return {
+            budget_info = {
                 'agent_config_tokens': agent_config_tokens,
                 'available_tokens': 0,
                 'history_budget': 0,
@@ -103,6 +103,8 @@ class ContextBudgetManager:
                 'max_new_tokens': 0,
                 'max_model_len': self.max_model_len
             }
+            self.budget_info = budget_info
+            return budget_info
         
         # 按比例分配
         budget_info = {

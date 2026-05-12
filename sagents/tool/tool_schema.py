@@ -27,6 +27,7 @@ class McpToolSpec:
     required: List[str]
     server_name: str
     server_params: Union[StdioServerParameters, SseServerParameters, StreamableHttpServerParameters]
+    input_schema: Optional[Dict[str, Any]] = None
     return_data : Optional[Dict[str, Any]] = None # 返回数据格式
     return_properties_i18n: Optional[Dict[str, Dict[str, Any]]] = None # 返回对象属性描述的多语言
     param_description_i18n: Optional[Dict[str, Dict[str, str]]] = None # 参数描述多语言映射 param -> {lang: text}

@@ -92,6 +92,10 @@ Core runtime `sagents/` architecture:
 4. [Tool & Skill System](ARCHITECTURE_SAGENTS_TOOL_SKILL.md)
 5. [Sandbox, LLM Adapter & Observability](ARCHITECTURE_SAGENTS_SANDBOX_OBS.md)
 
+### Design drafts (not implemented in code)
+
+1. [Permissions & Confirmation Design](DESIGN_PERMISSIONS_AND_CONFIRMATION.md): tiered permissions, confirmation flows, and policy hooks for tools, sandboxes, and Web/Desktop/CLI entries
+
 ## Reading Tips
 
 ```mermaid

@@ -209,6 +209,7 @@ async def list_tools(
                 "description": tool_info.get("description", ""),
                 "parameters": tool_info.get("parameters", {}),
                 "required": tool_info.get("required", []),
+                "input_schema": tool_info.get("input_schema", {}),
                 "type": current_tool_type,
                 "source": source,
                 "user_id": tool_owner,

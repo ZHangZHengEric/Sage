@@ -115,6 +115,7 @@ class ISandboxHandle(ABC):
         command: str,
         workdir: Optional[str] = None,
         env_vars: Optional[Dict[str, str]] = None,
+        log_dir: Optional[str] = None,
     ) -> Dict[str, Any]:
         """以后台方式启动命令；返回 ``{task_id, pid, log_path}``。
 
