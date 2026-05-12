@@ -73,6 +73,38 @@ def delete_session_run_lock(session_id: str):
     lock_manager.delete_lock_ref(session_id)
 
 
+def _context_budget_config_from_model(
+    context_budget_config: Optional[Dict[str, Any]],
+    model_config: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    effective_config = dict(context_budget_config or {})
+    if "max_model_len" not in effective_config and effective_config.get("maxModelLen"):
+        effective_config["max_model_len"] = effective_config.get("maxModelLen")
+        logger.debug(
+            f"SessionRuntime: normalized context_budget_config maxModelLen="
+            f"{effective_config['max_model_len']}"
+        )
+    if "max_model_len" not in effective_config:
+        max_model_len = None
+        if isinstance(model_config, dict):
+            max_model_len = model_config.get("max_model_len") or model_config.get("maxModelLen")
+        if max_model_len:
+            effective_config["max_model_len"] = max_model_len
+            logger.debug(
+                f"SessionRuntime: derived context_budget_config from model_config, "
+                f"max_model_len={max_model_len}"
+            )
+    elif isinstance(model_config, dict):
+        model_max_model_len = model_config.get("max_model_len") or model_config.get("maxModelLen")
+        if model_max_model_len and model_max_model_len != effective_config.get("max_model_len"):
+            logger.debug(
+                f"SessionRuntime: using explicit context_budget_config, "
+                f"max_model_len={effective_config.get('max_model_len')}, "
+                f"model_config_max_model_len={model_max_model_len}"
+            )
+    return effective_config or None
+
+
 class Session:
     def __init__(self, session_id: str, enable_obs: bool = True, sandbox_type: str = "local"):
         self.session_id = session_id
@@ -253,6 +285,20 @@ class Session:
             try:
                 agent_config = snapshot.get("agent_config") or {}
                 system_context = snapshot.get("system_context") or {}
+                context_budget_config = snapshot.get("context_budget_config")
+                llm_config = agent_config.get("llm_config") if isinstance(agent_config, dict) else {}
+                has_persisted_budget_config = isinstance(context_budget_config, dict)
+                context_budget_config = _context_budget_config_from_model(
+                    context_budget_config if isinstance(context_budget_config, dict) else None,
+                    llm_config if isinstance(llm_config, dict) else None,
+                )
+                if context_budget_config:
+                    restore_source = "context_budget_config" if has_persisted_budget_config else "legacy llm_config"
+                    logger.info(
+                        f"SessionRuntime: restored context_budget_config from {restore_source}, "
+                        f"session_id={self.session_id}, "
+                        f"max_model_len={context_budget_config.get('max_model_len')}"
+                    )
                 self.session_context = SessionContext(
                     session_id=str(snapshot.get("session_id") or self.session_id),
                     user_id=str(snapshot.get("user_id") or ""),
@@ -261,7 +307,7 @@ class Session:
                     sandbox_agent_workspace=snapshot.get("sandbox_agent_workspace"),
                     volume_mounts=None,
                     sandbox_id=None,
-                    context_budget_config=None,
+                    context_budget_config=context_budget_config,
                     system_context=system_context if isinstance(system_context, dict) else {},
                     tool_manager=None,
                     skill_manager=None,
@@ -445,8 +491,11 @@ class Session:
             if parent_session_id:
                 logger.info(f"SessionRuntime: 从 system_context 中提取 parent_session_id={parent_session_id}")
 
+        context_budget_config = _context_budget_config_from_model(context_budget_config, self.model_config)
+
         if self.session_context:
             self._cache_session_workspace(session_id, self.session_context)
+            self.session_context.update_context_budget_config(context_budget_config)
             if tool_manager:
                 self.session_context.tool_manager = tool_manager
             if skill_manager:

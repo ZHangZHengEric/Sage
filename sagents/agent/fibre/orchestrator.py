@@ -1349,9 +1349,8 @@ class FibreOrchestrator:
         # Let's manually ensure context, similar to run_stream logic but without execution
         sub_agent_system_context = copy.deepcopy(agent_def.system_context)
         
-        # Inherit context_budget_config from parent session
         parent_context = parent_session.session_context if parent_session and parent_session.session_context else None
-        # context_budget_config is passed to MessageManager, not stored in SessionContext
+        # Let SessionRuntime derive context_budget_config from the sub-agent model_config.
         context_budget_config = None
         
         # Merge parent session's system_context (excluding specific keys)
