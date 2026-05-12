@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
+
 
 def _load_memory_index_module():
     repo_root = Path(__file__).resolve().parents[4]
@@ -807,6 +809,7 @@ class TestMemoryIndexFTS(unittest.TestCase):
             self.assertEqual(len(results), 2)
             self.assertEqual(results[0].path, "/workspace/app/cli/memory_search.py")
 
+    @pytest.mark.timeout(120)
     def test_search_latency_stays_reasonable_on_moderate_synthetic_corpus(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
@@ -985,6 +988,7 @@ class TestMemoryIndexFTS(unittest.TestCase):
             self.assertEqual(len(results), 2)
             self.assertEqual(results[0].path, "/workspace/app/cli/doctor_config.py")
 
+    @pytest.mark.timeout(120)
     def test_index_build_and_batch_search_latency_stay_reasonable(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
