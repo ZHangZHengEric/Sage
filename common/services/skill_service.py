@@ -3,6 +3,8 @@ import os
 import shutil
 import stat
 import tempfile
+import threading
+import time
 import zipfile
 import hashlib
 from pathlib import Path
@@ -14,11 +16,18 @@ import yaml
 from fastapi import UploadFile
 from loguru import logger
 from sagents.skill.skill_manager import SkillManager, get_skill_manager
+from sagents.skill.skill_schema import SkillSchema
 
 from common.core import config
 from common.core.exceptions import SageHTTPException
 from common.models.agent import AgentConfigDao
 from common.services.agent_workspace import get_agent_skill_dir
+
+
+_SERVER_SKILLS_CACHE_TTL_SECONDS = 5.0
+_server_skills_cache_lock = threading.Lock()
+_server_skills_cache_expires_at = 0.0
+_server_skills_cache: List[SkillSchema] = []
 
 
 def _calculate_skill_hash(skill_path: str) -> str:
@@ -409,29 +418,79 @@ def _sync_desktop_agent_skills() -> None:
         logger.error(f"Error syncing agent skills: {e}")
 
 
-def _collect_server_skills() -> List[Any]:
+def _invalidate_server_skills_cache() -> None:
+    global _server_skills_cache_expires_at, _server_skills_cache
+    with _server_skills_cache_lock:
+        _server_skills_cache_expires_at = 0.0
+        _server_skills_cache = []
+
+
+def _load_server_skill_info_from_dir(skill_path: str) -> Optional[SkillSchema]:
+    skill_md_path = os.path.join(skill_path, "SKILL.md")
+    if not os.path.exists(skill_md_path):
+        return None
+
+    try:
+        with open(skill_md_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        metadata: Dict[str, Any] = {}
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                raw_metadata = yaml.safe_load(parts[1]) or {}
+                if isinstance(raw_metadata, dict):
+                    metadata = raw_metadata
+
+        name = metadata.get("name")
+        description = metadata.get("description")
+        if not name or not description:
+            logger.warning(f"SkillManager: {skill_path} SKILL.md 缺少必要的元数据 (name, description)")
+            return None
+
+        return SkillSchema(
+            name=name,
+            description=description,
+            path=skill_path,
+            instructions=content,
+            file_list="",
+        )
+    except Exception as e:
+        logger.warning(f"加载技能元信息失败 {skill_path}: {e}")
+        return None
+
+
+def _collect_skill_infos_from_workspace(workspace: str) -> List[SkillSchema]:
+    skills_by_name: Dict[str, SkillSchema] = {}
+    try:
+        for item in os.listdir(workspace):
+            skill_path = os.path.join(workspace, item)
+            if not os.path.isdir(skill_path):
+                continue
+            skill = _load_server_skill_info_from_dir(skill_path)
+            if skill:
+                skills_by_name[skill.name] = skill
+    except Exception as e:
+        logger.warning(f"扫描技能目录失败 {workspace}: {e}")
+    return list(skills_by_name.values())
+
+
+def _collect_server_skills_uncached() -> List[SkillSchema]:
     cfg = _get_cfg()
     skill_dir = cfg.skill_dir
     user_dir = cfg.user_dir
     agents_dir = cfg.agents_dir
-    all_skills: List[Any] = []
+    all_skills: List[SkillSchema] = []
 
     if os.path.exists(skill_dir):
-        try:
-            all_skills.extend(list(SkillManager(skill_dirs=[skill_dir], isolated=True).list_skill_info()))
-        except Exception as e:
-            logger.warning(f"加载系统技能失败: {e}")
+        all_skills.extend(_collect_skill_infos_from_workspace(skill_dir))
 
     if os.path.exists(user_dir):
         try:
             for user_folder in os.listdir(user_dir):
                 user_skills_path = os.path.join(user_dir, user_folder, "skills")
                 if os.path.isdir(user_skills_path):
-                    try:
-                        tm = SkillManager(skill_dirs=[user_skills_path], isolated=True)
-                        all_skills.extend(list(tm.list_skill_info()))
-                    except Exception as e:
-                        logger.warning(f"加载用户 {user_folder} 技能失败: {e}")
+                    all_skills.extend(_collect_skill_infos_from_workspace(user_skills_path))
         except Exception as e:
             logger.warning(f"扫描用户技能目录失败: {e}")
 
@@ -447,17 +506,26 @@ def _collect_server_skills() -> List[Any]:
                             "skills",
                         )
                         if os.path.isdir(agent_skills_path):
-                            try:
-                                tm = SkillManager(skill_dirs=[agent_skills_path], isolated=True)
-                                all_skills.extend(list(tm.list_skill_info()))
-                            except Exception as e:
-                                logger.warning(
-                                    f"加载 Agent {user_folder}/{agent_folder} 技能失败: {e}"
-                                )
+                            all_skills.extend(_collect_skill_infos_from_workspace(agent_skills_path))
         except Exception as e:
             logger.warning(f"扫描Agent技能目录失败: {e}")
 
     return all_skills
+
+
+def _collect_server_skills() -> List[SkillSchema]:
+    global _server_skills_cache_expires_at, _server_skills_cache
+
+    now = time.monotonic()
+    with _server_skills_cache_lock:
+        if now < _server_skills_cache_expires_at:
+            return list(_server_skills_cache)
+
+    skills = _collect_server_skills_uncached()
+    with _server_skills_cache_lock:
+        _server_skills_cache = list(skills)
+        _server_skills_cache_expires_at = time.monotonic() + _SERVER_SKILLS_CACHE_TTL_SECONDS
+    return skills
 
 
 def _list_desktop_skills_sync(current_user_id: str = "") -> List[Dict[str, Any]]:
@@ -718,26 +786,18 @@ def _find_source_skill_path(
     if agent_user_id and os.path.exists(cfg.user_dir):
         user_skills_path = os.path.join(cfg.user_dir, agent_user_id, "skills")
         if os.path.isdir(user_skills_path):
-            try:
-                tm_user = SkillManager(skill_dirs=[user_skills_path], isolated=True)
-                skill_info = _get_skill_info_safe(tm_user, skill_name)
-                if skill_info:
-                    return skill_info.path
-            except Exception as e:
-                logger.warning(f"_find_source_skill_path: SkillManager 查找用户技能失败: {e}")
+            for skill in _collect_skill_infos_from_workspace(user_skills_path):
+                if skill.name == skill_name:
+                    return skill.path
         # Fallback: 直接路径匹配
         direct_path = os.path.join(cfg.user_dir, agent_user_id, "skills", skill_name)
         if os.path.isdir(direct_path):
             return direct_path
 
     if os.path.exists(cfg.skill_dir):
-        try:
-            tm_sys = SkillManager(skill_dirs=[cfg.skill_dir], isolated=True)
-            skill_info = _get_skill_info_safe(tm_sys, skill_name)
-            if skill_info:
-                return skill_info.path
-        except Exception as e:
-            logger.warning(f"_find_source_skill_path: SkillManager 查找系统技能失败: {e}")
+        for skill in _collect_skill_infos_from_workspace(cfg.skill_dir):
+            if skill.name == skill_name:
+                return skill.path
         # Fallback: 直接路径匹配
         system_skill_path = os.path.join(cfg.skill_dir, skill_name)
         if os.path.isdir(system_skill_path):
@@ -916,6 +976,8 @@ async def sync_skill_to_agent_workspaces(
         if failed_skills:
             result["failed_workspace_count"] += 1
 
+    if result["updated_workspace_count"]:
+        _invalidate_server_skills_cache()
     return result
 
 
@@ -1003,6 +1065,8 @@ async def sync_workspace_skills(
         f"sync_workspace_skills 完成: agent_id={agent_id}, "
         f"synced={synced}, removed={removed}, unchanged={unchanged}"
     )
+    if synced or removed:
+        _invalidate_server_skills_cache()
     return {"synced": synced, "removed": removed, "unchanged": unchanged}
 
 
@@ -1081,6 +1145,7 @@ async def sync_skill_to_agent(
 
         logger.info(f"技能 '{skill_name}' 已同步到Agent '{agent_id}' 工作空间")
 
+        _invalidate_server_skills_cache()
         return {
             "skill_name": skill_name,
             "agent_id": agent_id,
@@ -1135,6 +1200,7 @@ async def delete_skill(
             raise SageHTTPException(detail=f"Skill '{skill_name}' not found in agent workspace")
         try:
             await asyncio.to_thread(shutil.rmtree, agent_skills_path)
+            _invalidate_server_skills_cache()
             return
         except (PermissionError, OSError) as e:
             raise SageHTTPException(detail=f"删除技能文件失败: {e}")
@@ -1144,6 +1210,7 @@ async def delete_skill(
         if os.path.exists(user_skills_path):
             try:
                 await asyncio.to_thread(shutil.rmtree, user_skills_path)
+                _invalidate_server_skills_cache()
                 return
             except (PermissionError, OSError) as e:
                 raise SageHTTPException(detail=f"删除技能文件失败: {e}")
@@ -1157,6 +1224,7 @@ async def delete_skill(
             skill_manager = get_skill_manager()
             if skill_manager:
                 skill_manager.reload()
+            _invalidate_server_skills_cache()
             return
         except (PermissionError, OSError) as e:
             raise SageHTTPException(detail=f"删除技能文件失败: {e}")
@@ -1224,6 +1292,7 @@ async def update_skill_content(
             if tm.reload_skill(skill_info.path):
                 return "技能更新成功"
             raise ValueError("Skill validation failed")
+        _invalidate_server_skills_cache()
         return "技能更新成功"
     except Exception as e:
         logger.error(f"Update skill content failed: {e}")
@@ -1391,6 +1460,8 @@ async def import_skill_by_file(
 
         if not success:
             raise SageHTTPException(status_code=500 if _is_desktop_mode() else 400, detail=message)
+        if not _is_desktop_mode():
+            _invalidate_server_skills_cache()
         return message
     except Exception as e:
         if isinstance(e, SageHTTPException):
@@ -1456,6 +1527,8 @@ async def import_skill_by_url(
 
         if not success:
             raise SageHTTPException(status_code=500 if _is_desktop_mode() else 400, detail=message)
+        if not _is_desktop_mode():
+            _invalidate_server_skills_cache()
         return message
     except Exception as e:
         if isinstance(e, SageHTTPException):
