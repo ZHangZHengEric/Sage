@@ -600,7 +600,8 @@ class SimpleAgent(AgentBase):
             messages_for_complete = messages_input
 
         # 压缩消息，避免 token 超限
-        budget = min(session_context.message_manager.context_budget_manager.budget_info.get('active_budget', 3000), 3000)
+        budget_info = session_context.message_manager.context_budget_manager.budget_info or {}
+        budget = min(budget_info.get('active_budget', 3000), 3000)
         messages_for_complete = MessageManager.compress_messages(messages_for_complete, budget)
 
         clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_for_complete)

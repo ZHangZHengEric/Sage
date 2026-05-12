@@ -137,6 +137,57 @@ class SessionContext:
         except Exception as e:
             logger.warning(f"SessionContext: 清理过期任务失败: {e}")
 
+    @staticmethod
+    def _normalize_context_budget_config(context_budget_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if not isinstance(context_budget_config, dict):
+            return {}
+        allowed_keys = {
+            "max_model_len",
+            "history_ratio",
+            "active_ratio",
+            "max_new_message_ratio",
+        }
+        return {
+            key: value
+            for key, value in context_budget_config.items()
+            if key in allowed_keys and value is not None
+        }
+
+    def _effective_context_budget_config(self) -> Dict[str, Any]:
+        manager = self.message_manager.context_budget_manager
+        return {
+            "max_model_len": manager.max_model_len,
+            "history_ratio": manager.history_ratio,
+            "active_ratio": manager.active_ratio,
+            "max_new_message_ratio": manager.max_new_message_ratio,
+        }
+
+    def update_context_budget_config(self, context_budget_config: Optional[Dict[str, Any]]) -> None:
+        """Refresh budget settings on a reused/restored SessionContext."""
+        incoming = self._normalize_context_budget_config(context_budget_config)
+        if not incoming:
+            return
+
+        manager = self.message_manager.context_budget_manager
+        current_config = self._effective_context_budget_config()
+        next_config = dict(current_config)
+        next_config.update(incoming)
+
+        if next_config == current_config:
+            self.context_budget_config = next_config
+            return
+
+        manager.max_model_len = next_config["max_model_len"]
+        manager.history_ratio = next_config["history_ratio"]
+        manager.active_ratio = next_config["active_ratio"]
+        manager.max_new_message_ratio = next_config["max_new_message_ratio"]
+        manager.budget_info = None
+        self.context_budget_config = next_config
+        logger.info(
+            f"SessionContext: 更新 context_budget_config, "
+            f"max_model_len={manager.max_model_len}"
+        )
+
     def _init_runtime_state(self, context_budget_config: Optional[Dict[str, Any]] = None):
         # 运行期状态容器（与 I/O、会话生命周期绑定）
         self.llm_requests_logs: List[Dict[str, Any]] = []
@@ -146,6 +197,7 @@ class SessionContext:
         self.end_time = None
         self._status = SessionStatus.IDLE
         self.message_manager = MessageManager(context_budget_config=context_budget_config)
+        self.context_budget_config = self._effective_context_budget_config()
         # pending_user_injections：运行中等待被下一次 LLM 请求消费的"引导用户消息"。
         # 不进入持久化快照，会话销毁即释放。
         self.pending_user_injections: List[MessageChunk] = []
@@ -935,7 +987,8 @@ class SessionContext:
             llm_config = {
                 "model": model_config.get("model", ""),
                 "maxTokens": model_config.get("max_tokens", ""),
-                "temperature": model_config.get("temperature", "")
+                "temperature": model_config.get("temperature", ""),
+                "max_model_len": model_config.get("max_model_len"),
             }
 
         self.agent_config = {
@@ -1355,6 +1408,7 @@ class SessionContext:
                 "system_context": make_serializable(self.system_context),
                 "audit_status": make_serializable(self.audit_status),
                 "tokens_usage_info": self.get_tokens_usage_info(),
+                "context_budget_config": make_serializable(self._effective_context_budget_config()),
 
                 # Agent 配置
                 "agent_config": make_serializable(self.agent_config)
