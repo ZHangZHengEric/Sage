@@ -185,7 +185,9 @@ class SessionContext:
         self.context_budget_config = next_config
         logger.info(
             f"SessionContext: 更新 context_budget_config, "
-            f"max_model_len={manager.max_model_len}"
+            f"session_id={self.session_id}, "
+            f"old_max_model_len={current_config.get('max_model_len')}, "
+            f"new_max_model_len={manager.max_model_len}"
         )
 
     def _init_runtime_state(self, context_budget_config: Optional[Dict[str, Any]] = None):
