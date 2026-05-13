@@ -185,6 +185,52 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(params["properties"].keys()), {"foo"})
         self.assertEqual(params["required"], ["foo"])
 
+    def test_defaulted_params_are_optional_in_openai_schema(self):
+        tool = McpToolSpec(
+            name="remote_echo",
+            description="echo",
+            description_i18n={},
+            func=None,
+            parameters={
+                "foo": {"type": "string"},
+                "limit": {"type": "integer", "default": 5},
+                "format": {"type": "string"},
+            },
+            required=["foo"],
+            server_name="remote",
+            server_params=StreamableHttpServerParameters(url="http://example.invalid"),
+        )
+
+        openai_tool = convert_spec_to_openai_format(tool)
+        params = openai_tool["function"]["parameters"]
+
+        self.assertEqual(set(params["required"]), {"foo", "format"})
+        self.assertEqual(params["properties"]["limit"]["default"], 5)
+        self.assertNotIn("anyOf", params["properties"]["limit"])
+        self.assertFalse(openai_tool["function"]["strict"])
+
+    def test_internal_tool_schema_uses_same_default_rule(self):
+        tool = ToolSpec(
+            name="local_echo",
+            description="echo",
+            description_i18n={},
+            func=echo_kwargs,
+            parameters={
+                "foo": {"type": "string"},
+                "limit": {"type": "integer", "default": 5},
+                "format": {"type": "string"},
+                "session_id": {"type": "string"},
+            },
+            required=["foo"],
+        )
+
+        openai_tool = convert_spec_to_openai_format(tool)
+        params = openai_tool["function"]["parameters"]
+
+        self.assertEqual(set(params["properties"].keys()), {"foo", "limit", "format"})
+        self.assertEqual(set(params["required"]), {"foo", "format"})
+        self.assertFalse(openai_tool["function"]["strict"])
+
     async def test_tool_service_passes_user_id_to_tool_manager(self):
         fake_manager = type("FakeManager", (), {})()
         fake_manager.tools = {"basic_tool": object()}

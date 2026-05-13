@@ -180,8 +180,8 @@ def sage_mcp_tool(
             # Handle defaults
             if param.default == inspect.Parameter.empty:
                 required.append(param_name)
-            else:
-                pass
+            elif "default" not in param_info:
+                param_info["default"] = param.default
 
             parameters[param_name] = param_info
 
