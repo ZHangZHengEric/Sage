@@ -124,6 +124,8 @@ def tool(
 
             if param.default == inspect.Parameter.empty:
                 required.append(name)
+            elif "default" not in param_info:
+                param_info["default"] = param.default
 
             parameters[name] = param_info
         _t_params_end = time.perf_counter() if _profile else None
