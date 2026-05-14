@@ -68,6 +68,8 @@ class MessageType(Enum):
     # 其他类型
     THINKING = "thinking"
     ERROR = "error"
+    # Agent 执行轨迹错误：保留给模型理解，客户端可自行决定是否展示
+    AGENT_EXECUTION_ERROR = "agent_execution_error"
     CHUNK = "chunk"
     GUIDE = "guide"
     # 特殊类型
@@ -78,6 +80,16 @@ class MessageType(Enum):
     EMPTY = "empty"
     # 循环熔断：连续相同错误导致自动暂停，前端可用特殊样式展示
     LOOP_BREAK = "loop_break"
+
+
+EXECUTION_ERROR_MESSAGE_TYPES = {
+    MessageType.ERROR.value,
+    MessageType.AGENT_EXECUTION_ERROR.value,
+}
+
+
+def is_execution_error_message_type(message_type: Optional[str]) -> bool:
+    return message_type in EXECUTION_ERROR_MESSAGE_TYPES
 
 
 @dataclass
