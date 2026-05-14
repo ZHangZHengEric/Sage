@@ -245,5 +245,5 @@ async def test_simple_agent_does_not_add_synthetic_tool_result_when_tool_call_wa
     non_empty = [chunk for chunk in chunks if chunk.message_type != MessageType.EMPTY.value]
     assert client.chat.completions.calls == 1
     assert [chunk.role for chunk in non_empty] == ["assistant"]
-    assert non_empty[0].message_type == MessageType.ERROR.value
+    assert non_empty[0].message_type == MessageType.AGENT_EXECUTION_ERROR.value
     assert "incomplete tool call was discarded" in non_empty[0].content
