@@ -268,10 +268,6 @@ async def get_session_summary(
     user_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     from common.models.conversation import ConversationDao
-    from common.services.conversation_service import (
-        _load_session_goal,
-        _load_session_goal_transition,
-    )
 
     dao = ConversationDao()
     conversation = await dao.get_by_session_id(session_id)
@@ -282,8 +278,6 @@ async def get_session_summary(
         return None
 
     counts = conversation.get_message_count()
-    goal = _load_session_goal(session_id)
-    goal_transition = _load_session_goal_transition(session_id)
     return {
         "session_id": conversation.session_id,
         "user_id": conversation.user_id,
@@ -295,8 +289,8 @@ async def get_session_summary(
         "agent_count": counts.get("agent_count", 0),
         "created_at": conversation.created_at.isoformat() if conversation.created_at else "",
         "updated_at": conversation.updated_at.isoformat() if conversation.updated_at else "",
-        "goal": goal.model_dump(mode="json") if goal else None,
-        "goal_transition": goal_transition.model_dump(mode="json") if goal_transition else None,
+        "goal": None,
+        "goal_transition": None,
     }
 
 
@@ -403,4 +397,3 @@ async def inspect_session(
         "recent_messages": preview_messages,
         "message_preview_limit": normalized_limit,
     }
-
