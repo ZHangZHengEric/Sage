@@ -161,7 +161,6 @@ class SAgent:
         more_suggest: bool = False,
         force_summary: bool = False,
         system_context: Optional[Dict[str, Any]] = None,
-        goal: Optional[Dict[str, Any]] = None,
         available_workflows: Optional[Dict[str, Any]] = None,
         context_budget_config: Optional[Dict[str, Any]] = None,
         custom_sub_agents: Optional[List[Dict[str, Any]]] = None,

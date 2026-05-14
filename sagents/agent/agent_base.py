@@ -37,10 +37,6 @@ from sagents.utils.agent_session_helper import (
     get_live_session_context as _get_live_session_context_util,
     should_abort_due_to_session as _should_abort_due_to_session_util,
 )
-from sagents.agent.lightweight_intent import (
-    extract_latest_user_text_from_any,
-    should_skip_preflight_for_lightweight_prompt,
-)
 import traceback
 import time
 import os
@@ -176,7 +172,6 @@ class AgentBase(ABC):
         """
         logger.debug(f"{self.__class__.__name__}: 调用语言模型进行流式生成, session_id={session_id}")
 
-        session = None
         if session_id:
             session = self._get_live_session(session_id)
             if session is None:
@@ -206,20 +201,11 @@ class AgentBase(ABC):
         all_chunks = []
         attempt_chunks = []
 
-        # 重试配置 - 默认允许较充分的网络重试；对明显轻量的直答请求收紧预算，
-        # 避免 "hello" 之类的小请求被指数退避拖到几十秒。
-        latest_user_text = extract_latest_user_text_from_any(messages)
-        is_lightweight_prompt = should_skip_preflight_for_lightweight_prompt(latest_user_text)
-        fast_retry_mode = step_name == "direct_execution" and is_lightweight_prompt
-        max_retries = 3 if fast_retry_mode else 8
+        # 重试配置 - 增加重试次数以应对网络不稳定情况
+        max_retries = 8
         retry_count = 0
         last_exception = None
         structured_output_fallback_used = False
-        if fast_retry_mode:
-            logger.info(
-                f"{self.__class__.__name__}: 轻量请求命中快速重试策略，"
-                f"latest_user_text={latest_user_text}, max_retries={max_retries}"
-            )
         partial_stream_aborted = False
 
         while retry_count < max_retries:
@@ -475,8 +461,6 @@ class AgentBase(ABC):
                         wait_time = min(wait_time, 10)  # 超时错误最多等待10秒
                     else:
                         error_type = "网络连接"
-                    if fast_retry_mode:
-                        wait_time = min(wait_time, 2)
                     if attempt_chunks:
                         logger.warning(
                             f"{self.__class__.__name__}: 流式响应已输出 {len(attempt_chunks)} 个chunk后遇到{error_type}错误，"
@@ -484,8 +468,6 @@ class AgentBase(ABC):
                         )
                         partial_stream_aborted = True
                         break
-                    if fast_retry_mode:
-                        wait_time = min(wait_time, 2)
                     logger.warning(f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time} 秒后重试 ({retry_count}/{max_retries}): {e}")
                     await asyncio.sleep(wait_time)
                 elif is_token_limit_error:
@@ -548,8 +530,6 @@ class AgentBase(ABC):
                     import random
                     wait_time = min(2 ** retry_count + random.uniform(0, 1), 30)  # 最大30秒
                     error_type = "HTTP超时" if is_httpx_error else "网络"
-                    if fast_retry_mode:
-                        wait_time = min(wait_time, 2)
                     if attempt_chunks:
                         logger.warning(
                             f"{self.__class__.__name__}: 流式响应已输出 {len(attempt_chunks)} 个chunk后遇到{error_type}错误，"
@@ -557,8 +537,6 @@ class AgentBase(ABC):
                         )
                         partial_stream_aborted = True
                         break
-                    if fast_retry_mode:
-                        wait_time = min(wait_time, 2)
                     logger.warning(f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time:.1f} 秒后重试 ({retry_count}/{max_retries}): {e}")
                     await asyncio.sleep(wait_time)
                     continue  # 继续重试循环

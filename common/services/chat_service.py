@@ -1034,7 +1034,6 @@ async def execute_chat_session(
     last_activity_time = time.time()
     token_usage_persisted = False
     token_usage_payload: Optional[Dict[str, Any]] = None
-    session_list_metadata_synced = False
 
     progress_queue: asyncio.Queue = asyncio.Queue()
     register_progress_queue(session_id, progress_queue)
@@ -1061,17 +1060,6 @@ async def execute_chat_session(
             result = payload
             token_usage_payload = _extract_token_usage_payload(result) or token_usage_payload
 
-            if not session_list_metadata_synced:
-                try:
-                    from common.services.chat_stream_manager import StreamManager as CommonStreamManager
-
-                    await CommonStreamManager.get_instance().notify_session_list_changed()
-                except Exception as sync_exc:
-                    logger.bind(session_id=session_id).debug(
-                        f"同步 active session metadata 失败: {sync_exc}"
-                    )
-                session_list_metadata_synced = True
-
             yield_result = result.copy()
             yield_result.pop("message_type", None)
             yield_result.pop("is_final", None)
@@ -1083,6 +1071,7 @@ async def execute_chat_session(
             stream_service,
             token_usage_payload=token_usage_payload,
         )
+
         yield json.dumps(
             {
                 "type": "stream_end",

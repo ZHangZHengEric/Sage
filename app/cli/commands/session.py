@@ -3,7 +3,8 @@ import sys
 import uuid
 from typing import Any, Callable, Dict, Optional
 
-from common.schemas.goal import GoalStatus
+GOAL_STATUS_ACTIVE = "active"
+GOAL_STATUS_COMPLETED = "completed"
 
 
 def _current_goal_payload(
@@ -14,7 +15,7 @@ def _current_goal_payload(
     if getattr(args, "goal_objective", None):
         return {
             "objective": args.goal_objective,
-            "status": getattr(args, "goal_status", None) or GoalStatus.ACTIVE.value,
+            "status": getattr(args, "goal_status", None) or GOAL_STATUS_ACTIVE,
         }
     if session_summary:
         raw_goal = session_summary.get("goal")
@@ -32,7 +33,7 @@ def _print_goal_status(session_summary: Optional[Dict[str, Any]], args: argparse
         print("goal: (none)")
         return
     print(f"goal: {goal.get('objective')}")
-    print(f"goal_status: {goal.get('status') or GoalStatus.ACTIVE.value}")
+    print(f"goal_status: {goal.get('status') or GOAL_STATUS_ACTIVE}")
 
 
 def _print_resume_goal_hint(session_summary: Optional[Dict[str, Any]]) -> None:
@@ -44,7 +45,7 @@ def _print_resume_goal_hint(session_summary: Optional[Dict[str, Any]]) -> None:
     objective = str(raw_goal.get("objective") or "").strip()
     if not objective:
         return
-    status = str(raw_goal.get("status") or GoalStatus.ACTIVE.value).strip() or GoalStatus.ACTIVE.value
+    status = str(raw_goal.get("status") or GOAL_STATUS_ACTIVE).strip() or GOAL_STATUS_ACTIVE
     print(f"continuing goal: {objective} ({status})")
 
 
@@ -61,7 +62,7 @@ def _handle_goal_command(
             print("Usage: /goal | /goal <objective> | /goal show | /goal set <objective> | /goal clear | /goal done")
             return None
         args.goal_objective = objective
-        args.goal_status = GoalStatus.ACTIVE.value
+        args.goal_status = GOAL_STATUS_ACTIVE
         args.clear_goal = False
         print(f"goal set: {objective}")
         return None
@@ -71,7 +72,7 @@ def _handle_goal_command(
             print("Usage: /goal | /goal <objective> | /goal show | /goal set <objective> | /goal clear | /goal done")
             return None
         args.goal_objective = objective
-        args.goal_status = GoalStatus.ACTIVE.value
+        args.goal_status = GOAL_STATUS_ACTIVE
         args.clear_goal = False
         print(f"goal set: {objective}")
         return objective
@@ -94,7 +95,7 @@ def _handle_goal_command(
             print("no active goal")
             return None
         args.goal_objective = None
-        args.goal_status = GoalStatus.COMPLETED.value
+        args.goal_status = GOAL_STATUS_COMPLETED
         args.clear_goal = False
         print(f"goal marked complete: {goal.get('objective')}")
         return None
@@ -116,7 +117,7 @@ def _apply_goal_mutation_to_summary(
     if getattr(args, "goal_objective", None):
         session_summary["goal"] = {
             "objective": args.goal_objective,
-            "status": getattr(args, "goal_status", None) or GoalStatus.ACTIVE.value,
+            "status": getattr(args, "goal_status", None) or GOAL_STATUS_ACTIVE,
         }
         return session_summary
 
@@ -152,7 +153,7 @@ async def build_request(args: argparse.Namespace, task: str):
     elif getattr(args, "goal_objective", None) or getattr(args, "goal_status", None):
         goal = {
             "objective": getattr(args, "goal_objective", None),
-            "status": getattr(args, "goal_status", None) or GoalStatus.ACTIVE.value,
+            "status": getattr(args, "goal_status", None) or GOAL_STATUS_ACTIVE,
             "clear": False,
         }
 
