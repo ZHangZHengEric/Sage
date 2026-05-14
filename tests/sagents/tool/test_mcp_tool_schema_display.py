@@ -44,7 +44,7 @@ class TestMcpToolSchemaDisplay(unittest.TestCase):
         self.assertNotIn("anyOf", display_tool["parameters"]["count"])
         self.assertEqual(display_tool["input_schema"]["required"], ["query"])
 
-    def test_openai_schema_still_uses_strict_nullable_optional_params(self):
+    def test_openai_schema_uses_default_to_keep_params_optional(self):
         tm = ToolManager(is_auto_discover=False, isolated=True)
         tm.tools = {}
 
@@ -53,6 +53,9 @@ class TestMcpToolSchemaDisplay(unittest.TestCase):
             "properties": {
                 "query": {"type": "string"},
                 "count": {"type": "integer", "default": 10},
+                "source": {"type": "string"},
+                "session_id": {"type": "string"},
+                "user_id": {"type": "string"},
             },
             "required": ["query"],
         }
@@ -71,9 +74,11 @@ class TestMcpToolSchemaDisplay(unittest.TestCase):
 
         params = tm.get_openai_tools()[0]["function"]["parameters"]
 
-        self.assertEqual(set(params["required"]), {"query", "count"})
-        self.assertEqual(params["properties"]["count"]["anyOf"][0]["type"], "integer")
-        self.assertEqual(params["properties"]["count"]["anyOf"][1]["type"], "null")
+        self.assertEqual(set(params["properties"].keys()), {"query", "count", "source"})
+        self.assertEqual(set(params["required"]), {"query", "source"})
+        self.assertEqual(params["properties"]["count"]["type"], "integer")
+        self.assertNotIn("anyOf", params["properties"]["count"])
+        self.assertFalse(tm.get_openai_tools()[0]["function"]["strict"])
 
 
 if __name__ == "__main__":
