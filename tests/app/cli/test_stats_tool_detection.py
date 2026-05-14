@@ -643,10 +643,11 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
                 "agent_mode": "simple",
                 "available_skills": [],
                 "max_loop_count": 50,
-                "goal": GoalMutation(
-                    objective="Ship the runtime goal contract",
-                    status="active",
-                ),
+                "system_context": {
+                    "goal_mode": "true",
+                    "active_goal": "Ship the runtime goal contract",
+                    "goal_status": "active",
+                },
             },
         )()
 
@@ -704,7 +705,7 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
                 "agent_mode": "simple",
                 "available_skills": [],
                 "max_loop_count": 50,
-                "goal": None,
+                "system_context": {},
             },
         )()
 
@@ -767,10 +768,11 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
                 "agent_mode": "simple",
                 "available_skills": [],
                 "max_loop_count": 50,
-                "goal": GoalMutation(
-                    objective="Ship the runtime goal contract",
-                    status="active",
-                ),
+                "system_context": {
+                    "goal_mode": "true",
+                    "active_goal": "Ship the runtime goal contract",
+                    "goal_status": "active",
+                },
             },
         )()
 
