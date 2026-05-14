@@ -76,6 +76,15 @@ class SelfCheckAgent(AgentBase):
                 )
                 continue
 
+            workspace_issue = self._validate_reference_in_workspace(
+                session_context,
+                normalized_path,
+                original_file_path=original_file_path,
+            )
+            if workspace_issue:
+                issues.append(workspace_issue)
+                continue
+
             file_path = normalized_path
             checked_files.append(file_path)
             file_issues = await self._validate_file(
@@ -101,9 +110,13 @@ class SelfCheckAgent(AgentBase):
                     role=MessageRole.ASSISTANT.value,
                     content=content,
                     message_id=str(uuid.uuid4()),
-                    message_type=MessageType.OBSERVATION.value,
+                    message_type=MessageType.AGENT_EXECUTION_ERROR.value,
                     agent_name=self.agent_name,
-                    metadata={"self_check_passed": False, "checked_files": checked_files},
+                    metadata={
+                        "self_check_passed": False,
+                        "checked_files": checked_files,
+                        "error_type": MessageType.AGENT_EXECUTION_ERROR.value,
+                    },
                 )
             ]
             return
@@ -216,6 +229,61 @@ class SelfCheckAgent(AgentBase):
 
     def _is_concrete_absolute_file_reference(self, file_path: str) -> bool:
         return os.path.isabs(file_path) and not self._is_ambiguous_root_file_reference(file_path)
+
+    def _validate_reference_in_workspace(
+        self,
+        session_context: SessionContext,
+        file_path: str,
+        original_file_path: Optional[str] = None,
+    ) -> Optional[str]:
+        sandbox = session_context.sandbox
+        if sandbox is not None and hasattr(sandbox, "is_path_allowed"):
+            try:
+                if sandbox.is_path_allowed(file_path, operation="read"):
+                    return None
+                return (
+                    "文件路径超出可访问工作区，不能作为最终产物引用: "
+                    f"{original_file_path or file_path}"
+                )
+            except Exception as e:
+                logger.warning(f"SelfCheckAgent: sandbox path permission check failed {file_path}: {e}")
+
+        allowed_roots = self._fallback_allowed_roots(session_context)
+        if not allowed_roots:
+            return None
+
+        normalized = os.path.realpath(os.path.abspath(file_path))
+        for root in allowed_roots:
+            try:
+                if os.path.commonpath([normalized, root]) == root:
+                    return None
+            except ValueError:
+                continue
+
+        return (
+            "文件路径超出可访问工作区，不能作为最终产物引用: "
+            f"{original_file_path or file_path}"
+        )
+
+    def _fallback_allowed_roots(self, session_context: SessionContext) -> List[str]:
+        roots: List[str] = []
+        candidates = [
+            getattr(session_context, "sandbox_agent_workspace", None),
+            (getattr(session_context, "system_context", {}) or {}).get("private_workspace"),
+        ]
+        external_paths = getattr(session_context, "external_paths", None)
+        if external_paths is None:
+            external_paths = (getattr(session_context, "system_context", {}) or {}).get("external_paths")
+        if isinstance(external_paths, str):
+            candidates.append(external_paths)
+        elif isinstance(external_paths, list):
+            candidates.extend(str(path) for path in external_paths if path)
+
+        for candidate in candidates:
+            if not candidate:
+                continue
+            roots.append(os.path.realpath(os.path.abspath(str(candidate))))
+        return sorted(set(roots))
 
     async def _validate_file(
         self,
