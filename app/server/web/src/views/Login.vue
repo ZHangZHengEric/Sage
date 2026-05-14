@@ -14,7 +14,7 @@
           <div class="size-8 rounded-lg bg-primary/10 flex items-center justify-center p-1">
             <img :src="logoUrl" :alt="t('auth.logoAlt')" class="size-full object-contain" />
           </div>
-          <span>Sage</span>
+          <span>Speakly AI</span>
         </div>
 
         <div :class="headerClass">
@@ -313,7 +313,7 @@ import { getAssetUrl } from '@/config/runtime.js'
 const router = useRouter()
 const route = useRoute()
 const { toggleLanguage, isZhCN, t } = useLanguage()
-const logoUrl = getAssetUrl('sage_logo.svg')
+const logoUrl = `${import.meta.env.BASE_URL}speaklyai_logo.svg`
 
 const authProviders = ref([])
 const allowRegistration = ref(true)
