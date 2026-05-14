@@ -56,6 +56,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
         self._sandbox_id = sandbox_id
         self._sandbox_agent_workspace = sandbox_agent_workspace
         self._volume_mounts = volume_mounts or []
+        self._allowed_paths: List[str] = []
 
         # 路径映射表，支持动态修改
         self._dynamic_mounts: Dict[str, str] = {}
@@ -109,6 +110,59 @@ class PassthroughSandboxProvider(ISandboxHandle):
         mappings = self._iter_virtual_mappings()
         host_first = [(host, virtual) for virtual, host in mappings]
         return sorted(host_first, key=lambda item: len(item[0]), reverse=True)
+
+    def _allowed_path_roots(self) -> List[tuple[str, bool]]:
+        roots: List[tuple[str, bool]] = []
+        if self._dynamic_mounts:
+            volume_read_only = {
+                os.path.realpath(os.path.abspath(mount.host_path)): bool(getattr(mount, "read_only", False))
+                for mount in self._volume_mounts
+            }
+            for host_path in self._dynamic_mounts.values():
+                root = os.path.realpath(os.path.abspath(host_path))
+                roots.append((root, volume_read_only.get(root, False)))
+        elif self._sandbox_agent_workspace:
+            roots.append((os.path.realpath(os.path.abspath(self._sandbox_agent_workspace)), False))
+
+        for path in self._allowed_paths:
+            roots.append((os.path.realpath(os.path.abspath(os.path.expanduser(path))), False))
+
+        deduped: Dict[str, bool] = {}
+        for root, read_only in roots:
+            if not root:
+                continue
+            deduped[root] = deduped.get(root, True) and read_only
+        return sorted(deduped.items(), key=lambda item: len(item[0]), reverse=True)
+
+    def _path_under_root(self, path: str, root: str) -> bool:
+        try:
+            return os.path.commonpath([path, root]) == root
+        except ValueError:
+            return False
+
+    def _validate_host_path_allowed(self, host_path: str, operation: str = "read") -> str:
+        actual = os.path.realpath(os.path.abspath(host_path))
+        write_operation = operation in {"write", "delete", "mkdir"}
+        for root, read_only in self._allowed_path_roots():
+            if self._path_under_root(actual, root):
+                if write_operation and read_only:
+                    raise PermissionError(f"Path is read-only in passthrough sandbox: {host_path}")
+                return actual
+
+        allowed = ", ".join(root for root, _ in self._allowed_path_roots()) or "<none>"
+        raise PermissionError(
+            f"Access denied: path outside sandbox workspace or mounted paths: {host_path}. "
+            f"Allowed roots: {allowed}"
+        )
+
+    def is_path_allowed(self, path: str, operation: str = "read") -> bool:
+        if not path:
+            return False
+        try:
+            self._validate_host_path_allowed(self.to_host_path(path), operation=operation)
+            return True
+        except PermissionError:
+            return False
 
     def remove_mount(self, sandbox_path: str) -> None:
         """动态移除路径映射"""
@@ -199,7 +253,10 @@ class PassthroughSandboxProvider(ISandboxHandle):
         host_workdir = self.to_host_path(workdir) if workdir else self.to_host_path(
             self._sandbox_agent_workspace
         )
+        host_workdir = self._validate_host_path_allowed(host_workdir, operation="read")
         host_log_dir = self.to_host_path(log_dir) if log_dir else None
+        if host_log_dir:
+            host_log_dir = self._validate_host_path_allowed(host_log_dir, operation="write")
         return self._bg_runner.start(
             converted,
             workdir=host_workdir,
@@ -231,19 +288,18 @@ class PassthroughSandboxProvider(ISandboxHandle):
         self._bg_runner.cleanup(task_id)
 
     def add_allowed_paths(self, paths: List[str]) -> None:
-        """添加允许访问的路径列表 - 直通模式无限制，空实现"""
-        # 直通模式没有访问限制，不需要实现
-        pass
+        """添加允许访问的路径列表"""
+        for path in paths:
+            if path not in self._allowed_paths:
+                self._allowed_paths.append(path)
 
     def remove_allowed_paths(self, paths: List[str]) -> None:
-        """移除允许访问的路径列表 - 直通模式无限制，空实现"""
-        # 直通模式没有访问限制，不需要实现
-        pass
+        """移除允许访问的路径列表"""
+        self._allowed_paths = [path for path in self._allowed_paths if path not in paths]
 
     def get_allowed_paths(self) -> List[str]:
-        """获取当前允许访问的路径列表 - 直通模式返回空列表"""
-        # 直通模式没有访问限制，返回空列表
-        return []
+        """获取当前允许访问的路径列表"""
+        return list(self._allowed_paths)
 
     def _convert_paths_in_command(self, command: str) -> str:
         """Convert virtual paths to host paths in command string
@@ -346,6 +402,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
             cwd = self.to_host_path(workdir)
         else:
             cwd = self.to_host_path(self._sandbox_agent_workspace)
+        cwd = self._validate_host_path_allowed(cwd, operation="read")
 
         # 为 npm/npx 配置项目级缓存，避免写入用户主目录 ~/.npm 导致权限问题
         npm_cache_dir = os.path.join(os.path.expanduser("~"), ".sage", ".npm-cache")
@@ -452,6 +509,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
     async def read_file(self, path: str, encoding: str = "utf-8") -> str:
         """读取文件"""
         host_path = self.to_host_path(path)
+        host_path = self._validate_host_path_allowed(host_path, operation="read")
         return await asyncio.to_thread(self._read_file_sync, host_path, encoding)
 
     async def write_file(
@@ -463,16 +521,19 @@ class PassthroughSandboxProvider(ISandboxHandle):
     ) -> None:
         """写入文件"""
         host_path = self.to_host_path(path)
+        host_path = self._validate_host_path_allowed(host_path, operation="write")
         await asyncio.to_thread(self._write_file_sync, host_path, content, encoding, mode)
 
     async def file_exists(self, path: str) -> bool:
         """检查文件是否存在"""
         host_path = self.to_host_path(path)
+        host_path = self._validate_host_path_allowed(host_path, operation="read")
         return await asyncio.to_thread(os.path.exists, host_path)
 
     async def get_mtime(self, path: str) -> float:
         """直通模式直接读取宿主机 mtime。"""
         host_path = self.to_host_path(path)
+        host_path = self._validate_host_path_allowed(host_path, operation="read")
         try:
             if not await asyncio.to_thread(os.path.exists, host_path):
                 return 0
@@ -484,16 +545,19 @@ class PassthroughSandboxProvider(ISandboxHandle):
     async def list_directory(self, path: str, include_hidden: bool = False) -> List[FileInfo]:
         """列出目录内容"""
         host_path = self.to_host_path(path)
+        host_path = self._validate_host_path_allowed(host_path, operation="read")
         return await asyncio.to_thread(self._list_directory_sync, host_path, include_hidden)
 
     async def ensure_directory(self, path: str) -> None:
         """确保目录存在"""
         host_path = self.to_host_path(path)
+        host_path = self._validate_host_path_allowed(host_path, operation="mkdir")
         await asyncio.to_thread(os.makedirs, host_path, exist_ok=True)
 
     async def get_file_info(self, path: str) -> Optional[FileInfo]:
         """获取文件信息"""
         host_path = self.to_host_path(path)
+        host_path = self._validate_host_path_allowed(host_path, operation="read")
         if not await asyncio.to_thread(os.path.exists, host_path):
             return None
         stat = await asyncio.to_thread(os.stat, host_path)
@@ -508,11 +572,13 @@ class PassthroughSandboxProvider(ISandboxHandle):
     async def delete_file(self, path: str) -> None:
         """删除文件"""
         host_path = self.to_host_path(path)
+        host_path = self._validate_host_path_allowed(host_path, operation="delete")
         await asyncio.to_thread(self._delete_path_sync, host_path)
 
     async def copy_from_host(self, host_path: str, sandbox_path: str) -> None:
         """从宿主机复制文件到沙箱"""
         target_path = self.to_host_path(sandbox_path)
+        target_path = self._validate_host_path_allowed(target_path, operation="write")
         await asyncio.to_thread(self._copy_from_host_sync, host_path, target_path)
 
     async def execute_python(
@@ -532,6 +598,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
         actual_workdir = (
             self.to_host_path(workdir) if workdir else self.to_host_path(self._sandbox_agent_workspace)
         )
+        actual_workdir = self._validate_host_path_allowed(actual_workdir, operation="read")
 
         # 创建临时文件存储代码
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
@@ -599,6 +666,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
         actual_workdir = (
             self.to_host_path(workdir) if workdir else self.to_host_path(self._sandbox_agent_workspace)
         )
+        actual_workdir = self._validate_host_path_allowed(actual_workdir, operation="read")
 
         # 检查是否有 node 环境
         try:
@@ -663,6 +731,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
             target_path = self.to_host_path(root_path)
         else:
             target_path = self._sandbox_agent_workspace
+        target_path = self._validate_host_path_allowed(target_path, operation="read")
 
         if not os.path.exists(target_path):
             return ""
