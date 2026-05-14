@@ -194,7 +194,7 @@ const exampleBody = {
 }
 
 const responseParams = [
-  { name: 'type', type: 'enum', required: true, desc: '消息类型，例如 user_input、assistant_text、do_subtask_result、token_usage、stream_end' },
+  { name: 'type', type: 'enum', required: true, desc: '消息类型，例如 user_input、assistant_text、agent_execution_error、do_subtask_result、token_usage、stream_end' },
   { name: 'message_type', type: 'string', required: false, desc: '兼容字段，通常与 type 相同；历史数据可能仍出现旧类型值' },
   { name: 'role', type: '"user" | "assistant" | "tool"', required: false, desc: '角色标识，流式事件如 stream_end 不携带' },
   { name: 'message_id', type: 'string', required: false, desc: '消息唯一ID' },
