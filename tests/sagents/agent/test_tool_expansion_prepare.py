@@ -120,7 +120,7 @@ def test_task_executor_rejects_tool_not_in_current_llm_tools(monkeypatch):
 
     asyncio.run(_collect_with_filtered_tools())
 
-    errors = [item for item in out if item.message_type == MessageType.ERROR.value]
+    errors = [item for item in out if item.message_type == MessageType.AGENT_EXECUTION_ERROR.value]
     assert len(errors) == 1
     assert "tool_expand_tools" in errors[0].content
     assert "beta_tool" in errors[0].content

@@ -2,7 +2,12 @@ from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase, PartialStreamConsumedError
 from typing import Any, Dict, List, Optional, AsyncGenerator, Tuple, Union, cast
 from sagents.utils.logger import logger
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.messages.message import (
+    MessageChunk,
+    MessageRole,
+    MessageType,
+    is_execution_error_message_type,
+)
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.prompt_manager import PromptManager
@@ -785,7 +790,7 @@ class SimpleAgent(AgentBase):
                             "模型未按协议调用 turn_status 工具来报告本轮状态，已暂停以避免重复循环。"
                             "请重试或切换支持 tool_choice=required 的模型配置。"
                         ),
-                        type=MessageType.ERROR.value,
+                        type=MessageType.AGENT_EXECUTION_ERROR.value,
                         agent_name=self.agent_name,
                     )]
                     break
@@ -802,7 +807,7 @@ class SimpleAgent(AgentBase):
             #   其他错误（超时/参数错误/未知）→ 连续2次熔断，给一次重试机会
             error_chunks_this_turn = [
                 c for c in all_new_response_chunks
-                if c.message_type == MessageType.ERROR.value and (c.content or "").strip()
+                if is_execution_error_message_type(c.message_type) and (c.content or "").strip()
             ]
             if error_chunks_this_turn:
                 error_key = "|".join(
@@ -892,7 +897,7 @@ class SimpleAgent(AgentBase):
             if MessageManager.calculate_messages_token_length(cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input)) > self.max_model_input_len:
                 logger.warning(f"SimpleAgent: 消息长度超过 {self.max_model_input_len}，截断消息")
                 # 任务暂停，返回一个超长的错误消息块
-                yield [MessageChunk(role=MessageRole.ASSISTANT.value, content=f"消息长度超过最大长度：{self.max_model_input_len},是否需要继续执行？", type=MessageType.ERROR.value)]
+                yield [MessageChunk(role=MessageRole.ASSISTANT.value, content=f"消息长度超过最大长度：{self.max_model_input_len},是否需要继续执行？", type=MessageType.AGENT_EXECUTION_ERROR.value)]
                 break
             if self._should_abort_due_to_session(session_context):
                 break
@@ -1062,7 +1067,7 @@ class SimpleAgent(AgentBase):
                     "The incomplete tool call was discarded to avoid corrupting the conversation history. "
                     "Please retry the current operation."
                 ),
-                message_type=MessageType.ERROR.value,
+                message_type=MessageType.AGENT_EXECUTION_ERROR.value,
                 agent_name=self.agent_name,
                 metadata={"partial_stream_discarded": True, "error": str(exc)},
             ))
@@ -1111,7 +1116,7 @@ class SimpleAgent(AgentBase):
                     yield ([MessageChunk(
                         role=MessageRole.ASSISTANT.value,
                         content=rejection_template.format(tools=unavailable_tools_label),
-                        type=MessageType.ERROR.value,
+                        type=MessageType.AGENT_EXECUTION_ERROR.value,
                         agent_name=self.agent_name,
                     )], False)
                     return
