@@ -8,7 +8,6 @@ from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
 from common.core.render import Response
-from common.schemas.goal import GoalSetRequest
 from common.services import conversation_router_service, conversation_service
 from ..user_context import get_desktop_user_id
 
@@ -22,44 +21,6 @@ class InterruptRequest(BaseModel):
 
 class EditLastUserMessageRequest(BaseModel):
     content: str
-
-
-@conversation_router.get("/api/sessions/{session_id}/goal")
-async def get_goal(session_id: str, request: Request):
-    result = await conversation_router_service.build_goal_status_response(
-        session_id,
-        user_id=get_desktop_user_id(request),
-    )
-    return await Response.succ(message=result["message"], data=result["data"])
-
-
-@conversation_router.post("/api/sessions/{session_id}/goal")
-async def set_goal(session_id: str, request: Request, body: GoalSetRequest):
-    result = await conversation_router_service.build_goal_set_response(
-        session_id,
-        objective=body.objective,
-        status=body.status,
-        user_id=get_desktop_user_id(request),
-    )
-    return await Response.succ(message=result["message"], data=result["data"])
-
-
-@conversation_router.delete("/api/sessions/{session_id}/goal")
-async def clear_goal(session_id: str, request: Request):
-    result = await conversation_router_service.build_goal_clear_response(
-        session_id,
-        user_id=get_desktop_user_id(request),
-    )
-    return await Response.succ(message=result["message"], data=result["data"])
-
-
-@conversation_router.post("/api/sessions/{session_id}/goal/complete")
-async def complete_goal(session_id: str, request: Request):
-    result = await conversation_router_service.build_goal_complete_response(
-        session_id,
-        user_id=get_desktop_user_id(request),
-    )
-    return await Response.succ(message=result["message"], data=result["data"])
 
 
 class InjectUserMessageRequest(BaseModel):
@@ -182,20 +143,3 @@ async def edit_last_user_message(session_id: str, request: Request, body: EditLa
         user_id=get_desktop_user_id(request),
     )
     return await Response.succ(message="最后一条用户消息已更新", data=data)
-
-
-@conversation_router.get("/api/share/conversations/{session_id}/messages")
-async def get_shared_messages(session_id: str):
-    """获取分享对话的消息（无权限校验）"""
-    data = await conversation_service.get_conversation_messages(session_id)
-    return await Response.succ(data=data, message="获取分享消息成功")
-
-
-@conversation_router.delete("/api/conversations/{session_id}")
-async def delete(session_id: str, request: Request):
-    """删除指定对话"""
-    result = await conversation_router_service.build_delete_response(
-        session_id,
-        user_id=get_desktop_user_id(request),
-    )
-    return await Response.succ(message=result["message"], data=result["data"])
