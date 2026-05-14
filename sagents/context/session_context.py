@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional, List, Union
 from enum import Enum
 from concurrent.futures import ThreadPoolExecutor
 
-from sagents.context.messages.message import MessageChunk, MessageRole
+from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_memory import create_session_memory_manager
 from sagents.skill import SkillProxy, SkillManager
@@ -389,26 +389,6 @@ class SessionContext:
             List[MessageChunk]: 消息列表
         """
         return self.message_manager.messages
-
-    def get_goal(self) -> None:
-        return None
-
-    def set_goal(self, objective: str, status: Optional[str] = None) -> None:
-        del objective, status
-        return None
-
-    def clear_goal(self) -> None:
-        return None
-
-    def pause_goal(self, reason: Optional[str] = None) -> None:
-        del reason
-        return None
-
-    def activate_goal(self) -> None:
-        return None
-
-    def complete_goal(self) -> None:
-        return None
 
     def enqueue_user_injection(
         self,

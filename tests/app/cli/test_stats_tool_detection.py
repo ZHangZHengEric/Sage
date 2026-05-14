@@ -8,7 +8,6 @@ from unittest.mock import patch
 
 import app.cli.main as cli_main
 import app.cli.service as cli_service
-from common.schemas.goal import GoalMutation
 from app.cli.commands.session import _handle_goal_command
 from app.cli.main import (
     CHAT_INPUT_PROMPT,

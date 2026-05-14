@@ -377,15 +377,6 @@ class Session:
             logger.warning(f"SessionRuntime: 获取 session {self.session_id} 任务状态失败: {exc}")
             return {"tasks": []}
 
-    def get_goal(self) -> None:
-        return None
-
-    def get_goal_transition(self) -> Optional[Dict[str, Any]]:
-        return None
-
-    def get_goal_resume_hint(self) -> Optional[str]:
-        return None
-
     def request_interrupt(self, message: str = "用户请求中断", cascade: bool = True) -> bool:
         if not self.session_context:
             return False
@@ -1191,11 +1182,7 @@ class SessionManager:
         """获取 Session 状态"""
         session = self.get(session_id)
         if session:
-            goal = session.get_goal()
-            return {
-                "status": session.get_status().value,
-                "goal": goal.model_dump(mode="json") if goal else None,
-            }
+            return {"status": session.get_status().value}
         return None
 
     def list_active_sessions(self) -> List[Dict[str, Any]]:
@@ -1263,24 +1250,6 @@ class SessionManager:
         if not session:
             return None
         return session.get_tasks_status()
-
-    def get_goal(self, session_id: str) -> None:
-        session = self.get(session_id)
-        if not session:
-            return None
-        return session.get_goal()
-
-    def get_goal_transition(self, session_id: str) -> Optional[Dict[str, Any]]:
-        session = self.get(session_id)
-        if not session:
-            return None
-        return session.get_goal_transition()
-
-    def get_goal_resume_hint(self, session_id: str) -> Optional[str]:
-        session = self.get(session_id)
-        if not session:
-            return None
-        return session.get_goal_resume_hint()
 
     def save_session(self, session_id: str) -> bool:
         session = self.get(session_id)

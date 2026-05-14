@@ -1,7 +1,5 @@
 from pydantic import BaseModel
 
-from common.schemas.goal import GoalTransition, SessionGoal
-
 
 class ConversationInfo(BaseModel):
     session_id: str
@@ -16,5 +14,3 @@ class ConversationInfo(BaseModel):
     user_id: str | None = None
     trace_id: str | None = None
     trace_url: str | None = None
-    goal: SessionGoal | None = None
-    goal_transition: GoalTransition | None = None
