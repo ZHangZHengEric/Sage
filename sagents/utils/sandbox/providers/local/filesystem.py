@@ -49,6 +49,11 @@ class SandboxFileSystem:
         host_first = [(host, virtual) for virtual, host in items]
         return sorted(host_first, key=lambda item: len(item[0]), reverse=True)
 
+    def add_mapping(self, virtual_path: str, host_path: str) -> None:
+        """Add or replace an extra virtual-to-host path mapping."""
+        normalized_virtual = virtual_path.rstrip(os.sep).rstrip("/") or os.sep
+        self._mappings[normalized_virtual] = os.path.abspath(host_path)
+
     def _normalize_input_path(self, path: str) -> str:
         """Normalize common local-path variants before mapping."""
         if not path:
