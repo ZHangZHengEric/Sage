@@ -270,7 +270,12 @@ async def get_session_summary(
     from common.models.conversation import ConversationDao
 
     dao = ConversationDao()
-    conversation = await dao.get_by_session_id(session_id)
+    try:
+        conversation = await dao.get_by_session_id(session_id)
+    except RuntimeError as exc:
+        if "全局数据库管理器未设置" in str(exc):
+            return None
+        raise
     if not conversation:
         return None
 
