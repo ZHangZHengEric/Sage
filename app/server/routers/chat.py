@@ -237,12 +237,24 @@ async def stream_api_with_disconnect_check(generator, request: Request, lock: as
             logger.bind(session_id=session_id).error(f"清理资源时发生错误: {e}")
 
 
-def validate_and_prepare_request(request: ChatRequest | StreamRequest, http_request: Request) -> None:
+def validate_and_prepare_request(
+    request: ChatRequest | StreamRequest,
+    http_request: Request,
+    *,
+    allow_pending_guidance_flush: bool = False,
+) -> None:
 
 
     # 验证请求参数
     if not request.messages or len(request.messages) == 0:
-        raise SageHTTPException(detail="消息列表不能为空")
+        if (
+            not allow_pending_guidance_flush
+            or not _has_pending_user_injections(request.session_id)
+        ):
+            raise SageHTTPException(detail="消息列表不能为空")
+        logger.bind(session_id=request.session_id).info(
+            "允许空 messages 请求消费 pending guidance"
+        )
 
     # 注入当前用户ID（如果未指定）
     claims = getattr(http_request.state, "user_claims", {}) or {}
@@ -251,10 +263,29 @@ def validate_and_prepare_request(request: ChatRequest | StreamRequest, http_requ
         request.user_id = req_user_id
 
 
+def _has_pending_user_injections(session_id: str | None) -> bool:
+    normalized_session_id = (session_id or "").strip()
+    if not normalized_session_id:
+        return False
+    try:
+        data = conversation_service.list_pending_user_injections(normalized_session_id)
+    except Exception as exc:
+        logger.bind(session_id=normalized_session_id).debug(
+            f"空 messages pending guidance 检查失败: {exc}"
+        )
+        return False
+    items = data.get("items") if isinstance(data, dict) else None
+    return isinstance(items, list) and len(items) > 0
+
+
 @chat_router.post("/api/chat")
 async def chat(request: ChatRequest, http_request: Request):
     """流式聊天接口"""
-    validate_and_prepare_request(request, http_request)
+    validate_and_prepare_request(
+        request,
+        http_request,
+        allow_pending_guidance_flush=True,
+    )
 
     # 构建 StreamRequest
     inner_request = StreamRequest(
