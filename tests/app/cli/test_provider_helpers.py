@@ -51,6 +51,8 @@ class TestProviderHelpers(unittest.TestCase):
 
     def test_verify_cli_provider_maps_probe_errors_to_cli_error(self):
         original_init_cli_config = cli_service.init_cli_config
+        import app.cli.services.provider as provider_service
+        original_provider_init_cli_config = provider_service.init_cli_config
         original_common_services = sys.modules.get("common.services")
 
         async def _run():
@@ -61,11 +63,13 @@ class TestProviderHelpers(unittest.TestCase):
             sys.modules["common.services"] = fake_common_services
             try:
                 cli_service.init_cli_config = lambda init_logging=False: StubConfig()
+                provider_service.init_cli_config = lambda init_logging=False: StubConfig()
                 with self.assertRaises(CLIError) as ctx:
                     await cli_service.verify_cli_provider()
                 self.assertIn("Provider authentication failed", str(ctx.exception))
             finally:
                 cli_service.init_cli_config = original_init_cli_config
+                provider_service.init_cli_config = original_provider_init_cli_config
                 if original_common_services is None:
                     sys.modules.pop("common.services", None)
                 else:
