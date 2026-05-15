@@ -22,30 +22,12 @@ pub(crate) struct CliStreamEvent {
     pub(crate) tool_steps: Vec<CliToolStep>,
     pub(crate) phase_timings: Vec<CliPhaseTiming>,
     pub(crate) goal: Option<CliGoal>,
-    pub(crate) goal_transition: Option<CliGoalTransition>,
-    pub(crate) goal_outcome: Option<CliGoalOutcome>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct CliGoal {
     pub(crate) objective: String,
     pub(crate) status: String,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct CliGoalTransition {
-    pub(crate) transition_type: String,
-    pub(crate) objective: Option<String>,
-    pub(crate) status: Option<String>,
-    pub(crate) previous_objective: Option<String>,
-    pub(crate) previous_status: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct CliGoalOutcome {
-    pub(crate) action: String,
-    pub(crate) objective: Option<String>,
-    pub(crate) reason: Option<String>,
 }
 
 pub(crate) struct CliToolCall {
@@ -231,50 +213,6 @@ pub(crate) fn parse_stream_event(line: &str) -> Option<CliStreamEvent> {
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_string(),
-            }),
-        goal_transition: object
-            .get("goal_transition")
-            .and_then(Value::as_object)
-            .map(|transition| CliGoalTransition {
-                transition_type: transition
-                    .get("type")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
-                objective: transition
-                    .get("objective")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string),
-                status: transition
-                    .get("status")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string),
-                previous_objective: transition
-                    .get("previous_objective")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string),
-                previous_status: transition
-                    .get("previous_status")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string),
-            }),
-        goal_outcome: object
-            .get("goal_outcome")
-            .and_then(Value::as_object)
-            .map(|outcome| CliGoalOutcome {
-                action: outcome
-                    .get("action")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
-                objective: outcome
-                    .get("objective")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string),
-                reason: outcome
-                    .get("reason")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string),
             }),
     })
 }

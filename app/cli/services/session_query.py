@@ -295,7 +295,6 @@ async def get_session_summary(
         "created_at": conversation.created_at.isoformat() if conversation.created_at else "",
         "updated_at": conversation.updated_at.isoformat() if conversation.updated_at else "",
         "goal": None,
-        "goal_transition": None,
     }
 
 

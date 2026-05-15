@@ -17,21 +17,11 @@ pub struct BackendGoal {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BackendGoalTransition {
-    pub transition_type: String,
-    pub objective: Option<String>,
-    pub status: Option<String>,
-    pub previous_objective: Option<String>,
-    pub previous_status: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BackendSessionMeta {
     pub session_id: String,
     pub command_mode: Option<String>,
     pub session_state: Option<String>,
     pub goal: Option<BackendGoal>,
-    pub goal_transition: Option<BackendGoalTransition>,
 }
 
 pub struct SessionDetail {

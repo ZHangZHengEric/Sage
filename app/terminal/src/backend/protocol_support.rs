@@ -1,8 +1,7 @@
 use crate::app::MessageKind;
 use crate::backend::contract::CliStreamEvent;
 use crate::backend::{
-    BackendGoal, BackendGoalTransition, BackendPhaseTiming, BackendSessionMeta, BackendStats,
-    BackendToolStep,
+    BackendGoal, BackendPhaseTiming, BackendSessionMeta, BackendStats, BackendToolStep,
 };
 use crate::display_policy::{internal_tool_count, visible_tool_names, DisplayMode};
 
@@ -58,26 +57,11 @@ pub(super) fn backend_session_meta_from_event(
             status: goal.status.trim().to_string(),
         })
     });
-    let goal_transition = event.goal_transition.as_ref().and_then(|transition| {
-        let transition_type = transition.transition_type.trim();
-        if transition_type.is_empty() {
-            return None;
-        }
-        Some(BackendGoalTransition {
-            transition_type: transition_type.to_string(),
-            objective: transition.objective.clone(),
-            status: transition.status.clone(),
-            previous_objective: transition.previous_objective.clone(),
-            previous_status: transition.previous_status.clone(),
-        })
-    });
-
     Some(BackendSessionMeta {
         session_id: session_id.to_string(),
         command_mode: event.command_mode.clone(),
         session_state: event.session_state.clone(),
         goal,
-        goal_transition,
     })
 }
 
@@ -99,7 +83,6 @@ pub(super) fn live_message_kind(
             | "cli_stats"
             | "cli_phase"
             | "cli_tool"
-            | "cli_goal"
             | "token_usage"
             | "start"
             | "done"
@@ -175,48 +158,4 @@ pub(super) fn truncate(text: &str, max_len: usize) -> String {
 
 fn clean_single_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-pub(super) fn summarize_goal_outcome(
-    action: &str,
-    objective: Option<&str>,
-    reason: Option<&str>,
-) -> Option<String> {
-    let action = action.trim();
-    if action.is_empty() {
-        return None;
-    }
-
-    let objective = objective.unwrap_or_default().trim();
-    let reason = reason.unwrap_or_default().trim();
-
-    let base = match action {
-        "completed" => {
-            if objective.is_empty() {
-                "goal completed".to_string()
-            } else {
-                format!("goal completed • {objective}")
-            }
-        }
-        "paused" => {
-            if objective.is_empty() {
-                "goal paused".to_string()
-            } else {
-                format!("goal paused • {objective}")
-            }
-        }
-        "continued" => {
-            if objective.is_empty() {
-                "continuing goal".to_string()
-            } else {
-                format!("continuing goal • {objective}")
-            }
-        }
-        _ => return None,
-    };
-
-    if reason.is_empty() {
-        return Some(base);
-    }
-    Some(format!("{base} • {}", truncate(reason, 80)))
 }

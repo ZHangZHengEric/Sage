@@ -48,8 +48,7 @@ fn parse_backend_line_hydrates_session_goal_from_cli_session() {
             "command_mode":"resume",
             "session_state":"existing",
             "session_id":"session-demo",
-            "goal":{"objective":"ship runtime goal contract","status":"active"},
-            "goal_transition":{"type":"resumed","objective":"ship runtime goal contract","status":"active"}
+            "goal":{"objective":"ship terminal goal MVP","status":"active"}
         }"#,
     );
 
@@ -59,34 +58,8 @@ fn parse_backend_line_hydrates_session_goal_from_cli_session() {
             if meta.session_id == "session-demo"
                 && meta.command_mode.as_deref() == Some("resume")
                 && meta.session_state.as_deref() == Some("existing")
-                && meta.goal.as_ref().map(|goal| goal.objective.as_str()) == Some("ship runtime goal contract")
+                && meta.goal.as_ref().map(|goal| goal.objective.as_str()) == Some("ship terminal goal MVP")
                 && meta.goal.as_ref().map(|goal| goal.status.as_str()) == Some("active")
-                && meta.goal_transition.as_ref().map(|transition| transition.transition_type.as_str()) == Some("resumed")
-    ));
-}
-
-#[test]
-fn parse_backend_line_hydrates_session_goal_from_cli_goal_event() {
-    let events = parse_backend_line(
-        r#"{
-            "type":"cli_goal",
-            "command_mode":"run",
-            "session_state":"existing",
-            "session_id":"session-demo",
-            "source":"session_refresh",
-            "goal":{"objective":"ship runtime goal contract","status":"active"},
-            "goal_transition":{"type":"resumed","objective":"ship runtime goal contract","status":"active"}
-        }"#,
-    );
-
-    assert!(matches!(
-        events.first(),
-        Some(BackendEvent::SessionHydrated(meta))
-            if meta.session_id == "session-demo"
-                && meta.command_mode.as_deref() == Some("run")
-                && meta.session_state.as_deref() == Some("existing")
-                && meta.goal.as_ref().map(|goal| goal.objective.as_str()) == Some("ship runtime goal contract")
-                && meta.goal_transition.as_ref().map(|transition| transition.transition_type.as_str()) == Some("resumed")
     ));
 }
 
@@ -97,8 +70,7 @@ fn parse_backend_line_hydrates_session_goal_from_tool_result_goal_update() {
             "type":"tool_result",
             "session_id":"session-demo",
             "metadata":{"tool_name":"turn_status"},
-            "goal":{"objective":"ship runtime goal contract","status":"completed"},
-            "goal_transition":{"type":"completed","objective":"ship runtime goal contract","status":"completed"},
+            "goal":{"objective":"ship terminal goal MVP","status":"completed"},
             "content":"completed turn_status"
         }"#,
     );
@@ -107,32 +79,8 @@ fn parse_backend_line_hydrates_session_goal_from_tool_result_goal_update() {
         events.first(),
         Some(BackendEvent::SessionHydrated(meta))
             if meta.session_id == "session-demo"
-                && meta.goal.as_ref().map(|goal| goal.objective.as_str()) == Some("ship runtime goal contract")
+                && meta.goal.as_ref().map(|goal| goal.objective.as_str()) == Some("ship terminal goal MVP")
                 && meta.goal.as_ref().map(|goal| goal.status.as_str()) == Some("completed")
-                && meta.goal_transition.as_ref().map(|transition| transition.transition_type.as_str()) == Some("completed")
-    ));
-}
-
-#[test]
-fn parse_backend_line_hydrates_session_goal_clear_transition_without_goal_payload() {
-    let events = parse_backend_line(
-        r#"{
-            "type":"tool_result",
-            "session_id":"session-demo",
-            "metadata":{"tool_name":"turn_status"},
-            "goal":null,
-            "goal_transition":{"type":"cleared","previous_objective":"ship runtime goal contract","previous_status":"active"},
-            "content":"completed turn_status"
-        }"#,
-    );
-
-    assert!(matches!(
-        events.first(),
-        Some(BackendEvent::SessionHydrated(meta))
-            if meta.session_id == "session-demo"
-                && meta.goal.is_none()
-                && meta.goal_transition.as_ref().map(|transition| transition.transition_type.as_str()) == Some("cleared")
-                && meta.goal_transition.as_ref().and_then(|transition| transition.previous_objective.as_deref()) == Some("ship runtime goal contract")
     ));
 }
 
@@ -221,25 +169,6 @@ fn parse_backend_line_hides_internal_tool_messages_and_statuses() {
 }
 
 #[test]
-fn parse_backend_line_promotes_goal_outcome_to_process_message() {
-    let events = parse_backend_line(
-        r#"{
-            "type":"tool_result",
-            "session_id":"session-demo",
-            "metadata":{"tool_name":"turn_status"},
-            "goal_outcome":{"action":"paused","objective":"wait for approval","reason":"waiting_for_user_input"},
-            "content":"completed turn_status"
-        }"#,
-    );
-
-    assert!(matches!(
-        events.first(),
-        Some(BackendEvent::Message(crate::app::MessageKind::Process, text))
-            if text.contains("goal paused") && text.contains("wait for approval")
-    ));
-}
-
-#[test]
 fn parse_backend_line_ignores_structured_log_json_without_stream_type() {
     let events = parse_backend_line(
         r#"{
@@ -271,7 +200,7 @@ fn parse_stream_contract_fixture_round_trip_sequence() {
                 BackendEvent::SessionHydrated(meta)
                     if meta.session_id == "session-demo"
                         && meta.goal.as_ref().map(|goal| goal.objective.as_str())
-                            == Some("Ship the runtime goal contract") =>
+                            == Some("Ship the terminal goal MVP") =>
                 {
                     saw_goal = true
                 }

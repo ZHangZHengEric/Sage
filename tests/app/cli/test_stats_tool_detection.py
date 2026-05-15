@@ -549,7 +549,6 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
                 "requested_skills": ["search_memory"],
                 "max_loop_count": 50,
                 "goal": None,
-                "goal_transition": None,
                 "has_prior_messages": True,
                 "prior_message_count": 4,
                 "session_summary": {
@@ -616,7 +615,6 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[0]["prior_message_count"], 0)
         self.assertIsNone(events[0]["session_summary"])
         self.assertIsNone(events[0]["goal"])
-        self.assertIsNone(events[0]["goal_transition"])
         self.assertIsInstance(events[0]["session_id"], str)
         self.assertTrue(events[0]["session_id"])
         self.assertEqual(request.session_id, events[0]["session_id"])
@@ -679,10 +677,6 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
                 "status": "active",
             },
         )
-        self.assertIsNone(events[0]["goal_transition"])
-        self.assertEqual(events[1]["type"], "cli_goal")
-        self.assertEqual(events[1]["source"], "session_start")
-        self.assertEqual(events[1]["goal"]["status"], "active")
 
     async def test_stream_request_emits_cli_notice_when_json_stream_is_idle(self):
         async def fake_run_request_stream(_request, workspace=None):
@@ -788,15 +782,6 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
                     "session_id": "session-goal-refresh",
                     "title": "Goal refresh demo",
                     "message_count": 2,
-                    "goal": {
-                        "objective": "Ship the runtime goal contract",
-                        "status": "completed",
-                    },
-                    "goal_transition": {
-                        "type": "completed",
-                        "objective": "Ship the runtime goal contract",
-                        "status": "completed",
-                    },
                 },
             ),
             patch("sys.stdout", stdout),
@@ -813,83 +798,12 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, 0)
         events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip().startswith("{")]
         session_events = [event for event in events if event.get("type") == "cli_session"]
-        goal_events = [event for event in events if event.get("type") == "cli_goal"]
         self.assertEqual(len(session_events), 2)
-        self.assertEqual(len(goal_events), 2)
         self.assertEqual(session_events[0]["session_state"], "new")
         self.assertEqual(session_events[0]["goal"]["status"], "active")
         self.assertEqual(session_events[1]["session_state"], "existing")
-        self.assertEqual(session_events[1]["goal"]["status"], "completed")
-        self.assertEqual(session_events[1]["goal_transition"]["type"], "completed")
+        self.assertIsNone(session_events[1]["goal"])
         self.assertEqual(session_events[1]["prior_message_count"], 2)
-        self.assertEqual(goal_events[-1]["source"], "session_refresh")
-        self.assertEqual(goal_events[-1]["goal"]["status"], "completed")
-        self.assertEqual(goal_events[-1]["goal_transition"]["type"], "completed")
-
-    async def test_stream_request_emits_dedicated_cli_goal_event_for_runtime_goal_updates(self):
-        async def fake_run_request_stream(_request, workspace=None):
-            del workspace
-            yield {
-                "type": "tool_result",
-                "metadata": {"tool_name": "turn_status"},
-                "content": "completed turn_status",
-                "goal": {
-                    "objective": "Ship the runtime goal contract",
-                    "status": "completed",
-                },
-                "goal_transition": {
-                    "type": "completed",
-                    "objective": "Ship the runtime goal contract",
-                    "status": "completed",
-                },
-                "goal_outcome": {
-                    "action": "completed",
-                    "objective": "Ship the runtime goal contract",
-                    "reason": "ok",
-                },
-            }
-            yield {"type": "stream_end"}
-
-        request = type(
-            "Request",
-            (),
-            {
-                "session_id": "session-goal-event",
-                "user_id": "user-test",
-                "agent_id": None,
-                "agent_mode": "simple",
-                "available_skills": [],
-                "max_loop_count": 50,
-                "goal": None,
-            },
-        )()
-
-        from io import StringIO
-        import json
-
-        stdout = StringIO()
-        with (
-            patch("app.cli.service.run_request_stream", fake_run_request_stream),
-            patch("sys.stdout", stdout),
-            patch("sys.stderr", StringIO()),
-        ):
-            result = await _stream_request(
-                request,
-                json_output=True,
-                stats_output=False,
-                workspace=None,
-                command_mode="run",
-            )
-
-        self.assertEqual(result, 0)
-        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip().startswith("{")]
-        goal_events = [event for event in events if event.get("type") == "cli_goal"]
-        runtime_goal_event = next(
-            event for event in goal_events if event.get("source") == "tool_result"
-        )
-        self.assertEqual(runtime_goal_event["goal"]["status"], "completed")
-        self.assertEqual(runtime_goal_event["goal_transition"]["type"], "completed")
-        self.assertEqual(runtime_goal_event["goal_outcome"]["action"], "completed")
 
     async def test_stream_request_idle_notice_prefers_recent_session_warning(self):
         async def fake_run_request_stream(_request, workspace=None):

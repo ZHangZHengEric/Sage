@@ -10,7 +10,6 @@ from typing import Any, Dict, Optional
 
 from app.cli.runtime.contracts import (
     _emit_json_notice_event,
-    _emit_json_goal_event,
     _emit_json_session_event,
     _emit_json_tool_events,
     _ensure_request_session_id,
@@ -121,18 +120,16 @@ async def _stream_request(
             command_mode=command_mode,
             session_summary=session_summary,
         )
-        _emit_json_goal_event(
-            request,
-            command_mode=command_mode,
-            source="session_start",
-            session_summary=session_summary,
-        )
 
     try:
         while True:
+            queue_get_task = asyncio.create_task(event_queue.get())
             try:
-                item_type, payload = await asyncio.wait_for(event_queue.get(), timeout=1.0)
+                item_type, payload = await asyncio.wait_for(queue_get_task, timeout=1.0)
             except asyncio.TimeoutError:
+                queue_get_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await queue_get_task
                 now = time.monotonic()
                 idle_seconds = now - last_event_time
                 if idle_seconds >= STREAM_IDLE_NOTICE_SECONDS and (
@@ -166,6 +163,11 @@ async def _stream_request(
                     if issue_notice:
                         last_issue_notice = issue_notice
                 continue
+            finally:
+                if not queue_get_task.done():
+                    queue_get_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await queue_get_task
 
             if item_type == "end":
                 break
@@ -192,23 +194,6 @@ async def _stream_request(
                         )
                     )
                 _emit_json_tool_events(previous_tool_steps, stats.get("tool_steps") or [])
-                _emit_json_goal_event(
-                    request,
-                    command_mode=command_mode,
-                    source=str(event.get("type") or "runtime"),
-                    goal=event.get("goal") if isinstance(event.get("goal"), dict) else None,
-                    goal_transition=(
-                        event.get("goal_transition")
-                        if isinstance(event.get("goal_transition"), dict)
-                        else None
-                    ),
-                    goal_outcome=(
-                        event.get("goal_outcome")
-                        if isinstance(event.get("goal_outcome"), dict)
-                        else None
-                    ),
-                    include_request_goal_overlay=False,
-                )
                 print(json.dumps(event, ensure_ascii=False))
             else:
                 _print_plain_event(event, render_state)
@@ -231,13 +216,6 @@ async def _stream_request(
                 request,
                 workspace,
                 command_mode=command_mode,
-                session_summary=refreshed_summary,
-                include_request_goal_overlay=False,
-            )
-            _emit_json_goal_event(
-                request,
-                command_mode=command_mode,
-                source="session_refresh",
                 session_summary=refreshed_summary,
                 include_request_goal_overlay=False,
             )
