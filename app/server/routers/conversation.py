@@ -3,7 +3,7 @@
 """
 
 import os
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse
@@ -31,7 +31,7 @@ class InterruptRequest(BaseModel):
 
 
 class InjectUserMessageRequest(BaseModel):
-    content: str
+    content: str | list[dict[str, Any]]
     guidance_id: Optional[str] = None
     metadata: Optional[dict] = None
 
@@ -65,7 +65,7 @@ async def inject_user_message(session_id: str, request: Request, body: InjectUse
 
 
 class UpdateInjectUserMessageRequest(BaseModel):
-    content: str
+    content: str | list[dict[str, Any]]
 
 
 @conversation_router.get("/api/sessions/{session_id}/inject-user-message")

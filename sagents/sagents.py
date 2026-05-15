@@ -534,7 +534,7 @@ class SAgent:
     def inject_user_message(
         self,
         session_id: str,
-        content: str,
+        content: Union[str, List[Dict[str, Any]]],
         *,
         guidance_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
@@ -547,7 +547,7 @@ class SAgent:
 
         Args:
             session_id: 目标 session id；必须是当前 live session。
-            content: 注入的文本内容，非空。
+            content: 注入内容，支持非空文本或多模态 content 列表。
             guidance_id: 可选；不传自动生成 uuid，便于前端引导区按 id 移除 chip。
             metadata: 透传到 MessageChunk.metadata 的额外字段；
                 与默认的 ``injected/guidance_id/source`` 共存。
@@ -573,7 +573,12 @@ class SAgent:
         from sagents.session_runtime import _list_pending_user_injections_via_manager
         return _list_pending_user_injections_via_manager(self.session_manager, session_id)
 
-    def update_pending_user_injection(self, session_id: str, guidance_id: str, content: str) -> bool:
+    def update_pending_user_injection(
+        self,
+        session_id: str,
+        guidance_id: str,
+        content: Union[str, List[Dict[str, Any]]],
+    ) -> bool:
         """修改尚未被消费的 pending 引导消息内容。返回 True 命中、False 未命中。"""
         from sagents.session_runtime import _update_pending_user_injection_via_manager
         return _update_pending_user_injection_via_manager(
