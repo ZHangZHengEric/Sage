@@ -221,7 +221,7 @@ You can inspect or change the current terminal workspace from inside the TUI:
 
 ## Goal Control
 
-The terminal can carry a session goal through the shared Sage runtime contract.
+The terminal can carry a local goal through the CLI/TUI layer.
 
 ```text
 /goal
@@ -232,9 +232,9 @@ The terminal can carry a session goal through the shared Sage runtime contract.
 /goal done
 ```
 
-`/goal <objective>` sets the session goal and immediately submits the same objective as the next task, matching the Codex-style flow.
+`/goal <objective>` stores a local goal and immediately submits the same objective as the next task, matching the Codex-style flow.
 
-`/goal set` still queues the goal without running anything yet. Once the backend hydrates the session again, the terminal shows the resolved goal state from the runtime.
+`/goal set` still queues the local goal without running anything yet.
 
 ## Composer History And Slash Popup
 

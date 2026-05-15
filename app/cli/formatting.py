@@ -18,9 +18,6 @@ def _print_session_summary(summary: Dict[str, Any], *, prefix: str = "session") 
     if isinstance(goal, dict) and goal.get("objective"):
         print(f"goal: {_truncate(goal.get('objective'), 120)}")
         print(f"goal_status: {goal.get('status')}")
-    transition = summary.get("goal_transition") or {}
-    if isinstance(transition, dict) and transition.get("type"):
-        print(f"goal_transition: {transition.get('type')}")
 
 
 def _print_message_preview(message: Optional[Dict[str, Any]], *, label: str) -> None:

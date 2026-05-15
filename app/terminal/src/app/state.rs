@@ -160,7 +160,6 @@ pub struct App {
     pub(crate) workspace_override: Option<PathBuf>,
     pub current_goal: Option<BackendGoal>,
     pub pending_goal_mutation: Option<PendingGoalMutation>,
-    pub(crate) last_goal_transition_signature: Option<String>,
     pub status: String,
     pub busy: bool,
     pub should_quit: bool,
@@ -223,7 +222,6 @@ impl App {
             workspace_override: None,
             current_goal: None,
             pending_goal_mutation: None,
-            last_goal_transition_signature: None,
             status: String::new(),
             busy: false,
             should_quit: false,
@@ -270,7 +268,6 @@ impl App {
         self.busy = false;
         self.current_goal = None;
         self.pending_goal_mutation = None;
-        self.last_goal_transition_signature = None;
         self.live_message = None;
         self.live_message_had_history = false;
         self.request_started_at = None;
@@ -334,103 +331,16 @@ impl App {
     }
 
     pub fn apply_session_meta(&mut self, meta: BackendSessionMeta) {
-        let previous_session_id = self.session_id.clone();
-        let previous_goal = self.current_goal.clone();
-        let goal_transition = meta.goal_transition.clone();
         self.session_id = meta.session_id;
-        self.current_goal = meta.goal;
+        if let Some(goal) = meta.goal {
+            self.current_goal = Some(goal);
+        }
         self.pending_goal_mutation = None;
         self.status = if meta.command_mode.as_deref() == Some("resume") {
             format!("resumed  {}", self.session_id)
         } else {
             format!("ready  {}", self.session_id)
         };
-
-        if meta.command_mode.as_deref() == Some("resume")
-            && previous_session_id != self.session_id
-        {
-            if let Some(goal) = self.current_goal.as_ref() {
-                self.queue_message(
-                    MessageKind::Process,
-                    format!("continuing goal • {} ({})", goal.objective, goal.status),
-                );
-            }
-        }
-
-        if let Some(transition) = goal_transition {
-            let signature = format!(
-                "{}|{}|{}|{}|{}|{}",
-                self.session_id,
-                transition.transition_type,
-                transition.objective.as_deref().unwrap_or(""),
-                transition.status.as_deref().unwrap_or(""),
-                transition.previous_objective.as_deref().unwrap_or(""),
-                transition.previous_status.as_deref().unwrap_or(""),
-            );
-            if self.last_goal_transition_signature.as_deref() == Some(signature.as_str()) {
-                return;
-            }
-            self.last_goal_transition_signature = Some(signature);
-            match transition.transition_type.as_str() {
-                "completed" => {
-                    if let Some(objective) = transition.objective.or_else(|| {
-                        self.current_goal
-                            .as_ref()
-                            .map(|goal| goal.objective.clone())
-                    }) {
-                        self.queue_message(
-                            MessageKind::Process,
-                            format!("goal completed • {}", objective),
-                        );
-                    } else {
-                        self.queue_message(MessageKind::Process, "goal completed");
-                    }
-                }
-                "cleared" => {
-                    self.queue_message(MessageKind::Process, "goal cleared");
-                }
-                "replaced" => {
-                    let next_goal = transition
-                        .objective
-                        .or_else(|| self.current_goal.as_ref().map(|goal| goal.objective.clone()));
-                    if let Some(objective) = next_goal {
-                        self.queue_message(
-                            MessageKind::Process,
-                            format!("goal updated • {}", objective),
-                        );
-                    }
-                }
-                "resumed" => {
-                    if let Some(objective) = transition
-                        .objective
-                        .or_else(|| self.current_goal.as_ref().map(|goal| goal.objective.clone()))
-                    {
-                        self.queue_message(
-                            MessageKind::Process,
-                            format!("continuing goal • {}", objective),
-                        );
-                    }
-                }
-                _ => {}
-            }
-        } else {
-            match (previous_goal.as_ref(), self.current_goal.as_ref()) {
-                (Some(_), None) => {
-                    self.queue_message(MessageKind::Process, "goal cleared");
-                }
-                (Some(previous), Some(current))
-                    if previous.objective == current.objective
-                        && previous.status != current.status
-                        && current.status == "completed" =>
-                {
-                    self.queue_message(
-                        MessageKind::Process,
-                        format!("goal completed • {}", current.objective),
-                    );
-                }
-                _ => {}
-            }
-        }
     }
 }
 

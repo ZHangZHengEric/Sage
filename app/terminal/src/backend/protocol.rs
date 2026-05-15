@@ -4,7 +4,7 @@ use crate::app::MessageKind;
 use crate::backend::contract::parse_stream_event;
 use crate::backend::protocol_support::{
     backend_session_meta_from_event, backend_stats_from_event, collect_tool_names,
-    live_message_kind, summarize_goal_outcome, summarize_tool_event, truncate,
+    live_message_kind, summarize_tool_event, truncate,
 };
 use crate::display_policy::{is_visible_tool, DisplayMode};
 
@@ -40,27 +40,13 @@ pub(crate) fn parse_backend_line(line: &str) -> Vec<BackendEvent> {
     let tool_names = collect_tool_names(&event);
     let content = event.content.clone();
 
-    if event_type == "cli_session"
-        || event_type == "cli_goal"
-        || event.goal.is_some()
-        || event.goal_transition.is_some()
-    {
+    if event_type == "cli_session" || event.goal.is_some() {
         if let Some(meta) = backend_session_meta_from_event(&event) {
             events.push(BackendEvent::SessionHydrated(meta));
         }
     }
 
-    if let Some(goal_outcome) = event.goal_outcome.as_ref() {
-        if let Some(summary) = summarize_goal_outcome(
-            &goal_outcome.action,
-            goal_outcome.objective.as_deref(),
-            goal_outcome.reason.as_deref(),
-        ) {
-            events.push(BackendEvent::Message(MessageKind::Process, summary));
-        }
-    }
-
-    if event_type == "cli_session" || event_type == "cli_goal" {
+    if event_type == "cli_session" {
         // already handled above
     } else if event_type == "cli_stats" {
         events.push(BackendEvent::Stats(backend_stats_from_event(event)));
@@ -103,7 +89,7 @@ pub(crate) fn parse_backend_line(line: &str) -> Vec<BackendEvent> {
                 }
             }
             "error" | "cli_error" => events.push(BackendEvent::Error(content)),
-            "cli_stats" | "cli_phase" | "cli_tool" | "cli_goal" | "cli_notice" | "token_usage" | "start" | "done" => {}
+            "cli_stats" | "cli_phase" | "cli_tool" | "cli_notice" | "token_usage" | "start" | "done" => {}
             _ => events.push(BackendEvent::Message(
                 MessageKind::Process,
                 truncate(
