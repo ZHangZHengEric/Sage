@@ -57,6 +57,15 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Resolve image tag
+        id: image-tag
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build and Push ${{ matrix.service }}
         uses: docker/build-push-action@v6
         with:
@@ -65,6 +74,4 @@ jobs:
           platforms: linux/amd64
           push: true
           build-args: ${{ matrix.build_args }}
-          tags: |
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ matrix.image }}:prod
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ matrix.image }}:prod-${{ github.sha }}
+          tags: ${{ env.DOCKERHUB_NAMESPACE }}/${{ matrix.image }}:${{ steps.image-tag.outputs.tag }}
