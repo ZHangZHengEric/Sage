@@ -392,7 +392,7 @@ class SessionContext:
 
     def enqueue_user_injection(
         self,
-        content: str,
+        content: Union[str, List[Dict[str, Any]]],
         *,
         guidance_id: Optional[str] = None,
         extra_metadata: Optional[Dict[str, Any]] = None,
@@ -403,14 +403,14 @@ class SessionContext:
         将 pending 消息写入 ``message_manager``、追加到本轮请求 messages、并 yield 给 SSE。
 
         Args:
-            content: 注入的文本内容。
+            content: 注入内容，支持文本或多模态 content 列表。
             guidance_id: 客户端可生成；不传则自动生成 uuid，便于前端引导区按 id 对账消费。
             extra_metadata: 透传到 MessageChunk.metadata 的额外字段。
 
         Returns:
             str: 实际生效的 ``guidance_id``。
         """
-        if not content or not str(content).strip():
+        if not self._is_valid_user_injection_content(content):
             raise ValueError("inject 内容不能为空")
         gid = guidance_id or str(uuid.uuid4())
         metadata: Dict[str, Any] = {
@@ -422,7 +422,7 @@ class SessionContext:
             metadata.update(extra_metadata)
         chunk = MessageChunk(
             role="user",
-            content=str(content),
+            content=content,
             session_id=self.session_id,
             metadata=metadata,
         )
@@ -452,26 +452,54 @@ class SessionContext:
             md = chunk.metadata or {}
             snapshot.append({
                 "guidance_id": md.get("guidance_id"),
-                "content": chunk.content if isinstance(chunk.content, str) else "",
+                "content": chunk.content,
                 "metadata": dict(md),
                 "timestamp": chunk.timestamp,
             })
         return snapshot
 
-    def update_user_injection(self, guidance_id: str, content: str) -> bool:
+    def update_user_injection(
+        self,
+        guidance_id: str,
+        content: Union[str, List[Dict[str, Any]]],
+    ) -> bool:
         """修改尚未被消费的 pending 引导消息内容。返回是否命中。"""
         if not guidance_id:
             return False
-        if not content or not str(content).strip():
+        if not self._is_valid_user_injection_content(content):
             raise ValueError("content 不能为空")
         for chunk in self.pending_user_injections:
             md = chunk.metadata or {}
             if md.get("guidance_id") == guidance_id:
-                chunk.content = str(content)
+                chunk.content = content
                 logger.info(
                     f"SessionContext: update user injection session={self.session_id} guidance_id={guidance_id}"
                 )
                 return True
+        return False
+
+    def _is_valid_user_injection_content(
+        self,
+        content: Union[str, List[Dict[str, Any]], None],
+    ) -> bool:
+        if isinstance(content, str):
+            return bool(content.strip())
+        if not isinstance(content, list):
+            return False
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get("type") or "").strip()
+            if item_type == "text" and str(item.get("text") or "").strip():
+                return True
+            if item_type == "image_url" and isinstance(item.get("image_url"), dict):
+                image_url = item.get("image_url") or {}
+                if str(image_url.get("url") or "").strip():
+                    return True
+            if item_type == "input_audio" and isinstance(item.get("input_audio"), dict):
+                input_audio = item.get("input_audio") or {}
+                if str(input_audio.get("data") or input_audio.get("url") or "").strip():
+                    return True
         return False
 
     def delete_user_injection(self, guidance_id: str) -> bool:

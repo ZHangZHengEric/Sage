@@ -11,7 +11,7 @@ import zipfile
 from collections import Counter
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import anyio
 from loguru import logger
@@ -74,7 +74,7 @@ def _build_session_trace_url(session_id: str) -> Optional[str]:
 
 def inject_user_message(
     session_id: str,
-    content: str,
+    content: Union[str, List[Dict[str, Any]]],
     *,
     guidance_id: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
@@ -89,7 +89,7 @@ def inject_user_message(
     """
     from sagents import SAgent
 
-    if not content or not str(content).strip():
+    if isinstance(content, str) and not content.strip():
         raise SageHTTPException(detail="content 不能为空")
     sage_engine = SAgent(session_root_space=str(get_sessions_root()))
     try:
@@ -110,7 +110,7 @@ def inject_user_message(
     except ValueError as exc:
         raise SageHTTPException(detail=str(exc))
     logger.bind(session_id=session_id).info(
-        f"已注入引导消息 guidance_id={gid} content_len={len(content)}"
+        f"已注入引导消息 guidance_id={gid} content_type={type(content).__name__}"
     )
     return {"session_id": session_id, "guidance_id": gid, "accepted": True}
 
@@ -143,12 +143,12 @@ def list_pending_user_injections(session_id: str) -> Dict[str, Any]:
 def update_pending_user_injection(
     session_id: str,
     guidance_id: str,
-    content: str,
+    content: Union[str, List[Dict[str, Any]]],
 ) -> Dict[str, Any]:
     """编辑指定 pending 引导消息。"""
     if not guidance_id:
         raise SageHTTPException(detail="guidance_id 不能为空")
-    if not content or not str(content).strip():
+    if isinstance(content, str) and not content.strip():
         raise SageHTTPException(detail="content 不能为空")
     sage_engine = _build_inject_sage_engine()
     try:
