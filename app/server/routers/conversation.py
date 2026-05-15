@@ -158,7 +158,6 @@ async def list_conversations(
     search: Optional[str] = Query(None, description="搜索关键词"),
     agent_id: Optional[str] = Query(None, description="Agent ID过滤"),
     sort_by: Optional[str] = Query("date", description="排序方式: date, title, messages"),
-    goal_status: Optional[str] = Query(None, description="目标状态过滤: active, paused, completed, none"),
 ):
     current_user_id = get_request_user_id(request, user_id or "")
     role = get_request_role(request)
@@ -174,7 +173,6 @@ async def list_conversations(
         search=search,
         agent_id=agent_id,
         sort_by=sort_by,
-        goal_status=goal_status,
         include_user_id=True,
         context_user_id=current_user_id,
     )

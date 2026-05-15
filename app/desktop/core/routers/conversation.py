@@ -113,7 +113,6 @@ async def list_conversations(
     search: Optional[str] = Query(None, description="搜索关键词"),
     agent_id: Optional[str] = Query(None, description="Agent ID过滤"),
     sort_by: Optional[str] = Query("date", description="排序方式: date, title, messages"),
-    goal_status: Optional[str] = Query(None, description="目标状态过滤: active, paused, completed, none"),
 ):
     user_id = get_desktop_user_id(request)
     result = await conversation_router_service.build_list_conversations_response(
@@ -123,7 +122,6 @@ async def list_conversations(
         search=search,
         agent_id=agent_id,
         sort_by=sort_by,
-        goal_status=goal_status,
     )
     return await Response.succ(data=result, message="获取会话列表成功")
 
@@ -143,3 +141,20 @@ async def edit_last_user_message(session_id: str, request: Request, body: EditLa
         user_id=get_desktop_user_id(request),
     )
     return await Response.succ(message="最后一条用户消息已更新", data=data)
+
+
+@conversation_router.get("/api/share/conversations/{session_id}/messages")
+async def get_shared_messages(session_id: str):
+    """获取分享对话的消息（无权限校验）"""
+    data = await conversation_service.get_conversation_messages(session_id)
+    return await Response.succ(data=data, message="获取分享消息成功")
+
+
+@conversation_router.delete("/api/conversations/{session_id}")
+async def delete(session_id: str, request: Request):
+    """删除指定对话"""
+    result = await conversation_router_service.build_delete_response(
+        session_id,
+        user_id=get_desktop_user_id(request),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])

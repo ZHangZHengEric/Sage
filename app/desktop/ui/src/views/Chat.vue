@@ -166,18 +166,6 @@
               @select="onAbilityCardClick"
             />
 
-            <div v-if="currentSessionId" class="mx-auto w-full max-w-4xl">
-              <SessionGoalCard
-                :goal="currentGoal"
-                :goal-transition="currentGoalTransition"
-                :busy="isGoalMutating"
-                :can-edit="!!currentGoal || normalizedMessages.length > 0"
-                @save-goal="saveSessionGoal"
-                @clear-goal="clearSessionGoal"
-                @complete-goal="completeSessionGoal"
-              />
-            </div>
-
             <!-- 无消息时：默认显示空态 -->
             <div
               v-if="!filteredMessages || filteredMessages.length === 0"
@@ -349,7 +337,6 @@ import SubSessionPanel from '@/components/chat/SubSessionPanel.vue'
 import WorkbenchPreview from '@/components/chat/WorkbenchPreview.vue'
 import AbilityPanel from '@/components/chat/AbilityPanel.vue'
 import AgentUsageDanmaku from '@/components/chat/AgentUsageDanmaku.vue'
-import SessionGoalCard from '@/components/chat/SessionGoalCard.vue'
 import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 import { Button } from '@/components/ui/button'
 import {
@@ -408,9 +395,6 @@ const {
   messagesEndRef,
   showLoadingBubble,
   filteredMessages,
-  currentGoal,
-  currentGoalTransition,
-  isGoalMutating,
   isLoading,
   isCurrentSessionLoading,
   handleAgentChange,
@@ -448,9 +432,6 @@ const {
   retryAbilityFetch,
   onAbilityCardClick,
   submitEditedLastUserMessage,
-  saveSessionGoal,
-  clearSessionGoal,
-  completeSessionGoal
   applyGuidanceNow
 } = useChatPage(props)
 

@@ -112,22 +112,6 @@ export const chatAPI = {
     })
   },
 
-  getSessionGoal: async (sessionId) => {
-    return await request.get(`/api/sessions/${sessionId}/goal`)
-  },
-
-  setSessionGoal: async (sessionId, payload) => {
-    return await request.post(`/api/sessions/${sessionId}/goal`, payload)
-  },
-
-  clearSessionGoal: async (sessionId) => {
-    return await request.delete(`/api/sessions/${sessionId}/goal`)
-  },
-
-  completeSessionGoal: async (sessionId) => {
-    return await request.post(`/api/sessions/${sessionId}/goal/complete`, {})
-  },
-
   injectUserMessage: async (sessionId, content, guidanceId, metadata) => {
     return await request.post(`/api/sessions/${sessionId}/inject-user-message`, {
       content,
