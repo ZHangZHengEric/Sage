@@ -13,7 +13,6 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import anyio
 from loguru import logger
 from sagents.session_runtime import (
     build_conversation_messages_view,
@@ -263,20 +262,35 @@ async def persist_session_state(session_id: str) -> None:
         logger.bind(session_id=session_id).info("会话状态已刷新 conversation 时间戳")
 
 
+# 全局登记表：持有后台持久化 task 的强引用，避免被 GC，并便于进程退出时统一 await。
+_BACKGROUND_PERSISTENCE_TASKS: "set[asyncio.Task]" = set()
+
+
+def _spawn_background_persistence(session_id: str) -> asyncio.Task:
+    task = asyncio.create_task(
+        persist_session_state(session_id),
+        name=f"persist-session-{session_id}",
+    )
+    _BACKGROUND_PERSISTENCE_TASKS.add(task)
+
+    def _on_done(t: asyncio.Task) -> None:
+        _BACKGROUND_PERSISTENCE_TASKS.discard(t)
+        _log_background_persistence_result(session_id, t)
+
+    task.add_done_callback(_on_done)
+    return task
+
+
 async def persist_session_state_with_cancel_protection(session_id: str) -> None:
-    persistence_task = None
-    try:
-        with anyio.CancelScope(shield=True):
-            persistence_task = asyncio.create_task(persist_session_state(session_id))
-            await asyncio.shield(persistence_task)
-    except asyncio.CancelledError as cancel_exc:
-        if persistence_task is None:
-            raise cancel_exc
-        logger.bind(session_id=session_id).warning("会话持久化遇到取消，转入后台继续完成")
-        persistence_task.add_done_callback(
-            lambda task: _log_background_persistence_result(session_id, task)
-        )
-        raise cancel_exc
+    # 历史实现叠了 anyio.CancelScope(shield=True) + asyncio.shield()，在客户端断开/会话中断
+    # 的取消链路上会被同一函数连续调用两次（一次来自 interrupt_session，一次来自
+    # execute_chat_session 的 finally → _finalize_session_end），导致 anyio 的
+    # _deliver_cancellation 在事件循环里反复 call_soon 自己，sage-server 主线程出现
+    # 100% CPU 空转（py-spy 热点稳定停在 anyio/_backends/_asyncio.py:_deliver_cancellation）。
+    #
+    # 业务上这里只是一次会话快照写入，没有必要在取消路径上同步等待；改为登记到全局后台
+    # task 集合，立刻让取消传播收敛。即使后台持久化失败，影响也仅限于这一次快照丢失。
+    _spawn_background_persistence(session_id)
 
 
 def _log_background_persistence_result(session_id: str, task: asyncio.Task) -> None:
