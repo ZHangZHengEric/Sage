@@ -558,11 +558,15 @@ class SimpleAgent(AgentBase):
             return True
 
         # 规则2：最后一条消息是工具调用错误结果（如参数解析失败等）
+        # 历史实现"工具失败必须继续"，与主循环按 error_category 的连续错误熔断方向相反：
+        # 当 LLM 措辞抖动让熔断 key 命不中时，规则 2 会一路放行到 max_loop_count 跑出大量 chunk。
+        # 改为让控制权回到主循环熔断（已按 TOOL_REJECTED=1 / 其他=2 的阈值生效），失败本身
+        # 不再强制再跑一轮。
         if last_message.matches_message_types([MessageType.DO_SUBTASK_RESULT.value]):
             content = last_message.content or ""
             if any(mark in content for mark in ["参数解析失败", "工具调用失败"]):
-                logger.debug("[SimpleAgent] must_continue 规则2命中：工具调用失败，必须继续")
-                return True
+                logger.debug("[SimpleAgent] must_continue 规则2命中：工具调用失败，交由主循环熔断按类别判断")
+                return False
 
         # 规则4：assistant 文本以继续标点结尾时强制继续；
         # 但若最后一条是真实 user 输入则不触发（避免反问用户被误判）
@@ -802,21 +806,26 @@ class SimpleAgent(AgentBase):
                 logger.info("SimpleAgent: 检测到停止条件，终止执行")
                 break
 
-            # 快速错误熔断：LLM 温度导致签名哈希不同，但错误内容固定可直接比对。
-            # 根据错误类型设置不同的容忍阈值：
-            #   TOOL_REJECTED（工具调用被拒绝）→ 1次即熔断，根本无法执行无需重试
-            #   其他错误（超时/参数错误/未知）→ 连续2次熔断，给一次重试机会
+            # 快速错误熔断：
+            # 历史实现用 error_content[:120] 作为比较 key，依赖错误文本逐字一致；一旦 LLM 措辞抖动
+            # 或错误信息里带时间戳/尾随空格，consecutive_error_hits 会反复重置为 1，再叠加
+            # _must_continue_by_rules 规则 2 的"工具失败必须继续"，可以一路撑到 max_loop_count
+            # 跑出大量 chunk，是这次 100% CPU 事故的放大器之一。
+            # 这里改为以 error_category 作为比较 key（5 个稳定类别，对措辞抖动免疫）；
+            # 同时按注释承诺的策略真的让 fuse_threshold 按类别走：
+            #   TOOL_REJECTED（工具调用被拒绝）→ 1 次即熔断，根本无法执行无需重试
+            #   其他错误（超时/参数错误/未知）→ 连续 2 次熔断，给一次重试机会
             error_chunks_this_turn = [
                 c for c in all_new_response_chunks
                 if is_execution_error_message_type(c.message_type) and (c.content or "").strip()
             ]
             if error_chunks_this_turn:
-                error_key = "|".join(
-                    (c.content or "").strip()[:120] for c in error_chunks_this_turn
-                )
-                # 识别错误类别
                 error_category = self._classify_error_category(error_chunks_this_turn)
-                fuse_threshold = 2
+                error_key = error_category
+                fuse_threshold = 1 if error_category == "TOOL_REJECTED" else 2
+                error_summary = " | ".join(
+                    (c.content or "").strip()[:80] for c in error_chunks_this_turn
+                )[:160]
 
                 if error_key == consecutive_error_key:
                     consecutive_error_hits += 1
@@ -826,13 +835,13 @@ class SimpleAgent(AgentBase):
 
                 if consecutive_error_hits >= fuse_threshold:
                     logger.warning(
-                        f"SimpleAgent: [{error_category}] 连续 {consecutive_error_hits} 轮出现相同错误，熔断停止。"
-                        f"错误摘要: {error_key[:80]}"
+                        f"SimpleAgent: [{error_category}] 连续 {consecutive_error_hits} 轮出现同类错误，熔断停止。"
+                        f"错误摘要: {error_summary}"
                     )
                     yield [MessageChunk(
                         role=MessageRole.ASSISTANT.value,
                         content=(
-                            f"检测到连续相同错误（类型：{error_category}，已出现 {consecutive_error_hits} 次），"
+                            f"检测到同类错误（类型：{error_category}，已出现 {consecutive_error_hits} 次），"
                             "已自动暂停以避免无效循环。请检查工具配置或提供新的指令。"
                         ),
                         type=MessageType.LOOP_BREAK.value,
