@@ -13,7 +13,6 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import anyio
 from loguru import logger
 from sagents.session_runtime import (
     build_conversation_messages_view,
@@ -266,9 +265,8 @@ async def persist_session_state(session_id: str) -> None:
 async def persist_session_state_with_cancel_protection(session_id: str) -> None:
     persistence_task = None
     try:
-        with anyio.CancelScope(shield=True):
-            persistence_task = asyncio.create_task(persist_session_state(session_id))
-            await asyncio.shield(persistence_task)
+        persistence_task = asyncio.create_task(persist_session_state(session_id))
+        await asyncio.shield(persistence_task)
     except asyncio.CancelledError as cancel_exc:
         if persistence_task is None:
             raise cancel_exc

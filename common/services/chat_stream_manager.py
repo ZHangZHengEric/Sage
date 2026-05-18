@@ -26,6 +26,7 @@ class StreamManager:
     _instance = None
     _sessions: Dict[str, SessionState] = {}
     _session_list_subscribers: Set[asyncio.Queue] = set()
+    _GENERATOR_ACLOSE_TIMEOUT = 5.0
 
     def __new__(cls):
         if cls._instance is None:
@@ -144,7 +145,15 @@ class StreamManager:
         finally:
             try:
                 if hasattr(generator, "aclose"):
-                    await generator.aclose()
+                    await asyncio.wait_for(
+                        generator.aclose(),
+                        timeout=self._GENERATOR_ACLOSE_TIMEOUT,
+                    )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"Background worker generator.aclose for {session.session_id} "
+                    f"exceeded {self._GENERATOR_ACLOSE_TIMEOUT}s, skipping wait"
+                )
             except Exception as e:
                 logger.warning(f"Error closing generator for {session.session_id}: {e}")
             session.is_completed = True
