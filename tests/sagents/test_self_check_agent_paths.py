@@ -209,3 +209,49 @@ def test_absolute_markdown_link_outside_workspace_is_execution_error(monkeypatch
     assert "文件路径超出可访问工作区" in chunks[0].content
     assert str(outside) in chunks[0].content
     assert chunks[0].message_type == "agent_execution_error"
+
+
+def test_broad_sandbox_permission_is_authoritative(monkeypatch, tmp_path):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    user_root = tmp_path / "agents" / "user_1"
+    workspace = user_root / "agent_1"
+    outside = user_root / "data" / "out.md"
+    outside.parent.mkdir(parents=True)
+    outside.write_text("ok", encoding="utf-8")
+
+    class BroadSandbox:
+        def is_path_allowed(self, path, operation="read"):
+            return str(path).startswith(str(user_root))
+
+        async def file_exists(self, path):
+            return True
+
+        async def read_file(self, path, encoding="utf-8"):
+            return ""
+
+    session_context = SimpleNamespace(
+        audit_status={},
+        sandbox=BroadSandbox(),
+        sandbox_agent_workspace=str(workspace),
+        system_context={"private_workspace": str(workspace)},
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "请生成结果"),
+                _make_message("assistant", f"[out.md](file://{outside})"),
+            ]
+        ),
+    )
+
+    async def collect():
+        chunks = []
+        async for batch in agent.run_stream(session_context):
+            chunks.extend(batch)
+        return chunks
+
+    chunks = asyncio.run(collect())
+
+    assert chunks == []
+    assert session_context.audit_status["self_check_passed"] is True
+    assert session_context.audit_status["self_check_checked_files"] == [str(outside)]
