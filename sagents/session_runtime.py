@@ -1380,7 +1380,7 @@ def _resolve_live_session_context(session_manager: SessionManager, session_id: s
 def _inject_user_message_via_manager(
     session_manager: SessionManager,
     session_id: str,
-    content: str,
+    content: Union[str, List[Dict[str, Any]]],
     *,
     guidance_id: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
@@ -1404,7 +1404,7 @@ def _update_pending_user_injection_via_manager(
     session_manager: SessionManager,
     session_id: str,
     guidance_id: str,
-    content: str,
+    content: Union[str, List[Dict[str, Any]]],
 ) -> bool:
     ctx = _resolve_live_session_context(session_manager, session_id)
     return ctx.update_user_injection(guidance_id, content)

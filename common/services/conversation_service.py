@@ -11,9 +11,8 @@ import zipfile
 from collections import Counter
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-import anyio
 from loguru import logger
 from sagents.session_runtime import (
     build_conversation_messages_view,
@@ -27,6 +26,8 @@ from common.models.conversation import Conversation, ConversationDao
 from common.schemas.conversation import ConversationInfo
 from common.services.chat_processor import ContentProcessor
 from common.services.chat_utils import get_sessions_root
+
+_SESSION_PERSISTENCE_TASKS: Dict[str, asyncio.Task] = {}
 
 
 def _get_cfg() -> config.StartupConfig:
@@ -74,7 +75,7 @@ def _build_session_trace_url(session_id: str) -> Optional[str]:
 
 def inject_user_message(
     session_id: str,
-    content: str,
+    content: Union[str, List[Dict[str, Any]]],
     *,
     guidance_id: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
@@ -89,7 +90,7 @@ def inject_user_message(
     """
     from sagents import SAgent
 
-    if not content or not str(content).strip():
+    if isinstance(content, str) and not content.strip():
         raise SageHTTPException(detail="content 不能为空")
     sage_engine = SAgent(session_root_space=str(get_sessions_root()))
     try:
@@ -110,7 +111,7 @@ def inject_user_message(
     except ValueError as exc:
         raise SageHTTPException(detail=str(exc))
     logger.bind(session_id=session_id).info(
-        f"已注入引导消息 guidance_id={gid} content_len={len(content)}"
+        f"已注入引导消息 guidance_id={gid} content_type={type(content).__name__}"
     )
     return {"session_id": session_id, "guidance_id": gid, "accepted": True}
 
@@ -143,12 +144,12 @@ def list_pending_user_injections(session_id: str) -> Dict[str, Any]:
 def update_pending_user_injection(
     session_id: str,
     guidance_id: str,
-    content: str,
+    content: Union[str, List[Dict[str, Any]]],
 ) -> Dict[str, Any]:
     """编辑指定 pending 引导消息。"""
     if not guidance_id:
         raise SageHTTPException(detail="guidance_id 不能为空")
-    if not content or not str(content).strip():
+    if isinstance(content, str) and not content.strip():
         raise SageHTTPException(detail="content 不能为空")
     sage_engine = _build_inject_sage_engine()
     try:
@@ -263,19 +264,32 @@ async def persist_session_state(session_id: str) -> None:
         logger.bind(session_id=session_id).info("会话状态已刷新 conversation 时间戳")
 
 
-async def persist_session_state_with_cancel_protection(session_id: str) -> None:
-    persistence_task = None
+async def _run_single_session_persistence(session_id: str) -> None:
     try:
-        with anyio.CancelScope(shield=True):
-            persistence_task = asyncio.create_task(persist_session_state(session_id))
-            await asyncio.shield(persistence_task)
-    except asyncio.CancelledError as cancel_exc:
-        if persistence_task is None:
-            raise cancel_exc
-        logger.bind(session_id=session_id).warning("会话持久化遇到取消，转入后台继续完成")
-        persistence_task.add_done_callback(
-            lambda task: _log_background_persistence_result(session_id, task)
+        await persist_session_state(session_id)
+    finally:
+        current = _SESSION_PERSISTENCE_TASKS.get(session_id)
+        if current is asyncio.current_task():
+            _SESSION_PERSISTENCE_TASKS.pop(session_id, None)
+
+
+async def persist_session_state_with_cancel_protection(session_id: str) -> None:
+    persistence_task = _SESSION_PERSISTENCE_TASKS.get(session_id)
+    if persistence_task is None or persistence_task.done():
+        persistence_task = asyncio.create_task(
+            _run_single_session_persistence(session_id),
+            name=f"persist-session-state-{session_id}",
         )
+        _SESSION_PERSISTENCE_TASKS[session_id] = persistence_task
+
+    try:
+        await asyncio.shield(persistence_task)
+    except asyncio.CancelledError as cancel_exc:
+        logger.bind(session_id=session_id).warning("会话持久化遇到取消，转入后台继续完成")
+        if not persistence_task.done():
+            persistence_task.add_done_callback(
+                lambda task: _log_background_persistence_result(session_id, task)
+            )
         raise cancel_exc
 
 

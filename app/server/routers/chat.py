@@ -193,36 +193,60 @@ async def _filter_stream_chunks(generator):
             await generator.aclose()
 
 
+# 流式清理动作的超时上限。
+# 历史实现把 interrupt_session / generator.aclose() 都无超时 await 在断开链路里，
+# 一旦下层 await 卡在 anyio 取消派发或锁等待，整个事件循环会被拖住。
+_DISCONNECT_INTERRUPT_TIMEOUT = 5.0
+_GENERATOR_ACLOSE_TIMEOUT = 5.0
+
+
 async def stream_api_with_disconnect_check(generator, request: Request, lock: asyncio.Lock, session_id: str):
     """
     Wrap the generator to monitor client disconnection.
     If client disconnects, stop the generator (which triggers its finally block).
+
+    断开检测策略：发现 ``request.is_disconnected()`` 后只 ``break``，不再人为抛 ``GeneratorExit``。
+    ``GeneratorExit`` 是 async generator 的关闭信号，规范上不应该在 ``except GeneratorExit`` 里
+    再 ``await`` 长协程（旧写法会在 generator 关闭临界态做远程持久化，叠加 anyio CancelScope
+    导致 sage-server 主线程 100% CPU 空转）。改为 ``break`` 后统一在 ``finally`` 里收尾。
     """
+    client_disconnected = False
     try:
         async for chunk in generator:
             if await request.is_disconnected():
                 logger.bind(session_id=session_id).info("Client disconnection detected")
-                # 抛出 GeneratorExit 模拟客户端断开，统一由异常处理逻辑处理
-                raise GeneratorExit
+                client_disconnected = True
+                break
             yield chunk
-    except (asyncio.CancelledError, GeneratorExit) as e:
-        # 标记会话中断，让内部逻辑有机会感知并处理
-        try:
-            await conversation_service.interrupt_session(session_id, "客户端断开连接")
-        except Exception as ex:
-            logger.bind(session_id=session_id).error(f"Error interrupting session: {ex}")
-
-        # 重新抛出异常，确保生成器正确关闭
-        raise e
+    except asyncio.CancelledError:
+        client_disconnected = True
+        raise
     except Exception as e:
         logger.bind(session_id=session_id).error(f"Stream generator error: {e}")
-        raise e
+        raise
     finally:
+        if client_disconnected:
+            try:
+                await asyncio.wait_for(
+                    conversation_service.interrupt_session(session_id, "客户端断开连接"),
+                    timeout=_DISCONNECT_INTERRUPT_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.bind(session_id=session_id).warning(
+                    f"interrupt_session 超过 {_DISCONNECT_INTERRUPT_TIMEOUT}s 未返回，跳过强制等待"
+                )
+            except Exception as ex:
+                logger.bind(session_id=session_id).error(f"Error interrupting session: {ex}")
+
         # 确保 generator 关闭，触发内部清理逻辑 (sagents cleanup)
         # 这必须在释放锁之前执行，因为 sagents 清理逻辑需要获取锁
         try:
             if hasattr(generator, "aclose"):
-                await generator.aclose()
+                await asyncio.wait_for(generator.aclose(), timeout=_GENERATOR_ACLOSE_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.bind(session_id=session_id).warning(
+                f"generator.aclose 超过 {_GENERATOR_ACLOSE_TIMEOUT}s 未返回，跳过强制等待"
+            )
         except Exception as e:
             logger.bind(session_id=session_id).warning(f"Error closing generator: {e}")
 
@@ -237,12 +261,24 @@ async def stream_api_with_disconnect_check(generator, request: Request, lock: as
             logger.bind(session_id=session_id).error(f"清理资源时发生错误: {e}")
 
 
-def validate_and_prepare_request(request: ChatRequest | StreamRequest, http_request: Request) -> None:
+def validate_and_prepare_request(
+    request: ChatRequest | StreamRequest,
+    http_request: Request,
+    *,
+    allow_pending_guidance_flush: bool = False,
+) -> None:
 
 
     # 验证请求参数
     if not request.messages or len(request.messages) == 0:
-        raise SageHTTPException(detail="消息列表不能为空")
+        if (
+            not allow_pending_guidance_flush
+            or not _has_pending_user_injections(request.session_id)
+        ):
+            raise SageHTTPException(detail="消息列表不能为空")
+        logger.bind(session_id=request.session_id).info(
+            "允许空 messages 请求消费 pending guidance"
+        )
 
     # 注入当前用户ID（如果未指定）
     claims = getattr(http_request.state, "user_claims", {}) or {}
@@ -251,10 +287,29 @@ def validate_and_prepare_request(request: ChatRequest | StreamRequest, http_requ
         request.user_id = req_user_id
 
 
+def _has_pending_user_injections(session_id: str | None) -> bool:
+    normalized_session_id = (session_id or "").strip()
+    if not normalized_session_id:
+        return False
+    try:
+        data = conversation_service.list_pending_user_injections(normalized_session_id)
+    except Exception as exc:
+        logger.bind(session_id=normalized_session_id).debug(
+            f"空 messages pending guidance 检查失败: {exc}"
+        )
+        return False
+    items = data.get("items") if isinstance(data, dict) else None
+    return isinstance(items, list) and len(items) > 0
+
+
 @chat_router.post("/api/chat")
 async def chat(request: ChatRequest, http_request: Request):
     """流式聊天接口"""
-    validate_and_prepare_request(request, http_request)
+    validate_and_prepare_request(
+        request,
+        http_request,
+        allow_pending_guidance_flush=True,
+    )
 
     # 构建 StreamRequest
     inner_request = StreamRequest(

@@ -7,7 +7,7 @@ import re
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
-from fastapi import APIRouter, Request, UploadFile, File
+from fastapi import APIRouter, File, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 import shutil
@@ -427,7 +427,12 @@ async def optimize(request: SystemPromptOptimizeRequest, http_request: Request):
 
 
 @agent_router.post("/{agent_id}/file_workspace")
-async def get_workspace(agent_id: str, request: Request):
+async def get_workspace(
+    agent_id: str,
+    request: Request,
+    path: Optional[str] = None,
+    max_depth: Optional[int] = None,
+):
     """获取指定Agent的文件工作空间"""
     user_home = Path.home()
     sage_home = user_home / ".sage"
@@ -435,7 +440,11 @@ async def get_workspace(agent_id: str, request: Request):
     logger.info(f"获取Agent {agent_id} 的工作空间路径：{workspace_path}")
     result = await agent_router_service.build_workspace_listing_response(
         agent_id=agent_id,
-        fetcher=lambda: agent_service.get_desktop_file_workspace(agent_id),
+        fetcher=lambda: agent_service.get_desktop_file_workspace(
+            agent_id,
+            path=path,
+            max_depth=max_depth,
+        ),
     )
     return await Response.succ(message=result["message"], data=result["data"])
 

@@ -295,7 +295,13 @@ async def update_auth(agent_id: str, req: AuthorizationRequest, http_request: Re
     return await Response.succ(data={}, message="更新授权成功")
 
 @agent_router.post("/{agent_id}/file_workspace")
-async def get_workspace(agent_id: str, request: Request, session_id: Optional[str] = None):
+async def get_workspace(
+    agent_id: str,
+    request: Request,
+    session_id: Optional[str] = None,
+    path: Optional[str] = None,
+    max_depth: Optional[int] = None,
+):
     """获取指定会话的文件工作空间"""
     user_id = get_request_user_id(request)
     role = get_request_role(request)
@@ -309,7 +315,12 @@ async def get_workspace(agent_id: str, request: Request, session_id: Optional[st
     result = await agent_router_service.build_workspace_listing_response(
         agent_id=agent_id,
         user_id=user_id,
-        fetcher=lambda: agent_service.get_server_file_workspace(agent_id, user_id),
+        fetcher=lambda: agent_service.get_server_file_workspace(
+            agent_id,
+            user_id,
+            path=path,
+            max_depth=max_depth,
+        ),
     )
     files = result["data"].get("files", [])
     logger.bind(agent_id=agent_id).info(f"获取工作空间文件数量：{len(files)}")

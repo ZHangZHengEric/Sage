@@ -82,6 +82,71 @@ class LocalSandboxProvider(ISandboxHandle):
         # 不进 bwrap/seatbelt，方便长跑任务管理）
         self._bg_runner = HostBackgroundRunner()
 
+    def _allowed_path_roots(self) -> List[tuple[str, bool]]:
+        """Return allowed host roots as ``(path, read_only)`` pairs."""
+        roots: List[tuple[str, bool]] = []
+
+        if self._volume_mounts:
+            for mount in self._volume_mounts:
+                roots.append((
+                    os.path.realpath(os.path.abspath(mount.host_path)),
+                    bool(getattr(mount, "read_only", False)),
+                ))
+        elif self._file_system is not None:
+            roots.append((os.path.realpath(os.path.abspath(self._file_system.host_path)), False))
+        elif self._sandbox_agent_workspace:
+            roots.append((os.path.realpath(self._sandbox_agent_workspace), False))
+
+        # ``allowed_paths`` is kept for compatibility with callers that pass extra
+        # explicit roots outside VolumeMount, but it is not normally populated.
+        for path in self._allowed_paths or []:
+            roots.append((os.path.realpath(os.path.expanduser(path)), False))
+
+        deduped: Dict[str, bool] = {}
+        for root, read_only in roots:
+            if not root:
+                continue
+            deduped[root] = deduped.get(root, True) and read_only
+        return sorted(deduped.items(), key=lambda item: len(item[0]), reverse=True)
+
+    def _path_under_root(self, path: str, root: str) -> bool:
+        try:
+            return os.path.commonpath([path, root]) == root
+        except ValueError:
+            return False
+
+    def _validate_host_path_allowed(self, host_path: str, operation: str = "read") -> str:
+        """Ensure a resolved host path is inside the workspace or explicit mounts."""
+        actual = os.path.realpath(os.path.abspath(host_path))
+        write_operation = operation in {"write", "delete", "mkdir"}
+        for root, read_only in self._allowed_path_roots():
+            if self._path_under_root(actual, root):
+                if write_operation and read_only:
+                    raise PermissionError(f"Path is read-only in sandbox: {host_path}")
+                return actual
+
+        allowed = ", ".join(root for root, _ in self._allowed_path_roots()) or "<none>"
+        raise PermissionError(
+            f"Access denied: path outside sandbox workspace or mounted paths: {host_path}. "
+            f"Allowed roots: {allowed}"
+        )
+
+    def is_path_allowed(self, path: str, operation: str = "read") -> bool:
+        """Public containment check used by deterministic validators."""
+        if not path:
+            return False
+        if self._file_system is None:
+            # Best effort before initialization: validate against the configured
+            # workspace/mount roots without forcing async setup from sync callers.
+            host_path = path
+        else:
+            host_path = self.to_host_path(path)
+        try:
+            self._validate_host_path_allowed(host_path, operation=operation)
+            return True
+        except PermissionError:
+            return False
+
     async def _ensure_initialized(self):
         """确保沙箱已初始化"""
         if self._file_system is None:
@@ -299,8 +364,10 @@ class LocalSandboxProvider(ISandboxHandle):
 
     def add_mount(self, host_path: str, sandbox_path: str) -> None:
         """动态添加路径映射"""
+        mount = VolumeMount(host_path=host_path, mount_path=sandbox_path)
+        self._volume_mounts.append(mount)
         if self._file_system:
-            self._file_system.add_mapping(sandbox_path, host_path)
+            self._file_system.add_mapping(mount.mount_path, mount.host_path)
 
     def remove_mount(self, sandbox_path: str) -> None:
         """动态移除路径映射"""
@@ -333,7 +400,10 @@ class LocalSandboxProvider(ISandboxHandle):
         host_workdir = (
             self.to_host_path(workdir) if workdir else self.to_host_path(self._sandbox_agent_workspace)
         )
+        host_workdir = self._validate_host_path_allowed(host_workdir, operation="read")
         host_log_dir = self.to_host_path(log_dir) if log_dir else None
+        if host_log_dir:
+            host_log_dir = self._validate_host_path_allowed(host_log_dir, operation="write")
         return self._bg_runner.start(
             converted,
             workdir=host_workdir,
@@ -528,6 +598,7 @@ class LocalSandboxProvider(ISandboxHandle):
         actual_workdir = (
             self.to_host_path(workdir) if workdir else self.to_host_path(self._sandbox_agent_workspace)
         )
+        actual_workdir = self._validate_host_path_allowed(actual_workdir, operation="read")
 
         # 转换命令中的虚拟路径为宿主机路径
         converted_command = self._convert_paths_in_command(command)
@@ -734,6 +805,7 @@ class LocalSandboxProvider(ISandboxHandle):
         actual_workdir = (
             self.to_host_path(workdir) if workdir else self.to_host_path(self._sandbox_agent_workspace)
         )
+        actual_workdir = self._validate_host_path_allowed(actual_workdir, operation="read")
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(code)
@@ -858,6 +930,7 @@ class LocalSandboxProvider(ISandboxHandle):
         """读取文件"""
         await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
+        actual_path = self._validate_host_path_allowed(actual_path, operation="read")
         return await asyncio.to_thread(self._read_file_sync, actual_path, encoding)
 
     async def write_file(
@@ -870,12 +943,14 @@ class LocalSandboxProvider(ISandboxHandle):
         """写入文件"""
         await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
+        actual_path = self._validate_host_path_allowed(actual_path, operation="write")
         await asyncio.to_thread(self._write_file_sync, actual_path, content, encoding, mode)
 
     async def file_exists(self, path: str) -> bool:
         """检查文件是否存在"""
         await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
+        actual_path = self._validate_host_path_allowed(actual_path, operation="read")
         return await asyncio.to_thread(os.path.exists, actual_path)
 
     async def get_mtime(self, path: str) -> float:
@@ -887,6 +962,7 @@ class LocalSandboxProvider(ISandboxHandle):
         """
         await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
+        actual_path = self._validate_host_path_allowed(actual_path, operation="read")
         try:
             if not await asyncio.to_thread(os.path.exists, actual_path):
                 return 0
@@ -903,18 +979,21 @@ class LocalSandboxProvider(ISandboxHandle):
         """列出目录内容"""
         await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
+        actual_path = self._validate_host_path_allowed(actual_path, operation="read")
         return await asyncio.to_thread(self._list_directory_sync, actual_path, include_hidden)
 
     async def ensure_directory(self, path: str) -> None:
         """确保目录存在"""
         await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
+        actual_path = self._validate_host_path_allowed(actual_path, operation="mkdir")
         await asyncio.to_thread(os.makedirs, actual_path, exist_ok=True)
 
     async def delete_file(self, path: str) -> None:
         """删除文件"""
         await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
+        actual_path = self._validate_host_path_allowed(actual_path, operation="delete")
         await asyncio.to_thread(self._delete_path_sync, actual_path)
 
     async def get_file_tree(
@@ -934,6 +1013,8 @@ class LocalSandboxProvider(ISandboxHandle):
         if self._file_system:
             # 转换虚拟路径为宿主机路径
             host_root_path = self.to_host_path(root_path) if root_path else None
+            if host_root_path:
+                host_root_path = self._validate_host_path_allowed(host_root_path, operation="read")
             return await self._file_system.get_file_tree_compact(
                 include_hidden=include_hidden,
                 root_path=host_root_path,
@@ -961,6 +1042,7 @@ class LocalSandboxProvider(ISandboxHandle):
         target_root = (
             self.to_host_path(root_path) if root_path else self.to_host_path(self._sandbox_agent_workspace)
         )
+        target_root = self._validate_host_path_allowed(target_root, operation="read")
         
         if not os.path.exists(target_root):
             return ""
@@ -1030,6 +1112,7 @@ class LocalSandboxProvider(ISandboxHandle):
         
         # 转换沙箱虚拟路径为宿主机路径
         host_dest_path = self.to_host_path(sandbox_dest_path)
+        host_dest_path = self._validate_host_path_allowed(host_dest_path, operation="write")
         
         try:
             copied = await asyncio.to_thread(

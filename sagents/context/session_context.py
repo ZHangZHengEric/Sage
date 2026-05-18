@@ -216,6 +216,9 @@ class SessionContext:
         self._current_request: Optional[Dict[str, Any]] = None
         self._request_lock = threading.Lock()
         self._llm_request_save_lock = threading.Lock()
+        self._save_lock = threading.Lock()
+        self._last_save_signature: Optional[tuple] = None
+        self._last_save_time = 0.0
         self.record_timing_event(
             "session_start",
             status=self.status.value,
@@ -392,7 +395,7 @@ class SessionContext:
 
     def enqueue_user_injection(
         self,
-        content: str,
+        content: Union[str, List[Dict[str, Any]]],
         *,
         guidance_id: Optional[str] = None,
         extra_metadata: Optional[Dict[str, Any]] = None,
@@ -403,14 +406,14 @@ class SessionContext:
         将 pending 消息写入 ``message_manager``、追加到本轮请求 messages、并 yield 给 SSE。
 
         Args:
-            content: 注入的文本内容。
+            content: 注入内容，支持文本或多模态 content 列表。
             guidance_id: 客户端可生成；不传则自动生成 uuid，便于前端引导区按 id 对账消费。
             extra_metadata: 透传到 MessageChunk.metadata 的额外字段。
 
         Returns:
             str: 实际生效的 ``guidance_id``。
         """
-        if not content or not str(content).strip():
+        if not self._is_valid_user_injection_content(content):
             raise ValueError("inject 内容不能为空")
         gid = guidance_id or str(uuid.uuid4())
         metadata: Dict[str, Any] = {
@@ -422,7 +425,7 @@ class SessionContext:
             metadata.update(extra_metadata)
         chunk = MessageChunk(
             role="user",
-            content=str(content),
+            content=content,
             session_id=self.session_id,
             metadata=metadata,
         )
@@ -452,26 +455,54 @@ class SessionContext:
             md = chunk.metadata or {}
             snapshot.append({
                 "guidance_id": md.get("guidance_id"),
-                "content": chunk.content if isinstance(chunk.content, str) else "",
+                "content": chunk.content,
                 "metadata": dict(md),
                 "timestamp": chunk.timestamp,
             })
         return snapshot
 
-    def update_user_injection(self, guidance_id: str, content: str) -> bool:
+    def update_user_injection(
+        self,
+        guidance_id: str,
+        content: Union[str, List[Dict[str, Any]]],
+    ) -> bool:
         """修改尚未被消费的 pending 引导消息内容。返回是否命中。"""
         if not guidance_id:
             return False
-        if not content or not str(content).strip():
+        if not self._is_valid_user_injection_content(content):
             raise ValueError("content 不能为空")
         for chunk in self.pending_user_injections:
             md = chunk.metadata or {}
             if md.get("guidance_id") == guidance_id:
-                chunk.content = str(content)
+                chunk.content = content
                 logger.info(
                     f"SessionContext: update user injection session={self.session_id} guidance_id={guidance_id}"
                 )
                 return True
+        return False
+
+    def _is_valid_user_injection_content(
+        self,
+        content: Union[str, List[Dict[str, Any]], None],
+    ) -> bool:
+        if isinstance(content, str):
+            return bool(content.strip())
+        if not isinstance(content, list):
+            return False
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get("type") or "").strip()
+            if item_type == "text" and str(item.get("text") or "").strip():
+                return True
+            if item_type == "image_url" and isinstance(item.get("image_url"), dict):
+                image_url = item.get("image_url") or {}
+                if str(image_url.get("url") or "").strip():
+                    return True
+            if item_type == "input_audio" and isinstance(item.get("input_audio"), dict):
+                input_audio = item.get("input_audio") or {}
+                if str(input_audio.get("data") or input_audio.get("url") or "").strip():
+                    return True
         return False
 
     def delete_user_injection(self, guidance_id: str) -> bool:
@@ -1378,69 +1409,91 @@ class SessionContext:
         interrupt_reason: Optional[str] = None,
     ):
         """保存会话上下文（不包含 llm_requests，已在 add 时异步保存）"""
-        effective_status = session_status or self._status
-        effective_child_session_ids = child_session_ids if child_session_ids is not None else self.child_session_ids
-        if interrupt_reason is not None:
-            self.audit_status["interrupt_reason"] = interrupt_reason
-        # 1. 保存 messages 到 messages.json
-        # 始终覆盖，保存完整历史
-        try:
-            with open(os.path.join(self.session_workspace, "messages.json"), "w", encoding="utf-8") as f:
-                serializable_messages = make_serializable(self.message_manager.messages)
-                json.dump(serializable_messages, f, ensure_ascii=False, indent=4)
-        except Exception as e:
-            logger.error(f"SessionContext: Failed to save messages.json: {e}")
+        with self._save_lock:
+            effective_status = session_status or self._status
+            effective_child_session_ids = child_session_ids if child_session_ids is not None else self.child_session_ids
+            if interrupt_reason is not None:
+                self.audit_status["interrupt_reason"] = interrupt_reason
 
-        # 3. 保存 session_context.json (仅保存最新状态)
-        # 包含 system_context, audit_status, token_usage, 基本元数据
-        try:
-            context_data = {
-                "session_id": self.session_id,
-                "user_id": self.user_id,
-                "parent_session_id": self.parent_session_id,
-                "child_session_ids": effective_child_session_ids,
-                "status": effective_status.value if hasattr(effective_status, 'value') else str(effective_status),
-                "created_at": self.start_time,
-                "updated_at": time.time(),
-                "session_root_space": self.session_root_space,
-                "session_workspace": self.session_workspace,
-                "sandbox_agent_workspace": self.sandbox_agent_workspace,
+            status_value = effective_status.value if hasattr(effective_status, "value") else str(effective_status)
+            message_stats = self.message_manager.stats
+            signature = (
+                len(self.message_manager.messages),
+                message_stats.get("total_chunks"),
+                message_stats.get("last_updated"),
+                status_value,
+                tuple(effective_child_session_ids or []),
+                self.audit_status.get("interrupt_reason"),
+                self.audit_status.get("tools_expanded"),
+                len(self.llm_requests_logs),
+                self._current_request is None,
+            )
+            now = time.time()
+            if signature == self._last_save_signature and now - self._last_save_time < 2.0:
+                logger.debug(f"SessionContext: 跳过重复保存 session_id={self.session_id}")
+                return
 
-                # 关键状态
-                "system_context": make_serializable(self.system_context),
-                "audit_status": make_serializable(self.audit_status),
-                "tokens_usage_info": self.get_tokens_usage_info(),
-                "context_budget_config": make_serializable(self._effective_context_budget_config()),
+            # 1. 保存 messages 到 messages.json
+            # 始终覆盖，保存完整历史
+            try:
+                with open(os.path.join(self.session_workspace, "messages.json"), "w", encoding="utf-8") as f:
+                    serializable_messages = make_serializable(self.message_manager.messages)
+                    json.dump(serializable_messages, f, ensure_ascii=False, indent=4)
+            except Exception as e:
+                logger.error(f"SessionContext: Failed to save messages.json: {e}")
 
-                # Agent 配置
-                "agent_config": make_serializable(self.agent_config)
-            }
-            
-            with open(os.path.join(self.session_workspace, "session_context.json"), "w", encoding="utf-8") as f:
-                json.dump(context_data, f, ensure_ascii=False, indent=4)
-                
-        except Exception as e:
-            logger.error(f"SessionContext: Failed to save session_context.json: {e}")
+            # 3. 保存 session_context.json (仅保存最新状态)
+            # 包含 system_context, audit_status, token_usage, 基本元数据
+            try:
+                context_data = {
+                    "session_id": self.session_id,
+                    "user_id": self.user_id,
+                    "parent_session_id": self.parent_session_id,
+                    "child_session_ids": effective_child_session_ids,
+                    "status": status_value,
+                    "created_at": self.start_time,
+                    "updated_at": now,
+                    "session_root_space": self.session_root_space,
+                    "session_workspace": self.session_workspace,
+                    "sandbox_agent_workspace": self.sandbox_agent_workspace,
 
-        # 基于messages.json 提取里面不同的工具调用的数量统计，并保存到tools_usage.json
-        try:
-            tools_usage = {}
-            for msg in self.message_manager.messages:
-                if msg.tool_calls:
-                    for tool_call in msg.tool_calls:
-                        tool_name = tool_call.get('function', {}).get('name')
-                        if tool_name:
-                            tools_usage[tool_name] = tools_usage.get(tool_name, 0) + 1
-            
-            with open(os.path.join(self.session_workspace, "tools_usage.json"), "w", encoding="utf-8") as f:
-                json.dump(tools_usage, f, ensure_ascii=False, indent=4)
-        except Exception as e:
-            logger.error(f"SessionContext: Failed to save tools_usage.json: {e}")
+                    # 关键状态
+                    "system_context": make_serializable(self.system_context),
+                    "audit_status": make_serializable(self.audit_status),
+                    "tokens_usage_info": self.get_tokens_usage_info(),
+                    "context_budget_config": make_serializable(self._effective_context_budget_config()),
 
-        self.record_timing_event(
-            "session_end",
-            status=effective_status.value if hasattr(effective_status, "value") else str(effective_status),
-        )
+                    # Agent 配置
+                    "agent_config": make_serializable(self.agent_config)
+                }
+
+                with open(os.path.join(self.session_workspace, "session_context.json"), "w", encoding="utf-8") as f:
+                    json.dump(context_data, f, ensure_ascii=False, indent=4)
+
+            except Exception as e:
+                logger.error(f"SessionContext: Failed to save session_context.json: {e}")
+
+            # 基于messages.json 提取里面不同的工具调用的数量统计，并保存到tools_usage.json
+            try:
+                tools_usage = {}
+                for msg in self.message_manager.messages:
+                    if msg.tool_calls:
+                        for tool_call in msg.tool_calls:
+                            tool_name = tool_call.get('function', {}).get('name')
+                            if tool_name:
+                                tools_usage[tool_name] = tools_usage.get(tool_name, 0) + 1
+
+                with open(os.path.join(self.session_workspace, "tools_usage.json"), "w", encoding="utf-8") as f:
+                    json.dump(tools_usage, f, ensure_ascii=False, indent=4)
+            except Exception as e:
+                logger.error(f"SessionContext: Failed to save tools_usage.json: {e}")
+
+            self.record_timing_event(
+                "session_end",
+                status=status_value,
+            )
+            self._last_save_signature = signature
+            self._last_save_time = now
 
     # def _serialize_messages_for_history_memory(self, messages: List[MessageChunk]) -> str:
     #     """序列化消息列表为系统上下文格式的字符串（私有方法）"""
