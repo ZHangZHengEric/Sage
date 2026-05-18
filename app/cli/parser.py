@@ -1,6 +1,22 @@
 import argparse
 
 
+def _add_goal_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--goal", dest="goal_objective", help="Set or replace the current session goal objective")
+    parser.add_argument(
+        "--goal-status",
+        dest="goal_status",
+        choices=["active", "paused", "completed"],
+        help="Override the goal status for this request",
+    )
+    parser.add_argument(
+        "--clear-goal",
+        dest="clear_goal",
+        action="store_true",
+        help="Clear the current session goal",
+    )
+
+
 def _add_provider_config_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--name", help="Provider display name")
     parser.add_argument("--base-url", dest="base_url", help="Provider base URL")
@@ -91,6 +107,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     run_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     run_parser.add_argument("--stats", action="store_true", help="Print execution summary after completion")
+    _add_goal_args(run_parser)
 
     chat_parser = subparsers.add_parser("chat", help="Start an interactive Sage chat session")
     chat_parser.add_argument("--session-id", dest="session_id")
@@ -114,6 +131,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     chat_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     chat_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     chat_parser.add_argument("--stats", action="store_true", help="Print execution summary for each turn")
+    _add_goal_args(chat_parser)
 
     resume_parser = subparsers.add_parser("resume", help="Resume an existing Sage chat session")
     resume_parser.add_argument("session_id", help="Session id to resume")
@@ -137,6 +155,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     resume_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     resume_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     resume_parser.add_argument("--stats", action="store_true", help="Print execution summary for each turn")
+    _add_goal_args(resume_parser)
 
     doctor_parser = subparsers.add_parser("doctor", help="Show local CLI/runtime configuration")
     doctor_parser.add_argument("--probe-provider", action="store_true", help="Run a lightweight connection probe against the default provider")
@@ -243,4 +262,3 @@ def build_argument_parser() -> argparse.ArgumentParser:
     provider_delete_parser.add_argument("--json", action="store_true", help="Print deletion result as JSON")
     provider_delete_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     return parser
-

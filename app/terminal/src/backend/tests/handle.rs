@@ -25,6 +25,9 @@ fn backend_handle_supports_two_round_trips_without_respawn() {
         workspace: Some(temp_dir.clone()),
         skills: Vec::new(),
         model_override: None,
+        goal_objective: None,
+        goal_status: None,
+        clear_goal: false,
         task: "unused".to_string(),
     };
 
@@ -71,6 +74,9 @@ fn backend_handle_omits_workspace_flag_when_not_overridden() {
         workspace: None,
         skills: Vec::new(),
         model_override: None,
+        goal_objective: None,
+        goal_status: None,
+        clear_goal: false,
         task: "unused".to_string(),
     };
 

@@ -4,7 +4,6 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::app::{ActiveSurfaceKind, App};
 use crate::app_render::truncate_middle;
-use crate::bottom_pane::command_popup;
 use crate::bottom_pane::composer::ComposerProps;
 use crate::bottom_pane::footer::FooterProps;
 use crate::bottom_pane::help_overlay::HelpOverlayProps;
@@ -47,10 +46,6 @@ pub(crate) fn composer_props(app: &App) -> ComposerProps<'_> {
         input_cursor: app.input_cursor,
         busy: app.busy,
     }
-}
-
-pub(crate) fn command_popup_height(app: &App) -> u16 {
-    command_popup::popup_height(app.popup_props().as_ref())
 }
 
 pub(crate) fn help_overlay_props(app: &App) -> Option<HelpOverlayProps> {
@@ -102,6 +97,9 @@ pub(crate) fn footer_status_summary(app: &App) -> String {
     if let Some(agent_id) = app.selected_agent_id.as_deref() {
         parts.push(format!("agent {}", truncate_middle(agent_id, 18)));
     }
+    if let Some(goal) = app.current_goal.as_ref() {
+        parts.push(format!("goal {}", goal.status));
+    }
     parts.push(compact_workspace_label(&app.workspace_label));
     if app.busy {
         if let Some(phase) = app.active_phase_label() {
@@ -110,7 +108,7 @@ pub(crate) fn footer_status_summary(app: &App) -> String {
     }
     parts.push(normalize_footer_status(&app.footer_status()));
     if app.busy && app.active_tool_status().is_none() {
-        parts.push(app.session_id.clone());
+        parts.push(app.session_label().to_string());
     }
     parts.join(" • ")
 }

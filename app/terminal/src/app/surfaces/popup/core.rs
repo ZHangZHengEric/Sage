@@ -24,6 +24,11 @@ impl App {
         command_popup::props_from_matches(&matches, self.slash_popup_selected)
     }
 
+    pub fn popup_props_for_rows(&self, max_rows: usize) -> Option<command_popup::CommandPopupProps> {
+        let matches = self.popup_matches();
+        command_popup::props_from_matches_for_rows(&matches, self.slash_popup_selected, max_rows)
+    }
+
     pub fn needs_provider_catalog(&self) -> bool {
         self.provider_popup_context().is_some() && self.provider_catalog.is_none()
     }

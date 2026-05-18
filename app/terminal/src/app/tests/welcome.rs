@@ -15,7 +15,42 @@ fn welcome_banner_renders_in_idle_region_before_transcript() {
     assert!(rendered.contains("Sage Terminal"));
     assert!(rendered.contains("display: "));
     assert!(rendered.contains("compact"));
+    assert!(rendered.contains("goal: "));
+    assert!(rendered.contains("session: "));
+    assert!(rendered.contains("new"));
     assert!(rendered.contains("Tip: "));
+}
+
+#[test]
+fn first_task_materializes_local_session_id() {
+    let mut app = App::new();
+    assert_eq!(app.session_label(), "new");
+
+    app.input = "hello".to_string();
+    app.input_cursor = app.input.len();
+    let _ = app.submit_input();
+
+    assert_ne!(app.session_label(), "new");
+    assert!(app.session_id.starts_with("local-"));
+}
+
+#[test]
+fn welcome_banner_renders_current_goal_when_present() {
+    let mut app = App::new();
+    app.set_goal_selection("ship the runtime goal contract".to_string());
+    app.pending_goal_mutation = None;
+
+    let lines = app.rendered_idle_lines(120);
+    let rendered = lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("goal: "));
+    assert!(rendered.contains("ship the runtime goal contract"));
+    assert!(rendered.contains("(active)"));
 }
 
 #[test]

@@ -193,6 +193,9 @@ sage run --workspace /path/to/project --stats "简单分析一下这个仓库。
 - `--user-id`
 - `--agent-id`
 - `--agent-mode`
+- `--goal`
+- `--goal-status`
+- `--clear-goal`
 - `--workspace`
 - `--skill`（可重复）
 - `--max-loop-count`
@@ -215,12 +218,18 @@ sage chat
 sage chat --stats
 sage chat --workspace /path/to/project
 sage chat --skill my_skill
+sage chat --goal "完成 runtime goal contract"
 ```
 
 内置命令：
 
 - `/help`：查看内置命令帮助
 - `/session`：输出当前 session id
+- `/goal`：查看当前本地 goal
+- `/goal <objective>`：设置当前 goal，并立即提交同一句任务
+- `/goal set <objective>`：为下一次请求设置或替换本地 goal
+- `/goal clear`：为下一次请求清除 goal
+- `/goal done`：将当前 goal 标记为完成
 - `/exit`：退出会话
 - `/quit`：退出会话的兼容别名
 

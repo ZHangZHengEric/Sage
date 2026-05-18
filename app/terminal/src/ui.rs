@@ -3,23 +3,29 @@ use crate::bottom_pane::command_popup;
 use crate::bottom_pane::{composer, footer, help_overlay, picker_overlay, transcript_overlay};
 use crate::custom_terminal::Frame;
 use crate::ui_support::{
-    command_popup_height, composer_props, footer_props, help_overlay_props, live_region_height,
-    picker_overlay_props, render_live_region, transcript_overlay_props,
+    composer_props, footer_props, help_overlay_props, live_region_height, picker_overlay_props,
+    render_live_region, transcript_overlay_props,
 };
 use ratatui::layout::{Constraint, Direction, Layout};
 
 pub fn render(frame: &mut Frame, app: &App) {
     let composer_props = composer_props(app);
     let live_region_height = live_region_height(app, frame.area().width);
+    let composer_height = composer::composer_height(&composer_props, frame.area().width);
+    let popup_max_rows = frame
+        .area()
+        .height
+        .saturating_sub(live_region_height)
+        .saturating_sub(composer_height)
+        .saturating_sub(1) as usize;
+    let popup_props = app.popup_props_for_rows(popup_max_rows);
+    let popup_height = command_popup::popup_height(popup_props.as_ref());
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(live_region_height),
-            Constraint::Length(composer::composer_height(
-                &composer_props,
-                frame.area().width,
-            )),
-            Constraint::Length(command_popup_height(app)),
+            Constraint::Length(composer_height),
+            Constraint::Length(popup_height),
             Constraint::Length(1),
         ])
         .split(frame.area());
@@ -28,7 +34,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     if let Some(cursor) = composer::render(frame, chunks[1], &composer_props) {
         frame.set_cursor_position(cursor);
     }
-    if let Some(popup_props) = app.popup_props() {
+    if let Some(popup_props) = popup_props {
         command_popup::render(frame, chunks[2], &popup_props);
     }
     let footer_props = footer_props(app);
@@ -78,6 +84,16 @@ mod tests {
 
         let summary = footer_status_summary(&app);
         assert!(summary.contains("phase response"));
+    }
+
+    #[test]
+    fn footer_summary_includes_goal_status_when_present() {
+        let mut app = App::new();
+        app.set_goal_selection("ship the runtime goal contract".to_string());
+        app.pending_goal_mutation = None;
+
+        let summary = footer_status_summary(&app);
+        assert!(summary.contains("goal active"));
     }
 
     #[test]

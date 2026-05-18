@@ -57,7 +57,7 @@ fn prepare_state_root_uses_home_for_packaged_runtime_layout() {
 }
 
 #[test]
-fn apply_state_env_keeps_default_sage_session_dir() {
+fn apply_state_env_routes_sage_session_dir_into_terminal_state_root() {
     let _env_lock = lock_env();
     let temp_dir = unique_temp_dir("state-env");
     let state_root_path = temp_dir.join("terminal-state");
@@ -80,7 +80,12 @@ fn apply_state_env_keeps_default_sage_session_dir() {
         })
         .collect::<Vec<_>>();
 
-    assert!(!envs.iter().any(|(key, _)| key == "SAGE_SESSION_DIR"));
+    assert!(envs.iter().any(|(key, value)| {
+        key == "SAGE_SESSION_DIR"
+            && value
+                .as_deref()
+                .is_some_and(|value| value.ends_with("terminal-state/sessions"))
+    }));
     assert!(envs.iter().any(|(key, value)| {
         key == "SAGE_LOGS_DIR_PATH"
             && value
@@ -121,6 +126,50 @@ fn resolve_python_command_prefers_bundled_runtime_python() {
 
     let resolved = resolve_python_command(&runtime_root);
     assert_eq!(resolved, python_path);
+}
+
+#[test]
+fn resolve_python_command_prefers_active_virtualenv_python() {
+    let _env_lock = lock_env();
+    let runtime_root = unique_temp_dir("active-venv-python");
+    let venv_root = unique_temp_dir("venv-root");
+    let python_path = venv_root.join("bin").join("python3");
+    fs::create_dir_all(python_path.parent().expect("parent should exist"))
+        .expect("python dir should exist");
+    fs::write(&python_path, "").expect("python stub should be written");
+    let _sage_python_guard = EnvVarGuard::unset("SAGE_PYTHON");
+    let _python_guard = EnvVarGuard::unset("PYTHON");
+    let _virtual_env_guard = EnvVarGuard::set("VIRTUAL_ENV", &venv_root.display().to_string());
+    let _conda_prefix_guard = EnvVarGuard::unset("CONDA_PREFIX");
+    let _conda_prefix_2_guard = EnvVarGuard::unset("CONDA_PREFIX_2");
+
+    let resolved = resolve_python_command(&runtime_root);
+    assert_eq!(resolved, python_path);
+}
+
+#[test]
+fn resolve_python_command_prefers_highest_priority_conda_prefix_python() {
+    let _env_lock = lock_env();
+    let runtime_root = unique_temp_dir("active-conda-python");
+    let base_conda = unique_temp_dir("conda-base");
+    let stacked_conda = unique_temp_dir("conda-stacked");
+    let base_python = base_conda.join("bin").join("python3");
+    let stacked_python = stacked_conda.join("bin").join("python3");
+    fs::create_dir_all(base_python.parent().expect("parent should exist"))
+        .expect("base python dir should exist");
+    fs::create_dir_all(stacked_python.parent().expect("parent should exist"))
+        .expect("stacked python dir should exist");
+    fs::write(&base_python, "").expect("base python stub should be written");
+    fs::write(&stacked_python, "").expect("stacked python stub should be written");
+    let _sage_python_guard = EnvVarGuard::unset("SAGE_PYTHON");
+    let _python_guard = EnvVarGuard::unset("PYTHON");
+    let _virtual_env_guard = EnvVarGuard::unset("VIRTUAL_ENV");
+    let _conda_prefix_guard = EnvVarGuard::set("CONDA_PREFIX", &base_conda.display().to_string());
+    let _conda_prefix_2_guard =
+        EnvVarGuard::set("CONDA_PREFIX_2", &stacked_conda.display().to_string());
+
+    let resolved = resolve_python_command(&runtime_root);
+    assert_eq!(resolved, stacked_python);
 }
 
 #[test]

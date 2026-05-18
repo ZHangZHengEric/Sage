@@ -59,6 +59,7 @@ if "opentelemetry" not in sys.modules:
     sys.modules["opentelemetry.context"] = context_module
 
 from common.services import chat_service
+from common.services import chat_stream_manager
 from common.services import conversation_service
 from common.services.chat_stream_manager import StreamManager
 
@@ -101,7 +102,7 @@ class _FakeStreamService:
                 }
             },
         }
-        await asyncio.sleep(10)
+        return
 
 
 def test_execute_chat_session_persists_token_usage_when_generator_closes_early(monkeypatch):

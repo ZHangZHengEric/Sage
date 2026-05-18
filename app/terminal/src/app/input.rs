@@ -19,9 +19,11 @@ impl App {
     }
 
     pub(crate) fn begin_task_submission(&mut self, task: String, queue_user_message: bool) {
+        self.ensure_local_session();
         if queue_user_message {
             self.queue_message(crate::app::MessageKind::User, task.clone());
         }
+        self.record_input_history(&task);
         self.last_submitted_task = Some(task.clone());
         self.current_task = Some(task);
         self.busy = true;
@@ -35,7 +37,7 @@ impl App {
         self.active_phase = None;
         self.active_tools.clear();
         self.tool_step_seq = 0;
-        self.status = format!("running  {}", self.session_id);
+        self.status = format!("running  {}", self.session_label());
     }
 
     pub fn insert_char(&mut self, ch: char) {
@@ -114,6 +116,52 @@ impl App {
         self.input.clear();
         self.input_cursor = 0;
         self.slash_popup_selected = 0;
+        self.input_history_index = None;
+        self.input_history_draft = None;
+    }
+
+    pub fn select_previous_input_history(&mut self) -> bool {
+        if self.busy && !self.input.starts_with('/') {
+            return false;
+        }
+        if self.input_history.is_empty() {
+            return false;
+        }
+
+        let next_index = match self.input_history_index {
+            Some(0) => 0,
+            Some(index) => index.saturating_sub(1),
+            None => {
+                self.input_history_draft = Some(self.input.clone());
+                self.input_history.len().saturating_sub(1)
+            }
+        };
+        self.input_history_index = Some(next_index);
+        self.input = self.input_history[next_index].clone();
+        self.input_cursor = self.input.len();
+        self.sync_slash_popup_selection();
+        true
+    }
+
+    pub fn select_next_input_history(&mut self) -> bool {
+        if self.busy && !self.input.starts_with('/') {
+            return false;
+        }
+        let Some(index) = self.input_history_index else {
+            return false;
+        };
+
+        if index + 1 >= self.input_history.len() {
+            self.input_history_index = None;
+            self.input = self.input_history_draft.take().unwrap_or_default();
+        } else {
+            let next_index = index + 1;
+            self.input_history_index = Some(next_index);
+            self.input = self.input_history[next_index].clone();
+        }
+        self.input_cursor = self.input.len();
+        self.sync_slash_popup_selection();
+        true
     }
 
     pub(super) fn sync_slash_popup_selection(&mut self) {
@@ -142,6 +190,28 @@ impl App {
         } else {
             picker.selected = picker.selected.min(len.saturating_sub(1));
         }
+    }
+
+    fn record_input_history(&mut self, task: &str) {
+        let normalized = task.trim();
+        if normalized.is_empty() {
+            self.input_history_index = None;
+            self.input_history_draft = None;
+            return;
+        }
+        if self
+            .input_history
+            .last()
+            .map(|entry| entry == normalized)
+            .unwrap_or(false)
+        {
+            self.input_history_index = None;
+            self.input_history_draft = None;
+            return;
+        }
+        self.input_history.push(normalized.to_string());
+        self.input_history_index = None;
+        self.input_history_draft = None;
     }
 }
 

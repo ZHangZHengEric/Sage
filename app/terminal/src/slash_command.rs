@@ -6,7 +6,7 @@ pub(crate) struct SlashCommandDef {
     pub(crate) example: &'static str,
 }
 
-const COMMANDS: [SlashCommandDef; 22] = [
+const COMMANDS: [SlashCommandDef; 23] = [
     SlashCommandDef {
         command: "/help",
         description: "Show available commands",
@@ -102,6 +102,12 @@ const COMMANDS: [SlashCommandDef; 22] = [
         description: "Show or override the current workspace",
         usage: "/workspace | /workspace show | /workspace set <path> | /workspace clear",
         example: "/workspace set /tmp/project",
+    },
+    SlashCommandDef {
+        command: "/goal",
+        description: "Show the current goal, or set and run a new goal",
+        usage: "/goal | /goal <objective> | /goal show | /goal set <objective> | /goal clear | /goal done",
+        example: "/goal ship the terminal goal MVP",
     },
     SlashCommandDef {
         command: "/interrupt",

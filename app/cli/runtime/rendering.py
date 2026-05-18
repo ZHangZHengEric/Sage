@@ -223,11 +223,26 @@ def _print_plain_event(event: Dict[str, Any], render_state: Dict[str, Any]) -> N
 
 
 def _emit_stream_idle_notice(idle_seconds: float) -> None:
-    sys.stderr.write(f"\n[working] still running ({idle_seconds:.1f}s since last event)\n")
+    sys.stderr.write(f"\n{_build_stream_idle_notice(idle_seconds)}\n")
     sys.stderr.flush()
 
 
+def _build_stream_idle_notice(idle_seconds: float) -> str:
+    return f"[working] still running ({idle_seconds:.1f}s since last event)"
+
+
 def _emit_stream_idle_notice_for_state(render_state: Dict[str, Any], idle_seconds: float) -> None:
+    message = _build_stream_idle_notice_for_state(render_state, idle_seconds)
+    if not message:
+        return
+
+    sys.stderr.write(f"\n{message}\n")
+    sys.stderr.flush()
+
+
+def _build_stream_idle_notice_for_state(
+    render_state: Dict[str, Any], idle_seconds: float
+) -> Optional[str]:
     last_tool_name = render_state.get("last_tool_name")
     last_visible_phase = render_state.get("last_visible_phase")
     has_visible_output = bool(render_state.get("assistant_emitted")) or bool(
@@ -235,18 +250,15 @@ def _emit_stream_idle_notice_for_state(render_state: Dict[str, Any], idle_second
     )
 
     if last_tool_name:
-        message = f"\n[working] waiting for {last_tool_name} ({idle_seconds:.1f}s since last event)\n"
+        return f"[working] waiting for {last_tool_name} ({idle_seconds:.1f}s since last event)"
     elif last_visible_phase == "assistant_text" and not has_visible_output:
-        message = f"\n[working] generating response ({idle_seconds:.1f}s since last event)\n"
+        return f"[working] generating response ({idle_seconds:.1f}s since last event)"
     elif last_visible_phase == "assistant_text":
-        return
+        return None
     elif has_visible_output:
-        return
+        return None
     else:
-        message = f"\n[working] still running ({idle_seconds:.1f}s since last event)\n"
-
-    sys.stderr.write(message)
-    sys.stderr.flush()
+        return _build_stream_idle_notice(idle_seconds)
 
 
 def _emit_chat_exit_summary(session_id: Optional[str], *, json_output: bool) -> None:
@@ -269,4 +281,3 @@ def _read_chat_prompt(prompt_text: str) -> Optional[str]:
     if line == "":
         return None
     return line.rstrip("\r\n")
-

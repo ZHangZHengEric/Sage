@@ -2,6 +2,8 @@
 mod agent;
 #[path = "tests/display.rs"]
 mod display;
+#[path = "tests/goal.rs"]
+mod goal;
 #[path = "tests/golden.rs"]
 mod golden;
 #[path = "tests/popup.rs"]
