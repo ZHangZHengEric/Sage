@@ -59,6 +59,7 @@ if "opentelemetry" not in sys.modules:
     sys.modules["opentelemetry.context"] = context_module
 
 from common.services import chat_service
+from common.services import conversation_service
 from common.services.chat_stream_manager import StreamManager
 
 
@@ -192,3 +193,110 @@ def test_stream_manager_stop_session_times_out_when_background_task_hangs(monkey
 
     # 应在 timeout (100ms) 附近返回，给充分余量避免 CI 抖动误报。
     assert elapsed < 1.0, f"stop_session 在背景 task 卡死时未及时返回，elapsed={elapsed:.3f}s"
+
+
+def test_stream_manager_background_worker_aclose_has_own_timeout(monkeypatch):
+    """background worker 自己的 generator.aclose 也要有封顶，避免 task 留在 finally 里。"""
+    manager = StreamManager.get_instance()
+    monkeypatch.setattr(manager, "_GENERATOR_ACLOSE_TIMEOUT", 0.1)
+
+    class _GeneratorWithHangingAclose:
+        def __init__(self):
+            self._sent = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self._sent:
+                raise StopAsyncIteration
+            self._sent = True
+            return '{"type":"assistant_text"}\n'
+
+        async def aclose(self):
+            await asyncio.Future()
+
+    async def _run() -> tuple[float, bool, bool]:
+        session_id = "session-worker-aclose-hang"
+        lock = asyncio.Lock()
+        await lock.acquire()
+        await manager.start_session(session_id, "query", _GeneratorWithHangingAclose(), lock)
+        session = manager._sessions[session_id]
+        start = asyncio.get_event_loop().time()
+        await asyncio.wait_for(session.task, timeout=1.0)
+        elapsed = asyncio.get_event_loop().time() - start
+        return elapsed, bool(session.task and session.task.done()), lock.locked()
+
+    elapsed, task_done, lock_locked = asyncio.run(_run())
+
+    assert elapsed < 1.0, f"background worker aclose 卡死时未及时返回，elapsed={elapsed:.3f}s"
+    assert task_done is True
+    assert lock_locked is False
+
+
+def test_persist_cancel_protection_waits_for_normal_completion(monkeypatch):
+    """正常路径必须等持久化完成后返回，保护 interrupt_session 的接口语义。"""
+    events = []
+
+    async def _fake_persist(session_id: str):
+        events.append(("start", session_id))
+        await asyncio.sleep(0.01)
+        events.append(("done", session_id))
+
+    monkeypatch.setattr(conversation_service, "persist_session_state", _fake_persist)
+
+    async def _run():
+        await conversation_service.persist_session_state_with_cancel_protection("persist-normal")
+        events.append(("returned", "persist-normal"))
+
+    asyncio.run(_run())
+
+    assert events == [
+        ("start", "persist-normal"),
+        ("done", "persist-normal"),
+        ("returned", "persist-normal"),
+    ]
+
+
+def test_persist_cancel_protection_backgrounds_on_caller_cancellation(monkeypatch):
+    """调用方取消时，持久化继续完成，但取消能立即传播给调用方。"""
+    started = None
+    finish = None
+    events = []
+
+    async def _fake_persist(session_id: str):
+        events.append(("start", session_id))
+        started.set()
+        await finish.wait()
+        events.append(("done", session_id))
+
+    monkeypatch.setattr(conversation_service, "persist_session_state", _fake_persist)
+
+    async def _run():
+        nonlocal started, finish
+        started = asyncio.Event()
+        finish = asyncio.Event()
+        task = asyncio.create_task(
+            conversation_service.persist_session_state_with_cancel_protection("persist-cancel")
+        )
+        await started.wait()
+        task.cancel()
+
+        cancel_start = asyncio.get_event_loop().time()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        cancel_elapsed = asyncio.get_event_loop().time() - cancel_start
+
+        finish.set()
+        await asyncio.sleep(0)
+        return cancel_elapsed
+
+    cancel_elapsed = asyncio.run(_run())
+
+    assert cancel_elapsed < 0.5
+    assert events == [
+        ("start", "persist-cancel"),
+        ("done", "persist-cancel"),
+    ]
