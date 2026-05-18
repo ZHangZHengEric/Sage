@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 
 def _build_cli_error_payload(exc: Exception, *, verbose: bool) -> Dict[str, Any]:
-    from app.cli.service import CLIError
+    from app.cli.services.base import CLIError
 
     try:
         from common.core.exceptions import SageHTTPException
@@ -96,4 +96,3 @@ def _emit_cli_error(args: argparse.Namespace, payload: Dict[str, Any]) -> int:
         sys.stderr.write(f"{debug_detail.rstrip()}\n")
     sys.stderr.flush()
     return int(payload.get("exit_code", 1))
-

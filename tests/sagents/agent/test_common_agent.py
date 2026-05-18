@@ -1,5 +1,6 @@
 import pytest
 import os
+import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
 
 from sagents.agent.common_agent import CommonAgent
@@ -112,3 +113,74 @@ class TestCommonAgent:
         assert len(result) == 1
         assert result[0].content == tool_response
         # assert result[0].show_content == '\n' + tool_response + '\n'
+
+    def test_build_system_segments_includes_active_goal_context(self, common_agent):
+        mock_context = MagicMock()
+        mock_context.system_context = {
+            "goal_mode": "true",
+            "active_goal": "Ship the runtime goal contract",
+            "goal_status": "active",
+        }
+        mock_context.sandbox = None
+        mock_context.effective_skill_manager = None
+
+        with patch.object(common_agent, "_get_live_session_context", return_value=mock_context):
+            segments = asyncio.run(
+                common_agent._build_system_segments(
+                    session_id="test_session",
+                    language="en",
+                    include_sections=["system_context"],
+                )
+            )
+
+        assert "<goal_mode>true</goal_mode>" in segments["volatile"]
+        assert "<active_goal>Ship the runtime goal contract</active_goal>" in segments["volatile"]
+        assert "<goal_status>active</goal_status>" in segments["volatile"]
+        assert "Ship the runtime goal contract" in segments["volatile"]
+
+    def test_build_system_segments_includes_goal_transition_guidance(self, common_agent):
+        mock_context = MagicMock()
+        mock_context.system_context = {
+            "goal_mode": "true",
+            "active_goal": "Ship the runtime goal contract",
+            "goal_status": "completed",
+        }
+        mock_context.sandbox = None
+        mock_context.effective_skill_manager = None
+
+        with patch.object(common_agent, "_get_live_session_context", return_value=mock_context):
+            segments = asyncio.run(
+                common_agent._build_system_segments(
+                    session_id="test_session",
+                    language="en",
+                    include_sections=["system_context"],
+                )
+            )
+
+        assert "<goal_mode>true</goal_mode>" in segments["volatile"]
+        assert "<active_goal>Ship the runtime goal contract</active_goal>" in segments["volatile"]
+        assert "<goal_status>completed</goal_status>" in segments["volatile"]
+        assert "Ship the runtime goal contract" in segments["volatile"]
+
+    def test_build_system_segments_includes_resume_goal_continuation_guidance(self, common_agent):
+        mock_context = MagicMock()
+        mock_context.system_context = {
+            "goal_mode": "true",
+            "active_goal": "Ship the runtime goal contract",
+            "goal_status": "active",
+        }
+        mock_context.sandbox = None
+        mock_context.effective_skill_manager = None
+
+        with patch.object(common_agent, "_get_live_session_context", return_value=mock_context):
+            segments = asyncio.run(
+                common_agent._build_system_segments(
+                    session_id="test_session",
+                    language="en",
+                    include_sections=["system_context"],
+                )
+            )
+
+        assert "<goal_mode>true</goal_mode>" in segments["volatile"]
+        assert "<active_goal>Ship the runtime goal contract</active_goal>" in segments["volatile"]
+        assert "<goal_status>active</goal_status>" in segments["volatile"]

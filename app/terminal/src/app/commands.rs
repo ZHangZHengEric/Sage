@@ -4,6 +4,8 @@ pub(crate) mod agent;
 mod dispatch;
 #[path = "commands/display.rs"]
 mod display;
+#[path = "commands/goal.rs"]
+mod goal;
 #[path = "commands/model.rs"]
 mod model;
 #[path = "commands/session.rs"]

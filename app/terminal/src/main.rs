@@ -22,7 +22,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use app::App;
-use preferences::load_startup_preferences;
+use preferences::{load_next_local_session_sequence, load_startup_preferences};
 use startup::{parse_startup_action, print_usage, StartupBehavior};
 use terminal::{restore_terminal, run, run_with_startup_action, setup_terminal};
 
@@ -39,7 +39,11 @@ fn main() -> Result<()> {
             eprintln!("warning: failed to load terminal preferences: {err}");
             startup::StartupOptions::default()
         }));
-    let mut app = App::new();
+    let session_seq = load_next_local_session_sequence().unwrap_or_else(|err| {
+        eprintln!("warning: failed to resolve next local session sequence: {err}");
+        1
+    });
+    let mut app = App::new_with_session_seq(session_seq);
     app.apply_startup_options(
         startup_options.agent_id,
         startup_options.agent_mode,

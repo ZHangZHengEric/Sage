@@ -2,7 +2,7 @@ use crate::slash_command::SlashCommandDef;
 
 use super::model::{CommandMatch, CommandPopupItem, CommandPopupProps, PopupAction};
 
-const MAX_POPUP_ROWS: usize = 4;
+pub(crate) const MAX_POPUP_ROWS: usize = 6;
 
 pub(crate) fn popup_query(input: &str) -> Option<&str> {
     let first_line = input.lines().next().unwrap_or("");
@@ -58,11 +58,19 @@ pub(crate) fn props_from_matches(
     matches: &[CommandMatch],
     selected: usize,
 ) -> Option<CommandPopupProps> {
+    props_from_matches_for_rows(matches, selected, MAX_POPUP_ROWS)
+}
+
+pub(crate) fn props_from_matches_for_rows(
+    matches: &[CommandMatch],
+    selected: usize,
+    max_rows: usize,
+) -> Option<CommandPopupProps> {
     if matches.is_empty() {
         return None;
     }
 
-    let window = visible_window(matches.len(), selected);
+    let window = visible_window(matches.len(), selected, max_rows.max(1));
     let window_start = window.start;
     let window_end = window.end;
     let visible_count = window_end.saturating_sub(window_start);
@@ -85,8 +93,8 @@ pub(crate) fn props_from_matches(
     })
 }
 
-fn visible_window(total: usize, selected: usize) -> std::ops::Range<usize> {
-    let window_len = total.min(MAX_POPUP_ROWS);
+fn visible_window(total: usize, selected: usize, max_rows: usize) -> std::ops::Range<usize> {
+    let window_len = total.min(max_rows.max(1));
     let selected = selected.min(total.saturating_sub(1));
     let mut start = selected.saturating_sub(window_len.saturating_sub(1));
     if start + window_len > total {

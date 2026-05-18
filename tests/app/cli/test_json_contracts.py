@@ -31,6 +31,10 @@ class TestCliJsonContracts(unittest.TestCase):
         self.assertEqual(events[0]["has_prior_messages"], False)
         self.assertEqual(events[0]["prior_message_count"], 0)
         self.assertIsNone(events[0]["session_summary"])
+        self.assertEqual(
+            events[0]["goal"],
+            {"objective": "Ship the terminal goal MVP", "status": "active"},
+        )
         self.assertEqual(events[1], {"type": "cli_phase", "phase": "planning"})
         self.assertEqual(events[2]["type"], "analysis")
         self.assertEqual(events[3], {"type": "cli_phase", "phase": "tool"})
@@ -39,6 +43,10 @@ class TestCliJsonContracts(unittest.TestCase):
         self.assertEqual(events[7]["type"], "cli_tool")
         self.assertEqual(events[7]["action"], "finished")
         self.assertEqual(events[8], {"type": "cli_phase", "phase": "assistant_text"})
+        session_events = [event for event in events if event["type"] == "cli_session"]
+        self.assertEqual(session_events[-1]["type"], "cli_session")
+        self.assertEqual(session_events[-1]["session_state"], "existing")
+        self.assertEqual(session_events[-1]["prior_message_count"], 2)
         self.assertEqual(events[-1]["type"], "cli_stats")
         self.assertEqual(events[-1]["tool_steps"][0]["tool_name"], "read_file")
         self.assertEqual(events[-1]["phase_timings"][0]["phase"], "planning")

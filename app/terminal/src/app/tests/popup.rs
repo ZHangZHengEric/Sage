@@ -62,12 +62,17 @@ fn slash_popup_selection_can_reach_commands_beyond_first_visible_page() {
 
     let props = command_popup::props_from_matches(&app.popup_matches(), app.slash_popup_selected)
         .expect("popup props");
+    let expected_command = app.popup_matches()[app.slash_popup_selected]
+        .command
+        .clone();
     assert_eq!(app.slash_popup_selected, 4);
     assert_eq!(
-        props.items.last().map(|item| item.command.as_str()),
-        Some("/resume")
+        props.items
+            .iter()
+            .find(|item| item.selected)
+            .map(|item| item.command.as_str()),
+        Some(expected_command.as_str())
     );
-    assert!(props.items.last().is_some_and(|item| item.selected));
 }
 
 #[test]

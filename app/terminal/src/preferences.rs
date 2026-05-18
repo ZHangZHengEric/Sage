@@ -44,6 +44,40 @@ pub(crate) fn load_startup_preferences() -> Result<StartupOptions> {
     })
 }
 
+pub(crate) fn load_next_local_session_sequence() -> Result<u32> {
+    let runtime_root = resolve_runtime_root()?;
+    let state_root = prepare_state_root(&runtime_root)?;
+    let sessions_root = state_root.join("sessions");
+    if !sessions_root.is_dir() {
+        return Ok(1);
+    }
+
+    let mut max_seen = 0u32;
+    for entry in fs::read_dir(&sessions_root)
+        .map_err(|err| anyhow!("failed to read {}: {err}", sessions_root.display()))?
+    {
+        let entry = entry.map_err(|err| {
+            anyhow!(
+                "failed to inspect session entry in {}: {err}",
+                sessions_root.display()
+            )
+        })?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Some(raw_number) = name.strip_prefix("local-") else {
+            continue;
+        };
+        let Ok(number) = raw_number.parse::<u32>() else {
+            continue;
+        };
+        max_seen = max_seen.max(number);
+    }
+
+    Ok(max_seen.saturating_add(1).max(1))
+}
+
 pub(crate) fn persist_app_preferences_notice(app: &mut App) {
     if should_skip_test_persistence() {
         return;
@@ -203,6 +237,37 @@ mod tests {
         let loaded = load_startup_preferences().expect("preferences should load");
         assert!(loaded.agent_id.is_none());
         assert!(loaded.workspace.is_none());
+    }
+
+    #[test]
+    fn next_local_session_sequence_uses_existing_session_directories() {
+        let _env_lock = lock_env();
+        let runtime_root = unique_temp_dir("preferences-seq-runtime");
+        fs::create_dir_all(runtime_root.join("app").join("cli"))
+            .expect("runtime cli dir should exist");
+        fs::write(
+            runtime_root.join("app").join("cli").join("main.py"),
+            "# stub",
+        )
+        .expect("runtime entry should exist");
+        let state_root = unique_temp_dir("preferences-seq-state");
+        fs::create_dir_all(state_root.join("sessions").join("local-000001"))
+            .expect("first session dir should exist");
+        fs::create_dir_all(state_root.join("sessions").join("local-000123"))
+            .expect("latest session dir should exist");
+        fs::create_dir_all(state_root.join("sessions").join("custom-session"))
+            .expect("non-local session dir should exist");
+        let _runtime_guard = EnvVarGuard::set(
+            "SAGE_TERMINAL_RUNTIME_ROOT",
+            &runtime_root.display().to_string(),
+        );
+        let _state_guard = EnvVarGuard::set(
+            "SAGE_TERMINAL_STATE_ROOT",
+            &state_root.display().to_string(),
+        );
+
+        let next = super::load_next_local_session_sequence().expect("sequence should load");
+        assert_eq!(next, 124);
     }
 
     fn lock_env() -> MutexGuard<'static, ()> {

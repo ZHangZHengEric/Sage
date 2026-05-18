@@ -1,6 +1,8 @@
 use crate::app::MessageKind;
 use crate::backend::contract::CliStreamEvent;
-use crate::backend::{BackendPhaseTiming, BackendStats, BackendToolStep};
+use crate::backend::{
+    BackendGoal, BackendPhaseTiming, BackendSessionMeta, BackendStats, BackendToolStep,
+};
 use crate::display_policy::{internal_tool_count, visible_tool_names, DisplayMode};
 
 pub(super) fn backend_stats_from_event(event: CliStreamEvent) -> BackendStats {
@@ -35,6 +37,32 @@ pub(super) fn backend_stats_from_event(event: CliStreamEvent) -> BackendStats {
             })
             .collect(),
     }
+}
+
+pub(super) fn backend_session_meta_from_event(
+    event: &CliStreamEvent,
+) -> Option<BackendSessionMeta> {
+    let session_id = event.session_id.as_ref()?.trim();
+    if session_id.is_empty() {
+        return None;
+    }
+
+    let goal = event.goal.as_ref().and_then(|goal| {
+        let objective = goal.objective.trim();
+        if objective.is_empty() {
+            return None;
+        }
+        Some(BackendGoal {
+            objective: objective.to_string(),
+            status: goal.status.trim().to_string(),
+        })
+    });
+    Some(BackendSessionMeta {
+        session_id: session_id.to_string(),
+        command_mode: event.command_mode.clone(),
+        session_state: event.session_state.clone(),
+        goal,
+    })
 }
 
 pub(super) fn live_message_kind(
@@ -72,7 +100,7 @@ pub(super) fn live_message_kind(
 
     if matches!(
         event_type,
-        "text" | "assistant" | "message" | "do_subtask_result"
+        "text" | "assistant" | "assistant_text" | "message" | "do_subtask_result" | "final_answer"
     ) || matches!(role, "assistant" | "agent")
     {
         return Some(MessageKind::Assistant);

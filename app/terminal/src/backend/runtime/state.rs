@@ -23,6 +23,7 @@ pub(crate) fn prepare_state_root(runtime_root: &Path) -> Result<PathBuf> {
 pub(crate) fn apply_state_env(command: &mut Command, state_root: &Path) {
     command
         .env("SAGE_LOGS_DIR_PATH", state_root.join("logs"))
+        .env("SAGE_SESSION_DIR", state_root.join("sessions"))
         .env("SAGE_AGENTS_DIR", state_root.join("agents"))
         .env("SAGE_USER_DIR", state_root.join("users"))
         .env("SAGE_DB_FILE", state_root.join("sage.db"))

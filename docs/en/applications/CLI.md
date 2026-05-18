@@ -196,6 +196,9 @@ Useful options:
 - `--user-id`
 - `--agent-id`
 - `--agent-mode`
+- `--goal`
+- `--goal-status`
+- `--clear-goal`
 - `--workspace`
 - `--skill` (repeatable)
 - `--max-loop-count`
@@ -218,7 +221,23 @@ sage chat
 sage chat --stats
 sage chat --workspace /path/to/project
 sage chat --skill my_skill
+sage chat --goal "Ship the runtime goal contract"
 ```
+
+Interactive chat also supports lightweight built-in goal commands:
+
+```text
+/goal
+/goal <objective>
+/goal show
+/goal set <objective>
+/goal clear
+/goal done
+```
+
+`/goal <objective>` stores a local CLI goal and immediately submits the same objective as the next task, matching the Codex-style flow.
+
+`/goal set` still stores the local goal for the next request without submitting a task immediately.
 
 Built-in chat commands:
 
