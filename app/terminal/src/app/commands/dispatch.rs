@@ -349,12 +349,16 @@ impl App {
                 self.queue_message(
                     MessageKind::System,
                     format!(
-                        "session: {}\nbusy: {}\nagent_id: {}\nagent_mode: {}\ndisplay_mode: {}\nworkspace: {}\nmax_loop_count: {}\nskills: {}\nmodel_override: {}\ninput: {} chars",
+                        "session: {}\nbusy: {}\nagent_id: {}\nagent_config: {}\nagent_mode: {}\ndisplay_mode: {}\nworkspace: {}\nmax_loop_count: {}\nskills: {}\nmodel_override: {}\ninput: {} chars",
                         self.session_id,
                         self.busy,
                         self.selected_agent_id
                             .clone()
                             .unwrap_or_else(|| "(default)".to_string()),
+                        self.agent_config_path
+                            .as_ref()
+                            .map(|path| path.display().to_string())
+                            .unwrap_or_else(|| "(none)".to_string()),
                         self.agent_mode,
                         display_mode_name(self.display_mode),
                         self.workspace_label,

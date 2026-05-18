@@ -12,7 +12,7 @@ ref: tui-guide
 
 # Sage Terminal TUI 使用指南
 
-`sage-terminal` 是 Sage 当前的 Rust 终端 UI 预览版。
+`sage tui` 是 Sage 当前的 Rust 终端 UI 预览入口；底层二进制仍然叫 `sage-terminal`。
 
 本文档只说明当前的源码运行方式，不涉及打包安装。
 
@@ -82,29 +82,30 @@ cargo build --release
 目前支持这些启动形式：
 
 ```bash
-sage-terminal
-sage-terminal --display compact
-sage-terminal --display verbose
-sage-terminal --agent-id agent_demo
-sage-terminal --agent-id agent_demo --agent-mode fibre
-sage-terminal --workspace /path/to/project
-sage-terminal run "inspect this repo"
-sage-terminal --workspace /path/to/project run "inspect this repo"
-sage-terminal chat "hello"
-sage-terminal config init
-sage-terminal config init /tmp/.sage_env --force
-sage-terminal doctor
-sage-terminal doctor probe-provider
-sage-terminal provider verify
-sage-terminal provider verify model=deepseek-chat base=https://api.deepseek.com/v1
-sage-terminal sessions
-sage-terminal sessions 25
-sage-terminal sessions inspect latest
-sage-terminal sessions inspect <session_id>
-sage-terminal resume
-sage-terminal resume latest
-sage-terminal resume <session_id>
-sage-terminal --help
+sage tui
+sage tui --display compact
+sage tui --display verbose
+sage tui --agent-id agent_demo
+sage tui --agent-config coding
+sage tui --agent-id agent_demo --agent-mode fibre
+sage tui --workspace /path/to/project
+sage tui run "inspect this repo"
+sage tui --workspace /path/to/project run "inspect this repo"
+sage tui chat "hello"
+sage tui config init
+sage tui config init /tmp/.sage_env --force
+sage tui doctor
+sage tui doctor probe-provider
+sage tui provider verify
+sage tui provider verify model=deepseek-chat base=https://api.deepseek.com/v1
+sage tui sessions
+sage tui sessions 25
+sage tui sessions inspect latest
+sage tui sessions inspect <session_id>
+sage tui resume
+sage tui resume latest
+sage tui resume <session_id>
+sage tui --help
 ```
 
 如果通过 `cargo run` 传参数，记得在中间加 `--`：
@@ -160,6 +161,37 @@ TUI 现在可以覆盖运行时使用的 agent，但不会自己接管 agent 配
 
 真正的 agent 定义、工具、skills 和行为仍然来自 Sage runtime 已保存的 agent 配置。
 
+### Coding Agent 预设
+
+仓库提供了一个可导入的 coding 场景 Agent 配置：
+
+- `examples/preset_running_coding_agent_config.json`
+
+它面向仓库代码阅读、终端调试、文件编辑、代码 review 和迭代验证，行为参考 Codex CLI：读取仓库指引、保护脏工作区、做最小根因修复，并用最小相关检查验证。配置里的 `systemContext` 分成几块：
+
+- `codexCliDesignReference`：记录 Codex CLI 到 Sage TUI 的设计映射，包括 profile-like 配置、workspace-oriented 执行、工具 allow-list、search/edit/verify loop、轻量 planning、review mode 和 context management。
+- `codingAgentOperatingContract`：把启动检查、planning、编辑、命令执行、验证、review 和最终回复拆成更明确的行为规则。
+- `sageToolPlaybook`：说明如何优先使用 Sage 已有工具，比如 `grep`、`glob`、`list_dir`、`file_update`、`execute_shell_command`、`await_shell`、`read_lints`、`todo_write` 和 `search_memory`。
+
+它也说明 Codex 的 sandbox、approval、config layering、MCP approval、apply_patch 等 runtime 能力在当前 Sage JSON 预设里只能作为软约束。这个预设默认启用代码搜索、文件读写、shell、lint、todo、记忆搜索和网页抓取等工具。
+
+TUI 可以直接从这个预设启动本次会话，不需要先去 Web 或桌面端导入。内置 JSON 可以用 `coding` 短别名：
+
+```bash
+sage tui --agent-config coding --workspace /path/to/repo
+```
+
+同一个预设也可以直接用于普通 CLI：
+
+```bash
+sage chat --agent-config coding --workspace /path/to/repo
+sage run --agent-config coding --workspace /path/to/repo "inspect this repo"
+```
+
+如果要复制并自定义 JSON，仍然可以使用完整路径：`--agent-config examples/preset_running_coding_agent_config.json`。
+
+如果已经把配置保存成 Agent，也可以继续用 `--agent-id <agent_id>` 选择已保存的 Agent。
+
 ## 持久化默认值
 
 Terminal 现在会跨启动记住这些本地默认值：
@@ -174,7 +206,7 @@ Terminal 现在会跨启动记住这些本地默认值：
 启动参数仍然优先于已保存默认值。比如你已经保存了 `verbose`，但这次执行：
 
 ```bash
-sage-terminal --display compact
+sage tui --display compact
 ```
 
 则只会在当前这次启动里使用 `compact`。
@@ -189,7 +221,7 @@ Terminal transcript 现在支持两种展示模式：
 你可以在启动时指定，也可以在 TUI 内切换：
 
 ```bash
-sage-terminal --display verbose
+sage tui --display verbose
 ```
 
 ```text
@@ -220,7 +252,7 @@ sage-terminal --display verbose
 
 ## Workspace 行为
 
-默认情况下，`sage-terminal` 不会强制把当前仓库目录透传成 `--workspace`。
+默认情况下，`sage tui` 不会强制把当前仓库目录透传成 `--workspace`。
 
 这意味着：
 

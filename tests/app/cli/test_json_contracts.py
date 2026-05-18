@@ -2,9 +2,10 @@
 import asyncio
 import io
 import json
-from pathlib import Path
+import tempfile
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import patch
 
 import app.cli.main as cli_main
@@ -119,6 +120,91 @@ class TestCliJsonContracts(unittest.TestCase):
         self.assertEqual(payload["message"], "Provider verification succeeded")
         self.assertEqual(payload["provider"]["model"], "demo-chat")
         self.assertEqual(payload["sources"]["base_url"], "cli")
+
+    def test_agent_config_file_populates_cli_request(self):
+        config = {
+            "name": "Coding Agent",
+            "agentMode": "simple",
+            "memoryType": "session",
+            "maxLoopCount": 80,
+            "deepThinking": True,
+            "moreSuggest": True,
+            "forceSummary": True,
+            "availableSubAgentIds": ["agent-reviewer"],
+            "availableTools": ["grep", "file_read"],
+            "availableSkills": ["docs"],
+            "systemContext": {"role": "coding"},
+            "systemPrefix": "You are a coding agent.",
+            "llmConfig": {"model": "demo-model", "maxTokens": 2048, "temperature": 0.1},
+            "contextBudgetConfig": {"recent_turns": 4},
+            "extraMcpConfig": {"demo": {"url": "http://localhost:8000/mcp"}},
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "agent.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+
+            loaded = cli_service.load_agent_config_file(str(config_path))
+            request = cli_service.build_run_request(
+                task="inspect repo",
+                user_id="user-demo",
+                agent_config=loaded,
+            )
+
+        self.assertEqual(request.agent_name, "Coding Agent")
+        self.assertEqual(request.agent_mode, "simple")
+        self.assertEqual(request.max_loop_count, 80)
+        self.assertEqual(request.available_tools, ["grep", "file_read"])
+        self.assertEqual(request.available_skills, ["docs"])
+        self.assertEqual(request.available_sub_agent_ids, ["agent-reviewer"])
+        self.assertEqual(request.more_suggest, True)
+        self.assertEqual(request.force_summary, True)
+        self.assertEqual(request.system_context, {"role": "coding"})
+        self.assertEqual(request.system_prefix, "You are a coding agent.")
+        self.assertEqual(request.llm_model_config["model"], "demo-model")
+        self.assertEqual(request.llm_model_config["max_tokens"], 2048)
+        self.assertEqual(request.context_budget_config, {"recent_turns": 4})
+        self.assertEqual(
+            request.extra_mcp_config,
+            {"demo": {"url": "http://localhost:8000/mcp"}},
+        )
+        self.assertEqual(request.memory_type, "session")
+        self.assertTrue(
+            request.messages[0].content.startswith(
+                "<enable_deep_thinking>true</enable_deep_thinking>"
+            )
+        )
+
+    def test_agent_config_coding_alias_loads_bundled_preset(self):
+        loaded = cli_service.load_agent_config_file(" coding ")
+
+        self.assertEqual(loaded["name"], "Sage Coding Agent")
+        self.assertIn("grep", loaded["availableTools"])
+
+    def test_agent_config_file_drops_blank_llm_values(self):
+        request = cli_service.build_run_request(
+            task="inspect repo",
+            user_id="user-demo",
+            agent_config={
+                "llmConfig": {
+                    "model": "",
+                    "baseUrl": "",
+                    "apiKey": None,
+                    "temperature": 0.1,
+                },
+            },
+        )
+
+        self.assertEqual(request.llm_model_config, {"temperature": 0.1})
+
+    def test_agent_config_string_skill_is_not_split_into_characters(self):
+        request = cli_service.build_run_request(
+            task="inspect repo",
+            user_id="user-demo",
+            available_skills=["review"],
+            agent_config={"availableSkills": "docs"},
+        )
+
+        self.assertEqual(request.available_skills, ["docs", "review"])
 
 
 if __name__ == "__main__":

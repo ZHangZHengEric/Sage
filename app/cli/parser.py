@@ -73,20 +73,21 @@ def build_argument_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--session-id", dest="session_id")
     run_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
     run_parser.add_argument("--agent-id", dest="agent_id")
+    run_parser.add_argument("--agent-config", dest="agent_config", help="Load an agent config JSON path or preset name, e.g. coding")
     run_parser.add_argument("--workspace", dest="workspace", help="Use a specific local workspace directory")
     run_parser.add_argument("--skill", dest="skills", action="append", default=[], help="Enable a skill by name (repeatable)")
     run_parser.add_argument(
         "--agent-mode",
         dest="agent_mode",
         choices=["simple", "multi", "fibre"],
-        default="simple",
+        default=None,
     )
     run_parser.add_argument(
         "--max-loop-count",
         dest="max_loop_count",
         type=int,
-        default=default_max_loop_count,
-        help=f"Maximum agent loop count (default: {default_max_loop_count})",
+        default=None,
+        help=f"Maximum agent loop count (default: {default_max_loop_count}; agent config can override)",
     )
     run_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     run_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
@@ -96,20 +97,21 @@ def build_argument_parser() -> argparse.ArgumentParser:
     chat_parser.add_argument("--session-id", dest="session_id")
     chat_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
     chat_parser.add_argument("--agent-id", dest="agent_id")
+    chat_parser.add_argument("--agent-config", dest="agent_config", help="Load an agent config JSON path or preset name, e.g. coding")
     chat_parser.add_argument("--workspace", dest="workspace", help="Use a specific local workspace directory")
     chat_parser.add_argument("--skill", dest="skills", action="append", default=[], help="Enable a skill by name (repeatable)")
     chat_parser.add_argument(
         "--agent-mode",
         dest="agent_mode",
         choices=["simple", "multi", "fibre"],
-        default="simple",
+        default=None,
     )
     chat_parser.add_argument(
         "--max-loop-count",
         dest="max_loop_count",
         type=int,
-        default=default_max_loop_count,
-        help=f"Maximum agent loop count per turn (default: {default_max_loop_count})",
+        default=None,
+        help=f"Maximum agent loop count per turn (default: {default_max_loop_count}; agent config can override)",
     )
     chat_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     chat_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
@@ -119,20 +121,21 @@ def build_argument_parser() -> argparse.ArgumentParser:
     resume_parser.add_argument("session_id", help="Session id to resume")
     resume_parser.add_argument("--user-id", dest="user_id", default=default_user_id)
     resume_parser.add_argument("--agent-id", dest="agent_id")
+    resume_parser.add_argument("--agent-config", dest="agent_config", help="Load an agent config JSON path or preset name, e.g. coding")
     resume_parser.add_argument("--workspace", dest="workspace", help="Use a specific local workspace directory")
     resume_parser.add_argument("--skill", dest="skills", action="append", default=[], help="Enable a skill by name (repeatable)")
     resume_parser.add_argument(
         "--agent-mode",
         dest="agent_mode",
         choices=["simple", "multi", "fibre"],
-        default="simple",
+        default=None,
     )
     resume_parser.add_argument(
         "--max-loop-count",
         dest="max_loop_count",
         type=int,
-        default=default_max_loop_count,
-        help=f"Maximum agent loop count per turn (default: {default_max_loop_count})",
+        default=None,
+        help=f"Maximum agent loop count per turn (default: {default_max_loop_count}; agent config can override)",
     )
     resume_parser.add_argument("--json", action="store_true", help="Print raw JSON events")
     resume_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
@@ -175,6 +178,13 @@ def build_argument_parser() -> argparse.ArgumentParser:
     skills_parser.add_argument("--agent-id", dest="agent_id", help="Show the skills currently available to a specific agent")
     skills_parser.add_argument("--workspace", dest="workspace", help="Include skills from a specific workspace directory")
     skills_parser.add_argument("--json", action="store_true", help="Print skills as JSON")
+
+    tui_parser = subparsers.add_parser("tui", help="Start the Sage Terminal TUI")
+    tui_parser.add_argument(
+        "terminal_args",
+        nargs=argparse.REMAINDER,
+        help="Arguments forwarded to the terminal TUI, e.g. --workspace /path/to/repo",
+    )
 
     config_parser = subparsers.add_parser("config", help="Inspect CLI configuration")
     config_subparsers = config_parser.add_subparsers(dest="config_command", required=True)
@@ -243,4 +253,3 @@ def build_argument_parser() -> argparse.ArgumentParser:
     provider_delete_parser.add_argument("--json", action="store_true", help="Print deletion result as JSON")
     provider_delete_parser.add_argument("--verbose", action="store_true", help="Show runtime logs")
     return parser
-

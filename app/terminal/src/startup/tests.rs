@@ -48,6 +48,26 @@ fn parse_startup_action_supports_run_and_chat_prompts() {
 }
 
 #[test]
+fn parse_startup_action_supports_agent_config_option() {
+    let action = parse_startup_action(vec![
+        "--agent-config".to_string(),
+        "examples/preset_running_coding_agent_config.json".to_string(),
+        "chat".to_string(),
+        "hello".to_string(),
+    ])
+    .expect("parse");
+    assert!(matches!(
+        action,
+        StartupBehavior::Run {
+            action: Some(SubmitAction::RunTask(prompt)),
+            options,
+        } if prompt == "hello"
+            && options.agent_config.as_deref()
+                == Some("examples/preset_running_coding_agent_config.json")
+    ));
+}
+
+#[test]
 fn parse_startup_action_supports_doctor() {
     let action = parse_startup_action(vec!["doctor".to_string()]).expect("parse");
     assert!(matches!(
@@ -270,18 +290,24 @@ fn parse_startup_action_supports_display_option() {
 fn startup_options_merge_with_persisted_fallbacks() {
     let merged = super::StartupOptions {
         agent_id: None,
+        agent_config: None,
         agent_mode: Some("fibre".to_string()),
         display_mode: None,
         workspace: None,
     }
     .with_fallbacks(super::StartupOptions {
         agent_id: Some("agent_demo".to_string()),
+        agent_config: Some("/tmp/coding-agent.json".to_string()),
         agent_mode: Some("multi".to_string()),
         display_mode: Some(DisplayMode::Verbose),
         workspace: Some("/tmp/demo-workspace".to_string()),
     });
 
     assert_eq!(merged.agent_id.as_deref(), Some("agent_demo"));
+    assert_eq!(
+        merged.agent_config.as_deref(),
+        Some("/tmp/coding-agent.json")
+    );
     assert_eq!(merged.agent_mode.as_deref(), Some("fibre"));
     assert_eq!(merged.display_mode, Some(DisplayMode::Verbose));
     assert_eq!(merged.workspace.as_deref(), Some("/tmp/demo-workspace"));

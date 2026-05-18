@@ -8,13 +8,16 @@ impl App {
     pub fn apply_startup_options(
         &mut self,
         agent_id: Option<String>,
+        agent_config: Option<std::path::PathBuf>,
         agent_mode: Option<String>,
         display_mode: Option<DisplayMode>,
         workspace: Option<std::path::PathBuf>,
     ) {
         self.selected_agent_id = agent_id.filter(|value| !value.trim().is_empty());
+        self.agent_config_path = agent_config;
         if let Some(mode) = agent_mode {
             self.agent_mode = mode;
+            self.agent_mode_override = true;
         }
         if let Some(display_mode) = display_mode {
             self.display_mode = display_mode;
@@ -51,6 +54,7 @@ impl App {
 
     pub fn set_agent_mode_selection(&mut self, mode: String) {
         self.agent_mode = mode.clone();
+        self.agent_mode_override = true;
         self.backend_restart_requested = true;
         persist_app_preferences_notice(self);
         self.queue_message(MessageKind::Tool, format!("agent mode set: {mode}"));
@@ -61,10 +65,14 @@ impl App {
         self.queue_message(
             MessageKind::System,
             format!(
-                "agent_id: {}\nagent_mode: {}\nworkspace: {}",
+                "agent_id: {}\nagent_config: {}\nagent_mode: {}\nworkspace: {}",
                 self.selected_agent_id
                     .clone()
                     .unwrap_or_else(|| "(default)".to_string()),
+                self.agent_config_path
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "(none)".to_string()),
                 self.agent_mode,
                 self.workspace_label
             ),

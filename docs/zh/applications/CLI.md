@@ -186,12 +186,14 @@ sage run "用一句话介绍你自己。"
 sage run --stats "用一句话介绍你自己。"
 sage run --json --stats "用一句话介绍你自己。"
 sage run --workspace /path/to/project --stats "简单分析一下这个仓库。"
+sage run --agent-config coding --workspace /path/to/project "检查一下这个仓库。"
 ```
 
 常用参数：
 
 - `--user-id`
 - `--agent-id`
+- `--agent-config`
 - `--agent-mode`
 - `--workspace`
 - `--skill`（可重复）
@@ -214,6 +216,7 @@ sage run --workspace /path/to/project --stats "简单分析一下这个仓库。
 sage chat
 sage chat --stats
 sage chat --workspace /path/to/project
+sage chat --agent-config coding --workspace /path/to/project
 sage chat --skill my_skill
 ```
 
@@ -237,6 +240,23 @@ sage resume --workspace /path/to/project <session_id>
 ```
 
 如果当前数据库里有该会话的元信息，CLI 会在进入会话前先打印一段简短摘要。
+
+### Coding Agent 预设
+
+`--agent-config` 可以接收 JSON 文件路径，也可以接收内置预设名。源码仓库里提供了一个 Codex 风格的 coding 预设：`examples/preset_running_coding_agent_config.json`，并可通过短别名 `coding` 使用：
+
+```bash
+sage chat --agent-config coding --workspace /path/to/repo
+sage run --agent-config coding --workspace /path/to/repo "review the latest changes"
+```
+
+如果要复制并自定义这个预设，可以传完整 JSON 路径：
+
+```bash
+sage chat --agent-config examples/preset_running_coding_agent_config.json --workspace /path/to/repo
+```
+
+当命令行参数和 config 同时设置同一个行为时，命令行参数优先，例如 `--agent-mode` 和 `--max-loop-count`。
 
 ### `sage sessions`
 

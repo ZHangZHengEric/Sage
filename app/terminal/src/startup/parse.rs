@@ -124,6 +124,13 @@ fn parse_global_options(args: &[String]) -> Result<(StartupOptions, Vec<String>)
                 options.agent_id = Some(value.clone());
                 idx += 2;
             }
+            "--agent-config" => {
+                let value = args
+                    .get(idx + 1)
+                    .ok_or_else(|| anyhow!("--agent-config requires a value"))?;
+                options.agent_config = Some(value.clone());
+                idx += 2;
+            }
             "--agent-mode" => {
                 let value = args
                     .get(idx + 1)

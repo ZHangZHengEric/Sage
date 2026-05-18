@@ -32,6 +32,7 @@ pub(crate) fn load_startup_preferences() -> Result<StartupOptions> {
             .agent_id
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty()),
+        agent_config: None,
         agent_mode: preferences
             .agent_mode
             .as_deref()
@@ -161,6 +162,7 @@ mod tests {
         let mut restored = App::new();
         restored.apply_startup_options(
             options.agent_id,
+            options.agent_config.map(PathBuf::from),
             options.agent_mode,
             options.display_mode,
             options.workspace.map(PathBuf::from),
