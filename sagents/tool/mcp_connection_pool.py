@@ -460,12 +460,58 @@ class McpConnectionPool:
         self._entries: Dict[str, McpServerPoolEntry] = {}
         self._lock = asyncio.Lock()
 
+    async def _list_streamable_http_tools_once(
+        self,
+        server_name: str,
+        server_params: StreamableHttpServerParameters,
+    ) -> List[Tool]:
+        connection = McpPooledConnection(server_name, server_params)
+        try:
+            await connection.open()
+            assert connection.session is not None
+            response = await connection.session.list_tools()
+            return response.tools
+        finally:
+            await connection.close()
+
+    async def _call_streamable_http_tool_once(
+        self,
+        server_name: str,
+        server_params: StreamableHttpServerParameters,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        connection = McpPooledConnection(server_name, server_params)
+        try:
+            await connection.open()
+            call_timeout_seconds = _get_config_float(
+                config or {},
+                ["call_timeout_seconds"],
+                _env_float("SAGE_MCP_CALL_TIMEOUT_SECONDS", 1800.0, minimum=0.0),
+                minimum=0.0,
+            )
+            assert connection.session is not None
+            call = connection.session.call_tool(tool_name, arguments)
+            if call_timeout_seconds > 0:
+                return await asyncio.wait_for(call, timeout=call_timeout_seconds)
+            return await call
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"MCP tool call timed out after {call_timeout_seconds:g}s: "
+                f"server={server_name}, tool={tool_name}"
+            ) from exc
+        finally:
+            await connection.close()
+
     def get_cached_tools(
         self,
         server_name: str,
         server_params: ServerParams,
         config: Optional[Dict[str, Any]] = None,
     ) -> Optional[List[Tool]]:
+        if isinstance(server_params, StreamableHttpServerParameters):
+            return None
         key = server_name.strip()
         entry = self._entries.get(key)
         fingerprint = config_fingerprint(key, server_params, config)
@@ -481,6 +527,29 @@ class McpConnectionPool:
         force: bool = False,
     ) -> List[Tool]:
         key = server_name.strip()
+        if isinstance(server_params, StreamableHttpServerParameters):
+            # MCP streamable_http clients keep AnyIO CancelScope state inside the
+            # transport context. That context must be exited by the same task that
+            # entered it, so these connections are intentionally one-shot rather
+            # than kept in the global pool.
+            retry_enabled = _env_bool(
+                "SAGE_MCP_LIST_TOOLS_RETRY_ON_CONNECTION_ERROR", True
+            )
+            attempts = 2 if retry_enabled else 1
+            for attempt in range(attempts):
+                try:
+                    return await self._list_streamable_http_tools_once(
+                        key, server_params
+                    )
+                except Exception as exc:
+                    if _is_connection_error(exc) and attempt + 1 < attempts:
+                        logger.warning(
+                            f"MCP streamable_http list_tools failed, retrying once: "
+                            f"server={key}, error={exc}"
+                        )
+                        continue
+                    raise
+
         fingerprint = config_fingerprint(key, server_params, config)
         current = self._entries.get(key)
 
@@ -522,6 +591,29 @@ class McpConnectionPool:
         arguments: Dict[str, Any],
         config: Optional[Dict[str, Any]] = None,
     ) -> Any:
+        if isinstance(server_params, StreamableHttpServerParameters):
+            key = server_name.strip()
+            retry_enabled = _env_bool("SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR", True)
+            attempts = 2 if retry_enabled else 1
+            for attempt in range(attempts):
+                try:
+                    return await self._call_streamable_http_tool_once(
+                        key,
+                        server_params,
+                        tool_name,
+                        arguments,
+                        config=config,
+                    )
+                except TimeoutError:
+                    raise
+                except Exception as exc:
+                    if _is_connection_error(exc) and attempt + 1 < attempts:
+                        logger.warning(
+                            f"MCP streamable_http call failed, retrying once: "
+                            f"server={key}, tool={tool_name}, error={exc}"
+                        )
+                        continue
+                    raise
         entry = await self._get_or_create_entry(server_name, server_params, config)
         return await entry.call_tool(tool_name, arguments)
 
