@@ -64,6 +64,30 @@ def _get_display_input_schema(tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec
     }
 
 
+def _apply_localized_schema_descriptions(display_schema: Dict[str, Any], localized_schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Overlay localized descriptions without changing the display schema shape."""
+    if not isinstance(display_schema, dict) or not isinstance(localized_schema, dict):
+        return display_schema
+
+    if isinstance(localized_schema.get("description"), str):
+        display_schema["description"] = localized_schema["description"]
+
+    display_properties = display_schema.get("properties")
+    localized_properties = localized_schema.get("properties")
+    if isinstance(display_properties, dict) and isinstance(localized_properties, dict):
+        for name, display_property in display_properties.items():
+            localized_property = localized_properties.get(name)
+            if isinstance(display_property, dict) and isinstance(localized_property, dict):
+                _apply_localized_schema_descriptions(display_property, localized_property)
+
+    display_items = display_schema.get("items")
+    localized_items = localized_schema.get("items")
+    if isinstance(display_items, dict) and isinstance(localized_items, dict):
+        _apply_localized_schema_descriptions(display_items, localized_items)
+
+    return display_schema
+
+
 def _truncate_result(result: str, max_tokens: int = MAX_TOOL_RESULT_TOKENS) -> str:
     """截断工具返回结果，限制在最大 token 数内
     
@@ -884,6 +908,9 @@ class ToolManager:
             spec = convert_spec_to_openai_format(tool, lang=lang, fallback_chain=fallback_chain)
             fn = spec.get("function", {})
             input_schema = _get_display_input_schema(tool)
+            localized_parameters = fn.get("parameters", {})
+            if isinstance(localized_parameters, dict):
+                _apply_localized_schema_descriptions(input_schema, localized_parameters)
             params = input_schema.get("properties", {})
             tools_list.append({
                 "name": fn.get("name", getattr(tool, "name", "")),
@@ -942,6 +969,9 @@ class ToolManager:
             spec = convert_spec_to_openai_format(tool, lang=lang, fallback_chain=fallback_chain)
             fn = spec.get("function", {})
             input_schema = _get_display_input_schema(tool)
+            localized_parameters = fn.get("parameters", {})
+            if isinstance(localized_parameters, dict):
+                _apply_localized_schema_descriptions(input_schema, localized_parameters)
             params = input_schema.get("properties", {})
 
             tools_with_type.append({

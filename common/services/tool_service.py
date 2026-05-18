@@ -155,6 +155,7 @@ async def list_tools(
     user_id: str = "",
     role: str = "user",
     tool_type: Optional[str] = None,
+    language: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     try:
         await ensure_default_anytool_server()
@@ -164,7 +165,10 @@ async def list_tools(
     if not tool_manager:
         return []
 
-    available_tools = tool_manager.list_tools_with_type()
+    available_tools = tool_manager.list_tools_with_type(
+        lang=language,
+        fallback_chain=["en"] if language != "en" else None,
+    )
     # 隐藏工具：
     # - turn_status：协议性内置工具，由 SimpleAgent 强制注入，不让用户单独勾选；
     # - await_shell / kill_shell：与 execute_shell_command 共享后台任务注册表，作为捆绑工具
