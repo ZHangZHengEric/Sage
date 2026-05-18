@@ -517,7 +517,7 @@ const getToolTypeBadgeVariant = (type) => {
   }
 }
 
-const getSchemaVariant = (schema) => {
+function getSchemaVariant(schema) {
   if (!schema || typeof schema !== 'object') {
     return {}
   }
@@ -530,7 +530,7 @@ const getSchemaVariant = (schema) => {
   return variants.find((item) => item && typeof item === 'object' && item.type !== 'null') || schema
 }
 
-const normalizeSchema = (schema) => {
+function normalizeSchema(schema) {
   const variant = getSchemaVariant(schema)
   return {
     ...(variant && typeof variant === 'object' ? variant : {}),
@@ -540,7 +540,7 @@ const normalizeSchema = (schema) => {
   }
 }
 
-const getSchemaType = (schema) => {
+function getSchemaType(schema) {
   const variant = getSchemaVariant(schema)
   if (Array.isArray(variant.type)) {
     return variant.type.filter((item) => item !== 'null').join(' | ') || 'unknown'
@@ -548,7 +548,7 @@ const getSchemaType = (schema) => {
   return variant.type || 'unknown'
 }
 
-const formatParameters = (parameters, requiredNames = []) => {
+function formatParameters(parameters, requiredNames = []) {
   if (!parameters || typeof parameters !== 'object') {
     return []
   }
