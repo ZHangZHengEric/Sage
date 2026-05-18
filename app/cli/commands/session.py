@@ -5,7 +5,9 @@ from typing import Any, Callable, Dict, Optional
 
 
 async def build_request(args: argparse.Namespace, task: str):
-    from app.cli.service import build_run_request, validate_requested_skills
+    from app.cli.service import build_run_request, load_agent_config_file, validate_requested_skills
+
+    agent_config = load_agent_config_file(getattr(args, "agent_config", None))
 
     skills = await validate_requested_skills(
         requested_skills=args.skills,
@@ -22,6 +24,7 @@ async def build_request(args: argparse.Namespace, task: str):
         agent_mode=args.agent_mode,
         available_skills=skills or None,
         max_loop_count=args.max_loop_count,
+        agent_config=agent_config,
     )
 
 

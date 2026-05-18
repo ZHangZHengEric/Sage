@@ -26,8 +26,9 @@ struct BackendConfig {
     session_id: String,
     user_id: String,
     agent_id: Option<String>,
-    agent_mode: String,
-    max_loop_count: u32,
+    agent_config: Option<PathBuf>,
+    agent_mode: Option<String>,
+    max_loop_count: Option<u32>,
     workspace: Option<PathBuf>,
     skills: Vec<String>,
     model_override: Option<String>,
@@ -65,18 +66,26 @@ impl BackendHandle {
             .arg(&request.session_id)
             .arg("--user-id")
             .arg(&request.user_id)
-            .arg("--max-loop-count")
-            .arg(request.max_loop_count.to_string())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(max_loop_count) = request.max_loop_count {
+            command
+                .arg("--max-loop-count")
+                .arg(max_loop_count.to_string());
+        }
         if let Some(workspace) = &workspace {
             command.arg("--workspace").arg(workspace);
         }
         if let Some(agent_id) = &request.agent_id {
             command.arg("--agent-id").arg(agent_id);
         }
-        command.arg("--agent-mode").arg(&request.agent_mode);
+        if let Some(agent_config) = &request.agent_config {
+            command.arg("--agent-config").arg(agent_config);
+        }
+        if let Some(agent_mode) = &request.agent_mode {
+            command.arg("--agent-mode").arg(agent_mode);
+        }
         for skill in &request.skills {
             command.arg("--skill").arg(skill);
         }
@@ -187,6 +196,7 @@ impl BackendHandle {
                 session_id: request.session_id.clone(),
                 user_id: request.user_id.clone(),
                 agent_id: request.agent_id.clone(),
+                agent_config: request.agent_config.clone(),
                 agent_mode: request.agent_mode.clone(),
                 max_loop_count: request.max_loop_count,
                 workspace,
@@ -230,6 +240,7 @@ impl BackendHandle {
         self.config.session_id == request.session_id
             && self.config.user_id == request.user_id
             && self.config.agent_id == request.agent_id
+            && self.config.agent_config == request.agent_config
             && self.config.agent_mode == request.agent_mode
             && self.config.max_loop_count == request.max_loop_count
             && self.config.workspace == request.workspace

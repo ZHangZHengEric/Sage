@@ -6,6 +6,7 @@ import pkgutil
 import sys
 from contextlib import asynccontextmanager
 from importlib.util import find_spec
+from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from dotenv import load_dotenv
@@ -28,6 +29,12 @@ class CLIError(RuntimeError):
         self.next_steps = list(next_steps or [])
         self.debug_detail = debug_detail
         self.exit_code = exit_code
+
+
+AGENT_CONFIG_PRESETS = {
+    "coding": "examples/preset_running_coding_agent_config.json",
+    "coding-agent": "examples/preset_running_coding_agent_config.json",
+}
 
 
 def _load_cli_env_defaults() -> Dict[str, str]:
@@ -56,6 +63,113 @@ def get_default_cli_max_loop_count() -> int:
     except ValueError:
         return 50
     return value if value > 0 else 50
+
+
+def _agent_config_value(agent_config: Dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in agent_config:
+            return agent_config.get(key)
+    return None
+
+
+def _compact_agent_config_dict(value: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(value, dict):
+        return None
+    compacted = {
+        key: item
+        for key, item in value.items()
+        if item is not None and not (isinstance(item, str) and not item.strip())
+    }
+    return compacted or None
+
+
+def _agent_config_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if isinstance(value, list):
+        return [item for item in value if item]
+    return []
+
+
+def _normalize_llm_config(value: Any) -> Optional[Dict[str, Any]]:
+    config = _compact_agent_config_dict(value)
+    if not config:
+        return None
+
+    key_aliases = {
+        "apiKey": "api_key",
+        "baseUrl": "base_url",
+        "baseURL": "base_url",
+        "maxTokens": "max_tokens",
+        "maxModelLen": "max_model_len",
+        "topP": "top_p",
+        "presencePenalty": "presence_penalty",
+        "supportsMultimodal": "supports_multimodal",
+        "supportsStructuredOutput": "supports_structured_output",
+        "fastApiKey": "fast_api_key",
+        "fastBaseUrl": "fast_base_url",
+        "fastBaseURL": "fast_base_url",
+        "fastModelName": "fast_model_name",
+    }
+    normalized: Dict[str, Any] = {}
+    for key, item in config.items():
+        normalized[key_aliases.get(key, key)] = item
+    return normalized or None
+
+
+def resolve_agent_config_path(path: Optional[str]) -> Optional[str]:
+    if not path:
+        return None
+
+    normalized_path = path.strip()
+    preset_path = AGENT_CONFIG_PRESETS.get(normalized_path)
+    if preset_path:
+        return str(Path(__file__).resolve().parents[2] / preset_path)
+    return os.path.abspath(os.path.expanduser(normalized_path))
+
+
+def load_agent_config_file(path: Optional[str]) -> Dict[str, Any]:
+    if not path:
+        return {}
+
+    normalized_path = path.strip()
+    config_path = resolve_agent_config_path(normalized_path) or ""
+    if not os.path.exists(config_path):
+        preset_hint = ""
+        if normalized_path in AGENT_CONFIG_PRESETS:
+            preset_hint = " The built-in preset file is missing from this checkout."
+        raise CLIError(
+            f"Agent config file does not exist: {config_path}",
+            next_steps=[
+                "Pass an existing JSON file to `--agent-config`.",
+                "Use `--agent-config coding` for the bundled coding preset in a source checkout.",
+            ],
+            debug_detail=preset_hint.strip() or None,
+        )
+    if not os.path.isfile(config_path):
+        raise CLIError(
+            f"Agent config path is not a file: {config_path}",
+            next_steps=["Pass a JSON file path to `--agent-config`."],
+        )
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise CLIError(
+            f"Agent config is not valid JSON: {config_path}",
+            next_steps=["Fix the JSON syntax, then run the command again."],
+            debug_detail=str(exc),
+        ) from exc
+
+    if not isinstance(data, dict):
+        raise CLIError(
+            f"Agent config must be a JSON object: {config_path}",
+            next_steps=["Use a Sage agent config JSON object."],
+        )
+    return data
 
 
 def _dependency_status() -> Dict[str, bool]:
@@ -226,15 +340,101 @@ def build_run_request(
     agent_mode: Optional[str] = None,
     available_skills: Optional[List[str]] = None,
     max_loop_count: Optional[int] = None,
+    agent_config: Optional[Dict[str, Any]] = None,
 ) -> StreamRequest:
+    agent_config = agent_config or {}
+    config_loop_count = _agent_config_value(
+        agent_config,
+        "maxLoopCount",
+        "max_loop_count",
+    )
+    effective_max_loop_count = max_loop_count
+    if effective_max_loop_count is None:
+        effective_max_loop_count = config_loop_count
+    if effective_max_loop_count is None:
+        effective_max_loop_count = get_default_cli_max_loop_count()
+    try:
+        effective_max_loop_count = int(effective_max_loop_count)
+    except (TypeError, ValueError) as exc:
+        raise CLIError(
+            "Invalid max loop count",
+            next_steps=[
+                "Use a positive integer in `--max-loop-count` or agent config `maxLoopCount`."
+            ],
+            debug_detail=f"max_loop_count={effective_max_loop_count!r}",
+        ) from exc
+    if effective_max_loop_count < 1:
+        raise CLIError(
+            "Invalid max loop count",
+            next_steps=[
+                "Use a positive integer in `--max-loop-count` or agent config `maxLoopCount`."
+            ],
+            debug_detail=f"max_loop_count={effective_max_loop_count!r}",
+        )
+
+    config_skills = _agent_config_list(
+        _agent_config_value(agent_config, "availableSkills", "available_skills")
+    )
+    merged_skills = []
+    for skill in config_skills + list(available_skills or []):
+        if skill and skill not in merged_skills:
+            merged_skills.append(skill)
+
+    config_deep_thinking = _agent_config_value(
+        agent_config,
+        "deepThinking",
+        "deep_thinking",
+    )
+    if config_deep_thinking is True and not task.lstrip().startswith(
+        "<enable_deep_thinking>"
+    ):
+        task = "<enable_deep_thinking>true</enable_deep_thinking>\n" + task
+
     return StreamRequest(
         messages=[Message(role="user", content=task)],
         session_id=session_id,
         user_id=user_id or get_default_cli_user_id(),
         agent_id=agent_id,
-        agent_mode=agent_mode,
-        available_skills=available_skills,
-        max_loop_count=max_loop_count,
+        agent_name=_agent_config_value(agent_config, "name", "agent_name"),
+        agent_mode=(
+            agent_mode
+            or _agent_config_value(agent_config, "agentMode", "agent_mode")
+            or "simple"
+        ),
+        system_context=_agent_config_value(agent_config, "systemContext", "system_context"),
+        available_workflows=_agent_config_value(
+            agent_config,
+            "availableWorkflows",
+            "available_workflows",
+        ),
+        llm_model_config=_normalize_llm_config(
+            _agent_config_value(agent_config, "llmConfig", "llm_model_config")
+        ),
+        system_prefix=_agent_config_value(agent_config, "systemPrefix", "system_prefix"),
+        available_tools=_agent_config_value(agent_config, "availableTools", "available_tools"),
+        available_skills=merged_skills or None,
+        available_knowledge_bases=_agent_config_value(
+            agent_config,
+            "availableKnowledgeBases",
+            "available_knowledge_bases",
+        ),
+        available_sub_agent_ids=_agent_config_value(
+            agent_config,
+            "availableSubAgentIds",
+            "available_sub_agent_ids",
+        ),
+        more_suggest=_agent_config_value(agent_config, "moreSuggest", "more_suggest"),
+        force_summary=_agent_config_value(agent_config, "forceSummary", "force_summary") or False,
+        multi_agent=_agent_config_value(agent_config, "multiAgent", "multi_agent"),
+        custom_sub_agents=_agent_config_value(agent_config, "customSubAgents", "custom_sub_agents"),
+        context_budget_config=_agent_config_value(
+            agent_config,
+            "contextBudgetConfig",
+            "context_budget_config",
+        ),
+        extra_mcp_config=_agent_config_value(agent_config, "extraMcpConfig", "extra_mcp_config"),
+        memory_type=_agent_config_value(agent_config, "memoryType", "memory_type") or "session",
+        max_loop_count=effective_max_loop_count,
     )
 
 
@@ -243,7 +443,7 @@ def validate_cli_request_options(
     workspace: Optional[str] = None,
     max_loop_count: Optional[int] = None,
 ) -> Optional[str]:
-    if max_loop_count is None or int(max_loop_count) < 1:
+    if max_loop_count is not None and int(max_loop_count) < 1:
         raise CLIError(
             "Invalid max loop count",
             next_steps=["Pass `--max-loop-count` with a positive integer value."],

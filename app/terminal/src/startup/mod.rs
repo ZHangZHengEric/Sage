@@ -8,6 +8,7 @@ mod tests;
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct StartupOptions {
     pub(crate) agent_id: Option<String>,
+    pub(crate) agent_config: Option<String>,
     pub(crate) agent_mode: Option<String>,
     pub(crate) display_mode: Option<DisplayMode>,
     pub(crate) workspace: Option<String>,
@@ -17,6 +18,7 @@ impl StartupOptions {
     pub(crate) fn with_fallbacks(self, defaults: StartupOptions) -> Self {
         Self {
             agent_id: self.agent_id.or(defaults.agent_id),
+            agent_config: self.agent_config.or(defaults.agent_config),
             agent_mode: self.agent_mode.or(defaults.agent_mode),
             display_mode: self.display_mode.or(defaults.display_mode),
             workspace: self.workspace.or(defaults.workspace),

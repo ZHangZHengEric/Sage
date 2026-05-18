@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import sys
 from typing import Iterable, Optional
 
 from app.cli.commands.management import (
@@ -11,6 +12,7 @@ from app.cli.commands.management import (
     sessions_command as _sessions_command,
     skills_command as _skills_command,
 )
+from app.cli.commands.tui import tui_command as _tui_command
 from app.cli.commands.session import (
     build_request as _build_request_impl,
     chat_command as _chat_command_impl,
@@ -116,6 +118,8 @@ async def _main_async(args: argparse.Namespace) -> int:
             return _config_init_command(args)
         if args.command == "provider":
             return await _provider_command(args)
+        if args.command == "tui":
+            return _tui_command(args)
         raise ValueError(f"Unsupported command: {args.command}")
     except Exception as exc:
         return _emit_cli_error(args, _build_cli_error_payload(exc, verbose=getattr(args, "verbose", False)))
@@ -123,7 +127,11 @@ async def _main_async(args: argparse.Namespace) -> int:
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
     parser = build_argument_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    raw_args = list(argv) if argv is not None else sys.argv[1:]
+    if raw_args and raw_args[0] == "tui":
+        args = argparse.Namespace(command="tui", terminal_args=raw_args[1:])
+    else:
+        args = parser.parse_args(raw_args)
     return asyncio.run(_main_async(args))
 
 

@@ -189,12 +189,14 @@ sage run "Say hello briefly."
 sage run --stats "Say hello briefly."
 sage run --json --stats "Say hello briefly."
 sage run --workspace /path/to/project --stats "Analyze this repository briefly."
+sage run --agent-config coding --workspace /path/to/project "Inspect this repository."
 ```
 
 Useful options:
 
 - `--user-id`
 - `--agent-id`
+- `--agent-config`
 - `--agent-mode`
 - `--workspace`
 - `--skill` (repeatable)
@@ -217,6 +219,7 @@ Examples:
 sage chat
 sage chat --stats
 sage chat --workspace /path/to/project
+sage chat --agent-config coding --workspace /path/to/project
 sage chat --skill my_skill
 ```
 
@@ -240,6 +243,23 @@ sage resume --workspace /path/to/project <session_id>
 ```
 
 When session metadata is available, the CLI prints a short summary before entering the session.
+
+### Coding Agent Preset
+
+`--agent-config` accepts either a JSON file path or a built-in preset name. The source checkout includes a Codex-style coding preset at `examples/preset_running_coding_agent_config.json`, available through the short alias `coding`:
+
+```bash
+sage chat --agent-config coding --workspace /path/to/repo
+sage run --agent-config coding --workspace /path/to/repo "review the latest changes"
+```
+
+Use the full JSON path when you want to copy and customize the preset:
+
+```bash
+sage chat --agent-config examples/preset_running_coding_agent_config.json --workspace /path/to/repo
+```
+
+Explicit CLI flags still win over the config where both are provided, for example `--agent-mode` and `--max-loop-count`.
 
 ### `sage sessions`
 

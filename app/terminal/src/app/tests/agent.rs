@@ -42,6 +42,7 @@ fn startup_options_apply_without_emitting_messages() {
 
     app.apply_startup_options(
         Some("agent_demo".to_string()),
+        None,
         Some("multi".to_string()),
         Some(DisplayMode::Verbose),
         None,
@@ -59,12 +60,17 @@ fn startup_options_apply_explicit_workspace_override() {
 
     app.apply_startup_options(
         Some("agent_demo".to_string()),
+        Some(PathBuf::from("/tmp/coding-agent.json")),
         Some("multi".to_string()),
         Some(DisplayMode::Compact),
         Some(PathBuf::from("/tmp/demo-workspace")),
     );
 
     assert_eq!(app.selected_agent_id.as_deref(), Some("agent_demo"));
+    assert_eq!(
+        app.agent_config_path.as_deref(),
+        Some(PathBuf::from("/tmp/coding-agent.json").as_path())
+    );
     assert_eq!(app.agent_mode, "multi");
     assert_eq!(app.display_mode, DisplayMode::Compact);
     assert_eq!(
