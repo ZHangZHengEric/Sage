@@ -1098,11 +1098,19 @@ def get_desktop_agent_workspace_path(agent_id: str) -> Path:
     )
 
 
-async def get_server_file_workspace(agent_id: str, user_id: str) -> Dict[str, Any]:
+async def get_server_file_workspace(
+    agent_id: str,
+    user_id: str,
+    *,
+    path: Optional[str] = None,
+    max_depth: Optional[int] = None,
+) -> Dict[str, Any]:
     return await asyncio.to_thread(
         list_workspace_files,
         get_server_agent_workspace_path(agent_id, user_id),
         agent_id,
+        path,
+        max_depth,
     )
 
 
@@ -1136,11 +1144,18 @@ async def delete_server_agent_workspace(agent_id: str, user_id: str) -> Dict[str
     )
 
 
-async def get_desktop_file_workspace(agent_id: str) -> Dict[str, Any]:
+async def get_desktop_file_workspace(
+    agent_id: str,
+    *,
+    path: Optional[str] = None,
+    max_depth: Optional[int] = None,
+) -> Dict[str, Any]:
     return await asyncio.to_thread(
         list_workspace_files,
         get_desktop_agent_workspace_path(agent_id),
         agent_id,
+        path,
+        max_depth,
     )
 
 
@@ -1263,23 +1278,101 @@ def resolve_workspace_file_path(workspace_path: str | Path, file_path: str) -> s
     return full_file_abs
 
 
-def list_workspace_files(workspace_path: str | Path, agent_id: str) -> Dict[str, Any]:
+def _resolve_workspace_listing_path(
+    workspace_path: str | Path,
+    path: Optional[str],
+) -> Tuple[str, str]:
     workspace_str = os.fspath(workspace_path)
+    workspace_abs = os.path.normcase(os.path.abspath(workspace_str))
+    normalized_path = os.fspath(path or "").strip()
+
+    if os.path.isabs(normalized_path):
+        raise SageHTTPException(
+            detail="访问被拒绝：文件路径超出工作空间范围",
+            error_detail="Access denied: file path outside workspace",
+        )
+
+    listing_path = os.path.normpath(normalized_path) if normalized_path else ""
+    if listing_path == ".":
+        listing_path = ""
+
+    full_path = os.path.join(workspace_str, listing_path) if listing_path else workspace_str
+    full_path_abs = os.path.normcase(os.path.abspath(full_path))
+
+    try:
+        in_workspace = os.path.commonpath([workspace_abs, full_path_abs]) == workspace_abs
+    except ValueError:
+        in_workspace = False
+
+    if not in_workspace:
+        raise SageHTTPException(
+            detail="访问被拒绝：文件路径超出工作空间范围",
+            error_detail="Access denied: file path outside workspace",
+        )
+
+    return full_path_abs, listing_path
+
+
+def list_workspace_files(
+    workspace_path: str | Path,
+    agent_id: str,
+    path: Optional[str] = None,
+    max_depth: Optional[int] = None,
+) -> Dict[str, Any]:
+    workspace_str = os.fspath(workspace_path)
+    if max_depth is not None and max_depth < 0:
+        raise SageHTTPException(
+            detail="max_depth 必须大于等于 0",
+            error_detail="max_depth must be greater than or equal to 0",
+        )
+
+    listing_root = ""
+    listing_path = os.fspath(path or "").strip()
+    if workspace_str:
+        listing_root, listing_path = _resolve_workspace_listing_path(workspace_str, path)
+
     if not workspace_str or not os.path.exists(workspace_str):
         return {
             "agent_id": agent_id,
             "files": [],
+            "workspace_path": workspace_str,
+            "path": listing_path,
+            "max_depth": max_depth,
+            "truncated_by_depth": False,
             "message": "工作空间为空",
         }
 
+    if not os.path.exists(listing_root):
+        return {
+            "agent_id": agent_id,
+            "files": [],
+            "workspace_path": workspace_str,
+            "path": listing_path,
+            "max_depth": max_depth,
+            "truncated_by_depth": False,
+            "message": "工作空间为空",
+        }
+
+    if not os.path.isdir(listing_root):
+        raise SageHTTPException(
+            detail=f"路径不是目录: {listing_path or '.'}",
+            error_detail=f"Path is not a directory: {listing_path or '.'}",
+        )
+
+    workspace_abs = os.path.abspath(workspace_str)
     files: List[Dict[str, Any]] = []
-    for root, dirs, filenames in os.walk(workspace_str):
+    truncated_by_depth = False
+    for root, dirs, filenames in os.walk(listing_root):
         dirs[:] = [d for d in dirs if not d.startswith(".")]
         filenames = [f for f in filenames if not f.startswith(".")]
+        current_relative = os.path.relpath(root, listing_root)
+        current_depth = (
+            0 if current_relative == "." else len(Path(current_relative).parts)
+        )
 
         for filename in filenames:
             file_path = os.path.join(root, filename)
-            relative_path = os.path.relpath(file_path, workspace_str)
+            relative_path = os.path.relpath(file_path, workspace_abs)
             file_stat = os.stat(file_path)
             files.append(
                 {
@@ -1293,7 +1386,7 @@ def list_workspace_files(workspace_path: str | Path, agent_id: str) -> Dict[str,
 
         for dirname in dirs:
             dir_path = os.path.join(root, dirname)
-            relative_path = os.path.relpath(dir_path, workspace_str)
+            relative_path = os.path.relpath(dir_path, workspace_abs)
             files.append(
                 {
                     "name": dirname,
@@ -1304,10 +1397,19 @@ def list_workspace_files(workspace_path: str | Path, agent_id: str) -> Dict[str,
                 }
             )
 
+        if max_depth is not None and current_depth >= max_depth:
+            if dirs:
+                truncated_by_depth = True
+            dirs[:] = []
+
     logger.info(f"获取工作空间文件数量：{len(files)}")
     return {
         "agent_id": agent_id,
         "files": files,
+        "workspace_path": workspace_str,
+        "path": listing_path,
+        "max_depth": max_depth,
+        "truncated_by_depth": truncated_by_depth,
         "message": "获取文件列表成功",
     }
 

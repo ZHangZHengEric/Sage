@@ -2,7 +2,7 @@
 会话管理接口路由模块
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
@@ -24,7 +24,7 @@ class EditLastUserMessageRequest(BaseModel):
 
 
 class InjectUserMessageRequest(BaseModel):
-    content: str
+    content: str | list[dict[str, Any]]
     guidance_id: Optional[str] = None
     metadata: Optional[dict] = None
 
@@ -53,7 +53,7 @@ async def inject_user_message(session_id: str, request: Request, body: InjectUse
 
 
 class UpdateInjectUserMessageRequest(BaseModel):
-    content: str
+    content: str | list[dict[str, Any]]
 
 
 @conversation_router.get("/api/sessions/{session_id}/inject-user-message")
