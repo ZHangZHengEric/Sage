@@ -154,3 +154,41 @@ def test_stream_manager_stop_session_closes_background_generator():
     asyncio.run(_run())
 
     assert closed is True
+
+
+def test_stream_manager_stop_session_times_out_when_background_task_hangs(monkeypatch):
+    """回归 commit 8dfad2fb：stop_session 给 await task 加了 5s 超时封顶。
+
+    构造一个 generator，其 finally 里 await 一个永远不返回的 future，模拟
+    aclose / 锁等待卡死场景；原实现的无超时 await task 会在这里挂住整条
+    中断链路，新实现应在短时间内放弃等待并继续后续清理。
+    """
+    manager = StreamManager.get_instance()
+    # 把 5s 阈值压到 100ms，便于在 pytest 全局 2s timeout 内验证。
+    monkeypatch.setattr(manager, "_STOP_SESSION_TIMEOUT", 0.1)
+
+    async def _hanging_generator():
+        try:
+            yield '{"type":"assistant_text"}\n'
+            await asyncio.sleep(10)
+        finally:
+            # 模拟 generator 的清理逻辑被某个永远不返回的 await 挡住，
+            # 让 task 在被 cancel 之后依然无法终止。
+            await asyncio.Future()
+
+    async def _run() -> float:
+        session_id = "session-stop-hang"
+        lock = asyncio.Lock()
+        await lock.acquire()
+        await manager.start_session(session_id, "query", _hanging_generator(), lock)
+        await asyncio.sleep(0.01)
+
+        start = asyncio.get_event_loop().time()
+        await manager.stop_session(session_id)
+        elapsed = asyncio.get_event_loop().time() - start
+        return elapsed
+
+    elapsed = asyncio.run(_run())
+
+    # 应在 timeout (100ms) 附近返回，给充分余量避免 CI 抖动误报。
+    assert elapsed < 1.0, f"stop_session 在背景 task 卡死时未及时返回，elapsed={elapsed:.3f}s"
