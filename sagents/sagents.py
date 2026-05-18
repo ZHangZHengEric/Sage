@@ -445,7 +445,7 @@ class SAgent:
         ])
 
         # 预定义简单模式
-        simple_agent_body = SequenceNode(steps=[
+        simple_agent_core = SequenceNode(steps=[
             ParallelNode(branches=[
                 AgentNode(agent_key="tool_suggestion"),
                 AgentNode(agent_key="memory_recall"),
@@ -463,6 +463,14 @@ class SAgent:
             ),
             IfNode(condition="need_summary", true_body=AgentNode(agent_key="task_summary"))
         ])
+        simple_agent_body = LoopNode(
+            condition="self_check_should_retry",
+            max_loops=3,
+            body=SequenceNode(steps=[
+                simple_agent_core,
+                AgentNode(agent_key="self_check"),
+            ]),
+        )
 
         fib_agent_core = SequenceNode(steps=[
             ParallelNode(branches=[
