@@ -183,6 +183,10 @@ class StreamManager:
             return self._sessions[session_id].query
         return None
 
+    # 防御性兜底：即使下层 generator 的 aclose / 持久化路径仍可能偶发卡住，
+    # 这里也不应该让 stop_session 无限期 await，否则会顶住整条会话中断链路。
+    _STOP_SESSION_TIMEOUT = 5.0
+
     async def stop_session(self, session_id: Optional[str]) -> None:
         if not session_id:
             return
@@ -193,7 +197,12 @@ class StreamManager:
         if task and not task.done():
             task.cancel()
             try:
-                await task
+                # 用 shield 包一层只是为了让 wait_for 超时后不再额外 cancel 一次（task 已经被 cancel）。
+                await asyncio.wait_for(asyncio.shield(task), timeout=self._STOP_SESSION_TIMEOUT)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"stop_session: 等待 {session_id} 背景 task 取消超过 {self._STOP_SESSION_TIMEOUT}s，跳过等待"
+                )
             except asyncio.CancelledError:
                 pass
         session.status = "interrupted"
