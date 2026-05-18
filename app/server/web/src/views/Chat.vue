@@ -19,30 +19,31 @@
               </span>
             </div>
           </SelectTrigger>
-          <SelectContent class="w-[240px] p-2">
-            <div class="grid grid-cols-4 gap-1.5">
+          <SelectContent
+            class="w-[min(24rem,calc(100vw-2rem))]"
+            viewport-class="!h-auto max-h-[30rem] overflow-y-auto p-2"
+          >
+            <div class="flex flex-col gap-1.5">
               <RadixSelectItem
                 v-for="agent in (agents || [])"
                 :key="agent.id"
                 :value="agent.id"
                 :text-value="agent.name"
-                class="relative flex min-h-[4.25rem] w-full cursor-pointer select-none items-center justify-center rounded-lg p-1.5 outline-none transition-colors data-[highlighted]:bg-muted/80 data-[state=checked]:bg-primary/10 data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+                class="relative flex min-h-12 w-full cursor-pointer select-none items-center rounded-lg py-1.5 pl-2 pr-7 outline-none transition-colors data-[highlighted]:bg-muted/80 data-[state=checked]:bg-primary/10 data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
               >
-                <RadixSelectItemText as="div" class="flex w-full flex-col items-center gap-1">
-                  <div class="relative w-9 h-9 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary/20 to-primary/5">
+                <RadixSelectItemText as="div" class="flex w-full items-center gap-2.5">
+                  <div class="relative h-9 w-9 flex-shrink-0 overflow-hidden rounded-lg bg-gradient-to-br from-primary/20 to-primary/5">
                     <img
                       :src="`https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,square01,square02&seed=${encodeURIComponent(agent.id)}`"
                       :alt="agent.name"
                       class="w-full h-full object-cover"
                     />
                   </div>
-                  <div class="flex items-center justify-center w-full px-0.5">
-                    <span class="block max-w-full truncate text-[10px] font-medium text-foreground text-center leading-none">
-                      {{ agent.name }}
-                    </span>
-                  </div>
+                  <span class="min-w-0 flex-1 whitespace-normal break-words text-left text-[13px] font-medium leading-snug text-foreground">
+                    {{ agent.name }}
+                  </span>
                 </RadixSelectItemText>
-                <span class="absolute top-1.5 right-1.5 flex h-3 w-3 items-center justify-center">
+                <span class="absolute right-2 top-1/2 flex h-3 w-3 -translate-y-1/2 items-center justify-center">
                   <RadixSelectItemIndicator>
                     <span class="h-1.5 w-1.5 rounded-full bg-green-500" />
                   </RadixSelectItemIndicator>

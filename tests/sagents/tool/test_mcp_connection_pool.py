@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch
 
 import anyio
+from mcp import StdioServerParameters
 
 from sagents.tool.mcp_connection_pool import McpConnectionPool, McpPooledConnection
 from sagents.tool.tool_schema import SseServerParameters, StreamableHttpServerParameters
@@ -20,10 +21,14 @@ class _FakeListToolsResponse:
     tools = []
 
 
+def _stdio_params():
+    return StdioServerParameters(command="mcp-server", args=[])
+
+
 class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
     async def test_101_concurrent_calls_expand_to_second_connection(self):
         pool = McpConnectionPool()
-        server_params = SseServerParameters(url="http://mcp.example")
+        server_params = _stdio_params()
         release = asyncio.Event()
         condition = asyncio.Condition()
         started = 0
@@ -68,7 +73,7 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
 
     async def test_low_concurrency_reuses_initialized_connection(self):
         pool = McpConnectionPool()
-        server_params = SseServerParameters(url="http://mcp.example")
+        server_params = _stdio_params()
         open_count = 0
 
         class FakeSession:
@@ -89,25 +94,28 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(pool._entries["server"].connections), 1)
         await pool.close_all(drain=False)
 
-    async def test_streamable_http_uses_one_shot_connections(self):
+    async def _assert_http_transport_reuses_worker_connection(self, server_params):
         pool = McpConnectionPool()
-        server_params = StreamableHttpServerParameters(url="http://mcp.example")
         open_count = 0
         close_count = 0
+        open_task = None
+        close_task = None
 
         class FakeSession:
             async def call_tool(self, name, arguments):
                 return _FakeResult()
 
         async def fake_open(self):
-            nonlocal open_count
+            nonlocal open_count, open_task
             open_count += 1
+            open_task = asyncio.current_task()
             self.session = FakeSession()
             return self
 
         async def fake_close(self):
-            nonlocal close_count
+            nonlocal close_count, close_task
             close_count += 1
+            close_task = asyncio.current_task()
             self.closed = True
 
         with patch.object(McpPooledConnection, "open", fake_open), patch.object(
@@ -115,14 +123,27 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
         ):
             await pool.call_tool("server", server_params, "echo", {"i": 1})
             await pool.call_tool("server", server_params, "echo", {"i": 2})
+            self.assertEqual(open_count, 1)
+            self.assertEqual(close_count, 0)
+            self.assertIn("server", pool._entries)
+            await pool.close_all(drain=True)
+            self.assertEqual(close_count, 1)
+            self.assertIs(close_task, open_task)
+            self.assertNotIn("server", pool._entries)
 
-        self.assertEqual(open_count, 2)
-        self.assertEqual(close_count, 2)
-        self.assertNotIn("server", pool._entries)
+    async def test_streamable_http_reuses_worker_connection(self):
+        await self._assert_http_transport_reuses_worker_connection(
+            StreamableHttpServerParameters(url="http://mcp.example")
+        )
+
+    async def test_sse_reuses_worker_connection(self):
+        await self._assert_http_transport_reuses_worker_connection(
+            SseServerParameters(url="http://mcp.example")
+        )
 
     async def test_server_config_overrides_per_connection_concurrency(self):
         pool = McpConnectionPool()
-        server_params = SseServerParameters(url="http://mcp.example")
+        server_params = _stdio_params()
         release = asyncio.Event()
         condition = asyncio.Condition()
         started = 0
@@ -172,7 +193,7 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
 
     async def test_call_reuses_registered_entry_when_runtime_config_was_used(self):
         pool = McpConnectionPool()
-        server_params = SseServerParameters(url="http://mcp.example")
+        server_params = _stdio_params()
         open_count = 0
 
         class FakeSession:
@@ -202,7 +223,7 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
 
     async def test_list_tools_retries_closed_connection_when_cache_missing(self):
         pool = McpConnectionPool()
-        server_params = SseServerParameters(url="http://mcp.example")
+        server_params = _stdio_params()
         open_count = 0
 
         class FakeSession:
@@ -233,7 +254,7 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
 
     async def test_force_list_tools_replaces_pool_and_closes_existing_connections(self):
         pool = McpConnectionPool()
-        server_params = SseServerParameters(url="http://mcp.example")
+        server_params = _stdio_params()
         opened_connections = []
         closed_connections = []
 
@@ -271,7 +292,7 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
 
     async def test_call_tool_times_out_and_discards_connection(self):
         pool = McpConnectionPool()
-        server_params = SseServerParameters(url="http://mcp.example")
+        server_params = _stdio_params()
         open_count = 0
 
         class FakeSession:
@@ -301,7 +322,7 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
 
     async def test_call_tool_retries_anyio_closed_resource_error(self):
         pool = McpConnectionPool()
-        server_params = SseServerParameters(url="http://mcp.example")
+        server_params = _stdio_params()
         open_count = 0
 
         class FakeSession:

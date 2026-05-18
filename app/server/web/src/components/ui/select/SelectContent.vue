@@ -17,11 +17,17 @@ const props = defineProps({
   sticky: { type: String, required: false },
   hideWhenDetached: { type: Boolean, required: false },
   updatePositionStrategy: { type: String, required: false },
+  viewportClass: { type: String, default: '' },
   class: { type: String, default: '' },
 })
 const emits = defineEmits(['closeAutoFocus', 'escapeKeyDown', 'pointerDownOutside'])
 
-const forwarded = useForwardPropsEmits(props, emits)
+const delegatedProps = computed(() => {
+  const { class: _, viewportClass, ...delegated } = props
+  return delegated
+})
+
+const forwarded = useForwardPropsEmits(delegatedProps, emits)
 </script>
 
 <template>
@@ -35,7 +41,7 @@ const forwarded = useForwardPropsEmits(props, emits)
         props.class,
       )"
     >
-      <SelectViewport :class="cn('p-1', position === 'popper' && 'h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]')">
+      <SelectViewport :class="cn('p-1', position === 'popper' && 'h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]', props.viewportClass)">
         <slot />
       </SelectViewport>
     </SelectContent>
