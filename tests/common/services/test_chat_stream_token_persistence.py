@@ -237,6 +237,7 @@ def test_stream_manager_background_worker_aclose_has_own_timeout(monkeypatch):
 def test_persist_cancel_protection_waits_for_normal_completion(monkeypatch):
     """正常路径必须等持久化完成后返回，保护 interrupt_session 的接口语义。"""
     events = []
+    conversation_service._SESSION_PERSISTENCE_TASKS.clear()
 
     async def _fake_persist(session_id: str):
         events.append(("start", session_id))
@@ -263,6 +264,7 @@ def test_persist_cancel_protection_backgrounds_on_caller_cancellation(monkeypatc
     started = None
     finish = None
     events = []
+    conversation_service._SESSION_PERSISTENCE_TASKS.clear()
 
     async def _fake_persist(session_id: str):
         events.append(("start", session_id))
@@ -300,3 +302,42 @@ def test_persist_cancel_protection_backgrounds_on_caller_cancellation(monkeypatc
         ("start", "persist-cancel"),
         ("done", "persist-cancel"),
     ]
+
+
+def test_persist_cancel_protection_coalesces_same_session(monkeypatch):
+    """同一 session 并发持久化只启动一个底层保存任务，避免线程池重复 CPU 序列化。"""
+    started = None
+    finish = None
+    events = []
+    conversation_service._SESSION_PERSISTENCE_TASKS.clear()
+
+    async def _fake_persist(session_id: str):
+        events.append(("start", session_id))
+        started.set()
+        await finish.wait()
+        events.append(("done", session_id))
+
+    monkeypatch.setattr(conversation_service, "persist_session_state", _fake_persist)
+
+    async def _run():
+        nonlocal started, finish
+        started = asyncio.Event()
+        finish = asyncio.Event()
+        first = asyncio.create_task(
+            conversation_service.persist_session_state_with_cancel_protection("persist-singleflight")
+        )
+        await started.wait()
+        second = asyncio.create_task(
+            conversation_service.persist_session_state_with_cancel_protection("persist-singleflight")
+        )
+        await asyncio.sleep(0)
+        finish.set()
+        await asyncio.gather(first, second)
+
+    asyncio.run(_run())
+
+    assert events == [
+        ("start", "persist-singleflight"),
+        ("done", "persist-singleflight"),
+    ]
+    assert conversation_service._SESSION_PERSISTENCE_TASKS == {}

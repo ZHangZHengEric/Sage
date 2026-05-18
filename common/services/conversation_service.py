@@ -27,6 +27,8 @@ from common.schemas.conversation import ConversationInfo
 from common.services.chat_processor import ContentProcessor
 from common.services.chat_utils import get_sessions_root
 
+_SESSION_PERSISTENCE_TASKS: Dict[str, asyncio.Task] = {}
+
 
 def _get_cfg() -> config.StartupConfig:
     cfg = config.get_startup_config()
@@ -262,18 +264,32 @@ async def persist_session_state(session_id: str) -> None:
         logger.bind(session_id=session_id).info("会话状态已刷新 conversation 时间戳")
 
 
-async def persist_session_state_with_cancel_protection(session_id: str) -> None:
-    persistence_task = None
+async def _run_single_session_persistence(session_id: str) -> None:
     try:
-        persistence_task = asyncio.create_task(persist_session_state(session_id))
+        await persist_session_state(session_id)
+    finally:
+        current = _SESSION_PERSISTENCE_TASKS.get(session_id)
+        if current is asyncio.current_task():
+            _SESSION_PERSISTENCE_TASKS.pop(session_id, None)
+
+
+async def persist_session_state_with_cancel_protection(session_id: str) -> None:
+    persistence_task = _SESSION_PERSISTENCE_TASKS.get(session_id)
+    if persistence_task is None or persistence_task.done():
+        persistence_task = asyncio.create_task(
+            _run_single_session_persistence(session_id),
+            name=f"persist-session-state-{session_id}",
+        )
+        _SESSION_PERSISTENCE_TASKS[session_id] = persistence_task
+
+    try:
         await asyncio.shield(persistence_task)
     except asyncio.CancelledError as cancel_exc:
-        if persistence_task is None:
-            raise cancel_exc
         logger.bind(session_id=session_id).warning("会话持久化遇到取消，转入后台继续完成")
-        persistence_task.add_done_callback(
-            lambda task: _log_background_persistence_result(session_id, task)
-        )
+        if not persistence_task.done():
+            persistence_task.add_done_callback(
+                lambda task: _log_background_persistence_result(session_id, task)
+            )
         raise cancel_exc
 
 

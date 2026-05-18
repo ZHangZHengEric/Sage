@@ -216,6 +216,9 @@ class SessionContext:
         self._current_request: Optional[Dict[str, Any]] = None
         self._request_lock = threading.Lock()
         self._llm_request_save_lock = threading.Lock()
+        self._save_lock = threading.Lock()
+        self._last_save_signature: Optional[tuple] = None
+        self._last_save_time = 0.0
         self.record_timing_event(
             "session_start",
             status=self.status.value,
@@ -1406,69 +1409,91 @@ class SessionContext:
         interrupt_reason: Optional[str] = None,
     ):
         """保存会话上下文（不包含 llm_requests，已在 add 时异步保存）"""
-        effective_status = session_status or self._status
-        effective_child_session_ids = child_session_ids if child_session_ids is not None else self.child_session_ids
-        if interrupt_reason is not None:
-            self.audit_status["interrupt_reason"] = interrupt_reason
-        # 1. 保存 messages 到 messages.json
-        # 始终覆盖，保存完整历史
-        try:
-            with open(os.path.join(self.session_workspace, "messages.json"), "w", encoding="utf-8") as f:
-                serializable_messages = make_serializable(self.message_manager.messages)
-                json.dump(serializable_messages, f, ensure_ascii=False, indent=4)
-        except Exception as e:
-            logger.error(f"SessionContext: Failed to save messages.json: {e}")
+        with self._save_lock:
+            effective_status = session_status or self._status
+            effective_child_session_ids = child_session_ids if child_session_ids is not None else self.child_session_ids
+            if interrupt_reason is not None:
+                self.audit_status["interrupt_reason"] = interrupt_reason
 
-        # 3. 保存 session_context.json (仅保存最新状态)
-        # 包含 system_context, audit_status, token_usage, 基本元数据
-        try:
-            context_data = {
-                "session_id": self.session_id,
-                "user_id": self.user_id,
-                "parent_session_id": self.parent_session_id,
-                "child_session_ids": effective_child_session_ids,
-                "status": effective_status.value if hasattr(effective_status, 'value') else str(effective_status),
-                "created_at": self.start_time,
-                "updated_at": time.time(),
-                "session_root_space": self.session_root_space,
-                "session_workspace": self.session_workspace,
-                "sandbox_agent_workspace": self.sandbox_agent_workspace,
+            status_value = effective_status.value if hasattr(effective_status, "value") else str(effective_status)
+            message_stats = self.message_manager.stats
+            signature = (
+                len(self.message_manager.messages),
+                message_stats.get("total_chunks"),
+                message_stats.get("last_updated"),
+                status_value,
+                tuple(effective_child_session_ids or []),
+                self.audit_status.get("interrupt_reason"),
+                self.audit_status.get("tools_expanded"),
+                len(self.llm_requests_logs),
+                self._current_request is None,
+            )
+            now = time.time()
+            if signature == self._last_save_signature and now - self._last_save_time < 2.0:
+                logger.debug(f"SessionContext: 跳过重复保存 session_id={self.session_id}")
+                return
 
-                # 关键状态
-                "system_context": make_serializable(self.system_context),
-                "audit_status": make_serializable(self.audit_status),
-                "tokens_usage_info": self.get_tokens_usage_info(),
-                "context_budget_config": make_serializable(self._effective_context_budget_config()),
+            # 1. 保存 messages 到 messages.json
+            # 始终覆盖，保存完整历史
+            try:
+                with open(os.path.join(self.session_workspace, "messages.json"), "w", encoding="utf-8") as f:
+                    serializable_messages = make_serializable(self.message_manager.messages)
+                    json.dump(serializable_messages, f, ensure_ascii=False, indent=4)
+            except Exception as e:
+                logger.error(f"SessionContext: Failed to save messages.json: {e}")
 
-                # Agent 配置
-                "agent_config": make_serializable(self.agent_config)
-            }
-            
-            with open(os.path.join(self.session_workspace, "session_context.json"), "w", encoding="utf-8") as f:
-                json.dump(context_data, f, ensure_ascii=False, indent=4)
-                
-        except Exception as e:
-            logger.error(f"SessionContext: Failed to save session_context.json: {e}")
+            # 3. 保存 session_context.json (仅保存最新状态)
+            # 包含 system_context, audit_status, token_usage, 基本元数据
+            try:
+                context_data = {
+                    "session_id": self.session_id,
+                    "user_id": self.user_id,
+                    "parent_session_id": self.parent_session_id,
+                    "child_session_ids": effective_child_session_ids,
+                    "status": status_value,
+                    "created_at": self.start_time,
+                    "updated_at": now,
+                    "session_root_space": self.session_root_space,
+                    "session_workspace": self.session_workspace,
+                    "sandbox_agent_workspace": self.sandbox_agent_workspace,
 
-        # 基于messages.json 提取里面不同的工具调用的数量统计，并保存到tools_usage.json
-        try:
-            tools_usage = {}
-            for msg in self.message_manager.messages:
-                if msg.tool_calls:
-                    for tool_call in msg.tool_calls:
-                        tool_name = tool_call.get('function', {}).get('name')
-                        if tool_name:
-                            tools_usage[tool_name] = tools_usage.get(tool_name, 0) + 1
-            
-            with open(os.path.join(self.session_workspace, "tools_usage.json"), "w", encoding="utf-8") as f:
-                json.dump(tools_usage, f, ensure_ascii=False, indent=4)
-        except Exception as e:
-            logger.error(f"SessionContext: Failed to save tools_usage.json: {e}")
+                    # 关键状态
+                    "system_context": make_serializable(self.system_context),
+                    "audit_status": make_serializable(self.audit_status),
+                    "tokens_usage_info": self.get_tokens_usage_info(),
+                    "context_budget_config": make_serializable(self._effective_context_budget_config()),
 
-        self.record_timing_event(
-            "session_end",
-            status=effective_status.value if hasattr(effective_status, "value") else str(effective_status),
-        )
+                    # Agent 配置
+                    "agent_config": make_serializable(self.agent_config)
+                }
+
+                with open(os.path.join(self.session_workspace, "session_context.json"), "w", encoding="utf-8") as f:
+                    json.dump(context_data, f, ensure_ascii=False, indent=4)
+
+            except Exception as e:
+                logger.error(f"SessionContext: Failed to save session_context.json: {e}")
+
+            # 基于messages.json 提取里面不同的工具调用的数量统计，并保存到tools_usage.json
+            try:
+                tools_usage = {}
+                for msg in self.message_manager.messages:
+                    if msg.tool_calls:
+                        for tool_call in msg.tool_calls:
+                            tool_name = tool_call.get('function', {}).get('name')
+                            if tool_name:
+                                tools_usage[tool_name] = tools_usage.get(tool_name, 0) + 1
+
+                with open(os.path.join(self.session_workspace, "tools_usage.json"), "w", encoding="utf-8") as f:
+                    json.dump(tools_usage, f, ensure_ascii=False, indent=4)
+            except Exception as e:
+                logger.error(f"SessionContext: Failed to save tools_usage.json: {e}")
+
+            self.record_timing_event(
+                "session_end",
+                status=status_value,
+            )
+            self._last_save_signature = signature
+            self._last_save_time = now
 
     # def _serialize_messages_for_history_memory(self, messages: List[MessageChunk]) -> str:
     #     """序列化消息列表为系统上下文格式的字符串（私有方法）"""
