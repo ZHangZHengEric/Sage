@@ -37,6 +37,7 @@ services:
       default:
         aliases:
           - sage-server
+      shared: {}
 
   sage-web-dev:
     restart: always
@@ -75,3 +76,8 @@ services:
       - ${SAGE_ROOT}/mysql/conf:/etc/mysql/conf.d
     mem_limit: 1g
     cpus: 1.0
+
+networks:
+  shared:
+    name: ${SAGE_SHARED_NETWORK:-sage_shared_default}
+    external: true

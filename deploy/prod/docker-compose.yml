@@ -33,6 +33,9 @@ services:
       - apparmor=unconfined
     mem_limit: 16g
     cpus: 4.0
+    networks:
+      default: {}
+      shared: {}
 
   sage-web:
     restart: always
@@ -93,3 +96,8 @@ services:
       - ${SAGE_ROOT}/es/data/node:/usr/share/elasticsearch/data
     mem_limit: 2g
     cpus: 1.0
+
+networks:
+  shared:
+    name: ${SAGE_SHARED_NETWORK:-sage_shared_default}
+    external: true
