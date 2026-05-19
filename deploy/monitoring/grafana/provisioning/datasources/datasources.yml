@@ -2,6 +2,7 @@ apiVersion: 1
 
 datasources:
   - name: Sage Prometheus
+    uid: sage-prometheus
     type: prometheus
     access: proxy
     url: http://sage-prometheus:9090
@@ -9,6 +10,7 @@ datasources:
     editable: true
 
   - name: Sage Loki
+    uid: sage-loki
     type: loki
     access: proxy
     url: http://sage-loki:3100

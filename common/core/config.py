@@ -36,6 +36,7 @@ class StartupConfig:
 
     env: str = "development"
     auth_mode: str = "native"
+    log_level: str = "INFO"
     port: int = 8080
     logs_dir: str = "logs"
     session_dir: str = "sessions"
@@ -147,6 +148,7 @@ class ENV:
     TRACE_JAEGER_BASE_PATH = "SAGE_TRACE_JAEGER_BASE_PATH"
 
     PORT = "SAGE_PORT"
+    LOG_LEVEL = "SAGE_LOG_LEVEL"
     SESSION_DIR = "SAGE_SESSION_DIR"
     LOGS_DIR = "SAGE_LOGS_DIR_PATH"
     AGENTS_DIR = "SAGE_AGENTS_DIR"
@@ -360,6 +362,7 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
         app_mode="server",
         env=env_str(ENV.APP_ENV, StartupConfig.env) or StartupConfig.env,
         auth_mode=env_str(ENV.AUTH_MODE, StartupConfig.auth_mode) or StartupConfig.auth_mode,
+        log_level=env_str(ENV.LOG_LEVEL, StartupConfig.log_level) or StartupConfig.log_level,
         port=env_int(ENV.PORT, StartupConfig.port),
         logs_dir=env_str(ENV.LOGS_DIR, StartupConfig.logs_dir),
         session_dir=env_str(ENV.SESSION_DIR, StartupConfig.session_dir),
