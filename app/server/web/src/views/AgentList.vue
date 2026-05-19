@@ -402,7 +402,7 @@ const agentToExport = ref(null)
 const showAuthModal = ref(false)
 const authAgentId = ref('')
 
-const { t, isZhCN } = useLanguage()
+const { t, isZhCN, language } = useLanguage()
 const route = useRoute()
 const currentUser = ref(getCurrentUser())
 const agentEditStore = useAgentEditStore()
@@ -412,6 +412,10 @@ watch(() => route.query.refresh, () => {
   if (currentView.value !== 'list') {
     handleBackToList()
   }
+})
+
+watch(language, () => {
+  loadAvailableTools()
 })
 
 const canEdit = (agent) => {
@@ -432,6 +436,10 @@ const handleToolsUpdated = () => {
   loadAvailableTools()
 }
 
+const getToolListLanguage = () => {
+  return language.value === 'enUS' ? 'en' : 'zh'
+}
+
 onMounted(async () => {
   await loadAgents()
   await loadModelProviders()
@@ -448,7 +456,7 @@ onUnmounted(() => {
 const loadAvailableTools = async () => {
   try {
     loading.value = true
-    const response = await toolAPI.getTools()
+    const response = await toolAPI.getTools({ language: getToolListLanguage() })
     if (response.tools) {
       tools.value = response.tools
     }
