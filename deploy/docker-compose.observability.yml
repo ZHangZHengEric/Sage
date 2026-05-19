@@ -1,7 +1,7 @@
 services:
   sage-prometheus:
     image: docker.m.daocloud.io/prom/prometheus:v3.11.3
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-prometheus
+    container_name: sage-prometheus
     restart: always
     user: "0:0"
     command:
@@ -25,7 +25,7 @@ services:
 
   sage-grafana:
     image: docker.m.daocloud.io/grafana/grafana-enterprise:13.0.1-security-01
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-grafana
+    container_name: sage-grafana
     restart: always
     user: "0:0"
     environment:
@@ -51,7 +51,7 @@ services:
 
   sage-cadvisor:
     image: ghcr.io/google/cadvisor:0.56.2
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-cadvisor
+    container_name: sage-cadvisor
     restart: always
     privileged: true
     command:
@@ -72,7 +72,7 @@ services:
 
   sage-loki:
     image: docker.m.daocloud.io/grafana/loki:3.7.1
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-loki
+    container_name: sage-loki
     restart: always
     user: "0:0"
     command:
@@ -91,7 +91,7 @@ services:
 
   sage-alloy:
     image: docker.m.daocloud.io/grafana/alloy:v1.16.1
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-alloy
+    container_name: sage-alloy
     restart: always
     user: "0:0"
     command:

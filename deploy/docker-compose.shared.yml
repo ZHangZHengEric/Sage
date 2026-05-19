@@ -7,7 +7,7 @@ services:
       args:
         NGINX_CONF: deploy/nginx/nginx_wiki.conf
     image: sage-wiki:v1.0
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-wiki
+    container_name: sage-wiki
     ports:
       - ${SAGE_WIKI_PORT:-30057}:80
     environment:
@@ -22,7 +22,7 @@ services:
       - ${SAGE_RUSTFS_CONSOLE_PORT:-30055}:9001
     volumes:
       - ${SAGE_ROOT}/rustfs/data:/data
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-rustfs
+    container_name: sage-rustfs
     restart: always
     environment:
       - RUSTFS_ADDRESS=0.0.0.0:9000
@@ -50,7 +50,7 @@ services:
   sage-redis:
     image: docker.m.daocloud.io/redis:7-alpine
     restart: unless-stopped
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-redis
+    container_name: sage-redis
     command:
       [
         "sh",
@@ -79,7 +79,7 @@ services:
 
   sage-jaeger:
     image: docker.m.daocloud.io/jaegertracing/jaeger:2.16.0
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-jaeger
+    container_name: sage-jaeger
     restart: always
     command:
       - --config
