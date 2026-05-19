@@ -1723,6 +1723,239 @@
       ],
       "title": "容器内存",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 72
+      },
+      "id": 53,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(container_fs_reads_bytes_total{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}[$__rate_interval])) by (name)",
+          "legendFormat": "读取 {{name}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(container_fs_writes_bytes_total{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}[$__rate_interval])) by (name)",
+          "legendFormat": "写入 {{name}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "容器文件系统读写吞吐",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "iops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 72
+      },
+      "id": 54,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(container_fs_reads_total{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}[$__rate_interval])) by (name)",
+          "legendFormat": "读次数 {{name}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(container_fs_writes_total{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}[$__rate_interval])) by (name)",
+          "legendFormat": "写次数 {{name}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "容器文件系统 IOPS",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 80
+      },
+      "id": 55,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(container_fs_usage_bytes{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}) by (name)",
+          "legendFormat": "已用 {{name}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(container_fs_limit_bytes{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}) by (name)",
+          "legendFormat": "上限 {{name}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "容器文件系统占用",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 80
+      },
+      "id": 56,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "100 * sum(container_fs_usage_bytes{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}) by (name) / clamp_min(sum(container_fs_limit_bytes{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}) by (name), 1)",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "容器文件系统使用率",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",
