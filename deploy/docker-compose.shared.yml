@@ -86,8 +86,30 @@ services:
     mem_limit: 1g
     cpus: 0.5
 
+  sage-grafana:
+    image: docker.m.daocloud.io/grafana/grafana-enterprise:13.0.1-security-01
+    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-grafana
+    restart: always
+    user: "0:0"
+    environment:
+      TZ: Asia/Shanghai
+      GF_SECURITY_ADMIN_USER: ${SAGE_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${SAGE_GRAFANA_ADMIN_PASSWORD:-change_this_grafana_password}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    ports:
+      - "${SAGE_GRAFANA_PORT:-30093}:3000"
+    volumes:
+      - ${SAGE_DEPLOY_DIR:-..}/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ${SAGE_ROOT}/grafana/data:/var/lib/grafana
+    depends_on:
+      - sage-prometheus
+      - sage-loki
+    mem_limit: 1g
+    cpus: 0.5
+
   sage-cadvisor:
-    image: docker.m.daocloud.io/ghcr.io/google/cadvisor:0.56.2
+    image: ghcr.io/google/cadvisor:0.56.2
     container_name: ${SAGE_CONTAINER_PREFIX:-sage}-cadvisor
     restart: always
     privileged: true

@@ -1,0 +1,15 @@
+apiVersion: 1
+
+datasources:
+  - name: Sage Prometheus
+    type: prometheus
+    access: proxy
+    url: http://sage-prometheus:9090
+    isDefault: true
+    editable: true
+
+  - name: Sage Loki
+    type: loki
+    access: proxy
+    url: http://sage-loki:3100
+    editable: true
