@@ -96,6 +96,8 @@ services:
     cpus: 0.5
 
   sage-prometheus:
+    profiles:
+      - observability
     image: docker.m.daocloud.io/prom/prometheus:v3.11.3
     container_name: ${SAGE_CONTAINER_PREFIX:-sage}-prometheus
     restart: always
@@ -118,6 +120,8 @@ services:
     cpus: 0.5
 
   sage-grafana:
+    profiles:
+      - observability
     image: docker.m.daocloud.io/grafana/grafana-enterprise:13.0.1-security-01
     container_name: ${SAGE_CONTAINER_PREFIX:-sage}-grafana
     restart: always
@@ -142,6 +146,8 @@ services:
     cpus: 0.5
 
   sage-cadvisor:
+    profiles:
+      - observability
     image: ghcr.io/google/cadvisor:0.56.2
     container_name: ${SAGE_CONTAINER_PREFIX:-sage}-cadvisor
     restart: always
@@ -161,6 +167,8 @@ services:
     cpus: 0.5
 
   sage-loki:
+    profiles:
+      - observability
     image: docker.m.daocloud.io/grafana/loki:3.7.1
     container_name: ${SAGE_CONTAINER_PREFIX:-sage}-loki
     restart: always
@@ -178,6 +186,8 @@ services:
     cpus: 0.5
 
   sage-alloy:
+    profiles:
+      - observability
     image: docker.m.daocloud.io/grafana/alloy:v1.16.1
     container_name: ${SAGE_CONTAINER_PREFIX:-sage}-alloy
     restart: always

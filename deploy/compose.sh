@@ -8,17 +8,24 @@ DEPLOY_ENV="${DEPLOY_ENV:-prod}"
 usage() {
   cat <<'EOF'
 Usage: deploy/compose.sh [dev|prod|test] [docker compose args...]
+       deploy/compose.sh [dev|prod|test] --observability [docker compose args...]
 
 Default environment: prod
 
 Examples:
   deploy/compose.sh up -d
+  deploy/compose.sh --observability up -d
+  deploy/compose.sh dev --observability up -d
   deploy/compose.sh dev up -d
   deploy/compose.sh prod pull
   deploy/compose.sh test down
 
 The script runs:
   docker compose --env-file deploy/<env>/.env -f deploy/<env>/docker-compose.yml -f deploy/docker-compose.shared.yml ...
+
+Observability services (prometheus, grafana, cadvisor, loki, alloy) are behind the
+`observability` compose profile and are not started unless --observability is set
+or COMPOSE_PROFILES already includes observability.
 
 If deploy/<env>/.env is missing, it falls back to .env in the repo root.
 EOF
@@ -34,6 +41,12 @@ case "${1:-}" in
     shift
     ;;
 esac
+
+ENABLE_OBSERVABILITY="${ENABLE_OBSERVABILITY:-false}"
+if [ "${1:-}" = "--observability" ]; then
+  ENABLE_OBSERVABILITY="true"
+  shift
+fi
 
 COMPOSE_FILE="$DEPLOY_DIR/$DEPLOY_ENV/docker-compose.yml"
 SHARED_COMPOSE_FILE="$DEPLOY_DIR/docker-compose.shared.yml"
@@ -69,7 +82,12 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
+COMPOSE_ARGS=(--env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$SHARED_COMPOSE_FILE")
+if [ "$ENABLE_OBSERVABILITY" = "true" ]; then
+  COMPOSE_ARGS+=(--profile observability)
+fi
+
 SAGE_REPO_ROOT="$ROOT_DIR" \
 SAGE_DEPLOY_DIR="$DEPLOY_DIR" \
 SAGE_COMPOSE_ENV_FILE="$ENV_FILE" \
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$SHARED_COMPOSE_FILE" "$@"
+  docker compose "${COMPOSE_ARGS[@]}" "$@"
