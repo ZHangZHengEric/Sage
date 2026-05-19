@@ -1,0 +1,121 @@
+services:
+  sage-prometheus:
+    image: docker.m.daocloud.io/prom/prometheus:v3.11.3
+    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-prometheus
+    restart: always
+    user: "0:0"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "${SAGE_PROMETHEUS_PORT:-30090}:9090"
+    volumes:
+      - ${SAGE_DEPLOY_DIR:-..}/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ${SAGE_ROOT}/prometheus/data:/prometheus
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - sage-cadvisor
+    mem_limit: 1g
+    cpus: 0.5
+    networks:
+      - shared
+
+  sage-grafana:
+    image: docker.m.daocloud.io/grafana/grafana-enterprise:13.0.1-security-01
+    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-grafana
+    restart: always
+    user: "0:0"
+    environment:
+      TZ: Asia/Shanghai
+      GF_SECURITY_ADMIN_USER: ${SAGE_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${SAGE_GRAFANA_ADMIN_PASSWORD:-change_this_grafana_password}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/sage-server-observability.json
+    ports:
+      - "${SAGE_GRAFANA_PORT:-30093}:3000"
+    volumes:
+      - ${SAGE_DEPLOY_DIR:-..}/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ${SAGE_DEPLOY_DIR:-..}/monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+      - ${SAGE_ROOT}/grafana/data:/var/lib/grafana
+    depends_on:
+      - sage-prometheus
+      - sage-loki
+    mem_limit: 1g
+    cpus: 0.5
+    networks:
+      - shared
+
+  sage-cadvisor:
+    image: ghcr.io/google/cadvisor:0.56.2
+    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-cadvisor
+    restart: always
+    privileged: true
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=10s
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    mem_limit: 512m
+    cpus: 0.5
+    networks:
+      - shared
+
+  sage-loki:
+    image: docker.m.daocloud.io/grafana/loki:3.7.1
+    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-loki
+    restart: always
+    user: "0:0"
+    command:
+      - -config.file=/etc/loki/config.yml
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "${SAGE_LOKI_PORT:-30091}:3100"
+    volumes:
+      - ${SAGE_DEPLOY_DIR:-..}/monitoring/loki.yml:/etc/loki/config.yml:ro
+      - ${SAGE_ROOT}/loki/data:/loki
+    mem_limit: 1g
+    cpus: 0.5
+    networks:
+      - shared
+
+  sage-alloy:
+    image: docker.m.daocloud.io/grafana/alloy:v1.16.1
+    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-alloy
+    restart: always
+    user: "0:0"
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "${SAGE_ALLOY_PORT:-30092}:12345"
+    volumes:
+      - ${SAGE_DEPLOY_DIR:-..}/monitoring/alloy.alloy:/etc/alloy/config.alloy:ro
+      - ${SAGE_ROOT}/alloy/data:/var/lib/alloy/data
+      - ${SAGE_ROOT}/sage-server/logs:/var/log/sage-server:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - sage-loki
+    mem_limit: 512m
+    cpus: 0.5
+    networks:
+      - shared
+
+networks:
+  shared:
+    name: ${SAGE_SHARED_NETWORK:-sage_shared_default}
+    external: true

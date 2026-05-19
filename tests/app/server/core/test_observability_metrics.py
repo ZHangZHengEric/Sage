@@ -1,6 +1,6 @@
 import asyncio
 
-from app.server.core.middleware import _is_whitelisted
+from app.server.core.middleware import _is_whitelisted, _should_record_prometheus_http_metrics
 from app.server.routers.observability import prometheus_metrics
 from app.server.services.prometheus_metrics import (
     _reset_prometheus_metrics_state,
@@ -35,6 +35,14 @@ def test_prometheus_metrics_route_returns_text_response():
 
 def test_prometheus_metrics_endpoint_is_auth_whitelisted():
     assert _is_whitelisted("/api/observability/metrics")
+
+
+def test_prometheus_http_metrics_skip_health_checks():
+    assert not _should_record_prometheus_http_metrics("/")
+    assert not _should_record_prometheus_http_metrics("/active")
+    assert not _should_record_prometheus_http_metrics("/api/health")
+    assert not _should_record_prometheus_http_metrics("/api/observability/metrics")
+    assert _should_record_prometheus_http_metrics("/api/chat")
 
 
 def test_prometheus_metrics_records_http_request_counts_and_duration():
