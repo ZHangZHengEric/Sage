@@ -21,15 +21,15 @@ Examples:
   deploy/compose.sh test down
 
 The script runs:
-  docker compose --env-file deploy/<env>/.env -f deploy/<env>/docker-compose.yml -f deploy/docker-compose.shared.yml ...
+  docker compose --env-file deploy/<env>/.env -f deploy/<env>/docker-compose.yml ...
 
 For `up`, shared services are reused when they are already running in another
 environment. Otherwise they are started under the shared compose project
 `sage_shared` first, then the selected environment is started.
 
-Observability services (prometheus, grafana, cadvisor, loki, alloy) are behind the
-`observability` compose profile and are not started unless --observability is set
-or COMPOSE_PROFILES already includes observability.
+Observability services (prometheus, grafana, cadvisor, loki, alloy) are defined
+in deploy/docker-compose.observability.yml and are not started unless
+--observability is set.
 
 If deploy/<env>/.env is missing, it falls back to .env in the repo root.
 EOF
@@ -54,6 +54,7 @@ fi
 
 COMPOSE_FILE="$DEPLOY_DIR/$DEPLOY_ENV/docker-compose.yml"
 SHARED_COMPOSE_FILE="$DEPLOY_DIR/docker-compose.shared.yml"
+OBSERVABILITY_COMPOSE_FILE="$DEPLOY_DIR/docker-compose.observability.yml"
 SHARED_PROJECT_NAME="${SAGE_SHARED_PROJECT_NAME:-sage_shared}"
 SHARED_CONTAINER_PREFIX="${SAGE_SHARED_CONTAINER_PREFIX:-sage-shared}"
 
@@ -82,6 +83,11 @@ if [ ! -f "$SHARED_COMPOSE_FILE" ]; then
   exit 1
 fi
 
+if [ "$ENABLE_OBSERVABILITY" = "true" ] && [ ! -f "$OBSERVABILITY_COMPOSE_FILE" ]; then
+  echo "Observability compose file not found: $OBSERVABILITY_COMPOSE_FILE" >&2
+  exit 1
+fi
+
 if [ ! -f "$ENV_FILE" ]; then
   echo "Env file not found: $ENV_FILE" >&2
   echo "Create it from: $DEPLOY_DIR/$DEPLOY_ENV/.env.example or $ROOT_DIR/.env.example" >&2
@@ -91,9 +97,9 @@ fi
 COMPOSE_ARGS=(--env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$SHARED_COMPOSE_FILE")
 ENV_COMPOSE_ARGS=(--env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 SHARED_COMPOSE_ARGS=(--env-file "$ENV_FILE" -p "$SHARED_PROJECT_NAME" -f "$SHARED_COMPOSE_FILE")
+OBSERVABILITY_COMPOSE_ARGS=(--env-file "$ENV_FILE" -p "$SHARED_PROJECT_NAME" -f "$OBSERVABILITY_COMPOSE_FILE")
 if [ "$ENABLE_OBSERVABILITY" = "true" ]; then
-  COMPOSE_ARGS+=(--profile observability)
-  SHARED_COMPOSE_ARGS+=(--profile observability)
+  COMPOSE_ARGS+=(-f "$OBSERVABILITY_COMPOSE_FILE")
 fi
 
 env_value() {
@@ -160,6 +166,14 @@ run_compose() {
     docker compose "$@"
 }
 
+start_observability() {
+  local shared_network="$1"
+
+  COMPOSE_PROJECT_NAME="$SHARED_PROJECT_NAME" \
+  SAGE_CONTAINER_PREFIX="$SHARED_CONTAINER_PREFIX" \
+    run_compose "$shared_network" "${OBSERVABILITY_COMPOSE_ARGS[@]}" up -d
+}
+
 if [ "${1:-}" = "up" ]; then
   if current_shared_id="$(shared_container_for_project "$CURRENT_PROJECT_NAME")" && [ -n "$current_shared_id" ]; then
     shared_network="$(network_for_container "$current_shared_id")"
@@ -168,6 +182,9 @@ if [ "${1:-}" = "up" ]; then
       exit 1
     fi
     run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "$@"
+    if [ "$ENABLE_OBSERVABILITY" = "true" ]; then
+      start_observability "$shared_network"
+    fi
     exit $?
   fi
 
@@ -178,6 +195,9 @@ if [ "${1:-}" = "up" ]; then
       exit 1
     fi
     run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "$@"
+    if [ "$ENABLE_OBSERVABILITY" = "true" ]; then
+      start_observability "$shared_network"
+    fi
     exit $?
   fi
 
@@ -185,6 +205,9 @@ if [ "${1:-}" = "up" ]; then
   SAGE_CONTAINER_PREFIX="$SHARED_CONTAINER_PREFIX" \
     run_compose "" "${SHARED_COMPOSE_ARGS[@]}" up -d
   run_compose "${SHARED_PROJECT_NAME}_default" "${ENV_COMPOSE_ARGS[@]}" "$@"
+  if [ "$ENABLE_OBSERVABILITY" = "true" ]; then
+    start_observability "${SHARED_PROJECT_NAME}_default"
+  fi
   exit $?
 fi
 

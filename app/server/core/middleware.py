@@ -63,11 +63,23 @@ def _compile_whitelist_regex(paths: frozenset[str]) -> Tuple[re.Pattern, ...]:
 
 
 WHITELIST_API_REGEXES = _compile_whitelist_regex(WHITELIST_API_PATHS)
+PROMETHEUS_HTTP_METRICS_IGNORED_PATHS = frozenset(
+    {
+        "/",
+        "/active",
+        "/api/health",
+        "/api/observability/metrics",
+    }
+)
 
 
 def _is_whitelisted(path: str) -> bool:
     """判断路径是否在白名单"""
     return path in WHITELIST_API_PATHS or any(r.match(path) for r in WHITELIST_API_REGEXES)
+
+
+def _should_record_prometheus_http_metrics(path: str) -> bool:
+    return path not in PROMETHEUS_HTTP_METRICS_IGNORED_PATHS
 
 
 def _is_trusted_identity_proxy(host: str | None, trusted_proxy_ips: list[str] | None) -> bool:
@@ -109,6 +121,8 @@ def register_middlewares(app):
 
     @app.middleware("http")
     async def prometheus_metrics_middleware(request: Request, call_next):
+        if not _should_record_prometheus_http_metrics(request.url.path):
+            return await call_next(request)
         started_at, method, path = start_http_request(request.method, request.url.path)
         status_code: int | str = 500
         try:
