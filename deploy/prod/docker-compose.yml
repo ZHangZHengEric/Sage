@@ -5,7 +5,7 @@ services:
       context: ../..
       dockerfile: deploy/images/Dockerfile.server
     image: sage-server:v1.0
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-server
+    container_name: sage-server
     volumes:
       - ${SAGE_ROOT}/sage-server/sessions:/app/sessions
       - ${SAGE_ROOT}/sage-server/agents:/app/agents
@@ -45,7 +45,7 @@ services:
       args:
         NGINX_CONF: deploy/prod/nginx/nginx.conf
     image: sage-web:v1.0
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-web
+    container_name: sage-web
     ports:
       - ${SAGE_WEB_PORT:-30051}:80
     environment:
@@ -57,7 +57,7 @@ services:
   sage-mysql:
     restart: always
     image: docker.m.daocloud.io/mysql:8.4
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-mysql
+    container_name: sage-mysql
     ports:
       - ${SAGE_MYSQL_PUBLISHED_PORT:-30052}:3306
     environment:
@@ -81,7 +81,7 @@ services:
       context: ../..
       dockerfile: deploy/images/Dockerfile.es
     image: sage-es:v1.0
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-es
+    container_name: sage-es
     ports:
       - ${SAGE_ELASTICSEARCH_PUBLISHED_PORT:-30053}:9200
     environment:
