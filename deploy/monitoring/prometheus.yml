@@ -14,7 +14,24 @@ scrape_configs:
       - targets:
           - sage-server:8080
 
+  - job_name: sage-server-dev
+    metrics_path: /api/observability/metrics
+    static_configs:
+      - targets:
+          - sage-server-dev:8080
+
+  - job_name: sage-server-test
+    metrics_path: /api/observability/metrics
+    static_configs:
+      - targets:
+          - sage-server-test:8080
+
   - job_name: docker-containers
     static_configs:
       - targets:
           - sage-cadvisor:8080
+    metric_relabel_configs:
+      - source_labels: [container_label_com_docker_compose_service]
+        regex: (.+)
+        target_label: job
+        replacement: $1

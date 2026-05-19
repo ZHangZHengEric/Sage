@@ -878,7 +878,7 @@
           },
           "editorMode": "code",
           "expr": "sum(rate(sage_server_operations_total{job=~\"$job\",instance=~\"$instance\",category=\"stream\"}[$__rate_interval])) by (name, status)",
-          "legendFormat": "{{name}} {{status}}",
+          "legendFormat": "{{job}} {{status}}",
           "range": true,
           "refId": "A"
         }
@@ -928,7 +928,7 @@
           },
           "editorMode": "code",
           "expr": "histogram_quantile(0.95, sum(rate(sage_server_operation_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\",category=\"stream\"}[$__rate_interval])) by (le, name))",
-          "legendFormat": "p95 {{name}}",
+          "legendFormat": "p95 {{job}}",
           "range": true,
           "refId": "A"
         }
@@ -990,7 +990,7 @@
           },
           "editorMode": "code",
           "expr": "sum(sagents_observability_operations_active{job=~\"$job\",instance=~\"$instance\",category=~\"$category\",name=~\"$operation\"}) by (category, name)",
-          "legendFormat": "{{category}} {{name}}",
+          "legendFormat": "{{category}} {{job}}",
           "range": true,
           "refId": "A"
         }
@@ -1040,7 +1040,7 @@
           },
           "editorMode": "code",
           "expr": "sum(rate(sagents_observability_operations_total{job=~\"$job\",instance=~\"$instance\",category=~\"$category\",name=~\"$operation\"}[$__rate_interval])) by (category, name, status)",
-          "legendFormat": "{{category}} {{name}} {{status}}",
+          "legendFormat": "{{category}} {{job}} {{status}}",
           "range": true,
           "refId": "A"
         }
@@ -1090,7 +1090,7 @@
           },
           "editorMode": "code",
           "expr": "sum(rate(sagents_observability_operations_total{job=~\"$job\",instance=~\"$instance\",status=\"error\",category=~\"$category\",name=~\"$operation\"}[$__rate_interval])) by (category, name)",
-          "legendFormat": "{{category}} {{name}}",
+          "legendFormat": "{{category}} {{job}}",
           "range": true,
           "refId": "A"
         }
@@ -1140,7 +1140,7 @@
           },
           "editorMode": "code",
           "expr": "histogram_quantile(0.50, sum(rate(sagents_observability_operation_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\",category=~\"$category\",name=~\"$operation\"}[$__rate_interval])) by (le, category, name))",
-          "legendFormat": "p50 {{category}} {{name}}",
+          "legendFormat": "p50 {{category}} {{job}}",
           "range": true,
           "refId": "A"
         },
@@ -1151,7 +1151,7 @@
           },
           "editorMode": "code",
           "expr": "histogram_quantile(0.95, sum(rate(sagents_observability_operation_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\",category=~\"$category\",name=~\"$operation\"}[$__rate_interval])) by (le, category, name))",
-          "legendFormat": "p95 {{category}} {{name}}",
+          "legendFormat": "p95 {{category}} {{job}}",
           "range": true,
           "refId": "B"
         },
@@ -1162,7 +1162,7 @@
           },
           "editorMode": "code",
           "expr": "histogram_quantile(0.99, sum(rate(sagents_observability_operation_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\",category=~\"$category\",name=~\"$operation\"}[$__rate_interval])) by (le, category, name))",
-          "legendFormat": "p99 {{category}} {{name}}",
+          "legendFormat": "p99 {{category}} {{job}}",
           "range": true,
           "refId": "C"
         }
@@ -1216,7 +1216,7 @@
           "expr": "topk(15, histogram_quantile(0.95, sum(rate(sagents_observability_operation_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (le, category, name)))",
           "format": "table",
           "instant": true,
-          "legendFormat": "{{category}} {{name}}",
+          "legendFormat": "{{category}} {{job}}",
           "range": false,
           "refId": "A"
         }
@@ -1665,8 +1665,8 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(container_cpu_usage_seconds_total{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\"}[$__rate_interval])) by (name)",
-          "legendFormat": "{{name}}",
+          "expr": "sum(rate(container_cpu_usage_seconds_total{job=~\"$job\",container_label_com_docker_compose_service!=\"\"}[$__rate_interval])) by (job)",
+          "legendFormat": "{{job}}",
           "range": true,
           "refId": "A"
         }
@@ -1715,8 +1715,8 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "container_memory_working_set_bytes{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\"}",
-          "legendFormat": "{{name}}",
+          "expr": "sum(container_memory_working_set_bytes{job=~\"$job\",container_label_com_docker_compose_service!=\"\"}) by (job)",
+          "legendFormat": "{{job}}",
           "range": true,
           "refId": "A"
         }
@@ -1765,8 +1765,8 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(container_fs_reads_bytes_total{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}[$__rate_interval])) by (name)",
-          "legendFormat": "读取 {{name}}",
+          "expr": "sum(rate(container_fs_reads_bytes_total{job=~\"$job\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}[$__rate_interval])) by (job)",
+          "legendFormat": "读取 {{job}}",
           "range": true,
           "refId": "A"
         },
@@ -1776,8 +1776,8 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(container_fs_writes_bytes_total{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}[$__rate_interval])) by (name)",
-          "legendFormat": "写入 {{name}}",
+          "expr": "sum(rate(container_fs_writes_bytes_total{job=~\"$job\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}[$__rate_interval])) by (job)",
+          "legendFormat": "写入 {{job}}",
           "range": true,
           "refId": "B"
         }
@@ -1826,8 +1826,8 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(container_fs_reads_total{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}[$__rate_interval])) by (name)",
-          "legendFormat": "读次数 {{name}}",
+          "expr": "sum(rate(container_fs_reads_total{job=~\"$job\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}[$__rate_interval])) by (job)",
+          "legendFormat": "读次数 {{job}}",
           "range": true,
           "refId": "A"
         },
@@ -1837,8 +1837,8 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(container_fs_writes_total{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}[$__rate_interval])) by (name)",
-          "legendFormat": "写次数 {{name}}",
+          "expr": "sum(rate(container_fs_writes_total{job=~\"$job\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}[$__rate_interval])) by (job)",
+          "legendFormat": "写次数 {{job}}",
           "range": true,
           "refId": "B"
         }
@@ -1887,8 +1887,8 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(container_fs_usage_bytes{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}) by (name)",
-          "legendFormat": "已用 {{name}}",
+          "expr": "sum(container_fs_usage_bytes{job=~\"$job\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}) by (job)",
+          "legendFormat": "已用 {{job}}",
           "range": true,
           "refId": "A"
         },
@@ -1898,8 +1898,8 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(container_fs_limit_bytes{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}) by (name)",
-          "legendFormat": "上限 {{name}}",
+          "expr": "sum(container_fs_limit_bytes{job=~\"$job\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}) by (job)",
+          "legendFormat": "上限 {{job}}",
           "range": true,
           "refId": "B"
         }
@@ -1948,8 +1948,8 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "100 * sum(container_fs_usage_bytes{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}) by (name) / clamp_min(sum(container_fs_limit_bytes{job=\"docker-containers\",name=~\".*sage.*\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}) by (name), 1)",
-          "legendFormat": "{{name}}",
+          "expr": "100 * sum(container_fs_usage_bytes{job=~\"$job\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}) by (job) / clamp_min(sum(container_fs_limit_bytes{job=~\"$job\",container_label_com_docker_compose_service!=\"\",device!~\"tmpfs|shm\"}) by (job), 1)",
+          "legendFormat": "{{job}}",
           "range": true,
           "refId": "A"
         }
@@ -1996,7 +1996,7 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values(sage_server_process_cpu_seconds_total, job)",
+        "definition": "label_values({__name__=~\"sage_server_process_cpu_seconds_total|container_cpu_usage_seconds_total\",job=~\"sage.*\"}, job)",
         "hide": 0,
         "includeAll": true,
         "label": "job",
@@ -2004,7 +2004,7 @@
         "name": "job",
         "options": [],
         "query": {
-          "query": "label_values(sage_server_process_cpu_seconds_total, job)",
+          "query": "label_values({__name__=~\"sage_server_process_cpu_seconds_total|container_cpu_usage_seconds_total\",job=~\"sage.*\"}, job)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
