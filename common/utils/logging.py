@@ -74,6 +74,9 @@ class InterceptHandler(logging.Handler):
         except ValueError:
             level = record.levelname
 
+        if record.name == "uvicorn.access":
+            level = "ACCESS"
+
         record_name = record.name or ""
         record_path = getattr(record, "pathname", "") or ""
         record_filename = getattr(record, "filename", "") or ""
@@ -161,6 +164,10 @@ def init_logging_base(
     """
 
     logger.remove()  # Remove default handler
+    try:
+        logger.level("ACCESS", no=25, color="<cyan>")
+    except ValueError:
+        pass
 
     def formatting_payload(record: Dict[str, Any]) -> str:
         extra = record["extra"]

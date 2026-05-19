@@ -32,7 +32,23 @@ loki.source.docker "containers" {
   targets          = discovery.relabel.docker.output
   labels           = {"job" = "docker"}
   refresh_interval = "5s"
-  forward_to       = [loki.write.local.receiver]
+  forward_to       = [loki.process.docker_logs.receiver]
+}
+
+loki.process "docker_logs" {
+  stage.json {
+    expressions = {
+      level = "level",
+    }
+  }
+
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+
+  forward_to = [loki.write.local.receiver]
 }
 
 loki.write "local" {
