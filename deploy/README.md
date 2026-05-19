@@ -48,6 +48,8 @@ SAGE_REPO_ROOT=$PWD SAGE_DEPLOY_DIR=$PWD/deploy docker compose --env-file deploy
 Prometheus 会抓取 `sage-server:8080/api/observability/metrics` 和 `sage-cadvisor:8080`；dev/test 的 server 服务通过 compose network alias 暴露为统一的 `sage-server`。
 Grafana 默认管理员账号变量为 `SAGE_GRAFANA_ADMIN_USER` / `SAGE_GRAFANA_ADMIN_PASSWORD`，并预置 Prometheus 与 Loki 数据源。
 
+Elasticsearch 默认不随 `deploy/compose.sh prod up -d` 启动。需要内置 ES 时，使用 `deploy/compose.sh prod --profile es up -d`，或显式指定 `deploy/compose.sh prod up -d sage-es`。
+
 ## GitHub frontend dist
 
 Web 和 Wiki 的前端产物由 GitHub Actions 生成，避免部署机执行 `npm run build`：

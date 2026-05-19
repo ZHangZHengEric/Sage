@@ -67,6 +67,8 @@ services:
     mem_limit: 1g
     cpus: 1.0
   sage-es:
+    profiles:
+      - es
     restart: always
     build:
       context: ../..

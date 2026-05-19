@@ -9,8 +9,8 @@ dist_dir="${SAGE_DIST_DIR:-/usr/share/nginx/html}"
 archive_file="/tmp/sage-dist.tgz"
 checksum_file="/tmp/sage-dist.sha256"
 
-curl -fsSL "$dist_url" -o "$archive_file"
-curl -fsSL "$checksum_url" -o "$checksum_file"
+wget -qO "$archive_file" "$dist_url"
+wget -qO "$checksum_file" "$checksum_url"
 
 expected_sha="$(awk '{print $1}' "$checksum_file")"
 actual_sha="$(sha256sum "$archive_file" | awk '{print $1}')"
