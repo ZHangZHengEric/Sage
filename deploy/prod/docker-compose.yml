@@ -50,6 +50,9 @@ services:
       - ${SAGE_WEB_PORT:-30051}:80
     environment:
       TZ: 'Asia/Shanghai'
+    networks:
+      default: {}
+      shared: {}
 
   sage-mysql:
     restart: always

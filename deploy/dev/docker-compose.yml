@@ -56,6 +56,9 @@ services:
       - sage-server-dev
     mem_limit: 512m
     cpus: 0.5
+    networks:
+      default: {}
+      shared: {}
 
   sage-mysql-dev:
     restart: always
