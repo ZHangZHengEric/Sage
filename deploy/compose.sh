@@ -162,7 +162,12 @@ run_compose() {
 
 if [ "${1:-}" = "up" ]; then
   if current_shared_id="$(shared_container_for_project "$CURRENT_PROJECT_NAME")" && [ -n "$current_shared_id" ]; then
-    run_compose "" "${COMPOSE_ARGS[@]}" "$@"
+    shared_network="$(network_for_container "$current_shared_id")"
+    if [ -z "$shared_network" ]; then
+      echo "Shared service is running but its Docker network could not be detected." >&2
+      exit 1
+    fi
+    run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "$@"
     exit $?
   fi
 
@@ -176,7 +181,9 @@ if [ "${1:-}" = "up" ]; then
     exit $?
   fi
 
-  run_compose "" "${SHARED_COMPOSE_ARGS[@]}" up -d
+  COMPOSE_PROJECT_NAME="$SHARED_PROJECT_NAME" \
+  SAGE_CONTAINER_PREFIX="$SHARED_CONTAINER_PREFIX" \
+    run_compose "" "${SHARED_COMPOSE_ARGS[@]}" up -d
   run_compose "${SHARED_PROJECT_NAME}_default" "${ENV_COMPOSE_ARGS[@]}" "$@"
   exit $?
 fi
