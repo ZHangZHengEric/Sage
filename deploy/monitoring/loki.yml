@@ -4,6 +4,9 @@ server:
   http_listen_port: 3100
   grpc_listen_port: 9096
 
+memberlist:
+  advertise_addr: 127.0.0.1
+
 common:
   path_prefix: /loki
   replication_factor: 1
