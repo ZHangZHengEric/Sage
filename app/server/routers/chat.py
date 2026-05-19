@@ -20,6 +20,7 @@ from common.core.request_identity import get_request_user_id
 from common.services import chat_service
 from common.services import conversation_service
 from common.schemas.chat import ChatRequest, StreamRequest, UserInputOptimizeRequest
+from app.server.services.prometheus_metrics import finish_operation, start_operation
 from pydantic import BaseModel
 
 from ..services.chat.stream_manager import StreamManager
@@ -73,6 +74,7 @@ async def _start_web_stream_session(
     interrupt_message: str,
     query: str,
     filter_stream_types: bool = False,
+    stream_name: str = "web_stream",
 ):
     session_id = request.session_id
 
@@ -99,7 +101,7 @@ async def _start_web_stream_session(
     await manager.start_session(session_id, query, generator, lock)
 
     return StreamingResponse(
-        stream_with_manager(session_id, last_index=0, resume=False),
+        stream_with_manager(session_id, last_index=0, resume=False, stream_name=stream_name),
         media_type="text/plain",
     )
 
@@ -148,30 +150,47 @@ async def optimize_chat_input_stream(request: UserInputOptimizeRequest, http_req
     return StreamingResponse(event_generator(), media_type="text/plain")
 
 
-async def stream_with_manager(session_id: str, last_index: int = 0, resume: bool = False):
+async def stream_with_manager(
+    session_id: str,
+    last_index: int = 0,
+    resume: bool = False,
+    stream_name: str = "manager_stream",
+):
     """
     通过 StreamManager 订阅会话流
     """
+    started_at, category, name = start_operation("stream", stream_name)
+    status = "completed"
     manager = StreamManager.get_instance()
     has_stream_data = False
-    async for chunk in manager.subscribe(session_id, last_index):
-        has_stream_data = True
-        yield chunk
-    if has_stream_data:
-        return
     try:
-        await conversation_service.get_conversation_messages(session_id)
+        async for chunk in manager.subscribe(session_id, last_index):
+            has_stream_data = True
+            yield chunk
+        if has_stream_data:
+            return
+        try:
+            await conversation_service.get_conversation_messages(session_id)
+        except Exception:
+            status = "fallback_missing"
+            return
+        yield json.dumps(
+            {
+                "type": "stream_end",
+                "session_id": session_id,
+                "timestamp": time.time(),
+                "resume_fallback": True,
+            },
+            ensure_ascii=False,
+        ) + "\n"
+    except asyncio.CancelledError:
+        status = "cancelled"
+        raise
     except Exception:
-        return
-    yield json.dumps(
-        {
-            "type": "stream_end",
-            "session_id": session_id,
-            "timestamp": time.time(),
-            "resume_fallback": True,
-        },
-        ensure_ascii=False,
-    ) + "\n"
+        status = "error"
+        raise
+    finally:
+        finish_operation(started_at, category, name, status)
 
 
 def _should_filter_stream_chunk(chunk: str) -> bool:
@@ -200,7 +219,13 @@ _DISCONNECT_INTERRUPT_TIMEOUT = 5.0
 _GENERATOR_ACLOSE_TIMEOUT = 5.0
 
 
-async def stream_api_with_disconnect_check(generator, request: Request, lock: asyncio.Lock, session_id: str):
+async def stream_api_with_disconnect_check(
+    generator,
+    request: Request,
+    lock: asyncio.Lock,
+    session_id: str,
+    stream_name: str = "chat_stream",
+):
     """
     Wrap the generator to monitor client disconnection.
     If client disconnects, stop the generator (which triggers its finally block).
@@ -210,18 +235,23 @@ async def stream_api_with_disconnect_check(generator, request: Request, lock: as
     再 ``await`` 长协程（旧写法会在 generator 关闭临界态做远程持久化，叠加 anyio CancelScope
     导致 sage-server 主线程 100% CPU 空转）。改为 ``break`` 后统一在 ``finally`` 里收尾。
     """
+    started_at, category, name = start_operation("stream", stream_name)
     client_disconnected = False
+    status = "completed"
     try:
         async for chunk in generator:
             if await request.is_disconnected():
                 logger.bind(session_id=session_id).info("Client disconnection detected")
                 client_disconnected = True
+                status = "disconnected"
                 break
             yield chunk
     except asyncio.CancelledError:
         client_disconnected = True
+        status = "cancelled"
         raise
     except Exception as e:
+        status = "error"
         logger.bind(session_id=session_id).error(f"Stream generator error: {e}")
         raise
     finally:
@@ -259,6 +289,7 @@ async def stream_api_with_disconnect_check(generator, request: Request, lock: as
             logger.bind(session_id=session_id).info("资源已清理")
         except Exception as e:
             logger.bind(session_id=session_id).error(f"清理资源时发生错误: {e}")
+        finish_operation(started_at, category, name, status)
 
 
 def validate_and_prepare_request(
@@ -338,6 +369,7 @@ async def chat(request: ChatRequest, http_request: Request):
             http_request,
             lock,
             session_id,
+            stream_name="api_chat",
         ),
         media_type="text/plain",
     )
@@ -363,6 +395,7 @@ async def stream_chat(request: StreamRequest, http_request: Request):
             http_request,
             lock,
             session_id,
+            stream_name="api_stream",
         ),
         media_type="text/plain",
     )
@@ -383,6 +416,7 @@ async def stream_chat_web(request: StreamRequest, http_request: Request):
         interrupt_message="同会话重入，先中断旧会话",
         query=query,
         filter_stream_types=True,
+        stream_name="web_stream",
     )
 
 
@@ -394,7 +428,10 @@ async def resume_stream(session_id: str, last_index: int = 0):
     :param last_index: 已收到的最后一条消息索引
     """
 
-    return StreamingResponse(stream_with_manager(session_id, last_index, resume=True), media_type="text/plain")
+    return StreamingResponse(
+        stream_with_manager(session_id, last_index, resume=True, stream_name="resume_stream"),
+        media_type="text/plain",
+    )
 
 
 @chat_router.get("/api/stream/active_sessions")
@@ -406,20 +443,27 @@ async def get_active_sessions(request: Request):
     client_host = request.client.host if request.client else "unknown"
 
     async def event_generator():
+        started_at, category, name = start_operation("stream", "active_sessions")
+        status = "completed"
         try:
             async for sessions in manager.subscribe_active_sessions():
                 if await request.is_disconnected():
                     logger.info(f"Client {client_host} disconnected active_sessions stream")
+                    status = "disconnected"
                     break
 
                 # 手动构建 SSE 格式
                 json_str = json.dumps(sessions, default=str, ensure_ascii=False)
                 yield f"data: {json_str}\n\n"
         except asyncio.CancelledError:
+            status = "cancelled"
             pass
         except Exception as e:
+            status = "error"
             logger.error(f"Error in SSE generator for {client_host}: {e}")
             raise
+        finally:
+            finish_operation(started_at, category, name, status)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -471,4 +515,5 @@ async def rerun_conversation_stream(
         manager=manager,
         interrupt_message="重新执行最后一条用户消息，先中断旧会话",
         query=guidance_content or payload["query"] or "",
+        stream_name="rerun_stream",
     )

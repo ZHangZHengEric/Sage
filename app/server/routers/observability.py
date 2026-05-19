@@ -6,9 +6,10 @@ from fastapi.responses import RedirectResponse, Response
 from common.core import config
 from common.core.exceptions import SageHTTPException
 from common.models.user import User, UserDao
-from common.services.oauth.upstream import is_local_auth_enabled
+from app.server.services.prometheus_metrics import render_prometheus_metrics
 
 observability_router = APIRouter(prefix="/api/observability", tags=["Observability"])
+PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 
 
 def _build_public_jaeger_url(
@@ -71,6 +72,8 @@ async def login_jaeger(request: Request):
             )
         return RedirectResponse(url=next_path, status_code=302)
 
+    from common.services.oauth.upstream import is_local_auth_enabled
+
     if is_local_auth_enabled():
         return RedirectResponse(
             url=_build_web_login_path(cfg, next_path),
@@ -81,6 +84,14 @@ async def login_jaeger(request: Request):
         status_code=503,
         detail="Jaeger 仅支持本地管理员登录",
         error_detail="local auth required for observability",
+    )
+
+
+@observability_router.get("/metrics")
+async def prometheus_metrics():
+    return Response(
+        content=render_prometheus_metrics(),
+        media_type=PROMETHEUS_CONTENT_TYPE,
     )
 
 

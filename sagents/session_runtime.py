@@ -32,7 +32,13 @@ from sagents.context.session_context import (
     SessionStatus,
 )
 
-from sagents.observability import AgentRuntime, ObservabilityManager, OpenTelemetryTraceHandler, ObservableAsyncOpenAI
+from sagents.observability import (
+    AgentRuntime,
+    ObservabilityManager,
+    OpenTelemetryTraceHandler,
+    ObservableAsyncOpenAI,
+    PrometheusTraceHandler,
+)
 from sagents.skill import SkillManager, SkillProxy
 from sagents.tool import ToolManager, ToolProxy
 from sagents.tool.impl.todo_tool import ToDoTool
@@ -438,8 +444,12 @@ class Session:
 
         self.observability_manager = None
         if self.enable_obs:
-            otel_handler = OpenTelemetryTraceHandler(service_name="sagents")
-            self.observability_manager = ObservabilityManager(handlers=[otel_handler])
+            handlers = []
+            if OpenTelemetryTraceHandler is not None:
+                handlers.append(OpenTelemetryTraceHandler(service_name="sagents"))
+            prometheus_handler = PrometheusTraceHandler()
+            handlers.append(prometheus_handler)
+            self.observability_manager = ObservabilityManager(handlers=handlers)
             self.model = ObservableAsyncOpenAI(self.model, self.observability_manager)
 
     def _load_saved_system_context(self, session_id: str) -> Optional[Dict[str, Any]]:
