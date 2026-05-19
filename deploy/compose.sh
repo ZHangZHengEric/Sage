@@ -163,6 +163,7 @@ run_compose() {
   SAGE_DEPLOY_DIR="$DEPLOY_DIR" \
   SAGE_COMPOSE_ENV_FILE="$ENV_FILE" \
   SAGE_SHARED_NETWORK="$shared_network" \
+  COMPOSE_IGNORE_ORPHANS="${COMPOSE_IGNORE_ORPHANS:-true}" \
     docker compose "$@"
 }
 
