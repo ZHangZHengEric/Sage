@@ -507,7 +507,41 @@ def ensure_scheduler_started() -> bool:
 # --- MCP Tools ---
 
 @mcp.tool()
-@sage_mcp_tool(server_name="task_scheduler")
+@sage_mcp_tool(
+    server_name="task_scheduler",
+    description_i18n={
+        "zh": "从任务调度器中列出任务，支持按任务类型、状态、计划时间范围和数量限制筛选。",
+        "en": "List tasks from the task scheduler with filters for task type, status, scheduled time range and result limit.",
+        "pt": "Lista tarefas do agendador com filtros por tipo de tarefa, status, intervalo de horário agendado e limite de resultados.",
+    },
+    param_description_i18n={
+        "task_type": {
+            "zh": "要列出的任务类型。可选值：once（一次性任务，支持状态和时间筛选）、recurring（循环任务模板）、all（两者都包含）。默认 once。",
+            "en": "Task type to list. Values: once (one-time tasks, supports status and time filters), recurring (recurring templates), all (both). Defaults to once.",
+            "pt": "Tipo de tarefa a listar. Valores: once (tarefas únicas, com filtros de status e tempo), recurring (modelos recorrentes), all (ambos). O padrão é once.",
+        },
+        "status": {
+            "zh": "按状态筛选一次性任务。可选值：pending、processing、completed、failed。仅对一次性任务生效。",
+            "en": "Filter one-time tasks by status. Values: pending, processing, completed, failed. Applies only to one-time tasks.",
+            "pt": "Filtra tarefas únicas por status. Valores: pending, processing, completed, failed. Aplica-se apenas a tarefas únicas.",
+        },
+        "scheduled_after": {
+            "zh": "筛选计划时间晚于此时间的一次性任务。优先使用带时区偏移的 ISO 8601，例如 '2026-04-13T18:37:42+08:00'；未带偏移时按当前会话本地时区解释。",
+            "en": "Filter one-time tasks scheduled after this time. Prefer ISO 8601 with timezone offset, e.g. '2026-04-13T18:37:42+08:00'. If no offset is provided, it is interpreted in the current session's local timezone.",
+            "pt": "Filtra tarefas únicas agendadas após este horário. Prefira ISO 8601 com fuso horário, por exemplo '2026-04-13T18:37:42+08:00'. Sem deslocamento, será interpretado no fuso local da sessão atual.",
+        },
+        "scheduled_before": {
+            "zh": "筛选计划时间早于此时间的一次性任务。优先使用带时区偏移的 ISO 8601，例如 '2026-04-13T18:37:42+08:00'；未带偏移时按当前会话本地时区解释。",
+            "en": "Filter one-time tasks scheduled before this time. Prefer ISO 8601 with timezone offset, e.g. '2026-04-13T18:37:42+08:00'. If no offset is provided, it is interpreted in the current session's local timezone.",
+            "pt": "Filtra tarefas únicas agendadas antes deste horário. Prefira ISO 8601 com fuso horário, por exemplo '2026-04-13T18:37:42+08:00'. Sem deslocamento, será interpretado no fuso local da sessão atual.",
+        },
+        "limit": {
+            "zh": "最多返回的任务数量，默认 50。",
+            "en": "Maximum number of tasks to return. Defaults to 50.",
+            "pt": "Número máximo de tarefas a retornar. O padrão é 50.",
+        },
+    },
+)
 async def list_tasks(
     task_type: str = "once",
     status: Optional[str] = None,
@@ -628,7 +662,41 @@ async def list_tasks(
 
 
 @mcp.tool()
-@sage_mcp_tool(server_name="task_scheduler")
+@sage_mcp_tool(
+    server_name="task_scheduler",
+    description_i18n={
+        "zh": "添加新任务到调度器。可创建一次性任务或循环任务；时间必须按当前会话本地时区理解，不要主动改写为 UTC。",
+        "en": "Add a new task to the scheduler. Creates either a one-time task or a recurring task; time values must be interpreted in the current session's local timezone and should not be rewritten to UTC.",
+        "pt": "Adiciona uma nova tarefa ao agendador. Cria uma tarefa única ou recorrente; horários devem ser interpretados no fuso local da sessão atual e não devem ser reescritos para UTC.",
+    },
+    param_description_i18n={
+        "name": {
+            "zh": "任务名称或标题。",
+            "en": "Task name or title.",
+            "pt": "Nome ou título da tarefa.",
+        },
+        "description": {
+            "zh": "单次执行的具体任务描述，说明这次要做什么。循环任务也应写单次执行内容，不要写“每天执行”这类循环信息。",
+            "en": "Concrete description of one execution: what should be done this time. For recurring tasks, describe one run, not recurrence text such as 'run every day'.",
+            "pt": "Descrição concreta de uma execução: o que deve ser feito desta vez. Para tarefas recorrentes, descreva uma execução, não textos de recorrência como 'executar todos os dias'.",
+        },
+        "agent_id": {
+            "zh": "执行此任务的 Agent ID。",
+            "en": "Agent ID that will execute this task.",
+            "pt": "ID do agente que executará esta tarefa.",
+        },
+        "schedule": {
+            "zh": "任务计划。一次性任务：执行时间，优先使用带时区偏移的 ISO 8601，例如 '2026-04-13T18:37:42+08:00'；未带偏移时按当前会话本地时区解释。循环任务：cron 表达式，例如 '0 9 * * *'。",
+            "en": "Task schedule. For one-time tasks: execution time, preferably ISO 8601 with timezone offset, e.g. '2026-04-13T18:37:42+08:00'; without an offset, interpret it in the current session's local timezone. For recurring tasks: cron expression, e.g. '0 9 * * *'.",
+            "pt": "Agendamento da tarefa. Para tarefas únicas: horário de execução, de preferência ISO 8601 com fuso horário, por exemplo '2026-04-13T18:37:42+08:00'; sem deslocamento, interprete no fuso local da sessão atual. Para tarefas recorrentes: expressão cron, por exemplo '0 9 * * *'.",
+        },
+        "is_recurring": {
+            "zh": "是否创建循环任务。False 表示一次性任务，True 表示循环任务。默认 False。",
+            "en": "Whether to create a recurring task. False means one-time task, True means recurring task. Defaults to False.",
+            "pt": "Se deve criar uma tarefa recorrente. False significa tarefa única, True significa tarefa recorrente. O padrão é False.",
+        },
+    },
+)
 async def add_task(
     name: str,
     description: str,
@@ -734,7 +802,21 @@ async def add_task(
 
 
 @mcp.tool()
-@sage_mcp_tool(server_name="task_scheduler")
+@sage_mcp_tool(
+    server_name="task_scheduler",
+    description_i18n={
+        "zh": "从调度器中删除任务。一次性任务会连同执行历史一起删除；循环任务会删除模板和所有待执行实例。此操作不可撤销。",
+        "en": "Delete a task from the scheduler. One-time tasks are removed with their execution history; recurring tasks remove the template and all pending instances. This action cannot be undone.",
+        "pt": "Remove uma tarefa do agendador. Tarefas únicas são removidas com o histórico de execução; tarefas recorrentes removem o modelo e todas as instâncias pendentes. Esta ação não pode ser desfeita.",
+    },
+    param_description_i18n={
+        "task_id": {
+            "zh": "要删除的任务 ID，例如 'once_123' 或 'rec_456'。",
+            "en": "ID of the task to delete, e.g. 'once_123' or 'rec_456'.",
+            "pt": "ID da tarefa a excluir, por exemplo 'once_123' ou 'rec_456'.",
+        },
+    },
+)
 async def delete_task(task_id: str, user_id: Optional[str] = None) -> str:
     """
     Delete a task from the scheduler.
@@ -789,7 +871,21 @@ async def delete_task(task_id: str, user_id: Optional[str] = None) -> str:
 
 
 @mcp.tool()
-@sage_mcp_tool(server_name="task_scheduler")
+@sage_mcp_tool(
+    server_name="task_scheduler",
+    description_i18n={
+        "zh": "手动将任务标记为完成。一次性任务会更新为 completed；循环任务会更新最近执行时间。",
+        "en": "Manually mark a task as completed. One-time tasks are updated to completed; recurring tasks update their last executed time.",
+        "pt": "Marca manualmente uma tarefa como concluída. Tarefas únicas são atualizadas para completed; tarefas recorrentes atualizam o último horário de execução.",
+    },
+    param_description_i18n={
+        "task_id": {
+            "zh": "要标记完成的任务 ID，例如 'once_123' 或 'rec_456'。",
+            "en": "ID of the task to mark as completed, e.g. 'once_123' or 'rec_456'.",
+            "pt": "ID da tarefa a marcar como concluída, por exemplo 'once_123' ou 'rec_456'.",
+        },
+    },
+)
 async def complete_task(task_id: str, user_id: Optional[str] = None) -> str:
     """
     Mark a task as completed manually.
@@ -852,7 +948,26 @@ async def complete_task(task_id: str, user_id: Optional[str] = None) -> str:
 
 
 @mcp.tool()
-@sage_mcp_tool(server_name="task_scheduler")
+@sage_mcp_tool(
+    server_name="task_scheduler",
+    description_i18n={
+        "zh": "启用或禁用循环任务。仅适用于 rec_* 循环任务；禁用后不会再生成新的待执行实例。",
+        "en": "Enable or disable a recurring task. Applies only to rec_* tasks; disabled recurring tasks will not spawn new pending instances.",
+        "pt": "Ativa ou desativa uma tarefa recorrente. Aplica-se apenas a tarefas rec_*; tarefas recorrentes desativadas não criarão novas instâncias pendentes.",
+    },
+    param_description_i18n={
+        "task_id": {
+            "zh": "循环任务 ID，例如 'rec_456'。",
+            "en": "Recurring task ID, e.g. 'rec_456'.",
+            "pt": "ID da tarefa recorrente, por exemplo 'rec_456'.",
+        },
+        "enabled": {
+            "zh": "True 表示启用循环任务，False 表示禁用循环任务。默认 True。",
+            "en": "True enables the recurring task; False disables it. Defaults to True.",
+            "pt": "True ativa a tarefa recorrente; False a desativa. O padrão é True.",
+        },
+    },
+)
 async def enable_task(task_id: str, enabled: bool = True, user_id: Optional[str] = None) -> str:
     """
     Enable or disable a recurring task.
@@ -906,7 +1021,21 @@ async def enable_task(task_id: str, enabled: bool = True, user_id: Optional[str]
 
 
 @mcp.tool()
-@sage_mcp_tool(server_name="task_scheduler")
+@sage_mcp_tool(
+    server_name="task_scheduler",
+    description_i18n={
+        "zh": "获取指定任务的详细信息。一次性任务会返回任务详情和执行历史；循环任务会返回循环任务模板详情。",
+        "en": "Get detailed information for a specific task. One-time tasks return task details and execution history; recurring tasks return template details.",
+        "pt": "Obtém informações detalhadas de uma tarefa específica. Tarefas únicas retornam detalhes e histórico de execução; tarefas recorrentes retornam detalhes do modelo.",
+    },
+    param_description_i18n={
+        "task_id": {
+            "zh": "要查询的任务 ID，例如 'once_123' 或 'rec_456'。",
+            "en": "ID of the task to retrieve, e.g. 'once_123' or 'rec_456'.",
+            "pt": "ID da tarefa a recuperar, por exemplo 'once_123' ou 'rec_456'.",
+        },
+    },
+)
 async def get_task_details(task_id: str, user_id: Optional[str] = None) -> str:
     """
     Get detailed information about a specific task.
@@ -988,7 +1117,51 @@ async def get_task_details(task_id: str, user_id: Optional[str] = None) -> str:
 
 
 @mcp.tool()
-@sage_mcp_tool(server_name="task_scheduler")
+@sage_mcp_tool(
+    server_name="task_scheduler",
+    description_i18n={
+        "zh": "更新调度器中的已有任务。一次性任务可更新名称、描述、执行 Agent、执行时间或最大重试次数；循环任务可更新名称、描述、执行 Agent、cron 表达式或启用状态。只会更新提供的字段。",
+        "en": "Update an existing scheduler task. One-time tasks can update name, description, agent, execution time or max retries; recurring tasks can update name, description, agent, cron expression or enabled state. Only provided fields are changed.",
+        "pt": "Atualiza uma tarefa existente no agendador. Tarefas únicas podem atualizar nome, descrição, agente, horário de execução ou máximo de tentativas; tarefas recorrentes podem atualizar nome, descrição, agente, expressão cron ou estado ativo. Somente campos fornecidos são alterados.",
+    },
+    param_description_i18n={
+        "task_id": {
+            "zh": "要更新的任务 ID，例如 'once_123' 或 'rec_456'。",
+            "en": "ID of the task to update, e.g. 'once_123' or 'rec_456'.",
+            "pt": "ID da tarefa a atualizar, por exemplo 'once_123' ou 'rec_456'.",
+        },
+        "name": {
+            "zh": "新的任务名称或标题，可选。",
+            "en": "New task name or title. Optional.",
+            "pt": "Novo nome ou título da tarefa. Opcional.",
+        },
+        "description": {
+            "zh": "新的任务描述，可选。对于循环任务，仍应描述单次执行内容。",
+            "en": "New task description. Optional. For recurring tasks, still describe one execution.",
+            "pt": "Nova descrição da tarefa. Opcional. Para tarefas recorrentes, ainda descreva uma execução.",
+        },
+        "agent_id": {
+            "zh": "新的执行 Agent ID，可选。",
+            "en": "New agent ID to execute the task. Optional.",
+            "pt": "Novo ID do agente que executará a tarefa. Opcional.",
+        },
+        "schedule": {
+            "zh": "新的计划时间，可选。一次性任务优先使用带时区偏移的 ISO 8601，例如 '2026-04-13T18:37:42+08:00'；未带偏移时按当前会话本地时区解释。循环任务使用 cron 表达式。",
+            "en": "New schedule. Optional. For one-time tasks, prefer ISO 8601 with timezone offset, e.g. '2026-04-13T18:37:42+08:00'; without an offset, interpret it in the current session's local timezone. For recurring tasks, use a cron expression.",
+            "pt": "Novo agendamento. Opcional. Para tarefas únicas, prefira ISO 8601 com fuso horário, por exemplo '2026-04-13T18:37:42+08:00'; sem deslocamento, interprete no fuso local da sessão atual. Para tarefas recorrentes, use uma expressão cron.",
+        },
+        "enabled": {
+            "zh": "是否启用循环任务，可选。仅适用于循环任务。",
+            "en": "Whether the recurring task is enabled. Optional. Applies only to recurring tasks.",
+            "pt": "Se a tarefa recorrente está ativa. Opcional. Aplica-se apenas a tarefas recorrentes.",
+        },
+        "max_retries": {
+            "zh": "新的最大重试次数，可选。仅适用于一次性任务。",
+            "en": "New maximum retry count. Optional. Applies only to one-time tasks.",
+            "pt": "Novo número máximo de tentativas. Opcional. Aplica-se apenas a tarefas únicas.",
+        },
+    },
+)
 async def update_task(
     task_id: str,
     name: Optional[str] = None,

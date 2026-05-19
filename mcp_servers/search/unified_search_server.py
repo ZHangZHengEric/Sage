@@ -222,7 +222,31 @@ async def search_images(
     name="search_web_page",
     description="搜索网页内容。支持多个搜索引擎，自动选择可用的引擎。"
 )
-@sage_mcp_tool(server_name="unified_search_server")
+@sage_mcp_tool(
+    server_name="unified_search_server",
+    description_i18n={
+        "zh": "搜索网页内容。支持多个搜索引擎，并会自动选择当前可用的搜索引擎。",
+        "en": "Search web pages. Supports multiple search engines and automatically selects an available provider.",
+        "pt": "Pesquise páginas da web. Suporta vários mecanismos de busca e seleciona automaticamente um provedor disponível.",
+    },
+    param_description_i18n={
+        "query": {
+            "zh": "搜索查询词，必填。",
+            "en": "Search query. Required.",
+            "pt": "Consulta de pesquisa. Obrigatória.",
+        },
+        "count": {
+            "zh": "返回结果数量，默认 10，最大 100。",
+            "en": "Number of results to return. Defaults to 10, maximum 100.",
+            "pt": "Número de resultados a retornar. O padrão é 10, máximo 100.",
+        },
+        "time_range": {
+            "zh": "时间范围筛选，可选值：day、week、month、year；空字符串表示不限时间。",
+            "en": "Optional time range filter. Values: day, week, month, year. Empty string means no time limit.",
+            "pt": "Filtro opcional de intervalo de tempo. Valores: day, week, month, year. String vazia significa sem limite de tempo.",
+        },
+    },
+)
 async def search_web_page(
     query: str,
     count: int = 10,
@@ -271,7 +295,31 @@ async def search_web_page(
     name="search_image_from_web",
     description="搜索网络图片。支持多个搜索引擎，自动选择可用的引擎。"
 )
-@sage_mcp_tool(server_name="unified_search_server")
+@sage_mcp_tool(
+    server_name="unified_search_server",
+    description_i18n={
+        "zh": "搜索网络图片。支持多个图片搜索引擎，并会自动选择当前可用的搜索引擎。",
+        "en": "Search images on the web. Supports multiple image search engines and automatically selects an available provider.",
+        "pt": "Pesquise imagens na web. Suporta vários mecanismos de busca de imagens e seleciona automaticamente um provedor disponível.",
+    },
+    param_description_i18n={
+        "query": {
+            "zh": "图片搜索查询词，必填。",
+            "en": "Image search query. Required.",
+            "pt": "Consulta de pesquisa de imagens. Obrigatória.",
+        },
+        "count": {
+            "zh": "返回图片结果数量，默认 10，最大 100。",
+            "en": "Number of image results to return. Defaults to 10, maximum 100.",
+            "pt": "Número de resultados de imagem a retornar. O padrão é 10, máximo 100.",
+        },
+        "time_range": {
+            "zh": "时间范围筛选，可选值：day、week、month、year；空字符串表示不限时间。",
+            "en": "Optional time range filter. Values: day, week, month, year. Empty string means no time limit.",
+            "pt": "Filtro opcional de intervalo de tempo. Valores: day, week, month, year. String vazia significa sem limite de tempo.",
+        },
+    },
+)
 async def search_image_from_web(
     query: str,
     count: int = 10,
