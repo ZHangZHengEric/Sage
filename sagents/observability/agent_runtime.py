@@ -4,6 +4,7 @@ from sagents.observability.manager import ObservabilityManager
 from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 from sagents.tool import tool_manager
 from sagents.tool.tool_manager import ToolManager
+from sagents.tool.tool_schema import McpToolSpec, SageMcpToolSpec
 from sagents.context.session_context import SessionContext
 from sagents.utils.logger import logger
 
@@ -39,8 +40,27 @@ class ObservableToolManager:
         # Note: The agent might pass session_id, but we also have self.session_id.
         # We use the passed one if available, else ours.
         sid = session_id or self.session_id
+        tool = None
+        try:
+            tool = self._tool_manager.get_tool(tool_name)
+        except Exception:
+            tool = None
+        tool_type = "tool"
+        server_name = None
+        if isinstance(tool, McpToolSpec):
+            tool_type = "mcp"
+            server_name = tool.server_name
+        elif isinstance(tool, SageMcpToolSpec):
+            tool_type = "sage_mcp"
+            server_name = tool.server_name
 
-        self.observability_manager.on_tool_start(sid, tool_name, kwargs)
+        self.observability_manager.on_tool_start(
+            sid,
+            tool_name,
+            kwargs,
+            tool_type=tool_type,
+            server_name=server_name,
+        )
 
         try:
             result = await self._tool_manager.run_tool_async(
