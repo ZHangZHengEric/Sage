@@ -99,7 +99,7 @@ def render_prometheus_trace_metrics() -> str:
         lines.append(
             _labeled_metric_line(
                 "sagents_observability_operations_total",
-                {"category": category, "name": name, "status": status},
+                {"category": category, "name": name, "session_id": name, "status": status},
                 total[(category, name, status)],
             )
         )
@@ -117,28 +117,28 @@ def render_prometheus_trace_metrics() -> str:
             lines.append(
                 _labeled_metric_line(
                     "sagents_observability_operation_duration_seconds_bucket",
-                    {"category": category, "name": name, "le": str(bucket)},
+                    {"category": category, "name": name, "session_id": name, "le": str(bucket)},
                     cumulative,
                 )
             )
         lines.append(
             _labeled_metric_line(
                 "sagents_observability_operation_duration_seconds_bucket",
-                {"category": category, "name": name, "le": "+Inf"},
+                {"category": category, "name": name, "session_id": name, "le": "+Inf"},
                 duration_count.get((category, name), 0),
             )
         )
         lines.append(
             _labeled_metric_line(
                 "sagents_observability_operation_duration_seconds_sum",
-                {"category": category, "name": name},
+                {"category": category, "name": name, "session_id": name},
                 duration_sum.get((category, name), 0.0),
             )
         )
         lines.append(
             _labeled_metric_line(
                 "sagents_observability_operation_duration_seconds_count",
-                {"category": category, "name": name},
+                {"category": category, "name": name, "session_id": name},
                 duration_count.get((category, name), 0),
             )
         )
@@ -153,7 +153,7 @@ def render_prometheus_trace_metrics() -> str:
         lines.append(
             _labeled_metric_line(
                 "sagents_observability_operations_active",
-                {"category": category, "name": name},
+                {"category": category, "name": name, "session_id": name},
                 active[(category, name)],
             )
         )

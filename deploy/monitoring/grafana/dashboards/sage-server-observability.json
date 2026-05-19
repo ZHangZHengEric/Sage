@@ -990,7 +990,7 @@
           },
           "editorMode": "code",
           "expr": "sum(sagents_observability_operations_active{job=~\"$job\",instance=~\"$instance\"}) by (category, name)",
-          "legendFormat": "{{category}} {{job}}",
+          "legendFormat": "{{category}} {{name}}",
           "range": true,
           "refId": "A"
         }
@@ -1040,7 +1040,7 @@
           },
           "editorMode": "code",
           "expr": "sum(rate(sagents_observability_operations_total{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (category, name, status)",
-          "legendFormat": "{{category}} {{job}} {{status}}",
+          "legendFormat": "{{category}} {{name}} {{status}}",
           "range": true,
           "refId": "A"
         }
@@ -1090,7 +1090,7 @@
           },
           "editorMode": "code",
           "expr": "sum(rate(sagents_observability_operations_total{job=~\"$job\",instance=~\"$instance\",status=\"error\"}[$__rate_interval])) by (category, name)",
-          "legendFormat": "{{category}} {{job}}",
+          "legendFormat": "{{category}} {{name}}",
           "range": true,
           "refId": "A"
         }
@@ -1140,7 +1140,7 @@
           },
           "editorMode": "code",
           "expr": "histogram_quantile(0.50, sum(rate(sagents_observability_operation_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (le, category, name))",
-          "legendFormat": "p50 {{category}} {{job}}",
+          "legendFormat": "p50 {{category}} {{name}}",
           "range": true,
           "refId": "A"
         },
@@ -1151,7 +1151,7 @@
           },
           "editorMode": "code",
           "expr": "histogram_quantile(0.95, sum(rate(sagents_observability_operation_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (le, category, name))",
-          "legendFormat": "p95 {{category}} {{job}}",
+          "legendFormat": "p95 {{category}} {{name}}",
           "range": true,
           "refId": "B"
         },
@@ -1162,7 +1162,7 @@
           },
           "editorMode": "code",
           "expr": "histogram_quantile(0.99, sum(rate(sagents_observability_operation_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (le, category, name))",
-          "legendFormat": "p99 {{category}} {{job}}",
+          "legendFormat": "p99 {{category}} {{name}}",
           "range": true,
           "refId": "C"
         }
@@ -1216,7 +1216,7 @@
           "expr": "topk(15, histogram_quantile(0.95, sum(rate(sagents_observability_operation_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (le, category, name)))",
           "format": "table",
           "instant": true,
-          "legendFormat": "{{category}} {{job}}",
+          "legendFormat": "{{category}} {{name}}",
           "range": false,
           "refId": "A"
         }
