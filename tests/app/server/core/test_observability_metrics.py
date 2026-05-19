@@ -82,6 +82,8 @@ def test_prometheus_trace_handler_records_agent_llm_tool_and_mcp_hooks():
     reset_prometheus_trace_metrics()
     handler = PrometheusTraceHandler()
 
+    handler.on_chain_start("session-1", {})
+    handler.on_chain_end("ok")
     handler.on_agent_start("session-1", "SimpleAgent")
     handler.on_agent_end({"status": "finished"})
     handler.on_llm_start("session-1", "gpt-test", [], step_name="plan")
@@ -93,7 +95,8 @@ def test_prometheus_trace_handler_records_agent_llm_tool_and_mcp_hooks():
 
     body = render_prometheus_trace_metrics()
 
-    assert 'sagents_observability_operations_total{category="agent",name="SimpleAgent",status="success"} 1.000000' in body
-    assert 'sagents_observability_operations_total{category="llm",name="gpt-test/plan",status="success"} 1.000000' in body
-    assert 'sagents_observability_operations_total{category="tool",name="search",status="error"} 1.000000' in body
-    assert 'sagents_observability_operations_total{category="mcp",name="AnyTool/query",status="success"} 1.000000' in body
+    assert 'sagents_observability_operations_total{category="chain",name="session-1",status="success"} 1.000000' in body
+    assert 'sagents_observability_operations_total{category="agent",name="session-1",status="success"} 1.000000' in body
+    assert 'sagents_observability_operations_total{category="llm",name="session-1",status="success"} 1.000000' in body
+    assert 'sagents_observability_operations_total{category="tool",name="session-1",status="error"} 1.000000' in body
+    assert 'sagents_observability_operations_total{category="mcp",name="session-1",status="success"} 1.000000' in body

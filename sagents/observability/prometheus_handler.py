@@ -162,16 +162,16 @@ def render_prometheus_trace_metrics() -> str:
 
 class PrometheusTraceHandler(BaseTraceHandler):
     def on_chain_start(self, session_id: str, input_data: Any, **kwargs: Any) -> Any:
-        _start_operation("chain", "session")
+        _start_operation("chain", _session_operation_name(session_id))
 
     def on_chain_end(self, output_data: Any, **kwargs: Any) -> Any:
-        _finish_operation("chain", "session", "success")
+        _finish_operation("chain", _current_name_for_category("chain"), "success")
 
     def on_chain_error(self, error: Exception, **kwargs: Any) -> Any:
-        _finish_operation("chain", "session", "error")
+        _finish_operation("chain", _current_name_for_category("chain"), "error")
 
     def on_agent_start(self, session_id: str, agent_name: str, **kwargs: Any) -> Any:
-        _start_operation("agent", agent_name or "unknown")
+        _start_operation("agent", _session_operation_name(session_id))
 
     def on_agent_end(self, output: Any, **kwargs: Any) -> Any:
         status = "success"
@@ -191,10 +191,7 @@ class PrometheusTraceHandler(BaseTraceHandler):
         step_name: str = None,
         **kwargs: Any,
     ) -> Any:
-        name = str(model_name or "unknown")
-        if step_name:
-            name = f"{name}/{step_name}"
-        _start_operation("llm", name)
+        _start_operation("llm", _session_operation_name(session_id))
 
     def on_llm_end(self, response: Any, **kwargs: Any) -> Any:
         _finish_operation("llm", _current_name_for_category("llm"), "success")
@@ -210,10 +207,8 @@ class PrometheusTraceHandler(BaseTraceHandler):
         **kwargs: Any,
     ) -> Any:
         tool_type = str(kwargs.get("tool_type") or "tool")
-        server_name = str(kwargs.get("server_name") or "")
         category = "mcp" if tool_type == "mcp" else "tool"
-        name = f"{server_name}/{tool_name}" if category == "mcp" and server_name else str(tool_name or "unknown")
-        _start_operation(category, name)
+        _start_operation(category, _session_operation_name(session_id))
 
     def on_tool_end(self, tool_output: Any, **kwargs: Any) -> Any:
         category, name = _current_tool_category_and_name()
@@ -235,6 +230,10 @@ def _current_name_for_category(category: str) -> str:
         if item_category == category:
             return item_name
     return "unknown"
+
+
+def _session_operation_name(session_id: str) -> str:
+    return str(session_id or "unknown")
 
 
 def _current_tool_category_and_name() -> tuple[str, str]:
