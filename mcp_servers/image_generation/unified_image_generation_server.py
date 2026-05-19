@@ -268,7 +268,36 @@ async def generate_image_impl(
     name="generate_image",
     description="根据文本描述生成图片。支持参考图生成（保持人物一致性）。自动选择可用的提供商。"
 )
-@sage_mcp_tool(server_name="unified_image_generation_server")
+@sage_mcp_tool(
+    server_name="unified_image_generation_server",
+    description_i18n={
+        "zh": "根据文本描述生成图片。支持使用参考图生成风格一致或人物一致的图片，并会自动选择当前可用的图片生成提供商。",
+        "en": "Generate an image from a text prompt. Supports reference images for style or character consistency and automatically selects an available image generation provider.",
+        "pt": "Gera uma imagem a partir de um prompt de texto. Suporta imagens de referência para consistência de estilo ou personagem e seleciona automaticamente um provedor de geração de imagens disponível.",
+    },
+    param_description_i18n={
+        "prompt": {
+            "zh": "图片描述提示词，必填。建议详细描述场景、风格、人物、光线、构图等。",
+            "en": "Image prompt. Required. Describe the scene, style, characters, lighting, composition and other details.",
+            "pt": "Prompt da imagem. Obrigatório. Descreva a cena, estilo, personagens, iluminação, composição e outros detalhes.",
+        },
+        "aspect_ratio": {
+            "zh": "图片宽高比，默认 1:1。可选值：1:1、16:9、4:3、3:2、2:3、9:16。",
+            "en": "Image aspect ratio. Defaults to 1:1. Values: 1:1, 16:9, 4:3, 3:2, 2:3, 9:16.",
+            "pt": "Proporção da imagem. O padrão é 1:1. Valores: 1:1, 16:9, 4:3, 3:2, 2:3, 9:16.",
+        },
+        "reference_image": {
+            "zh": "参考图 URL，可选。提供后可用于生成风格一致或人物一致的图片。",
+            "en": "Optional reference image URL. Use it to generate images with consistent style or character identity.",
+            "pt": "URL opcional da imagem de referência. Use para gerar imagens com estilo ou identidade de personagem consistentes.",
+        },
+        "output_path": {
+            "zh": "图片保存路径，可选。提供后图片会保存到该路径；否则返回 base64 编码的图片数据。",
+            "en": "Optional output path. If provided, the image is saved there; otherwise base64-encoded image data is returned.",
+            "pt": "Caminho de saída opcional. Se informado, a imagem será salva nesse caminho; caso contrário, os dados da imagem em base64 serão retornados.",
+        },
+    },
+)
 async def generate_image(
     prompt: str,
     aspect_ratio: str = "1:1",
