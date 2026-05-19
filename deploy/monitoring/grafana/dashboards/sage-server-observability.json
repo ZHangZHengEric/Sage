@@ -1723,56 +1723,6 @@
       ],
       "title": "容器内存",
       "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 72
-      },
-      "id": 60,
-      "panels": [],
-      "title": "日志",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "loki",
-        "uid": "sage-loki"
-      },
-      "gridPos": {
-        "h": 10,
-        "w": 24,
-        "x": 0,
-        "y": 73
-      },
-      "id": 61,
-      "options": {
-        "dedupStrategy": "none",
-        "enableLogDetails": true,
-        "prettifyLogMessage": false,
-        "showCommonLabels": false,
-        "showLabels": false,
-        "showTime": true,
-        "sortOrder": "Descending",
-        "wrapLogMessage": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "sage-loki"
-          },
-          "editorMode": "code",
-          "expr": "{job=\"docker\",service=~\"sage-server|sage-server-dev|sage-server-test\"}",
-          "queryType": "range",
-          "refId": "A"
-        }
-      ],
-      "title": "Sage 服务日志",
-      "type": "logs"
     }
   ],
   "refresh": "10s",
