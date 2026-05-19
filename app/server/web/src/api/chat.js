@@ -3,6 +3,7 @@
  */
 
 import request from '../utils/request.js'
+import { getApiPrefix } from '../config/runtime.js'
 
 const resolveRequestLanguage = (language) => {
   const savedLanguage = language || (typeof localStorage !== 'undefined' ? localStorage.getItem('language') : null)
@@ -26,7 +27,7 @@ export const chatAPI = {
   },
 
   downloadSessionFolder: async (sessionId) => {
-    const apiPrefix = import.meta.env.VITE_BACKEND_API_PREFIX || ''
+    const apiPrefix = getApiPrefix()
     const url = `${apiPrefix}/api/sessions/${encodeURIComponent(sessionId)}/download`
     const headers = {
       Accept: 'application/zip',

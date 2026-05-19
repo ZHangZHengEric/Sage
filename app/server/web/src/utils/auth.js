@@ -12,8 +12,9 @@ export function removeCookie(key) {
 
 
 import { userAPI } from '../api/user.js'
+import { getApiPrefix } from '../config/runtime.js'
 
-export const getApiPrefix = () => import.meta.env.VITE_BACKEND_API_PREFIX || ''
+export { getApiPrefix }
 
 export const buildOAuthLoginUrl = (providerId, nextPath = null) => {
   const apiPrefix = getApiPrefix()

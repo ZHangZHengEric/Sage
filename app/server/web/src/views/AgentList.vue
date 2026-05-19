@@ -362,6 +362,7 @@ import MarkdownRenderer from '../components/chat/MarkdownRenderer.vue'
 import { useAgentEditStore } from '../stores/agentEdit'
 import { normalizeAgentMode } from '../utils/agentMode.js'
 import { buildImportedAgentDraft, parseAgentConfigImport } from '../utils/agentConfigImport.js'
+import { getBackendEndpoint } from '../config/runtime.js'
 import { dump } from 'js-yaml'
 import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 import { Button } from '@/components/ui/button'
@@ -904,7 +905,7 @@ const openUsageModal = async (agent) => {
   }
 }
 
-const backendEndpoint = (import.meta.env.VITE_SAGE_API_BASE_URL || '').replace(/\/+$/, '')
+const backendEndpoint = getBackendEndpoint()
 
 const generateUsageCodes = (agent) => {
   const body = {

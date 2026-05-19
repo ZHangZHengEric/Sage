@@ -16,6 +16,7 @@ import { usePanelStore } from '@/stores/panel.js'
 import { useWorkbenchStore } from '@/stores/workbench.js'
 import { isToolResultMessage } from '@/utils/messageLabels.js'
 import { mergeToolFunctionArguments } from '@/utils/mergeToolFunctionArguments.js'
+import { getWebBasePath } from '@/config/runtime.js'
 import { storeToRefs } from 'pinia'
 
 const abilityCacheByAgentGlobal = ref({})
@@ -846,8 +847,7 @@ export const useChatPage = (props) => {
       toast.error(t('chat.shareNoSession') || 'No active session to share')
       return
     }
-    const rawBase = (import.meta.env?.BASE_URL || '/').toString()
-    const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`
+    const base = getWebBasePath()
     const shareUrl = `${window.location.origin}${base}share/${currentSessionId.value}`
     copyToClipboard(shareUrl).then(() => {
       toast.success(t('chat.shareSuccess') || 'Share link copied to clipboard')
