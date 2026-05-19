@@ -190,4 +190,4 @@ kubectl -n "${NAMESPACE:-sage-dev}" get pods,svc
 
 - MySQL 数据库 `SAGE_MYSQL_DATABASE` 由应用启动逻辑自动创建。
 - MySQL、RustFS 和 Jaeger 的内部 Service 名称保持为 compose 中的服务名，应用配置无需改成 Kubernetes FQDN。
-- `sage-web` 镜像构建时会写入 `VITE_SAGE_WEB_BASE_PATH=/sage/`，并通过镜像内 nginx 将 `/prod-api/api` 和 `/jaeger` 代理到后端与 Jaeger。
+- `sage-web` 前端固定使用 `/sage/` 和 `/prod-api`，镜像不需要前端运行时环境变量。

@@ -1,0 +1,77 @@
+name: Build frontend dist
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+      - 'web-v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to upload dist assets to'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-frontend-dist:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build web dist
+        working-directory: app/server/web
+        run: |
+          npm ci
+          npm run build
+          tar -C dist -czf ../../../sage-web-dist.tgz .
+          cd ../../..
+          sha256sum sage-web-dist.tgz > sage-web-dist.sha256
+
+      - name: Build wiki dist
+        working-directory: app/wiki
+        run: |
+          npm ci
+          npm run build
+          tar -C .vitepress/dist -czf ../../sage-wiki-dist.tgz .
+          cd ../..
+          sha256sum sage-wiki-dist.tgz > sage-wiki-dist.sha256
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sage-frontend-dist
+          path: |
+            sage-web-dist.tgz
+            sage-web-dist.sha256
+            sage-wiki-dist.tgz
+            sage-wiki-dist.sha256
+
+      - name: Upload release assets
+        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/web-v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release_tag="${{ inputs.release_tag }}"
+          if [ -z "$release_tag" ]; then
+            release_tag="${GITHUB_REF_NAME}"
+          fi
+          if ! gh release view "$release_tag" >/dev/null 2>&1; then
+            gh release create "$release_tag" --title "$release_tag" --notes "Sage frontend dist assets."
+          fi
+          gh release upload "$release_tag" \
+            sage-web-dist.tgz \
+            sage-web-dist.sha256 \
+            sage-wiki-dist.tgz \
+            sage-wiki-dist.sha256 \
+            --clobber

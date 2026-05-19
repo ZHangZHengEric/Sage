@@ -3,6 +3,7 @@
  */
 
 import request from '../utils/request.js'
+import { getApiPrefix } from '../config/runtime.js'
 
 const sleep = (ms, signal) => new Promise((resolve, reject) => {
   const timeoutId = setTimeout(() => {
@@ -249,7 +250,7 @@ export const agentAPI = {
       return response.blob()
     }
 
-    const apiPrefix = import.meta.env.VITE_BACKEND_API_PREFIX || '';
+    const apiPrefix = getApiPrefix()
     const params = new URLSearchParams({
       file_path: filePath
     })

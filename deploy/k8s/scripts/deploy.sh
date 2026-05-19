@@ -185,7 +185,7 @@ if [ "${#SELECTED_SERVICE_KEYS[@]}" -eq 0 ]; then
   add_service_key all
 fi
 
-if { selected_has web || selected_has wiki; } && [ ! -d "$ENV_DIR/nginx" ]; then
+if selected_has web && [ ! -d "$ENV_DIR/nginx" ]; then
   echo "Environment nginx config directory not found: $ENV_DIR/nginx" >&2
   exit 1
 fi
@@ -426,19 +426,15 @@ build_images() {
         ;;
       web)
         docker build \
-          -f "$DEPLOY_DIR/images/Dockerfile.web" \
+          -f "$DEPLOY_DIR/images/Dockerfile.web-github" \
           --build-arg "NGINX_CONF=deploy/$DEPLOY_ENV/nginx/nginx.conf" \
-          --build-arg "VITE_SAGE_API_BASE_URL=$SAGE_PUBLIC_URL" \
-          --build-arg "VITE_SAGE_TRACE_WEB_URL=$SAGE_TRACE_WEB_URL" \
-          --build-arg "VITE_SAGE_WEB_BASE_PATH=${SAGE_WEB_BASE_PATH%/}/" \
           -t "$SAGE_WEB_IMAGE" \
           "$ROOT_DIR"
         ;;
       wiki)
         docker build \
-          -f "$DEPLOY_DIR/images/Dockerfile.wiki" \
-          --build-arg "NGINX_CONF=deploy/$DEPLOY_ENV/nginx/nginx_wiki.conf" \
-          --build-arg "VITE_SAGE_API_BASE_URL=$SAGE_PUBLIC_URL" \
+          -f "$DEPLOY_DIR/images/Dockerfile.wiki-github" \
+          --build-arg "NGINX_CONF=deploy/nginx/nginx_wiki.conf" \
           -t "$SAGE_WIKI_IMAGE" \
           "$ROOT_DIR"
         ;;

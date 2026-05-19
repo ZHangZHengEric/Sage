@@ -1,0 +1,17 @@
+# syntax=docker.m.daocloud.io/docker/dockerfile:1.8.1
+
+FROM docker.m.daocloud.io/nginx:1.27-alpine
+
+RUN apk add --no-cache curl
+
+ARG NGINX_CONF=deploy/nginx/nginx_wiki.conf
+COPY --link ${NGINX_CONF} /etc/nginx/conf.d/default.conf
+COPY --link deploy/images/github-dist-entrypoint.sh /usr/local/bin/github-dist-entrypoint.sh
+RUN chmod +x /usr/local/bin/github-dist-entrypoint.sh
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -qO- http://localhost/ || exit 1
+
+ENTRYPOINT ["/usr/local/bin/github-dist-entrypoint.sh", "https://ghfast.top/https://github.com/ZHangZHengEric/Sage/releases/latest/download/sage-wiki-dist.tgz", "https://ghfast.top/https://github.com/ZHangZHengEric/Sage/releases/latest/download/sage-wiki-dist.sha256"]
+CMD ["nginx", "-g", "daemon off;"]

@@ -411,6 +411,7 @@ import { chatAPI } from '@/api/chat.js'
 import { getCurrentUser } from '@/utils/auth.js'
 import { sanitizeSessionTitle } from '@/utils/sessionTitle'
 import { isTokenUsageMessage } from '@/utils/messageLabels.js'
+import { getWebBasePath } from '@/config/runtime.js'
 import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -593,8 +594,7 @@ const getAgentName = (agentId) => {
 
 const buildShareUrl = (sessionId) => {
   if (!sessionId) return ''
-  const rawBase = (import.meta.env?.BASE_URL || '/').toString()
-  const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`
+  const base = getWebBasePath()
   return `${window.location.origin}${base}share/${sessionId}`
 }
 

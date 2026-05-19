@@ -3,12 +3,13 @@
 部署相关文件统一放在 `deploy/` 下：
 
 - `deploy/images/`: Dockerfile、entrypoint、Jaeger 配置等共享镜像构建资源
+- `deploy/nginx/`: 不区分环境的 nginx 配置，例如 Wiki
 - `deploy/dev/`: 开发环境 Docker Compose 与环境变量模板
 - `deploy/prod/`: 生产环境 Docker Compose 与环境变量模板
 - `deploy/test/`: 测试环境 Docker Compose 与环境变量模板
 - `deploy/k8s/`: Kubernetes 共享资源模板和部署脚本
 
-各环境的 nginx 配置放在对应环境目录内，例如 `deploy/dev/nginx/nginx.conf`、`deploy/prod/nginx/nginx.conf`、`deploy/test/nginx/nginx.conf`，不会放在共享镜像构建目录。
+各环境的 Web nginx 配置放在对应环境目录内，例如 `deploy/dev/nginx/nginx.conf`、`deploy/prod/nginx/nginx.conf`、`deploy/test/nginx/nginx.conf`。Wiki nginx 配置不区分环境，统一使用 `deploy/nginx/nginx_wiki.conf`。
 
 ## Docker Compose
 
@@ -31,15 +32,32 @@ deploy/compose.sh test up -d
 
 `deploy/compose.sh` 默认使用 `prod` 环境；也可以通过第一个参数指定 `dev`、`prod` 或 `test`。脚本默认优先读取 `deploy/<env>/.env`；如果该文件不存在，则回退读取仓库根目录 `.env`。也可以通过 `ENV_FILE=/path/to/.env` 显式指定配置文件。
 
+`wiki`、`rustfs`、`jaeger` 使用共享 compose 文件 `deploy/docker-compose.shared.yml`，不再在 `dev`、`prod`、`test` 的 compose 文件中重复定义。
+
 也可以直接指定对应 compose 文件：
 
 ```bash
-docker compose --env-file deploy/dev/.env -f deploy/dev/docker-compose.yml up -d
-docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml up -d
-docker compose --env-file deploy/test/.env -f deploy/test/docker-compose.yml up -d
+SAGE_REPO_ROOT=$PWD SAGE_DEPLOY_DIR=$PWD/deploy docker compose --env-file deploy/dev/.env -f deploy/dev/docker-compose.yml -f deploy/docker-compose.shared.yml up -d
+SAGE_REPO_ROOT=$PWD SAGE_DEPLOY_DIR=$PWD/deploy docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml -f deploy/docker-compose.shared.yml up -d
+SAGE_REPO_ROOT=$PWD SAGE_DEPLOY_DIR=$PWD/deploy docker compose --env-file deploy/test/.env -f deploy/test/docker-compose.yml -f deploy/docker-compose.shared.yml up -d
 ```
 
-`dev`、`prod`、`test` 的 `.env.example` 已区分 `COMPOSE_PROJECT_NAME`、容器名前缀、宿主机端口、`SAGE_ENV`、命名空间和默认数据目录。需要并行启动多个环境时，保持这些值互不冲突即可。
+`dev`、`prod`、`test` 的 `.env.example` 已区分 `COMPOSE_PROJECT_NAME`、容器名前缀、server/web/mysql/es 宿主机端口、`SAGE_ENV`、命名空间和默认数据目录。共享服务默认端口为 Wiki `30057`、RustFS `30054` / `30055`、Jaeger OTLP `4317` / `4318`；需要覆盖时仍可在 `.env` 中显式设置 `SAGE_WIKI_PORT`、`SAGE_RUSTFS_API_PORT`、`SAGE_RUSTFS_CONSOLE_PORT`、`SAGE_JAEGER_OTLP_GRPC_PORT`、`SAGE_JAEGER_OTLP_HTTP_PORT`。
+
+## GitHub frontend dist
+
+Web 和 Wiki 的前端产物由 GitHub Actions 生成，避免部署机执行 `npm run build`：
+
+- `.github/workflows/build-frontend-dist.yml` 构建 `app/server/web/dist` 与 `app/wiki/.vitepress/dist`
+- Release assets 固定为 `sage-web-dist.tgz`、`sage-web-dist.sha256`、`sage-wiki-dist.tgz`、`sage-wiki-dist.sha256`
+- `deploy/images/Dockerfile.web-github` 和 `deploy/images/Dockerfile.wiki-github` 运行时从 `https://ghfast.top/https://github.com/ZHangZHengEric/Sage/releases/latest/download/...` 下载产物
+- Web 前端固定使用 `/sage/` 和 `/prod-api`，容器无需前端运行时环境变量
+
+部署命令不变：
+
+```bash
+deploy/compose.sh prod up -d --build sage-web sage-wiki
+```
 
 ## Kubernetes
 
