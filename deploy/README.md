@@ -50,21 +50,6 @@ Grafana 默认管理员账号变量为 `SAGE_GRAFANA_ADMIN_USER` / `SAGE_GRAFANA
 
 Elasticsearch 默认不随 `deploy/compose.sh prod up -d` 启动。需要内置 ES 时，使用 `deploy/compose.sh prod --profile es up -d`，或显式指定 `deploy/compose.sh prod up -d sage-es`。
 
-## GitHub frontend dist
-
-Web 和 Wiki 的前端产物由 GitHub Actions 生成，避免部署机执行 `npm run build`：
-
-- `.github/workflows/build-frontend-dist.yml` 构建 `app/server/web/dist` 与 `app/wiki/.vitepress/dist`
-- Release assets 固定为 `sage-web-dist.tgz`、`sage-web-dist.sha256`、`sage-wiki-dist.tgz`、`sage-wiki-dist.sha256`
-- `deploy/images/Dockerfile.web-github` 和 `deploy/images/Dockerfile.wiki-github` 运行时从 `https://ghfast.top/https://github.com/ZHangZHengEric/Sage/releases/latest/download/...` 下载产物
-- Web 前端固定使用 `/sage/` 和 `/prod-api`，容器无需前端运行时环境变量
-
-部署命令不变：
-
-```bash
-deploy/compose.sh prod up -d --build sage-web sage-wiki
-```
-
 ## Kubernetes
 
 Kubernetes 使用同一套资源模板，按 `DEPLOY_ENV` 读取对应环境变量：

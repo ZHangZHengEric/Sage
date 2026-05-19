@@ -426,14 +426,14 @@ build_images() {
         ;;
       web)
         docker build \
-          -f "$DEPLOY_DIR/images/Dockerfile.web-github" \
+          -f "$DEPLOY_DIR/images/Dockerfile.web" \
           --build-arg "NGINX_CONF=deploy/$DEPLOY_ENV/nginx/nginx.conf" \
           -t "$SAGE_WEB_IMAGE" \
           "$ROOT_DIR"
         ;;
       wiki)
         docker build \
-          -f "$DEPLOY_DIR/images/Dockerfile.wiki-github" \
+          -f "$DEPLOY_DIR/images/Dockerfile.wiki" \
           --build-arg "NGINX_CONF=deploy/nginx/nginx_wiki.conf" \
           -t "$SAGE_WIKI_IMAGE" \
           "$ROOT_DIR"
