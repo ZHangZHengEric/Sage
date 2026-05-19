@@ -41,7 +41,7 @@ services:
     restart: always
     build:
       context: ../..
-      dockerfile: deploy/images/Dockerfile.web-github
+      dockerfile: deploy/images/Dockerfile.web
       args:
         NGINX_CONF: deploy/test/nginx/nginx.conf
     image: sage-web-test:v1.0

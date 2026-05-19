@@ -3,7 +3,7 @@ services:
     restart: always
     build:
       context: ${SAGE_REPO_ROOT:-../..}
-      dockerfile: deploy/images/Dockerfile.wiki-github
+      dockerfile: deploy/images/Dockerfile.wiki
       args:
         NGINX_CONF: deploy/nginx/nginx_wiki.conf
     image: sage-wiki:v1.0
