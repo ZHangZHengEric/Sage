@@ -23,6 +23,10 @@ Examples:
 The script runs:
   docker compose --env-file deploy/<env>/.env -f deploy/<env>/docker-compose.yml -f deploy/docker-compose.shared.yml ...
 
+For `up`, shared services are reused when they are already running in another
+environment. Otherwise they are started under the shared compose project
+`sage_shared` first, then the selected environment is started.
+
 Observability services (prometheus, grafana, cadvisor, loki, alloy) are behind the
 `observability` compose profile and are not started unless --observability is set
 or COMPOSE_PROFILES already includes observability.
@@ -50,6 +54,8 @@ fi
 
 COMPOSE_FILE="$DEPLOY_DIR/$DEPLOY_ENV/docker-compose.yml"
 SHARED_COMPOSE_FILE="$DEPLOY_DIR/docker-compose.shared.yml"
+SHARED_PROJECT_NAME="${SAGE_SHARED_PROJECT_NAME:-sage_shared}"
+SHARED_CONTAINER_PREFIX="${SAGE_SHARED_CONTAINER_PREFIX:-sage-shared}"
 
 if [ -z "${ENV_FILE:-}" ]; then
   ENV_FILE="$DEPLOY_DIR/$DEPLOY_ENV/.env"
@@ -83,11 +89,96 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 
 COMPOSE_ARGS=(--env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$SHARED_COMPOSE_FILE")
+ENV_COMPOSE_ARGS=(--env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+SHARED_COMPOSE_ARGS=(--env-file "$ENV_FILE" -p "$SHARED_PROJECT_NAME" -f "$SHARED_COMPOSE_FILE")
 if [ "$ENABLE_OBSERVABILITY" = "true" ]; then
   COMPOSE_ARGS+=(--profile observability)
+  SHARED_COMPOSE_ARGS+=(--profile observability)
 fi
 
-SAGE_REPO_ROOT="$ROOT_DIR" \
-SAGE_DEPLOY_DIR="$DEPLOY_DIR" \
-SAGE_COMPOSE_ENV_FILE="$ENV_FILE" \
-  docker compose "${COMPOSE_ARGS[@]}" "$@"
+env_value() {
+  local key="$1"
+  awk -F= -v key="$key" '
+    $0 ~ /^[[:space:]]*(#|$)/ { next }
+    {
+      line=$0
+      sub(/^[[:space:]]*export[[:space:]]+/, "", line)
+      split(line, parts, "=")
+      name=parts[1]
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
+      if (name == key) {
+        sub(/^[^=]*=/, "", line)
+        sub(/[[:space:]]+#.*$/, "", line)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+        gsub(/^["'\''"]|["'\''"]$/, "", line)
+        print line
+        exit
+      }
+    }
+  ' "$ENV_FILE"
+}
+
+CURRENT_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(env_value COMPOSE_PROJECT_NAME)}"
+
+shared_container_for_project() {
+  local project="$1"
+  if [ -z "$project" ]; then
+    return 0
+  fi
+  docker ps \
+    --filter "status=running" \
+    --filter "label=com.docker.compose.service=sage-rustfs" \
+    --filter "label=com.docker.compose.project=$project" \
+    --format '{{.ID}}' \
+    | head -n 1
+}
+
+shared_container_outside_current_project() {
+  docker ps \
+    --filter "status=running" \
+    --filter "label=com.docker.compose.service=sage-rustfs" \
+    --format '{{.ID}} {{.Label "com.docker.compose.project"}}' \
+    | awk -v current="$CURRENT_PROJECT_NAME" '$2 != current { print $1; exit }'
+}
+
+network_for_container() {
+  local container_id="$1"
+  docker inspect \
+    --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' \
+    "$container_id" \
+    | head -n 1
+}
+
+run_compose() {
+  local shared_network="${1:-}"
+  shift || true
+
+  SAGE_REPO_ROOT="$ROOT_DIR" \
+  SAGE_DEPLOY_DIR="$DEPLOY_DIR" \
+  SAGE_COMPOSE_ENV_FILE="$ENV_FILE" \
+  SAGE_SHARED_NETWORK="$shared_network" \
+    docker compose "$@"
+}
+
+if [ "${1:-}" = "up" ]; then
+  if current_shared_id="$(shared_container_for_project "$CURRENT_PROJECT_NAME")" && [ -n "$current_shared_id" ]; then
+    run_compose "" "${COMPOSE_ARGS[@]}" "$@"
+    exit $?
+  fi
+
+  if shared_id="$(shared_container_outside_current_project)" && [ -n "$shared_id" ]; then
+    shared_network="$(network_for_container "$shared_id")"
+    if [ -z "$shared_network" ]; then
+      echo "Shared service is running but its Docker network could not be detected." >&2
+      exit 1
+    fi
+    run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "$@"
+    exit $?
+  fi
+
+  run_compose "" "${SHARED_COMPOSE_ARGS[@]}" up -d
+  run_compose "${SHARED_PROJECT_NAME}_default" "${ENV_COMPOSE_ARGS[@]}" "$@"
+  exit $?
+fi
+
+run_compose "" "${COMPOSE_ARGS[@]}" "$@"
