@@ -56,7 +56,6 @@ COMPOSE_FILE="$DEPLOY_DIR/$DEPLOY_ENV/docker-compose.yml"
 SHARED_COMPOSE_FILE="$DEPLOY_DIR/docker-compose.shared.yml"
 OBSERVABILITY_COMPOSE_FILE="$DEPLOY_DIR/docker-compose.observability.yml"
 SHARED_PROJECT_NAME="${SAGE_SHARED_PROJECT_NAME:-sage_shared}"
-SHARED_CONTAINER_PREFIX="${SAGE_SHARED_CONTAINER_PREFIX:-sage-shared}"
 
 if [ -z "${ENV_FILE:-}" ]; then
   ENV_FILE="$DEPLOY_DIR/$DEPLOY_ENV/.env"
@@ -171,7 +170,6 @@ start_observability() {
   local shared_network="$1"
 
   COMPOSE_PROJECT_NAME="$SHARED_PROJECT_NAME" \
-  SAGE_CONTAINER_PREFIX="$SHARED_CONTAINER_PREFIX" \
     run_compose "$shared_network" "${OBSERVABILITY_COMPOSE_ARGS[@]}" up -d
 }
 
@@ -203,7 +201,6 @@ if [ "${1:-}" = "up" ]; then
   fi
 
   COMPOSE_PROJECT_NAME="$SHARED_PROJECT_NAME" \
-  SAGE_CONTAINER_PREFIX="$SHARED_CONTAINER_PREFIX" \
     run_compose "" "${SHARED_COMPOSE_ARGS[@]}" up -d
   run_compose "${SHARED_PROJECT_NAME}_default" "${ENV_COMPOSE_ARGS[@]}" "$@"
   if [ "$ENABLE_OBSERVABILITY" = "true" ]; then
