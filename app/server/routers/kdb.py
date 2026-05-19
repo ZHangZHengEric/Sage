@@ -349,7 +349,31 @@ async def kdb_doc_task_redo(req: KdbDocTaskRedoRequest, http_request: Request):
     return await Response.succ(data=SuccessResponse(success=True, user_id=kdb.user_id))
 
 
-@sage_mcp_tool(server_name="knowledge_base")
+@sage_mcp_tool(
+    server_name="knowledge_base",
+    description_i18n={
+        "zh": "在 ZavixAI 知识库中检索文档，并返回与查询最相关的结果。",
+        "en": "Search documents in the ZavixAI knowledge database and return the most relevant results for the query.",
+        "pt": "Pesquisa documentos na base de conhecimento ZavixAI e retorna os resultados mais relevantes para a consulta.",
+    },
+    param_description_i18n={
+        "index_name": {
+            "zh": "要检索的知识库索引名称，必填。",
+            "en": "Name of the knowledge base index to search. Required.",
+            "pt": "Nome do índice da base de conhecimento a pesquisar. Obrigatório.",
+        },
+        "query": {
+            "zh": "检索查询内容，必填。",
+            "en": "Search query. Required.",
+            "pt": "Consulta de pesquisa. Obrigatória.",
+        },
+        "top_k": {
+            "zh": "返回结果数量，范围 1 到 50，默认 5。",
+            "en": "Number of results to return, from 1 to 50. Defaults to 5.",
+            "pt": "Número de resultados a retornar, de 1 a 50. O padrão é 5.",
+        },
+    },
+)
 async def retrieve_on_zavixai_db(index_name: str, query: str, top_k: int = 5):
     """
     Search documents on ZavixAI knowledge database.

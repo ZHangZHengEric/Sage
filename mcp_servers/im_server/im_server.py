@@ -265,7 +265,36 @@ async def _send_file_via_provider(
 
 
 @mcp.tool()
-@sage_mcp_tool(server_name="IM Service")
+@sage_mcp_tool(
+    server_name="IM Service",
+    description_i18n={
+        "zh": "发送本地文件给 IM 用户或群聊。支持企业微信、钉钉、飞书。重要：agent_id 必填，必须使用当前对话关联的 Agent ID。",
+        "en": "Send a local file to an IM user or group chat. Supports WeChat Work, DingTalk and Feishu. Important: agent_id is required and must be the agent ID bound to the current conversation.",
+        "pt": "Envia um arquivo local para um usuário ou grupo de IM. Suporta WeChat Work, DingTalk e Feishu. Importante: agent_id é obrigatório e deve ser o ID do agente vinculado à conversa atual.",
+    },
+    param_description_i18n={
+        "file_path": {
+            "zh": "本地文件路径，例如 '/path/to/document.pdf'。",
+            "en": "Local file path, e.g. '/path/to/document.pdf'.",
+            "pt": "Caminho do arquivo local, por exemplo '/path/to/document.pdf'.",
+        },
+        "provider": {
+            "zh": "IM 平台名称，可选值：wechat_work（企业微信）、feishu（飞书）、dingtalk（钉钉）。",
+            "en": "IM platform name. Values: wechat_work, feishu, dingtalk.",
+            "pt": "Nome da plataforma de IM. Valores: wechat_work, feishu, dingtalk.",
+        },
+        "agent_id": {
+            "zh": "必填。Agent 标识，必须使用系统提示中提供的当前 Agent ID，不要省略或自行编造。",
+            "en": "Required. Agent identifier; must be the current agent ID provided in the system prompt. Do not omit or fabricate it.",
+            "pt": "Obrigatório. Identificador do agente; deve ser o ID do agente atual fornecido no prompt do sistema. Não omita nem invente.",
+        },
+        "chat_id": {
+            "zh": "群聊 ID。需要发送到群聊时填写；chat_id 与私聊接收方至少提供一个。",
+            "en": "Group chat ID. Provide this when sending to a group chat; provide at least one group chat ID or private recipient.",
+            "pt": "ID do chat em grupo. Use ao enviar para um grupo; forneça pelo menos um ID de grupo ou destinatário privado.",
+        },
+    },
+)
 async def send_file_through_im(
     file_path: str,
     provider: str,
@@ -335,7 +364,36 @@ async def send_file_through_im(
 
 
 @mcp.tool()
-@sage_mcp_tool(server_name="IM Service")
+@sage_mcp_tool(
+    server_name="IM Service",
+    description_i18n={
+        "zh": "发送本地图片给 IM 用户或群聊，图片会以图片消息形式显示。支持企业微信、钉钉、飞书。重要：agent_id 必填，必须使用当前对话关联的 Agent ID。",
+        "en": "Send a local image to an IM user or group chat as an image message. Supports WeChat Work, DingTalk and Feishu. Important: agent_id is required and must be the agent ID bound to the current conversation.",
+        "pt": "Envia uma imagem local para um usuário ou grupo de IM como mensagem de imagem. Suporta WeChat Work, DingTalk e Feishu. Importante: agent_id é obrigatório e deve ser o ID do agente vinculado à conversa atual.",
+    },
+    param_description_i18n={
+        "file_path": {
+            "zh": "本地图片路径，例如 '/path/to/image.png'。支持 JPG、PNG、GIF、BMP、WebP。",
+            "en": "Local image path, e.g. '/path/to/image.png'. Supports JPG, PNG, GIF, BMP and WebP.",
+            "pt": "Caminho da imagem local, por exemplo '/path/to/image.png'. Suporta JPG, PNG, GIF, BMP e WebP.",
+        },
+        "provider": {
+            "zh": "IM 平台名称，可选值：wechat_work（企业微信）、dingtalk（钉钉）、feishu（飞书）。",
+            "en": "IM platform name. Values: wechat_work, dingtalk, feishu.",
+            "pt": "Nome da plataforma de IM. Valores: wechat_work, dingtalk, feishu.",
+        },
+        "agent_id": {
+            "zh": "必填。Agent 标识，必须使用系统提示中提供的当前 Agent ID，不要省略或自行编造。",
+            "en": "Required. Agent identifier; must be the current agent ID provided in the system prompt. Do not omit or fabricate it.",
+            "pt": "Obrigatório. Identificador do agente; deve ser o ID do agente atual fornecido no prompt do sistema. Não omita nem invente.",
+        },
+        "chat_id": {
+            "zh": "群聊 ID。需要发送到群聊时填写；chat_id 与私聊接收方至少提供一个。",
+            "en": "Group chat ID. Provide this when sending to a group chat; provide at least one group chat ID or private recipient.",
+            "pt": "ID do chat em grupo. Use ao enviar para um grupo; forneça pelo menos um ID de grupo ou destinatário privado.",
+        },
+    },
+)
 async def send_image_through_im(
     file_path: str,
     provider: str,
@@ -475,7 +533,36 @@ async def _send_message_to_agent(
 
 
 @mcp.tool()
-@sage_mcp_tool(server_name="IM Service")
+@sage_mcp_tool(
+    server_name="IM Service",
+    description_i18n={
+        "zh": "向 IM 用户或群聊发送文本消息。支持飞书、钉钉、企业微信、iMessage。重要：agent_id 必填，必须使用当前对话关联的 Agent ID。多条消息会自动按顺序发送。",
+        "en": "Send a text message to an IM user or group chat. Supports Feishu, DingTalk, WeChat Work and iMessage. Important: agent_id is required and must be the agent ID bound to the current conversation. Multiple messages are sent in order automatically.",
+        "pt": "Envia uma mensagem de texto para um usuário ou grupo de IM. Suporta Feishu, DingTalk, WeChat Work e iMessage. Importante: agent_id é obrigatório e deve ser o ID do agente vinculado à conversa atual. Várias mensagens são enviadas em ordem automaticamente.",
+    },
+    param_description_i18n={
+        "content": {
+            "zh": "要发送的消息内容。",
+            "en": "Message content to send.",
+            "pt": "Conteúdo da mensagem a enviar.",
+        },
+        "provider": {
+            "zh": "IM 平台名称，可选值：feishu（飞书）、dingtalk（钉钉）、wechat_work（企业微信）、imessage。",
+            "en": "IM platform name. Values: feishu, dingtalk, wechat_work, imessage.",
+            "pt": "Nome da plataforma de IM. Valores: feishu, dingtalk, wechat_work, imessage.",
+        },
+        "agent_id": {
+            "zh": "必填。Agent 标识，必须使用系统提示中提供的当前 Agent ID，不要省略或自行编造。",
+            "en": "Required. Agent identifier; must be the current agent ID provided in the system prompt. Do not omit or fabricate it.",
+            "pt": "Obrigatório. Identificador do agente; deve ser o ID do agente atual fornecido no prompt do sistema. Não omita nem invente.",
+        },
+        "chat_id": {
+            "zh": "群聊 ID。需要发送到群聊时填写；chat_id 与私聊接收方至少提供一个。",
+            "en": "Group chat ID. Provide this when sending to a group chat; provide at least one group chat ID or private recipient.",
+            "pt": "ID do chat em grupo. Use ao enviar para um grupo; forneça pelo menos um ID de grupo ou destinatário privado.",
+        },
+    },
+)
 async def send_message_through_im(
     content: str,
     provider: str,
