@@ -5,6 +5,11 @@ logging {
 
 discovery.docker "local" {
   host = "unix:///var/run/docker.sock"
+
+  filter {
+    name   = "status"
+    values = ["running"]
+  }
 }
 
 discovery.relabel "docker_without_sage_server" {
@@ -18,10 +23,11 @@ discovery.relabel "docker_without_sage_server" {
 }
 
 loki.source.docker "containers" {
-  host       = "unix:///var/run/docker.sock"
-  targets    = discovery.relabel.docker_without_sage_server.output
-  labels     = {"job" = "docker"}
-  forward_to = [loki.write.local.receiver]
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.docker_without_sage_server.output
+  labels           = {"job" = "docker"}
+  refresh_interval = "5s"
+  forward_to       = [loki.write.local.receiver]
 }
 
 local.file_match "sage_server_logs" {
