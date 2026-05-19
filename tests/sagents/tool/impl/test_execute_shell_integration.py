@@ -17,6 +17,10 @@ from sagents.utils.sandbox.config import VolumeMount
 from sagents.utils.sandbox.providers.passthrough.passthrough import PassthroughSandboxProvider
 
 
+def _same_real_path(left: str, right: str) -> bool:
+    return os.path.realpath(left) == os.path.realpath(right)
+
+
 pytestmark = [
     pytest.mark.skipif(
         shutil.which("bash") is None,
@@ -148,7 +152,7 @@ async def test_await_shell_reads_running_task_tail_from_agent_workspace_bg_log(s
     task_id = started["task_id"]
     expected_output_file = os.path.join(tmpdir, "bg", f"{task_id}.log")
     assert started["status"] == "running"
-    assert started["output_file"] == expected_output_file
+    assert _same_real_path(started["output_file"], expected_output_file)
     assert os.path.exists(expected_output_file)
 
     monitored = await tool.await_shell(
@@ -158,7 +162,7 @@ async def test_await_shell_reads_running_task_tail_from_agent_workspace_bg_log(s
         session_id="s1",
     )
     assert monitored["status"] == "running"
-    assert monitored["output_file"] == expected_output_file
+    assert _same_real_path(monitored["output_file"], expected_output_file)
     assert "phase1" in monitored["tail_output"]
     assert "phase2" not in monitored["tail_output"]
 
@@ -176,7 +180,7 @@ async def test_await_shell_reads_completed_stdout_from_agent_workspace_bg_log(sh
     task_id = started["task_id"]
     expected_output_file = os.path.join(tmpdir, "bg", f"{task_id}.log")
     assert started["status"] == "running"
-    assert started["output_file"] == expected_output_file
+    assert _same_real_path(started["output_file"], expected_output_file)
 
     completed = await tool.await_shell(
         task_id=task_id,
@@ -186,9 +190,9 @@ async def test_await_shell_reads_completed_stdout_from_agent_workspace_bg_log(sh
     final_output_file = completed["output_file"]
     assert completed["status"] == "completed"
     assert completed["exit_code"] == 0
-    assert final_output_file == expected_output_file
+    assert _same_real_path(final_output_file, expected_output_file)
     assert os.path.isabs(final_output_file)
-    assert os.path.dirname(final_output_file) == os.path.join(tmpdir, "bg")
+    assert _same_real_path(os.path.dirname(final_output_file), os.path.join(tmpdir, "bg"))
     assert os.path.basename(final_output_file) == f"{task_id}.log"
     assert "phase1" in completed["stdout"]
     assert "phase2" in completed["stdout"]
@@ -219,8 +223,8 @@ async def test_background_log_dir_virtual_workspace_is_restored_to_host_path(mon
         task_id = started["task_id"]
         expected_host_output_file = os.path.join(host_tmpdir, "bg", f"{task_id}.log")
 
-        assert started["output_file"] == expected_host_output_file
-        assert os.path.dirname(started["output_file"]) == os.path.join(host_tmpdir, "bg")
+        assert _same_real_path(started["output_file"], expected_host_output_file)
+        assert _same_real_path(os.path.dirname(started["output_file"]), os.path.join(host_tmpdir, "bg"))
         assert not started["output_file"].startswith(sandbox_workspace)
 
         completed = await tool.await_shell(
@@ -229,7 +233,7 @@ async def test_background_log_dir_virtual_workspace_is_restored_to_host_path(mon
             session_id="s1",
         )
         assert completed["status"] == "completed"
-        assert completed["output_file"] == expected_host_output_file
+        assert _same_real_path(completed["output_file"], expected_host_output_file)
         with open(completed["output_file"], encoding="utf-8") as log_file:
             assert "mapped-log" in log_file.read()
     finally:
