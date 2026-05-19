@@ -22,7 +22,7 @@ scrape_configs:
       - source_labels: [__meta_docker_container_name]
         regex: /?(.*)
         target_label: container
-      - source_labels: [__meta_docker_network_ip]
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
         regex: (.+)
         target_label: __address__
         replacement: $1:8080
