@@ -20,6 +20,11 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 
+_SUPPRESSED_UVICORN_ACCESS_PATHS = {
+    "/api/observability/metrics",
+}
+
+
 def _ensure_loguru_has_sink() -> None:
     """单测等场景可能 `logger.remove()` 清空全部 sink，导致 opt().bind() 链异常。"""
     try:
@@ -30,6 +35,25 @@ def _ensure_loguru_has_sink() -> None:
         pass
 
 
+def _uvicorn_access_path(record: logging.LogRecord) -> str | None:
+    """Extract request path from uvicorn access log records."""
+    if record.name != "uvicorn.access":
+        return None
+
+    args = record.args
+    if not isinstance(args, tuple) or len(args) < 3:
+        return None
+
+    path = args[2]
+    if not isinstance(path, str):
+        return None
+    return path.split("?", 1)[0]
+
+
+def _should_suppress_log_record(record: logging.LogRecord) -> bool:
+    return _uvicorn_access_path(record) in _SUPPRESSED_UVICORN_ACCESS_PATHS
+
+
 class InterceptHandler(logging.Handler):
     """Bridge standard logging to loguru.
 
@@ -37,6 +61,9 @@ class InterceptHandler(logging.Handler):
     """
 
     def emit(self, record: logging.LogRecord) -> None:  # type: ignore[override]
+        if _should_suppress_log_record(record):
+            return
+
         # Map logging level to loguru level
         try:
             lvl = logger.level(record.levelname)

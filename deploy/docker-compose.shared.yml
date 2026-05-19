@@ -47,6 +47,36 @@ services:
     mem_limit: 1g
     cpus: 0.5
 
+  sage-redis:
+    image: docker.m.daocloud.io/redis:7-alpine
+    restart: unless-stopped
+    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-redis
+    command:
+      [
+        "sh",
+        "-c",
+        "if [ -n \"$$REDIS_PASSWORD\" ]; then exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\"; else exec redis-server --appendonly yes; fi",
+      ]
+    environment:
+      TZ: Asia/Shanghai
+      REDIS_PASSWORD: ${SAGE_REDIS_PASSWORD:-}
+    ports:
+      - "${SAGE_REDIS_PORT:-30056}:6379"
+    volumes:
+      - ${SAGE_ROOT}/redis/data:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "if [ -n \"$$REDIS_PASSWORD\" ]; then redis-cli -a \"$$REDIS_PASSWORD\" ping; else redis-cli ping; fi",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    mem_limit: 512m
+    cpus: 0.5
+
   sage-jaeger:
     image: docker.m.daocloud.io/jaegertracing/jaeger:2.16.0
     container_name: ${SAGE_CONTAINER_PREFIX:-sage}-jaeger
@@ -97,10 +127,12 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${SAGE_GRAFANA_ADMIN_PASSWORD:-change_this_grafana_password}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/sage-server-observability.json
     ports:
       - "${SAGE_GRAFANA_PORT:-30093}:3000"
     volumes:
       - ${SAGE_DEPLOY_DIR:-..}/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ${SAGE_DEPLOY_DIR:-..}/monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
       - ${SAGE_ROOT}/grafana/data:/var/lib/grafana
     depends_on:
       - sage-prometheus

@@ -10,6 +10,14 @@ from logging.handlers import TimedRotatingFileHandler
 from typing import Dict, Optional
 
 
+_DISABLE_FILE_LOGGING_ENV = "SAGE_DISABLE_SAGENTS_FILE_LOGGING"
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+
+
+def _file_logging_disabled() -> bool:
+    return os.getenv(_DISABLE_FILE_LOGGING_ENV, "").strip().lower() in _TRUE_VALUES
+
+
 class BoundLogger:
     def __init__(self, base_logger: "Logger", context: Optional[Dict[str, object]] = None):
         self.base_logger = base_logger
@@ -101,64 +109,68 @@ class Logger:
         console_handler.setFormatter(console_format)
         self.logger.addHandler(console_handler)
 
-        try:
-            os.makedirs(log_dir, exist_ok=True)
+        self.file_logging_enabled = not _file_logging_disabled()
 
-            # 文件日志格式
-            file_format = logging.Formatter('%(asctime)s - %(levelname)s - [%(session_id)s] - [%(caller_filename)s:%(caller_lineno)d] - %(message)s')
+        if self.file_logging_enabled:
+            try:
+                os.makedirs(log_dir, exist_ok=True)
 
-            # 创建四个不同级别的文件日志处理器，按天分割
-            log_levels = [
-                ('debug', logging.DEBUG),
-                ('info', logging.INFO), 
-                ('warning', logging.WARNING),
-                ('error', logging.ERROR)
-            ]
+                # 文件日志格式
+                file_format = logging.Formatter('%(asctime)s - %(levelname)s - [%(session_id)s] - [%(caller_filename)s:%(caller_lineno)d] - %(message)s')
 
-            for level_name, level_value in log_levels:
-                # 使用TimedRotatingFileHandler按天分割日志
-                # 基础文件名不包含日期，日期通过suffix添加
-                log_file = os.path.join(log_dir, f'sage_{level_name}.log')
-                file_handler = TimedRotatingFileHandler(
-                    log_file, 
-                    when='midnight',  # 每天午夜分割
-                    interval=1,       # 每1天
-                    backupCount=30,   # 保留30天的日志
-                    encoding='utf-8'
-                )
-                file_handler.setLevel(level_value)
-                file_handler.setFormatter(file_format)
+                # 创建四个不同级别的文件日志处理器，按天分割
+                log_levels = [
+                    ('debug', logging.DEBUG),
+                    ('info', logging.INFO), 
+                    ('warning', logging.WARNING),
+                    ('error', logging.ERROR)
+                ]
 
-                # 设置日志文件名后缀格式，轮转时会变成 sage_info.log._20241024 格式
-                # 但我们需要 sage_info_20241024.log 格式，所以需要自定义
-                file_handler.suffix = "_%Y%m%d"
-                # 设置namer函数来自定义轮转后的文件名格式
-                def custom_namer(default_name):
-                    # default_name 格式: sage_info.log._20241024
-                    # 我们要转换为: sage_info_20241024.log
-                    if '._' in default_name:
-                        # 处理 sage_info.log._20241024 格式
-                        base_part, date_part = default_name.split('._')
-                        base_name = base_part.replace('.log', '')  # 移除 .log
-                        return f"{base_name}_{date_part}.log"
-                    return default_name
-                file_handler.namer = custom_namer
+                for level_name, level_value in log_levels:
+                    # 使用TimedRotatingFileHandler按天分割日志
+                    # 基础文件名不包含日期，日期通过suffix添加
+                    log_file = os.path.join(log_dir, f'sage_{level_name}.log')
+                    file_handler = TimedRotatingFileHandler(
+                        log_file, 
+                        when='midnight',  # 每天午夜分割
+                        interval=1,       # 每1天
+                        backupCount=30,   # 保留30天的日志
+                        encoding='utf-8'
+                    )
+                    file_handler.setLevel(level_value)
+                    file_handler.setFormatter(file_format)
 
-                self.logger.addHandler(file_handler)
-        
-        except (PermissionError, OSError) as e:
-            # In sandbox or restricted environments, we might not have permission to write to log files
-            # Just fallback to console logging
-            sys.stderr.write(f"Warning: Could not setup file logging: {e}\n")
+                    # 设置日志文件名后缀格式，轮转时会变成 sage_info.log._20241024 格式
+                    # 但我们需要 sage_info_20241024.log 格式，所以需要自定义
+                    file_handler.suffix = "_%Y%m%d"
+                    # 设置namer函数来自定义轮转后的文件名格式
+                    def custom_namer(default_name):
+                        # default_name 格式: sage_info.log._20241024
+                        # 我们要转换为: sage_info_20241024.log
+                        if '._' in default_name:
+                            # 处理 sage_info.log._20241024 格式
+                            base_part, date_part = default_name.split('._')
+                            base_name = base_part.replace('.log', '')  # 移除 .log
+                            return f"{base_name}_{date_part}.log"
+                        return default_name
+                    file_handler.namer = custom_namer
+
+                    self.logger.addHandler(file_handler)
+            
+            except (PermissionError, OSError) as e:
+                # In sandbox or restricted environments, we might not have permission to write to log files
+                # Just fallback to console logging
+                sys.stderr.write(f"Warning: Could not setup file logging: {e}\n")
 
         # Session-specific loggers cache
         self.session_loggers: Dict[str, logging.Logger] = {}
 
-        # 清理一个月前的日志文件
-        self._cleanup_old_logs()
+        if self.file_logging_enabled:
+            # 清理一个月前的日志文件
+            self._cleanup_old_logs()
 
-        # 启动定期清理
-        self._start_periodic_cleanup()
+            # 启动定期清理
+            self._start_periodic_cleanup()
 
         Logger._initialized = True
 

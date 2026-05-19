@@ -12,35 +12,27 @@ discovery.docker "local" {
   }
 }
 
-discovery.relabel "docker_without_sage_server" {
+discovery.relabel "docker" {
   targets = discovery.docker.local.targets
 
   rule {
     source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    regex         = "sage-server|sage-server-dev|sage-server-test"
-    action        = "drop"
+    target_label  = "service"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/?(.*)"
+    target_label  = "container"
   }
 }
 
 loki.source.docker "containers" {
   host             = "unix:///var/run/docker.sock"
-  targets          = discovery.relabel.docker_without_sage_server.output
+  targets          = discovery.relabel.docker.output
   labels           = {"job" = "docker"}
   refresh_interval = "5s"
   forward_to       = [loki.write.local.receiver]
-}
-
-local.file_match "sage_server_logs" {
-  path_targets = [{
-    "__path__" = "/var/log/sage-server/*.log",
-    "job"      = "sage-server-file",
-    "service"  = "sage-server",
-  }]
-}
-
-loki.source.file "sage_server_logs" {
-  targets    = local.file_match.sage_server_logs.targets
-  forward_to = [loki.write.local.receiver]
 }
 
 loki.write "local" {

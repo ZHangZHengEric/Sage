@@ -23,6 +23,7 @@ services:
       SAGE_TRACE_JAEGER_UI_URL: ${SAGE_TRACE_JAEGER_UI_URL:-http://sage-jaeger:16686/jaeger}
       SAGE_TRACE_JAEGER_PUBLIC_URL: ${SAGE_TRACE_JAEGER_PUBLIC_URL:-http://127.0.0.1:30051/jaeger}
       SAGE_TRACE_JAEGER_BASE_PATH: ${SAGE_TRACE_JAEGER_BASE_PATH:-/api/observability/jaeger}
+      SAGE_LOG_LEVEL: ${SAGE_LOG_LEVEL:-DEBUG}
       SAGE_SESSION_DIR: /app/sessions
       SAGE_LOCAL_LINUX_ISOLATION: bwrap
     cap_add:
