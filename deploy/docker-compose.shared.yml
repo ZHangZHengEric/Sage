@@ -111,6 +111,7 @@ services:
     volumes:
       - ${SAGE_DEPLOY_DIR:-..}/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ${SAGE_ROOT}/prometheus/data:/prometheus
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       - sage-cadvisor
     mem_limit: 1g
