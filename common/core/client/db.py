@@ -13,6 +13,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 _PENDING_SESSION_CLOSE_TASKS: set[asyncio.Task] = set()
 
 
+def _create_aiomysql_engine(url: str, **kwargs):
+    engine = create_async_engine(url, **kwargs)
+    # SQLAlchemy's aiomysql dialect inherits PyMySQL ping detection, which can
+    # choose ping() even though aiomysql versions used by deployments require
+    # ping(reconnect).
+    engine.sync_engine.dialect.__dict__["_send_false_to_ping"] = True
+    return engine
+
+
 def _track_session_close_task(task: asyncio.Task) -> None:
     _PENDING_SESSION_CLOSE_TASKS.add(task)
 
@@ -153,7 +162,7 @@ class SessionManager:
                     charset = self.mysql_config.get("charset", "utf8mb4")
 
                     url = f"mysql+aiomysql://{user}:{password}@{host}:{port}/{database}?charset={charset}"
-                    self._engine = create_async_engine(
+                    self._engine = _create_aiomysql_engine(
                         url,
                         future=True,
                         pool_size=100,
@@ -204,7 +213,7 @@ class SessionManager:
                             logger.warning(f"数据库 '{database}' 不存在，尝试自动创建...")
                             try:
                                 admin_url = f"mysql+aiomysql://{user}:{password}@{host}:{port}/?charset={charset}"
-                                admin_engine = create_async_engine(
+                                admin_engine = _create_aiomysql_engine(
                                     admin_url,
                                     isolation_level="AUTOCOMMIT",
                                     future=True,
