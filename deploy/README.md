@@ -44,6 +44,8 @@ deploy/compose.sh --observability up -d
 deploy/compose.sh dev --observability up -d
 ```
 
+`deploy/docker-compose.observability.yml` 中的 `sage-cadvisor` 当前默认使用 `ghcr.io/google/cadvisor:v0.57.0`，兼容 Docker Engine API `v1.40+`（按 Docker 官方 API version matrix，对应 Docker 19.03 及以上）。
+
 也可以直接指定对应 compose 文件：
 
 ```bash
