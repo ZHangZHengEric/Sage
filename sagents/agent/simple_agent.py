@@ -957,6 +957,10 @@ class SimpleAgent(AgentBase):
             )
             if tool_choice:
                 model_config_override['tool_choice'] = tool_choice
+        is_turn_status_only_request = self._is_turn_status_only_request(
+            tools_json,
+            force_tool_choice_required,
+        )
         response = self._call_llm_streaming(
             messages=cast(List[Union[MessageChunk, Dict[str, Any]]], clean_message_input),
             session_id=session_id,
@@ -969,6 +973,7 @@ class SimpleAgent(AgentBase):
         content_response_message_id = str(uuid.uuid4())
         last_tool_call_id = None
         full_content_accumulator = ""
+        suppressed_status_only_content = ""
         tool_calls_messages_id = str(uuid.uuid4())
         emitted_tool_call_stream = False
         # 处理流式响应块
@@ -1021,6 +1026,9 @@ class SimpleAgent(AgentBase):
                 elif chunk.choices[0].delta.content:
                     if len(chunk.choices[0].delta.content) > 0:
                         content_piece = chunk.choices[0].delta.content
+                        if is_turn_status_only_request:
+                            suppressed_status_only_content += content_piece
+                            continue
                         full_content_accumulator += content_piece
                         output_messages = [MessageChunk(
                             role='assistant',
@@ -1081,6 +1089,22 @@ class SimpleAgent(AgentBase):
                  save_agent_response_content(full_content_accumulator, session_id)
              except Exception as e:
                  logger.error(f"SimpleAgent: Failed to save response content: {e}")
+
+        if is_turn_status_only_request and not tool_calls:
+            if suppressed_status_only_content.strip():
+                logger.warning(
+                    "SimpleAgent: turn_status-only 阶段模型只返回了自然语言，已隐藏该文本并暂停避免循环"
+                )
+            yield ([MessageChunk(
+                role=MessageRole.ASSISTANT.value,
+                content=(
+                    "模型未按协议调用 turn_status 工具来报告本轮状态，已暂停以避免重复循环。"
+                    "请重试或切换支持 tool_choice=required 的模型配置。"
+                ),
+                type=MessageType.AGENT_EXECUTION_ERROR.value,
+                agent_name=self.agent_name,
+            )], True)
+            return
 
         # 处理工具调用
         if len(tool_calls) > 0:

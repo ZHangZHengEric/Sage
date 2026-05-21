@@ -19,6 +19,183 @@ def _agent():
     return SimpleAgent(model=_DummyModel(), model_config={})
 
 
+def _llm_chunk(*, content=None, tool_calls=None):
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                delta=SimpleNamespace(content=content, tool_calls=tool_calls)
+            )
+        ]
+    )
+
+
+def _turn_status_tool_call(call_id="call_ts"):
+    return SimpleNamespace(
+        id=call_id,
+        index=0,
+        type="function",
+        function=SimpleNamespace(
+            name="turn_status",
+            arguments='{"status":"need_user_input","note":"waiting"}',
+        ),
+    )
+
+
+async def _collect_llm_response(agent, **kwargs):
+    collected = []
+    async for chunks, is_complete in agent._call_llm_and_process_response(**kwargs):
+        collected.extend(chunks)
+        if is_complete:
+            break
+    return collected
+
+
+def _base_messages():
+    return [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="你好",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="你好，直接说需求。",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+    ]
+
+
+def _turn_status_tools_json():
+    return [{"function": {"name": "turn_status"}}]
+
+
+def _patch_prepared_messages(monkeypatch, agent, messages):
+    async def _fake_prepare_messages_for_llm(messages_input, session_id):
+        yield messages, True
+
+    monkeypatch.setattr(agent, "_prepare_messages_for_llm", _fake_prepare_messages_for_llm)
+
+
+def _patch_tool_handler(monkeypatch, agent, seen_tool_calls):
+    async def _fake_handle_tool_calls(**kwargs):
+        seen_tool_calls.update(kwargs["tool_calls"])
+        yield ([
+            MessageChunk(
+                role=MessageRole.TOOL.value,
+                content='{"should_end": true}',
+                tool_call_id="call_ts",
+                message_type=MessageType.TOOL_CALL_RESULT.value,
+            )
+        ], True)
+
+    monkeypatch.setattr(agent, "_handle_tool_calls", _fake_handle_tool_calls)
+
+
+def test_status_only_turn_status_response_suppresses_duplicate_text(monkeypatch):
+    agent = _agent()
+    messages = _base_messages()
+    saved_content = []
+    seen_tool_calls = {}
+    _patch_prepared_messages(monkeypatch, agent, messages)
+    _patch_tool_handler(monkeypatch, agent, seen_tool_calls)
+    monkeypatch.setattr(
+        "sagents.agent.simple_agent.save_agent_response_content",
+        lambda content, session_id: saved_content.append(content),
+    )
+
+    def _fake_call_llm_streaming(*args, **kwargs):
+        async def _gen():
+            yield _llm_chunk(content="已收到。把你的目标发来。")
+            yield _llm_chunk(tool_calls=[_turn_status_tool_call()])
+
+        return _gen()
+
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_call_llm_streaming)
+
+    chunks = asyncio.run(_collect_llm_response(
+        agent,
+        messages_input=messages,
+        tools_json=_turn_status_tools_json(),
+        tool_manager=None,
+        session_id="s-status-only",
+        force_tool_choice_required=True,
+    ))
+
+    assert "call_ts" in seen_tool_calls
+    assert saved_content == []
+    assert all(chunk.content != "已收到。把你的目标发来。" for chunk in chunks)
+    assert any(chunk.role == MessageRole.TOOL.value for chunk in chunks)
+
+
+def test_non_status_only_turn_status_response_keeps_user_visible_text(monkeypatch):
+    agent = _agent()
+    messages = _base_messages()
+    saved_content = []
+    seen_tool_calls = {}
+    _patch_prepared_messages(monkeypatch, agent, messages)
+    _patch_tool_handler(monkeypatch, agent, seen_tool_calls)
+    monkeypatch.setattr(
+        "sagents.agent.simple_agent.save_agent_response_content",
+        lambda content, session_id: saved_content.append(content),
+    )
+
+    def _fake_call_llm_streaming(*args, **kwargs):
+        async def _gen():
+            yield _llm_chunk(content="普通回复正文。")
+            yield _llm_chunk(tool_calls=[_turn_status_tool_call()])
+
+        return _gen()
+
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_call_llm_streaming)
+
+    chunks = asyncio.run(_collect_llm_response(
+        agent,
+        messages_input=messages,
+        tools_json=_turn_status_tools_json(),
+        tool_manager=None,
+        session_id="s-normal",
+        force_tool_choice_required=False,
+    ))
+
+    assert "call_ts" in seen_tool_calls
+    assert saved_content == ["普通回复正文。"]
+    assert any(chunk.content == "普通回复正文。" for chunk in chunks)
+
+
+def test_status_only_text_without_tool_call_is_hidden_and_errors(monkeypatch):
+    agent = _agent()
+    messages = _base_messages()
+    saved_content = []
+    _patch_prepared_messages(monkeypatch, agent, messages)
+    monkeypatch.setattr(
+        "sagents.agent.simple_agent.save_agent_response_content",
+        lambda content, session_id: saved_content.append(content),
+    )
+
+    def _fake_call_llm_streaming(*args, **kwargs):
+        async def _gen():
+            yield _llm_chunk(content="这句也不应该展示。")
+
+        return _gen()
+
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_call_llm_streaming)
+
+    chunks = asyncio.run(_collect_llm_response(
+        agent,
+        messages_input=messages,
+        tools_json=_turn_status_tools_json(),
+        tool_manager=None,
+        session_id="s-status-only-no-tool",
+        force_tool_choice_required=True,
+    ))
+
+    assert saved_content == []
+    assert all(chunk.content != "这句也不应该展示。" for chunk in chunks)
+    assert len(chunks) == 1
+    assert chunks[0].message_type == MessageType.AGENT_EXECUTION_ERROR.value
+    assert "模型未按协议调用 turn_status" in chunks[0].content
+
+
 def test_returns_true_when_recent_assistant_text_exists():
     msgs = [
         MessageChunk(role=MessageRole.USER.value, content="跑一下", message_type=MessageType.USER_INPUT.value),
