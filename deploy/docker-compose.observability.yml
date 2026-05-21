@@ -50,7 +50,7 @@ services:
       - shared
 
   sage-cadvisor:
-    image: ghcr.io/google/cadvisor:0.56.2
+    image: ghcr.io/google/cadvisor:v0.57.0
     container_name: sage-cadvisor
     restart: always
     privileged: true
