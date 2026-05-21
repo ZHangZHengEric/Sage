@@ -50,7 +50,6 @@ services:
       - shared
 
   sage-cadvisor:
-    # cAdvisor v0.57.0 restores Docker Engine API compatibility for v1.40+.
     image: ghcr.io/google/cadvisor:v0.57.0
     container_name: sage-cadvisor
     restart: always
