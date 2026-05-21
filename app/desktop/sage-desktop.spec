@@ -52,6 +52,7 @@ hiddenimports = [
 hiddenimports += collect_submodules("sagents")
 hiddenimports += collect_submodules("sagents.tool.impl")
 hiddenimports += collect_submodules("sagents.skill")
+hiddenimports += collect_submodules("common.models")
 
 for _pkg in (
     "certifi",
