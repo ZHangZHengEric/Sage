@@ -385,7 +385,15 @@ def validate_and_prepare_request(
     allow_pending_guidance_flush: bool = False,
 ) -> None:
     """验证并准备请求参数"""
-    if not get_chat_client():
+    try:
+        chat_client = get_chat_client()
+    except RuntimeError as exc:
+        logger.bind(session_id=request.session_id).warning(
+            f"模型客户端不可用: {exc}"
+        )
+        chat_client = None
+
+    if not chat_client:
         raise SageHTTPException(
             status_code=503,
             detail="模型客户端未配置或不可用",
