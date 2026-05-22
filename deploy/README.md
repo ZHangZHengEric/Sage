@@ -42,6 +42,7 @@ deploy/compose.sh test up -d
 ```bash
 deploy/compose.sh --observability up -d
 deploy/compose.sh dev --observability up -d
+deploy/compose.sh --observability up -d sage-cadvisor
 ```
 
 `deploy/docker-compose.observability.yml` 中的 `sage-cadvisor` 当前默认使用 `ghcr.io/google/cadvisor:v0.57.0`，兼容 Docker Engine API `v1.40+`（按 Docker 官方 API version matrix，对应 Docker 19.03 及以上）。
@@ -52,6 +53,13 @@ deploy/compose.sh dev --observability up -d
 SAGE_REPO_ROOT=$PWD SAGE_DEPLOY_DIR=$PWD/deploy docker compose --env-file deploy/dev/.env -f deploy/docker-compose.shared.yml -p sage_shared up -d
 SAGE_COMPOSE_ENV_FILE=$PWD/deploy/dev/.env SAGE_SHARED_NETWORK=sage_shared_default docker compose --env-file deploy/dev/.env -f deploy/dev/docker-compose.yml up -d
 SAGE_DEPLOY_DIR=$PWD/deploy SAGE_SHARED_NETWORK=sage_shared_default docker compose --env-file deploy/dev/.env -p sage_shared -f deploy/docker-compose.observability.yml up -d
+```
+
+需要单独启动 shared 服务时，直接指定 shared service 名即可，脚本会把它路由到 `deploy/docker-compose.shared.yml`：
+
+```bash
+deploy/compose.sh up -d sage-redis
+deploy/compose.sh up -d sage-rustfs
 ```
 
 `dev`、`prod`、`test` 的 `.env.example` 已区分 `COMPOSE_PROJECT_NAME`、server/web/mysql/es 宿主机端口、`SAGE_ENV`、命名空间和默认数据目录。共享服务默认端口为 Wiki `30057`、RustFS `30054` / `30055`、Redis `30056`、Jaeger OTLP `4317` / `4318`、Prometheus `30090`、Loki `30091`、Alloy `30092`、Grafana `30093`；需要覆盖时仍可在 `.env` 中显式设置 `SAGE_WIKI_PORT`、`SAGE_RUSTFS_API_PORT`、`SAGE_RUSTFS_CONSOLE_PORT`、`SAGE_REDIS_PORT`、`SAGE_REDIS_PASSWORD`、`SAGE_JAEGER_OTLP_GRPC_PORT`、`SAGE_JAEGER_OTLP_HTTP_PORT`、`SAGE_PROMETHEUS_PORT`、`SAGE_LOKI_PORT`、`SAGE_ALLOY_PORT`、`SAGE_GRAFANA_PORT`。

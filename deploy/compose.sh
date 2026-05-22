@@ -15,6 +15,8 @@ Default environment: prod
 Examples:
   deploy/compose.sh up -d
   deploy/compose.sh --observability up -d
+  deploy/compose.sh --observability up -d sage-cadvisor
+  deploy/compose.sh up -d sage-redis
   deploy/compose.sh dev --observability up -d
   deploy/compose.sh dev up -d
   deploy/compose.sh prod pull
@@ -101,6 +103,60 @@ if [ "$ENABLE_OBSERVABILITY" = "true" ]; then
   COMPOSE_ARGS+=(-f "$OBSERVABILITY_COMPOSE_FILE")
 fi
 
+ENV_SERVICES=(sage-server sage-web sage-mysql sage-es)
+SHARED_SERVICES=(sage-wiki sage-rustfs sage-redis sage-jaeger)
+OBSERVABILITY_SERVICES=(sage-prometheus sage-grafana sage-cadvisor sage-loki sage-alloy)
+
+contains_service() {
+  local service="$1"
+  shift
+  local item
+  for item in "$@"; do
+    if [ "$item" = "$service" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+append_up_arg() {
+  local arg="$1"
+
+  if contains_service "$arg" "${ENV_SERVICES[@]}"; then
+    UP_HAS_TARGETS="true"
+    UP_ENV_TARGETS+=("$arg")
+    return 0
+  fi
+
+  if contains_service "$arg" "${SHARED_SERVICES[@]}"; then
+    UP_HAS_TARGETS="true"
+    UP_SHARED_TARGETS+=("$arg")
+    return 0
+  fi
+
+  if contains_service "$arg" "${OBSERVABILITY_SERVICES[@]}"; then
+    UP_HAS_TARGETS="true"
+    UP_OBSERVABILITY_TARGETS+=("$arg")
+    return 0
+  fi
+
+  UP_ARGS+=("$arg")
+}
+
+prepare_up_args() {
+  UP_ARGS=(up)
+  UP_ENV_TARGETS=()
+  UP_SHARED_TARGETS=()
+  UP_OBSERVABILITY_TARGETS=()
+  UP_HAS_TARGETS="false"
+
+  shift
+  local arg
+  for arg in "$@"; do
+    append_up_arg "$arg"
+  done
+}
+
 env_value() {
   local key="$1"
   awk -F= -v key="$key" '
@@ -166,25 +222,76 @@ run_compose() {
     docker compose "$@"
 }
 
-start_observability() {
+start_shared() {
   local shared_network="$1"
+  shift
 
   COMPOSE_PROJECT_NAME="$SHARED_PROJECT_NAME" \
-    run_compose "$shared_network" "${OBSERVABILITY_COMPOSE_ARGS[@]}" up -d
+    run_compose "$shared_network" "${SHARED_COMPOSE_ARGS[@]}" "$@"
+}
+
+start_observability() {
+  local shared_network="$1"
+  shift
+
+  COMPOSE_PROJECT_NAME="$SHARED_PROJECT_NAME" \
+    run_compose "$shared_network" "${OBSERVABILITY_COMPOSE_ARGS[@]}" "$@"
 }
 
 if [ "${1:-}" = "up" ]; then
+  prepare_up_args "$@"
+
+  if [ "${#UP_OBSERVABILITY_TARGETS[@]}" -gt 0 ] && [ "$ENABLE_OBSERVABILITY" != "true" ]; then
+    echo "Observability service requested without --observability: ${UP_OBSERVABILITY_TARGETS[*]}" >&2
+    exit 1
+  fi
+
+  RUN_ENV_UP="false"
+  RUN_SHARED_UP="false"
+  RUN_OBSERVABILITY_UP="false"
+
+  if [ "$UP_HAS_TARGETS" = "false" ]; then
+    RUN_ENV_UP="true"
+    RUN_SHARED_UP="true"
+    if [ "$ENABLE_OBSERVABILITY" = "true" ]; then
+      RUN_OBSERVABILITY_UP="true"
+    fi
+  else
+    if [ "${#UP_ENV_TARGETS[@]}" -gt 0 ]; then
+      RUN_ENV_UP="true"
+    fi
+    if [ "${#UP_SHARED_TARGETS[@]}" -gt 0 ]; then
+      RUN_SHARED_UP="true"
+    fi
+    if [ "${#UP_OBSERVABILITY_TARGETS[@]}" -gt 0 ]; then
+      RUN_OBSERVABILITY_UP="true"
+    fi
+  fi
+
   if current_shared_id="$(shared_container_for_project "$CURRENT_PROJECT_NAME")" && [ -n "$current_shared_id" ]; then
     shared_network="$(network_for_container "$current_shared_id")"
     if [ -z "$shared_network" ]; then
       echo "Shared service is running but its Docker network could not be detected." >&2
       exit 1
     fi
-    run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "$@"
-    if [ "$ENABLE_OBSERVABILITY" = "true" ]; then
-      start_observability "$shared_network"
+    if [ "$RUN_SHARED_UP" = "true" ] && [ "$UP_HAS_TARGETS" = "true" ]; then
+      start_shared "$shared_network" "${UP_ARGS[@]}" "${UP_SHARED_TARGETS[@]}"
     fi
-    exit $?
+    if [ "$RUN_ENV_UP" = "true" ]; then
+      if [ "$UP_HAS_TARGETS" = "true" ]; then
+        run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "${UP_ARGS[@]}" "${UP_ENV_TARGETS[@]}"
+      else
+        run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "${UP_ARGS[@]}"
+      fi
+    fi
+    if [ "$RUN_OBSERVABILITY_UP" = "true" ]; then
+      if [ "$UP_HAS_TARGETS" = "true" ]; then
+        start_observability "$shared_network" "${UP_ARGS[@]}" "${UP_OBSERVABILITY_TARGETS[@]}"
+      else
+        start_observability "$shared_network" "${UP_ARGS[@]}"
+      fi
+    fi
+    exit 0
   fi
 
   if shared_id="$(shared_container_outside_current_project)" && [ -n "$shared_id" ]; then
@@ -193,20 +300,52 @@ if [ "${1:-}" = "up" ]; then
       echo "Shared service is running but its Docker network could not be detected." >&2
       exit 1
     fi
-    run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "$@"
-    if [ "$ENABLE_OBSERVABILITY" = "true" ]; then
-      start_observability "$shared_network"
+    if [ "$RUN_SHARED_UP" = "true" ] && [ "$UP_HAS_TARGETS" = "true" ]; then
+      start_shared "$shared_network" "${UP_ARGS[@]}" "${UP_SHARED_TARGETS[@]}"
     fi
-    exit $?
+    if [ "$RUN_ENV_UP" = "true" ]; then
+      if [ "$UP_HAS_TARGETS" = "true" ]; then
+        run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "${UP_ARGS[@]}" "${UP_ENV_TARGETS[@]}"
+      else
+        run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "${UP_ARGS[@]}"
+      fi
+    fi
+    if [ "$RUN_OBSERVABILITY_UP" = "true" ]; then
+      if [ "$UP_HAS_TARGETS" = "true" ]; then
+        start_observability "$shared_network" "${UP_ARGS[@]}" "${UP_OBSERVABILITY_TARGETS[@]}"
+      else
+        start_observability "$shared_network" "${UP_ARGS[@]}"
+      fi
+    fi
+    exit 0
   fi
 
-  COMPOSE_PROJECT_NAME="$SHARED_PROJECT_NAME" \
-    run_compose "" "${SHARED_COMPOSE_ARGS[@]}" up -d
-  run_compose "${SHARED_PROJECT_NAME}_default" "${ENV_COMPOSE_ARGS[@]}" "$@"
-  if [ "$ENABLE_OBSERVABILITY" = "true" ]; then
-    start_observability "${SHARED_PROJECT_NAME}_default"
+  if [ "$RUN_SHARED_UP" = "true" ]; then
+    if [ "$UP_HAS_TARGETS" = "true" ]; then
+      start_shared "" "${UP_ARGS[@]}" "${UP_SHARED_TARGETS[@]}"
+    else
+      start_shared "" "${UP_ARGS[@]}"
+    fi
+  elif [ "$RUN_ENV_UP" = "true" ] || [ "$RUN_OBSERVABILITY_UP" = "true" ]; then
+    start_shared "" up -d
   fi
-  exit $?
+
+  shared_network="${SHARED_PROJECT_NAME}_default"
+  if [ "$RUN_ENV_UP" = "true" ]; then
+    if [ "$UP_HAS_TARGETS" = "true" ]; then
+      run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "${UP_ARGS[@]}" "${UP_ENV_TARGETS[@]}"
+    else
+      run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "${UP_ARGS[@]}"
+    fi
+  fi
+  if [ "$RUN_OBSERVABILITY_UP" = "true" ]; then
+    if [ "$UP_HAS_TARGETS" = "true" ]; then
+      start_observability "$shared_network" "${UP_ARGS[@]}" "${UP_OBSERVABILITY_TARGETS[@]}"
+    else
+      start_observability "$shared_network" "${UP_ARGS[@]}"
+    fi
+  fi
+  exit 0
 fi
 
 run_compose "" "${COMPOSE_ARGS[@]}" "$@"
