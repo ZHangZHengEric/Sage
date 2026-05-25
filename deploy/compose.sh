@@ -102,6 +102,7 @@ OBSERVABILITY_COMPOSE_ARGS=(--env-file "$ENV_FILE" -p "$SHARED_PROJECT_NAME" -f 
 if [ "$ENABLE_OBSERVABILITY" = "true" ]; then
   COMPOSE_ARGS+=(-f "$OBSERVABILITY_COMPOSE_FILE")
 fi
+REQUESTED_SHARED_NETWORK="${SAGE_SHARED_NETWORK:-}"
 
 ENV_SERVICES=(sage-server sage-web sage-mysql sage-es)
 SHARED_SERVICES=(sage-wiki sage-rustfs sage-redis sage-jaeger)
@@ -213,13 +214,20 @@ network_for_container() {
 run_compose() {
   local shared_network="${1:-}"
   shift || true
+  if [ -n "$REQUESTED_SHARED_NETWORK" ]; then
+    shared_network="$REQUESTED_SHARED_NETWORK"
+  fi
+  local compose_env=(
+    "SAGE_REPO_ROOT=$ROOT_DIR"
+    "SAGE_DEPLOY_DIR=$DEPLOY_DIR"
+    "SAGE_COMPOSE_ENV_FILE=$ENV_FILE"
+    "COMPOSE_IGNORE_ORPHANS=${COMPOSE_IGNORE_ORPHANS:-true}"
+  )
+  if [ -n "$shared_network" ]; then
+    compose_env+=("SAGE_SHARED_NETWORK=$shared_network")
+  fi
 
-  SAGE_REPO_ROOT="$ROOT_DIR" \
-  SAGE_DEPLOY_DIR="$DEPLOY_DIR" \
-  SAGE_COMPOSE_ENV_FILE="$ENV_FILE" \
-  SAGE_SHARED_NETWORK="$shared_network" \
-  COMPOSE_IGNORE_ORPHANS="${COMPOSE_IGNORE_ORPHANS:-true}" \
-    docker compose "$@"
+  env "${compose_env[@]}" docker compose "$@"
 }
 
 start_shared() {
