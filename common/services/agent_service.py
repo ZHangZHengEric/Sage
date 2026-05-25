@@ -1175,6 +1175,37 @@ async def delete_desktop_agent_file(agent_id: str, file_path: str) -> bool:
     )
 
 
+async def upload_server_agent_file(
+    agent_id: str,
+    user_id: str,
+    filename: str,
+    source_file,
+    target_path: str = "",
+) -> Dict[str, Any]:
+    return await asyncio.to_thread(
+        save_workspace_upload,
+        get_server_agent_workspace_path(agent_id, user_id),
+        filename,
+        source_file,
+        target_path,
+    )
+
+
+async def upload_desktop_agent_file(
+    agent_id: str,
+    filename: str,
+    source_file,
+    target_path: str = "",
+) -> Dict[str, Any]:
+    return await asyncio.to_thread(
+        save_workspace_upload,
+        get_desktop_agent_workspace_path(agent_id),
+        filename,
+        source_file,
+        target_path,
+    )
+
+
 async def generate_agent_abilities(
     agent_id: str,
     session_id: Optional[str] = None,
@@ -1473,3 +1504,73 @@ def delete_workspace_entry(workspace_path: str | Path, file_path: str) -> bool:
             detail=f"删除文件失败: {str(e)}",
             error_detail=f"Failed to delete file: {str(e)}",
         )
+
+
+def _resolve_workspace_upload_path(
+    workspace_path: str | Path,
+    filename: str,
+    target_path: str = "",
+) -> Tuple[str, str]:
+    if not filename or os.path.basename(filename) != filename:
+        raise SageHTTPException(
+            status_code=400,
+            detail="非法文件名",
+            error_detail="Invalid filename",
+        )
+
+    workspace_str = os.fspath(workspace_path)
+    workspace_abs = os.path.normcase(os.path.abspath(workspace_str))
+    normalized_target = os.fspath(target_path or "").strip()
+
+    if os.path.isabs(normalized_target):
+        raise SageHTTPException(
+            status_code=400,
+            detail="访问被拒绝：文件路径超出工作空间范围",
+            error_detail="Access denied: file path outside workspace",
+        )
+
+    relative_dir = os.path.normpath(normalized_target) if normalized_target else ""
+    if relative_dir == ".":
+        relative_dir = ""
+
+    target_dir = os.path.join(workspace_str, relative_dir) if relative_dir else workspace_str
+    file_path = os.path.join(target_dir, filename)
+    file_abs = os.path.normcase(os.path.abspath(file_path))
+
+    try:
+        in_workspace = os.path.commonpath([workspace_abs, file_abs]) == workspace_abs
+    except ValueError:
+        in_workspace = False
+
+    if not in_workspace:
+        raise SageHTTPException(
+            status_code=400,
+            detail="访问被拒绝：文件路径超出工作空间范围",
+            error_detail="Access denied: file path outside workspace",
+        )
+
+    return file_abs, os.path.relpath(file_abs, workspace_abs)
+
+
+def save_workspace_upload(
+    workspace_path: str | Path,
+    filename: str,
+    source_file,
+    target_path: str = "",
+) -> Dict[str, Any]:
+    file_path, relative_path = _resolve_workspace_upload_path(
+        workspace_path,
+        filename,
+        target_path,
+    )
+
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(source_file, buffer)
+
+    file_size = os.path.getsize(file_path)
+    return {
+        "filename": filename,
+        "path": relative_path,
+        "size": file_size,
+    }

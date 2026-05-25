@@ -7,7 +7,7 @@ import re
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
-from fastapi import APIRouter, File, Request, UploadFile
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 import shutil
@@ -552,51 +552,28 @@ async def delete_file(agent_id: str, request: Request):
 
 
 @agent_router.post("/{agent_id}/file_workspace/upload")
-async def upload_file(agent_id: str, file: UploadFile = File(...), target_path: str = ""):
+async def upload_file(
+    agent_id: str,
+    file: UploadFile = File(...),
+    target_path: str = Form(""),
+):
     """上传文件到Agent工作空间"""
     logger.bind(agent_id=agent_id).info(f"Upload request: filename={file.filename}, target_path={target_path}")
-    user_home = Path.home()
-    sage_home = user_home / ".sage"
-    workspace_path = sage_home / "agents" / agent_id
-    
+
     try:
-        # 确保工作空间目录存在
-        workspace_path.mkdir(parents=True, exist_ok=True)
-        
-        # 构建目标文件路径
-        if target_path:
-            # 如果指定了目标路径，创建子目录
-            target_dir = workspace_path / target_path
-            target_dir.mkdir(parents=True, exist_ok=True)
-            file_path = target_dir / file.filename
-        else:
-            file_path = workspace_path / file.filename
-        
-        # 安全检查：确保文件路径在工作空间内
-        workspace_abs = os.path.normcase(os.path.abspath(workspace_path))
-        file_abs = os.path.normcase(os.path.abspath(file_path))
-        try:
-            in_workspace = os.path.commonpath([workspace_abs, file_abs]) == workspace_abs
-        except ValueError:
-            in_workspace = False
-        
-        if not in_workspace:
-            raise SageHTTPException(status_code=400, detail="访问被拒绝：文件路径超出工作空间范围")
-        
-        # 保存文件
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        file_size = os.path.getsize(file_path)
-        logger.bind(agent_id=agent_id).info(f"Upload successful: {file_path}, size={file_size}")
-        
+        result = await agent_service.upload_desktop_agent_file(
+            agent_id,
+            file.filename,
+            file.file,
+            target_path,
+        )
+        logger.bind(agent_id=agent_id).info(
+            f"Upload successful: path={result['path']}, size={result['size']}"
+        )
+
         return await Response.succ(
             message=f"文件 {file.filename} 上传成功",
-            data={
-                "filename": file.filename,
-                "path": str(file_path.relative_to(workspace_path)),
-                "size": file_size,
-            }
+            data=result,
         )
     except Exception as e:
         logger.bind(agent_id=agent_id).error(f"Upload failed: {e}")
