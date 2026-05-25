@@ -13,7 +13,7 @@ Test history anchor / active_start_index 的新语义。
 
 from datetime import datetime
 from typing import Dict, List, Optional
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
@@ -137,6 +137,14 @@ class TestAddMessagesRefreshesAnchor:
         mm.add_messages(_make(MessageRole.USER.value, "u1"))
         mm.add_messages(_make(MessageRole.ASSISTANT.value, "a1"))
         assert mm.active_start_index is None
+
+    def test_unchanged_anchor_does_not_log_on_each_stream_chunk(self):
+        mm = MessageManager()
+        with patch("sagents.context.messages.message_manager.logger.debug") as debug:
+            mm.add_messages(_make(MessageRole.USER.value, "u1"))
+            mm.add_messages(_make(MessageRole.ASSISTANT.value, "a1"))
+
+        debug.assert_not_called()
 
     def test_adding_compress_tool_call_sets_anchor(self):
         mm = MessageManager()
