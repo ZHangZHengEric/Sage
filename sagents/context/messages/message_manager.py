@@ -127,10 +127,12 @@ class MessageManager:
         Args:
             index: 活跃消息的起始索引，None表示所有消息都是活跃消息
         """  
+        previous_index = self.active_start_index
         self.active_start_index = index
-        logger.debug(f"MessageManager: 设置 active_start_index = {index}，"
-                   f"历史消息: {index if index else 0}条，"
-                   f"活跃消息: {len(self.messages) - (index if index else 0)}条")
+        if previous_index != index:
+            logger.debug(f"MessageManager: 设置 active_start_index = {index}，"
+                       f"历史消息: {index if index else 0}条，"
+                       f"活跃消息: {len(self.messages) - (index if index else 0)}条")
     
     def prepare_history_split(self, agent_config: Dict[str, Any]) -> Dict[str, Any]:
         """计算 token 预算并刷新历史锚点。
