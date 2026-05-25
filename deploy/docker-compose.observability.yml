@@ -34,7 +34,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${SAGE_GRAFANA_ADMIN_PASSWORD:-change_this_grafana_password}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/sage-server-observability.json
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/sage/sage-server-observability.json
     ports:
       - "${SAGE_GRAFANA_PORT:-30093}:3000"
     volumes:

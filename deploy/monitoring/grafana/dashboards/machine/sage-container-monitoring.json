@@ -407,7 +407,7 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values(container_cpu_usage_seconds_total{job=~\"sage.*\"}, job)",
+        "definition": "label_values(container_cpu_usage_seconds_total{container_label_com_docker_compose_service!=\"\"}, job)",
         "hide": 0,
         "includeAll": true,
         "label": "job",
@@ -415,7 +415,7 @@
         "name": "job",
         "options": [],
         "query": {
-          "query": "label_values(container_cpu_usage_seconds_total{job=~\"sage.*\"}, job)",
+          "query": "label_values(container_cpu_usage_seconds_total{container_label_com_docker_compose_service!=\"\"}, job)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
@@ -431,7 +431,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Sage 容器监测",
+  "title": "机器容器指标",
   "uid": "sage-container-monitoring",
   "version": 1,
   "weekStart": ""

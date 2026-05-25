@@ -33,9 +33,6 @@ scrape_configs:
           - sage-cadvisor:8080
     metric_relabel_configs:
       - source_labels: [container_label_com_docker_compose_service]
-        regex: sage.*
-        action: keep
-      - source_labels: [container_label_com_docker_compose_service]
         regex: (.+)
         target_label: job
         replacement: $1
