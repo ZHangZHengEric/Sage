@@ -25,12 +25,51 @@ function Find-CondaExe {
         $env:CONDA_EXE,
         "$env:USERPROFILE\miniconda3\Scripts\conda.exe",
         "$env:USERPROFILE\anaconda3\Scripts\conda.exe",
+        "$env:USERPROFILE\AppData\Local\miniconda3\Scripts\conda.exe",
+        "$env:USERPROFILE\AppData\Local\anaconda3\Scripts\conda.exe",
         "C:\ProgramData\miniconda3\Scripts\conda.exe",
-        "C:\ProgramData\anaconda3\Scripts\conda.exe"
+        "C:\ProgramData\anaconda3\Scripts\conda.exe",
+        "C:\ProgramData\Anaconda3\Scripts\conda.exe"
     )
     foreach ($p in $paths) {
         if ($p -and (Test-Path $p)) { return $p }
     }
+
+    $condaCmd = Get-Command conda.exe -ErrorAction SilentlyContinue
+    if ($condaCmd -and (Test-Path $condaCmd.Source)) {
+        return $condaCmd.Source
+    }
+
+    return $null
+}
+
+function Resolve-CondaEnvPython {
+    param(
+        [string]$CondaExe,
+        [string]$EnvName,
+        [string]$CondaBase
+    )
+
+    $envListLines = & $CondaExe env list 2>$null
+    foreach ($line in $envListLines) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match '^#|^\s*$') { continue }
+        $parts = $trimmed -split '\s+', 3
+        if ($parts.Count -ge 2 -and $parts[0] -eq $EnvName) {
+            $envPath = $parts[-1]
+            $pythonExe = Join-Path $envPath "python.exe"
+            if (Test-Path $pythonExe) { return $pythonExe }
+        }
+    }
+
+    $defaultPython = Join-Path $CondaBase "envs\$EnvName\python.exe"
+    if (Test-Path $defaultPython) { return $defaultPython }
+
+    try {
+        $resolved = (& $CondaExe run -n $EnvName python -c "import sys; print(sys.executable)" 2>$null).Trim()
+        if ($resolved -and (Test-Path $resolved)) { return $resolved }
+    } catch {}
+
     return $null
 }
 
@@ -72,9 +111,9 @@ if ($envExists) {
 }
 
 Write-Host "Resolving Python executable for Conda environment '$EnvName'..." -ForegroundColor Cyan
-$SagePython = Join-Path $CondaBase "envs\$EnvName\python.exe"
-if (-not (Test-Path $SagePython)) {
-    Write-Host "[ERROR] Python not found in Conda environment: $SagePython" -ForegroundColor Red
+$SagePython = Resolve-CondaEnvPython -CondaExe $CondaExe -EnvName $EnvName -CondaBase $CondaBase
+if (-not $SagePython) {
+    Write-Host "[ERROR] Python not found in Conda environment '$EnvName'. Check 'conda env list'." -ForegroundColor Red
     exit 1
 }
 
