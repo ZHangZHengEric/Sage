@@ -1,5 +1,6 @@
 apiVersion: 1
 
+# Create missing data sources, but leave existing ones unchanged.
 datasources:
   - name: Sage Prometheus
     uid: sage-prometheus
@@ -7,6 +8,7 @@ datasources:
     access: proxy
     url: http://sage-prometheus:9090
     isDefault: true
+    version: -1
     editable: true
 
   - name: Sage Loki
@@ -14,4 +16,5 @@ datasources:
     type: loki
     access: proxy
     url: http://sage-loki:3100
+    version: -1
     editable: true
