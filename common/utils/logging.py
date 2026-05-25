@@ -21,6 +21,7 @@ from loguru import logger
 
 
 _SUPPRESSED_UVICORN_ACCESS_PATHS = {
+    "/api/health",
     "/api/observability/metrics",
 }
 

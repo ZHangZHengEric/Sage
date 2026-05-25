@@ -21,5 +21,9 @@ def test_suppresses_prometheus_metrics_uvicorn_access_log():
     )
 
 
+def test_suppresses_health_uvicorn_access_log():
+    assert _should_suppress_log_record(_uvicorn_access_record("/api/health"))
+
+
 def test_keeps_regular_uvicorn_access_log():
     assert not _should_suppress_log_record(_uvicorn_access_record("/api/chat"))
