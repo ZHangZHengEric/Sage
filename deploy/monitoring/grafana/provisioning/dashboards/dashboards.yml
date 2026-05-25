@@ -9,4 +9,12 @@ providers:
     editable: true
     updateIntervalSeconds: 30
     options:
-      path: /etc/grafana/dashboards
+      path: /etc/grafana/dashboards/sage
+  - name: Machine Dashboards
+    orgId: 1
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards/machine
