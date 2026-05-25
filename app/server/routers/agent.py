@@ -4,7 +4,7 @@ Agent 相关路由
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from common.core.request_identity import (
@@ -377,6 +377,47 @@ async def delete_file(agent_id: str, request: Request, session_id: Optional[str]
         return await Response.succ(message=result["message"], data=result["data"])
     except Exception as e:
         logger.error(f"Delete failed: {e}")
+        raise
+
+
+@agent_router.post("/{agent_id}/file_workspace/upload")
+async def upload_file(
+    agent_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    target_path: str = Form(""),
+    session_id: Optional[str] = None,
+):
+    """上传文件到 Agent 工作空间"""
+    user_id = get_request_user_id(request)
+    role = get_request_role(request)
+
+    if role == "admin" and session_id:
+        dao = ConversationDao()
+        conversation = await dao.get_by_session_id(session_id)
+        if conversation:
+            user_id = conversation.user_id
+
+    logger.bind(agent_id=agent_id, user_id=user_id).info(
+        f"Upload request: filename={file.filename}, target_path={target_path}"
+    )
+    try:
+        result = await agent_service.upload_server_agent_file(
+            agent_id,
+            user_id,
+            file.filename,
+            file.file,
+            target_path,
+        )
+        logger.bind(agent_id=agent_id, user_id=user_id).info(
+            f"Upload successful: path={result['path']}, size={result['size']}"
+        )
+        return await Response.succ(
+            message=f"文件 {file.filename} 上传成功",
+            data=result,
+        )
+    except Exception as e:
+        logger.bind(agent_id=agent_id, user_id=user_id).error(f"Upload failed: {e}")
         raise
 
 
