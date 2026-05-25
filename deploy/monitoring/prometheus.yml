@@ -22,7 +22,10 @@ scrape_configs:
       - source_labels: [__meta_docker_container_name]
         regex: /?(.*)
         target_label: container
-      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+      - source_labels: [__meta_docker_network_name]
+        regex: sage_shared_default
+        action: keep
+      - source_labels: [__meta_docker_network_ip]
         regex: (.+)
         target_label: __address__
         replacement: $1:8080
