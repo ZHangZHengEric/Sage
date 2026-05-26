@@ -784,7 +784,7 @@
       },
       "id": 20,
       "panels": [],
-      "title": "流式响应 / SSE",
+      "title": "SAgents 对话执行 / SSE",
       "type": "row"
     },
     {
@@ -800,7 +800,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 6,
         "x": 0,
         "y": 21
       },
@@ -827,15 +827,15 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(sage_server_operations_active{job=~\"$job\",instance=~\"$instance\",category=\"stream\"}) by (name)",
-          "legendFormat": "{{name}}",
+          "expr": "sum(sagents_agent_runs_active{job=~\"$job\",instance=~\"$instance\"}) by (agent_id)",
+          "legendFormat": "{{agent_id}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "当前进行中流式连接",
+      "title": "当前进行中 Agent 执行",
       "type": "timeseries",
-      "description": "当前值取最新 Prometheus scrape 的 active gauge；折线表示所选时间范围内每个采样点的并发流式连接数，Max 是该时间范围内的峰值。"
+      "description": "来自 SAgent 执行入口，按 agent_id 统计当前仍在运行的 Agent 会话；原始指标保留 session_id 方便排查。"
     },
     {
       "datasource": {
@@ -851,8 +851,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 8,
+        "w": 6,
+        "x": 6,
         "y": 21
       },
       "id": 22,
@@ -878,15 +878,15 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(sage_server_operations_total{job=~\"$job\",instance=~\"$instance\",category=\"stream\"}[$__rate_interval])) by (name, status)",
-          "legendFormat": "{{name}} / {{status}}",
+          "expr": "sum(rate(sagents_agent_runs_total{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (agent_id, status)",
+          "legendFormat": "{{agent_id}} / {{status}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "流式结束速率（次/秒，按接口/状态）",
+      "title": "Agent 执行结束速率（次/秒）",
       "type": "timeseries",
-      "description": "按 stream 和 status 展示完成、错误、取消、断开的每秒速率；单位为次/秒。"
+      "description": "来自 SAgent 执行入口，按 agent_id 和 status 展示成功/失败结束速率；SSE 断开另看失败列表。"
     },
     {
       "datasource": {
@@ -902,8 +902,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 12,
         "y": 21
       },
       "id": 23,
@@ -929,15 +929,66 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(sage_server_operation_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\",category=\"stream\"}[$__rate_interval])) by (le, name))",
-          "legendFormat": "p95 {{name}}",
+          "expr": "histogram_quantile(0.95, sum(rate(sagents_agent_run_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (le, agent_id))",
+          "legendFormat": "p95 {{agent_id}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "流式耗时 P95（按接口）",
+      "title": "Agent 完整执行耗时 P95",
       "type": "timeseries",
-      "description": "按 stream 展示已结束流式请求的 95 分位耗时，单位为秒；p95 不是最大值，而是 95% 请求低于该耗时。"
+      "description": "来自 SAgent 执行入口，展示已结束 Agent run 的 95 分位完整执行耗时；不按 router/SSE 连接计时。"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 21
+      },
+      "id": 24,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum(rate(sagents_first_token_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (le, agent_id))",
+          "legendFormat": "p95 {{agent_id}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "首 token 耗时 P95（按 Agent）",
+      "type": "timeseries",
+      "description": "从 SAgent run_stream 开始到第一次输出有内容的 assistant/tool chunk 的耗时 P95；按 agent_id 聚合。"
     },
     {
       "collapsed": false,
@@ -1031,7 +1082,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "increase(sage_server_sse_stream_failures_total{job=~\"$job\",instance=~\"$instance\"}[$__range]) > 0",
+          "expr": "increase(sage_server_sse_stream_failures_total{job=~\"$job\",instance=~\"$instance\",stream=~\"api_chat|api_stream|web_stream|resume_stream|rerun_stream\"}[$__range]) > 0",
           "format": "table",
           "instant": true,
           "legendFormat": "",

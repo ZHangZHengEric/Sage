@@ -14,6 +14,7 @@ from app.server.services.prometheus_metrics import (
 )
 from sagents.observability.prometheus_handler import (
     PrometheusTraceHandler,
+    record_agent_first_token,
     render_prometheus_trace_metrics,
     reset_prometheus_trace_metrics,
 )
@@ -85,7 +86,11 @@ def test_prometheus_trace_handler_records_agent_and_tool_metrics():
     handler = PrometheusTraceHandler()
 
     handler.on_agent_start("session-1", "SimpleAgent", agent_id="agent-demo")
+    active_body = render_prometheus_trace_metrics()
+    assert 'sagents_agent_runs_active{agent_id="agent-demo",session_id="session-1"} 1.000000' in active_body
+
     handler.on_agent_end({"status": "finished"})
+    record_agent_first_token("agent-demo", "session-1", 0.2)
     handler.on_tool_start("session-1", "search", {})
     handler.on_tool_error(Exception("boom"))
     handler.on_tool_start("session-2", "query", {}, tool_type="mcp", server_name="AnyTool")
@@ -95,6 +100,10 @@ def test_prometheus_trace_handler_records_agent_and_tool_metrics():
     trace_id = hashlib.md5(b"session-1").hexdigest()
 
     assert 'sagents_agent_runs_total{agent_id="agent-demo",status="success"} 1.000000' in body
+    assert 'sagents_agent_runs_active{agent_id="agent-demo",session_id="session-1"}' not in body
+    assert 'sagents_agent_run_duration_seconds_count{agent_id="agent-demo",status="success"} 1.000000' in body
+    assert 'sagents_first_token_seconds_count{agent_id="agent-demo",session_id="session-1"} 1.000000' in body
+    assert 'sagents_first_token_seconds_sum{agent_id="agent-demo",session_id="session-1"} 0.200000' in body
     assert 'sagents_tool_calls_total{tool_name="search",status="error"} 1.000000' in body
     assert 'sagents_tool_calls_total{tool_name="query",status="success"} 1.000000' in body
     assert 'sagents_tool_call_duration_seconds_count{tool_name="search"} 1.000000' in body

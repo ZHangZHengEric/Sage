@@ -13,6 +13,7 @@ from sagents.utils.logger import logger
 from sagents.flow.schema import AgentFlow, SequenceNode, ParallelNode, AgentNode, IfNode, SwitchNode, LoopNode
 from sagents.session_runtime import get_global_session_manager
 from sagents.utils.sandbox.config import VolumeMount
+from sagents.observability.prometheus_handler import record_agent_first_token
 
 
 @dataclass
@@ -397,6 +398,7 @@ class SAgent:
                             if content and str(content).strip():
                                 first_show_time = time.time()
                                 delta_ms = int((first_show_time - start_time) * 1000)
+                                record_agent_first_token(agent_id or "unknown", session_id, first_show_time - start_time)
                                 logger.info(f"SAgent: 会话首个可显示内容耗时 {delta_ms} ms")
                         except Exception as e:
                             logger.error(f"SAgent: 统计首个content耗时出错: {e}\n{traceback.format_exc()}")
