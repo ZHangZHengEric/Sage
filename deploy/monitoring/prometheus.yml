@@ -19,6 +19,8 @@ scrape_configs:
         action: keep
       - source_labels: [__meta_docker_container_label_com_docker_compose_service]
         target_label: job
+      - source_labels: [__meta_docker_container_label_com_sage_environment]
+        target_label: environment
       - source_labels: [__meta_docker_container_name]
         regex: /?(.*)
         target_label: container
@@ -37,4 +39,8 @@ scrape_configs:
       - source_labels: [container_label_com_docker_compose_service]
         regex: (.+)
         target_label: job
+        replacement: $1
+      - source_labels: [container_label_com_sage_environment]
+        regex: (.+)
+        target_label: environment
         replacement: $1

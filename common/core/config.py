@@ -57,12 +57,12 @@ class StartupConfig:
     preset_mcp_config: str = "mcp_setting.json"
     preset_running_config: str = "agent_setting.json"
 
-    default_llm_api_key: str = ""
-    default_llm_api_base_url: str = "https://api.deepseek.com/v1"
-    default_llm_model_name: str = "deepseek-chat"
-    default_llm_max_tokens: Optional[int] = None
+    default_llm_api_key: str = "sk-demo"
+    default_llm_api_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1/"
+    default_llm_model_name: str = "deepseek-v4-flash"
+    default_llm_max_tokens: Optional[int] = 4096
     default_llm_temperature: float = 0.2
-    default_llm_max_model_len: int = 64000
+    default_llm_max_model_len: int = 52000
     default_llm_top_p: float = 0.9
     default_llm_presence_penalty: float = 0.0
 
@@ -98,13 +98,13 @@ class StartupConfig:
     eml_security_token: Optional[str] = None
     eml_account_name: Optional[str] = None
     eml_template_id: Optional[str] = None
-    eml_register_subject: str = ""
+    eml_register_subject: str = "Sage 安全验证，请确认您的邮箱"
     eml_address_type: int = 1
     eml_reply_to_address: bool = False
 
     embed_api_key: Optional[str] = None
-    embed_base_url: Optional[str] = None
-    embed_model: str = "text-embedding-3-large"
+    embed_base_url: Optional[str] = "https://dashscope.aliyuncs.com/compatible-mode/v1/"
+    embed_model: str = "text-embedding-v4"
     embed_dims: int = 1024
 
     es_url: Optional[str] = None
@@ -143,9 +143,7 @@ class ENV:
 
     TRACE_JAEGER_URL = "SAGE_TRACE_JAEGER_URL"
     TRACE_JAEGER_ENDPOINT = "SAGE_TRACE_JAEGER_ENDPOINT"
-    TRACE_JAEGER_UI_URL = "SAGE_TRACE_JAEGER_UI_URL"
     TRACE_JAEGER_PUBLIC_URL = "SAGE_TRACE_JAEGER_PUBLIC_URL"
-    TRACE_JAEGER_BASE_PATH = "SAGE_TRACE_JAEGER_BASE_PATH"
 
     PORT = "SAGE_PORT"
     LOG_LEVEL = "SAGE_LOG_LEVEL"
@@ -331,7 +329,10 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
             preset_mcp_config=env_str(ENV.PRESET_MCP_CONFIG, StartupConfig.preset_mcp_config) or StartupConfig.preset_mcp_config,
             preset_running_config=env_str(ENV.PRESET_RUNNING_CONFIG, StartupConfig.preset_running_config) or StartupConfig.preset_running_config,
             default_llm_api_key=env_str(ENV.DEFAULT_LLM_API_KEY, StartupConfig.default_llm_api_key) or StartupConfig.default_llm_api_key,
-            default_llm_api_base_url=env_str(ENV.DEFAULT_LLM_API_BASE_URL, StartupConfig.default_llm_api_base_url) or StartupConfig.default_llm_api_base_url,
+            default_llm_api_base_url=env_str(
+                ENV.DEFAULT_LLM_API_BASE_URL, StartupConfig.default_llm_api_base_url
+            )
+            or StartupConfig.default_llm_api_base_url,
             default_llm_model_name=env_str(ENV.DEFAULT_LLM_MODEL_NAME, StartupConfig.default_llm_model_name) or StartupConfig.default_llm_model_name,
             default_llm_max_tokens=env_int(ENV.DEFAULT_LLM_MAX_TOKENS, StartupConfig.default_llm_max_tokens),
             default_llm_temperature=env_float(ENV.DEFAULT_LLM_TEMPERATURE, StartupConfig.default_llm_temperature),
@@ -346,7 +347,7 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
             jwt_expire_hours=env_int(ENV.JWT_EXPIRE_HOURS, StartupConfig.jwt_expire_hours),
             refresh_token_secret=env_str(ENV.REFRESH_TOKEN_SECRET, StartupConfig.refresh_token_secret) or StartupConfig.refresh_token_secret,
             embed_api_key=env_str(ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key),
-            embed_base_url=env_str(ENV.EMBEDDING_BASE_URL, StartupConfig.embed_base_url),
+            embed_base_url=env_str(ENV.EMBEDDING_BASE_URL, StartupConfig.embed_base_url) or StartupConfig.embed_base_url,
             embed_model=env_str(ENV.EMBEDDING_MODEL, StartupConfig.embed_model) or StartupConfig.embed_model,
             embed_dims=env_int(ENV.EMBEDDING_DIMS, StartupConfig.embed_dims),
             s3_endpoint=env_str(ENV.S3_ENDPOINT, StartupConfig.s3_endpoint),
@@ -378,8 +379,11 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
         mysql_database=env_str(ENV.MYSQL_DATABASE, StartupConfig.mysql_database),
         mysql_charset=StartupConfig.mysql_charset,
         default_llm_api_key=env_str(ENV.DEFAULT_LLM_API_KEY, StartupConfig.default_llm_api_key),
-        default_llm_api_base_url=env_str(ENV.DEFAULT_LLM_API_BASE_URL, StartupConfig.default_llm_api_base_url),
-        default_llm_model_name=env_str(ENV.DEFAULT_LLM_MODEL_NAME, StartupConfig.default_llm_model_name),
+        default_llm_api_base_url=env_str(
+            ENV.DEFAULT_LLM_API_BASE_URL, StartupConfig.default_llm_api_base_url
+        )
+        or StartupConfig.default_llm_api_base_url,
+        default_llm_model_name=env_str(ENV.DEFAULT_LLM_MODEL_NAME, StartupConfig.default_llm_model_name) or StartupConfig.default_llm_model_name,
         default_llm_max_tokens=env_int(ENV.DEFAULT_LLM_MAX_TOKENS, StartupConfig.default_llm_max_tokens),
         default_llm_temperature=env_float(ENV.DEFAULT_LLM_TEMPERATURE, StartupConfig.default_llm_temperature),
         default_llm_max_model_len=env_int(ENV.DEFAULT_LLM_MAX_MODEL_LEN, StartupConfig.default_llm_max_model_len),
@@ -420,7 +424,7 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
         eml_address_type=env_int(ENV.EML_ADDRESS_TYPE, StartupConfig.eml_address_type) or StartupConfig.eml_address_type,
         eml_reply_to_address=env_bool(ENV.EML_REPLY_TO_ADDRESS, StartupConfig.eml_reply_to_address),
         embed_api_key=env_str(ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key),
-        embed_base_url=env_str(ENV.EMBEDDING_BASE_URL, StartupConfig.embed_base_url),
+        embed_base_url=env_str(ENV.EMBEDDING_BASE_URL, StartupConfig.embed_base_url) or StartupConfig.embed_base_url,
         embed_model=env_str(ENV.EMBEDDING_MODEL, StartupConfig.embed_model) or StartupConfig.embed_model,
         embed_dims=env_int(ENV.EMBEDDING_DIMS, StartupConfig.embed_dims),
         es_url=env_str(ENV.ES_URL, StartupConfig.es_url),

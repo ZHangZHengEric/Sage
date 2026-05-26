@@ -1,3 +1,6 @@
+x-sage-observability-labels: &sage-observability-labels
+  com.sage.environment: ${SAGE_OBSERVABILITY_ENV:-${SAGE_ENV:-production}}
+
 services:
   sage-prometheus:
     image: docker.m.daocloud.io/prom/prometheus:v3.11.3
@@ -10,10 +13,11 @@ services:
       - --web.enable-lifecycle
     environment:
       TZ: Asia/Shanghai
+    labels: *sage-observability-labels
     ports:
       - "${SAGE_PROMETHEUS_PORT:-30090}:9090"
     volumes:
-      - ${SAGE_DEPLOY_DIR:-..}/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ${SAGE_PROMETHEUS_CONFIG_FILE:-./monitoring/prometheus.yml}:/etc/prometheus/prometheus.yml:ro
       - ${SAGE_ROOT}/prometheus/data:/prometheus
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
@@ -24,6 +28,8 @@ services:
       - shared
 
   sage-grafana:
+    profiles:
+      - grafana
     image: docker.m.daocloud.io/grafana/grafana-enterprise:13.0.1-security-01
     container_name: sage-grafana
     restart: always
@@ -35,6 +41,7 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/sage/sage-server-observability.json
+    labels: *sage-observability-labels
     ports:
       - "${SAGE_GRAFANA_PORT:-30093}:3000"
     volumes:
@@ -60,6 +67,7 @@ services:
       - --housekeeping_interval=30s
       - --max_housekeeping_interval=2m
       - --disable_metrics=disk
+    labels: *sage-observability-labels
     devices:
       - /dev/kmsg:/dev/kmsg
     volumes:
@@ -82,6 +90,7 @@ services:
       - -config.file=/etc/loki/config.yml
     environment:
       TZ: Asia/Shanghai
+    labels: *sage-observability-labels
     ports:
       - "${SAGE_LOKI_PORT:-30091}:3100"
     volumes:
@@ -104,6 +113,8 @@ services:
       - /etc/alloy/config.alloy
     environment:
       TZ: Asia/Shanghai
+      SAGE_LOKI_PUSH_URL: ${SAGE_LOKI_PUSH_URL:-http://sage-loki:3100/loki/api/v1/push}
+    labels: *sage-observability-labels
     ports:
       - "${SAGE_ALLOY_PORT:-30092}:12345"
     volumes:
@@ -125,6 +136,7 @@ services:
     command:
       - --config
       - /etc/jaeger/config.yaml
+    labels: *sage-observability-labels
     volumes:
       - ${SAGE_DEPLOY_DIR:-..}/images/jaeger/config.yaml:/etc/jaeger/config.yaml:ro
     ports:

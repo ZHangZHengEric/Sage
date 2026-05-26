@@ -68,9 +68,7 @@ Review the storage-related variables:
 Check the Jaeger-related variables:
 
 - `SAGE_TRACE_JAEGER_ENDPOINT`
-- `SAGE_TRACE_JAEGER_UI_URL`
 - `SAGE_TRACE_JAEGER_PUBLIC_URL`
-- `SAGE_TRACE_JAEGER_BASE_PATH`
 
 ## There is a mismatch between docs and code
 

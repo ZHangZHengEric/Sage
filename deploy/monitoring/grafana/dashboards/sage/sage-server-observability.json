@@ -77,7 +77,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(sage_server_http_requests_total{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval]))",
+          "expr": "sum(rate(sage_server_http_requests_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}[$__rate_interval]))",
           "legendFormat": "qps",
           "range": true,
           "refId": "A"
@@ -151,7 +151,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "100 * sum(rate(sage_server_http_requests_total{job=~\"$job\",instance=~\"$instance\",status=~\"5..\"}[$__rate_interval])) / clamp_min(sum(rate(sage_server_http_requests_total{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])), 0.001)",
+          "expr": "100 * sum(rate(sage_server_http_requests_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\",status=~\"5..\"}[$__rate_interval])) / clamp_min(sum(rate(sage_server_http_requests_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}[$__rate_interval])), 0.001)",
           "legendFormat": "5xx %",
           "range": true,
           "refId": "A"
@@ -223,7 +223,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(sage_server_http_request_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(sage_server_http_request_duration_seconds_bucket{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}[$__rate_interval])) by (le))",
           "legendFormat": "p95",
           "range": true,
           "refId": "A"
@@ -294,7 +294,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(sage_server_http_requests_in_progress{job=~\"$job\",instance=~\"$instance\"})",
+          "expr": "sum(sage_server_http_requests_in_progress{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"})",
           "legendFormat": "active",
           "range": true,
           "refId": "A"
@@ -365,7 +365,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(sagents_agent_runs_total{job=~\"$job\",instance=~\"$instance\"}[$__range]))",
+          "expr": "sum(increase(sagents_agent_runs_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}[$__range]))",
           "legendFormat": "agent runs",
           "range": true,
           "refId": "A"
@@ -437,7 +437,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(sagents_tool_call_failures_total{job=~\"$job\",instance=~\"$instance\"}[$__range]))",
+          "expr": "sum(increase(sagents_tool_call_failures_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}[$__range]))",
           "legendFormat": "失败次数",
           "range": true,
           "refId": "A"
@@ -508,7 +508,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(sage_server_http_requests_total{job=~\"$job\",instance=~\"$instance\",path=~\"$path\"}[$__rate_interval])) by (path, status)",
+          "expr": "sum(rate(sage_server_http_requests_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\",path=~\"$path\"}[$__rate_interval])) by (path, status)",
           "legendFormat": "{{path}} {{status}}",
           "range": true,
           "refId": "A"
@@ -566,7 +566,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum(rate(sage_server_http_request_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\",path=~\"$path\"}[$__rate_interval])) by (le, path))",
+          "expr": "histogram_quantile(0.50, sum(rate(sage_server_http_request_duration_seconds_bucket{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\",path=~\"$path\"}[$__rate_interval])) by (le, path))",
           "legendFormat": "p50 {{path}}",
           "range": true,
           "refId": "A"
@@ -577,7 +577,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(sage_server_http_request_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\",path=~\"$path\"}[$__rate_interval])) by (le, path))",
+          "expr": "histogram_quantile(0.95, sum(rate(sage_server_http_request_duration_seconds_bucket{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\",path=~\"$path\"}[$__rate_interval])) by (le, path))",
           "hide": false,
           "legendFormat": "p95 {{path}}",
           "range": true,
@@ -589,7 +589,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum(rate(sage_server_http_request_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\",path=~\"$path\"}[$__rate_interval])) by (le, path))",
+          "expr": "histogram_quantile(0.99, sum(rate(sage_server_http_request_duration_seconds_bucket{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\",path=~\"$path\"}[$__rate_interval])) by (le, path))",
           "hide": false,
           "legendFormat": "p99 {{path}}",
           "range": true,
@@ -650,7 +650,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(sage_server_http_requests_in_progress{job=~\"$job\",instance=~\"$instance\",path=~\"$path\"}) by (path)",
+          "expr": "sum(sage_server_http_requests_in_progress{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\",path=~\"$path\"}) by (path)",
           "legendFormat": "{{path}}",
           "range": true,
           "refId": "A"
@@ -700,7 +700,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(sage_server_http_requests_total{job=~\"$job\",instance=~\"$instance\",path=~\"$path\",status=~\"4..\"}[$__rate_interval])) by (path, status)",
+          "expr": "sum(rate(sage_server_http_requests_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\",path=~\"$path\",status=~\"4..\"}[$__rate_interval])) by (path, status)",
           "legendFormat": "{{path}} {{status}}",
           "range": true,
           "refId": "A"
@@ -711,7 +711,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(sage_server_http_requests_total{job=~\"$job\",instance=~\"$instance\",path=~\"$path\",status=~\"5..\"}[$__rate_interval])) by (path, status)",
+          "expr": "sum(rate(sage_server_http_requests_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\",path=~\"$path\",status=~\"5..\"}[$__rate_interval])) by (path, status)",
           "legendFormat": "{{path}} {{status}}",
           "range": true,
           "refId": "B"
@@ -763,7 +763,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "topk(10, histogram_quantile(0.95, sum(rate(sage_server_http_request_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\",path=~\"$path\"}[$__rate_interval])) by (le, path)))",
+          "expr": "topk(10, histogram_quantile(0.95, sum(rate(sage_server_http_request_duration_seconds_bucket{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\",path=~\"$path\"}[$__rate_interval])) by (le, path)))",
           "format": "table",
           "instant": true,
           "legendFormat": "{{path}}",
@@ -828,7 +828,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(sagents_agent_starts_total{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (agent_id)",
+          "expr": "sum(rate(sagents_agent_starts_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}[$__rate_interval])) by (agent_id)",
           "legendFormat": "{{agent_id}}",
           "range": true,
           "refId": "A"
@@ -879,7 +879,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(sagents_agent_run_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (le, agent_id))",
+          "expr": "histogram_quantile(0.95, sum(rate(sagents_agent_run_duration_seconds_bucket{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}[$__rate_interval])) by (le, agent_id))",
           "legendFormat": "p95 {{agent_id}}",
           "range": true,
           "refId": "A"
@@ -930,7 +930,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(sagents_first_token_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (le, agent_id))",
+          "expr": "histogram_quantile(0.95, sum(rate(sagents_first_token_seconds_bucket{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}[$__rate_interval])) by (le, agent_id))",
           "legendFormat": "p95 {{agent_id}}",
           "range": true,
           "refId": "A"
@@ -966,7 +966,7 @@
                 "value": [
                   {
                     "title": "Explore logs by session_id",
-                    "url": "/explore?orgId=1&left=%7B%22datasource%22:%22sage-loki%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22expr%22:%22%7Bservice%3D~%5C%22sage-server.*%5C%22%7D%20%7C%20json%20%7C%20session_id%3D%5C%22${__data.fields.session_id}%5C%22%22%7D%5D,%22range%22:%7B%22from%22:%22${__from}%22,%22to%22:%22${__to}%22%7D%7D",
+                    "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22%24%7BDS_LOKI%7D%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22%7Benvironment%3D~%5C%22%24environment%5C%22%2Cservice%3D~%5C%22sage-server.*%5C%22%7D%20%7C%20json%20%7C%20session_id%3D%5C%22%24%7B__data.fields.session_id%7D%5C%22%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22%24%7B__from%7D%22%2C%22to%22%3A%22%24%7B__to%7D%22%7D%7D",
                     "targetBlank": true
                   }
                 ]
@@ -984,7 +984,7 @@
                 "value": [
                   {
                     "title": "Explore Jaeger trace",
-                    "url": "/explore?orgId=1&left=%7B%22datasource%22:%22sage-jaeger%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22query%22:%22${__data.fields.trace_id}%22%7D%5D,%22range%22:%7B%22from%22:%22${__from}%22,%22to%22:%22${__to}%22%7D%7D",
+                    "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22%24%7BDS_JAEGER%7D%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22query%22%3A%22%24%7B__data.fields.trace_id%7D%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22%24%7B__from%7D%22%2C%22to%22%3A%22%24%7B__to%7D%22%7D%7D",
                     "targetBlank": true
                   }
                 ]
@@ -1019,7 +1019,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "increase(sage_server_sse_stream_failures_total{job=~\"$job\",instance=~\"$instance\",stream=~\"api_chat|api_stream|web_stream|resume_stream|rerun_stream\"}[$__range]) > 0",
+          "expr": "increase(sage_server_sse_stream_failures_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\",stream=~\"api_chat|api_stream|web_stream|resume_stream|rerun_stream\"}[$__range]) > 0",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -1032,7 +1032,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "increase(sagents_tool_call_failures_total{job=~\"$job\",instance=~\"$instance\"}[$__range]) > 0",
+          "expr": "increase(sagents_tool_call_failures_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}[$__range]) > 0",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -1086,7 +1086,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(sagents_tool_calls_total{job=~\"$job\",instance=~\"$instance\"}[$__range])) by (tool_name, status)",
+          "expr": "sum(increase(sagents_tool_calls_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}[$__range])) by (tool_name, status)",
           "legendFormat": "{{tool_name}} / {{status}}",
           "range": true,
           "refId": "A"
@@ -1140,7 +1140,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "topk(15, (histogram_quantile(0.95, sum((increase(sagents_tool_call_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[$__range]) or sagents_tool_call_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"})) by (le, tool_name)) and on(tool_name) (sum((increase(sagents_tool_call_duration_seconds_count{job=~\"$job\",instance=~\"$instance\"}[$__range]) or sagents_tool_call_duration_seconds_count{job=~\"$job\",instance=~\"$instance\"})) by (tool_name) > 0)))",
+          "expr": "topk(15, (histogram_quantile(0.95, sum((increase(sagents_tool_call_duration_seconds_bucket{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}[$__range]) or sagents_tool_call_duration_seconds_bucket{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"})) by (le, tool_name)) and on(tool_name) (sum((increase(sagents_tool_call_duration_seconds_count{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}[$__range]) or sagents_tool_call_duration_seconds_count{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"})) by (tool_name) > 0)))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -1224,7 +1224,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "100 * rate(sage_server_process_cpu_seconds_total{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "100 * rate(sage_server_process_cpu_seconds_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}[$__rate_interval])",
           "legendFormat": "{{instance}}",
           "range": true,
           "refId": "A"
@@ -1274,7 +1274,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sage_server_process_resident_memory_bytes{job=~\"$job\",instance=~\"$instance\"}",
+          "expr": "sage_server_process_resident_memory_bytes{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}",
           "legendFormat": "常驻内存 {{instance}}",
           "range": true,
           "refId": "A"
@@ -1285,7 +1285,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sage_server_process_virtual_memory_bytes{job=~\"$job\",instance=~\"$instance\"}",
+          "expr": "sage_server_process_virtual_memory_bytes{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}",
           "legendFormat": "虚拟内存 {{instance}}",
           "range": true,
           "refId": "B"
@@ -1334,7 +1334,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sage_server_process_threads{job=~\"$job\",instance=~\"$instance\"}",
+          "expr": "sage_server_process_threads{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}",
           "legendFormat": "线程数 {{instance}}",
           "range": true,
           "refId": "A"
@@ -1345,7 +1345,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sage_server_process_open_fds{job=~\"$job\",instance=~\"$instance\"}",
+          "expr": "sage_server_process_open_fds{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}",
           "legendFormat": "已打开文件描述符 {{instance}}",
           "range": true,
           "refId": "B"
@@ -1356,7 +1356,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sage_server_process_max_fds{job=~\"$job\",instance=~\"$instance\"}",
+          "expr": "sage_server_process_max_fds{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}",
           "legendFormat": "文件描述符上限 {{instance}}",
           "range": true,
           "refId": "C"
@@ -1405,7 +1405,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sage_server_system_load1{job=~\"$job\",instance=~\"$instance\"}",
+          "expr": "sage_server_system_load1{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}",
           "legendFormat": "load1 {{instance}}",
           "range": true,
           "refId": "A"
@@ -1416,7 +1416,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sage_server_system_load5{job=~\"$job\",instance=~\"$instance\"}",
+          "expr": "sage_server_system_load5{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}",
           "legendFormat": "load5 {{instance}}",
           "range": true,
           "refId": "B"
@@ -1427,7 +1427,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sage_server_system_load15{job=~\"$job\",instance=~\"$instance\"}",
+          "expr": "sage_server_system_load15{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}",
           "legendFormat": "load15 {{instance}}",
           "range": true,
           "refId": "C"
@@ -1476,7 +1476,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sage_server_python_objects{job=~\"$job\",instance=~\"$instance\"}",
+          "expr": "sage_server_python_objects{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}",
           "legendFormat": "objects {{instance}}",
           "range": true,
           "refId": "A"
@@ -1487,7 +1487,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(sage_server_python_gc_collections_total{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (generation)",
+          "expr": "sum(rate(sage_server_python_gc_collections_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}[$__rate_interval])) by (generation)",
           "legendFormat": "gc gen {{generation}}",
           "range": true,
           "refId": "B"
@@ -1510,8 +1510,8 @@
       {
         "current": {
           "selected": false,
-          "text": "Sage Prometheus",
-          "value": "sage-prometheus"
+          "text": "",
+          "value": ""
         },
         "hide": 0,
         "includeAll": false,
@@ -1530,19 +1530,54 @@
           "text": "",
           "value": ""
         },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Loki",
+        "multi": false,
+        "name": "DS_LOKI",
+        "options": [],
+        "query": "loki",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Jaeger",
+        "multi": false,
+        "name": "DS_JAEGER",
+        "options": [],
+        "query": "jaeger",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values(sage_server_process_cpu_seconds_total{job=~\"sage-server.*\"}, job)",
+        "definition": "label_values(sage_server_process_cpu_seconds_total{job=~\"sage-server.*\"}, environment)",
         "hide": 0,
-        "includeAll": false,
-        "label": "job",
+        "includeAll": true,
+        "label": "environment",
         "multi": true,
-        "name": "job",
+        "name": "environment",
         "options": [],
         "query": {
-          "query": "label_values(sage_server_process_cpu_seconds_total{job=~\"sage-server.*\"}, job)",
+          "query": "label_values(sage_server_process_cpu_seconds_total{job=~\"sage-server.*\"}, environment)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
@@ -1560,7 +1595,7 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values(sage_server_process_cpu_seconds_total{job=~\"$job\"}, instance)",
+        "definition": "label_values(sage_server_process_cpu_seconds_total{environment=~\"$environment\",job=~\"sage-server.*\"}, instance)",
         "hide": 0,
         "includeAll": false,
         "label": "instance",
@@ -1568,7 +1603,7 @@
         "name": "instance",
         "options": [],
         "query": {
-          "query": "label_values(sage_server_process_cpu_seconds_total{job=~\"$job\"}, instance)",
+          "query": "label_values(sage_server_process_cpu_seconds_total{environment=~\"$environment\",job=~\"sage-server.*\"}, instance)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
@@ -1587,7 +1622,7 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values(sage_server_http_requests_total{job=~\"$job\",instance=~\"$instance\"}, path)",
+        "definition": "label_values(sage_server_http_requests_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}, path)",
         "hide": 0,
         "includeAll": true,
         "label": "HTTP path",
@@ -1595,7 +1630,7 @@
         "name": "path",
         "options": [],
         "query": {
-          "query": "label_values(sage_server_http_requests_total{job=~\"$job\",instance=~\"$instance\"}, path)",
+          "query": "label_values(sage_server_http_requests_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\"}, path)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,

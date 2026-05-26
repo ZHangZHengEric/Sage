@@ -25,6 +25,11 @@ discovery.relabel "docker" {
     regex         = "/?(.*)"
     target_label  = "container"
   }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_sage_environment"]
+    target_label  = "environment"
+  }
 }
 
 loki.source.docker "containers" {
@@ -53,6 +58,6 @@ loki.process "docker_logs" {
 
 loki.write "local" {
   endpoint {
-    url = "http://sage-loki:3100/loki/api/v1/push"
+    url = sys.env("SAGE_LOKI_PUSH_URL")
   }
 }

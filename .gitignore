@@ -15,6 +15,8 @@ __pycache__/
 logs/
 workspace/
 agent_sessions
+deploy/monitoring/prometheus.local.yml
+deploy/monitoring/prometheus.generated.yml
 mcp_servers/search/api_doc
 *.py[cod]
 *$py.class
@@ -156,6 +158,8 @@ celerybeat.pid
 env/
 venv/
 ENV/
+!deploy/k8s/env/
+!deploy/k8s/env/*.env.example
 env.bak/
 venv.bak/
 
