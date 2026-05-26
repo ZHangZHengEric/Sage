@@ -42,11 +42,15 @@ def test_spawn_agent_defaults_empty_name_to_display_name():
     backend_client = _FakeBackendClient()
 
     orchestrator = FibreOrchestrator.__new__(FibreOrchestrator)
-    orchestrator.agent = SimpleNamespace(agent_name="主Agent", model=None, model_config={})
+    orchestrator.agent = SimpleNamespace(
+        agent_name="主Agent", model=None, model_config={}
+    )
     orchestrator.backend_client = backend_client
     orchestrator.sub_session_manager = _FakeSessionManager(parent_session)
     orchestrator.sub_agents = {}
-    orchestrator._get_fibre_system_prompt_content = lambda **kwargs: kwargs["custom_system_prompt"]
+    orchestrator._get_fibre_system_prompt_content = lambda **kwargs: kwargs[
+        "custom_system_prompt"
+    ]
 
     with patch("sagents.agent.fibre.orchestrator.random.choice", return_value="x"):
         agent_id = asyncio.run(

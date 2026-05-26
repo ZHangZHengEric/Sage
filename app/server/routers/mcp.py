@@ -93,7 +93,7 @@ async def list(http_request: Request):
 
     user_id = get_request_user_id(http_request)
     role = get_request_role(http_request)
-    
+
     # Admin sees all (user_id=None), User sees own (user_id=user_id)
     target_user_id = None if role == "admin" else user_id
     mcp_servers = await mcp_service.list_mcp_servers(user_id=target_user_id)
@@ -147,7 +147,7 @@ async def remove(server_name: str, http_request: Request):
     """
     user_id = get_request_user_id(http_request)
     role = get_request_role(http_request)
-    
+
     logger.info(f"开始删除MCP server: {server_name}")
     await mcp_service.remove_mcp_server(server_name, user_id, role)
     return await Response.succ(
@@ -179,7 +179,6 @@ async def refresh(server_name: str, http_request: Request):
     user_id = get_request_user_id(http_request)
     role = get_request_role(http_request)
 
-
     status = await mcp_service.refresh_mcp_server(server_name, user_id, role)
     return await Response.succ(data={"server_name": server_name, "status": status})
 
@@ -204,7 +203,7 @@ async def preview(server_name: str, req: AnyToolPreviewRequest, http_request: Re
 @mcp_router.post("/anytool/preview-draft")
 async def preview_draft(req: AnyToolDraftPreviewRequest, http_request: Request):
     user_id = get_request_user_id(http_request)
-    role = get_request_role(http_request)
+    get_request_role(http_request)
     result = await mcp_service.preview_anytool_draft(
         tool_definition=req.tool_definition,
         arguments=req.arguments,
@@ -236,7 +235,9 @@ async def upsert_anytool_tool(req: AnyToolToolUpsertRequest, http_request: Reque
 
 
 @mcp_router.delete("/anytool/tool/{tool_name}")
-async def delete_anytool_tool(tool_name: str, http_request: Request, server_name: Optional[str] = None):
+async def delete_anytool_tool(
+    tool_name: str, http_request: Request, server_name: Optional[str] = None
+):
     # 必须显式声明，否则会落到 mount 的 AnyToolStreamableHTTPApp 上。
     result = await mcp_service.delete_anytool_tool(
         tool_name=tool_name,

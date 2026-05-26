@@ -79,9 +79,9 @@ async def record_session_execution(
 
     total_tokens = total_info.get("total_tokens")
     if not isinstance(total_tokens, (int, float)):
-        logger.bind(session_id=session_id or getattr(session_context, "session_id", "")).warning(
-            "跳过 token_usage 落库：缺少 total_tokens"
-        )
+        logger.bind(
+            session_id=session_id or getattr(session_context, "session_id", "")
+        ).warning("跳过 token_usage 落库：缺少 total_tokens")
         return False
 
     per_step_info = token_usage.get("per_step_info") or []
@@ -107,8 +107,16 @@ async def record_session_execution(
     record = TokenUsage(
         id=str(uuid.uuid4()),
         session_id=str(session_id or getattr(session_context, "session_id", "") or ""),
-        user_id=str(user_id if user_id is not None else getattr(session_context, "user_id", "") or ""),
-        agent_id=str(agent_id if agent_id is not None else getattr(session_context, "agent_id", "") or ""),
+        user_id=str(
+            user_id
+            if user_id is not None
+            else getattr(session_context, "user_id", "") or ""
+        ),
+        agent_id=str(
+            agent_id
+            if agent_id is not None
+            else getattr(session_context, "agent_id", "") or ""
+        ),
         request_source=str(request_source or ""),
         input_tokens=_to_int(total_info.get("prompt_tokens")),
         output_tokens=_to_int(total_info.get("completion_tokens")),
@@ -152,7 +160,9 @@ async def record_execution_payload(
 
     total_tokens = total_info.get("total_tokens")
     if not isinstance(total_tokens, (int, float)):
-        logger.bind(session_id=session_id).warning("跳过 token_usage 落库：payload 缺少 total_tokens")
+        logger.bind(session_id=session_id).warning(
+            "跳过 token_usage 落库：payload 缺少 total_tokens"
+        )
         return False
 
     per_step_info = token_usage.get("per_step_info") or []

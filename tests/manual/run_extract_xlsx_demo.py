@@ -1,7 +1,6 @@
+# ruff: noqa: E402
 import os
 import sys
-import json
-import types
 
 # 保证可以导入 sagents 包（本文件在 tests/manual/ 下，需两级回到仓库根）
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -19,9 +18,9 @@ def main():
         result = FileParserTool().extract_text_from_non_text_file(input_path)
         print(result)
 
-        
     except Exception as e:
         import traceback
+
         print("提取失败:", str(e))
         print(traceback.format_exc())
         sys.exit(1)

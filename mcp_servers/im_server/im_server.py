@@ -27,7 +27,7 @@ from .db import get_im_db
 from .session_manager import get_session_manager
 from .agent_client import get_agent_client
 from .service_manager import get_service_manager
-from .agent_config import get_agent_im_config, AgentIMConfig, get_default_agent_id
+from .agent_config import get_agent_im_config, get_default_agent_id
 
 # Constants
 logger = logging.getLogger("IMServer")
@@ -36,6 +36,7 @@ logger = logging.getLogger("IMServer")
 _message_locks: Dict[str, asyncio.Lock] = {}
 _message_locks_lock = asyncio.Lock()
 
+
 async def _get_session_lock(session_key: str) -> asyncio.Lock:
     """Get or create a lock for a specific session to ensure message ordering."""
     async with _message_locks_lock:
@@ -43,96 +44,109 @@ async def _get_session_lock(session_key: str) -> asyncio.Lock:
             _message_locks[session_key] = asyncio.Lock()
         return _message_locks[session_key]
 
+
 # ============================================================================
 # Automatic Configuration Migration
 # ============================================================================
 
 _migration_done: bool = False
 
+
 async def ensure_config_migrated() -> bool:
     """
     Automatically migrate legacy database configurations to Agent-level JSON files.
-    
+
     This function runs once at startup to ensure smooth transition from old
     global configuration to new per-Agent configuration system.
-    
+
     Migration triggers when:
     1. Default agent has no channel configurations
     2. Legacy database has configurations for DEFAULT_SAGE_USER_ID
-    
+
     Returns:
         True if migration was performed or not needed, False on error
     """
     global _migration_done
-    
+
     if _migration_done:
         return True
-    
+
     try:
         # Check if default agent already has configurations
         default_agent_id = get_default_agent_id()
         agent_config = get_agent_im_config(default_agent_id)
         existing_channels = agent_config.get_all_channels()
-        
+
         if existing_channels:
-            logger.info(f"[IM Migration] Default agent already has {len(existing_channels)} channel(s), skipping migration")
+            logger.info(
+                f"[IM Migration] Default agent already has {len(existing_channels)} channel(s), skipping migration"
+            )
             _migration_done = True
             return True
-        
+
         # Check legacy database for configurations
         logger.info("[IM Migration] Checking for legacy configurations...")
         db = get_im_db()
         legacy_configs = db.list_user_configs(DEFAULT_SAGE_USER_ID)
-        
+
         if not legacy_configs:
-            logger.info("[IM Migration] No legacy configurations found, starting with empty config")
+            logger.info(
+                "[IM Migration] No legacy configurations found, starting with empty config"
+            )
             _migration_done = True
             return True
-        
-        logger.info(f"[IM Migration] Found {len(legacy_configs)} legacy configuration(s), migrating...")
-        
+
+        logger.info(
+            f"[IM Migration] Found {len(legacy_configs)} legacy configuration(s), migrating..."
+        )
+
         # Perform migration
         migrated_count = 0
         skipped_count = 0
-        
+
         for config in legacy_configs:
             provider = config.get("provider")
             enabled = config.get("enabled", False)
             provider_config = config.get("config", {})
-            
+
             # Validate (especially for iMessage)
             # Skip iMessage migration - it should only be on default agent
             if provider == "imessage":
-                logger.warning(f"[IM Migration] Skipping iMessage for migration - configure it manually on default agent")
+                logger.warning(
+                    "[IM Migration] Skipping iMessage for migration - configure it manually on default agent"
+                )
                 skipped_count += 1
                 continue
                 skipped_count += 1
                 continue
-            
+
             # Save to new format
             try:
-                success = agent_config.set_provider_config(provider, enabled, provider_config)
+                success = agent_config.set_provider_config(
+                    provider, enabled, provider_config
+                )
                 if success:
-                    logger.info(f"[IM Migration] ✓ Migrated: {provider} (enabled={enabled})")
+                    logger.info(
+                        f"[IM Migration] ✓ Migrated: {provider} (enabled={enabled})"
+                    )
                     migrated_count += 1
                 else:
                     logger.error(f"[IM Migration] ✗ Failed to migrate: {provider}")
             except Exception as e:
                 logger.error(f"[IM Migration] ✗ Error migrating {provider}: {e}")
                 skipped_count += 1
-        
-        logger.info(f"[IM Migration] Complete: {migrated_count} migrated, {skipped_count} skipped")
+
+        logger.info(
+            f"[IM Migration] Complete: {migrated_count} migrated, {skipped_count} skipped"
+        )
         _migration_done = True
         return True
-        
+
     except Exception as e:
         logger.error(f"[IM Migration] Migration failed: {e}", exc_info=True)
         # Don't block startup on migration failure
         return True
 
-
-# Run migration on module load (for immediate config availability)
-import asyncio
 
 # Try to run migration synchronously first
 # (will run again async if this fails)
@@ -153,18 +167,19 @@ DEFAULT_SAGE_USER_ID = "desktop_default_user"
 # File Tools Implementation
 # ============================================================================
 
+
 async def _send_file_via_provider(
     file_path: str,
     provider: str,
     agent_id: Optional[str] = None,
     user_id: Optional[str] = None,
     chat_id: Optional[str] = None,
-    file_type: str = "file"
+    file_type: str = "file",
 ) -> str:
     """
     Internal function: Send file via specified Provider.
     内部函数：通过指定 Provider 发送文件
-    
+
     Args:
         file_path: Local file path / 本地文件路径
         provider: Platform name (wechat_work, feishu, dingtalk) / 平台名称
@@ -172,83 +187,75 @@ async def _send_file_via_provider(
         user_id: User ID / 用户 ID
         chat_id: Chat/Group ID / 群聊 ID
         file_type: File type (file/image) / 文件类型
-        
+
     Returns:
         Result message / 结果消息
     """
     # Validate file / 验证文件
     if not os.path.exists(file_path):
         return f"错误: 文件不存在 - {file_path}"
-    
+
     if not os.path.isfile(file_path):
         return f"错误: 路径不是文件 - {file_path}"
-    
+
     # Check file size (WeChat Work limit 20MB) / 检查文件大小
     file_size = os.path.getsize(file_path)
     max_size = 20 * 1024 * 1024  # 20MB
     if file_size > max_size:
         return f"错误: 文件大小 {file_size / 1024 / 1024:.2f}MB 超过限制 (20MB)"
-    
-    logger.info(f"[_send_file_via_provider] agent={agent_id}, provider={provider}, file={file_path}, size={file_size}")
-    
+
+    logger.info(
+        f"[_send_file_via_provider] agent={agent_id}, provider={provider}, file={file_path}, size={file_size}"
+    )
+
     # Get Provider configuration from Agent config / 从 Agent 配置获取 Provider 配置
     agent_config = get_agent_im_config(agent_id)
     config = agent_config.get_provider_config(provider)
-    
+
     if not config:
-        logger.error(f"[_send_file_via_provider] {provider} not enabled or not configured for agent={agent_id}")
+        logger.error(
+            f"[_send_file_via_provider] {provider} not enabled or not configured for agent={agent_id}"
+        )
         return f"错误: {provider} 未启用或未配置 (agent={agent_id})"
-    
+
     try:
         # 获取 Provider 实例
         provider_instance = get_im_provider(provider, config)
-        
+
         # 根据 Provider 类型调用不同方法
         if provider == "wechat_work":
             # 企业微信
             if file_type == "image":
                 result = await provider_instance.send_image(
-                    image_path=file_path,
-                    chat_id=chat_id,
-                    user_id=user_id
+                    image_path=file_path, chat_id=chat_id, user_id=user_id
                 )
             else:
                 result = await provider_instance.send_file(
-                    file_path=file_path,
-                    chat_id=chat_id,
-                    user_id=user_id
+                    file_path=file_path, chat_id=chat_id, user_id=user_id
                 )
         elif provider == "feishu":
             # 飞书
             if file_type == "image":
                 result = await provider_instance.send_image(
-                    image_path=file_path,
-                    chat_id=chat_id,
-                    user_id=user_id
+                    image_path=file_path, chat_id=chat_id, user_id=user_id
                 )
             else:
                 result = await provider_instance.send_file(
-                    file_path=file_path,
-                    chat_id=chat_id,
-                    user_id=user_id
+                    file_path=file_path, chat_id=chat_id, user_id=user_id
                 )
         elif provider == "dingtalk":
             # 钉钉
             if file_type == "image":
                 result = await provider_instance.send_image(
-                    image_path=file_path,
-                    chat_id=chat_id,
-                    user_id=user_id
+                    image_path=file_path, chat_id=chat_id, user_id=user_id
                 )
             else:
                 result = await provider_instance.send_file(
-                    file_path=file_path,
-                    chat_id=chat_id,
-                    user_id=user_id
+                    file_path=file_path, chat_id=chat_id, user_id=user_id
                 )
         else:
             return f"错误: 不支持的 Provider - {provider}"
-        
+
         # 处理结果
         if result.get("success"):
             target = f"群聊 {chat_id}" if chat_id else f"用户 {user_id}"
@@ -258,7 +265,7 @@ async def _send_file_via_provider(
             error = result.get("error", "未知错误")
             logger.error(f"[_send_file_via_provider] 发送失败: {error}")
             return f"❌ 发送失败: {error}"
-            
+
     except Exception as e:
         logger.error(f"[_send_file_via_provider] 异常: {e}", exc_info=True)
         return f"错误: {str(e)}"
@@ -305,24 +312,24 @@ async def send_file_through_im(
     """
     Send file to IM user. Supports WeChat Work, DingTalk, Feishu.
     发送文件给 IM 用户 (支持企业微信、钉钉、飞书)
-    
+
     Send local files to specified user or group chat.
     将本地文件发送给指定用户或群聊。
-    
+
     **重要**: agent_id 是必填参数，必须使用当前对话关联的 Agent ID。
     系统提示中已提供正确的 agent_id，请直接使用，不要省略或使用其他值。
-    
+
     Args:
         file_path: Local file path (e.g., "/path/to/document.pdf") / 本地文件路径
-        provider: Platform name - wechat_work, feishu, dingtalk / 
+        provider: Platform name - wechat_work, feishu, dingtalk /
                  平台名称 - wechat_work(企业微信)、feishu(飞书)、dingtalk(钉钉)
-        agent_id: **必填** Agent ID for configuration lookup. Must use the current agent ID from system prompt. / 
+        agent_id: **必填** Agent ID for configuration lookup. Must use the current agent ID from system prompt. /
                  **必填** Agent 标识符，必须使用系统提示中提供的当前 Agent ID。
-        user_id: User ID for private chat (optional, either user_id or chat_id required) / 
+        user_id: User ID for private chat (optional, either user_id or chat_id required) /
                 用户ID（私聊选填，user_id 和 chat_id 至少提供一个）
-        chat_id: Chat/Group ID for group chat (optional, either user_id or chat_id required) / 
+        chat_id: Chat/Group ID for group chat (optional, either user_id or chat_id required) /
                 群聊ID（群聊选填，user_id 和 chat_id 至少提供一个）
-    
+
     Examples:
         >>> send_file_through_im(
         ...     file_path="/tmp/report.pdf",
@@ -331,35 +338,39 @@ async def send_file_through_im(
         ...     user_id="userid_xxx"
         ... )
         "✅ 文件已发送给 user userid_xxx"
-    
+
     Limits:
         - File size max 20MB
         - Supported formats: documents, images, audio, video, etc.
     """
     # Validate agent_id is provided
     if not agent_id:
-        logger.error("[IM Tool] send_file_through_im: agent_id is required but not provided")
+        logger.error(
+            "[IM Tool] send_file_through_im: agent_id is required but not provided"
+        )
         return "错误: agent_id 是必填参数，请使用系统提示中提供的 agent_id"
-    
-    logger.info(f"[IM Tool] send_file_through_im called: agent={agent_id}, provider={provider}, file={file_path}")
-    
+
+    logger.info(
+        f"[IM Tool] send_file_through_im called: agent={agent_id}, provider={provider}, file={file_path}"
+    )
+
     # Validate parameters
     if not file_path:
         return "错误: file_path 不能为空"
-    
+
     if not provider:
         return "错误: provider 不能为空"
-    
+
     if not user_id and not chat_id:
         return "错误: user_id 和 chat_id 至少提供一个"
-    
+
     return await _send_file_via_provider(
         file_path=file_path,
         provider=provider,
         agent_id=agent_id,
         user_id=user_id,
         chat_id=chat_id,
-        file_type="file"
+        file_type="file",
     )
 
 
@@ -404,24 +415,24 @@ async def send_image_through_im(
     """
     Send image to IM user. Supports WeChat Work, DingTalk, Feishu.
     发送图片给 IM 用户 (支持企业微信、钉钉、飞书)
-    
+
     Send local image to specified user or group. Images display as image messages.
     将本地图片发送给指定用户或群聊。图片会以图片消息形式显示。
-    
+
     **重要**: agent_id 是必填参数，必须使用当前对话关联的 Agent ID。
     系统提示中已提供正确的 agent_id，请直接使用，不要省略或使用其他值。
-    
+
     Args:
         file_path: Local image path (e.g., "/path/to/image.png") / 本地图片路径
-        provider: Platform name - wechat_work, dingtalk, feishu / 
+        provider: Platform name - wechat_work, dingtalk, feishu /
                  平台名称 - wechat_work(企业微信)、dingtalk(钉钉)、feishu(飞书)
-        agent_id: **必填** Agent ID for configuration lookup. Must use the current agent ID from system prompt. / 
+        agent_id: **必填** Agent ID for configuration lookup. Must use the current agent ID from system prompt. /
                  **必填** Agent 标识符，必须使用系统提示中提供的当前 Agent ID。
-        user_id: User ID for private chat (optional, either user_id or chat_id required) / 
+        user_id: User ID for private chat (optional, either user_id or chat_id required) /
                 用户ID（私聊选填，user_id 和 chat_id 至少提供一个）
-        chat_id: Chat/Group ID for group chat (optional, either user_id or chat_id required) / 
+        chat_id: Chat/Group ID for group chat (optional, either user_id or chat_id required) /
                 群聊ID（群聊选填，user_id 和 chat_id 至少提供一个）
-    
+
     Examples:
         >>> send_image_through_im(
         ...     file_path="/tmp/photo.jpg",
@@ -429,40 +440,44 @@ async def send_image_through_im(
         ...     agent_id="agent_5e6b9f59",  # 使用系统提示中的 agent_id
         ...     user_id="userid_xxx"
         ... )
-    
+
     Limits:
         - Image size max 20MB
         - Supported formats: JPG, PNG, GIF, BMP, WebP
     """
     # Validate agent_id is provided
     if not agent_id:
-        logger.error("[IM Tool] send_image_through_im: agent_id is required but not provided")
+        logger.error(
+            "[IM Tool] send_image_through_im: agent_id is required but not provided"
+        )
         return "错误: agent_id 是必填参数，请使用系统提示中提供的 agent_id"
-    
-    logger.info(f"[IM Tool] send_image_through_im called: agent={agent_id}, provider={provider}, image={file_path}")
-    
+
+    logger.info(
+        f"[IM Tool] send_image_through_im called: agent={agent_id}, provider={provider}, image={file_path}"
+    )
+
     # Validate parameters
     if not file_path:
         return "错误: file_path 不能为空"
-    
+
     if not provider:
         return "错误: provider 不能为空"
-    
+
     if not user_id and not chat_id:
         return "错误: user_id 和 chat_id 至少提供一个"
-    
+
     # Validate image format
-    valid_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp')
+    valid_extensions = (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp")
     if not file_path.lower().endswith(valid_extensions):
         return f"错误: 不支持的图片格式，请使用: {', '.join(valid_extensions)}"
-    
+
     return await _send_file_via_provider(
         file_path=file_path,
         provider=provider,
         agent_id=agent_id,
         user_id=user_id,
         chat_id=chat_id,
-        file_type="image"
+        file_type="image",
     )
 
 
@@ -472,11 +487,11 @@ logger.info("[IM Server] File tools registered")
 def is_provider_enabled(provider: str, agent_id: Optional[str] = None) -> bool:
     """
     Check if a provider is enabled for an Agent.
-    
+
     Args:
         provider: Provider type (wechat_work, dingtalk, etc.)
         agent_id: Agent identifier (default: uses database default agent)
-        
+
     Returns:
         True if provider is enabled for this Agent.
     """
@@ -484,18 +499,22 @@ def is_provider_enabled(provider: str, agent_id: Optional[str] = None) -> bool:
         agent_id = get_default_agent_id()
     config = get_agent_im_config(agent_id)
     enabled = config.is_provider_enabled(provider)
-    logger.info(f"[IM Tool] Checking provider {provider} for agent={agent_id}: enabled={enabled}")
+    logger.info(
+        f"[IM Tool] Checking provider {provider} for agent={agent_id}: enabled={enabled}"
+    )
     return enabled
 
 
-def get_provider_config(provider: str, agent_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def get_provider_config(
+    provider: str, agent_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     """
     Get provider configuration for an Agent.
-    
+
     Args:
         provider: Provider type (wechat_work, dingtalk, etc.)
         agent_id: Agent identifier (default: uses database default agent)
-        
+
     Returns:
         Provider configuration dict, or None if not configured/disabled.
     """
@@ -506,7 +525,9 @@ def get_provider_config(provider: str, agent_id: Optional[str] = None) -> Option
     if provider_config:
         logger.info(f"[IM Tool] Got config for provider={provider}, agent={agent_id}")
     else:
-        logger.warning(f"[IM Tool] No config found for provider={provider}, agent={agent_id}")
+        logger.warning(
+            f"[IM Tool] No config found for provider={provider}, agent={agent_id}"
+        )
     return provider_config
 
 
@@ -528,7 +549,7 @@ async def _send_message_to_agent(
         user_id=user_id,
         user_name=user_name,
         provider=provider,
-        file_info=file_info
+        file_info=file_info,
     )
 
 
@@ -572,7 +593,7 @@ async def send_message_through_im(
 ) -> str:
     """
     Send message to IM user. Supports Feishu, DingTalk, WeChat Work, iMessage.
-    
+
     向 IM 用户发送消息。支持飞书、钉钉、企业微信、iMessage。
 
     **重要**: agent_id 是必填参数，必须使用当前对话关联的 Agent ID。
@@ -582,13 +603,13 @@ async def send_message_through_im(
 
     Args:
         content: Message content / 消息内容
-        provider: Platform name - feishu, dingtalk, wechat_work, imessage / 
+        provider: Platform name - feishu, dingtalk, wechat_work, imessage /
                  平台名称 - feishu(飞书)、dingtalk(钉钉)、wechat_work(企业微信)、imessage
-        agent_id: **必填** Agent ID for configuration lookup. Must use the current agent ID from system prompt. / 
+        agent_id: **必填** Agent ID for configuration lookup. Must use the current agent ID from system prompt. /
                  **必填** Agent 标识符，必须使用系统提示中提供的当前 Agent ID。
-        user_id: User ID for private chat (optional, either user_id or chat_id required) / 
+        user_id: User ID for private chat (optional, either user_id or chat_id required) /
                 用户ID（私聊选填，user_id 和 chat_id 至少提供一个）
-        chat_id: Chat/Group ID for group messages (optional, either user_id or chat_id required) / 
+        chat_id: Chat/Group ID for group messages (optional, either user_id or chat_id required) /
                 群聊ID（群聊选填，user_id 和 chat_id 至少提供一个）
 
     Returns:
@@ -607,7 +628,7 @@ async def send_message_through_im(
     # First try to get chat_id from session if not provided
     target_chat_id = chat_id
     target_user_id = user_id
-    
+
     if not target_chat_id and target_user_id:
         try:
             session_mgr = get_session_manager()
@@ -615,14 +636,14 @@ async def send_message_through_im(
             if session_id:
                 binding = session_mgr.get_binding(session_id)
                 if binding:
-                    target_chat_id = binding.get('chat_id')
+                    target_chat_id = binding.get("chat_id")
         except Exception:
             pass
-    
+
     # Use chat_id if available, otherwise user_id
     session_key = f"{provider}:{target_chat_id or target_user_id or 'unknown'}"
     lock = await _get_session_lock(session_key)
-    
+
     # Acquire lock to ensure message ordering
     async with lock:
         return await _send_message_through_im_impl(
@@ -630,8 +651,9 @@ async def send_message_through_im(
             provider=provider,
             agent_id=agent_id,
             user_id=user_id,
-            chat_id=chat_id
+            chat_id=chat_id,
         )
+
 
 async def _send_message_through_im_impl(
     content: str,
@@ -643,11 +665,15 @@ async def _send_message_through_im_impl(
     """Internal implementation of send_message_through_im (without lock)."""
     # Validate agent_id is provided
     if not agent_id:
-        logger.error("[IM Tool] send_message_through_im: agent_id is required but not provided")
+        logger.error(
+            "[IM Tool] send_message_through_im: agent_id is required but not provided"
+        )
         return "错误: agent_id 是必填参数，请使用系统提示中提供的 agent_id"
-    
-    logger.info(f"[IM Tool] send_message_through_im called: agent={agent_id}, provider={provider}, "
-                f"user_id={user_id}, chat_id={chat_id}, content_length={len(content) if content else 0}")
+
+    logger.info(
+        f"[IM Tool] send_message_through_im called: agent={agent_id}, provider={provider}, "
+        f"user_id={user_id}, chat_id={chat_id}, content_length={len(content) if content else 0}"
+    )
 
     # Validate required parameters
     if not content:
@@ -676,18 +702,26 @@ async def _send_message_through_im_impl(
             if session_id:
                 binding = session_mgr.get_binding(session_id)
                 if binding:
-                    target_chat_id = binding.get('chat_id')
-                    logger.info(f"[IM Tool] Found chat_id from session: {target_chat_id}")
+                    target_chat_id = binding.get("chat_id")
+                    logger.info(
+                        f"[IM Tool] Found chat_id from session: {target_chat_id}"
+                    )
         except Exception as e:
             logger.warning(f"[IM Tool] Failed to find chat_id from session: {e}")
 
-    logger.info(f"[IM Tool] Processing message: agent={agent_id}, provider={provider_name}, "
-                f"user_id={target_user_id}, chat_id={target_chat_id}")
+    logger.info(
+        f"[IM Tool] Processing message: agent={agent_id}, provider={provider_name}, "
+        f"user_id={target_user_id}, chat_id={target_chat_id}"
+    )
 
     # Check if provider is enabled for this agent
-    logger.info(f"[IM Tool] Checking if provider {provider_name} is enabled for agent={agent_id}...")
+    logger.info(
+        f"[IM Tool] Checking if provider {provider_name} is enabled for agent={agent_id}..."
+    )
     if not is_provider_enabled(provider_name, agent_id):
-        logger.error(f"[IM Tool] Provider '{provider_name}' is not enabled for agent={agent_id}")
+        logger.error(
+            f"[IM Tool] Provider '{provider_name}' is not enabled for agent={agent_id}"
+        )
         return f"Error: Provider '{provider_name}' is not enabled for this agent"
 
     logger.info(f"[IM Tool] Provider {provider_name} is enabled, getting config...")
@@ -696,20 +730,27 @@ async def _send_message_through_im_impl(
     try:
         # First, try to get running provider from service_manager (reuse existing connection)
         from .service_manager import get_service_manager
+
         service_manager = get_service_manager()
         provider_instance = service_manager.get_provider(agent_id, provider_name)
-        
+
         if provider_instance:
-            logger.info(f"[IM Tool] Reusing existing provider connection for {provider_name}")
+            logger.info(
+                f"[IM Tool] Reusing existing provider connection for {provider_name}"
+            )
         else:
             # No running provider, create new instance
             config = get_provider_config(provider_name, agent_id)
             logger.info(f"[IM Tool] Got provider config for agent={agent_id}: {config}")
             if not config:
-                logger.error(f"[IM Tool] No configuration found for provider '{provider_name}' and agent '{agent_id}'")
+                logger.error(
+                    f"[IM Tool] No configuration found for provider '{provider_name}' and agent '{agent_id}'"
+                )
                 return f"Error: No configuration found for provider '{provider_name}'"
 
-            logger.info(f"[IM Tool] Creating new provider instance for {provider_name}...")
+            logger.info(
+                f"[IM Tool] Creating new provider instance for {provider_name}..."
+            )
             provider_instance = get_im_provider(provider_name, config)
             logger.info("[IM Tool] Provider instance created, sending message...")
 
@@ -719,17 +760,21 @@ async def _send_message_through_im_impl(
             content=content,
             chat_id=target_chat_id,
             user_id=target_user_id,
-            msg_type=msg_type
+            msg_type=msg_type,
         )
 
         logger.info(f"[IM Tool] send_message result: {result}")
 
         if result.get("success"):
-            target = f"group {target_chat_id}" if target_chat_id else f"user {target_user_id}"
+            target = (
+                f"group {target_chat_id}"
+                if target_chat_id
+                else f"user {target_user_id}"
+            )
             logger.info(f"[IM Tool] Message sent successfully to {target}")
             return f"Message sent via {provider_name} to {target}"
         else:
-            error = result.get('error', 'Unknown error')
+            error = result.get("error", "Unknown error")
             logger.error(f"[IM Tool] Failed to send message: {error}")
             return f"Error: {error}"
 
@@ -758,7 +803,7 @@ async def handle_incoming_message(
     session_webhook: Optional[str] = None,
     sender_staff_id: Optional[str] = None,
     session_webhook_expired_time: Optional[int] = None,
-    file_info: Optional[Dict[str, Any]] = None
+    file_info: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Handle incoming message from any IM provider.
@@ -792,7 +837,7 @@ async def handle_incoming_message(
         user_id=user_id,
         agent_id=default_agent_id,
         chat_id=chat_id,
-        user_name=user_name
+        user_name=user_name,
     )
 
     # Send to agent
@@ -803,7 +848,7 @@ async def handle_incoming_message(
         user_id=user_id,
         provider=provider,
         user_name=user_name,
-        file_info=file_info
+        file_info=file_info,
     )
 
     if result.get("success"):
@@ -811,40 +856,65 @@ async def handle_incoming_message(
         response = result.get("response", "")
         has_im_tool = result.get("has_im_tool", False)
 
-        logger.info(f"[IM] Agent response: success=True, has_im_tool={has_im_tool}, response_length={len(response) if response else 0}")
-        logger.info(f"[IM] Response content preview: {response[:200] if response else 'EMPTY'}...")
+        logger.info(
+            f"[IM] Agent response: success=True, has_im_tool={has_im_tool}, response_length={len(response) if response else 0}"
+        )
+        logger.info(
+            f"[IM] Response content preview: {response[:200] if response else 'EMPTY'}..."
+        )
 
         if has_im_tool:
-            logger.info("[IM] Agent used send_message_through_im tool, skipping automatic response")
+            logger.info(
+                "[IM] Agent used send_message_through_im tool, skipping automatic response"
+            )
         elif response:
             try:
                 binding = session_mgr.get_binding(session_id)
-                logger.info(f"[IM] Sending response back to {provider}: chat_id={chat_id}, user_id={user_id}")
+                logger.info(
+                    f"[IM] Sending response back to {provider}: chat_id={chat_id}, user_id={user_id}"
+                )
 
                 if binding:
                     # 首先尝试从 service_manager 获取正在运行的 provider（复用现有连接）
                     from .service_manager import get_service_manager
+
                     sm = get_service_manager()
-                    
+
                     # 通过 agent_id + provider 查找正在运行的 provider (新架构)
-                    logger.info(f"[IM] Looking for provider instance: agent={default_agent_id}, provider={provider}")
-                    provider_instance = sm.find_provider_by_agent(default_agent_id, provider)
-                    
+                    logger.info(
+                        f"[IM] Looking for provider instance: agent={default_agent_id}, provider={provider}"
+                    )
+                    provider_instance = sm.find_provider_by_agent(
+                        default_agent_id, provider
+                    )
+
                     if provider_instance:
-                        logger.info(f"[IM] Reusing existing provider connection for agent={default_agent_id}, provider={provider}")
+                        logger.info(
+                            f"[IM] Reusing existing provider connection for agent={default_agent_id}, provider={provider}"
+                        )
                     else:
                         # 如果没有运行的 provider，创建新实例
-                        logger.warning(f"[IM] No running provider for agent={default_agent_id}, provider={provider}, creating new instance")
+                        logger.warning(
+                            f"[IM] No running provider for agent={default_agent_id}, provider={provider}, creating new instance"
+                        )
                         config = get_provider_config(provider, default_agent_id)
-                        logger.info(f"[IM] Provider config for agent={default_agent_id}: {config}")
+                        logger.info(
+                            f"[IM] Provider config for agent={default_agent_id}: {config}"
+                        )
                         if config:
                             provider_instance = get_im_provider(provider, config)
-                            logger.info(f"[IM] Created new provider instance: {provider_instance}")
+                            logger.info(
+                                f"[IM] Created new provider instance: {provider_instance}"
+                            )
                         else:
-                            logger.error(f"[IM] No config found for agent={default_agent_id}, provider: {provider}")
+                            logger.error(
+                                f"[IM] No config found for agent={default_agent_id}, provider: {provider}"
+                            )
                             return {"success": True, "session_id": session_id}
 
-                    logger.info(f"[IM] Calling {provider}.send_message with content length: {len(response)}, chat_id={chat_id}, user_id={user_id}")
+                    logger.info(
+                        f"[IM] Calling {provider}.send_message with content length: {len(response)}, chat_id={chat_id}, user_id={user_id}"
+                    )
 
                     # Prepare send parameters
                     send_params = {
@@ -862,7 +932,9 @@ async def handle_incoming_message(
                         if sender_staff_id:
                             send_params["sender_staff_id"] = sender_staff_id
                         if session_webhook_expired_time:
-                            send_params["session_webhook_expired_time"] = session_webhook_expired_time
+                            send_params["session_webhook_expired_time"] = (
+                                session_webhook_expired_time
+                            )
                     elif provider == "wechat_work":
                         # WeChat Work aibot_send_msg only supports markdown/template_card
                         send_params["msg_type"] = "markdown"
@@ -892,13 +964,15 @@ async def initialize_im_server():
     logger.info("=" * 50)
     logger.info("[IM Server] ========== Initializing IM Server ==========")
     logger.info("=" * 50)
-    
+
     # Step 1: Migrate legacy configurations (if needed)
     logger.info("[IM Server] Checking configuration migration...")
     migration_success = await ensure_config_migrated()
     if not migration_success:
-        logger.warning("[IM Server] Configuration migration had issues, continuing with startup")
-    
+        logger.warning(
+            "[IM Server] Configuration migration had issues, continuing with startup"
+        )
+
     # Step 2: Start service manager for multi-tenant IM management
     logger.info("[IM Server] Starting Service Manager...")
     service_manager = get_service_manager()

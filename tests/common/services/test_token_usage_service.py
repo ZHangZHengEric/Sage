@@ -54,7 +54,9 @@ async def _reset_test_db():
 async def _list_records():
     db = await get_global_db()
     async with db.get_session() as session:  # type: ignore[attr-defined]
-        result = await session.execute(select(TokenUsage).order_by(TokenUsage.finished_at))
+        result = await session.execute(
+            select(TokenUsage).order_by(TokenUsage.finished_at)
+        )
         return list(result.scalars().all())
 
 
@@ -73,9 +75,21 @@ def test_record_session_execution_persists_valid_usage():
                     "reasoning_tokens": 8,
                 },
                 "per_step_info": [
-                    {"step_name": "direct_execution", "model": "gpt-4.1", "usage": {"total_tokens": 60}},
-                    {"step_name": "direct_execution", "model": "gpt-4.1", "usage": {"total_tokens": 40}},
-                    {"step_name": "task_complete_judge", "model": "gpt-4.1-mini", "usage": {"total_tokens": 50}},
+                    {
+                        "step_name": "direct_execution",
+                        "model": "gpt-4.1",
+                        "usage": {"total_tokens": 60},
+                    },
+                    {
+                        "step_name": "direct_execution",
+                        "model": "gpt-4.1",
+                        "usage": {"total_tokens": 40},
+                    },
+                    {
+                        "step_name": "task_complete_judge",
+                        "model": "gpt-4.1-mini",
+                        "usage": {"total_tokens": 50},
+                    },
                 ],
             },
             start_time=started_at.timestamp(),
@@ -122,7 +136,9 @@ def test_session_stats_aggregate_multiple_executions_without_time_range():
                 "cached_tokens": 10,
                 "reasoning_tokens": 6,
             },
-            "per_step_info": [{"step_name": "direct_execution", "usage": {"total_tokens": 140}}],
+            "per_step_info": [
+                {"step_name": "direct_execution", "usage": {"total_tokens": 140}}
+            ],
         }
 
         for offset in (0, 5):
@@ -184,8 +200,14 @@ def test_grouped_stats_support_time_filters():
 
         old_ctx = _FakeSessionContext(
             usage={
-                "total_info": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
-                "per_step_info": [{"step_name": "direct_execution", "usage": {"total_tokens": 30}}],
+                "total_info": {
+                    "prompt_tokens": 20,
+                    "completion_tokens": 10,
+                    "total_tokens": 30,
+                },
+                "per_step_info": [
+                    {"step_name": "direct_execution", "usage": {"total_tokens": 30}}
+                ],
             },
             session_id="s-old",
             user_id="user-a",
@@ -195,8 +217,14 @@ def test_grouped_stats_support_time_filters():
         )
         new_ctx = _FakeSessionContext(
             usage={
-                "total_info": {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70},
-                "per_step_info": [{"step_name": "direct_execution", "usage": {"total_tokens": 70}}],
+                "total_info": {
+                    "prompt_tokens": 50,
+                    "completion_tokens": 20,
+                    "total_tokens": 70,
+                },
+                "per_step_info": [
+                    {"step_name": "direct_execution", "usage": {"total_tokens": 70}}
+                ],
             },
             session_id="s-new",
             user_id="user-b",
@@ -205,8 +233,12 @@ def test_grouped_stats_support_time_filters():
             end_time=new_time,
         )
 
-        await token_usage_service.record_session_execution(session_context=old_ctx, request_source="api/chat")
-        await token_usage_service.record_session_execution(session_context=new_ctx, request_source="api/chat")
+        await token_usage_service.record_session_execution(
+            session_context=old_ctx, request_source="api/chat"
+        )
+        await token_usage_service.record_session_execution(
+            session_context=new_ctx, request_source="api/chat"
+        )
 
         stats = await token_usage_service.get_token_usage_stats(
             dimension="user",
@@ -238,7 +270,9 @@ def test_record_session_execution_skips_invalid_usage():
                     "prompt_tokens": 10,
                     "completion_tokens": 5,
                 },
-                "per_step_info": [{"step_name": "direct_execution", "usage": {"prompt_tokens": 10}}],
+                "per_step_info": [
+                    {"step_name": "direct_execution", "usage": {"prompt_tokens": 10}}
+                ],
             }
         )
 
@@ -265,15 +299,25 @@ def test_agent_stats_use_uniform_item_fields_and_filters():
     async def _run():
         await _reset_test_db()
         usage_a = {
-            "total_info": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+            "total_info": {
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "total_tokens": 150,
+            },
             "per_step_info": [
                 {"step_name": "direct_execution", "usage": {"total_tokens": 100}},
                 {"step_name": "task_complete_judge", "usage": {"total_tokens": 50}},
             ],
         }
         usage_b = {
-            "total_info": {"prompt_tokens": 30, "completion_tokens": 20, "total_tokens": 50},
-            "per_step_info": [{"step_name": "direct_execution", "usage": {"total_tokens": 50}}],
+            "total_info": {
+                "prompt_tokens": 30,
+                "completion_tokens": 20,
+                "total_tokens": 50,
+            },
+            "per_step_info": [
+                {"step_name": "direct_execution", "usage": {"total_tokens": 50}}
+            ],
         }
         for session_id, usage, source in (
             ("s-a", usage_a, "api/chat"),

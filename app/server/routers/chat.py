@@ -11,7 +11,6 @@ from datetime import datetime
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
-from sqlalchemy.orm import query
 from sagents.context.session_context import delete_session_run_lock
 from sagents.utils.lock_manager import safe_release
 
@@ -33,14 +32,14 @@ SERVER_STREAM_FILTERED_TYPES = {
 }
 
 
-def _resolve_request_language(http_request: Request, language: str | None = None, default: str = "zh") -> str:
+def _resolve_request_language(
+    http_request: Request, language: str | None = None, default: str = "zh"
+) -> str:
     candidate = (language or "").strip()
     if not candidate:
         headers = http_request.headers
         candidate = (
-            headers.get("x-accept-language")
-            or headers.get("accept-language")
-            or ""
+            headers.get("x-accept-language") or headers.get("accept-language") or ""
         ).strip()
     lowered = candidate.lower()
     if lowered.startswith("pt"):
@@ -135,7 +134,9 @@ async def optimize_chat_input(request: UserInputOptimizeRequest, http_request: R
 
 
 @chat_router.post("/api/chat/optimize-input/stream")
-async def optimize_chat_input_stream(request: UserInputOptimizeRequest, http_request: Request):
+async def optimize_chat_input_stream(
+    request: UserInputOptimizeRequest, http_request: Request
+):
     claims = getattr(http_request.state, "user_claims", {}) or {}
     if not request.user_id:
         request.user_id = claims.get("userid") or ""
@@ -144,7 +145,9 @@ async def optimize_chat_input_stream(request: UserInputOptimizeRequest, http_req
     async def event_generator():
         async for chunk in chat_service.optimize_user_input_stream(
             current_input=request.current_input,
-            history_messages=[message.model_dump() for message in request.history_messages],
+            history_messages=[
+                message.model_dump() for message in request.history_messages
+            ],
             session_id=request.session_id or "",
             agent_id=request.agent_id or "",
             user_id=request.user_id or "",
@@ -178,15 +181,18 @@ async def stream_with_manager(
         except Exception:
             status = "fallback_missing"
             return
-        yield json.dumps(
-            {
-                "type": "stream_end",
-                "session_id": session_id,
-                "timestamp": time.time(),
-                "resume_fallback": True,
-            },
-            ensure_ascii=False,
-        ) + "\n"
+        yield (
+            json.dumps(
+                {
+                    "type": "stream_end",
+                    "session_id": session_id,
+                    "timestamp": time.time(),
+                    "resume_fallback": True,
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
     except asyncio.CancelledError:
         status = "cancelled"
         raise
@@ -202,7 +208,10 @@ def _should_filter_stream_chunk(chunk: str) -> bool:
         payload = json.loads(chunk)
     except Exception:
         return False
-    return isinstance(payload, dict) and payload.get("type") in SERVER_STREAM_FILTERED_TYPES
+    return (
+        isinstance(payload, dict)
+        and payload.get("type") in SERVER_STREAM_FILTERED_TYPES
+    )
 
 
 async def _filter_stream_chunks(generator):
@@ -261,7 +270,9 @@ async def stream_api_with_disconnect_check(
         if client_disconnected:
             try:
                 await asyncio.wait_for(
-                    conversation_service.interrupt_session(session_id, "客户端断开连接"),
+                    conversation_service.interrupt_session(
+                        session_id, "客户端断开连接"
+                    ),
                     timeout=_DISCONNECT_INTERRUPT_TIMEOUT,
                 )
             except asyncio.TimeoutError:
@@ -269,13 +280,17 @@ async def stream_api_with_disconnect_check(
                     f"interrupt_session 超过 {_DISCONNECT_INTERRUPT_TIMEOUT}s 未返回，跳过强制等待"
                 )
             except Exception as ex:
-                logger.bind(session_id=session_id).error(f"Error interrupting session: {ex}")
+                logger.bind(session_id=session_id).error(
+                    f"Error interrupting session: {ex}"
+                )
 
         # 确保 generator 关闭，触发内部清理逻辑 (sagents cleanup)
         # 这必须在释放锁之前执行，因为 sagents 清理逻辑需要获取锁
         try:
             if hasattr(generator, "aclose"):
-                await asyncio.wait_for(generator.aclose(), timeout=_GENERATOR_ACLOSE_TIMEOUT)
+                await asyncio.wait_for(
+                    generator.aclose(), timeout=_GENERATOR_ACLOSE_TIMEOUT
+                )
         except asyncio.TimeoutError:
             logger.bind(session_id=session_id).warning(
                 f"generator.aclose 超过 {_GENERATOR_ACLOSE_TIMEOUT}s 未返回，跳过强制等待"
@@ -302,12 +317,10 @@ def validate_and_prepare_request(
     allow_pending_guidance_flush: bool = False,
 ) -> None:
 
-
     # 验证请求参数
     if not request.messages or len(request.messages) == 0:
-        if (
-            not allow_pending_guidance_flush
-            or not _has_pending_user_injections(request.session_id)
+        if not allow_pending_guidance_flush or not _has_pending_user_injections(
+            request.session_id
         ):
             raise SageHTTPException(detail="消息列表不能为空")
         logger.bind(session_id=request.session_id).info(
@@ -410,7 +423,6 @@ async def stream_chat_web(request: StreamRequest, http_request: Request):
     validate_and_prepare_request(request, http_request)
     chat_service.mark_request_execution(request, request_source="api/web-stream")
 
-    session_id = request.session_id
     manager = StreamManager.get_instance()
     query = request.messages[0].content
     return await _start_web_stream_session(
@@ -454,7 +466,9 @@ async def get_active_sessions(request: Request):
         try:
             async for sessions in manager.subscribe_active_sessions():
                 if await request.is_disconnected():
-                    logger.info(f"Client {client_host} disconnected active_sessions stream")
+                    logger.info(
+                        f"Client {client_host} disconnected active_sessions stream"
+                    )
                     break
 
                 # 手动构建 SSE 格式
@@ -484,11 +498,13 @@ async def rerun_conversation_stream(
     guidance_content = (rerun_request.guidance_content or "").strip()
     rerun_messages = []
     if guidance_content:
-        rerun_messages.append({
-            "message_id": rerun_request.guidance_id or str(uuid.uuid4()),
-            "role": "user",
-            "content": guidance_content,
-        })
+        rerun_messages.append(
+            {
+                "message_id": rerun_request.guidance_id or str(uuid.uuid4()),
+                "role": "user",
+                "content": guidance_content,
+            }
+        )
 
     request = StreamRequest(
         messages=rerun_messages,

@@ -16,7 +16,6 @@ from .plan_agent import PlanAgent
 from .self_check_agent import SelfCheckAgent
 
 
-
 __all__ = [
     "AgentBase",
     "SimpleAgent",

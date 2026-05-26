@@ -41,7 +41,6 @@ from sagents.observability import (
 )
 from sagents.skill import SkillManager, SkillProxy
 from sagents.tool import ToolManager, ToolProxy
-from sagents.tool.impl.todo_tool import ToDoTool
 from sagents.utils.lock_manager import lock_manager, safe_release
 from sagents.utils.logger import logger
 from sagents.flow.schema import AgentFlow
@@ -50,7 +49,9 @@ from sagents.utils.sandbox.config import VolumeMount
 from sagents.utils.message_control_flags import extract_control_flags_from_messages
 
 
-_session_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("session_id", default=None)
+_session_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "session_id", default=None
+)
 
 
 def _load_json_file_sync(file_path: str) -> Optional[Any]:
@@ -93,7 +94,9 @@ def _context_budget_config_from_model(
     if "max_model_len" not in effective_config:
         max_model_len = None
         if isinstance(model_config, dict):
-            max_model_len = model_config.get("max_model_len") or model_config.get("maxModelLen")
+            max_model_len = model_config.get("max_model_len") or model_config.get(
+                "maxModelLen"
+            )
         if max_model_len:
             effective_config["max_model_len"] = max_model_len
             logger.debug(
@@ -101,8 +104,12 @@ def _context_budget_config_from_model(
                 f"max_model_len={max_model_len}"
             )
     elif isinstance(model_config, dict):
-        model_max_model_len = model_config.get("max_model_len") or model_config.get("maxModelLen")
-        if model_max_model_len and model_max_model_len != effective_config.get("max_model_len"):
+        model_max_model_len = model_config.get("max_model_len") or model_config.get(
+            "maxModelLen"
+        )
+        if model_max_model_len and model_max_model_len != effective_config.get(
+            "max_model_len"
+        ):
             logger.debug(
                 f"SessionRuntime: using explicit context_budget_config, "
                 f"max_model_len={effective_config.get('max_model_len')}, "
@@ -112,7 +119,9 @@ def _context_budget_config_from_model(
 
 
 class Session:
-    def __init__(self, session_id: str, enable_obs: bool = True, sandbox_type: str = "local"):
+    def __init__(
+        self, session_id: str, enable_obs: bool = True, sandbox_type: str = "local"
+    ):
         self.session_id = session_id
         self.enable_obs = enable_obs
         self.sandbox_type = sandbox_type
@@ -160,7 +169,9 @@ class Session:
 
     def set_context(self, session_context: SessionContext) -> None:
         self.session_context = session_context
-        self.session_workspace = getattr(session_context, "session_workspace", self.session_workspace)
+        self.session_workspace = getattr(
+            session_context, "session_workspace", self.session_workspace
+        )
         session_context.start_time = self.start_time
         session_context.end_time = self.end_time
         session_context.child_session_ids = list(self.child_session_ids)
@@ -191,15 +202,36 @@ class Session:
                 )
             self.interrupt_event.clear()
             self.interrupt_reason = None
-            if self.session_context and isinstance(getattr(self.session_context, "audit_status", None), dict):
+            if self.session_context and isinstance(
+                getattr(self.session_context, "audit_status", None), dict
+            ):
                 self.session_context.audit_status.pop("interrupt_reason", None)
         if self.session_context:
-            self.session_context.end_time = time.time() if status in {SessionStatus.COMPLETED, SessionStatus.ERROR, SessionStatus.INTERRUPTED} else self.session_context.end_time
-        if status in {SessionStatus.COMPLETED, SessionStatus.ERROR, SessionStatus.INTERRUPTED}:
+            self.session_context.end_time = (
+                time.time()
+                if status
+                in {
+                    SessionStatus.COMPLETED,
+                    SessionStatus.ERROR,
+                    SessionStatus.INTERRUPTED,
+                }
+                else self.session_context.end_time
+            )
+        if status in {
+            SessionStatus.COMPLETED,
+            SessionStatus.ERROR,
+            SessionStatus.INTERRUPTED,
+        }:
             self.end_time = time.time()
-        logger.debug(f"SessionRuntime: Session {self.session_id} status changed from {old_status.value} to {status.value}")
+        logger.debug(
+            f"SessionRuntime: Session {self.session_id} status changed from {old_status.value} to {status.value}"
+        )
 
-        if cascade and status in {SessionStatus.INTERRUPTED, SessionStatus.ERROR} and self.child_session_ids:
+        if (
+            cascade
+            and status in {SessionStatus.INTERRUPTED, SessionStatus.ERROR}
+            and self.child_session_ids
+        ):
             try:
                 manager = get_global_session_manager()
             except Exception:
@@ -207,7 +239,9 @@ class Session:
             if manager:
                 for child_session_id in list(self.child_session_ids):
                     try:
-                        child_session = manager.get_live_session(child_session_id) or manager.get(child_session_id)
+                        child_session = manager.get_live_session(
+                            child_session_id
+                        ) or manager.get(child_session_id)
                         if child_session:
                             child_session.set_status(status, cascade=False)
                     except Exception as exc:
@@ -223,13 +257,19 @@ class Session:
     def add_child_session(self, child_session_id: str) -> None:
         if child_session_id not in self.child_session_ids:
             self.child_session_ids.append(child_session_id)
-        if self.session_context and child_session_id not in self.session_context.child_session_ids:
+        if (
+            self.session_context
+            and child_session_id not in self.session_context.child_session_ids
+        ):
             self.session_context.child_session_ids.append(child_session_id)
 
     def remove_child_session(self, child_session_id: str) -> None:
         if child_session_id in self.child_session_ids:
             self.child_session_ids.remove(child_session_id)
-        if self.session_context and child_session_id in self.session_context.child_session_ids:
+        if (
+            self.session_context
+            and child_session_id in self.session_context.child_session_ids
+        ):
             self.session_context.child_session_ids.remove(child_session_id)
 
     def _load_persisted_snapshot(self) -> Optional[Dict[str, Any]]:
@@ -248,7 +288,9 @@ class Session:
                 self._persisted_snapshot = snapshot
                 return snapshot
         except Exception as exc:
-            logger.debug(f"SessionRuntime: 读取 session {self.session_id} 快照失败: {exc}")
+            logger.debug(
+                f"SessionRuntime: 读取 session {self.session_id} 快照失败: {exc}"
+            )
         return None
 
     def _load_persisted_messages(self) -> List[MessageChunk]:
@@ -273,7 +315,9 @@ class Session:
             else:
                 self._persisted_messages = []
         except Exception as exc:
-            logger.debug(f"SessionRuntime: 读取 session {self.session_id} messages 失败: {exc}")
+            logger.debug(
+                f"SessionRuntime: 读取 session {self.session_id} messages 失败: {exc}"
+            )
             self._persisted_messages = []
         return self._persisted_messages
 
@@ -292,14 +336,24 @@ class Session:
                 agent_config = snapshot.get("agent_config") or {}
                 system_context = snapshot.get("system_context") or {}
                 context_budget_config = snapshot.get("context_budget_config")
-                llm_config = agent_config.get("llm_config") if isinstance(agent_config, dict) else {}
+                llm_config = (
+                    agent_config.get("llm_config")
+                    if isinstance(agent_config, dict)
+                    else {}
+                )
                 has_persisted_budget_config = isinstance(context_budget_config, dict)
                 context_budget_config = _context_budget_config_from_model(
-                    context_budget_config if isinstance(context_budget_config, dict) else None,
+                    context_budget_config
+                    if isinstance(context_budget_config, dict)
+                    else None,
                     llm_config if isinstance(llm_config, dict) else None,
                 )
                 if context_budget_config:
-                    restore_source = "context_budget_config" if has_persisted_budget_config else "legacy llm_config"
+                    restore_source = (
+                        "context_budget_config"
+                        if has_persisted_budget_config
+                        else "legacy llm_config"
+                    )
                     logger.info(
                         f"SessionRuntime: restored context_budget_config from {restore_source}, "
                         f"session_id={self.session_id}, "
@@ -309,35 +363,51 @@ class Session:
                     session_id=str(snapshot.get("session_id") or self.session_id),
                     user_id=str(snapshot.get("user_id") or ""),
                     agent_id=str(agent_config.get("agent_id") or ""),
-                    session_root_space=str(snapshot.get("session_root_space") or self.session_space),
+                    session_root_space=str(
+                        snapshot.get("session_root_space") or self.session_space
+                    ),
                     sandbox_agent_workspace=snapshot.get("sandbox_agent_workspace"),
                     volume_mounts=None,
                     sandbox_id=None,
                     context_budget_config=context_budget_config,
-                    system_context=system_context if isinstance(system_context, dict) else {},
+                    system_context=system_context
+                    if isinstance(system_context, dict)
+                    else {},
                     tool_manager=None,
                     skill_manager=None,
                     parent_session_id=snapshot.get("parent_session_id"),
                 )
-                self.session_context.session_workspace = snapshot.get("session_workspace") or self.session_workspace
-                self.status = SessionStatus(str(snapshot.get("status") or SessionStatus.IDLE.value))
-                self.start_time = float(snapshot.get("created_at") or self.session_context.start_time)
+                self.session_context.session_workspace = (
+                    snapshot.get("session_workspace") or self.session_workspace
+                )
+                self.status = SessionStatus(
+                    str(snapshot.get("status") or SessionStatus.IDLE.value)
+                )
+                self.start_time = float(
+                    snapshot.get("created_at") or self.session_context.start_time
+                )
                 self.end_time = snapshot.get("updated_at")
                 self.session_context.start_time = self.start_time
                 self.session_context.end_time = self.end_time
-                self.session_context.child_session_ids = list(snapshot.get("child_session_ids") or [])
+                self.session_context.child_session_ids = list(
+                    snapshot.get("child_session_ids") or []
+                )
                 self.child_session_ids = list(self.session_context.child_session_ids)
                 self.session_context.audit_status = snapshot.get("audit_status") or {}
                 if isinstance(agent_config, dict):
                     self.session_context.agent_config = agent_config
-                self.session_context.message_manager.messages = self._load_persisted_messages()
+                self.session_context.message_manager.messages = (
+                    self._load_persisted_messages()
+                )
                 # 注意：这里不再根据持久化的 INTERRUPTED 状态去 set interrupt_event。
                 # interrupt_event 是用于"当前运行周期"的中断信号，磁盘里的 INTERRUPTED 仅是上一轮
                 # 结束时的历史状态。如果在加载时把 event 置位，下一次新的 run_stream 进入时即使
                 # set_status(RUNNING)，FlowExecutor 仍会因 should_interrupt() 为 True 而立刻退出。
                 # 当前轮次是否需要中断，由 SessionManager.interrupt_session(...) 在运行期再次触发。
             except Exception as exc:
-                logger.warning(f"SessionRuntime: 恢复 session {self.session_id} 快照失败: {exc}")
+                logger.warning(
+                    f"SessionRuntime: 恢复 session {self.session_id} 快照失败: {exc}"
+                )
                 return False
 
         return snapshot is not None or bool(self._persisted_messages)
@@ -380,10 +450,14 @@ class Session:
         try:
             return self.session_context.task_manager.to_dict()
         except Exception as exc:
-            logger.warning(f"SessionRuntime: 获取 session {self.session_id} 任务状态失败: {exc}")
+            logger.warning(
+                f"SessionRuntime: 获取 session {self.session_id} 任务状态失败: {exc}"
+            )
             return {"tasks": []}
 
-    def request_interrupt(self, message: str = "用户请求中断", cascade: bool = True) -> bool:
+    def request_interrupt(
+        self, message: str = "用户请求中断", cascade: bool = True
+    ) -> bool:
         if not self.session_context:
             return False
         try:
@@ -394,7 +468,9 @@ class Session:
             self.set_status(SessionStatus.INTERRUPTED, cascade=cascade)
             return True
         except Exception as exc:
-            logger.warning(f"SessionRuntime: 中断 session {self.session_id} 失败: {exc}")
+            logger.warning(
+                f"SessionRuntime: 中断 session {self.session_id} 失败: {exc}"
+            )
             return False
 
     def configure_runtime(
@@ -431,10 +507,12 @@ class Session:
         self.volume_mounts = volume_mounts or []
         self.sandbox_id = sandbox_id
 
-        logger.debug(f"SessionRuntime: configure_runtime "
-                    f"sandbox_agent_workspace={self.sandbox_agent_workspace}, "
-                    f"volume_mounts_count={len(self.volume_mounts)}, "
-                    f"sandbox_id={self.sandbox_id}")
+        logger.debug(
+            f"SessionRuntime: configure_runtime "
+            f"sandbox_agent_workspace={self.sandbox_agent_workspace}, "
+            f"volume_mounts_count={len(self.volume_mounts)}, "
+            f"sandbox_id={self.sandbox_id}"
+        )
 
         # agent_id 为 None 时生成随机 UUID
         self.agent_id = agent_id or str(uuid.uuid4())
@@ -456,34 +534,48 @@ class Session:
         # 尝试从 SessionManager 获取已知的 session_workspace
         # 如果是第一次创建，可能还不知道路径，返回 None
         # 如果 SessionManager 已经扫描到，则直接使用
-        
+
         # 我们需要访问全局 SessionManager 吗？
         # Session 实例本身不知道自己属于哪个 Manager，除非传入。
         # 但我们有 get_global_session_manager。
-        
+
         # 更好的方式：Session 初始化时，应该尝试定位自己的 workspace
-        
+
         # 假设我们通过全局 Manager 查找
         try:
             manager = get_global_session_manager()
             if manager:
-                session_workspace = manager.get_session_workspace(session_id, only_all_session_paths=True)
+                session_workspace = manager.get_session_workspace(
+                    session_id, only_all_session_paths=True
+                )
                 if session_workspace:
-                    context_path = os.path.join(session_workspace, "session_context.json")
+                    context_path = os.path.join(
+                        session_workspace, "session_context.json"
+                    )
                     if os.path.exists(context_path):
                         data = _load_json_file_sync(context_path)
-                        return data.get("system_context") if isinstance(data, dict) else None
-                            
-            default_path = os.path.join(self.session_root_space, session_id, "session_context.json")
+                        return (
+                            data.get("system_context")
+                            if isinstance(data, dict)
+                            else None
+                        )
+
+            default_path = os.path.join(
+                self.session_root_space, session_id, "session_context.json"
+            )
             if os.path.exists(default_path):
                 data = _load_json_file_sync(default_path)
                 return data.get("system_context") if isinstance(data, dict) else None
-                 
+
         except UnicodeDecodeError:
-            logger.warning(f"SessionRuntime: Failed to decode session_context.json for {session_id}, file may be in legacy encoding")
+            logger.warning(
+                f"SessionRuntime: Failed to decode session_context.json for {session_id}, file may be in legacy encoding"
+            )
         except Exception as e:
-            logger.warning(f"SessionRuntime: Failed to load saved system_context for {session_id}: {e}")
-            
+            logger.warning(
+                f"SessionRuntime: Failed to load saved system_context for {session_id}: {e}"
+            )
+
         return None
 
     async def _ensure_session_context(
@@ -499,9 +591,13 @@ class Session:
         if not parent_session_id and system_context:
             parent_session_id = system_context.get("parent_session_id")
             if parent_session_id:
-                logger.info(f"SessionRuntime: 从 system_context 中提取 parent_session_id={parent_session_id}")
+                logger.info(
+                    f"SessionRuntime: 从 system_context 中提取 parent_session_id={parent_session_id}"
+                )
 
-        context_budget_config = _context_budget_config_from_model(context_budget_config, self.model_config)
+        context_budget_config = _context_budget_config_from_model(
+            context_budget_config, self.model_config
+        )
 
         if self.session_context:
             self._cache_session_workspace(session_id, self.session_context)
@@ -512,14 +608,18 @@ class Session:
                 self.session_context.skill_manager = skill_manager
             if system_context:
                 self.session_context.add_and_update_system_context(system_context)
-                logger.debug(f"SAgent: 更新了 system_context 参数 keys: {list(system_context.keys())}")
+                logger.debug(
+                    f"SAgent: 更新了 system_context 参数 keys: {list(system_context.keys())}"
+                )
             if parent_session_id and not self.session_context.parent_session_id:
                 self.session_context.parent_session_id = parent_session_id
             if getattr(self.session_context, "sandbox", None) is None:
                 logger.warning(
                     f"SessionRuntime: session_context for {session_id} has no sandbox, reinitializing"
                 )
-                await self.session_context.init_more(self.session_context._session_root_space)
+                await self.session_context.init_more(
+                    self.session_context._session_root_space
+                )
             return self.session_context
 
         # saved_system_context = self._load_saved_system_context(session_id)
@@ -535,10 +635,12 @@ class Session:
         #         logger.info(f"SessionContext: Using saved system_context for session {session_id}")
 
         # 调试：检查 workspace 配置
-        logger.debug(f"SessionRuntime: 创建 SessionContext，"
-                    f"sandbox_agent_workspace={self.sandbox_agent_workspace}, "
-                    f"volume_mounts_count={len(self.volume_mounts or [])}, "
-                    f"sandbox_id={self.sandbox_id}")
+        logger.debug(
+            f"SessionRuntime: 创建 SessionContext，"
+            f"sandbox_agent_workspace={self.sandbox_agent_workspace}, "
+            f"volume_mounts_count={len(self.volume_mounts or [])}, "
+            f"sandbox_id={self.sandbox_id}"
+        )
 
         self.session_context = SessionContext(
             session_id=session_id,
@@ -557,7 +659,7 @@ class Session:
 
         # 异步初始化 SessionContext
         await self.session_context.init_more()
-        
+
         self._cache_session_workspace(session_id, self.session_context)
         return self.session_context
 
@@ -574,7 +676,9 @@ class Session:
                 enable_obs=False,
             )
         else:
-            agent = agent_cls(self.model, self.model_config, system_prefix=self.system_prefix)
+            agent = agent_cls(
+                self.model, self.model_config, system_prefix=self.system_prefix
+            )
         if self.observability_manager:
             agent = AgentRuntime(agent, self.observability_manager)
         self._agents[agent_key] = agent
@@ -619,23 +723,35 @@ class Session:
 
             if custom_sub_agents:
                 session_context.custom_sub_agents = custom_sub_agents
-                logger.debug(f"SAgent: 设置了 {len(custom_sub_agents)} 个自定义 Sub Agent")
+                logger.debug(
+                    f"SAgent: 设置了 {len(custom_sub_agents)} 个自定义 Sub Agent"
+                )
 
             if available_workflows:
-                logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
-                session_context.workflow_manager.load_workflows_from_dict(available_workflows)
+                logger.info(
+                    f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}"
+                )
+                session_context.workflow_manager.load_workflows_from_dict(
+                    available_workflows
+                )
 
             initial_messages = self._prepare_initial_messages(input_messages)
             control_flags = extract_control_flags_from_messages(initial_messages)
-            enable_deep_thinking = bool(control_flags.get("enable_deep_thinking", False))
+            enable_deep_thinking = bool(
+                control_flags.get("enable_deep_thinking", False)
+            )
             if deep_thinking is not None:
-                logger.warning("SAgent: 参数 deep_thinking 已过时且已忽略，请改用消息控制标签 <enable_deep_thinking>")
+                logger.warning(
+                    "SAgent: 参数 deep_thinking 已过时且已忽略，请改用消息控制标签 <enable_deep_thinking>"
+                )
 
             session_context.set_agent_config(
                 model=self.model,
                 model_config=self.model_config,
                 system_prefix=self.system_prefix,
-                available_tools=tool_manager.list_all_tools_name() if tool_manager else [],
+                available_tools=tool_manager.list_all_tools_name()
+                if tool_manager
+                else [],
                 available_skills=skill_manager.list_skills() if skill_manager else [],
                 system_context=session_context.system_context,
                 available_workflows=available_workflows,
@@ -648,16 +764,22 @@ class Session:
             self.set_status(SessionStatus.RUNNING)
 
             try:
-                session_context.start_request({
-                    "agent_mode": agent_mode,
-                    "model": (self.model_config or {}).get("model") if isinstance(self.model_config, dict) else None,
-                    "max_loop_count": max_loop_count,
-                })
+                session_context.start_request(
+                    {
+                        "agent_mode": agent_mode,
+                        "model": (self.model_config or {}).get("model")
+                        if isinstance(self.model_config, dict)
+                        else None,
+                        "max_loop_count": max_loop_count,
+                    }
+                )
             except Exception as exc:
                 logger.warning(f"SAgent: 开启 per-request tokens 统计失败: {exc}")
 
             merge_before_num = len(session_context.message_manager.messages)
-            all_message_ids = [m.message_id for m in session_context.message_manager.messages]
+            all_message_ids = [
+                m.message_id for m in session_context.message_manager.messages
+            ]
             add_new_messages_num = 0
             update_messages_num = 0
             for message in initial_messages:
@@ -671,23 +793,29 @@ class Session:
             logger.info(
                 f"SAgent: 初始消息数量:{merge_before_num} 合并后数量：{len(session_context.message_manager.messages)} 新增消息数量：{add_new_messages_num} 更新消息数量：{update_messages_num}"
             )
-            
+
             # 初始化消息历史切分，设置 active_start_index
             # 在所有消息（包括用户输入）添加完成后调用
             if session_context.message_manager.messages:
                 try:
-                    session_context.message_manager.prepare_history_split(session_context.agent_config)
-                    logger.debug(f"SAgent: 初始化消息历史切分完成，active_start_index={session_context.message_manager.active_start_index}")
+                    session_context.message_manager.prepare_history_split(
+                        session_context.agent_config
+                    )
+                    logger.debug(
+                        f"SAgent: 初始化消息历史切分完成，active_start_index={session_context.message_manager.active_start_index}"
+                    )
                 except Exception as e:
                     logger.warning(f"SAgent: 初始化消息历史切分失败: {e}")
-    
+
             load_recent_skill_start = time.perf_counter()
 
             # 加载最近使用的技能到上下文
             await session_context.load_recent_skill_to_context()
             load_recent_skill_cost = time.perf_counter() - load_recent_skill_start
             if load_recent_skill_cost > 0.2:
-                logger.warning(f"SAgent: load_recent_skill_to_context slow, cost={load_recent_skill_cost:.3f}s")
+                logger.warning(
+                    f"SAgent: load_recent_skill_to_context slow, cost={load_recent_skill_cost:.3f}s"
+                )
 
             # history_context_start = time.perf_counter()
             # 设置会话历史上下文
@@ -700,7 +828,9 @@ class Session:
             # 1. 预处理状态 (兼容旧逻辑)
             # 确保一些状态已经设置到 SessionContext 中，供 ConditionRegistry 使用
             session_context.audit_status["deep_thinking"] = enable_deep_thinking
-            session_context.audit_status["enable_plan"] = bool(control_flags.get("enable_plan", False))
+            session_context.audit_status["enable_plan"] = bool(
+                control_flags.get("enable_plan", False)
+            )
             if agent_mode is not None:
                 session_context.audit_status["agent_mode"] = agent_mode
             if more_suggest is not None:
@@ -711,14 +841,19 @@ class Session:
             session_context.audit_status.pop("self_check_issues", None)
             session_context.audit_status.pop("self_check_summary", None)
             session_context.audit_status.pop("self_check_checked_files", None)
-                
+
             # 2. 准备工具白名单
             # 这里直接按显式 agent_mode 收敛可用工具，不再经过自动路由分叉
             session_context.restrict_tools_for_mode(agent_mode)
             tool_manager = session_context.tool_manager
-            
+
             # 3. 执行 Flow
-            executor = FlowExecutor(tool_manager, self, session_id, session_manager=get_global_session_manager())
+            executor = FlowExecutor(
+                tool_manager,
+                self,
+                session_id,
+                session_manager=get_global_session_manager(),
+            )
             async for message_chunks in executor.execute(flow.root):
                 yield message_chunks
 
@@ -728,10 +863,18 @@ class Session:
             else:
                 logger.warning(f"SAgent: 会话被中断，会话ID: {session_id}")
 
-    async def _handle_workflow_error(self, error: Exception) -> AsyncGenerator[List[MessageChunk], None]:
+    async def _handle_workflow_error(
+        self, error: Exception
+    ) -> AsyncGenerator[List[MessageChunk], None]:
         logger.error(f"SAgent: 处理工作流错误: {str(error)}\n{traceback.format_exc()}")
         error_message = self._extract_friendly_error_message(error)
-        yield [MessageChunk(role="assistant", content=f"工作流执行失败: {error_message}", type="final_answer")]
+        yield [
+            MessageChunk(
+                role="assistant",
+                content=f"工作流执行失败: {error_message}",
+                type="final_answer",
+            )
+        ]
 
     def _extract_friendly_error_message(self, error: Exception) -> str:
         """从异常中提取友好的错误信息"""
@@ -752,23 +895,41 @@ class Session:
             return "API 配额不足，请检查账户余额或配额设置"
 
         # 处理认证错误
-        if "authentication" in error_str.lower() or "unauthorized" in error_str.lower() or "401" in error_str:
+        if (
+            "authentication" in error_str.lower()
+            or "unauthorized" in error_str.lower()
+            or "401" in error_str
+        ):
             return "API 认证失败，请检查 API Key 是否正确"
 
         # 处理模型不存在错误
-        if "model" in error_str.lower() and ("not found" in error_str.lower() or "does not exist" in error_str.lower()):
+        if "model" in error_str.lower() and (
+            "not found" in error_str.lower() or "does not exist" in error_str.lower()
+        ):
             return "指定的模型不存在或不可用，请检查模型配置"
 
         # 处理上下文长度超限
-        if "context_length" in error_str.lower() or "token" in error_str.lower() and "exceed" in error_str.lower():
+        if (
+            "context_length" in error_str.lower()
+            or "token" in error_str.lower()
+            and "exceed" in error_str.lower()
+        ):
             return "输入内容过长，请缩短后重试"
 
         # 处理连接错误
-        if "connection" in error_str.lower() or "timeout" in error_str.lower() or "network" in error_str.lower():
+        if (
+            "connection" in error_str.lower()
+            or "timeout" in error_str.lower()
+            or "network" in error_str.lower()
+        ):
             return "网络连接失败，请检查网络设置或稍后重试"
 
         # 处理服务不可用
-        if "service unavailable" in error_str.lower() or "503" in error_str or "502" in error_str:
+        if (
+            "service unavailable" in error_str.lower()
+            or "503" in error_str
+            or "502" in error_str
+        ):
             return "服务暂时不可用，请稍后再试"
 
         # 默认返回原始错误信息（但截断过长的）
@@ -776,7 +937,9 @@ class Session:
             return error_str[:200] + "..."
         return error_str
 
-    async def run_stream_safe(self, **kwargs) -> AsyncGenerator[List[MessageChunk], None]:
+    async def run_stream_safe(
+        self, **kwargs
+    ) -> AsyncGenerator[List[MessageChunk], None]:
         session_id = kwargs.get("session_id")
         try:
             # 尝试获取 flow 参数，如果存在则调用 run_stream_with_flow
@@ -828,7 +991,9 @@ class Session:
                     logger.debug(f"SAgent: 发送 message_end 观测事件失败: {e}")
 
             if self.observability_manager:
-                self.observability_manager.on_chain_end(output_data={"status": "finished"}, session_id=session_id)
+                self.observability_manager.on_chain_end(
+                    output_data={"status": "finished"}, session_id=session_id
+                )
             self._cache_session_workspace(session_id, session_context)
 
             # 顺序原则：先做"必须落盘"的副作用（end_request / save / 资源清理），
@@ -844,14 +1009,18 @@ class Session:
                         request_status = "interrupted"
                     else:
                         request_status = "completed"
-                    await asyncio.to_thread(session_context.end_request, status=request_status)
+                    await asyncio.to_thread(
+                        session_context.end_request, status=request_status
+                    )
                 except Exception as exc:
                     logger.warning(f"SAgent: 关闭 per-request tokens 统计失败: {exc}")
 
             token_usage_chunks: List[MessageChunk] = []
             if session_context:
                 try:
-                    token_usage_chunks = await self._emit_token_usage_if_any(session_context, session_id)
+                    token_usage_chunks = await self._emit_token_usage_if_any(
+                        session_context, session_id
+                    )
                 except Exception as e:
                     logger.error(f"SAgent: 计算 token usage 失败: {e}")
 
@@ -880,7 +1049,6 @@ class Session:
                     )
                     break
 
-
     async def _execute_agent_phase(
         self,
         session_id: str,
@@ -890,13 +1058,17 @@ class Session:
     ) -> AsyncGenerator[List[MessageChunk], None]:
         session_manager = get_global_session_manager()
         if not session_manager:
-            raise RuntimeError(f"SAgent: session_manager 未初始化，session_id={session_id}")
+            raise RuntimeError(
+                f"SAgent: session_manager 未初始化，session_id={session_id}"
+            )
         session = session_manager.get_live_session(session_id)
         if session is None:
             raise RuntimeError(f"SAgent: session 未绑定，session_id={session_id}")
         session_context = session.get_context()
         if session_context is None:
-            raise RuntimeError(f"SAgent: session_context 未绑定，session_id={session_id}")
+            raise RuntimeError(
+                f"SAgent: session_context 未绑定，session_id={session_id}"
+            )
 
         logger.info(f"SAgent: 使用 {agent.agent_description} 智能体，{phase_name}阶段")
         # 检查中断
@@ -907,22 +1079,31 @@ class Session:
         async for chunk in agent.run_stream(session_context):
             # 在每个块之间检查中断
             if session.should_interrupt():
-                logger.info(f"SAgent: {phase_name} 阶段在块处理中被中断，会话ID: {session_id}")
+                logger.info(
+                    f"SAgent: {phase_name} 阶段在块处理中被中断，会话ID: {session_id}"
+                )
                 return
             yield chunk
 
         logger.info(f"SAgent: {phase_name} 阶段完成")
 
-    def _prepare_initial_messages(self, input_messages: Union[List[Dict[str, Any]], List[MessageChunk]]) -> List[MessageChunk]:
+    def _prepare_initial_messages(
+        self, input_messages: Union[List[Dict[str, Any]], List[MessageChunk]]
+    ) -> List[MessageChunk]:
         for msg in input_messages:
             if not isinstance(msg, (dict, MessageChunk)):
                 raise ValueError("每个消息必须是字典或MessageChunk类型")
-        return [MessageChunk.from_dict(msg) if isinstance(msg, dict) else msg for msg in input_messages]
+        return [
+            MessageChunk.from_dict(msg) if isinstance(msg, dict) else msg
+            for msg in input_messages
+        ]
 
     def close(self):
         self.clear_context()
 
-    async def _emit_token_usage_if_any(self, session_context: SessionContext, session_id: str) -> list[MessageChunk]:
+    async def _emit_token_usage_if_any(
+        self, session_context: SessionContext, session_id: str
+    ) -> list[MessageChunk]:
         """生成 token_usage MessageChunk。
 
         约定：只要 session_context 存在，本方法**一定**返回一条 chunk，便于上游
@@ -977,7 +1158,9 @@ class Session:
             )
         ]
 
-    def _cache_session_workspace(self, session_id: Optional[str], session_context: Optional[SessionContext]):
+    def _cache_session_workspace(
+        self, session_id: Optional[str], session_context: Optional[SessionContext]
+    ):
         if not session_id or not session_context:
             return
         try:
@@ -986,7 +1169,9 @@ class Session:
                 manager.cache_session_workspace(
                     session_id,
                     session_context.session_workspace,
-                    parent_session_id=getattr(session_context, 'parent_session_id', None),
+                    parent_session_id=getattr(
+                        session_context, "parent_session_id", None
+                    ),
                 )
         except Exception as e:
             logger.warning(f"SAgent: 缓存会话路径失败: {e}")
@@ -1010,7 +1195,10 @@ class Session:
                 manager.remove_session_context(session_id)
                 logger.debug(f"SAgent: 会话 {session_id} 已清理", session_id=session_id)
         except Exception as e:
-            logger.error(f"SAgent: 清理会话 {session_id} 时出错: {e}", session_id=session_id)
+            logger.error(
+                f"SAgent: 清理会话 {session_id} 时出错: {e}", session_id=session_id
+            )
+
 
 class SessionManager:
     def __init__(self, session_root_space: str, enable_obs: bool = True):
@@ -1019,6 +1207,7 @@ class SessionManager:
         self._sessions: Dict[str, Session] = {}
 
         from sagents.session_registry import SessionRegistry
+
         db_path = os.path.join(self.session_root_space, "sessions_index.sqlite")
         need_migrate = not os.path.exists(db_path)
         os.makedirs(self.session_root_space, exist_ok=True)
@@ -1029,10 +1218,14 @@ class SessionManager:
     def _migrate_from_filesystem(self):
         """One-time migration: scan existing directories and populate the SQLite registry."""
         if not os.path.exists(self.session_root_space):
-            logger.info(f"SessionManager: Session root space does not exist: {self.session_root_space}")
+            logger.info(
+                f"SessionManager: Session root space does not exist: {self.session_root_space}"
+            )
             return
 
-        logger.info(f"SessionManager: Migrating existing sessions from {self.session_root_space} into SQLite registry")
+        logger.info(
+            f"SessionManager: Migrating existing sessions from {self.session_root_space} into SQLite registry"
+        )
         entries = []
         try:
             with os.scandir(self.session_root_space) as root_entries:
@@ -1040,7 +1233,9 @@ class SessionManager:
                     if not entry.is_dir():
                         continue
                     entry_path = entry.path
-                    if os.path.exists(os.path.join(entry_path, "session_context.json")) or os.path.exists(os.path.join(entry_path, "messages.json")):
+                    if os.path.exists(
+                        os.path.join(entry_path, "session_context.json")
+                    ) or os.path.exists(os.path.join(entry_path, "messages.json")):
                         entries.append((entry.name, entry_path, None))
                         logger.debug(f"Migrating root session: {entry.name}")
 
@@ -1052,19 +1247,31 @@ class SessionManager:
                             if not sub_entry.is_dir():
                                 continue
                             sub_entry_path = sub_entry.path
-                            if os.path.exists(os.path.join(sub_entry_path, "session_context.json")) or os.path.exists(os.path.join(sub_entry_path, "messages.json")):
-                                entries.append((sub_entry.name, sub_entry_path, entry.name))
+                            if os.path.exists(
+                                os.path.join(sub_entry_path, "session_context.json")
+                            ) or os.path.exists(
+                                os.path.join(sub_entry_path, "messages.json")
+                            ):
+                                entries.append(
+                                    (sub_entry.name, sub_entry_path, entry.name)
+                                )
                                 logger.debug(f"Migrating sub session: {sub_entry.name}")
         except FileNotFoundError:
-            logger.info(f"SessionManager: Session root space disappeared during migration: {self.session_root_space}")
+            logger.info(
+                f"SessionManager: Session root space disappeared during migration: {self.session_root_space}"
+            )
             return
         except Exception as e:
-            logger.warning(f"SessionManager: Failed to scan sessions in {self.session_root_space}: {e}")
+            logger.warning(
+                f"SessionManager: Failed to scan sessions in {self.session_root_space}: {e}"
+            )
             return
 
         if entries:
             self._registry.register_batch(entries)
-        logger.info(f"SessionManager: Migrated {len(entries)} sessions into SQLite registry")
+        logger.info(
+            f"SessionManager: Migrated {len(entries)} sessions into SQLite registry"
+        )
 
     def _is_sub_session(self, session_id: str) -> bool:
         """判断是否为子会话"""
@@ -1074,29 +1281,38 @@ class SessionManager:
         """获取父会话 ID"""
         return self._registry.get_parent_session_id(session_id)
 
-    def get_session_workspace(self, session_id: str, only_all_session_paths: bool = False) -> Optional[str]:
+    def get_session_workspace(
+        self, session_id: str, only_all_session_paths: bool = False
+    ) -> Optional[str]:
         """
         获取指定 session 的工作区路径
-        
+
         Args:
             session_id: 会话 ID（全局唯一）
             only_all_session_paths: 保留参数以兼容旧调用，行为不变
-        
+
         Returns:
             工作区路径，找不到则返回 None
         """
         return self._registry.get_workspace(session_id)
 
-    def cache_session_workspace(self, session_id: str, session_workspace: Optional[str], parent_session_id: Optional[str] = None):
+    def cache_session_workspace(
+        self,
+        session_id: str,
+        session_workspace: Optional[str],
+        parent_session_id: Optional[str] = None,
+    ):
         if not session_id or not session_workspace:
             return
-        self._registry.register(session_id, session_workspace, parent_session_id=parent_session_id)
+        self._registry.register(
+            session_id, session_workspace, parent_session_id=parent_session_id
+        )
 
     def get_or_create(
         self,
         session_id: str,
         sandbox_type: str = "local",
-        session_space: Optional[str] = None
+        session_space: Optional[str] = None,
     ) -> Session:
         """
         获取或创建 Session
@@ -1113,7 +1329,7 @@ class SessionManager:
             self._sessions[session_id] = Session(
                 session_id=session_id,
                 enable_obs=self.enable_obs,
-                sandbox_type=sandbox_type
+                sandbox_type=sandbox_type,
             )
         else:
             self._sessions[session_id].sandbox_type = sandbox_type
@@ -1123,10 +1339,10 @@ class SessionManager:
     def get(self, session_id: str) -> Optional[Session]:
         """
         获取 Session。优先返回内存中的活对象；如果不存在，则尝试从磁盘恢复。
-        
+
         Args:
             session_id: 会话 ID
-        
+
         Returns:
             Session 实例，找不到则返回 None
         """
@@ -1154,7 +1370,9 @@ class SessionManager:
         """兼容旧内部调用，优先使用 get_live_session。"""
         return self.get_live_session(session_id)
 
-    def register_session_context(self, session_id: str, session_context: SessionContext):
+    def register_session_context(
+        self, session_id: str, session_context: SessionContext
+    ):
         """注册 SessionContext"""
         session = self.get_or_create(session_id)
         session.set_context(session_context)
@@ -1210,7 +1428,7 @@ class SessionManager:
     def get_session_messages(self, session_id: str) -> List[MessageChunk]:
         """
         获取会话消息历史
-        
+
         Args:
             session_id: 会话 ID（全局唯一）
         """
@@ -1222,20 +1440,24 @@ class SessionManager:
         # 2. 尝试从磁盘获取（支持子会话按需加载）
         session_workspace_path = self.get_session_workspace(session_id)
         if not session_workspace_path:
-             logger.warning(f"SessionManager: 无法找到会话 {session_id} 的路径")
-             return []
+            logger.warning(f"SessionManager: 无法找到会话 {session_id} 的路径")
+            return []
 
         messages_path = os.path.join(session_workspace_path, "messages.json")
         if not os.path.exists(messages_path):
             return []
-            
+
         try:
             raw_messages = _load_json_file_sync(messages_path)
         except json.JSONDecodeError as e:
-            logger.error(f"SessionManager: Failed to decode messages.json for session {session_id}: {e}")
+            logger.error(
+                f"SessionManager: Failed to decode messages.json for session {session_id}: {e}"
+            )
             return []
         except UnicodeDecodeError:
-            logger.error(f"SessionManager: messages.json encoding error for session {session_id}, file may be in legacy encoding")
+            logger.error(
+                f"SessionManager: messages.json encoding error for session {session_id}, file may be in legacy encoding"
+            )
             return []
         except Exception as e:
             logger.error(f"SessionManager: 读取 messages.json 失败: {e}")
@@ -1289,15 +1511,14 @@ def build_conversation_messages_view(session_id: str) -> Dict[str, Any]:
     seen_message_keys = set()
 
     def append_message(message_dict: Dict[str, Any]):
-        message_key = (
-            message_dict.get("message_id")
-            or (
-                message_dict.get("role"),
-                message_dict.get("tool_call_id"),
-                json.dumps(message_dict.get("tool_calls", []), ensure_ascii=False, sort_keys=True),
-                json.dumps(message_dict.get("content"), ensure_ascii=False, sort_keys=True),
-                message_dict.get("timestamp"),
-            )
+        message_key = message_dict.get("message_id") or (
+            message_dict.get("role"),
+            message_dict.get("tool_call_id"),
+            json.dumps(
+                message_dict.get("tool_calls", []), ensure_ascii=False, sort_keys=True
+            ),
+            json.dumps(message_dict.get("content"), ensure_ascii=False, sort_keys=True),
+            message_dict.get("timestamp"),
         )
         if message_key in seen_message_keys:
             return
@@ -1317,7 +1538,9 @@ def build_conversation_messages_view(session_id: str) -> Dict[str, Any]:
 
             try:
                 arguments = tool_call["function"]["arguments"]
-                args = json.loads(arguments) if isinstance(arguments, str) else arguments
+                args = (
+                    json.loads(arguments) if isinstance(arguments, str) else arguments
+                )
                 tasks = args.get("tasks", [])
                 if not isinstance(tasks, list):
                     continue
@@ -1355,14 +1578,16 @@ def initialize_global_session_manager(session_root_space: str, enable_obs: bool 
     return _global_session_manager
 
 
-def get_global_session_manager(session_root_space: Optional[str] = None, enable_obs: bool = True) -> SessionManager:
+def get_global_session_manager(
+    session_root_space: Optional[str] = None, enable_obs: bool = True
+) -> SessionManager:
     """
     获取全局 SessionManager 实例
-    
+
     Args:
         session_root_space: 会话根目录（如果是第一次初始化，需要提供）
         enable_obs: 是否启用观测
-    
+
     Returns:
         SessionManager 实例
     """
@@ -1400,7 +1625,9 @@ def _inject_user_message_via_manager(
     供 ``SAgent.inject_user_message`` 调用；其它代码不要直接调用，请走 ``SAgent``。
     """
     ctx = _resolve_live_session_context(session_manager, session_id)
-    return ctx.enqueue_user_injection(content, guidance_id=guidance_id, extra_metadata=metadata)
+    return ctx.enqueue_user_injection(
+        content, guidance_id=guidance_id, extra_metadata=metadata
+    )
 
 
 def _list_pending_user_injections_via_manager(

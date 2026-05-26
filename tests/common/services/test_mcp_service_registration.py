@@ -9,7 +9,10 @@ from common.services import mcp_service
 class TestMcpServiceRegistration(unittest.IsolatedAsyncioTestCase):
     async def test_update_external_mcp_uses_requested_name_and_removes_old(self):
         existing = SimpleNamespace(
-            config={"protocol": "streamable_http", "streamable_http_url": "http://old/mcp"},
+            config={
+                "protocol": "streamable_http",
+                "streamable_http_url": "http://old/mcp",
+            },
             user_id="owner",
         )
         dao = SimpleNamespace()
@@ -21,10 +24,12 @@ class TestMcpServiceRegistration(unittest.IsolatedAsyncioTestCase):
         tm.register_mcp_server = AsyncMock(return_value=[object()])
         tm.remove_tool_by_mcp = AsyncMock()
 
-        with patch.object(mcp_service, "MCPServerDao", return_value=dao), patch.object(
-            mcp_service, "get_tool_manager", return_value=tm
-        ), patch.object(
-            mcp_service, "_get_cfg", return_value=SimpleNamespace(app_mode="server")
+        with (
+            patch.object(mcp_service, "MCPServerDao", return_value=dao),
+            patch.object(mcp_service, "get_tool_manager", return_value=tm),
+            patch.object(
+                mcp_service, "_get_cfg", return_value=SimpleNamespace(app_mode="server")
+            ),
         ):
             result = await mcp_service.update_mcp_server(
                 server_name="old",
@@ -51,7 +56,11 @@ class TestMcpServiceRegistration(unittest.IsolatedAsyncioTestCase):
 
         async def save_mcp_server(**kwargs):
             events.append("save")
-            return SimpleNamespace(name=kwargs["name"], config=kwargs["config"], user_id=kwargs.get("user_id") or "")
+            return SimpleNamespace(
+                name=kwargs["name"],
+                config=kwargs["config"],
+                user_id=kwargs.get("user_id") or "",
+            )
 
         dao.save_mcp_server = AsyncMock(side_effect=save_mcp_server)
         dao.delete_by_name = AsyncMock()
@@ -66,10 +75,14 @@ class TestMcpServiceRegistration(unittest.IsolatedAsyncioTestCase):
         tm.register_mcp_server = AsyncMock(side_effect=register_mcp_server)
         tm.remove_tool_by_mcp = AsyncMock()
 
-        with patch.object(mcp_service, "MCPServerDao", return_value=dao), patch.object(
-            mcp_service, "get_tool_manager", return_value=tm
-        ), patch.object(
-            mcp_service, "_get_cfg", return_value=SimpleNamespace(app_mode="server", port=18080)
+        with (
+            patch.object(mcp_service, "MCPServerDao", return_value=dao),
+            patch.object(mcp_service, "get_tool_manager", return_value=tm),
+            patch.object(
+                mcp_service,
+                "_get_cfg",
+                return_value=SimpleNamespace(app_mode="server", port=18080),
+            ),
         ):
             result = await mcp_service.add_mcp_server(
                 name="AnyTool",
@@ -93,10 +106,14 @@ class TestMcpServiceRegistration(unittest.IsolatedAsyncioTestCase):
         tm.register_mcp_server = AsyncMock(return_value=False)
         tm.remove_tool_by_mcp = AsyncMock()
 
-        with patch.object(mcp_service, "MCPServerDao", return_value=dao), patch.object(
-            mcp_service, "get_tool_manager", return_value=tm
-        ), patch.object(
-            mcp_service, "_get_cfg", return_value=SimpleNamespace(app_mode="server", port=18080)
+        with (
+            patch.object(mcp_service, "MCPServerDao", return_value=dao),
+            patch.object(mcp_service, "get_tool_manager", return_value=tm),
+            patch.object(
+                mcp_service,
+                "_get_cfg",
+                return_value=SimpleNamespace(app_mode="server", port=18080),
+            ),
         ):
             with self.assertRaises(SageHTTPException):
                 await mcp_service.add_mcp_server(
@@ -108,8 +125,12 @@ class TestMcpServiceRegistration(unittest.IsolatedAsyncioTestCase):
                 )
 
         dao.save_mcp_server.assert_awaited_once()
-        dao.delete_by_name.assert_awaited_once_with(mcp_service.DEFAULT_ANYTOOL_SERVER_NAME)
-        tm.remove_tool_by_mcp.assert_awaited_once_with(mcp_service.DEFAULT_ANYTOOL_SERVER_NAME)
+        dao.delete_by_name.assert_awaited_once_with(
+            mcp_service.DEFAULT_ANYTOOL_SERVER_NAME
+        )
+        tm.remove_tool_by_mcp.assert_awaited_once_with(
+            mcp_service.DEFAULT_ANYTOOL_SERVER_NAME
+        )
 
 
 if __name__ == "__main__":

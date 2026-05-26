@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from common.models.agent import Agent
 from common.schemas.agent import convert_config_to_agent
@@ -26,7 +26,9 @@ def serialize_agents(agents: List[Agent]) -> List[Dict[str, Any]]:
     return items
 
 
-def get_default_system_prompt_content(language: str = "zh", blank_draft: bool = False) -> str:
+def get_default_system_prompt_content(
+    language: str = "zh", blank_draft: bool = False
+) -> str:
     content = PromptManager().get_prompt(
         "agent_intro_template",
         agent="common",

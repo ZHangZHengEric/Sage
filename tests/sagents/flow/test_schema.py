@@ -1,7 +1,13 @@
 import unittest
 from sagents.flow.schema import (
-    AgentNode, SequenceNode, LoopNode, IfNode, SwitchNode, AgentFlow
+    AgentNode,
+    SequenceNode,
+    LoopNode,
+    IfNode,
+    SwitchNode,
+    AgentFlow,
 )
+
 
 class TestFlowSchema(unittest.TestCase):
     def test_agent_node(self):
@@ -30,9 +36,7 @@ class TestFlowSchema(unittest.TestCase):
         true_branch = AgentNode(agent_key="true_agent")
         false_branch = AgentNode(agent_key="false_agent")
         node = IfNode(
-            condition="check_ok",
-            true_body=true_branch,
-            false_body=false_branch
+            condition="check_ok", true_body=true_branch, false_body=false_branch
         )
         self.assertEqual(node.node_type, "if")
         self.assertEqual(node.condition, "check_ok")
@@ -42,11 +46,7 @@ class TestFlowSchema(unittest.TestCase):
     def test_switch_node(self):
         case1 = AgentNode(agent_key="case1")
         default = AgentNode(agent_key="default")
-        node = SwitchNode(
-            variable="mode",
-            cases={"1": case1},
-            default=default
-        )
+        node = SwitchNode(variable="mode", cases={"1": case1}, default=default)
         self.assertEqual(node.node_type, "switch")
         self.assertEqual(node.variable, "mode")
         self.assertIn("1", node.cases)
@@ -56,23 +56,26 @@ class TestFlowSchema(unittest.TestCase):
         # Test complex flow serialization/deserialization
         flow = AgentFlow(
             name="Test Flow",
-            root=SequenceNode(steps=[
-                AgentNode(agent_key="start"),
-                IfNode(
-                    condition="is_ok",
-                    true_body=AgentNode(agent_key="success"),
-                    false_body=AgentNode(agent_key="retry")
-                )
-            ])
+            root=SequenceNode(
+                steps=[
+                    AgentNode(agent_key="start"),
+                    IfNode(
+                        condition="is_ok",
+                        true_body=AgentNode(agent_key="success"),
+                        false_body=AgentNode(agent_key="retry"),
+                    ),
+                ]
+            ),
         )
-        
+
         json_data = flow.model_dump_json()
         restored_flow = AgentFlow.model_validate_json(json_data)
-        
+
         self.assertEqual(restored_flow.name, "Test Flow")
         self.assertIsInstance(restored_flow.root, SequenceNode)
         self.assertEqual(len(restored_flow.root.steps), 2)
         self.assertIsInstance(restored_flow.root.steps[1], IfNode)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

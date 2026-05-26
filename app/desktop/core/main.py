@@ -1,9 +1,11 @@
+# ruff: noqa: E402
 """
 Sage Stream Service
 
 基于 Sage 框架的智能体流式服务
 提供简洁的 HTTP API 和 Server-Sent Events (SSE) 实时通信
 """
+
 import os
 import sys
 
@@ -13,8 +15,8 @@ os.environ["AGENT_BROWSER_HEADED"] = "1"
 # 1. Setup paths
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
-if getattr(sys, 'frozen', False):
-    if hasattr(sys, '_MEIPASS'):
+if getattr(sys, "frozen", False):
+    if hasattr(sys, "_MEIPASS"):
         current_dir = sys._MEIPASS
     project_root = current_dir
 else:
@@ -25,11 +27,10 @@ sys.path.insert(0, os.path.join(project_root, "app"))
 
 # Ensure sagents.prompts is imported so PyInstaller can find all prompt modules
 try:
-    import sagents.prompts
+    __import__("sagents.prompts")
 except ImportError:
     pass
 
-import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -46,7 +47,10 @@ from fastapi import FastAPI
 from common.core.config import init_startup_config
 from common.core.context import get_request_id
 from common.core.exceptions import register_exception_handlers
-from common.core.middleware import register_cors_middleware, register_request_logging_middleware
+from common.core.middleware import (
+    register_cors_middleware,
+    register_request_logging_middleware,
+)
 from common.utils.logging import init_logging_base
 from mcp_servers.anytool.anytool_http import AnyToolStreamableHTTPApp
 from .user_context import get_desktop_user_claims
@@ -114,7 +118,9 @@ def create_fastapi_app() -> FastAPI:
 
     @app.middleware("http")
     async def inject_desktop_user_context(request, call_next):
-        internal_user_id = str(request.headers.get("X-Sage-Internal-UserId") or "").strip()
+        internal_user_id = str(
+            request.headers.get("X-Sage-Internal-UserId") or ""
+        ).strip()
         if internal_user_id:
             request.state.user_claims = {
                 "userid": internal_user_id,
@@ -152,7 +158,7 @@ def start_server(port: int = 8000):
         log_config=None,
         reload=False,
         factory=True,
-        timeout_keep_alive=65, # Keep-alive timeout slightly longer than heartbeat interval (20s)
+        timeout_keep_alive=65,  # Keep-alive timeout slightly longer than heartbeat interval (20s)
     )
     server = uvicorn.Server(config=un_cfg)
     server.run()
@@ -168,13 +174,13 @@ def check_single_instance():
     import atexit
     import fcntl
     import signal
-    
+
     pid_file = Path("/tmp/sage_desktop.pid")
-    
+
     try:
         # Try to open PID file
         fd = os.open(str(pid_file), os.O_RDWR | os.O_CREAT)
-        
+
         # Try to acquire exclusive lock (non-blocking)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -199,21 +205,28 @@ def check_single_instance():
                             os.kill(old_pid, signal.SIGTERM)
                             # Wait a bit for the process to terminate
                             import time
+
                             time.sleep(2)
                             # Check if it's still running
                             try:
                                 os.kill(old_pid, 0)
                                 # Still running, force kill
-                                _safe_print(f"Force killing process {old_pid}...", flush=True)
+                                _safe_print(
+                                    f"Force killing process {old_pid}...", flush=True
+                                )
                                 os.kill(old_pid, signal.SIGKILL)
                                 time.sleep(1)
                             except (OSError, ProcessLookupError):
                                 # Process terminated successfully
                                 pass
-                            _safe_print(f"Old process {old_pid} terminated.", flush=True)
+                            _safe_print(
+                                f"Old process {old_pid} terminated.", flush=True
+                            )
                         except (OSError, ProcessLookupError) as e:
-                            _safe_print(f"Failed to terminate old process: {e}", flush=True)
-                        
+                            _safe_print(
+                                f"Failed to terminate old process: {e}", flush=True
+                            )
+
                         # Clean up old PID file and retry
                         fcntl.flock(fd, fcntl.LOCK_UN)
                         os.close(fd)
@@ -242,28 +255,28 @@ def check_single_instance():
                 try:
                     fcntl.flock(fd, fcntl.LOCK_UN)
                     os.close(fd)
-                except:
+                except Exception:
                     pass
                 pid_file.unlink(missing_ok=True)
                 return check_single_instance()
-        
+
         # Write current PID
         os.ftruncate(fd, 0)
         os.write(fd, str(os.getpid()).encode())
         os.fsync(fd)
-        
+
         # Register cleanup on exit
         def cleanup():
             try:
                 fcntl.flock(fd, fcntl.LOCK_UN)
                 os.close(fd)
                 pid_file.unlink(missing_ok=True)
-            except:
+            except Exception:
                 pass
-        
+
         atexit.register(cleanup)
         return True
-        
+
     except Exception as e:
         _safe_print(f"Warning: Could not create PID file lock: {e}", flush=True)
         return True
@@ -273,17 +286,18 @@ def main():
     try:
         # Check single instance before anything else
         check_single_instance()
-        
+
         # Force stdout to be unbuffered when the underlying stream supports it.
         try:
-            if hasattr(sys.stdout, 'reconfigure'):
+            if hasattr(sys.stdout, "reconfigure"):
                 sys.stdout.reconfigure(line_buffering=True, write_through=True)
         except (OSError, ValueError):
             pass
-        
+
         # Windows specific event loop policy
-        if sys.platform == 'win32':
+        if sys.platform == "win32":
             import asyncio
+
             try:
                 asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
             except AttributeError:
@@ -293,14 +307,16 @@ def main():
         sage_home = user_home / ".sage"
         sage_home.mkdir(parents=True, exist_ok=True)
         os.environ.setdefault("SAGE_SHARED_PYTHON_ENV", "1")
-        os.environ.setdefault("SAGE_SHARED_PYTHON_ENV_DIR", str(sage_home / ".sage_py_env"))
+        os.environ.setdefault(
+            "SAGE_SHARED_PYTHON_ENV_DIR", str(sage_home / ".sage_py_env")
+        )
 
         logs_dir = sage_home / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         skills_dir = sage_home / "skills"
         skills_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Sync IDE skills to Sage skills folder
         # Disabled temporarily: do not auto-import external IDE/CLI skills on desktop startup.
         # try:
@@ -308,7 +324,7 @@ def main():
         #     sync_skills_with_logging()
         # except Exception as e:
         #     print(f"Warning: Failed to sync IDE skills: {e}", flush=True)
-        
+
         agents_workspace_dir = sage_home / "agents"
         agents_workspace_dir.mkdir(parents=True, exist_ok=True)
 
@@ -316,7 +332,7 @@ def main():
         sessions_dir.mkdir(parents=True, exist_ok=True)
         os.environ["SAGE_SESSIONS_PATH"] = str(sessions_dir)
 
-        cfg = init_startup_config(mode="desktop")
+        init_startup_config(mode="desktop")
         # Ensures CORSMiddleware uses desktop allowlist even if cfg.app_mode were mis-set.
         os.environ["SAGE_INTERNAL_DESKTOP_PROCESS"] = "1"
 
@@ -325,7 +341,9 @@ def main():
         if port_env:
             try:
                 port = int(port_env)
-                _safe_print(f"Using port from environment SAGE_PORT: {port}", flush=True)
+                _safe_print(
+                    f"Using port from environment SAGE_PORT: {port}", flush=True
+                )
             except ValueError:
                 _safe_print(
                     f"Invalid SAGE_PORT environment variable: {port_env}, finding free port...",
@@ -337,13 +355,14 @@ def main():
 
         if port is None:
             import socket
+
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(('', 0))
+                s.bind(("", 0))
                 s.listen(1)
                 port = s.getsockname()[1]
             os.environ["SAGE_PORT"] = str(port)
             _safe_print(f"Set SAGE_PORT environment variable to {port}", flush=True)
-            
+
         _safe_print(f"Starting Sage Desktop Server on port {port}...", flush=True)
         init_logging_base(
             log_name="sage-desktop",

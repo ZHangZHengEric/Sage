@@ -6,13 +6,17 @@ from fastapi import UploadFile
 
 from common.core.client.s3 import upload_kdb_file
 from common.core.exceptions import SageHTTPException
-from common.utils.safe_remote_fetch import SafeRemoteFetchError, fetch_http_url_bytes_bounded
+from common.utils.safe_remote_fetch import (
+    SafeRemoteFetchError,
+    fetch_http_url_bytes_bounded,
+)
 
 
 async def upload_file_to_oss(file: UploadFile, path: str = None) -> str:
     content = await file.read()
     if path:
         from common.core.client.s3 import upload_file_with_path
+
         return await upload_file_with_path(content, path, file.content_type)
 
     return await upload_kdb_file(file.filename, content, file.content_type)
@@ -20,7 +24,9 @@ async def upload_file_to_oss(file: UploadFile, path: str = None) -> str:
 
 async def import_remote_url_to_oss(url: str) -> tuple[str, str]:
     try:
-        body, content_type, suggested_name = await fetch_http_url_bytes_bounded(url.strip())
+        body, content_type, suggested_name = await fetch_http_url_bytes_bounded(
+            url.strip()
+        )
         if not body:
             raise SageHTTPException(detail="远端资源为空")
         public_url = await upload_kdb_file(suggested_name, body, content_type)
@@ -50,7 +56,9 @@ def resolve_sage_agent_upload_files_path(agent_id: str, filename: str) -> Path:
     return path
 
 
-async def import_sandbox_upload_file_to_oss(agent_id: str, filename: str) -> tuple[str, str]:
+async def import_sandbox_upload_file_to_oss(
+    agent_id: str, filename: str
+) -> tuple[str, str]:
     path = resolve_sage_agent_upload_files_path(agent_id, filename)
     content = await asyncio.to_thread(path.read_bytes)
     if not content:

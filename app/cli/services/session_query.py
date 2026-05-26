@@ -60,7 +60,8 @@ async def list_sessions(
                     agent_id=conv.agent_id,
                     agent_name=conv.agent_name,
                     title=conv.title,
-                    message_count=message_count.get("user_count", 0) + message_count.get("agent_count", 0),
+                    message_count=message_count.get("user_count", 0)
+                    + message_count.get("agent_count", 0),
                     user_count=message_count.get("user_count", 0),
                     agent_count=message_count.get("agent_count", 0),
                     created_at=conv.created_at.isoformat() if conv.created_at else "",
@@ -79,11 +80,11 @@ async def list_sessions(
 
 
 def _resolve_agent_mode_from_config(agent_config: Dict[str, Any]) -> str:
-    raw_value = str(
-        agent_config.get("agentMode")
-        or agent_config.get("agent_mode")
-        or ""
-    ).strip().lower()
+    raw_value = (
+        str(agent_config.get("agentMode") or agent_config.get("agent_mode") or "")
+        .strip()
+        .lower()
+    )
     if raw_value in {"simple", "multi", "fibre"}:
         return raw_value
     return "simple"
@@ -145,7 +146,9 @@ async def list_available_skills(
         skills = []
         source_counts: Dict[str, int] = {}
         for item in agent_skills:
-            source_name = item.get("source_dimension") or item.get("dimension") or "unknown"
+            source_name = (
+                item.get("source_dimension") or item.get("dimension") or "unknown"
+            )
             source_counts[source_name] = source_counts.get(source_name, 0) + 1
             skills.append(
                 {
@@ -183,7 +186,8 @@ async def list_available_skills(
         (
             "workspace",
             os.path.join(os.path.abspath(workspace), "skills")
-            if workspace and os.path.isdir(os.path.join(os.path.abspath(workspace), "skills"))
+            if workspace
+            and os.path.isdir(os.path.join(os.path.abspath(workspace), "skills"))
             else None,
         ),
     ]
@@ -209,10 +213,14 @@ async def list_available_skills(
                 "path": source_path,
             }
 
-    skills = [value for key, value in skills_map.items() if not key.startswith("__error__:")]
+    skills = [
+        value for key, value in skills_map.items() if not key.startswith("__error__:")
+    ]
     skills.sort(key=lambda item: item["name"])
 
-    errors = [value for key, value in skills_map.items() if key.startswith("__error__:")]
+    errors = [
+        value for key, value in skills_map.items() if key.startswith("__error__:")
+    ]
     source_counts: Dict[str, int] = {}
     for item in skills:
         source_name = item["source"]
@@ -237,18 +245,26 @@ async def validate_requested_skills(
     agent_id: Optional[str] = None,
     workspace: Optional[str] = None,
 ) -> List[str]:
-    normalized = [skill.strip() for skill in (requested_skills or []) if skill and skill.strip()]
+    normalized = [
+        skill.strip() for skill in (requested_skills or []) if skill and skill.strip()
+    ]
     if not normalized:
         return []
 
-    result = await list_available_skills(user_id=user_id, agent_id=agent_id, workspace=workspace)
+    result = await list_available_skills(
+        user_id=user_id, agent_id=agent_id, workspace=workspace
+    )
     available_names = {item["name"] for item in result.get("list", [])}
     missing = [skill for skill in normalized if skill not in available_names]
     if missing:
-        available_display = ", ".join(sorted(available_names)) if available_names else "(none)"
+        available_display = (
+            ", ".join(sorted(available_names)) if available_names else "(none)"
+        )
         next_steps = ["Run `sage skills` to inspect currently visible skills."]
         if agent_id:
-            next_steps[0] = f"Run `sage skills --agent-id {agent_id}` to inspect the skills currently available to that agent."
+            next_steps[0] = (
+                f"Run `sage skills --agent-id {agent_id}` to inspect the skills currently available to that agent."
+            )
         if workspace:
             next_steps.append(
                 f"Run `sage skills --workspace {os.path.abspath(workspace)}` to inspect workspace skills."
@@ -292,8 +308,12 @@ async def get_session_summary(
         "message_count": counts.get("user_count", 0) + counts.get("agent_count", 0),
         "user_count": counts.get("user_count", 0),
         "agent_count": counts.get("agent_count", 0),
-        "created_at": conversation.created_at.isoformat() if conversation.created_at else "",
-        "updated_at": conversation.updated_at.isoformat() if conversation.updated_at else "",
+        "created_at": conversation.created_at.isoformat()
+        if conversation.created_at
+        else "",
+        "updated_at": conversation.updated_at.isoformat()
+        if conversation.updated_at
+        else "",
         "goal": None,
     }
 
@@ -315,7 +335,9 @@ async def inspect_session(
                 return []
         return raw_messages if isinstance(raw_messages, list) else []
 
-    def _find_last_message(messages: List[Dict[str, Any]], *, role: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def _find_last_message(
+        messages: List[Dict[str, Any]], *, role: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         for message in reversed(messages):
             message_role = (message or {}).get("role")
             content = ((message or {}).get("content") or "").strip()
@@ -356,15 +378,23 @@ async def inspect_session(
             next_steps=["Run `sage sessions` to inspect visible sessions."],
         )
 
-    if resolved_user_id and conversation.user_id and conversation.user_id != resolved_user_id:
+    if (
+        resolved_user_id
+        and conversation.user_id
+        and conversation.user_id != resolved_user_id
+    ):
         raise CLIError(
             f"Session {conversation.session_id} is not visible to user {resolved_user_id}",
-            next_steps=["Check `--user-id`, or run `sage sessions --user-id <user>` to inspect visible sessions."],
+            next_steps=[
+                "Check `--user-id`, or run `sage sessions --user-id <user>` to inspect visible sessions."
+            ],
         )
     if agent_id and conversation.agent_id and conversation.agent_id != agent_id:
         raise CLIError(
             f"Session {conversation.session_id} is not visible to agent {agent_id}",
-            next_steps=[f"Run `sage sessions --agent-id {agent_id}` to inspect sessions for that agent."],
+            next_steps=[
+                f"Run `sage sessions --agent-id {agent_id}` to inspect sessions for that agent."
+            ],
         )
 
     counts = conversation.get_message_count()
@@ -393,8 +423,12 @@ async def inspect_session(
         "message_count": counts.get("user_count", 0) + counts.get("agent_count", 0),
         "user_count": counts.get("user_count", 0),
         "agent_count": counts.get("agent_count", 0),
-        "created_at": conversation.created_at.isoformat() if conversation.created_at else "",
-        "updated_at": conversation.updated_at.isoformat() if conversation.updated_at else "",
+        "created_at": conversation.created_at.isoformat()
+        if conversation.created_at
+        else "",
+        "updated_at": conversation.updated_at.isoformat()
+        if conversation.updated_at
+        else "",
         "last_user_message": _find_last_message(messages, role="user"),
         "last_assistant_message": _find_last_message(messages, role="assistant")
         or _find_last_message(messages, role="agent"),

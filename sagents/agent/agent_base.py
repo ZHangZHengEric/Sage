@@ -16,7 +16,10 @@ from sagents.context.messages.message_manager import MessageManager
 from sagents.utils.prompt_caching import add_cache_control_to_messages
 from sagents.llm.sage_openai import SageAsyncOpenAI
 from sagents.llm.capabilities import create_chat_completion_with_fallback
-from sagents.llm.model_capabilities import is_openai_reasoning_model, resolve_reasoning_effort
+from sagents.llm.model_capabilities import (
+    is_openai_reasoning_model,
+    resolve_reasoning_effort,
+)
 from sagents.utils.llm_request_utils import (
     format_api_error_details,
     is_unsupported_input_format_error,
@@ -30,8 +33,12 @@ from sagents.utils.message_sanitizer import (
     remove_orphan_tool_calls as _remove_orphan_tool_calls_util,
     strip_content_when_tool_calls as _strip_content_when_tool_calls_util,
 )
-from sagents.utils.stream_merger import merge_chat_completion_chunks as _merge_chunks_util
-from sagents.utils.stream_tag_parser import judge_delta_content_type as _judge_delta_content_type_util
+from sagents.utils.stream_merger import (
+    merge_chat_completion_chunks as _merge_chunks_util,
+)
+from sagents.utils.stream_tag_parser import (
+    judge_delta_content_type as _judge_delta_content_type_util,
+)
 from sagents.utils.agent_session_helper import (
     get_live_session as _get_live_session_util,
     get_live_session_context as _get_live_session_context_util,
@@ -61,7 +68,12 @@ class AgentBase(ABC):
     流式处理和内容解析等核心功能。
     """
 
-    def __init__(self, model: Optional[AsyncOpenAI] = None, model_config: Optional[Dict[str, Any]] = None, system_prefix: str = ""):
+    def __init__(
+        self,
+        model: Optional[AsyncOpenAI] = None,
+        model_config: Optional[Dict[str, Any]] = None,
+        system_prefix: str = "",
+    ):
         """
         初始化智能体基类
 
@@ -82,15 +94,21 @@ class AgentBase(ABC):
 
         self.max_model_input_len = 1000000
 
-        logger.debug(f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}, 最大输入长度（安全阈值）: {self.max_model_input_len}")
+        logger.debug(
+            f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}, 最大输入长度（安全阈值）: {self.max_model_input_len}"
+        )
 
     def _get_live_session(self, session_id: Optional[str]):
         return _get_live_session_util(session_id, log_prefix=self.__class__.__name__)
 
     def _get_live_session_context(self, session_id: Optional[str]):
-        return _get_live_session_context_util(session_id, log_prefix=self.__class__.__name__)
+        return _get_live_session_context_util(
+            session_id, log_prefix=self.__class__.__name__
+        )
 
-    def _consume_user_injections(self, session_context: Optional[SessionContext]) -> List[MessageChunk]:
+    def _consume_user_injections(
+        self, session_context: Optional[SessionContext]
+    ) -> List[MessageChunk]:
         """Drain SessionContext 上的 pending 引导消息。
 
         - flush 已经把消息写入 ``message_manager``，因此返回值仅用于上层 yield 给 SSE 通道，
@@ -102,13 +120,16 @@ class AgentBase(ABC):
         try:
             return session_context.flush_user_injections()
         except Exception as exc:
-            logger.warning(f"{self.__class__.__name__}: flush user injections 失败: {exc}")
+            logger.warning(
+                f"{self.__class__.__name__}: flush user injections 失败: {exc}"
+            )
             return []
 
     @abstractmethod
-    async def run_stream(self,
-                         session_context: SessionContext,
-                         ) -> AsyncGenerator[List[MessageChunk], None]:
+    async def run_stream(
+        self,
+        session_context: SessionContext,
+    ) -> AsyncGenerator[List[MessageChunk], None]:
         """
         流式处理消息的抽象方法
 
@@ -123,13 +144,17 @@ class AgentBase(ABC):
         if False:
             yield []
 
-    def _remove_tool_call_without_id(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _remove_tool_call_without_id(
+        self, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """移除 tool_calls 没有对应 tool 回复的 assistant 消息。详见
         ``sagents.utils.message_sanitizer.remove_orphan_tool_calls``。
         """
         return _remove_orphan_tool_calls_util(messages)
 
-    def _remove_content_if_tool_calls(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _remove_content_if_tool_calls(
+        self, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """assistant 消息带 tool_calls 时移除 content 字段。详见
         ``sagents.utils.message_sanitizer.strip_content_when_tool_calls``。
         """
@@ -154,7 +179,14 @@ class AgentBase(ABC):
         """
         return _get_mime_type_util(file_extension)
 
-    async def _call_llm_streaming(self, messages: List[Union[MessageChunk, Dict[str, Any]]], session_id: Optional[str] = None, step_name: str = "llm_call", model_config_override: Optional[Dict[str, Any]] = None, enable_thinking: Optional[bool] = None):
+    async def _call_llm_streaming(
+        self,
+        messages: List[Union[MessageChunk, Dict[str, Any]]],
+        session_id: Optional[str] = None,
+        step_name: str = "llm_call",
+        model_config_override: Optional[Dict[str, Any]] = None,
+        enable_thinking: Optional[bool] = None,
+    ):
         """
         通用的流式模型调用方法，有这个封装，主要是为了将
         模型调用和日志记录等功能统一起来，以及token 的记录等，方便后续的维护和扩展。
@@ -170,34 +202,44 @@ class AgentBase(ABC):
         Returns:
             Generator: 语言模型的流式响应
         """
-        logger.debug(f"{self.__class__.__name__}: 调用语言模型进行流式生成, session_id={session_id}")
+        logger.debug(
+            f"{self.__class__.__name__}: 调用语言模型进行流式生成, session_id={session_id}"
+        )
 
         if session_id:
             session = self._get_live_session(session_id)
             if session is None:
-                logger.warning(f"{self.__class__.__name__}: session is None for session_id={session_id}")
+                logger.warning(
+                    f"{self.__class__.__name__}: session is None for session_id={session_id}"
+                )
             elif session.is_interrupted():
-                logger.info(f"{self.__class__.__name__}: 跳过模型调用，session已中断，会话ID: {session_id}")
+                logger.info(
+                    f"{self.__class__.__name__}: 跳过模型调用，session已中断，会话ID: {session_id}"
+                )
                 return
         # 确定最终的模型配置
         final_config = {**self.model_config}
         if model_config_override:
             final_config.update(model_config_override)
 
-        model_name = cast(str, final_config.pop('model')) if 'model' in final_config else "gpt-3.5-turbo"
+        model_name = (
+            cast(str, final_config.pop("model"))
+            if "model" in final_config
+            else "gpt-3.5-turbo"
+        )
         # 移除不是OpenAI API标准参数的配置项
-        final_config.pop('max_model_len', None)
-        final_config.pop('api_key', None)
-        final_config.pop('maxTokens', None)
-        final_config.pop('base_url', None)
+        final_config.pop("max_model_len", None)
+        final_config.pop("api_key", None)
+        final_config.pop("maxTokens", None)
+        final_config.pop("base_url", None)
         # 移除快速模型相关配置（这些是我们内部使用的参数）
-        final_config.pop('fast_api_key', None)
-        final_config.pop('fast_base_url', None)
-        final_config.pop('fast_model_name', None)
+        final_config.pop("fast_api_key", None)
+        final_config.pop("fast_base_url", None)
+        final_config.pop("fast_model_name", None)
         # 只有当 model 不是 SageAsyncOpenAI 类型时，才移除 model_type
         # SageAsyncOpenAI 需要 model_type 来选择使用哪个客户端
         if not isinstance(self.model, SageAsyncOpenAI):
-            final_config.pop('model_type', None)
+            final_config.pop("model_type", None)
         all_chunks = []
         attempt_chunks = []
 
@@ -219,7 +261,9 @@ class AgentBase(ABC):
 
                 # 纯 MessageChunk 列表：与 convert_messages_to_dict_for_request 一致，剔除 turn_status 协议对
                 if messages and all(isinstance(m, MessageChunk) for m in messages):
-                    messages = MessageManager.strip_turn_status_from_llm_context(list(messages))
+                    messages = MessageManager.strip_turn_status_from_llm_context(
+                        list(messages)
+                    )
 
                 # 发起LLM请求
                 # 将 MessageChunk 对象转换为字典，以便进行 JSON 序列化
@@ -234,8 +278,8 @@ class AgentBase(ABC):
                         msg_dict = await self._process_multimodal_content(msg_dict)
                         serializable_messages.append(msg_dict)
                         seg = None
-                        if isinstance(getattr(msg, 'metadata', None), dict):
-                            seg = msg.metadata.get('cache_segment')
+                        if isinstance(getattr(msg, "metadata", None), dict):
+                            seg = msg.metadata.get("cache_segment")
                         cache_segments.append(seg)
                     else:
                         msg_copy = msg.copy()
@@ -243,7 +287,14 @@ class AgentBase(ABC):
                         serializable_messages.append(msg_copy)
                         cache_segments.append(None)
                 # 只保留model.chat.completions.create 需要的messages的key，移除掉不不要的
-                serializable_messages = [{k: v for k, v in msg.items() if k in ['role', 'content', 'tool_calls', 'tool_call_id']} for msg in serializable_messages]
+                serializable_messages = [
+                    {
+                        k: v
+                        for k, v in msg.items()
+                        if k in ["role", "content", "tool_calls", "tool_call_id"]
+                    }
+                    for msg in serializable_messages
+                ]
 
                 # === 注入 shell completion 事件作为 <system_reminder> 消息 ===
                 # 后台 shell 命令完成后，watcher 会把事件写入 ExecuteCommandTool._COMPLETION_EVENTS。
@@ -256,8 +307,13 @@ class AgentBase(ABC):
                 # 因此被显式消费过的不会在这里重复出现。
                 if session_id:
                     try:
-                        from sagents.tool.impl.execute_command_tool import ExecuteCommandTool
-                        completion_events = ExecuteCommandTool.pop_completion_events(session_id)
+                        from sagents.tool.impl.execute_command_tool import (
+                            ExecuteCommandTool,
+                        )
+
+                        completion_events = ExecuteCommandTool.pop_completion_events(
+                            session_id
+                        )
                     except Exception as _e:
                         logger.warning(f"flush shell completion events 失败: {_e}")
                         completion_events = []
@@ -273,23 +329,24 @@ class AgentBase(ABC):
                         _is_zh = str(_reminder_lang).lower().startswith("zh")
 
                     for ev in completion_events:
-                        tail = ev.get('tail', '') or ''
+                        tail = ev.get("tail", "") or ""
                         if _is_zh:
                             tail_section = (
                                 f"最后几行输出:\n{tail}" if tail else "（无输出）"
                             )
                             note = (
                                 f"注意：这只是完成通知，输出已截断。"
-                                f"如需完整 stdout，请调用 await_shell(task_id=\"{ev.get('task_id')}\")。"
+                                f'如需完整 stdout，请调用 await_shell(task_id="{ev.get("task_id")}")。'
                             )
                         else:
                             tail_section = (
-                                f"tail (last few lines):\n{tail}" if tail
+                                f"tail (last few lines):\n{tail}"
+                                if tail
                                 else "(no output captured)"
                             )
                             note = (
                                 f"Note: This is a brief notification only. "
-                                f"Call await_shell(task_id=\"{ev.get('task_id')}\") to retrieve the full stdout if needed."
+                                f'Call await_shell(task_id="{ev.get("task_id")}") to retrieve the full stdout if needed.'
                             )
                         reminder_text = (
                             "<system_reminder>\n"
@@ -300,7 +357,9 @@ class AgentBase(ABC):
                             f"{note}\n"
                             "</system_reminder>"
                         )
-                        serializable_messages.append({"role": "user", "content": reminder_text})
+                        serializable_messages.append(
+                            {"role": "user", "content": reminder_text}
+                        )
                         cache_segments.append(None)
                     if completion_events:
                         logger.info(
@@ -310,15 +369,20 @@ class AgentBase(ABC):
                 # 为消息添加 prompt caching 支持（Anthropic 格式）
                 # 多段 system 时按 cache_segments 打多个断点；老路径保持单断点回退
                 if serializable_messages:
-                    add_cache_control_to_messages(serializable_messages, cache_segments=cache_segments)
+                    add_cache_control_to_messages(
+                        serializable_messages, cache_segments=cache_segments
+                    )
 
                 # 统计图片数量
                 image_count = 0
                 for msg in serializable_messages:
-                    content = msg.get('content')
+                    content = msg.get("content")
                     if isinstance(content, list):
                         for item in content:
-                            if isinstance(item, dict) and item.get('type') == 'image_url':
+                            if (
+                                isinstance(item, dict)
+                                and item.get("type") == "image_url"
+                            ):
                                 image_count += 1
                 if image_count > 0:
                     logger.info(f"[LLM请求] 包含 {image_count} 张图片")
@@ -326,18 +390,26 @@ class AgentBase(ABC):
                 # print("serializable_messages:",serializable_messages)
                 # 确保所有的messages 中都包含role 和 content
                 for msg in serializable_messages:
-                    if 'role' not in msg:
-                        msg['role'] = MessageRole.USER.value
-                    if 'content' not in msg:
-                        msg['content'] = ''
+                    if "role" not in msg:
+                        msg["role"] = MessageRole.USER.value
+                    if "content" not in msg:
+                        msg["content"] = ""
 
                 # 需要处理 serializable_messages 中，如果有tool call ，但是没有后续的tool call id,需要去掉这条消息
-                serializable_messages = self._remove_tool_call_without_id(serializable_messages)
+                serializable_messages = self._remove_tool_call_without_id(
+                    serializable_messages
+                )
                 # 如果针对带有 tool_calls 的assistant 的消息，要删除content 这个字段
-                serializable_messages = self._remove_content_if_tool_calls(serializable_messages)
+                serializable_messages = self._remove_content_if_tool_calls(
+                    serializable_messages
+                )
                 # 提取tools 的value
-                logger_final_config = {k: v for k, v in final_config.items() if k != 'tools'}
-                logger.debug(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成 (尝试 {retry_count + 1}/{max_retries}) |final_config={logger_final_config}")
+                logger_final_config = {
+                    k: v for k, v in final_config.items() if k != "tools"
+                }
+                logger.debug(
+                    f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成 (尝试 {retry_count + 1}/{max_retries}) |final_config={logger_final_config}"
+                )
                 final_config = {k: v for k, v in final_config.items() if v is not None}
                 response_format = final_config.pop("response_format", None)
 
@@ -347,7 +419,9 @@ class AgentBase(ABC):
                 if enable_thinking is not None:
                     final_enable_thinking = enable_thinking
                 elif session is not None:
-                    deep_thinking = session.session_context.agent_config.get("deep_thinking", False)
+                    deep_thinking = session.session_context.agent_config.get(
+                        "deep_thinking", False
+                    )
                     # 处理字符串 "auto" 的情况，默认为 False
                     if isinstance(deep_thinking, str):
                         final_enable_thinking = deep_thinking.lower() == "true"
@@ -358,7 +432,7 @@ class AgentBase(ABC):
                 # 对于 OpenAI 推理模型 (o3-mini, GPT-5.2等) 使用 reasoning_effort
                 # 对于其他模型使用 enable_thinking/thinking 参数
                 extra_body = {
-                    "_step_name": step_name # 观察用，记录下当前是哪个步骤的调用
+                    "_step_name": step_name  # 观察用，记录下当前是哪个步骤的调用
                 }
 
                 # 判断是否为 OpenAI / 兼容三方 reasoning 模型（白名单前缀，避免误伤 gpt-4o 等）
@@ -381,11 +455,17 @@ class AgentBase(ABC):
                     )
                 else:
                     # 其他模型使用 enable_thinking/thinking 参数
-                    extra_body["chat_template_kwargs"] = {"enable_thinking": final_enable_thinking}
+                    extra_body["chat_template_kwargs"] = {
+                        "enable_thinking": final_enable_thinking
+                    }
                     extra_body["enable_thinking"] = final_enable_thinking
-                    extra_body["thinking"] = {'type': "enabled" if final_enable_thinking else "disabled"}
-                    logger.debug(f"{self.__class__.__name__} | {step_name}: 思考模式={final_enable_thinking}")
-                
+                    extra_body["thinking"] = {
+                        "type": "enabled" if final_enable_thinking else "disabled"
+                    }
+                    logger.debug(
+                        f"{self.__class__.__name__} | {step_name}: 思考模式={final_enable_thinking}"
+                    )
+
                 stream = await create_chat_completion_with_fallback(
                     self.model,
                     model=model_name,
@@ -403,10 +483,10 @@ class AgentBase(ABC):
                     if first_token_time is None:
                         first_token_time = time.time()
                     attempt_chunks.append(chunk)
-                    
+
                     # 显式让出控制权，确保在高吞吐量时不会饿死事件循环（如心跳检测）
                     await asyncio.sleep(0)
-                    
+
                     attempt_yielded_chunks = True
                     yield chunk
 
@@ -414,7 +494,14 @@ class AgentBase(ABC):
                 all_chunks = attempt_chunks
                 break
 
-            except (RateLimitError, APIError, APIConnectionError, httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ReadError) as e:
+            except (
+                RateLimitError,
+                APIError,
+                APIConnectionError,
+                httpx.ReadTimeout,
+                httpx.ConnectTimeout,
+                httpx.ReadError,
+            ) as e:
                 if (
                     response_format is not None
                     and not structured_output_fallback_used
@@ -434,15 +521,33 @@ class AgentBase(ABC):
                 error_message = str(e).lower()
 
                 # 检查是否是限流错误
-                is_rate_limit = isinstance(e, RateLimitError) or "rate limit" in error_message or "too many requests" in error_message
+                is_rate_limit = (
+                    isinstance(e, RateLimitError)
+                    or "rate limit" in error_message
+                    or "too many requests" in error_message
+                )
                 # 检查是否是网络连接错误（包括连接中断、超时等）
-                is_connection_error = isinstance(e, APIConnectionError) or "connection" in error_message or "incomplete chunked read" in error_message
+                is_connection_error = (
+                    isinstance(e, APIConnectionError)
+                    or "connection" in error_message
+                    or "incomplete chunked read" in error_message
+                )
                 # 检查是否是超时错误
-                is_timeout = isinstance(e, (httpx.ReadTimeout, httpx.ConnectTimeout)) or "timeout" in error_message or "read timeout" in error_message
+                is_timeout = (
+                    isinstance(e, (httpx.ReadTimeout, httpx.ConnectTimeout))
+                    or "timeout" in error_message
+                    or "read timeout" in error_message
+                )
                 # 检查是否是读取错误
-                is_read_error = isinstance(e, httpx.ReadError) or "read error" in error_message
+                is_read_error = (
+                    isinstance(e, httpx.ReadError) or "read error" in error_message
+                )
                 # 检查是否是 token 超限错误
-                is_token_limit_error = "range of input length" in error_message or "token" in error_message and "exceed" in error_message
+                is_token_limit_error = (
+                    "range of input length" in error_message
+                    or "token" in error_message
+                    and "exceed" in error_message
+                )
 
                 if attempt_yielded_chunks:
                     message = (
@@ -452,8 +557,10 @@ class AgentBase(ABC):
                     logger.warning(message)
                     raise PartialStreamConsumedError(message, e) from e
 
-                if retry_count < max_retries and (is_rate_limit or is_connection_error or is_timeout or is_read_error):
-                    wait_time = 2 ** retry_count  # 指数退避: 2, 4, 8 秒
+                if retry_count < max_retries and (
+                    is_rate_limit or is_connection_error or is_timeout or is_read_error
+                ):
+                    wait_time = 2**retry_count  # 指数退避: 2, 4, 8 秒
                     if is_rate_limit:
                         error_type = "限流"
                     elif is_timeout:
@@ -468,11 +575,15 @@ class AgentBase(ABC):
                         )
                         partial_stream_aborted = True
                         break
-                    logger.warning(f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time} 秒后重试 ({retry_count}/{max_retries}): {e}")
+                    logger.warning(
+                        f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time} 秒后重试 ({retry_count}/{max_retries}): {e}"
+                    )
                     await asyncio.sleep(wait_time)
                 elif is_token_limit_error:
                     # token 超限错误，直接抛出，由上层处理压缩逻辑
-                    logger.error(f"{self.__class__.__name__}: Token 超限错误，需要压缩消息: {e}")
+                    logger.error(
+                        f"{self.__class__.__name__}: Token 超限错误，需要压缩消息: {e}"
+                    )
                     raise
                 else:
                     # 非可重试错误或已达到最大重试次数
@@ -481,7 +592,9 @@ class AgentBase(ABC):
                             f"{self.__class__.__name__}: LLM流式调用失败: {format_api_error_details(e)}\n{traceback.format_exc()}"
                         )
                     else:
-                        logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}")
+                        logger.error(
+                            f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}"
+                        )
                     all_chunks.append(
                         chat_completion_chunk.ChatCompletionChunk(
                             id="",
@@ -510,12 +623,29 @@ class AgentBase(ABC):
                 error_message = str(e).lower()
 
                 # 检查是否是网络相关错误（如 httpx.RemoteProtocolError, httpx.ReadTimeout 等）
-                is_network_error = any(keyword in error_message for keyword in [
-                    "connection", "incomplete chunked read", "peer closed", "remoteprotocolerror",
-                    "timeout", "read timeout", "connect timeout", "read error"
-                ])
+                is_network_error = any(
+                    keyword in error_message
+                    for keyword in [
+                        "connection",
+                        "incomplete chunked read",
+                        "peer closed",
+                        "remoteprotocolerror",
+                        "timeout",
+                        "read timeout",
+                        "connect timeout",
+                        "read error",
+                    ]
+                )
                 # 检查是否是 httpx 特定的超时或读取错误
-                is_httpx_error = isinstance(e, (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ReadError, httpx.ConnectError))
+                is_httpx_error = isinstance(
+                    e,
+                    (
+                        httpx.ReadTimeout,
+                        httpx.ConnectTimeout,
+                        httpx.ReadError,
+                        httpx.ConnectError,
+                    ),
+                )
 
                 if attempt_yielded_chunks:
                     message = (
@@ -528,7 +658,10 @@ class AgentBase(ABC):
                 if (is_network_error or is_httpx_error) and retry_count < max_retries:
                     # 使用指数退避 + 随机抖动，避免同时重试
                     import random
-                    wait_time = min(2 ** retry_count + random.uniform(0, 1), 30)  # 最大30秒
+
+                    wait_time = min(
+                        2**retry_count + random.uniform(0, 1), 30
+                    )  # 最大30秒
                     error_type = "HTTP超时" if is_httpx_error else "网络"
                     if attempt_chunks:
                         logger.warning(
@@ -537,7 +670,9 @@ class AgentBase(ABC):
                         )
                         partial_stream_aborted = True
                         break
-                    logger.warning(f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time:.1f} 秒后重试 ({retry_count}/{max_retries}): {e}")
+                    logger.warning(
+                        f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time:.1f} 秒后重试 ({retry_count}/{max_retries}): {e}"
+                    )
                     await asyncio.sleep(wait_time)
                     continue  # 继续重试循环
                 else:
@@ -547,7 +682,9 @@ class AgentBase(ABC):
                             f"{self.__class__.__name__}: LLM流式调用失败: {format_api_error_details(e)}\n{traceback.format_exc()}"
                         )
                     else:
-                        logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}")
+                        logger.error(
+                            f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}"
+                        )
                     all_chunks.append(
                         chat_completion_chunk.ChatCompletionChunk(
                             id="",
@@ -570,13 +707,30 @@ class AgentBase(ABC):
                     raise e
             finally:
                 # 只有在成功完成或最终失败时才记录
-                if retry_count == 0 or retry_count >= max_retries or (last_exception and not isinstance(last_exception, (RateLimitError, APIError))):
+                if (
+                    retry_count == 0
+                    or retry_count >= max_retries
+                    or (
+                        last_exception
+                        and not isinstance(last_exception, (RateLimitError, APIError))
+                    )
+                ):
                     # 将次请求记录在session context 中的llm调用记录中
                     total_time = time.time() - start_request_time
-                    first_token_latency = first_token_time - start_request_time if first_token_time else None
-                    first_token_str = f"{first_token_latency:.3f}s" if first_token_latency else "N/A"
-                    chunks_for_record = [] if partial_stream_aborted else (all_chunks or attempt_chunks)
-                    logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成，总耗时: {total_time:.3f}s, 首token延迟: {first_token_str}, 返回{len(chunks_for_record)}个chunk")
+                    first_token_latency = (
+                        first_token_time - start_request_time
+                        if first_token_time
+                        else None
+                    )
+                    first_token_str = (
+                        f"{first_token_latency:.3f}s" if first_token_latency else "N/A"
+                    )
+                    chunks_for_record = (
+                        [] if partial_stream_aborted else (all_chunks or attempt_chunks)
+                    )
+                    logger.info(
+                        f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成，总耗时: {total_time:.3f}s, 首token延迟: {first_token_str}, 返回{len(chunks_for_record)}个chunk"
+                    )
                     if session_id:
                         session_context = self._get_live_session_context(session_id)
 
@@ -590,25 +744,41 @@ class AgentBase(ABC):
                             "messages": serializable_messages,
                             "started_at": start_request_time,
                             "first_token_time": first_token_time,
-                            "ttfb_sec": (first_token_time - start_request_time) if first_token_time else None,
+                            "ttfb_sec": (first_token_time - start_request_time)
+                            if first_token_time
+                            else None,
                             "duration_sec": total_time,
                         }
                         # 将流式的chunk，进行合并成非流式的response，保存下chunk所有的记录
                         try:
-                            llm_response = self.merge_stream_response_to_non_stream_response(chunks_for_record)
+                            llm_response = (
+                                self.merge_stream_response_to_non_stream_response(
+                                    chunks_for_record
+                                )
+                            )
                         except Exception:
-                            logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {traceback.format_exc()}")
-                            logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {all_chunks}")
+                            logger.error(
+                                f"{self.__class__.__name__}: 合并流式响应失败: {traceback.format_exc()}"
+                            )
+                            logger.error(
+                                f"{self.__class__.__name__}: 合并流式响应失败: {all_chunks}"
+                            )
                             llm_response = None
                         if session_context:
                             session_context.add_llm_request(llm_request, llm_response)
 
                             # 更新动态 token 比例
-                            logger.debug(f"{self.__class__.__name__}: 检查 token 比例更新条件: llm_response={llm_response is not None}, usage={llm_response.usage if llm_response else None}")
+                            logger.debug(
+                                f"{self.__class__.__name__}: 检查 token 比例更新条件: llm_response={llm_response is not None}, usage={llm_response.usage if llm_response else None}"
+                            )
                             if llm_response and llm_response.usage:
-                                components = MessageManager.calculate_message_token_components(messages)
-                                input_chars = components['text_chars']
-                                image_tokens = components['image_tokens']
+                                components = (
+                                    MessageManager.calculate_message_token_components(
+                                        messages
+                                    )
+                                )
+                                input_chars = components["text_chars"]
+                                image_tokens = components["image_tokens"]
                                 actual_tokens = llm_response.usage.prompt_tokens
 
                                 session_context.message_manager.update_token_ratio(
@@ -618,16 +788,22 @@ class AgentBase(ABC):
                                 )
                                 if input_chars > 0:
                                     text_tokens = max(0, actual_tokens - image_tokens)
-                                    logger.debug(f"{self.__class__.__name__}: 更新 token 比例，文本字符数={input_chars}，prompt_tokens={actual_tokens}，图片估算tokens={image_tokens}，文本比例={text_tokens/input_chars:.4f}")
+                                    logger.debug(
+                                        f"{self.__class__.__name__}: 更新 token 比例，文本字符数={input_chars}，prompt_tokens={actual_tokens}，图片估算tokens={image_tokens}，文本比例={text_tokens / input_chars:.4f}"
+                                    )
                         else:
-                            logger.warning(f"{self.__class__.__name__}: session_context is None for session_id={session_id}, skip add_llm_request")
+                            logger.warning(
+                                f"{self.__class__.__name__}: session_context is None for session_id={session_id}, skip add_llm_request"
+                            )
 
-    async def _build_system_segments(self,
-                                     session_id: Optional[str] = None,
-                                     custom_prefix: Optional[str] = None,
-                                     language: Optional[str] = None,
-                                     system_prefix_override: Optional[str] = None,
-                                     include_sections: Optional[List[str]] = None) -> Dict[str, str]:
+    async def _build_system_segments(
+        self,
+        session_id: Optional[str] = None,
+        custom_prefix: Optional[str] = None,
+        language: Optional[str] = None,
+        system_prefix_override: Optional[str] = None,
+        include_sections: Optional[List[str]] = None,
+    ) -> Dict[str, str]:
         """构建按缓存稳定度切分的 system 文本段。
 
         返回 dict 形如 ``{"stable": str, "semi_stable": str, "volatile": str}``。
@@ -639,7 +815,14 @@ class AgentBase(ABC):
         - ``volatile``：system_context（含时间戳等动态字段）+ workspace_files + external_paths
         """
         if include_sections is None:
-            include_sections = ['role_definition', 'system_context', 'active_skill', 'workspace_files', 'available_skills', 'AGENT.MD']
+            include_sections = [
+                "role_definition",
+                "system_context",
+                "active_skill",
+                "workspace_files",
+                "available_skills",
+                "AGENT.MD",
+            ]
 
         stable_buf = ""
         semi_buf = ""
@@ -653,29 +836,32 @@ class AgentBase(ABC):
 
         # 1. Role Definition  → stable
         use_identity = False
-        if 'role_definition' in include_sections:
+        if "role_definition" in include_sections:
             role_content = ""
             if system_prefix_override:
                 role_content = system_prefix_override
-            elif hasattr(self, 'SYSTEM_PREFIX_FIXED'):
+            elif hasattr(self, "SYSTEM_PREFIX_FIXED"):
                 role_content = self.SYSTEM_PREFIX_FIXED
             elif self.system_prefix:
                 role_content = self.system_prefix
             else:
                 if session_context and session_context.sandbox:
-                    identity_path = os.path.join(session_context.sandbox_agent_workspace, 'IDENTITY.md')
+                    identity_path = os.path.join(
+                        session_context.sandbox_agent_workspace, "IDENTITY.md"
+                    )
                     try:
                         if await session_context.sandbox.file_exists(identity_path):
-                            role_content = await session_context.sandbox.read_file(identity_path)
+                            role_content = await session_context.sandbox.read_file(
+                                identity_path
+                            )
                             use_identity = True
                     except Exception as e:
                         logger.warning(f"AgentBase: Failed to read IDENTITY.md: {e}")
 
                 if not role_content:
                     role_content = prompt_manager.get_prompt(
-                        'agent_intro_template',
-                        agent='common',
-                        language=language)
+                        "agent_intro_template", agent="common", language=language
+                    )
 
             if custom_prefix:
                 role_content += f"\n\n{custom_prefix}"
@@ -696,61 +882,83 @@ class AgentBase(ABC):
                     "Use it as context to drive the next step; do not reply to or acknowledge the reminder itself. "
                     "A common case is background shell command completion events."
                 )
-            stable_buf += f"<system_reminder_hint>\n{reminder_hint}\n</system_reminder_hint>\n"
+            stable_buf += (
+                f"<system_reminder_hint>\n{reminder_hint}\n</system_reminder_hint>\n"
+            )
 
         if session_context:
             system_context_info = session_context.system_context.copy()
-            logger.debug(f"{self.__class__.__name__}: 添加运行时system_context到系统消息")
-            use_claw_mode = os.environ.get("SAGE_USE_CLAW_MODE", "true").lower() == "true"
-            if 'use_claw_mode' in system_context_info:
+            logger.debug(
+                f"{self.__class__.__name__}: 添加运行时system_context到系统消息"
+            )
+            use_claw_mode = (
+                os.environ.get("SAGE_USE_CLAW_MODE", "true").lower() == "true"
+            )
+            if "use_claw_mode" in system_context_info:
                 use_claw_mode = system_context_info.get("use_claw_mode", use_claw_mode)
                 if isinstance(use_claw_mode, str):
                     use_claw_mode = use_claw_mode.lower() == "true"
             logger.debug(f"{self.__class__.__name__}: use_claw_mode: {use_claw_mode}")
-            if "AGENT.MD" in include_sections and use_claw_mode and session_context.sandbox:
+            if (
+                "AGENT.MD" in include_sections
+                and use_claw_mode
+                and session_context.sandbox
+            ):
                 # 各种 .md 文件 → stable
                 workspace = session_context.sandbox_agent_workspace
 
                 try:
-                    agent_md_content = await session_context.sandbox.read_file(os.path.join(workspace, 'AGENT.md'))
+                    agent_md_content = await session_context.sandbox.read_file(
+                        os.path.join(workspace, "AGENT.md")
+                    )
                     if agent_md_content:
                         stable_buf += f"<agent_md>\n{agent_md_content}\n</agent_md>\n"
                 except Exception as e:
                     logger.debug(f"AgentBase: AGENT.md not found or error reading: {e}")
 
                 try:
-                    soul_content = await session_context.sandbox.read_file(os.path.join(workspace, 'SOUL.md'))
+                    soul_content = await session_context.sandbox.read_file(
+                        os.path.join(workspace, "SOUL.md")
+                    )
                     if soul_content:
                         if len(soul_content) > 300:
-                            soul_content = soul_content[:300]+"……"
+                            soul_content = soul_content[:300] + "……"
                         stable_buf += f"<soul>\n{soul_content}\n</soul>\n"
                 except Exception as e:
                     logger.debug(f"AgentBase: SOUL.md not found or error reading: {e}")
 
                 try:
-                    user_content = await session_context.sandbox.read_file(os.path.join(workspace, 'USER.md'))
+                    user_content = await session_context.sandbox.read_file(
+                        os.path.join(workspace, "USER.md")
+                    )
                     if user_content:
                         if len(user_content) > 300:
-                            user_content = user_content[:300]+"……"
+                            user_content = user_content[:300] + "……"
                         stable_buf += f"<user>\n{user_content}\n</user>\n"
                 except Exception as e:
                     logger.debug(f"AgentBase: USER.md not found or error reading: {e}")
 
                 try:
-                    memory_content = await session_context.sandbox.read_file(os.path.join(workspace, 'MEMORY.md'))
+                    memory_content = await session_context.sandbox.read_file(
+                        os.path.join(workspace, "MEMORY.md")
+                    )
                     if memory_content:
                         if len(memory_content) > 500:
-                            memory_content = memory_content[:500]+"……"
+                            memory_content = memory_content[:500] + "……"
                         stable_buf += f"<memory>\n{memory_content}\n</memory>\n"
                 except Exception as e:
-                    logger.debug(f"AgentBase: MEMORY.md not found or error reading: {e}")
+                    logger.debug(
+                        f"AgentBase: MEMORY.md not found or error reading: {e}"
+                    )
 
                 if not use_identity:
                     try:
-                        identity_content = await session_context.sandbox.read_file(os.path.join(workspace, 'IDENTITY.md'))
+                        identity_content = await session_context.sandbox.read_file(
+                            os.path.join(workspace, "IDENTITY.md")
+                        )
                         if identity_content:
                             if len(identity_content) > 300:
-                                identity_content = identity_content[:300]+"……"
+                                identity_content = identity_content[:300] + "……"
                             identity_hint = prompt_manager.get_prompt(
                                 "agent_identity_extension_hint",
                                 agent="common",
@@ -763,16 +971,23 @@ class AgentBase(ABC):
                                 "</agent_identity_extension>\n"
                             )
                     except Exception as e:
-                        logger.debug(f"AgentBase: IDENTITY.md not found or error reading: {e}")
+                        logger.debug(
+                            f"AgentBase: IDENTITY.md not found or error reading: {e}"
+                        )
 
             active_skills = None
-            if 'active_skills' in system_context_info:
-                active_skills = system_context_info.pop('active_skills')
+            if "active_skills" in system_context_info:
+                active_skills = system_context_info.pop("active_skills")
 
             # 2. System Context  → volatile（含时间戳/动态字段）
-            if 'system_context' in include_sections:
+            if "system_context" in include_sections:
                 volatile_buf += "<system_context>\n"
-                excluded_keys = {'active_skills', 'active_skill_instruction', '可以访问的其他路径文件夹', 'external_paths'}
+                excluded_keys = {
+                    "active_skills",
+                    "active_skill_instruction",
+                    "可以访问的其他路径文件夹",
+                    "external_paths",
+                }
                 for key, value in system_context_info.items():
                     if key in excluded_keys:
                         continue
@@ -786,37 +1001,42 @@ class AgentBase(ABC):
                 volatile_buf += "</system_context>\n"
 
             # 3. Active Skills  → semi_stable
-            if 'active_skill' in include_sections and active_skills:
+            if "active_skill" in include_sections and active_skills:
                 semi_buf += "<active_skills>\n"
                 for skill in active_skills:
-                    skill_name = skill.get('skill_name', 'unknown')
-                    skill_content = skill.get('skill_content', '')
-                    skill_content_escaped = str(skill_content).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    skill_name = skill.get("skill_name", "unknown")
+                    skill_content = skill.get("skill_content", "")
+                    skill_content_escaped = (
+                        str(skill_content)
+                        .replace("&", "&amp;")
+                        .replace("<", "&lt;")
+                        .replace(">", "&gt;")
+                    )
                     semi_buf += f"  <{skill_name}>\n{skill_content_escaped}\n  </{skill_name}>\n"
                 semi_buf += "</active_skills>\n"
 
             # 4. Workspace Files  → volatile
-            if 'workspace_files' in include_sections:
-                if hasattr(session_context, 'sandbox') and session_context.sandbox:
-                    workspace_name = session_context.system_context.get('private_workspace', '')
+            if "workspace_files" in include_sections:
+                if hasattr(session_context, "sandbox") and session_context.sandbox:
+                    workspace_name = session_context.system_context.get(
+                        "private_workspace", ""
+                    )
                     volatile_buf += "<workspace_files>\n"
                     workspace_files = prompt_manager.get_prompt(
-                        'workspace_files_label',
-                        agent='common',
+                        "workspace_files_label",
+                        agent="common",
                         language=language,
                     )
                     volatile_buf += workspace_files.format(workspace=workspace_name)
 
                     try:
                         file_tree = await session_context.sandbox.get_file_tree(
-                            include_hidden=True,
-                            max_depth=2,
-                            max_items_per_dir=5
+                            include_hidden=True, max_depth=2, max_items_per_dir=5
                         )
                         if not file_tree:
                             no_files = prompt_manager.get_prompt(
-                                'no_files_message',
-                                agent='common',
+                                "no_files_message",
+                                agent="common",
                                 language=language,
                             )
                             volatile_buf += no_files
@@ -825,20 +1045,25 @@ class AgentBase(ABC):
                     except Exception as e:
                         logger.error(f"AgentBase: 获取工作空间文件树时出错: {e}")
                         no_files = prompt_manager.get_prompt(
-                            'no_files_message',
-                            agent='common',
+                            "no_files_message",
+                            agent="common",
                             language=language,
                         )
                         volatile_buf += no_files
 
                     volatile_buf += "</workspace_files>\n"
 
-                external_paths = session_context.system_context.get('external_paths')
-                if external_paths and isinstance(external_paths, list) and hasattr(session_context, 'sandbox') and session_context.sandbox:
+                external_paths = session_context.system_context.get("external_paths")
+                if (
+                    external_paths
+                    and isinstance(external_paths, list)
+                    and hasattr(session_context, "sandbox")
+                    and session_context.sandbox
+                ):
                     volatile_buf += "<external_paths>\n"
                     ext_paths_intro = prompt_manager.get_prompt(
-                        'external_paths_intro',
-                        agent='common',
+                        "external_paths_intro",
+                        agent="common",
                         language=language,
                     )
                     volatile_buf += ext_paths_intro
@@ -850,7 +1075,7 @@ class AgentBase(ABC):
                                     root_path=ext_path,
                                     include_hidden=True,
                                     max_depth=2,
-                                    max_items_per_dir=5
+                                    max_items_per_dir=5,
                                 )
                                 if ext_tree:
                                     volatile_buf += ext_tree
@@ -862,7 +1087,7 @@ class AgentBase(ABC):
                     volatile_buf += "</external_paths>\n"
 
             # 5. Available Skills  → semi_stable
-            if 'available_skills' in include_sections:
+            if "available_skills" in include_sections:
                 sm = session_context.effective_skill_manager
                 if sm:
                     if hasattr(sm, "load_new_skills"):
@@ -875,21 +1100,25 @@ class AgentBase(ABC):
                     if skill_infos:
                         semi_buf += "<available_skills>\n"
                         for skill in skill_infos:
-                            semi_buf += f"<skill>\n<skill_name>{skill.name}</skill_name>\n<skill_description>{skill.description[:50]+'...' if len(skill.description) > 50 else skill.description}</skill_description>\n</skill>\n"
+                            semi_buf += f"<skill>\n<skill_name>{skill.name}</skill_name>\n<skill_description>{skill.description[:50] + '...' if len(skill.description) > 50 else skill.description}</skill_description>\n</skill>\n"
                         semi_buf += "</available_skills>\n"
 
                         skills_hint = prompt_manager.get_prompt(
-                            'skills_usage_hint',
-                            agent='common',
+                            "skills_usage_hint",
+                            agent="common",
                             language=language,
-                            default=""
+                            default="",
                         )
                         if skills_hint:
-                            semi_buf += f"<skill_usage>\n{skills_hint}\n</skill_usage>\n"
+                            semi_buf += (
+                                f"<skill_usage>\n{skills_hint}\n</skill_usage>\n"
+                            )
 
         # 兼容已有局部变量名（避免上游 logger 行依赖）
         system_prefix = stable_buf + semi_buf + volatile_buf
-        logger.debug(f"{self.__class__.__name__}: 系统消息生成完成，总长度: {len(system_prefix)}")
+        logger.debug(
+            f"{self.__class__.__name__}: 系统消息生成完成，总长度: {len(system_prefix)}"
+        )
 
         return {
             "stable": stable_buf,
@@ -897,12 +1126,14 @@ class AgentBase(ABC):
             "volatile": volatile_buf,
         }
 
-    async def prepare_unified_system_message(self,
-                                       session_id: Optional[str] = None,
-                                       custom_prefix: Optional[str] = None,
-                                       language: Optional[str] = None,
-                                       system_prefix_override: Optional[str] = None,
-                                       include_sections: Optional[List[str]] = None) -> MessageChunk:
+    async def prepare_unified_system_message(
+        self,
+        session_id: Optional[str] = None,
+        custom_prefix: Optional[str] = None,
+        language: Optional[str] = None,
+        system_prefix_override: Optional[str] = None,
+        include_sections: Optional[List[str]] = None,
+    ) -> MessageChunk:
         """单条 system message（向后兼容）。
 
         内部调用 ``_build_system_segments`` 后把三段顺序拼接成一条 system，保持
@@ -924,12 +1155,14 @@ class AgentBase(ABC):
             agent_name=self.agent_name,
         )
 
-    async def prepare_unified_system_messages(self,
-                                              session_id: Optional[str] = None,
-                                              custom_prefix: Optional[str] = None,
-                                              language: Optional[str] = None,
-                                              system_prefix_override: Optional[str] = None,
-                                              include_sections: Optional[List[str]] = None) -> List[MessageChunk]:
+    async def prepare_unified_system_messages(
+        self,
+        session_id: Optional[str] = None,
+        custom_prefix: Optional[str] = None,
+        language: Optional[str] = None,
+        system_prefix_override: Optional[str] = None,
+        include_sections: Optional[List[str]] = None,
+    ) -> List[MessageChunk]:
         """按 cache 稳定度切分的多段 system message。
 
         - 返回顺序固定为 ``[stable, semi_stable, volatile]``，空段会被过滤掉
@@ -948,50 +1181,57 @@ class AgentBase(ABC):
 
         if os.environ.get("SAGE_SPLIT_SYSTEM", "true").lower() == "false":
             merged = segments["stable"] + segments["semi_stable"] + segments["volatile"]
-            return [MessageChunk(
-                role=MessageRole.SYSTEM.value,
-                content=merged,
-                type=MessageType.SYSTEM.value,
-                agent_name=self.agent_name,
-                metadata={"cache_segment": "stable"},
-            )]
+            return [
+                MessageChunk(
+                    role=MessageRole.SYSTEM.value,
+                    content=merged,
+                    type=MessageType.SYSTEM.value,
+                    agent_name=self.agent_name,
+                    metadata={"cache_segment": "stable"},
+                )
+            ]
 
         out: List[MessageChunk] = []
         for seg_name in ("stable", "semi_stable", "volatile"):
             seg_text = segments.get(seg_name) or ""
             if not seg_text.strip():
                 continue
-            out.append(MessageChunk(
-                role=MessageRole.SYSTEM.value,
-                content=seg_text,
-                type=MessageType.SYSTEM.value,
-                agent_name=self.agent_name,
-                metadata={"cache_segment": seg_name},
-            ))
+            out.append(
+                MessageChunk(
+                    role=MessageRole.SYSTEM.value,
+                    content=seg_text,
+                    type=MessageType.SYSTEM.value,
+                    agent_name=self.agent_name,
+                    metadata={"cache_segment": seg_name},
+                )
+            )
         # 至少保留一条空 stable，避免下游 history 为空时 LLM 直接拒绝
         if not out:
-            out.append(MessageChunk(
-                role=MessageRole.SYSTEM.value,
-                content="",
-                type=MessageType.SYSTEM.value,
-                agent_name=self.agent_name,
-                metadata={"cache_segment": "stable"},
-            ))
+            out.append(
+                MessageChunk(
+                    role=MessageRole.SYSTEM.value,
+                    content="",
+                    type=MessageType.SYSTEM.value,
+                    agent_name=self.agent_name,
+                    metadata={"cache_segment": "stable"},
+                )
+            )
         return out
 
-    def _judge_delta_content_type(self,
-                                  delta_content: str,
-                                  all_tokens_str: str,
-                                  tag_type: Optional[List[str]] = None) -> str:
+    def _judge_delta_content_type(
+        self,
+        delta_content: str,
+        all_tokens_str: str,
+        tag_type: Optional[List[str]] = None,
+    ) -> str:
         """根据已累积的输出，判断当前 delta 所属的 tag 类型。详见
         ``sagents.utils.stream_tag_parser.judge_delta_content_type``。
         """
         return _judge_delta_content_type_util(delta_content, all_tokens_str, tag_type)
 
-    def _handle_tool_calls_chunk(self,
-                                 chunk,
-                                 tool_calls: Dict[str, Any],
-                                 last_tool_call_id: str) -> None:
+    def _handle_tool_calls_chunk(
+        self, chunk, tool_calls: Dict[str, Any], last_tool_call_id: str
+    ) -> None:
         """
         处理工具调用数据块
 
@@ -1004,7 +1244,11 @@ class AgentBase(ABC):
             return
 
         for tool_call in chunk.choices[0].delta.tool_calls:
-            tc_id = tool_call.id if tool_call.id is not None and len(tool_call.id) > 0 else ""
+            tc_id = (
+                tool_call.id
+                if tool_call.id is not None and len(tool_call.id) > 0
+                else ""
+            )
             tc_index = getattr(tool_call, "index", None)
             temp_key = f"__tool_call_index_{tc_index}" if tc_index is not None else None
 
@@ -1014,7 +1258,10 @@ class AgentBase(ABC):
             elif tc_index is not None:
                 # 优先按 index 复用已有的 tool_call，避免多 tool 场景下串台
                 for existing_key, existing_value in tool_calls.items():
-                    if isinstance(existing_value, dict) and existing_value.get("index") == tc_index:
+                    if (
+                        isinstance(existing_value, dict)
+                        and existing_value.get("index") == tc_index
+                    ):
                         target_key = existing_key
                         break
                 if target_key is None and temp_key and temp_key in tool_calls:
@@ -1023,7 +1270,11 @@ class AgentBase(ABC):
                     target_key = tc_id
                 if target_key is None and temp_key:
                     target_key = temp_key
-                if target_key is None and last_tool_call_id and last_tool_call_id in tool_calls:
+                if (
+                    target_key is None
+                    and last_tool_call_id
+                    and last_tool_call_id in tool_calls
+                ):
                     target_key = last_tool_call_id
                 if target_key is None and tool_calls:
                     target_key = next(reversed(tool_calls))
@@ -1044,37 +1295,36 @@ class AgentBase(ABC):
                     f"{tc_id or target_key}, index={tc_index}, 工具名称: {tool_call.function.name}"
                 )
                 entry = {
-                    'id': tc_id or "",
-                    'index': tc_index,
-                    'type': tool_call.type or 'function',
-                    'function': {
-                        'name': tool_call.function.name or "",
-                        'arguments': tool_call.function.arguments or ""
-                    }
+                    "id": tc_id or "",
+                    "index": tc_index,
+                    "type": tool_call.type or "function",
+                    "function": {
+                        "name": tool_call.function.name or "",
+                        "arguments": tool_call.function.arguments or "",
+                    },
                 }
                 tool_calls[target_key] = entry
             else:
-                if tc_id and not entry.get('id'):
-                    entry['id'] = tc_id
+                if tc_id and not entry.get("id"):
+                    entry["id"] = tc_id
                     if target_key != tc_id:
                         tool_calls[tc_id] = entry
                         del tool_calls[target_key]
                         target_key = tc_id
-                if tc_index is not None and entry.get('index') is None:
-                    entry['index'] = tc_index
+                if tc_index is not None and entry.get("index") is None:
+                    entry["index"] = tc_index
                 if tool_call.function.name:
                     logger.info(
                         f"{self.agent_name}: 更新工具调用: {entry.get('id') or target_key}, "
                         f"index={tc_index}, 工具名称: {tool_call.function.name}"
                     )
-                    entry['function']['name'] = tool_call.function.name
+                    entry["function"]["name"] = tool_call.function.name
                 if tool_call.function.arguments:
-                    entry['function']['arguments'] += tool_call.function.arguments
+                    entry["function"]["arguments"] += tool_call.function.arguments
 
-    def _create_tool_call_error_message(self,
-                                        tool_name: str,
-                                        raw_arguments: str,
-                                        error_reason: str) -> MessageChunk:
+    def _create_tool_call_error_message(
+        self, tool_name: str, raw_arguments: str, error_reason: str
+    ) -> MessageChunk:
         """
         创建工具调用错误消息，当JSON解析失败时返回给用户
 
@@ -1091,10 +1341,14 @@ class AgentBase(ABC):
         suggestions = []
 
         if param_length > 2000:
-            suggestions.append("• 参数内容过长（超过2000字符），建议将任务拆分为多次工具调用")
+            suggestions.append(
+                "• 参数内容过长（超过2000字符），建议将任务拆分为多次工具调用"
+            )
             suggestions.append("• 或者将大段内容保存到文件，然后传递文件路径")
 
-        if '{' in raw_arguments and raw_arguments.count('{') != raw_arguments.count('}'):
+        if "{" in raw_arguments and raw_arguments.count("{") != raw_arguments.count(
+            "}"
+        ):
             suggestions.append("• JSON括号不匹配，请检查花括号是否成对闭合")
 
         if '"' in raw_arguments:
@@ -1102,7 +1356,7 @@ class AgentBase(ABC):
             if quote_count % 2 != 0:
                 suggestions.append("• 引号未正确闭合，请检查字符串引号是否成对")
 
-        if '\\' in raw_arguments:
+        if "\\" in raw_arguments:
             suggestions.append("• 包含反斜杠字符，请确保特殊字符已正确转义")
 
         if not suggestions:
@@ -1111,7 +1365,9 @@ class AgentBase(ABC):
             suggestions.append("• 确保没有多余的逗号或缺少逗号")
 
         # 截断过长的参数显示
-        display_args = raw_arguments[:200] + "..." if len(raw_arguments) > 200 else raw_arguments
+        display_args = (
+            raw_arguments[:200] + "..." if len(raw_arguments) > 200 else raw_arguments
+        )
 
         content = f"""我尝试调用工具 `{tool_name}`，但参数解析失败。
 
@@ -1132,10 +1388,12 @@ class AgentBase(ABC):
             content=content,
             message_id=str(uuid.uuid4()),
             message_type=MessageType.DO_SUBTASK_RESULT.value,
-            agent_name=self.agent_name
+            agent_name=self.agent_name,
         )
 
-    def _create_tool_call_message(self, tool_call: Dict[str, Any]) -> List[MessageChunk]:
+    def _create_tool_call_message(
+        self, tool_call: Dict[str, Any]
+    ) -> List[MessageChunk]:
         """
         创建工具调用消息
 
@@ -1147,25 +1405,33 @@ class AgentBase(ABC):
         """
         # 格式化工具参数显示
         # 兼容两种分隔符
-        args = tool_call['function']['arguments']
-        if '```<｜tool▁call▁end｜>' in args:
+        args = tool_call["function"]["arguments"]
+        if "```<｜tool▁call▁end｜>" in args:
             logger.debug(f"{self.agent_name}: 原始错误参数(▁): {args}")
-            tool_call['function']['arguments'] = args.split('```<｜tool▁call▁end｜>')[0]
-        elif '```<｜tool call end｜>' in args:
+            tool_call["function"]["arguments"] = args.split("```<｜tool▁call▁end｜>")[0]
+        elif "```<｜tool call end｜>" in args:
             logger.debug(f"{self.agent_name}: 原始错误参数(space): {args}")
-            tool_call['function']['arguments'] = args.split('```<｜tool call end｜>')[0]
+            tool_call["function"]["arguments"] = args.split("```<｜tool call end｜>")[0]
 
-        function_params = tool_call['function']['arguments']
+        function_params = tool_call["function"]["arguments"]
         if len(function_params) > 0:
             try:
                 function_params = json.loads(function_params)
             except json.JSONDecodeError:
                 try:
                     # 尝试使用 eval 解析，并注入 JSON 常量
-                    function_params = eval(function_params, {"__builtins__": None}, {'true': True, 'false': False, 'null': None})
+                    function_params = eval(
+                        function_params,
+                        {"__builtins__": None},
+                        {"true": True, "false": False, "null": None},
+                    )
                 except Exception:
-                    logger.error(f"{self.agent_name}: 第一次参数解析报错，再次进行参数解析失败")
-                    logger.error(f"{self.agent_name}: 原始参数: {tool_call['function']['arguments']}")
+                    logger.error(
+                        f"{self.agent_name}: 第一次参数解析报错，再次进行参数解析失败"
+                    )
+                    logger.error(
+                        f"{self.agent_name}: 原始参数: {tool_call['function']['arguments']}"
+                    )
 
             if isinstance(function_params, str):
                 try:
@@ -1173,53 +1439,77 @@ class AgentBase(ABC):
                 except json.JSONDecodeError:
                     try:
                         # 再次尝试使用 eval 解析
-                        function_params = eval(function_params, {"__builtins__": None}, {'true': True, 'false': False, 'null': None})
+                        function_params = eval(
+                            function_params,
+                            {"__builtins__": None},
+                            {"true": True, "false": False, "null": None},
+                        )
                     except Exception:
-                        logger.error(f"{self.agent_name}: 解析完参数化依旧后是str，再次进行参数解析失败")
-                        logger.error(f"{self.agent_name}: 原始参数: {tool_call['function']['arguments']}")
-                        logger.error(f"{self.agent_name}: 工具参数格式错误: {function_params}")
-                        logger.error(f"{self.agent_name}: 工具参数类型: {type(function_params)}")
+                        logger.error(
+                            f"{self.agent_name}: 解析完参数化依旧后是str，再次进行参数解析失败"
+                        )
+                        logger.error(
+                            f"{self.agent_name}: 原始参数: {tool_call['function']['arguments']}"
+                        )
+                        logger.error(
+                            f"{self.agent_name}: 工具参数格式错误: {function_params}"
+                        )
+                        logger.error(
+                            f"{self.agent_name}: 工具参数类型: {type(function_params)}"
+                        )
 
-            formatted_params = ''
+            formatted_params = ""
             if isinstance(function_params, dict):
-                tool_call['function']['arguments'] = json.dumps(function_params, ensure_ascii=False)
+                tool_call["function"]["arguments"] = json.dumps(
+                    function_params, ensure_ascii=False
+                )
                 for param, value in function_params.items():
-                    formatted_params += f"{param} = {json.dumps(value, ensure_ascii=False)}, "
-                formatted_params = formatted_params.rstrip(', ')
+                    formatted_params += (
+                        f"{param} = {json.dumps(value, ensure_ascii=False)}, "
+                    )
+                formatted_params = formatted_params.rstrip(", ")
             else:
                 # 只有当非空且非字典时才记录错误（SimpleAgent逻辑兼容）
-                if function_params: 
-                    logger.warning(f"{self.agent_name}: 参数解析结果不是字典: {type(function_params)}")
+                if function_params:
+                    logger.warning(
+                        f"{self.agent_name}: 参数解析结果不是字典: {type(function_params)}"
+                    )
                 formatted_params = str(function_params)
         else:
             formatted_params = ""
 
-        tool_name = tool_call['function']['name']
+        tool_call["function"]["name"]
 
         # 将content 整理成函数调用的形式
-        return [MessageChunk(
-            role='assistant',
-            tool_calls=[{
-                'id': tool_call['id'],
-                'type': tool_call['type'],
-                'function': {
-                    'name': tool_call['function']['name'],
-                    'arguments': tool_call['function']['arguments']
-                }
-            }],
-            message_type=MessageType.TOOL_CALL.value,
-            message_id=str(uuid.uuid4()),
-            # content=f"{tool_name}({formatted_params})",
-            content = None,
-            agent_name=self.agent_name
-        )]
+        return [
+            MessageChunk(
+                role="assistant",
+                tool_calls=[
+                    {
+                        "id": tool_call["id"],
+                        "type": tool_call["type"],
+                        "function": {
+                            "name": tool_call["function"]["name"],
+                            "arguments": tool_call["function"]["arguments"],
+                        },
+                    }
+                ],
+                message_type=MessageType.TOOL_CALL.value,
+                message_id=str(uuid.uuid4()),
+                # content=f"{tool_name}({formatted_params})",
+                content=None,
+                agent_name=self.agent_name,
+            )
+        ]
 
-    async def _execute_tool(self,
-                            tool_call: Dict[str, Any],
-                            tool_manager: Optional[ToolManager],
-                            messages_input: List[Any],
-                            session_id: str,
-                            session_context: Optional[SessionContext] = None) -> AsyncGenerator[List[MessageChunk], None]:
+    async def _execute_tool(
+        self,
+        tool_call: Dict[str, Any],
+        tool_manager: Optional[ToolManager],
+        messages_input: List[Any],
+        session_id: str,
+        session_context: Optional[SessionContext] = None,
+    ) -> AsyncGenerator[List[MessageChunk], None]:
         """
         执行工具
 
@@ -1232,22 +1522,28 @@ class AgentBase(ABC):
         Yields:
             List[MessageChunk]: 消息块列表
         """
-        tool_name = tool_call['function']['name']
+        tool_name = tool_call["function"]["name"]
         if session_context is None and session_id:
             try:
                 session_context = self._get_live_session_context(session_id)
             except Exception as e:
-                logger.debug(f"{self.agent_name}: 无法通过 session_id 获取 session_context: {e}")
+                logger.debug(
+                    f"{self.agent_name}: 无法通过 session_id 获取 session_context: {e}"
+                )
 
         try:
             # 解析并执行工具调用
-            if len(tool_call['function']['arguments']) > 0:
-                arguments = json.loads(tool_call['function']['arguments'])
+            if len(tool_call["function"]["arguments"]) > 0:
+                arguments = json.loads(tool_call["function"]["arguments"])
             else:
                 arguments = {}
 
             if not isinstance(arguments, dict):
-                async for chunk in self._handle_tool_error(tool_call['id'], tool_name, Exception("工具参数格式错误: 参数必须是JSON对象")):
+                async for chunk in self._handle_tool_error(
+                    tool_call["id"],
+                    tool_name,
+                    Exception("工具参数格式错误: 参数必须是JSON对象"),
+                ):
                     yield chunk
                 return
 
@@ -1257,14 +1553,12 @@ class AgentBase(ABC):
             # 构造调用参数，确保 session_id 正确传递且不重复
             call_kwargs = arguments.copy()
             # 如果 arguments 中有 session_id，移除它（因为会作为显式参数传递）
-            call_kwargs.pop('session_id', None)
+            call_kwargs.pop("session_id", None)
 
-            with _bind_tool_progress_context(session_id, tool_call['id']):
+            with _bind_tool_progress_context(session_id, tool_call["id"]):
                 try:
                     tool_response = await tool_manager.run_tool_async(
-                        tool_name,
-                        session_id=session_id,
-                        **call_kwargs
+                        tool_name, session_id=session_id, **call_kwargs
                     )
                 finally:
                     try:
@@ -1273,7 +1567,9 @@ class AgentBase(ABC):
                         pass
 
             # 检查是否为流式响应
-            if hasattr(tool_response, '__iter__') and not isinstance(tool_response, (str, bytes)):
+            if hasattr(tool_response, "__iter__") and not isinstance(
+                tool_response, (str, bytes)
+            ):
                 # 处理流式响应
                 logger.debug(f"{self.agent_name}: 收到流式工具响应")
                 try:
@@ -1284,45 +1580,57 @@ class AgentBase(ABC):
                             message_chunks = []
                             for message in chunk:
                                 if isinstance(message, dict):
-                                    message_chunks.append(MessageChunk(
-                                        role=MessageRole.TOOL.value,
-                                        content=message['content'],
-                                        tool_call_id=tool_call['id'],
-                                        message_id=str(uuid.uuid4()),
-                                        message_type=MessageType.TOOL_CALL_RESULT.value,
-                                        agent_name=self.agent_name
-                                    ))
+                                    message_chunks.append(
+                                        MessageChunk(
+                                            role=MessageRole.TOOL.value,
+                                            content=message["content"],
+                                            tool_call_id=tool_call["id"],
+                                            message_id=str(uuid.uuid4()),
+                                            message_type=MessageType.TOOL_CALL_RESULT.value,
+                                            agent_name=self.agent_name,
+                                        )
+                                    )
                             yield message_chunks
                         else:
                             # 单个消息
                             if isinstance(chunk, dict):
                                 message_chunk_ = MessageChunk(
                                     role=MessageRole.TOOL.value,
-                                    content=chunk['content'],
-                                    tool_call_id=tool_call['id'],
+                                    content=chunk["content"],
+                                    tool_call_id=tool_call["id"],
                                     message_id=str(uuid.uuid4()),
                                     message_type=MessageType.TOOL_CALL_RESULT.value,
-                                    agent_name=self.agent_name
+                                    agent_name=self.agent_name,
                                 )
                                 yield [message_chunk_]
                 except Exception as e:
-                    logger.error(f"{self.agent_name}: 处理流式工具响应时发生错误: {str(e)}")
-                    async for chunk in self._handle_tool_error(tool_call['id'], tool_name, e):
+                    logger.error(
+                        f"{self.agent_name}: 处理流式工具响应时发生错误: {str(e)}"
+                    )
+                    async for chunk in self._handle_tool_error(
+                        tool_call["id"], tool_name, e
+                    ):
                         yield chunk
             else:
                 # 处理非流式响应
                 logger.debug(f"{self.agent_name}: 收到非流式工具响应，正在处理")
                 logger.debug(f"{self.agent_name}: 工具响应 {tool_response}")
-                processed_response = self.process_tool_response(tool_response, tool_call['id'])
+                processed_response = self.process_tool_response(
+                    tool_response, tool_call["id"]
+                )
                 yield processed_response
 
         except Exception as e:
-            logger.error(f"{self.agent_name}: 执行工具 {tool_name} 时发生错误: {str(e)}")
+            logger.error(
+                f"{self.agent_name}: 执行工具 {tool_name} 时发生错误: {str(e)}"
+            )
             logger.error(f"{self.agent_name}: 堆栈: {traceback.format_exc()}")
-            async for chunk in self._handle_tool_error(tool_call['id'], tool_name, e):
+            async for chunk in self._handle_tool_error(tool_call["id"], tool_name, e):
                 yield chunk
 
-    async def _handle_tool_error(self, tool_call_id: str, tool_name: str, error: Exception) -> AsyncGenerator[List[MessageChunk], None]:
+    async def _handle_tool_error(
+        self, tool_call_id: str, tool_name: str, error: Exception
+    ) -> AsyncGenerator[List[MessageChunk], None]:
         """
         处理工具执行错误
 
@@ -1338,7 +1646,7 @@ class AgentBase(ABC):
         logger.error(f"{self.agent_name}: {error_message}")
 
         error_chunk = MessageChunk(
-            role='tool',
+            role="tool",
             content=json.dumps({"error": error_message}, ensure_ascii=False),
             tool_call_id=tool_call_id,
             message_id=str(uuid.uuid4()),
@@ -1347,7 +1655,9 @@ class AgentBase(ABC):
 
         yield [error_chunk]
 
-    def process_tool_response(self, tool_response: str, tool_call_id: str) -> List[MessageChunk]:
+    def process_tool_response(
+        self, tool_response: str, tool_call_id: str
+    ) -> List[MessageChunk]:
         """
         处理工具执行响应
 
@@ -1376,14 +1686,16 @@ class AgentBase(ABC):
         else:
             content = str(content)
 
-        return [MessageChunk(
-            role=MessageRole.TOOL.value,
-            content=content,
-            tool_call_id=tool_call_id,
-            message_id=str(uuid.uuid4()),
-            message_type=MessageType.TOOL_CALL_RESULT.value,
-            agent_name=self.agent_name
-        )]
+        return [
+            MessageChunk(
+                role=MessageRole.TOOL.value,
+                content=content,
+                tool_call_id=tool_call_id,
+                message_id=str(uuid.uuid4()),
+                message_type=MessageType.TOOL_CALL_RESULT.value,
+                agent_name=self.agent_name,
+            )
+        ]
 
     def merge_stream_response_to_non_stream_response(self, chunks):
         """将流式的 chunk 合并成非流式的 response。详见
@@ -1391,13 +1703,15 @@ class AgentBase(ABC):
         """
         return _merge_chunks_util(chunks)
 
-    async def _handle_tool_calls(self,
-                                 tool_calls: Dict[str, Any],
-                                 tool_manager: Optional[ToolManager],
-                                 messages_input: List[Any],
-                                 session_id: str,
-                                 handle_complete_task: bool = False,
-                                 emit_tool_call_message: bool = True) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
+    async def _handle_tool_calls(
+        self,
+        tool_calls: Dict[str, Any],
+        tool_manager: Optional[ToolManager],
+        messages_input: List[Any],
+        session_id: str,
+        handle_complete_task: bool = False,
+        emit_tool_call_message: bool = True,
+    ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
         """
         处理工具调用
 
@@ -1416,9 +1730,9 @@ class AgentBase(ABC):
         for tool_call_id, tool_call in tool_calls.items():
             # 增加让出主线程逻辑，防止工具循环处理导致卡死
             await asyncio.sleep(0)
-            
-            tool_name = tool_call['function']['name']
-            raw_arguments = tool_call['function']['arguments']
+
+            tool_name = tool_call["function"]["name"]
+            raw_arguments = tool_call["function"]["arguments"]
             logger.info(f"{self.agent_name}: 执行工具 {tool_name}")
             logger.debug(f"{self.agent_name}: 参数 {raw_arguments}")
 
@@ -1426,37 +1740,48 @@ class AgentBase(ABC):
             # 将复杂的解析逻辑放到线程池中执行
             is_valid_json = False
             parsed_arguments = None
-            
+
             try:
                 # 使用线程池执行同步的解析逻辑
-                parsed_arguments, is_valid_json = await asyncio.to_thread(self._parse_and_validate_json, raw_arguments)
+                parsed_arguments, is_valid_json = await asyncio.to_thread(
+                    self._parse_and_validate_json, raw_arguments
+                )
             except Exception as e:
                 logger.error(f"{self.agent_name}: JSON解析异常: {e}")
                 is_valid_json = False
 
             # 如果JSON解析失败，将工具调用转换为普通消息返回
             if not is_valid_json:
-                logger.warning(f"{self.agent_name}: 工具参数JSON解析失败，转换为普通消息")
+                logger.warning(
+                    f"{self.agent_name}: 工具参数JSON解析失败，转换为普通消息"
+                )
                 error_message = self._create_tool_call_error_message(
                     tool_name=tool_name,
                     raw_arguments=raw_arguments,
-                    error_reason="JSON格式无效或结构不完整"
+                    error_reason="JSON格式无效或结构不完整",
                 )
                 yield ([error_message], False)
                 continue
 
             # 更新解析后的参数
-            tool_call['function']['arguments'] = json.dumps(parsed_arguments, ensure_ascii=False)
+            tool_call["function"]["arguments"] = json.dumps(
+                parsed_arguments, ensure_ascii=False
+            )
 
             # 检查是否为complete_task（仅TaskExecutorAgent需要处理）
-            if handle_complete_task and tool_name == 'complete_task':
+            if handle_complete_task and tool_name == "complete_task":
                 logger.info(f"{self.agent_name}: complete_task，停止执行")
-                yield ([MessageChunk(
-                    role=MessageRole.ASSISTANT.value,
-                    content='已经完成了满足用户的所有要求',
-                    message_id=str(uuid.uuid4()),
-                    message_type=MessageType.DO_SUBTASK_RESULT.value
-                )], True)
+                yield (
+                    [
+                        MessageChunk(
+                            role=MessageRole.ASSISTANT.value,
+                            content="已经完成了满足用户的所有要求",
+                            message_id=str(uuid.uuid4()),
+                            message_type=MessageType.DO_SUBTASK_RESULT.value,
+                        )
+                    ],
+                    True,
+                )
                 return
 
             # 如果上游已经把 tool_call 以流式消息发出来了，这里就不要重复发卡片了。
@@ -1469,9 +1794,10 @@ class AgentBase(ABC):
                 tool_call=tool_call,
                 tool_manager=tool_manager,
                 messages_input=messages_input,
-                session_id=session_id
+                session_id=session_id,
             ):
                 yield (message_chunk_list, False)
+
     def _parse_and_validate_json(self, raw_arguments: str) -> tuple[Any, bool]:
         """
         在线程池中运行的同步JSON解析逻辑
@@ -1496,7 +1822,9 @@ class AgentBase(ABC):
             except (ValueError, SyntaxError, TypeError):
                 return None, False
 
-    def _should_abort_due_to_session(self, session_context: SessionContext, session_id: Optional[str] = None) -> bool:
+    def _should_abort_due_to_session(
+        self, session_context: SessionContext, session_id: Optional[str] = None
+    ) -> bool:
         """检查会话/父会话状态，命中即返回 True。详见
         ``sagents.utils.agent_session_helper.should_abort_due_to_session``。
         """

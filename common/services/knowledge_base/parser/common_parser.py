@@ -26,10 +26,12 @@ class CommonParser(BaseParser):
         )
         return ids
 
-    async def process(self, index_name: str, doc: KdbDoc, file: File) -> List["DocumentInput"]:
+    async def process(
+        self, index_name: str, doc: KdbDoc, file: File
+    ) -> List["DocumentInput"]:
         # Lazy import to avoid circular dependency at runtime
         from ..knowledge_base import DocumentInput
-        
+
         file_dao = FileDao()
         logger.info(f"[CommonParser] 处理开始：索引={index_name}, 文档ID={doc.id}")
         text, _ = await self.convert_file_to_text(file.path)
@@ -71,7 +73,7 @@ class CommonParser(BaseParser):
                         metadata=metadata,
                     )
                 )
-        
+
         logger.info(
             f"[CommonParser] 处理完成：索引={index_name}，生成文档数={len(docs)}"
         )

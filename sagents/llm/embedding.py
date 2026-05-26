@@ -3,16 +3,18 @@ from typing import List, Optional
 from openai import AsyncOpenAI
 from sagents.utils.logger import logger
 
+
 class OpenAIEmbedding:
     """
     OpenAI Embedding 客户端封装
     """
+
     def __init__(
-        self, 
-        api_key: str, 
-        base_url: Optional[str] = None, 
-        model_name: str = "text-embedding-3-large", 
-        dims: int = 1024
+        self,
+        api_key: str,
+        base_url: Optional[str] = None,
+        model_name: str = "text-embedding-3-large",
+        dims: int = 1024,
     ):
         self.model_name = model_name
         self.dims = dims
@@ -20,7 +22,6 @@ class OpenAIEmbedding:
             self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         else:
             self.client = AsyncOpenAI(api_key=api_key)
-        
 
     async def batch_embed_query(self, texts: List[str]) -> List[List[float]]:
         """
@@ -29,7 +30,7 @@ class OpenAIEmbedding:
         results: List[List[float]] = []
         # OpenAI 限制每批次大小，这里简单分批
         chunk_size = 10
-        
+
         for i in range(0, len(texts or []), chunk_size):
             batch = texts[i : i + chunk_size]
             try:
@@ -61,4 +62,3 @@ class OpenAIEmbedding:
             await self.client.close()
         except Exception as e:
             logger.error(f"Failed to close OpenAIEmbedding client: {e}")
-

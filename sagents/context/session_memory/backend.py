@@ -14,16 +14,13 @@ class SessionMemoryBackend(Protocol):
         messages: List[MessageChunk],
         query: str,
         history_budget: int,
-    ) -> List[MessageChunk]:
-        ...
+    ) -> List[MessageChunk]: ...
 
     def retrieve_group_messages_by_chat(
         self,
         messages: List[MessageChunk],
         query: str,
         history_budget: int,
-    ) -> List[MessageChunk]:
-        ...
+    ) -> List[MessageChunk]: ...
 
-    def clear_cache(self) -> None:
-        ...
+    def clear_cache(self) -> None: ...

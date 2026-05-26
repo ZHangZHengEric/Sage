@@ -109,7 +109,9 @@ class SandboxProviderFactory:
         if config.mode == SandboxType.LOCAL:
             provider_class = cls._get_local_provider()
             if not config.sandbox_agent_workspace:
-                raise ValueError("sandbox_agent_workspace is required for local sandbox")
+                raise ValueError(
+                    "sandbox_agent_workspace is required for local sandbox"
+                )
             return provider_class(
                 sandbox_id=sandbox_id,
                 sandbox_agent_workspace=config.sandbox_agent_workspace,
@@ -131,7 +133,8 @@ class SandboxProviderFactory:
                 "sandbox_id": sandbox_id,
                 "workspace_mount": provider_config.pop("workspace_mount", None),
                 "mount_paths": config.volume_mounts,
-                "virtual_workspace": config.sandbox_agent_workspace or "/sage-workspace",
+                "virtual_workspace": config.sandbox_agent_workspace
+                or "/sage-workspace",
                 "timeout": timedelta(seconds=config.remote_timeout),
             }
 
@@ -146,7 +149,7 @@ class SandboxProviderFactory:
                     image=config.remote_image,
                     persistent=config.remote_persistent,
                     sandbox_ttl=config.remote_sandbox_ttl,
-                    **provider_config
+                    **provider_config,
                 )
 
             elif config.remote_provider == "kubernetes":
@@ -159,7 +162,7 @@ class SandboxProviderFactory:
                         k: v
                         for k, v in provider_config.items()
                         if k not in ["namespace", "resources"]
-                    }
+                    },
                 )
 
             elif config.remote_provider == "firecracker":
@@ -170,7 +173,7 @@ class SandboxProviderFactory:
                         k: v
                         for k, v in provider_config.items()
                         if k != "microvm_config"
-                    }
+                    },
                 )
 
             else:
@@ -180,7 +183,9 @@ class SandboxProviderFactory:
         else:  # PASSTHROUGH
             provider_class = cls._get_passthrough_provider()
             if not config.sandbox_agent_workspace:
-                raise ValueError("sandbox_agent_workspace is required for passthrough sandbox")
+                raise ValueError(
+                    "sandbox_agent_workspace is required for passthrough sandbox"
+                )
             return provider_class(
                 sandbox_id=sandbox_id,
                 sandbox_agent_workspace=config.sandbox_agent_workspace,
@@ -188,7 +193,9 @@ class SandboxProviderFactory:
             )
 
     @classmethod
-    def register_local_provider(cls, mode: SandboxType, provider_class: Type[ISandboxHandle]):
+    def register_local_provider(
+        cls, mode: SandboxType, provider_class: Type[ISandboxHandle]
+    ):
         """注册本地/直通模式提供者"""
         cls._providers[mode] = provider_class
 

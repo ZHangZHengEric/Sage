@@ -72,7 +72,9 @@ def _extract_recent_session_issue_notice(
             continue
         try:
             timestamp_str, _, _, message = line.split(" - ", 3)
-            log_time = datetime.strptime(timestamp_str.strip(), "%Y-%m-%d %H:%M:%S,%f").timestamp()
+            log_time = datetime.strptime(
+                timestamp_str.strip(), "%Y-%m-%d %H:%M:%S,%f"
+            ).timestamp()
             if log_time + 1 < request_started_at_epoch:
                 continue
             return f"[working] {message.strip()}"
@@ -133,7 +135,8 @@ async def _stream_request(
                 now = time.monotonic()
                 idle_seconds = now - last_event_time
                 if idle_seconds >= STREAM_IDLE_NOTICE_SECONDS and (
-                    last_notice_time is None or (now - last_notice_time) >= STREAM_IDLE_REPEAT_SECONDS
+                    last_notice_time is None
+                    or (now - last_notice_time) >= STREAM_IDLE_REPEAT_SECONDS
                 ):
                     issue_notice = _extract_recent_session_issue_notice(
                         getattr(request, "session_id", None),
@@ -143,7 +146,9 @@ async def _stream_request(
                     if issue_notice and issue_notice != last_issue_notice:
                         notice = issue_notice
                     elif not issue_notice:
-                        notice = _build_stream_idle_notice_for_state(render_state, idle_seconds)
+                        notice = _build_stream_idle_notice_for_state(
+                            render_state, idle_seconds
+                        )
 
                     if json_output:
                         if notice:
@@ -183,7 +188,11 @@ async def _stream_request(
             _record_stats_event(stats, event, start_time)
             if json_output:
                 next_phase = stats.get("_active_phase")
-                if isinstance(next_phase, str) and next_phase and next_phase != previous_phase:
+                if (
+                    isinstance(next_phase, str)
+                    and next_phase
+                    and next_phase != previous_phase
+                ):
                     print(
                         json.dumps(
                             {
@@ -193,7 +202,9 @@ async def _stream_request(
                             ensure_ascii=False,
                         )
                     )
-                _emit_json_tool_events(previous_tool_steps, stats.get("tool_steps") or [])
+                _emit_json_tool_events(
+                    previous_tool_steps, stats.get("tool_steps") or []
+                )
                 print(json.dumps(event, ensure_ascii=False))
             else:
                 _print_plain_event(event, render_state)

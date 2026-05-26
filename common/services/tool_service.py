@@ -76,7 +76,11 @@ def _normalize_tool_result(tool_response: Any) -> Dict[str, Any]:
         if parsed is None:
             parsed = tool_response.get("result")
         if not raw_text:
-            raw_text = tool_response.get("content") if isinstance(tool_response.get("content"), str) else ""
+            raw_text = (
+                tool_response.get("content")
+                if isinstance(tool_response.get("content"), str)
+                else ""
+            )
     elif isinstance(tool_response, str):
         raw_text = tool_response
         parsed = tool_response

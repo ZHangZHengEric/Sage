@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import re
-import sys
 from pathlib import Path
 
 

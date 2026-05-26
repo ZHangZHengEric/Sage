@@ -9,6 +9,7 @@ from dataclasses import dataclass
 @dataclass
 class GeneratedImage:
     """统一生成的图片结果格式"""
+
     image_data: str  # base64 编码的图片数据或 URL
     image_format: str  # 图片格式: jpeg, png, webp 等
     is_base64: bool  # 是否是 base64 编码
@@ -52,7 +53,7 @@ class BaseImageProvider:
         prompt: str,
         aspect_ratio: str = "1:1",
         reference_image: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> GeneratedImage:
         """
         生成图片，子类必须实现

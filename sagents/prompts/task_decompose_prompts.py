@@ -13,7 +13,7 @@ AGENT_IDENTIFIER = "TaskDecomposeAgent"
 task_decompose_system_prefix = {
     "zh": "你是一个任务分解智能体，代替其他的智能体，要以其他智能体的人称来输出，你需要根据用户需求，将复杂任务分解为清晰可执行的子任务。",
     "en": "You are a task decomposition agent, representing other agents, and should output in the persona of other agents. You need to decompose complex tasks into clear and executable subtasks based on user needs.",
-    "pt": "Você é um agente de decomposição de tarefas, representando outros agentes, e deve produzir saída na persona de outros agentes. Você precisa decompor tarefas complexas em subtarefas claras e executáveis com base nas necessidades do usuário."
+    "pt": "Você é um agente de decomposição de tarefas, representando outros agentes, e deve produzir saída na persona de outros agentes. Você precisa decompor tarefas complexas em subtarefas claras e executáveis com base nas necessidades do usuário.",
 }
 
 # 分解模板
@@ -108,5 +108,5 @@ Observe as necessidades ou tarefas mais recentes do usuário através do diálog
 10. Se houver skills disponíveis e esta subtarefa se encaixar muito bem em uma skill específica, apenas declare explicitamente que usará a skill correspondente.
 
 Por favor, chame a ferramenta `todo_write` para saída da lista de tarefas analisadas.
-"""
+""",
 }

@@ -13,7 +13,7 @@ AGENT_IDENTIFIER = "MemoryExtractor"
 memory_extraction_system_prefix = {
     "zh": "你是一个记忆提取智能体，专门负责从对话历史中提取潜在的系统级记忆，检测和处理记忆冲突，提供智能化的记忆管理建议。",
     "en": "You are a memory extraction agent, specializing in extracting potential system-level memories from conversation history, detecting and handling memory conflicts, and providing intelligent memory management recommendations.",
-    "pt": "Você é um agente de extração de memória, especializado em extrair potenciais memórias do nível do sistema de histórico de conversa, detectar e lidar com conflitos de memória, e fornecer recomendações de gerenciamento de memória inteligente."
+    "pt": "Você é um agente de extração de memória, especializado em extrair potenciais memórias do nível do sistema de histórico de conversa, detectar e lidar com conflitos de memória, e fornecer recomendações de gerenciamento de memória inteligente.",
 }
 
 # 记忆提取模板
@@ -149,7 +149,7 @@ Se nenhuma informação digna de lembrança for encontrada, por favor retorne um
 {{
     "extracted_memories": []
 }}
-</Requisitos de Formato de Retorno>"""
+</Requisitos de Formato de Retorno>""",
 }
 
 # 记忆去重模板
@@ -291,5 +291,5 @@ O formato de saída é uma lista Json de chaves, por exemplo:
 ```
 Requisitos de saída:
 1. key1 é a chave da memória a ser esquecida.
-2. Não produza nenhum outro conteúdo ou explicação, apenas produza conteúdo no formato Json."""
+2. Não produza nenhum outro conteúdo ou explicação, apenas produza conteúdo no formato Json.""",
 }

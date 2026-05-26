@@ -48,31 +48,23 @@ def get_available_providers() -> List[BaseImageProvider]:
                 logger.info(f"检测到可用图片生成提供商: {provider_enum.value}")
             except Exception as e:
                 logger.warning(f"初始化图片生成提供商 {provider_enum.value} 失败: {e}")
-    
+
     if not available_providers:
         logger.warning("未检测到任何可用的图片生成API密钥")
-    
+
     return available_providers
 
 
 def get_config_status() -> dict:
     """获取详细的配置状态"""
-    status = {
-        "available": [],
-        "missing": [],
-        "details": {}
-    }
+    status = {"available": [], "missing": [], "details": {}}
 
     for provider_enum, provider_class in PROVIDER_CLASSES.items():
         provider_name = provider_enum.value
         env_vars = provider_class.get_required_env_vars()
 
         # 检查每个环境变量
-        provider_status = {
-            "name": provider_name,
-            "env_vars": {},
-            "is_available": True
-        }
+        provider_status = {"name": provider_name, "env_vars": {}, "is_available": True}
 
         for var_name, var_info in env_vars.items():
             current_value = os.environ.get(var_name, "")
@@ -109,7 +101,7 @@ def get_config_error() -> str:
         "",
         "请检查以下环境变量设置:",
         "=" * 60,
-        ""
+        "",
     ]
 
     for provider_name, provider_status in status["details"].items():
@@ -139,12 +131,14 @@ def get_config_error() -> str:
 
             lines.append("")
 
-    lines.extend([
-        "=" * 60,
-        "",
-        "配置示例:",
-        "",
-    ])
+    lines.extend(
+        [
+            "=" * 60,
+            "",
+            "配置示例:",
+            "",
+        ]
+    )
 
     # 从每个 provider 获取配置示例
     for provider_enum, provider_class in PROVIDER_CLASSES.items():
@@ -155,9 +149,11 @@ def get_config_error() -> str:
         except Exception:
             pass
 
-    lines.extend([
-        "支持的模型:",
-    ])
+    lines.extend(
+        [
+            "支持的模型:",
+        ]
+    )
 
     # 从每个 provider 获取支持的模型信息
     for provider_enum, provider_class in PROVIDER_CLASSES.items():
@@ -178,15 +174,19 @@ def get_config_error() -> str:
         if provider_class.supports_reference_image:
             ref_providers.append(provider_enum.value)
 
-    lines.extend([
-        "",
-        f"支持参考图的提供商: {', '.join(ref_providers)}",
-    ])
+    lines.extend(
+        [
+            "",
+            f"支持参考图的提供商: {', '.join(ref_providers)}",
+        ]
+    )
 
     return "\n".join(lines)
 
 
-def get_reference_image_providers(providers: List[BaseImageProvider]) -> List[BaseImageProvider]:
+def get_reference_image_providers(
+    providers: List[BaseImageProvider],
+) -> List[BaseImageProvider]:
     """获取支持参考图的提供商列表"""
     return [p for p in providers if p.supports_reference_image]
 
@@ -195,7 +195,7 @@ def _save_base64_image(base64_data: str, output_path: str):
     """保存 base64 图片到文件"""
     # 确保目录存在
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    
+
     # 解码并保存
     image_bytes = base64.b64decode(base64_data)
     with open(output_path, "wb") as f:
@@ -210,21 +210,21 @@ async def generate_image_impl(
 ) -> Tuple[Optional[GeneratedImage], Optional[str]]:
     """
     生成图片
-    
+
     Args:
         prompt: 图片描述提示词
         aspect_ratio: 图片宽高比 (1:1, 16:9, 4:3, 3:2, 2:3, 9:16)
         reference_image: 参考图 URL（可选）
         output_path: 图片保存路径（可选，如果不提供则返回 base64）
-        
+
     Returns:
         (生成的图片结果, 错误信息)
     """
     available_providers = get_available_providers()
-    
+
     if not available_providers:
         return None, get_config_error()
-    
+
     # 如果提供了参考图，优先使用支持参考图的提供商
     providers = available_providers
     if reference_image:
@@ -233,7 +233,7 @@ async def generate_image_impl(
             providers = ref_providers
         else:
             return None, "没有支持参考图的提供商"
-    
+
     # 尝试每个可用的提供商
     last_error = None
     for provider in providers:
@@ -243,21 +243,21 @@ async def generate_image_impl(
                 aspect_ratio=aspect_ratio,
                 reference_image=reference_image,
             )
-            
+
             # 如果指定了输出路径，保存图片
             if output_path and result.is_base64:
                 _save_base64_image(result.image_data, output_path)
                 result.image_data = output_path
                 result.is_base64 = False
-            
+
             logger.info(f"使用 {provider.name} 生成图片成功")
             return result, None
-            
+
         except Exception as e:
             logger.warning(f"图片生成提供商 {provider.name} 失败: {e}")
             last_error = str(e)
             continue
-    
+
     error_msg = "所有图片生成提供商都失败了"
     if last_error:
         error_msg += f"。最后一个错误: {last_error}"
@@ -266,7 +266,7 @@ async def generate_image_impl(
 
 @mcp.tool(
     name="generate_image",
-    description="根据文本描述生成图片。支持参考图生成（保持人物一致性）。自动选择可用的提供商。"
+    description="根据文本描述生成图片。支持参考图生成（保持人物一致性）。自动选择可用的提供商。",
 )
 @sage_mcp_tool(
     server_name="unified_image_generation_server",
@@ -320,12 +320,16 @@ async def generate_image(
     available_providers = get_available_providers()
     if not available_providers:
         config_error = get_config_error()
-        return json.dumps({
-            "success": False,
-            "error": "未配置任何可用的图片生成提供商",
-            "config_help": config_error,
-            "message": "请先配置图片生成提供商的环境变量后再使用此功能"
-        }, ensure_ascii=False, indent=2)
+        return json.dumps(
+            {
+                "success": False,
+                "error": "未配置任何可用的图片生成提供商",
+                "config_help": config_error,
+                "message": "请先配置图片生成提供商的环境变量后再使用此功能",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     # 执行图片生成
     result, error = await generate_image_impl(
@@ -336,11 +340,15 @@ async def generate_image(
     )
 
     if error:
-        return json.dumps({
-            "error": error,
-            "success": False,
-        }, ensure_ascii=False, indent=2)
-    
+        return json.dumps(
+            {
+                "error": error,
+                "success": False,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     # 构建返回结果
     response = {
         "success": True,
@@ -351,15 +359,19 @@ async def generate_image(
         "image_format": result.image_format,
         "is_base64": result.is_base64,
     }
-    
+
     if result.is_base64:
         # 返回 base64 数据（截断显示）
-        response["image_data"] = result.image_data[:100] + "..." if len(result.image_data) > 100 else result.image_data
+        response["image_data"] = (
+            result.image_data[:100] + "..."
+            if len(result.image_data) > 100
+            else result.image_data
+        )
         response["image_data_full"] = result.image_data  # 完整的 base64 数据
     else:
         # 返回文件路径
         response["image_path"] = result.image_data
-    
+
     return json.dumps(response, ensure_ascii=False, indent=2)
 
 

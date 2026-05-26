@@ -74,7 +74,7 @@ export SEEDREAM_MODEL=doubao-seedream-5.0-lite"""
         prompt: str,
         aspect_ratio: str = "1:1",
         reference_image: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> GeneratedImage:
         """
         使用 Seedream 生成图片
@@ -90,7 +90,7 @@ export SEEDREAM_MODEL=doubao-seedream-5.0-lite"""
         # 构建请求头
         headers = {
             "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         # 构建请求体
@@ -109,14 +109,13 @@ export SEEDREAM_MODEL=doubao-seedream-5.0-lite"""
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                self.API_ENDPOINT,
-                headers=headers,
-                json=payload,
-                timeout=60.0
+                self.API_ENDPOINT, headers=headers, json=payload, timeout=60.0
             )
 
             if response.status_code == 401 or response.status_code == 403:
-                raise Exception(f"Seedream API Key 无效或没有权限，请检查环境变量 {self.env_key}")
+                raise Exception(
+                    f"Seedream API Key 无效或没有权限，请检查环境变量 {self.env_key}"
+                )
 
             response.raise_for_status()
             data = response.json()
@@ -134,7 +133,7 @@ export SEEDREAM_MODEL=doubao-seedream-5.0-lite"""
                     is_base64=True,
                     prompt=prompt,
                     model=self.model,
-                    provider=self.name
+                    provider=self.name,
                 )
             else:
                 raise Exception("Seedream 返回的数据格式不正确")

@@ -32,7 +32,9 @@ def _content_chunk(content):
 def _message_text(message):
     content = message.get("content", "")
     if isinstance(content, list):
-        return "\n".join(item.get("text", "") for item in content if isinstance(item, dict))
+        return "\n".join(
+            item.get("text", "") for item in content if isinstance(item, dict)
+        )
     return content
 
 
@@ -104,9 +106,13 @@ async def test_shell_completion_reminder_preserves_tool_choice_auto(monkeypatch)
     )
     messages = [MessageChunk(role=MessageRole.USER.value, content="continue")]
 
-    async for _ in agent._call_llm_streaming(messages, session_id="sid", enable_thinking=False):
+    async for _ in agent._call_llm_streaming(
+        messages, session_id="sid", enable_thinking=False
+    ):
         pass
-    async for _ in agent._call_llm_streaming(messages, session_id="sid", enable_thinking=False):
+    async for _ in agent._call_llm_streaming(
+        messages, session_id="sid", enable_thinking=False
+    ):
         pass
 
     assert calls[0]["model_config"]["tool_choice"] == "auto"
@@ -116,4 +122,6 @@ async def test_shell_completion_reminder_preserves_tool_choice_auto(monkeypatch)
 
     assert calls[1]["model_config"]["tool_choice"] == "auto"
     assert calls[1]["kwargs"]["tool_choice"] == "auto"
-    assert all("<system_reminder>" not in _message_text(msg) for msg in calls[1]["messages"])
+    assert all(
+        "<system_reminder>" not in _message_text(msg) for msg in calls[1]["messages"]
+    )

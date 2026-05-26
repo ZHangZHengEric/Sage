@@ -18,13 +18,13 @@ from sagents.utils.logger import logger
 
 
 _MIME_TYPES: Dict[str, str] = {
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.png': 'image/png',
-    '.gif': 'image/gif',
-    '.webp': 'image/webp',
-    '.bmp': 'image/bmp',
-    '.svg': 'image/svg+xml',
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".svg": "image/svg+xml",
 }
 
 # 压缩到的最大边长（保持比例）
@@ -41,7 +41,7 @@ _STANDALONE_MARKDOWN_IMAGE = re.compile(r"^\s*!\[[^\]]*\]\([^)]+\)\s*$", re.DOTA
 
 def get_mime_type(file_extension: str) -> str:
     """根据文件扩展名获取 MIME 类型，未知类型回落到 image/jpeg。"""
-    return _MIME_TYPES.get(file_extension, 'image/jpeg')
+    return _MIME_TYPES.get(file_extension, "image/jpeg")
 
 
 def resolve_local_sage_url(url: str) -> Optional[str]:
@@ -61,7 +61,7 @@ def resolve_local_sage_url(url: str) -> Optional[str]:
         prefix = "/api/oss/file/"
         if not path.startswith(prefix):
             return None
-        rest = path[len(prefix):]
+        rest = path[len(prefix) :]
         parts = rest.split("/", 1)
         if len(parts) != 2:
             return None
@@ -89,23 +89,25 @@ def resolve_local_sage_url(url: str) -> Optional[str]:
 
 def _compress_image_to_jpeg_bytes(img: Image.Image) -> bytes:
     """RGB 化、缩放至最大边长、保存为 JPEG bytes。"""
-    if img.mode in ('RGBA', 'P'):
-        img = img.convert('RGB')
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
     img.thumbnail((_MAX_IMAGE_EDGE, _MAX_IMAGE_EDGE), Image.Resampling.LANCZOS)
     output = io.BytesIO()
-    img.save(output, format='JPEG', quality=_JPEG_QUALITY)
+    img.save(output, format="JPEG", quality=_JPEG_QUALITY)
     return output.getvalue()
 
 
 def _compress_base64_data_url(data_url: str) -> Optional[str]:
     """对已是 base64 的 data URL 解码、压缩、再编码，失败返回 None。"""
     try:
-        _, base64_str = data_url.split(',', 1)
+        _, base64_str = data_url.split(",", 1)
         raw = base64.b64decode(base64_str)
         with Image.open(io.BytesIO(raw)) as img:
             compressed = _compress_image_to_jpeg_bytes(img)
-        encoded = base64.b64encode(compressed).decode('utf-8')
-        logger.debug(f"Compressed base64 image from {len(raw)} to {len(compressed)} bytes")
+        encoded = base64.b64encode(compressed).decode("utf-8")
+        logger.debug(
+            f"Compressed base64 image from {len(raw)} to {len(compressed)} bytes"
+        )
         return f"data:image/jpeg;base64,{encoded}"
     except Exception as exc:
         logger.error(f"Failed to compress base64 image: {exc}")
@@ -117,7 +119,7 @@ def _file_to_base64_data_url(file_path: Path) -> Optional[str]:
     try:
         with Image.open(file_path) as img:
             compressed = _compress_image_to_jpeg_bytes(img)
-        encoded = base64.b64encode(compressed).decode('utf-8')
+        encoded = base64.b64encode(compressed).decode("utf-8")
         logger.debug(
             f"Converted and compressed local image to base64: {file_path}, size: {len(compressed)} bytes"
         )
@@ -132,7 +134,7 @@ def _bytes_to_base64_data_url(raw: bytes) -> Optional[str]:
     try:
         with Image.open(io.BytesIO(raw)) as img:
             compressed = _compress_image_to_jpeg_bytes(img)
-        encoded = base64.b64encode(compressed).decode('utf-8')
+        encoded = base64.b64encode(compressed).decode("utf-8")
         logger.debug(f"Converted fetched image to base64: size={len(compressed)} bytes")
         return f"data:image/jpeg;base64,{encoded}"
     except Exception as exc:
@@ -151,13 +153,17 @@ async def _fetch_url_to_base64(url: str, timeout: float = 10.0) -> Optional[str]
     try:
         import httpx  # 局部导入，避免在不需要这条分支的环境里被强依赖
     except ImportError:
-        logger.warning("httpx not installed, cannot fetch local image URL via HTTP fallback")
+        logger.warning(
+            "httpx not installed, cannot fetch local image URL via HTTP fallback"
+        )
         return None
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             resp = await client.get(url)
             if resp.status_code != 200:
-                logger.warning(f"HTTP fallback fetch non-200: url={url}, status={resp.status_code}")
+                logger.warning(
+                    f"HTTP fallback fetch non-200: url={url}, status={resp.status_code}"
+                )
                 return None
             data = resp.content
             if not data:
@@ -231,7 +237,7 @@ async def process_multimodal_content(msg: Dict[str, Any]) -> Dict[str, Any]:
 
     无 list content 的消息原样返回。
     """
-    content = msg.get('content')
+    content = msg.get("content")
     if not isinstance(content, list):
         return msg
 
@@ -241,33 +247,39 @@ async def process_multimodal_content(msg: Dict[str, Any]) -> Dict[str, Any]:
             new_content.append(item)
             continue
 
-        item_type = item.get('type')
-        if item_type == 'text':
+        item_type = item.get("type")
+        if item_type == "text":
             new_content.append(item)
             continue
-        if item_type != 'image_url':
+        if item_type != "image_url":
             new_content.append(item)
             continue
 
-        image_url_data = item.get('image_url', {})
-        url = image_url_data.get('url', '') if isinstance(image_url_data, dict) else str(image_url_data)
+        image_url_data = item.get("image_url", {})
+        url = (
+            image_url_data.get("url", "")
+            if isinstance(image_url_data, dict)
+            else str(image_url_data)
+        )
         if not url:
             new_content.append(item)
             continue
 
         # 已是 base64 data URL：解码-压缩-编码
-        if url.startswith('data:image/'):
+        if url.startswith("data:image/"):
             compressed = await asyncio.to_thread(_compress_base64_data_url, url)
             if compressed is None:
                 new_content.append(item)
             else:
-                new_content.append({'type': 'image_url', 'image_url': {'url': compressed}})
+                new_content.append(
+                    {"type": "image_url", "image_url": {"url": compressed}}
+                )
             continue
 
         # 解析为本地路径
-        if url.startswith('file://'):
+        if url.startswith("file://"):
             file_path_str = url[7:]
-        elif url.startswith('http://') or url.startswith('https://'):
+        elif url.startswith("http://") or url.startswith("https://"):
             local_path = await asyncio.to_thread(resolve_local_sage_url, url)
             if local_path is None:
                 if _is_localhost_url(url):
@@ -285,7 +297,9 @@ async def process_multimodal_content(msg: Dict[str, Any]) -> Dict[str, Any]:
                         )
                         new_content.append(item)
                     else:
-                        new_content.append({'type': 'image_url', 'image_url': {'url': data_url}})
+                        new_content.append(
+                            {"type": "image_url", "image_url": {"url": data_url}}
+                        )
                     continue
                 # 真正的远端 URL 原样保留
                 new_content.append(item)
@@ -305,10 +319,10 @@ async def process_multimodal_content(msg: Dict[str, Any]) -> Dict[str, Any]:
         if data_url is None:
             new_content.append(item)
         else:
-            new_content.append({'type': 'image_url', 'image_url': {'url': data_url}})
+            new_content.append({"type": "image_url", "image_url": {"url": data_url}})
 
     role = msg.get("role")
     if role == "user":
         new_content = augment_multimodal_content_list_for_llm(new_content)
-    msg['content'] = new_content
+    msg["content"] = new_content
     return msg

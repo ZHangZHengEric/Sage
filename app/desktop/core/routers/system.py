@@ -27,7 +27,7 @@ async def check_version():
     此处作为 Proxy，请求远程服务器获取最新版本信息，并转换为 Tauri 需要的格式。
     """
     remote_url = os.getenv("SAGE_UPDATE_URL", "https://api.sage.com/version/check")
-    
+
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(remote_url, timeout=10.0)
@@ -38,34 +38,31 @@ async def check_version():
         # In a real scenario, you might want to return an empty response or log the error
         # Here we return a default/empty response to avoid crashing the client
         return TauriUpdateResponse(
-            version="0.0.0",
-            notes=f"Check failed: {str(e)}",
-            pub_date="",
-            platforms={}
+            version="0.0.0", notes=f"Check failed: {str(e)}", pub_date="", platforms={}
         )
-    
+
     data = user_data.get("data", {})
     artifacts = data.get("artifacts", [])
-    
+
     platforms = {}
     for artifact in artifacts:
         platform_key = artifact.get("platform")
         if platform_key:
             platforms[platform_key] = {
                 "url": artifact.get("url"),
-                "signature": artifact.get("signature", "")
+                "signature": artifact.get("signature", ""),
             }
-            
+
     # Tauri prefers UTC ISO format with Z
     pub_date = data.get("pub_date", "")
     if pub_date and not pub_date.endswith("Z") and "+" not in pub_date:
         pub_date += "Z"
-        
+
     return TauriUpdateResponse(
         version=data.get("version", "0.0.0"),
         notes=data.get("release_notes", ""),
         pub_date=pub_date,
-        platforms=platforms
+        platforms=platforms,
     )
 
 
@@ -77,17 +74,17 @@ async def get_system_info(request: Request):
         include_desktop_flags=True,
     )
     data["allow_registration"] = False
-    return await Response.succ(
-        data=data,
-        message="获取系统信息成功"
-    )
+    return await Response.succ(data=data, message="获取系统信息成功")
+
 
 @system_router.post("/system/update_settings", response_model=BaseResponse[dict])
 async def update_system_settings(request: Request, req: SystemSettingsRequest):
     claims = getattr(request.state, "user_claims", {}) or {}
     role = claims.get("role")
     if role != "admin":
-        return await Response.error(code=403, message="权限不足", error_detail="permission denied")
+        return await Response.error(
+            code=403, message="权限不足", error_detail="permission denied"
+        )
 
     await system_service.update_allow_registration(req.allow_registration)
     return await Response.succ(data={}, message="系统设置更新成功")

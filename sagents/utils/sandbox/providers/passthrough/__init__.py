@@ -4,4 +4,4 @@
 
 from .passthrough import PassthroughSandboxProvider
 
-__all__ = ['PassthroughSandboxProvider']
+__all__ = ["PassthroughSandboxProvider"]

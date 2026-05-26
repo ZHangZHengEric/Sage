@@ -16,7 +16,9 @@ class TestCliErrorHandling(unittest.TestCase):
         payload = _build_cli_error_payload(exc, verbose=True)
 
         self.assertEqual(payload["message"], "Workspace path is not writable")
-        self.assertEqual(payload["next_steps"], ["Choose a writable `--workspace` path."])
+        self.assertEqual(
+            payload["next_steps"], ["Choose a writable `--workspace` path."]
+        )
         self.assertEqual(payload["debug_detail"], "debug-info")
 
     def test_build_payload_from_module_not_found_adds_install_hint(self):

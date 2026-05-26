@@ -66,7 +66,9 @@ class MCPServerDao(BaseDao):
                 await session.merge(existing)
                 return existing
             else:
-                obj = MCPServer(name=name, config=config, created_at=now, updated_at=now)
+                obj = MCPServer(
+                    name=name, config=config, created_at=now, updated_at=now
+                )
                 if user_id is not None:
                     obj.user_id = user_id
                 session.add(obj)

@@ -6,6 +6,7 @@
 - glob 支持 ** 跨目录、按 mtime 倒序
 - list_dir 直接复用 sandbox.get_file_tree 限制深度
 """
+
 from __future__ import annotations
 
 import os
@@ -16,7 +17,9 @@ import time
 import pytest
 
 from sagents.tool.impl.codebase_tool import CodebaseTool
-from sagents.utils.sandbox.providers.passthrough.passthrough import PassthroughSandboxProvider
+from sagents.utils.sandbox.providers.passthrough.passthrough import (
+    PassthroughSandboxProvider,
+)
 
 
 pytestmark = [pytest.mark.timeout(30)]
@@ -39,7 +42,9 @@ def codebase_env(monkeypatch):
     with open(os.path.join(tmp, "README.md"), "w") as f:
         f.write("# project\n\nNo todo here.\n")
 
-    sandbox = PassthroughSandboxProvider(sandbox_id="cb-test", sandbox_agent_workspace=tmp)
+    sandbox = PassthroughSandboxProvider(
+        sandbox_id="cb-test", sandbox_agent_workspace=tmp
+    )
     tool = CodebaseTool()
     monkeypatch.setattr(tool, "_get_sandbox", lambda session_id: sandbox)
     yield tool, sandbox, tmp
@@ -47,6 +52,7 @@ def codebase_env(monkeypatch):
 
 
 # ===== grep =====
+
 
 async def test_grep_content_finds_matches(codebase_env):
     tool, _, _ = codebase_env
@@ -60,14 +66,18 @@ async def test_grep_content_finds_matches(codebase_env):
 
 async def test_grep_no_match_returns_empty(codebase_env):
     tool, _, _ = codebase_env
-    out = await tool.grep(pattern="this_string_does_not_exist_anywhere", session_id="s1")
+    out = await tool.grep(
+        pattern="this_string_does_not_exist_anywhere", session_id="s1"
+    )
     assert out["success"] is True
     assert out["count"] == 0
 
 
 async def test_grep_files_with_matches_mode(codebase_env):
     tool, _, _ = codebase_env
-    out = await tool.grep(pattern="TODO", output_mode="files_with_matches", session_id="s1")
+    out = await tool.grep(
+        pattern="TODO", output_mode="files_with_matches", session_id="s1"
+    )
     assert out["success"] is True
     assert out["output_mode"] == "files_with_matches"
     assert any(f.endswith("beta.py") for f in out["files"])
@@ -103,6 +113,7 @@ async def test_grep_falls_back_when_rg_missing(codebase_env, monkeypatch):
 
 # ===== glob =====
 
+
 async def test_glob_double_star_matches_nested_files(codebase_env):
     tool, _, _ = codebase_env
     out = await tool.glob(pattern="**/*.py", session_id="s1")
@@ -131,6 +142,7 @@ async def test_glob_invalid_pattern(codebase_env):
 
 
 # ===== list_dir =====
+
 
 async def test_list_dir_returns_tree_string(codebase_env):
     tool, _, _ = codebase_env

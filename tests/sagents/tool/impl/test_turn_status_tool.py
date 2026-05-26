@@ -1,4 +1,5 @@
 """turn_status 工具的轻量单测：校验入参、返回结构与描述。"""
+
 import asyncio
 
 from sagents.tool.impl.turn_status_tool import TurnStatusTool
@@ -14,7 +15,9 @@ def test_turn_status_accepts_terminal_status():
 
 def test_turn_status_continue_work_does_not_end():
     tool = TurnStatusTool()
-    out = asyncio.run(tool.turn_status(status="continue_work", note="more work", session_id="s1"))
+    out = asyncio.run(
+        tool.turn_status(status="continue_work", note="more work", session_id="s1")
+    )
     assert out["success"] is True
     assert out["status"] == "success"
     assert out["should_end"] is False

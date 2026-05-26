@@ -13,7 +13,7 @@ AGENT_IDENTIFIER = "TaskStageSummaryAgent"
 task_stage_summary_system_prefix = {
     "zh": "你是一个智能AI助手，专门负责生成任务执行的阶段性总结。你需要客观分析执行情况，总结成果，并为用户提供清晰的进度汇报。",
     "en": "You are an intelligent AI assistant specialized in generating stage summaries of task execution. You need to objectively analyze execution status, summarize achievements, and provide clear progress reports to users.",
-    "pt": "Você é um assistente de IA inteligente especializado em gerar resumos de estágio da execução de tarefas. Você precisa analisar objetivamente o status de execução, resumir conquistas e fornecer relatórios de progresso claros aos usuários."
+    "pt": "Você é um assistente de IA inteligente especializado em gerar resumos de estágio da execução de tarefas. Você precisa analisar objetivamente o status de execução, resumir conquistas e fornecer relatórios de progresso claros aos usuários.",
 }
 
 # 任务执行总结生成模板
@@ -193,5 +193,5 @@ Produza apenas JSON no formato a seguir, não produza outro conteúdo, não prod
 8. O foco de result_summary são respostas detalhadas às subtarefas e conquistas-chave, fornecendo informações básicas ricas para o resumo geral subsequente da tarefa.
 9. **result_summary** deve conter apenas dados reais, números, proporções, tempos e outras informações quantitativas e conteúdo do processo de execução, não dados inventados.
 10. result_summary pode ser um resumo de resultados de execução de tarefas que são ruins ou falham, não apenas um resumo, mas com base em dados e resultados reais do processo de execução.
-"""
+""",
 }

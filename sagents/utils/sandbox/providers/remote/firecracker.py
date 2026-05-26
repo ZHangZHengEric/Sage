@@ -129,7 +129,7 @@ class FirecrackerSandboxProvider(RemoteSandboxProvider):
         include_hidden: bool = False,
     ) -> List[FileInfo]:
         """列出目录内容"""
-        result = await self.execute_command(f"ls -la {path}")
+        await self.execute_command(f"ls -la {path}")
         # 解析 ls 输出... (简化实现)
         return []
 
@@ -145,9 +145,7 @@ class FirecrackerSandboxProvider(RemoteSandboxProvider):
         """清理沙箱资源"""
         if self._vm_id:
             # TODO: 停止并删除 Firecracker VM
-            logger.info(
-                f"FirecrackerSandboxProvider: 删除 MicroVM {self._vm_id}"
-            )
+            logger.info(f"FirecrackerSandboxProvider: 删除 MicroVM {self._vm_id}")
             self._vm_id = None
             self._is_initialized = False
 

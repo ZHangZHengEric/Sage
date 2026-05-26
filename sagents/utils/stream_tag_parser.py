@@ -31,7 +31,7 @@ def judge_delta_content_type(
     end_tag_process_list: List[str] = []
     for tag in end_tag:
         for i in range(len(tag)):
-            end_tag_process_list.append(tag[:i + 1])
+            end_tag_process_list.append(tag[: i + 1])
 
     last_tag = None
     last_tag_index: Optional[int] = None
@@ -50,12 +50,12 @@ def judge_delta_content_type(
 
     if last_tag in start_tag:
         if last_tag_index + len(last_tag) == len(all_tokens_str):
-            return 'tag'
+            return "tag"
         for end_tag_process in end_tag_process_list:
             if all_tokens_str.endswith(end_tag_process):
-                return 'unknown'
+                return "unknown"
         return last_tag.replace("<", "").replace(">", "")
     elif last_tag in end_tag:
-        return 'tag'
+        return "tag"
 
     return "tag"

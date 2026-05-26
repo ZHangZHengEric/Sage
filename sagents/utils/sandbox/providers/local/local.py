@@ -88,12 +88,16 @@ class LocalSandboxProvider(ISandboxHandle):
 
         if self._volume_mounts:
             for mount in self._volume_mounts:
-                roots.append((
-                    os.path.realpath(os.path.abspath(mount.host_path)),
-                    bool(getattr(mount, "read_only", False)),
-                ))
+                roots.append(
+                    (
+                        os.path.realpath(os.path.abspath(mount.host_path)),
+                        bool(getattr(mount, "read_only", False)),
+                    )
+                )
         elif self._file_system is not None:
-            roots.append((os.path.realpath(os.path.abspath(self._file_system.host_path)), False))
+            roots.append(
+                (os.path.realpath(os.path.abspath(self._file_system.host_path)), False)
+            )
         elif self._sandbox_agent_workspace:
             roots.append((os.path.realpath(self._sandbox_agent_workspace), False))
 
@@ -115,7 +119,9 @@ class LocalSandboxProvider(ISandboxHandle):
         except ValueError:
             return False
 
-    def _validate_host_path_allowed(self, host_path: str, operation: str = "read") -> str:
+    def _validate_host_path_allowed(
+        self, host_path: str, operation: str = "read"
+    ) -> str:
         """Ensure a resolved host path is inside the workspace or explicit mounts."""
         actual = os.path.realpath(os.path.abspath(host_path))
         write_operation = operation in {"write", "delete", "mkdir"}
@@ -152,7 +158,9 @@ class LocalSandboxProvider(ISandboxHandle):
         if self._file_system is None:
             from .filesystem import SandboxFileSystem
 
-            logger.debug(f"LocalSandboxProvider: Initializing with workspace={self._sandbox_agent_workspace}")
+            logger.debug(
+                f"LocalSandboxProvider: Initializing with workspace={self._sandbox_agent_workspace}"
+            )
 
             # 显式传入 volume_mounts 时以其为准；否则用 sandbox_agent_workspace 作 1:1 宿主机映射
             if self._volume_mounts:
@@ -164,12 +172,14 @@ class LocalSandboxProvider(ISandboxHandle):
                         mount_path=self._sandbox_agent_workspace,
                     )
                 ]
-            
+
             # 使用 volume_mounts 创建文件系统
             self._file_system = SandboxFileSystem(volume_mounts)
 
             # venv / 运行时目录必须落在宿主机路径上（虚拟路径如 /sage-workspace 不可直接 mkdir）
-            host_workspace = self._file_system.to_host_path(self._sandbox_agent_workspace)
+            host_workspace = self._file_system.to_host_path(
+                self._sandbox_agent_workspace
+            )
 
             # 设置 venv 目录（desktop 可切换为共享 venv）
             self._venv_dir = resolve_python_venv_dir(host_workspace)
@@ -178,7 +188,10 @@ class LocalSandboxProvider(ISandboxHandle):
                 os.makedirs(sandbox_runtime_dir, exist_ok=True)
 
             # 初始化隔离层（如果需要）
-            if self._linux_isolation_mode != "subprocess" or self._macos_isolation_mode != "subprocess":
+            if (
+                self._linux_isolation_mode != "subprocess"
+                or self._macos_isolation_mode != "subprocess"
+            ):
                 self._init_isolation()
 
     async def _ensure_initialized_async(self):
@@ -194,18 +207,28 @@ class LocalSandboxProvider(ISandboxHandle):
                 self._isolation = SeatbeltIsolation(
                     venv_dir=self._venv_dir,
                     sandbox_agent_workspace=self._sandbox_agent_workspace,
-                    sandbox_runtime_dir=resolve_sandbox_runtime_dir(self._sandbox_agent_workspace),
+                    sandbox_runtime_dir=resolve_sandbox_runtime_dir(
+                        self._sandbox_agent_workspace
+                    ),
                     volume_mounts=self._volume_mounts,
-                    limits={"cpu_time": self._cpu_time_limit, "memory": self._memory_limit_mb * 1024 * 1024},
+                    limits={
+                        "cpu_time": self._cpu_time_limit,
+                        "memory": self._memory_limit_mb * 1024 * 1024,
+                    },
                 )
         else:
             if self._linux_isolation_mode == "bwrap":
                 self._isolation = BwrapIsolation(
                     venv_dir=self._venv_dir,
                     sandbox_agent_workspace=self._sandbox_agent_workspace,
-                    sandbox_runtime_dir=resolve_sandbox_runtime_dir(self._sandbox_agent_workspace),
+                    sandbox_runtime_dir=resolve_sandbox_runtime_dir(
+                        self._sandbox_agent_workspace
+                    ),
                     volume_mounts=self._volume_mounts,
-                    limits={"cpu_time": self._cpu_time_limit, "memory": self._memory_limit_mb * 1024 * 1024},
+                    limits={
+                        "cpu_time": self._cpu_time_limit,
+                        "memory": self._memory_limit_mb * 1024 * 1024,
+                    },
                 )
 
     def _get_venv_python(self) -> Optional[str]:
@@ -238,9 +261,13 @@ class LocalSandboxProvider(ISandboxHandle):
                     new_mode = current_mode | 0o111
                     if current_mode != new_mode:
                         os.chmod(python_path, new_mode)
-                        logger.info(f"[LocalSandboxProvider] 添加执行权限: {python_path}")
+                        logger.info(
+                            f"[LocalSandboxProvider] 添加执行权限: {python_path}"
+                        )
                 except Exception as e:
-                    logger.warning(f"[LocalSandboxProvider] 添加执行权限失败 {python_path}: {e}")
+                    logger.warning(
+                        f"[LocalSandboxProvider] 添加执行权限失败 {python_path}: {e}"
+                    )
 
     def _ensure_python3_link(self):
         """确保 venv 中同时存在 python 和 python3 命令"""
@@ -256,7 +283,9 @@ class LocalSandboxProvider(ISandboxHandle):
         if os.path.exists(python_path) and not os.path.exists(python3_path):
             try:
                 os.symlink("python", python3_path)
-                logger.info(f"[LocalSandboxProvider] 创建 python3 符号链接: {python3_path}")
+                logger.info(
+                    f"[LocalSandboxProvider] 创建 python3 符号链接: {python3_path}"
+                )
             except Exception as e:
                 logger.warning(f"[LocalSandboxProvider] 创建 python3 符号链接失败: {e}")
 
@@ -264,7 +293,9 @@ class LocalSandboxProvider(ISandboxHandle):
         if os.path.exists(python3_path) and not os.path.exists(python_path):
             try:
                 os.symlink("python3", python_path)
-                logger.info(f"[LocalSandboxProvider] 创建 python 符号链接: {python_path}")
+                logger.info(
+                    f"[LocalSandboxProvider] 创建 python 符号链接: {python_path}"
+                )
             except Exception as e:
                 logger.warning(f"[LocalSandboxProvider] 创建 python 符号链接失败: {e}")
 
@@ -290,7 +321,9 @@ class LocalSandboxProvider(ISandboxHandle):
                 raise RuntimeError("无法找到系统 Python 解释器")
 
             # 使用 subprocess 调用 python -m venv 创建虚拟环境
-            logger.info(f"[LocalSandboxProvider] 创建虚拟环境: {self._venv_dir} 使用 Python: {system_python}")
+            logger.info(
+                f"[LocalSandboxProvider] 创建虚拟环境: {self._venv_dir} 使用 Python: {system_python}"
+            )
             result = await asyncio.to_thread(
                 subprocess.run,
                 [system_python, "-m", "venv", self._venv_dir],
@@ -319,9 +352,16 @@ class LocalSandboxProvider(ISandboxHandle):
             return
 
         install_cmd = [
-            venv_python, "-m", "pip", "install", "-U", "uv",
-            "--index-url", "https://mirrors.aliyun.com/pypi/simple/",
-            "--trusted-host", "mirrors.aliyun.com",
+            venv_python,
+            "-m",
+            "pip",
+            "install",
+            "-U",
+            "uv",
+            "--index-url",
+            "https://mirrors.aliyun.com/pypi/simple/",
+            "--trusted-host",
+            "mirrors.aliyun.com",
         ]
         result = await asyncio.to_thread(
             subprocess.run, install_cmd, capture_output=True, text=True, timeout=180
@@ -338,7 +378,9 @@ class LocalSandboxProvider(ISandboxHandle):
         if fallback_result.returncode == 0:
             logger.info("[LocalSandboxProvider] uv 已安装到 venv（默认源）")
         else:
-            logger.warning(f"[LocalSandboxProvider] 预装 uv 失败，不影响后续执行: {fallback_result.stderr}")
+            logger.warning(
+                f"[LocalSandboxProvider] 预装 uv 失败，不影响后续执行: {fallback_result.stderr}"
+            )
 
     @property
     def sandbox_type(self) -> SandboxType:
@@ -398,12 +440,16 @@ class LocalSandboxProvider(ISandboxHandle):
         await self._ensure_initialized_async()
         converted = self._convert_paths_in_command(command)
         host_workdir = (
-            self.to_host_path(workdir) if workdir else self.to_host_path(self._sandbox_agent_workspace)
+            self.to_host_path(workdir)
+            if workdir
+            else self.to_host_path(self._sandbox_agent_workspace)
         )
         host_workdir = self._validate_host_path_allowed(host_workdir, operation="read")
         host_log_dir = self.to_host_path(log_dir) if log_dir else None
         if host_log_dir:
-            host_log_dir = self._validate_host_path_allowed(host_log_dir, operation="write")
+            host_log_dir = self._validate_host_path_allowed(
+                host_log_dir, operation="write"
+            )
         return self._bg_runner.start(
             converted,
             workdir=host_workdir,
@@ -420,7 +466,9 @@ class LocalSandboxProvider(ISandboxHandle):
     async def read_background_output_range(
         self, task_id: str, offset: int = 0, max_bytes: int = 1 << 20
     ):
-        return self._bg_runner.read_range_bytes(task_id, offset=offset, max_bytes=max_bytes)
+        return self._bg_runner.read_range_bytes(
+            task_id, offset=offset, max_bytes=max_bytes
+        )
 
     async def is_background_alive(self, task_id: str) -> bool:
         return self._bg_runner.is_alive(task_id)
@@ -442,7 +490,7 @@ class LocalSandboxProvider(ISandboxHandle):
             if path not in self._allowed_paths:
                 self._allowed_paths.append(path)
         # 如果隔离层已初始化，也需要更新
-        if self._isolation and hasattr(self._isolation, 'allowed_paths'):
+        if self._isolation and hasattr(self._isolation, "allowed_paths"):
             for path in paths:
                 if path not in self._isolation.allowed_paths:
                     self._isolation.allowed_paths.append(path)
@@ -452,8 +500,10 @@ class LocalSandboxProvider(ISandboxHandle):
         if self._allowed_paths:
             self._allowed_paths = [p for p in self._allowed_paths if p not in paths]
         # 如果隔离层已初始化，也需要更新
-        if self._isolation and hasattr(self._isolation, 'allowed_paths'):
-            self._isolation.allowed_paths = [p for p in self._isolation.allowed_paths if p not in paths]
+        if self._isolation and hasattr(self._isolation, "allowed_paths"):
+            self._isolation.allowed_paths = [
+                p for p in self._isolation.allowed_paths if p not in paths
+            ]
 
     def get_allowed_paths(self) -> List[str]:
         """获取当前允许访问的路径列表"""
@@ -464,7 +514,9 @@ class LocalSandboxProvider(ISandboxHandle):
         if self._file_system:
             host_path = self._file_system.to_host_path(virtual_path)
             if host_path != virtual_path:
-                logger.debug(f"LocalSandboxProvider: Path conversion: {virtual_path} -> {host_path}")
+                logger.debug(
+                    f"LocalSandboxProvider: Path conversion: {virtual_path} -> {host_path}"
+                )
             return host_path
         return virtual_path
 
@@ -476,32 +528,32 @@ class LocalSandboxProvider(ISandboxHandle):
 
     def _convert_paths_in_command(self, command: str) -> str:
         """Convert virtual paths to host paths in command string
-        
+
         This method finds path-like patterns in the command and converts
         virtual paths to host paths.
         """
         if not command:
             return command
-            
+
         # Pattern to match common path patterns:
         # - Absolute paths starting with / (e.g., /sage-workspace, /tmp)
         # - Paths in quotes (single or double)
         # This is a simple heuristic and may need refinement
-        
+
         converted_command = command
-        
+
         # Find all potential paths (simplified approach)
         # Look for patterns like: /path/to/file, "/path/to/file", '/path/to/file'
         path_pattern = r'["\']?(/[a-zA-Z0-9_\-./]+)["\']?'
-        
+
         def replace_path(match):
             full_match = match.group(0)
             path = match.group(1)
-            
+
             # Check if this looks like a virtual path we should convert
             # Convert the path
             host_path = self.to_host_path(path)
-            
+
             # If conversion changed the path, replace it
             if host_path != path:
                 # Preserve quotes if they existed
@@ -512,7 +564,7 @@ class LocalSandboxProvider(ISandboxHandle):
                 else:
                     return host_path
             return full_match
-        
+
         converted_command = re.sub(path_pattern, replace_path, converted_command)
         return converted_command
 
@@ -520,13 +572,17 @@ class LocalSandboxProvider(ISandboxHandle):
         with open(actual_path, "r", encoding=encoding) as f:
             return f.read()
 
-    def _write_file_sync(self, actual_path: str, content: str, encoding: str, mode: str) -> None:
+    def _write_file_sync(
+        self, actual_path: str, content: str, encoding: str, mode: str
+    ) -> None:
         os.makedirs(os.path.dirname(actual_path), exist_ok=True)
         write_mode = "a" if mode == "append" else "w"
         with open(actual_path, write_mode, encoding=encoding) as f:
             f.write(content)
 
-    def _list_directory_sync(self, actual_path: str, include_hidden: bool) -> List[FileInfo]:
+    def _list_directory_sync(
+        self, actual_path: str, include_hidden: bool
+    ) -> List[FileInfo]:
         if not os.path.isdir(actual_path):
             return []
 
@@ -568,10 +624,13 @@ class LocalSandboxProvider(ISandboxHandle):
                 shutil.rmtree(host_dest_path)
 
             if ignore_patterns:
+
                 def ignore_filter(_dir, files):
                     ignored = []
                     for pattern in ignore_patterns:
-                        ignored.extend([f for f in files if fnmatch.fnmatch(f, pattern)])
+                        ignored.extend(
+                            [f for f in files if fnmatch.fnmatch(f, pattern)]
+                        )
                     return ignored
 
                 shutil.copytree(host_source_path, host_dest_path, ignore=ignore_filter)
@@ -596,15 +655,20 @@ class LocalSandboxProvider(ISandboxHandle):
 
         # 转换工作目录
         actual_workdir = (
-            self.to_host_path(workdir) if workdir else self.to_host_path(self._sandbox_agent_workspace)
+            self.to_host_path(workdir)
+            if workdir
+            else self.to_host_path(self._sandbox_agent_workspace)
         )
-        actual_workdir = self._validate_host_path_allowed(actual_workdir, operation="read")
+        actual_workdir = self._validate_host_path_allowed(
+            actual_workdir, operation="read"
+        )
 
         # 转换命令中的虚拟路径为宿主机路径
         converted_command = self._convert_paths_in_command(command)
         if converted_command != command:
-            logger.info(f"LocalSandboxProvider: Command path conversion: {command} -> {converted_command}")
-
+            logger.info(
+                f"LocalSandboxProvider: Command path conversion: {command} -> {converted_command}"
+            )
 
         # 准备环境变量
         env = os.environ.copy()
@@ -627,7 +691,9 @@ class LocalSandboxProvider(ISandboxHandle):
         if bundled_node_bin and os.path.exists(bundled_node_bin):
             # 将打包的 Node.js bin 目录添加到 PATH 最前面
             env["PATH"] = bundled_node_bin + os.pathsep + env.get("PATH", "")
-            logger.debug(f"LocalSandboxProvider: Added bundled Node.js bin to PATH: {bundled_node_bin}")
+            logger.debug(
+                f"LocalSandboxProvider: Added bundled Node.js bin to PATH: {bundled_node_bin}"
+            )
             # 设置 SAGE_USING_BUNDLED_NODE 标记
             env["SAGE_USING_BUNDLED_NODE"] = "1"
 
@@ -640,26 +706,36 @@ class LocalSandboxProvider(ISandboxHandle):
                 # 避免重复添加
                 if sage_bin not in env.get("PATH", ""):
                     env["PATH"] = sage_bin + os.pathsep + env.get("PATH", "")
-                    logger.debug(f"LocalSandboxProvider: Added Sage node bin to PATH: {sage_bin}")
+                    logger.debug(
+                        f"LocalSandboxProvider: Added Sage node bin to PATH: {sage_bin}"
+                    )
             # 设置 NODE_PATH 以便 require 能找到模块
             env["NODE_PATH"] = sage_node_modules_dir
-            logger.debug(f"LocalSandboxProvider: Set NODE_PATH: {sage_node_modules_dir}")
+            logger.debug(
+                f"LocalSandboxProvider: Set NODE_PATH: {sage_node_modules_dir}"
+            )
 
         # 添加 Sage node_modules/.bin 到 PATH（优先使用真正安装的包）
         # 使用环境变量 NODE_PATH 的值（通常是 ~/.sage/.sage_node_env）
         node_path_env = env.get("NODE_PATH") or os.environ.get("NODE_PATH")
         if node_path_env:
             sage_node_env_bin = os.path.join(node_path_env, "node_modules", ".bin")
-            if os.path.exists(sage_node_env_bin) and sage_node_env_bin not in env.get("PATH", ""):
+            if os.path.exists(sage_node_env_bin) and sage_node_env_bin not in env.get(
+                "PATH", ""
+            ):
                 env["PATH"] = sage_node_env_bin + os.pathsep + env.get("PATH", "")
-                logger.debug(f"LocalSandboxProvider: Added Sage node_modules/.bin to PATH: {sage_node_env_bin}")
+                logger.debug(
+                    f"LocalSandboxProvider: Added Sage node_modules/.bin to PATH: {sage_node_env_bin}"
+                )
 
         # 为 npm/npx 配置项目级缓存，避免写入用户主目录 ~/.npm 导致权限问题
         npm_cache_dir = os.path.join(os.path.expanduser("~"), ".sage", ".npm-cache")
         try:
             os.makedirs(npm_cache_dir, exist_ok=True)
         except Exception as e:
-            logger.warning(f"LocalSandboxProvider: Failed to create npm cache dir {npm_cache_dir}: {e}")
+            logger.warning(
+                f"LocalSandboxProvider: Failed to create npm cache dir {npm_cache_dir}: {e}"
+            )
         env.setdefault("npm_config_cache", npm_cache_dir)
         env.setdefault("NPM_CONFIG_CACHE", npm_cache_dir)
 
@@ -671,35 +747,41 @@ class LocalSandboxProvider(ISandboxHandle):
         if self._isolation:
             try:
                 payload = {
-                    'mode': 'shell',
-                    'command': converted_command,
-                    'cwd': actual_workdir,
+                    "mode": "shell",
+                    "command": converted_command,
+                    "cwd": actual_workdir,
                 }
                 result = await self._isolation.execute(payload, cwd=actual_workdir)
                 if isinstance(result, dict):
                     return CommandResult(
-                        success=result.get('success', True),
-                        stdout=result.get('output', ''),
-                        stderr='',
-                        return_code=0 if result.get('success', True) else 1,
+                        success=result.get("success", True),
+                        stdout=result.get("output", ""),
+                        stderr="",
+                        return_code=0 if result.get("success", True) else 1,
                         execution_time=0,
                     )
                 else:
                     return CommandResult(
                         success=True,
                         stdout=str(result),
-                        stderr='',
+                        stderr="",
                         return_code=0,
                         execution_time=0,
                     )
             except Exception as e:
                 # 隔离层执行失败，永久禁用隔离层并回退到直接执行
                 # 避免每次执行都重复尝试和报错
-                if "Operation not permitted" in str(e) or "Seatbelt execution failed" in str(e):
-                    logger.warning(f"Isolation layer failed permanently (sandbox-exec not permitted), disabling isolation: {e}")
+                if "Operation not permitted" in str(
+                    e
+                ) or "Seatbelt execution failed" in str(e):
+                    logger.warning(
+                        f"Isolation layer failed permanently (sandbox-exec not permitted), disabling isolation: {e}"
+                    )
                     self._isolation = None  # 永久禁用隔离层
                 else:
-                    logger.error(f"Isolation execution failed: {e}, falling back to direct execution")
+                    logger.error(
+                        f"Isolation execution failed: {e}, falling back to direct execution"
+                    )
 
         # 使用异步 subprocess 执行命令，避免阻塞
         proc = None
@@ -723,12 +805,11 @@ class LocalSandboxProvider(ISandboxHandle):
                 while True:
                     try:
                         chunk = await asyncio.wait_for(
-                            proc.stdout.read(4096),
-                            timeout=0.5
+                            proc.stdout.read(4096), timeout=0.5
                         )
                         if not chunk:
                             break
-                        chunk_text = chunk.decode('utf-8', errors='replace')
+                        chunk_text = chunk.decode("utf-8", errors="replace")
                         collected_output.append(chunk_text)
                         echo_chunk(chunk_text)
                     except asyncio.TimeoutError:
@@ -736,7 +817,7 @@ class LocalSandboxProvider(ISandboxHandle):
                         if proc.returncode is not None:
                             break
                         continue
-                return ''.join(collected_output)
+                return "".join(collected_output)
 
             try:
                 stdout_text = await asyncio.wait_for(
@@ -752,7 +833,7 @@ class LocalSandboxProvider(ISandboxHandle):
                 )
             except asyncio.TimeoutError:
                 # 超时发生时，返回已收集的输出
-                stdout_text = ''.join(collected_output)
+                stdout_text = "".join(collected_output)
                 if proc:
                     try:
                         proc.kill()
@@ -768,7 +849,7 @@ class LocalSandboxProvider(ISandboxHandle):
                 )
         except Exception as e:
             # 其他异常，返回已收集的输出
-            stdout_text = ''.join(collected_output)
+            stdout_text = "".join(collected_output)
             if proc:
                 try:
                     proc.kill()
@@ -803,9 +884,13 @@ class LocalSandboxProvider(ISandboxHandle):
         import tempfile
 
         actual_workdir = (
-            self.to_host_path(workdir) if workdir else self.to_host_path(self._sandbox_agent_workspace)
+            self.to_host_path(workdir)
+            if workdir
+            else self.to_host_path(self._sandbox_agent_workspace)
         )
-        actual_workdir = self._validate_host_path_allowed(actual_workdir, operation="read")
+        actual_workdir = self._validate_host_path_allowed(
+            actual_workdir, operation="read"
+        )
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(code)
@@ -830,8 +915,8 @@ class LocalSandboxProvider(ISandboxHandle):
                     proc.communicate(),
                     timeout=timeout,
                 )
-                stdout_text = stdout.decode('utf-8', errors='replace') if stdout else ""
-                stderr_text = stderr.decode('utf-8', errors='replace') if stderr else ""
+                stdout_text = stdout.decode("utf-8", errors="replace") if stdout else ""
+                stderr_text = stderr.decode("utf-8", errors="replace") if stderr else ""
 
                 return ExecutionResult(
                     success=proc.returncode == 0,
@@ -876,7 +961,9 @@ class LocalSandboxProvider(ISandboxHandle):
         import tempfile
 
         actual_workdir = (
-            self.to_host_path(workdir) if workdir else self.to_host_path(self._sandbox_agent_workspace)
+            self.to_host_path(workdir)
+            if workdir
+            else self.to_host_path(self._sandbox_agent_workspace)
         )
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
@@ -899,8 +986,8 @@ class LocalSandboxProvider(ISandboxHandle):
                     proc.communicate(),
                     timeout=timeout,
                 )
-                stdout_text = stdout.decode('utf-8', errors='replace') if stdout else ""
-                stderr_text = stderr.decode('utf-8', errors='replace') if stderr else ""
+                stdout_text = stdout.decode("utf-8", errors="replace") if stdout else ""
+                stderr_text = stderr.decode("utf-8", errors="replace") if stderr else ""
 
                 return ExecutionResult(
                     success=proc.returncode == 0,
@@ -944,7 +1031,9 @@ class LocalSandboxProvider(ISandboxHandle):
         await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
         actual_path = self._validate_host_path_allowed(actual_path, operation="write")
-        await asyncio.to_thread(self._write_file_sync, actual_path, content, encoding, mode)
+        await asyncio.to_thread(
+            self._write_file_sync, actual_path, content, encoding, mode
+        )
 
     async def file_exists(self, path: str) -> bool:
         """检查文件是否存在"""
@@ -980,7 +1069,9 @@ class LocalSandboxProvider(ISandboxHandle):
         await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
         actual_path = self._validate_host_path_allowed(actual_path, operation="read")
-        return await asyncio.to_thread(self._list_directory_sync, actual_path, include_hidden)
+        return await asyncio.to_thread(
+            self._list_directory_sync, actual_path, include_hidden
+        )
 
     async def ensure_directory(self, path: str) -> None:
         """确保目录存在"""
@@ -1001,27 +1092,29 @@ class LocalSandboxProvider(ISandboxHandle):
         root_path: Optional[str] = None,
         include_hidden: bool = False,
         max_depth: Optional[int] = None,
-        max_items_per_dir: int = 5
+        max_items_per_dir: int = 5,
     ) -> str:
         """
         获取文件树结构（紧凑格式）
-        
+
         使用 filesystem 的 get_file_tree_compact 方法
         """
         await self._ensure_initialized_async()
-        
+
         if self._file_system:
             # 转换虚拟路径为宿主机路径
             host_root_path = self.to_host_path(root_path) if root_path else None
             if host_root_path:
-                host_root_path = self._validate_host_path_allowed(host_root_path, operation="read")
+                host_root_path = self._validate_host_path_allowed(
+                    host_root_path, operation="read"
+                )
             return await self._file_system.get_file_tree_compact(
                 include_hidden=include_hidden,
                 root_path=host_root_path,
                 max_depth=max_depth,
                 max_items_per_dir=max_items_per_dir,
             )
-        
+
         # Fallback: 使用基本实现
         return await asyncio.to_thread(
             self._basic_get_file_tree,
@@ -1030,90 +1123,113 @@ class LocalSandboxProvider(ISandboxHandle):
             max_depth,
             max_items_per_dir,
         )
-    
+
     def _basic_get_file_tree(
         self,
         root_path: Optional[str] = None,
         include_hidden: bool = False,
         max_depth: Optional[int] = None,
-        max_items_per_dir: int = 5
+        max_items_per_dir: int = 5,
     ) -> str:
         """基本的文件树实现（当 filesystem 不可用时）"""
         target_root = (
-            self.to_host_path(root_path) if root_path else self.to_host_path(self._sandbox_agent_workspace)
+            self.to_host_path(root_path)
+            if root_path
+            else self.to_host_path(self._sandbox_agent_workspace)
         )
         target_root = self._validate_host_path_allowed(target_root, operation="read")
-        
+
         if not os.path.exists(target_root):
             return ""
-        
-        ALWAYS_HIDDEN_DIRS = {'.sandbox', '.git', '.idea', '.vscode', '__pycache__', 'node_modules', 'venv', '.DS_Store'}
+
+        ALWAYS_HIDDEN_DIRS = {
+            ".sandbox",
+            ".git",
+            ".idea",
+            ".vscode",
+            "__pycache__",
+            "node_modules",
+            "venv",
+            ".DS_Store",
+        }
         target_root = os.path.abspath(target_root)
         base_depth = target_root.rstrip(os.sep).count(os.sep)
-        
+
         result = []
         root_name = os.path.basename(target_root) or "workspace"
         result.append(f"{root_name}/")
-        
+
         for root, dirs, files in os.walk(target_root):
             current_depth = root.rstrip(os.sep).count(os.sep) - base_depth
-            
+
             if max_depth is not None and current_depth >= max_depth:
                 dirs[:] = []
-            
-            dirs[:] = [d for d in dirs if d not in ALWAYS_HIDDEN_DIRS and (include_hidden or not d.startswith('.'))]
-            filtered_files = [f for f in files if f not in ALWAYS_HIDDEN_DIRS and (include_hidden or not f.startswith('.'))]
-            
+
+            dirs[:] = [
+                d
+                for d in dirs
+                if d not in ALWAYS_HIDDEN_DIRS
+                and (include_hidden or not d.startswith("."))
+            ]
+            filtered_files = [
+                f
+                for f in files
+                if f not in ALWAYS_HIDDEN_DIRS
+                and (include_hidden or not f.startswith("."))
+            ]
+
             rel_root = os.path.relpath(root, target_root)
-            if rel_root == '.':
-                rel_root = ''
-            
+            if rel_root == ".":
+                rel_root = ""
+
             path_parts = rel_root.split(os.sep) if rel_root else []
             indent = "  " * len(path_parts)
-            
+
             if current_depth > 0:
-                items = [('dir', d) for d in sorted(dirs)]
+                items = [("dir", d) for d in sorted(dirs)]
                 shown_items = items[:max_items_per_dir]
                 hidden_count = len(items) - len(shown_items)
-                
+
                 for _, item_name in shown_items:
                     result.append(f"{indent}  {item_name}/")
-                
+
                 if hidden_count > 0:
                     result.append(f"{indent}  ... (and {hidden_count} more dirs)")
-                
+
                 if current_depth >= 1:
                     dirs[:] = []
             else:
-                items = [('dir', d) for d in sorted(dirs)]
-                items.extend([('file', f) for f in sorted(filtered_files)])
-                
+                items = [("dir", d) for d in sorted(dirs)]
+                items.extend([("file", f) for f in sorted(filtered_files)])
+
                 for item_type, item_name in items:
-                    suffix = "/" if item_type == 'dir' else ""
+                    suffix = "/" if item_type == "dir" else ""
                     result.append(f"{indent}  {item_name}{suffix}")
-            
-            if rel_root == 'skills':
+
+            if rel_root == "skills":
                 dirs[:] = []
-        
+
         return "\n".join(result)
 
     async def copy_from_host(
         self,
         host_source_path: str,
         sandbox_dest_path: str,
-        ignore_patterns: Optional[List[str]] = None
+        ignore_patterns: Optional[List[str]] = None,
     ) -> bool:
         """
         从宿主机复制文件/目录到沙箱
-        
+
         本地沙箱实现：直接复制到宿主机路径
         """
         await self._ensure_initialized_async()
-        
+
         # 转换沙箱虚拟路径为宿主机路径
         host_dest_path = self.to_host_path(sandbox_dest_path)
-        host_dest_path = self._validate_host_path_allowed(host_dest_path, operation="write")
-        
+        host_dest_path = self._validate_host_path_allowed(
+            host_dest_path, operation="write"
+        )
+
         try:
             copied = await asyncio.to_thread(
                 self._copy_from_host_path_sync,
@@ -1124,8 +1240,10 @@ class LocalSandboxProvider(ISandboxHandle):
             if not copied:
                 logger.warning(f"源路径不存在: {host_source_path}")
                 return False
-            
-            logger.debug(f"复制成功: {host_source_path} -> {sandbox_dest_path} (实际: {host_dest_path})")
+
+            logger.debug(
+                f"复制成功: {host_source_path} -> {sandbox_dest_path} (实际: {host_dest_path})"
+            )
             return True
         except Exception as e:
             logger.error(f"复制失败: {host_source_path} -> {sandbox_dest_path}: {e}")

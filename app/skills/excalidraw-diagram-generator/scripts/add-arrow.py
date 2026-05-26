@@ -22,15 +22,16 @@ import json
 import sys
 import uuid
 from pathlib import Path
-from typing import Dict, Any
 
 
 def generate_unique_id() -> str:
     """Generate a unique ID for Excalidraw elements."""
-    return str(uuid.uuid4()).replace('-', '')[:16]
+    return str(uuid.uuid4()).replace("-", "")[:16]
 
 
-def prepare_edit_path(diagram_path: Path, use_edit_suffix: bool) -> tuple[Path, Path | None]:
+def prepare_edit_path(
+    diagram_path: Path, use_edit_suffix: bool
+) -> tuple[Path, Path | None]:
     """
     Prepare a safe edit path to avoid editor overwrite issues.
 
@@ -73,11 +74,11 @@ def create_arrow(
     to_y: float,
     style: str = "solid",
     color: str = "#1e1e1e",
-    label: str = None
+    label: str = None,
 ) -> list:
     """
     Create an arrow element.
-    
+
     Args:
         from_x: Starting X coordinate
         from_y: Starting Y coordinate
@@ -86,12 +87,12 @@ def create_arrow(
         style: Line style (solid, dashed, dotted)
         color: Arrow color
         label: Optional text label on the arrow
-    
+
     Returns:
         List of elements (arrow and optional label)
     """
     elements = []
-    
+
     # Arrow element
     arrow = {
         "id": generate_unique_id(),
@@ -111,9 +112,7 @@ def create_arrow(
         "groupIds": [],
         "frameId": None,
         "index": "a0",
-        "roundness": {
-            "type": 2
-        },
+        "roundness": {"type": 2},
         "seed": 1000000000 + hash(f"{from_x}{from_y}{to_x}{to_y}") % 1000000000,
         "version": 1,
         "versionNonce": 2000000000 + hash(f"{from_x}{from_y}{to_x}{to_y}") % 1000000000,
@@ -122,23 +121,20 @@ def create_arrow(
         "updated": 1738195200000,
         "link": None,
         "locked": False,
-        "points": [
-            [0, 0],
-            [to_x - from_x, to_y - from_y]
-        ],
+        "points": [[0, 0], [to_x - from_x, to_y - from_y]],
         "startBinding": None,
         "endBinding": None,
         "startArrowhead": None,
         "endArrowhead": "arrow",
-        "lastCommittedPoint": None
+        "lastCommittedPoint": None,
     }
     elements.append(arrow)
-    
+
     # Optional label
     if label:
         mid_x = (from_x + to_x) / 2 - (len(label) * 5)
         mid_y = (from_y + to_y) / 2 - 10
-        
+
         label_element = {
             "id": generate_unique_id(),
             "type": "text",
@@ -174,10 +170,10 @@ def create_arrow(
             "containerId": None,
             "originalText": label,
             "autoResize": True,
-            "lineHeight": 1.25
+            "lineHeight": 1.25,
         }
         elements.append(label_element)
-    
+
     return elements
 
 
@@ -189,11 +185,11 @@ def add_arrow_to_diagram(
     to_y: float,
     style: str = "solid",
     color: str = "#1e1e1e",
-    label: str = None
+    label: str = None,
 ) -> None:
     """
     Add an arrow to an Excalidraw diagram.
-    
+
     Args:
         diagram_path: Path to the Excalidraw diagram file
         from_x: Starting X coordinate
@@ -206,99 +202,107 @@ def add_arrow_to_diagram(
     """
     print(f"Creating arrow from ({from_x}, {from_y}) to ({to_x}, {to_y})")
     arrow_elements = create_arrow(from_x, from_y, to_x, to_y, style, color, label)
-    
+
     if label:
         print(f"  With label: '{label}'")
-    
+
     # Load diagram
     print(f"Loading diagram: {diagram_path}")
-    with open(diagram_path, 'r', encoding='utf-8') as f:
+    with open(diagram_path, "r", encoding="utf-8") as f:
         diagram = json.load(f)
-    
+
     # Add arrow elements
-    if 'elements' not in diagram:
-        diagram['elements'] = []
-    
-    original_count = len(diagram['elements'])
-    diagram['elements'].extend(arrow_elements)
-    print(f"  Added {len(arrow_elements)} elements (total: {original_count} -> {len(diagram['elements'])})")
-    
+    if "elements" not in diagram:
+        diagram["elements"] = []
+
+    original_count = len(diagram["elements"])
+    diagram["elements"].extend(arrow_elements)
+    print(
+        f"  Added {len(arrow_elements)} elements (total: {original_count} -> {len(diagram['elements'])})"
+    )
+
     # Save diagram
-    print(f"Saving diagram")
-    with open(diagram_path, 'w', encoding='utf-8') as f:
+    print("Saving diagram")
+    with open(diagram_path, "w", encoding="utf-8") as f:
         json.dump(diagram, f, indent=2, ensure_ascii=False)
-    
-    print(f"✓ Successfully added arrow to diagram")
+
+    print("✓ Successfully added arrow to diagram")
 
 
 def main():
     """Main entry point."""
     if len(sys.argv) < 6:
-        print("Usage: python add-arrow.py <diagram_path> <from_x> <from_y> <to_x> <to_y> [OPTIONS]")
+        print(
+            "Usage: python add-arrow.py <diagram_path> <from_x> <from_y> <to_x> <to_y> [OPTIONS]"
+        )
         print("\nOptions:")
         print("  --style {solid|dashed|dotted}    Line style (default: solid)")
         print("  --color HEX                      Color (default: #1e1e1e)")
         print("  --label TEXT                     Text label on arrow")
-        print("  --use-edit-suffix                Edit via .excalidraw.edit to avoid editor overwrite issues (enabled by default; use --no-use-edit-suffix to disable)")
+        print(
+            "  --use-edit-suffix                Edit via .excalidraw.edit to avoid editor overwrite issues (enabled by default; use --no-use-edit-suffix to disable)"
+        )
         print("\nExamples:")
         print("  python add-arrow.py diagram.excalidraw 300 200 500 300")
         print("  python add-arrow.py diagram.excalidraw 300 200 500 300 --label 'HTTP'")
         sys.exit(1)
-    
+
     diagram_path = Path(sys.argv[1])
     from_x = float(sys.argv[2])
     from_y = float(sys.argv[3])
     to_x = float(sys.argv[4])
     to_y = float(sys.argv[5])
-    
+
     # Parse optional arguments
     style = "solid"
     color = "#1e1e1e"
     label = None
     # Default: use edit suffix to avoid editor overwrite issues
     use_edit_suffix = True
-    
+
     i = 6
     while i < len(sys.argv):
-        if sys.argv[i] == '--style':
+        if sys.argv[i] == "--style":
             if i + 1 < len(sys.argv):
                 style = sys.argv[i + 1]
-                if style not in ['solid', 'dashed', 'dotted']:
-                    print(f"Error: Invalid style '{style}'. Must be: solid, dashed, or dotted")
+                if style not in ["solid", "dashed", "dotted"]:
+                    print(
+                        f"Error: Invalid style '{style}'. Must be: solid, dashed, or dotted"
+                    )
                     sys.exit(1)
                 i += 2
             else:
                 print("Error: --style requires an argument")
                 sys.exit(1)
-        elif sys.argv[i] == '--color':
+        elif sys.argv[i] == "--color":
             if i + 1 < len(sys.argv):
                 color = sys.argv[i + 1]
                 i += 2
             else:
                 print("Error: --color requires an argument")
                 sys.exit(1)
-        elif sys.argv[i] == '--label':
+        elif sys.argv[i] == "--label":
             if i + 1 < len(sys.argv):
                 label = sys.argv[i + 1]
                 i += 2
             else:
                 print("Error: --label requires a text argument")
                 sys.exit(1)
-        elif sys.argv[i] == '--use-edit-suffix':
+        elif sys.argv[i] == "--use-edit-suffix":
             use_edit_suffix = True
             i += 1
-        elif sys.argv[i] == '--no-use-edit-suffix':
+        elif sys.argv[i] == "--no-use-edit-suffix":
             use_edit_suffix = False
             i += 1
         else:
             print(f"Error: Unknown option: {sys.argv[i]}")
             sys.exit(1)
-    
+
     # Validate inputs
     if not diagram_path.exists():
         print(f"Error: Diagram file not found: {diagram_path}")
         sys.exit(1)
-    
+
     try:
         work_path, final_path = prepare_edit_path(diagram_path, use_edit_suffix)
         add_arrow_to_diagram(work_path, from_x, from_y, to_x, to_y, style, color, label)
@@ -308,5 +312,5 @@ def main():
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

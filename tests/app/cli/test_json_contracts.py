@@ -14,7 +14,9 @@ import app.cli.service as cli_service
 class TestCliJsonContracts(unittest.TestCase):
     def test_stream_contract_fixture_uses_supported_event_types(self):
         fixture_path = (
-            Path(__file__).resolve().parent / "fixtures" / "stream_contract_round_trip.jsonl"
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "stream_contract_round_trip.jsonl"
         )
         events = [
             json.loads(line)
@@ -83,7 +85,9 @@ class TestCliJsonContracts(unittest.TestCase):
             "next_steps": ["Run `sage doctor`."],
         }
 
-        with patch.object(cli_service, "write_cli_config_file", return_value=fake_result):
+        with patch.object(
+            cli_service, "write_cli_config_file", return_value=fake_result
+        ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
                 exit_code = cli_main._config_init_command(args)
@@ -97,7 +101,15 @@ class TestCliJsonContracts(unittest.TestCase):
 
     def test_provider_verify_command_json_outputs_verification_payload(self):
         args = cli_main.build_argument_parser().parse_args(
-            ["provider", "verify", "--json", "--model", "demo-chat", "--base-url", "https://example.com/v1"]
+            [
+                "provider",
+                "verify",
+                "--json",
+                "--model",
+                "demo-chat",
+                "--base-url",
+                "https://example.com/v1",
+            ]
         )
         fake_result = {
             "status": "ok",
@@ -114,7 +126,9 @@ class TestCliJsonContracts(unittest.TestCase):
         }
 
         async def _run():
-            with patch.object(cli_service, "verify_cli_provider", return_value=fake_result):
+            with patch.object(
+                cli_service, "verify_cli_provider", return_value=fake_result
+            ):
                 stdout = io.StringIO()
                 with redirect_stdout(stdout):
                     exit_code = await cli_main._provider_command(args)

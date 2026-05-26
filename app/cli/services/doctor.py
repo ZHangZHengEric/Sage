@@ -100,7 +100,9 @@ def collect_doctor_info() -> Dict[str, Any]:
     local_defaults = config.get_local_storage_defaults()
     shared_env_file = local_defaults["env_file"]
     project_env_file = os.path.abspath(".env")
-    effective_env_file = shared_env_file if os.path.exists(shared_env_file) else project_env_file
+    effective_env_file = (
+        shared_env_file if os.path.exists(shared_env_file) else project_env_file
+    )
     env_files = [shared_env_file]
     if os.path.exists(project_env_file):
         env_files.append(project_env_file)
@@ -117,12 +119,15 @@ def collect_doctor_info() -> Dict[str, Any]:
 
     return {
         "status": status,
-        "python": os.environ.get("PYTHON_BIN") or os.environ.get("CONDA_PYTHON_EXE") or "python",
+        "python": os.environ.get("PYTHON_BIN")
+        or os.environ.get("CONDA_PYTHON_EXE")
+        or "python",
         "cwd": os.getcwd(),
         "cwd_writable": os.access(os.getcwd(), os.W_OK),
         "env_file": effective_env_file,
         "env_files": env_files,
-        "env_file_exists": os.path.exists(shared_env_file) or os.path.exists(project_env_file),
+        "env_file_exists": os.path.exists(shared_env_file)
+        or os.path.exists(project_env_file),
         "app_mode": cfg.app_mode,
         "auth_mode": cfg.auth_mode,
         "port": cfg.port,
@@ -170,7 +175,9 @@ async def probe_default_provider() -> Dict[str, Any]:
         )
         return {
             "status": "ok" if result.get("supported") else "error",
-            "message": "Default provider probe succeeded" if result.get("supported") else "Default provider probe failed",
+            "message": "Default provider probe succeeded"
+            if result.get("supported")
+            else "Default provider probe failed",
             "response": result.get("response"),
         }
     except Exception as exc:
@@ -186,7 +193,9 @@ def collect_config_info() -> Dict[str, Any]:
     local_defaults = config.get_local_storage_defaults()
     shared_env_file = local_defaults["env_file"]
     project_env_file = os.path.abspath(".env")
-    effective_env_file = shared_env_file if os.path.exists(shared_env_file) else project_env_file
+    effective_env_file = (
+        shared_env_file if os.path.exists(shared_env_file) else project_env_file
+    )
     env_files = [shared_env_file]
     if os.path.exists(project_env_file):
         env_files.append(project_env_file)
@@ -215,13 +224,23 @@ def collect_config_info() -> Dict[str, Any]:
             "SAGE_CLI_USER_ID": os.environ.get("SAGE_CLI_USER_ID"),
             "SAGE_CLI_MAX_LOOP_COUNT": os.environ.get("SAGE_CLI_MAX_LOOP_COUNT"),
             "SAGE_DESKTOP_USER_ID": os.environ.get("SAGE_DESKTOP_USER_ID"),
-            "SAGE_DEFAULT_LLM_API_KEY": "(set)" if os.environ.get("SAGE_DEFAULT_LLM_API_KEY") else None,
-            "SAGE_DEFAULT_LLM_API_BASE_URL": os.environ.get("SAGE_DEFAULT_LLM_API_BASE_URL"),
-            "SAGE_DEFAULT_LLM_MODEL_NAME": os.environ.get("SAGE_DEFAULT_LLM_MODEL_NAME"),
+            "SAGE_DEFAULT_LLM_API_KEY": "(set)"
+            if os.environ.get("SAGE_DEFAULT_LLM_API_KEY")
+            else None,
+            "SAGE_DEFAULT_LLM_API_BASE_URL": os.environ.get(
+                "SAGE_DEFAULT_LLM_API_BASE_URL"
+            ),
+            "SAGE_DEFAULT_LLM_MODEL_NAME": os.environ.get(
+                "SAGE_DEFAULT_LLM_MODEL_NAME"
+            ),
             "SAGE_DB_TYPE": os.environ.get("SAGE_DB_TYPE"),
-            "SAGE_SESSION_MEMORY_BACKEND": os.environ.get("SAGE_SESSION_MEMORY_BACKEND"),
+            "SAGE_SESSION_MEMORY_BACKEND": os.environ.get(
+                "SAGE_SESSION_MEMORY_BACKEND"
+            ),
             "SAGE_FILE_MEMORY_BACKEND": os.environ.get("SAGE_FILE_MEMORY_BACKEND"),
-            "SAGE_SESSION_MEMORY_STRATEGY": os.environ.get("SAGE_SESSION_MEMORY_STRATEGY"),
+            "SAGE_SESSION_MEMORY_STRATEGY": os.environ.get(
+                "SAGE_SESSION_MEMORY_STRATEGY"
+            ),
         },
     }
 
@@ -261,7 +280,9 @@ def build_minimal_cli_env_template() -> str:
     return "\n".join(lines)
 
 
-def write_cli_config_file(*, path: Optional[str] = None, force: bool = False) -> Dict[str, Any]:
+def write_cli_config_file(
+    *, path: Optional[str] = None, force: bool = False
+) -> Dict[str, Any]:
     output_target = path or config.get_local_storage_defaults()["env_file"]
     os.makedirs(os.path.dirname(os.path.abspath(output_target)), exist_ok=True)
     output_path = os.path.abspath(output_target)
@@ -285,4 +306,3 @@ def write_cli_config_file(*, path: Optional[str] = None, force: bool = False) ->
             "Run `sage doctor` to verify the generated config.",
         ],
     }
-

@@ -8,6 +8,7 @@
 运行示例：
   conda run -n zz python3 /Users/zhangzheng/zavixai/Sage/tests/test_extract_text_from_xlsx.py
 """
+
 import os
 import sys
 import types
@@ -22,14 +23,19 @@ def _inject_stubs():
         import pdfplumber  # noqa: F401
     except Exception:
         mod = types.ModuleType("pdfplumber")
+
         class _DummyPDF:
             def __enter__(self):
                 return self
+
             def __exit__(self, exc_type, exc, tb):
                 return False
+
             pages = []
+
         def _open(*args, **kwargs):
             return _DummyPDF()
+
         mod.open = _open
         sys.modules["pdfplumber"] = mod
 
@@ -38,8 +44,10 @@ def _inject_stubs():
         import pypandoc  # noqa: F401
     except Exception:
         mod = types.ModuleType("pypandoc")
+
         def _convert_file(*args, **kwargs):
             return ""
+
         mod.convert_file = _convert_file
         sys.modules["pypandoc"] = mod
 
@@ -48,9 +56,11 @@ def _inject_stubs():
         import pptx  # noqa: F401
     except Exception:
         mod = types.ModuleType("pptx")
+
         class Presentation:  # minimal stub
             def __init__(self, *args, **kwargs):
                 pass
+
         mod.Presentation = Presentation
         sys.modules["pptx"] = mod
 
@@ -59,12 +69,15 @@ def _inject_stubs():
         import html2text  # noqa: F401
     except Exception:
         mod = types.ModuleType("html2text")
+
         class HTML2Text:
             def __init__(self):
                 self.ignore_links = True
                 self.bodywidth = 0
+
             def handle(self, content: str) -> str:
                 return content
+
         mod.HTML2Text = HTML2Text
         sys.modules["html2text"] = mod
 
@@ -73,9 +86,12 @@ def _inject_stubs():
         import sagents.utils.logger  # noqa: F401
     except Exception:
         import logging
+
         # 创建分层模块：sagents -> sagents.utils -> sagents.utils.logger
         sagents_mod = sys.modules.get("sagents") or types.ModuleType("sagents")
-        utils_mod = getattr(sagents_mod, "utils", None) or types.ModuleType("sagents.utils")
+        utils_mod = getattr(sagents_mod, "utils", None) or types.ModuleType(
+            "sagents.utils"
+        )
         logger_mod = types.ModuleType("sagents.utils.logger")
         # 简单 logger
         logging.basicConfig(level=logging.INFO)
@@ -92,11 +108,15 @@ def _inject_stubs():
         from sagents.context.session_context import SessionContext  # noqa: F401
     except Exception:
         sagents_mod = sys.modules.get("sagents") or types.ModuleType("sagents")
-        context_mod = getattr(sagents_mod, "context", None) or types.ModuleType("sagents.context")
+        context_mod = getattr(sagents_mod, "context", None) or types.ModuleType(
+            "sagents.context"
+        )
         session_mod = types.ModuleType("sagents.context.session_context")
+
         class SessionContext:  # minimal stub
             def __init__(self):
                 self.session_id = "test"
+
         session_mod.SessionContext = SessionContext
         context_mod.session_context = session_mod
         sagents_mod.context = context_mod

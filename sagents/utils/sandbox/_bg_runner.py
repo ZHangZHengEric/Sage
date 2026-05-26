@@ -42,7 +42,9 @@ class HostBackgroundRunner:
         try:
             os.makedirs(self._log_dir, exist_ok=True)
         except Exception as exc:
-            logger.warning(f"HostBackgroundRunner: 创建日志目录失败 {self._log_dir}: {exc}")
+            logger.warning(
+                f"HostBackgroundRunner: 创建日志目录失败 {self._log_dir}: {exc}"
+            )
         self._tasks: Dict[str, Dict[str, Any]] = {}
 
     @property
@@ -80,7 +82,9 @@ class HostBackgroundRunner:
                 creationflags = 0
                 # DETACHED_PROCESS = 0x8, CREATE_NEW_PROCESS_GROUP = 0x200
                 creationflags |= getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-                creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+                creationflags |= getattr(
+                    subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
+                )
                 creationflags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
                 proc = subprocess.Popen(
                     command,
@@ -121,7 +125,9 @@ class HostBackgroundRunner:
             "command": command,
             "started_at": time.time(),
         }
-        logger.info(f"HostBackgroundRunner: 启动后台任务 task_id={task_id} pid={proc.pid}")
+        logger.info(
+            f"HostBackgroundRunner: 启动后台任务 task_id={task_id} pid={proc.pid}"
+        )
         return {"task_id": task_id, "pid": proc.pid, "log_path": log_path}
 
     def read_tail(self, task_id: str, max_bytes: int = 8192) -> str:
@@ -147,7 +153,7 @@ class HostBackgroundRunner:
             if truncated:
                 nl = data.find(b"\n")
                 if 0 <= nl < min(len(data), 4096):
-                    data = data[nl + 1:]
+                    data = data[nl + 1 :]
             return data.decode("utf-8", errors="replace")
         except FileNotFoundError:
             return ""
@@ -155,7 +161,9 @@ class HostBackgroundRunner:
             logger.warning(f"HostBackgroundRunner: 读取日志失败 {path}: {exc}")
             return ""
 
-    def read_range_bytes(self, task_id: str, offset: int = 0, max_bytes: int = 1 << 20) -> Tuple[str, int]:
+    def read_range_bytes(
+        self, task_id: str, offset: int = 0, max_bytes: int = 1 << 20
+    ) -> Tuple[str, int]:
         """从 ``offset`` 字节起向后读到末尾，返回 ``(text, new_offset)``。
 
         用于 progress 通道做"零重复、零丢失"的纯增量推送：
@@ -238,6 +246,7 @@ class HostBackgroundRunner:
                     proc.terminate()
             else:
                 import signal
+
                 sig = signal.SIGKILL if force else signal.SIGTERM
                 pgid = None
                 try:

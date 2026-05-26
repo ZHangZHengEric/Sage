@@ -59,7 +59,6 @@ if "opentelemetry" not in sys.modules:
     sys.modules["opentelemetry.context"] = context_module
 
 from common.services import chat_service
-from common.services import chat_stream_manager
 from common.services import conversation_service
 from common.services.chat_stream_manager import StreamManager
 
@@ -105,7 +104,9 @@ class _FakeStreamService:
         return
 
 
-def test_execute_chat_session_persists_token_usage_when_generator_closes_early(monkeypatch):
+def test_execute_chat_session_persists_token_usage_when_generator_closes_early(
+    monkeypatch,
+):
     calls = []
 
     async def _fake_persist(stream_service, *, token_usage_payload=None):
@@ -115,7 +116,9 @@ def test_execute_chat_session_persists_token_usage_when_generator_closes_early(m
     async def _fake_finalize(request, original_skills):
         calls.append("finalize")
 
-    monkeypatch.setattr(chat_service, "_persist_token_usage_if_available", _fake_persist)
+    monkeypatch.setattr(
+        chat_service, "_persist_token_usage_if_available", _fake_persist
+    )
     monkeypatch.setattr(chat_service, "_finalize_session_end", _fake_finalize)
 
     async def _run():
@@ -193,7 +196,9 @@ def test_stream_manager_stop_session_times_out_when_background_task_hangs(monkey
     elapsed = asyncio.run(_run())
 
     # 应在 timeout (100ms) 附近返回，给充分余量避免 CI 抖动误报。
-    assert elapsed < 1.0, f"stop_session 在背景 task 卡死时未及时返回，elapsed={elapsed:.3f}s"
+    assert elapsed < 1.0, (
+        f"stop_session 在背景 task 卡死时未及时返回，elapsed={elapsed:.3f}s"
+    )
 
 
 def test_stream_manager_background_worker_aclose_has_own_timeout(monkeypatch):
@@ -221,7 +226,9 @@ def test_stream_manager_background_worker_aclose_has_own_timeout(monkeypatch):
         session_id = "session-worker-aclose-hang"
         lock = asyncio.Lock()
         await lock.acquire()
-        await manager.start_session(session_id, "query", _GeneratorWithHangingAclose(), lock)
+        await manager.start_session(
+            session_id, "query", _GeneratorWithHangingAclose(), lock
+        )
         session = manager._sessions[session_id]
         start = asyncio.get_event_loop().time()
         await asyncio.wait_for(session.task, timeout=1.0)
@@ -230,7 +237,9 @@ def test_stream_manager_background_worker_aclose_has_own_timeout(monkeypatch):
 
     elapsed, task_done, lock_locked = asyncio.run(_run())
 
-    assert elapsed < 1.0, f"background worker aclose 卡死时未及时返回，elapsed={elapsed:.3f}s"
+    assert elapsed < 1.0, (
+        f"background worker aclose 卡死时未及时返回，elapsed={elapsed:.3f}s"
+    )
     assert task_done is True
     assert lock_locked is False
 
@@ -248,7 +257,9 @@ def test_persist_cancel_protection_waits_for_normal_completion(monkeypatch):
     monkeypatch.setattr(conversation_service, "persist_session_state", _fake_persist)
 
     async def _run():
-        await conversation_service.persist_session_state_with_cancel_protection("persist-normal")
+        await conversation_service.persist_session_state_with_cancel_protection(
+            "persist-normal"
+        )
         events.append(("returned", "persist-normal"))
 
     asyncio.run(_run())
@@ -280,7 +291,9 @@ def test_persist_cancel_protection_backgrounds_on_caller_cancellation(monkeypatc
         started = asyncio.Event()
         finish = asyncio.Event()
         task = asyncio.create_task(
-            conversation_service.persist_session_state_with_cancel_protection("persist-cancel")
+            conversation_service.persist_session_state_with_cancel_protection(
+                "persist-cancel"
+            )
         )
         await started.wait()
         task.cancel()
@@ -325,11 +338,15 @@ def test_persist_cancel_protection_coalesces_same_session(monkeypatch):
         started = asyncio.Event()
         finish = asyncio.Event()
         first = asyncio.create_task(
-            conversation_service.persist_session_state_with_cancel_protection("persist-singleflight")
+            conversation_service.persist_session_state_with_cancel_protection(
+                "persist-singleflight"
+            )
         )
         await started.wait()
         second = asyncio.create_task(
-            conversation_service.persist_session_state_with_cancel_protection("persist-singleflight")
+            conversation_service.persist_session_state_with_cancel_protection(
+                "persist-singleflight"
+            )
         )
         await asyncio.sleep(0)
         finish.set()

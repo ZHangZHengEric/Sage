@@ -25,7 +25,9 @@ def test_logger_skips_framework_file_handlers_when_disabled(monkeypatch, tmp_pat
     logger = logger_module.Logger(log_dir=str(tmp_path))
 
     assert logger.file_logging_enabled is False
-    assert not any(isinstance(handler, logging.FileHandler) for handler in logger.logger.handlers)
+    assert not any(
+        isinstance(handler, logging.FileHandler) for handler in logger.logger.handlers
+    )
     assert not (tmp_path / "sage_debug.log").exists()
 
     logger.stop_periodic_cleanup()

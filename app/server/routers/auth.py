@@ -35,7 +35,9 @@ from ..services.user import (
 auth_router = APIRouter(prefix="/api/auth", tags=["Auth"])
 
 
-@auth_router.post("/register/send-code", response_model=BaseResponse[RegisterVerificationCodeResponse])
+@auth_router.post(
+    "/register/send-code", response_model=BaseResponse[RegisterVerificationCodeResponse]
+)
 async def send_register_code(req: RegisterVerificationCodeRequest):
     if not is_local_registration_enabled():
         return await Response.error(
@@ -45,7 +47,9 @@ async def send_register_code(req: RegisterVerificationCodeRequest):
         )
     expires_in, retry_after = await send_register_verification_code(req.email)
     return await Response.succ(
-        data=RegisterVerificationCodeResponse(expires_in=expires_in, retry_after=retry_after),
+        data=RegisterVerificationCodeResponse(
+            expires_in=expires_in, retry_after=retry_after
+        ),
         message="验证码发送成功",
     )
 
@@ -65,7 +69,9 @@ async def register(req: RegisterRequest):
         req.phonenum,
         req.verification_code,
     )
-    return await Response.succ(data=RegisterResponse(user_id=user_id), message="注册成功")
+    return await Response.succ(
+        data=RegisterResponse(user_id=user_id), message="注册成功"
+    )
 
 
 @auth_router.post("/login", response_model=BaseResponse[LoginResponse])

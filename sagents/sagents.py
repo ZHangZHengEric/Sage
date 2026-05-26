@@ -10,7 +10,15 @@ from sagents.skill import SkillManager, SkillProxy
 from sagents.tool import ToolManager, ToolProxy
 from sagents.tool.impl import HIDDEN_FROM_STREAM_TOOL_NAMES
 from sagents.utils.logger import logger
-from sagents.flow.schema import AgentFlow, SequenceNode, ParallelNode, AgentNode, IfNode, SwitchNode, LoopNode
+from sagents.flow.schema import (
+    AgentFlow,
+    SequenceNode,
+    ParallelNode,
+    AgentNode,
+    IfNode,
+    SwitchNode,
+    LoopNode,
+)
 from sagents.session_runtime import get_global_session_manager
 from sagents.utils.sandbox.config import VolumeMount
 from sagents.observability.prometheus_handler import record_agent_first_token
@@ -132,12 +140,19 @@ def _redact_hidden_tools_from_chunk(
 
 
 class SAgent:
-    def __init__(self, session_root_space: str, enable_obs: bool = True, sandbox_type: Optional[str] = None):
+    def __init__(
+        self,
+        session_root_space: str,
+        enable_obs: bool = True,
+        sandbox_type: Optional[str] = None,
+    ):
         self.session_root_space = str(session_root_space)
         self.enable_obs = enable_obs
         # 优先使用传入的参数，其次从环境变量读取，默认使用 local
         self.sandbox_type = sandbox_type or os.environ.get("SAGE_SANDBOX_MODE", "local")
-        self.session_manager = get_global_session_manager(session_root_space=self.session_root_space, enable_obs=enable_obs)
+        self.session_manager = get_global_session_manager(
+            session_root_space=self.session_root_space, enable_obs=enable_obs
+        )
 
     async def run_stream(
         self,
@@ -253,9 +268,9 @@ class SAgent:
 
         # 确定沙箱类型（优先级：参数 > __init__ > 环境变量 > 默认）
         effective_sandbox_type = (
-            sandbox_type or
-            self.sandbox_type or
-            os.environ.get("SAGE_SANDBOX_MODE", "local")
+            sandbox_type
+            or self.sandbox_type
+            or os.environ.get("SAGE_SANDBOX_MODE", "local")
         )
 
         # 确保 volume_mounts 是列表
@@ -276,11 +291,15 @@ class SAgent:
         elif effective_sandbox_type == "passthrough":
             # passthrough 模式必须有 sandbox_agent_workspace
             if not sandbox_agent_workspace:
-                raise ValueError("passthrough 沙箱模式需要提供 sandbox_agent_workspace 参数")
+                raise ValueError(
+                    "passthrough 沙箱模式需要提供 sandbox_agent_workspace 参数"
+                )
 
-        logger.debug(f"run_stream: sandbox_type={effective_sandbox_type}, "
-                    f"sandbox_id={sandbox_id}, "
-                    f"volume_mounts_count={len(volume_mounts)}")
+        logger.debug(
+            f"run_stream: sandbox_type={effective_sandbox_type}, "
+            f"sandbox_id={sandbox_id}, "
+            f"volume_mounts_count={len(volume_mounts)}"
+        )
         start_time = time.time()
         first_show_time = None
 
@@ -298,7 +317,9 @@ class SAgent:
             elif isinstance(msg, dict) and not msg.get("session_id"):
                 msg["session_id"] = session_id
 
-        session = self.session_manager.get_or_create(session_id, sandbox_type=effective_sandbox_type)
+        session = self.session_manager.get_or_create(
+            session_id, sandbox_type=effective_sandbox_type
+        )
         session.configure_runtime(
             model=model,
             model_config=model_config,
@@ -311,12 +332,16 @@ class SAgent:
         )
 
         if session.observability_manager:
-            session.observability_manager.on_chain_start(session_id=session_id, input_data=input_messages)
+            session.observability_manager.on_chain_start(
+                session_id=session_id, input_data=input_messages
+            )
 
         # 构建执行流程
         flow = custom_flow
         if flow is None:
-            flow = self._build_default_flow(agent_mode=agent_mode, max_loop_count=max_loop_count)
+            flow = self._build_default_flow(
+                agent_mode=agent_mode, max_loop_count=max_loop_count
+            )
 
         message_timings: Dict[str, Dict[str, Any]] = {}
         last_started_stat: Optional[Dict[str, Any]] = None
@@ -327,22 +352,22 @@ class SAgent:
         hidden_tool_state = _HiddenToolStreamState()
         try:
             async for message_chunks in session.run_stream_safe(
-                    input_messages=input_messages,
-                    flow=flow,
-                    tool_manager=tool_manager,
-                    skill_manager=skill_manager,
-                    session_id=session_id,
-                    user_id=user_id,
-                    deep_thinking=deep_thinking,
-                    max_loop_count=max_loop_count,
-                    agent_mode=agent_mode,
-                    more_suggest=more_suggest,
-                    force_summary=force_summary,
-                    system_context=system_context,
-                    available_workflows=available_workflows or {},
-                    context_budget_config=context_budget_config,
-                    custom_sub_agents=custom_sub_agents,
-                ):
+                input_messages=input_messages,
+                flow=flow,
+                tool_manager=tool_manager,
+                skill_manager=skill_manager,
+                session_id=session_id,
+                user_id=user_id,
+                deep_thinking=deep_thinking,
+                max_loop_count=max_loop_count,
+                agent_mode=agent_mode,
+                more_suggest=more_suggest,
+                force_summary=force_summary,
+                system_context=system_context,
+                available_workflows=available_workflows or {},
+                context_budget_config=context_budget_config,
+                custom_sub_agents=custom_sub_agents,
+            ):
                 for message_chunk in message_chunks:
                     if not message_chunk.session_id:
                         message_chunk.session_id = session_id
@@ -358,14 +383,23 @@ class SAgent:
                             start_gap_ms = None
                             prev_end_gap_ms = None
                             if last_started_stat:
-                                start_gap_ms = max(0.0, (now_ts - float(last_started_stat["start_ts"])) * 1000.0)
-                                prev_end_gap_ms = max(0.0, (now_ts - float(last_started_stat["end_ts"])) * 1000.0)
+                                start_gap_ms = max(
+                                    0.0,
+                                    (now_ts - float(last_started_stat["start_ts"]))
+                                    * 1000.0,
+                                )
+                                prev_end_gap_ms = max(
+                                    0.0,
+                                    (now_ts - float(last_started_stat["end_ts"]))
+                                    * 1000.0,
+                                )
                             stat = {
                                 "message_id": message_chunk.message_id,
                                 "start_ts": now_ts,
                                 "end_ts": now_ts,
                                 "role": message_chunk.role,
-                                "message_type": message_chunk.message_type or message_chunk.type,
+                                "message_type": message_chunk.message_type
+                                or message_chunk.type,
                                 "tool_call_id": message_chunk.tool_call_id,
                                 "sequence_index": message_sequence_index,
                             }
@@ -388,7 +422,9 @@ class SAgent:
                             if not stat.get("role"):
                                 stat["role"] = message_chunk.role
                             if not stat.get("message_type"):
-                                stat["message_type"] = message_chunk.message_type or message_chunk.type
+                                stat["message_type"] = (
+                                    message_chunk.message_type or message_chunk.type
+                                )
                             if not stat.get("tool_call_id"):
                                 stat["tool_call_id"] = message_chunk.tool_call_id
 
@@ -398,17 +434,29 @@ class SAgent:
                             if content and str(content).strip():
                                 first_show_time = time.time()
                                 delta_ms = int((first_show_time - start_time) * 1000)
-                                record_agent_first_token(agent_id or "unknown", session_id, first_show_time - start_time)
-                                logger.info(f"SAgent: 会话首个可显示内容耗时 {delta_ms} ms")
+                                record_agent_first_token(
+                                    agent_id or "unknown",
+                                    session_id,
+                                    first_show_time - start_time,
+                                )
+                                logger.info(
+                                    f"SAgent: 会话首个可显示内容耗时 {delta_ms} ms"
+                                )
                         except Exception as e:
-                            logger.error(f"SAgent: 统计首个content耗时出错: {e}\n{traceback.format_exc()}")
-                    redacted = _redact_hidden_tools_from_chunk(message_chunk, hidden_tool_state)
+                            logger.error(
+                                f"SAgent: 统计首个content耗时出错: {e}\n{traceback.format_exc()}"
+                            )
+                    redacted = _redact_hidden_tools_from_chunk(
+                        message_chunk, hidden_tool_state
+                    )
                     if redacted is None:
                         continue
                     if (
                         redacted.content
                         or redacted.tool_calls
-                        or redacted.matches_message_types([MessageType.TOKEN_USAGE.value])
+                        or redacted.matches_message_types(
+                            [MessageType.TOKEN_USAGE.value]
+                        )
                     ):
                         yield [redacted]
         finally:
@@ -416,111 +464,139 @@ class SAgent:
             logger.info(f"SAgent: 会话完整执行耗时 {total_ms} ms", session_id)
             self.session_manager.close_session(session_id)
 
-    def _build_default_flow(self, agent_mode: Optional[str], max_loop_count: int) -> AgentFlow:
+    def _build_default_flow(
+        self, agent_mode: Optional[str], max_loop_count: int
+    ) -> AgentFlow:
         """构建默认的执行流程，兼容原有逻辑"""
-        
+
         # 1. 深度思考 (可选)
-        steps = [IfNode(
-            condition="is_deep_thinking",
-            true_body=AgentNode(agent_key="task_analysis")
-        )]
-        
+        steps = [
+            IfNode(
+                condition="is_deep_thinking",
+                true_body=AgentNode(agent_key="task_analysis"),
+            )
+        ]
+
         # 2. 模式选择 (Switch)
         # 预定义多智能体循环体
-        multi_agent_body = SequenceNode(steps=[
-             AgentNode(agent_key="task_planning"),
-             AgentNode(agent_key="tool_suggestion"),
-             AgentNode(agent_key="task_executor"),
-             AgentNode(agent_key="task_observation"),
-             AgentNode(agent_key="task_completion_judge")
-        ])
+        multi_agent_body = SequenceNode(
+            steps=[
+                AgentNode(agent_key="task_planning"),
+                AgentNode(agent_key="tool_suggestion"),
+                AgentNode(agent_key="task_executor"),
+                AgentNode(agent_key="task_observation"),
+                AgentNode(agent_key="task_completion_judge"),
+            ]
+        )
 
         # 预定义多智能体完整流程（包含总结）
-        multi_agent_full = SequenceNode(steps=[
-            AgentNode(agent_key="memory_recall"),
-            LoopNode(
-                condition="task_not_completed",
-                max_loops=max_loop_count,
-                body=multi_agent_body
-            ),
-            AgentNode(agent_key="task_summary")
-        ])
+        multi_agent_full = SequenceNode(
+            steps=[
+                AgentNode(agent_key="memory_recall"),
+                LoopNode(
+                    condition="task_not_completed",
+                    max_loops=max_loop_count,
+                    body=multi_agent_body,
+                ),
+                AgentNode(agent_key="task_summary"),
+            ]
+        )
 
         # 预定义简单模式
-        simple_agent_core = SequenceNode(steps=[
-            ParallelNode(branches=[
-                AgentNode(agent_key="tool_suggestion"),
-                AgentNode(agent_key="memory_recall"),
-            ]),
-            IfNode(
-                condition="enable_plan",
-                true_body=SequenceNode(steps=[
-                    AgentNode(agent_key="plan"),
-                    IfNode(
-                        condition="plan_should_start_execution",
-                        true_body=AgentNode(agent_key="simple"),
+        simple_agent_core = SequenceNode(
+            steps=[
+                ParallelNode(
+                    branches=[
+                        AgentNode(agent_key="tool_suggestion"),
+                        AgentNode(agent_key="memory_recall"),
+                    ]
+                ),
+                IfNode(
+                    condition="enable_plan",
+                    true_body=SequenceNode(
+                        steps=[
+                            AgentNode(agent_key="plan"),
+                            IfNode(
+                                condition="plan_should_start_execution",
+                                true_body=AgentNode(agent_key="simple"),
+                            ),
+                        ]
                     ),
-                ]),
-                false_body=AgentNode(agent_key="simple"),
-            ),
-            IfNode(condition="need_summary", true_body=AgentNode(agent_key="task_summary"))
-        ])
+                    false_body=AgentNode(agent_key="simple"),
+                ),
+                IfNode(
+                    condition="need_summary",
+                    true_body=AgentNode(agent_key="task_summary"),
+                ),
+            ]
+        )
         simple_agent_body = LoopNode(
             condition="self_check_should_retry",
             max_loops=3,
-            body=SequenceNode(steps=[
-                simple_agent_core,
-                AgentNode(agent_key="self_check"),
-            ]),
+            body=SequenceNode(
+                steps=[
+                    simple_agent_core,
+                    AgentNode(agent_key="self_check"),
+                ]
+            ),
         )
 
-        fib_agent_core = SequenceNode(steps=[
-            ParallelNode(branches=[
-                AgentNode(agent_key="tool_suggestion"),
-                AgentNode(agent_key="memory_recall"),
-            ]),
-            IfNode(
-                condition="enable_plan",
-                true_body=SequenceNode(steps=[
-                    AgentNode(agent_key="plan"),
-                    IfNode(
-                        condition="plan_should_start_execution",
-                        true_body=AgentNode(agent_key="fibre"),
+        fib_agent_core = SequenceNode(
+            steps=[
+                ParallelNode(
+                    branches=[
+                        AgentNode(agent_key="tool_suggestion"),
+                        AgentNode(agent_key="memory_recall"),
+                    ]
+                ),
+                IfNode(
+                    condition="enable_plan",
+                    true_body=SequenceNode(
+                        steps=[
+                            AgentNode(agent_key="plan"),
+                            IfNode(
+                                condition="plan_should_start_execution",
+                                true_body=AgentNode(agent_key="fibre"),
+                            ),
+                        ]
                     ),
-                ]),
-                false_body=AgentNode(agent_key="fibre"),
-            ),
-        ])
+                    false_body=AgentNode(agent_key="fibre"),
+                ),
+            ]
+        )
 
         fib_agent_body = LoopNode(
             condition="self_check_should_retry",
             max_loops=3,
-            body=SequenceNode(steps=[
-                fib_agent_core,
-                AgentNode(agent_key="self_check"),
-            ]),
+            body=SequenceNode(
+                steps=[
+                    fib_agent_core,
+                    AgentNode(agent_key="self_check"),
+                ]
+            ),
         )
 
-        steps.append(SwitchNode(
-            variable="agent_mode",
-            cases={
-                "fibre": fib_agent_body,
-                "simple": simple_agent_body,
-                "multi": multi_agent_full
-            },
-            default=simple_agent_body
-        ))
+        steps.append(
+            SwitchNode(
+                variable="agent_mode",
+                cases={
+                    "fibre": fib_agent_body,
+                    "simple": simple_agent_body,
+                    "multi": multi_agent_full,
+                },
+                default=simple_agent_body,
+            )
+        )
 
         # 3. 更多建议 (可选)
-        steps.append(IfNode(
-            condition="enable_more_suggest",
-            true_body=AgentNode(agent_key="query_suggest")
-        ))
-        
-        return AgentFlow(
-            name="Standard Hybrid Flow",
-            root=SequenceNode(steps=steps)
+        steps.append(
+            IfNode(
+                condition="enable_more_suggest",
+                true_body=AgentNode(agent_key="query_suggest"),
+            )
         )
+
+        return AgentFlow(name="Standard Hybrid Flow", root=SequenceNode(steps=steps))
 
     def get_session_status(self, session_id: str) -> Optional[Dict[str, Any]]:
         return self.session_manager.get_session_status(session_id)
@@ -570,6 +646,7 @@ class SAgent:
             ValueError: content 为空。
         """
         from sagents.session_runtime import _inject_user_message_via_manager
+
         return _inject_user_message_via_manager(
             self.session_manager,
             session_id,
@@ -581,7 +658,10 @@ class SAgent:
     def list_pending_user_injections(self, session_id: str) -> List[Dict[str, Any]]:
         """列出当前 session 尚未被消费的 pending 引导消息（快照，不修改状态）。"""
         from sagents.session_runtime import _list_pending_user_injections_via_manager
-        return _list_pending_user_injections_via_manager(self.session_manager, session_id)
+
+        return _list_pending_user_injections_via_manager(
+            self.session_manager, session_id
+        )
 
     def update_pending_user_injection(
         self,
@@ -591,6 +671,7 @@ class SAgent:
     ) -> bool:
         """修改尚未被消费的 pending 引导消息内容。返回 True 命中、False 未命中。"""
         from sagents.session_runtime import _update_pending_user_injection_via_manager
+
         return _update_pending_user_injection_via_manager(
             self.session_manager, session_id, guidance_id, content
         )
@@ -598,6 +679,7 @@ class SAgent:
     def delete_pending_user_injection(self, session_id: str, guidance_id: str) -> bool:
         """删除尚未被消费的 pending 引导消息。返回 True 命中、False 未命中。"""
         from sagents.session_runtime import _delete_pending_user_injection_via_manager
+
         return _delete_pending_user_injection_via_manager(
             self.session_manager, session_id, guidance_id
         )

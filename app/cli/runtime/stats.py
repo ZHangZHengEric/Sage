@@ -38,7 +38,9 @@ def _empty_stats(*, request, workspace: Optional[str]) -> Dict[str, Any]:
     }
 
 
-def _record_stats_event(stats: Dict[str, Any], event: Dict[str, Any], start_time: float) -> None:
+def _record_stats_event(
+    stats: Dict[str, Any], event: Dict[str, Any], start_time: float
+) -> None:
     def _event_timestamp() -> float:
         timestamp = event.get("timestamp")
         if isinstance(timestamp, (int, float)):
@@ -61,7 +63,9 @@ def _record_stats_event(stats: Dict[str, Any], event: Dict[str, Any], start_time
                 "segment_count": 0,
             },
         )
-        totals["started_at"] = min(float(totals.get("started_at") or started_at), float(started_at))
+        totals["started_at"] = min(
+            float(totals.get("started_at") or started_at), float(started_at)
+        )
         totals["finished_at"] = max(
             float(totals.get("finished_at") or until_timestamp),
             float(until_timestamp),
@@ -107,12 +111,17 @@ def _record_stats_event(stats: Dict[str, Any], event: Dict[str, Any], start_time
         stats["_active_tool_steps"][key] = step
         stats["tool_steps"].append(step)
 
-    def _finish_tool_step(tool_call_id: Optional[str], tool_name: Optional[str]) -> None:
+    def _finish_tool_step(
+        tool_call_id: Optional[str], tool_name: Optional[str]
+    ) -> None:
         key = tool_call_id or ""
         step = stats["_active_tool_steps"].get(key) if key else None
         if step is None and tool_name:
             for candidate in reversed(stats["tool_steps"]):
-                if candidate.get("tool_name") == tool_name and candidate.get("status") == "running":
+                if (
+                    candidate.get("tool_name") == tool_name
+                    and candidate.get("status") == "running"
+                ):
                     step = candidate
                     break
         if step is None:
@@ -172,7 +181,9 @@ def _record_stats_event(stats: Dict[str, Any], event: Dict[str, Any], start_time
         buffer = (stats.get("_tool_tag_buffer") or "") + content
         stats["_tool_tag_buffer"] = buffer[-2048:]
 
-    tool_names = _collect_event_tool_names(event, content_buffer=stats.get("_tool_tag_buffer") or "")
+    tool_names = _collect_event_tool_names(
+        event, content_buffer=stats.get("_tool_tag_buffer") or ""
+    )
     if tool_names:
         has_visible_output = True
         existing_tool_names = set(stats["tools"])
@@ -214,7 +225,9 @@ def _record_stats_event(stats: Dict[str, Any], event: Dict[str, Any], start_time
             tool_name = event.get("tool_name")
         _finish_tool_step(
             str(tool_call_id).strip() or None if tool_call_id else None,
-            str(tool_name).strip() if isinstance(tool_name, str) and tool_name.strip() else None,
+            str(tool_name).strip()
+            if isinstance(tool_name, str) and tool_name.strip()
+            else None,
         )
 
     if event.get("type") == "token_usage":
@@ -361,8 +374,7 @@ def _print_stats(stats: Dict[str, Any], *, json_output: bool) -> None:
                 else str(step.get("status") or "unknown")
             )
             output_lines.append(
-                "  - "
-                f"#{step.get('step')} {step.get('tool_name')} ({duration_text})"
+                f"  - #{step.get('step')} {step.get('tool_name')} ({duration_text})"
             )
 
     phase_timings = stats.get("phase_timings") or []
@@ -398,4 +410,3 @@ def _snapshot_tool_steps(stats: Dict[str, Any]) -> Dict[str, str]:
             continue
         snapshot[_tool_step_event_key(step)] = str(step.get("status") or "")
     return snapshot
-

@@ -11,6 +11,7 @@ Prompt Caching 工具模块
 2. 后续请求保持相同前缀，自动命中缓存
 3. 缓存有效期 5 分钟，命中后重置
 """
+
 from typing import List, Dict, Any, Optional
 
 
@@ -19,14 +20,14 @@ _MIN_USER_LEN = 1000  # 约 250 tokens
 
 
 def _content_length(msg: Dict[str, Any]) -> int:
-    content = msg.get('content', '')
+    content = msg.get("content", "")
     if isinstance(content, str):
         return len(content)
     if isinstance(content, list):
         total = 0
         for block in content:
             if isinstance(block, dict):
-                text = block.get('text', '')
+                text = block.get("text", "")
                 if isinstance(text, str):
                     total += len(text)
         return total
@@ -62,11 +63,13 @@ def add_cache_control_to_messages(
     placed = 0
 
     # === 多段 system 策略 ===
-    if cache_segments and any(seg in {"stable", "semi_stable"} for seg in cache_segments):
+    if cache_segments and any(
+        seg in {"stable", "semi_stable"} for seg in cache_segments
+    ):
         for i, msg in enumerate(messages):
             if placed >= max_breakpoints:
                 return
-            if msg.get('role') != 'system':
+            if msg.get("role") != "system":
                 continue
             seg = cache_segments[i] if i < len(cache_segments) else None
             if seg in {"stable", "semi_stable"} and _content_length(msg) > 0:
@@ -76,8 +79,8 @@ def add_cache_control_to_messages(
         # 末尾滚动断点：最近一条 user/assistant 非 tool 消息
         if placed < max_breakpoints:
             for j in range(len(messages) - 1, -1, -1):
-                role = messages[j].get('role')
-                if role in {'user', 'assistant'} and _content_length(messages[j]) > 0:
+                role = messages[j].get("role")
+                if role in {"user", "assistant"} and _content_length(messages[j]) > 0:
                     _add_cache_control_to_message(messages[j])
                     placed += 1
                     break
@@ -87,7 +90,7 @@ def add_cache_control_to_messages(
     system_msg_idx = -1
     system_msg_length = 0
     for i, msg in enumerate(messages):
-        if msg.get('role') == 'system':
+        if msg.get("role") == "system":
             length = _content_length(msg)
             if length > system_msg_length:
                 system_msg_length = length
@@ -98,13 +101,13 @@ def add_cache_control_to_messages(
         return
 
     for msg in messages:
-        if msg.get('role') == 'user' and _content_length(msg) > _MIN_USER_LEN:
+        if msg.get("role") == "user" and _content_length(msg) > _MIN_USER_LEN:
             _add_cache_control_to_message(msg)
             return
 
     for msg in reversed(messages):
-        role = msg.get('role')
-        if role in ['system', 'user', 'assistant']:
+        role = msg.get("role")
+        if role in ["system", "user", "assistant"]:
             _add_cache_control_to_message(msg)
             return
 
@@ -116,24 +119,26 @@ def _add_cache_control_to_message(msg: Dict[str, Any]) -> None:
     Args:
         msg: 消息字典（会被原地修改）
     """
-    content = msg.get('content')
+    content = msg.get("content")
 
     if isinstance(content, list) and len(content) > 0:
         # 如果 content 是列表（多模态格式），在最后一个 block 上添加 cache_control
         last_block = content[-1]
         if isinstance(last_block, dict):
             # 避免重复添加
-            if 'cache_control' not in last_block:
-                last_block['cache_control'] = {'type': 'ephemeral'}
+            if "cache_control" not in last_block:
+                last_block["cache_control"] = {"type": "ephemeral"}
     elif isinstance(content, str) and content:
         # 如果 content 是字符串，转换为列表格式并添加 cache_control
-        msg['content'] = [
-            {'type': 'text', 'text': content, 'cache_control': {'type': 'ephemeral'}}
+        msg["content"] = [
+            {"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}
         ]
     # 如果 content 为空或为其他类型，不添加 cache_control
 
 
-def should_enable_caching(messages: List[Dict[str, Any]], min_tokens: int = 1024) -> bool:
+def should_enable_caching(
+    messages: List[Dict[str, Any]], min_tokens: int = 1024
+) -> bool:
     """
     判断是否满足启用 prompt caching 的条件
 
@@ -147,13 +152,13 @@ def should_enable_caching(messages: List[Dict[str, Any]], min_tokens: int = 1024
     # 简单估算 token 数（实际应该使用 tokenizer）
     total_chars = 0
     for msg in messages:
-        content = msg.get('content', '')
+        content = msg.get("content", "")
         if isinstance(content, str):
             total_chars += len(content)
         elif isinstance(content, list):
             for block in content:
                 if isinstance(block, dict):
-                    text = block.get('text', '')
+                    text = block.get("text", "")
                     if isinstance(text, str):
                         total_chars += len(text)
 

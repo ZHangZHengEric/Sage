@@ -74,7 +74,12 @@ class FileContentValidator:
         }
 
     @staticmethod
-    def _success(extension: str, validator: str, message: str = "内容校验通过", warnings: Optional[List[str]] = None) -> Dict[str, Any]:
+    def _success(
+        extension: str,
+        validator: str,
+        message: str = "内容校验通过",
+        warnings: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         return {
             "enabled": True,
             "skipped": False,
@@ -88,7 +93,12 @@ class FileContentValidator:
         }
 
     @staticmethod
-    def _error(extension: str, validator: str, message: str, warnings: Optional[List[str]] = None) -> Dict[str, Any]:
+    def _error(
+        extension: str,
+        validator: str,
+        message: str,
+        warnings: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         return {
             "enabled": True,
             "skipped": False,
@@ -107,10 +117,14 @@ class FileContentValidator:
             json.loads(content)
             return FileContentValidator._success(extension, "json")
         except json.JSONDecodeError as exc:
-            message = f"JSON 语法错误: {exc.msg} (line {exc.lineno}, column {exc.colno})"
+            message = (
+                f"JSON 语法错误: {exc.msg} (line {exc.lineno}, column {exc.colno})"
+            )
             return FileContentValidator._error(extension, "json", message)
         except Exception as exc:
-            return FileContentValidator._error(extension, "json", f"JSON 校验失败: {exc}")
+            return FileContentValidator._error(
+                extension, "json", f"JSON 校验失败: {exc}"
+            )
 
     @staticmethod
     def _validate_yaml(extension: str, content: str) -> Dict[str, Any]:
@@ -136,10 +150,14 @@ class FileContentValidator:
                 line = getattr(mark, "line", None)
                 column = getattr(mark, "column", None)
                 if line is not None and column is not None:
-                    message = f"YAML 语法错误: {exc} (line {line + 1}, column {column + 1})"
+                    message = (
+                        f"YAML 语法错误: {exc} (line {line + 1}, column {column + 1})"
+                    )
             return FileContentValidator._error(extension, "yaml", message)
         except Exception as exc:
-            return FileContentValidator._error(extension, "yaml", f"YAML 校验失败: {exc}")
+            return FileContentValidator._error(
+                extension, "yaml", f"YAML 校验失败: {exc}"
+            )
 
     @staticmethod
     def _validate_python(extension: str, content: str) -> Dict[str, Any]:
@@ -152,7 +170,9 @@ class FileContentValidator:
             message = f"Python 语法错误: {exc.msg} (line {line}, column {column})"
             return FileContentValidator._error(extension, "python", message)
         except Exception as exc:
-            return FileContentValidator._error(extension, "python", f"Python 校验失败: {exc}")
+            return FileContentValidator._error(
+                extension, "python", f"Python 校验失败: {exc}"
+            )
 
     @staticmethod
     def _validate_toml(extension: str, content: str) -> Dict[str, Any]:
@@ -179,7 +199,9 @@ class FileContentValidator:
                 message = f"TOML 语法错误: {exc} (line {line}, column {column})"
             return FileContentValidator._error(extension, "toml", message)
         except Exception as exc:
-            return FileContentValidator._error(extension, "toml", f"TOML 校验失败: {exc}")
+            return FileContentValidator._error(
+                extension, "toml", f"TOML 校验失败: {exc}"
+            )
 
     @staticmethod
     def _validate_javascript(extension: str, content: str) -> Dict[str, Any]:
@@ -198,7 +220,9 @@ class FileContentValidator:
             }
 
         suffix = extension if extension in {".js", ".mjs", ".cjs"} else ".js"
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=suffix, delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", suffix=suffix, delete=False
+        ) as tmp:
             tmp.write(content)
             tmp_path = tmp.name
 
@@ -215,7 +239,9 @@ class FileContentValidator:
             message = f"JavaScript 语法错误: {stderr or 'node --check failed'}"
             return FileContentValidator._error(extension, "javascript", message)
         except Exception as exc:
-            return FileContentValidator._error(extension, "javascript", f"JavaScript 校验失败: {exc}")
+            return FileContentValidator._error(
+                extension, "javascript", f"JavaScript 校验失败: {exc}"
+            )
         finally:
             try:
                 Path(tmp_path).unlink(missing_ok=True)

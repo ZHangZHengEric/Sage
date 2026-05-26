@@ -24,7 +24,7 @@ def diff_tail_for_progress(prev: str, cur: str) -> str:
     if not prev:
         return cur
     if cur.startswith(prev):
-        return cur[len(prev):]
+        return cur[len(prev) :]
     # 沙箱 tail 已截断旧字节：找 cur 的开头与 prev 的末尾的最长重叠 k，
     # 使 prev.endswith(cur[:k])。窗口最大限制 512 字符。
     max_overlap = min(len(prev), len(cur), 512)

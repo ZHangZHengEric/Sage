@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 import asyncio
 import os
 import json
@@ -14,9 +15,9 @@ logger = logging.getLogger("TaskScheduler")
 # Configure logging if not already configured
 if not logger.handlers:
     handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    ))
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    )
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     logger.debug("TaskScheduler logger initialized")
@@ -24,13 +25,15 @@ if not logger.handlers:
 # Try to import croniter, fallback to simple implementation if not available
 try:
     from croniter import croniter
+
     CRONITER_AVAILABLE = True
 except ImportError:
     CRONITER_AVAILABLE = False
     logger.warning("croniter not available, using simple cron validation")
-    
+
     class SimpleCroniter:
         """Simple cron parser fallback"""
+
         @staticmethod
         def is_valid(cron_string: str) -> bool:
             """Basic cron validation (5 fields: min hour day month dow)"""
@@ -38,15 +41,17 @@ except ImportError:
             if len(parts) != 5:
                 return False
             return True
-        
+
         def __init__(self, cron_string: str, start_time=None):
             self.cron_string = cron_string
-            self.start_time = start_time or datetime.now().astimezone().replace(tzinfo=None)
-        
+            self.start_time = start_time or datetime.now().astimezone().replace(
+                tzinfo=None
+            )
+
         def get_next(self, ret_type=None):
             """Return next run time (simplified - just returns current time + 1 minute)"""
             return self.start_time + timedelta(minutes=1)
-    
+
     croniter = SimpleCroniter
 
 from mcp.server.fastmcp import FastMCP
@@ -138,17 +143,23 @@ async def _request_json(
                 return None
             result = response.json()
             return result
-    except httpx.TimeoutException as e:
+    except httpx.TimeoutException:
         elapsed = time.time() - start_time
-        logger.error(f"[HTTP Timeout] {method} {url} | timeout after {elapsed:.3f}s (limit: {timeout}s)")
+        logger.error(
+            f"[HTTP Timeout] {method} {url} | timeout after {elapsed:.3f}s (limit: {timeout}s)"
+        )
         raise
     except httpx.HTTPStatusError as e:
         elapsed = time.time() - start_time
-        logger.error(f"[HTTP Error] {method} {url} | status={e.response.status_code} | time={elapsed:.3f}s | response={e.response.text[:500]}")
+        logger.error(
+            f"[HTTP Error] {method} {url} | status={e.response.status_code} | time={elapsed:.3f}s | response={e.response.text[:500]}"
+        )
         raise
     except Exception as e:
         elapsed = time.time() - start_time
-        logger.error(f"[HTTP Exception] {method} {url} | error={type(e).__name__}: {str(e)} | time={elapsed:.3f}s")
+        logger.error(
+            f"[HTTP Exception] {method} {url} | error={type(e).__name__}: {str(e)} | time={elapsed:.3f}s"
+        )
         raise
 
 
@@ -198,14 +209,18 @@ def _track_background_task(task: asyncio.Task[Any]) -> None:
 async def _is_api_ready(timeout: float = 5.0) -> bool:
     url = f"{_get_api_base_url()}/active"
     try:
-        async with httpx.AsyncClient(timeout=timeout, headers=_internal_headers(), trust_env=False) as client:
+        async with httpx.AsyncClient(
+            timeout=timeout, headers=_internal_headers(), trust_env=False
+        ) as client:
             response = await client.get(url)
             return response.is_success
     except Exception:
         return False
 
 
-async def _wait_for_api_ready(max_wait_seconds: float = 60.0, poll_interval: float = 2.0) -> bool:
+async def _wait_for_api_ready(
+    max_wait_seconds: float = 60.0, poll_interval: float = 2.0
+) -> bool:
     deadline = time.time() + max_wait_seconds
     announced_wait = False
 
@@ -213,17 +228,25 @@ async def _wait_for_api_ready(max_wait_seconds: float = 60.0, poll_interval: flo
         if await _is_api_ready():
             return True
         if not announced_wait:
-            logger.info("[SCHEDULER] Waiting for backend API to become ready before polling tasks")
+            logger.info(
+                "[SCHEDULER] Waiting for backend API to become ready before polling tasks"
+            )
             announced_wait = True
         await asyncio.sleep(poll_interval)
 
-    logger.warning("[SCHEDULER] Backend API not ready after waiting; scheduler will still start polling")
+    logger.warning(
+        "[SCHEDULER] Backend API not ready after waiting; scheduler will still start polling"
+    )
     return False
 
 
 def _parse_schedule_to_local_str(schedule: str) -> str:
     try:
-        dt = datetime.fromisoformat(schedule) if "T" in schedule else datetime.strptime(schedule, "%Y-%m-%d %H:%M:%S")
+        dt = (
+            datetime.fromisoformat(schedule)
+            if "T" in schedule
+            else datetime.strptime(schedule, "%Y-%m-%d %H:%M:%S")
+        )
     except ValueError:
         dt = datetime.fromisoformat(schedule.replace(" ", "T"))
     if dt.tzinfo is not None:
@@ -245,12 +268,17 @@ async def _fetch_recurring_task(raw_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-async def _fetch_one_time_task_history(raw_id: int, limit: int = 10) -> list[Dict[str, Any]]:
+async def _fetch_one_time_task_history(
+    raw_id: int, limit: int = 10
+) -> list[Dict[str, Any]]:
     try:
-        data = await _request_json("GET", f"/tasks/one-time/{raw_id}/history", params={"limit": limit})
+        data = await _request_json(
+            "GET", f"/tasks/one-time/{raw_id}/history", params={"limit": limit}
+        )
         return data if isinstance(data, list) else []
     except Exception:
         return []
+
 
 def _encode_task_id(task_id: int, is_recurring: bool = False) -> str:
     """Encode task ID with prefix"""
@@ -261,9 +289,9 @@ def _encode_task_id(task_id: int, is_recurring: bool = False) -> str:
 def _decode_task_id(encoded_id: str) -> tuple[int, bool]:
     """Decode task ID, returns (task_id, is_recurring)"""
     if encoded_id.startswith(RECURRING_TASK_PREFIX):
-        return int(encoded_id[len(RECURRING_TASK_PREFIX):]), True
+        return int(encoded_id[len(RECURRING_TASK_PREFIX) :]), True
     elif encoded_id.startswith(ONCE_TASK_PREFIX):
-        return int(encoded_id[len(ONCE_TASK_PREFIX):]), False
+        return int(encoded_id[len(ONCE_TASK_PREFIX) :]), False
     else:
         # Fallback: treat as once task without prefix
         return int(encoded_id), False
@@ -329,24 +357,30 @@ async def _execute_task(task: Dict[str, Any]) -> None:
     """
     Execute a task by sending it to the specified agent.
     """
-    task_id = int(task['id'])
-    agent_id = task['agent_id']
-    name = task['name']
-    description = task['description']
-    task_user_id = str(task.get('user_id') or SCHEDULER_USER_ID)
+    task_id = int(task["id"])
+    agent_id = task["agent_id"]
+    name = task["name"]
+    description = task["description"]
+    task_user_id = str(task.get("user_id") or SCHEDULER_USER_ID)
 
-    logger.info(f"[TASK EXECUTION] Starting task {task_id} for agent {agent_id} with task name: {name} and description: {description}")
+    logger.info(
+        f"[TASK EXECUTION] Starting task {task_id} for agent {agent_id} with task name: {name} and description: {description}"
+    )
 
     try:
         # Prepare the message content
-        content = f"【任务消息】{description} \n 执行过程中严禁添加定时任务" if description else f"【任务消息】{name} \n 执行过程中严禁添加定时任务"
+        content = (
+            f"【任务消息】{description} \n 执行过程中严禁添加定时任务"
+            if description
+            else f"【任务消息】{name} \n 执行过程中严禁添加定时任务"
+        )
 
         # Note: session_id is not passed - backend will auto-generate it
         payload = {
             "agent_id": agent_id,
             "messages": [{"role": "user", "content": content}],
             "force_summary": True,
-            "user_id": task_user_id
+            "user_id": task_user_id,
         }
 
         api_base_url = _get_api_base_url()
@@ -355,12 +389,21 @@ async def _execute_task(task: Dict[str, Any]) -> None:
         full_response_text = ""
 
         # Use an async client so the scheduler loop stays non-blocking.
-        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=10.0), trust_env=False) as client:
-            async with client.stream("POST", f"{api_base_url}/api/chat", json=payload, headers=_internal_headers(task_user_id)) as response:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(300.0, connect=10.0), trust_env=False
+        ) as client:
+            async with client.stream(
+                "POST",
+                f"{api_base_url}/api/chat",
+                json=payload,
+                headers=_internal_headers(task_user_id),
+            ) as response:
                 response.raise_for_status()
                 full_response_text = await _parse_stream_response(response)
 
-        logger.info(f"[TASK EXECUTION] Task {task_id} completed successfully. Response length: {len(full_response_text)}")
+        logger.info(
+            f"[TASK EXECUTION] Task {task_id} completed successfully. Response length: {len(full_response_text)}"
+        )
 
         await _request_json(
             "POST",
@@ -380,8 +423,8 @@ async def _execute_task(task: Dict[str, Any]) -> None:
             user_id=task_user_id,
         )
 
-        retry_count = int(task.get('retry_count', 0)) + 1
-        max_retries = int(task.get('max_retries', 3))
+        retry_count = int(task.get("retry_count", 0)) + 1
+        max_retries = int(task.get("max_retries", 3))
         if retry_count <= max_retries:
             logger.info(f"Task {task_id} will be retried ({retry_count}/{max_retries})")
         else:
@@ -393,22 +436,30 @@ async def _execute_task_claimed(task: Dict[str, Any]) -> None:
     Execute a task by claiming it first, then running it.
     Tasks are executed concurrently (no session-level locking needed since backend auto-generates session_id).
     """
-    task_id = int(task['id'])
-    task_user_id = str(task.get('user_id') or SCHEDULER_USER_ID)
+    task_id = int(task["id"])
+    task_user_id = str(task.get("user_id") or SCHEDULER_USER_ID)
 
     # Try to claim the task first (atomic operation)
-    claim_result = await _request_json("POST", f"/tasks/internal/one-time/{task_id}/claim", user_id=task_user_id)
+    claim_result = await _request_json(
+        "POST", f"/tasks/internal/one-time/{task_id}/claim", user_id=task_user_id
+    )
     if not claim_result or not claim_result.get("claimed"):
-        logger.debug(f"[TASK EXECUTION] Task {task_id} already being processed or not pending. Skipping.")
+        logger.debug(
+            f"[TASK EXECUTION] Task {task_id} already being processed or not pending. Skipping."
+        )
         return
-    
+
     # Execute the task
-    logger.info(f"[TASK EXECUTION] Task {task_id} claimed successfully, starting execution")
+    logger.info(
+        f"[TASK EXECUTION] Task {task_id} claimed successfully, starting execution"
+    )
     try:
         await _execute_task(task)
         logger.info(f"[TASK EXECUTION] Task {task_id} execution completed successfully")
     except Exception as e:
-        logger.error(f"[TASK EXECUTION] Task {task_id} execution failed: {e}", exc_info=True)
+        logger.error(
+            f"[TASK EXECUTION] Task {task_id} execution failed: {e}", exc_info=True
+        )
         raise
 
 
@@ -431,7 +482,7 @@ async def _check_and_spawn_recurring_tasks():
 async def scheduler_loop_async():
     """
     Background loop to check for pending tasks.
-    
+
     Logic:
     1. First, check recurring tasks and spawn one-time instances if needed
     2. Then, process pending tasks grouped by session_id (sequential execution per session)
@@ -439,43 +490,60 @@ async def scheduler_loop_async():
     logger.info("[SCHEDULER] Task scheduler started.")
     logger.info(f"[SCHEDULER] API Base URL: {_get_api_base_url()}")
     await _wait_for_api_ready()
-    
+
     loop_count = 0
-    
+
     while True:
         loop_count += 1
         sleep_seconds = 5
         try:
             # Step 1: Check recurring tasks and spawn instances
             spawned_count = await _check_and_spawn_recurring_tasks()
-            
+
             # Step 2: Get all pending tasks that are due
-            due_result = await _request_json("GET", "/tasks/internal/due", params={"limit": 200})
+            due_result = await _request_json(
+                "GET", "/tasks/internal/due", params={"limit": 200}
+            )
             pending_tasks = (due_result or {}).get("items") or []
-            
+
             if pending_tasks:
-                logger.debug(f"[SCHEDULER] due returned {len(pending_tasks)} pending tasks")
-                logger.debug(f"[SCHEDULER] Found {len(pending_tasks)} pending tasks to execute")
-                
+                logger.debug(
+                    f"[SCHEDULER] due returned {len(pending_tasks)} pending tasks"
+                )
+                logger.debug(
+                    f"[SCHEDULER] Found {len(pending_tasks)} pending tasks to execute"
+                )
+
                 # Process all pending tasks concurrently
                 # (no session-level locking needed since backend auto-generates session_id)
                 for task in pending_tasks:
                     try:
-                        task_id = task['id']
-                        logger.debug(f"[SCHEDULER] Starting task {task_id} in new thread")
-                        
+                        task_id = task["id"]
+                        logger.debug(
+                            f"[SCHEDULER] Starting task {task_id} in new thread"
+                        )
+
                         # Start task in separate thread
-                        task_future = asyncio.create_task(_execute_task_claimed(task), name=f"TaskExecutor-{task_id}")
+                        task_future = asyncio.create_task(
+                            _execute_task_claimed(task), name=f"TaskExecutor-{task_id}"
+                        )
                         _track_background_task(task_future)
-                        logger.debug(f"[SCHEDULER] Task {task_id} started in async task {task_future.get_name()}")
+                        logger.debug(
+                            f"[SCHEDULER] Task {task_id} started in async task {task_future.get_name()}"
+                        )
                     except Exception as e:
-                        logger.error(f"[SCHEDULER] Failed to start task {task['id']}: {e}", exc_info=True)
+                        logger.error(
+                            f"[SCHEDULER] Failed to start task {task['id']}: {e}",
+                            exc_info=True,
+                        )
             else:
                 if spawned_count == 0:
                     sleep_seconds = 30
-                            
+
         except Exception as e:
-            logger.error(f"[SCHEDULER] Scheduler error in loop {loop_count}: {e}", exc_info=True)
+            logger.error(
+                f"[SCHEDULER] Scheduler error in loop {loop_count}: {e}", exc_info=True
+            )
 
         await asyncio.sleep(sleep_seconds)
 
@@ -505,6 +573,7 @@ def ensure_scheduler_started() -> bool:
 
 
 # --- MCP Tools ---
+
 
 @mcp.tool()
 @sage_mcp_tool(
@@ -597,8 +666,10 @@ async def list_tasks(
         list_tasks(task_type="all")
     """
     start_time = time.time()
-    logger.info(f"[list_tasks] START | task_type={task_type} | status={status} | limit={limit}")
-    
+    logger.info(
+        f"[list_tasks] START | task_type={task_type} | status={status} | limit={limit}"
+    )
+
     try:
         result = []
 
@@ -608,7 +679,7 @@ async def list_tasks(
             return f"Error: Invalid task_type '{task_type}'. Must be 'once', 'recurring', or 'all'."
 
         if task_type in ("once", "all"):
-            logger.info(f"[list_tasks] Fetching one-time tasks")
+            logger.info("[list_tasks] Fetching one-time tasks")
             once_data = await _request_json(
                 "GET",
                 "/tasks/one-time",
@@ -616,8 +687,16 @@ async def list_tasks(
                 user_id=_tool_visible_user_id(user_id),
             )
             once_tasks = (once_data or {}).get("items") or []
-            normalized_after = _parse_schedule_to_local_str(scheduled_after) if scheduled_after else None
-            normalized_before = _parse_schedule_to_local_str(scheduled_before) if scheduled_before else None
+            normalized_after = (
+                _parse_schedule_to_local_str(scheduled_after)
+                if scheduled_after
+                else None
+            )
+            normalized_before = (
+                _parse_schedule_to_local_str(scheduled_before)
+                if scheduled_before
+                else None
+            )
             for task in once_tasks:
                 execute_at = str(task.get("execute_at") or "")
                 if status and task.get("status") != status:
@@ -627,15 +706,15 @@ async def list_tasks(
                 if normalized_before and execute_at and execute_at > normalized_before:
                     continue
                 item = dict(task)
-                item['task_id'] = _encode_task_id(item['id'], is_recurring=False)
-                item['task_type'] = 'once'
-                item.pop('id', None)
-                item.pop('description', None)
+                item["task_id"] = _encode_task_id(item["id"], is_recurring=False)
+                item["task_type"] = "once"
+                item.pop("id", None)
+                item.pop("description", None)
                 result.append(item)
             logger.info(f"[list_tasks] Found {len(result)} one-time tasks")
 
         if task_type in ("recurring", "all"):
-            logger.info(f"[list_tasks] Fetching recurring tasks")
+            logger.info("[list_tasks] Fetching recurring tasks")
             recurring_data = await _request_json(
                 "GET",
                 "/tasks/recurring",
@@ -645,15 +724,19 @@ async def list_tasks(
             recurring_tasks = (recurring_data or {}).get("items") or []
             for task in recurring_tasks:
                 item = dict(task)
-                item['task_id'] = _encode_task_id(item['id'], is_recurring=True)
-                item['task_type'] = 'recurring'
-                item.pop('id', None)
-                item.pop('description', None)
+                item["task_id"] = _encode_task_id(item["id"], is_recurring=True)
+                item["task_type"] = "recurring"
+                item.pop("id", None)
+                item.pop("description", None)
                 result.append(item)
-            logger.info(f"[list_tasks] Found {len(result)} total tasks (including recurring)")
+            logger.info(
+                f"[list_tasks] Found {len(result)} total tasks (including recurring)"
+            )
 
         elapsed = time.time() - start_time
-        logger.info(f"[list_tasks] SUCCESS | count={len(result[:limit])} | time={elapsed:.3f}s")
+        logger.info(
+            f"[list_tasks] SUCCESS | count={len(result[:limit])} | time={elapsed:.3f}s"
+        )
         return json.dumps(result[:limit], indent=2, ensure_ascii=False)
     except Exception as e:
         elapsed = time.time() - start_time
@@ -738,16 +821,18 @@ async def add_task(
         包含任务 ID 的确认消息（一次性任务前缀为 'once_'，循环任务前缀为 'rec_'）。
     """
     start_time = time.time()
-    logger.info(f"[add_task] START | name='{name}' | agent_id={agent_id} | is_recurring={is_recurring} | schedule={schedule}")
-    
+    logger.info(
+        f"[add_task] START | name='{name}' | agent_id={agent_id} | is_recurring={is_recurring} | schedule={schedule}"
+    )
+
     try:
         if is_recurring:
             logger.info(f"[add_task] Validating cron expression: {schedule}")
             if not croniter.is_valid(schedule):
                 logger.warning(f"[add_task] Invalid cron expression: {schedule}")
                 return "Error: Invalid schedule for recurring task. Use standard cron format (e.g., '0 9 * * *')."
-            
-            logger.info(f"[add_task] Creating recurring task via API")
+
+            logger.info("[add_task] Creating recurring task via API")
             task = await _request_json(
                 "POST",
                 "/tasks/recurring",
@@ -763,14 +848,16 @@ async def add_task(
             task_id = int(task["id"])
             encoded_id = _encode_task_id(task_id, is_recurring=True)
             elapsed = time.time() - start_time
-            logger.info(f"[add_task] SUCCESS (recurring) | task_id={encoded_id} | time={elapsed:.3f}s")
+            logger.info(
+                f"[add_task] SUCCESS (recurring) | task_id={encoded_id} | time={elapsed:.3f}s"
+            )
             return f"Recurring task '{name}' (ID: {encoded_id}) added successfully. Cron: {schedule}"
         else:
             logger.info(f"[add_task] Parsing schedule: {schedule}")
             execute_at = _parse_schedule_to_local_str(schedule)
             logger.info(f"[add_task] Parsed execute_at: {execute_at}")
-            
-            logger.info(f"[add_task] Creating one-time task via API")
+
+            logger.info("[add_task] Creating one-time task via API")
             task = await _request_json(
                 "POST",
                 "/tasks/one-time",
@@ -785,19 +872,25 @@ async def add_task(
             task_id = int(task["id"])
             encoded_id = _encode_task_id(task_id, is_recurring=False)
             elapsed = time.time() - start_time
-            logger.info(f"[add_task] SUCCESS (one-time) | task_id={encoded_id} | time={elapsed:.3f}s")
+            logger.info(
+                f"[add_task] SUCCESS (one-time) | task_id={encoded_id} | time={elapsed:.3f}s"
+            )
             return f"Task '{name}' (ID: {encoded_id}) added successfully. Execute at: {schedule}"
 
     except ValueError as e:
         elapsed = time.time() - start_time
-        logger.error(f"[add_task] FAILED (ValueError) | time={elapsed:.3f}s | error={str(e)}")
+        logger.error(
+            f"[add_task] FAILED (ValueError) | time={elapsed:.3f}s | error={str(e)}"
+        )
         return (
             "Error: Invalid schedule format. For one-time tasks use ISO 8601 with timezone "
             "offset, for example '2026-04-13T18:37:42+08:00'."
         )
     except Exception as e:
         elapsed = time.time() - start_time
-        logger.error(f"[add_task] FAILED (Exception) | time={elapsed:.3f}s | error={type(e).__name__}: {str(e)}")
+        logger.error(
+            f"[add_task] FAILED (Exception) | time={elapsed:.3f}s | error={type(e).__name__}: {str(e)}"
+        )
         return f"Error adding task: {str(e)}"
 
 
@@ -838,35 +931,57 @@ async def delete_task(task_id: str, user_id: Optional[str] = None) -> str:
     """
     start_time = time.time()
     logger.info(f"[delete_task] START | task_id={task_id}")
-    
+
     try:
         raw_id, is_recurring = _decode_task_id(task_id)
-        
+
         if is_recurring:
             logger.info(f"[delete_task] Fetching recurring task {task_id}")
-            task = await _request_json("GET", f"/tasks/recurring/{raw_id}", user_id=_tool_visible_user_id(user_id))
+            task = await _request_json(
+                "GET",
+                f"/tasks/recurring/{raw_id}",
+                user_id=_tool_visible_user_id(user_id),
+            )
             if not task:
                 logger.warning(f"[delete_task] Recurring task {task_id} not found")
                 return f"Error: Recurring task {task_id} not found."
             logger.info(f"[delete_task] Deleting recurring task {task_id}")
-            await _request_json("DELETE", f"/tasks/recurring/{raw_id}", user_id=_tool_visible_user_id(user_id))
+            await _request_json(
+                "DELETE",
+                f"/tasks/recurring/{raw_id}",
+                user_id=_tool_visible_user_id(user_id),
+            )
             elapsed = time.time() - start_time
-            logger.info(f"[delete_task] SUCCESS | task_id={task_id} | time={elapsed:.3f}s")
+            logger.info(
+                f"[delete_task] SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
+            )
             return f"Recurring task {task_id} ('{task['name']}') and pending instances deleted successfully."
         else:
             logger.info(f"[delete_task] Fetching one-time task {task_id}")
-            task = await _request_json("GET", f"/tasks/one-time/{raw_id}", user_id=_tool_visible_user_id(user_id))
+            task = await _request_json(
+                "GET",
+                f"/tasks/one-time/{raw_id}",
+                user_id=_tool_visible_user_id(user_id),
+            )
             if not task:
                 logger.warning(f"[delete_task] Task {task_id} not found")
                 return f"Error: Task {task_id} not found."
             logger.info(f"[delete_task] Deleting one-time task {task_id}")
-            await _request_json("DELETE", f"/tasks/one-time/{raw_id}", user_id=_tool_visible_user_id(user_id))
+            await _request_json(
+                "DELETE",
+                f"/tasks/one-time/{raw_id}",
+                user_id=_tool_visible_user_id(user_id),
+            )
             elapsed = time.time() - start_time
-            logger.info(f"[delete_task] SUCCESS | task_id={task_id} | time={elapsed:.3f}s")
+            logger.info(
+                f"[delete_task] SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
+            )
             return f"Task {task_id} ('{task['name']}') deleted successfully."
     except Exception as e:
         elapsed = time.time() - start_time
-        logger.error(f"[delete_task] FAILED | task_id={task_id} | time={elapsed:.3f}s | error={str(e)}")
+        logger.error(
+            f"[delete_task] FAILED | task_id={task_id} | time={elapsed:.3f}s | error={str(e)}"
+        )
         return f"Error deleting task: {str(e)}"
 
 
@@ -906,29 +1021,43 @@ async def complete_task(task_id: str, user_id: Optional[str] = None) -> str:
     """
     start_time = time.time()
     logger.info(f"[complete_task] START | task_id={task_id}")
-    
+
     try:
         raw_id, is_recurring = _decode_task_id(task_id)
-        
+
         if is_recurring:
             logger.info(f"[complete_task] Fetching recurring task {task_id}")
-            task = await _request_json("GET", f"/tasks/recurring/{raw_id}", user_id=_tool_visible_user_id(user_id))
+            task = await _request_json(
+                "GET",
+                f"/tasks/recurring/{raw_id}",
+                user_id=_tool_visible_user_id(user_id),
+            )
             if not task:
                 logger.warning(f"[complete_task] Recurring task {task_id} not found")
                 return f"Error: Recurring task {task_id} not found."
             logger.info(f"[complete_task] Marking recurring task {task_id} as executed")
-            await _request_json("POST", f"/tasks/internal/recurring/{raw_id}/complete", user_id=_tool_visible_user_id(user_id))
+            await _request_json(
+                "POST",
+                f"/tasks/internal/recurring/{raw_id}/complete",
+                user_id=_tool_visible_user_id(user_id),
+            )
             elapsed = time.time() - start_time
-            logger.info(f"[complete_task] SUCCESS | task_id={task_id} | time={elapsed:.3f}s")
+            logger.info(
+                f"[complete_task] SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
+            )
             return f"Recurring task {task_id} ('{task['name']}') marked as executed."
         else:
             logger.info(f"[complete_task] Fetching one-time task {task_id}")
-            task = await _request_json("GET", f"/tasks/one-time/{raw_id}", user_id=_tool_visible_user_id(user_id))
+            task = await _request_json(
+                "GET",
+                f"/tasks/one-time/{raw_id}",
+                user_id=_tool_visible_user_id(user_id),
+            )
             if not task:
                 logger.warning(f"[complete_task] Task {task_id} not found")
                 return f"Error: Task {task_id} not found."
 
-            if task['status'] == 'completed':
+            if task["status"] == "completed":
                 logger.info(f"[complete_task] Task {task_id} is already completed")
                 return f"Task {task_id} is already completed."
             logger.info(f"[complete_task] Marking one-time task {task_id} as completed")
@@ -939,11 +1068,15 @@ async def complete_task(task_id: str, user_id: Optional[str] = None) -> str:
                 user_id=_tool_visible_user_id(user_id),
             )
             elapsed = time.time() - start_time
-            logger.info(f"[complete_task] SUCCESS | task_id={task_id} | time={elapsed:.3f}s")
+            logger.info(
+                f"[complete_task] SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
+            )
             return f"Task {task_id} ('{task['name']}') marked as completed."
     except Exception as e:
         elapsed = time.time() - start_time
-        logger.error(f"[complete_task] FAILED | task_id={task_id} | time={elapsed:.3f}s | error={str(e)}")
+        logger.error(
+            f"[complete_task] FAILED | task_id={task_id} | time={elapsed:.3f}s | error={str(e)}"
+        )
         return f"Error completing task: {str(e)}"
 
 
@@ -968,7 +1101,9 @@ async def complete_task(task_id: str, user_id: Optional[str] = None) -> str:
         },
     },
 )
-async def enable_task(task_id: str, enabled: bool = True, user_id: Optional[str] = None) -> str:
+async def enable_task(
+    task_id: str, enabled: bool = True, user_id: Optional[str] = None
+) -> str:
     """
     Enable or disable a recurring task.
 
@@ -990,20 +1125,24 @@ async def enable_task(task_id: str, enabled: bool = True, user_id: Optional[str]
     """
     start_time = time.time()
     logger.info(f"[enable_task] START | task_id={task_id} | enabled={enabled}")
-    
+
     try:
         raw_id, is_recurring = _decode_task_id(task_id)
-        
+
         if not is_recurring:
             logger.warning(f"[enable_task] Task {task_id} is not a recurring task")
             return f"Error: Task {task_id} is not a recurring task. Only recurring tasks can be enabled/disabled."
-        
+
         logger.info(f"[enable_task] Fetching recurring task {task_id}")
-        task = await _request_json("GET", f"/tasks/recurring/{raw_id}", user_id=_tool_visible_user_id(user_id))
+        task = await _request_json(
+            "GET", f"/tasks/recurring/{raw_id}", user_id=_tool_visible_user_id(user_id)
+        )
         if not task:
             logger.warning(f"[enable_task] Recurring task {task_id} not found")
             return f"Error: Recurring task {task_id} not found."
-        logger.info(f"[enable_task] Toggling recurring task {task_id} to enabled={enabled}")
+        logger.info(
+            f"[enable_task] Toggling recurring task {task_id} to enabled={enabled}"
+        )
         await _request_json(
             "POST",
             f"/tasks/recurring/{raw_id}/toggle",
@@ -1012,11 +1151,15 @@ async def enable_task(task_id: str, enabled: bool = True, user_id: Optional[str]
         )
         status = "enabled" if enabled else "disabled"
         elapsed = time.time() - start_time
-        logger.info(f"[enable_task] SUCCESS | task_id={task_id} | status={status} | time={elapsed:.3f}s")
+        logger.info(
+            f"[enable_task] SUCCESS | task_id={task_id} | status={status} | time={elapsed:.3f}s"
+        )
         return f"Recurring task {task_id} ('{task['name']}') {status} successfully."
     except Exception as e:
         elapsed = time.time() - start_time
-        logger.error(f"[enable_task] FAILED | task_id={task_id} | time={elapsed:.3f}s | error={str(e)}")
+        logger.error(
+            f"[enable_task] FAILED | task_id={task_id} | time={elapsed:.3f}s | error={str(e)}"
+        )
         return f"Error updating recurring task: {str(e)}"
 
 
@@ -1057,27 +1200,37 @@ async def get_task_details(task_id: str, user_id: Optional[str] = None) -> str:
     """
     start_time = time.time()
     logger.info(f"[get_task_details] START | task_id={task_id}")
-    
+
     try:
         raw_id, is_recurring = _decode_task_id(task_id)
-        
+
         if is_recurring:
             logger.info(f"[get_task_details] Fetching recurring task {task_id}")
-            task = await _request_json("GET", f"/tasks/recurring/{raw_id}", user_id=_tool_visible_user_id(user_id))
+            task = await _request_json(
+                "GET",
+                f"/tasks/recurring/{raw_id}",
+                user_id=_tool_visible_user_id(user_id),
+            )
             if not task:
                 logger.warning(f"[get_task_details] Recurring task {task_id} not found")
                 return f"Error: Recurring task {task_id} not found."
 
             item = dict(task)
-            item['task_id'] = task_id
-            item['task_type'] = 'recurring'
-            item.pop('id', None)
+            item["task_id"] = task_id
+            item["task_type"] = "recurring"
+            item.pop("id", None)
             elapsed = time.time() - start_time
-            logger.info(f"[get_task_details] SUCCESS | task_id={task_id} | type=recurring | time={elapsed:.3f}s")
+            logger.info(
+                f"[get_task_details] SUCCESS | task_id={task_id} | type=recurring | time={elapsed:.3f}s"
+            )
             return json.dumps(item, indent=2, ensure_ascii=False)
         else:
             logger.info(f"[get_task_details] Fetching one-time task {task_id}")
-            task = await _request_json("GET", f"/tasks/one-time/{raw_id}", user_id=_tool_visible_user_id(user_id))
+            task = await _request_json(
+                "GET",
+                f"/tasks/one-time/{raw_id}",
+                user_id=_tool_visible_user_id(user_id),
+            )
             if not task:
                 logger.warning(f"[get_task_details] Task {task_id} not found")
                 return f"Error: Task {task_id} not found."
@@ -1093,26 +1246,27 @@ async def get_task_details(task_id: str, user_id: Optional[str] = None) -> str:
 
             # Truncate response content to last 1000 characters
             for entry in history:
-                if entry.get('response'):
-                    response = entry['response']
+                if entry.get("response"):
+                    response = entry["response"]
                     if len(response) > 1000:
-                        entry['response'] = "...[truncated]" + response[-1000:]
+                        entry["response"] = "...[truncated]" + response[-1000:]
 
             task = dict(task)
-            task['task_id'] = task_id
-            task['task_type'] = 'once'
-            task.pop('id', None)
-            
-            result = {
-                "task": task,
-                "history": history
-            }
+            task["task_id"] = task_id
+            task["task_type"] = "once"
+            task.pop("id", None)
+
+            result = {"task": task, "history": history}
             elapsed = time.time() - start_time
-            logger.info(f"[get_task_details] SUCCESS | task_id={task_id} | type=once | history_count={len(history)} | time={elapsed:.3f}s")
+            logger.info(
+                f"[get_task_details] SUCCESS | task_id={task_id} | type=once | history_count={len(history)} | time={elapsed:.3f}s"
+            )
             return json.dumps(result, indent=2, ensure_ascii=False)
     except Exception as e:
         elapsed = time.time() - start_time
-        logger.error(f"[get_task_details] FAILED | task_id={task_id} | time={elapsed:.3f}s | error={str(e)}")
+        logger.error(
+            f"[get_task_details] FAILED | task_id={task_id} | time={elapsed:.3f}s | error={str(e)}"
+        )
         return f"Error getting task details: {str(e)}"
 
 
@@ -1202,11 +1356,13 @@ async def update_task(
         Confirmation message with updated fields.
     """
     start_time = time.time()
-    logger.info(f"[update_task] START | task_id={task_id} | fields={[k for k, v in {'name': name, 'description': description, 'agent_id': agent_id, 'schedule': schedule, 'enabled': enabled, 'max_retries': max_retries}.items() if v is not None]}")
-    
+    logger.info(
+        f"[update_task] START | task_id={task_id} | fields={[k for k, v in {'name': name, 'description': description, 'agent_id': agent_id, 'schedule': schedule, 'enabled': enabled, 'max_retries': max_retries}.items() if v is not None]}"
+    )
+
     try:
         raw_id, is_recurring = _decode_task_id(task_id)
-        
+
         if is_recurring:
             logger.info(f"[update_task] Updating recurring task {task_id}")
             # Validate cron expression if provided
@@ -1214,30 +1370,38 @@ async def update_task(
                 if not croniter.is_valid(schedule):
                     logger.warning(f"[update_task] Invalid cron expression: {schedule}")
                     return f"Error: Invalid cron expression '{schedule}'. Use format like '0 9 * * *'."
-            
+
             # Build update kwargs
             update_kwargs = {}
             if name is not None:
-                update_kwargs['name'] = name
+                update_kwargs["name"] = name
             if description is not None:
-                update_kwargs['description'] = description
+                update_kwargs["description"] = description
             if agent_id is not None:
-                update_kwargs['agent_id'] = agent_id
+                update_kwargs["agent_id"] = agent_id
             if schedule is not None:
-                update_kwargs['cron_expression'] = schedule
+                update_kwargs["cron_expression"] = schedule
             if enabled is not None:
-                update_kwargs['enabled'] = enabled
-            
+                update_kwargs["enabled"] = enabled
+
             if not update_kwargs:
-                logger.warning(f"[update_task] No fields to update for recurring task {task_id}")
+                logger.warning(
+                    f"[update_task] No fields to update for recurring task {task_id}"
+                )
                 return "Error: No fields to update."
-            
+
             # Ensure the tool edits the same user-visible task scope as the desktop UI.
-            task = await _request_json("GET", f"/tasks/recurring/{raw_id}", user_id=_tool_visible_user_id(user_id))
+            task = await _request_json(
+                "GET",
+                f"/tasks/recurring/{raw_id}",
+                user_id=_tool_visible_user_id(user_id),
+            )
             if not task:
                 logger.warning(f"[update_task] Recurring task {task_id} not found")
                 return f"Error: Recurring task {task_id} not found."
-            logger.info(f"[update_task] Sending PUT request for recurring task {task_id}")
+            logger.info(
+                f"[update_task] Sending PUT request for recurring task {task_id}"
+            )
             await _request_json(
                 "PUT",
                 f"/tasks/recurring/{raw_id}",
@@ -1246,7 +1410,9 @@ async def update_task(
             )
             updated_fields = ", ".join(update_kwargs.keys())
             elapsed = time.time() - start_time
-            logger.info(f"[update_task] SUCCESS | task_id={task_id} | type=recurring | fields={updated_fields} | time={elapsed:.3f}s")
+            logger.info(
+                f"[update_task] SUCCESS | task_id={task_id} | type=recurring | fields={updated_fields} | time={elapsed:.3f}s"
+            )
             return f"Recurring task {task_id} updated successfully. Fields updated: {updated_fields}."
         else:
             logger.info(f"[update_task] Updating one-time task {task_id}")
@@ -1261,36 +1427,46 @@ async def update_task(
                         "offset, for example '2026-04-13T18:37:42+08:00', or a local time string "
                         "like 'YYYY-MM-DD HH:MM:SS'."
                     )
-            
+
             # Build update kwargs
             update_kwargs = {}
             if name is not None:
-                update_kwargs['name'] = name
+                update_kwargs["name"] = name
             if description is not None:
-                update_kwargs['description'] = description
+                update_kwargs["description"] = description
             if agent_id is not None:
-                update_kwargs['agent_id'] = agent_id
+                update_kwargs["agent_id"] = agent_id
             if normalized_schedule is not None:
-                update_kwargs['execute_at'] = normalized_schedule
+                update_kwargs["execute_at"] = normalized_schedule
             if max_retries is not None:
-                update_kwargs['max_retries'] = max_retries
-            
+                update_kwargs["max_retries"] = max_retries
+
             if not update_kwargs:
-                logger.warning(f"[update_task] No fields to update for one-time task {task_id}")
+                logger.warning(
+                    f"[update_task] No fields to update for one-time task {task_id}"
+                )
                 return "Error: No fields to update."
-            
+
             # Ensure the tool edits the same user-visible task scope as the desktop UI.
-            task = await _request_json("GET", f"/tasks/one-time/{raw_id}", user_id=_tool_visible_user_id(user_id))
+            task = await _request_json(
+                "GET",
+                f"/tasks/one-time/{raw_id}",
+                user_id=_tool_visible_user_id(user_id),
+            )
             if not task:
                 logger.warning(f"[update_task] Task {task_id} not found")
                 return f"Error: Task {task_id} not found."
-            
+
             # Check if task can be updated (not processing or completed)
-            if task['status'] in ['processing', 'completed']:
-                logger.warning(f"[update_task] Cannot update task {task_id} with status '{task['status']}'")
+            if task["status"] in ["processing", "completed"]:
+                logger.warning(
+                    f"[update_task] Cannot update task {task_id} with status '{task['status']}'"
+                )
                 return f"Error: Cannot update task {task_id} with status '{task['status']}'. Only pending or failed tasks can be updated."
-            
-            logger.info(f"[update_task] Sending PUT request for one-time task {task_id}")
+
+            logger.info(
+                f"[update_task] Sending PUT request for one-time task {task_id}"
+            )
             await _request_json(
                 "PUT",
                 f"/tasks/one-time/{raw_id}",
@@ -1299,16 +1475,22 @@ async def update_task(
             )
             updated_fields = ", ".join(update_kwargs.keys())
             elapsed = time.time() - start_time
-            logger.info(f"[update_task] SUCCESS | task_id={task_id} | type=once | fields={updated_fields} | time={elapsed:.3f}s")
+            logger.info(
+                f"[update_task] SUCCESS | task_id={task_id} | type=once | fields={updated_fields} | time={elapsed:.3f}s"
+            )
             return f"Task {task_id} updated successfully. Fields updated: {updated_fields}."
-                
+
     except ValueError as e:
         elapsed = time.time() - start_time
-        logger.error(f"[update_task] FAILED (ValueError) | task_id={task_id} | time={elapsed:.3f}s | error={str(e)}")
+        logger.error(
+            f"[update_task] FAILED (ValueError) | task_id={task_id} | time={elapsed:.3f}s | error={str(e)}"
+        )
         return f"Error: Invalid value - {str(e)}"
     except Exception as e:
         elapsed = time.time() - start_time
-        logger.error(f"[update_task] FAILED | task_id={task_id} | time={elapsed:.3f}s | error={type(e).__name__}: {str(e)}")
+        logger.error(
+            f"[update_task] FAILED | task_id={task_id} | time={elapsed:.3f}s | error={type(e).__name__}: {str(e)}"
+        )
         return f"Error updating task: {str(e)}"
 
 

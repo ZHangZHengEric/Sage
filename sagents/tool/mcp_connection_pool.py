@@ -6,6 +6,11 @@ import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 
+try:
+    from builtins import BaseExceptionGroup
+except ImportError:  # pragma: no cover - Python < 3.11 compatibility
+    from exceptiongroup import BaseExceptionGroup
+
 import httpx
 from mcp import ClientSession, StdioServerParameters, Tool
 from mcp.client.sse import sse_client
@@ -206,7 +211,9 @@ class McpPooledConnection:
                 stdio_client(self.server_params)
             )
         else:
-            raise ValueError(f"Unknown MCP server params type: {type(self.server_params)}")
+            raise ValueError(
+                f"Unknown MCP server params type: {type(self.server_params)}"
+            )
 
         self.session = await self._stack.enter_async_context(ClientSession(read, write))
         await self.session.initialize()
@@ -372,7 +379,9 @@ class McpServerPoolEntry:
                 raise
         if last_error is not None:
             raise last_error
-        raise RuntimeError(f"MCP call failed: server={self.server_name}, tool={tool_name}")
+        raise RuntimeError(
+            f"MCP call failed: server={self.server_name}, tool={tool_name}"
+        )
 
     @asynccontextmanager
     async def checkout(self) -> AsyncGenerator[McpPooledConnection, None]:
@@ -459,7 +468,9 @@ HttpWorkerServerParams = Union[SseServerParameters, StreamableHttpServerParamete
 
 
 def _is_http_worker_server_params(server_params: ServerParams) -> bool:
-    return isinstance(server_params, (SseServerParameters, StreamableHttpServerParameters))
+    return isinstance(
+        server_params, (SseServerParameters, StreamableHttpServerParameters)
+    )
 
 
 class McpHttpWorkerPoolEntry:
@@ -584,7 +595,7 @@ class McpHttpWorkerPoolEntry:
                             result = await call
                     else:
                         raise RuntimeError(f"Unknown MCP worker operation: {operation}")
-                except asyncio.TimeoutError as exc:
+                except asyncio.TimeoutError:
                     timeout_error = TimeoutError(
                         f"MCP tool call timed out after {self.call_timeout_seconds:g}s: "
                         f"server={self.server_name}, tool={payload['tool_name']}"
@@ -623,9 +634,7 @@ class McpHttpWorkerPoolEntry:
 
 class McpConnectionPool:
     def __init__(self):
-        self._entries: Dict[
-            str, Union[McpServerPoolEntry, McpHttpWorkerPoolEntry]
-        ] = {}
+        self._entries: Dict[str, Union[McpServerPoolEntry, McpHttpWorkerPoolEntry]] = {}
         self._lock = asyncio.Lock()
 
     def get_cached_tools(
@@ -700,7 +709,10 @@ class McpConnectionPool:
         ):
             return current.tools_cache
 
-        if isinstance(current, McpServerPoolEntry) and current.fingerprint == fingerprint:
+        if (
+            isinstance(current, McpServerPoolEntry)
+            and current.fingerprint == fingerprint
+        ):
             return await current.list_tools()
 
         candidate = McpServerPoolEntry(key, server_params, fingerprint, config)

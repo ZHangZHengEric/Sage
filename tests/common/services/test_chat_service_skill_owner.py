@@ -23,7 +23,9 @@ def _server_cfg(tmp_path: Path) -> config.StartupConfig:
     return cfg
 
 
-def test_sage_stream_service_uses_caller_workspace_and_agent_owner_skills(tmp_path, monkeypatch):
+def test_sage_stream_service_uses_caller_workspace_and_agent_owner_skills(
+    tmp_path, monkeypatch
+):
     cfg = _server_cfg(tmp_path)
     monkeypatch.setattr(config, "_GLOBAL_STARTUP_CONFIG", cfg, raising=False)
 
@@ -102,7 +104,9 @@ def test_populate_request_records_agent_owner_user_id(tmp_path, monkeypatch):
 
     monkeypatch.setattr(chat_service, "AgentConfigDao", FakeAgentConfigDao)
     monkeypatch.setattr(chat_service, "LLMProviderDao", FakeLLMProviderDao)
-    monkeypatch.setattr(chat_service, "_register_extra_mcp_tools", fake_register_extra_mcp_tools)
+    monkeypatch.setattr(
+        chat_service, "_register_extra_mcp_tools", fake_register_extra_mcp_tools
+    )
 
     request = StreamRequest(
         messages=[Message(role="user", content="hi")],
@@ -117,7 +121,9 @@ def test_populate_request_records_agent_owner_user_id(tmp_path, monkeypatch):
     assert request.available_skills == ["schedule-management"]
 
 
-def test_populate_request_prefers_agent_response_language_over_request(tmp_path, monkeypatch):
+def test_populate_request_prefers_agent_response_language_over_request(
+    tmp_path, monkeypatch
+):
     cfg = _server_cfg(tmp_path)
     monkeypatch.setattr(config, "_GLOBAL_STARTUP_CONFIG", cfg, raising=False)
 
@@ -159,7 +165,9 @@ def test_populate_request_prefers_agent_response_language_over_request(tmp_path,
 
     monkeypatch.setattr(chat_service, "AgentConfigDao", FakeAgentConfigDao)
     monkeypatch.setattr(chat_service, "LLMProviderDao", FakeLLMProviderDao)
-    monkeypatch.setattr(chat_service, "_register_extra_mcp_tools", fake_register_extra_mcp_tools)
+    monkeypatch.setattr(
+        chat_service, "_register_extra_mcp_tools", fake_register_extra_mcp_tools
+    )
 
     request = StreamRequest(
         messages=[Message(role="user", content="hi")],
@@ -177,7 +185,9 @@ def test_populate_request_prefers_agent_response_language_over_request(tmp_path,
     assert request.system_context["business_key"] == "request_value"
 
 
-def test_populate_request_uses_agent_response_language_when_request_omits_it(tmp_path, monkeypatch):
+def test_populate_request_uses_agent_response_language_when_request_omits_it(
+    tmp_path, monkeypatch
+):
     cfg = _server_cfg(tmp_path)
     monkeypatch.setattr(config, "_GLOBAL_STARTUP_CONFIG", cfg, raising=False)
 
@@ -219,7 +229,9 @@ def test_populate_request_uses_agent_response_language_when_request_omits_it(tmp
 
     monkeypatch.setattr(chat_service, "AgentConfigDao", FakeAgentConfigDao)
     monkeypatch.setattr(chat_service, "LLMProviderDao", FakeLLMProviderDao)
-    monkeypatch.setattr(chat_service, "_register_extra_mcp_tools", fake_register_extra_mcp_tools)
+    monkeypatch.setattr(
+        chat_service, "_register_extra_mcp_tools", fake_register_extra_mcp_tools
+    )
 
     request = StreamRequest(
         messages=[Message(role="user", content="hi")],

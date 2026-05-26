@@ -31,7 +31,9 @@ def _print_message_preview(message: Optional[Dict[str, Any]], *, label: str) -> 
     print(f"{label}: [{role}]{suffix} {content}")
 
 
-def _print_provider_summary(provider: Optional[Dict[str, Any]], *, prefix: str = "provider") -> None:
+def _print_provider_summary(
+    provider: Optional[Dict[str, Any]], *, prefix: str = "provider"
+) -> None:
     if not provider:
         print(f"{prefix}: (none)")
         return

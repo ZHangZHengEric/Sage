@@ -12,6 +12,7 @@ class ChineseRecursiveTextSplitter:
     Split text based on punctuation and length constraints.
     Renamed from DocumentSplit to better reflect its functionality (Chinese punctuation aware).
     """
+
     def __init__(self):
         pass
 
@@ -22,7 +23,9 @@ class ChineseRecursiveTextSplitter:
             return hashlib.sha256(text.encode()).hexdigest()
         raise ValueError("hash_fun must be 'md5' or 'sha_256'")
 
-    def segment_length_by_punctuation(self, text_: str, length_: int) -> List[Dict[str, Any]]:
+    def segment_length_by_punctuation(
+        self, text_: str, length_: int
+    ) -> List[Dict[str, Any]]:
         pattern = re.compile(r"[.。]\n?")
         positions = list(pattern.finditer(text_))
         inner_sentences = []
@@ -31,31 +34,42 @@ class ChineseRecursiveTextSplitter:
             end = pos.end()
             if end - start > length_ or end == len(text_):
                 passage_content = text_[start:end]
-                inner_sentences.append({
-                    "passage_id": self.generate_id_based_string(passage_content),
-                    "passage_content": passage_content,
-                    "start": start,
-                    "end": end,
-                })
+                inner_sentences.append(
+                    {
+                        "passage_id": self.generate_id_based_string(passage_content),
+                        "passage_content": passage_content,
+                        "start": start,
+                        "end": end,
+                    }
+                )
                 start = end
         if start < len(text_):
             passage_content = text_[start:]
-            inner_sentences.append({
-                "passage_id": self.generate_id_based_string(passage_content),
-                "passage_content": passage_content,
-                "start": start,
-                "end": len(text_),
-            })
+            inner_sentences.append(
+                {
+                    "passage_id": self.generate_id_based_string(passage_content),
+                    "passage_content": passage_content,
+                    "start": start,
+                    "end": len(text_),
+                }
+            )
         return inner_sentences
 
-    def merge_sentences_split(self, doc_content: str, fix_length_list: List[int] | None = None) -> List[Dict[str, Any]]:
+    def merge_sentences_split(
+        self, doc_content: str, fix_length_list: List[int] | None = None
+    ) -> List[Dict[str, Any]]:
         fix_length_list = fix_length_list or [128, 256, 512]
         sentences: List[Dict[str, Any]] = []
         for length in fix_length_list:
             sentences += self.segment_length_by_punctuation(doc_content, length)
         return sentences
 
-    async def split_text_by_punctuation(self, text: str, fix_length_list: List[int] | None = None, text_cutting_version: str = "punc_cutting") -> Dict[str, Any]:
+    async def split_text_by_punctuation(
+        self,
+        text: str,
+        fix_length_list: List[int] | None = None,
+        text_cutting_version: str = "punc_cutting",
+    ) -> Dict[str, Any]:
         try:
             fix_length_list = fix_length_list or [128, 256, 512]
             if text_cutting_version != "punc_cutting":

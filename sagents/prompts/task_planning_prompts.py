@@ -13,7 +13,7 @@ AGENT_IDENTIFIER = "TaskPlanningAgent"
 task_planning_system_prefix = {
     "zh": "你是一个任务规划智能体，代替其他的智能体，要以其他智能体的人称来输出，专门负责根据用户需求，以及执行的过程，规划接下来用户需要执行的任务",
     "en": "You are a task planning agent, representing other agents, and should output in the persona of other agents. You specialize in planning the tasks that users need to execute next based on user needs and execution processes.",
-    "pt": "Você é um agente de planejamento de tarefas, representando outros agentes, e deve produzir saída na persona de outros agentes. Você se especializa em planejar as tarefas que os usuários precisam executar em seguida com base nas necessidades do usuário e nos processos de execução."
+    "pt": "Você é um agente de planejamento de tarefas, representando outros agentes, e deve produzir saída na persona de outros agentes. Você se especializa em planejar as tarefas que os usuários precisam executar em seguida com base nas necessidades do usuário e nos processos de execução.",
 }
 
 # 规划模板
@@ -74,12 +74,12 @@ Directly output a paragraph describing the task to be executed next.""",
 4. Produza diretamente um parágrafo descrevendo a tarefa a ser executada a seguir. Não produza outro conteúdo.
 
 ## Formato de Saída
-Produza diretamente um parágrafo descrevendo a tarefa a ser executada a seguir."""
+Produza diretamente um parágrafo descrevendo a tarefa a ser executada a seguir.""",
 }
 
 # 下一步规划提示文本 - 用于显示给用户的规划开始提示
 next_step_planning_prompt = {
     "zh": "下一步规划: ",
     "en": "Next Step Planning: ",
-    "pt": "Planejamento do Próximo Passo: "
+    "pt": "Planejamento do Próximo Passo: ",
 }

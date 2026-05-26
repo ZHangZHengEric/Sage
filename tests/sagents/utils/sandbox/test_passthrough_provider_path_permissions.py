@@ -3,7 +3,9 @@ import asyncio
 import pytest
 
 from sagents.utils.sandbox.config import VolumeMount
-from sagents.utils.sandbox.providers.passthrough.passthrough import PassthroughSandboxProvider
+from sagents.utils.sandbox.providers.passthrough.passthrough import (
+    PassthroughSandboxProvider,
+)
 
 
 def test_passthrough_provider_rejects_file_write_outside_workspace(tmp_path):

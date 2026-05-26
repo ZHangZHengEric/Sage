@@ -19,10 +19,13 @@ from sagents.context.messages.message import MessageChunk, MessageRole, MessageT
 from sagents.context.messages.message_manager import MessageManager
 
 
-def _make(role: str, content: str = "",
-          msg_type: Optional[str] = None,
-          tool_calls: Optional[List[Dict]] = None,
-          tool_call_id: Optional[str] = None) -> MessageChunk:
+def _make(
+    role: str,
+    content: str = "",
+    msg_type: Optional[str] = None,
+    tool_calls: Optional[List[Dict]] = None,
+    tool_call_id: Optional[str] = None,
+) -> MessageChunk:
     if msg_type is None:
         if role == MessageRole.USER.value:
             msg_type = MessageType.USER_INPUT.value
@@ -45,14 +48,17 @@ def _make(role: str, content: str = "",
 
 
 def _compress_tc(idx: int = 1) -> List[Dict]:
-    return [{
-        "id": f"call_compress_{idx}",
-        "type": "function",
-        "function": {"name": "compress_conversation_history", "arguments": "{}"},
-    }]
+    return [
+        {
+            "id": f"call_compress_{idx}",
+            "type": "function",
+            "function": {"name": "compress_conversation_history", "arguments": "{}"},
+        }
+    ]
 
 
 # ---------- compute_history_anchor_index ----------
+
 
 class TestComputeHistoryAnchorIndex:
     def test_empty_messages_returns_none(self):
@@ -72,11 +78,13 @@ class TestComputeHistoryAnchorIndex:
         mm = MessageManager()
         mm.messages = [
             _make(MessageRole.USER.value, "u1"),
-            _make(MessageRole.ASSISTANT.value, "",
-                  msg_type=MessageType.TOOL_CALL.value,
-                  tool_calls=_compress_tc(1)),  # idx=1
-            _make(MessageRole.TOOL.value, "summary",
-                  tool_call_id="call_compress_1"),
+            _make(
+                MessageRole.ASSISTANT.value,
+                "",
+                msg_type=MessageType.TOOL_CALL.value,
+                tool_calls=_compress_tc(1),
+            ),  # idx=1
+            _make(MessageRole.TOOL.value, "summary", tool_call_id="call_compress_1"),
             _make(MessageRole.USER.value, "u2"),
         ]
         assert mm.compute_history_anchor_index() == 1
@@ -85,14 +93,20 @@ class TestComputeHistoryAnchorIndex:
         mm = MessageManager()
         mm.messages = [
             _make(MessageRole.USER.value, "u1"),
-            _make(MessageRole.ASSISTANT.value, "",
-                  msg_type=MessageType.TOOL_CALL.value,
-                  tool_calls=_compress_tc(1)),  # idx=1
+            _make(
+                MessageRole.ASSISTANT.value,
+                "",
+                msg_type=MessageType.TOOL_CALL.value,
+                tool_calls=_compress_tc(1),
+            ),  # idx=1
             _make(MessageRole.TOOL.value, "s1", tool_call_id="call_compress_1"),
             _make(MessageRole.USER.value, "u2"),
-            _make(MessageRole.ASSISTANT.value, "",
-                  msg_type=MessageType.TOOL_CALL.value,
-                  tool_calls=_compress_tc(2)),  # idx=4 (latest)
+            _make(
+                MessageRole.ASSISTANT.value,
+                "",
+                msg_type=MessageType.TOOL_CALL.value,
+                tool_calls=_compress_tc(2),
+            ),  # idx=4 (latest)
             _make(MessageRole.TOOL.value, "s2", tool_call_id="call_compress_2"),
         ]
         assert mm.compute_history_anchor_index() == 4
@@ -101,9 +115,12 @@ class TestComputeHistoryAnchorIndex:
         """边界：第一条就是压缩工具调用（不常见但允许）"""
         mm = MessageManager()
         mm.messages = [
-            _make(MessageRole.ASSISTANT.value, "",
-                  msg_type=MessageType.TOOL_CALL.value,
-                  tool_calls=_compress_tc(1)),  # idx=0
+            _make(
+                MessageRole.ASSISTANT.value,
+                "",
+                msg_type=MessageType.TOOL_CALL.value,
+                tool_calls=_compress_tc(1),
+            ),  # idx=0
             _make(MessageRole.TOOL.value, "s", tool_call_id="call_compress_1"),
         ]
         assert mm.compute_history_anchor_index() == 0
@@ -113,19 +130,25 @@ class TestComputeHistoryAnchorIndex:
         mm = MessageManager()
         mm.messages = [
             _make(MessageRole.USER.value, "u1"),
-            _make(MessageRole.ASSISTANT.value, "",
-                  msg_type=MessageType.TOOL_CALL.value,
-                  tool_calls=[{
-                      "id": "x",
-                      "type": "function",
-                      "function": {"name": "other_tool", "arguments": "{}"},
-                  }]),
+            _make(
+                MessageRole.ASSISTANT.value,
+                "",
+                msg_type=MessageType.TOOL_CALL.value,
+                tool_calls=[
+                    {
+                        "id": "x",
+                        "type": "function",
+                        "function": {"name": "other_tool", "arguments": "{}"},
+                    }
+                ],
+            ),
             _make(MessageRole.TOOL.value, "result", tool_call_id="x"),
         ]
         assert mm.compute_history_anchor_index() is None
 
 
 # ---------- add_messages 自动刷新锚点 ----------
+
 
 class TestAddMessagesRefreshesAnchor:
     def test_initial_state_is_none(self):
@@ -151,23 +174,30 @@ class TestAddMessagesRefreshesAnchor:
         mm.add_messages(_make(MessageRole.USER.value, "u1"))
         mm.add_messages(_make(MessageRole.ASSISTANT.value, "a1"))
         # 第三条加入压缩工具调用
-        mm.add_messages(_make(
-            MessageRole.ASSISTANT.value, "",
-            msg_type=MessageType.TOOL_CALL.value,
-            tool_calls=_compress_tc(1),
-        ))
+        mm.add_messages(
+            _make(
+                MessageRole.ASSISTANT.value,
+                "",
+                msg_type=MessageType.TOOL_CALL.value,
+                tool_calls=_compress_tc(1),
+            )
+        )
         assert mm.active_start_index == 2
 
     def test_adding_more_after_compress_keeps_anchor(self):
         mm = MessageManager()
         mm.add_messages(_make(MessageRole.USER.value, "u1"))
-        mm.add_messages(_make(
-            MessageRole.ASSISTANT.value, "",
-            msg_type=MessageType.TOOL_CALL.value,
-            tool_calls=_compress_tc(1),
-        ))
-        mm.add_messages(_make(MessageRole.TOOL.value, "s",
-                              tool_call_id="call_compress_1"))
+        mm.add_messages(
+            _make(
+                MessageRole.ASSISTANT.value,
+                "",
+                msg_type=MessageType.TOOL_CALL.value,
+                tool_calls=_compress_tc(1),
+            )
+        )
+        mm.add_messages(
+            _make(MessageRole.TOOL.value, "s", tool_call_id="call_compress_1")
+        )
         mm.add_messages(_make(MessageRole.USER.value, "u2"))
         # anchor 仍指向 idx=1（最近的压缩调用），不会跟着新消息漂移
         assert mm.active_start_index == 1
@@ -175,26 +205,34 @@ class TestAddMessagesRefreshesAnchor:
     def test_second_compress_call_advances_anchor(self):
         mm = MessageManager()
         mm.add_messages(_make(MessageRole.USER.value, "u1"))
-        mm.add_messages(_make(
-            MessageRole.ASSISTANT.value, "",
-            msg_type=MessageType.TOOL_CALL.value,
-            tool_calls=_compress_tc(1),
-        ))
-        mm.add_messages(_make(MessageRole.TOOL.value, "s1",
-                              tool_call_id="call_compress_1"))
+        mm.add_messages(
+            _make(
+                MessageRole.ASSISTANT.value,
+                "",
+                msg_type=MessageType.TOOL_CALL.value,
+                tool_calls=_compress_tc(1),
+            )
+        )
+        mm.add_messages(
+            _make(MessageRole.TOOL.value, "s1", tool_call_id="call_compress_1")
+        )
         assert mm.active_start_index == 1
 
         mm.add_messages(_make(MessageRole.USER.value, "u2"))
-        mm.add_messages(_make(
-            MessageRole.ASSISTANT.value, "",
-            msg_type=MessageType.TOOL_CALL.value,
-            tool_calls=_compress_tc(2),
-        ))
+        mm.add_messages(
+            _make(
+                MessageRole.ASSISTANT.value,
+                "",
+                msg_type=MessageType.TOOL_CALL.value,
+                tool_calls=_compress_tc(2),
+            )
+        )
         # anchor 推进到新的压缩调用位置
         assert mm.active_start_index == 4
 
 
 # ---------- extract_all_context_messages 不再被 active_start_index 硬截断 ----------
+
 
 class TestExtractIgnoresActiveStartIndex:
     def _build_session(self) -> MessageManager:
@@ -243,11 +281,13 @@ class TestExtractIgnoresActiveStartIndex:
             _make(MessageRole.USER.value, "u1"),
             _make(MessageRole.ASSISTANT.value, "a1"),
             _make(MessageRole.USER.value, "u2"),
-            _make(MessageRole.ASSISTANT.value, "",
-                  msg_type=MessageType.TOOL_CALL.value,
-                  tool_calls=_compress_tc(1)),
-            _make(MessageRole.TOOL.value, "summary",
-                  tool_call_id="call_compress_1"),
+            _make(
+                MessageRole.ASSISTANT.value,
+                "",
+                msg_type=MessageType.TOOL_CALL.value,
+                tool_calls=_compress_tc(1),
+            ),
+            _make(MessageRole.TOOL.value, "summary", tool_call_id="call_compress_1"),
             _make(MessageRole.USER.value, "u3"),
         ]
         result = mm.extract_all_context_messages(
@@ -263,6 +303,7 @@ class TestExtractIgnoresActiveStartIndex:
 
 
 # ---------- prepare_history_split 新行为 ----------
+
 
 class TestPrepareHistorySplit:
     def test_returns_budget_info_only(self):
@@ -280,9 +321,12 @@ class TestPrepareHistorySplit:
         mm = MessageManager()
         mm.messages = [
             _make(MessageRole.USER.value, "u1"),
-            _make(MessageRole.ASSISTANT.value, "",
-                  msg_type=MessageType.TOOL_CALL.value,
-                  tool_calls=_compress_tc(1)),
+            _make(
+                MessageRole.ASSISTANT.value,
+                "",
+                msg_type=MessageType.TOOL_CALL.value,
+                tool_calls=_compress_tc(1),
+            ),
         ]
         # 故意先设错的值
         mm.set_active_start_index(99)
@@ -309,30 +353,36 @@ class TestPrepareHistorySplit:
 
 # ---------- 向后兼容 ----------
 
+
 class TestBackwardCompat:
     def test_legacy_recent_turns_in_config_does_not_crash(self):
         """examples/sage_*.py 仍会传 recent_turns，应被静默忽略"""
-        mm = MessageManager(context_budget_config={
-            "max_model_len": 20000,
-            "recent_turns": 5,  # 已废弃的 key
-            "history_ratio": 0.2,
-            "active_ratio": 0.3,
-            "max_new_message_ratio": 0.5,
-        })
+        mm = MessageManager(
+            context_budget_config={
+                "max_model_len": 20000,
+                "recent_turns": 5,  # 已废弃的 key
+                "history_ratio": 0.2,
+                "active_ratio": 0.3,
+                "max_new_message_ratio": 0.5,
+            }
+        )
         assert mm is not None
         # 不再有 recent_turns 字段
         assert not hasattr(mm.context_budget_manager, "recent_turns")
 
     def test_legacy_dropped_history_bridge_budget_does_not_crash(self):
         """旧的桥接预算配置项也应被静默忽略"""
-        mm = MessageManager(context_budget_config={
-            "dropped_history_bridge_budget": 1000,
-        })
+        mm = MessageManager(
+            context_budget_config={
+                "dropped_history_bridge_budget": 1000,
+            }
+        )
         assert mm is not None
         assert not hasattr(mm, "dropped_history_bridge_budget")
 
 
 # ---------- memory 工具历史边界 ----------
+
 
 class TestMemoryToolHistoryBoundary:
     def _build_session_context(self, mm: MessageManager) -> MagicMock:
@@ -372,11 +422,13 @@ class TestMemoryToolHistoryBoundary:
             _make(MessageRole.USER.value, "u1"),
             _make(MessageRole.ASSISTANT.value, "a1"),
             _make(MessageRole.USER.value, "u2"),
-            _make(MessageRole.ASSISTANT.value, "",
-                  msg_type=MessageType.TOOL_CALL.value,
-                  tool_calls=_compress_tc(1)),  # anchor 在 idx=3
-            _make(MessageRole.TOOL.value, "summary",
-                  tool_call_id="call_compress_1"),
+            _make(
+                MessageRole.ASSISTANT.value,
+                "",
+                msg_type=MessageType.TOOL_CALL.value,
+                tool_calls=_compress_tc(1),
+            ),  # anchor 在 idx=3
+            _make(MessageRole.TOOL.value, "summary", tool_call_id="call_compress_1"),
             _make(MessageRole.USER.value, "u3"),
         ]
         ctx = self._build_session_context(mm)
@@ -398,9 +450,12 @@ class TestMemoryToolHistoryBoundary:
 
         mm = MessageManager()
         mm.messages = [
-            _make(MessageRole.ASSISTANT.value, "",
-                  msg_type=MessageType.TOOL_CALL.value,
-                  tool_calls=_compress_tc(1)),  # anchor=0
+            _make(
+                MessageRole.ASSISTANT.value,
+                "",
+                msg_type=MessageType.TOOL_CALL.value,
+                tool_calls=_compress_tc(1),
+            ),  # anchor=0
             _make(MessageRole.TOOL.value, "s", tool_call_id="call_compress_1"),
         ]
         ctx = self._build_session_context(mm)

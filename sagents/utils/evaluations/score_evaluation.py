@@ -5,6 +5,7 @@ from .base_agent_processor import BaseAgentProcessor
 from ..logger import logger
 from sagents.utils.prompt_manager import PromptManager
 
+
 class AgentScoreEvaluator(BaseAgentProcessor):
     def __init__(
         self,
@@ -34,18 +35,16 @@ class AgentScoreEvaluator(BaseAgentProcessor):
 
         template = Template(instruction_prompt)
         instruction_prompt = template.substitute(
-            agent_config=agent_config,
-            agent_result=agent_result,
-            checkpoint=checkpoint
+            agent_config=agent_config, agent_result=agent_result, checkpoint=checkpoint
         )
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": instruction_prompt}
+            {"role": "user", "content": instruction_prompt},
         ]
 
         response = await self.call_qianxun(messages, model_name=model_name)
         parsed_response = self.parse_json_response(response)
-        
+
         final_result_str = ""
         if isinstance(parsed_response, (dict, list)):
             final_response = {"evaluation_result": parsed_response}
@@ -54,12 +53,6 @@ class AgentScoreEvaluator(BaseAgentProcessor):
             final_result_str = parsed_response
         else:
             final_result_str = str(parsed_response)
-            
+
         logger.info("evaluation response: " + final_result_str)
         return final_result_str
-
-
-
-
-
-

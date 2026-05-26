@@ -48,7 +48,7 @@ Se o conjunto de ferramentas contiver a ferramenta de função file_write, os re
 6. Se for necessário escrever código, use a ferramenta de função file_write, com o conteúdo do código como parâmetros da função.
 7. Se for para produzir relatórios ou resumos, use a ferramenta de função file_write, com o conteúdo do relatório como parâmetros da função, usando formato markdown.
 8. Se usar file_write para criar arquivos, sempre crie arquivos no diretório de trabalho, exigindo caminhos de arquivo absolutos.
-9. Para gerar documentos ou código maiores, primeiro use file_write para gerar conteúdo parcial ou estrutura, depois use file_update para substituição e refinamento de conteúdo local."""
+9. Para gerar documentos ou código maiores, primeiro use file_write para gerar conteúdo parcial ou estrutura, depois use file_update para substituição e refinamento de conteúdo local.""",
 }
 
 # 任务执行提示模板
@@ -61,7 +61,7 @@ task_execution_template = {
 Please start executing the task directly, observe the conversation history, and don't do repetitive work. Don't give any next step suggestions or plans.""",
     "pt": """Por favor, execute os seguintes requisitos ou tarefas: {next_subtask_description}
 
-Por favor, comece a executar a tarefa diretamente, observe o histórico de conversas e não faça trabalho repetitivo. Não dê sugestões ou planos para os próximos passos."""
+Por favor, comece a executar a tarefa diretamente, observe o histórico de conversas e não faça trabalho repetitivo. Não dê sugestões ou planos para os próximos passos.""",
 }
 
 tool_suggestion_template = {
@@ -136,5 +136,5 @@ Formato de Saída:
 Notas:
 1. Os nomes das ferramentas devem ser da lista de ferramentas disponíveis.
 2. Retorne todos os nomes de ferramentas possíveis que possam ser usados. Não retorne ferramentas que provavelmente não serão usadas.
-3. Retorne no máximo 7 ferramentas possíveis."""
+3. Retorne no máximo 7 ferramentas possíveis.""",
 }

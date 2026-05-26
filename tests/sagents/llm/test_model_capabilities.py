@@ -47,7 +47,9 @@ class TestResolveReasoningEffort(unittest.TestCase):
 
     def test_custom_default_off(self):
         self.assertEqual(
-            resolve_reasoning_effort(enable_thinking=False, env_value=None, default_off="minimal"),
+            resolve_reasoning_effort(
+                enable_thinking=False, env_value=None, default_off="minimal"
+            ),
             "minimal",
         )
 
@@ -94,7 +96,9 @@ class TestIsOpenAIReasoningModel(unittest.TestCase):
 
 
 class TestProbeLlmCapabilities(unittest.IsolatedAsyncioTestCase):
-    async def test_optional_capability_probe_failures_do_not_fail_connection_probe(self):
+    async def test_optional_capability_probe_failures_do_not_fail_connection_probe(
+        self,
+    ):
         calls = []
 
         async def fake_connection(api_key, base_url, model):
@@ -134,7 +138,12 @@ class TestProbeLlmCapabilities(unittest.IsolatedAsyncioTestCase):
             [
                 ("connection", "sk-test", "https://example.com/v1", "text-only-model"),
                 ("multimodal", "sk-test", "https://example.com/v1", "text-only-model"),
-                ("structured_output", "sk-test", "https://example.com/v1", "text-only-model"),
+                (
+                    "structured_output",
+                    "sk-test",
+                    "https://example.com/v1",
+                    "text-only-model",
+                ),
             ],
         )
         self.assertTrue(result["connection"]["supported"])

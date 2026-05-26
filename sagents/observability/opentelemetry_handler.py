@@ -14,7 +14,10 @@ from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 # ContextVar to hold the stack of (span, token) for the current task.
 # We use an immutable tuple to ensure safety across async tasks (copy-on-write).
 # Each element is a tuple: (span, token)
-_span_token_stack: contextvars.ContextVar[tuple] = contextvars.ContextVar("span_token_stack", default=())
+_span_token_stack: contextvars.ContextVar[tuple] = contextvars.ContextVar(
+    "span_token_stack", default=()
+)
+
 
 class OpenTelemetryTraceHandler(BaseTraceHandler):
     """
@@ -52,7 +55,9 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         except Exception as e:
             if self._is_ignorable_detach_error(e):
                 self._detached_token_ids.add(token_id)
-                logger.debug(f"OpenTelemetry: Ignore cross-context detach during cleanup: {e}")
+                logger.debug(
+                    f"OpenTelemetry: Ignore cross-context detach during cleanup: {e}"
+                )
                 return False
             raise
 
@@ -104,7 +109,9 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
                 self._safe_detach(token)
             except Exception as e:
                 # Token may have already been used/detached in a different context
-                logger.warning(f"OpenTelemetry: Failed to detach context (may be already detached): {e}")
+                logger.warning(
+                    f"OpenTelemetry: Failed to detach context (may be already detached): {e}"
+                )
         return span
 
     def _get_current_span(self) -> Optional[trace.Span]:
@@ -129,7 +136,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
                             self._safe_detach(token)
                         except Exception as e:
                             logger.warning(f"Failed to detach leaked token: {e}")
-                    
+
                     # Optionally end the span if it's still recording
                     try:
                         if span.is_recording():
@@ -144,31 +151,26 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
 
         # Start a new span. OTel will automatically pick up parent from context if it exists.
         # We don't manually generate trace_id or parent context anymore.
-        
+
         # 1. Generate consistent trace_id from session_id
         # We use MD5 hash of session_id to get a 128-bit integer
-        trace_id = int(hashlib.md5(session_id.encode('utf-8')).hexdigest(), 16)
+        trace_id = int(hashlib.md5(session_id.encode("utf-8")).hexdigest(), 16)
 
         # 2. Create a parent context that forces this trace_id
         # We simulate a parent span so that this new span belongs to the same trace.
         span_id = random.getrandbits(64)
         trace_flags = trace.TraceFlags(trace.TraceFlags.SAMPLED)
-        
+
         span_context = trace.SpanContext(
-            trace_id=trace_id,
-            span_id=span_id,
-            is_remote=True,
-            trace_flags=trace_flags
+            trace_id=trace_id, span_id=span_id, is_remote=True, trace_flags=trace_flags
         )
-        
+
         # Wrap in NonRecordingSpan to create a Context
         parent_ctx = trace.set_span_in_context(trace.NonRecordingSpan(span_context))
-        
+
         # 3. Start the span representing this "User Input" turn
         span = self.tracer.start_span(
-            name="用户输入", 
-            context=parent_ctx, 
-            kind=trace.SpanKind.SERVER
+            name="用户输入", context=parent_ctx, kind=trace.SpanKind.SERVER
         )
 
         # Use specific attributes instead of SERVICE_NAME (which is Resource-level)
@@ -176,16 +178,19 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
 
         try:
             if isinstance(input_data, (dict, list)):
+
                 def default_serializer(obj):
                     if dataclasses.is_dataclass(obj):
                         return dataclasses.asdict(obj)
-                    if hasattr(obj, 'to_dict'):
+                    if hasattr(obj, "to_dict"):
                         return obj.to_dict()
-                    if hasattr(obj, '__dict__'):
+                    if hasattr(obj, "__dict__"):
                         return obj.__dict__
                     return str(obj)
-                    
-                input_str = json.dumps(input_data, ensure_ascii=False, default=default_serializer)
+
+                input_str = json.dumps(
+                    input_data, ensure_ascii=False, default=default_serializer
+                )
             else:
                 input_str = str(input_data)
             span.set_attribute("input", input_str)
@@ -202,16 +207,19 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
 
         try:
             if isinstance(output_data, (dict, list)):
+
                 def default_serializer(obj):
                     if dataclasses.is_dataclass(obj):
                         return dataclasses.asdict(obj)
-                    if hasattr(obj, 'to_dict'):
+                    if hasattr(obj, "to_dict"):
                         return obj.to_dict()
-                    if hasattr(obj, '__dict__'):
+                    if hasattr(obj, "__dict__"):
                         return obj.__dict__
                     return str(obj)
 
-                output_str = json.dumps(output_data, ensure_ascii=False, default=default_serializer)
+                output_str = json.dumps(
+                    output_data, ensure_ascii=False, default=default_serializer
+                )
             else:
                 output_str = str(output_data)
             span.set_attribute("output", str(output_str))
@@ -226,8 +234,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
 
     def on_agent_start(self, session_id: str, agent_name: str, **kwargs: Any) -> Any:
         span = self.tracer.start_span(
-            name=f"Agent运行:{agent_name}",
-            kind=trace.SpanKind.INTERNAL
+            name=f"Agent运行:{agent_name}", kind=trace.SpanKind.INTERNAL
         )
         agent_id = kwargs.get("agent_id")
         if agent_id:
@@ -249,17 +256,25 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         elif status == "cancelled":
             span.set_attribute("agent.cancelled", True)
         elif status == "error":
-            span.set_status(Status(StatusCode.ERROR, description or "Agent execution failed"))
+            span.set_status(
+                Status(StatusCode.ERROR, description or "Agent execution failed")
+            )
 
         self._pop_span()
 
     def on_agent_error(self, error: Exception, **kwargs: Any) -> Any:
         self._end_span_on_error(error)
 
-    def on_llm_start(self, session_id: str, model_name: str, messages: List[Any], step_name: str, **kwargs: Any) -> Any:
+    def on_llm_start(
+        self,
+        session_id: str,
+        model_name: str,
+        messages: List[Any],
+        step_name: str,
+        **kwargs: Any,
+    ) -> Any:
         span = self.tracer.start_span(
-            name=f"阶段：{step_name}",
-            kind=trace.SpanKind.CLIENT
+            name=f"阶段：{step_name}", kind=trace.SpanKind.CLIENT
         )
         llm_system = kwargs.get("llm_system", "openai")
         span.set_attribute("llm.system", llm_system)
@@ -282,38 +297,43 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
 
         try:
             # Convert response to serializable dict if needed
-            if hasattr(response, 'model_dump'):
+            if hasattr(response, "model_dump"):
                 # Pydantic v2 model
                 response_dict = response.model_dump()
-            elif hasattr(response, 'dict'):
+            elif hasattr(response, "dict"):
                 # Pydantic v1 model
                 response_dict = response.dict()
-            elif hasattr(response, '__dict__'):
+            elif hasattr(response, "__dict__"):
                 # Regular object
                 response_dict = response.__dict__
             else:
                 response_dict = str(response)
-            
+
             # Limit response size to avoid span attribute limits
             response_str = json.dumps(response_dict, ensure_ascii=False, default=str)
             if len(response_str) > 10000:
                 response_str = response_str[:10000] + "... [truncated]"
-            
+
             span.set_attribute("llm.response", response_str)
         except Exception as e:
             logger.error(f"Error setting llm.response attribute: {e}")
             pass
-        
+
         span.set_status(Status(StatusCode.OK))
         self._pop_span()
 
     def on_llm_error(self, error: Exception, **kwargs: Any) -> Any:
         self._end_span_on_error(error)
 
-    def on_tool_start(self, session_id: str, tool_name: str, tool_input: Union[str, Dict], **kwargs: Any) -> Any:
+    def on_tool_start(
+        self,
+        session_id: str,
+        tool_name: str,
+        tool_input: Union[str, Dict],
+        **kwargs: Any,
+    ) -> Any:
         span = self.tracer.start_span(
-            name=f"工具执行:{tool_name}",
-            kind=trace.SpanKind.INTERNAL
+            name=f"工具执行:{tool_name}", kind=trace.SpanKind.INTERNAL
         )
         span.set_attribute("tool.name", tool_name)
         span.set_attribute("session_id", session_id)

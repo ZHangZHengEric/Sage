@@ -1,7 +1,10 @@
 import asyncio
 import hashlib
 
-from app.server.core.middleware import _is_whitelisted, _should_record_prometheus_http_metrics
+from app.server.core.middleware import (
+    _is_whitelisted,
+    _should_record_prometheus_http_metrics,
+)
 from app.server.routers.observability import prometheus_metrics
 from app.server.services.prometheus_metrics import (
     _reset_prometheus_metrics_state,
@@ -55,9 +58,18 @@ def test_prometheus_metrics_records_http_request_counts_and_duration():
 
     body = render_prometheus_metrics()
 
-    assert 'sage_server_http_requests_total{method="GET",path="/api/chat",status="200"} 1.000000' in body
-    assert 'sage_server_http_request_duration_seconds_count{method="GET",path="/api/chat"} 1.000000' in body
-    assert 'sage_server_http_requests_in_progress{method="GET",path="/api/chat"} 0.000000' in body
+    assert (
+        'sage_server_http_requests_total{method="GET",path="/api/chat",status="200"} 1.000000'
+        in body
+    )
+    assert (
+        'sage_server_http_request_duration_seconds_count{method="GET",path="/api/chat"} 1.000000'
+        in body
+    )
+    assert (
+        'sage_server_http_requests_in_progress{method="GET",path="/api/chat"} 0.000000'
+        in body
+    )
 
 
 def test_prometheus_metrics_normalizes_dynamic_path_segments():
@@ -77,8 +89,14 @@ def test_prometheus_metrics_records_stream_operations():
 
     body = render_prometheus_metrics()
 
-    assert 'sage_server_operations_total{category="stream",name="api_chat",status="completed"} 1.000000' in body
-    assert 'sage_server_operations_active{category="stream",name="api_chat"} 0.000000' in body
+    assert (
+        'sage_server_operations_total{category="stream",name="api_chat",status="completed"} 1.000000'
+        in body
+    )
+    assert (
+        'sage_server_operations_active{category="stream",name="api_chat"} 0.000000'
+        in body
+    )
 
 
 def test_prometheus_trace_handler_records_agent_and_tool_metrics():
@@ -88,26 +106,52 @@ def test_prometheus_trace_handler_records_agent_and_tool_metrics():
     handler.on_agent_start("session-1", "SimpleAgent", agent_id="agent-demo")
     active_body = render_prometheus_trace_metrics()
     assert 'sagents_agent_starts_total{agent_id="agent-demo"} 1.000000' in active_body
-    assert 'sagents_agent_runs_active{agent_id="agent-demo",session_id="session-1"} 1.000000' in active_body
+    assert (
+        'sagents_agent_runs_active{agent_id="agent-demo",session_id="session-1"} 1.000000'
+        in active_body
+    )
 
     handler.on_agent_end({"status": "finished"})
     record_agent_first_token("agent-demo", "session-1", 0.2)
     handler.on_tool_start("session-1", "search", {})
     handler.on_tool_error(Exception("boom"))
-    handler.on_tool_start("session-2", "query", {}, tool_type="mcp", server_name="AnyTool")
+    handler.on_tool_start(
+        "session-2", "query", {}, tool_type="mcp", server_name="AnyTool"
+    )
     handler.on_tool_end({"content": "ok"})
 
     body = render_prometheus_trace_metrics()
     trace_id = hashlib.md5(b"session-1").hexdigest()
 
-    assert 'sagents_agent_runs_total{agent_id="agent-demo",status="success"} 1.000000' in body
-    assert 'sagents_agent_runs_active{agent_id="agent-demo",session_id="session-1"}' not in body
-    assert 'sagents_agent_run_duration_seconds_count{agent_id="agent-demo",status="success"} 1.000000' in body
-    assert 'sagents_first_token_seconds_count{agent_id="agent-demo",session_id="session-1"} 1.000000' in body
-    assert 'sagents_first_token_seconds_sum{agent_id="agent-demo",session_id="session-1"} 0.200000' in body
-    assert 'sagents_tool_calls_total{tool_name="search",status="error"} 1.000000' in body
-    assert 'sagents_tool_calls_total{tool_name="query",status="success"} 1.000000' in body
-    assert 'sagents_tool_call_duration_seconds_count{tool_name="search"} 1.000000' in body
+    assert (
+        'sagents_agent_runs_total{agent_id="agent-demo",status="success"} 1.000000'
+        in body
+    )
+    assert (
+        'sagents_agent_runs_active{agent_id="agent-demo",session_id="session-1"}'
+        not in body
+    )
+    assert (
+        'sagents_agent_run_duration_seconds_count{agent_id="agent-demo",status="success"} 1.000000'
+        in body
+    )
+    assert (
+        'sagents_first_token_seconds_count{agent_id="agent-demo",session_id="session-1"} 1.000000'
+        in body
+    )
+    assert (
+        'sagents_first_token_seconds_sum{agent_id="agent-demo",session_id="session-1"} 0.200000'
+        in body
+    )
+    assert (
+        'sagents_tool_calls_total{tool_name="search",status="error"} 1.000000' in body
+    )
+    assert (
+        'sagents_tool_calls_total{tool_name="query",status="success"} 1.000000' in body
+    )
+    assert (
+        'sagents_tool_call_duration_seconds_count{tool_name="search"} 1.000000' in body
+    )
     assert (
         'sagents_tool_call_failures_total{tool_name="search",'
         f'session_id="session-1",trace_id="{trace_id}",error_type="Exception"}} 1.000000'

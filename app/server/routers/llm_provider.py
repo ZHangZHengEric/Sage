@@ -6,6 +6,7 @@ from common.services import llm_provider_service
 
 router = APIRouter(prefix="/api/llm-provider", tags=["LLM Provider"])
 
+
 @router.post("/verify")
 async def verify_provider(data: LLMProviderCreate):
     """
@@ -41,16 +42,23 @@ async def verify_multimodal(data: LLMProviderCreate):
         if not result["supports_multimodal"]:
             return await Response.succ(message="该模型不支持多模态", data=result)
         return await Response.succ(
-            message="多模态验证成功，模型正确识别了图片内容" if result["recognized"] else "模型支持多模态但未能正确识别图片内容",
+            message="多模态验证成功，模型正确识别了图片内容"
+            if result["recognized"]
+            else "模型支持多模态但未能正确识别图片内容",
             data=result,
         )
     except Exception as e:
-        return await Response.succ(message="该模型不支持多模态", data={"supports_multimodal": False, "error": str(e)})
+        return await Response.succ(
+            message="该模型不支持多模态",
+            data={"supports_multimodal": False, "error": str(e)},
+        )
+
 
 @router.get("/list")
 async def list_providers(request: Request):
     user_id = get_request_user_id(request)
     return await Response.succ(data=await llm_provider_service.list_providers(user_id))
+
 
 @router.post("/create")
 async def create_provider(data: LLMProviderCreate, request: Request):
@@ -60,6 +68,7 @@ async def create_provider(data: LLMProviderCreate, request: Request):
         return await Response.succ(data={"provider_id": provider_id})
     except ValueError as e:
         return await Response.error(message=str(e))
+
 
 @router.put("/update/{provider_id}")
 async def update_provider(provider_id: str, data: LLMProviderUpdate, request: Request):
@@ -76,6 +85,7 @@ async def update_provider(provider_id: str, data: LLMProviderUpdate, request: Re
         return await Response.error(message=str(e))
     except ValueError as e:
         return await Response.error(message=str(e))
+
 
 @router.delete("/delete/{provider_id}")
 async def delete_provider(provider_id: str, request: Request):

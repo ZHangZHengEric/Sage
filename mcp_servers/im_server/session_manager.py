@@ -14,21 +14,21 @@ logger = logging.getLogger("IMSessionManager")
 
 class SessionManager:
     """Unified session manager for all IM providers using database storage."""
-    
+
     def __init__(self, db: Optional[IMServerDB] = None):
         """
         Initialize session manager.
-        
+
         Args:
             db: IMServerDB instance (optional, will use global instance if not provided)
         """
         self._lock = threading.Lock()
-        
+
         # Use provided db or get global instance
         self._db = db or get_im_db()
-        
+
         logger.info("SessionManager initialized with database storage")
-        
+
     def bind_session(
         self,
         session_id: str,
@@ -37,11 +37,11 @@ class SessionManager:
         chat_id: Optional[str] = None,
         user_name: Optional[str] = None,
         agent_id: Optional[str] = None,
-        extra: Optional[Dict[str, Any]] = None
+        extra: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
         Bind a session to an IM user.
-        
+
         Args:
             session_id: Sage session ID
             provider: IM provider name (feishu, dingtalk, wechat_work, imessage)
@@ -50,7 +50,7 @@ class SessionManager:
             user_name: Display name of the user
             agent_id: Agent ID to route messages to
             extra: Extra provider-specific data
-            
+
         Returns:
             True if binding successful
         """
@@ -62,32 +62,32 @@ class SessionManager:
                 user_name=user_name,
                 chat_id=chat_id,
                 agent_id=agent_id,
-                metadata=extra
+                metadata=extra,
             )
-            
+
         if result:
             logger.info(f"Bound session {session_id} to {provider}:{user_id}")
         else:
             logger.error(f"Failed to bind session {session_id} to {provider}:{user_id}")
-        
+
         return result
-    
+
     def unbind_session(self, session_id: str) -> bool:
         """Unbind a session."""
         with self._lock:
             result = self._db.delete_binding(session_id)
-            
+
         if result:
             logger.info(f"Unbound session {session_id}")
         else:
             logger.warning(f"Failed to unbind session {session_id} (not found)")
-        
+
         return result
-    
+
     def get_binding(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get binding by session ID."""
         binding = self._db.get_binding(session_id)
-        
+
         if binding:
             # Update last active time
             self._db.create_or_update_binding(
@@ -97,88 +97,97 @@ class SessionManager:
                 user_name=binding.get("user_name"),
                 chat_id=binding.get("chat_id"),
                 agent_id=binding.get("agent_id"),
-                metadata=binding.get("metadata")
+                metadata=binding.get("metadata"),
             )
-        
+
         return binding
-    
-    def find_session_by_user(self, provider: str, user_id: str, chat_id: Optional[str] = None) -> Optional[str]:
+
+    def find_session_by_user(
+        self, provider: str, user_id: str, chat_id: Optional[str] = None
+    ) -> Optional[str]:
         """Find session ID by provider and user ID."""
         binding = self._db.find_binding_by_user(provider, user_id, chat_id)
         if binding:
             return binding.get("session_id")
         return None
-    
+
     def find_or_create_session(
         self,
         provider: str,
         user_id: str,
         agent_id: str,
         chat_id: Optional[str] = None,
-        user_name: Optional[str] = None
+        user_name: Optional[str] = None,
     ) -> str:
         """
         Find existing session or create new one.
-        
+
         For providers where chat_id changes frequently (e.g., wechat_personal's context_token),
         we only match by provider + user_id to ensure same user shares one session.
-        
+
         Returns:
             session_id
         """
         # Providers where chat_id is volatile and should not be used for session matching
-        volatile_chat_id_providers = {'wechat_personal'}
-        
+        volatile_chat_id_providers = {"wechat_personal"}
+
         # Try to find existing session
         # For volatile providers, ignore chat_id to ensure same user shares one session
         if provider in volatile_chat_id_providers:
             existing_session = self.find_session_by_user(provider, user_id, None)
             if existing_session:
-                logger.info(f"Found existing session {existing_session} for {provider}:{user_id}")
+                logger.info(
+                    f"Found existing session {existing_session} for {provider}:{user_id}"
+                )
                 # Update chat_id if changed (e.g., new context_token)
                 if chat_id:
                     binding = self.get_binding(existing_session)
-                    if binding and binding.get('chat_id') != chat_id:
-                        logger.info(f"Updating chat_id for session {existing_session}: {binding.get('chat_id')} -> {chat_id}")
+                    if binding and binding.get("chat_id") != chat_id:
+                        logger.info(
+                            f"Updating chat_id for session {existing_session}: {binding.get('chat_id')} -> {chat_id}"
+                        )
                         self.bind_session(
                             session_id=existing_session,
                             provider=provider,
                             user_id=user_id,
                             chat_id=chat_id,
-                            user_name=user_name or binding.get('user_name'),
-                            agent_id=agent_id
+                            user_name=user_name or binding.get("user_name"),
+                            agent_id=agent_id,
                         )
                 return existing_session
         else:
             existing_session = self.find_session_by_user(provider, user_id, chat_id)
             if existing_session:
-                logger.info(f"Found existing session {existing_session} for {provider}:{user_id}")
+                logger.info(
+                    f"Found existing session {existing_session} for {provider}:{user_id}"
+                )
                 return existing_session
-        
+
         # Create new session
         import uuid
+
         session_id = f"im_{provider}_{uuid.uuid4().hex[:12]}"
-        
+
         self.bind_session(
             session_id=session_id,
             provider=provider,
             user_id=user_id,
             chat_id=chat_id,
             user_name=user_name,
-            agent_id=agent_id
+            agent_id=agent_id,
         )
-        
+
         return session_id
-    
+
     def list_bindings(
         self,
         provider: Optional[str] = None,
         agent_id: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
     ) -> List[Dict[str, Any]]:
         """List all bindings with optional filtering."""
         return self._db.list_bindings(provider, agent_id, limit)
-    
+
     def update_last_active(self, session_id: str):
         """Update last active timestamp."""
         binding = self._db.get_binding(session_id)
@@ -190,14 +199,16 @@ class SessionManager:
                 user_name=binding.get("user_name"),
                 chat_id=binding.get("chat_id"),
                 agent_id=binding.get("agent_id"),
-                metadata=binding.get("metadata")
+                metadata=binding.get("metadata"),
             )
 
     def cleanup_expired_sessions(self, max_age_hours: int = 24):
         """Clean up expired sessions (not implemented for DB version - use SQL query if needed)."""
         # For database version, we could use a SQL query to delete old sessions
         # But for now, we'll leave them in the database for history
-        logger.debug(f"Cleanup not implemented for DB version (max_age={max_age_hours}h)")
+        logger.debug(
+            f"Cleanup not implemented for DB version (max_age={max_age_hours}h)"
+        )
 
 
 # Global session manager instance

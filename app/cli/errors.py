@@ -47,7 +47,9 @@ def _build_cli_error_payload(exc: Exception, *, verbose: bool) -> Dict[str, Any]
         return {
             "type": "cli_error",
             "message": str(exc) or "Permission denied",
-            "next_steps": ["Check file permissions, selected user id, and agent visibility."],
+            "next_steps": [
+                "Check file permissions, selected user id, and agent visibility."
+            ],
             "debug_detail": traceback.format_exc() if verbose else None,
             "exit_code": 1,
         }
