@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import random
+import string
 import traceback
 import uuid
 from typing import List, Dict, Any, Optional, Union, AsyncGenerator, TYPE_CHECKING
@@ -418,7 +420,7 @@ class FibreOrchestrator:
             parent_session_id: The session ID that is creating this agent
             agent_id: Agent ID (optional, will be auto-generated if not provided)
             system_prompt: System prompt
-            name: Human-readable nickname for display (defaults to agent_id)
+            name: Human-readable nickname for display
             description: Description
             available_tools: List of available tool names
             available_skills: List of available skill names
@@ -452,6 +454,11 @@ class FibreOrchestrator:
 
         # 2. Get parent session for configuration
         parent_session = self.sub_session_manager.get_live_session(parent_session_id)
+        name = str(name or "").strip()
+        if not name:
+            parent_agent_name = str(getattr(self.agent, "agent_name", "") or "").strip() or "Agent"
+            random_suffix = random.choice(string.ascii_lowercase)
+            name = f"{parent_agent_name}的子Agent{random_suffix}"
 
         # 3. Try to store in backend first (if available) to get final agent_id
         backend_stored = False

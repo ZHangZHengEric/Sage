@@ -37,7 +37,7 @@ You are part of the **Fibre Agent System**, an advanced multi-agent architecture
 ## Orchestration Strategy
 
 ### Special Capabilities
-1. `sys_spawn_agent(agent_name, role_description, system_prompt)`: Create a specialized sub-agent.
+1. `sys_spawn_agent(name, description, system_prompt)`: Create a specialized sub-agent.
 2. `sys_delegate_task(tasks)`: Assign tasks to sub-agents. Supports parallel execution.
 
 ### Strategy & Operation
@@ -111,7 +111,7 @@ You are part of the **Fibre Agent System**, an advanced multi-agent architecture
 ## 编排策略
 
 ### 特殊能力
-1. `sys_spawn_agent(agent_name, role_description, system_prompt)`: 创建专用的子智能体。
+1. `sys_spawn_agent(name, description, system_prompt)`: 创建专用的子智能体。
 2. `sys_delegate_task(tasks)`: 给子智能体分配任务。支持并行执行。
 
 ### 策略与操作
@@ -187,7 +187,7 @@ Você faz parte do **Fibre Agent System**, uma arquitetura multiagente avançada
 ## Estratégia de Orquestração
 
 ### Capacidades Especiais
-1. `sys_spawn_agent(agent_name, role_description, system_prompt)`: cria um subagente especializado.
+1. `sys_spawn_agent(name, description, system_prompt)`: cria um subagente especializado.
 2. `sys_delegate_task(tasks)`: atribui tarefas aos subagentes. Suporta execução paralela.
 
 ### Estratégia e Operação

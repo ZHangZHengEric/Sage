@@ -57,7 +57,9 @@ services:
     privileged: true
     command:
       - --docker_only=true
-      - --housekeeping_interval=10s
+      - --housekeeping_interval=30s
+      - --max_housekeeping_interval=2m
+      - --disable_metrics=disk
     devices:
       - /dev/kmsg:/dev/kmsg
     volumes:

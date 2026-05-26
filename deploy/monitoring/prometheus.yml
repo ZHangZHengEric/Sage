@@ -28,6 +28,8 @@ scrape_configs:
         replacement: $1:8080
 
   - job_name: docker-containers
+    scrape_interval: 30s
+    scrape_timeout: 25s
     static_configs:
       - targets:
           - sage-cadvisor:8080
