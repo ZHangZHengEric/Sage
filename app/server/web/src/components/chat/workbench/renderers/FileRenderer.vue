@@ -46,17 +46,6 @@
           <Download class="w-4 h-4 sm:mr-1" />
           <span class="workbench-action-label">{{ t('workspace.download') }}</span>
         </Button>
-        <Button
-          v-if="drawioOpenUrl"
-          variant="ghost"
-          size="sm"
-          @click="openInDrawio"
-          class="workbench-action-button h-7 px-2"
-          title="在 draw.io 中打开"
-        >
-          <Globe class="w-4 h-4 sm:mr-1" />
-          <span class="workbench-action-label">draw.io</span>
-        </Button>
       </div>
     </div>
 
@@ -83,8 +72,6 @@
         </Button>
       </div>
 
-      <DrawioEmbedRenderer v-else-if="drawioXmlContent" :xml="drawioXmlContent" />
-
       <!-- PDF 预览 -->
       <PdfRenderer v-else-if="fileType === 'pdf'" :file-url="blobUrl" />
 
@@ -103,23 +90,10 @@
       <!-- 代码文件预览 -->
       <CodeRenderer v-else-if="fileType === 'code'" :content="fileContent" :language="language" />
 
-      <!-- Excalidraw 预览 -->
-      <div v-else-if="fileType === 'excalidraw'" class="excalidraw-preview h-full">
-        <ExcalidrawRenderer
-          v-if="excalidrawData"
-          :data="excalidrawData"
-          :theme="isDark ? 'dark' : 'light'"
-          class="w-full h-full"
-        />
-      </div>
-
       <!-- 文本文件预览 -->
       <TextRenderer v-else-if="fileType === 'text'" :content="fileContent" />
 
-      <!-- Office 文件预览 -->
-      <DocxRenderer v-else-if="fileType === 'office' && (fileExtension === 'docx' || fileExtension === 'doc')" :file-content="fileArrayBuffer" :file-url="blobUrl" />
-      <XlsxRenderer v-else-if="fileType === 'office' && (fileExtension === 'xlsx' || fileExtension === 'xls')" :file-content="fileArrayBuffer" :file-url="blobUrl" />
-      <PptxRenderer v-else-if="fileType === 'office' && (fileExtension === 'pptx' || fileExtension === 'ppt')" :file-data="fileArrayBuffer" :file-url="blobUrl" />
+      <!-- Office 文件 -->
       <div v-else-if="fileType === 'office'" class="h-full flex flex-col items-center justify-center p-4 text-muted-foreground bg-muted/20">
         <FileText class="w-16 h-16 mb-3 opacity-50" />
         <p class="text-sm mb-1">{{ officeFileType }} 文件</p>
@@ -174,20 +148,12 @@ import {
   File,
   FileText,
   Download,
-  Eye,
-  Globe
+  Eye
 } from 'lucide-vue-next'
-import { useThemeStore } from '@/stores/theme'
 import PdfRenderer from './filerender/PdfRenderer.vue'
 import ImageRenderer from './filerender/ImageRenderer.vue'
 import TextRenderer from './filerender/TextRenderer.vue'
 import { agentAPI } from '@/api/agent'
-import {
-  buildDrawioPreviewUrlFromArrayBuffer,
-  buildDrawioPreviewUrlFromText,
-  isDirectDrawioExtension,
-  isPotentialDrawioExtension
-} from '@/utils/drawio'
 
 import { 
   getFileExtension, 
@@ -204,11 +170,6 @@ const HtmlRenderer = defineAsyncComponent(() => import('./filerender/HtmlRendere
 const VideoRenderer = defineAsyncComponent(() => import('./filerender/VideoRenderer.vue'))
 const MarkdownRenderer = defineAsyncComponent(() => import('./filerender/MarkdownRenderer.vue'))
 const CodeRenderer = defineAsyncComponent(() => import('./filerender/CodeRenderer.vue'))
-const DrawioEmbedRenderer = defineAsyncComponent(() => import('./filerender/DrawioEmbedRenderer.vue'))
-const ExcalidrawRenderer = defineAsyncComponent(() => import('./filerender/ExcalidrawRenderer.vue'))
-const DocxRenderer = defineAsyncComponent(() => import('./filerender/DocxRenderer.vue'))
-const XlsxRenderer = defineAsyncComponent(() => import('./filerender/XlsxRenderer.vue'))
-const PptxRenderer = defineAsyncComponent(() => import('./filerender/PptxRenderer.vue'))
 
 const props = defineProps({
   filePath: {
@@ -233,15 +194,10 @@ const props = defineProps({
 const loading = ref(false)
 const error = ref(null)
 const fileContent = ref('') // 文本内容
-const fileArrayBuffer = ref(null) // 二进制内容
 const blobUrl = ref('') // Blob URL
 const copied = ref(false)
 const previewDialogOpen = ref(false)
 const { t } = useLanguage()
-
-// 主题
-const themeStore = useThemeStore()
-const isDark = computed(() => themeStore.isDark)
 
 // ItemHeader 相关信息
 const roleLabel = computed(() => {
@@ -337,109 +293,28 @@ const canCopy = computed(() => {
   return ['code', 'text', 'markdown'].includes(fileType.value)
 })
 
-const canPreviewInDialog = computed(() => {
-  if (props.dialogMode) return false
-  return ['pdf', 'image', 'html', 'markdown', 'code', 'excalidraw', 'drawio', 'text', 'office'].includes(fileType.value)
+const canInlinePreview = computed(() => {
+  return ['pdf', 'image', 'video', 'html', 'markdown', 'code', 'text'].includes(fileType.value)
 })
 
-const drawioOpenUrl = ref('')
-const drawioXmlContent = ref('')
-
-const createDrawioPreviewUrl = ({ textContent = '', arrayBuffer = null } = {}) => {
-  if (!isPotentialDrawioExtension(fileExtension.value)) return ''
-  const direct = isDirectDrawioExtension(fileExtension.value)
-
-  if (textContent) {
-    return buildDrawioPreviewUrlFromText({
-      content: textContent,
-      fileName: displayFileName.value,
-      extension: fileExtension.value,
-      force: direct
-    })
-  }
-
-  if (arrayBuffer) {
-    return buildDrawioPreviewUrlFromArrayBuffer({
-      arrayBuffer,
-      fileName: displayFileName.value,
-      extension: fileExtension.value,
-      force: direct
-    })
-  }
-
-  return ''
-}
-
-// Excalidraw 特定数据
-const excalidrawElementCount = ref(0)
-const excalidrawTypeSummary = ref('')
-const excalidrawWidth = ref(800)
-const excalidrawHeight = ref(600)
-const excalidrawSvg = ref('')
-const excalidrawData = ref(null)
-
-// 生成 Excalidraw SVG (保持原样)
-const generateExcalidrawSvg = (data) => {
-  if (!data.elements || !Array.isArray(data.elements)) return ''
-  
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-  
-  data.elements.forEach(el => {
-    const w = el.width || 100
-    const h = el.height || 100
-    if (el.x !== undefined) {
-      minX = Math.min(minX, el.x)
-      maxX = Math.max(maxX, el.x + w)
-    }
-    if (el.y !== undefined) {
-      minY = Math.min(minY, el.y)
-      maxY = Math.max(maxY, el.y + h)
-    }
-  })
-  
-  const padding = 50
-  excalidrawWidth.value = Math.max(400, maxX - minX + padding * 2)
-  excalidrawHeight.value = Math.max(300, maxY - minY + padding * 2)
-  
-  let svgElements = ''
-  data.elements.slice(0, 100).forEach(el => {
-    const x = (el.x || 0) - minX + padding
-    const y = (el.y || 0) - minY + padding
-    const w = el.width || 100
-    const h = el.height || 100
-    const fill = el.backgroundColor || 'transparent'
-    const stroke = el.strokeColor || '#1e1e1e'
-    const strokeWidth = el.strokeWidth || 1
-    const opacity = el.opacity !== undefined ? el.opacity : 1
-    
-    const style = `fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" opacity="${opacity}"`
-    
-    switch (el.type) {
-      case 'rectangle':
-        const rx = el.roundness?.value || 0
-        svgElements += `<rect x="${x}" y="${y}" width="${w}" height="${h}" ${style} rx="${rx}"/>`
-        break
-      case 'ellipse':
-        svgElements += `<ellipse cx="${x + w/2}" cy="${y + h/2}" rx="${w/2}" ry="${h/2}" ${style}/>`
-        break
-      // ... 简化 ...
-    }
-  })
-  
-  return svgElements
-}
+const canPreviewInDialog = computed(() => {
+  if (props.dialogMode) return false
+  return canInlinePreview.value
+})
 
 // 加载文件内容
 const loadContent = async () => {
   try {
     loading.value = true
     error.value = null
-    drawioOpenUrl.value = ''
-    drawioXmlContent.value = ''
-
     // 如果是在线图片 URL，直接使用该 URL 预览
     if (isOnlineImageUrl.value) {
       blobUrl.value = props.filePath
+      loading.value = false
+      return
+    }
+
+    if (!canInlinePreview.value) {
       loading.value = false
       return
     }
@@ -465,66 +340,15 @@ const loadContent = async () => {
     }
     blobUrl.value = URL.createObjectURL(blob)
 
-    if (isPotentialDrawioExtension(fileExtension.value)) {
-      const arrayBuffer = await blob.arrayBuffer()
-      drawioOpenUrl.value = createDrawioPreviewUrl({ arrayBuffer })
-      if (!drawioOpenUrl.value || fileType.value === 'drawio' || fileExtension.value === 'xml') {
-        const textContent = await blob.text()
-        fileContent.value = textContent
-        if (!drawioOpenUrl.value) {
-          drawioOpenUrl.value = createDrawioPreviewUrl({ textContent })
-        }
-      }
-      if (
-        (fileType.value === 'drawio' || fileExtension.value === 'xml') &&
-        fileContent.value &&
-        fileContent.value.includes('<mxfile')
-      ) {
-        drawioXmlContent.value = fileContent.value
-      }
-
-      if (drawioXmlContent.value || fileType.value === 'drawio') {
-        loading.value = false
-        return
-      }
-    }
-    
     // 根据文件类型处理内容
     if (['pdf', 'image', 'video', 'audio'].includes(fileType.value)) {
       // 这些类型直接使用 blobUrl 或原始 URL，不需要读取文本内容
       loading.value = false
       return
     }
-    
-    // 对于 Office 文件，获取 ArrayBuffer
-    if (fileType.value === 'office') {
-        fileArrayBuffer.value = await blob.arrayBuffer()
-        loading.value = false
-        return
-    }
 
     // 对于文本类文件，获取文本内容
     fileContent.value = await blob.text()
-
-    if (fileType.value === 'excalidraw') {
-      try {
-        const data = JSON.parse(fileContent.value)
-        // ... Excalidraw 处理逻辑 ...
-        excalidrawElementCount.value = data.elements?.length || 0
-        
-        // 简化的 Excalidraw 数据处理
-        excalidrawData.value = {
-          elements: data.elements || [],
-          appState: {
-            ...data.appState,
-            viewBackgroundColor: data.appState?.viewBackgroundColor || '#ffffff'
-          },
-          files: data.files || {}
-        }
-      } catch (e) {
-        console.warn('解析 Excalidraw 数据失败:', e)
-      }
-    }
 
     loading.value = false
   } catch (err) {
@@ -572,11 +396,6 @@ const openFile = async () => {
   }
 }
 
-const openInDrawio = () => {
-  if (!drawioOpenUrl.value) return
-  window.open(drawioOpenUrl.value, '_blank', 'noopener,noreferrer')
-}
-
 // 复制内容
 const copyContent = async () => {
   try {
@@ -597,9 +416,18 @@ onMounted(() => {
 
 watch(() => props.item?.agentId, (agentId, previousAgentId) => {
   if (!agentId || agentId === previousAgentId) return
-  if (!blobUrl.value && !fileContent.value && !fileArrayBuffer.value) {
+  if (!blobUrl.value && !fileContent.value) {
     loadContent()
   }
+})
+
+watch(() => [props.filePath, props.fileName], () => {
+  fileContent.value = ''
+  if (blobUrl.value && blobUrl.value !== props.filePath) {
+    URL.revokeObjectURL(blobUrl.value)
+    blobUrl.value = ''
+  }
+  loadContent()
 })
 
 // 清理

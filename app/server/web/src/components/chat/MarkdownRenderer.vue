@@ -10,14 +10,9 @@
 import {computed, nextTick, onMounted, onUnmounted, ref, watch} from 'vue'
 import {marked} from 'marked'
 import DOMPurify from 'dompurify'
-import * as echarts from 'echarts'
-import { unified } from 'unified'
-import rehypeParse from 'rehype-parse'
-import rehypePrism from 'rehype-prism-plus'
-import rehypeStringify from 'rehype-stringify'
-import { visit } from 'unist-util-visit'
 import { toast } from 'vue-sonner'
 import { setDebugCounter } from '@/utils/memoryDebug'
+import { hljs } from '@/utils/highlightLanguages'
 
 const props = defineProps({
   content: {
@@ -86,6 +81,8 @@ const escapeHtml = (text) => {
   return text.replace(/[&<>"']/g, char => map[char])
 }
 
+const escapeAttribute = (text) => escapeHtml(text)
+
 const jsToJson = (jsStr) => {
   jsStr = typeof jsStr === 'string' ? jsStr : String(jsStr ?? '')
   // 移除注释
@@ -102,9 +99,31 @@ const jsToJson = (jsStr) => {
 
 const chartList = [] // 存放所有图表容器与配置项
 const chartInstances = ref([])
+let chartRenderVersion = 0
+let echartsModulePromise = null
 const renderer = new marked.Renderer()
 
-// 修改 renderer.code，不再使用 Prism，只返回基础 HTML
+const loadECharts = async () => {
+  if (!echartsModulePromise) {
+    echartsModulePromise = import('echarts')
+  }
+  return echartsModulePromise
+}
+
+const highlightCode = (codeText, lang) => {
+  if (!lang || lang === 'text' || !hljs.getLanguage(lang)) {
+    return escapeHtml(codeText)
+  }
+
+  try {
+    return hljs.highlight(codeText, { language: lang, ignoreIllegals: true }).value
+  } catch (error) {
+    console.warn('代码高亮失败:', error)
+    return escapeHtml(codeText)
+  }
+}
+
+// 修改 renderer.code，使用 highlight.js 生成轻量代码块 HTML
 renderer.code = (code, language) => {
   // 获取代码文本，兼容不同版本的 marked
   const codeText = typeof code === 'string' ? code : code.text
@@ -112,7 +131,7 @@ renderer.code = (code, language) => {
   const rawLang = (typeof code === 'string' ? language : code.lang) || ''
   const lang = rawLang.split(/\s+/)[0] || 'text'
 
-  if (lang === 'echarts') {
+  if (lang === 'echarts' || lang === 'echart') {
     try {
       // 移除 option = 前缀和末尾的分号
       let chartCode = codeText.replace(/^[\s\S]*?=\s*/, '').trim()
@@ -129,7 +148,10 @@ renderer.code = (code, language) => {
       return `<pre class="text-destructive p-4 border border-destructive/50 rounded bg-destructive/10">图表配置错误: ${err.message}</pre>`
     }
   }
-  return `<pre><code class="language-${lang}">${escapeHtml(codeText)}</code></pre>`
+
+  const safeLang = escapeAttribute(lang)
+  const highlighted = highlightCode(codeText, lang)
+  return `<pre class="my-3 p-3 rounded-lg overflow-auto text-xs font-mono leading-relaxed bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700" data-language="${safeLang}"><code class="hljs language-${safeLang}">${highlighted}</code></pre>`
 }
 
 renderer.table = function(token) {
@@ -187,68 +209,8 @@ marked.setOptions({
   renderer
 })
 
-// Rehype 插件：代码块处理（简化样式，直接显示）
-const rehypeCodeBlockWrapper = () => {
-  return (tree) => {
-    visit(tree, 'element', (node, index, parent) => {
-      if (node.tagName === 'pre' && node.children && node.children.length > 0) {
-        const codeNode = node.children.find(n => n.tagName === 'code')
-        if (codeNode) {
-          let lang = 'text'
-
-          if (codeNode.properties && codeNode.properties.className) {
-            const classes = Array.isArray(codeNode.properties.className)
-              ? codeNode.properties.className
-              : [codeNode.properties.className]
-
-            const langClass = classes.find(c => String(c).startsWith('language-'))
-            if (langClass) {
-              lang = String(langClass).replace('language-', '')
-            }
-          }
-
-          if (lang === 'text' && node.properties && node.properties.className) {
-            const classes = Array.isArray(node.properties.className)
-              ? node.properties.className
-              : [node.properties.className]
-
-            const langClass = classes.find(c => String(c).startsWith('language-'))
-            if (langClass) {
-              lang = String(langClass).replace('language-', '')
-            }
-          }
-
-          node.properties = {
-            ...node.properties,
-            className: [
-              'my-3',
-              'p-3',
-              'rounded-lg',
-              'overflow-auto',
-              'text-xs',
-              'font-mono',
-              'leading-relaxed',
-              'bg-slate-100',
-              'dark:bg-slate-800',
-              'text-slate-800',
-              'dark:text-slate-200',
-              'border',
-              'border-slate-200',
-              'dark:border-slate-700'
-            ]
-          }
-
-          node.properties['data-language'] = lang
-        }
-      }
-    })
-  }
-}
-
 // 检测视频链接的正则表达式
 const videoExtensions = /\.(mp4|webm|ogg|mov|avi|mkv)$/i
-// 检测图片链接的正则表达式
-const imageExtensions = /\.(jpg|jpeg|png|gif|bmp|webp|svg)$/i
 
 // 下载图片函数
 const downloadImage = (url, filename) => {
@@ -357,16 +319,6 @@ const renderedContent = computed(() => {
     const preprocessed = preprocessContent(normalizedContent.value)
     let html = marked(preprocessed)
 
-    // Unified Pipeline: Parse -> Highlight -> Stringify
-    const processed = unified()
-      .use(rehypeParse, { fragment: true })
-      .use(rehypePrism, { ignoreMissing: true })
-      .use(rehypeCodeBlockWrapper)
-      .use(rehypeStringify)
-      .processSync(html)
-    
-    html = String(processed)
-
     // Post-processing
     html = convertVideoLinks(html)
     html = convertHttpLinksToDownload(html)
@@ -389,7 +341,7 @@ const renderedContent = computed(() => {
         'width', 'height', 'viewBox', 'fill', 'stroke', 'stroke-width',
         'stroke-linecap', 'stroke-linejoin',
         'points', 'x1', 'y1', 'x2', 'y2', 'd', 'x', 'y', 'rx', 'ry',
-        'style' // Prism uses style for some highlights
+        'style', 'data-language'
       ]
     })
   } catch (error) {
@@ -412,10 +364,15 @@ const disposeCharts = () => {
 }
 
 const renderCharts = async () => {
+  const version = ++chartRenderVersion
   await nextTick()
   await new Promise(resolve => setTimeout(resolve, 200))
 
   disposeCharts()
+  if (chartList.length === 0) return
+
+  const echarts = await loadECharts()
+  if (version !== chartRenderVersion) return
 
   chartList.forEach(({id, option}) => {
     const el = document.getElementById(id)

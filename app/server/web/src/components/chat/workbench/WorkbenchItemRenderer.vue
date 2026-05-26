@@ -32,12 +32,14 @@
 </template>
 
 <script setup>
+import { defineAsyncComponent } from 'vue'
 import FileRenderer from './renderers/FileRenderer.vue'
-import CodeRenderer from './renderers/filerender/CodeRenderer.vue'
 import ToolCallRenderer from './renderers/ToolCallRenderer.vue'
 import DefaultRenderer from './renderers/DefaultRenderer.vue'
 
-const props = defineProps({
+const CodeRenderer = defineAsyncComponent(() => import('./renderers/filerender/CodeRenderer.vue'))
+
+defineProps({
   item: {
     type: Object,
     required: true

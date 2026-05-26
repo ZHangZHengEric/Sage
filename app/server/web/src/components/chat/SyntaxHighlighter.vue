@@ -20,7 +20,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import hljs from 'highlight.js'
+import { hljs } from '@/utils/highlightLanguages'
 
 const loadTheme = async (isDark) => {
   if (isDark) {
