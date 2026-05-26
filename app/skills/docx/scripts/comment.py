@@ -20,7 +20,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import defusedxml.minidom
+import defusedxml.minidom  # pyright: ignore[reportMissingModuleSource]
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 NS = {
@@ -88,7 +88,7 @@ def _append_xml(xml_path: Path, root_tag: str, content: str) -> None:
     root = dom.getElementsByTagName(root_tag)[0]
     ns_attrs = " ".join(f'xmlns:{k}="{v}"' for k, v in NS.items())
     wrapper_dom = defusedxml.minidom.parseString(f"<root {ns_attrs}>{content}</root>")
-    for child in wrapper_dom.documentElement.childNodes:
+    for child in wrapper_dom.documentElement.childNodes:  # pyright: ignore[reportOptionalMemberAccess]
         if child.nodeType == child.ELEMENT_NODE:
             root.appendChild(dom.importNode(child, True))
     output = _encode_smart_quotes(dom.toxml(encoding="UTF-8").decode("utf-8"))
@@ -170,7 +170,7 @@ def _ensure_comment_relationships(unpacked_dir: Path) -> None:
         rel.setAttribute("Id", f"rId{next_rid}")
         rel.setAttribute("Type", rel_type)
         rel.setAttribute("Target", target)
-        root.appendChild(rel)
+        root.appendChild(rel)  # pyright: ignore[reportOptionalMemberAccess]
         next_rid += 1
 
     rels_path.write_bytes(dom.toxml(encoding="UTF-8"))
@@ -210,7 +210,7 @@ def _ensure_comment_content_types(unpacked_dir: Path) -> None:
         override = dom.createElement("Override")
         override.setAttribute("PartName", part_name)
         override.setAttribute("ContentType", content_type)
-        root.appendChild(override)
+        root.appendChild(override)  # pyright: ignore[reportOptionalMemberAccess]
 
     ct_path.write_bytes(dom.toxml(encoding="UTF-8"))
 

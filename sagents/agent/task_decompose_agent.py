@@ -124,7 +124,7 @@ class TaskDecomposeAgent(AgentBase):
         last_tool_call_id = None
 
         async for chunk in self._call_llm_streaming(
-            messages=llm_request_message,
+            messages=llm_request_message,  # pyright: ignore[reportArgumentType]
             session_id=session_id,
             step_name="task_decompose",
             model_config_override=model_config_override,
@@ -197,7 +197,7 @@ class TaskDecomposeAgent(AgentBase):
             )
             async for messages, _ in self._handle_tool_calls(
                 tool_calls=tool_calls,
-                tool_manager=tool_manager,
+                tool_manager=tool_manager,  # pyright: ignore[reportArgumentType]
                 messages_input=messages_input,
                 session_id=session_id or "",
                 emit_tool_call_message=emit_on_complete,

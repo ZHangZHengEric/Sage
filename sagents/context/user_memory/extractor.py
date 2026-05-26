@@ -65,7 +65,7 @@ class MemoryExtractor:
                 return
 
             # 2. 保存新记忆
-            memory_manager = session_context.user_memory_manager
+            memory_manager = session_context.user_memory_manager  # pyright: ignore[reportAttributeAccessIssue]
             user_id = session_context.user_id
 
             if not memory_manager or not user_id:

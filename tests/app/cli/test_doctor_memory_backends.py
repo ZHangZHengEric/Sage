@@ -16,7 +16,7 @@ if "rank_bm25" not in sys.modules:
         def get_scores(self, query_tokens):
             return [1.0 for _ in self.corpus]
 
-    fake_rank_bm25.BM25Okapi = _FakeBM25Okapi
+    fake_rank_bm25.BM25Okapi = _FakeBM25Okapi  # pyright: ignore[reportAttributeAccessIssue]
     sys.modules["rank_bm25"] = fake_rank_bm25
 
 

@@ -122,7 +122,7 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
         payload = json.loads(result)
         self.assertEqual(payload["content"], "ok")
         mock_run_mcp_tool.assert_awaited_once()
-        call_kwargs = mock_run_mcp_tool.await_args.kwargs
+        call_kwargs = mock_run_mcp_tool.await_args.kwargs  # pyright: ignore[reportOptionalMemberAccess]
         self.assertEqual(call_kwargs["user_id"], "user-3")
         self.assertEqual(call_kwargs["foo"], "bar")
 
@@ -158,7 +158,7 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, {"content": [{"text": "ok"}]})
         mock_execute.assert_awaited_once()
-        call_kwargs = mock_execute.await_args.kwargs
+        call_kwargs = mock_execute.await_args.kwargs  # pyright: ignore[reportOptionalMemberAccess]
         self.assertEqual(call_kwargs["foo"], "bar")
         self.assertEqual(call_kwargs["session_id"], "session-4")
         self.assertEqual(call_kwargs["user_id"], "user-4")
@@ -233,9 +233,9 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
 
     async def test_tool_service_passes_user_id_to_tool_manager(self):
         fake_manager = type("FakeManager", (), {})()
-        fake_manager.tools = {"basic_tool": object()}
-        fake_manager.get_tool_info = lambda name: {"type": "basic"}
-        fake_manager.run_tool_async = AsyncMock(return_value='{"content":"ok"}')
+        fake_manager.tools = {"basic_tool": object()}  # pyright: ignore[reportAttributeAccessIssue]
+        fake_manager.get_tool_info = lambda name: {"type": "basic"}  # pyright: ignore[reportAttributeAccessIssue]
+        fake_manager.run_tool_async = AsyncMock(return_value='{"content":"ok"}')  # pyright: ignore[reportAttributeAccessIssue]
 
         with patch.object(tool_service, "get_tool_manager", return_value=fake_manager):
             result = await execute_tool(
@@ -248,8 +248,8 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["raw_text"], '{"content":"ok"}')
         self.assertEqual(result["parsed"], {"content": "ok"})
         self.assertEqual(result["content"], {"content": "ok"})
-        fake_manager.run_tool_async.assert_awaited_once()
-        call_kwargs = fake_manager.run_tool_async.await_args.kwargs
+        fake_manager.run_tool_async.assert_awaited_once()  # pyright: ignore[reportAttributeAccessIssue]
+        call_kwargs = fake_manager.run_tool_async.await_args.kwargs  # pyright: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]
         self.assertEqual(call_kwargs["user_id"], "user-5")
         self.assertEqual(call_kwargs["foo"], "bar")
 

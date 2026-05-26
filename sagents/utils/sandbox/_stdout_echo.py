@@ -96,7 +96,7 @@ def run_with_streaming_stdout(
     )
     if os.name == "posix":
         popen_kwargs["start_new_session"] = True
-    proc = subprocess.Popen(list(cmd), **popen_kwargs)
+    proc = subprocess.Popen(list(cmd), **popen_kwargs)  # pyright: ignore[reportArgumentType,reportCallIssue]
 
     stdout_buf: List[str] = []
     stderr_buf: List[str] = []
@@ -168,7 +168,7 @@ def run_with_streaming_stdout(
     if timed_out:
         raise subprocess.TimeoutExpired(
             cmd=list(cmd),
-            timeout=timeout,
+            timeout=timeout,  # pyright: ignore[reportArgumentType]
             output="".join(stdout_buf),
             stderr="".join(stderr_buf),
         )

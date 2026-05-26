@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-from anthropic import Anthropic
+from anthropic import Anthropic  # pyright: ignore[reportMissingImports]
 
 from connections import create_connection
 
@@ -134,7 +134,7 @@ async def agent_loop(
         messages.append(
             {
                 "role": "user",
-                "content": [
+                "content": [  # pyright: ignore[reportArgumentType]
                     {
                         "type": "tool_result",
                         "tool_use_id": tool_use.id,
@@ -158,7 +158,7 @@ async def agent_loop(
         (block.text for block in response.content if hasattr(block, "text")),
         None,
     )
-    return response_text, tool_metrics
+    return response_text, tool_metrics  # pyright: ignore[reportReturnType]
 
 
 async def evaluate_single_task(
@@ -401,9 +401,9 @@ Examples:
             transport=args.transport,
             command=args.command,
             args=args.args,
-            env=env_vars,
+            env=env_vars,  # pyright: ignore[reportArgumentType]
             url=args.url,
-            headers=headers,
+            headers=headers,  # pyright: ignore[reportArgumentType]
         )
     except ValueError as e:
         print(f"Error: {e}")

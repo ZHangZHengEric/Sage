@@ -123,13 +123,13 @@ def test_server_workspace_upload_route_forwards_file_and_target_path(monkeypatch
         server_agent_router.upload_file(
             "agent_demo",
             _fake_request(),
-            upload,
+            upload,  # pyright: ignore[reportArgumentType]
             target_path="docs",
         )
     )
 
     assert response.message == "文件 hello.txt 上传成功"
-    assert response.data["path"] == "docs/hello.txt"
+    assert response.data["path"] == "docs/hello.txt"  # pyright: ignore[reportOptionalSubscript]
     assert calls == {
         "agent_id": "agent_demo",
         "user_id": "user_a",

@@ -65,7 +65,7 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
             ]
             await wait_until_started(101)
             self.assertEqual(open_count, 2)
-            self.assertEqual(len(pool._entries["server"].connections), 2)
+            self.assertEqual(len(pool._entries["server"].connections), 2)  # pyright: ignore[reportAttributeAccessIssue]
             release.set()
             await asyncio.gather(*tasks)
 
@@ -91,7 +91,7 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
             await pool.call_tool("server", server_params, "echo", {"i": 2})
 
         self.assertEqual(open_count, 1)
-        self.assertEqual(len(pool._entries["server"].connections), 1)
+        self.assertEqual(len(pool._entries["server"].connections), 1)  # pyright: ignore[reportAttributeAccessIssue]
         await pool.close_all(drain=False)
 
     async def _assert_http_transport_reuses_worker_connection(self, server_params):
@@ -219,7 +219,7 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
             await pool.call_tool("server", server_params, "echo", {"i": 1})
 
         self.assertEqual(open_count, 1)
-        self.assertEqual(pool._entries["server"].per_connection_concurrency, 2)
+        self.assertEqual(pool._entries["server"].per_connection_concurrency, 2)  # pyright: ignore[reportAttributeAccessIssue]
         await pool.close_all(drain=False)
 
     async def test_list_tools_retries_closed_connection_when_cache_missing(self):
@@ -250,7 +250,7 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
             await pool.list_tools("server", server_params)
 
         self.assertEqual(open_count, 2)
-        self.assertEqual(len(pool._entries["server"].connections), 1)
+        self.assertEqual(len(pool._entries["server"].connections), 1)  # pyright: ignore[reportAttributeAccessIssue]
         await pool.close_all(drain=False)
 
     async def test_force_list_tools_replaces_pool_and_closes_existing_connections(self):
@@ -287,8 +287,8 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(old_entry.draining)
             self.assertIn(old_connection, closed_connections)
             self.assertTrue(old_connection.closed)
-            self.assertNotIn(old_connection, new_entry.connections)
-            self.assertEqual(len(new_entry.connections), 1)
+            self.assertNotIn(old_connection, new_entry.connections)  # pyright: ignore[reportAttributeAccessIssue]
+            self.assertEqual(len(new_entry.connections), 1)  # pyright: ignore[reportAttributeAccessIssue]
 
             await pool.close_all(drain=False)
 
@@ -319,7 +319,7 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
                 )
 
         self.assertEqual(open_count, 1)
-        self.assertEqual(len(pool._entries["server"].connections), 0)
+        self.assertEqual(len(pool._entries["server"].connections), 0)  # pyright: ignore[reportAttributeAccessIssue]
         await pool.close_all(drain=False)
 
     async def test_call_tool_retries_anyio_closed_resource_error(self):
@@ -347,7 +347,7 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(result, _FakeResult)
         self.assertEqual(open_count, 2)
-        self.assertEqual(len(pool._entries["server"].connections), 1)
+        self.assertEqual(len(pool._entries["server"].connections), 1)  # pyright: ignore[reportAttributeAccessIssue]
         await pool.close_all(drain=False)
 
 

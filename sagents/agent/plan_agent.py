@@ -118,7 +118,7 @@ class PlanAgent(AgentBase):
                 assistant_content_parts: List[str] = []
 
                 async for llm_chunk in self._call_llm_streaming(
-                    messages=llm_messages,
+                    messages=llm_messages,  # pyright: ignore[reportArgumentType]
                     session_id=session_id,
                     step_name="plan_agent",
                     model_config_override={"tools": plan_tools} if plan_tools else {},
@@ -280,7 +280,7 @@ class PlanAgent(AgentBase):
                 from sagents.observability.agent_runtime import ObservableToolManager
 
                 return ObservableToolManager(
-                    tool_proxy,
+                    tool_proxy,  # pyright: ignore[reportArgumentType]
                     observable_wrapper.observability_manager,
                     observable_wrapper.session_id,
                 )

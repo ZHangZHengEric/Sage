@@ -46,7 +46,7 @@ class _FakeSessionContext:
 async def _reset_test_db():
     await close_db_client()
     db = await init_db_client(StartupConfig(db_type="memory"))
-    async with db._engine.begin() as conn:
+    async with db._engine.begin() as conn:  # pyright: ignore[reportOptionalMemberAccess]
         await conn.run_sync(Base.metadata.create_all)
     return db
 

@@ -78,7 +78,7 @@ class WorkflowSelectAgent(AgentBase):
         ]
         all_content = ""
         async for llm_repsonse_chunk in self._call_llm_streaming(
-            messages=llm_request_message,
+            messages=llm_request_message,  # pyright: ignore[reportArgumentType]
             session_id=session_id,
             step_name="workflow_select",
             enable_thinking=False,

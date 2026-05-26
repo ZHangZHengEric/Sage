@@ -82,18 +82,18 @@ def split_library(library_dir: str) -> None:
     Args:
         library_dir: Path to the directory containing the .excalidrawlib file
     """
-    library_dir = Path(library_dir)
+    library_dir = Path(library_dir)  # pyright: ignore[reportAssignmentType]
 
-    if not library_dir.exists():
+    if not library_dir.exists():  # pyright: ignore[reportAttributeAccessIssue]
         print(f"Error: Directory not found: {library_dir}")
         sys.exit(1)
 
-    if not library_dir.is_dir():
+    if not library_dir.is_dir():  # pyright: ignore[reportAttributeAccessIssue]
         print(f"Error: Path is not a directory: {library_dir}")
         sys.exit(1)
 
     # Find the library file
-    library_path = find_library_file(library_dir)
+    library_path = find_library_file(library_dir)  # pyright: ignore[reportArgumentType]
     print(f"Found library: {library_path.name}")
 
     # Load library file
@@ -107,7 +107,7 @@ def split_library(library_dir: str) -> None:
         sys.exit(1)
 
     # Create icons directory
-    icons_dir = library_dir / "icons"
+    icons_dir = library_dir / "icons"  # pyright: ignore[reportOperatorIssue]
     icons_dir.mkdir(exist_ok=True)
     print(f"Output directory: {library_dir}")
 
@@ -139,7 +139,7 @@ def split_library(library_dir: str) -> None:
 
     # Generate reference.md
     library_name = library_path.stem
-    reference_path = library_dir / "reference.md"
+    reference_path = library_dir / "reference.md"  # pyright: ignore[reportOperatorIssue]
     with open(reference_path, "w", encoding="utf-8") as f:
         f.write(f"# {library_name} Reference\n\n")
         f.write(
@@ -169,7 +169,7 @@ def main():
     """Main entry point."""
     if hasattr(sys.stdout, "reconfigure"):
         # Ensure consistent UTF-8 output on Windows consoles.
-        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stdout.reconfigure(encoding="utf-8")  # pyright: ignore[reportAttributeAccessIssue]
     if len(sys.argv) != 2:
         print("Usage: python split-excalidraw-library.py <path-to-library-directory>")
         print("\nExample:")

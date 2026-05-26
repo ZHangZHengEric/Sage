@@ -112,7 +112,7 @@ async def send_register_verification_mail(to_address: str, code: str) -> None:
     runtime = util_models.RuntimeOptions()
 
     try:
-        await client.single_send_mail_with_options_async(mail_request, runtime)
+        await client.single_send_mail_with_options_async(mail_request, runtime)  # pyright: ignore[reportArgumentType]
         logger.info(f"注册验证码邮件发送成功: {to_address}")
     except Exception as error:
         message = getattr(error, "message", "") or str(error)

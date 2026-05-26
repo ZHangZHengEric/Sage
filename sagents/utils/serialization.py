@@ -4,9 +4,9 @@ import numpy as np
 
 
 def make_serializable(obj: Any):
-    if isinstance(obj, (np.integer, np.int64, np.int32)):
+    if isinstance(obj, (np.integer, np.int64, np.int32)):  # pyright: ignore[reportArgumentType]
         return int(obj)
-    if isinstance(obj, (np.floating, np.float64, np.float32)):
+    if isinstance(obj, (np.floating, np.float64, np.float32)):  # pyright: ignore[reportArgumentType]
         return float(obj)
     if isinstance(obj, np.ndarray):
         return obj.tolist()

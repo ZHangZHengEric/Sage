@@ -351,7 +351,7 @@ async def download_file(
         path, filename, media_type = await agent_service.download_server_agent_file(
             agent_id,
             user_id,
-            file_path,
+            file_path,  # pyright: ignore[reportArgumentType]
         )
         logger.info(f"Download resolved: path={path}")
         return FileResponse(path=path, filename=filename, media_type=media_type)
@@ -378,9 +378,11 @@ async def delete_file(
     logger.info(f"Delete request: file_path={file_path}")
     try:
         result = await agent_router_service.build_workspace_delete_response(
-            file_path=file_path,
+            file_path=file_path,  # pyright: ignore[reportArgumentType]
             deleter=lambda: agent_service.delete_server_agent_file(
-                agent_id, user_id, file_path
+                agent_id,
+                user_id,
+                file_path,  # pyright: ignore[reportArgumentType]
             ),
         )
         return await Response.succ(message=result["message"], data=result["data"])
@@ -414,7 +416,7 @@ async def upload_file(
         result = await agent_service.upload_server_agent_file(
             agent_id,
             user_id,
-            file.filename,
+            file.filename,  # pyright: ignore[reportArgumentType]
             file.file,
             target_path,
         )

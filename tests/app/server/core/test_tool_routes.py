@@ -79,10 +79,10 @@ class TestToolRoutes(unittest.TestCase):
         self.assertTrue(payload["success"])
         self.assertEqual(payload["data"], {"content": {"ok": True}})
         mock_execute.assert_awaited_once()
-        self.assertEqual(mock_execute.await_args.args[0], "demo_tool")
-        self.assertEqual(mock_execute.await_args.args[1], {"query": "acme"})
-        self.assertEqual(mock_execute.await_args.kwargs["user_id"], "")
-        self.assertEqual(mock_execute.await_args.kwargs["role"], "user")
+        self.assertEqual(mock_execute.await_args.args[0], "demo_tool")  # pyright: ignore[reportOptionalMemberAccess]
+        self.assertEqual(mock_execute.await_args.args[1], {"query": "acme"})  # pyright: ignore[reportOptionalMemberAccess]
+        self.assertEqual(mock_execute.await_args.kwargs["user_id"], "")  # pyright: ignore[reportOptionalMemberAccess]
+        self.assertEqual(mock_execute.await_args.kwargs["role"], "user")  # pyright: ignore[reportOptionalMemberAccess]
 
     def test_exec_tool_route_accepts_arguments_alias(self):
         app = _build_app()
@@ -103,8 +103,8 @@ class TestToolRoutes(unittest.TestCase):
         self.assertTrue(payload["success"])
         self.assertEqual(payload["data"], {"content": {"ok": True}})
         mock_execute.assert_awaited_once()
-        self.assertEqual(mock_execute.await_args.args[0], "demo_tool")
-        self.assertEqual(mock_execute.await_args.args[1], {"query": "alias"})
+        self.assertEqual(mock_execute.await_args.args[0], "demo_tool")  # pyright: ignore[reportOptionalMemberAccess]
+        self.assertEqual(mock_execute.await_args.args[1], {"query": "alias"})  # pyright: ignore[reportOptionalMemberAccess]
 
     def test_anytool_draft_preview_route_uses_preview_service(self):
         app = _build_app()
@@ -143,13 +143,15 @@ class TestToolRoutes(unittest.TestCase):
             payload["data"], {"raw_text": '{"value":1}', "parsed": {"value": 1}}
         )
         mock_preview.assert_awaited_once()
-        self.assertEqual(mock_preview.await_args.kwargs["server_name"], "draft_server")
-        self.assertEqual(mock_preview.await_args.kwargs["arguments"], {"query": "acme"})
+        self.assertEqual(mock_preview.await_args.kwargs["server_name"], "draft_server")  # pyright: ignore[reportOptionalMemberAccess]
+        self.assertEqual(mock_preview.await_args.kwargs["arguments"], {"query": "acme"})  # pyright: ignore[reportOptionalMemberAccess]
         self.assertEqual(
-            mock_preview.await_args.kwargs["simulator"], {"model": "gpt-test"}
+            mock_preview.await_args.kwargs["simulator"],  # pyright: ignore[reportOptionalMemberAccess]
+            {"model": "gpt-test"},  # pyright: ignore[reportOptionalMemberAccess]
         )
         self.assertEqual(
-            mock_preview.await_args.kwargs["tool_definition"]["name"], "search_customer"
+            mock_preview.await_args.kwargs["tool_definition"]["name"],  # pyright: ignore[reportOptionalMemberAccess]
+            "search_customer",  # pyright: ignore[reportOptionalMemberAccess]
         )
 
     def test_anytool_draft_preview_rejects_whitespace_tool_name(self):

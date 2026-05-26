@@ -34,7 +34,7 @@ def test_bootstrap_admin_log_masks_password():
         )
     )
 
-    message = format_bootstrap_admin_log(spec)
+    message = format_bootstrap_admin_log(spec)  # pyright: ignore[reportArgumentType]
 
     assert "root-admin" in message
     assert "SuperSecret123" not in message

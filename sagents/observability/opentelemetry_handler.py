@@ -181,7 +181,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
 
                 def default_serializer(obj):
                     if dataclasses.is_dataclass(obj):
-                        return dataclasses.asdict(obj)
+                        return dataclasses.asdict(obj)  # pyright: ignore[reportArgumentType]
                     if hasattr(obj, "to_dict"):
                         return obj.to_dict()
                     if hasattr(obj, "__dict__"):
@@ -210,7 +210,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
 
                 def default_serializer(obj):
                     if dataclasses.is_dataclass(obj):
-                        return dataclasses.asdict(obj)
+                        return dataclasses.asdict(obj)  # pyright: ignore[reportArgumentType]
                     if hasattr(obj, "to_dict"):
                         return obj.to_dict()
                     if hasattr(obj, "__dict__"):

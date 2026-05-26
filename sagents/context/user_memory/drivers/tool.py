@@ -85,9 +85,9 @@ class ToolMemoryDriver(IMemoryDriver):
             return "记忆功能不可用"
 
         try:
-            return await self.tool_manager.run_tool_async(
+            return await self.tool_manager.run_tool_async(  # pyright: ignore[reportOptionalMemberAccess]
                 tool_name="remember_user_memory",
-                session_id=session_id,
+                session_id=session_id,  # pyright: ignore[reportArgumentType]
                 user_id=user_id,
                 memory_key=memory_key,
                 content=content,
@@ -105,9 +105,9 @@ class ToolMemoryDriver(IMemoryDriver):
             return "记忆功能不可用"
 
         try:
-            return await self.tool_manager.run_tool_async(
+            return await self.tool_manager.run_tool_async(  # pyright: ignore[reportOptionalMemberAccess]
                 tool_name="forget_user_memory",
-                session_id=session_id,
+                session_id=session_id,  # pyright: ignore[reportArgumentType]
                 user_id=user_id,
                 memory_key=memory_key,
             )
@@ -200,9 +200,9 @@ class ToolMemoryDriver(IMemoryDriver):
             return []
 
         try:
-            result = await self.tool_manager.run_tool_async(
+            result = await self.tool_manager.run_tool_async(  # pyright: ignore[reportOptionalMemberAccess]
                 tool_name="recall_user_memory",
-                session_id=session_id,
+                session_id=session_id,  # pyright: ignore[reportArgumentType]
                 user_id=user_id,
                 query=query,
                 limit=limit,
@@ -227,9 +227,9 @@ class ToolMemoryDriver(IMemoryDriver):
             return []
 
         try:
-            result = await self.tool_manager.run_tool_async(
+            result = await self.tool_manager.run_tool_async(  # pyright: ignore[reportOptionalMemberAccess]
                 tool_name="recall_user_memory_by_type",
-                session_id=session_id,
+                session_id=session_id,  # pyright: ignore[reportArgumentType]
                 user_id=user_id,
                 memory_type=memory_type,
                 query=query,

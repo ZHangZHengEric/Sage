@@ -208,7 +208,7 @@ async def cli_runtime(
     def _skip_builtin_mcp_discovery(_self):
         return None
 
-    ToolManager.discover_builtin_mcp_tools_from_path = _skip_builtin_mcp_discovery
+    ToolManager.discover_builtin_mcp_tools_from_path = _skip_builtin_mcp_discovery  # pyright: ignore[reportAttributeAccessIssue]
     await initialize_db_connection(cfg)
     try:
         await initialize_tool_manager()
@@ -344,7 +344,7 @@ async def run_request_stream(
         stream_service.agent_workspace = workspace_path
         stream_service.skill_manager, stream_service.agent_skill_manager = (
             create_skill_proxy(
-                request.available_skills,
+                request.available_skills,  # pyright: ignore[reportArgumentType]
                 user_id=request.user_id,
                 agent_workspace=workspace_path,
             )

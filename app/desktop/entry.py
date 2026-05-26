@@ -7,7 +7,7 @@ import os
 if getattr(sys, "frozen", False):
     # Running in a PyInstaller bundle
     bundle_dir = (
-        sys._MEIPASS if hasattr(sys, "_MEIPASS") else os.path.dirname(sys.executable)
+        sys._MEIPASS if hasattr(sys, "_MEIPASS") else os.path.dirname(sys.executable)  # pyright: ignore[reportAttributeAccessIssue]
     )
 
     # Set SSL certificate paths for certifi

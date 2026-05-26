@@ -20,7 +20,7 @@ def test_public_request_cannot_forge_internal_user_header():
     config._GLOBAL_STARTUP_CONFIG = config.StartupConfig()
     app = _build_app()
 
-    with TestClient(app, client=("203.0.113.10", 50000)) as client:
+    with TestClient(app, client=("203.0.113.10", 50000)) as client:  # pyright: ignore[reportCallIssue]
         response = client.get(
             "/api/protected",
             headers={"X-Sage-Internal-UserId": "attacker"},
@@ -36,7 +36,7 @@ def test_whitelisted_proxy_request_can_use_internal_user_header():
     )
     app = _build_app()
 
-    with TestClient(app, client=("10.1.2.3", 50000)) as client:
+    with TestClient(app, client=("10.1.2.3", 50000)) as client:  # pyright: ignore[reportCallIssue]
         response = client.get(
             "/api/protected",
             headers={"X-Sage-Internal-UserId": "internal-user"},
@@ -53,7 +53,7 @@ def test_trusted_proxy_mode_allows_whitelisted_proxy_without_auth():
     )
     app = _build_app()
 
-    with TestClient(app, client=("10.1.2.3", 50000)) as client:
+    with TestClient(app, client=("10.1.2.3", 50000)) as client:  # pyright: ignore[reportCallIssue]
         response = client.get("/api/protected")
 
     assert response.status_code == 401
@@ -66,7 +66,7 @@ def test_non_whitelisted_proxy_request_is_rejected():
     )
     app = _build_app()
 
-    with TestClient(app, client=("203.0.113.10", 50000)) as client:
+    with TestClient(app, client=("203.0.113.10", 50000)) as client:  # pyright: ignore[reportCallIssue]
         response = client.get(
             "/api/protected",
             headers={"X-Sage-Internal-UserId": "internal-user"},

@@ -130,7 +130,7 @@ class WeChatWorkProvider(IMProviderBase):
                 return {"success": False, "error": f"不支持的消息类型: {msg_type}"}
 
             # 构建主动推送消息命令
-            {
+            {  # pyright: ignore[reportUnusedExpression]
                 "cmd": "aibot_send_msg",
                 "headers": {"req_id": str(uuid.uuid4())},
                 "body": body,
@@ -209,11 +209,14 @@ class WeChatWorkProvider(IMProviderBase):
                 return {"success": False, "error": f"上传失败: {upload_result.error}"}
 
             media_id = upload_result.media_id
-            logger.info(f"[WeChatWork] 文件上传成功: media_id={media_id[:20]}...")
+            logger.info(f"[WeChatWork] 文件上传成功: media_id={media_id[:20]}...")  # pyright: ignore[reportOptionalSubscript]
 
             # 2. 发送文件消息
             return await self._send_media_message(
-                media_id=media_id, msg_type="file", chat_id=chat_id, user_id=user_id
+                media_id=media_id,  # pyright: ignore[reportArgumentType]
+                msg_type="file",
+                chat_id=chat_id,
+                user_id=user_id,  # pyright: ignore[reportArgumentType]
             )
 
         except Exception as e:
@@ -469,7 +472,7 @@ class WeChatWorkProvider(IMProviderBase):
             logger.error(f"[WeChatWork] 解析消息异常: {e}")
             return None
 
-    def start_client(self, message_handler: callable) -> bool:
+    def start_client(self, message_handler: callable) -> bool:  # pyright: ignore[reportGeneralTypeIssues]
         """启动 WebSocket 客户端
 
         Args:

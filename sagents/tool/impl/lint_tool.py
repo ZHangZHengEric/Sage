@@ -277,7 +277,7 @@ class LintTool:
         self,
         paths: List[str],
         max_diagnostics: int = 50,
-        session_id: str = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         if not session_id:
             raise ValueError("LintTool: session_id is required")

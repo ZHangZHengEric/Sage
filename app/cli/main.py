@@ -26,8 +26,20 @@ from app.cli.formatting import (
 )
 from app.cli.parser import build_argument_parser
 from app.cli.runtime.rendering import (
+    _collect_event_file_paths as _collect_event_file_paths,
+    _collect_event_tool_names as _collect_event_tool_names,
     _emit_chat_exit_summary,
+    _emit_stream_idle_notice as _emit_stream_idle_notice,
+    _emit_stream_idle_notice_for_state as _emit_stream_idle_notice_for_state,
+    _empty_render_state as _empty_render_state,
+    _print_plain_event as _print_plain_event,
     _read_chat_prompt,
+    _render_assistant_content_delta as _render_assistant_content_delta,
+)
+from app.cli.runtime.stats import (
+    _empty_stats as _empty_stats,
+    _finalize_stats as _finalize_stats,
+    _record_stats_event as _record_stats_event,
 )
 from app.cli.runtime.stream import (
     _stream_request,

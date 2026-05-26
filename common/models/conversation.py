@@ -196,7 +196,7 @@ class ConversationDao(BaseDao):
                 .values(messages=messages or [], updated_at=get_local_now())
             )
             result = await session.execute(stmt)
-            return bool(result.rowcount)
+            return bool(result.rowcount)  # pyright: ignore[reportAttributeAccessIssue]
 
     async def update_title(self, session_id: str, title: str) -> bool:
         db = await self._get_db()
@@ -207,7 +207,7 @@ class ConversationDao(BaseDao):
                 .values(title=title, updated_at=get_local_now())
             )
             result = await session.execute(stmt)
-            return bool(result.rowcount)
+            return bool(result.rowcount)  # pyright: ignore[reportAttributeAccessIssue]
 
     async def update_timestamp(self, session_id: str) -> bool:
         """仅更新会话的 updated_at 时间戳。"""
@@ -219,7 +219,7 @@ class ConversationDao(BaseDao):
                 .values(updated_at=get_local_now())
             )
             result = await session.execute(stmt)
-            return bool(result.rowcount)
+            return bool(result.rowcount)  # pyright: ignore[reportAttributeAccessIssue]
 
     # Desktop 端兼容方法：不带 user_id 的分页查询（保持原签名）
     async def get_conversations_paginated_desktop(

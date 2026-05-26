@@ -55,7 +55,7 @@ def get_field_info(reader: PdfReader):
     field_info_by_id = {}
     possible_radio_names = set()
 
-    for field_id, field in fields.items():
+    for field_id, field in fields.items():  # pyright: ignore[reportOptionalMemberAccess]
         if field.get("/Kids"):
             if field.get("/FT") == "/Btn":
                 possible_radio_names.add(field_id)

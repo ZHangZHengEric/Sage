@@ -111,11 +111,11 @@ class InterceptHandler(logging.Handler):
             hasattr(record, "session_id")
             and getattr(record, "session_id") != "NO_SESSION"
         ):
-            payload["session_id"] = record.session_id
+            payload["session_id"] = record.session_id  # pyright: ignore[reportAttributeAccessIssue]
         if hasattr(record, "caller_filename"):
-            payload["file.name"] = record.caller_filename
+            payload["file.name"] = record.caller_filename  # pyright: ignore[reportAttributeAccessIssue]
         if hasattr(record, "caller_lineno"):
-            payload["line"] = record.caller_lineno
+            payload["line"] = record.caller_lineno  # pyright: ignore[reportAttributeAccessIssue]
 
         _ensure_loguru_has_sink()
         try:
@@ -219,7 +219,7 @@ def init_logging_base(
 
         record["message"] = formatting_payload(record)
 
-    logger.configure(patcher=patcher)
+    logger.configure(patcher=patcher)  # pyright: ignore[reportArgumentType]
 
     # stdout sink
     stdout_sink: Any = SafeStdout() if use_safe_stdout else sys.stdout

@@ -58,7 +58,7 @@ class TestProviderHelpers(unittest.TestCase):
 
         async def _run():
             fake_common_services = types.ModuleType("common.services")
-            fake_common_services.llm_provider_service = types.SimpleNamespace(
+            fake_common_services.llm_provider_service = types.SimpleNamespace(  # pyright: ignore[reportAttributeAccessIssue]
                 verify_provider=_fake_verify_provider,
             )
             sys.modules["common.services"] = fake_common_services
@@ -105,7 +105,7 @@ class TestProviderHelpers(unittest.TestCase):
                 async def get_by_id(self, provider_id):
                     return _Provider()
 
-            fake_module.LLMProviderDao = _Dao
+            fake_module.LLMProviderDao = _Dao  # pyright: ignore[reportAttributeAccessIssue]
             sys.modules["common.models.llm_provider"] = fake_module
             try:
                 with self.assertRaises(CLIError) as ctx:

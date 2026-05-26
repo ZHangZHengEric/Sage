@@ -110,7 +110,7 @@ def test_accepts_single_string_tool_name(monkeypatch):
     _patch_ctx(monkeypatch, ctx)
 
     out = asyncio.run(
-        ToolExpansionTool().tool_expand_tools("beta_tool", session_id="s1")
+        ToolExpansionTool().tool_expand_tools("beta_tool", session_id="s1")  # pyright: ignore[reportArgumentType]
     )
 
     assert out["success"] is True

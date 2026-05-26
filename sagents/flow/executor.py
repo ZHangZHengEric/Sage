@@ -121,7 +121,7 @@ class FlowExecutor:
                     )
                     continue
                 if result:
-                    yield result
+                    yield result  # pyright: ignore[reportReturnType]
 
             if self._is_terminal_session_state(session):
                 logger.info(

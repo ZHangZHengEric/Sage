@@ -24,7 +24,7 @@ if not logger.handlers:
 
 # Try to import croniter, fallback to simple implementation if not available
 try:
-    from croniter import croniter
+    from croniter import croniter  # pyright: ignore[reportMissingModuleSource]
 
     CRONITER_AVAILABLE = True
 except ImportError:

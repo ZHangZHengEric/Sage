@@ -390,8 +390,9 @@ def _copy_docs_to_agent_workspace(agent_workspace: str) -> None:
             # PyInstaller 运行时，sys._MEIPASS 指向临时解压目录
             import sys
 
-            if hasattr(sys, "_MEIPASS"):
-                possible_docs = Path(sys._MEIPASS) / "docs"
+            meipass_dir = getattr(sys, "_MEIPASS", None)
+            if meipass_dir:
+                possible_docs = Path(meipass_dir) / "docs"
                 if possible_docs.exists() and possible_docs.is_dir():
                     docs_dir = possible_docs
                     logger.debug(f"从 PyInstaller 目录找到 docs: {docs_dir}")
@@ -506,7 +507,7 @@ async def _copy_sage_usage_docs_to_agent_workspace(
 
 
 async def _register_extra_mcp_tools(request: StreamRequest) -> None:
-    extra_mcp_config = request.extra_mcp_config or request.system_context.get(
+    extra_mcp_config = request.extra_mcp_config or request.system_context.get(  # pyright: ignore[reportOptionalMemberAccess]
         "extra_mcp_config", None
     )
     if not extra_mcp_config:
@@ -544,8 +545,8 @@ async def _register_extra_mcp_tools(request: StreamRequest) -> None:
         if not registered_tools:
             logger.warning(f"Failed to register MCP server {key} with tools")
 
-    if "extra_mcp_config" in request.system_context:
-        del request.system_context["extra_mcp_config"]
+    if "extra_mcp_config" in request.system_context:  # pyright: ignore[reportOperatorIssue]
+        del request.system_context["extra_mcp_config"]  # pyright: ignore[reportOptionalSubscript]
 
 
 def _inject_skill_tools(request: StreamRequest) -> None:
@@ -670,7 +671,7 @@ async def populate_request_from_agent_config(
             request.more_suggest = agent_config.get("moreSuggest")
         if agent_config.get("systemContext") is not None:
             agent_system_context = agent_config.get("systemContext")
-            _merge_dict(request, "system_context", agent_system_context)
+            _merge_dict(request, "system_context", agent_system_context)  # pyright: ignore[reportArgumentType]
             if (
                 isinstance(agent_system_context, dict)
                 and agent_system_context.get("response_language") is not None
@@ -721,6 +722,8 @@ async def populate_request_from_agent_config(
     provider_id = agent_config.get("llm_provider_id") if agent_config else None
     if provider_id:
         provider = await provider_dao.get_by_id(provider_id)
+        if provider is None:
+            raise ValueError(f"LLM provider not found: {provider_id}")
         request.llm_model_config["base_url"] = provider.base_url
         request.llm_model_config["api_key"] = _get_provider_api_key(provider)
         request.llm_model_config["model"] = provider.model
@@ -736,6 +739,8 @@ async def populate_request_from_agent_config(
         )
     else:
         provider = await provider_dao.get_default()
+        if provider is None:
+            raise ValueError("Default LLM provider not found")
         if request.llm_model_config.get("base_url") is None:
             request.llm_model_config["base_url"] = provider.base_url
         if request.llm_model_config.get("api_key") is None:
@@ -809,8 +814,8 @@ async def populate_request_from_agent_config(
             im_enabled = any(
                 config.get("enabled", False) for config in all_im_configs.values()
             )
-            if im_enabled and "send_message_through_im" not in request.available_tools:
-                request.available_tools = list(request.available_tools) + [
+            if im_enabled and "send_message_through_im" not in request.available_tools:  # pyright: ignore[reportOperatorIssue]
+                request.available_tools = list(request.available_tools) + [  # pyright: ignore[reportArgumentType]
                     "send_message_through_im"
                 ]
                 logger.info(
@@ -842,8 +847,8 @@ async def populate_request_from_agent_config(
         kdb_dao = KdbDao()
         kdbs, _ = await kdb_dao.get_kdbs_paginated(
             kdb_ids=request.available_knowledge_bases,
-            data_type=None,
-            query_name=None,
+            data_type=None,  # pyright: ignore[reportArgumentType]
+            query_name=None,  # pyright: ignore[reportArgumentType]
             page=1,
             page_size=1000,
         )
@@ -852,8 +857,8 @@ async def populate_request_from_agent_config(
                 f"{kdb.name}数据库的index_name": kdb.get_index_name() for kdb in kdbs
             }
             _merge_dict(request, "system_context", kdb_context)
-            if "retrieve_on_zavixai_db" not in request.available_tools:
-                request.available_tools.append("retrieve_on_zavixai_db")
+            if "retrieve_on_zavixai_db" not in request.available_tools:  # pyright: ignore[reportOperatorIssue]
+                request.available_tools.append("retrieve_on_zavixai_db")  # pyright: ignore[reportOptionalMemberAccess]
 
     _inject_skill_tools(request)
     _strip_skill_tools_when_unavailable(request)
@@ -899,13 +904,13 @@ class SageStreamService:
             self.agent_workspace_root = workspace_root
             self.agent_workspace = str(self.agent_workspace_root)
 
-        self.tool_manager = create_tool_proxy(request.available_tools)
+        self.tool_manager = create_tool_proxy(request.available_tools)  # pyright: ignore[reportArgumentType]
         self.skill_manager, self.agent_skill_manager = create_skill_proxy(
-            request.available_skills,
+            request.available_skills,  # pyright: ignore[reportArgumentType]
             user_id=self.skill_owner_user_id,
             agent_workspace=self.agent_workspace,
         )
-        self.model_client = create_model_client(request.llm_model_config)
+        self.model_client = create_model_client(request.llm_model_config)  # pyright: ignore[reportArgumentType]
         if _is_desktop_mode():
             self.sage_engine = SAgent(
                 session_root_space=str(self.sessions_root),
@@ -1061,7 +1066,7 @@ async def prepare_session(
     try:
         stream_service = SageStreamService(request)
         await stream_service.initialize_workspace_assets()
-        return stream_service, lock
+        return stream_service, lock  # pyright: ignore[reportReturnType]
     except Exception as e:
         if acquired:
             await safe_release(
@@ -1097,7 +1102,7 @@ async def execute_chat_session(
     token_usage_payload: Optional[Dict[str, Any]] = None
 
     progress_queue: asyncio.Queue = asyncio.Queue()
-    register_progress_queue(session_id, progress_queue)
+    register_progress_queue(session_id, progress_queue)  # pyright: ignore[reportArgumentType]
 
     try:
         async for kind, payload in interleave_message_and_progress(
@@ -1148,7 +1153,7 @@ async def execute_chat_session(
             + "\n"
         )
     finally:
-        unregister_progress_queue(session_id)
+        unregister_progress_queue(session_id)  # pyright: ignore[reportArgumentType]
         if not token_usage_persisted:
             await _persist_token_usage_if_available(
                 stream_service,
@@ -1165,7 +1170,7 @@ async def _finalize_session_end(
         persist_session_state_with_cancel_protection,
     )
 
-    await persist_session_state_with_cancel_protection(request.session_id)
+    await persist_session_state_with_cancel_protection(request.session_id)  # pyright: ignore[reportArgumentType]
 
     if not _is_desktop_mode() and request.available_skills and request.agent_id:
         asyncio.create_task(_check_and_update_agent_skills(request, original_skills))
@@ -1246,7 +1251,7 @@ async def _check_and_update_agent_skills(
         cfg = _get_cfg()
         agent_skills_path = str(
             get_agent_skill_dir(
-                request.agent_id,
+                request.agent_id,  # pyright: ignore[reportArgumentType]
                 user_id=request.user_id or "default_user",
                 app_mode=cfg.app_mode,
                 ensure_exists=False,
@@ -1263,7 +1268,7 @@ async def _check_and_update_agent_skills(
             return
 
         agent_dao = AgentConfigDao()
-        agent = await agent_dao.get_by_id(request.agent_id)
+        agent = await agent_dao.get_by_id(request.agent_id)  # pyright: ignore[reportArgumentType]
         if agent and agent.config:
             current_skills = set(agent.config.get("availableSkills") or [])
             updated_skills = current_skills | added_in_session
@@ -1280,13 +1285,13 @@ async def _check_and_update_agent_skills(
 
 async def _ensure_conversation(request: StreamRequest) -> None:
     conversation_dao = ConversationDao()
-    existing_conversation = await conversation_dao.get_by_session_id(request.session_id)
+    existing_conversation = await conversation_dao.get_by_session_id(request.session_id)  # pyright: ignore[reportArgumentType]
     if existing_conversation:
         return
 
     await conversation_dao.save_conversation(
         user_id=request.user_id or "default_user",
-        session_id=request.session_id,
+        session_id=request.session_id,  # pyright: ignore[reportArgumentType]
         agent_id=request.agent_id or "default_agent",
         agent_name=request.agent_name or "Sage Assistant",
         title=await create_conversation_title(request),

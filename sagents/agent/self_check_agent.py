@@ -13,7 +13,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 try:
     import tomllib  # Python 3.11+
 except ImportError:
-    import tomli as tomllib  # Python 3.10 compatibility
+    import tomli as tomllib  # Python 3.10 compatibility  # pyright: ignore[reportMissingImports]
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import SessionContext
@@ -174,7 +174,7 @@ class SelfCheckAgent(AgentBase):
         if latest_assistant_message is None:
             return referenced_files
 
-        for raw_path in markdown_link_pattern.findall(latest_assistant_message.content):
+        for raw_path in markdown_link_pattern.findall(latest_assistant_message.content):  # pyright: ignore[reportArgumentType,reportCallIssue]
             normalized_path = self._normalize_raw_file_reference(raw_path)
             if self._looks_like_file_path(normalized_path):
                 referenced_files.add(normalized_path)

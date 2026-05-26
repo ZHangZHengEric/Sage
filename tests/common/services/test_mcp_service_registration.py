@@ -42,10 +42,10 @@ class TestMcpServiceRegistration(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, "new")
         tm.register_mcp_server.assert_awaited_once()
-        self.assertEqual(tm.register_mcp_server.await_args.args[0], "new")
-        self.assertTrue(tm.register_mcp_server.await_args.kwargs["force"])
+        self.assertEqual(tm.register_mcp_server.await_args.args[0], "new")  # pyright: ignore[reportOptionalMemberAccess]
+        self.assertTrue(tm.register_mcp_server.await_args.kwargs["force"])  # pyright: ignore[reportOptionalMemberAccess]
         dao.save_mcp_server.assert_awaited_once()
-        self.assertEqual(dao.save_mcp_server.await_args.kwargs["name"], "new")
+        self.assertEqual(dao.save_mcp_server.await_args.kwargs["name"], "new")  # pyright: ignore[reportOptionalMemberAccess]
         tm.remove_tool_by_mcp.assert_awaited_once_with("old")
         dao.delete_by_name.assert_awaited_once_with("old")
 
@@ -94,7 +94,7 @@ class TestMcpServiceRegistration(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, mcp_service.DEFAULT_ANYTOOL_SERVER_NAME)
         self.assertEqual(events, ["save", "register"])
-        self.assertTrue(tm.register_mcp_server.await_args.kwargs["force"])
+        self.assertTrue(tm.register_mcp_server.await_args.kwargs["force"])  # pyright: ignore[reportOptionalMemberAccess]
 
     async def test_add_new_anytool_rolls_back_when_registration_fails(self):
         dao = SimpleNamespace()

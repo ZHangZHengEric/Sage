@@ -15,7 +15,7 @@ def _load_memory_index_module():
     spec = importlib.util.spec_from_file_location(
         "memory_index_under_test", module_path
     )
-    module = importlib.util.module_from_spec(spec)
+    module = importlib.util.module_from_spec(spec)  # pyright: ignore[reportArgumentType]
     assert spec and spec.loader
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)

@@ -125,7 +125,7 @@ def test_session_context_save_runs_when_status_changes(tmp_path):
     ctx = _make_session(tmp_path)
 
     ctx.save(session_status=ctx.status)
-    ctx.save(session_status="interrupted", interrupt_reason="客户端断开连接")
+    ctx.save(session_status="interrupted", interrupt_reason="客户端断开连接")  # pyright: ignore[reportArgumentType]
 
     session_end_events = [
         event

@@ -436,7 +436,7 @@ class _ToolNameManager:
 def test_system_prefix_omits_turn_status_contract_when_protocol_disabled(monkeypatch):
     monkeypatch.setenv("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "false")
 
-    prompt = _get_system_prefix(_ToolNameManager(["dudu_generate_route_scheme"]), "en")
+    prompt = _get_system_prefix(_ToolNameManager(["dudu_generate_route_scheme"]), "en")  # pyright: ignore[reportArgumentType]
 
     assert "turn_status" not in prompt
     assert "Task Management Requirements" not in prompt
@@ -445,7 +445,7 @@ def test_system_prefix_omits_turn_status_contract_when_protocol_disabled(monkeyp
 def test_system_prefix_includes_turn_status_contract_when_protocol_enabled(monkeypatch):
     monkeypatch.setenv("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "true")
 
-    prompt = _get_system_prefix(_ToolNameManager(["todo_write"]), "en")
+    prompt = _get_system_prefix(_ToolNameManager(["todo_write"]), "en")  # pyright: ignore[reportArgumentType]
 
     assert "turn_status" in prompt
     assert "Task Management Requirements" in prompt
@@ -507,8 +507,8 @@ def test_task_complete_judge_uses_composed_system_prefix_when_protocol_disabled(
             agent._is_task_complete(
                 messages_input=messages,
                 session_id="s1",
-                tool_manager=tool_manager,
-                session_context=session_context,
+                tool_manager=tool_manager,  # pyright: ignore[reportArgumentType]
+                session_context=session_context,  # pyright: ignore[reportArgumentType]
             )
         )
         is True

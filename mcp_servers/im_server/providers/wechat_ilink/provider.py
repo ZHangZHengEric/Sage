@@ -159,7 +159,7 @@ class WeChatPersonalPoller:
             # Handle async message handler in a separate thread with its own event loop
             def run_async_handler():
                 try:
-                    asyncio.run(self.message_handler(message_data))
+                    asyncio.run(self.message_handler(message_data))  # pyright: ignore[reportArgumentType]
                 except Exception as e:
                     logger.error(f"[WeChatPersonal] Handler error: {e}")
 

@@ -395,7 +395,7 @@ def process_conversations(
         session_id = conv.get("session_id") or conv.get("id")
 
         # 获取并压缩消息
-        messages = fetch_messages(session_id)
+        messages = fetch_messages(session_id)  # pyright: ignore[reportArgumentType]
         if not messages:
             continue
 

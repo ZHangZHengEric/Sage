@@ -109,13 +109,13 @@ class GIFBuilder:
             # Apply global palette to all frames
             for frame in self.frames:
                 pil_frame = Image.fromarray(frame)
-                quantized = pil_frame.quantize(palette=global_palette, dither=1)
+                quantized = pil_frame.quantize(palette=global_palette, dither=1)  # pyright: ignore[reportArgumentType]
                 optimized.append(np.array(quantized.convert("RGB")))
         else:
             # Use per-frame quantization
             for frame in self.frames:
                 pil_frame = Image.fromarray(frame)
-                quantized = pil_frame.quantize(colors=num_colors, method=2, dither=1)
+                quantized = pil_frame.quantize(colors=num_colors, method=2, dither=1)  # pyright: ignore[reportArgumentType]
                 optimized.append(np.array(quantized.convert("RGB")))
 
         return optimized

@@ -44,7 +44,10 @@ async def list_one_time_tasks(
         user_id=get_request_user_id(request),
     )
     return OneTimeTaskListResponse(
-        items=items, total=total, page=page, page_size=page_size
+        items=items,  # pyright: ignore[reportArgumentType]
+        total=total,
+        page=page,
+        page_size=page_size,  # pyright: ignore[reportArgumentType]
     )
 
 
@@ -94,7 +97,7 @@ async def list_recurring_tasks(
         agent_id,
         user_id=get_request_user_id(request),
     )
-    return TaskListResponse(items=items, total=total, page=page, page_size=page_size)
+    return TaskListResponse(items=items, total=total, page=page, page_size=page_size)  # pyright: ignore[reportArgumentType]
 
 
 @task_router.get("/recurring/{task_id}", response_model=RecurringTaskResponse)
@@ -155,7 +158,10 @@ async def get_task_history(
         user_id=get_request_user_id(request),
     )
     return TaskHistoryListResponse(
-        items=items, total=total, page=page, page_size=page_size
+        items=items,  # pyright: ignore[reportArgumentType]
+        total=total,
+        page=page,
+        page_size=page_size,  # pyright: ignore[reportArgumentType]
     )
 
 

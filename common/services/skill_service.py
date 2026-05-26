@@ -1523,7 +1523,7 @@ async def import_skill_by_file(
     is_agent: bool = False,
     agent_id: Optional[str] = None,
 ) -> str:
-    if not file.filename.endswith(".zip"):
+    if not file.filename.endswith(".zip"):  # pyright: ignore[reportOptionalMemberAccess]
         raise SageHTTPException(
             status_code=500 if _is_desktop_mode() else 400, detail="仅支持 ZIP 文件"
         )
@@ -1540,7 +1540,10 @@ async def import_skill_by_file(
             if not tm:
                 raise SageHTTPException(status_code=500, detail="技能管理器未初始化")
             success, message = await _process_desktop_zip_and_register(
-                tm, tmp_file_path, file.filename, user_id
+                tm,
+                tmp_file_path,
+                file.filename,  # pyright: ignore[reportArgumentType]
+                user_id,  # pyright: ignore[reportArgumentType]
             )
         else:
             cfg = _get_cfg()
@@ -1559,7 +1562,9 @@ async def import_skill_by_file(
                 target_dir = os.path.join(cfg.user_dir, user_id, "skills")
                 await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
             success, message = await _process_server_zip_to_dir(
-                tmp_file_path, file.filename, target_dir
+                tmp_file_path,
+                file.filename,  # pyright: ignore[reportArgumentType]
+                target_dir,  # pyright: ignore[reportArgumentType]
             )
 
         if not success:

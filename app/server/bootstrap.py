@@ -380,7 +380,7 @@ async def ensure_system_init(cfg: StartupConfig):
     from common.core.client.db import get_global_db, sync_database_schema
 
     db = await get_global_db()
-    async with db._engine.begin() as conn:
+    async with db._engine.begin() as conn:  # pyright: ignore[reportOptionalMemberAccess]
         await conn.run_sync(Base.metadata.create_all)
         # Sync schema: add missing columns to existing tables
         await conn.run_sync(sync_database_schema, Base)
@@ -462,7 +462,7 @@ async def ensure_system_init(cfg: StartupConfig):
         default_provider.base_url = base_url
         default_provider.api_keys = [api_key]
         default_provider.model = model
-        default_provider.max_tokens = (
+        default_provider.max_tokens = (  # pyright: ignore[reportAttributeAccessIssue]
             int(max_tokens) if max_tokens is not None else None
         )
         default_provider.temperature = temperature

@@ -613,7 +613,7 @@ class IMServiceManager:
             )
 
             # Create and start client
-            client = FeishuWebSocketClient(app_id, app_secret, message_handler)
+            client = FeishuWebSocketClient(app_id, app_secret, message_handler)  # pyright: ignore[reportArgumentType]
             client.start()
 
             # Update state to connected
@@ -795,7 +795,7 @@ class IMServiceManager:
             )
 
             # Create and start client
-            client = DingTalkStreamClient(client_id, client_secret, message_handler)
+            client = DingTalkStreamClient(client_id, client_secret, message_handler)  # pyright: ignore[reportArgumentType]
             client.start()
 
             # Update state to connected
@@ -1033,7 +1033,8 @@ class IMServiceManager:
 
             # Create and start poller
             poller = iMessageDatabasePoller(
-                message_handler=message_handler, allowed_senders=allowed_senders
+                message_handler=message_handler,  # pyright: ignore[reportArgumentType]
+                allowed_senders=allowed_senders,  # pyright: ignore[reportArgumentType]
             )
             poller.start()
 
@@ -1107,7 +1108,7 @@ class IMServiceManager:
             # Stop the client - use the saved provider instance
             try:
                 with self._lock:
-                    saved_provider = self._connections.get(key, {}).get("provider")
+                    saved_provider = self._connections.get(key, {}).get("provider")  # pyright: ignore[reportAttributeAccessIssue]
                 if saved_provider:
                     saved_provider.stop_client()
                     logger.info(
@@ -1151,7 +1152,8 @@ class IMServiceManager:
 
             # Create and start poller
             poller = WeChatPersonalPoller(
-                message_handler=message_handler, bot_token=bot_token
+                message_handler=message_handler,  # pyright: ignore[reportArgumentType]
+                bot_token=bot_token,  # pyright: ignore[reportArgumentType]
             )
             poller.start()
 
@@ -1231,7 +1233,12 @@ class IMServiceManager:
                 # Handle slash commands immediately (no merging)
                 if text.startswith("/"):
                     handled = await self._handle_slash_command(
-                        text, user_id, chat_id, provider_type, sage_user_id, user_name
+                        text,
+                        user_id,  # pyright: ignore[reportArgumentType]
+                        chat_id,
+                        provider_type,
+                        sage_user_id,
+                        user_name,  # pyright: ignore[reportArgumentType]
                     )
                     if handled:
                         logger.info(f"[ServiceManager] Slash command handled: {text}")
@@ -1253,7 +1260,7 @@ class IMServiceManager:
                                     buffer_key,
                                     sage_user_id,
                                     provider_type,
-                                    user_id,
+                                    user_id,  # pyright: ignore[reportArgumentType]
                                     chat_id,
                                     user_name,
                                 )
@@ -1271,7 +1278,7 @@ class IMServiceManager:
                                     buffer_key,
                                     sage_user_id,
                                     provider_type,
-                                    user_id,
+                                    user_id,  # pyright: ignore[reportArgumentType]
                                     chat_id,
                                     user_name,
                                 )

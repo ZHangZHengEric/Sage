@@ -171,7 +171,7 @@ def migrate_global_config(
 
             # Validate (especially for iMessage)
             try:
-                validate_provider_config(agent_id, provider, provider_config)
+                validate_provider_config(agent_id, provider, provider_config)  # pyright: ignore[reportArgumentType]
                 configs_to_migrate.append(
                     {
                         "provider": provider,

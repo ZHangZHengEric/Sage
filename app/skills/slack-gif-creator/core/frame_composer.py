@@ -89,7 +89,7 @@ def draw_text(
         text_height = bbox[3] - bbox[1]
         x = position[0] - text_width // 2
         y = position[1] - text_height // 2
-        position = (x, y)
+        position = (x, y)  # pyright: ignore[reportAssignmentType]
 
     draw.text(position, text, fill=color, font=font)
     return frame

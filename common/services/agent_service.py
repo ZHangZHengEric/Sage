@@ -225,7 +225,7 @@ def _create_model_client(
 
     # 使用 OpenAIChat 创建客户端（支持双模型）
     openai_chat = OpenAIChat(
-        api_key=api_key,
+        api_key=api_key,  # pyright: ignore[reportArgumentType]
         base_url=base_url,
         model_name=model_name,
         fast_api_key=fast_api_key,
@@ -652,14 +652,14 @@ async def auto_generate_agent(
 
     if available_tools:
         logger.info(f"使用指定的工具列表: {available_tools}")
-        tool_manager_or_proxy = ToolProxy(get_tool_manager(), available_tools)
+        tool_manager_or_proxy = ToolProxy(get_tool_manager(), available_tools)  # pyright: ignore[reportArgumentType]
     else:
         logger.info("使用完整的工具管理器")
         tool_manager_or_proxy = get_tool_manager()
 
     agent_config = await auto_gen_func.generate_agent_config(
         agent_description=agent_description,
-        tool_manager=tool_manager_or_proxy,
+        tool_manager=tool_manager_or_proxy,  # pyright: ignore[reportArgumentType]
         llm_client=model_client,
         model=model_name,
         language=language,

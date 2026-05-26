@@ -44,31 +44,31 @@ class BoundLogger:
 
     def debug(self, message, **kwargs):
         final_message, session_id = self._format_message(message)
-        self.base_logger.debug(final_message, session_id=session_id, **kwargs)
+        self.base_logger.debug(final_message, session_id=session_id, **kwargs)  # pyright: ignore[reportArgumentType]
 
     def info(self, message, **kwargs):
         final_message, session_id = self._format_message(message)
-        self.base_logger.info(final_message, session_id=session_id, **kwargs)
+        self.base_logger.info(final_message, session_id=session_id, **kwargs)  # pyright: ignore[reportArgumentType]
 
     def warning(self, message, **kwargs):
         final_message, session_id = self._format_message(message)
-        self.base_logger.warning(final_message, session_id=session_id, **kwargs)
+        self.base_logger.warning(final_message, session_id=session_id, **kwargs)  # pyright: ignore[reportArgumentType]
 
     def error(self, message, **kwargs):
         final_message, session_id = self._format_message(message)
-        self.base_logger.error(final_message, session_id=session_id, **kwargs)
+        self.base_logger.error(final_message, session_id=session_id, **kwargs)  # pyright: ignore[reportArgumentType]
 
     def critical(self, message, **kwargs):
         final_message, session_id = self._format_message(message)
-        self.base_logger.critical(final_message, session_id=session_id, **kwargs)
+        self.base_logger.critical(final_message, session_id=session_id, **kwargs)  # pyright: ignore[reportArgumentType]
 
     def exception(self, message, **kwargs):
         final_message, session_id = self._format_message(message)
-        self.base_logger.error(final_message, session_id=session_id, **kwargs)
+        self.base_logger.error(final_message, session_id=session_id, **kwargs)  # pyright: ignore[reportArgumentType]
 
     def success(self, message, **kwargs):
         final_message, session_id = self._format_message(message)
-        self.base_logger.info(final_message, session_id=session_id, **kwargs)
+        self.base_logger.info(final_message, session_id=session_id, **kwargs)  # pyright: ignore[reportArgumentType]
 
 
 class Logger:

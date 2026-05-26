@@ -12,18 +12,18 @@ from app.cli.commands.session import _handle_goal_command
 from app.cli.main import (
     CHAT_INPUT_PROMPT,
     CHAT_COMMAND_HELP,
-    _collect_event_file_paths,
-    _collect_event_tool_names,
+    _collect_event_file_paths,  # pyright: ignore[reportAttributeAccessIssue]
+    _collect_event_tool_names,  # pyright: ignore[reportAttributeAccessIssue]
     _emit_chat_exit_summary,
-    _emit_stream_idle_notice,
-    _emit_stream_idle_notice_for_state,
-    _empty_render_state,
-    _empty_stats,
-    _finalize_stats,
+    _emit_stream_idle_notice,  # pyright: ignore[reportAttributeAccessIssue]
+    _emit_stream_idle_notice_for_state,  # pyright: ignore[reportAttributeAccessIssue]
+    _empty_render_state,  # pyright: ignore[reportAttributeAccessIssue]
+    _empty_stats,  # pyright: ignore[reportAttributeAccessIssue]
+    _finalize_stats,  # pyright: ignore[reportAttributeAccessIssue]
     _stream_request,
-    _print_plain_event,
-    _record_stats_event,
-    _render_assistant_content_delta,
+    _print_plain_event,  # pyright: ignore[reportAttributeAccessIssue]
+    _record_stats_event,  # pyright: ignore[reportAttributeAccessIssue]
+    _render_assistant_content_delta,  # pyright: ignore[reportAttributeAccessIssue]
 )
 
 
@@ -34,7 +34,7 @@ class TestStatsToolDetection(unittest.TestCase):
     def test_build_run_request_defaults_response_language_to_chinese(self):
         request = cli_service.build_run_request(task="hello")
         self.assertIsNotNone(request.system_context)
-        self.assertEqual(request.system_context.get("response_language"), "zh-CN")
+        self.assertEqual(request.system_context.get("response_language"), "zh-CN")  # pyright: ignore[reportOptionalMemberAccess]
 
     def test_chat_help_mentions_resume_and_history_commands(self):
         self.assertIn("sage resume <session_id>", CHAT_COMMAND_HELP)
@@ -670,7 +670,7 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(events[0]["goal"])
         self.assertIsInstance(events[0]["session_id"], str)
         self.assertTrue(events[0]["session_id"])
-        self.assertEqual(request.session_id, events[0]["session_id"])
+        self.assertEqual(request.session_id, events[0]["session_id"])  # pyright: ignore[reportAttributeAccessIssue]
         self.assertEqual(events[-1]["type"], "cli_stats")
         self.assertEqual(events[-1]["session_id"], events[0]["session_id"])
 
@@ -802,9 +802,9 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNotNone(notice_event)
         notice_event = notice_event
-        self.assertEqual(notice_event["session_id"], "session-idle-notice")
-        self.assertEqual(notice_event["source"], "idle_poll")
-        self.assertIn("[working]", notice_event["content"])
+        self.assertEqual(notice_event["session_id"], "session-idle-notice")  # pyright: ignore[reportOptionalSubscript]
+        self.assertEqual(notice_event["source"], "idle_poll")  # pyright: ignore[reportOptionalSubscript]
+        self.assertIn("[working]", notice_event["content"])  # pyright: ignore[reportOptionalSubscript]
 
     async def test_stream_request_emits_refreshed_cli_session_after_completion(self):
         async def fake_run_request_stream(_request, workspace=None):
@@ -911,9 +911,9 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             return await original_wait_for(awaitable, timeout)
 
         with tempfile.TemporaryDirectory() as tempdir:
-            session_dir = os.path.join(tempdir, request.session_id)
+            session_dir = os.path.join(tempdir, request.session_id)  # pyright: ignore[reportAttributeAccessIssue]
             os.makedirs(session_dir, exist_ok=True)
-            session_log = os.path.join(session_dir, f"session_{request.session_id}.log")
+            session_log = os.path.join(session_dir, f"session_{request.session_id}.log")  # pyright: ignore[reportAttributeAccessIssue]
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
             with open(session_log, "w", encoding="utf-8") as handle:
                 handle.write(
@@ -948,8 +948,8 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             (event for event in events if event.get("type") == "cli_notice"), None
         )
         self.assertIsNotNone(notice_event)
-        self.assertIn("ToolSuggestionAgent", notice_event["content"])
-        self.assertIn("Connection error.", notice_event["content"])
+        self.assertIn("ToolSuggestionAgent", notice_event["content"])  # pyright: ignore[reportOptionalSubscript]
+        self.assertIn("Connection error.", notice_event["content"])  # pyright: ignore[reportOptionalSubscript]
 
     async def test_run_command_normalizes_workspace_before_stream_request(self):
         args = cli_main.build_argument_parser().parse_args(

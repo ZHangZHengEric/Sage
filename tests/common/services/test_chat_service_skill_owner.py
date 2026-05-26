@@ -181,8 +181,8 @@ def test_populate_request_prefers_agent_response_language_over_request(
 
     asyncio.run(chat_service.populate_request_from_agent_config(request))
 
-    assert request.system_context["response_language"] == "zh-CN"
-    assert request.system_context["business_key"] == "request_value"
+    assert request.system_context["response_language"] == "zh-CN"  # pyright: ignore[reportOptionalSubscript]
+    assert request.system_context["business_key"] == "request_value"  # pyright: ignore[reportOptionalSubscript]
 
 
 def test_populate_request_uses_agent_response_language_when_request_omits_it(
@@ -244,5 +244,5 @@ def test_populate_request_uses_agent_response_language_when_request_omits_it(
 
     asyncio.run(chat_service.populate_request_from_agent_config(request))
 
-    assert request.system_context["response_language"] == "zh-CN"
-    assert request.system_context["business_key"] == "request_value"
+    assert request.system_context["response_language"] == "zh-CN"  # pyright: ignore[reportOptionalSubscript]
+    assert request.system_context["business_key"] == "request_value"  # pyright: ignore[reportOptionalSubscript]

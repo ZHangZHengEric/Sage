@@ -77,7 +77,7 @@ class ToolSuggestionAgent(AgentBase):
                 max(budget_info.get("active_budget", 8000), 3000),
                 recent_messages_count=8,
             )
-        available_tools = tool_manager.list_tools_simplified(lang=language)
+        available_tools = tool_manager.list_tools_simplified(lang=language)  # pyright: ignore[reportOptionalMemberAccess]
 
         if len(available_tools) <= 15:
             logger.info("ToolSuggestionAgent: 可用工具数量小于等于15个，返回所有工具")
@@ -124,7 +124,7 @@ class ToolSuggestionAgent(AgentBase):
                         ]
                     )
 
-            available_tools = session_context.tool_manager.list_tools_simplified(
+            available_tools = session_context.tool_manager.list_tools_simplified(  # pyright: ignore[reportOptionalMemberAccess]
                 lang=session_context.get_language()
             )
             # 准备工具列表字符串，包含ID和名称，以及描述的前100个字符
@@ -281,10 +281,10 @@ class ToolSuggestionAgent(AgentBase):
         # 构建模型配置覆盖项
         model_config_override = {"model_type": "fast"}  # 使用快速模型
         if require_json:
-            model_config_override["response_format"] = {"type": "json_object"}
+            model_config_override["response_format"] = {"type": "json_object"}  # pyright: ignore[reportArgumentType]
 
         response = self._call_llm_streaming(
-            messages=messages_input,
+            messages=messages_input,  # pyright: ignore[reportArgumentType]
             session_id=session_id,
             step_name="tool_suggestion",
             enable_thinking=False,
@@ -308,7 +308,7 @@ class ToolSuggestionAgent(AgentBase):
                 for item in suggested_tool_ids
                 if isinstance(item, (int, str)) and str(item).isdigit()
             ]
-            return suggested_tool_ids
+            return suggested_tool_ids  # pyright: ignore[reportReturnType]
         except json.JSONDecodeError:
             logger.warning("ToolSuggestionAgent: 解析工具建议响应时JSON解码错误")
             return []

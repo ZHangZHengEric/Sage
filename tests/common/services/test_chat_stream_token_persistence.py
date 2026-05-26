@@ -10,7 +10,7 @@ if "rank_bm25" not in sys.modules:
         def __init__(self, *args, **kwargs):
             pass
 
-    rank_bm25_stub.BM25Okapi = _BM25Okapi
+    rank_bm25_stub.BM25Okapi = _BM25Okapi  # pyright: ignore[reportAttributeAccessIssue]
     sys.modules["rank_bm25"] = rank_bm25_stub
 
 if "pytz" not in sys.modules:
@@ -42,17 +42,17 @@ if "opentelemetry" not in sys.modules:
         ERROR = "ERROR"
         OK = "OK"
 
-    trace_module.get_tracer = lambda *args, **kwargs: _DummyTracer()
-    trace_module.set_span_in_context = lambda span: span
-    trace_module.Span = _DummySpan
-    trace_module.Status = _Status
-    trace_module.StatusCode = _StatusCode
-    context_module.attach = lambda ctx: object()
-    context_module.detach = lambda token: None
+    trace_module.get_tracer = lambda *args, **kwargs: _DummyTracer()  # pyright: ignore[reportAttributeAccessIssue]
+    trace_module.set_span_in_context = lambda span: span  # pyright: ignore[reportAttributeAccessIssue]
+    trace_module.Span = _DummySpan  # pyright: ignore[reportAttributeAccessIssue]
+    trace_module.Status = _Status  # pyright: ignore[reportAttributeAccessIssue]
+    trace_module.StatusCode = _StatusCode  # pyright: ignore[reportAttributeAccessIssue]
+    context_module.attach = lambda ctx: object()  # pyright: ignore[reportAttributeAccessIssue]
+    context_module.detach = lambda token: None  # pyright: ignore[reportAttributeAccessIssue]
 
     opentelemetry_module = types.ModuleType("opentelemetry")
-    opentelemetry_module.trace = trace_module
-    opentelemetry_module.context = context_module
+    opentelemetry_module.trace = trace_module  # pyright: ignore[reportAttributeAccessIssue]
+    opentelemetry_module.context = context_module  # pyright: ignore[reportAttributeAccessIssue]
 
     sys.modules["opentelemetry"] = opentelemetry_module
     sys.modules["opentelemetry.trace"] = trace_module
@@ -122,7 +122,7 @@ def test_execute_chat_session_persists_token_usage_when_generator_closes_early(
     monkeypatch.setattr(chat_service, "_finalize_session_end", _fake_finalize)
 
     async def _run():
-        generator = chat_service.execute_chat_session(_FakeStreamService())
+        generator = chat_service.execute_chat_session(_FakeStreamService())  # pyright: ignore[reportArgumentType]
         first_chunk = await generator.__anext__()
         assert '"type": "assistant_text"' in first_chunk
         second_chunk = await generator.__anext__()
@@ -231,7 +231,7 @@ def test_stream_manager_background_worker_aclose_has_own_timeout(monkeypatch):
         )
         session = manager._sessions[session_id]
         start = asyncio.get_event_loop().time()
-        await asyncio.wait_for(session.task, timeout=1.0)
+        await asyncio.wait_for(session.task, timeout=1.0)  # pyright: ignore[reportArgumentType]
         elapsed = asyncio.get_event_loop().time() - start
         return elapsed, bool(session.task and session.task.done()), lock.locked()
 
@@ -280,8 +280,8 @@ def test_persist_cancel_protection_backgrounds_on_caller_cancellation(monkeypatc
 
     async def _fake_persist(session_id: str):
         events.append(("start", session_id))
-        started.set()
-        await finish.wait()
+        started.set()  # pyright: ignore[reportOptionalMemberAccess]
+        await finish.wait()  # pyright: ignore[reportOptionalMemberAccess]
         events.append(("done", session_id))
 
     monkeypatch.setattr(conversation_service, "persist_session_state", _fake_persist)
@@ -327,8 +327,8 @@ def test_persist_cancel_protection_coalesces_same_session(monkeypatch):
 
     async def _fake_persist(session_id: str):
         events.append(("start", session_id))
-        started.set()
-        await finish.wait()
+        started.set()  # pyright: ignore[reportOptionalMemberAccess]
+        await finish.wait()  # pyright: ignore[reportOptionalMemberAccess]
         events.append(("done", session_id))
 
     monkeypatch.setattr(conversation_service, "persist_session_state", _fake_persist)

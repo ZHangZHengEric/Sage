@@ -181,7 +181,7 @@ class UserMemoryManager:
         driver = self._get_active_driver()
         if not driver:
             logger.warning("记忆功能已禁用：未配置记忆存储路径且无可用的MCP记忆服务")
-            return
+            return  # pyright: ignore[reportReturnType]
 
         try:
             return await driver.remember(

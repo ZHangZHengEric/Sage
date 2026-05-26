@@ -12,10 +12,10 @@ except ImportError:
     AsyncElasticsearch = None  # type: ignore[assignment]
     helpers = None  # type: ignore[assignment]
 
-ES_CLIENT: Optional["AsyncElasticsearch"] = None
+ES_CLIENT: Optional["AsyncElasticsearch"] = None  # pyright: ignore[reportInvalidTypeForm]
 
 
-def get_es_client() -> "AsyncElasticsearch":
+def get_es_client() -> "AsyncElasticsearch":  # pyright: ignore[reportInvalidTypeForm]
     global ES_CLIENT
     if ES_CLIENT is None:
         raise RuntimeError("ES 客户端未初始化，请先调用 init_es_client()")
@@ -24,7 +24,7 @@ def get_es_client() -> "AsyncElasticsearch":
 
 async def init_es_client(
     cfg: Optional[StartupConfig] = None,
-) -> Optional["AsyncElasticsearch"]:
+) -> Optional["AsyncElasticsearch"]:  # pyright: ignore[reportInvalidTypeForm]
     global ES_CLIENT
     if ES_CLIENT is not None:
         return ES_CLIENT
@@ -80,7 +80,7 @@ def dims() -> int:
         return 1024
 
 
-async def _index_exists(client: "AsyncElasticsearch", index_name: str) -> bool:
+async def _index_exists(client: "AsyncElasticsearch", index_name: str) -> bool:  # pyright: ignore[reportInvalidTypeForm]
     try:
         return await client.indices.exists(index=index_name, ignore=[404, 400])
     except Exception as e:
@@ -152,7 +152,7 @@ async def document_insert(
         for i in range(0, len(docs), chunk_size):
             chunk = docs[i : i + chunk_size]
             actions = [{"_index": index_name, "_source": doc} for doc in chunk]
-            await helpers.async_bulk(es_client, actions, refresh=refresh)
+            await helpers.async_bulk(es_client, actions, refresh=refresh)  # pyright: ignore[reportOptionalMemberAccess]
         logger.info(f"文档批量插入完成: {len(docs)} 条, 索引 {index_name}")
     except Exception as e:
         logger.error(f"文档插入失败 ({index_name}): {e}")

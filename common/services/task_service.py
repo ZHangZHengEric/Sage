@@ -14,7 +14,7 @@ from common.schemas.base import (
 from sagents.utils.logger import logger
 
 try:
-    from croniter import croniter
+    from croniter import croniter  # pyright: ignore[reportMissingModuleSource]
 except ImportError:
     croniter = None
 

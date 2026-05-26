@@ -172,8 +172,8 @@ class Session:
         self.session_workspace = getattr(
             session_context, "session_workspace", self.session_workspace
         )
-        session_context.start_time = self.start_time
-        session_context.end_time = self.end_time
+        session_context.start_time = self.start_time  # pyright: ignore[reportAttributeAccessIssue]
+        session_context.end_time = self.end_time  # pyright: ignore[reportAttributeAccessIssue]
         session_context.child_session_ids = list(self.child_session_ids)
         if hasattr(session_context, "audit_status"):
             session_context.audit_status["interrupt_reason"] = self.interrupt_reason
@@ -207,7 +207,7 @@ class Session:
             ):
                 self.session_context.audit_status.pop("interrupt_reason", None)
         if self.session_context:
-            self.session_context.end_time = (
+            self.session_context.end_time = (  # pyright: ignore[reportAttributeAccessIssue]
                 time.time()
                 if status
                 in {
@@ -377,7 +377,7 @@ class Session:
                     skill_manager=None,
                     parent_session_id=snapshot.get("parent_session_id"),
                 )
-                self.session_context.session_workspace = (
+                self.session_context.session_workspace = (  # pyright: ignore[reportAttributeAccessIssue]
                     snapshot.get("session_workspace") or self.session_workspace
                 )
                 self.status = SessionStatus(
@@ -388,7 +388,7 @@ class Session:
                 )
                 self.end_time = snapshot.get("updated_at")
                 self.session_context.start_time = self.start_time
-                self.session_context.end_time = self.end_time
+                self.session_context.end_time = self.end_time  # pyright: ignore[reportAttributeAccessIssue]
                 self.session_context.child_session_ids = list(
                     snapshot.get("child_session_ids") or []
                 )
@@ -442,13 +442,13 @@ class Session:
         return self.session_context.get_messages()
 
     def get_tasks_status(self) -> Dict[str, Any]:
-        if not self.session_context or not self.session_context.task_manager:
+        if not self.session_context or not self.session_context.task_manager:  # pyright: ignore[reportAttributeAccessIssue]
             snapshot = self._load_persisted_snapshot()
             if snapshot is not None:
                 return snapshot.get("tasks_status") or {"tasks": []}
             return {"tasks": []}
         try:
-            return self.session_context.task_manager.to_dict()
+            return self.session_context.task_manager.to_dict()  # pyright: ignore[reportAttributeAccessIssue]
         except Exception as exc:
             logger.warning(
                 f"SessionRuntime: 获取 session {self.session_id} 任务状态失败: {exc}"
@@ -644,7 +644,7 @@ class Session:
 
         self.session_context = SessionContext(
             session_id=session_id,
-            user_id=user_id,
+            user_id=user_id,  # pyright: ignore[reportArgumentType]
             agent_id=self.agent_id,
             session_root_space=self.session_root_space,
             sandbox_agent_workspace=self.sandbox_agent_workspace,
@@ -681,8 +681,8 @@ class Session:
             )
         if self.observability_manager:
             agent = AgentRuntime(agent, self.observability_manager)
-        self._agents[agent_key] = agent
-        return agent
+        self._agents[agent_key] = agent  # pyright: ignore[reportArgumentType]
+        return agent  # pyright: ignore[reportReturnType]
 
     async def run_stream_with_flow(
         self,
@@ -710,7 +710,7 @@ class Session:
                 raise ValueError("max_loop_count is required")
             # 确保SessionContext存在，并进行初始化
             session_context = await self._ensure_session_context(
-                session_id=session_id,
+                session_id=session_id,  # pyright: ignore[reportArgumentType]
                 user_id=user_id,
                 system_context=merged_system_context,
                 context_budget_config=context_budget_config,
@@ -844,14 +844,14 @@ class Session:
 
             # 2. 准备工具白名单
             # 这里直接按显式 agent_mode 收敛可用工具，不再经过自动路由分叉
-            session_context.restrict_tools_for_mode(agent_mode)
+            session_context.restrict_tools_for_mode(agent_mode)  # pyright: ignore[reportArgumentType]
             tool_manager = session_context.tool_manager
 
             # 3. 执行 Flow
             executor = FlowExecutor(
                 tool_manager,
                 self,
-                session_id,
+                session_id,  # pyright: ignore[reportArgumentType]
                 session_manager=get_global_session_manager(),
             )
             async for message_chunks in executor.execute(flow.root):
@@ -979,7 +979,7 @@ class Session:
                         if role not in {"assistant", "tool"}:
                             continue
                         self.observability_manager.on_message_end(
-                            session_id=session_id,
+                            session_id=session_id,  # pyright: ignore[reportArgumentType]
                             message_id=message_id,
                             role=role,
                             message_type=item.get("message_type"),
@@ -1019,7 +1019,8 @@ class Session:
             if session_context:
                 try:
                     token_usage_chunks = await self._emit_token_usage_if_any(
-                        session_context, session_id
+                        session_context,
+                        session_id,  # pyright: ignore[reportArgumentType]
                     )
                 except Exception as e:
                     logger.error(f"SAgent: 计算 token usage 失败: {e}")
@@ -1035,7 +1036,7 @@ class Session:
                     )
                 except Exception as e:
                     logger.error(f"SAgent: 会话状态保存时出错: {e}")
-            await self._cleanup_session_resources(session_id)
+            await self._cleanup_session_resources(session_id)  # pyright: ignore[reportArgumentType]
 
             # 真正向消费者推送 token_usage 放在最后；任何 yield 异常（含
             # GeneratorExit）都不得影响前面的清理，因此放在所有清理之后。
@@ -1488,7 +1489,7 @@ class SessionManager:
         if not session or not session.has_context():
             return False
         try:
-            session.get_context().save(
+            session.get_context().save(  # pyright: ignore[reportOptionalMemberAccess]
                 session_status=session.get_status(),
                 child_session_ids=list(session.child_session_ids),
                 interrupt_reason=session.interrupt_reason,

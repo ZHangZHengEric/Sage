@@ -478,7 +478,8 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 while True:
                     try:
                         stdout_chunk = await asyncio.wait_for(
-                            process.stdout.read(4096), timeout=0.5
+                            process.stdout.read(4096),  # pyright: ignore[reportOptionalMemberAccess]
+                            timeout=0.5,  # pyright: ignore[reportOptionalMemberAccess]
                         )
                         if stdout_chunk:
                             collected_stdout.append(
@@ -486,7 +487,8 @@ class PassthroughSandboxProvider(ISandboxHandle):
                             )
 
                         stderr_chunk = await asyncio.wait_for(
-                            process.stderr.read(4096), timeout=0.5
+                            process.stderr.read(4096),  # pyright: ignore[reportOptionalMemberAccess]
+                            timeout=0.5,  # pyright: ignore[reportOptionalMemberAccess]
                         )
                         if stderr_chunk:
                             collected_stderr.append(
@@ -512,7 +514,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
                     success=process.returncode == 0,
                     stdout=stdout_text,
                     stderr=stderr_text,
-                    return_code=process.returncode,
+                    return_code=process.returncode,  # pyright: ignore[reportArgumentType]
                     execution_time=0,
                 )
             except asyncio.TimeoutError:

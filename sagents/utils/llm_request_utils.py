@@ -299,12 +299,12 @@ def _sanitize_for_log(value: Any, *, max_depth: int = 2, max_items: int = 8) -> 
 
     if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
         items = list(value)
-        result = [
+        result = [  # pyright: ignore[reportAssignmentType]
             _sanitize_for_log(item, max_depth=max_depth - 1, max_items=max_items)
             for item in items[:max_items]
         ]
         if len(items) > max_items:
-            result.append(f"... +{len(items) - max_items} more")
+            result.append(f"... +{len(items) - max_items} more")  # pyright: ignore[reportAttributeAccessIssue]
         return result
 
     return f"<{type(value).__name__}>"

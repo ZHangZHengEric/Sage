@@ -74,7 +74,7 @@ class Bm25SessionMemoryBackend:
         return hashlib.md5("\n".join(digests).encode("utf-8")).hexdigest()
 
     def _calculate_message_tokens(self, msg: MessageChunk) -> int:
-        return ContextBudgetManager.calculate_str_token_length(msg.get_content())
+        return ContextBudgetManager.calculate_str_token_length(msg.get_content())  # pyright: ignore[reportArgumentType]
 
     def _calculate_messages_tokens(self, messages: List[MessageChunk]) -> int:
         return sum(self._calculate_message_tokens(msg) for msg in messages)
@@ -106,7 +106,7 @@ class Bm25SessionMemoryBackend:
         if self._message_bm25_cache_key == cache_key and self._message_bm25_cache:
             return self._message_bm25_cache[0]
 
-        corpus = [self._tokenize_text(msg.get_content()) for msg in messages]
+        corpus = [self._tokenize_text(msg.get_content()) for msg in messages]  # pyright: ignore[reportArgumentType]
         if not corpus:
             return None
 

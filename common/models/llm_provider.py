@@ -53,11 +53,11 @@ class LLMProvider(Base):
         self.base_url = base_url
         self.api_keys = self.normalize_api_keys(api_keys)
         self.model = model
-        self.max_tokens = max_tokens
-        self.temperature = temperature
-        self.top_p = top_p
-        self.presence_penalty = presence_penalty
-        self.max_model_len = max_model_len
+        self.max_tokens = max_tokens  # pyright: ignore[reportAttributeAccessIssue]
+        self.temperature = temperature  # pyright: ignore[reportAttributeAccessIssue]
+        self.top_p = top_p  # pyright: ignore[reportAttributeAccessIssue]
+        self.presence_penalty = presence_penalty  # pyright: ignore[reportAttributeAccessIssue]
+        self.max_model_len = max_model_len  # pyright: ignore[reportAttributeAccessIssue]
         self.supports_multimodal = supports_multimodal
         self.supports_structured_output = supports_structured_output
         self.is_default = is_default

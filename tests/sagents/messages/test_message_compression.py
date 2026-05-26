@@ -70,12 +70,14 @@ class TestMessageCompression(unittest.TestCase):
         self.print_messages("Level 1 Compression Result", compressed)
 
         # 验证 Tool 截断
-        self.assertIn("...[Tool output truncated", compressed[2].content)
-        self.assertTrue(len(compressed[2].content) < 300)  # 100+100+提示语
+        self.assertIn("...[Tool output truncated", compressed[2].content)  # pyright: ignore[reportArgumentType]
+        self.assertTrue(
+            len(compressed[2].content) < 300  # pyright: ignore[reportArgumentType]
+        )  # 100+100+提示语  # pyright: ignore[reportArgumentType]
 
         # 验证 Thinking 移除
-        self.assertNotIn("<thinking>", compressed[3].content)
-        self.assertIn("The answer is 42", compressed[3].content)
+        self.assertNotIn("<thinking>", compressed[3].content)  # pyright: ignore[reportArgumentType]
+        self.assertIn("The answer is 42", compressed[3].content)  # pyright: ignore[reportArgumentType]
 
     def test_level_2_aging(self):
         """测试 Level 0.5: 老化消息直接 Level 2"""
@@ -98,8 +100,8 @@ class TestMessageCompression(unittest.TestCase):
         self.print_messages("Aging Strategy Result", compressed)
 
         # 验证老化压缩
-        self.assertIn("...[Content truncated]", compressed[2].content)
-        self.assertTrue(len(compressed[2].content) <= 200)
+        self.assertIn("...[Content truncated]", compressed[2].content)  # pyright: ignore[reportArgumentType]
+        self.assertTrue(len(compressed[2].content) <= 200)  # pyright: ignore[reportArgumentType]
 
     def test_level_3_history_drop(self):
         """测试 Level 3: 历史分组丢弃"""
@@ -167,8 +169,8 @@ class TestMessageCompression(unittest.TestCase):
 
         # Check Tool 2 is NOT compressed (Level 1 would truncate to 200 chars + omitted)
         tool_msg = compressed[-1]
-        self.assertNotIn("truncated", tool_msg.content)
-        self.assertNotIn("omitted", tool_msg.content)
+        self.assertNotIn("truncated", tool_msg.content)  # pyright: ignore[reportArgumentType]
+        self.assertNotIn("omitted", tool_msg.content)  # pyright: ignore[reportArgumentType]
 
     def test_recent_messages_count_protection(self):
         """测试 recent_messages_count 按条数强制保护末尾 N 条消息"""
@@ -192,7 +194,7 @@ class TestMessageCompression(unittest.TestCase):
         )
         self.print_messages("No recent protection", compressed_no_protect)
         # tool output 应该被截断
-        self.assertIn("omitted", compressed_no_protect[-1].content)
+        self.assertIn("omitted", compressed_no_protect[-1].content)  # pyright: ignore[reportArgumentType]
 
         # 保护末尾 2 条（recent_messages_count=2）：User 2 和 Tool 不被压缩
         compressed_with_protect = self.manager.compress_messages(
@@ -202,8 +204,8 @@ class TestMessageCompression(unittest.TestCase):
 
         # 验证最近的 tool output 不被截断
         last_tool_msg = compressed_with_protect[-1]
-        self.assertNotIn("omitted", last_tool_msg.content)
-        self.assertNotIn("truncated", last_tool_msg.content)
+        self.assertNotIn("omitted", last_tool_msg.content)  # pyright: ignore[reportArgumentType]
+        self.assertNotIn("truncated", last_tool_msg.content)  # pyright: ignore[reportArgumentType]
         self.assertEqual(last_tool_msg.content, very_long_tool_output)
 
         # 验证 User 2（倒数第 2 条）也被保护

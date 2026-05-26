@@ -11,7 +11,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from openai import OpenAI
-from agents.agent.message_manager import MessageManager
+from agents.agent.message_manager import MessageManager  # pyright: ignore[reportMissingImports]
 
 
 def main():
@@ -39,8 +39,8 @@ def main():
 
     # 3. 创建Agent
     print("📝 创建TaskSummaryAgent...")
-    from agents.agent.task_summary_agent.task_summary_agent import TaskSummaryAgent
-    from agents.task.task_manager import TaskManager
+    from agents.agent.task_summary_agent.task_summary_agent import TaskSummaryAgent  # pyright: ignore[reportMissingImports]
+    from agents.task.task_manager import TaskManager  # pyright: ignore[reportMissingImports]
 
     agent = TaskSummaryAgent(model=model, model_config=llm_config)
 

@@ -200,15 +200,15 @@ async def update_provider(
     # 让用户在前端清空后能真正清掉 DB 中的值，避免下游仍把旧值带进 LLM 请求。
     fields_set = data.model_fields_set
     if "max_tokens" in fields_set:
-        provider.max_tokens = data.max_tokens
+        provider.max_tokens = data.max_tokens  # pyright: ignore[reportAttributeAccessIssue]
     if "temperature" in fields_set:
-        provider.temperature = data.temperature
+        provider.temperature = data.temperature  # pyright: ignore[reportAttributeAccessIssue]
     if "top_p" in fields_set:
-        provider.top_p = data.top_p
+        provider.top_p = data.top_p  # pyright: ignore[reportAttributeAccessIssue]
     if "presence_penalty" in fields_set:
-        provider.presence_penalty = data.presence_penalty
+        provider.presence_penalty = data.presence_penalty  # pyright: ignore[reportAttributeAccessIssue]
     if "max_model_len" in fields_set:
-        provider.max_model_len = data.max_model_len
+        provider.max_model_len = data.max_model_len  # pyright: ignore[reportAttributeAccessIssue]
     if data.supports_multimodal is not None:
         provider.supports_multimodal = data.supports_multimodal
     if data.supports_structured_output is not None:

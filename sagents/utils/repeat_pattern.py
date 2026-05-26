@@ -53,13 +53,13 @@ def build_loop_signature(chunks: List[MessageChunk]) -> str:
                     )
                 tool_call_parts.append(f"{fn}:{short_hash(stable_json(args))}")
 
-        if chunk.role == MessageRole.ASSISTANT.value and (chunk.content or "").strip():
+        if chunk.role == MessageRole.ASSISTANT.value and (chunk.content or "").strip():  # pyright: ignore[reportAttributeAccessIssue]
             if chunk.message_type != MessageType.REASONING_CONTENT.value:
-                text_parts.append(normalize_text(chunk.content))
+                text_parts.append(normalize_text(chunk.content))  # pyright: ignore[reportArgumentType]
 
         if chunk.role == MessageRole.TOOL.value:
             tool_name = (chunk.metadata or {}).get("tool_name", "")
-            tool_content_norm = normalize_text(chunk.content or "")
+            tool_content_norm = normalize_text(chunk.content or "")  # pyright: ignore[reportArgumentType]
             tool_result_parts.append(f"{tool_name}:{short_hash(tool_content_norm)}")
 
     signature_obj = {

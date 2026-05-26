@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
-import defusedxml.minidom
+import defusedxml.minidom  # pyright: ignore[reportMissingModuleSource]
 
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 

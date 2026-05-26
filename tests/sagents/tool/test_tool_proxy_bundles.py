@@ -38,7 +38,7 @@ class _StubTurnStatus:
 
 class _StubToolExpansion:
     @tool()
-    def tool_expand_tools(self, tool_names: list[str] = None):
+    def tool_expand_tools(self, tool_names: list[str] = None):  # pyright: ignore[reportArgumentType]
         """expand"""
         return tool_names or []
 

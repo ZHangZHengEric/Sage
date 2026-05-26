@@ -135,7 +135,7 @@ class IMChannelConfigDao(BaseDao):
                     )
                 )
             )
-            return result.rowcount > 0
+            return result.rowcount > 0  # pyright: ignore[reportAttributeAccessIssue]
 
     async def list_user_configs(
         self, sage_user_id: str = DEFAULT_SAGE_USER_ID

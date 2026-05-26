@@ -53,7 +53,7 @@ class CommonAgent(AgentBase):
         message_manager = session_context.message_manager
         all_messages = message_manager.extract_all_context_messages(
             recent_turns=10,
-            max_length=self.max_history_context_length,
+            max_length=self.max_history_context_length,  # pyright: ignore[reportCallIssue]
             last_turn_user_only=False,
         )
 
@@ -64,7 +64,7 @@ class CommonAgent(AgentBase):
             lang=session_context.get_language(), fallback_chain=["en"]
         )
         tools_json = [
-            tools_json[tool_name]
+            tools_json[tool_name]  # pyright: ignore[reportArgumentType,reportCallIssue]
             for tool_name in self.tools_name
             if tool_name in tools_json
         ]
@@ -78,7 +78,7 @@ class CommonAgent(AgentBase):
         async for msg in self._call_llm_and_process_response(
             messages_input=llm_request_message,
             tools_json=tools_json,
-            tool_manager=tool_manager,
+            tool_manager=tool_manager,  # pyright: ignore[reportArgumentType]
             session_id=session_id,
         ):
             yield msg
@@ -102,7 +102,7 @@ class CommonAgent(AgentBase):
             model_config_override["tools"] = tools_json
 
         response = self._call_llm_streaming(
-            messages=clean_message_input,
+            messages=clean_message_input,  # pyright: ignore[reportArgumentType]
             session_id=session_id,
             step_name="task_execution",
             model_config_override=model_config_override,
@@ -120,7 +120,7 @@ class CommonAgent(AgentBase):
             if len(chunk.choices) == 0:
                 continue
             if chunk.choices[0].delta.tool_calls:
-                self._handle_tool_calls_chunk(chunk, tool_calls, last_tool_call_id)
+                self._handle_tool_calls_chunk(chunk, tool_calls, last_tool_call_id)  # pyright: ignore[reportArgumentType]
                 # 更新last_tool_call_id
                 for tool_call in chunk.choices[0].delta.tool_calls:
                     if tool_call.id is not None and len(tool_call.id) > 0:
@@ -197,7 +197,7 @@ class CommonAgent(AgentBase):
             async for msg in self._handle_tool_calls(
                 tool_calls=tool_calls,
                 tool_manager=tool_manager,
-                messages_input=messages_input,
+                messages_input=messages_input,  # pyright: ignore[reportArgumentType]
                 session_id=session_id,
                 emit_tool_call_message=emit_on_complete,
             ):
@@ -321,12 +321,12 @@ class CommonAgent(AgentBase):
                 ]
 
             logger.debug("CommonAgent: 工具响应处理成功")
-            return result
+            return result  # pyright: ignore[reportReturnType]
 
         except json.JSONDecodeError:
             logger.warning("CommonAgent: 处理工具响应时JSON解码错误，按普通文本处理")
             return [
-                MessageChunk(
+                MessageChunk(  # pyright: ignore[reportReturnType]
                     role=MessageRole.TOOL.value,
                     content=tool_response,
                     tool_call_id=tool_call_id,

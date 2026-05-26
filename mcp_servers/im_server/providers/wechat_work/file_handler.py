@@ -154,7 +154,7 @@ class FileDecryptor:
             )
             return data
 
-        except base64.binascii.Error as e:
+        except base64.binascii.Error as e:  # pyright: ignore[reportAttributeAccessIssue]
             logger.error(f"[FileDecryptor] Base64 decode failed: {e}")
             raise ValueError(f"Invalid Base64 aeskey: {e}")
         except Exception as e:

@@ -50,7 +50,7 @@ def test_session_persisted_state_restores_context_budget_config(tmp_path):
     session = Session(session_id="s1", enable_obs=False)
     assert session.load_persisted_state(str(tmp_path)) is True
 
-    manager = session.session_context.message_manager.context_budget_manager
+    manager = session.session_context.message_manager.context_budget_manager  # pyright: ignore[reportOptionalMemberAccess]
     assert manager.max_model_len == 210000
 
 

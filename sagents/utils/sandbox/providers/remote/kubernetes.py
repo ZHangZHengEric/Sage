@@ -43,7 +43,7 @@ class KubernetesSandboxProvider(RemoteSandboxProvider):
     async def initialize(self) -> None:
         """在 K8s 中创建 Pod"""
         try:
-            from kubernetes import client, config
+            from kubernetes import client, config  # pyright: ignore[reportAttributeAccessIssue]
         except ImportError:
             raise ImportError(
                 "kubernetes package is required. Install with: pip install kubernetes"
@@ -141,12 +141,12 @@ class KubernetesSandboxProvider(RemoteSandboxProvider):
         if not self._is_initialized:
             await self.initialize()
 
-        from kubernetes import stream
+        from kubernetes import stream  # pyright: ignore[reportAttributeAccessIssue]
 
         exec_command = ["/bin/sh", "-c", command]
 
         resp = stream.stream(
-            self._k8s_client.connect_get_namespaced_pod_exec,
+            self._k8s_client.connect_get_namespaced_pod_exec,  # pyright: ignore[reportOptionalMemberAccess]
             self._pod_name,
             self.namespace,
             command=exec_command,

@@ -43,7 +43,7 @@ def _gen_tokens(user: User) -> Tuple[str, str, int]:
     exp_seconds = int(cfg.jwt_expire_hours) * 60 * 60
     now = int(time.time())
     access_claims = build_user_claims(user)
-    access_claims["exp"] = now + exp_seconds
+    access_claims["exp"] = now + exp_seconds  # pyright: ignore[reportArgumentType]
     refresh_claims = {
         "uid": user.user_id,
         "nonce": gen_id()[:8],

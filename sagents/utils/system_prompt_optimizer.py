@@ -26,7 +26,7 @@ try:
 except ImportError:
     from logger import logger
     from prompt_manager import PromptManager
-    from common_util_prompts import system_prompt_optimizer_section_definitions
+    from common_util_prompts import system_prompt_optimizer_section_definitions  # pyright: ignore[reportMissingImports]
 
 
 class SystemPromptOptimizer:

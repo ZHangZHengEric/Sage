@@ -60,7 +60,7 @@ class TestToolIsolation(unittest.TestCase):
 
         # Check execution (by inspecting tool spec)
         tool_spec = proxy.get_tool("conflict_tool")
-        self.assertIn("Tools1", tool_spec.func.__qualname__)
+        self.assertIn("Tools1", tool_spec.func.__qualname__)  # pyright: ignore[reportOptionalMemberAccess]
 
     def test_add_tool_manager_priority(self):
         """Test adding a tool manager dynamically inserts at high priority"""
@@ -75,7 +75,7 @@ class TestToolIsolation(unittest.TestCase):
 
         proxy = ToolProxy([tm1])
         tool_spec = proxy.get_tool("test_tool")
-        self.assertIn("Tools1", tool_spec.func.__qualname__)
+        self.assertIn("Tools1", tool_spec.func.__qualname__)  # pyright: ignore[reportOptionalMemberAccess]
 
         # Add new manager with same tool
         tm2 = ToolManager(is_auto_discover=False, isolated=True)
@@ -91,7 +91,7 @@ class TestToolIsolation(unittest.TestCase):
 
         # Now tm2 should be priority
         tool_spec = proxy.get_tool("test_tool")
-        self.assertIn("Tools2", tool_spec.func.__qualname__)
+        self.assertIn("Tools2", tool_spec.func.__qualname__)  # pyright: ignore[reportOptionalMemberAccess]
 
     def test_register_tools_from_object_proxy(self):
         """Test registering tools directly to proxy registers to highest priority manager"""

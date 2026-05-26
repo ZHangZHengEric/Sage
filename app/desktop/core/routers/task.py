@@ -14,7 +14,7 @@ from common.schemas.base import (
     TaskListResponse,
     TaskResponse,
 )
-from ..services.task import task_service
+from common.services.task_service import task_service
 from ..user_context import DEFAULT_DESKTOP_USER_ID, get_desktop_user_id
 
 SCHEDULER_USER_ID = os.getenv("SAGE_TASK_SCHEDULER_USER_ID", "task_scheduler")

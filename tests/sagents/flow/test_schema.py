@@ -73,8 +73,8 @@ class TestFlowSchema(unittest.TestCase):
 
         self.assertEqual(restored_flow.name, "Test Flow")
         self.assertIsInstance(restored_flow.root, SequenceNode)
-        self.assertEqual(len(restored_flow.root.steps), 2)
-        self.assertIsInstance(restored_flow.root.steps[1], IfNode)
+        self.assertEqual(len(restored_flow.root.steps), 2)  # pyright: ignore[reportAttributeAccessIssue]
+        self.assertIsInstance(restored_flow.root.steps[1], IfNode)  # pyright: ignore[reportAttributeAccessIssue]
 
 
 if __name__ == "__main__":

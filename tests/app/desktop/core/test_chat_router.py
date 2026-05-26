@@ -11,7 +11,7 @@ def test_validate_and_prepare_request_returns_503_when_chat_client_uninitialized
     monkeypatch,
 ):
     request = StreamRequest(
-        messages=[{"role": "user", "content": "hi"}],
+        messages=[{"role": "user", "content": "hi"}],  # pyright: ignore[reportArgumentType]
         session_id="session-no-client",
     )
 
@@ -21,7 +21,7 @@ def test_validate_and_prepare_request_returns_503_when_chat_client_uninitialized
     monkeypatch.setattr(chat_module, "get_chat_client", _raise_uninitialized)
 
     with pytest.raises(SageHTTPException) as exc_info:
-        chat_module.validate_and_prepare_request(request, SimpleNamespace())
+        chat_module.validate_and_prepare_request(request, SimpleNamespace())  # pyright: ignore[reportArgumentType]
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail == "模型客户端未配置或不可用"

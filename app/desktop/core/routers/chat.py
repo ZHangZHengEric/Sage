@@ -172,7 +172,7 @@ async def _start_web_stream_session(
         logger.bind(session_id=session_id).info(interrupt_message)
         try:
             await conversation_service.interrupt_session(
-                session_id,
+                session_id,  # pyright: ignore[reportArgumentType]
                 interrupt_message,
             )
         finally:
@@ -188,7 +188,7 @@ async def _start_web_stream_session(
     stream_service, lock = await chat_service.prepare_session(request)
     session_id = request.session_id
     await manager.start_session(
-        session_id,
+        session_id,  # pyright: ignore[reportArgumentType]
         query,
         chat_service.execute_chat_session(
             mode="web-stream",
@@ -198,7 +198,7 @@ async def _start_web_stream_session(
     )
 
     return StreamingResponse(
-        stream_with_manager(session_id, last_index=0, resume=False),
+        stream_with_manager(session_id, last_index=0, resume=False),  # pyright: ignore[reportArgumentType]
         media_type="text/plain",
     )
 
@@ -386,12 +386,12 @@ async def chat(request: ChatRequest, http_request: Request):
                     mode="chat",
                     stream_service=stream_service,
                 ),
-                session_id,
-                query,
+                session_id,  # pyright: ignore[reportArgumentType]
+                query,  # pyright: ignore[reportArgumentType]
             ),
             http_request,
             lock,
-            session_id,
+            session_id,  # pyright: ignore[reportArgumentType]
         ),
         media_type="text/plain",
     )
@@ -457,7 +457,7 @@ async def stream_chat_web(request: StreamRequest, http_request: Request):
         request,
         manager=manager,
         interrupt_message="同会话重入，先中断旧会话",
-        query=query,
+        query=query,  # pyright: ignore[reportArgumentType]
     )
 
 

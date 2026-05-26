@@ -81,7 +81,7 @@ class TaskPlanningAgent(AgentBase):
         message_id = str(uuid.uuid4())
         all_content = ""
         async for llm_repsonse_chunk in self._call_llm_streaming(
-            messages=llm_request_message,
+            messages=llm_request_message,  # pyright: ignore[reportArgumentType]
             session_id=session_id,
             step_name="planning",
             enable_thinking=False,

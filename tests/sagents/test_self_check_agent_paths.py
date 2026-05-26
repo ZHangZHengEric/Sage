@@ -36,19 +36,19 @@ def _load_self_check_agent(monkeypatch):
         def __init__(self, **kwargs):
             self.__dict__.update(kwargs)
 
-    message_module.MessageChunk = MessageChunk
-    message_module.MessageRole = MessageRole
-    message_module.MessageType = MessageType
+    message_module.MessageChunk = MessageChunk  # pyright: ignore[reportAttributeAccessIssue]
+    message_module.MessageRole = MessageRole  # pyright: ignore[reportAttributeAccessIssue]
+    message_module.MessageType = MessageType  # pyright: ignore[reportAttributeAccessIssue]
     monkeypatch.setitem(sys.modules, "sagents.context.messages.message", message_module)
 
     session_context_module = types.ModuleType("sagents.context.session_context")
-    session_context_module.SessionContext = object
+    session_context_module.SessionContext = object  # pyright: ignore[reportAttributeAccessIssue]
     monkeypatch.setitem(
         sys.modules, "sagents.context.session_context", session_context_module
     )
 
     logger_module = types.ModuleType("sagents.utils.logger")
-    logger_module.logger = SimpleNamespace(
+    logger_module.logger = SimpleNamespace(  # pyright: ignore[reportAttributeAccessIssue]
         info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None
     )
     monkeypatch.setitem(sys.modules, "sagents.utils.logger", logger_module)
@@ -62,7 +62,7 @@ def _load_self_check_agent(monkeypatch):
         def _should_abort_due_to_session(self, session_context):
             return False
 
-    agent_base_module.AgentBase = AgentBase
+    agent_base_module.AgentBase = AgentBase  # pyright: ignore[reportAttributeAccessIssue]
     monkeypatch.setitem(sys.modules, "sagents.agent.agent_base", agent_base_module)
 
     repo_root = Path(__file__).resolve().parent.parent.parent
@@ -70,10 +70,10 @@ def _load_self_check_agent(monkeypatch):
     spec = importlib.util.spec_from_file_location(
         "sagents.agent.self_check_agent", module_path
     )
-    module = importlib.util.module_from_spec(spec)
+    module = importlib.util.module_from_spec(spec)  # pyright: ignore[reportArgumentType]
     monkeypatch.setitem(sys.modules, "sagents.agent.self_check_agent", module)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
+    assert spec.loader is not None  # pyright: ignore[reportOptionalMemberAccess]
+    spec.loader.exec_module(module)  # pyright: ignore[reportOptionalMemberAccess]
     return module.SelfCheckAgent
 
 

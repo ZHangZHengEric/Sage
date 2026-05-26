@@ -99,7 +99,7 @@ export MINIMAX_MODEL=image-01"""
 
         # 如果提供了参考图，添加 subject_reference
         if reference_image and self.supports_reference_image:
-            payload["subject_reference"] = [
+            payload["subject_reference"] = [  # pyright: ignore[reportArgumentType]
                 {
                     "type": "character",
                     "image_file": reference_image,

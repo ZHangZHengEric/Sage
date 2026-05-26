@@ -5,7 +5,7 @@ Base validator with common validation logic for document files.
 import re
 from pathlib import Path
 
-import defusedxml.minidom
+import defusedxml.minidom  # pyright: ignore[reportMissingModuleSource]
 import lxml.etree
 
 

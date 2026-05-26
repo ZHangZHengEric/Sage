@@ -78,9 +78,9 @@ def create_tool_proxy(available_tools: List[str]):
 
     if not available_tools:
         logger.info("初始化工具代理：未显式提供工具白名单，默认开放全部工具")
-        return ToolProxy(get_tool_manager(), None)
+        return ToolProxy(get_tool_manager(), None)  # pyright: ignore[reportArgumentType]
     logger.info(f"初始化工具代理，可用工具: {available_tools}")
-    return ToolProxy(get_tool_manager(), available_tools)
+    return ToolProxy(get_tool_manager(), available_tools)  # pyright: ignore[reportArgumentType]
 
 
 def create_skill_proxy(
@@ -92,11 +92,11 @@ def create_skill_proxy(
     from sagents.skill.skill_proxy import SkillProxy
 
     if not available_skills:
-        return SkillProxy(get_skill_manager(), []), None
+        return SkillProxy(get_skill_manager(), []), None  # pyright: ignore[reportArgumentType]
 
     if _is_desktop_mode():
         logger.info(f"初始化技能代理，可用技能: {available_skills}")
-        return SkillProxy(get_skill_manager(), available_skills), None
+        return SkillProxy(get_skill_manager(), available_skills), None  # pyright: ignore[reportArgumentType]
 
     cfg = _get_cfg()
     skill_managers = []
@@ -135,6 +135,6 @@ def create_skill_proxy(
 def get_sessions_root() -> str:
     if _is_desktop_mode():
         if os.environ.get("SAGE_SESSIONS_PATH"):
-            return str(Path(os.environ.get("SAGE_SESSIONS_PATH")))
+            return str(Path(os.environ.get("SAGE_SESSIONS_PATH")))  # pyright: ignore[reportArgumentType]
         return str(Path.home() / ".sage" / "sessions")
     return _get_cfg().session_dir

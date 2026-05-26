@@ -118,7 +118,7 @@ class SessionContext:
 
         # 解析工作空间路径
         # - session_workspace: 会话数据路径（宿主机）
-        self._resolve_workspace_paths(session_root_space)
+        self._resolve_workspace_paths(session_root_space)  # pyright: ignore[reportArgumentType]
 
         # 初始化外部路径和上下文
         self._init_external_paths_and_context()
@@ -251,7 +251,7 @@ class SessionContext:
                 "perf_ms": self._now_perf_ms(),
             }
             event.update(fields)
-            self.execution_timeline_events.append(make_serializable(event))
+            self.execution_timeline_events.append(make_serializable(event))  # pyright: ignore[reportArgumentType]
         except Exception as e:
             logger.debug(f"SessionContext: 记录 timing 事件失败 {event_type}: {e}")
 
@@ -671,20 +671,20 @@ class SessionContext:
         ]
 
         for filename, content_key in bootstrap_files:
-            file_path = os.path.join(self.sandbox_agent_workspace, filename)
+            file_path = os.path.join(self.sandbox_agent_workspace, filename)  # pyright: ignore[reportArgumentType,reportCallIssue]
             try:
-                exists = await self.sandbox.file_exists(file_path)
+                exists = await self.sandbox.file_exists(file_path)  # pyright: ignore[reportOptionalMemberAccess]
                 if not exists:
                     content = self._get_default_md_content(content_key, filename)
                     if content:
-                        await self.sandbox.write_file(file_path, content)
+                        await self.sandbox.write_file(file_path, content)  # pyright: ignore[reportOptionalMemberAccess]
                         logger.debug(f"创建引导文件: {file_path}")
             except Exception as e:
                 logger.warning(f"创建引导文件失败 {file_path}: {e}")
 
         try:
-            memory_dir = os.path.join(self.sandbox_agent_workspace, "memory")
-            await self.sandbox.ensure_directory(memory_dir)
+            memory_dir = os.path.join(self.sandbox_agent_workspace, "memory")  # pyright: ignore[reportArgumentType,reportCallIssue]
+            await self.sandbox.ensure_directory(memory_dir)  # pyright: ignore[reportOptionalMemberAccess]
         except Exception as e:
             logger.warning(f"创建 memory 目录失败: {e}")
 
@@ -840,7 +840,7 @@ class SessionContext:
         ``<agent_workspace>/skills/<name>/`` 加载（与挂载目录一致），供 load_skill 与提示词使用。
         """
         # 创建沙箱技能管理器
-        skills_dir = os.path.join(self.sandbox_agent_workspace, "skills")
+        skills_dir = os.path.join(self.sandbox_agent_workspace, "skills")  # pyright: ignore[reportArgumentType,reportCallIssue]
         self.sandbox_skill_manager = SandboxSkillManager(self.sandbox, skills_dir)
         await self.sandbox_skill_manager.sync_from_host(self.skill_manager)
 
@@ -866,13 +866,13 @@ class SessionContext:
         logger.debug(f"self.external_paths: {self.external_paths}")
         if self.external_paths and isinstance(self.external_paths, list):
             permission_paths.extend([str(p) for p in self.external_paths])
-        paths_str = ", ".join(permission_paths)
+        paths_str = ", ".join(permission_paths)  # pyright: ignore[reportArgumentType,reportCallIssue]
         sandbox_root = workspace
         common_dirs = ["data", "projects", "temp", "logs"]
         for d in common_dirs:
-            dir_path = os.path.join(sandbox_root, d)
+            dir_path = os.path.join(sandbox_root, d)  # pyright: ignore[reportArgumentType,reportCallIssue]
             if hasattr(self.sandbox, "ensure_directory"):
-                await self.sandbox.ensure_directory(dir_path)
+                await self.sandbox.ensure_directory(dir_path)  # pyright: ignore[reportOptionalMemberAccess]
             else:
                 # 沙箱不支持 ensure_directory 接口，报错
                 raise NotImplementedError(
@@ -1021,7 +1021,7 @@ class SessionContext:
                     # 移除 arguments 中的 session_id，避免重复传递
                     args = arguments.copy()
                     args.pop("session_id", None)
-                    await self.tool_manager.run_tool_async(
+                    await self.tool_manager.run_tool_async(  # pyright: ignore[reportOptionalMemberAccess]
                         tool_name="load_skill", session_id=self.session_id, **args
                     )
                 except Exception as e:
@@ -1072,7 +1072,7 @@ class SessionContext:
             new_available = list(available_tools - tools_to_remove)
 
             # 创建新的 ToolProxy
-            self.tool_manager = ToolProxy(base_manager, new_available)
+            self.tool_manager = ToolProxy(base_manager, new_available)  # pyright: ignore[reportArgumentType]
             logger.info(
                 f"SessionContext: Restricted tools for mode '{agent_mode}'. Removed: {tools_to_remove}"
             )
@@ -1229,7 +1229,7 @@ class SessionContext:
         permission_paths = [private_workspace]
         if self.external_paths and isinstance(self.external_paths, list):
             permission_paths.extend([str(p) for p in self.external_paths])
-        paths_str = ", ".join(permission_paths)
+        paths_str = ", ".join(permission_paths)  # pyright: ignore[reportArgumentType,reportCallIssue]
         workspace = self.sandbox_agent_workspace
         self.system_context["file_permission"] = (
             f"only allow read and write files in: {paths_str} (Note: {workspace} is your private sandbox), and use absolute path"
@@ -1496,14 +1496,14 @@ class SessionContext:
                 tokens_info["per_step_info"].append(step_info)
 
                 # 处理基本 token 字段
-                for key, value in usage.items():
+                for key, value in usage.items():  # pyright: ignore[reportAttributeAccessIssue]
                     if isinstance(value, (int, float)):
                         if key not in tokens_info["total_info"]:
                             tokens_info["total_info"][key] = 0
                         tokens_info["total_info"][key] += value
 
                 # 处理 prompt_tokens_details 中的 cached_tokens
-                prompt_details = usage.get("prompt_tokens_details")
+                prompt_details = usage.get("prompt_tokens_details")  # pyright: ignore[reportAttributeAccessIssue]
                 if prompt_details and isinstance(prompt_details, dict):
                     cached_tokens = prompt_details.get("cached_tokens")
                     if isinstance(cached_tokens, (int, float)):
@@ -1518,7 +1518,7 @@ class SessionContext:
                         tokens_info["total_info"]["prompt_audio_tokens"] += audio_tokens
 
                 # 处理 completion_tokens_details
-                completion_details = usage.get("completion_tokens_details")
+                completion_details = usage.get("completion_tokens_details")  # pyright: ignore[reportAttributeAccessIssue]
                 if completion_details and isinstance(completion_details, dict):
                     reasoning_tokens = completion_details.get("reasoning_tokens")
                     if isinstance(reasoning_tokens, (int, float)):

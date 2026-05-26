@@ -55,9 +55,9 @@ def _resolve_provider_create_data(
     return {
         "data": LLMProviderCreate(
             name=trim_optional_text(name),
-            base_url=resolved_base_url,
-            api_keys=[resolved_api_key],
-            model=resolved_model,
+            base_url=resolved_base_url,  # pyright: ignore[reportArgumentType]
+            api_keys=[resolved_api_key],  # pyright: ignore[reportArgumentType]
+            model=resolved_model,  # pyright: ignore[reportArgumentType]
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,

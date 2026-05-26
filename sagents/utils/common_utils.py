@@ -105,8 +105,8 @@ def detect_machine_environment(
     }
 
     if sandbox is not None:
-        environment.update(
-            {
+        environment.update(  # pyright: ignore[reportCallIssue]
+            {  # pyright: ignore[reportArgumentType]
                 "sandbox_type": sandbox.__class__.__name__,
                 "sandbox_workspace": sandbox_agent_workspace
                 or getattr(sandbox, "sandbox_agent_workspace", None),
@@ -192,7 +192,7 @@ def file_lock(lock_path: str):
             lock_file.close()
 
 
-def ensure_list(content: Union[str, List[Any]], separator: str = None) -> List[Any]:
+def ensure_list(content: Union[str, List[Any]], separator: str = None) -> List[Any]:  # pyright: ignore[reportArgumentType]
     """
     Try to parse the input content into a list.
 

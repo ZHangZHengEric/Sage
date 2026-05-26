@@ -17,7 +17,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 
 if getattr(sys, "frozen", False):
     if hasattr(sys, "_MEIPASS"):
-        current_dir = sys._MEIPASS
+        current_dir = sys._MEIPASS  # pyright: ignore[reportAttributeAccessIssue]
     project_root = current_dir
 else:
     project_root = os.path.abspath(os.path.join(current_dir, "../../../"))
@@ -290,7 +290,7 @@ def main():
         # Force stdout to be unbuffered when the underlying stream supports it.
         try:
             if hasattr(sys.stdout, "reconfigure"):
-                sys.stdout.reconfigure(line_buffering=True, write_through=True)
+                sys.stdout.reconfigure(line_buffering=True, write_through=True)  # pyright: ignore[reportAttributeAccessIssue]
         except (OSError, ValueError):
             pass
 

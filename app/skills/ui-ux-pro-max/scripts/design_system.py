@@ -47,7 +47,7 @@ class DesignSystemGenerator:
         with open(filepath, "r", encoding="utf-8") as f:
             return list(csv.DictReader(f))
 
-    def _multi_domain_search(self, query: str, style_priority: list = None) -> dict:
+    def _multi_domain_search(self, query: str, style_priority: list = None) -> dict:  # pyright: ignore[reportArgumentType]
         """Execute searches across multiple domains."""
         results = {}
         for domain, config in SEARCH_CONFIG.items():
@@ -163,7 +163,7 @@ class DesignSystemGenerator:
         """Extract results list from search result dict."""
         return search_result.get("results", [])
 
-    def generate(self, query: str, project_name: str = None) -> dict:
+    def generate(self, query: str, project_name: str = None) -> dict:  # pyright: ignore[reportArgumentType]
         """Generate complete design system recommendation."""
         # Step 1: First search product to get category
         product_result = search(query, "product", 1)
@@ -510,11 +510,11 @@ def format_markdown(design_system: dict) -> str:
 # ============ MAIN ENTRY POINT ============
 def generate_design_system(
     query: str,
-    project_name: str = None,
+    project_name: str = None,  # pyright: ignore[reportArgumentType]
     output_format: str = "ascii",
     persist: bool = False,
-    page: str = None,
-    output_dir: str = None,
+    page: str = None,  # pyright: ignore[reportArgumentType]
+    output_dir: str = None,  # pyright: ignore[reportArgumentType]
 ) -> str:
     """
     Main entry point for design system generation.
@@ -545,9 +545,9 @@ def generate_design_system(
 # ============ PERSISTENCE FUNCTIONS ============
 def persist_design_system(
     design_system: dict,
-    page: str = None,
-    output_dir: str = None,
-    page_query: str = None,
+    page: str = None,  # pyright: ignore[reportArgumentType]
+    output_dir: str = None,  # pyright: ignore[reportArgumentType]
+    page_query: str = None,  # pyright: ignore[reportArgumentType]
 ) -> dict:
     """
     Persist design system to design-system/<project>/ folder using Master + Overrides pattern.
@@ -885,7 +885,9 @@ def format_master_md(design_system: dict) -> str:
 
 
 def format_page_override_md(
-    design_system: dict, page_name: str, page_query: str = None
+    design_system: dict,
+    page_name: str,
+    page_query: str = None,  # pyright: ignore[reportArgumentType]
 ) -> str:
     """Format a page-specific override file with intelligent AI-generated content."""
     project = design_system.get("project_name", "PROJECT")

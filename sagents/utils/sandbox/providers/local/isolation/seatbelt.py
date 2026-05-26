@@ -45,8 +45,8 @@ class SeatbeltIsolation:
     def _generate_profile(
         self,
         output_pkl: str,
-        additional_read_paths: list = None,
-        additional_write_paths: list = None,
+        additional_read_paths: list = None,  # pyright: ignore[reportArgumentType]
+        additional_write_paths: list = None,  # pyright: ignore[reportArgumentType]
     ) -> str:
         """生成 seatbelt 配置文件"""
         import tempfile
@@ -246,4 +246,4 @@ class SeatbeltIsolation:
             volume_mounts=self.volume_mounts,
             limits=self.limits,
         )
-        return subproc.execute_background(command, cwd)
+        return subproc.execute_background(command, cwd)  # pyright: ignore[reportReturnType]

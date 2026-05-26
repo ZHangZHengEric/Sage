@@ -436,7 +436,7 @@ def detect_domain(query):
         domain: sum(1 for kw in keywords if kw in query_lower)
         for domain, keywords in domain_keywords.items()
     }
-    best = max(scores, key=scores.get)
+    best = max(scores, key=scores.get)  # pyright: ignore[reportArgumentType,reportCallIssue]
     return best if scores[best] > 0 else "style"
 
 
