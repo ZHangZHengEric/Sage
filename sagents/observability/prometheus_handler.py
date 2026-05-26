@@ -19,6 +19,13 @@ _OP_STACK: contextvars.ContextVar[tuple[tuple[str, str, str, float], ...]] = con
 class _PrometheusTraceState:
     lock: threading.Lock = field(default_factory=threading.Lock)
     agent_total: dict[tuple[str, str], int] = field(default_factory=dict)
+    agent_active: dict[tuple[str, str], int] = field(default_factory=dict)
+    agent_duration_sum: dict[tuple[str, str], float] = field(default_factory=dict)
+    agent_duration_count: dict[tuple[str, str], int] = field(default_factory=dict)
+    agent_duration_buckets: dict[tuple[str, str, float], int] = field(default_factory=dict)
+    first_token_duration_sum: dict[tuple[str, str], float] = field(default_factory=dict)
+    first_token_duration_count: dict[tuple[str, str], int] = field(default_factory=dict)
+    first_token_duration_buckets: dict[tuple[str, str, float], int] = field(default_factory=dict)
     tool_total: dict[tuple[str, str], int] = field(default_factory=dict)
     tool_duration_sum: dict[str, float] = field(default_factory=dict)
     tool_duration_count: dict[str, int] = field(default_factory=dict)
@@ -69,9 +76,63 @@ def _pop_operation(kind: str) -> tuple[str, str, float] | None:
 
 
 def _record_agent(agent_id: str, status: str) -> None:
-    key = (_normalize_label_value(agent_id), _normalize_label_value(status))
+    normalized_agent_id = _normalize_label_value(agent_id)
+    normalized_status = _normalize_label_value(status)
+    key = (normalized_agent_id, normalized_status)
     with _STATE.lock:
         _STATE.agent_total[key] = _STATE.agent_total.get(key, 0) + 1
+
+
+def _increment_agent_active(agent_id: str, session_id: str) -> None:
+    key = (_normalize_label_value(agent_id), _normalize_label_value(session_id))
+    with _STATE.lock:
+        _STATE.agent_active[key] = _STATE.agent_active.get(key, 0) + 1
+
+
+def _decrement_agent_active(agent_id: str, session_id: str) -> None:
+    key = (_normalize_label_value(agent_id), _normalize_label_value(session_id))
+    with _STATE.lock:
+        active = _STATE.agent_active.get(key, 0)
+        if active <= 1:
+            _STATE.agent_active.pop(key, None)
+        else:
+            _STATE.agent_active[key] = active - 1
+
+
+def _record_agent_duration(agent_id: str, status: str, duration_seconds: float) -> None:
+    normalized_agent_id = _normalize_label_value(agent_id)
+    normalized_status = _normalize_label_value(status)
+    key = (normalized_agent_id, normalized_status)
+    duration = max(float(duration_seconds or 0.0), 0.0)
+    with _STATE.lock:
+        _STATE.agent_duration_sum[key] = _STATE.agent_duration_sum.get(key, 0.0) + duration
+        _STATE.agent_duration_count[key] = _STATE.agent_duration_count.get(key, 0) + 1
+        for bucket in _DURATION_BUCKETS:
+            if duration <= bucket:
+                bucket_key = (normalized_agent_id, normalized_status, bucket)
+                _STATE.agent_duration_buckets[bucket_key] = (
+                    _STATE.agent_duration_buckets.get(bucket_key, 0) + 1
+                )
+
+
+def record_agent_first_token(agent_id: str, session_id: str, duration_seconds: float) -> None:
+    normalized_agent_id = _normalize_label_value(agent_id)
+    normalized_session_id = _normalize_label_value(session_id)
+    key = (normalized_agent_id, normalized_session_id)
+    duration = max(float(duration_seconds or 0.0), 0.0)
+    with _STATE.lock:
+        _STATE.first_token_duration_sum[key] = (
+            _STATE.first_token_duration_sum.get(key, 0.0) + duration
+        )
+        _STATE.first_token_duration_count[key] = (
+            _STATE.first_token_duration_count.get(key, 0) + 1
+        )
+        for bucket in _DURATION_BUCKETS:
+            if duration <= bucket:
+                bucket_key = (normalized_agent_id, normalized_session_id, bucket)
+                _STATE.first_token_duration_buckets[bucket_key] = (
+                    _STATE.first_token_duration_buckets.get(bucket_key, 0) + 1
+                )
 
 
 def _record_tool(tool_name: str, status: str, duration: float) -> None:
@@ -112,6 +173,13 @@ def _agent_status(output: Any) -> str:
 def reset_prometheus_trace_metrics() -> None:
     with _STATE.lock:
         _STATE.agent_total.clear()
+        _STATE.agent_active.clear()
+        _STATE.agent_duration_sum.clear()
+        _STATE.agent_duration_count.clear()
+        _STATE.agent_duration_buckets.clear()
+        _STATE.first_token_duration_sum.clear()
+        _STATE.first_token_duration_count.clear()
+        _STATE.first_token_duration_buckets.clear()
         _STATE.tool_total.clear()
         _STATE.tool_duration_sum.clear()
         _STATE.tool_duration_count.clear()
@@ -123,6 +191,13 @@ def reset_prometheus_trace_metrics() -> None:
 def render_prometheus_trace_metrics() -> str:
     with _STATE.lock:
         agent_total = dict(_STATE.agent_total)
+        agent_active = dict(_STATE.agent_active)
+        agent_duration_sum = dict(_STATE.agent_duration_sum)
+        agent_duration_count = dict(_STATE.agent_duration_count)
+        agent_duration_buckets = dict(_STATE.agent_duration_buckets)
+        first_token_duration_sum = dict(_STATE.first_token_duration_sum)
+        first_token_duration_count = dict(_STATE.first_token_duration_count)
+        first_token_duration_buckets = dict(_STATE.first_token_duration_buckets)
         tool_total = dict(_STATE.tool_total)
         tool_duration_sum = dict(_STATE.tool_duration_sum)
         tool_duration_count = dict(_STATE.tool_duration_count)
@@ -139,6 +214,99 @@ def render_prometheus_trace_metrics() -> str:
                 "sagents_agent_runs_total",
                 {"agent_id": agent_id, "status": status},
                 agent_total[(agent_id, status)],
+            )
+        )
+
+    lines.extend(
+        [
+            "# HELP sagents_agent_run_duration_seconds SAgents agent run duration in seconds.",
+            "# TYPE sagents_agent_run_duration_seconds histogram",
+        ]
+    )
+    for agent_id, status in sorted(set(agent_duration_count) | set(agent_duration_sum)):
+        cumulative = 0
+        for bucket in _DURATION_BUCKETS:
+            cumulative = agent_duration_buckets.get((agent_id, status, bucket), cumulative)
+            lines.append(
+                _labeled_metric_line(
+                    "sagents_agent_run_duration_seconds_bucket",
+                    {"agent_id": agent_id, "status": status, "le": str(bucket)},
+                    cumulative,
+                )
+            )
+        lines.append(
+            _labeled_metric_line(
+                "sagents_agent_run_duration_seconds_bucket",
+                {"agent_id": agent_id, "status": status, "le": "+Inf"},
+                agent_duration_count.get((agent_id, status), 0),
+            )
+        )
+        lines.append(
+            _labeled_metric_line(
+                "sagents_agent_run_duration_seconds_sum",
+                {"agent_id": agent_id, "status": status},
+                agent_duration_sum.get((agent_id, status), 0.0),
+            )
+        )
+        lines.append(
+            _labeled_metric_line(
+                "sagents_agent_run_duration_seconds_count",
+                {"agent_id": agent_id, "status": status},
+                agent_duration_count.get((agent_id, status), 0),
+            )
+        )
+
+    lines.extend(
+        [
+            "# HELP sagents_agent_runs_active SAgents agent runs currently in progress.",
+            "# TYPE sagents_agent_runs_active gauge",
+        ]
+    )
+    for agent_id, session_id in sorted(agent_active):
+        lines.append(
+            _labeled_metric_line(
+                "sagents_agent_runs_active",
+                {"agent_id": agent_id, "session_id": session_id},
+                agent_active[(agent_id, session_id)],
+            )
+        )
+
+    lines.extend(
+        [
+            "# HELP sagents_first_token_seconds SAgents time from run_stream start to first visible assistant/tool content.",
+            "# TYPE sagents_first_token_seconds histogram",
+        ]
+    )
+    for agent_id, session_id in sorted(set(first_token_duration_count) | set(first_token_duration_sum)):
+        cumulative = 0
+        for bucket in _DURATION_BUCKETS:
+            cumulative = first_token_duration_buckets.get((agent_id, session_id, bucket), cumulative)
+            lines.append(
+                _labeled_metric_line(
+                    "sagents_first_token_seconds_bucket",
+                    {"agent_id": agent_id, "session_id": session_id, "le": str(bucket)},
+                    cumulative,
+                )
+            )
+        lines.append(
+            _labeled_metric_line(
+                "sagents_first_token_seconds_bucket",
+                {"agent_id": agent_id, "session_id": session_id, "le": "+Inf"},
+                first_token_duration_count.get((agent_id, session_id), 0),
+            )
+        )
+        lines.append(
+            _labeled_metric_line(
+                "sagents_first_token_seconds_sum",
+                {"agent_id": agent_id, "session_id": session_id},
+                first_token_duration_sum.get((agent_id, session_id), 0.0),
+            )
+        )
+        lines.append(
+            _labeled_metric_line(
+                "sagents_first_token_seconds_count",
+                {"agent_id": agent_id, "session_id": session_id},
+                first_token_duration_count.get((agent_id, session_id), 0),
             )
         )
 
@@ -230,19 +398,28 @@ class PrometheusTraceHandler(BaseTraceHandler):
 
     def on_agent_start(self, session_id: str, agent_name: str, **kwargs: Any) -> Any:
         agent_id = _normalize_label_value(kwargs.get("agent_id") or agent_name)
-        _push_operation("agent", agent_id, session_id)
+        normalized_session_id = _normalize_label_value(session_id)
+        _push_operation("agent", agent_id, normalized_session_id)
+        _increment_agent_active(agent_id, normalized_session_id)
 
     def on_agent_end(self, output: Any, **kwargs: Any) -> Any:
         current = _pop_operation("agent")
         if not current:
             return
-        agent_id = current[0]
-        _record_agent(agent_id, _agent_status(output))
+        agent_id, session_id, started_at = current
+        status = _agent_status(output)
+        _record_agent(agent_id, status)
+        _record_agent_duration(agent_id, status, time.perf_counter() - started_at)
+        _decrement_agent_active(agent_id, session_id)
 
     def on_agent_error(self, error: Exception, **kwargs: Any) -> Any:
         current = _pop_operation("agent")
         agent_id = current[0] if current else _normalize_label_value(kwargs.get("agent_id"))
         _record_agent(agent_id, "error")
+        if current:
+            _, session_id, started_at = current
+            _record_agent_duration(agent_id, "error", time.perf_counter() - started_at)
+            _decrement_agent_active(agent_id, session_id)
 
     def on_llm_start(
         self,

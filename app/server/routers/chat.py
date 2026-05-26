@@ -20,7 +20,7 @@ from common.core.request_identity import get_request_user_id
 from common.services import chat_service
 from common.services import conversation_service
 from common.schemas.chat import ChatRequest, StreamRequest, UserInputOptimizeRequest
-from app.server.services.prometheus_metrics import finish_operation, record_sse_stream_failure, start_operation
+from app.server.services.prometheus_metrics import record_sse_stream_failure
 from pydantic import BaseModel
 
 from ..services.chat.stream_manager import StreamManager
@@ -101,7 +101,12 @@ async def _start_web_stream_session(
     await manager.start_session(session_id, query, generator, lock)
 
     return StreamingResponse(
-        stream_with_manager(session_id, last_index=0, resume=False, stream_name=stream_name),
+        stream_with_manager(
+            session_id,
+            last_index=0,
+            resume=False,
+            stream_name=stream_name,
+        ),
         media_type="text/plain",
     )
 
@@ -159,7 +164,6 @@ async def stream_with_manager(
     """
     通过 StreamManager 订阅会话流
     """
-    started_at, category, name = start_operation("stream", stream_name)
     status = "completed"
     manager = StreamManager.get_instance()
     has_stream_data = False
@@ -190,7 +194,6 @@ async def stream_with_manager(
         status = "error"
         raise
     finally:
-        finish_operation(started_at, category, name, status)
         record_sse_stream_failure(stream_name, session_id, status)
 
 
@@ -236,7 +239,6 @@ async def stream_api_with_disconnect_check(
     再 ``await`` 长协程（旧写法会在 generator 关闭临界态做远程持久化，叠加 anyio CancelScope
     导致 sage-server 主线程 100% CPU 空转）。改为 ``break`` 后统一在 ``finally`` 里收尾。
     """
-    started_at, category, name = start_operation("stream", stream_name)
     client_disconnected = False
     status = "completed"
     try:
@@ -290,7 +292,6 @@ async def stream_api_with_disconnect_check(
             logger.bind(session_id=session_id).info("资源已清理")
         except Exception as e:
             logger.bind(session_id=session_id).error(f"清理资源时发生错误: {e}")
-        finish_operation(started_at, category, name, status)
         record_sse_stream_failure(stream_name, session_id, status)
 
 
@@ -431,7 +432,12 @@ async def resume_stream(session_id: str, last_index: int = 0):
     """
 
     return StreamingResponse(
-        stream_with_manager(session_id, last_index, resume=True, stream_name="resume_stream"),
+        stream_with_manager(
+            session_id,
+            last_index,
+            resume=True,
+            stream_name="resume_stream",
+        ),
         media_type="text/plain",
     )
 
@@ -445,27 +451,20 @@ async def get_active_sessions(request: Request):
     client_host = request.client.host if request.client else "unknown"
 
     async def event_generator():
-        started_at, category, name = start_operation("stream", "active_sessions")
-        status = "completed"
         try:
             async for sessions in manager.subscribe_active_sessions():
                 if await request.is_disconnected():
                     logger.info(f"Client {client_host} disconnected active_sessions stream")
-                    status = "disconnected"
                     break
 
                 # 手动构建 SSE 格式
                 json_str = json.dumps(sessions, default=str, ensure_ascii=False)
                 yield f"data: {json_str}\n\n"
         except asyncio.CancelledError:
-            status = "cancelled"
             pass
         except Exception as e:
-            status = "error"
             logger.error(f"Error in SSE generator for {client_host}: {e}")
             raise
-        finally:
-            finish_operation(started_at, category, name, status)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
