@@ -384,7 +384,7 @@
           "color": {
             "mode": "thresholds"
           },
-          "decimals": 2,
+          "decimals": 0,
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -403,7 +403,7 @@
               }
             ]
           },
-          "unit": "ops"
+          "unit": "suffix:次"
         },
         "overrides": []
       },
@@ -438,12 +438,12 @@
           },
           "editorMode": "code",
           "expr": "sum(increase(sagents_tool_call_failures_total{job=~\"$job\",instance=~\"$instance\"}[$__range]))",
-          "legendFormat": "tool failures",
+          "legendFormat": "失败次数",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Tool 失败数",
+      "title": "Tool 失败次数",
       "type": "stat"
     },
     {
@@ -833,8 +833,9 @@
           "refId": "A"
         }
       ],
-      "title": "进行中流式连接",
-      "type": "timeseries"
+      "title": "当前进行中流式连接",
+      "type": "timeseries",
+      "description": "当前值取最新 Prometheus scrape 的 active gauge；折线表示所选时间范围内每个采样点的并发流式连接数，Max 是该时间范围内的峰值。"
     },
     {
       "datasource": {
@@ -844,7 +845,7 @@
       "fieldConfig": {
         "defaults": {
           "mappings": [],
-          "unit": "ops"
+          "unit": "suffix:次/秒"
         },
         "overrides": []
       },
@@ -878,13 +879,14 @@
           },
           "editorMode": "code",
           "expr": "sum(rate(sage_server_operations_total{job=~\"$job\",instance=~\"$instance\",category=\"stream\"}[$__rate_interval])) by (name, status)",
-          "legendFormat": "{{job}} {{status}}",
+          "legendFormat": "{{name}} / {{status}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "流式完成/断开速率",
-      "type": "timeseries"
+      "title": "流式结束速率（次/秒，按接口/状态）",
+      "type": "timeseries",
+      "description": "按 stream 和 status 展示完成、错误、取消、断开的每秒速率；单位为次/秒。"
     },
     {
       "datasource": {
@@ -928,13 +930,14 @@
           },
           "editorMode": "code",
           "expr": "histogram_quantile(0.95, sum(rate(sage_server_operation_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\",category=\"stream\"}[$__rate_interval])) by (le, name))",
-          "legendFormat": "p95 {{job}}",
+          "legendFormat": "p95 {{name}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "流式耗时 P95",
-      "type": "timeseries"
+      "title": "流式耗时 P95（按接口）",
+      "type": "timeseries",
+      "description": "按 stream 展示已结束流式请求的 95 分位耗时，单位为秒；p95 不是最大值，而是 95% 请求低于该耗时。"
     },
     {
       "collapsed": false,
@@ -1137,7 +1140,8 @@
       "fieldConfig": {
         "defaults": {
           "mappings": [],
-          "unit": "ops"
+          "unit": "suffix:次",
+          "decimals": 0
         },
         "overrides": []
       },
@@ -1171,13 +1175,14 @@
           },
           "editorMode": "code",
           "expr": "sum(increase(sagents_tool_calls_total{job=~\"$job\",instance=~\"$instance\"}[$__range])) by (tool_name, status)",
-          "legendFormat": "{{tool_name}} {{status}}",
+          "legendFormat": "{{tool_name}} / {{status}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Tool 调用量",
-      "type": "timeseries"
+      "title": "Tool 调用次数（本时间范围）",
+      "type": "timeseries",
+      "description": "按当前 Grafana 时间范围统计每个 tool 的调用次数；单位为次，不是每秒速率。"
     },
     {
       "datasource": {
@@ -1191,46 +1196,11 @@
               "type": "auto"
             }
           },
-          "mappings": []
+          "decimals": 3,
+          "mappings": [],
+          "unit": "s"
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "session_id"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Explore logs by session_id",
-                    "url": "/explore?orgId=1&left=%7B%22datasource%22:%22sage-loki%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22expr%22:%22%7Bservice%3D~%5C%22sage-server.*%5C%22%7D%20%7C%20json%20%7C%20session_id%3D%5C%22${__data.fields.session_id}%5C%22%22%7D%5D,%22range%22:%7B%22from%22:%22${__from}%22,%22to%22:%22${__to}%22%7D%7D",
-                    "targetBlank": true
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "trace_id"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Explore Jaeger trace",
-                    "url": "/explore?orgId=1&left=%7B%22datasource%22:%22sage-jaeger%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22query%22:%22${__data.fields.trace_id}%22%7D%5D,%22range%22:%7B%22from%22:%22${__from}%22,%22to%22:%22${__to}%22%7D%7D",
-                    "targetBlank": true
-                  }
-                ]
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -1258,7 +1228,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "topk(15, histogram_quantile(0.95, sum(rate(sagents_tool_call_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (le, tool_name)))",
+          "expr": "topk(15, (histogram_quantile(0.95, sum(increase(sagents_tool_call_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[$__range])) by (le, tool_name)) and on(tool_name) (sum(increase(sagents_tool_call_duration_seconds_count{job=~\"$job\",instance=~\"$instance\"}[$__range])) by (tool_name) > 0)))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -1266,8 +1236,27 @@
           "refId": "A"
         }
       ],
-      "title": "Tool 耗时 Top P95",
-      "type": "table"
+      "title": "Tool 耗时 Top P95（本时间范围）",
+      "type": "table",
+      "description": "按当前 Grafana 时间范围内已完成的 tool 调用计算 P95；没有调用的 tool 会被过滤，避免空 bucket 显示 NaN。",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "tool_name": 0,
+              "Value": 1
+            },
+            "renameByName": {
+              "tool_name": "tool_name",
+              "Value": "p95_seconds"
+            }
+          }
+        }
+      ]
     },
     {
       "datasource": {
