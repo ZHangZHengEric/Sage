@@ -4,8 +4,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_DIR="$ROOT_DIR/deploy"
 DEPLOY_ENV="${DEPLOY_ENV:-prod}"
-SAGE_DEPLOY_OUTPUT="${SAGE_DEPLOY_OUTPUT:-progress}"
-FILTER_COMPOSE_OUTPUT="false"
 
 usage() {
   cat <<'EOF'
@@ -37,8 +35,7 @@ defined in deploy/docker-compose.observability.yml and are not started unless
 
 If deploy/<env>/.env is missing, it falls back to .env in the repo root.
 
-`up` 部署流程默认隐藏 Docker Compose 原生输出，改为打印部署进度。
-设置 SAGE_DEPLOY_OUTPUT=raw 可直接显示 Docker Compose 原生输出。
+`up` 部署流程保留 Docker Compose 原生输出。
 EOF
 }
 
@@ -177,9 +174,7 @@ format_elapsed() {
 }
 
 log_line() {
-  if [ "$SAGE_DEPLOY_OUTPUT" = "progress" ]; then
-    printf '[%s] [Sage 部署] %s\n' "$(timestamp)" "$*" >&2
-  fi
+  :
 }
 
 log_step() {
@@ -305,24 +300,7 @@ run_compose() {
     "COMPOSE_IGNORE_ORPHANS=${COMPOSE_IGNORE_ORPHANS:-true}"
   )
 
-  if [ "$FILTER_COMPOSE_OUTPUT" != "true" ] || [ "$SAGE_DEPLOY_OUTPUT" = "raw" ]; then
-    env "${compose_env[@]}" docker compose "$@"
-    return
-  fi
-
-  local log_file
-  log_file="$(mktemp "${TMPDIR:-/tmp}/sage-compose.XXXXXX")"
-
-  if env "${compose_env[@]}" docker compose --ansi never --progress quiet "$@" >"$log_file" 2>&1; then
-    rm -f "$log_file"
-    return 0
-  else
-    local status=$?
-    log_line "Docker Compose 执行失败，原始输出如下："
-    cat "$log_file" >&2
-    rm -f "$log_file"
-    return "$status"
-  fi
+  env "${compose_env[@]}" docker compose "$@"
 }
 
 ordered_group_services() {
@@ -457,7 +435,6 @@ start_observability() {
 }
 
 if [ "${1:-}" = "up" ]; then
-  FILTER_COMPOSE_OUTPUT="true"
   prepare_up_args "$@"
   ACTIVE_UP_ARGS=("${UP_ARGS[@]}")
 
