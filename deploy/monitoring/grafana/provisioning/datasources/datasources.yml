@@ -18,3 +18,11 @@ datasources:
     url: http://sage-loki:3100
     version: -1
     editable: true
+
+  - name: Sage Jaeger
+    uid: sage-jaeger
+    type: jaeger
+    access: proxy
+    url: http://sage-jaeger:16686
+    version: -1
+    editable: true

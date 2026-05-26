@@ -229,6 +229,9 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
             name=f"Agent运行:{agent_name}",
             kind=trace.SpanKind.INTERNAL
         )
+        agent_id = kwargs.get("agent_id")
+        if agent_id:
+            span.set_attribute("agent.id", str(agent_id))
         span.set_attribute("agent.name", agent_name)
         span.set_attribute("session_id", session_id)
         self._push_span(span)

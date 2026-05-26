@@ -194,12 +194,13 @@ class AgentRuntime:
         # 2. Start Chain Span
         # We use agent name as the chain name
         agent_name = getattr(self.agent, 'agent_name', self.agent.__class__.__name__)
+        agent_id = getattr(session_context, "agent_id", "") or agent_name
 
         # Extract input info for logging
         log_input = input_messages
         agent_end_status: Dict[str, Any] = {"status": "finished"}
         
-        self.observability_manager.on_agent_start(session_id, agent_name, input=log_input)
+        self.observability_manager.on_agent_start(session_id, agent_name, input=log_input, agent_id=agent_id)
         
         original_tool_manager = tool_manager
         try:

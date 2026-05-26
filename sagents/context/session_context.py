@@ -1326,8 +1326,6 @@ class SessionContext:
 
         for i, llm_request in enumerate(self.llm_requests_logs):
             raw_response = llm_request['response']
-            if raw_response and hasattr(raw_response, 'usage'):
-                logger.debug(f"get_tokens_usage_info: raw_response.usage={raw_response.usage}")
 
             response_dict = make_serializable(raw_response)
             if not isinstance(response_dict, dict):

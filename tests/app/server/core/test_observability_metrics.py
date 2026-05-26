@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 
 from app.server.core.middleware import _is_whitelisted, _should_record_prometheus_http_metrics
 from app.server.routers.observability import prometheus_metrics
@@ -6,6 +7,7 @@ from app.server.services.prometheus_metrics import (
     _reset_prometheus_metrics_state,
     finish_http_request,
     finish_operation,
+    record_sse_stream_failure,
     render_prometheus_metrics,
     start_http_request,
     start_operation,
@@ -78,25 +80,47 @@ def test_prometheus_metrics_records_stream_operations():
     assert 'sage_server_operations_active{category="stream",name="api_chat"} 0.000000' in body
 
 
-def test_prometheus_trace_handler_records_agent_llm_tool_and_mcp_hooks():
+def test_prometheus_trace_handler_records_agent_and_tool_metrics():
     reset_prometheus_trace_metrics()
     handler = PrometheusTraceHandler()
 
-    handler.on_chain_start("session-1", {})
-    handler.on_chain_end("ok")
-    handler.on_agent_start("session-1", "SimpleAgent")
+    handler.on_agent_start("session-1", "SimpleAgent", agent_id="agent-demo")
     handler.on_agent_end({"status": "finished"})
-    handler.on_llm_start("session-1", "gpt-test", [], step_name="plan")
-    handler.on_llm_end("ok")
     handler.on_tool_start("session-1", "search", {})
     handler.on_tool_error(Exception("boom"))
-    handler.on_tool_start("session-1", "query", {}, tool_type="mcp", server_name="AnyTool")
+    handler.on_tool_start("session-2", "query", {}, tool_type="mcp", server_name="AnyTool")
     handler.on_tool_end({"content": "ok"})
 
     body = render_prometheus_trace_metrics()
+    trace_id = hashlib.md5(b"session-1").hexdigest()
 
-    assert 'sagents_observability_operations_total{category="chain",name="session-1",session_id="session-1",status="success"} 1.000000' in body
-    assert 'sagents_observability_operations_total{category="agent",name="session-1",session_id="session-1",status="success"} 1.000000' in body
-    assert 'sagents_observability_operations_total{category="llm",name="session-1",session_id="session-1",status="success"} 1.000000' in body
-    assert 'sagents_observability_operations_total{category="tool",name="session-1",session_id="session-1",status="error"} 1.000000' in body
-    assert 'sagents_observability_operations_total{category="mcp",name="session-1",session_id="session-1",status="success"} 1.000000' in body
+    assert 'sagents_agent_runs_total{agent_id="agent-demo",status="success"} 1.000000' in body
+    assert 'sagents_tool_calls_total{tool_name="search",status="error"} 1.000000' in body
+    assert 'sagents_tool_calls_total{tool_name="query",status="success"} 1.000000' in body
+    assert 'sagents_tool_call_duration_seconds_count{tool_name="search"} 1.000000' in body
+    assert (
+        'sagents_tool_call_failures_total{tool_name="search",'
+        f'session_id="session-1",trace_id="{trace_id}",error_type="Exception"}} 1.000000'
+    ) in body
+    assert "SAGE_PROMETHEUS_SESSION_LABELS" not in body
+    assert "sagents_observability_operations_total" not in body
+
+
+def test_prometheus_sse_failures_include_session_drilldown_only_for_failure_statuses():
+    _reset_prometheus_metrics_state()
+
+    record_sse_stream_failure("chat_stream", "session-1", "error")
+    record_sse_stream_failure("chat_stream", "session-2", "cancelled")
+    record_sse_stream_failure("resume_stream", "session-3", "fallback_missing")
+    record_sse_stream_failure("chat_stream", "session-4", "disconnected")
+
+    body = render_prometheus_metrics()
+    trace_id = hashlib.md5(b"session-1").hexdigest()
+
+    assert (
+        'sage_server_sse_stream_failures_total{stream="chat_stream",'
+        f'session_id="session-1",trace_id="{trace_id}",status="error"}} 1.000000'
+    ) in body
+    assert 'session_id="session-2"' in body
+    assert 'session_id="session-3"' in body
+    assert 'session_id="session-4"' not in body

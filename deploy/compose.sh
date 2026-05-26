@@ -15,7 +15,7 @@ Default environment: prod
 Examples:
   deploy/compose.sh up -d
   deploy/compose.sh --observability up -d
-  deploy/compose.sh --observability up -d sage-cadvisor
+  deploy/compose.sh --observability up -d sage-jaeger
   deploy/compose.sh up -d sage-redis
   deploy/compose.sh dev --observability up -d
   deploy/compose.sh dev up -d
@@ -25,12 +25,12 @@ Examples:
 The script runs:
   docker compose --env-file deploy/<env>/.env -f deploy/<env>/docker-compose.yml ...
 
-For `up`, shared services are reused when they are already running in another
-environment. Otherwise they are started under the shared compose project
-`sage_shared` first, then the selected environment is started.
+For `up`, the script ensures the shared Docker network exists, starts shared
+services under the `sage_shared` compose project first, then starts the selected
+environment.
 
-Observability services (prometheus, grafana, cadvisor, loki, alloy) are defined
-in deploy/docker-compose.observability.yml and are not started unless
+Observability services (prometheus, grafana, cadvisor, loki, alloy, jaeger) are
+defined in deploy/docker-compose.observability.yml and are not started unless
 --observability is set.
 
 If deploy/<env>/.env is missing, it falls back to .env in the repo root.
@@ -58,6 +58,7 @@ COMPOSE_FILE="$DEPLOY_DIR/$DEPLOY_ENV/docker-compose.yml"
 SHARED_COMPOSE_FILE="$DEPLOY_DIR/docker-compose.shared.yml"
 OBSERVABILITY_COMPOSE_FILE="$DEPLOY_DIR/docker-compose.observability.yml"
 SHARED_PROJECT_NAME="${SAGE_SHARED_PROJECT_NAME:-sage_shared}"
+SHARED_NETWORK="${SAGE_SHARED_NETWORK:-sage_shared_default}"
 
 if [ -z "${ENV_FILE:-}" ]; then
   ENV_FILE="$DEPLOY_DIR/$DEPLOY_ENV/.env"
@@ -102,11 +103,9 @@ OBSERVABILITY_COMPOSE_ARGS=(--env-file "$ENV_FILE" -p "$SHARED_PROJECT_NAME" -f 
 if [ "$ENABLE_OBSERVABILITY" = "true" ]; then
   COMPOSE_ARGS+=(-f "$OBSERVABILITY_COMPOSE_FILE")
 fi
-REQUESTED_SHARED_NETWORK="${SAGE_SHARED_NETWORK:-}"
-
 ENV_SERVICES=(sage-server sage-web sage-mysql sage-es)
-SHARED_SERVICES=(sage-wiki sage-rustfs sage-redis sage-jaeger)
-OBSERVABILITY_SERVICES=(sage-prometheus sage-grafana sage-cadvisor sage-loki sage-alloy)
+SHARED_SERVICES=(sage-wiki sage-rustfs sage-redis)
+OBSERVABILITY_SERVICES=(sage-prometheus sage-grafana sage-cadvisor sage-loki sage-alloy sage-jaeger)
 
 contains_service() {
   local service="$1"
@@ -158,74 +157,24 @@ prepare_up_args() {
   done
 }
 
-env_value() {
-  local key="$1"
-  awk -F= -v key="$key" '
-    $0 ~ /^[[:space:]]*(#|$)/ { next }
-    {
-      line=$0
-      sub(/^[[:space:]]*export[[:space:]]+/, "", line)
-      split(line, parts, "=")
-      name=parts[1]
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
-      if (name == key) {
-        sub(/^[^=]*=/, "", line)
-        sub(/[[:space:]]+#.*$/, "", line)
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
-        gsub(/^["'\''"]|["'\''"]$/, "", line)
-        print line
-        exit
-      }
-    }
-  ' "$ENV_FILE"
-}
-
-CURRENT_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(env_value COMPOSE_PROJECT_NAME)}"
-
-shared_container_for_project() {
-  local project="$1"
-  if [ -z "$project" ]; then
+ensure_shared_network() {
+  if docker network inspect "$SHARED_NETWORK" >/dev/null 2>&1; then
     return 0
   fi
-  docker ps \
-    --filter "status=running" \
-    --filter "label=com.docker.compose.service=sage-rustfs" \
-    --filter "label=com.docker.compose.project=$project" \
-    --format '{{.ID}}' \
-    | head -n 1
-}
 
-shared_container_outside_current_project() {
-  docker ps \
-    --filter "status=running" \
-    --filter "label=com.docker.compose.service=sage-rustfs" \
-    --format '{{.ID}} {{.Label "com.docker.compose.project"}}' \
-    | awk -v current="$CURRENT_PROJECT_NAME" '$2 != current { print $1; exit }'
-}
-
-network_for_container() {
-  local container_id="$1"
-  docker inspect \
-    --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' \
-    "$container_id" \
-    | head -n 1
+  docker network create "$SHARED_NETWORK" >/dev/null
 }
 
 run_compose() {
-  local shared_network="${1:-}"
+  local shared_network="${1:-$SHARED_NETWORK}"
   shift || true
-  if [ -n "$REQUESTED_SHARED_NETWORK" ]; then
-    shared_network="$REQUESTED_SHARED_NETWORK"
-  fi
   local compose_env=(
     "SAGE_REPO_ROOT=$ROOT_DIR"
     "SAGE_DEPLOY_DIR=$DEPLOY_DIR"
     "SAGE_COMPOSE_ENV_FILE=$ENV_FILE"
+    "SAGE_SHARED_NETWORK=$shared_network"
     "COMPOSE_IGNORE_ORPHANS=${COMPOSE_IGNORE_ORPHANS:-true}"
   )
-  if [ -n "$shared_network" ]; then
-    compose_env+=("SAGE_SHARED_NETWORK=$shared_network")
-  fi
 
   env "${compose_env[@]}" docker compose "$@"
 }
@@ -276,69 +225,19 @@ if [ "${1:-}" = "up" ]; then
     fi
   fi
 
-  if current_shared_id="$(shared_container_for_project "$CURRENT_PROJECT_NAME")" && [ -n "$current_shared_id" ]; then
-    shared_network="$(network_for_container "$current_shared_id")"
-    if [ -z "$shared_network" ]; then
-      echo "Shared service is running but its Docker network could not be detected." >&2
-      exit 1
-    fi
-    if [ "$RUN_SHARED_UP" = "true" ] && [ "$UP_HAS_TARGETS" = "true" ]; then
-      start_shared "$shared_network" "${UP_ARGS[@]}" "${UP_SHARED_TARGETS[@]}"
-    fi
-    if [ "$RUN_ENV_UP" = "true" ]; then
-      if [ "$UP_HAS_TARGETS" = "true" ]; then
-        run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "${UP_ARGS[@]}" "${UP_ENV_TARGETS[@]}"
-      else
-        run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "${UP_ARGS[@]}"
-      fi
-    fi
-    if [ "$RUN_OBSERVABILITY_UP" = "true" ]; then
-      if [ "$UP_HAS_TARGETS" = "true" ]; then
-        start_observability "$shared_network" "${UP_ARGS[@]}" "${UP_OBSERVABILITY_TARGETS[@]}"
-      else
-        start_observability "$shared_network" "${UP_ARGS[@]}"
-      fi
-    fi
-    exit 0
-  fi
-
-  if shared_id="$(shared_container_outside_current_project)" && [ -n "$shared_id" ]; then
-    shared_network="$(network_for_container "$shared_id")"
-    if [ -z "$shared_network" ]; then
-      echo "Shared service is running but its Docker network could not be detected." >&2
-      exit 1
-    fi
-    if [ "$RUN_SHARED_UP" = "true" ] && [ "$UP_HAS_TARGETS" = "true" ]; then
-      start_shared "$shared_network" "${UP_ARGS[@]}" "${UP_SHARED_TARGETS[@]}"
-    fi
-    if [ "$RUN_ENV_UP" = "true" ]; then
-      if [ "$UP_HAS_TARGETS" = "true" ]; then
-        run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "${UP_ARGS[@]}" "${UP_ENV_TARGETS[@]}"
-      else
-        run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "${UP_ARGS[@]}"
-      fi
-    fi
-    if [ "$RUN_OBSERVABILITY_UP" = "true" ]; then
-      if [ "$UP_HAS_TARGETS" = "true" ]; then
-        start_observability "$shared_network" "${UP_ARGS[@]}" "${UP_OBSERVABILITY_TARGETS[@]}"
-      else
-        start_observability "$shared_network" "${UP_ARGS[@]}"
-      fi
-    fi
-    exit 0
-  fi
+  ensure_shared_network
+  shared_network="$SHARED_NETWORK"
 
   if [ "$RUN_SHARED_UP" = "true" ]; then
     if [ "$UP_HAS_TARGETS" = "true" ]; then
-      start_shared "" "${UP_ARGS[@]}" "${UP_SHARED_TARGETS[@]}"
+      start_shared "$shared_network" "${UP_ARGS[@]}" "${UP_SHARED_TARGETS[@]}"
     else
-      start_shared "" "${UP_ARGS[@]}"
+      start_shared "$shared_network" "${UP_ARGS[@]}"
     fi
   elif [ "$RUN_ENV_UP" = "true" ] || [ "$RUN_OBSERVABILITY_UP" = "true" ]; then
-    start_shared "" up -d
+    start_shared "$shared_network" up -d
   fi
 
-  shared_network="${SHARED_PROJECT_NAME}_default"
   if [ "$RUN_ENV_UP" = "true" ]; then
     if [ "$UP_HAS_TARGETS" = "true" ]; then
       run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "${UP_ARGS[@]}" "${UP_ENV_TARGETS[@]}"

@@ -20,7 +20,7 @@ from common.core.request_identity import get_request_user_id
 from common.services import chat_service
 from common.services import conversation_service
 from common.schemas.chat import ChatRequest, StreamRequest, UserInputOptimizeRequest
-from app.server.services.prometheus_metrics import finish_operation, start_operation
+from app.server.services.prometheus_metrics import finish_operation, record_sse_stream_failure, start_operation
 from pydantic import BaseModel
 
 from ..services.chat.stream_manager import StreamManager
@@ -191,6 +191,7 @@ async def stream_with_manager(
         raise
     finally:
         finish_operation(started_at, category, name, status)
+        record_sse_stream_failure(stream_name, session_id, status)
 
 
 def _should_filter_stream_chunk(chunk: str) -> bool:
@@ -290,6 +291,7 @@ async def stream_api_with_disconnect_check(
         except Exception as e:
             logger.bind(session_id=session_id).error(f"清理资源时发生错误: {e}")
         finish_operation(started_at, category, name, status)
+        record_sse_stream_failure(stream_name, session_id, status)
 
 
 def validate_and_prepare_request(

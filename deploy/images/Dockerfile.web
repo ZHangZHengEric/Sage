@@ -20,6 +20,8 @@ RUN --mount=type=cache,id=sage-web-npm-cache,target=/root/.npm,sharing=locked \
 # Copy the rest of the app after dependencies are installed to maximize cache reuse
 COPY --link app/server/web/ .
 
+ARG VITE_SAGE_GRAFANA_URL=http://127.0.0.1:30093
+ENV VITE_SAGE_GRAFANA_URL=${VITE_SAGE_GRAFANA_URL}
 
 RUN npm run build
 

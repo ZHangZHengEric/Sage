@@ -44,6 +44,7 @@ services:
       dockerfile: deploy/images/Dockerfile.web
       args:
         NGINX_CONF: deploy/prod/nginx/nginx.conf
+        VITE_SAGE_GRAFANA_URL: ${SAGE_GRAFANA_PUBLIC_URL:-http://127.0.0.1:30093}
     image: sage-web:v1.0
     container_name: sage-web
     ports:

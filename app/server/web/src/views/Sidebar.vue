@@ -368,7 +368,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { cn } from '@/utils/cn'
-import { getAssetUrl } from '@/config/runtime.js'
+import { getAssetUrl, getGrafanaUrl } from '@/config/runtime.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -394,7 +394,7 @@ const logoUrl = computed(() => {
   const logoName = themeStore.isDark ? 'sage_logo.svg' : 'sage_logo_white.svg'
   return getAssetUrl(logoName)
 })
-const observabilityProxyUrl = '/jaeger/'
+const grafanaUrl = getGrafanaUrl()
 
 const currentUser = ref(getCurrentUser())
 const isCollapsed = ref(false)
@@ -546,17 +546,11 @@ const predefinedServices = computed(() => {
     })
 
     services.push({
-      id: 'cat_ops',
-      key: 'operation_management',
-      nameKey: 'sidebar.operationManagement',
-      children: [
-        {
-          id: 'svc_request_records',
-          nameKey: 'sidebar.requestRecords',
-          url: observabilityProxyUrl,
-          isInternal: false
-        }
-      ]
+      id: 'svc_grafana',
+      key: 'grafana',
+      nameKey: 'sidebar.grafana',
+      url: grafanaUrl,
+      isInternal: false
     })
   }
 
@@ -570,8 +564,7 @@ const expandedCategories = ref({
   history: false,
   api_reference: false,
   skills: false,
-  system_management: false,
-  operation_management: false
+  system_management: false
 })
 
 const getCategoryIcon = (key) => {
@@ -585,7 +578,7 @@ const getCategoryIcon = (key) => {
     history: Clock,
     api_reference: Code,
     system_management: Settings,
-    operation_management: Activity,
+    grafana: Activity,
     download_client: Download
   }
   return map[key] || LayoutGrid
