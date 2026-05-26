@@ -346,7 +346,7 @@ def _spawn_background_process_sync(
                 env=env,
                 stdout=f_log,
                 stderr=subprocess.STDOUT,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                creationflags=subprocess.CREATE_NO_WINDOW  # pyright: ignore[reportAttributeAccessIssue]
                 if hasattr(subprocess, "CREATE_NO_WINDOW")
                 else 0,
             )

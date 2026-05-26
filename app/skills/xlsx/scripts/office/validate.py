@@ -84,7 +84,7 @@ def main():
             ]
             if original_file:
                 validators.append(
-                    RedliningValidator(
+                    RedliningValidator(  # pyright: ignore[reportArgumentType]
                         unpacked_dir,
                         original_file,
                         verbose=args.verbose,

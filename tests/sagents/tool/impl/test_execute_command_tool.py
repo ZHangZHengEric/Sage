@@ -136,7 +136,7 @@ def test_execute_shell_command_passes_tool_env_to_background_runner(monkeypatch)
             command="printenv SHARED",
             session_id="session-1",
             block_until_ms=0,
-            env_vars={
+            env_vars={  # pyright: ignore[reportArgumentType]
                 "SHARED": "tool-override",
                 "TOOL_ONLY": "tool-value",
             },

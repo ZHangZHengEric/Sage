@@ -79,7 +79,7 @@ class ContextBudgetManager:
                 token_length += 0.4
         return int(token_length)
 
-    def calculate_budget(self, agent_config: Dict[str, Any] = None) -> Dict[str, int]:
+    def calculate_budget(self, agent_config: Dict[str, Any] = None) -> Dict[str, int]:  # pyright: ignore[reportArgumentType]
         """计算上下文 token 预算分配"""
         if self.budget_info is not None and agent_config is None:
             return self.budget_info

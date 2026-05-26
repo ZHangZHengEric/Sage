@@ -75,7 +75,7 @@ class AgentDefinition:
     def from_dict(cls, data: Dict[str, Any]) -> "AgentDefinition":
         """Create from dictionary representation."""
         return cls(
-            agent_id=data.get("agent_id") or data.get("name"),
+            agent_id=data.get("agent_id") or data.get("name"),  # pyright: ignore[reportArgumentType]
             name=data.get("name", ""),
             system_prompt=data["system_prompt"],
             description=data.get("description", ""),

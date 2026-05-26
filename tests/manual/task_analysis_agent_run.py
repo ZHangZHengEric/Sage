@@ -12,7 +12,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from openai import OpenAI
-from agents.agent.message_manager import MessageManager
+from agents.agent.message_manager import MessageManager  # pyright: ignore[reportMissingImports]
 
 
 def main():
@@ -40,9 +40,9 @@ def main():
 
     # 3. 创建Agent
     print("🚀 创建TaskAnalysisAgent...")
-    from agents.agent.task_analysis_agent.task_analysis_agent import TaskAnalysisAgent
-    from agents.task.task_manager import TaskManager
-    from agents.tool.tool_manager import ToolManager
+    from agents.agent.task_analysis_agent.task_analysis_agent import TaskAnalysisAgent  # pyright: ignore[reportMissingImports]
+    from agents.task.task_manager import TaskManager  # pyright: ignore[reportMissingImports]
+    from agents.tool.tool_manager import ToolManager  # pyright: ignore[reportMissingImports]
 
     agent = TaskAnalysisAgent(
         model=model, model_config=llm_config, system_prefix="专业需求分析师"

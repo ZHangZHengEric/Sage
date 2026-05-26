@@ -1,4 +1,4 @@
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright  # pyright: ignore[reportMissingImports]
 
 # Example: Discovering buttons and other elements on a page
 

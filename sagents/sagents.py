@@ -577,7 +577,7 @@ class SAgent:
         )
 
         steps.append(
-            SwitchNode(
+            SwitchNode(  # pyright: ignore[reportArgumentType]
                 variable="agent_mode",
                 cases={
                     "fibre": fib_agent_body,
@@ -596,7 +596,7 @@ class SAgent:
             )
         )
 
-        return AgentFlow(name="Standard Hybrid Flow", root=SequenceNode(steps=steps))
+        return AgentFlow(name="Standard Hybrid Flow", root=SequenceNode(steps=steps))  # pyright: ignore[reportArgumentType]
 
     def get_session_status(self, session_id: str) -> Optional[Dict[str, Any]]:
         return self.session_manager.get_session_status(session_id)

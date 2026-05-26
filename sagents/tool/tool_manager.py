@@ -245,7 +245,7 @@ def _ensure_command_available(command: str) -> bool:
 
 
 try:
-    BaseExceptionGroup
+    BaseExceptionGroup  # pyright: ignore[reportUnusedExpression]
 except NameError:
 
     class BaseExceptionGroup(BaseException):

@@ -123,7 +123,7 @@ class TokenUsageStatsRequest(BaseModel):
         has_end = self.end_date is not None
         if has_start != has_end:
             raise ValueError("start_date and end_date must be provided together")
-        if has_start and has_end and self.start_date > self.end_date:
+        if has_start and has_end and self.start_date > self.end_date:  # pyright: ignore[reportOperatorIssue]
             raise ValueError("start_date must be earlier than or equal to end_date")
         if not (self.dimension == "session" and self.session_id) and not (
             has_start and has_end

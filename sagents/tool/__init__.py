@@ -1,6 +1,8 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .tool_manager import get_tool_manager
+    from .tool_progress import emit_tool_progress, emit_tool_progress_closed
     from .tool_manager import ToolManager
     from .tool_proxy import ToolProxy
 

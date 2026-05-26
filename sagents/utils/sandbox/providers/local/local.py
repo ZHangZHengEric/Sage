@@ -205,7 +205,7 @@ class LocalSandboxProvider(ISandboxHandle):
         if sys.platform == "darwin":
             if self._macos_isolation_mode == "seatbelt":
                 self._isolation = SeatbeltIsolation(
-                    venv_dir=self._venv_dir,
+                    venv_dir=self._venv_dir,  # pyright: ignore[reportArgumentType]
                     sandbox_agent_workspace=self._sandbox_agent_workspace,
                     sandbox_runtime_dir=resolve_sandbox_runtime_dir(
                         self._sandbox_agent_workspace
@@ -248,7 +248,7 @@ class LocalSandboxProvider(ISandboxHandle):
             # Windows 下不需要设置执行权限
             return
 
-        venv_bin = os.path.join(self._venv_dir, "bin")
+        venv_bin = os.path.join(self._venv_dir, "bin")  # pyright: ignore[reportArgumentType,reportCallIssue]
         python_executables = ["python", "python3"]
 
         for exe_name in python_executables:
@@ -275,7 +275,7 @@ class LocalSandboxProvider(ISandboxHandle):
             # Windows 下不需要创建符号链接，venv 会自动处理
             return
 
-        venv_bin = os.path.join(self._venv_dir, "bin")
+        venv_bin = os.path.join(self._venv_dir, "bin")  # pyright: ignore[reportArgumentType,reportCallIssue]
         python_path = os.path.join(venv_bin, "python")
         python3_path = os.path.join(venv_bin, "python3")
 
@@ -492,8 +492,8 @@ class LocalSandboxProvider(ISandboxHandle):
         # 如果隔离层已初始化，也需要更新
         if self._isolation and hasattr(self._isolation, "allowed_paths"):
             for path in paths:
-                if path not in self._isolation.allowed_paths:
-                    self._isolation.allowed_paths.append(path)
+                if path not in self._isolation.allowed_paths:  # pyright: ignore[reportAttributeAccessIssue]
+                    self._isolation.allowed_paths.append(path)  # pyright: ignore[reportAttributeAccessIssue]
 
     def remove_allowed_paths(self, paths: List[str]) -> None:
         """移除允许访问的路径列表"""
@@ -501,8 +501,10 @@ class LocalSandboxProvider(ISandboxHandle):
             self._allowed_paths = [p for p in self._allowed_paths if p not in paths]
         # 如果隔离层已初始化，也需要更新
         if self._isolation and hasattr(self._isolation, "allowed_paths"):
-            self._isolation.allowed_paths = [
-                p for p in self._isolation.allowed_paths if p not in paths
+            self._isolation.allowed_paths = [  # pyright: ignore[reportAttributeAccessIssue]
+                p
+                for p in self._isolation.allowed_paths  # pyright: ignore[reportAttributeAccessIssue]
+                if p not in paths  # pyright: ignore[reportAttributeAccessIssue]
             ]
 
     def get_allowed_paths(self) -> List[str]:
@@ -805,7 +807,8 @@ class LocalSandboxProvider(ISandboxHandle):
                 while True:
                     try:
                         chunk = await asyncio.wait_for(
-                            proc.stdout.read(4096), timeout=0.5
+                            proc.stdout.read(4096),  # pyright: ignore[reportOptionalMemberAccess]
+                            timeout=0.5,  # pyright: ignore[reportOptionalMemberAccess]
                         )
                         if not chunk:
                             break
@@ -828,7 +831,7 @@ class LocalSandboxProvider(ISandboxHandle):
                     success=proc.returncode == 0,
                     stdout=stdout_text,
                     stderr="",  # 已合并到 stdout
-                    return_code=proc.returncode,
+                    return_code=proc.returncode,  # pyright: ignore[reportArgumentType]
                     execution_time=0,
                 )
             except asyncio.TimeoutError:

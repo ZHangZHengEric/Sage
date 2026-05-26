@@ -154,7 +154,7 @@ async def search_web(
                 logger.info(
                     f"使用 {provider.name} 搜索成功，返回 {len(results)} 条结果"
                 )
-                return results, None
+                return results, None  # pyright: ignore[reportReturnType]
         except Exception as e:
             logger.warning(f"搜索引擎 {provider.name} 失败: {e}")
             last_error = str(e)
@@ -204,7 +204,7 @@ async def search_images(
                 logger.info(
                     f"使用 {provider.name} 图片搜索成功，返回 {len(results)} 条结果"
                 )
-                return results, None
+                return results, None  # pyright: ignore[reportReturnType]
         except Exception as e:
             logger.warning(f"搜索引擎 {provider.name} 图片搜索失败: {e}")
             last_error = str(e)

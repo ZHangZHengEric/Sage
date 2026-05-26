@@ -89,7 +89,7 @@ def _normalize_tool_result(tool_response: Any) -> Dict[str, Any]:
 
     parsed = _try_parse_json_like(parsed)
     if not raw_text:
-        raw_text = _format_result_text(parsed, raw_text)
+        raw_text = _format_result_text(parsed, raw_text)  # pyright: ignore[reportArgumentType]
     formatted_text = _format_result_text(parsed, raw_text)
 
     return {
@@ -124,7 +124,7 @@ async def execute_tool(
         )
 
     if role != "admin":
-        tool_info = tool_manager.get_tool_info(tool_name)
+        tool_info = tool_manager.get_tool_info(tool_name)  # pyright: ignore[reportAttributeAccessIssue]
         tool_type = tool_info.get("type", "basic")
         if tool_type == "mcp":
             source = normalize_tool_source(tool_info.get("source", "internal"))

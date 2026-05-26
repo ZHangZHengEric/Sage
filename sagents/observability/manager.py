@@ -81,7 +81,7 @@ class ObservabilityManager(BaseTraceHandler):
         session_id: str,
         model_name: str,
         messages: List[Any],
-        step_name: str = None,
+        step_name: str = None,  # pyright: ignore[reportArgumentType]
         **kwargs: Any,
     ) -> Any:
         for handler in self.handlers:

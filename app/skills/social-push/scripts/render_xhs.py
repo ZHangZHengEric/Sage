@@ -37,7 +37,7 @@ from typing import List
 try:
     import markdown
     import yaml
-    from playwright.async_api import async_playwright
+    from playwright.async_api import async_playwright  # pyright: ignore[reportMissingImports]
 except ImportError as e:
     print(f"缺少依赖: {e}")
     print(

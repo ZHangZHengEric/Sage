@@ -16,7 +16,7 @@ except ImportError:
         Annotated = None
 
 try:
-    from pydantic.fields import FieldInfo
+    from pydantic.fields import FieldInfo  # pyright: ignore[reportAssignmentType]
 except ImportError:
 
     class FieldInfo:
@@ -76,10 +76,10 @@ def get_detailed_schema(py_type, type_mapping):
             for metadata in args[1:]:
                 # Handle pydantic Field
                 if isinstance(metadata, FieldInfo):
-                    if metadata.description:
-                        schema["description"] = metadata.description
-                    if metadata.json_schema_extra:
-                        schema.update(metadata.json_schema_extra)
+                    if metadata.description:  # pyright: ignore[reportAttributeAccessIssue]
+                        schema["description"] = metadata.description  # pyright: ignore[reportAttributeAccessIssue]
+                    if metadata.json_schema_extra:  # pyright: ignore[reportAttributeAccessIssue]
+                        schema.update(metadata.json_schema_extra)  # pyright: ignore[reportAttributeAccessIssue]
                 # Fallback for generic objects with these attributes
                 elif hasattr(metadata, "description") or hasattr(
                     metadata, "json_schema_extra"
@@ -235,8 +235,8 @@ def sage_mcp_tool(
         def wrapper(*args, **kwargs):
             return func(*args, **kwargs)
 
-        wrapper._mcp_tool_spec = spec
-        wrapper._is_sagents_mcp_tool = True
+        wrapper._mcp_tool_spec = spec  # pyright: ignore[reportAttributeAccessIssue]
+        wrapper._is_sagents_mcp_tool = True  # pyright: ignore[reportAttributeAccessIssue]
 
         return wrapper
 

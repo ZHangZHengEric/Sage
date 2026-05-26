@@ -11,7 +11,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from openai import OpenAI
-from agents.agent.message_manager import MessageManager
+from agents.agent.message_manager import MessageManager  # pyright: ignore[reportMissingImports]
 
 
 def main():
@@ -39,10 +39,10 @@ def main():
 
     # 3. 创建Agent
     print("🚀 创建TaskDecomposeAgent...")
-    from agents.agent.task_decompose_agent.task_decompose_agent import (
+    from agents.agent.task_decompose_agent.task_decompose_agent import (  # pyright: ignore[reportMissingImports]
         TaskDecomposeAgent,
     )
-    from agents.task.task_manager import TaskManager
+    from agents.task.task_manager import TaskManager  # pyright: ignore[reportMissingImports]
 
     agent = TaskDecomposeAgent(model=model, model_config=llm_config)
 

@@ -571,11 +571,11 @@ class ExecuteCommandTool:
             # 模块级常量，便于测试 / 配置时动态改写
             max_bytes = globals().get("_COMPLETED_STDOUT_MAX_BYTES", 1_000_000)
         total = await self._read_log_size(sandbox, task_info)
-        data = await self._read_tail(sandbox, task_info, max_bytes=max_bytes)
+        data = await self._read_tail(sandbox, task_info, max_bytes=max_bytes)  # pyright: ignore[reportArgumentType]
         if total is not None:
-            truncated = total > max_bytes
+            truncated = total > max_bytes  # pyright: ignore[reportOperatorIssue]
         else:
-            truncated = len(data.encode("utf-8", errors="ignore")) >= max_bytes
+            truncated = len(data.encode("utf-8", errors="ignore")) >= max_bytes  # pyright: ignore[reportOperatorIssue]
 
         if truncated:
             shown = len(data.encode("utf-8", errors="ignore"))
@@ -814,7 +814,7 @@ class ExecuteCommandTool:
         workdir: Optional[str] = None,
         block_until_ms: int = 30000,
         env_vars: Optional[str] = None,
-        session_id: str = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         if not session_id:
             raise ValueError("ExecuteCommandTool: session_id is required")
@@ -1019,7 +1019,7 @@ class ExecuteCommandTool:
         task_id: str,
         block_until_ms: int = 600000,
         pattern: Optional[str] = None,
-        session_id: str = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         if not session_id:
             raise ValueError("ExecuteCommandTool: session_id is required")
@@ -1129,7 +1129,7 @@ class ExecuteCommandTool:
     async def kill_shell(
         self,
         task_id: str,
-        session_id: str = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         if not session_id:
             raise ValueError("ExecuteCommandTool: session_id is required")

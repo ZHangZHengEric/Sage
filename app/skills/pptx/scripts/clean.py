@@ -18,7 +18,7 @@ This script removes:
 import sys
 from pathlib import Path
 
-import defusedxml.minidom
+import defusedxml.minidom  # pyright: ignore[reportMissingModuleSource]
 
 
 import re

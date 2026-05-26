@@ -8,7 +8,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 
-from sagents.tool.file_parser_tool import FileParserTool
+from sagents.tool.file_parser_tool import FileParserTool  # pyright: ignore[reportMissingImports]
 
 
 def main():

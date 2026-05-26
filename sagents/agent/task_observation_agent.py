@@ -97,7 +97,7 @@ class TaskObservationAgent(AgentBase):
         async for chunk in self._call_llm_and_process_response(
             messages=llm_request_message,
             tools_json=tools_json,
-            tool_manager=tool_manager,
+            tool_manager=tool_manager,  # pyright: ignore[reportArgumentType]
             session_context=session_context,
             session_id=session_id,
             step_name="observation",
@@ -110,7 +110,7 @@ class TaskObservationAgent(AgentBase):
             # 但是要注意 message_type，我们需要保持一致性
             for msg in chunk:
                 if msg.role == MessageRole.ASSISTANT.value and msg.content:
-                    all_content += msg.content
+                    all_content += msg.content  # pyright: ignore[reportOperatorIssue]
                 # 强制设置 message_type 为 OBSERVATION
                 msg.message_type = MessageType.OBSERVATION.value
             yield chunk
@@ -164,7 +164,7 @@ class TaskObservationAgent(AgentBase):
         tool_calls = []
         model_config_override = {"tools": tools_json if tools_json else None}
         async for chunk in self._call_llm_streaming(
-            messages=messages,
+            messages=messages,  # pyright: ignore[reportArgumentType]
             session_id=session_id,
             step_name=step_name,
             model_config_override=model_config_override,

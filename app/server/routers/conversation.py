@@ -37,7 +37,7 @@ class InjectUserMessageRequest(BaseModel):
 
 
 @conversation_router.post("/api/sessions/{session_id}/interrupt")
-async def interrupt(session_id: str, request: Request, body: InterruptRequest = None):
+async def interrupt(session_id: str, request: Request, body: InterruptRequest = None):  # pyright: ignore[reportArgumentType]
     """中断指定会话"""
     result = await conversation_router_service.build_interrupt_response(
         session_id,

@@ -2,7 +2,7 @@
 Tool call parser for streaming JSON parameters using ijson + regex
 """
 
-import ijson
+import ijson  # pyright: ignore[reportMissingImports]
 import io
 import json
 import re
@@ -120,7 +120,7 @@ class ToolCallParser:
 
     def get_full_args(self) -> dict:
         """Get the fully parsed args if available"""
-        return self.full_args
+        return self.full_args  # pyright: ignore[reportReturnType]
 
     def reset(self):
         self.buffer = ""

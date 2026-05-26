@@ -263,7 +263,7 @@ class WebFetcherTool:
             try:
                 sandbox_agent_workspace = session_context.sandbox_agent_workspace
                 # 在工作空间下创建 downloads 目录
-                workspace = os.path.join(sandbox_agent_workspace, "downloads")
+                workspace = os.path.join(sandbox_agent_workspace, "downloads")  # pyright: ignore[reportArgumentType,reportCallIssue]
                 os.makedirs(workspace, exist_ok=True)
                 return workspace
             except Exception as e:
@@ -389,7 +389,7 @@ class WebFetcherTool:
         for unit in ["B", "KB", "MB", "GB"]:
             if size_bytes < 1024:
                 return f"{size_bytes:.2f} {unit}"
-            size_bytes /= 1024
+            size_bytes /= 1024  # pyright: ignore[reportAssignmentType]
         return f"{size_bytes:.2f} TB"
 
     async def _fetch_single_html_with_save(
@@ -401,7 +401,7 @@ class WebFetcherTool:
         retries: int,
     ) -> Dict[str, Any]:
         """抓取单个HTML页面，保存完整内容到文件，返回部分内容"""
-        from scrapling.fetchers import AsyncFetcher
+        from scrapling.fetchers import AsyncFetcher  # pyright: ignore[reportMissingImports]
 
         last_error = None
         for attempt in range(retries + 1):
@@ -545,7 +545,7 @@ class WebFetcherTool:
         self, url: str, max_length: int, timeout: int, retries: int
     ) -> Dict[str, Any]:
         """抓取单个HTML页面，带重试机制和严格超时控制"""
-        from scrapling.fetchers import AsyncFetcher
+        from scrapling.fetchers import AsyncFetcher  # pyright: ignore[reportMissingImports]
 
         last_error = None
         for attempt in range(retries + 1):

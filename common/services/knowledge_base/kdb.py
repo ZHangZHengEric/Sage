@@ -191,7 +191,7 @@ class KdbService:
             import openpyxl
 
             for uf in files:
-                filename = uf.filename.lower()
+                filename = uf.filename.lower()  # pyright: ignore[reportOptionalMemberAccess]
                 if not (
                     filename.endswith(".csv")
                     or filename.endswith(".xlsx")
@@ -311,7 +311,7 @@ class KdbService:
             pass
         await self.kdb_doc_dao.batch_update_status([doc_id], KdbDocStatus.PENDING)
         logger.info(f"文档重做: {doc_id}")
-        return kdb
+        return kdb  # pyright: ignore[reportReturnType]
 
     async def _add_doc_by_files(
         self, kdb: Kdb, files: List[File], attach_map: Dict[str, List[File]]
@@ -352,11 +352,11 @@ class KdbService:
         data = await uf.read()
         content_type = (
             uf.content_type
-            or mimetypes.guess_type(uf.filename)[0]
+            or mimetypes.guess_type(uf.filename)[0]  # pyright: ignore[reportArgumentType]
             or "application/octet-stream"
         )
         file_id = gen_id()
-        path = await upload_kdb_file(uf.filename, data, content_type)
+        path = await upload_kdb_file(uf.filename, data, content_type)  # pyright: ignore[reportArgumentType]
         f = File(
             id=file_id,
             name=uf.filename,

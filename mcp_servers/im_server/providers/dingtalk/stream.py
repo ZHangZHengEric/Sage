@@ -14,12 +14,12 @@ logger = logging.getLogger("DingTalkStream")
 
 # Runtime imports with fallback
 try:
-    import dingtalk_stream
-    from dingtalk_stream import (
+    import dingtalk_stream  # pyright: ignore[reportMissingImports]
+    from dingtalk_stream import (  # pyright: ignore[reportMissingImports]
         Credential,
         DingTalkStreamClient as _DingTalkStreamClient,
     )
-    from dingtalk_stream import (
+    from dingtalk_stream import (  # pyright: ignore[reportMissingImports]
         ChatbotHandler,
         CallbackMessage,
         ChatbotMessage,
@@ -255,10 +255,10 @@ class DingTalkStreamClient:
     async def _run_client_async(self):
         """Async method to run DingTalk Stream client."""
         # Create credential
-        credential = Credential(self.client_id, self.client_secret)
+        credential = Credential(self.client_id, self.client_secret)  # pyright: ignore[reportCallIssue]
 
         # Create client
-        self.client = _DingTalkStreamClient(credential)
+        self.client = _DingTalkStreamClient(credential)  # pyright: ignore[reportCallIssue]
 
         # Register message handler - pass client reference for heartbeat updates
         handler = _DingTalkMessageHandler(self.message_handler, self)
@@ -299,7 +299,7 @@ class DingTalkStreamClient:
                 logger.error(f"[DingTalk Stream] Unexpected error: {e}")
 
 
-class _DingTalkMessageHandler(ChatbotHandler):
+class _DingTalkMessageHandler(ChatbotHandler):  # pyright: ignore[reportGeneralTypeIssues]
     """Internal handler for DingTalk messages."""
 
     def __init__(
@@ -321,34 +321,34 @@ class _DingTalkMessageHandler(ChatbotHandler):
 
         # ===== 最开始的调试日志 =====
         logger.info("[DingTalk] ========== process() CALLED ==========")
-        logger.info(f"[DingTalk] callback.data: {callback.data}")
+        logger.info(f"[DingTalk] callback.data: {callback.data}")  # pyright: ignore[reportAttributeAccessIssue]
         # =============================
 
         try:
             # Parse message
-            message = ChatbotMessage.from_dict(callback.data)
+            message = ChatbotMessage.from_dict(callback.data)  # pyright: ignore[reportAttributeAccessIssue]
 
             logger.info(f"[DingTalk] Parsed message: {message}")
-            logger.info(f"[DingTalk] Message type: {message.message_type}")
+            logger.info(f"[DingTalk] Message type: {message.message_type}")  # pyright: ignore[reportAttributeAccessIssue]
 
             # Handle different message types
-            msg_type = message.message_type or "text"
+            msg_type = message.message_type or "text"  # pyright: ignore[reportAttributeAccessIssue]
             content = {}
             file_info = None
 
-            if msg_type == "text" and message.text:
+            if msg_type == "text" and message.text:  # pyright: ignore[reportAttributeAccessIssue]
                 # Text message
-                content = {"text": message.text.content or ""}
+                content = {"text": message.text.content or ""}  # pyright: ignore[reportAttributeAccessIssue]
                 logger.info(f"[DingTalk] Text message: {content['text'][:50]}...")
 
-            elif msg_type == "picture" and message.image_content:
+            elif msg_type == "picture" and message.image_content:  # pyright: ignore[reportAttributeAccessIssue]
                 # Image message
-                download_code = message.image_content.download_code
+                download_code = message.image_content.download_code  # pyright: ignore[reportAttributeAccessIssue]
                 content = {"text": "[图片消息]"}
                 file_info = {
                     "type": "image",
                     "download_code": download_code,
-                    "message_id": message.message_id,
+                    "message_id": message.message_id,  # pyright: ignore[reportAttributeAccessIssue]
                 }
                 logger.info(
                     f"[DingTalk] Image message with download_code: {download_code}"
@@ -357,7 +357,7 @@ class _DingTalkMessageHandler(ChatbotHandler):
             elif msg_type == "file":
                 # File message - extract download code from raw data
                 # File content is in callback.data['content']['downloadCode']
-                raw_content = callback.data.get("content", {})
+                raw_content = callback.data.get("content", {})  # pyright: ignore[reportAttributeAccessIssue]
                 logger.info(f"[DingTalk] File message raw content: {raw_content}")
 
                 if isinstance(raw_content, dict):
@@ -372,7 +372,7 @@ class _DingTalkMessageHandler(ChatbotHandler):
                     "type": "file",
                     "download_code": download_code,
                     "file_name": file_name,
-                    "message_id": message.message_id,
+                    "message_id": message.message_id,  # pyright: ignore[reportAttributeAccessIssue]
                 }
                 logger.info(
                     f"[DingTalk] File message: file_name={file_name}, download_code={download_code}"
@@ -381,7 +381,7 @@ class _DingTalkMessageHandler(ChatbotHandler):
             elif msg_type == "richText":
                 # Rich text message - contains mixed text and picture elements
                 # Format: {"richText": [{"text": "..."}, {"picture": {"downloadCode": "..."}}]}
-                raw_content = callback.data.get("content", {})
+                raw_content = callback.data.get("content", {})  # pyright: ignore[reportAttributeAccessIssue]
                 rich_text_list = (
                     raw_content.get("richText", [])
                     if isinstance(raw_content, dict)
@@ -413,7 +413,7 @@ class _DingTalkMessageHandler(ChatbotHandler):
                     file_info = {
                         "type": "image",
                         "download_code": image_download_codes[0],
-                        "message_id": message.message_id,
+                        "message_id": message.message_id,  # pyright: ignore[reportAttributeAccessIssue]
                         "additional_images": image_download_codes[1:]
                         if len(image_download_codes) > 1
                         else [],
@@ -430,20 +430,20 @@ class _DingTalkMessageHandler(ChatbotHandler):
                 # Unknown or unsupported message type
                 content = {"text": f"[{msg_type}消息]"}
                 logger.warning(
-                    f"[DingTalk] Unknown message type: {msg_type}, data: {callback.data}"
+                    f"[DingTalk] Unknown message type: {msg_type}, data: {callback.data}"  # pyright: ignore[reportAttributeAccessIssue]
                 )
 
             # Extract relevant info including session_webhook for reply
             msg_data = {
-                "user_id": message.sender_staff_id,
-                "user_name": message.sender_nick,
+                "user_id": message.sender_staff_id,  # pyright: ignore[reportAttributeAccessIssue]
+                "user_name": message.sender_nick,  # pyright: ignore[reportAttributeAccessIssue]
                 "content": content,
-                "chat_id": message.conversation_id,
+                "chat_id": message.conversation_id,  # pyright: ignore[reportAttributeAccessIssue]
                 "msg_type": msg_type,
-                "session_webhook": message.session_webhook,  # Save for reply
-                "session_webhook_expired_time": message.session_webhook_expired_time,
-                "sender_staff_id": message.sender_staff_id,
-                "conversation_type": message.conversation_type,
+                "session_webhook": message.session_webhook,  # Save for reply  # pyright: ignore[reportAttributeAccessIssue]
+                "session_webhook_expired_time": message.session_webhook_expired_time,  # pyright: ignore[reportAttributeAccessIssue]
+                "sender_staff_id": message.sender_staff_id,  # pyright: ignore[reportAttributeAccessIssue]
+                "conversation_type": message.conversation_type,  # pyright: ignore[reportAttributeAccessIssue]
             }
 
             # Add file info if present

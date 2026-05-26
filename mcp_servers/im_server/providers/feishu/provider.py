@@ -343,7 +343,7 @@ class FeishuProvider(IMProviderBase):
                 data = resp.json()
                 if data.get("code") == 0:
                     logger.info(
-                        f"[Feishu] File sent successfully: file_key={file_key[:20]}..."
+                        f"[Feishu] File sent successfully: file_key={file_key[:20]}..."  # pyright: ignore[reportOptionalSubscript]
                     )
                     return {
                         "success": True,

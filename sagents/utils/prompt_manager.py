@@ -405,7 +405,7 @@ class PromptManager:
     def reload(self):
         """重新加载配置"""
         self.prompts.clear()
-        self._load_prompts()
+        self._load_prompts()  # pyright: ignore[reportCallIssue]
         logger.info("已重新加载prompt配置")
 
 

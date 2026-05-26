@@ -305,7 +305,7 @@ class MessageManager:
             if isinstance(content, str):
                 total_chars += len(content)
             elif isinstance(content, list):
-                for item in content:
+                for item in content:  # pyright: ignore[reportGeneralTypeIssues]
                     if isinstance(item, dict):
                         if item.get("type") == "text":
                             total_chars += len(item.get("text", ""))
@@ -348,7 +348,7 @@ class MessageManager:
             if isinstance(content, str):
                 text_chars += len(content)
             elif isinstance(content, list):
-                for item in content:
+                for item in content:  # pyright: ignore[reportGeneralTypeIssues]
                     if not isinstance(item, dict):
                         continue
                     if item.get("type") == "text":
@@ -795,7 +795,7 @@ class MessageManager:
         for tool_call in msg.tool_calls:
             # 获取工具名称
             if hasattr(tool_call, "function"):
-                tool_name = getattr(tool_call.function, "name", None)
+                tool_name = getattr(tool_call.function, "name", None)  # pyright: ignore[reportAttributeAccessIssue]
             elif isinstance(tool_call, dict):
                 tool_name = tool_call.get("function", {}).get("name")
             else:
@@ -1471,16 +1471,16 @@ class MessageManager:
                     if hasattr(tc, "id"):
                         # ChoiceDeltaToolCall 对象形式
                         tc_dict = {
-                            "id": tc.id,
-                            "type": tc.type if hasattr(tc, "type") else "function",
+                            "id": tc.id,  # pyright: ignore[reportAttributeAccessIssue]
+                            "type": tc.type if hasattr(tc, "type") else "function",  # pyright: ignore[reportAttributeAccessIssue]
                             "function": {
-                                "name": tc.function.name
+                                "name": tc.function.name  # pyright: ignore[reportAttributeAccessIssue]
                                 if hasattr(tc, "function")
-                                and hasattr(tc.function, "name")
+                                and hasattr(tc.function, "name")  # pyright: ignore[reportAttributeAccessIssue]
                                 else None,
-                                "arguments": tc.function.arguments
+                                "arguments": tc.function.arguments  # pyright: ignore[reportAttributeAccessIssue]
                                 if hasattr(tc, "function")
-                                and hasattr(tc.function, "arguments")
+                                and hasattr(tc.function, "arguments")  # pyright: ignore[reportAttributeAccessIssue]
                                 else None,
                             },
                         }

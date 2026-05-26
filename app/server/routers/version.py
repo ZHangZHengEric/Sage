@@ -276,8 +276,8 @@ async def fetch_github_release_info() -> Optional[Dict[str, Any]]:
                 "artifacts": artifacts,
             }
 
-            _github_cache["data"] = result
-            _github_cache["last_updated"] = now
+            _github_cache["data"] = result  # pyright: ignore[reportArgumentType]
+            _github_cache["last_updated"] = now  # pyright: ignore[reportArgumentType]
             return result
 
     except Exception as e:

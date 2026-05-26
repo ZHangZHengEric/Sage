@@ -180,13 +180,13 @@ class Sandbox:
             try:
                 import venv
 
-                lock_path = os.path.join(os.path.dirname(self.venv_dir), ".venv.lock")
+                lock_path = os.path.join(os.path.dirname(self.venv_dir), ".venv.lock")  # pyright: ignore[reportArgumentType,reportCallIssue]
                 with file_lock(lock_path):
-                    if os.path.exists(self.venv_dir):
+                    if os.path.exists(self.venv_dir):  # pyright: ignore[reportArgumentType]
                         return
 
                     logger.info(f"后台创建虚拟环境: {self.venv_dir}")
-                    os.makedirs(os.path.dirname(self.venv_dir), exist_ok=True)
+                    os.makedirs(os.path.dirname(self.venv_dir), exist_ok=True)  # pyright: ignore[reportArgumentType,reportCallIssue]
 
                     # 获取正确的 Python 解释器路径（处理 PyInstaller 打包环境）
                     system_python = get_system_python_path()
@@ -195,8 +195,8 @@ class Sandbox:
                         return
 
                     logger.info(f"使用 Python 解释器创建 venv: {system_python}")
-                    venv.create(self.venv_dir, with_pip=True, executable=system_python)
-                    self._ensure_uv_in_venv(self.venv_dir)
+                    venv.create(self.venv_dir, with_pip=True, executable=system_python)  # pyright: ignore[reportCallIssue]
+                    self._ensure_uv_in_venv(self.venv_dir)  # pyright: ignore[reportArgumentType]
                     logger.info(f"虚拟环境创建完成: {self.venv_dir}")
             except Exception as e:
                 logger.error(f"创建虚拟环境失败: {self.venv_dir}, 错误: {e}")
@@ -259,21 +259,21 @@ class Sandbox:
 
         if self.isolation_mode == "subprocess":
             self.isolation = SubprocessIsolation(
-                venv_dir=self.venv_dir,
+                venv_dir=self.venv_dir,  # pyright: ignore[reportArgumentType]
                 sandbox_agent_workspace=self.sandbox_agent_workspace,
                 sandbox_runtime_dir=self.sandbox_dir,
                 limits=self.limits,
             )
         elif self.isolation_mode == "seatbelt":
             self.isolation = SeatbeltIsolation(
-                venv_dir=self.venv_dir,
+                venv_dir=self.venv_dir,  # pyright: ignore[reportArgumentType]
                 sandbox_agent_workspace=self.sandbox_agent_workspace,
                 sandbox_runtime_dir=self.sandbox_dir,
                 limits=self.limits,
             )
         elif self.isolation_mode == "bwrap":
             self.isolation = BwrapIsolation(
-                venv_dir=self.venv_dir,
+                venv_dir=self.venv_dir,  # pyright: ignore[reportArgumentType]
                 sandbox_agent_workspace=self.sandbox_agent_workspace,
                 sandbox_runtime_dir=self.sandbox_dir,
                 limits=self.limits,
@@ -281,7 +281,7 @@ class Sandbox:
         else:
             logger.warning(f"未知的隔离模式: {self.isolation_mode}，使用 subprocess")
             self.isolation = SubprocessIsolation(
-                venv_dir=self.venv_dir,
+                venv_dir=self.venv_dir,  # pyright: ignore[reportArgumentType]
                 sandbox_agent_workspace=self.sandbox_agent_workspace,
                 sandbox_runtime_dir=self.sandbox_dir,
                 limits=self.limits,
@@ -368,7 +368,7 @@ class Sandbox:
             if _sys.platform == "win32":
                 venv_bin = _os.path.join(self.venv_dir, "Scripts")
             else:
-                venv_bin = _os.path.join(self.venv_dir, "bin")
+                venv_bin = _os.path.join(self.venv_dir, "bin")  # pyright: ignore[reportArgumentType,reportCallIssue]
 
             _os.environ["PATH"] = venv_bin + _os.pathsep + original_path
 

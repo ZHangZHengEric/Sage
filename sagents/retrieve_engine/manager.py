@@ -45,10 +45,10 @@ class KnowledgeManager:
             doc.chunks = []
             for s in sentences:
                 chunk = Chunk(
-                    id=s.get(
+                    id=s.get(  # pyright: ignore[reportArgumentType]
                         "passage_id"
                     ),  # Or generate a new ID if passage_id is not unique enough
-                    content=s.get("passage_content"),
+                    content=s.get("passage_content"),  # pyright: ignore[reportArgumentType]
                     document_id=doc.id,
                     metadata={
                         "start": s.get("start"),

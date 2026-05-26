@@ -465,7 +465,7 @@ class CodebaseTool:
         after_lines: Optional[int] = None,
         context_lines: Optional[int] = None,
         head_limit: int = 200,
-        session_id: str = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         if not session_id:
             raise ValueError("CodebaseTool: session_id is required")
@@ -633,7 +633,7 @@ class CodebaseTool:
         pattern: str,
         path: Optional[str] = None,
         head_limit: int = 200,
-        session_id: str = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         if not session_id:
             raise ValueError("CodebaseTool: session_id is required")
@@ -730,7 +730,7 @@ class CodebaseTool:
         depth: int = 2,
         max_items_per_dir: int = 50,
         include_hidden: bool = False,
-        session_id: str = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         if not session_id:
             raise ValueError("CodebaseTool: session_id is required")

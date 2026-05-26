@@ -45,10 +45,10 @@ def test_spawn_agent_defaults_empty_name_to_display_name():
     orchestrator.agent = SimpleNamespace(
         agent_name="主Agent", model=None, model_config={}
     )
-    orchestrator.backend_client = backend_client
-    orchestrator.sub_session_manager = _FakeSessionManager(parent_session)
+    orchestrator.backend_client = backend_client  # pyright: ignore[reportAttributeAccessIssue]
+    orchestrator.sub_session_manager = _FakeSessionManager(parent_session)  # pyright: ignore[reportAttributeAccessIssue]
     orchestrator.sub_agents = {}
-    orchestrator._get_fibre_system_prompt_content = lambda **kwargs: kwargs[
+    orchestrator._get_fibre_system_prompt_content = lambda **kwargs: kwargs[  # pyright: ignore[reportAttributeAccessIssue]
         "custom_system_prompt"
     ]
 
@@ -64,7 +64,7 @@ def test_spawn_agent_defaults_empty_name_to_display_name():
         )
 
     assert agent_id == "agent_test"
-    assert backend_client.create_agent_kwargs["name"] == "主Agent的子Agentx"
+    assert backend_client.create_agent_kwargs["name"] == "主Agent的子Agentx"  # pyright: ignore[reportOptionalSubscript]
     assert orchestrator.sub_agents["agent_test"].name == "主Agent的子Agentx"
     assert session_context.system_context["available_sub_agents"] == [
         {

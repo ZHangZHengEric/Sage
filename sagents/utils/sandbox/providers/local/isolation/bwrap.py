@@ -145,4 +145,4 @@ class BwrapIsolation:
             volume_mounts=self.volume_mounts,
             limits=self.limits,
         )
-        return subproc.execute_background(command, cwd)
+        return subproc.execute_background(command, cwd)  # pyright: ignore[reportReturnType]

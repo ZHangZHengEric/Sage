@@ -123,7 +123,7 @@ class TaskAnalysisAgent(AgentBase):
         ]
         all_analysis_chunks_content = ""
         async for llm_repsonse_chunk in self._call_llm_streaming(
-            messages=llm_request_message,
+            messages=llm_request_message,  # pyright: ignore[reportArgumentType]
             session_id=session_id,
             step_name="task_analysis",
             enable_thinking=False,

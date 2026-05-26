@@ -74,7 +74,7 @@ def create_arrow(
     to_y: float,
     style: str = "solid",
     color: str = "#1e1e1e",
-    label: str = None,
+    label: str = None,  # pyright: ignore[reportArgumentType]
 ) -> list:
     """
     Create an arrow element.
@@ -185,7 +185,7 @@ def add_arrow_to_diagram(
     to_y: float,
     style: str = "solid",
     color: str = "#1e1e1e",
-    label: str = None,
+    label: str = None,  # pyright: ignore[reportArgumentType]
 ) -> None:
     """
     Add an arrow to an Excalidraw diagram.
@@ -305,7 +305,7 @@ def main():
 
     try:
         work_path, final_path = prepare_edit_path(diagram_path, use_edit_suffix)
-        add_arrow_to_diagram(work_path, from_x, from_y, to_x, to_y, style, color, label)
+        add_arrow_to_diagram(work_path, from_x, from_y, to_x, to_y, style, color, label)  # pyright: ignore[reportArgumentType]
         finalize_edit_path(work_path, final_path)
     except Exception as e:
         print(f"Error: {e}")

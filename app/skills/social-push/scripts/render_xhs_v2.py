@@ -27,7 +27,7 @@ from typing import List
 try:
     import markdown
     import yaml
-    from playwright.async_api import async_playwright, Page
+    from playwright.async_api import async_playwright, Page  # pyright: ignore[reportMissingImports]
 except ImportError as e:
     print(f"缺少依赖: {e}")
     print(
@@ -256,7 +256,7 @@ def smart_split_content(content: str, max_height: int = SAFE_HEIGHT) -> List[str
     return cards if cards else [content]
 
 
-def convert_markdown_to_html(md_content: str, style: dict = None) -> str:
+def convert_markdown_to_html(md_content: str, style: dict = None) -> str:  # pyright: ignore[reportArgumentType]
     """将 Markdown 转换为 HTML"""
     style = style or STYLES["purple"]
 

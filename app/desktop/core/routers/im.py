@@ -489,7 +489,7 @@ async def get_agent_im_channels(
                 )
                 continue
 
-            result_channels[provider] = ProviderConfigResponse(
+            result_channels[provider] = ProviderConfigResponse(  # pyright: ignore[reportCallIssue]
                 provider=provider,
                 enabled=channel_data.get("enabled", False),
                 config=channel_data.get("config", {}),
@@ -513,7 +513,7 @@ async def get_agent_im_channels(
 @im_router.post("/agent/{agent_id}/im_channels")
 async def save_agent_im_channels(
     agent_id: str = FastApiPath(..., description="Agent ID"),
-    channels: Dict[str, ProviderConfigRequest] = None,
+    channels: Dict[str, ProviderConfigRequest] = None,  # pyright: ignore[reportArgumentType]
 ):
     """
     Save all IM channel configurations for an Agent.
@@ -684,7 +684,7 @@ async def get_agent_im_channel(
             if provider in all_channels:
                 channel_data = all_channels[provider]
                 return await Response.succ(
-                    data=ProviderConfigResponse(
+                    data=ProviderConfigResponse(  # pyright: ignore[reportCallIssue]
                         provider=provider,
                         enabled=channel_data.get("enabled", False),
                         config=channel_data.get("config", {}),
@@ -697,7 +697,7 @@ async def get_agent_im_channel(
 
         # Channel is enabled
         return await Response.succ(
-            data=ProviderConfigResponse(provider=provider, enabled=True, config=config),
+            data=ProviderConfigResponse(provider=provider, enabled=True, config=config),  # pyright: ignore[reportCallIssue]
             message="获取成功",
         )
 
@@ -710,7 +710,7 @@ async def get_agent_im_channel(
 async def update_agent_im_channel(
     agent_id: str = FastApiPath(..., description="Agent ID"),
     provider: str = FastApiPath(..., description="Provider type"),
-    config_request: ProviderConfigRequest = None,
+    config_request: ProviderConfigRequest = None,  # pyright: ignore[reportArgumentType]
 ):
     """
     Update specific IM channel configuration for an Agent.

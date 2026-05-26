@@ -28,7 +28,7 @@ class ConditionRegistry:
             )
             return False
         try:
-            return cls._registry[name](context, session=session)
+            return cls._registry[name](context, session=session)  # pyright: ignore[reportCallIssue]
         except Exception as e:
             logger.error(f"ConditionRegistry: Error checking condition '{name}': {e}")
             return False

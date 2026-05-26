@@ -22,7 +22,7 @@ async def initialize_db_connection():
             )
 
             ensure_desktop_models_registered()
-            async with db_client._engine.begin() as conn:
+            async with db_client._engine.begin() as conn:  # pyright: ignore[reportOptionalMemberAccess]
                 # Create all tables
                 await conn.run_sync(Base.metadata.create_all)
                 # Check and update schema for existing tables
@@ -124,7 +124,7 @@ def get_session_root_space() -> str:
     import os
 
     if os.environ.get("SAGE_SESSIONS_PATH"):
-        sessions_root = Path(os.environ.get("SAGE_SESSIONS_PATH"))
+        sessions_root = Path(os.environ.get("SAGE_SESSIONS_PATH"))  # pyright: ignore[reportArgumentType]
     else:
         user_home = Path.home()
         sage_home = user_home / ".sage"
@@ -248,7 +248,7 @@ async def copy_default_skills():
             elif getattr(sys, "frozen", False):
                 # 打包环境：使用 _MEIPASS 临时目录
                 if hasattr(sys, "_MEIPASS"):
-                    default_skills_dir = Path(sys._MEIPASS) / "skills"
+                    default_skills_dir = Path(sys._MEIPASS) / "skills"  # pyright: ignore[reportAttributeAccessIssue]
                 else:
                     # 备用方案：向上查找
                     current_file = Path(__file__).resolve()
@@ -364,7 +364,7 @@ async def copy_wiki_docs():
             elif getattr(sys, "frozen", False):
                 # 打包环境：使用 _MEIPASS 临时目录
                 if hasattr(sys, "_MEIPASS"):
-                    meipass_dir = Path(sys._MEIPASS)
+                    meipass_dir = Path(sys._MEIPASS)  # pyright: ignore[reportAttributeAccessIssue]
                     resource_candidates = [
                         meipass_dir / "wiki",
                         meipass_dir / "docs",

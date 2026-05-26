@@ -50,6 +50,8 @@ class Response:
 
     @staticmethod
     async def error(
-        code: int = 500, message: str = "操作失败", error_detail: str = None
+        code: int = 500,
+        message: str = "操作失败",
+        error_detail: str = None,  # pyright: ignore[reportArgumentType]
     ):
         return ErrorResponse(code=code, message=message, error_detail=error_detail)

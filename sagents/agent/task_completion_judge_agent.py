@@ -37,7 +37,7 @@ class TaskCompletionJudgeAgent(AgentBase):
         if budget_info:
             history_messages = MessageManager.compress_messages(
                 history_messages,
-                min(budget_info.get("max_model_len", 20000) * 0.6, 4000),
+                min(budget_info.get("max_model_len", 20000) * 0.6, 4000),  # pyright: ignore[reportArgumentType]
             )
         history_messages_str = MessageManager.convert_messages_to_str(history_messages)
 
@@ -68,7 +68,7 @@ class TaskCompletionJudgeAgent(AgentBase):
         message_id = str(uuid.uuid4())
         all_content = ""
         async for llm_repsonse_chunk in self._call_llm_streaming(
-            messages=llm_request_message,
+            messages=llm_request_message,  # pyright: ignore[reportArgumentType]
             session_id=session_id,
             step_name="task_completion_judge",
             enable_thinking=False,

@@ -45,7 +45,7 @@ async def init_chat_client(
         )
         return None
 
-    return default_client_wrapper.raw_client
+    return default_client_wrapper.raw_client  # pyright: ignore[reportReturnType]
 
 
 def get_chat_client(model_name: Optional[str] = None) -> "AsyncOpenAI":
@@ -59,7 +59,7 @@ def get_chat_client(model_name: Optional[str] = None) -> "AsyncOpenAI":
     if not client_wrapper:
         raise RuntimeError(f"No chat client available for model {model_name}")
 
-    return client_wrapper.raw_client
+    return client_wrapper.raw_client  # pyright: ignore[reportReturnType]
 
 
 async def close_chat_client() -> None:

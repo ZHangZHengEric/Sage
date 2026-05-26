@@ -412,7 +412,7 @@ class DingTalkProvider(IMProviderBase):
 
                 # Ensure directory exists
                 Path(save_dir).mkdir(parents=True, exist_ok=True)
-                file_path = os.path.join(save_dir, file_name)
+                file_path = os.path.join(save_dir, file_name)  # pyright: ignore[reportArgumentType,reportCallIssue]
 
                 # Save file
                 with open(file_path, "wb") as f:

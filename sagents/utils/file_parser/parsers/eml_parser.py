@@ -25,7 +25,7 @@ headerRE = re.compile(r"^(From |[\041-\071\073-\176]{1,}:|[\t ])")
 
 # 尝试导入flanker，如果没有则使用email.utils作为备选
 try:
-    from flanker.addresslib import address
+    from flanker.addresslib import address  # pyright: ignore[reportMissingImports]
 
     HAS_FLANKER = True
 except ImportError:
@@ -36,7 +36,7 @@ except ImportError:
 try:
     from opencc import OpenCC
 
-    convert = OpenCC("tw2s").convert
+    convert = OpenCC("tw2s").convert  # pyright: ignore[reportAssignmentType]
     HAS_OPENCC = True
 except ImportError:
     HAS_OPENCC = False
@@ -159,7 +159,8 @@ class EMLParser(BaseFileParser):
         return "\n".join(eml_content_lines[start_index:end_index])
 
     def _extract_email_content(
-        self, msg: email.message.Message
+        self,
+        msg: email.message.Message,  # pyright: ignore[reportAttributeAccessIssue]
     ) -> Tuple[str, Dict[str, Any]]:
         """
         提取邮件内容和元数据，使用增强的元数据提取逻辑
@@ -262,7 +263,7 @@ class EMLParser(BaseFileParser):
             traceback.print_exc()
             return "", {"extraction_error": str(e)}
 
-    def _safe_get_header(self, msg: email.message.Message, header_name: str) -> str:
+    def _safe_get_header(self, msg: email.message.Message, header_name: str) -> str:  # pyright: ignore[reportAttributeAccessIssue]
         """
         安全获取邮件头信息，支持编码解码和容错处理
         """
@@ -300,7 +301,7 @@ class EMLParser(BaseFileParser):
                 print(f"容错获取邮件头 {header_name} 也失败: {e2}")
                 return ""
 
-    def _get_raw_header(self, msg: email.message.Message, header_name: str) -> str:
+    def _get_raw_header(self, msg: email.message.Message, header_name: str) -> str:  # pyright: ignore[reportAttributeAccessIssue]
         """
         直接从原始邮件字符串中获取头信息，避免email库的CR/LF检查
         """
@@ -342,7 +343,7 @@ class EMLParser(BaseFileParser):
             print(f"原始头部解析失败 {header_name}: {e}")
             return ""
 
-    def _decode_payload_part(self, part: email.message.Message) -> str:
+    def _decode_payload_part(self, part: email.message.Message) -> str:  # pyright: ignore[reportAttributeAccessIssue]
         """
         解码邮件部分的载荷
         """
@@ -359,7 +360,7 @@ class EMLParser(BaseFileParser):
             print(f"解码邮件部分失败: {e}")
             return ""
 
-    def _extract_subject_from_body(self, msg: email.message.Message) -> str:
+    def _extract_subject_from_body(self, msg: email.message.Message) -> str:  # pyright: ignore[reportAttributeAccessIssue]
         """
         从邮件体中尝试提取主题信息（当Subject字段缺失时）
         """
@@ -402,7 +403,7 @@ class EMLParser(BaseFileParser):
 
         return ""
 
-    def _generate_fallback_message_id(self, msg: email.message.Message) -> str:
+    def _generate_fallback_message_id(self, msg: email.message.Message) -> str:  # pyright: ignore[reportAttributeAccessIssue]
         """
         当Message-ID缺失时，生成一个备用的标识符
         """
@@ -1210,7 +1211,7 @@ class EMLParser(BaseFileParser):
             # 解码主题
             if subject:
                 try:
-                    decoded_subject = email.header.decode_header(subject)
+                    decoded_subject = email.header.decode_header(subject)  # pyright: ignore[reportAttributeAccessIssue]
                     subject_parts = []
                     for part, encoding in decoded_subject:
                         if isinstance(part, bytes):

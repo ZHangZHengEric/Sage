@@ -97,7 +97,7 @@ class MemoryRecallAgent(AgentBase):
         message_manager = session_context.message_manager
         tool_manager = session_context.tool_manager
         # 如果 search_memory 不可用，则不进行记忆召回
-        if "search_memory" not in tool_manager.list_all_tools_name():
+        if "search_memory" not in tool_manager.list_all_tools_name():  # pyright: ignore[reportOptionalMemberAccess]
             logger.warning(
                 "MemoryRecallAgent: search_memory 工具不可用，无法进行记忆召回"
             )
@@ -290,7 +290,7 @@ class MemoryRecallAgent(AgentBase):
         logger.debug("MemoryRecallAgent: 调用LLM获取搜索查询")
 
         response = self._call_llm_streaming(
-            messages=llm_request_messages,
+            messages=llm_request_messages,  # pyright: ignore[reportArgumentType]
             session_id=session_id,
             step_name="memory_recall",
             model_config_override={

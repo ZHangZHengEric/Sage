@@ -73,7 +73,7 @@ class TurnStatusTool:
         self,
         status: str,
         note: Optional[str] = None,
-        session_id: str = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         if status not in _VALID_STATUSES:
             return make_tool_error(

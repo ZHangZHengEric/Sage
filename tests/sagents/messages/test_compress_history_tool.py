@@ -25,8 +25,8 @@ class TestCompressHistoryTool:
         role: str,
         content: str,
         msg_type: Optional[str] = None,
-        tool_calls: List[Dict] = None,
-        tool_call_id: str = None,
+        tool_calls: List[Dict] = None,  # pyright: ignore[reportArgumentType]
+        tool_call_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> MessageChunk:
         """Create test message"""
         if msg_type is None:

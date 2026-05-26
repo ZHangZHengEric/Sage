@@ -1,7 +1,7 @@
 import os
 import sys
 
-from pdf2image import convert_from_path
+from pdf2image import convert_from_path  # pyright: ignore[reportMissingImports]
 
 
 def convert(pdf_path, output_dir, max_dim=1000):

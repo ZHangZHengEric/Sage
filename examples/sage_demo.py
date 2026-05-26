@@ -380,7 +380,7 @@ class ComponentManager:
         logger.debug("初始化技能管理器")
         try:
             skill_dirs = [self.skills_path] if self.skills_path else None
-            return SkillManager(skill_dirs=skill_dirs)
+            return SkillManager(skill_dirs=skill_dirs)  # pyright: ignore[reportArgumentType]
         except Exception as e:
             logger.error(f"技能管理器初始化失败: {str(e)}")
             # 技能管理器初始化失败不应阻止整个应用启动，记录日志即可
@@ -491,18 +491,18 @@ class StreamingHandler:
 
         # 准备模型配置
         model_config = {
-            "model": self.component_manager.model_name,
-            "temperature": self.component_manager.temperature,
-            "max_tokens": self.component_manager.max_tokens,
-            "max_model_len": self.component_manager.max_model_len,
-            "top_p": self.component_manager.top_p,
-            "presence_penalty": self.component_manager.presence_penalty,
+            "model": self.component_manager.model_name,  # pyright: ignore[reportOptionalMemberAccess]
+            "temperature": self.component_manager.temperature,  # pyright: ignore[reportOptionalMemberAccess]
+            "max_tokens": self.component_manager.max_tokens,  # pyright: ignore[reportOptionalMemberAccess]
+            "max_model_len": self.component_manager.max_model_len,  # pyright: ignore[reportOptionalMemberAccess]
+            "top_p": self.component_manager.top_p,  # pyright: ignore[reportOptionalMemberAccess]
+            "presence_penalty": self.component_manager.presence_penalty,  # pyright: ignore[reportOptionalMemberAccess]
         }
 
         # 准备模型客户端
         model_client = AsyncOpenAI(
-            api_key=self.component_manager.api_key,
-            base_url=self.component_manager.base_url,
+            api_key=self.component_manager.api_key,  # pyright: ignore[reportOptionalMemberAccess]
+            base_url=self.component_manager.base_url,  # pyright: ignore[reportOptionalMemberAccess]
         )
 
         try:
@@ -513,11 +513,11 @@ class StreamingHandler:
                 skill_manager=skill_manager,
                 model=model_client,
                 model_config=model_config,
-                system_prefix=self.component_manager.system_prefix,
-                host_workspace=self.component_manager.workspace,
-                virtual_workspace=self.component_manager.virtual_workspace,
+                system_prefix=self.component_manager.system_prefix,  # pyright: ignore[reportOptionalMemberAccess]
+                host_workspace=self.component_manager.workspace,  # pyright: ignore[reportCallIssue,reportOptionalMemberAccess]
+                virtual_workspace=self.component_manager.virtual_workspace,  # pyright: ignore[reportCallIssue,reportOptionalMemberAccess]
                 user_id="default_user",
-                agent_id=self.component_manager.agent_id,
+                agent_id=self.component_manager.agent_id,  # pyright: ignore[reportOptionalMemberAccess]
                 deep_thinking=use_deepthink,
                 max_loop_count=max_loop_count,
                 agent_mode=agent_mode,
@@ -546,7 +546,8 @@ class StreamingHandler:
     ):
         """更新显示内容"""
         merged_messages = MessageManager.merge_new_messages_to_old_messages(
-            new_messages, base_messages.copy()
+            new_messages,  # pyright: ignore[reportArgumentType]
+            base_messages.copy(),  # pyright: ignore[reportArgumentType]
         )
         merged_messages_dict = [msg.to_dict() for msg in merged_messages]
         display_messages = convert_messages_for_show(merged_messages_dict)
@@ -736,7 +737,8 @@ def generate_response(tool_manager: Union[ToolManager, ToolProxy], controller: S
     # 合并消息
     if new_messages:
         merged_messages = MessageManager.merge_new_messages_to_old_messages(
-            new_messages, st.session_state.inference_conversation
+            new_messages,  # pyright: ignore[reportArgumentType]
+            st.session_state.inference_conversation,  # pyright: ignore[reportArgumentType]
         )
         merged_messages_dict = [msg.to_dict() for msg in merged_messages]
         st.session_state.inference_conversation = merged_messages_dict

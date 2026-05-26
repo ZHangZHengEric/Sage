@@ -103,7 +103,7 @@ async def fetch_http_url_bytes_bounded(
     url: str, max_bytes: int = 25 * 1024 * 1024
 ) -> Tuple[bytes, str, str]:
     parsed = parse_and_validate_public_http_url(url)
-    await resolve_host_ips_non_private(parsed.hostname)
+    await resolve_host_ips_non_private(parsed.hostname)  # pyright: ignore[reportArgumentType]
 
     try:
         import httpx

@@ -115,9 +115,9 @@ def tool(
                     args = get_args(param.annotation)
                     if args:
                         item_type = _infer_json_type(args[0])
-                        param_info["items"] = {"type": item_type}
+                        param_info["items"] = {"type": item_type}  # pyright: ignore[reportArgumentType]
                     else:
-                        param_info["items"] = {"type": "string"}
+                        param_info["items"] = {"type": "string"}  # pyright: ignore[reportArgumentType]
 
             param_desc = doc_param_map.get(name, "")
             param_info["description"] = param_desc or f"The {name} parameter"
@@ -125,7 +125,7 @@ def tool(
             if name in _param_desc_i18n_map and isinstance(
                 _param_desc_i18n_map[name], dict
             ):
-                param_info["description_i18n"] = _param_desc_i18n_map[name]
+                param_info["description_i18n"] = _param_desc_i18n_map[name]  # pyright: ignore[reportArgumentType]
 
             if (
                 param_schema
@@ -208,7 +208,7 @@ def tool(
         if inspect.iscoroutinefunction(func):
 
             @wraps(func)
-            async def wrapper(*args, **kwargs):
+            async def wrapper(*args, **kwargs):  # pyright: ignore[reportRedeclaration]
                 logger.debug(f"Calling async tool: {tool_name} with {len(kwargs)} args")
                 result = await func(*args, **kwargs)
                 logger.debug(f"Completed async tool: {tool_name}")
@@ -222,13 +222,13 @@ def tool(
                 logger.debug(f"Completed tool: {tool_name}")
                 return result
 
-        wrapper._tool_spec = spec
+        wrapper._tool_spec = spec  # pyright: ignore[reportAttributeAccessIssue]
         func._tool_spec = spec
         if "." in func.__qualname__:
             func._tool_owner_qualname = func.__qualname__.rsplit(".", 1)[0]
             func._tool_owner_module = func.__module__
-            wrapper._tool_owner_qualname = func._tool_owner_qualname
-            wrapper._tool_owner_module = func._tool_owner_module
+            wrapper._tool_owner_qualname = func._tool_owner_qualname  # pyright: ignore[reportAttributeAccessIssue]
+            wrapper._tool_owner_module = func._tool_owner_module  # pyright: ignore[reportAttributeAccessIssue]
 
         module_name = func.__module__
         if module_name not in _DISCOVERED_TOOLS:

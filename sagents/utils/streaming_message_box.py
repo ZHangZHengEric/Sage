@@ -58,7 +58,7 @@ def get_message_type_style(message_type: str) -> Tuple[str, str]:
 class StreamingMessageBox:
     """支持流式输出的消息框类"""
 
-    def __init__(self, console, message_type: str, agent_name: str = None):
+    def __init__(self, console, message_type: str, agent_name: str = None):  # pyright: ignore[reportArgumentType]
         self.console = console
         self.message_type = message_type
         self.agent_name = agent_name

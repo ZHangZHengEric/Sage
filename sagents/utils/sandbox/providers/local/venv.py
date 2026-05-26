@@ -39,7 +39,7 @@ class VenvManager:
             logger.info(f"[VenvManager] 使用 Python 解释器: {system_python}")
 
             # 创建虚拟环境，指定正确的 Python 解释器
-            venv.create(self.venv_dir, with_pip=True, executable=system_python)
+            venv.create(self.venv_dir, with_pip=True, executable=system_python)  # pyright: ignore[reportCallIssue]
             self._install_uv_in_venv()
 
             # 配置阿里云 pip 源

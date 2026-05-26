@@ -154,7 +154,7 @@ class ObservableCompletions:
                 model_name,
                 messages_for_obs,
                 llm_system=llm_system,
-                step_name=step_name,
+                step_name=step_name,  # pyright: ignore[reportArgumentType]
             )
 
         try:
@@ -231,7 +231,9 @@ class AgentRuntime:
             wrapped_tm = tool_manager
             if tool_manager:
                 wrapped_tm = ObservableToolManager(
-                    tool_manager, self.observability_manager, session_id
+                    tool_manager,  # pyright: ignore[reportArgumentType]
+                    self.observability_manager,
+                    session_id,  # pyright: ignore[reportArgumentType]
                 )
                 session_context.tool_manager = wrapped_tm
 

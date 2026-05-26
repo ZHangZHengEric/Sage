@@ -36,8 +36,8 @@ def main():
             "file_parser_tool.py",
         )
         spec = importlib.util.spec_from_file_location("file_parser_tool", module_path)
-        file_parser_tool = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(file_parser_tool)
+        file_parser_tool = importlib.util.module_from_spec(spec)  # pyright: ignore[reportArgumentType]
+        spec.loader.exec_module(file_parser_tool)  # pyright: ignore[reportOptionalMemberAccess]
         ExcelParser = file_parser_tool.ExcelParser
     except Exception as e:
         print(f"❌ 加载 ExcelParser 模块失败: {e}")

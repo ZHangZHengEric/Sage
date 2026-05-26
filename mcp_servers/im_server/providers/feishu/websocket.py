@@ -5,8 +5,8 @@ import logging
 import threading
 from typing import Optional, Callable, Dict, Any
 
-import lark_oapi as lark
-from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
+import lark_oapi as lark  # pyright: ignore[reportMissingImports]
+from lark_oapi.api.im.v1 import P2ImMessageReceiveV1  # pyright: ignore[reportMissingImports]
 
 logger = logging.getLogger("FeishuWebSocket")
 
@@ -146,7 +146,7 @@ class FeishuWebSocketClient:
 
             # Start client - SDK will use the event loop we just created
             try:
-                self.client.start()
+                self.client.start()  # pyright: ignore[reportOptionalMemberAccess]
             except RuntimeError as e:
                 if "already running" in str(e):
                     logger.warning(f"[Feishu] Event loop issue (SDK will retry): {e}")

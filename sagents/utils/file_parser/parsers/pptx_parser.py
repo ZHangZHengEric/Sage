@@ -69,11 +69,11 @@ class PPTXParser(BaseFileParser):
 
                 # 提取幻灯片中的文本
                 for shape in slide.shapes:
-                    if hasattr(shape, "text") and shape.text.strip():
-                        slide_content.append(shape.text.strip())
+                    if hasattr(shape, "text") and shape.text.strip():  # pyright: ignore[reportAttributeAccessIssue]
+                        slide_content.append(shape.text.strip())  # pyright: ignore[reportAttributeAccessIssue]
                     # 处理表格
                     if shape.has_table:
-                        table = shape.table
+                        table = shape.table  # pyright: ignore[reportAttributeAccessIssue]
                         table_text = []
                         for row in table.rows:
                             row_text = []

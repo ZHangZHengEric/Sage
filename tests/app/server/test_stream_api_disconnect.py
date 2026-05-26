@@ -78,7 +78,10 @@ async def test_disconnect_breaks_loop_without_raising_generator_exit(
 
     chunks = []
     gen = chat_module.stream_api_with_disconnect_check(
-        _normal_generator(5), request, lock, "session-disconnect-1"
+        _normal_generator(5),
+        request,  # pyright: ignore[reportArgumentType]
+        lock,
+        "session-disconnect-1",  # pyright: ignore[reportArgumentType]
     )
     # 直接消费完，不应抛任何异常
     async for ch in gen:
@@ -98,7 +101,10 @@ async def test_disconnect_yields_chunks_before_break(_patch_chat_module):
 
     chunks = []
     async for ch in chat_module.stream_api_with_disconnect_check(
-        _normal_generator(10), request, lock, "session-disconnect-2"
+        _normal_generator(10),
+        request,  # pyright: ignore[reportArgumentType]
+        lock,
+        "session-disconnect-2",  # pyright: ignore[reportArgumentType]
     ):
         chunks.append(ch)
 
@@ -124,7 +130,10 @@ async def test_interrupt_session_timeout_does_not_block_cleanup(
 
     start = asyncio.get_event_loop().time()
     async for _ in chat_module.stream_api_with_disconnect_check(
-        _normal_generator(5), request, lock, "session-interrupt-hang"
+        _normal_generator(5),
+        request,  # pyright: ignore[reportArgumentType]
+        lock,
+        "session-interrupt-hang",  # pyright: ignore[reportArgumentType]
     ):
         pass
     elapsed = asyncio.get_event_loop().time() - start
@@ -145,7 +154,10 @@ async def test_generator_aclose_timeout_does_not_block_cleanup(_patch_chat_modul
 
     start = asyncio.get_event_loop().time()
     async for _ in chat_module.stream_api_with_disconnect_check(
-        _generator_with_hanging_aclose(), request, lock, "session-aclose-hang"
+        _generator_with_hanging_aclose(),
+        request,  # pyright: ignore[reportArgumentType]
+        lock,
+        "session-aclose-hang",  # pyright: ignore[reportArgumentType]
     ):
         pass
     elapsed = asyncio.get_event_loop().time() - start

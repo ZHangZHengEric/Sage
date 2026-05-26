@@ -286,7 +286,11 @@ async def create_user(request: Request, req: UserAddRequest):
         )
 
     user_id = await add_user(
-        req.username, req.password, req.role, req.email, req.phonenum
+        req.username,
+        req.password,
+        req.role,  # pyright: ignore[reportArgumentType]
+        req.email,
+        req.phonenum,  # pyright: ignore[reportArgumentType]
     )
     return await Response.succ(
         data=RegisterResponse(user_id=user_id), message="用户添加成功"

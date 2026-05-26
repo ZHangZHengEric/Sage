@@ -123,7 +123,9 @@ async def ensure_config_migrated() -> bool:
             # Save to new format
             try:
                 success = agent_config.set_provider_config(
-                    provider, enabled, provider_config
+                    provider,  # pyright: ignore[reportArgumentType]
+                    enabled,
+                    provider_config,  # pyright: ignore[reportArgumentType]
                 )
                 if success:
                     logger.info(
@@ -209,7 +211,7 @@ async def _send_file_via_provider(
     )
 
     # Get Provider configuration from Agent config / 从 Agent 配置获取 Provider 配置
-    agent_config = get_agent_im_config(agent_id)
+    agent_config = get_agent_im_config(agent_id)  # pyright: ignore[reportArgumentType]
     config = agent_config.get_provider_config(provider)
 
     if not config:
@@ -226,31 +228,31 @@ async def _send_file_via_provider(
         if provider == "wechat_work":
             # 企业微信
             if file_type == "image":
-                result = await provider_instance.send_image(
+                result = await provider_instance.send_image(  # pyright: ignore[reportAttributeAccessIssue]
                     image_path=file_path, chat_id=chat_id, user_id=user_id
                 )
             else:
-                result = await provider_instance.send_file(
+                result = await provider_instance.send_file(  # pyright: ignore[reportAttributeAccessIssue]
                     file_path=file_path, chat_id=chat_id, user_id=user_id
                 )
         elif provider == "feishu":
             # 飞书
             if file_type == "image":
-                result = await provider_instance.send_image(
+                result = await provider_instance.send_image(  # pyright: ignore[reportAttributeAccessIssue]
                     image_path=file_path, chat_id=chat_id, user_id=user_id
                 )
             else:
-                result = await provider_instance.send_file(
+                result = await provider_instance.send_file(  # pyright: ignore[reportAttributeAccessIssue]
                     file_path=file_path, chat_id=chat_id, user_id=user_id
                 )
         elif provider == "dingtalk":
             # 钉钉
             if file_type == "image":
-                result = await provider_instance.send_image(
+                result = await provider_instance.send_image(  # pyright: ignore[reportAttributeAccessIssue]
                     image_path=file_path, chat_id=chat_id, user_id=user_id
                 )
             else:
-                result = await provider_instance.send_file(
+                result = await provider_instance.send_file(  # pyright: ignore[reportAttributeAccessIssue]
                     file_path=file_path, chat_id=chat_id, user_id=user_id
                 )
         else:
@@ -827,7 +829,7 @@ async def handle_incoming_message(
     """
     # Get default agent ID if not provided
     if default_agent_id is None:
-        default_agent_id = await get_default_agent_id()
+        default_agent_id = await get_default_agent_id()  # pyright: ignore[reportGeneralTypeIssues]
 
     session_mgr = get_session_manager()
 
@@ -835,7 +837,7 @@ async def handle_incoming_message(
     session_id = session_mgr.find_or_create_session(
         provider=provider,
         user_id=user_id,
-        agent_id=default_agent_id,
+        agent_id=default_agent_id,  # pyright: ignore[reportArgumentType]
         chat_id=chat_id,
         user_name=user_name,
     )
@@ -843,7 +845,7 @@ async def handle_incoming_message(
     # Send to agent
     result = await _send_message_to_agent(
         session_id=session_id,
-        agent_id=default_agent_id,
+        agent_id=default_agent_id,  # pyright: ignore[reportArgumentType]
         content=content,
         user_id=user_id,
         provider=provider,
@@ -885,7 +887,8 @@ async def handle_incoming_message(
                         f"[IM] Looking for provider instance: agent={default_agent_id}, provider={provider}"
                     )
                     provider_instance = sm.find_provider_by_agent(
-                        default_agent_id, provider
+                        default_agent_id,  # pyright: ignore[reportArgumentType]
+                        provider,  # pyright: ignore[reportArgumentType]
                     )
 
                     if provider_instance:

@@ -89,7 +89,7 @@ class AgentClient:
             return self._parse_stream_response_fallback(response)
 
         # Use MessageManager to manage messages (only collects and merges)
-        message_manager = MessageManager()
+        message_manager = MessageManager()  # pyright: ignore[reportOptionalCall]
 
         for line in response.iter_lines():
             if not line:
@@ -325,7 +325,7 @@ class AgentClient:
 
             try:
                 logger.info(f"[AgentClient] Sending file to {provider}: {host_path}")
-                result = await send_file_through_im(
+                result = await send_file_through_im(  # pyright: ignore[reportOptionalCall]
                     file_path=host_path,
                     provider=provider,
                     agent_id=agent_id,
@@ -760,7 +760,7 @@ class AgentClient:
                     return iter(self._chunks)
 
             mock_response = MockResponse(chunks)
-            messages = self._parse_stream_response(mock_response)
+            messages = self._parse_stream_response(mock_response)  # pyright: ignore[reportArgumentType]
 
             # Stream ended - now analyze the collected messages
             logger.debug(

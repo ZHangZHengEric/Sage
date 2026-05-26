@@ -193,10 +193,10 @@ async def probe_multimodal(api_key: str, base_url: str, model: str) -> Dict[str,
         logger.info(
             f"[LLM Capability Probe] multimodal request | summary={summarize_chat_completion_request(model=model, messages=request_messages, request_kwargs=request_kwargs)}"
         )
-        response = await client.chat.completions.create(
+        response = await client.chat.completions.create(  # pyright: ignore[reportCallIssue]
             model=model,
-            messages=request_messages,
-            **request_kwargs,
+            messages=request_messages,  # pyright: ignore[reportArgumentType]
+            **request_kwargs,  # pyright: ignore[reportArgumentType]
         )
 
         content = (

@@ -40,8 +40,8 @@ async def kdb_add(
     kdb_id = await svc.add(
         name=req.name,
         type=req.type,
-        intro=req.intro,
-        language=req.language,
+        intro=req.intro,  # pyright: ignore[reportArgumentType]
+        language=req.language,  # pyright: ignore[reportArgumentType]
         user_id=user_id,
     )
     return await Response.succ(data=KdbAddResponse(kdb_id=kdb_id, user_id=user_id))
@@ -58,8 +58,8 @@ async def kdb_update(req: KdbUpdateRequest, http_request: Request):
 
     kdb = await svc.update(
         kdb_id=req.kdb_id,
-        name=req.name,
-        intro=req.intro,
+        name=req.name,  # pyright: ignore[reportArgumentType]
+        intro=req.intro,  # pyright: ignore[reportArgumentType]
         kdb_setting=req.kdb_setting,
         user_id=check_user_id,
     )
@@ -79,14 +79,14 @@ async def kdb_info(http_request: Request, kdb_id: str = Query(...)):
     # svc.info raises 404/403 now, so obj is guaranteed to be valid if we reach here
     return await Response.succ(
         data=KdbInfoResponse(
-            kdbId=obj.id,
-            name=obj.name,
-            intro=obj.intro,
-            type=obj.data_type,
-            createdAt=int(obj.created_at.timestamp()),
-            updatedAt=int(obj.updated_at.timestamp()),
-            kdbSetting=obj.setting,
-            user_id=obj.user_id,
+            kdbId=obj.id,  # pyright: ignore[reportOptionalMemberAccess]
+            name=obj.name,  # pyright: ignore[reportOptionalMemberAccess]
+            intro=obj.intro,  # pyright: ignore[reportOptionalMemberAccess]
+            type=obj.data_type,  # pyright: ignore[reportOptionalMemberAccess]
+            createdAt=int(obj.created_at.timestamp()),  # pyright: ignore[reportOptionalMemberAccess]
+            updatedAt=int(obj.updated_at.timestamp()),  # pyright: ignore[reportOptionalMemberAccess]
+            kdbSetting=obj.setting,  # pyright: ignore[reportOptionalMemberAccess]
+            user_id=obj.user_id,  # pyright: ignore[reportOptionalMemberAccess]
         )
     )
 

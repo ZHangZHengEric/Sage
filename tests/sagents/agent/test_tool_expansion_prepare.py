@@ -24,7 +24,7 @@ class _StubTools:
         return "beta"
 
     @tool()
-    def tool_expand_tools(self, tool_names: list[str] = None):
+    def tool_expand_tools(self, tool_names: list[str] = None):  # pyright: ignore[reportArgumentType]
         """expand"""
         return tool_names or []
 
@@ -50,7 +50,7 @@ def test_simple_agent_exposes_expansion_when_suggestion_narrows_allowed_tools():
     tools_json = SimpleAgent(_DummyModel(), {})._prepare_tools(
         _tool_manager(),
         ["alpha_tool"],
-        _session_context(),
+        _session_context(),  # pyright: ignore[reportArgumentType]
     )
 
     assert _names(tools_json) == ["alpha_tool", "tool_expand_tools"]
@@ -60,7 +60,7 @@ def test_simple_agent_does_not_expose_expansion_when_suggestion_is_not_narrowed(
     tools_json = SimpleAgent(_DummyModel(), {})._prepare_tools(
         _tool_manager(),
         ["alpha_tool", "beta_tool"],
-        _session_context(),
+        _session_context(),  # pyright: ignore[reportArgumentType]
     )
 
     assert _names(tools_json) == ["alpha_tool", "beta_tool"]
@@ -70,7 +70,7 @@ def test_task_executor_exposes_expansion_when_suggestion_narrows_allowed_tools()
     tools_json = TaskExecutorAgent(_DummyModel(), {})._prepare_tools(
         _tool_manager(),
         ["alpha_tool"],
-        _session_context(),
+        _session_context(),  # pyright: ignore[reportArgumentType]
     )
 
     assert _names(tools_json) == ["alpha_tool", "tool_expand_tools"]

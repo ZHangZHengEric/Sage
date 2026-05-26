@@ -358,7 +358,10 @@ class MemoryTool:
         },
     )
     async def search_memory(
-        self, query: str, top_k: int = 5, session_id: str = None
+        self,
+        query: str,
+        top_k: int = 5,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         """
         Search memory (files and session history)

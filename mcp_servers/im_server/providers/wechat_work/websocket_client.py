@@ -20,7 +20,7 @@ import uuid
 from typing import Callable, Dict, Any, Optional
 
 import websockets
-from websockets.exceptions import ConnectionClosed, InvalidStatusCode
+from websockets.exceptions import ConnectionClosed, InvalidStatusCode  # pyright: ignore[reportAttributeAccessIssue]
 
 # Import file handler
 try:
@@ -73,7 +73,7 @@ class WeChatWorkWebSocketClient:
         self.heartbeat_interval = heartbeat_interval
 
         # WebSocket 连接对象
-        self.websocket: Optional[websockets.WebSocketClientProtocol] = None
+        self.websocket: Optional[websockets.WebSocketClientProtocol] = None  # pyright: ignore[reportAttributeAccessIssue]
 
         # 运行状态
         self.running = False
@@ -209,7 +209,7 @@ class WeChatWorkWebSocketClient:
                         # 使用 wait_for 包装 recv，以便能响应停止信号
                         message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
                         self._last_message_time = time.time()
-                        await self._handle_message(message)
+                        await self._handle_message(message)  # pyright: ignore[reportArgumentType]
                     except asyncio.TimeoutError:
                         # 超时继续循环，检查 self.running
                         continue
@@ -244,10 +244,10 @@ class WeChatWorkWebSocketClient:
 
         try:
             logger.info("[WeChatWork] 正在发送订阅请求...")
-            await self.websocket.send(json.dumps(subscribe_msg))
+            await self.websocket.send(json.dumps(subscribe_msg))  # pyright: ignore[reportOptionalMemberAccess]
 
             # 等待响应 (10秒超时)
-            response = await asyncio.wait_for(self.websocket.recv(), timeout=10)
+            response = await asyncio.wait_for(self.websocket.recv(), timeout=10)  # pyright: ignore[reportOptionalMemberAccess]
 
             data = json.loads(response)
             logger.debug(f"[WeChatWork] 订阅响应: {data}")

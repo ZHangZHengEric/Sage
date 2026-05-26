@@ -41,7 +41,7 @@ def test_pending_user_injection_preserves_multimodal_content(tmp_path):
 
     drained = ctx.flush_user_injections()
     assert drained[0].content == next_content
-    assert drained[0].metadata["guidance_id"] == "guidance-1"
+    assert drained[0].metadata["guidance_id"] == "guidance-1"  # pyright: ignore[reportOptionalSubscript]
     assert ctx.list_user_injections() == []
 
 

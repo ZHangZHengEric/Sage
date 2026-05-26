@@ -12,7 +12,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from openai import OpenAI
-from agents.agent.message_manager import MessageManager
+from agents.agent.message_manager import MessageManager  # pyright: ignore[reportMissingImports]
 
 
 def main():
@@ -40,9 +40,9 @@ def main():
 
     # 3. 创建Agent
     print("🚀 创建PlanningAgent...")
-    from agents.agent.planning_agent.planning_agent import PlanningAgent
-    from agents.task.task_manager import TaskManager
-    from agents.tool.tool_manager import ToolManager
+    from agents.agent.planning_agent.planning_agent import PlanningAgent  # pyright: ignore[reportMissingImports]
+    from agents.task.task_manager import TaskManager  # pyright: ignore[reportMissingImports]
+    from agents.tool.tool_manager import ToolManager  # pyright: ignore[reportMissingImports]
 
     agent = PlanningAgent(
         model=model, model_config=llm_config, system_prefix="智能规划助手"

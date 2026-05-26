@@ -272,7 +272,7 @@ def add_icon_to_diagram(
     x: float,
     y: float,
     library_path: Path,
-    label: str = None,
+    label: str = None,  # pyright: ignore[reportArgumentType]
 ) -> None:
     """
     Add an icon to an Excalidraw diagram.
@@ -298,7 +298,7 @@ def add_icon_to_diagram(
     if label and transformed_elements:
         min_x, min_y, max_x, max_y = calculate_bounding_box(transformed_elements)
         icon_width = max_x - min_x
-        max_y - min_y
+        max_y - min_y  # pyright: ignore[reportUnusedExpression]
 
         # Position label below icon, centered
         label_x = min_x + (icon_width / 2) - (len(label) * 5)
@@ -402,7 +402,7 @@ def main():
 
     try:
         work_path, final_path = prepare_edit_path(diagram_path, use_edit_suffix)
-        add_icon_to_diagram(work_path, icon_name, x, y, library_path, label)
+        add_icon_to_diagram(work_path, icon_name, x, y, library_path, label)  # pyright: ignore[reportArgumentType]
         finalize_edit_path(work_path, final_path)
     except Exception as e:
         print(f"Error: {e}")

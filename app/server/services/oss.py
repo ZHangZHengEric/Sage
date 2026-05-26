@@ -12,14 +12,14 @@ from common.utils.safe_remote_fetch import (
 )
 
 
-async def upload_file_to_oss(file: UploadFile, path: str = None) -> str:
+async def upload_file_to_oss(file: UploadFile, path: str = None) -> str:  # pyright: ignore[reportArgumentType]
     content = await file.read()
     if path:
         from common.core.client.s3 import upload_file_with_path
 
-        return await upload_file_with_path(content, path, file.content_type)
+        return await upload_file_with_path(content, path, file.content_type)  # pyright: ignore[reportArgumentType]
 
-    return await upload_kdb_file(file.filename, content, file.content_type)
+    return await upload_kdb_file(file.filename, content, file.content_type)  # pyright: ignore[reportArgumentType]
 
 
 async def import_remote_url_to_oss(url: str) -> tuple[str, str]:

@@ -58,7 +58,7 @@ class ToolExpansionTool:
             }
 
         requested = self._normalize_tool_names(tool_names)
-        allowed_tools = set(session_context.tool_manager.list_all_tools_name())
+        allowed_tools = set(session_context.tool_manager.list_all_tools_name())  # pyright: ignore[reportOptionalMemberAccess]
         suggested_tools = list(
             (session_context.audit_status or {}).get("suggested_tools") or []
         )

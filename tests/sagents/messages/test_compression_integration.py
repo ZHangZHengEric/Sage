@@ -102,7 +102,7 @@ class TestCompressionIntegration(unittest.TestCase):
 
         agent._call_llm_streaming = mock_call_llm
 
-        agent._prepare_tools = MagicMock(return_value=[])
+        agent._prepare_tools = MagicMock(return_value=[])  # pyright: ignore[reportAttributeAccessIssue]
         agent.prepare_unified_system_message = AsyncMock(
             return_value=MessageChunk(role="system", content="sys")
         )

@@ -220,7 +220,7 @@ class SandboxSkillManager:
             try:
                 ensure_dir = getattr(self.sandbox, "ensure_directory", None)
                 if callable(ensure_dir):
-                    await ensure_dir(self.skills_dir)
+                    await ensure_dir(self.skills_dir)  # pyright: ignore[reportGeneralTypeIssues]
                     logger.info(f"沙箱技能目录已创建: {self.skills_dir}")
                 else:
                     logger.warning(

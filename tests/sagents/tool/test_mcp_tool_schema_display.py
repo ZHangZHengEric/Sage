@@ -148,7 +148,7 @@ class TestMcpToolSchemaDisplay(unittest.TestCase):
                 "en": "Send an IM message.",
                 "pt": "Envia uma mensagem de IM.",
             },
-            func=None,
+            func=None,  # pyright: ignore[reportArgumentType]
             parameters={
                 "content": {"type": "string", "description": "Message content."},
                 "provider": {"type": "string", "description": "Provider name."},

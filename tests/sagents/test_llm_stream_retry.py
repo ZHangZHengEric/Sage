@@ -117,12 +117,12 @@ def _attempt_yields(*chunks):
 @pytest.mark.asyncio
 async def test_streaming_call_does_not_retry_after_partial_chunk_is_yielded():
     client = FakeClient()
-    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})  # pyright: ignore[reportArgumentType]
     messages = [MessageChunk(role=MessageRole.USER.value, content="run")]
 
     chunks = []
     with pytest.raises(PartialStreamConsumedError):
-        async for chunk in agent._call_llm_streaming(messages, enable_thinking=False):
+        async for chunk in agent._call_llm_streaming(messages, enable_thinking=False):  # pyright: ignore[reportArgumentType]
             chunks.append(chunk)
 
     assert client.chat.completions.calls == 1
@@ -144,11 +144,11 @@ async def test_streaming_call_still_retries_if_timeout_happens_before_any_chunk(
             _attempt_yields(_content_chunk("retry succeeded")),
         ]
     )
-    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})  # pyright: ignore[reportArgumentType]
     messages = [MessageChunk(role=MessageRole.USER.value, content="run")]
 
     chunks = []
-    async for chunk in agent._call_llm_streaming(messages, enable_thinking=False):
+    async for chunk in agent._call_llm_streaming(messages, enable_thinking=False):  # pyright: ignore[reportArgumentType]
         chunks.append(chunk)
 
     assert client.chat.completions.calls == 2
@@ -166,12 +166,12 @@ async def test_streaming_call_does_not_retry_after_text_chunk_is_yielded():
             _attempt_yields(_content_chunk("should not be used")),
         ]
     )
-    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})  # pyright: ignore[reportArgumentType]
     messages = [MessageChunk(role=MessageRole.USER.value, content="run")]
 
     chunks = []
     with pytest.raises(PartialStreamConsumedError):
-        async for chunk in agent._call_llm_streaming(messages, enable_thinking=False):
+        async for chunk in agent._call_llm_streaming(messages, enable_thinking=False):  # pyright: ignore[reportArgumentType]
             chunks.append(chunk)
 
     assert client.chat.completions.calls == 1

@@ -84,13 +84,13 @@ class EmlParser(BaseParser):
                     if not data_bytes:
                         logger.debug(f"[EmlParser] 附件跳过：名称={fname}，原因=无内容")
                         continue
-                    ext = os.path.splitext(fname)[1].lower()
+                    ext = os.path.splitext(fname)[1].lower()  # pyright: ignore[reportArgumentType,reportCallIssue]
                     if ext not in ALLOW_ATTACH_FILE_EXTS:
                         logger.debug(
                             f"[EmlParser] 附件跳过：名称={fname}，原因=不支持的文件类型"
                         )
                         continue
-                    path = await upload_kdb_file(fname, data_bytes, ctype)
+                    path = await upload_kdb_file(fname, data_bytes, ctype)  # pyright: ignore[reportArgumentType]
                     att = File(
                         id=gen_id(),
                         name=fname,

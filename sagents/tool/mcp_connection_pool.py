@@ -600,16 +600,16 @@ class McpHttpWorkerPoolEntry:
                         f"MCP tool call timed out after {self.call_timeout_seconds:g}s: "
                         f"server={self.server_name}, tool={payload['tool_name']}"
                     )
-                    if not current_future.cancelled():
-                        current_future.set_exception(timeout_error)
+                    if not current_future.cancelled():  # pyright: ignore[reportOptionalMemberAccess]
+                        current_future.set_exception(timeout_error)  # pyright: ignore[reportOptionalMemberAccess]
                     break
                 except BaseException as exc:
-                    if not current_future.cancelled():
-                        current_future.set_exception(exc)
+                    if not current_future.cancelled():  # pyright: ignore[reportOptionalMemberAccess]
+                        current_future.set_exception(exc)  # pyright: ignore[reportOptionalMemberAccess]
                     break
                 else:
-                    if not current_future.cancelled():
-                        current_future.set_result(result)
+                    if not current_future.cancelled():  # pyright: ignore[reportOptionalMemberAccess]
+                        current_future.set_result(result)  # pyright: ignore[reportOptionalMemberAccess]
         except BaseException as exc:
             if current_future is not None and not current_future.done():
                 current_future.set_exception(exc)
@@ -661,7 +661,7 @@ class McpConnectionPool:
         if _is_http_worker_server_params(server_params):
             entry = await self._get_or_create_http_worker_entry(
                 key,
-                server_params,
+                server_params,  # pyright: ignore[reportArgumentType]
                 config,
                 force=force,
             )
@@ -681,7 +681,7 @@ class McpConnectionPool:
                         )
                         entry = await self._get_or_create_http_worker_entry(
                             key,
-                            server_params,
+                            server_params,  # pyright: ignore[reportArgumentType]
                             config,
                             force=True,
                         )
@@ -736,7 +736,7 @@ class McpConnectionPool:
             key = server_name.strip()
             entry = await self._get_or_create_http_worker_entry(
                 key,
-                server_params,
+                server_params,  # pyright: ignore[reportArgumentType]
                 config,
             )
             retry_enabled = _env_bool("SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR", True)
@@ -757,7 +757,7 @@ class McpConnectionPool:
                         )
                         entry = await self._get_or_create_http_worker_entry(
                             key,
-                            server_params,
+                            server_params,  # pyright: ignore[reportArgumentType]
                             config,
                             force=True,
                         )

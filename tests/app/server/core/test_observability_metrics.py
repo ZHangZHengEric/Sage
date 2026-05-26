@@ -35,7 +35,7 @@ def test_prometheus_metrics_route_returns_text_response():
     response = asyncio.run(prometheus_metrics())
 
     assert response.status_code == 200
-    assert response.media_type.startswith("text/plain")
+    assert response.media_type.startswith("text/plain")  # pyright: ignore[reportOptionalMemberAccess]
     assert "sage_server_process_cpu_seconds_total " in response.body.decode()
 
 

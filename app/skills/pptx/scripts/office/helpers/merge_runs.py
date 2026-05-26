@@ -10,7 +10,7 @@ Also:
 
 from pathlib import Path
 
-import defusedxml.minidom
+import defusedxml.minidom  # pyright: ignore[reportMissingModuleSource]
 
 
 def merge_runs(input_dir: str) -> tuple[int, str]:
@@ -158,7 +158,7 @@ def _can_merge(run1, run2) -> bool:
         return False
     if rpr1 is None:
         return True
-    return rpr1.toxml() == rpr2.toxml()
+    return rpr1.toxml() == rpr2.toxml()  # pyright: ignore[reportOptionalMemberAccess]
 
 
 def _merge_run_content(target, source):

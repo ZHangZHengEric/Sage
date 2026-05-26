@@ -15,7 +15,7 @@ if str(REPO_ROOT) not in sys.path:
 def _load_memory_index_module():
     module_path = REPO_ROOT / "sagents" / "tool" / "impl" / "memory_index.py"
     spec = importlib.util.spec_from_file_location("memory_index_benchmark", module_path)
-    module = importlib.util.module_from_spec(spec)
+    module = importlib.util.module_from_spec(spec)  # pyright: ignore[reportArgumentType]
     assert spec and spec.loader
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)

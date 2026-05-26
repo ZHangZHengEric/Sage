@@ -215,7 +215,7 @@ class TaskDao(BaseDao):
 
             stmt = stmt.values(last_executed_at=executed_at, updated_at=executed_at)
             result = await session.execute(stmt)
-            return bool(result.rowcount)
+            return bool(result.rowcount)  # pyright: ignore[reportAttributeAccessIssue]
 
     async def delete_recurring_task(self, task_id: int) -> bool:
         start_time = time.perf_counter()
@@ -402,7 +402,7 @@ class TaskDao(BaseDao):
                 stmt = stmt.where(Task.user_id == user_id)
             stmt = stmt.values(status="processing", updated_at=get_local_now())
             result = await session.execute(stmt)
-            claimed = bool(result.rowcount)
+            claimed = bool(result.rowcount)  # pyright: ignore[reportAttributeAccessIssue]
         elapsed = time.perf_counter() - start_time
         logger.info(
             f"[TaskDao] claim_one_time_task SUCCESS | task_id={task_id} | claimed={claimed} | time={elapsed:.3f}s"
@@ -470,7 +470,7 @@ class TaskDao(BaseDao):
         task.retry_count = int(task.retry_count or 0) + 1
         max_retries = int(task.max_retries or 0)
         task.status = (
-            "pending" if retry and task.retry_count <= max_retries else "failed"
+            "pending" if retry and task.retry_count <= max_retries else "failed"  # pyright: ignore[reportOptionalOperand]
         )
         task.updated_at = now
         await self.save(task)

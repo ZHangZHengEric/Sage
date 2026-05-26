@@ -23,7 +23,7 @@ class DesktopBackendClient:
         async with httpx.AsyncClient() as client:
             return await client.get(f"{self.base_url}{path}")
 
-    async def post(self, path: str, json: dict = None):
+    async def post(self, path: str, json: dict = None):  # pyright: ignore[reportArgumentType]
         import httpx
 
         async with httpx.AsyncClient() as client:

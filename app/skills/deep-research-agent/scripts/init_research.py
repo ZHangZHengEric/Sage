@@ -42,7 +42,7 @@ def init_research_workspace(template_path: str, project_path: str) -> str:
         创建的项目路径
     """
     # 获取模板路径
-    template_path = resolve_template_path(template_path)
+    template_path = resolve_template_path(template_path)  # pyright: ignore[reportAssignmentType]
 
     # 创建项目目录
     project_dir = Path(project_path)
@@ -65,7 +65,7 @@ def init_research_workspace(template_path: str, project_path: str) -> str:
     (materials_dir / "notes").mkdir()
 
     # 读取模板并替换占位符
-    template_content = template_path.read_text(encoding="utf-8")
+    template_content = template_path.read_text(encoding="utf-8")  # pyright: ignore[reportAttributeAccessIssue]
     topic = get_topic_from_path(project_path)
     today = datetime.now().strftime("%Y-%m-%d")
 

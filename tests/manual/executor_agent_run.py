@@ -12,7 +12,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 import json
 from openai import OpenAI
 
-from agents.agent.message_manager import MessageManager
+from agents.agent.message_manager import MessageManager  # pyright: ignore[reportMissingImports]
 
 
 def main():
@@ -40,8 +40,8 @@ def main():
 
     # 3. 创建Agent
     print("⚡ 创建ExecutorAgent...")
-    from agents.agent.executor_agent.executor_agent import ExecutorAgent
-    from agents.task.task_manager import TaskManager
+    from agents.agent.executor_agent.executor_agent import ExecutorAgent  # pyright: ignore[reportMissingImports]
+    from agents.task.task_manager import TaskManager  # pyright: ignore[reportMissingImports]
 
     agent = ExecutorAgent(model=model, model_config=llm_config)
 

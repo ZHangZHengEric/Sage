@@ -20,7 +20,7 @@ class SkillTool:
             }
         },
     )
-    def load_skill(self, skill_name: str, session_id: str = None) -> str:
+    def load_skill(self, skill_name: str, session_id: str = None) -> str:  # pyright: ignore[reportArgumentType]
         """
         Load a skill into the current context.
         加载一个技能到当前上下文中。

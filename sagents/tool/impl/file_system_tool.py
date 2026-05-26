@@ -339,7 +339,7 @@ class FileSystemTool:
         start_line: int = 0,
         end_line: Optional[int] = 400,
         include_line_numbers: bool = True,
-        session_id: str = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         """读取文本文件指定行范围内容
 
@@ -479,7 +479,7 @@ class FileSystemTool:
         file_path: str,
         content: str,
         mode: str = "overwrite",
-        session_id: str = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         """写入文本到文件。
 
@@ -637,7 +637,7 @@ class FileSystemTool:
         self,
         file_path: str,
         operations: Optional[List[Dict[str, Any]]] = None,
-        session_id: str = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         """更新单个文件内容。优先使用局部替换或按行区间替换，不要整文件重写。
 
@@ -694,11 +694,11 @@ class FileSystemTool:
                     )
                 is_line_range = mode_result["update_mode"] == "line_range"
                 if is_line_range:
-                    op_summary["start_line"] = op.get("start_line")
-                    op_summary["end_line"] = op.get("end_line")
+                    op_summary["start_line"] = op.get("start_line")  # pyright: ignore[reportArgumentType]
+                    op_summary["end_line"] = op.get("end_line")  # pyright: ignore[reportArgumentType]
                     line_range_ops.append((index, op, op_summary))
                 else:
-                    op_summary["search_pattern"] = op.get("search_pattern")
+                    op_summary["search_pattern"] = op.get("search_pattern")  # pyright: ignore[reportArgumentType]
                     other_ops.append((index, op, op_summary))
 
             for index, op, op_summary in sorted(

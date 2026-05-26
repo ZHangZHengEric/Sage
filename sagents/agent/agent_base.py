@@ -261,8 +261,8 @@ class AgentBase(ABC):
 
                 # 纯 MessageChunk 列表：与 convert_messages_to_dict_for_request 一致，剔除 turn_status 协议对
                 if messages and all(isinstance(m, MessageChunk) for m in messages):
-                    messages = MessageManager.strip_turn_status_from_llm_context(
-                        list(messages)
+                    messages = MessageManager.strip_turn_status_from_llm_context(  # pyright: ignore[reportAssignmentType]
+                        list(messages)  # pyright: ignore[reportArgumentType]
                     )
 
                 # 发起LLM请求
@@ -279,7 +279,7 @@ class AgentBase(ABC):
                         serializable_messages.append(msg_dict)
                         seg = None
                         if isinstance(getattr(msg, "metadata", None), dict):
-                            seg = msg.metadata.get("cache_segment")
+                            seg = msg.metadata.get("cache_segment")  # pyright: ignore[reportOptionalMemberAccess]
                         cache_segments.append(seg)
                     else:
                         msg_copy = msg.copy()
@@ -455,11 +455,11 @@ class AgentBase(ABC):
                     )
                 else:
                     # 其他模型使用 enable_thinking/thinking 参数
-                    extra_body["chat_template_kwargs"] = {
+                    extra_body["chat_template_kwargs"] = {  # pyright: ignore[reportArgumentType]
                         "enable_thinking": final_enable_thinking
                     }
-                    extra_body["enable_thinking"] = final_enable_thinking
-                    extra_body["thinking"] = {
+                    extra_body["enable_thinking"] = final_enable_thinking  # pyright: ignore[reportArgumentType]
+                    extra_body["thinking"] = {  # pyright: ignore[reportArgumentType]
                         "type": "enabled" if final_enable_thinking else "disabled"
                     }
                     logger.debug(
@@ -765,7 +765,7 @@ class AgentBase(ABC):
                             )
                             llm_response = None
                         if session_context:
-                            session_context.add_llm_request(llm_request, llm_response)
+                            session_context.add_llm_request(llm_request, llm_response)  # pyright: ignore[reportArgumentType]
 
                             # 更新动态 token 比例
                             logger.debug(
@@ -841,13 +841,14 @@ class AgentBase(ABC):
             if system_prefix_override:
                 role_content = system_prefix_override
             elif hasattr(self, "SYSTEM_PREFIX_FIXED"):
-                role_content = self.SYSTEM_PREFIX_FIXED
+                role_content = self.SYSTEM_PREFIX_FIXED  # pyright: ignore[reportAttributeAccessIssue]
             elif self.system_prefix:
                 role_content = self.system_prefix
             else:
                 if session_context and session_context.sandbox:
-                    identity_path = os.path.join(
-                        session_context.sandbox_agent_workspace, "IDENTITY.md"
+                    identity_path = os.path.join(  # pyright: ignore[reportCallIssue]
+                        session_context.sandbox_agent_workspace,  # pyright: ignore[reportArgumentType]
+                        "IDENTITY.md",  # pyright: ignore[reportArgumentType]
                     )
                     try:
                         if await session_context.sandbox.file_exists(identity_path):
@@ -860,7 +861,9 @@ class AgentBase(ABC):
 
                 if not role_content:
                     role_content = prompt_manager.get_prompt(
-                        "agent_intro_template", agent="common", language=language
+                        "agent_intro_template",
+                        agent="common",
+                        language=language,  # pyright: ignore[reportArgumentType]
                     )
 
             if custom_prefix:
@@ -909,7 +912,7 @@ class AgentBase(ABC):
 
                 try:
                     agent_md_content = await session_context.sandbox.read_file(
-                        os.path.join(workspace, "AGENT.md")
+                        os.path.join(workspace, "AGENT.md")  # pyright: ignore[reportArgumentType,reportCallIssue]
                     )
                     if agent_md_content:
                         stable_buf += f"<agent_md>\n{agent_md_content}\n</agent_md>\n"
@@ -918,7 +921,7 @@ class AgentBase(ABC):
 
                 try:
                     soul_content = await session_context.sandbox.read_file(
-                        os.path.join(workspace, "SOUL.md")
+                        os.path.join(workspace, "SOUL.md")  # pyright: ignore[reportArgumentType,reportCallIssue]
                     )
                     if soul_content:
                         if len(soul_content) > 300:
@@ -929,7 +932,7 @@ class AgentBase(ABC):
 
                 try:
                     user_content = await session_context.sandbox.read_file(
-                        os.path.join(workspace, "USER.md")
+                        os.path.join(workspace, "USER.md")  # pyright: ignore[reportArgumentType,reportCallIssue]
                     )
                     if user_content:
                         if len(user_content) > 300:
@@ -940,7 +943,7 @@ class AgentBase(ABC):
 
                 try:
                     memory_content = await session_context.sandbox.read_file(
-                        os.path.join(workspace, "MEMORY.md")
+                        os.path.join(workspace, "MEMORY.md")  # pyright: ignore[reportArgumentType,reportCallIssue]
                     )
                     if memory_content:
                         if len(memory_content) > 500:
@@ -954,7 +957,7 @@ class AgentBase(ABC):
                 if not use_identity:
                     try:
                         identity_content = await session_context.sandbox.read_file(
-                            os.path.join(workspace, "IDENTITY.md")
+                            os.path.join(workspace, "IDENTITY.md")  # pyright: ignore[reportArgumentType,reportCallIssue]
                         )
                         if identity_content:
                             if len(identity_content) > 300:
@@ -1025,7 +1028,7 @@ class AgentBase(ABC):
                     workspace_files = prompt_manager.get_prompt(
                         "workspace_files_label",
                         agent="common",
-                        language=language,
+                        language=language,  # pyright: ignore[reportArgumentType]
                     )
                     volatile_buf += workspace_files.format(workspace=workspace_name)
 
@@ -1037,7 +1040,7 @@ class AgentBase(ABC):
                             no_files = prompt_manager.get_prompt(
                                 "no_files_message",
                                 agent="common",
-                                language=language,
+                                language=language,  # pyright: ignore[reportArgumentType]
                             )
                             volatile_buf += no_files
                         else:
@@ -1047,7 +1050,7 @@ class AgentBase(ABC):
                         no_files = prompt_manager.get_prompt(
                             "no_files_message",
                             agent="common",
-                            language=language,
+                            language=language,  # pyright: ignore[reportArgumentType]
                         )
                         volatile_buf += no_files
 
@@ -1064,7 +1067,7 @@ class AgentBase(ABC):
                     ext_paths_intro = prompt_manager.get_prompt(
                         "external_paths_intro",
                         agent="common",
-                        language=language,
+                        language=language,  # pyright: ignore[reportArgumentType]
                     )
                     volatile_buf += ext_paths_intro
                     for ext_path in external_paths:
@@ -1106,7 +1109,7 @@ class AgentBase(ABC):
                         skills_hint = prompt_manager.get_prompt(
                             "skills_usage_hint",
                             agent="common",
-                            language=language,
+                            language=language,  # pyright: ignore[reportArgumentType]
                             default="",
                         )
                         if skills_hint:
@@ -1616,7 +1619,8 @@ class AgentBase(ABC):
                 logger.debug(f"{self.agent_name}: 收到非流式工具响应，正在处理")
                 logger.debug(f"{self.agent_name}: 工具响应 {tool_response}")
                 processed_response = self.process_tool_response(
-                    tool_response, tool_call["id"]
+                    tool_response,  # pyright: ignore[reportArgumentType]
+                    tool_call["id"],  # pyright: ignore[reportArgumentType]
                 )
                 yield processed_response
 

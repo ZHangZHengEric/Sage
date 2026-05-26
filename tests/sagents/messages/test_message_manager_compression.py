@@ -20,8 +20,8 @@ class TestExtractAllContextMessages:
         role: str,
         content: str,
         msg_type: Optional[str] = None,
-        tool_calls: List[Dict] = None,
-        tool_call_id: str = None,
+        tool_calls: List[Dict] = None,  # pyright: ignore[reportArgumentType]
+        tool_call_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> MessageChunk:
         """Create test message"""
         if msg_type is None:
@@ -191,7 +191,7 @@ class TestExtractAllContextMessages:
         assert result[0].role == MessageRole.USER.value
         assert result[0].content == "User message 1"
         # Check it's the 3rd compression tool (last one)
-        assert result[1].tool_calls[0]["id"] == "call_compress_3"
+        assert result[1].tool_calls[0]["id"] == "call_compress_3"  # pyright: ignore[reportOptionalSubscript]
         print("OK: Multiple compression tools - keep User and last tool")
 
     def test_compression_tool_with_other_tools(self):

@@ -36,7 +36,7 @@ def _inject_stubs():
         def _open(*args, **kwargs):
             return _DummyPDF()
 
-        mod.open = _open
+        mod.open = _open  # pyright: ignore[reportAttributeAccessIssue]
         sys.modules["pdfplumber"] = mod
 
     # pypandoc stub
@@ -48,7 +48,7 @@ def _inject_stubs():
         def _convert_file(*args, **kwargs):
             return ""
 
-        mod.convert_file = _convert_file
+        mod.convert_file = _convert_file  # pyright: ignore[reportAttributeAccessIssue]
         sys.modules["pypandoc"] = mod
 
     # pptx stub: from pptx import Presentation
@@ -61,7 +61,7 @@ def _inject_stubs():
             def __init__(self, *args, **kwargs):
                 pass
 
-        mod.Presentation = Presentation
+        mod.Presentation = Presentation  # pyright: ignore[reportAttributeAccessIssue]
         sys.modules["pptx"] = mod
 
     # html2text stub
@@ -78,7 +78,7 @@ def _inject_stubs():
             def handle(self, content: str) -> str:
                 return content
 
-        mod.HTML2Text = HTML2Text
+        mod.HTML2Text = HTML2Text  # pyright: ignore[reportAttributeAccessIssue]
         sys.modules["html2text"] = mod
 
     # sagents.utils.logger stub，避免包初始化导致的循环导入
@@ -95,17 +95,17 @@ def _inject_stubs():
         logger_mod = types.ModuleType("sagents.utils.logger")
         # 简单 logger
         logging.basicConfig(level=logging.INFO)
-        logger_mod.logger = logging.getLogger("sagents-test")
+        logger_mod.logger = logging.getLogger("sagents-test")  # pyright: ignore[reportAttributeAccessIssue]
         # 组装层级
-        utils_mod.logger = logger_mod
-        sagents_mod.utils = utils_mod
+        utils_mod.logger = logger_mod  # pyright: ignore[reportAttributeAccessIssue]
+        sagents_mod.utils = utils_mod  # pyright: ignore[reportAttributeAccessIssue]
         sys.modules["sagents"] = sagents_mod
         sys.modules["sagents.utils"] = utils_mod
         sys.modules["sagents.utils.logger"] = logger_mod
 
     # sagents.context.session_context stub，提供 SessionContext
     try:
-        from sagents.context.session_context import SessionContext  # noqa: F401
+        from sagents.context.session_context import SessionContext  # noqa: F401  # pyright: ignore[reportAssignmentType]
     except Exception:
         sagents_mod = sys.modules.get("sagents") or types.ModuleType("sagents")
         context_mod = getattr(sagents_mod, "context", None) or types.ModuleType(
@@ -117,9 +117,9 @@ def _inject_stubs():
             def __init__(self):
                 self.session_id = "test"
 
-        session_mod.SessionContext = SessionContext
-        context_mod.session_context = session_mod
-        sagents_mod.context = context_mod
+        session_mod.SessionContext = SessionContext  # pyright: ignore[reportAttributeAccessIssue]
+        context_mod.session_context = session_mod  # pyright: ignore[reportAttributeAccessIssue]
+        sagents_mod.context = context_mod  # pyright: ignore[reportAttributeAccessIssue]
         sys.modules["sagents"] = sagents_mod
         sys.modules["sagents.context"] = context_mod
         sys.modules["sagents.context.session_context"] = session_mod
@@ -145,7 +145,7 @@ def main() -> bool:
 
     # 导入解析器
     try:
-        from Sage.sagents.tool.file_parser_tool import ExcelParser
+        from Sage.sagents.tool.file_parser_tool import ExcelParser  # pyright: ignore[reportMissingImports]
     except Exception as e:
         print(f"❌ 导入 ExcelParser 失败: {e}")
         return False

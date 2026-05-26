@@ -88,7 +88,7 @@ async def test_shell_completion_reminder_preserves_tool_choice_auto(monkeypatch)
     )
 
     agent = DummyAgent(
-        model=object(),
+        model=object(),  # pyright: ignore[reportArgumentType]
         model_config={
             "model": "gpt-test",
             "tools": [
@@ -107,11 +107,15 @@ async def test_shell_completion_reminder_preserves_tool_choice_auto(monkeypatch)
     messages = [MessageChunk(role=MessageRole.USER.value, content="continue")]
 
     async for _ in agent._call_llm_streaming(
-        messages, session_id="sid", enable_thinking=False
+        messages,  # pyright: ignore[reportArgumentType]
+        session_id="sid",
+        enable_thinking=False,  # pyright: ignore[reportArgumentType]
     ):
         pass
     async for _ in agent._call_llm_streaming(
-        messages, session_id="sid", enable_thinking=False
+        messages,  # pyright: ignore[reportArgumentType]
+        session_id="sid",
+        enable_thinking=False,  # pyright: ignore[reportArgumentType]
     ):
         pass
 

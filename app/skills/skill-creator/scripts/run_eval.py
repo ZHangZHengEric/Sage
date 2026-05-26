@@ -102,7 +102,7 @@ def run_single_query(
         try:
             while time.time() - start_time < timeout:
                 if process.poll() is not None:
-                    remaining = process.stdout.read()
+                    remaining = process.stdout.read()  # pyright: ignore[reportOptionalMemberAccess]
                     if remaining:
                         buffer += remaining.decode("utf-8", errors="replace")
                     break
@@ -111,7 +111,7 @@ def run_single_query(
                 if not ready:
                     continue
 
-                chunk = os.read(process.stdout.fileno(), 8192)
+                chunk = os.read(process.stdout.fileno(), 8192)  # pyright: ignore[reportOptionalMemberAccess]
                 if not chunk:
                     break
                 buffer += chunk.decode("utf-8", errors="replace")

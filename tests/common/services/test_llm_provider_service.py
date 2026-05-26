@@ -100,19 +100,19 @@ class StubLLMProvider:
 
 def _install_stub_modules():
     loguru_module = types.ModuleType("loguru")
-    loguru_module.logger = types.SimpleNamespace(
+    loguru_module.logger = types.SimpleNamespace(  # pyright: ignore[reportAttributeAccessIssue]
         info=lambda *a, **k: None, warning=lambda *a, **k: None
     )
     sys.modules["loguru"] = loguru_module
 
     models_module = types.ModuleType("common.models.llm_provider")
-    models_module.LLMProvider = StubLLMProvider
-    models_module.LLMProviderDao = object
+    models_module.LLMProvider = StubLLMProvider  # pyright: ignore[reportAttributeAccessIssue]
+    models_module.LLMProviderDao = object  # pyright: ignore[reportAttributeAccessIssue]
     sys.modules["common.models.llm_provider"] = models_module
 
     schemas_module = types.ModuleType("common.schemas.base")
-    schemas_module.LLMProviderCreate = StubLLMProviderCreate
-    schemas_module.LLMProviderUpdate = StubLLMProviderUpdate
+    schemas_module.LLMProviderCreate = StubLLMProviderCreate  # pyright: ignore[reportAttributeAccessIssue]
+    schemas_module.LLMProviderUpdate = StubLLMProviderUpdate  # pyright: ignore[reportAttributeAccessIssue]
     sys.modules["common.schemas.base"] = schemas_module
 
     sagents_llm_module = types.ModuleType("sagents.llm")
@@ -120,10 +120,10 @@ def _install_stub_modules():
     async def _unexpected_probe(*args, **kwargs):
         raise AssertionError("probe stub should be replaced by the test")
 
-    sagents_llm_module.probe_connection = _unexpected_probe
-    sagents_llm_module.probe_llm_capabilities = _unexpected_probe
-    sagents_llm_module.probe_multimodal = _unexpected_probe
-    sagents_llm_module.probe_structured_output = _unexpected_probe
+    sagents_llm_module.probe_connection = _unexpected_probe  # pyright: ignore[reportAttributeAccessIssue]
+    sagents_llm_module.probe_llm_capabilities = _unexpected_probe  # pyright: ignore[reportAttributeAccessIssue]
+    sagents_llm_module.probe_multimodal = _unexpected_probe  # pyright: ignore[reportAttributeAccessIssue]
+    sagents_llm_module.probe_structured_output = _unexpected_probe  # pyright: ignore[reportAttributeAccessIssue]
     sys.modules["sagents.llm"] = sagents_llm_module
 
 
@@ -133,7 +133,7 @@ def _load_service_module():
     spec = importlib.util.spec_from_file_location(
         "llm_provider_service_under_test", module_path
     )
-    module = importlib.util.module_from_spec(spec)
+    module = importlib.util.module_from_spec(spec)  # pyright: ignore[reportArgumentType]
     assert spec and spec.loader
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -181,8 +181,8 @@ class TestLLMProviderProbeRequired(unittest.IsolatedAsyncioTestCase):
             probe_calls.append((api_key, base_url, model))
             return {"supported": True}
 
-        self.module.LLMProviderDao = lambda: dao
-        self.module.probe_connection = fake_probe
+        self.module.LLMProviderDao = lambda: dao  # pyright: ignore[reportAttributeAccessIssue]
+        self.module.probe_connection = fake_probe  # pyright: ignore[reportAttributeAccessIssue]
 
         provider_id = await self.module.create_provider(
             self.module.LLMProviderCreate(
@@ -206,8 +206,8 @@ class TestLLMProviderProbeRequired(unittest.IsolatedAsyncioTestCase):
         async def fake_probe(api_key, base_url, model):
             raise RuntimeError("401 unauthorized")
 
-        self.module.LLMProviderDao = lambda: dao
-        self.module.probe_connection = fake_probe
+        self.module.LLMProviderDao = lambda: dao  # pyright: ignore[reportAttributeAccessIssue]
+        self.module.probe_connection = fake_probe  # pyright: ignore[reportAttributeAccessIssue]
 
         with self.assertRaises(ValueError) as ctx:
             await self.module.create_provider(
@@ -231,8 +231,8 @@ class TestLLMProviderProbeRequired(unittest.IsolatedAsyncioTestCase):
         async def fake_probe(api_key, base_url, model):
             raise RuntimeError("model not found")
 
-        self.module.LLMProviderDao = lambda: dao
-        self.module.probe_connection = fake_probe
+        self.module.LLMProviderDao = lambda: dao  # pyright: ignore[reportAttributeAccessIssue]
+        self.module.probe_connection = fake_probe  # pyright: ignore[reportAttributeAccessIssue]
 
         with self.assertRaises(ValueError) as ctx:
             await self.module.create_provider(
@@ -266,8 +266,8 @@ class TestLLMProviderProbeRequired(unittest.IsolatedAsyncioTestCase):
             probe_calls.append((api_key, base_url, model))
             return {"supported": True}
 
-        self.module.LLMProviderDao = lambda: dao
-        self.module.probe_connection = fake_probe
+        self.module.LLMProviderDao = lambda: dao  # pyright: ignore[reportAttributeAccessIssue]
+        self.module.probe_connection = fake_probe  # pyright: ignore[reportAttributeAccessIssue]
 
         updated = await self.module.update_provider(
             "provider-1",
@@ -303,8 +303,8 @@ class TestLLMProviderProbeRequired(unittest.IsolatedAsyncioTestCase):
             probe_calls.append((api_key, base_url, model))
             return {"supported": True}
 
-        self.module.LLMProviderDao = lambda: dao
-        self.module.probe_connection = fake_probe
+        self.module.LLMProviderDao = lambda: dao  # pyright: ignore[reportAttributeAccessIssue]
+        self.module.probe_connection = fake_probe  # pyright: ignore[reportAttributeAccessIssue]
 
         await self.module.update_provider(
             "provider-2",
@@ -326,8 +326,8 @@ class TestLLMProviderProbeRequired(unittest.IsolatedAsyncioTestCase):
         async def fake_probe(api_key, base_url, model):
             return {"supported": True}
 
-        self.module.LLMProviderDao = lambda: dao
-        self.module.probe_connection = fake_probe
+        self.module.LLMProviderDao = lambda: dao  # pyright: ignore[reportAttributeAccessIssue]
+        self.module.probe_connection = fake_probe  # pyright: ignore[reportAttributeAccessIssue]
 
         provider_id = await self.module.create_provider(
             self.module.LLMProviderCreate(
@@ -361,8 +361,8 @@ class TestLLMProviderProbeRequired(unittest.IsolatedAsyncioTestCase):
         async def fake_probe(api_key, base_url, model):
             raise RuntimeError("connection timeout")
 
-        self.module.LLMProviderDao = lambda: dao
-        self.module.probe_connection = fake_probe
+        self.module.LLMProviderDao = lambda: dao  # pyright: ignore[reportAttributeAccessIssue]
+        self.module.probe_connection = fake_probe  # pyright: ignore[reportAttributeAccessIssue]
 
         with self.assertRaises(ValueError) as ctx:
             await self.module.update_provider(
@@ -394,8 +394,8 @@ class TestLLMProviderProbeRequired(unittest.IsolatedAsyncioTestCase):
         async def fake_probe(api_key, base_url, model):
             return {"supported": True}
 
-        self.module.LLMProviderDao = lambda: dao
-        self.module.probe_connection = fake_probe
+        self.module.LLMProviderDao = lambda: dao  # pyright: ignore[reportAttributeAccessIssue]
+        self.module.probe_connection = fake_probe  # pyright: ignore[reportAttributeAccessIssue]
 
         await self.module.update_provider(
             "provider-4",

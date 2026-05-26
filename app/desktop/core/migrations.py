@@ -22,35 +22,35 @@ async def migrate_desktop_default_user_id() -> None:
             .where(or_(Agent.user_id == "", Agent.user_id.is_(None)))
             .values(user_id=DEFAULT_DESKTOP_USER_ID)
         )
-        migrated["agent_configs"] = int(result.rowcount or 0)
+        migrated["agent_configs"] = int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue]
 
         result = await session.execute(
             update(Conversation)
             .where(or_(Conversation.user_id == "", Conversation.user_id.is_(None)))
             .values(user_id=DEFAULT_DESKTOP_USER_ID)
         )
-        migrated["conversations"] = int(result.rowcount or 0)
+        migrated["conversations"] = int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue]
 
         result = await session.execute(
             update(LLMProvider)
             .where(or_(LLMProvider.user_id == "", LLMProvider.user_id.is_(None)))
             .values(user_id=DEFAULT_DESKTOP_USER_ID)
         )
-        migrated["llm_providers"] = int(result.rowcount or 0)
+        migrated["llm_providers"] = int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue]
 
         result = await session.execute(
             update(MCPServer)
             .where(or_(MCPServer.user_id == "", MCPServer.user_id.is_(None)))
             .values(user_id=DEFAULT_DESKTOP_USER_ID)
         )
-        migrated["mcp_servers"] = int(result.rowcount or 0)
+        migrated["mcp_servers"] = int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue]
 
         result = await session.execute(
             update(Kdb)
             .where(or_(Kdb.user_id == "", Kdb.user_id.is_(None)))
             .values(user_id=DEFAULT_DESKTOP_USER_ID)
         )
-        migrated["kdb"] = int(result.rowcount or 0)
+        migrated["kdb"] = int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue]
 
         result = await session.execute(
             update(AgentAuthorization)
@@ -62,7 +62,7 @@ async def migrate_desktop_default_user_id() -> None:
             )
             .values(user_id=DEFAULT_DESKTOP_USER_ID)
         )
-        migrated["agent_authorizations"] = int(result.rowcount or 0)
+        migrated["agent_authorizations"] = int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue]
 
         result = await session.execute(
             update(IMChannelConfig)
@@ -75,21 +75,21 @@ async def migrate_desktop_default_user_id() -> None:
             )
             .values(sage_user_id=DEFAULT_DESKTOP_USER_ID)
         )
-        migrated["im_user_configs"] = int(result.rowcount or 0)
+        migrated["im_user_configs"] = int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue]
 
         result = await session.execute(
             update(RecurringTask)
             .where(or_(RecurringTask.user_id == "", RecurringTask.user_id.is_(None)))
             .values(user_id=DEFAULT_DESKTOP_USER_ID)
         )
-        migrated["recurring_tasks"] = int(result.rowcount or 0)
+        migrated["recurring_tasks"] = int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue]
 
         result = await session.execute(
             update(Task)
             .where(or_(Task.user_id == "", Task.user_id.is_(None)))
             .values(user_id=DEFAULT_DESKTOP_USER_ID)
         )
-        migrated["tasks"] = int(result.rowcount or 0)
+        migrated["tasks"] = int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue]
 
         logger.info(
             "Desktop user_id migration completed: "

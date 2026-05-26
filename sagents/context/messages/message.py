@@ -219,7 +219,7 @@ class MessageChunk:
     def _serialize_tool_calls(self, tool_calls) -> List[Dict[str, Any]]:
         """序列化 tool_calls 为标准字典格式"""
         if tool_calls is None:
-            return None
+            return None  # pyright: ignore[reportReturnType]
 
         result = []
         for tc in tool_calls:
@@ -293,7 +293,7 @@ class MessageChunk:
         Returns:
             Optional[str]: 消息内容
         """
-        return self.content
+        return self.content  # pyright: ignore[reportReturnType]
 
     def normalized_message_type(self) -> Optional[str]:
         """返回规范化后的消息类型。

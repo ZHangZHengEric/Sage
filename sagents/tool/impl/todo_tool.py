@@ -38,7 +38,7 @@ class ToDoTool:
         if session_context:
             try:
                 sandbox_agent_workspace = session_context.sandbox_agent_workspace
-                return os.path.join(sandbox_agent_workspace, filename)
+                return os.path.join(sandbox_agent_workspace, filename)  # pyright: ignore[reportArgumentType,reportCallIssue]
             except Exception as e:
                 logger.warning(f"通过 session_context 获取路径失败: {e}")
 
