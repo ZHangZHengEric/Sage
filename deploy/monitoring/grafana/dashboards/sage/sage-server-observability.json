@@ -794,7 +794,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "mappings": []
+          "mappings": [],
+          "unit": "suffix:次/秒"
         },
         "overrides": []
       },
@@ -833,9 +834,9 @@
           "refId": "A"
         }
       ],
-      "title": "Agent 调用速率（次/秒）",
+      "title": "Agent 每秒调用量",
       "type": "timeseries",
-      "description": "每秒新启动的 Agent run 数，按 agent_id 聚合；用于观察入口流量和突增。"
+      "description": "每秒新启动的 Agent run 数，按 agent_id 分组；用于观察各 Agent 的实时调用流量。"
     },
     {
       "datasource": {
@@ -852,8 +853,8 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 0,
-        "y": 29
+        "x": 16,
+        "y": 21
       },
       "id": 23,
       "options": {
@@ -903,7 +904,7 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
+        "x": 8,
         "y": 21
       },
       "id": 24,
@@ -994,9 +995,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 37
+        "w": 8,
+        "x": 16,
+        "y": 29
       },
       "id": 31,
       "options": {
@@ -1050,97 +1051,6 @@
       },
       "fieldConfig": {
         "defaults": {
-          "custom": {
-            "cellOptions": {
-              "type": "auto"
-            }
-          },
-          "mappings": []
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "session_id"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Explore logs by session_id",
-                    "url": "/explore?orgId=1&left=%7B%22datasource%22:%22sage-loki%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22expr%22:%22%7Bservice%3D~%5C%22sage-server.*%5C%22%7D%20%7C%20json%20%7C%20session_id%3D%5C%22${__data.fields.session_id}%5C%22%22%7D%5D,%22range%22:%7B%22from%22:%22${__from}%22,%22to%22:%22${__to}%22%7D%7D",
-                    "targetBlank": true
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "trace_id"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Explore Jaeger trace",
-                    "url": "/explore?orgId=1&left=%7B%22datasource%22:%22sage-jaeger%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22query%22:%22${__data.fields.trace_id}%22%7D%5D,%22range%22:%7B%22from%22:%22${__from}%22,%22to%22:%22${__to}%22%7D%7D",
-                    "targetBlank": true
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 21
-      },
-      "id": 32,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "sum(increase(sagents_agent_runs_total{job=~\"$job\",instance=~\"$instance\"}[$__range])) by (agent_id, status)",
-          "format": "table",
-          "instant": true,
-          "legendFormat": "",
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "Agent 调用量（本时间范围）",
-      "type": "table",
-      "description": "当前 Grafana 时间范围内已结束的 Agent run 数，按 agent_id 和 status 汇总；用于看调用总量和成功/失败分布。"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
           "mappings": [],
           "unit": "suffix:次",
           "decimals": 0
@@ -1150,7 +1060,7 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 8,
+        "x": 0,
         "y": 29
       },
       "id": 33,
@@ -1207,7 +1117,7 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
+        "x": 8,
         "y": 29
       },
       "id": 34,
@@ -1230,7 +1140,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "topk(15, (histogram_quantile(0.95, sum(increase(sagents_tool_call_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[$__range])) by (le, tool_name)) and on(tool_name) (sum(increase(sagents_tool_call_duration_seconds_count{job=~\"$job\",instance=~\"$instance\"}[$__range])) by (tool_name) > 0)))",
+          "expr": "topk(15, (histogram_quantile(0.95, sum((increase(sagents_tool_call_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[$__range]) or sagents_tool_call_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"})) by (le, tool_name)) and on(tool_name) (sum((increase(sagents_tool_call_duration_seconds_count{job=~\"$job\",instance=~\"$instance\"}[$__range]) or sagents_tool_call_duration_seconds_count{job=~\"$job\",instance=~\"$instance\"})) by (tool_name) > 0)))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -1240,7 +1150,7 @@
       ],
       "title": "Tool 耗时 Top P95",
       "type": "table",
-      "description": "当前时间范围内 tool 调用 P95 耗时 Top，用于定位慢工具；没有调用的 tool 会被过滤。",
+      "description": "当前时间范围内 tool 调用 P95 耗时 Top，用于定位慢工具；优先使用区间增量，遇到新序列样本不足时回退当前 counter，避免刚产生数据时显示 No data。",
       "transformations": [
         {
           "id": "organize",
@@ -1266,7 +1176,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 45
+        "y": 37
       },
       "id": 40,
       "panels": [],
@@ -1289,7 +1199,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 46
+        "y": 38
       },
       "id": 41,
       "options": {
@@ -1339,7 +1249,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 46
+        "y": 38
       },
       "id": 42,
       "options": {
@@ -1399,7 +1309,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 46
+        "y": 38
       },
       "id": 43,
       "options": {
@@ -1470,7 +1380,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 54
+        "y": 46
       },
       "id": 45,
       "options": {
@@ -1541,7 +1451,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 54
+        "y": 46
       },
       "id": 46,
       "options": {
