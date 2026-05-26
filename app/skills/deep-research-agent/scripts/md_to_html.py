@@ -116,7 +116,9 @@ def basic_markdown_to_html(text: str, headings: list[dict]) -> str:
         nonlocal list_items, list_type
         if list_items:
             tag = "ol" if list_type == "ol" else "ul"
-            items_html = "".join(f"<li>{inline_format(item)}</li>" for item in list_items)
+            items_html = "".join(
+                f"<li>{inline_format(item)}</li>" for item in list_items
+            )
             out.append(f"<{tag}>{items_html}</{tag}>")
             list_items = []
             list_type = None
@@ -275,7 +277,9 @@ def wrap_sections(body: str) -> str:
     return "".join(blocks)
 
 
-def wrap_html(body: str, title: str, toc_html: str, footer_time: str, cover_style: str) -> str:
+def wrap_html(
+    body: str, title: str, toc_html: str, footer_time: str, cover_style: str
+) -> str:
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -583,7 +587,9 @@ def wrap_html(body: str, title: str, toc_html: str, footer_time: str, cover_styl
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Convert Markdown to a polished HTML report")
+    parser = argparse.ArgumentParser(
+        description="Convert Markdown to a polished HTML report"
+    )
     parser.add_argument("input", help="Markdown input file")
     parser.add_argument("--out", default=None, help="Output HTML file")
     parser.add_argument("--title", default=None, help="HTML title")
@@ -615,7 +621,11 @@ def main() -> None:
     cover_style = f"background: linear-gradient(135deg, {start}, {end});"
     html_text = wrap_html(body, title, toc_html, footer_time, cover_style)
 
-    out_path = Path(args.out).expanduser().resolve() if args.out else input_path.with_suffix(".html")
+    out_path = (
+        Path(args.out).expanduser().resolve()
+        if args.out
+        else input_path.with_suffix(".html")
+    )
     out_path.write_text(html_text, encoding="utf-8")
     print(f"✓ HTML已生成: {out_path}")
 

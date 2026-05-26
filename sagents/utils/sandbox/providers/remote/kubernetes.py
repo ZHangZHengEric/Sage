@@ -4,7 +4,6 @@ Kubernetes 远程沙箱实现
 通过创建 K8s Pod 实现沙箱隔离
 """
 
-import os
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
@@ -47,14 +46,13 @@ class KubernetesSandboxProvider(RemoteSandboxProvider):
             from kubernetes import client, config
         except ImportError:
             raise ImportError(
-                "kubernetes package is required. "
-                "Install with: pip install kubernetes"
+                "kubernetes package is required. Install with: pip install kubernetes"
             )
 
         # 加载 K8s 配置
         try:
             config.load_incluster_config()
-        except:
+        except Exception:
             config.load_kube_config()
 
         self._k8s_client = client.CoreV1Api()
@@ -87,26 +85,34 @@ class KubernetesSandboxProvider(RemoteSandboxProvider):
         volume_mounts = []
 
         if self.workspace_mount:
-            volumes.append({
-                "name": "workspace",
-                "hostPath": {"path": self.workspace_mount},
-            })
-            volume_mounts.append({
-                "name": "workspace",
-                "mountPath": self._workspace_path,
-            })
+            volumes.append(
+                {
+                    "name": "workspace",
+                    "hostPath": {"path": self.workspace_mount},
+                }
+            )
+            volume_mounts.append(
+                {
+                    "name": "workspace",
+                    "mountPath": self._workspace_path,
+                }
+            )
 
         for i, mp in enumerate(self.mount_paths):
             vol_name = f"mount-{i}"
-            volumes.append({
-                "name": vol_name,
-                "hostPath": {"path": mp.host_path},
-            })
-            volume_mounts.append({
-                "name": vol_name,
-                "mountPath": mp.sandbox_path,
-                "readOnly": mp.read_only,
-            })
+            volumes.append(
+                {
+                    "name": vol_name,
+                    "hostPath": {"path": mp.host_path},
+                }
+            )
+            volume_mounts.append(
+                {
+                    "name": vol_name,
+                    "mountPath": mp.sandbox_path,
+                    "readOnly": mp.read_only,
+                }
+            )
 
         if volumes:
             pod_manifest["spec"]["volumes"] = volumes
@@ -222,7 +228,7 @@ class KubernetesSandboxProvider(RemoteSandboxProvider):
         include_hidden: bool = False,
     ) -> List[FileInfo]:
         """列出目录内容"""
-        result = await self.execute_command(f"ls -la {path}")
+        await self.execute_command(f"ls -la {path}")
         # 解析 ls 输出... (简化实现)
         return []
 

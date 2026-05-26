@@ -59,6 +59,7 @@ def test_trusted_proxy_mode_allows_whitelisted_proxy_without_auth():
     assert response.status_code == 401
     assert response.json()["message"] == "未授权"
 
+
 def test_non_whitelisted_proxy_request_is_rejected():
     config._GLOBAL_STARTUP_CONFIG = config.StartupConfig(
         trusted_identity_proxy_ips=["10.0.0.0/8"]

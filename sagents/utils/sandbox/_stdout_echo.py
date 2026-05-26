@@ -9,6 +9,7 @@ Shell 命令实时回显工具
 注意：这是"诊断/可观测"层面的回显，不是消息流；正常的工具结果仍然通过返回值传回
 agent，互不冲突。
 """
+
 import os
 import signal
 import subprocess

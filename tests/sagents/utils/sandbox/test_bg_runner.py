@@ -3,10 +3,10 @@
 仅依赖 Python stdlib + 主机 shell，POSIX 与 Windows 都应通过。
 覆盖：start / read_tail / is_alive / get_exit_code / kill / cleanup。
 """
+
 from __future__ import annotations
 
 import os
-import sys
 import time
 
 import pytest
@@ -105,6 +105,7 @@ def test_log_file_lives_in_log_dir(runner):
 
 
 # ---- read_tail 截断行为 + get_log_size ----
+
 
 def _wait_done(runner, task_id, timeout=5.0):
     deadline = time.time() + timeout

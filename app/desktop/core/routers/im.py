@@ -23,12 +23,11 @@ import logging
 # Import new Agent IM Config system
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from mcp_servers.im_server.agent_config import (
     get_agent_im_config,
-    AgentIMConfig,
     IMESSAGE_PROVIDER,
-    validate_provider_config
 )
 
 # ============================================================================
@@ -37,6 +36,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 # Async helper functions
 # ============================================================================
+
 
 async def is_agent_default_async(agent_id: str) -> bool:
     """
@@ -54,13 +54,15 @@ async def is_agent_default_async(agent_id: str) -> bool:
         return False
 
 
-async def validate_provider_config_async(agent_id: str, provider: str, config: Dict, enabled: bool = False):
+async def validate_provider_config_async(
+    agent_id: str, provider: str, config: Dict, enabled: bool = False
+):
     """
     Async version of validate_provider_config.
     Validates config, with iMessage only allowed on default agent.
     """
     from mcp_servers.im_server.agent_config import IMESSAGE_PROVIDER
-    
+
     # iMessage restriction (only check if enabled)
     if provider == IMESSAGE_PROVIDER and enabled:
         is_default = await is_agent_default_async(agent_id)
@@ -69,21 +71,24 @@ async def validate_provider_config_async(agent_id: str, provider: str, config: D
                 f"iMessage provider can only be configured on the default agent. "
                 f"Current agent={agent_id}"
             )
-        
+
         # iMessage allowed_senders validation
-        allowed_senders = config.get('allowed_senders', []) if config else []
+        allowed_senders = config.get("allowed_senders", []) if config else []
         if not allowed_senders or len(allowed_senders) == 0:
             raise ValueError(
                 "iMessage must have at least one allowed sender configured. "
                 "Please add phone numbers to the '监听发送者' field."
             )
 
+
 # ============================================================================
 # Pydantic Models
 # ============================================================================
 
+
 class FeishuConfig(BaseModel):
     """Feishu configuration."""
+
     enabled: bool = False
     app_id: Optional[str] = None
     app_secret: Optional[str] = None
@@ -91,6 +96,7 @@ class FeishuConfig(BaseModel):
 
 class DingTalkConfig(BaseModel):
     """DingTalk configuration."""
+
     enabled: bool = False
     client_id: Optional[str] = None
     client_secret: Optional[str] = None
@@ -98,6 +104,7 @@ class DingTalkConfig(BaseModel):
 
 class WeChatWorkConfig(BaseModel):
     """WeChat Work (企业微信) configuration for long connection mode."""
+
     enabled: bool = False
     bot_id: Optional[str] = None  # 智能机器人 BotID
     secret: Optional[str] = None  # 长连接专用 Secret
@@ -105,6 +112,7 @@ class WeChatWorkConfig(BaseModel):
 
 class IMessageConfig(BaseModel):
     """iMessage configuration."""
+
     enabled: bool = False
     mode: str = "database_poll"
     allowed_senders: list = []
@@ -112,18 +120,21 @@ class IMessageConfig(BaseModel):
 
 class WeChatPersonalConfig(BaseModel):
     """WeChat Personal (iLink) configuration."""
+
     enabled: bool = False
     bot_token: Optional[str] = None  # iLink Bot Token
-    bot_id: Optional[str] = None     # iLink Bot ID
+    bot_id: Optional[str] = None  # iLink Bot ID
 
 
 class IMServiceStatus(BaseModel):
     """IM service status."""
+
     running: bool = False
 
 
 class IMConfig(BaseModel):
     """Complete IM configuration (backward compatible)."""
+
     feishu: FeishuConfig = FeishuConfig()
     dingtalk: DingTalkConfig = DingTalkConfig()
     wechat_work: WeChatWorkConfig = WeChatWorkConfig()  # 企业微信配置
@@ -136,14 +147,19 @@ class IMConfig(BaseModel):
 # New Agent-level Configuration Models
 # ============================================================================
 
+
 class ProviderConfigRequest(BaseModel):
     """Request model for saving provider configuration."""
+
     enabled: bool = Field(default=False, description="Whether this channel is enabled")
-    config: Dict[str, Any] = Field(default_factory=dict, description="Provider-specific configuration")
+    config: Dict[str, Any] = Field(
+        default_factory=dict, description="Provider-specific configuration"
+    )
 
 
 class ProviderConfigResponse(BaseModel):
     """Response model for provider configuration."""
+
     provider: str = Field(..., description="Provider type")
     enabled: bool = Field(..., description="Whether this channel is enabled")
     config: Dict[str, Any] = Field(..., description="Provider-specific configuration")
@@ -153,15 +169,21 @@ class ProviderConfigResponse(BaseModel):
 
 class AgentChannelsResponse(BaseModel):
     """Response model for all channels of an agent."""
+
     agent_id: str = Field(..., description="Agent identifier")
-    channels: Dict[str, ProviderConfigResponse] = Field(..., description="All configured channels")
+    channels: Dict[str, ProviderConfigResponse] = Field(
+        ..., description="All configured channels"
+    )
 
 
 class TestConnectionResponse(BaseModel):
     """Response model for connection test."""
+
     success: bool = Field(..., description="Whether the test was successful")
     message: str = Field(..., description="Test result message")
-    details: Optional[Dict[str, Any]] = Field(None, description="Additional test details")
+    details: Optional[Dict[str, Any]] = Field(
+        None, description="Additional test details"
+    )
 
 
 # Router
@@ -175,29 +197,29 @@ async def get_im_config():
     try:
         dao = IMChannelConfigDao()
         logger.info("[IM] DAO created")
-        
+
         # Get all configs for default user
         all_configs = await dao.get_all_configs(sage_user_id=DEFAULT_SAGE_USER_ID)
         logger.info(f"[IM] Retrieved {len(all_configs)} provider configs")
-        
+
         # Build response
         result = {
             "feishu": all_configs.get("feishu", {}),
             "dingtalk": all_configs.get("dingtalk", {}),
             "wechat_work": all_configs.get("wechat_work", {}),
             "imessage": all_configs.get("imessage", {}),
-            "service": {"running": False}  # TODO: get actual service status
+            "service": {"running": False},  # TODO: get actual service status
         }
-        
+
         logger.info("[IM] Returning config from database:")
         logger.info(f"[IM]   feishu: {result['feishu']}")
         logger.info(f"[IM]   dingtalk: {result['dingtalk']}")
         logger.info(f"[IM]   wechat_work: {result['wechat_work']}")
         logger.info(f"[IM]   imessage: {result['imessage']}")
         logger.info("[IM] ========== END GET /api/im/config ==========")
-        
+
         return await Response.succ(data=result, message="获取配置成功")
-        
+
     except Exception as e:
         logger.error("[IM] ========== ERROR GET /api/im/config ==========")
         logger.error(f"[IM] Failed to get config: {e}", exc_info=True)
@@ -226,9 +248,11 @@ async def save_im_config(config: IMConfig):
         enabled_providers = []
         for provider_type, provider_config in providers:
             logger.info(f"[IM] Saving {provider_type} config: {provider_config}")
-            await dao.save_config(provider_type, provider_config, sage_user_id=DEFAULT_SAGE_USER_ID)
+            await dao.save_config(
+                provider_type, provider_config, sage_user_id=DEFAULT_SAGE_USER_ID
+            )
             logger.info(f"[IM] {provider_type} config saved to database")
-            if provider_config.get('enabled', False):
+            if provider_config.get("enabled", False):
                 enabled_providers.append(provider_type)
 
         logger.info("[IM] All configs saved successfully")
@@ -236,15 +260,16 @@ async def save_im_config(config: IMConfig):
         # Also save to IM Server DB for multi-tenant support
         try:
             from mcp_servers.im_server.db import get_im_db
+
             im_db = get_im_db()
-            
+
             for provider_type, provider_config in providers:
                 # Save to IM server DB with default user ID
                 im_db.save_user_config(
                     sage_user_id=DEFAULT_SAGE_USER_ID,
                     provider=provider_type,
                     config=provider_config,
-                    enabled=provider_config.get('enabled', False)
+                    enabled=provider_config.get("enabled", False),
                 )
                 logger.info(f"[IM] {provider_type} config saved to IM server DB")
         except Exception as e:
@@ -255,27 +280,29 @@ async def save_im_config(config: IMConfig):
         try:
             import asyncio
             from mcp_servers.im_server.service_manager import get_service_manager
-            
+
             manager = get_service_manager()
-            
+
             # Start service manager if not running
             await manager.start()
-            
+
             # Process each provider: start if enabled, stop if disabled
             for provider_type, provider_config in providers:
-                is_enabled = provider_config.get('enabled', False)
-                
+                is_enabled = provider_config.get("enabled", False)
+
                 if is_enabled:
                     # Start enabled channel
                     logger.info(f"[IM] Starting {provider_type} channel...")
-                    asyncio.create_task(manager.start_channel(DEFAULT_SAGE_USER_ID, provider_type))
+                    asyncio.create_task(
+                        manager.start_channel(DEFAULT_SAGE_USER_ID, provider_type)
+                    )
                     logger.info(f"[IM] {provider_type} channel started")
                 else:
                     # Stop disabled channel
                     logger.info(f"[IM] Stopping {provider_type} channel (disabled)...")
                     await manager.stop_channel(DEFAULT_SAGE_USER_ID, provider_type)
                     logger.info(f"[IM] {provider_type} channel stopped")
-            
+
             logger.info("[IM] IM service channels managed successfully")
         except Exception as e:
             logger.error(f"[IM] Failed to manage IM service channels: {e}")
@@ -296,13 +323,13 @@ async def save_im_config(config: IMConfig):
 async def get_im_service_status():
     """Get IM service status."""
     logger.info("[IM] GET /api/im/service/status")
-    
+
     try:
         from mcp_servers.im_server.service_manager import get_service_manager
-        
+
         manager = get_service_manager()
         channels = manager.list_user_channels(DEFAULT_SAGE_USER_ID)
-        
+
         # Build status response
         providers_status = {
             "feishu": {"enabled": False, "connected": False, "status": "inactive"},
@@ -310,41 +337,58 @@ async def get_im_service_status():
             "wechat_work": {"enabled": False, "connected": False, "status": "inactive"},
             "imessage": {"enabled": False, "connected": False, "status": "inactive"},
         }
-        
+
         any_running = False
         for channel in channels:
-            provider = channel.get('provider_type')
+            provider = channel.get("provider_type")
             if provider in providers_status:
                 providers_status[provider] = {
-                    "enabled": channel.get('is_enabled', False),
-                    "connected": channel.get('status') == 'connected',
-                    "status": channel.get('status', 'inactive'),
-                    "error": channel.get('error_message')
+                    "enabled": channel.get("is_enabled", False),
+                    "connected": channel.get("status") == "connected",
+                    "status": channel.get("status", "inactive"),
+                    "error": channel.get("error_message"),
                 }
-                if channel.get('status') in ['connected', 'connecting']:
+                if channel.get("status") in ["connected", "connecting"]:
                     any_running = True
-        
+
         return await Response.succ(
-            data={
-                "running": any_running,
-                "providers": providers_status
-            },
-            message="获取服务状态成功"
+            data={"running": any_running, "providers": providers_status},
+            message="获取服务状态成功",
         )
-        
+
     except Exception as e:
         logger.error(f"[IM] Failed to get service status: {e}")
         return await Response.succ(
             data={
                 "running": False,
                 "providers": {
-                    "feishu": {"enabled": False, "connected": False, "status": "error", "error": str(e)},
-                    "dingtalk": {"enabled": False, "connected": False, "status": "error", "error": str(e)},
-                    "wechat_work": {"enabled": False, "connected": False, "status": "error", "error": str(e)},
-                    "imessage": {"enabled": False, "connected": False, "status": "error", "error": str(e)},
-                }
+                    "feishu": {
+                        "enabled": False,
+                        "connected": False,
+                        "status": "error",
+                        "error": str(e),
+                    },
+                    "dingtalk": {
+                        "enabled": False,
+                        "connected": False,
+                        "status": "error",
+                        "error": str(e),
+                    },
+                    "wechat_work": {
+                        "enabled": False,
+                        "connected": False,
+                        "status": "error",
+                        "error": str(e),
+                    },
+                    "imessage": {
+                        "enabled": False,
+                        "connected": False,
+                        "status": "error",
+                        "error": str(e),
+                    },
+                },
             },
-            message="获取服务状态失败"
+            message="获取服务状态失败",
         )
 
 
@@ -352,15 +396,15 @@ async def get_im_service_status():
 async def start_im_service():
     """Start IM service."""
     logger.info("[IM] POST /api/im/service/start")
-    
+
     try:
         from mcp_servers.im_server.service_manager import get_service_manager
-        
+
         manager = get_service_manager()
         await manager.start()
-        
+
         return await Response.succ(message="IM服务已启动")
-        
+
     except Exception as e:
         logger.error(f"[IM] Failed to start service: {e}")
         return await Response.error(code=500, message=f"启动IM服务失败: {str(e)}")
@@ -370,15 +414,15 @@ async def start_im_service():
 async def stop_im_service():
     """Stop IM service."""
     logger.info("[IM] POST /api/im/service/stop")
-    
+
     try:
         from mcp_servers.im_server.service_manager import get_service_manager
-        
+
         manager = get_service_manager()
         await manager.stop()
-        
+
         return await Response.succ(message="IM服务已停止")
-        
+
     except Exception as e:
         logger.error(f"[IM] Failed to stop service: {e}")
         return await Response.error(code=500, message=f"停止IM服务失败: {str(e)}")
@@ -388,21 +432,25 @@ async def stop_im_service():
 async def restart_im_channel(provider_type: str):
     """Restart specific IM channel."""
     logger.info(f"[IM] POST /api/im/channels/{provider_type}/restart")
-    
+
     try:
         from mcp_servers.im_server.service_manager import get_service_manager
-        
+
         manager = get_service_manager()
         result = await manager.restart_channel(DEFAULT_SAGE_USER_ID, provider_type)
-        
+
         if result:
             return await Response.succ(message=f"{provider_type}渠道已重启")
         else:
-            return await Response.error(code=500, message=f"重启{provider_type}渠道失败")
-        
+            return await Response.error(
+                code=500, message=f"重启{provider_type}渠道失败"
+            )
+
     except Exception as e:
         logger.error(f"[IM] Failed to restart channel: {e}")
         return await Response.error(code=500, message=f"重启渠道失败: {str(e)}")
+
+
 # Append to the end of app/desktop/core/routers/im.py
 
 
@@ -410,48 +458,53 @@ async def restart_im_channel(provider_type: str):
 # New Agent-level IM Configuration API
 # ============================================================================
 
+
 @im_router.get("/agent/{agent_id}/im_channels")
-async def get_agent_im_channels(agent_id: str = FastApiPath(..., description="Agent ID")):
+async def get_agent_im_channels(
+    agent_id: str = FastApiPath(..., description="Agent ID"),
+):
     """
     Get all IM channel configurations for an Agent.
-    
+
     Returns the complete IM channel configuration for the specified Agent.
     Note: iMessage is only returned for the default Agent.
     """
     logger.info(f"[IM Agent] GET /api/agent/{agent_id}/im_channels")
-    
+
     try:
         # Get Agent IM Config
         agent_config = get_agent_im_config(agent_id)
         channels = agent_config.get_all_channels()
-        
+
         # Check if this is the default agent
         is_default = await is_agent_default_async(agent_id)
-        
+
         # Convert to response format
         result_channels = {}
         for provider, channel_data in channels.items():
             # Skip iMessage for non-default agents
             if provider == IMESSAGE_PROVIDER and not is_default:
-                logger.debug(f"[IM Agent] Hiding iMessage config for non-default agent={agent_id}")
+                logger.debug(
+                    f"[IM Agent] Hiding iMessage config for non-default agent={agent_id}"
+                )
                 continue
-            
+
             result_channels[provider] = ProviderConfigResponse(
                 provider=provider,
                 enabled=channel_data.get("enabled", False),
                 config=channel_data.get("config", {}),
-                updated_at=channel_data.get("updated_at")
+                updated_at=channel_data.get("updated_at"),
             )
-        
+
         return await Response.succ(
             data={
                 "agent_id": agent_id,
                 "is_default": is_default,
-                "channels": result_channels
+                "channels": result_channels,
             },
-            message="获取成功"
+            message="获取成功",
         )
-        
+
     except Exception as e:
         logger.error(f"[IM Agent] Failed to get channels: {e}", exc_info=True)
         return await Response.error(code=500, message=f"获取配置失败: {str(e)}")
@@ -460,58 +513,72 @@ async def get_agent_im_channels(agent_id: str = FastApiPath(..., description="Ag
 @im_router.post("/agent/{agent_id}/im_channels")
 async def save_agent_im_channels(
     agent_id: str = FastApiPath(..., description="Agent ID"),
-    channels: Dict[str, ProviderConfigRequest] = None
+    channels: Dict[str, ProviderConfigRequest] = None,
 ):
     """
     Save all IM channel configurations for an Agent.
-    
+
     Replaces the entire channel configuration for the Agent.
     Auto-restarts enabled channels after saving.
     """
     logger.info(f"[IM Agent] POST /api/agent/{agent_id}/im_channels")
-    
+
     if channels is None:
         channels = {}
-    
+
     try:
         agent_config = get_agent_im_config(agent_id)
         results = []
         restarted = []
-        
+
         for provider, config_request in channels.items():
             # Validate (especially for iMessage)
             try:
-                await validate_provider_config_async(agent_id, provider, config_request.config, config_request.enabled)
-                
+                await validate_provider_config_async(
+                    agent_id, provider, config_request.config, config_request.enabled
+                )
+
                 # Check for duplicate provider ID (bot_id/client_id/app_id) across agents
                 if config_request.enabled:
-                    from mcp_servers.im_server.agent_config import find_agent_by_provider_id
-                    
+                    from mcp_servers.im_server.agent_config import (
+                        find_agent_by_provider_id,
+                    )
+
                     id_field_map = {
                         "wechat_work": "bot_id",
                         "dingtalk": "client_id",
-                        "feishu": "app_id"
+                        "feishu": "app_id",
                     }
                     id_field = id_field_map.get(provider)
-                    
+
                     if id_field and config_request.config:
                         id_value = config_request.config.get(id_field)
                         if id_value:
-                            existing_agent = find_agent_by_provider_id(provider, id_value, exclude_agent_id=agent_id)
+                            existing_agent = find_agent_by_provider_id(
+                                provider, id_value, exclude_agent_id=agent_id
+                            )
                             if existing_agent:
                                 error_msg = f"{provider} 的 {id_field} '{id_value}' 已被 Agent '{existing_agent}' 使用，不能重复配置"
-                                logger.warning(f"[IM Agent] Duplicate {provider} {id_field} detected: {id_value} "
-                                             f"between agents {agent_id} and {existing_agent}")
-                                results.append({"provider": provider, "status": "skipped", "error": error_msg})
+                                logger.warning(
+                                    f"[IM Agent] Duplicate {provider} {id_field} detected: {id_value} "
+                                    f"between agents {agent_id} and {existing_agent}"
+                                )
+                                results.append(
+                                    {
+                                        "provider": provider,
+                                        "status": "skipped",
+                                        "error": error_msg,
+                                    }
+                                )
                                 continue
-                
+
                 # Save config
                 success = agent_config.set_provider_config(
                     provider=provider,
                     enabled=config_request.enabled,
-                    config=config_request.config
+                    config=config_request.config,
                 )
-                
+
                 if success:
                     # Check if config actually changed
                     old_config = agent_config.get_provider_config(provider)
@@ -520,53 +587,78 @@ async def save_agent_im_channels(
                         config_changed = True
                     else:
                         config_changed = (
-                            old_config.get('enabled') != config_request.enabled or
-                            old_config.get('config') != config_request.config
+                            old_config.get("enabled") != config_request.enabled
+                            or old_config.get("config") != config_request.config
                         )
-                    
+
                     if config_changed:
                         results.append({"provider": provider, "status": "saved"})
-                        logger.info(f"[IM Agent] Saved {provider} config for agent={agent_id}")
+                        logger.info(
+                            f"[IM Agent] Saved {provider} config for agent={agent_id}"
+                        )
                     else:
                         results.append({"provider": provider, "status": "unchanged"})
-                        logger.info(f"[IM Agent] {provider} config unchanged for agent={agent_id}")
-                    
+                        logger.info(
+                            f"[IM Agent] {provider} config unchanged for agent={agent_id}"
+                        )
+
                     # Auto-restart/stop channels based on enabled status
                     if config_changed:
                         try:
-                            from mcp_servers.im_server.service_manager import get_service_manager
+                            from mcp_servers.im_server.service_manager import (
+                                get_service_manager,
+                            )
+
                             manager = get_service_manager()
-                            
+
                             if config_request.enabled:
                                 # Start/restart channel
-                                restart_result = await manager.restart_channel(agent_id, provider)
+                                restart_result = await manager.restart_channel(
+                                    agent_id, provider
+                                )
                                 if restart_result:
                                     restarted.append(provider)
-                                    logger.info(f"[IM Agent] Auto-restarted {provider} channel for agent={agent_id}")
+                                    logger.info(
+                                        f"[IM Agent] Auto-restarted {provider} channel for agent={agent_id}"
+                                    )
                             else:
                                 # Stop channel when disabled
-                                stop_result = await manager.stop_channel(agent_id, provider)
+                                stop_result = await manager.stop_channel(
+                                    agent_id, provider
+                                )
                                 if stop_result:
                                     restarted.append(f"{provider}(stopped)")
-                                    logger.info(f"[IM Agent] Auto-stopped {provider} channel for agent={agent_id}")
+                                    logger.info(
+                                        f"[IM Agent] Auto-stopped {provider} channel for agent={agent_id}"
+                                    )
                         except Exception as e:
-                            logger.warning(f"[IM Agent] Failed to auto-manage {provider} channel: {e}")
+                            logger.warning(
+                                f"[IM Agent] Failed to auto-manage {provider} channel: {e}"
+                            )
                 else:
-                    results.append({"provider": provider, "status": "failed", "error": "Save failed"})
-                    
+                    results.append(
+                        {
+                            "provider": provider,
+                            "status": "failed",
+                            "error": "Save failed",
+                        }
+                    )
+
             except ValueError as ve:
                 logger.warning(f"[IM Agent] Validation failed for {provider}: {ve}")
-                results.append({"provider": provider, "status": "skipped", "error": str(ve)})
-        
+                results.append(
+                    {"provider": provider, "status": "skipped", "error": str(ve)}
+                )
+
         msg = f"已保存 {len([r for r in results if r['status'] == 'saved'])} 个配置"
         if restarted:
             msg += f"，已重启 {', '.join(restarted)} 渠道"
-        
+
         return await Response.succ(
             data={"agent_id": agent_id, "results": results, "restarted": restarted},
-            message=msg
+            message=msg,
         )
-        
+
     except Exception as e:
         logger.error(f"[IM Agent] Failed to save channels: {e}", exc_info=True)
         return await Response.error(code=500, message=f"保存配置失败: {str(e)}")
@@ -575,15 +667,17 @@ async def save_agent_im_channels(
 @im_router.get("/agent/{agent_id}/im_channels/{provider}")
 async def get_agent_im_channel(
     agent_id: str = FastApiPath(..., description="Agent ID"),
-    provider: str = FastApiPath(..., description="Provider type (wechat_work, dingtalk, feishu, imessage)")
+    provider: str = FastApiPath(
+        ..., description="Provider type (wechat_work, dingtalk, feishu, imessage)"
+    ),
 ):
     """Get specific IM channel configuration for an Agent."""
     logger.info(f"[IM Agent] GET /api/agent/{agent_id}/im_channels/{provider}")
-    
+
     try:
         agent_config = get_agent_im_config(agent_id)
         config = agent_config.get_provider_config(provider)
-        
+
         if config is None:
             # Channel not configured or disabled
             all_channels = agent_config.get_all_channels()
@@ -594,23 +688,19 @@ async def get_agent_im_channel(
                         provider=provider,
                         enabled=channel_data.get("enabled", False),
                         config=channel_data.get("config", {}),
-                        updated_at=channel_data.get("updated_at")
+                        updated_at=channel_data.get("updated_at"),
                     ),
-                    message="获取成功"
+                    message="获取成功",
                 )
             else:
                 return await Response.error(code=404, message=f"未找到 {provider} 配置")
-        
+
         # Channel is enabled
         return await Response.succ(
-            data=ProviderConfigResponse(
-                provider=provider,
-                enabled=True,
-                config=config
-            ),
-            message="获取成功"
+            data=ProviderConfigResponse(provider=provider, enabled=True, config=config),
+            message="获取成功",
         )
-        
+
     except Exception as e:
         logger.error(f"[IM Agent] Failed to get channel: {e}", exc_info=True)
         return await Response.error(code=500, message=f"获取配置失败: {str(e)}")
@@ -620,40 +710,46 @@ async def get_agent_im_channel(
 async def update_agent_im_channel(
     agent_id: str = FastApiPath(..., description="Agent ID"),
     provider: str = FastApiPath(..., description="Provider type"),
-    config_request: ProviderConfigRequest = None
+    config_request: ProviderConfigRequest = None,
 ):
     """
     Update specific IM channel configuration for an Agent.
-    
+
     Creates new config if not exists, updates existing config.
     Validates iMessage restriction (only default agent).
     """
     logger.info(f"[IM Agent] PUT /api/agent/{agent_id}/im_channels/{provider}")
-    
+
     if config_request is None:
         return await Response.error(code=400, message="请求体不能为空")
-    
+
     try:
         # Validate (especially for iMessage)
-        await validate_provider_config_async(agent_id, provider, config_request.config, config_request.enabled)
-        
+        await validate_provider_config_async(
+            agent_id, provider, config_request.config, config_request.enabled
+        )
+
         # Save config
         agent_config = get_agent_im_config(agent_id)
         success = agent_config.set_provider_config(
             provider=provider,
             enabled=config_request.enabled,
-            config=config_request.config
+            config=config_request.config,
         )
-        
+
         if success:
             logger.info(f"[IM Agent] Updated {provider} config for agent={agent_id}")
             return await Response.succ(
-                data={"agent_id": agent_id, "provider": provider, "enabled": config_request.enabled},
-                message="保存成功"
+                data={
+                    "agent_id": agent_id,
+                    "provider": provider,
+                    "enabled": config_request.enabled,
+                },
+                message="保存成功",
             )
         else:
             return await Response.error(code=500, message="保存失败")
-            
+
     except ValueError as ve:
         logger.warning(f"[IM Agent] Validation failed: {ve}")
         return await Response.error(code=403, message=str(ve))
@@ -665,21 +761,21 @@ async def update_agent_im_channel(
 @im_router.delete("/agent/{agent_id}/im_channels/{provider}")
 async def delete_agent_im_channel(
     agent_id: str = FastApiPath(..., description="Agent ID"),
-    provider: str = FastApiPath(..., description="Provider type")
+    provider: str = FastApiPath(..., description="Provider type"),
 ):
     """Delete specific IM channel configuration for an Agent."""
     logger.info(f"[IM Agent] DELETE /api/agent/{agent_id}/im_channels/{provider}")
-    
+
     try:
         agent_config = get_agent_im_config(agent_id)
         success = agent_config.remove_provider(provider)
-        
+
         if success:
             logger.info(f"[IM Agent] Deleted {provider} config for agent={agent_id}")
             return await Response.succ(message="删除成功")
         else:
             return await Response.error(code=500, message="删除失败")
-            
+
     except Exception as e:
         logger.error(f"[IM Agent] Failed to delete channel: {e}", exc_info=True)
         return await Response.error(code=500, message=f"删除失败: {str(e)}")
@@ -687,23 +783,26 @@ async def delete_agent_im_channel(
 
 class TestConnectionRequest(BaseModel):
     """Request model for testing connection with provided config."""
-    config: Optional[Dict[str, Any]] = Field(None, description="Provider configuration to test")
+
+    config: Optional[Dict[str, Any]] = Field(
+        None, description="Provider configuration to test"
+    )
 
 
 @im_router.post("/agent/{agent_id}/im_channels/{provider}/test")
 async def test_agent_im_connection(
     request: TestConnectionRequest,
     agent_id: str = FastApiPath(..., description="Agent ID"),
-    provider: str = FastApiPath(..., description="Provider type")
+    provider: str = FastApiPath(..., description="Provider type"),
 ):
     """
     Test IM connection for an Agent.
-    
+
     Attempts to connect to the IM provider using the provided configuration
     or stored configuration and returns connection test result.
     """
     logger.info(f"[IM Agent] POST /api/agent/{agent_id}/im_channels/{provider}/test")
-    
+
     try:
         # Get config: use provided config if available, otherwise use stored config
         if request.config:
@@ -712,229 +811,231 @@ async def test_agent_im_connection(
         else:
             agent_config = get_agent_im_config(agent_id)
             config = agent_config.get_provider_config(provider)
-            
+
         if not config:
             return await Response.error(
-                code=404, 
-                message=f"未找到 {provider} 配置或配置未启用，请先保存配置或传入配置参数"
+                code=404,
+                message=f"未找到 {provider} 配置或配置未启用，请先保存配置或传入配置参数",
             )
-        
+
         # Test connection based on provider type
         if provider == "wechat_work":
             # Test WeChat Work connection using temporary WebSocket connection
             import asyncio
             import websockets
             import json
-            
+
             bot_id = config.get("bot_id")
             secret = config.get("secret")
-            
+
             if not bot_id or not secret:
                 return await Response.succ(
                     data=TestConnectionResponse(
-                        success=False,
-                        message="缺少 BotID 或 Secret 配置",
-                        details={}
+                        success=False, message="缺少 BotID 或 Secret 配置", details={}
                     ),
-                    message="配置不完整"
+                    message="配置不完整",
                 )
-            
+
             try:
                 # Use temporary WebSocket connection to test credentials
                 ws_url = "wss://openws.work.weixin.qq.com"
-                
+
                 async def test_wechat_connection():
                     async with websockets.connect(ws_url, ping_interval=None) as ws:
                         # Send subscribe request
                         subscribe_msg = {
                             "cmd": "aibot_subscribe",
-                            "headers": {"req_id": str(__import__('uuid').uuid4())},
-                            "body": {"bot_id": bot_id, "secret": secret}
+                            "headers": {"req_id": str(__import__("uuid").uuid4())},
+                            "body": {"bot_id": bot_id, "secret": secret},
                         }
                         await ws.send(json.dumps(subscribe_msg))
-                        
+
                         # Wait for subscribe response
                         response = await asyncio.wait_for(ws.recv(), timeout=10)
                         data = json.loads(response)
-                        
+
                         return data.get("errcode", -1), data.get("errmsg", "未知错误")
-                
-                errcode, errmsg = await asyncio.wait_for(test_wechat_connection(), timeout=15)
-                
+
+                errcode, errmsg = await asyncio.wait_for(
+                    test_wechat_connection(), timeout=15
+                )
+
                 if errcode == 0:
                     return await Response.succ(
                         data=TestConnectionResponse(
                             success=True,
                             message="企业微信连接测试成功",
-                            details={"bot_id": bot_id}
+                            details={"bot_id": bot_id},
                         ),
-                        message="连接测试成功"
+                        message="连接测试成功",
                     )
                 elif errcode == 40014:
                     return await Response.succ(
                         data=TestConnectionResponse(
                             success=False,
                             message="BotID 或 Secret 无效，请检查配置",
-                            details={"error": errmsg, "errcode": errcode}
+                            details={"error": errmsg, "errcode": errcode},
                         ),
-                        message="连接测试失败"
+                        message="连接测试失败",
                     )
                 else:
                     return await Response.succ(
                         data=TestConnectionResponse(
                             success=False,
                             message=f"连接测试失败: {errmsg} (错误码: {errcode})",
-                            details={"errcode": errcode}
+                            details={"errcode": errcode},
                         ),
-                        message="连接测试失败"
+                        message="连接测试失败",
                     )
-                    
+
             except asyncio.TimeoutError:
                 logger.error("[IM Agent] WeChat Work test connection timeout")
                 return await Response.succ(
                     data=TestConnectionResponse(
-                        success=False,
-                        message="连接超时，请检查网络连接",
-                        details={}
+                        success=False, message="连接超时，请检查网络连接", details={}
                     ),
-                    message="连接测试失败"
+                    message="连接测试失败",
                 )
             except Exception as e:
                 logger.error(f"[IM Agent] WeChat Work test failed: {e}", exc_info=True)
                 return await Response.succ(
                     data=TestConnectionResponse(
-                        success=False,
-                        message=f"连接测试失败: {str(e)}",
-                        details={}
+                        success=False, message=f"连接测试失败: {str(e)}", details={}
                     ),
-                    message="连接测试失败"
+                    message="连接测试失败",
                 )
-        
+
         elif provider == "dingtalk":
             # Test DingTalk connection by getting access token
             import httpx
-            
+
             client_id = config.get("client_id") or config.get("app_key")
             client_secret = config.get("client_secret") or config.get("app_secret")
-            
+
             if not client_id or not client_secret:
                 return await Response.succ(
                     data=TestConnectionResponse(
                         success=False,
                         message="缺少 Client ID 或 Client Secret 配置",
-                        details={}
+                        details={},
                     ),
-                    message="配置不完整"
+                    message="配置不完整",
                 )
-            
+
             try:
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     resp = await client.get(
                         "https://oapi.dingtalk.com/gettoken",
-                        params={"appkey": client_id, "appsecret": client_secret}
+                        params={"appkey": client_id, "appsecret": client_secret},
                     )
                     data = resp.json()
-                    
+
                     if data.get("errcode") == 0:
                         access_token = data.get("access_token")
                         expires_in = data.get("expires_in")
-                        
+
                         return await Response.succ(
                             data=TestConnectionResponse(
                                 success=True,
                                 message="钉钉连接测试成功，凭证有效",
                                 details={
                                     "client_id": client_id,
-                                    "token_expire": f"{expires_in}秒" if expires_in else "未知",
-                                    "token_preview": access_token[:10] + "..." if access_token else None
-                                }
+                                    "token_expire": f"{expires_in}秒"
+                                    if expires_in
+                                    else "未知",
+                                    "token_preview": access_token[:10] + "..."
+                                    if access_token
+                                    else None,
+                                },
                             ),
-                            message="连接测试成功"
+                            message="连接测试成功",
                         )
                     elif data.get("errcode") == 40089:
                         return await Response.succ(
                             data=TestConnectionResponse(
                                 success=False,
                                 message="Client Secret 无效，请检查配置",
-                                details={"error": data.get("errmsg"), "errcode": data.get("errcode")}
+                                details={
+                                    "error": data.get("errmsg"),
+                                    "errcode": data.get("errcode"),
+                                },
                             ),
-                            message="连接测试失败"
+                            message="连接测试失败",
                         )
                     elif data.get("errcode") == 40014:
                         return await Response.succ(
                             data=TestConnectionResponse(
                                 success=False,
                                 message="Client ID 无效，请检查配置",
-                                details={"error": data.get("errmsg"), "errcode": data.get("errcode")}
+                                details={
+                                    "error": data.get("errmsg"),
+                                    "errcode": data.get("errcode"),
+                                },
                             ),
-                            message="连接测试失败"
+                            message="连接测试失败",
                         )
                     else:
                         return await Response.succ(
                             data=TestConnectionResponse(
                                 success=False,
                                 message=f"连接测试失败: {data.get('errmsg', '未知错误')} (错误码: {data.get('errcode')})",
-                                details={"errcode": data.get("errcode")}
+                                details={"errcode": data.get("errcode")},
                             ),
-                            message="连接测试失败"
+                            message="连接测试失败",
                         )
-                        
+
             except httpx.TimeoutException:
                 logger.error("[IM Agent] DingTalk test connection timeout")
                 return await Response.succ(
                     data=TestConnectionResponse(
-                        success=False,
-                        message="连接超时，请检查网络连接",
-                        details={}
+                        success=False, message="连接超时，请检查网络连接", details={}
                     ),
-                    message="连接测试失败"
+                    message="连接测试失败",
                 )
             except Exception as e:
                 logger.error(f"[IM Agent] DingTalk test failed: {e}", exc_info=True)
                 return await Response.succ(
                     data=TestConnectionResponse(
-                        success=False,
-                        message=f"连接测试失败: {str(e)}",
-                        details={}
+                        success=False, message=f"连接测试失败: {str(e)}", details={}
                     ),
-                    message="连接测试失败"
+                    message="连接测试失败",
                 )
-        
+
         elif provider == "feishu":
             # Test Feishu connection by getting access token
             import httpx
-            
+
             app_id = config.get("app_id")
             app_secret = config.get("app_secret")
-            
+
             if not app_id or not app_secret:
                 return await Response.succ(
                     data=TestConnectionResponse(
                         success=False,
                         message="缺少 App ID 或 App Secret 配置",
-                        details={}
+                        details={},
                     ),
-                    message="配置不完整"
+                    message="配置不完整",
                 )
-            
+
             try:
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     resp = await client.post(
                         "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-                        json={"app_id": app_id, "app_secret": app_secret}
+                        json={"app_id": app_id, "app_secret": app_secret},
                     )
                     data = resp.json()
-                    
+
                     if data.get("code") == 0:
                         # Also try to get app info to verify permissions
                         token = data.get("tenant_access_token")
                         try:
                             info_resp = await client.get(
                                 "https://open.feishu.cn/open-apis/application/v3/apps/",
-                                headers={"Authorization": f"Bearer {token}"}
+                                headers={"Authorization": f"Bearer {token}"},
                             )
-                            info_data = info_resp.json()
-                            
+                            info_resp.json()
+
                             return await Response.succ(
                                 data=TestConnectionResponse(
                                     success=True,
@@ -942,10 +1043,12 @@ async def test_agent_im_connection(
                                     details={
                                         "app_id": app_id,
                                         "expire": data.get("expire"),
-                                        "token_preview": token[:10] + "..." if token else None
-                                    }
+                                        "token_preview": token[:10] + "..."
+                                        if token
+                                        else None,
+                                    },
                                 ),
-                                message="连接测试成功"
+                                message="连接测试成功",
                             )
                         except Exception as e:
                             # Token works but can't get app info (permissions may be insufficient)
@@ -955,100 +1058,102 @@ async def test_agent_im_connection(
                                     message="飞书凭证验证成功，但应用信息查询失败（可能需要添加权限）",
                                     details={
                                         "app_id": app_id,
-                                        "token_preview": token[:10] + "..." if token else None,
-                                        "warning": str(e)
-                                    }
+                                        "token_preview": token[:10] + "..."
+                                        if token
+                                        else None,
+                                        "warning": str(e),
+                                    },
                                 ),
-                                message="连接测试成功（有警告）"
+                                message="连接测试成功（有警告）",
                             )
                     elif data.get("code") == 10003:
                         return await Response.succ(
                             data=TestConnectionResponse(
                                 success=False,
                                 message="App ID 无效，请检查配置",
-                                details={"error": data.get("msg"), "code": data.get("code")}
+                                details={
+                                    "error": data.get("msg"),
+                                    "code": data.get("code"),
+                                },
                             ),
-                            message="连接测试失败"
+                            message="连接测试失败",
                         )
                     elif data.get("code") == 10012:
                         return await Response.succ(
                             data=TestConnectionResponse(
                                 success=False,
                                 message="App Secret 无效，请检查配置",
-                                details={"error": data.get("msg"), "code": data.get("code")}
+                                details={
+                                    "error": data.get("msg"),
+                                    "code": data.get("code"),
+                                },
                             ),
-                            message="连接测试失败"
+                            message="连接测试失败",
                         )
                     else:
                         return await Response.succ(
                             data=TestConnectionResponse(
                                 success=False,
                                 message=f"连接测试失败: {data.get('msg', '未知错误')} (错误码: {data.get('code')})",
-                                details={"code": data.get("code")}
+                                details={"code": data.get("code")},
                             ),
-                            message="连接测试失败"
+                            message="连接测试失败",
                         )
-                        
+
             except httpx.TimeoutException:
                 logger.error("[IM Agent] Feishu test connection timeout")
                 return await Response.succ(
                     data=TestConnectionResponse(
-                        success=False,
-                        message="连接超时，请检查网络连接",
-                        details={}
+                        success=False, message="连接超时，请检查网络连接", details={}
                     ),
-                    message="连接测试失败"
+                    message="连接测试失败",
                 )
             except Exception as e:
                 logger.error(f"[IM Agent] Feishu test failed: {e}", exc_info=True)
                 return await Response.succ(
                     data=TestConnectionResponse(
-                        success=False,
-                        message=f"连接测试失败: {str(e)}",
-                        details={}
+                        success=False, message=f"连接测试失败: {str(e)}", details={}
                     ),
-                    message="连接测试失败"
+                    message="连接测试失败",
                 )
-        
+
         elif provider == "imessage":
             # iMessage doesn't need connection test (uses local database)
             return await Response.succ(
                 data=TestConnectionResponse(
                     success=True,
                     message="iMessage 配置正确（本地模式无需连接测试）",
-                    details={"mode": "database_poll"}
+                    details={"mode": "database_poll"},
                 ),
-                message="配置检查通过"
+                message="配置检查通过",
             )
-        
+
         elif provider == "wechat_personal":
             # Test WeChat Personal (iLink) connection
             # iLink uses long polling, so we just validate token format and presence
-            
+
             bot_token = config.get("bot_token")
             bot_id = config.get("bot_id")
-            
+
             if not bot_token:
                 return await Response.succ(
                     data=TestConnectionResponse(
-                        success=False,
-                        message="缺少 Bot Token 配置",
-                        details={}
+                        success=False, message="缺少 Bot Token 配置", details={}
                     ),
-                    message="配置不完整"
+                    message="配置不完整",
                 )
-            
+
             # Validate token format (iLink tokens typically look like: xxx@im.bot:hash)
             if "@im.bot:" not in bot_token:
                 return await Response.succ(
                     data=TestConnectionResponse(
                         success=False,
                         message="Bot Token 格式不正确，请检查是否复制完整",
-                        details={}
+                        details={},
                     ),
-                    message="配置格式错误"
+                    message="配置格式错误",
                 )
-            
+
             # Since iLink uses long polling which causes timeout, we consider the config valid
             # if token format is correct. The actual connection will be tested when channel starts.
             return await Response.succ(
@@ -1057,15 +1162,19 @@ async def test_agent_im_connection(
                     message="微信个人号配置格式正确（Token 已保存，启动后将自动连接）",
                     details={
                         "bot_id": bot_id,
-                        "token_preview": bot_token[:20] + "..." if len(bot_token) > 20 else bot_token
-                    }
+                        "token_preview": bot_token[:20] + "..."
+                        if len(bot_token) > 20
+                        else bot_token,
+                    },
                 ),
-                message="配置检查通过"
+                message="配置检查通过",
             )
-        
+
         else:
-            return await Response.error(code=400, message=f"不支持的 Provider: {provider}")
-            
+            return await Response.error(
+                code=400, message=f"不支持的 Provider: {provider}"
+            )
+
     except Exception as e:
         logger.error(f"[IM Agent] Test connection failed: {e}", exc_info=True)
         return await Response.error(code=500, message=f"测试连接失败: {str(e)}")
@@ -1074,25 +1183,25 @@ async def test_agent_im_connection(
 @im_router.post("/agent/{agent_id}/im_channels/{provider}/restart")
 async def restart_agent_im_channel(
     agent_id: str = FastApiPath(..., description="Agent ID"),
-    provider: str = FastApiPath(..., description="Provider type")
+    provider: str = FastApiPath(..., description="Provider type"),
 ):
     """Restart IM channel service for an Agent."""
     logger.info(f"[IM Agent] POST /api/agent/{agent_id}/im_channels/{provider}/restart")
-    
+
     try:
         from mcp_servers.im_server.service_manager import get_service_manager
-        
+
         manager = get_service_manager()
-        
+
         # Use agent_id as sage_user_id for channel management
         result = await manager.restart_channel(agent_id, provider)
-        
+
         if result:
             logger.info(f"[IM Agent] Restarted {provider} channel for agent={agent_id}")
             return await Response.succ(message=f"{provider} 渠道已重启")
         else:
             return await Response.error(code=500, message=f"重启 {provider} 渠道失败")
-            
+
     except Exception as e:
         logger.error(f"[IM Agent] Failed to restart channel: {e}", exc_info=True)
         return await Response.error(code=500, message=f"重启失败: {str(e)}")
@@ -1102,31 +1211,30 @@ async def restart_agent_im_channel(
 # WeChat Personal (iLink) Login APIs
 # ============================================================================
 
+
 class WeChatPersonalQRCodeResponse(BaseModel):
     """Response for WeChat Personal QR code generation."""
-    qrcode: str                          # 二维码标识符
-    qrcode_url: str                      # 完整的扫码 URL
-    expires_in: int = 300                # 过期时间（秒）
+
+    qrcode: str  # 二维码标识符
+    qrcode_url: str  # 完整的扫码 URL
+    expires_in: int = 300  # 过期时间（秒）
 
 
 @im_router.get("/tools/wechat_uin", response_model=None)
 async def get_wechat_uin():
     """
     生成随机的 X-WECHAT-UIN。
-    
+
     用于 iLink API 调用的请求头验证。
     """
     try:
         import base64
         import secrets
-        
+
         uint32 = secrets.randbits(32)
         wechat_uin = base64.b64encode(str(uint32).encode()).decode()
-        
-        return await Response.succ(
-            data={"wechat_uin": wechat_uin},
-            message="生成成功"
-        )
+
+        return await Response.succ(data={"wechat_uin": wechat_uin}, message="生成成功")
     except Exception as e:
         logger.error(f"[IM Tools] Failed to generate wechat_uin: {e}")
         return await Response.error(code=500, message="生成失败")
@@ -1134,125 +1242,128 @@ async def get_wechat_uin():
 
 class WeChatPersonalStatusResponse(BaseModel):
     """Response for WeChat Personal login status check."""
-    status: str                          # wait / scaned / confirmed / expired
-    bot_token: Optional[str] = None      # 登录成功后返回的 token
-    bot_id: Optional[str] = None         # Bot ID
-    baseurl: Optional[str] = None        # API 基础 URL
+
+    status: str  # wait / scaned / confirmed / expired
+    bot_token: Optional[str] = None  # 登录成功后返回的 token
+    bot_id: Optional[str] = None  # Bot ID
+    baseurl: Optional[str] = None  # API 基础 URL
 
 
-@im_router.post("/agent/{agent_id}/im_channels/wechat_personal/qrcode", response_model=None)
+@im_router.post(
+    "/agent/{agent_id}/im_channels/wechat_personal/qrcode", response_model=None
+)
 async def get_wechat_personal_qrcode(
-    agent_id: str = FastApiPath(..., description="Agent ID")
+    agent_id: str = FastApiPath(..., description="Agent ID"),
 ):
     """
     获取微信个人号(iLink)登录二维码。
-    
+
     返回二维码 URL，用户可以用微信扫码后获取 Bot Token。
     """
     logger.info(f"[IM Agent] Getting WeChat Personal QR code for agent={agent_id}")
-    
+
     try:
         import httpx
         import base64
         import secrets
-        
+
         BASE_URL = "https://ilinkai.weixin.qq.com"
         BOT_TYPE = "3"
-        
+
         def random_wechat_uin():
             uint32 = secrets.randbits(32)
             return base64.b64encode(str(uint32).encode()).decode()
-        
+
         # 1. 获取二维码
         headers = {
             "X-WECHAT-UIN": random_wechat_uin(),
         }
-        
+
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
                 f"{BASE_URL}/ilink/bot/get_bot_qrcode",
                 params={"bot_type": BOT_TYPE},
-                headers=headers
+                headers=headers,
             )
             response.raise_for_status()
             qr_resp = response.json()
-        
+
         logger.info(f"[IM Agent] QR code response: {qr_resp}")
-        
+
         if not qr_resp or qr_resp.get("ret") != 0:
             logger.error(f"[IM Agent] Failed to get QR code: {qr_resp}")
             return await Response.error(code=500, message="获取二维码失败")
-        
+
         qrcode = qr_resp.get("qrcode", "")
         qrcode_url = qr_resp.get("qrcode_img_content", "")
-        
+
         logger.info(f"[IM Agent] qrcode: {qrcode[:50]}...")
         logger.info(f"[IM Agent] qrcode_url: {qrcode_url[:100]}...")
-        
+
         if not qrcode or not qrcode_url:
             logger.error("[IM Agent] QR response missing required fields")
-            return await Response.error(code=500, message="获取二维码失败：响应数据不完整")
-        
+            return await Response.error(
+                code=500, message="获取二维码失败：响应数据不完整"
+            )
+
         return await Response.succ(
             data=WeChatPersonalQRCodeResponse(
-                qrcode=qrcode,
-                qrcode_url=qrcode_url,
-                expires_in=300
+                qrcode=qrcode, qrcode_url=qrcode_url, expires_in=300
             ),
-            message="获取二维码成功"
+            message="获取二维码成功",
         )
-        
+
     except Exception as e:
         logger.error(f"[IM Agent] Failed to get QR code: {e}", exc_info=True)
         return await Response.error(code=500, message=f"获取二维码失败: {str(e)}")
 
 
-@im_router.post("/agent/{agent_id}/im_channels/wechat_personal/qrcode/status", response_model=None)
+@im_router.post(
+    "/agent/{agent_id}/im_channels/wechat_personal/qrcode/status", response_model=None
+)
 async def check_wechat_personal_qrcode_status(
-    request: Dict[str, Any],
-    agent_id: str = FastApiPath(..., description="Agent ID")
+    request: Dict[str, Any], agent_id: str = FastApiPath(..., description="Agent ID")
 ):
     """
     检查微信个人号(iLink)二维码扫码状态。
-    
+
     请求体：
         - qrcode: 二维码标识符（从 /qrcode 接口获取）
-    
+
     返回：
         - status: wait/scaned/confirmed/expired
         - bot_token: 登录成功后的 token
         - bot_id: Bot ID
     """
     qrcode = request.get("qrcode")
-    
+
     if not qrcode:
         return await Response.error(code=400, message="缺少 qrcode 参数")
-    
+
     logger.info(f"[IM Agent] Checking WeChat Personal QR status for agent={agent_id}")
-    
+
     try:
         import httpx
         import base64
         import secrets
-        from urllib.parse import quote
-        
+
         BASE_URL = "https://ilinkai.weixin.qq.com"
-        
+
         def random_wechat_uin():
             uint32 = secrets.randbits(32)
             return base64.b64encode(str(uint32).encode()).decode()
-        
+
         headers = {
             "X-WECHAT-UIN": random_wechat_uin(),
         }
-        
+
         # 使用长轮询，超时时间设为 35 秒（接近服务器 38 秒超时）
         async with httpx.AsyncClient(timeout=35.0) as client:
             try:
                 response = await client.get(
                     f"{BASE_URL}/ilink/bot/get_qrcode_status",
                     params={"qrcode": qrcode},
-                    headers=headers
+                    headers=headers,
                 )
                 response.raise_for_status()
                 status_resp = response.json()
@@ -1260,17 +1371,16 @@ async def check_wechat_personal_qrcode_status(
                 # 长轮询超时，说明没有状态变化，返回 wait
                 logger.info("[IM Agent] Long polling timeout, returning wait status")
                 return await Response.succ(
-                    data=WeChatPersonalStatusResponse(status="wait"),
-                    message="等待扫码"
+                    data=WeChatPersonalStatusResponse(status="wait"), message="等待扫码"
                 )
-        
+
         logger.info(f"[IM Agent] QR status response: {status_resp}")
-        
+
         if not status_resp:
             return await Response.error(code=500, message="检查状态失败")
-        
+
         status_code = status_resp.get("status", "unknown")
-        
+
         if status_code == "confirmed":
             # 登录成功
             return await Response.succ(
@@ -1278,27 +1388,27 @@ async def check_wechat_personal_qrcode_status(
                     status=status_code,
                     bot_token=status_resp.get("bot_token"),
                     bot_id=status_resp.get("ilink_bot_id"),
-                    baseurl=status_resp.get("baseurl", BASE_URL)
+                    baseurl=status_resp.get("baseurl", BASE_URL),
                 ),
-                message="登录成功"
+                message="登录成功",
             )
         elif status_code == "expired":
             return await Response.succ(
                 data=WeChatPersonalStatusResponse(status=status_code),
-                message="二维码已过期"
+                message="二维码已过期",
             )
         elif status_code == "scaned":
             return await Response.succ(
                 data=WeChatPersonalStatusResponse(status=status_code),
-                message="已扫码，等待确认"
+                message="已扫码，等待确认",
             )
         else:
             # wait or other status
             return await Response.succ(
                 data=WeChatPersonalStatusResponse(status=status_code),
-                message="等待扫码"
+                message="等待扫码",
             )
-        
+
     except Exception as e:
         logger.error(f"[IM Agent] Failed to check QR status: {e}", exc_info=True)
         return await Response.error(code=500, message=f"检查状态失败: {str(e)}")

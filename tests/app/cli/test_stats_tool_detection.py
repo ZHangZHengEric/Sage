@@ -64,7 +64,7 @@ class TestStatsToolDetection(unittest.TestCase):
     def test_collects_tool_name_from_skill_tag(self):
         event = {
             "role": "assistant",
-            "content": "<skill>\nsearch_memory\n</skill>\n<skill_input>\n{\"query\": \"foo\"}\n</skill_input>",
+            "content": '<skill>\nsearch_memory\n</skill>\n<skill_input>\n{"query": "foo"}\n</skill_input>',
         }
         names = _collect_event_tool_names(event)
         self.assertEqual(names, ["search_memory"])
@@ -72,7 +72,7 @@ class TestStatsToolDetection(unittest.TestCase):
     def test_collects_tool_name_from_dsml_invoke_tag(self):
         event = {
             "role": "assistant",
-            "content": "<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"ExecuteCommand\">",
+            "content": '<｜DSML｜tool_calls>\n<｜DSML｜invoke name="ExecuteCommand">',
         }
         names = _collect_event_tool_names(event)
         self.assertEqual(names, ["ExecuteCommand"])
@@ -82,8 +82,8 @@ class TestStatsToolDetection(unittest.TestCase):
             "role": "assistant",
             "content": (
                 "<｜DSML｜tool_calls>\n"
-                "<｜DSML｜invoke name=\"FileWrite\">\n"
-                "<｜DSML｜parameter name=\"file_path\" string=\"true\">"
+                '<｜DSML｜invoke name="FileWrite">\n'
+                '<｜DSML｜parameter name="file_path" string="true">'
                 "/tmp/demo.py"
                 "</｜DSML｜parameter>\n"
                 "</｜DSML｜invoke>\n"
@@ -94,7 +94,21 @@ class TestStatsToolDetection(unittest.TestCase):
         self.assertEqual(paths, ["/tmp/demo.py"])
 
     def test_records_tool_name_from_split_skill_stream(self):
-        stats = _empty_stats(request=type("Request", (), {"session_id": None, "user_id": None, "agent_id": None, "agent_mode": "simple", "available_skills": [], "max_loop_count": 50})(), workspace=None)
+        stats = _empty_stats(
+            request=type(
+                "Request",
+                (),
+                {
+                    "session_id": None,
+                    "user_id": None,
+                    "agent_id": None,
+                    "agent_mode": "simple",
+                    "available_skills": [],
+                    "max_loop_count": 50,
+                },
+            )(),
+            workspace=None,
+        )
 
         first_event = {
             "role": "assistant",
@@ -102,7 +116,7 @@ class TestStatsToolDetection(unittest.TestCase):
         }
         second_event = {
             "role": "assistant",
-            "content": "{\"query\": \"foo\"}\n</skill_input>\n<skill_result>\n<result>[]</result>\n</skill_result>",
+            "content": '{"query": "foo"}\n</skill_input>\n<skill_result>\n<result>[]</result>\n</skill_result>',
         }
 
         _record_stats_event(stats, first_event, 0.0)
@@ -137,7 +151,7 @@ class TestStatsToolDetection(unittest.TestCase):
                         "id": "call_1",
                         "function": {
                             "name": "read_file",
-                            "arguments": "{\"path\":\"/tmp/demo.txt\"}",
+                            "arguments": '{"path":"/tmp/demo.txt"}',
                         },
                     }
                 ],
@@ -248,7 +262,12 @@ class TestStatsToolDetection(unittest.TestCase):
 
         _record_stats_event(
             stats,
-            {"type": "analysis", "role": "assistant", "content": "先分析一下。", "timestamp": 10.0},
+            {
+                "type": "analysis",
+                "role": "assistant",
+                "content": "先分析一下。",
+                "timestamp": 10.0,
+            },
             0.0,
         )
         _record_stats_event(
@@ -256,22 +275,35 @@ class TestStatsToolDetection(unittest.TestCase):
             {
                 "type": "tool_call",
                 "timestamp": 10.3,
-                "tool_calls": [{"id": "call_1", "function": {"name": "read_file", "arguments": "{}"}}],
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    }
+                ],
             },
             0.0,
         )
         _record_stats_event(
             stats,
-            {"type": "text", "role": "assistant", "content": "处理完成。", "timestamp": 11.1},
+            {
+                "type": "text",
+                "role": "assistant",
+                "content": "处理完成。",
+                "timestamp": 11.1,
+            },
             0.0,
         )
         _finalize_stats(stats, finished_at=11.5)
 
-        self.assertEqual([item["phase"] for item in stats["phase_timings"]], [
-            "planning",
-            "tool",
-            "assistant_text",
-        ])
+        self.assertEqual(
+            [item["phase"] for item in stats["phase_timings"]],
+            [
+                "planning",
+                "tool",
+                "assistant_text",
+            ],
+        )
         self.assertAlmostEqual(stats["phase_timings"][0]["duration_ms"], 300.0)
         self.assertAlmostEqual(stats["phase_timings"][1]["duration_ms"], 800.0)
         self.assertAlmostEqual(stats["phase_timings"][2]["duration_ms"], 400.0)
@@ -295,7 +327,12 @@ class TestStatsToolDetection(unittest.TestCase):
 
         _record_stats_event(
             stats,
-            {"type": "analysis", "role": "assistant", "content": "先分析一下。", "timestamp": 10.0},
+            {
+                "type": "analysis",
+                "role": "assistant",
+                "content": "先分析一下。",
+                "timestamp": 10.0,
+            },
             0.0,
         )
         _record_stats_event(
@@ -331,7 +368,7 @@ class TestStatsToolDetection(unittest.TestCase):
         )
         second_delta = _render_assistant_content_delta(
             render_state,
-            "{\"query\": \"foo\"}\n</skill_input>\n<skill_result>\n<result>[]</result>\n</skill_result>\n查完了。",
+            '{"query": "foo"}\n</skill_input>\n<skill_result>\n<result>[]</result>\n</skill_result>\n查完了。',
         )
 
         self.assertEqual(first_delta, "我先查一下。")
@@ -342,11 +379,11 @@ class TestStatsToolDetection(unittest.TestCase):
 
         first_delta = _render_assistant_content_delta(
             render_state,
-            "开始处理。\n<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"ExecuteCommand\">",
+            '开始处理。\n<｜DSML｜tool_calls>\n<｜DSML｜invoke name="ExecuteCommand">',
         )
         second_delta = _render_assistant_content_delta(
             render_state,
-            "<｜DSML｜parameter name=\"command\" string=\"true\">python3 --version</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜tool_calls>\n处理完成。",
+            '<｜DSML｜parameter name="command" string="true">python3 --version</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜tool_calls>\n处理完成。',
         )
 
         self.assertEqual(first_delta, "开始处理。")
@@ -360,7 +397,9 @@ class TestStatsToolDetection(unittest.TestCase):
             "例如可以输出 `<skill>search_memory</skill>` 这样的标签示例。",
         )
 
-        self.assertEqual(delta, "例如可以输出 `<skill>search_memory</skill>` 这样的标签示例。")
+        self.assertEqual(
+            delta, "例如可以输出 `<skill>search_memory</skill>` 这样的标签示例。"
+        )
 
     def test_print_plain_event_emits_file_write_path_once(self):
         from io import StringIO
@@ -371,8 +410,8 @@ class TestStatsToolDetection(unittest.TestCase):
             "role": "assistant",
             "content": (
                 "<｜DSML｜tool_calls>\n"
-                "<｜DSML｜invoke name=\"FileWrite\">\n"
-                "<｜DSML｜parameter name=\"file_path\" string=\"true\">"
+                '<｜DSML｜invoke name="FileWrite">\n'
+                '<｜DSML｜parameter name="file_path" string="true">'
                 "/tmp/demo.py"
                 "</｜DSML｜parameter>\n"
                 "</｜DSML｜invoke>\n"
@@ -395,7 +434,9 @@ class TestStatsToolDetection(unittest.TestCase):
         with patch("sys.stderr", stderr):
             _emit_stream_idle_notice(4.2)
 
-        self.assertIn("[working] still running (4.2s since last event)", stderr.getvalue())
+        self.assertIn(
+            "[working] still running (4.2s since last event)", stderr.getvalue()
+        )
 
     def test_emit_stream_idle_notice_prefers_tool_context(self):
         from io import StringIO
@@ -408,7 +449,9 @@ class TestStatsToolDetection(unittest.TestCase):
         with patch("sys.stderr", stderr):
             _emit_stream_idle_notice_for_state(render_state, 5.0)
 
-        self.assertIn("[working] waiting for WriteFile (5.0s since last event)", stderr.getvalue())
+        self.assertIn(
+            "[working] waiting for WriteFile (5.0s since last event)", stderr.getvalue()
+        )
 
     def test_emit_stream_idle_notice_prefers_assistant_generation_context(self):
         from io import StringIO
@@ -421,7 +464,9 @@ class TestStatsToolDetection(unittest.TestCase):
         with patch("sys.stderr", stderr):
             _emit_stream_idle_notice_for_state(render_state, 3.5)
 
-        self.assertIn("[working] generating response (3.5s since last event)", stderr.getvalue())
+        self.assertIn(
+            "[working] generating response (3.5s since last event)", stderr.getvalue()
+        )
 
     def test_visible_assistant_text_clears_previous_tool_wait_context(self):
         from io import StringIO
@@ -533,7 +578,11 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result, 0)
-        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip().startswith("{")]
+        events = [
+            json.loads(line)
+            for line in stdout.getvalue().splitlines()
+            if line.strip().startswith("{")
+        ]
         self.assertEqual(
             events[0],
             {
@@ -606,7 +655,11 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result, 0)
-        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip().startswith("{")]
+        events = [
+            json.loads(line)
+            for line in stdout.getvalue().splitlines()
+            if line.strip().startswith("{")
+        ]
         self.assertEqual(events[0]["type"], "cli_session")
         self.assertEqual(events[0]["command_mode"], "run")
         self.assertEqual(events[0]["session_state"], "new")
@@ -669,7 +722,11 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result, 0)
-        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip().startswith("{")]
+        events = [
+            json.loads(line)
+            for line in stdout.getvalue().splitlines()
+            if line.strip().startswith("{")
+        ]
         self.assertEqual(
             events[0]["goal"],
             {
@@ -705,6 +762,7 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
 
         from io import StringIO
         import json
+
         original_wait_for = asyncio.wait_for
         first_poll = {"value": True}
 
@@ -734,8 +792,14 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, 0)
         payload = stdout.getvalue()
         self.assertIn('"type": "cli_notice"', payload)
-        events = [json.loads(line) for line in payload.splitlines() if line.strip().startswith("{")]
-        notice_event = next((event for event in events if event.get("type") == "cli_notice"), None)
+        events = [
+            json.loads(line)
+            for line in payload.splitlines()
+            if line.strip().startswith("{")
+        ]
+        notice_event = next(
+            (event for event in events if event.get("type") == "cli_notice"), None
+        )
         self.assertIsNotNone(notice_event)
         notice_event = notice_event
         self.assertEqual(notice_event["session_id"], "session-idle-notice")
@@ -796,8 +860,14 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result, 0)
-        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip().startswith("{")]
-        session_events = [event for event in events if event.get("type") == "cli_session"]
+        events = [
+            json.loads(line)
+            for line in stdout.getvalue().splitlines()
+            if line.strip().startswith("{")
+        ]
+        session_events = [
+            event for event in events if event.get("type") == "cli_session"
+        ]
         self.assertEqual(len(session_events), 2)
         self.assertEqual(session_events[0]["session_state"], "new")
         self.assertEqual(session_events[0]["goal"]["status"], "active")
@@ -869,14 +939,22 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
                 )
 
         self.assertEqual(result, 0)
-        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip().startswith("{")]
-        notice_event = next((event for event in events if event.get("type") == "cli_notice"), None)
+        events = [
+            json.loads(line)
+            for line in stdout.getvalue().splitlines()
+            if line.strip().startswith("{")
+        ]
+        notice_event = next(
+            (event for event in events if event.get("type") == "cli_notice"), None
+        )
         self.assertIsNotNone(notice_event)
         self.assertIn("ToolSuggestionAgent", notice_event["content"])
         self.assertIn("Connection error.", notice_event["content"])
 
     async def test_run_command_normalizes_workspace_before_stream_request(self):
-        args = cli_main.build_argument_parser().parse_args(["run", "--workspace", "./demo", "hello"])
+        args = cli_main.build_argument_parser().parse_args(
+            ["run", "--workspace", "./demo", "hello"]
+        )
         captured = {}
 
         @asynccontextmanager
@@ -900,7 +978,15 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
                 },
             )()
 
-        async def fake_stream_request(request, json_output, stats_output, workspace=None, *, command_mode="run", session_summary=None):
+        async def fake_stream_request(
+            request,
+            json_output,
+            stats_output,
+            workspace=None,
+            *,
+            command_mode="run",
+            session_summary=None,
+        ):
             del request, json_output, stats_output, session_summary
             captured["stream_workspace"] = workspace
             captured["command_mode"] = command_mode
@@ -908,7 +994,9 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("app.cli.service.validate_cli_runtime_requirements"),
-            patch("app.cli.service.validate_cli_request_options", return_value="/tmp/demo"),
+            patch(
+                "app.cli.service.validate_cli_request_options", return_value="/tmp/demo"
+            ),
             patch("app.cli.service.cli_runtime", fake_cli_runtime),
             patch("app.cli.main._build_request", fake_build_request),
             patch("app.cli.main._stream_request", fake_stream_request),
@@ -922,7 +1010,9 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["command_mode"], "run")
 
     async def test_chat_command_normalizes_workspace_before_stream_request(self):
-        args = cli_main.build_argument_parser().parse_args(["chat", "--workspace", "./demo", "--json"])
+        args = cli_main.build_argument_parser().parse_args(
+            ["chat", "--workspace", "./demo", "--json"]
+        )
         captured = {}
 
         @asynccontextmanager
@@ -946,7 +1036,15 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
                 },
             )()
 
-        async def fake_stream_request(request, json_output, stats_output, workspace=None, *, command_mode="chat", session_summary=None):
+        async def fake_stream_request(
+            request,
+            json_output,
+            stats_output,
+            workspace=None,
+            *,
+            command_mode="chat",
+            session_summary=None,
+        ):
             del request, json_output, stats_output
             captured["stream_workspace"] = workspace
             captured["command_mode"] = command_mode
@@ -955,7 +1053,9 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("app.cli.service.validate_cli_runtime_requirements"),
-            patch("app.cli.service.validate_cli_request_options", return_value="/tmp/demo"),
+            patch(
+                "app.cli.service.validate_cli_request_options", return_value="/tmp/demo"
+            ),
             patch("app.cli.service.cli_runtime", fake_cli_runtime),
             patch("app.cli.main._build_request", fake_build_request),
             patch("app.cli.main._stream_request", fake_stream_request),
@@ -992,7 +1092,14 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             command_mode="chat",
             session_summary=None,
         ):
-            del request, json_output, stats_output, workspace, command_mode, session_summary
+            del (
+                request,
+                json_output,
+                stats_output,
+                workspace,
+                command_mode,
+                session_summary,
+            )
             return 0
 
         with (
@@ -1041,8 +1148,23 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
                 },
             )()
 
-        async def fake_stream_request(request, json_output, stats_output, workspace=None, *, command_mode="chat", session_summary=None):
-            del request, json_output, stats_output, workspace, command_mode, session_summary
+        async def fake_stream_request(
+            request,
+            json_output,
+            stats_output,
+            workspace=None,
+            *,
+            command_mode="chat",
+            session_summary=None,
+        ):
+            del (
+                request,
+                json_output,
+                stats_output,
+                workspace,
+                command_mode,
+                session_summary,
+            )
             return 0
 
         with (
@@ -1051,7 +1173,14 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             patch("app.cli.service.cli_runtime", fake_cli_runtime),
             patch("app.cli.main._build_request", fake_build_request),
             patch("app.cli.main._stream_request", fake_stream_request),
-            patch("app.cli.main._read_chat_prompt", side_effect=["/goal set ship the runtime goal contract", "hello", "/exit"]),
+            patch(
+                "app.cli.main._read_chat_prompt",
+                side_effect=[
+                    "/goal set ship the runtime goal contract",
+                    "hello",
+                    "/exit",
+                ],
+            ),
         ):
             result = await cli_main._chat_command(args, command_mode="chat")
 
@@ -1125,7 +1254,9 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             stderr = StringIO()
             with (
                 patch("app.cli.service.validate_cli_runtime_requirements"),
-                patch("app.cli.service.validate_cli_request_options", return_value=None),
+                patch(
+                    "app.cli.service.validate_cli_request_options", return_value=None
+                ),
                 patch("app.cli.service.cli_runtime", fake_cli_runtime),
                 patch("app.cli.service.cli_db_runtime", fake_cli_db_runtime),
                 patch(
@@ -1149,7 +1280,9 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
 
         result, output = asyncio.run(_run())
         self.assertEqual(result, 0)
-        self.assertIn("continuing goal: ship the runtime goal contract (paused)", output)
+        self.assertIn(
+            "continuing goal: ship the runtime goal contract (paused)", output
+        )
 
     async def test_stream_request_does_not_cancel_slow_stream_on_idle_poll(self):
         async def fake_run_request_stream(_request, workspace=None):
@@ -1185,7 +1318,9 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             patch("sys.stdout", stdout),
             patch("sys.stderr", stderr),
         ):
-            result = await _stream_request(request, json_output=False, stats_output=False, workspace=None)
+            result = await _stream_request(
+                request, json_output=False, stats_output=False, workspace=None
+            )
 
         self.assertEqual(result, 0)
         self.assertIn("hello", stdout.getvalue())
@@ -1239,7 +1374,11 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result, 0)
-        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip().startswith("{")]
+        events = [
+            json.loads(line)
+            for line in stdout.getvalue().splitlines()
+            if line.strip().startswith("{")
+        ]
         self.assertEqual(events[0]["type"], "cli_session")
         self.assertEqual(events[0]["command_mode"], "chat")
         self.assertEqual(events[0]["session_state"], "new")
@@ -1305,7 +1444,11 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result, 0)
-        events = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip().startswith("{")]
+        events = [
+            json.loads(line)
+            for line in stdout.getvalue().splitlines()
+            if line.strip().startswith("{")
+        ]
         cli_tool_events = [event for event in events if event.get("type") == "cli_tool"]
         self.assertEqual(events[0]["type"], "cli_session")
         self.assertEqual(events[0]["command_mode"], "run")

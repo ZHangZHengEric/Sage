@@ -11,6 +11,7 @@ class SseServerParameters:
     url: str
     api_key: Optional[str] = None
 
+
 @dataclass
 class StreamableHttpServerParameters:
     url: str
@@ -26,12 +27,19 @@ class McpToolSpec:
     parameters: Dict[str, Dict[str, Any]]  # Now includes description for each param
     required: List[str]
     server_name: str
-    server_params: Union[StdioServerParameters, SseServerParameters, StreamableHttpServerParameters]
+    server_params: Union[
+        StdioServerParameters, SseServerParameters, StreamableHttpServerParameters
+    ]
     input_schema: Optional[Dict[str, Any]] = None
-    return_data : Optional[Dict[str, Any]] = None # 返回数据格式
-    return_properties_i18n: Optional[Dict[str, Dict[str, Any]]] = None # 返回对象属性描述的多语言
-    param_description_i18n: Optional[Dict[str, Dict[str, str]]] = None # 参数描述多语言映射 param -> {lang: text}
-    
+    return_data: Optional[Dict[str, Any]] = None  # 返回数据格式
+    return_properties_i18n: Optional[Dict[str, Dict[str, Any]]] = (
+        None  # 返回对象属性描述的多语言
+    )
+    param_description_i18n: Optional[Dict[str, Dict[str, str]]] = (
+        None  # 参数描述多语言映射 param -> {lang: text}
+    )
+
+
 @dataclass
 class ToolSpec:
     name: str
@@ -40,18 +48,24 @@ class ToolSpec:
     func: Callable
     parameters: Dict[str, Dict[str, Any]]  # Now includes description for each param
     required: List[str]
-    return_data : Optional[Dict[str, Any]] = None # 返回数据格式
-    return_properties_i18n: Optional[Dict[str, Dict[str, Any]]] = None # 返回对象属性描述的多语言
-    param_description_i18n: Optional[Dict[str, Dict[str, str]]] = None # 参数描述多语言映射 param -> {lang: text}
+    return_data: Optional[Dict[str, Any]] = None  # 返回数据格式
+    return_properties_i18n: Optional[Dict[str, Dict[str, Any]]] = (
+        None  # 返回对象属性描述的多语言
+    )
+    param_description_i18n: Optional[Dict[str, Dict[str, str]]] = (
+        None  # 参数描述多语言映射 param -> {lang: text}
+    )
     # 工具分类标签（如 "browser"），用于前端按来源分组；为 None 时按 "基础工具" 处理。
     # 由 @tool(category=...) 显式声明，或由宿主类的 TOOL_CATEGORY 类属性批量赋值。
     category: Optional[str] = None
+
 
 @dataclass
 class SageMcpToolSpec(ToolSpec):
     server_name: str = ""
     """Spec for built-in MCP tools (annotated with @sage_mcp_tool)"""
     pass
+
 
 def convert_spec_to_openai_format(
     tool_spec: Union[McpToolSpec, ToolSpec],
@@ -88,13 +102,17 @@ def convert_spec_to_openai_format(
         desc_i18n = node.get("description_i18n")
         if isinstance(desc_i18n, dict):
             node["description"] = _resolve_text(desc, desc_i18n)
-        
+
         # 移除 description_i18n
         if "description_i18n" in node:
             node.pop("description_i18n", None)
 
         # 2. 递归处理 properties (object)
-        if node.get("type") == "object" and "properties" in node and isinstance(node["properties"], dict):
+        if (
+            node.get("type") == "object"
+            and "properties" in node
+            and isinstance(node["properties"], dict)
+        ):
             for prop in node["properties"].values():
                 _recursive_localize(prop)
 
@@ -103,15 +121,21 @@ def convert_spec_to_openai_format(
             _recursive_localize(node["items"])
 
     # 工具描述本地化
-    localized_desc = _resolve_text(getattr(tool_spec, "description", ""), getattr(tool_spec, "description_i18n", None))
+    localized_desc = _resolve_text(
+        getattr(tool_spec, "description", ""),
+        getattr(tool_spec, "description_i18n", None),
+    )
 
     # 参数本地化
-    param_i18n_map: Optional[Dict[str, Dict[str, str]]] = getattr(tool_spec, "param_description_i18n", None)
+    param_i18n_map: Optional[Dict[str, Dict[str, str]]] = getattr(
+        tool_spec, "param_description_i18n", None
+    )
     localized_params: Dict[str, Any] = {}
-    
+
     # 既然有了 param_schema 支持，我们需要更深度的拷贝和递归处理
     # 为了避免修改原始数据，我们先进行深拷贝
     import json as _json
+
     raw_params = getattr(tool_spec, "parameters", {})
     try:
         # 使用 json 序列化反序列化进行深拷贝，确保彻底解耦
@@ -124,16 +148,16 @@ def convert_spec_to_openai_format(
         # 优先处理顶层的 param_description_i18n 映射（兼容旧逻辑）
         p_desc = p_info.get("description", "")
         p_desc_i18n = p_info.get("description_i18n")
-        
+
         candidate_i18n = None
         if isinstance(p_desc_i18n, dict):
             candidate_i18n = p_desc_i18n
         elif isinstance(param_i18n_map, dict):
             candidate_i18n = param_i18n_map.get(p_name)
-        
+
         if candidate_i18n:
-             p_info["description"] = _resolve_text(p_desc, candidate_i18n)
-        
+            p_info["description"] = _resolve_text(p_desc, candidate_i18n)
+
         # 递归处理该参数的内部结构（支持 param_schema 定义的深层 i18n）
         _recursive_localize(p_info)
 
@@ -143,6 +167,7 @@ def convert_spec_to_openai_format(
     if isinstance(rd, dict):
         # 深拷贝以避免外部修改
         import json as _json
+
         localized_returns = _json.loads(_json.dumps(rd))
         # 对于 object 类型，移除根级 description/description_i18n
         if localized_returns.get("type") == "object":
@@ -151,7 +176,9 @@ def convert_spec_to_openai_format(
 
         rdi_map = getattr(tool_spec, "return_properties_i18n", None)
 
-        def _apply_prop_i18n(props: Dict[str, Any], rdi: Optional[Dict[str, Dict[str, str]]] = None):
+        def _apply_prop_i18n(
+            props: Dict[str, Any], rdi: Optional[Dict[str, Dict[str, str]]] = None
+        ):
             if not isinstance(props, dict):
                 return
             for _pname, _pinfo in props.items():
@@ -175,7 +202,9 @@ def convert_spec_to_openai_format(
     # These top-level context fields are auto-injected and must not be exposed to the LLM.
     _AUTO_INJECT_PARAMS = {"session_id", "user_id"}
 
-    schema_params = {k: v for k, v in localized_params.items() if k not in _AUTO_INJECT_PARAMS}
+    schema_params = {
+        k: v for k, v in localized_params.items() if k not in _AUTO_INJECT_PARAMS
+    }
 
     def _has_default(schema: Any) -> bool:
         return isinstance(schema, dict) and "default" in schema

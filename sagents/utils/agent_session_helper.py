@@ -15,7 +15,9 @@ from sagents.context.session_context import SessionContext, SessionStatus
 from sagents.utils.logger import logger
 
 
-def get_live_session(session_id: Optional[str], log_prefix: str = "AgentBase") -> Optional[Any]:
+def get_live_session(
+    session_id: Optional[str], log_prefix: str = "AgentBase"
+) -> Optional[Any]:
     """根据 session_id 获取 live session；任何异常都吞掉返回 None。"""
     if not session_id:
         return None
@@ -28,7 +30,9 @@ def get_live_session(session_id: Optional[str], log_prefix: str = "AgentBase") -
             return None
         return session_manager.get_live_session(session_id)
     except Exception as exc:
-        logger.debug(f"{log_prefix}: 获取 live session 失败, session_id={session_id}: {exc}")
+        logger.debug(
+            f"{log_prefix}: 获取 live session 失败, session_id={session_id}: {exc}"
+        )
         return None
 
 
@@ -56,12 +60,14 @@ def get_session_sandbox(
         error_cls: 抛出的异常类型，默认 ``ValueError``；调用方有自定义异常的可传入。
     """
     session = get_live_session(session_id, log_prefix=log_prefix)
-    if not session or not getattr(session, 'session_context', None):
+    if not session or not getattr(session, "session_context", None):
         raise error_cls(f"{log_prefix}: Invalid session_id={session_id}")
 
     sandbox = session.session_context.sandbox
     if not sandbox:
-        raise error_cls(f"{log_prefix}: No sandbox available for session_id={session_id}")
+        raise error_cls(
+            f"{log_prefix}: No sandbox available for session_id={session_id}"
+        )
     return sandbox
 
 
@@ -85,10 +91,12 @@ def should_abort_due_to_session(
         SessionStatus.ERROR,
         SessionStatus.COMPLETED,
     ]:
-        logger.info(f"{log_prefix}: 跳过执行，session状态为{session.get_status().value}")
+        logger.info(
+            f"{log_prefix}: 跳过执行，session状态为{session.get_status().value}"
+        )
         return True
 
-    parent_session_id = getattr(session_context, 'parent_session_id', None)
+    parent_session_id = getattr(session_context, "parent_session_id", None)
     if parent_session_id:
         parent_session = get_live_session(parent_session_id, log_prefix=log_prefix)
         if parent_session and parent_session.get_status() in [

@@ -33,7 +33,9 @@ class BrowserCapabilityCoordinator:
     def start(self) -> None:
         if self._task and not self._task.done():
             return
-        self._task = asyncio.create_task(self._loop(), name="browser_capability_coordinator")
+        self._task = asyncio.create_task(
+            self._loop(), name="browser_capability_coordinator"
+        )
         logger.info("[BrowserCapability] coordinator started")
 
     async def stop(self) -> None:
@@ -56,7 +58,9 @@ class BrowserCapabilityCoordinator:
                 await self._sync_once()
                 self._wake_event.clear()
                 try:
-                    await asyncio.wait_for(self._wake_event.wait(), timeout=CHECK_INTERVAL_SECONDS)
+                    await asyncio.wait_for(
+                        self._wake_event.wait(), timeout=CHECK_INTERVAL_SECONDS
+                    )
                 except asyncio.TimeoutError:
                     pass
         except asyncio.CancelledError:
@@ -116,7 +120,9 @@ async def get_browser_tool_sync_state(
     ttl = float(status.get("heartbeat_ttl_seconds") or 45.0)
     browser_tools_online = False
     if last_seen_at > 0:
-        browser_tools_online = (time.time() - last_seen_at) <= (ttl + OFFLINE_GRACE_SECONDS)
+        browser_tools_online = (time.time() - last_seen_at) <= (
+            ttl + OFFLINE_GRACE_SECONDS
+        )
 
     if browser_tools_online:
         reported_capabilities = status.get("capabilities") or []

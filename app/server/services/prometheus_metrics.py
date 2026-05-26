@@ -71,11 +71,15 @@ def _metric_line(name: str, value: int | float) -> str:
 
 
 def _labeled_metric_line(name: str, labels: dict[str, str], value: int | float) -> str:
-    rendered_labels = ",".join(f'{key}="{_escape_label_value(val)}"' for key, val in labels.items())
+    rendered_labels = ",".join(
+        f'{key}="{_escape_label_value(val)}"' for key, val in labels.items()
+    )
     return f"{name}{{{rendered_labels}}} {float(value):.6f}"
 
 
-def _metric_block(name: str, description: str, metric_type: str, value: int | float) -> list[str]:
+def _metric_block(
+    name: str, description: str, metric_type: str, value: int | float
+) -> list[str]:
     return [
         f"# HELP {name} {description}",
         f"# TYPE {name} {metric_type}",
@@ -96,10 +100,15 @@ def _route_template(path: str, route_path: str | None) -> str:
         return route_path
     if not path:
         return "unknown"
-    return "/".join("{id}" if _DYNAMIC_PATH_SEGMENT_RE.match(segment) else segment for segment in path.split("/"))
+    return "/".join(
+        "{id}" if _DYNAMIC_PATH_SEGMENT_RE.match(segment) else segment
+        for segment in path.split("/")
+    )
 
 
-def start_http_request(method: str, path: str, route_path: str | None = None) -> tuple[float, str, str]:
+def start_http_request(
+    method: str, path: str, route_path: str | None = None
+) -> tuple[float, str, str]:
     normalized_method = (method or "GET").upper()
     normalized_path = _route_template(path, route_path)
     with _HTTP_STATE.lock:
@@ -108,20 +117,28 @@ def start_http_request(method: str, path: str, route_path: str | None = None) ->
     return time.perf_counter(), normalized_method, normalized_path
 
 
-def finish_http_request(started_at: float, method: str, path: str, status_code: int | str) -> None:
+def finish_http_request(
+    started_at: float, method: str, path: str, status_code: int | str
+) -> None:
     duration = max(time.perf_counter() - started_at, 0.0)
     status = str(status_code)
     key = (method, path)
     status_key = (method, path, status)
 
     with _HTTP_STATE.lock:
-        _HTTP_STATE.requests_total[status_key] = _HTTP_STATE.requests_total.get(status_key, 0) + 1
-        _HTTP_STATE.duration_sum[key] = _HTTP_STATE.duration_sum.get(key, 0.0) + duration
+        _HTTP_STATE.requests_total[status_key] = (
+            _HTTP_STATE.requests_total.get(status_key, 0) + 1
+        )
+        _HTTP_STATE.duration_sum[key] = (
+            _HTTP_STATE.duration_sum.get(key, 0.0) + duration
+        )
         _HTTP_STATE.duration_count[key] = _HTTP_STATE.duration_count.get(key, 0) + 1
         for bucket in _HTTP_DURATION_BUCKETS:
             if duration <= bucket:
                 bucket_key = (method, path, bucket)
-                _HTTP_STATE.duration_buckets[bucket_key] = _HTTP_STATE.duration_buckets.get(bucket_key, 0) + 1
+                _HTTP_STATE.duration_buckets[bucket_key] = (
+                    _HTTP_STATE.duration_buckets.get(bucket_key, 0) + 1
+                )
         in_progress = _HTTP_STATE.in_progress.get(key, 0)
         _HTTP_STATE.in_progress[key] = max(in_progress - 1, 0)
 
@@ -142,13 +159,21 @@ def finish_operation(started_at: float, category: str, name: str, status: str) -
     status_key = (category, name, normalized_status)
 
     with _OPERATION_STATE.lock:
-        _OPERATION_STATE.total[status_key] = _OPERATION_STATE.total.get(status_key, 0) + 1
-        _OPERATION_STATE.duration_sum[key] = _OPERATION_STATE.duration_sum.get(key, 0.0) + duration
-        _OPERATION_STATE.duration_count[key] = _OPERATION_STATE.duration_count.get(key, 0) + 1
+        _OPERATION_STATE.total[status_key] = (
+            _OPERATION_STATE.total.get(status_key, 0) + 1
+        )
+        _OPERATION_STATE.duration_sum[key] = (
+            _OPERATION_STATE.duration_sum.get(key, 0.0) + duration
+        )
+        _OPERATION_STATE.duration_count[key] = (
+            _OPERATION_STATE.duration_count.get(key, 0) + 1
+        )
         for bucket in _HTTP_DURATION_BUCKETS:
             if duration <= bucket:
                 bucket_key = (category, name, bucket)
-                _OPERATION_STATE.duration_buckets[bucket_key] = _OPERATION_STATE.duration_buckets.get(bucket_key, 0) + 1
+                _OPERATION_STATE.duration_buckets[bucket_key] = (
+                    _OPERATION_STATE.duration_buckets.get(bucket_key, 0) + 1
+                )
         active = _OPERATION_STATE.active.get(key, 0)
         _OPERATION_STATE.active[key] = max(active - 1, 0)
 
@@ -166,7 +191,9 @@ def record_sse_stream_failure(stream: str, session_id: str, status: str) -> None
         normalized_status,
     )
     with _SSE_FAILURE_STATE.lock:
-        _SSE_FAILURE_STATE.failures_total[key] = _SSE_FAILURE_STATE.failures_total.get(key, 0) + 1
+        _SSE_FAILURE_STATE.failures_total[key] = (
+            _SSE_FAILURE_STATE.failures_total.get(key, 0) + 1
+        )
 
 
 def _parse_proc_status() -> dict[str, int]:
@@ -545,14 +572,18 @@ def render_prometheus_metrics() -> str:
         lines.extend(_metric_block(name, description, metric_type, value))
 
     for name, value in _load_average():
-        lines.extend(_metric_block(name, f"{name} from os.getloadavg().", "gauge", value))
+        lines.extend(
+            _metric_block(name, f"{name} from os.getloadavg().", "gauge", value)
+        )
 
     lines.extend(_render_python_metrics())
     lines.extend(_render_http_metrics())
     lines.extend(_render_operation_metrics())
     lines.extend(_render_sse_failure_metrics())
     try:
-        from sagents.observability.prometheus_handler import render_prometheus_trace_metrics
+        from sagents.observability.prometheus_handler import (
+            render_prometheus_trace_metrics,
+        )
 
         lines.append(render_prometheus_trace_metrics().rstrip("\n"))
     except Exception:

@@ -78,7 +78,9 @@ class TestFileMemoryBackend(unittest.TestCase):
     def test_factory_prefers_agent_config_over_env(self):
         agent_config = {"memory_backends": {"file_memory": "noop"}}
         with patch.dict("os.environ", {"SAGE_FILE_MEMORY_BACKEND": "scoped_index"}):
-            backend = create_file_memory_backend(_FakeMemoryTool(), agent_config=agent_config)
+            backend = create_file_memory_backend(
+                _FakeMemoryTool(), agent_config=agent_config
+            )
         self.assertIsInstance(backend, NoopFileMemoryBackend)
 
     def test_factory_supports_legacy_agent_config_key(self):

@@ -144,7 +144,10 @@ async def _resolve_input_optimization_model_client(
     agent_id: str = "",
     user_id: str = "",
 ) -> Tuple[Any, str]:
-    from common.services.agent_service import _resolve_model_client, _create_model_client
+    from common.services.agent_service import (
+        _resolve_model_client,
+        _create_model_client,
+    )
 
     resolved_agent_id = agent_id or ""
     if not resolved_agent_id and session_id:
@@ -155,7 +158,11 @@ async def _resolve_input_optimization_model_client(
     if resolved_agent_id:
         agent = await AgentConfigDao().get_by_id(resolved_agent_id)
         agent_config = agent.config if agent and agent.config else {}
-        provider_id = agent_config.get("llm_provider_id") if isinstance(agent_config, dict) else None
+        provider_id = (
+            agent_config.get("llm_provider_id")
+            if isinstance(agent_config, dict)
+            else None
+        )
         if provider_id:
             provider = await LLMProviderDao().get_by_id(provider_id)
             if provider:
@@ -205,8 +212,13 @@ async def optimize_user_input(
             return result
 
         error_message = (result or {}).get("error_message", "") or ""
-        is_invalid_api_key = "INVALID_API_KEY" in error_message or "AuthenticationError" == (result or {}).get("error_type")
-        if not (_is_desktop_mode() and is_invalid_api_key and attempt < max_attempts - 1):
+        is_invalid_api_key = (
+            "INVALID_API_KEY" in error_message
+            or "AuthenticationError" == (result or {}).get("error_type")
+        )
+        if not (
+            _is_desktop_mode() and is_invalid_api_key and attempt < max_attempts - 1
+        ):
             break
 
         logger.warning(
@@ -282,7 +294,9 @@ async def optimize_user_input_stream(
                     "timestamp": time.time(),
                 }
                 total_cost = time.perf_counter() - overall_start
-                logger.info(f"流式优化用户输入成功，attempt={attempt + 1}, total_cost={total_cost:.3f}s")
+                logger.info(
+                    f"流式优化用户输入成功，attempt={attempt + 1}, total_cost={total_cost:.3f}s"
+                )
                 return
 
             fallback_result = optimizer._fallback_result(current_input)
@@ -290,7 +304,10 @@ async def optimize_user_input_stream(
         except Exception as exc:
             error_message = str(exc)
             error_type = type(exc).__name__
-            is_invalid_api_key = "INVALID_API_KEY" in error_message or error_type == "AuthenticationError"
+            is_invalid_api_key = (
+                "INVALID_API_KEY" in error_message
+                or error_type == "AuthenticationError"
+            )
             if _is_desktop_mode() and is_invalid_api_key and attempt < max_attempts - 1:
                 logger.warning(
                     f"流式优化用户输入命中无效 API Key，准备重试下一组客户端，attempt={attempt + 1}/{max_attempts}"
@@ -372,7 +389,8 @@ def _copy_docs_to_agent_workspace(agent_workspace: str) -> None:
         if docs_dir is None:
             # PyInstaller 运行时，sys._MEIPASS 指向临时解压目录
             import sys
-            if hasattr(sys, '_MEIPASS'):
+
+            if hasattr(sys, "_MEIPASS"):
                 possible_docs = Path(sys._MEIPASS) / "docs"
                 if possible_docs.exists() and possible_docs.is_dir():
                     docs_dir = possible_docs
@@ -381,6 +399,7 @@ def _copy_docs_to_agent_workspace(agent_workspace: str) -> None:
         # 3. 包安装目录（pip install 生产环境 - 旧方式）
         if docs_dir is None:
             import sagents
+
             package_dir = Path(sagents.__file__).parent.parent
             possible_docs = package_dir / "docs"
             if possible_docs.exists() and possible_docs.is_dir():
@@ -391,6 +410,7 @@ def _copy_docs_to_agent_workspace(agent_workspace: str) -> None:
         # data_files 会安装到 sys.prefix/share/sage/docs 或 /usr/local/share/sage/docs
         if docs_dir is None:
             import sys
+
             possible_paths = [
                 Path(sys.prefix) / "share" / "sage" / "docs",
                 Path("/usr") / "local" / "share" / "sage" / "docs",
@@ -405,6 +425,7 @@ def _copy_docs_to_agent_workspace(agent_workspace: str) -> None:
         # 5. 系统 site-packages 目录
         if docs_dir is None:
             import site
+
             for site_dir in site.getsitepackages():
                 possible_docs = Path(site_dir) / "docs"
                 if possible_docs.exists() and possible_docs.is_dir():
@@ -508,9 +529,12 @@ async def _register_extra_mcp_tools(request: StreamRequest) -> None:
             value["disabled"] = False
 
         if not any(
-            field in value for field in ["command", "sse_url", "url", "streamable_http_url"]
+            field in value
+            for field in ["command", "sse_url", "url", "streamable_http_url"]
         ):
-            logger.warning(f"Invalid MCP config for {key}: missing connection parameters")
+            logger.warning(
+                f"Invalid MCP config for {key}: missing connection parameters"
+            )
             continue
 
         from common.utils.mcp_anytool_url import coalesce_anytool_streamable_url
@@ -635,7 +659,10 @@ async def populate_request_from_agent_config(
             request.available_skills = agent_config.get("availableSkills")
         if agent_config.get("availableWorkflows") is not None:
             request.available_workflows = agent_config.get("availableWorkflows")
-        if agent_config.get("maxLoopCount") is not None and request.max_loop_count is None:
+        if (
+            agent_config.get("maxLoopCount") is not None
+            and request.max_loop_count is None
+        ):
             request.max_loop_count = agent_config.get("maxLoopCount")
         if agent_config.get("agentMode") is not None and request.agent_mode is None:
             request.agent_mode = agent_config.get("agentMode")
@@ -650,27 +677,37 @@ async def populate_request_from_agent_config(
             ):
                 if request.system_context is None:
                     request.system_context = {}
-                request.system_context["response_language"] = agent_system_context["response_language"]
+                request.system_context["response_language"] = agent_system_context[
+                    "response_language"
+                ]
         if agent_config.get("systemPrefix") is not None:
             request.system_prefix = agent_config.get("systemPrefix")
         if agent_config.get("memoryType") is not None:
             request.memory_type = agent_config.get("memoryType")
         if agent_config.get("availableKnowledgeBases") is not None:
-            request.available_knowledge_bases = agent_config.get("availableKnowledgeBases")
-        if agent_config.get("availableSubAgentIds") is not None and request.available_sub_agent_ids is None:
+            request.available_knowledge_bases = agent_config.get(
+                "availableKnowledgeBases"
+            )
+        if (
+            agent_config.get("availableSubAgentIds") is not None
+            and request.available_sub_agent_ids is None
+        ):
             request.available_sub_agent_ids = agent_config.get("availableSubAgentIds")
 
         # auto_all: when subAgentSelectionMode is "auto_all" (or defaults to it),
         # auto-populate available_sub_agent_ids with all agents (excluding self)
         if request.agent_mode == "fibre" and not request.available_sub_agent_ids:
-            selection_mode = agent_config.get("subAgentSelectionMode") or agent_config.get("sub_agent_selection_mode")
+            selection_mode = agent_config.get(
+                "subAgentSelectionMode"
+            ) or agent_config.get("sub_agent_selection_mode")
             configured_ids = agent_config.get("availableSubAgentIds")
             if selection_mode is None:
                 selection_mode = "manual" if configured_ids else "auto_all"
             if selection_mode == "auto_all":
                 all_agents = await AgentConfigDao().get_all()
                 request.available_sub_agent_ids = [
-                    a.agent_id for a in all_agents
+                    a.agent_id
+                    for a in all_agents
                     if a.agent_id and a.agent_id != request.agent_id
                 ]
 
@@ -694,7 +731,9 @@ async def populate_request_from_agent_config(
         request.llm_model_config["presence_penalty"] = provider.presence_penalty
         request.llm_model_config["max_model_len"] = provider.max_model_len
         request.llm_model_config["supports_multimodal"] = provider.supports_multimodal
-        request.llm_model_config["supports_structured_output"] = provider.supports_structured_output
+        request.llm_model_config["supports_structured_output"] = (
+            provider.supports_structured_output
+        )
     else:
         provider = await provider_dao.get_default()
         if request.llm_model_config.get("base_url") is None:
@@ -703,7 +742,10 @@ async def populate_request_from_agent_config(
             request.llm_model_config["api_key"] = _get_provider_api_key(provider)
         if request.llm_model_config.get("model") is None:
             request.llm_model_config["model"] = provider.model
-        if request.llm_model_config.get("max_tokens") is None and provider.max_tokens is not None:
+        if (
+            request.llm_model_config.get("max_tokens") is None
+            and provider.max_tokens is not None
+        ):
             request.llm_model_config["max_tokens"] = provider.max_tokens
         if request.llm_model_config.get("temperature") is None:
             request.llm_model_config["temperature"] = provider.temperature
@@ -714,16 +756,24 @@ async def populate_request_from_agent_config(
         if request.llm_model_config.get("max_model_len") is None:
             request.llm_model_config["max_model_len"] = provider.max_model_len
         if request.llm_model_config.get("supports_multimodal") is None:
-            request.llm_model_config["supports_multimodal"] = provider.supports_multimodal
+            request.llm_model_config["supports_multimodal"] = (
+                provider.supports_multimodal
+            )
         if request.llm_model_config.get("supports_structured_output") is None:
-            request.llm_model_config["supports_structured_output"] = provider.supports_structured_output
+            request.llm_model_config["supports_structured_output"] = (
+                provider.supports_structured_output
+            )
 
     # 处理快速模型配置
-    fast_provider_id = agent_config.get("fast_llm_provider_id") if agent_config else None
+    fast_provider_id = (
+        agent_config.get("fast_llm_provider_id") if agent_config else None
+    )
     if fast_provider_id:
         fast_provider = await provider_dao.get_by_id(fast_provider_id)
         if fast_provider:
-            request.llm_model_config["fast_api_key"] = _get_provider_api_key(fast_provider)
+            request.llm_model_config["fast_api_key"] = _get_provider_api_key(
+                fast_provider
+            )
             request.llm_model_config["fast_base_url"] = fast_provider.base_url
             request.llm_model_config["fast_model_name"] = fast_provider.model
             logger.info(f"Fast model configured: {fast_provider.model}")
@@ -756,12 +806,16 @@ async def populate_request_from_agent_config(
     if _is_desktop_mode():
         try:
             all_im_configs = await IMChannelConfigDao().get_all_configs()
-            im_enabled = any(config.get("enabled", False) for config in all_im_configs.values())
+            im_enabled = any(
+                config.get("enabled", False) for config in all_im_configs.values()
+            )
             if im_enabled and "send_message_through_im" not in request.available_tools:
                 request.available_tools = list(request.available_tools) + [
                     "send_message_through_im"
                 ]
-                logger.info("[Chat] Added send_message_through_im tool (IM provider enabled)")
+                logger.info(
+                    "[Chat] Added send_message_through_im tool (IM provider enabled)"
+                )
         except Exception as e:
             logger.warning(f"[Chat] Failed to check IM config: {e}")
     else:
@@ -817,8 +871,7 @@ class SageStreamService:
         # Server runtime workspaces are caller-scoped ("who uses it, owns the run files"),
         # while skills still resolve from the Agent owner.
         self.skill_owner_user_id = (
-            self.request.agent_owner_user_id
-            or self.runtime_user_id
+            self.request.agent_owner_user_id or self.runtime_user_id
         )
         self.runtime_agent_id = self.request.agent_id or "".join(
             random.choices(string.ascii_letters, k=8)
@@ -870,14 +923,18 @@ class SageStreamService:
             return
 
         if (not self._workspace_existed) and self.request.agent_id:
-            inherit_service = importlib.import_module("app.server.services.agent_inherit")
+            inherit_service = importlib.import_module(
+                "app.server.services.agent_inherit"
+            )
             await asyncio.to_thread(
                 inherit_service.copy_agent_inherit_to_workspace,
                 self.request.agent_id,
                 self.agent_workspace,
             )
 
-        await asyncio.to_thread(_copy_sage_usage_docs_to_workspace, self.agent_workspace)
+        await asyncio.to_thread(
+            _copy_sage_usage_docs_to_workspace, self.agent_workspace
+        )
 
     async def process_stream(self):
         session_id = self.request.session_id
@@ -971,7 +1028,9 @@ class SageStreamService:
             }
 
 
-async def prepare_session(request: StreamRequest) -> Tuple[SageStreamService, asyncio.Lock]:
+async def prepare_session(
+    request: StreamRequest,
+) -> Tuple[SageStreamService, asyncio.Lock]:
     session_id = request.session_id or str(uuid.uuid4())
     request.session_id = session_id
     logger.bind(session_id=session_id).info(
@@ -983,7 +1042,9 @@ async def prepare_session(request: StreamRequest) -> Tuple[SageStreamService, as
     if lock.locked():
         session = get_global_session_manager().get_live_session(session_id)
         if not session or not session.is_interrupted():
-            raise _chat_exception("会话正在运行中，请先调用 interrupt 或使用不同的会话ID")
+            raise _chat_exception(
+                "会话正在运行中，请先调用 interrupt 或使用不同的会话ID"
+            )
 
     try:
         lock_wait_start = time.perf_counter()
@@ -1058,7 +1119,9 @@ async def execute_chat_session(
                 continue
 
             result = payload
-            token_usage_payload = _extract_token_usage_payload(result) or token_usage_payload
+            token_usage_payload = (
+                _extract_token_usage_payload(result) or token_usage_payload
+            )
 
             yield_result = result.copy()
             yield_result.pop("message_type", None)
@@ -1072,15 +1135,18 @@ async def execute_chat_session(
             token_usage_payload=token_usage_payload,
         )
 
-        yield json.dumps(
-            {
-                "type": "stream_end",
-                "session_id": session_id,
-                "timestamp": time.time(),
-                "total_stream_count": stream_counter,
-            },
-            ensure_ascii=False,
-        ) + "\n"
+        yield (
+            json.dumps(
+                {
+                    "type": "stream_end",
+                    "session_id": session_id,
+                    "timestamp": time.time(),
+                    "total_stream_count": stream_counter,
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
     finally:
         unregister_progress_queue(session_id)
         if not token_usage_persisted:
@@ -1089,8 +1155,6 @@ async def execute_chat_session(
                 token_usage_payload=token_usage_payload,
             )
         await _finalize_session_end(request, original_skills)
-
-
 
 
 async def _finalize_session_end(
@@ -1154,7 +1218,9 @@ async def _persist_token_usage_if_available(
             finished_at=get_local_now(),
         )
     except Exception as e:
-        logger.bind(session_id=request.session_id or "").error(f"token_usage 落库失败: {e}")
+        logger.bind(session_id=request.session_id or "").error(
+            f"token_usage 落库失败: {e}"
+        )
         return False
 
 
@@ -1284,9 +1350,12 @@ async def create_conversation_title(request: StreamRequest) -> str:
                 _extract_text_from_content(getattr(request.messages[0], "content", ""))
             )
     else:
-        title_source = _sanitize_title_text(
-            _extract_text_from_content(request.messages[0].content)
-        ) or "新会话"
+        title_source = (
+            _sanitize_title_text(
+                _extract_text_from_content(request.messages[0].content)
+            )
+            or "新会话"
+        )
 
     if not title_source:
         return "新会话"

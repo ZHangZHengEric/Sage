@@ -2,7 +2,7 @@
 Agent 相关路由
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse
@@ -32,14 +32,14 @@ from loguru import logger
 agent_router = APIRouter(prefix="/api/agent", tags=["Agent"])
 
 
-def _resolve_request_language(http_request: Request, language: Optional[str] = None, default: str = "en") -> str:
+def _resolve_request_language(
+    http_request: Request, language: Optional[str] = None, default: str = "en"
+) -> str:
     candidate = (language or "").strip()
     if not candidate:
         headers = http_request.headers
         candidate = (
-            headers.get("x-accept-language")
-            or headers.get("accept-language")
-            or ""
+            headers.get("x-accept-language") or headers.get("accept-language") or ""
         ).strip()
     lowered = candidate.lower()
     if lowered.startswith("pt"):
@@ -79,15 +79,15 @@ async def get_default_system_prompt(http_request: Request, language: str = "en")
         StandardResponse: 包含默认System Prompt的内容
     """
     try:
-        resolved_language = _resolve_request_language(http_request, language, default="zh")
+        resolved_language = _resolve_request_language(
+            http_request, language, default="zh"
+        )
         result = await agent_router_service.build_default_system_prompt_response(
             language=resolved_language,
         )
         return await Response.succ(data=result["data"], message=result["message"])
     except Exception as e:
-        return await Response.error(
-            message=f"获取默认System Prompt模板失败: {str(e)}"
-        )
+        return await Response.error(message=f"获取默认System Prompt模板失败: {str(e)}")
 
 
 @agent_router.post("/create")
@@ -108,7 +108,8 @@ async def create(agent: AgentConfigDTO, http_request: Request):
         user_id,
     )
     return await Response.succ(
-        data={"agent_id": created_agent.agent_id}, message=f"Agent '{created_agent.agent_id}' 创建成功"
+        data={"agent_id": created_agent.agent_id},
+        message=f"Agent '{created_agent.agent_id}' 创建成功",
     )
 
 
@@ -278,7 +279,7 @@ async def get_auth(agent_id: str, http_request: Request):
     """
     user_id = get_request_user_id(http_request)
     role = get_request_role(http_request)
-    
+
     users = await agent_service.get_agent_authorized_users(agent_id, user_id, role)
     return await Response.succ(data=users, message="获取授权用户列表成功")
 
@@ -290,9 +291,12 @@ async def update_auth(agent_id: str, req: AuthorizationRequest, http_request: Re
     """
     user_id = get_request_user_id(http_request)
     role = get_request_role(http_request)
-    
-    await agent_service.update_agent_authorizations(agent_id, req.user_ids, user_id, role)
+
+    await agent_service.update_agent_authorizations(
+        agent_id, req.user_ids, user_id, role
+    )
     return await Response.succ(data={}, message="更新授权成功")
+
 
 @agent_router.post("/{agent_id}/file_workspace")
 async def get_workspace(
@@ -326,8 +330,11 @@ async def get_workspace(
     logger.bind(agent_id=agent_id).info(f"获取工作空间文件数量：{len(files)}")
     return await Response.succ(message=result["message"], data=result["data"])
 
+
 @agent_router.get("/{agent_id}/file_workspace/download")
-async def download_file(agent_id: str, request: Request, session_id: Optional[str] = None):
+async def download_file(
+    agent_id: str, request: Request, session_id: Optional[str] = None
+):
     """获取指定会话的文件工作空间"""
     user_id = get_request_user_id(request)
     role = get_request_role(request)
@@ -337,7 +344,7 @@ async def download_file(agent_id: str, request: Request, session_id: Optional[st
         conversation = await dao.get_by_session_id(session_id)
         if conversation:
             user_id = conversation.user_id
-            
+
     file_path = request.query_params.get("file_path")
     logger.info(f"Download request: file_path={file_path}")
     try:
@@ -347,32 +354,34 @@ async def download_file(agent_id: str, request: Request, session_id: Optional[st
             file_path,
         )
         logger.info(f"Download resolved: path={path}")
-        return FileResponse(
-            path=path, filename=filename, media_type=media_type
-        )
+        return FileResponse(path=path, filename=filename, media_type=media_type)
     except Exception as e:
         logger.error(f"Download failed: {e}")
         raise
 
 
 @agent_router.delete("/{agent_id}/file_workspace/delete")
-async def delete_file(agent_id: str, request: Request, session_id: Optional[str] = None):
+async def delete_file(
+    agent_id: str, request: Request, session_id: Optional[str] = None
+):
     """删除指定会话的文件"""
     user_id = get_request_user_id(request)
     role = get_request_role(request)
-    
+
     if role == "admin" and session_id:
         dao = ConversationDao()
         conversation = await dao.get_by_session_id(session_id)
         if conversation:
             user_id = conversation.user_id
-            
+
     file_path = request.query_params.get("file_path")
     logger.info(f"Delete request: file_path={file_path}")
     try:
         result = await agent_router_service.build_workspace_delete_response(
             file_path=file_path,
-            deleter=lambda: agent_service.delete_server_agent_file(agent_id, user_id, file_path),
+            deleter=lambda: agent_service.delete_server_agent_file(
+                agent_id, user_id, file_path
+            ),
         )
         return await Response.succ(message=result["message"], data=result["data"])
     except Exception as e:
@@ -431,6 +440,8 @@ async def delete_agent_workspace(req: DeleteAgentWorkspaceRequest):
     result = await agent_router_service.build_agent_workspace_delete_response(
         agent_id=req.agent_id,
         user_id=req.user_id,
-        deleter=lambda: agent_service.delete_server_agent_workspace(req.agent_id, req.user_id),
+        deleter=lambda: agent_service.delete_server_agent_workspace(
+            req.agent_id, req.user_id
+        ),
     )
     return await Response.succ(message=result["message"], data=result["data"])

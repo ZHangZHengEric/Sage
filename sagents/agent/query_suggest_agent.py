@@ -1,19 +1,21 @@
-import traceback
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
 from typing import Any, Dict, List, Optional, AsyncGenerator
 from sagents.utils.logger import logger
-from sagents.tool.tool_manager import ToolManager
-from sagents.context.messages.message import MessageChunk, MessageRole,MessageType
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import SessionContext
 from sagents.utils.prompt_manager import PromptManager
-import json
 import uuid
-import re
 from openai import AsyncOpenAI
 
+
 class QuerySuggestAgent(AgentBase):
-    def __init__(self, model: Optional[AsyncOpenAI] = None, model_config: Optional[Dict[str, Any]] = None, system_prefix: str = ""):
+    def __init__(
+        self,
+        model: Optional[AsyncOpenAI] = None,
+        model_config: Optional[Dict[str, Any]] = None,
+        system_prefix: str = "",
+    ):
         if model_config is None:
             model_config = {}
         super().__init__(model, model_config, system_prefix)
@@ -21,71 +23,85 @@ class QuerySuggestAgent(AgentBase):
         self.agent_description = "查询建议智能体，专门负责根据用户对话生成接下来用户可能会问的问题，或者可能帮助用户解决相关更加深入的事情。"
         logger.debug("QuerySuggestAgent 初始化完成")
 
-    async def run_stream(self, session_context: SessionContext) -> AsyncGenerator[List[MessageChunk], None]:
+    async def run_stream(
+        self, session_context: SessionContext
+    ) -> AsyncGenerator[List[MessageChunk], None]:
         session_id = session_context.session_id
         if self._should_abort_due_to_session(session_context):
             return
         message_manager = session_context.message_manager
 
-        conversation_messages = message_manager.extract_all_context_messages(recent_turns=2, last_turn_user_only=False)
+        conversation_messages = message_manager.extract_all_context_messages(
+            recent_turns=2, last_turn_user_only=False
+        )
         # 根据 active_budget 压缩消息
         budget_info = message_manager.context_budget_manager.budget_info
         if budget_info:
-            conversation_messages = MessageManager.compress_messages(conversation_messages, min(budget_info.get('active_budget', 8000),4000))
-        recent_message_str = MessageManager.convert_messages_to_str(conversation_messages)
-        suggest_template = PromptManager().get_agent_prompt_auto('suggest_template', language=session_context.get_language())
-        prompt = suggest_template.format(
-            task_description=recent_message_str
+            conversation_messages = MessageManager.compress_messages(
+                conversation_messages, min(budget_info.get("active_budget", 8000), 4000)
+            )
+        recent_message_str = MessageManager.convert_messages_to_str(
+            conversation_messages
         )
+        suggest_template = PromptManager().get_agent_prompt_auto(
+            "suggest_template", language=session_context.get_language()
+        )
+        prompt = suggest_template.format(task_description=recent_message_str)
         llm_request_message = [
-            *await self.prepare_unified_system_messages(session_id=session_id, language=session_context.get_language()),
+            *await self.prepare_unified_system_messages(
+                session_id=session_id, language=session_context.get_language()
+            ),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,
                 message_id=str(uuid.uuid4()),
-                message_type=MessageType.QUERY_SUGGEST.value
-            )
+                message_type=MessageType.QUERY_SUGGEST.value,
+            ),
         ]
         message_id = str(uuid.uuid4())
-        unknown_content = ''
-        full_response = ''
-        last_tag_type = ''
-        async for llm_repsonse_chunk in self._call_llm_streaming(messages=llm_request_message,
-                                             session_id=session_id,
-                                             step_name="query_suggest",
-                                             enable_thinking=False):
+        unknown_content = ""
+        full_response = ""
+        last_tag_type = ""
+        async for llm_repsonse_chunk in self._call_llm_streaming(
+            messages=llm_request_message,
+            session_id=session_id,
+            step_name="query_suggest",
+            enable_thinking=False,
+        ):
             if len(llm_repsonse_chunk.choices) == 0:
                 continue
             if llm_repsonse_chunk.choices[0].delta.content:
                 delta_content = llm_repsonse_chunk.choices[0].delta.content
-                
+
                 for delta_content_char in delta_content:
-                    delta_content_all = unknown_content+ delta_content_char
-                    delta_content_type = self._judge_delta_content_type(delta_content_all, full_response, ['suggest_item'])
-                    
+                    delta_content_all = unknown_content + delta_content_char
+                    delta_content_type = self._judge_delta_content_type(
+                        delta_content_all, full_response, ["suggest_item"]
+                    )
+
                     full_response += delta_content_char
-                    if delta_content_type == 'unknown':
+                    if delta_content_type == "unknown":
                         unknown_content = delta_content_all
                         continue
                     else:
-                        unknown_content = ''
-                        if delta_content_type == 'suggest_item':
-                            if last_tag_type != 'suggest_item':
-                                yield [MessageChunk(
+                        unknown_content = ""
+                        if delta_content_type == "suggest_item":
+                            if last_tag_type != "suggest_item":
+                                yield [
+                                    MessageChunk(
+                                        role=MessageRole.ASSISTANT.value,
+                                        content="\n- ",
+                                        message_id=message_id,
+                                        message_type=MessageType.QUERY_SUGGEST.value,
+                                    )
+                                ]
+
+                            yield [
+                                MessageChunk(
                                     role=MessageRole.ASSISTANT.value,
-                                    content='\n- ',
+                                    content=delta_content_all,
                                     message_id=message_id,
-                                    message_type=MessageType.QUERY_SUGGEST.value
-                                )]
-                            
-                            yield [MessageChunk(
-                                role=MessageRole.ASSISTANT.value,
-                                content=delta_content_all,
-                                message_id=message_id,
-                                message_type=MessageType.QUERY_SUGGEST.value
-                            )]
+                                    message_type=MessageType.QUERY_SUGGEST.value,
+                                )
+                            ]
                         last_tag_type = delta_content_type
-
-
-        
-        

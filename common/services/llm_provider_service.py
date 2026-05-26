@@ -6,17 +6,29 @@ from loguru import logger
 from common.models.llm_provider import LLMProvider, LLMProviderDao
 from common.services.llm_provider_probe_utils import friendly_provider_probe_error
 from common.schemas.base import LLMProviderCreate, LLMProviderUpdate
-from sagents.llm import probe_connection, probe_llm_capabilities, probe_multimodal, probe_structured_output
+from sagents.llm import (
+    probe_connection,
+    probe_llm_capabilities,
+    probe_multimodal,
+    probe_structured_output,
+)
 
 
 def _normalize_base_url(base_url: Optional[str]) -> Optional[str]:
     return base_url.rstrip("/") if base_url else base_url
 
 
-def _build_provider_name(model: str, normalized_base_url: Optional[str], name: Optional[str] = None) -> str:
+def _build_provider_name(
+    model: str, normalized_base_url: Optional[str], name: Optional[str] = None
+) -> str:
     if name:
         return name
-    base = (normalized_base_url or "").replace("https://", "").replace("http://", "").split("/")[0]
+    base = (
+        (normalized_base_url or "")
+        .replace("https://", "")
+        .replace("http://", "")
+        .split("/")[0]
+    )
     return f"{model}@{base}"
 
 
@@ -27,7 +39,9 @@ def _resolve_api_key(api_keys: Optional[List[str]]) -> str:
     return api_key
 
 
-async def _probe_provider_or_raise(*, api_keys: Optional[List[str]], base_url: Optional[str], model: str, action: str) -> None:
+async def _probe_provider_or_raise(
+    *, api_keys: Optional[List[str]], base_url: Optional[str], model: str, action: str
+) -> None:
     api_key = _resolve_api_key(api_keys)
     try:
         await probe_connection(api_key, base_url or "", model)
@@ -42,7 +56,9 @@ async def _probe_provider_or_raise(*, api_keys: Optional[List[str]], base_url: O
 
 async def verify_provider(data: LLMProviderCreate) -> None:
     api_key = _resolve_api_key(data.api_keys)
-    await probe_connection(api_key, _normalize_base_url(data.base_url) or "", data.model)
+    await probe_connection(
+        api_key, _normalize_base_url(data.base_url) or "", data.model
+    )
 
 
 async def verify_multimodal(data: LLMProviderCreate) -> Dict[str, Any]:
@@ -100,7 +116,9 @@ async def create_provider(
     logger.info(f"[LLMProvider] Request api_keys: {data.api_keys}")
 
     for provider in existing_providers:
-        logger.info(f"[LLMProvider] Comparing with provider {provider.id}: api_keys={provider.api_keys}")
+        logger.info(
+            f"[LLMProvider] Comparing with provider {provider.id}: api_keys={provider.api_keys}"
+        )
         if sorted(provider.api_keys) == sorted(data.api_keys):
             logger.info(f"[LLMProvider] Found matching provider: {provider.id}")
             return provider.id
@@ -130,7 +148,9 @@ async def create_provider(
         user_id=user_id,
     )
     if provider.is_default:
-        await dao.clear_default_for_user(user_id=user_id, exclude_provider_id=provider_id)
+        await dao.clear_default_for_user(
+            user_id=user_id, exclude_provider_id=provider_id
+        )
     await dao.save(provider)
     return provider_id
 
@@ -151,8 +171,14 @@ async def update_provider(
     if not allow_system_default_update and not provider.user_id:
         raise PermissionError("Cannot modify system default provider")
 
-    effective_base_url = _normalize_base_url(data.base_url) if data.base_url is not None else provider.base_url
-    effective_api_keys = data.api_keys if data.api_keys is not None else provider.api_keys
+    effective_base_url = (
+        _normalize_base_url(data.base_url)
+        if data.base_url is not None
+        else provider.base_url
+    )
+    effective_api_keys = (
+        data.api_keys if data.api_keys is not None else provider.api_keys
+    )
     effective_model = data.model if data.model is not None else provider.model
 
     await _probe_provider_or_raise(
@@ -191,7 +217,9 @@ async def update_provider(
         provider.is_default = data.is_default
 
     if provider.is_default:
-        await dao.clear_default_for_user(user_id=provider.user_id, exclude_provider_id=provider.id)
+        await dao.clear_default_for_user(
+            user_id=provider.user_id, exclude_provider_id=provider.id
+        )
     await dao.save(provider)
     return provider
 

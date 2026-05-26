@@ -18,7 +18,7 @@ class FeishuWebSocketClient:
         self,
         app_id: str,
         app_secret: str,
-        message_handler: Callable[[Dict[str, Any]], None]
+        message_handler: Callable[[Dict[str, Any]], None],
     ):
         """
         Initialize Feishu WebSocket client.
@@ -56,15 +56,19 @@ class FeishuWebSocketClient:
             if sender.sender_id:
                 # UserId object has 'union_id', 'user_id', 'open_id' attributes
                 # For sending messages, we need open_id (app-specific), not union_id (cross-app)
-                user_id = sender.sender_id.open_id or sender.sender_id.user_id or sender.sender_id.union_id
+                user_id = (
+                    sender.sender_id.open_id
+                    or sender.sender_id.user_id
+                    or sender.sender_id.union_id
+                )
 
             # Try to get user_name from raw data if available
             user_name = None
-            if hasattr(data, 'raw_data') and data.raw_data:
-                raw_event = data.raw_data.get('event', {})
-                raw_sender = raw_event.get('sender', {})
+            if hasattr(data, "raw_data") and data.raw_data:
+                raw_event = data.raw_data.get("event", {})
+                raw_sender = raw_event.get("sender", {})
                 # Try to find name in various places
-                user_name = raw_sender.get('name') or raw_sender.get('user_name')
+                user_name = raw_sender.get("name") or raw_sender.get("user_name")
 
             parsed_message = {
                 "type": "message",
@@ -74,10 +78,12 @@ class FeishuWebSocketClient:
                 "user_id": user_id,
                 "user_name": user_name,  # May be None if not provided by Feishu
                 "msg_type": message.message_type,
-                "provider": "feishu"
+                "provider": "feishu",
             }
 
-            logger.info(f"[Feishu] Received message from user_id={user_id}, user_name={user_name}: {parsed_message['content']}")
+            logger.info(
+                f"[Feishu] Received message from user_id={user_id}, user_name={user_name}: {parsed_message['content']}"
+            )
 
             # Call handler - handle async message handler
             try:
@@ -107,32 +113,36 @@ class FeishuWebSocketClient:
         def run_client():
             """Run client with its own event loop."""
             import asyncio
-            
+
             # CRITICAL: 确保线程有干净的事件循环
             # 清除任何已存在的事件循环状态
             try:
                 asyncio.set_event_loop(None)
-            except:
+            except Exception:
                 pass
-            
+
             # 创建全新的事件循环
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
+
             # Create event handler
-            event_handler = lark.EventDispatcherHandler.builder("", "") \
-                .register_p2_im_message_receive_v1(self._handle_message) \
+            event_handler = (
+                lark.EventDispatcherHandler.builder("", "")
+                .register_p2_im_message_receive_v1(self._handle_message)
                 .build()
+            )
 
             # Create WebSocket client
             self.client = lark.ws.Client(
                 self.app_id,
                 self.app_secret,
                 event_handler=event_handler,
-                log_level=lark.LogLevel.INFO
+                log_level=lark.LogLevel.INFO,
             )
 
-            logger.info(f"[Feishu] Starting WebSocket client with app_id: {self.app_id}")
+            logger.info(
+                f"[Feishu] Starting WebSocket client with app_id: {self.app_id}"
+            )
 
             # Start client - SDK will use the event loop we just created
             try:
@@ -142,12 +152,12 @@ class FeishuWebSocketClient:
                     logger.warning(f"[Feishu] Event loop issue (SDK will retry): {e}")
                 else:
                     raise
-            
+
             # Keep thread alive to maintain connection
             # lark-oapi SDK runs its own event loop internally
             try:
                 loop.run_forever()
-            except:
+            except Exception:
                 pass
 
         # Run in a new thread

@@ -35,17 +35,23 @@ class SelfCheckAgent(AgentBase):
     并要求最终消息中的 Markdown 文件链接必须使用绝对路径。
     """
 
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
+    def __init__(
+        self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""
+    ):
         super().__init__(model, model_config, system_prefix)
         self.agent_name = "SelfCheckAgent"
         self.agent_description = "执行后自检智能体，负责验证产物存在性与基础语法可靠性"
 
-    async def run_stream(self, session_context: SessionContext) -> AsyncGenerator[List[MessageChunk], None]:
+    async def run_stream(
+        self, session_context: SessionContext
+    ) -> AsyncGenerator[List[MessageChunk], None]:
         if self._should_abort_due_to_session(session_context):
             return
 
         audit_status = session_context.audit_status
-        audit_status["self_check_attempts"] = int(audit_status.get("self_check_attempts", 0)) + 1
+        audit_status["self_check_attempts"] = (
+            int(audit_status.get("self_check_attempts", 0)) + 1
+        )
 
         sandbox = session_context.sandbox
         if sandbox is None:
@@ -60,7 +66,9 @@ class SelfCheckAgent(AgentBase):
         )
 
         if not referenced_files:
-            self._mark_passed(session_context, summary="skip: no candidate files detected")
+            self._mark_passed(
+                session_context, summary="skip: no candidate files detected"
+            )
             return
 
         issues: List[str] = []
@@ -139,7 +147,9 @@ class SelfCheckAgent(AgentBase):
         if checked_files is not None:
             session_context.audit_status["self_check_checked_files"] = checked_files
 
-    def _collect_recent_referenced_files(self, session_context: SessionContext) -> Set[str]:
+    def _collect_recent_referenced_files(
+        self, session_context: SessionContext
+    ) -> Set[str]:
         messages = session_context.message_manager.messages
         if not messages:
             return set()
@@ -154,7 +164,11 @@ class SelfCheckAgent(AgentBase):
 
         latest_assistant_message = None
         for message in messages[last_user_index:]:
-            if message.role == MessageRole.ASSISTANT.value and isinstance(message.content, str) and message.content.strip():
+            if (
+                message.role == MessageRole.ASSISTANT.value
+                and isinstance(message.content, str)
+                and message.content.strip()
+            ):
                 latest_assistant_message = message
 
         if latest_assistant_message is None:
@@ -173,7 +187,9 @@ class SelfCheckAgent(AgentBase):
         if path.startswith("//"):
             return False
         lowered = path.lower()
-        if lowered.startswith(("http://", "https://", "file://", "data:", "javascript:")):
+        if lowered.startswith(
+            ("http://", "https://", "file://", "data:", "javascript:")
+        ):
             return False
         if path.startswith("/api/"):
             return False
@@ -211,7 +227,9 @@ class SelfCheckAgent(AgentBase):
 
         for paths in basename_to_paths.values():
             concrete_absolute_paths = [
-                path for path in paths if self._is_concrete_absolute_file_reference(path)
+                path
+                for path in paths
+                if self._is_concrete_absolute_file_reference(path)
             ]
             if not concrete_absolute_paths:
                 continue
@@ -219,7 +237,9 @@ class SelfCheckAgent(AgentBase):
             for path in paths:
                 if path in concrete_absolute_paths:
                     continue
-                if self._is_ambiguous_root_file_reference(path) or not os.path.isabs(path):
+                if self._is_ambiguous_root_file_reference(path) or not os.path.isabs(
+                    path
+                ):
                     deduped_files.discard(path)
 
         return deduped_files
@@ -228,7 +248,9 @@ class SelfCheckAgent(AgentBase):
         return os.path.isabs(file_path) and len(Path(file_path).parts) == 2
 
     def _is_concrete_absolute_file_reference(self, file_path: str) -> bool:
-        return os.path.isabs(file_path) and not self._is_ambiguous_root_file_reference(file_path)
+        return os.path.isabs(file_path) and not self._is_ambiguous_root_file_reference(
+            file_path
+        )
 
     def _validate_reference_in_workspace(
         self,
@@ -246,7 +268,9 @@ class SelfCheckAgent(AgentBase):
                     f"{original_file_path or file_path}"
                 )
             except Exception as e:
-                logger.warning(f"SelfCheckAgent: sandbox path permission check failed {file_path}: {e}")
+                logger.warning(
+                    f"SelfCheckAgent: sandbox path permission check failed {file_path}: {e}"
+                )
 
         allowed_roots = self._fallback_allowed_roots(session_context)
         if not allowed_roots:
@@ -269,11 +293,15 @@ class SelfCheckAgent(AgentBase):
         roots: List[str] = []
         candidates = [
             getattr(session_context, "sandbox_agent_workspace", None),
-            (getattr(session_context, "system_context", {}) or {}).get("private_workspace"),
+            (getattr(session_context, "system_context", {}) or {}).get(
+                "private_workspace"
+            ),
         ]
         external_paths = getattr(session_context, "external_paths", None)
         if external_paths is None:
-            external_paths = (getattr(session_context, "system_context", {}) or {}).get("external_paths")
+            external_paths = (getattr(session_context, "system_context", {}) or {}).get(
+                "external_paths"
+            )
         if isinstance(external_paths, str):
             candidates.append(external_paths)
         elif isinstance(external_paths, list):
@@ -328,7 +356,9 @@ class SelfCheckAgent(AgentBase):
                     timeout=20,
                 )
                 if not result.success or result.return_code != 0:
-                    stderr = (result.stderr or result.stdout or "unknown syntax error").strip()
+                    stderr = (
+                        result.stderr or result.stdout or "unknown syntax error"
+                    ).strip()
                     issues.append(f"JavaScript 语法错误: {file_path}\n{stderr}")
         except SyntaxError as e:
             issues.append(f"Python 语法错误: {file_path}:{e.lineno}:{e.offset} {e.msg}")
@@ -351,7 +381,9 @@ class SelfCheckAgent(AgentBase):
             logger.warning(f"SelfCheckAgent: failed to read {file_path}: {e}")
             return None
 
-    def _format_failure_message(self, issues: List[str], checked_files: List[str]) -> str:
+    def _format_failure_message(
+        self, issues: List[str], checked_files: List[str]
+    ) -> str:
         issue_lines = "\n".join(f"- {issue}" for issue in issues[:20])
         checked_lines = "\n".join(f"- {path}" for path in checked_files[:20])
         return (

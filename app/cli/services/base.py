@@ -35,8 +35,9 @@ def mask_api_key(value: Optional[str]) -> Optional[str]:
 def sanitize_provider_record(record: Dict[str, Any]) -> Dict[str, Any]:
     sanitized = dict(record)
     raw_api_keys = sanitized.get("api_keys") or []
-    masked_api_keys = [masked for item in raw_api_keys if (masked := mask_api_key(item))]
+    masked_api_keys = [
+        masked for item in raw_api_keys if (masked := mask_api_key(item))
+    ]
     sanitized["api_keys"] = masked_api_keys
     sanitized["api_key_preview"] = masked_api_keys[0] if masked_api_keys else None
     return sanitized
-

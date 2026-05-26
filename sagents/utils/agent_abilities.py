@@ -64,7 +64,9 @@ def _normalize_id(raw: str) -> str:
     return value
 
 
-def _format_name_list(label: str, values: Iterable[str] | None, max_count: int = 10) -> str:
+def _format_name_list(
+    label: str, values: Iterable[str] | None, max_count: int = 10
+) -> str:
     names = [str(v) for v in (values or []) if str(v).strip()]
     if not names:
         return f"{label}：无"
@@ -96,11 +98,15 @@ def _build_system_context_message(language: str) -> str:
     now = datetime.now().astimezone()
     timezone_name = now.tzname() or "local"
     current_time = now.strftime("%Y-%m-%d %H:%M:%S")
-    return PromptManager().get_prompt(
-        "auto_gen_agent_system_context_prompt",
-        agent="common_util",
-        language=language,
-    ).format(current_time=current_time, timezone_name=timezone_name)
+    return (
+        PromptManager()
+        .get_prompt(
+            "auto_gen_agent_system_context_prompt",
+            agent="common_util",
+            language=language,
+        )
+        .format(current_time=current_time, timezone_name=timezone_name)
+    )
 
 
 async def generate_agent_abilities_from_config(
@@ -139,7 +145,9 @@ async def generate_agent_abilities_from_config(
         or "这是一个通用智能助手。"
     )
 
-    tools = agent_config.get("availableTools") or agent_config.get("available_tools") or []
+    tools = (
+        agent_config.get("availableTools") or agent_config.get("available_tools") or []
+    )
 
     # 如果调用方显式传入了 skills（通常包含 name/description 等详情），优先使用；
     # 否则退回到 agent_config 中的 availableSkills/available_skills 仅名称列表。
@@ -163,13 +171,21 @@ async def generate_agent_abilities_from_config(
                 if text:
                     display_skills.append(text)
     else:
-        raw_skills = agent_config.get("availableSkills") or agent_config.get("available_skills") or []
+        raw_skills = (
+            agent_config.get("availableSkills")
+            or agent_config.get("available_skills")
+            or []
+        )
         for s in raw_skills:
             text = str(s).strip()
             if text:
                 display_skills.append(text)
 
-    workflows_cfg = agent_config.get("availableWorkflows") or agent_config.get("available_workflows") or {}
+    workflows_cfg = (
+        agent_config.get("availableWorkflows")
+        or agent_config.get("available_workflows")
+        or {}
+    )
 
     if isinstance(workflows_cfg, dict):
         workflow_names: List[str] = list(workflows_cfg.keys())
@@ -184,19 +200,23 @@ async def generate_agent_abilities_from_config(
 
     context_summary = _build_context_summary(context)
 
-    user_prompt = PromptManager().get_prompt(
-        "agent_abilities_user_prompt",
-        agent="common_util",
-        language=language,
-    ).format(
-        language=language,
-        agent_name=agent_name,
-        agent_description=agent_description,
-        tools_line=tools_line,
-        skills_line=skills_line,
-        workflows_line=workflows_line,
-        context_summary=context_summary,
-        abilities_count=AGENT_ABILITIES_TARGET_COUNT,
+    user_prompt = (
+        PromptManager()
+        .get_prompt(
+            "agent_abilities_user_prompt",
+            agent="common_util",
+            language=language,
+        )
+        .format(
+            language=language,
+            agent_name=agent_name,
+            agent_description=agent_description,
+            tools_line=tools_line,
+            skills_line=skills_line,
+            workflows_line=workflows_line,
+            context_summary=context_summary,
+            abilities_count=AGENT_ABILITIES_TARGET_COUNT,
+        )
     )
 
     try:
@@ -303,8 +323,6 @@ async def generate_agent_abilities_from_config(
             )
         )
 
-    logger.info(
-        "成功为 Agent 生成 {} 条能力项".format(len(results))
-    )
+    logger.info("成功为 Agent 生成 {} 条能力项".format(len(results)))
 
     return results

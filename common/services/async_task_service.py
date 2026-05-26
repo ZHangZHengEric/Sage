@@ -72,18 +72,26 @@ class AsyncTaskService:
             self._cleanup_locked()
             task = self._tasks.get(task_id)
             if not task:
-                raise SageHTTPException(detail="任务不存在", error_detail=f"task '{task_id}' not found")
+                raise SageHTTPException(
+                    detail="任务不存在", error_detail=f"task '{task_id}' not found"
+                )
             if task["owner_id"] and owner_id and task["owner_id"] != owner_id:
-                raise SageHTTPException(detail="无权访问该任务", error_detail="forbidden")
+                raise SageHTTPException(
+                    detail="无权访问该任务", error_detail="forbidden"
+                )
             return self._public_task(task)
 
     async def cancel(self, task_id: str, owner_id: str) -> Dict[str, Any]:
         async with self._lock:
             task = self._tasks.get(task_id)
             if not task:
-                raise SageHTTPException(detail="任务不存在", error_detail=f"task '{task_id}' not found")
+                raise SageHTTPException(
+                    detail="任务不存在", error_detail=f"task '{task_id}' not found"
+                )
             if task["owner_id"] and owner_id and task["owner_id"] != owner_id:
-                raise SageHTTPException(detail="无权访问该任务", error_detail="forbidden")
+                raise SageHTTPException(
+                    detail="无权访问该任务", error_detail="forbidden"
+                )
             asyncio_task = task.get("asyncio_task")
             if asyncio_task and not asyncio_task.done():
                 asyncio_task.cancel()

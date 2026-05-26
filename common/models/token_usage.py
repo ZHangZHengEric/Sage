@@ -31,12 +31,18 @@ class TokenUsage(Base):
     cached_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     reasoning_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     prompt_audio_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    completion_audio_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completion_audio_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
     step_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    step_model_names: Mapped[str] = mapped_column(String(2048), nullable=False, default="{}")
+    step_model_names: Mapped[str] = mapped_column(
+        String(2048), nullable=False, default="{}"
+    )
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=get_local_now)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=get_local_now
+    )
 
     def __init__(
         self,
@@ -119,11 +125,19 @@ class TokenUsageDao(BaseDao):
         db = await self._get_db()
         async with db.get_session() as session:  # type: ignore[attr-defined]
             summary_stmt = select(
-                func.coalesce(func.sum(TokenUsage.input_tokens), 0).label("input_tokens"),
-                func.coalesce(func.sum(TokenUsage.output_tokens), 0).label("output_tokens"),
-                func.coalesce(func.sum(TokenUsage.total_tokens), 0).label("total_tokens"),
+                func.coalesce(func.sum(TokenUsage.input_tokens), 0).label(
+                    "input_tokens"
+                ),
+                func.coalesce(func.sum(TokenUsage.output_tokens), 0).label(
+                    "output_tokens"
+                ),
+                func.coalesce(func.sum(TokenUsage.total_tokens), 0).label(
+                    "total_tokens"
+                ),
                 func.count(func.distinct(TokenUsage.session_id)).label("session_count"),
-                func.coalesce(func.sum(TokenUsage.step_count), 0).label("model_call_count"),
+                func.coalesce(func.sum(TokenUsage.step_count), 0).label(
+                    "model_call_count"
+                ),
             )
             for cond in where:
                 summary_stmt = summary_stmt.where(cond)
@@ -132,11 +146,21 @@ class TokenUsageDao(BaseDao):
             items_stmt = (
                 select(
                     dimension_column.label(dimension_key),
-                    func.coalesce(func.sum(TokenUsage.input_tokens), 0).label("input_tokens"),
-                    func.coalesce(func.sum(TokenUsage.output_tokens), 0).label("output_tokens"),
-                    func.coalesce(func.sum(TokenUsage.total_tokens), 0).label("total_tokens"),
-                    func.count(func.distinct(TokenUsage.session_id)).label("session_count"),
-                    func.coalesce(func.sum(TokenUsage.step_count), 0).label("model_call_count"),
+                    func.coalesce(func.sum(TokenUsage.input_tokens), 0).label(
+                        "input_tokens"
+                    ),
+                    func.coalesce(func.sum(TokenUsage.output_tokens), 0).label(
+                        "output_tokens"
+                    ),
+                    func.coalesce(func.sum(TokenUsage.total_tokens), 0).label(
+                        "total_tokens"
+                    ),
+                    func.count(func.distinct(TokenUsage.session_id)).label(
+                        "session_count"
+                    ),
+                    func.coalesce(func.sum(TokenUsage.step_count), 0).label(
+                        "model_call_count"
+                    ),
                     func.min(TokenUsage.started_at).label("started_at"),
                     func.max(TokenUsage.finished_at).label("finished_at"),
                     func.min(TokenUsage.user_id).label("resolved_user_id"),
@@ -193,7 +217,9 @@ class TokenUsageDao(BaseDao):
                 "total_tokens": summary_total_tokens,
                 "session_count": summary_session_count,
                 "average_tokens_per_session": (
-                    summary_total_tokens / summary_session_count if summary_session_count else 0
+                    summary_total_tokens / summary_session_count
+                    if summary_session_count
+                    else 0
                 ),
                 "model_call_count": int(summary_row["model_call_count"] or 0),
             },

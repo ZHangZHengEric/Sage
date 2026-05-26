@@ -26,6 +26,5 @@ def test_validate_and_prepare_request_returns_503_when_chat_client_uninitialized
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail == "模型客户端未配置或不可用"
     assert (
-        exc_info.value.error_detail
-        == "Model client is not configured or unavailable"
+        exc_info.value.error_detail == "Model client is not configured or unavailable"
     )

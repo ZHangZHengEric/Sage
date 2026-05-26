@@ -46,7 +46,10 @@ class TestDoctorMemoryBackends(unittest.TestCase):
                 patch.object(
                     cli_service.config,
                     "get_local_storage_defaults",
-                    return_value={"env_file": "/tmp/.sage_env", "sage_home": "/tmp/.sage"},
+                    return_value={
+                        "env_file": "/tmp/.sage_env",
+                        "sage_home": "/tmp/.sage",
+                    },
                 )
             )
             stack.enter_context(
@@ -64,10 +67,14 @@ class TestDoctorMemoryBackends(unittest.TestCase):
                 )
             )
             stack.enter_context(
-                patch.object(cli_service, "get_default_cli_user_id", return_value="default_user")
+                patch.object(
+                    cli_service, "get_default_cli_user_id", return_value="default_user"
+                )
             )
             stack.enter_context(
-                patch.object(cli_service, "get_default_cli_max_loop_count", return_value=50)
+                patch.object(
+                    cli_service, "get_default_cli_max_loop_count", return_value=50
+                )
             )
             stack.enter_context(patch("os.path.exists", return_value=True))
             stack.enter_context(
@@ -91,10 +98,14 @@ class TestDoctorMemoryBackends(unittest.TestCase):
         self.assertEqual(info["memory_backends"]["session_history"]["status"], "ok")
         self.assertEqual(info["memory_backends"]["file_memory"]["status"], "ok")
         self.assertEqual(info["memory_backends"]["session_history"]["resolved"], "noop")
-        self.assertEqual(info["memory_backends"]["file_memory"]["resolved"], "scoped_index")
+        self.assertEqual(
+            info["memory_backends"]["file_memory"]["resolved"], "scoped_index"
+        )
         self.assertIn("bm25", info["memory_backends"]["session_history"]["available"])
         self.assertIn("noop", info["memory_backends"]["session_history"]["available"])
-        self.assertIn("scoped_index", info["memory_backends"]["file_memory"]["available"])
+        self.assertIn(
+            "scoped_index", info["memory_backends"]["file_memory"]["available"]
+        )
         self.assertIn("noop", info["memory_backends"]["file_memory"]["available"])
         self.assertIn("memory_strategies", info)
         self.assertEqual(info["memory_strategies"]["session_history"]["status"], "ok")
@@ -123,7 +134,9 @@ class TestDoctorMemoryBackends(unittest.TestCase):
         self.assertEqual(info["memory_backends"]["session_history"]["status"], "ok")
         self.assertEqual(info["memory_backends"]["file_memory"]["status"], "ok")
         self.assertEqual(info["memory_backends"]["session_history"]["resolved"], "noop")
-        self.assertEqual(info["memory_backends"]["file_memory"]["resolved"], "scoped_index")
+        self.assertEqual(
+            info["memory_backends"]["file_memory"]["resolved"], "scoped_index"
+        )
         self.assertIn("memory_strategies", info)
         self.assertEqual(info["memory_strategies"]["session_history"]["status"], "ok")
         self.assertEqual(
@@ -135,8 +148,12 @@ class TestDoctorMemoryBackends(unittest.TestCase):
             "grouped_chat",
         )
         self.assertEqual(info["env_sources"]["SAGE_SESSION_MEMORY_BACKEND"], "noop")
-        self.assertEqual(info["env_sources"]["SAGE_FILE_MEMORY_BACKEND"], "scoped_index")
-        self.assertEqual(info["env_sources"]["SAGE_SESSION_MEMORY_STRATEGY"], "grouped_chat")
+        self.assertEqual(
+            info["env_sources"]["SAGE_FILE_MEMORY_BACKEND"], "scoped_index"
+        )
+        self.assertEqual(
+            info["env_sources"]["SAGE_SESSION_MEMORY_STRATEGY"], "grouped_chat"
+        )
 
     def test_collect_doctor_info_surfaces_invalid_memory_configuration(self):
         with self._patched_runtime():
@@ -157,17 +174,25 @@ class TestDoctorMemoryBackends(unittest.TestCase):
             "Unsupported session memory backend",
             info["memory_backends"]["session_history"]["error"],
         )
-        self.assertEqual(info["memory_strategies"]["session_history"]["status"], "error")
+        self.assertEqual(
+            info["memory_strategies"]["session_history"]["status"], "error"
+        )
         self.assertIsNone(info["memory_strategies"]["session_history"]["resolved"])
         self.assertIn(
             "Unsupported session memory strategy",
             info["memory_strategies"]["session_history"]["error"],
         )
         self.assertTrue(
-            any("Invalid memory_backends.session_history" in item for item in info["errors"])
+            any(
+                "Invalid memory_backends.session_history" in item
+                for item in info["errors"]
+            )
         )
         self.assertTrue(
-            any("Invalid memory_strategies.session_history" in item for item in info["errors"])
+            any(
+                "Invalid memory_strategies.session_history" in item
+                for item in info["errors"]
+            )
         )
 
     def test_collect_config_info_surfaces_invalid_memory_configuration(self):

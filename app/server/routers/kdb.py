@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
@@ -39,11 +38,11 @@ async def kdb_add(
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
     kdb_id = await svc.add(
-        name=req.name, 
-        type=req.type, 
-        intro=req.intro, 
-        language=req.language, 
-        user_id=user_id
+        name=req.name,
+        type=req.type,
+        intro=req.intro,
+        language=req.language,
+        user_id=user_id,
     )
     return await Response.succ(data=KdbAddResponse(kdb_id=kdb_id, user_id=user_id))
 
@@ -54,15 +53,15 @@ async def kdb_update(req: KdbUpdateRequest, http_request: Request):
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
     role = claims.get("role") or "user"
-    
+
     check_user_id = user_id if role != "admin" else None
 
     kdb = await svc.update(
-        kdb_id=req.kdb_id, 
-        name=req.name, 
-        intro=req.intro, 
+        kdb_id=req.kdb_id,
+        name=req.name,
+        intro=req.intro,
         kdb_setting=req.kdb_setting,
-        user_id=check_user_id
+        user_id=check_user_id,
     )
     return await Response.succ(data=SuccessResponse(success=True, user_id=kdb.user_id))
 
@@ -101,13 +100,15 @@ async def kdb_retrieve(
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
     role = claims.get("role") or "user"
-    
+
     check_user_id = user_id if role != "admin" else None
-    
+
     result, kdb = await svc.retrieve(
         kdb_id=req.kdb_id, query=req.query, top_k=req.top_k, user_id=check_user_id
     )
-    return await Response.succ(data=KdbRetrieveResponse(results=result, user_id=kdb.user_id))
+    return await Response.succ(
+        data=KdbRetrieveResponse(results=result, user_id=kdb.user_id)
+    )
 
 
 @kdb_router.get("/list", response_model=BaseResponse[KdbListResponse])
@@ -122,7 +123,7 @@ async def kdb_list(
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
     role = claims.get("role") or "user"
-    
+
     # For list, if admin, they can see all. If user, only theirs.
     # The svc.list method handles filtering if user_id is passed.
     # If admin, we pass None to see all? Or does admin want to filter by user_id?
@@ -131,9 +132,9 @@ async def kdb_list(
     # items, total, counts = await svc.list(..., user_id=user_id)
     # This forces admin to see only their own KDBs if we pass user_id.
     # We should allow admin to see all.
-    
+
     check_user_id = user_id if role != "admin" else None
-    
+
     items, total, counts = await svc.list(
         query_name=query_name,
         type=type,
@@ -157,7 +158,9 @@ async def kdb_list(
         )
         for k in items
     ]
-    return await Response.succ(data=KdbListResponse(list=out_list, total=total, user_id=user_id))
+    return await Response.succ(
+        data=KdbListResponse(list=out_list, total=total, user_id=user_id)
+    )
 
 
 @kdb_router.delete("/delete/{kdb_id}", response_model=BaseResponse[SuccessResponse])
@@ -167,7 +170,7 @@ async def kdb_delete(kdb_id: str, http_request: Request):
     user_id = claims.get("userid") or ""
     role = claims.get("role") or "user"
     check_user_id = user_id if role != "admin" else None
-    
+
     kdb = await svc.delete(kdb_id, user_id=check_user_id)
     return await Response.succ(data=SuccessResponse(success=True, user_id=kdb.user_id))
 
@@ -233,10 +236,14 @@ async def kdb_doc_list(
         )
         for d in docs
     ]
-    return await Response.succ(data=KdbDocListResponse(list=items, total=total, user_id=kdb.user_id))
+    return await Response.succ(
+        data=KdbDocListResponse(list=items, total=total, user_id=kdb.user_id)
+    )
 
 
-@kdb_router.get("/doc/info/{doc_id}", response_model=BaseResponse[Optional[KdbDocInfoResponse]])
+@kdb_router.get(
+    "/doc/info/{doc_id}", response_model=BaseResponse[Optional[KdbDocInfoResponse]]
+)
 async def kdb_doc_info(doc_id: str, http_request: Request):
     svc = KdbService()
     claims = getattr(http_request.state, "user_claims", {}) or {}
@@ -247,7 +254,7 @@ async def kdb_doc_info(doc_id: str, http_request: Request):
     d, kdb = await svc.doc_info(doc_id=doc_id, user_id=check_user_id)
     if not d:
         return await Response.succ(data=None)
-    
+
     # kdb should be present if d is present (enforced by service)
     kdb_user_id = kdb.user_id if kdb else ""
 
@@ -260,12 +267,14 @@ async def kdb_doc_info(doc_id: str, http_request: Request):
             createTime=d.created_at.isoformat(),
             metadata=d.meta_data,
             taskId=d.task_id,
-            user_id=kdb_user_id
+            user_id=kdb_user_id,
         )
     )
 
 
-@kdb_router.post("/doc/add_by_files", response_model=BaseResponse[KdbDocAddByFilesResponse])
+@kdb_router.post(
+    "/doc/add_by_files", response_model=BaseResponse[KdbDocAddByFilesResponse]
+)
 async def kdb_doc_add_by_files(
     http_request: Request,
     kdb_id: str = Form(...),
@@ -276,8 +285,12 @@ async def kdb_doc_add_by_files(
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
 
-    task_id, kdb = await svc.doc_add_by_upload_files(kdb_id=kdb_id, files=files, override=override, user_id=user_id)
-    return await Response.succ(data=KdbDocAddByFilesResponse(taskId=task_id, user_id=kdb.user_id))
+    task_id, kdb = await svc.doc_add_by_upload_files(
+        kdb_id=kdb_id, files=files, override=override, user_id=user_id
+    )
+    return await Response.succ(
+        data=KdbDocAddByFilesResponse(taskId=task_id, user_id=kdb.user_id)
+    )
 
 
 @kdb_router.delete("/doc/delete/{doc_id}", response_model=BaseResponse[SuccessResponse])
@@ -309,11 +322,11 @@ async def kdb_doc_redo(doc_id: str, http_request: Request):
     return await Response.succ(data=SuccessResponse(success=True, user_id=kdb_user_id))
 
 
-@kdb_router.get("/doc/task_process", response_model=BaseResponse[KdbDocTaskProcessResponse])
+@kdb_router.get(
+    "/doc/task_process", response_model=BaseResponse[KdbDocTaskProcessResponse]
+)
 async def kdb_doc_task_process(
-    http_request: Request,
-    kdb_id: str = Query(...), 
-    task_id: str = Query(...)
+    http_request: Request, kdb_id: str = Query(...), task_id: str = Query(...)
 ):
     svc = KdbService()
     claims = getattr(http_request.state, "user_claims", {}) or {}
@@ -321,9 +334,15 @@ async def kdb_doc_task_process(
     role = claims.get("role") or "user"
     check_user_id = user_id if role != "admin" else None
 
-    success, fail, in_progress, waiting, total, task_process, kdb = await svc.task_process(
-        kdb_id=kdb_id, task_id=task_id, user_id=check_user_id
-    )
+    (
+        success,
+        fail,
+        in_progress,
+        waiting,
+        total,
+        task_process,
+        kdb,
+    ) = await svc.task_process(kdb_id=kdb_id, task_id=task_id, user_id=check_user_id)
     return await Response.succ(
         data=KdbDocTaskProcessResponse(
             success=success,
@@ -332,7 +351,7 @@ async def kdb_doc_task_process(
             waiting=waiting,
             total=total,
             taskProcess=task_process,
-            user_id=kdb.user_id
+            user_id=kdb.user_id,
         )
     )
 
@@ -345,7 +364,9 @@ async def kdb_doc_task_redo(req: KdbDocTaskRedoRequest, http_request: Request):
     role = claims.get("role") or "user"
     check_user_id = user_id if role != "admin" else None
 
-    kdb = await svc.task_redo(kdb_id=req.kdb_id, task_id=req.task_id, user_id=check_user_id)
+    kdb = await svc.task_redo(
+        kdb_id=req.kdb_id, task_id=req.task_id, user_id=check_user_id
+    )
     return await Response.succ(data=SuccessResponse(success=True, user_id=kdb.user_id))
 
 
@@ -377,7 +398,7 @@ async def kdb_doc_task_redo(req: KdbDocTaskRedoRequest, http_request: Request):
 async def retrieve_on_zavixai_db(index_name: str, query: str, top_k: int = 5):
     """
     Search documents on ZavixAI knowledge database.
-    
+
     Args:
         index_name: The name of the index to search. (required)
         query: Search query (required)

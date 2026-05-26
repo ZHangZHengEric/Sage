@@ -119,7 +119,9 @@ class TestSessionMemoryManager(unittest.TestCase):
         self.assertIsInstance(manager.backend, NoopSessionMemoryBackend)
 
     def test_factory_supports_legacy_agent_config_key(self):
-        manager = create_session_memory_manager(agent_config={"session_memory_backend": "noop"})
+        manager = create_session_memory_manager(
+            agent_config={"session_memory_backend": "noop"}
+        )
         self.assertIsInstance(manager.backend, NoopSessionMemoryBackend)
 
     def test_resolve_backend_name_prefers_explicit_argument(self):
@@ -132,7 +134,9 @@ class TestSessionMemoryManager(unittest.TestCase):
     def test_resolve_strategy_prefers_agent_config_then_env(self):
         with patch.dict("os.environ", {"SAGE_SESSION_MEMORY_STRATEGY": "messages"}):
             resolved = resolve_session_memory_strategy(
-                agent_config={"memory_backends": {"session_history_strategy": "grouped_chat"}}
+                agent_config={
+                    "memory_backends": {"session_history_strategy": "grouped_chat"}
+                }
             )
         self.assertEqual(resolved, "grouped_chat")
 
@@ -144,7 +148,9 @@ class TestSessionMemoryManager(unittest.TestCase):
 
     def test_resolve_strategy_rejects_unknown_strategy(self):
         with self.assertRaisesRegex(ValueError, "Unsupported session memory strategy"):
-            resolve_session_memory_strategy(agent_config={"session_memory_strategy": "unknown"})
+            resolve_session_memory_strategy(
+                agent_config={"session_memory_strategy": "unknown"}
+            )
 
     def test_factory_rejects_unknown_backend(self):
         with self.assertRaisesRegex(ValueError, "Unsupported session memory backend"):

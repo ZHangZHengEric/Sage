@@ -113,7 +113,9 @@ def test_sanitize_strips_reasoning_effort_when_tool_choice_required() -> None:
     assert out["extra_body"]["_step_name"] == "main"
 
 
-def test_sanitize_strips_reasoning_effort_tool_choice_required_case_insensitive() -> None:
+def test_sanitize_strips_reasoning_effort_tool_choice_required_case_insensitive() -> (
+    None
+):
     out = sanitize_model_request_kwargs(
         {
             "tools": [

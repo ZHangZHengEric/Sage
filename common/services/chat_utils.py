@@ -29,7 +29,7 @@ def _get_first_api_key(api_key: Any) -> Any:
 def create_model_client(client_params: Dict[str, Any]) -> Any:
     """
     创建模型客户端
-    
+
     支持标准模型和快速模型双配置
     快速模型配置参数（可选）：
     - fast_api_key: 快速模型 API Key（默认使用标准模型的 key）
@@ -39,8 +39,8 @@ def create_model_client(client_params: Dict[str, Any]) -> Any:
     api_key = _get_first_api_key(client_params.get("api_key"))
     base_url = client_params.get("base_url")
     model_name = client_params.get("model")
-    timeout = client_params.get("timeout", 60 * 30)
-    
+    client_params.get("timeout", 60 * 30)
+
     # 快速模型配置（可选）
     fast_api_key = client_params.get("fast_api_key")
     fast_base_url = client_params.get("fast_base_url")
@@ -50,7 +50,7 @@ def create_model_client(client_params: Dict[str, Any]) -> Any:
         f"初始化Chat模型客户端: model={model_name}, base_url={base_url}, "
         f"fast_model={fast_model_name if fast_model_name else '未配置'}"
     )
-    
+
     from sagents.llm.chat import OpenAIChat
 
     # 使用 OpenAIChat 创建客户端（支持双模型）
@@ -67,7 +67,7 @@ def create_model_client(client_params: Dict[str, Any]) -> Any:
             if key in client_params
         },
     )
-    
+
     # 返回 SageAsyncOpenAI 实例
     return openai_chat.raw_client
 
@@ -105,14 +105,18 @@ def create_skill_proxy(
     if agent_workspace:
         agent_skills_dir = os.path.join(agent_workspace, "skills")
         if os.path.exists(agent_skills_dir):
-            agent_skill_manager = SkillManager(skill_dirs=[agent_skills_dir], isolated=True)
+            agent_skill_manager = SkillManager(
+                skill_dirs=[agent_skills_dir], isolated=True
+            )
             skill_managers.append(agent_skill_manager)
             logger.info(f"Agent工作区技能目录已加载: {agent_skills_dir}")
 
     if user_id:
         user_skills_dir = os.path.join(cfg.user_dir, user_id, "skills")
         if os.path.exists(user_skills_dir):
-            user_skill_manager = SkillManager(skill_dirs=[user_skills_dir], isolated=True)
+            user_skill_manager = SkillManager(
+                skill_dirs=[user_skills_dir], isolated=True
+            )
             skill_managers.append(user_skill_manager)
             logger.info(f"用户技能目录已加载: {user_skills_dir}")
 

@@ -142,7 +142,9 @@ async def remove(server_name: str, http_request: Request):
         StandardResponse: 包含操作结果的标准响应
     """
     logger.info(f"开始删除MCP server: {server_name}")
-    await mcp_service.remove_mcp_server(server_name, user_id=get_desktop_user_id(http_request))
+    await mcp_service.remove_mcp_server(
+        server_name, user_id=get_desktop_user_id(http_request)
+    )
     return await Response.succ(
         data={"server_name": server_name}, message=f"MCP服务器 '{server_name}' 删除成功"
     )
@@ -194,7 +196,9 @@ async def upsert_anytool_tool(req: AnyToolToolUpsertRequest, http_request: Reque
 
 
 @mcp_router.delete("/anytool/tool/{tool_name}")
-async def delete_anytool_tool(tool_name: str, http_request: Request, server_name: Optional[str] = None):
+async def delete_anytool_tool(
+    tool_name: str, http_request: Request, server_name: Optional[str] = None
+):
     result = await mcp_service.delete_anytool_tool(
         tool_name=tool_name,
         server_name=server_name or "AnyTool",
@@ -215,7 +219,9 @@ async def refresh(server_name: str, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    status = await mcp_service.refresh_mcp_server(server_name, user_id=get_desktop_user_id(http_request))
+    status = await mcp_service.refresh_mcp_server(
+        server_name, user_id=get_desktop_user_id(http_request)
+    )
     return await Response.succ(data={"server_name": server_name, "status": status})
 
 
@@ -230,8 +236,10 @@ async def toggle(server_name: str, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    disabled, status_text = await mcp_service.toggle_mcp_server(server_name, user_id=get_desktop_user_id(http_request))
+    disabled, status_text = await mcp_service.toggle_mcp_server(
+        server_name, user_id=get_desktop_user_id(http_request)
+    )
     return await Response.succ(
         data={"server_name": server_name, "disabled": disabled},
-        message=f"MCP服务器 '{server_name}' 已{status_text}"
+        message=f"MCP服务器 '{server_name}' 已{status_text}",
     )

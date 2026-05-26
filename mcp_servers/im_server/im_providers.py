@@ -13,6 +13,7 @@ from .providers.wechat_ilink import WeChatPersonalProvider
 if platform.system() == "Darwin":
     try:
         from .providers.imessage import iMessageProvider
+
         IMESSAGE_AVAILABLE = True
     except ImportError:
         IMESSAGE_AVAILABLE = False
@@ -39,6 +40,7 @@ PROVIDER_TYPE_MAP: Dict[str, str] = {
 def get_provider_display_name(provider_type: str) -> str:
     """获取 provider 的显示名称"""
     return PROVIDER_TYPE_MAP.get(provider_type.lower(), provider_type)
+
 
 # Add iMessage if available
 if IMESSAGE_AVAILABLE:

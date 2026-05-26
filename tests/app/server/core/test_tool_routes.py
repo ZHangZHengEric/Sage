@@ -22,12 +22,14 @@ def _build_app() -> FastAPI:
 
 class TestToolRoutes(unittest.TestCase):
     def test_anytool_server_name_resolution_prefers_last_path_segment(self):
-        self.assertEqual(resolve_anytool_server_name("/api/mcp/anytool/AnyTool"), "AnyTool")
+        self.assertEqual(
+            resolve_anytool_server_name("/api/mcp/anytool/AnyTool"), "AnyTool"
+        )
         self.assertEqual(resolve_anytool_server_name("/AnyTool"), "AnyTool")
         self.assertEqual(resolve_anytool_server_name(""), "AnyTool")
 
     def test_normalize_tool_result_formats_nested_json_content(self):
-        normalized = _normalize_tool_result({"content": "{\"value\": 1}"})
+        normalized = _normalize_tool_result({"content": '{"value": 1}'})
 
         self.assertEqual(normalized["parsed"], {"value": 1})
         self.assertIn('"value": 1', normalized["formatted_text"])
@@ -111,7 +113,7 @@ class TestToolRoutes(unittest.TestCase):
             with patch(
                 "common.services.mcp_service.preview_anytool_draft",
                 new_callable=AsyncMock,
-                return_value={"raw_text": "{\"value\":1}", "parsed": {"value": 1}},
+                return_value={"raw_text": '{"value":1}', "parsed": {"value": 1}},
             ) as mock_preview:
                 response = client.post(
                     "/api/mcp/anytool/preview-draft",
@@ -138,12 +140,14 @@ class TestToolRoutes(unittest.TestCase):
         payload = response.json()
         self.assertTrue(payload["success"])
         self.assertEqual(
-            payload["data"], {"raw_text": "{\"value\":1}", "parsed": {"value": 1}}
+            payload["data"], {"raw_text": '{"value":1}', "parsed": {"value": 1}}
         )
         mock_preview.assert_awaited_once()
         self.assertEqual(mock_preview.await_args.kwargs["server_name"], "draft_server")
         self.assertEqual(mock_preview.await_args.kwargs["arguments"], {"query": "acme"})
-        self.assertEqual(mock_preview.await_args.kwargs["simulator"], {"model": "gpt-test"})
+        self.assertEqual(
+            mock_preview.await_args.kwargs["simulator"], {"model": "gpt-test"}
+        )
         self.assertEqual(
             mock_preview.await_args.kwargs["tool_definition"]["name"], "search_customer"
         )
@@ -179,12 +183,13 @@ class TestToolRoutes(unittest.TestCase):
         app = _build_app()
 
         with TestClient(app) as client:
-            with patch(
-                "common.services.mcp_service.ensure_default_anytool_server",
-                new_callable=AsyncMock,
-            ) as mock_ensure, patch(
-                "common.services.mcp_service.MCPServerDao"
-            ) as mock_dao_cls:
+            with (
+                patch(
+                    "common.services.mcp_service.ensure_default_anytool_server",
+                    new_callable=AsyncMock,
+                ) as mock_ensure,
+                patch("common.services.mcp_service.MCPServerDao") as mock_dao_cls,
+            ):
                 mock_server = SimpleNamespace(
                     config={
                         "kind": "anytool",
@@ -236,24 +241,24 @@ class TestAnyToolRuntime(unittest.IsolatedAsyncioTestCase):
         )
 
         fake_response = SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content='{"ok": true}')
-                )
-            ]
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok": true}'))]
         )
         fake_client = SimpleNamespace(
             chat=SimpleNamespace(
-                completions=SimpleNamespace(create=AsyncMock(return_value=fake_response))
+                completions=SimpleNamespace(
+                    create=AsyncMock(return_value=fake_response)
+                )
             )
         )
 
-        with patch("mcp_servers.anytool.anytool_runtime._get_cfg") as mock_get_cfg, patch(
-            "mcp_servers.anytool.anytool_runtime.LLMProviderDao"
-        ) as mock_dao_cls, patch(
-            "mcp_servers.anytool.anytool_runtime.create_model_client",
-            return_value=fake_client,
-        ) as mock_create_client:
+        with (
+            patch("mcp_servers.anytool.anytool_runtime._get_cfg") as mock_get_cfg,
+            patch("mcp_servers.anytool.anytool_runtime.LLMProviderDao") as mock_dao_cls,
+            patch(
+                "mcp_servers.anytool.anytool_runtime.create_model_client",
+                return_value=fake_client,
+            ) as mock_create_client,
+        ):
             mock_get_cfg.return_value = SimpleNamespace(app_mode="server")
             mock_dao = mock_dao_cls.return_value
             mock_dao.get_list = AsyncMock(return_value=[fake_first, fake_default])
@@ -293,27 +298,31 @@ class TestAnyToolRuntime(unittest.IsolatedAsyncioTestCase):
             is_default=False,
         )
         fake_response = SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content='{"ok": true}')
-                )
-            ]
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok": true}'))]
         )
         fake_client = SimpleNamespace(
             chat=SimpleNamespace(
-                completions=SimpleNamespace(create=AsyncMock(return_value=fake_response))
+                completions=SimpleNamespace(
+                    create=AsyncMock(return_value=fake_response)
+                )
             )
         )
 
-        with patch("mcp_servers.anytool.anytool_runtime._get_cfg") as mock_get_cfg, patch(
-            "mcp_servers.anytool.anytool_runtime.ConversationDao"
-        ) as mock_conversation_dao_cls, patch(
-            "mcp_servers.anytool.anytool_runtime.AgentConfigDao"
-        ) as mock_agent_dao_cls, patch(
-            "mcp_servers.anytool.anytool_runtime.LLMProviderDao"
-        ) as mock_provider_dao_cls, patch(
-            "mcp_servers.anytool.anytool_runtime.create_model_client",
-            return_value=fake_client,
+        with (
+            patch("mcp_servers.anytool.anytool_runtime._get_cfg") as mock_get_cfg,
+            patch(
+                "mcp_servers.anytool.anytool_runtime.ConversationDao"
+            ) as mock_conversation_dao_cls,
+            patch(
+                "mcp_servers.anytool.anytool_runtime.AgentConfigDao"
+            ) as mock_agent_dao_cls,
+            patch(
+                "mcp_servers.anytool.anytool_runtime.LLMProviderDao"
+            ) as mock_provider_dao_cls,
+            patch(
+                "mcp_servers.anytool.anytool_runtime.create_model_client",
+                return_value=fake_client,
+            ),
         ):
             mock_get_cfg.return_value = SimpleNamespace(app_mode="server")
             mock_conversation_dao = mock_conversation_dao_cls.return_value

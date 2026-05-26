@@ -80,7 +80,9 @@ async def register_user(
     allow_reg = await sys_dao.get_by_key("allow_registration")
     if allow_reg == "false":
         raise SageHTTPException(
-            status_code=500, detail="系统不允许自注册", error_detail="registration disabled"
+            status_code=500,
+            detail="系统不允许自注册",
+            error_detail="registration disabled",
         )
 
     email = normalize_email(email)
@@ -123,7 +125,9 @@ async def send_register_verification_code(email: str) -> tuple[int, int]:
     allow_reg = await sys_dao.get_by_key("allow_registration")
     if allow_reg == "false":
         raise SageHTTPException(
-            status_code=500, detail="系统不允许自注册", error_detail="registration disabled"
+            status_code=500,
+            detail="系统不允许自注册",
+            error_detail="registration disabled",
         )
 
     normalized_email = normalize_email(email)
@@ -154,7 +158,9 @@ async def authenticate_user(username_or_email: str, password: str) -> User:
         user = await dao.get_by_email(username_or_email)
 
     if not user or not _verify_password(password, user.password_hash):
-        raise SageHTTPException(detail="用户名或密码错误", error_detail="invalid credentials")
+        raise SageHTTPException(
+            detail="用户名或密码错误", error_detail="invalid credentials"
+        )
     return user
 
 
@@ -164,11 +170,16 @@ async def change_password(user_id: str, old_password: str, new_password: str) ->
     if not user:
         # Check if it's admin (admin user in config cannot change password via this API)
         if user_id == "admin":
-            raise SageHTTPException(detail="管理员账户请通过配置文件修改密码", error_detail="admin password immutable via api")
+            raise SageHTTPException(
+                detail="管理员账户请通过配置文件修改密码",
+                error_detail="admin password immutable via api",
+            )
         raise SageHTTPException(detail="用户不存在", error_detail="user not found")
 
     if not _verify_password(old_password, user.password_hash):
-        raise SageHTTPException(detail="旧密码错误", error_detail="invalid old password")
+        raise SageHTTPException(
+            detail="旧密码错误", error_detail="invalid old password"
+        )
 
     user.password_hash = _hash_password(new_password)
     await dao.save(user)
@@ -177,7 +188,9 @@ async def change_password(user_id: str, old_password: str, new_password: str) ->
 
 async def get_user_list(page: int = 1, page_size: int = 20) -> Tuple[List[User], int]:
     dao = UserDao()
-    return await dao.paginate_list(User, order_by=User.created_at.desc(), page=page, page_size=page_size)
+    return await dao.paginate_list(
+        User, order_by=User.created_at.desc(), page=page, page_size=page_size
+    )
 
 
 async def delete_user(user_id: str) -> bool:
@@ -186,7 +199,9 @@ async def delete_user(user_id: str) -> bool:
     if not user:
         raise SageHTTPException(detail="用户不存在", error_detail="user not found")
     if user.role == "admin":
-        raise SageHTTPException(detail="无法删除管理员用户", error_detail="cannot delete admin")
+        raise SageHTTPException(
+            detail="无法删除管理员用户", error_detail="cannot delete admin"
+        )
     await dao.delete_by_id(User, user_id)
     return True
 
@@ -211,7 +226,7 @@ async def add_user(
             raise SageHTTPException(
                 status_code=500, detail="邮箱已存在", error_detail=email
             )
-    
+
     user_id = gen_id()
     password_hash = _hash_password(password)
     user = User(
@@ -220,7 +235,7 @@ async def add_user(
         password_hash=password_hash,
         email=email,
         phonenum=phonenum,
-        role=role
+        role=role,
     )
     await dao.save(user)
     logger.info(f"管理员添加用户成功: {username}")

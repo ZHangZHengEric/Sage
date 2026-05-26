@@ -17,7 +17,10 @@ def test_pending_user_injection_preserves_multimodal_content(tmp_path):
     content = [
         {"type": "text", "text": "继续解释这张图"},
         {"type": "image_url", "image_url": {"url": "https://example.com/a.png"}},
-        {"type": "input_audio", "input_audio": {"data": "base64-audio", "format": "mp3"}},
+        {
+            "type": "input_audio",
+            "input_audio": {"data": "base64-audio", "format": "mp3"},
+        },
     ]
 
     guidance_id = ctx.enqueue_user_injection(

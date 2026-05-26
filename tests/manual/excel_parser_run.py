@@ -8,6 +8,7 @@ ExcelParser 解析测试
 运行：
 python3 /Users/zhangzheng/zavixai/Sage/tests/test_excel_parser.py
 """
+
 import os
 import sys
 import re
@@ -27,9 +28,14 @@ def main():
     # 尝试导入解析器（避开包级依赖，直接从文件路径加载）
     try:
         import importlib.util
-        module_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                   'sagents', 'tool', 'file_parser_tool.py')
-        spec = importlib.util.spec_from_file_location('file_parser_tool', module_path)
+
+        module_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "sagents",
+            "tool",
+            "file_parser_tool.py",
+        )
+        spec = importlib.util.spec_from_file_location("file_parser_tool", module_path)
         file_parser_tool = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(file_parser_tool)
         ExcelParser = file_parser_tool.ExcelParser
@@ -69,6 +75,7 @@ def main():
         # 进一步使用 openpyxl 验证单元格值（如果可用）
         try:
             from openpyxl import load_workbook
+
             wb = load_workbook(excel_path, data_only=True, read_only=False)
             for sname in wb.sheetnames:
                 sd = wb[sname]
@@ -97,6 +104,7 @@ def main():
     except Exception as e:
         print(f"❌ 解析过程中发生异常: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 

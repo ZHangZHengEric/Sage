@@ -18,6 +18,7 @@ def disable_keywords(monkeypatch):
 
 # ---- 规则 1 / 2 / 4：不受 env 影响，始终运行 ----
 
+
 @pytest.mark.asyncio
 async def test_must_continue_when_last_role_is_tool(monkeypatch):
     """规则 1：tool 结果后必须继续。不受关键词开关影响。"""
@@ -25,10 +26,10 @@ async def test_must_continue_when_last_role_is_tool(monkeypatch):
     agent = SimpleAgent(model=DummyModel(), model_config={})
     messages = [
         MessageChunk(
-            role='tool',
-            content='工具执行结果',
+            role="tool",
+            content="工具执行结果",
             message_type=MessageType.TOOL_CALL_RESULT.value,
-            tool_call_id='call_1',
+            tool_call_id="call_1",
         ),
     ]
     assert await agent._must_continue_by_rules(messages) is True
@@ -42,7 +43,7 @@ async def test_must_continue_when_last_assistant_ends_with_colon(monkeypatch):
     messages = [
         MessageChunk(
             role=MessageRole.ASSISTANT.value,
-            content='HTML报告已生成，现在让我完成最后的检查并更新任务状态：',
+            content="HTML报告已生成，现在让我完成最后的检查并更新任务状态：",
             message_type=MessageType.ASSISTANT_TEXT.value,
         ),
     ]
@@ -56,7 +57,7 @@ async def test_not_must_continue_for_normal_assistant_message(monkeypatch):
     messages = [
         MessageChunk(
             role=MessageRole.ASSISTANT.value,
-            content='任务已经完成，这是最终结果。',
+            content="任务已经完成，这是最终结果。",
             message_type=MessageType.ASSISTANT_TEXT.value,
         ),
     ]
@@ -65,6 +66,7 @@ async def test_not_must_continue_for_normal_assistant_message(monkeypatch):
 
 # ---- 关键词规则已移除：以下测试验证"中文关键词不再触发强制继续" ----
 
+
 @pytest.mark.asyncio
 async def test_processing_keyword_no_longer_forces_continue():
     """'正在处理' 不再触发强制继续（关键词规则已下线）。"""
@@ -72,7 +74,7 @@ async def test_processing_keyword_no_longer_forces_continue():
     messages = [
         MessageChunk(
             role=MessageRole.ASSISTANT.value,
-            content='正在处理，请稍等',
+            content="正在处理，请稍等",
             message_type=MessageType.ASSISTANT_TEXT.value,
         ),
     ]
@@ -86,7 +88,7 @@ async def test_user_question_with_punctuation_does_not_force_continue():
     messages = [
         MessageChunk(
             role=MessageRole.USER.value,
-            content='你在处理什么？',
+            content="你在处理什么？",
             message_type=MessageType.USER_INPUT.value,
         ),
     ]

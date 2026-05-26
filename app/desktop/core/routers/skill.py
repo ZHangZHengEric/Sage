@@ -2,8 +2,6 @@
 工具执行接口路由模块
 """
 
-from typing import Any, Dict, List
-
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from pydantic import BaseModel
 
@@ -11,6 +9,7 @@ from common.core.render import Response
 from common.services import skill_router_service
 from loguru import logger
 from ..user_context import get_desktop_user_id, get_desktop_user_role
+
 # 创建路由器
 skill_router = APIRouter(prefix="/api/skills")
 
@@ -87,7 +86,7 @@ async def get_skill_content(name: str, http_request: Request):
     """
     获取技能内容 (SKILL.md)
     """
-    # name is query param, usually automatically decoded by FastAPI/Starlette, 
+    # name is query param, usually automatically decoded by FastAPI/Starlette,
     # but let's ensure it's handled if passed as part of query string.
     # Actually FastAPI decodes query params automatically.
     logger.info(f"get_skill_content name: {name}")
@@ -114,10 +113,7 @@ async def update_skill_content(request: SkillUpdateRequest, http_request: Reques
 
 
 @skill_router.get("/agent-available")
-async def get_agent_available_skills(
-    http_request: Request,
-    agent_id: str
-):
+async def get_agent_available_skills(http_request: Request, agent_id: str):
     """
     获取Agent可用的技能列表（带维度来源标签和同步状态）
 
@@ -134,9 +130,7 @@ async def get_agent_available_skills(
 
 @skill_router.post("/sync-to-agent")
 async def sync_skill_to_agent(
-    http_request: Request,
-    skill_name: str = Form(...),
-    agent_id: str = Form(...)
+    http_request: Request, skill_name: str = Form(...), agent_id: str = Form(...)
 ):
     """
     将技能同步到Agent工作空间

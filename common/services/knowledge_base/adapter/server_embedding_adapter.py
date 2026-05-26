@@ -10,6 +10,7 @@ class ServerEmbeddingAdapter(EmbeddingModel):
     Adapter for the existing server-side embedding service.
     Proxies calls to the global OpenAIEmbedding instance managed by Server.
     """
+
     async def embed_documents(self, texts: List[str]) -> List[List[float]]:
         client = get_embed_client()
         return await client.batch_embed_query(texts)

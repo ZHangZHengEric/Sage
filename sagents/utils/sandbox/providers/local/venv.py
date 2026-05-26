@@ -1,9 +1,9 @@
 """
 Python 虚拟环境管理。
 """
+
 import os
 import venv
-import sys
 from typing import Optional
 from sagents.utils.logger import logger
 from sagents.utils.common_utils import get_system_python_path
@@ -67,7 +67,7 @@ class VenvManager:
                 [pip_bin, "config", "set", "global.index-url", aliyun_index_url],
                 capture_output=True,
                 text=True,
-                timeout=60
+                timeout=60,
             )
 
             if result.returncode == 0:
@@ -76,7 +76,7 @@ class VenvManager:
                     [pip_bin, "config", "set", "global.trusted-host", trusted_host],
                     capture_output=True,
                     text=True,
-                    timeout=60
+                    timeout=60,
                 )
                 logger.info("[VenvManager] 阿里云 pip 镜像源配置成功")
             else:
@@ -95,99 +95,112 @@ class VenvManager:
             return
 
         install_cmd = [
-            python_bin, "-m", "pip", "install", "-U", "uv",
-            "--index-url", "https://mirrors.aliyun.com/pypi/simple/",
-            "--trusted-host", "mirrors.aliyun.com",
+            python_bin,
+            "-m",
+            "pip",
+            "install",
+            "-U",
+            "uv",
+            "--index-url",
+            "https://mirrors.aliyun.com/pypi/simple/",
+            "--trusted-host",
+            "mirrors.aliyun.com",
         ]
-        result = subprocess.run(install_cmd, capture_output=True, text=True, timeout=180)
+        result = subprocess.run(
+            install_cmd, capture_output=True, text=True, timeout=180
+        )
         if result.returncode == 0:
             logger.info("[VenvManager] uv 已安装到 venv")
             return
 
         fallback_cmd = [python_bin, "-m", "pip", "install", "-U", "uv"]
-        fallback_result = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=180)
+        fallback_result = subprocess.run(
+            fallback_cmd, capture_output=True, text=True, timeout=180
+        )
         if fallback_result.returncode == 0:
             logger.info("[VenvManager] uv 已安装到 venv（默认源）")
         else:
-            logger.warning(f"[VenvManager] uv 安装失败，不影响后续: {fallback_result.stderr}")
-            
+            logger.warning(
+                f"[VenvManager] uv 安装失败，不影响后续: {fallback_result.stderr}"
+            )
+
     def get_python_bin(self) -> str:
         """获取 Python 解释器路径"""
         return os.path.join(self.venv_dir, "bin", "python")
-    
+
     def get_pip_bin(self) -> str:
         """获取 pip 路径"""
         return os.path.join(self.venv_dir, "bin", "pip")
-    
+
     def install_package(self, package: str) -> bool:
         """
         安装 Python 包。
-        
+
         Args:
             package: 包名（如 'requests' 或 'requests==2.28.0'）
-            
+
         Returns:
             是否安装成功
         """
         import subprocess
-        
+
         logger.info(f"[VenvManager] 安装包: {package}")
-        
+
         pip_bin = self.get_pip_bin()
-        
+
         try:
             result = subprocess.run(
                 [pip_bin, "install", package, "--quiet"],
                 capture_output=True,
                 text=True,
-                timeout=300
+                timeout=300,
             )
-            
+
             if result.returncode == 0:
                 logger.info(f"[VenvManager] {package} 安装成功")
                 return True
             else:
                 logger.error(f"[VenvManager] {package} 安装失败: {result.stderr}")
                 return False
-                
+
         except Exception as e:
             logger.error(f"[VenvManager] 安装 {package} 失败: {e}")
             return False
-            
+
     def install_requirements(self, requirements: list) -> bool:
         """
         安装多个 Python 包。
-        
+
         Args:
             requirements: 包名列表
-            
+
         Returns:
             是否全部安装成功
         """
         import subprocess
-        
+
         if not requirements:
             return True
-            
+
         logger.info(f"[VenvManager] 安装 requirements: {requirements}")
-        
+
         pip_bin = self.get_pip_bin()
-        
+
         try:
             result = subprocess.run(
                 [pip_bin, "install"] + list(requirements),
                 capture_output=True,
                 text=True,
-                timeout=600
+                timeout=600,
             )
-            
+
             if result.returncode == 0:
                 logger.info("[VenvManager] requirements 安装成功")
                 return True
             else:
                 logger.error(f"[VenvManager] requirements 安装失败: {result.stderr}")
                 return False
-                
+
         except Exception as e:
             logger.error(f"[VenvManager] 安装 requirements 失败: {e}")
             return False

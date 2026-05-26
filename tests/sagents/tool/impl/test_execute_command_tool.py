@@ -58,7 +58,9 @@ class _FakeBackgroundSandbox(_FakeSandbox):
     def supports_background(self):
         return True
 
-    async def start_background(self, command, workdir=None, env_vars=None, log_dir=None):
+    async def start_background(
+        self, command, workdir=None, env_vars=None, log_dir=None
+    ):
         self.bg_calls.append(
             {
                 "command": command,
@@ -70,7 +72,9 @@ class _FakeBackgroundSandbox(_FakeSandbox):
         return {
             "task_id": "shtask_fake",
             "pid": 123,
-            "log_path": f"{log_dir}/shtask_fake.log" if log_dir else "/fallback/shtask_fake.log",
+            "log_path": f"{log_dir}/shtask_fake.log"
+            if log_dir
+            else "/fallback/shtask_fake.log",
         }
 
     async def read_background_output(self, task_id, max_bytes=8192):
@@ -216,7 +220,9 @@ def test_background_shell_logs_under_agent_workspace(monkeypatch, tmp_path):
     assert fake_sandbox.bg_calls[0]["log_dir"] == expected_log_dir
 
 
-def test_background_shell_passes_virtual_workspace_log_dir_to_provider(monkeypatch, tmp_path):
+def test_background_shell_passes_virtual_workspace_log_dir_to_provider(
+    monkeypatch, tmp_path
+):
     host_workspace = tmp_path / "host-agent-workspace"
     fake_sandbox = _FakeBackgroundSandbox(host_workspace)
     fake_sandbox.workspace_path = "/sandbox-agent-workspace"

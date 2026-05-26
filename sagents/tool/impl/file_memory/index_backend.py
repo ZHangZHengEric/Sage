@@ -39,14 +39,21 @@ class ScopedIndexFileMemoryBackend:
         scope = f"{user_id}|{agent_id}|{workspace_path}"
         return hashlib.md5(scope.encode("utf-8")).hexdigest()
 
-    async def search(self, query: str, top_k: int, session_context) -> List[Dict[str, Any]]:
+    async def search(
+        self, query: str, top_k: int, session_context
+    ) -> List[Dict[str, Any]]:
         try:
             sandbox = session_context.sandbox
             if not sandbox:
-                logger.warning("MemoryTool: No sandbox available for file memory search")
+                logger.warning(
+                    "MemoryTool: No sandbox available for file memory search"
+                )
                 return []
 
-            workspace_path = getattr(session_context, "sandbox_agent_workspace", None) or "/sage-workspace"
+            workspace_path = (
+                getattr(session_context, "sandbox_agent_workspace", None)
+                or "/sage-workspace"
+            )
             agent_id = getattr(session_context, "agent_id", None)
             user_id = getattr(session_context, "user_id", None) or "default_user"
 
@@ -82,23 +89,30 @@ class ScopedIndexFileMemoryBackend:
                     cache_entry.index.workspace_path = workspace_path.rstrip("/")
 
                 now = time.time()
-                has_search_index = await asyncio.to_thread(cache_entry.index.has_search_index)
+                has_search_index = await asyncio.to_thread(
+                    cache_entry.index.has_search_index
+                )
                 should_refresh = (
                     not has_search_index
-                    or (now - cache_entry.last_refresh_at) >= self.INDEX_REFRESH_INTERVAL_SECONDS
+                    or (now - cache_entry.last_refresh_at)
+                    >= self.INDEX_REFRESH_INTERVAL_SECONDS
                 )
                 if should_refresh:
                     stats = await cache_entry.index.update_index()
                     cache_entry.last_refresh_at = now
                     logger.debug(f"MemoryTool: File memory index update stats: {stats}")
 
-                results = await asyncio.to_thread(cache_entry.index.search, query, top_k)
+                results = await asyncio.to_thread(
+                    cache_entry.index.search, query, top_k
+                )
 
             formatted_results = []
             for result in results:
                 snippets = []
                 if result.content:
-                    snippet_matches = re.findall(r"\[Line (\d+)\] (.*?)(?=\n\n|\Z)", result.content, re.DOTALL)
+                    snippet_matches = re.findall(
+                        r"\[Line (\d+)\] (.*?)(?=\n\n|\Z)", result.content, re.DOTALL
+                    )
                     for line_num, snippet_text in snippet_matches:
                         snippets.append(
                             {

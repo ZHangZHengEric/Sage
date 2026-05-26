@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import JSON, String, Boolean, Integer, Float, func, select
+from sqlalchemy import JSON, String, Boolean, Integer, Float
 from sqlalchemy.orm import Mapped, mapped_column
 
 from common.models.base import Base, BaseDao, get_local_now
@@ -153,7 +153,9 @@ class LLMProviderDao(BaseDao):
     async def delete_by_id(self, provider_id: str) -> bool:
         return await BaseDao.delete_by_id(self, LLMProvider, provider_id)
 
-    async def get_default(self, user_id: Optional[str] = None) -> Optional["LLMProvider"]:
+    async def get_default(
+        self, user_id: Optional[str] = None
+    ) -> Optional["LLMProvider"]:
         where = [LLMProvider.is_default == True]  # noqa: E712
         if user_id is not None:
             where.append(LLMProvider.user_id == user_id)

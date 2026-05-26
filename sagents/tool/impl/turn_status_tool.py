@@ -54,7 +54,10 @@ class TurnStatusTool:
                 "zh": "可选简短备注，用作前端状态标签（不替代正文说明）",
                 "en": "Optional short note for UI status (does not replace user-facing text)",
             },
-            "session_id": {"zh": "会话ID（必填，自动注入）", "en": "Session ID (Required, Auto-injected)"},
+            "session_id": {
+                "zh": "会话ID（必填，自动注入）",
+                "en": "Session ID (Required, Auto-injected)",
+            },
         },
         param_schema={
             "status": {
@@ -79,7 +82,9 @@ class TurnStatusTool:
                 hint="改为 task_done / need_user_input / blocked / continue_work 之一后重试",
             )
         should_end = status != "continue_work"
-        logger.info(f"TurnStatusTool: turn_status called status={status} should_end={should_end} note={note!r} session={session_id}")
+        logger.info(
+            f"TurnStatusTool: turn_status called status={status} should_end={should_end} note={note!r} session={session_id}"
+        )
         # 成功路径：保留标准 success/status，业务字段仅 should_end；入参 status/note 见日志
         return {
             "success": True,

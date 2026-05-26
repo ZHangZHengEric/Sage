@@ -12,25 +12,25 @@
 from .workflow import WorkflowStep, Workflow, WorkflowFormat
 from .workflow_manager import WorkflowManager
 
-__all__ = [
-    'WorkflowFormat',
-    'WorkflowStep', 
-    'Workflow',
-    'WorkflowManager'
-]
+__all__ = ["WorkflowFormat", "WorkflowStep", "Workflow", "WorkflowManager"]
 
 # 版本信息
-__version__ = '1.0.0'
+__version__ = "1.0.0"
+
 
 # 模块级别的便捷函数
 def create_workflow_manager() -> WorkflowManager:
     """创建工作流管理器实例"""
     return WorkflowManager()
 
+
 def create_workflow(name: str, description: str = "") -> Workflow:
     """创建工作流实例"""
     return Workflow(name=name, description=description)
 
-def create_workflow_step(id: str, name: str, description: str, order: int = 0) -> WorkflowStep:
+
+def create_workflow_step(
+    id: str, name: str, description: str, order: int = 0
+) -> WorkflowStep:
     """创建工作流步骤实例"""
     return WorkflowStep(id=id, name=name, description=description, order=order)

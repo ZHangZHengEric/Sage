@@ -2,8 +2,8 @@
 
 验证 turn_status 的「先说明再报告状态」契约。
 """
+
 import asyncio
-import pytest
 from types import SimpleNamespace
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
@@ -73,20 +73,25 @@ def _patch_prepared_messages(monkeypatch, agent, messages):
     async def _fake_prepare_messages_for_llm(messages_input, session_id):
         yield messages, True
 
-    monkeypatch.setattr(agent, "_prepare_messages_for_llm", _fake_prepare_messages_for_llm)
+    monkeypatch.setattr(
+        agent, "_prepare_messages_for_llm", _fake_prepare_messages_for_llm
+    )
 
 
 def _patch_tool_handler(monkeypatch, agent, seen_tool_calls):
     async def _fake_handle_tool_calls(**kwargs):
         seen_tool_calls.update(kwargs["tool_calls"])
-        yield ([
-            MessageChunk(
-                role=MessageRole.TOOL.value,
-                content='{"should_end": true}',
-                tool_call_id="call_ts",
-                message_type=MessageType.TOOL_CALL_RESULT.value,
-            )
-        ], True)
+        yield (
+            [
+                MessageChunk(
+                    role=MessageRole.TOOL.value,
+                    content='{"should_end": true}',
+                    tool_call_id="call_ts",
+                    message_type=MessageType.TOOL_CALL_RESULT.value,
+                )
+            ],
+            True,
+        )
 
     monkeypatch.setattr(agent, "_handle_tool_calls", _fake_handle_tool_calls)
 
@@ -112,14 +117,16 @@ def test_status_only_turn_status_response_suppresses_duplicate_text(monkeypatch)
 
     monkeypatch.setattr(agent, "_call_llm_streaming", _fake_call_llm_streaming)
 
-    chunks = asyncio.run(_collect_llm_response(
-        agent,
-        messages_input=messages,
-        tools_json=_turn_status_tools_json(),
-        tool_manager=None,
-        session_id="s-status-only",
-        force_tool_choice_required=True,
-    ))
+    chunks = asyncio.run(
+        _collect_llm_response(
+            agent,
+            messages_input=messages,
+            tools_json=_turn_status_tools_json(),
+            tool_manager=None,
+            session_id="s-status-only",
+            force_tool_choice_required=True,
+        )
+    )
 
     assert "call_ts" in seen_tool_calls
     assert saved_content == []
@@ -148,14 +155,16 @@ def test_non_status_only_turn_status_response_keeps_user_visible_text(monkeypatc
 
     monkeypatch.setattr(agent, "_call_llm_streaming", _fake_call_llm_streaming)
 
-    chunks = asyncio.run(_collect_llm_response(
-        agent,
-        messages_input=messages,
-        tools_json=_turn_status_tools_json(),
-        tool_manager=None,
-        session_id="s-normal",
-        force_tool_choice_required=False,
-    ))
+    chunks = asyncio.run(
+        _collect_llm_response(
+            agent,
+            messages_input=messages,
+            tools_json=_turn_status_tools_json(),
+            tool_manager=None,
+            session_id="s-normal",
+            force_tool_choice_required=False,
+        )
+    )
 
     assert "call_ts" in seen_tool_calls
     assert saved_content == ["普通回复正文。"]
@@ -180,14 +189,16 @@ def test_status_only_text_without_tool_call_is_hidden_and_errors(monkeypatch):
 
     monkeypatch.setattr(agent, "_call_llm_streaming", _fake_call_llm_streaming)
 
-    chunks = asyncio.run(_collect_llm_response(
-        agent,
-        messages_input=messages,
-        tools_json=_turn_status_tools_json(),
-        tool_manager=None,
-        session_id="s-status-only-no-tool",
-        force_tool_choice_required=True,
-    ))
+    chunks = asyncio.run(
+        _collect_llm_response(
+            agent,
+            messages_input=messages,
+            tools_json=_turn_status_tools_json(),
+            tool_manager=None,
+            session_id="s-status-only-no-tool",
+            force_tool_choice_required=True,
+        )
+    )
 
     assert saved_content == []
     assert all(chunk.content != "这句也不应该展示。" for chunk in chunks)
@@ -198,33 +209,70 @@ def test_status_only_text_without_tool_call_is_hidden_and_errors(monkeypatch):
 
 def test_returns_true_when_recent_assistant_text_exists():
     msgs = [
-        MessageChunk(role=MessageRole.USER.value, content="跑一下", message_type=MessageType.USER_INPUT.value),
-        MessageChunk(role=MessageRole.ASSISTANT.value, content="任务完成，文件已生成。", message_type=MessageType.ASSISTANT_TEXT.value),
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="跑一下",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="任务完成，文件已生成。",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
     ]
     assert _agent()._has_recent_assistant_summary(msgs) is True
 
 
 def test_returns_false_when_no_assistant_text_since_last_user():
     msgs = [
-        MessageChunk(role=MessageRole.ASSISTANT.value, content="老的总结", message_type=MessageType.ASSISTANT_TEXT.value),
-        MessageChunk(role=MessageRole.USER.value, content="再来一次", message_type=MessageType.USER_INPUT.value),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="老的总结",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="再来一次",
+            message_type=MessageType.USER_INPUT.value,
+        ),
     ]
     assert _agent()._has_recent_assistant_summary(msgs) is False
 
 
 def test_user_message_acts_as_boundary():
     msgs = [
-        MessageChunk(role=MessageRole.ASSISTANT.value, content="老总结", message_type=MessageType.ASSISTANT_TEXT.value),
-        MessageChunk(role=MessageRole.USER.value, content="新需求", message_type=MessageType.USER_INPUT.value),
-        MessageChunk(role='tool', content='ok', tool_call_id='x', message_type=MessageType.TOOL_CALL_RESULT.value),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="老总结",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="新需求",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role="tool",
+            content="ok",
+            tool_call_id="x",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        ),
     ]
     assert _agent()._has_recent_assistant_summary(msgs) is False
 
 
 def test_blank_assistant_content_not_counted():
     msgs = [
-        MessageChunk(role=MessageRole.USER.value, content="hi", message_type=MessageType.USER_INPUT.value),
-        MessageChunk(role=MessageRole.ASSISTANT.value, content="   \n", message_type=MessageType.ASSISTANT_TEXT.value),
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="hi",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="   \n",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
     ]
     assert _agent()._has_recent_assistant_summary(msgs) is False
 
@@ -240,14 +288,29 @@ def test_trailing_tool_result_blocks_summary():
     立刻只调 turn_status —— 旧规则会把那段过渡话误判为总结。
     """
     msgs = [
-        MessageChunk(role=MessageRole.USER.value, content="跑测试", message_type=MessageType.USER_INPUT.value),
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="跑测试",
+            message_type=MessageType.USER_INPUT.value,
+        ),
         MessageChunk(
             role=MessageRole.ASSISTANT.value,
             content="完美！现在让我更新任务清单并生成最终报告：",
-            tool_calls=[{"id": "t1", "type": "function", "function": {"name": "todo_write", "arguments": "{}"}}],
+            tool_calls=[
+                {
+                    "id": "t1",
+                    "type": "function",
+                    "function": {"name": "todo_write", "arguments": "{}"},
+                }
+            ],
             message_type=MessageType.ASSISTANT_TEXT.value,
         ),
-        MessageChunk(role='tool', content='ok', tool_call_id='t1', message_type=MessageType.TOOL_CALL_RESULT.value),
+        MessageChunk(
+            role="tool",
+            content="ok",
+            tool_call_id="t1",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        ),
     ]
     assert _agent()._has_recent_assistant_summary(msgs) is False
 
@@ -255,11 +318,21 @@ def test_trailing_tool_result_blocks_summary():
 def test_assistant_with_tool_calls_does_not_count_as_summary():
     """assistant 既有 content 又有 tool_calls：那段文字是过渡话不是总结。"""
     msgs = [
-        MessageChunk(role=MessageRole.USER.value, content="干活", message_type=MessageType.USER_INPUT.value),
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="干活",
+            message_type=MessageType.USER_INPUT.value,
+        ),
         MessageChunk(
             role=MessageRole.ASSISTANT.value,
             content="好的，我先列一下 todo：",
-            tool_calls=[{"id": "t2", "type": "function", "function": {"name": "todo_write", "arguments": "{}"}}],
+            tool_calls=[
+                {
+                    "id": "t2",
+                    "type": "function",
+                    "function": {"name": "todo_write", "arguments": "{}"},
+                }
+            ],
             message_type=MessageType.ASSISTANT_TEXT.value,
         ),
     ]
@@ -269,14 +342,29 @@ def test_assistant_with_tool_calls_does_not_count_as_summary():
 def test_clean_trailing_assistant_text_counts_as_summary():
     """合法形态：tool 之后模型先发一条纯文本总结，再下一次 LLM 调用 turn_status。"""
     msgs = [
-        MessageChunk(role=MessageRole.USER.value, content="干活", message_type=MessageType.USER_INPUT.value),
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="干活",
+            message_type=MessageType.USER_INPUT.value,
+        ),
         MessageChunk(
             role=MessageRole.ASSISTANT.value,
             content="开工：",
-            tool_calls=[{"id": "t3", "type": "function", "function": {"name": "todo_write", "arguments": "{}"}}],
+            tool_calls=[
+                {
+                    "id": "t3",
+                    "type": "function",
+                    "function": {"name": "todo_write", "arguments": "{}"},
+                }
+            ],
             message_type=MessageType.ASSISTANT_TEXT.value,
         ),
-        MessageChunk(role='tool', content='ok', tool_call_id='t3', message_type=MessageType.TOOL_CALL_RESULT.value),
+        MessageChunk(
+            role="tool",
+            content="ok",
+            tool_call_id="t3",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        ),
         MessageChunk(
             role=MessageRole.ASSISTANT.value,
             content="任务全部完成：todo 已更新，关键产物 X、Y。",
@@ -296,7 +384,10 @@ def test_plain_text_without_tool_call_requests_turn_status_retry():
     ]
     tools_json = [{"function": {"name": "turn_status"}}]
 
-    assert _agent()._should_request_turn_status_after_text_response(chunks, tools_json) is True
+    assert (
+        _agent()._should_request_turn_status_after_text_response(chunks, tools_json)
+        is True
+    )
 
 
 def test_tool_call_response_does_not_request_turn_status_retry():
@@ -304,13 +395,22 @@ def test_tool_call_response_does_not_request_turn_status_retry():
         MessageChunk(
             role=MessageRole.ASSISTANT.value,
             content=None,
-            tool_calls=[{"id": "t1", "type": "function", "function": {"name": "todo_write", "arguments": "{}"}}],
+            tool_calls=[
+                {
+                    "id": "t1",
+                    "type": "function",
+                    "function": {"name": "todo_write", "arguments": "{}"},
+                }
+            ],
             message_type=MessageType.TOOL_CALL.value,
         )
     ]
     tools_json = [{"function": {"name": "turn_status"}}]
 
-    assert _agent()._should_request_turn_status_after_text_response(chunks, tools_json) is False
+    assert (
+        _agent()._should_request_turn_status_after_text_response(chunks, tools_json)
+        is False
+    )
 
 
 def test_missing_turn_status_tool_does_not_request_retry():
@@ -351,7 +451,9 @@ def test_system_prefix_includes_turn_status_contract_when_protocol_enabled(monke
     assert "Task Management Requirements" in prompt
 
 
-def test_task_complete_judge_uses_composed_system_prefix_when_protocol_disabled(monkeypatch):
+def test_task_complete_judge_uses_composed_system_prefix_when_protocol_disabled(
+    monkeypatch,
+):
     monkeypatch.setenv("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "false")
     agent = _agent()
     captured = {}
@@ -368,7 +470,9 @@ def test_task_complete_judge_uses_composed_system_prefix_when_protocol_disabled(
         yield SimpleNamespace(
             choices=[
                 SimpleNamespace(
-                    delta=SimpleNamespace(content='{"task_interrupted": true, "reason": "done"}')
+                    delta=SimpleNamespace(
+                        content='{"task_interrupted": true, "reason": "done"}'
+                    )
                 )
             ]
         )
@@ -398,16 +502,20 @@ def test_task_complete_judge_uses_composed_system_prefix_when_protocol_disabled(
         ),
     ]
 
-    assert asyncio.run(
-        agent._is_task_complete(
-            messages_input=messages,
-            session_id="s1",
-            tool_manager=tool_manager,
-            session_context=session_context,
+    assert (
+        asyncio.run(
+            agent._is_task_complete(
+                messages_input=messages,
+                session_id="s1",
+                tool_manager=tool_manager,
+                session_context=session_context,
+            )
         )
-    ) is True
+        is True
+    )
     assert "turn_status" not in captured["custom_prefix"]
     assert "找不到prompt" not in captured["llm_messages"][0]["content"]
+
 
 def test_turn_status_tools_only_filters_action_tools():
     tools_json = [
@@ -415,7 +523,9 @@ def test_turn_status_tools_only_filters_action_tools():
         {"function": {"name": "turn_status"}},
     ]
 
-    assert _agent()._turn_status_tools_only(tools_json) == [{"function": {"name": "turn_status"}}]
+    assert _agent()._turn_status_tools_only(tools_json) == [
+        {"function": {"name": "turn_status"}}
+    ]
 
 
 def test_coerce_invalid_status_only_returns_continue_work_with_metadata():
@@ -434,8 +544,8 @@ def test_coerce_invalid_status_only_returns_continue_work_with_metadata():
             "function": {"name": "load_skill", "arguments": "{}"},
         },
     }
-    new_calls, coerced_id, original_names = _agent()._coerce_invalid_status_only_tool_calls(
-        invalid_calls, language="zh"
+    new_calls, coerced_id, original_names = (
+        _agent()._coerce_invalid_status_only_tool_calls(invalid_calls, language="zh")
     )
 
     assert coerced_id == "call_X"
@@ -464,41 +574,53 @@ def test_turn_status_from_tool_call_reads_continue_work():
 def test_env_force_required_keeps_required_without_escape(monkeypatch):
     monkeypatch.setenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "true")
 
-    assert _agent()._resolve_tool_choice(
-        tools_json=[{"function": {"name": "todo_read"}}],
-        force_tool_choice_required=False,
-        force_tool_choice_auto=False,
-    ) == "required"
+    assert (
+        _agent()._resolve_tool_choice(
+            tools_json=[{"function": {"name": "todo_read"}}],
+            force_tool_choice_required=False,
+            force_tool_choice_auto=False,
+        )
+        == "required"
+    )
 
 
 def test_normal_path_omits_tool_choice_without_env_or_escape(monkeypatch):
     monkeypatch.delenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", raising=False)
 
-    assert _agent()._resolve_tool_choice(
-        tools_json=[{"function": {"name": "todo_read"}}],
-        force_tool_choice_required=False,
-        force_tool_choice_auto=False,
-    ) is None
+    assert (
+        _agent()._resolve_tool_choice(
+            tools_json=[{"function": {"name": "todo_read"}}],
+            force_tool_choice_required=False,
+            force_tool_choice_auto=False,
+        )
+        is None
+    )
 
 
 def test_escape_auto_overrides_env_required_once(monkeypatch):
     monkeypatch.setenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "true")
 
-    assert _agent()._resolve_tool_choice(
-        tools_json=[{"function": {"name": "todo_read"}}],
-        force_tool_choice_required=False,
-        force_tool_choice_auto=True,
-    ) == "auto"
+    assert (
+        _agent()._resolve_tool_choice(
+            tools_json=[{"function": {"name": "todo_read"}}],
+            force_tool_choice_required=False,
+            force_tool_choice_auto=True,
+        )
+        == "auto"
+    )
 
 
 def test_required_protocol_turn_overrides_escape_auto(monkeypatch):
     monkeypatch.setenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "true")
 
-    assert _agent()._resolve_tool_choice(
-        tools_json=[{"function": {"name": "turn_status"}}],
-        force_tool_choice_required=True,
-        force_tool_choice_auto=True,
-    ) == "required"
+    assert (
+        _agent()._resolve_tool_choice(
+            tools_json=[{"function": {"name": "turn_status"}}],
+            force_tool_choice_required=True,
+            force_tool_choice_auto=True,
+        )
+        == "required"
+    )
 
 
 def test_turn_status_rejection_requests_required_escape():
@@ -525,10 +647,13 @@ def test_repeat_pattern_requests_required_escape():
         )
     ]
 
-    assert _agent()._should_escape_required_next_turn(
-        chunks,
-        pattern={"period": 1, "cycles": 2, "span": 2},
-    ) is True
+    assert (
+        _agent()._should_escape_required_next_turn(
+            chunks,
+            pattern={"period": 1, "cycles": 2, "span": 2},
+        )
+        is True
+    )
 
 
 def test_historical_repeat_signature_requests_required_escape():

@@ -63,7 +63,9 @@ class AutoGenAgentFunc:
             logger.info(f"获取到 {len(available_tools)} 个可用工具")
 
             # 生成基础配置
-            basic_config = await self._generate_basic_config(agent_description, available_tools, llm_client, model, language=language)
+            basic_config = await self._generate_basic_config(
+                agent_description, available_tools, llm_client, model, language=language
+            )
             if not basic_config:
                 raise Exception("生成基础配置失败")
 
@@ -74,17 +76,23 @@ class AutoGenAgentFunc:
                 logger.info(f"使用ToolProxy中预选的工具: {selected_tools}")
             else:
                 # 如果是ToolManager，进行工具选择
-                selected_tools = await self._select_tools(basic_config, available_tools, llm_client, model, language=language)
+                selected_tools = await self._select_tools(
+                    basic_config, available_tools, llm_client, model, language=language
+                )
                 if selected_tools is None:
                     raise Exception("选择工具失败")
 
             # 生成工作流程
-            workflows = await self._generate_workflows(basic_config, selected_tools, llm_client, model, language=language)
+            workflows = await self._generate_workflows(
+                basic_config, selected_tools, llm_client, model, language=language
+            )
             if workflows is None:
                 raise Exception("生成工作流程失败")
 
             # 组装完整配置
-            config = self._assemble_config(basic_config, selected_tools, workflows, language=language)
+            config = self._assemble_config(
+                basic_config, selected_tools, workflows, language=language
+            )
 
             logger.info("Agent配置生成完成")
             return config
@@ -94,7 +102,9 @@ class AutoGenAgentFunc:
             logger.error(traceback.format_exc())
             raise
 
-    def _get_tools_info(self, tool_manager: Union[ToolManager, ToolProxy]) -> List[Dict[str, Any]]:
+    def _get_tools_info(
+        self, tool_manager: Union[ToolManager, ToolProxy]
+    ) -> List[Dict[str, Any]]:
         """
         从工具管理器或工具代理获取所有工具的详细信息
 
@@ -116,7 +126,7 @@ class AutoGenAgentFunc:
                     "description": tool_dict.get("description", ""),
                     "parameters": tool_dict.get("parameters", {}),
                     "required": tool_dict.get("required", []),
-                    "type": tool_dict.get("type", "unknown")
+                    "type": tool_dict.get("type", "unknown"),
                 }
                 tools_info.append(tool_info)
 
@@ -128,7 +138,14 @@ class AutoGenAgentFunc:
             logger.error(traceback.format_exc())
             return []
 
-    async def _generate_basic_config(self, description: str, available_tools: List[Dict], client, model: str, language: str = "en") -> Optional[Dict[str, Any]]:
+    async def _generate_basic_config(
+        self,
+        description: str,
+        available_tools: List[Dict],
+        client,
+        model: str,
+        language: str = "en",
+    ) -> Optional[Dict[str, Any]]:
         """
         生成基础配置（名称、描述、系统提示词等）
 
@@ -143,16 +160,19 @@ class AutoGenAgentFunc:
         """
         try:
             # 生成工具能力摘要
-            tools_summary = "\n".join([
-                f"- {tool['name']}: {tool['description']}"
-                for tool in available_tools
-            ])
+            tools_summary = "\n".join(
+                [f"- {tool['name']}: {tool['description']}" for tool in available_tools]
+            )
 
-            prompt = PromptManager().get_prompt(
-                "auto_gen_agent_basic_config_prompt",
-                agent="common_util",
-                language=language,
-            ).format(description=description, tools_summary=tools_summary)
+            prompt = (
+                PromptManager()
+                .get_prompt(
+                    "auto_gen_agent_basic_config_prompt",
+                    agent="common_util",
+                    language=language,
+                )
+                .format(description=description, tools_summary=tools_summary)
+            )
 
             logger.debug("调用大模型生成基础配置")
             response = await self._call_llm(client, prompt, model)
@@ -175,16 +195,27 @@ class AutoGenAgentFunc:
             except json.JSONDecodeError as e:
                 logger.error(f"解析大模型响应失败: {e}")
                 logger.error(f"原始响应: {response}")
-                logger.error(f"提取的JSON: {json_str if 'json_str' in locals() else 'N/A'}")
+                logger.error(
+                    f"提取的JSON: {json_str if 'json_str' in locals() else 'N/A'}"
+                )
                 # 返回默认配置
-                return await self._get_default_basic_config(description, language=language)
+                return await self._get_default_basic_config(
+                    description, language=language
+                )
 
         except Exception as e:
             logger.error(f"生成基础配置失败: {str(e)}")
             logger.error(traceback.format_exc())
             return None
 
-    async def _select_tools(self, basic_config: Dict, available_tools: List[Dict], client, model: str, language: str = "en") -> Optional[List[str]]:
+    async def _select_tools(
+        self,
+        basic_config: Dict,
+        available_tools: List[Dict],
+        client,
+        model: str,
+        language: str = "en",
+    ) -> Optional[List[str]]:
         """
         根据Agent基础配置选择合适的工具
 
@@ -198,20 +229,23 @@ class AutoGenAgentFunc:
             选中的工具名称列表
         """
         try:
-            tools_summary = "\n".join([
-                f"- {tool['name']}: {tool['description']}"
-                for tool in available_tools
-            ])
+            tools_summary = "\n".join(
+                [f"- {tool['name']}: {tool['description']}" for tool in available_tools]
+            )
 
-            prompt = PromptManager().get_prompt(
-                "auto_gen_agent_tool_selection_prompt",
-                agent="common_util",
-                language=language,
-            ).format(
-                name=basic_config.get("name", ""),
-                description=basic_config.get("description", ""),
-                systemPrefix=basic_config.get("systemPrefix", ""),
-                tools_summary=tools_summary,
+            prompt = (
+                PromptManager()
+                .get_prompt(
+                    "auto_gen_agent_tool_selection_prompt",
+                    agent="common_util",
+                    language=language,
+                )
+                .format(
+                    name=basic_config.get("name", ""),
+                    description=basic_config.get("description", ""),
+                    systemPrefix=basic_config.get("systemPrefix", ""),
+                    tools_summary=tools_summary,
+                )
             )
 
             logger.debug("调用大模型选择工具")
@@ -227,8 +261,10 @@ class AutoGenAgentFunc:
                     raise ValueError("响应不是数组格式")
 
                 # 验证工具名称是否存在
-                available_tool_names = [tool['name'] for tool in available_tools]
-                valid_tools = [tool for tool in selected_tools if tool in available_tool_names]
+                available_tool_names = [tool["name"] for tool in available_tools]
+                valid_tools = [
+                    tool for tool in selected_tools if tool in available_tool_names
+                ]
 
                 logger.info(f"选择了 {len(valid_tools)} 个工具: {valid_tools}")
                 return valid_tools
@@ -236,7 +272,9 @@ class AutoGenAgentFunc:
             except (json.JSONDecodeError, ValueError) as e:
                 logger.error(f"解析工具选择响应失败: {e}")
                 logger.error(f"原始响应: {response}")
-                logger.error(f"提取的JSON: {json_str if 'json_str' in locals() else 'N/A'}")
+                logger.error(
+                    f"提取的JSON: {json_str if 'json_str' in locals() else 'N/A'}"
+                )
                 # 返回一些基础工具
                 return self._get_default_tools()
 
@@ -245,7 +283,14 @@ class AutoGenAgentFunc:
             logger.error(traceback.format_exc())
             return None
 
-    async def _generate_workflows(self, basic_config: Dict, selected_tools: List[str], client, model: str, language: str = "en") -> Optional[Dict[str, List[str]]]:
+    async def _generate_workflows(
+        self,
+        basic_config: Dict,
+        selected_tools: List[str],
+        client,
+        model: str,
+        language: str = "en",
+    ) -> Optional[Dict[str, List[str]]]:
         """
         生成Agent的工作流程配置
 
@@ -261,15 +306,19 @@ class AutoGenAgentFunc:
         try:
             tools_str = ", ".join(selected_tools)
 
-            prompt = PromptManager().get_prompt(
-                "auto_gen_agent_workflow_generation_prompt",
-                agent="common_util",
-                language=language,
-            ).format(
-                name=basic_config.get("name", ""),
-                description=basic_config.get("description", ""),
-                systemPrefix=basic_config.get("systemPrefix", ""),
-                selected_tools=tools_str,
+            prompt = (
+                PromptManager()
+                .get_prompt(
+                    "auto_gen_agent_workflow_generation_prompt",
+                    agent="common_util",
+                    language=language,
+                )
+                .format(
+                    name=basic_config.get("name", ""),
+                    description=basic_config.get("description", ""),
+                    systemPrefix=basic_config.get("systemPrefix", ""),
+                    selected_tools=tools_str,
+                )
             )
 
             logger.debug("调用大模型生成工作流程")
@@ -290,7 +339,9 @@ class AutoGenAgentFunc:
             except (json.JSONDecodeError, ValueError) as e:
                 logger.error(f"解析工作流程响应失败: {e}")
                 logger.error(f"原始响应: {response}")
-                logger.error(f"提取的JSON: {json_str if 'json_str' in locals() else 'N/A'}")
+                logger.error(
+                    f"提取的JSON: {json_str if 'json_str' in locals() else 'N/A'}"
+                )
                 return self._get_default_workflows(language=language)
 
         except Exception as e:
@@ -298,7 +349,13 @@ class AutoGenAgentFunc:
             logger.error(traceback.format_exc())
             return None
 
-    def _assemble_config(self, basic_config: Dict, selected_tools: List[str], workflows: Dict, language: str = "en") -> Dict[str, Any]:
+    def _assemble_config(
+        self,
+        basic_config: Dict,
+        selected_tools: List[str],
+        workflows: Dict,
+        language: str = "en",
+    ) -> Dict[str, Any]:
         """
         组装完整的Agent配置
 
@@ -311,14 +368,18 @@ class AutoGenAgentFunc:
             完整的Agent配置
         """
         try:
-            max_loop_count = basic_config.get("maxLoopCount") or basic_config.get("max_loop_count")
+            max_loop_count = basic_config.get("maxLoopCount") or basic_config.get(
+                "max_loop_count"
+            )
             if max_loop_count is None:
                 raise ValueError("maxLoopCount is required in generated agent config")
 
             config = {
                 "id": str(int(time.time() * 1000)),  # 使用时间戳作为ID
                 "name": basic_config.get("name", "Auto-generated Agent"),
-                "description": basic_config.get("description", "Auto-generated assistant"),
+                "description": basic_config.get(
+                    "description", "Auto-generated assistant"
+                ),
                 "systemPrefix": basic_config.get(
                     "systemPrefix",
                     PromptManager().get_prompt(
@@ -331,16 +392,12 @@ class AutoGenAgentFunc:
                 "multiAgent": False,
                 "moreSupport": False,
                 "maxLoopCount": max_loop_count,
-                "llmConfig": {
-                    "model": "",
-                    "maxTokens": "",
-                    "temperature": ""
-                },
+                "llmConfig": {"model": "", "maxTokens": "", "temperature": ""},
                 "availableTools": selected_tools,
                 "systemContext": {},
                 "availableWorkflows": workflows,
                 "exportTime": datetime.now().isoformat() + "Z",
-                "version": "1.0"
+                "version": "1.0",
             }
 
             logger.info("Agent配置组装完成")
@@ -375,7 +432,7 @@ class AutoGenAgentFunc:
         import re
 
         # 匹配 ```json ... ``` 格式，支持对象和数组
-        json_pattern = r'```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```'
+        json_pattern = r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```"
         match = re.search(json_pattern, response, re.DOTALL | re.IGNORECASE)
         if match:
             return match.group(1).strip()
@@ -385,14 +442,14 @@ class AutoGenAgentFunc:
         start_idx = -1
 
         for i, char in enumerate(response):
-            if char == '{':
+            if char == "{":
                 if start_idx == -1:
                     start_idx = i
                 brace_count += 1
-            elif char == '}':
+            elif char == "}":
                 brace_count -= 1
                 if brace_count == 0 and start_idx != -1:
-                    json_str = response[start_idx:i+1]
+                    json_str = response[start_idx : i + 1]
                     try:
                         json.loads(json_str)
                         return json_str
@@ -404,14 +461,14 @@ class AutoGenAgentFunc:
         start_idx = -1
 
         for i, char in enumerate(response):
-            if char == '[':
+            if char == "[":
                 if start_idx == -1:
                     start_idx = i
                 bracket_count += 1
-            elif char == ']':
+            elif char == "]":
                 bracket_count -= 1
                 if bracket_count == 0 and start_idx != -1:
-                    json_str = response[start_idx:i+1]
+                    json_str = response[start_idx : i + 1]
                     try:
                         json.loads(json_str)
                         return json_str
@@ -440,38 +497,38 @@ class AutoGenAgentFunc:
 
             # 检查客户端是否有model属性，如果有则使用客户端的model
             actual_model = model
-            if hasattr(client, 'model') and client.model:
+            if hasattr(client, "model") and client.model:
                 actual_model = client.model
                 logger.debug(f"使用客户端设置的模型: {actual_model}")
 
             # 检查客户端类型，使用标准的OpenAI API调用方式
-            if hasattr(client, 'chat') and hasattr(client.chat, 'completions'):
+            if hasattr(client, "chat") and hasattr(client.chat, "completions"):
                 logger.debug("使用OpenAI标准API调用")
                 # OpenAI客户端，使用标准调用方式
                 response = await client.chat.completions.create(
                     model=actual_model,
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=2000,
-                    temperature=0.7
+                    temperature=0.7,
                 )
                 result = response.choices[0].message.content
                 logger.debug(f"大模型响应长度: {len(result) if result else 0}")
                 return result
-            elif hasattr(client, 'chat'):
+            elif hasattr(client, "chat"):
                 logger.debug("使用chat方法调用")
                 # 其他类型的chat客户端
                 response = client.chat(prompt)
                 result = str(response)
                 logger.debug(f"大模型响应长度: {len(result)}")
                 return result
-            elif hasattr(client, 'complete'):
+            elif hasattr(client, "complete"):
                 logger.debug("使用complete方法调用")
                 # complete方法的客户端
                 response = client.complete(prompt)
                 result = str(response)
                 logger.debug(f"大模型响应长度: {len(result)}")
                 return result
-            elif hasattr(client, 'generate'):
+            elif hasattr(client, "generate"):
                 logger.debug("使用generate方法调用")
                 # generate方法的客户端
                 response = client.generate(prompt)
@@ -485,7 +542,7 @@ class AutoGenAgentFunc:
                     model=actual_model,
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=2000,
-                    temperature=0.7
+                    temperature=0.7,
                 )
                 result = response.choices[0].message.content
                 logger.debug(f"大模型响应长度: {len(result) if result else 0}")
@@ -498,12 +555,20 @@ class AutoGenAgentFunc:
             logger.error(traceback.format_exc())
             raise
 
-    async def _get_default_basic_config(self, description: str, language: str = "en") -> Dict[str, Any]:
+    async def _get_default_basic_config(
+        self, description: str, language: str = "en"
+    ) -> Dict[str, Any]:
         """获取默认的基础配置"""
         default_texts = {
             "zh": ("自动助手", "基于描述自动生成的助手"),
-            "en": ("Auto Assistant", "Auto-generated assistant based on the description"),
-            "pt": ("Assistente Automático", "Assistente gerado automaticamente com base na descrição"),
+            "en": (
+                "Auto Assistant",
+                "Auto-generated assistant based on the description",
+            ),
+            "pt": (
+                "Assistente Automático",
+                "Assistente gerado automaticamente com base na descrição",
+            ),
         }
         name, desc = default_texts.get(language, default_texts["en"])
         return {
@@ -524,7 +589,7 @@ class AutoGenAgentFunc:
             "file_read",
             "file_write",
             "search_web_page",
-            "search_image_from_web"
+            "search_image_from_web",
         ]
 
     def _get_default_workflows(self, language: str = "en") -> Dict[str, List[str]]:
@@ -581,7 +646,9 @@ class AutoGenAgentFunc:
         }
         return defaults.get(language, defaults["en"])
 
-    def save_config_to_file(self, config: Dict[str, Any], file_path: str) -> Optional[str]:
+    def save_config_to_file(
+        self, config: Dict[str, Any], file_path: str
+    ) -> Optional[str]:
         """
         将配置保存到文件
 
@@ -593,7 +660,7 @@ class AutoGenAgentFunc:
             保存成功时返回文件路径，失败时返回None
         """
         try:
-            with open(file_path, 'w', encoding='utf-8') as f:
+            with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
 
             logger.info(f"配置已保存到: {file_path}")

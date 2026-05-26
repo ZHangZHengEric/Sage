@@ -10,6 +10,7 @@ from sagents.llm.capabilities import create_chat_completion_with_fallback
 
 class BaseAgentProcessor:
     """基础代理处理器类，包含公共的API调用、文件操作和日志功能"""
+
     def __init__(
         self,
         api_key: str,
@@ -39,7 +40,7 @@ class BaseAgentProcessor:
                     full_prompt = prompt
                 else:
                     full_prompt = [{"role": "user", "content": str(prompt)}]
-                
+
                 # Construct response_format properly based on r_format string
                 resp_fmt = {"type": "text"}
                 if r_format == "json_object":
@@ -48,12 +49,12 @@ class BaseAgentProcessor:
                     resp_fmt = {"type": "text"}
                 else:
                     # Default fallback or pass as is if typed dict matches
-                    resp_fmt = {"type": r_format} # type: ignore
+                    resp_fmt = {"type": r_format}  # type: ignore
 
                 response = await create_chat_completion_with_fallback(
                     self.client,
                     model=model_name,
-                    messages=full_prompt, # type: ignore
+                    messages=full_prompt,  # type: ignore
                     temperature=temperature,
                     timeout=timeout,
                     max_tokens=max_tokens,
@@ -64,7 +65,8 @@ class BaseAgentProcessor:
 
             except Exception as e:
                 logger.warning(
-                    f"API调用失败 (第 {attempt + 1} 次): {str(e)}", exc_info=True)
+                    f"API调用失败 (第 {attempt + 1} 次): {str(e)}", exc_info=True
+                )
                 if attempt == max_retries - 1:
                     logger.error("最终重试失败，放弃请求。", exc_info=True)
                     raise
@@ -78,10 +80,10 @@ class BaseAgentProcessor:
 
     def read_yaml_file(self, file_path: str) -> Dict[str, Any]:
         """读取YAML文件"""
-        with open(file_path, 'r', encoding='utf-8') as file:
+        with open(file_path, "r", encoding="utf-8") as file:
             content = yaml.safe_load(file)
         return content
-    
+
     def read_json_file(self, file_path: str) -> Dict[str, Any]:
         """读取JSON文件"""
         with open(file_path, "r", encoding="utf-8") as f:
@@ -90,7 +92,7 @@ class BaseAgentProcessor:
     def parse_json_response(self, response: str) -> Any:
         """解析评估响应（兼容旧版本）"""
         # 第一步：尝试提取 ```json ... ``` 中的内容
-        json_match = re.search(r'```json(.*?)```', response, re.DOTALL)
+        json_match = re.search(r"```json(.*?)```", response, re.DOTALL)
         if json_match:
             try:
                 return json.loads(json_match.group(1))

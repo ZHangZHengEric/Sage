@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 _GLOBAL_STARTUP_CONFIG: Any
 
@@ -268,7 +268,9 @@ def validate_startup_config(cfg: StartupConfig) -> None:
 
     auth_mode = (cfg.auth_mode or "").strip().lower()
     if auth_mode not in {"trusted_proxy", "oauth", "native"}:
-        raise ValueError("Unsupported auth mode. Expected trusted_proxy, oauth, or native.")
+        raise ValueError(
+            "Unsupported auth mode. Expected trusted_proxy, oauth, or native."
+        )
 
     if not is_production_like(cfg):
         if cfg.cors_allow_credentials and "*" in (cfg.cors_allowed_origins or []):
@@ -280,12 +282,18 @@ def validate_startup_config(cfg: StartupConfig) -> None:
         "refresh_token_secret": StartupConfig.refresh_token_secret,
         "session_secret": StartupConfig.session_secret,
     }
-    insecure = [name for name, default in default_secrets.items() if getattr(cfg, name) == default]
+    insecure = [
+        name
+        for name, default in default_secrets.items()
+        if getattr(cfg, name) == default
+    ]
     if insecure:
         raise ValueError("Production-like environments must use secure secrets.")
 
     if not cfg.session_cookie_secure:
-        raise ValueError("Production-like environments must enable secure session cookies.")
+        raise ValueError(
+            "Production-like environments must enable secure session cookies."
+        )
 
     if cfg.cors_allow_credentials and "*" in (cfg.cors_allowed_origins or []):
         raise ValueError("Credentialed wildcard CORS is not allowed.")
@@ -319,51 +327,102 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
         cfg = StartupConfig(
             app_mode="desktop",
             port=env_int(ENV.PORT, StartupConfig.port),
-            logs_dir=env_str(ENV.LOGS_DIR, local_defaults["logs_dir"]) or local_defaults["logs_dir"],
-            session_dir=env_str(ENV.SESSION_DIR, local_defaults["session_dir"]) or local_defaults["session_dir"],
-            agents_dir=env_str(ENV.AGENTS_DIR, local_defaults["agents_dir"]) or local_defaults["agents_dir"],
-            skill_dir=env_str(ENV.SKILL_DIR, local_defaults["skill_dir"]) or local_defaults["skill_dir"],
-            user_dir=env_str(ENV.USER_DIR, local_defaults["user_dir"]) or local_defaults["user_dir"],
-            db_type=env_str(ENV.DB_TYPE, StartupConfig.db_type) or StartupConfig.db_type,
-            db_file=env_str(ENV.DB_FILE, local_defaults["db_file"]) or local_defaults["db_file"],
-            preset_mcp_config=env_str(ENV.PRESET_MCP_CONFIG, StartupConfig.preset_mcp_config) or StartupConfig.preset_mcp_config,
-            preset_running_config=env_str(ENV.PRESET_RUNNING_CONFIG, StartupConfig.preset_running_config) or StartupConfig.preset_running_config,
-            default_llm_api_key=env_str(ENV.DEFAULT_LLM_API_KEY, StartupConfig.default_llm_api_key) or StartupConfig.default_llm_api_key,
+            logs_dir=env_str(ENV.LOGS_DIR, local_defaults["logs_dir"])
+            or local_defaults["logs_dir"],
+            session_dir=env_str(ENV.SESSION_DIR, local_defaults["session_dir"])
+            or local_defaults["session_dir"],
+            agents_dir=env_str(ENV.AGENTS_DIR, local_defaults["agents_dir"])
+            or local_defaults["agents_dir"],
+            skill_dir=env_str(ENV.SKILL_DIR, local_defaults["skill_dir"])
+            or local_defaults["skill_dir"],
+            user_dir=env_str(ENV.USER_DIR, local_defaults["user_dir"])
+            or local_defaults["user_dir"],
+            db_type=env_str(ENV.DB_TYPE, StartupConfig.db_type)
+            or StartupConfig.db_type,
+            db_file=env_str(ENV.DB_FILE, local_defaults["db_file"])
+            or local_defaults["db_file"],
+            preset_mcp_config=env_str(
+                ENV.PRESET_MCP_CONFIG, StartupConfig.preset_mcp_config
+            )
+            or StartupConfig.preset_mcp_config,
+            preset_running_config=env_str(
+                ENV.PRESET_RUNNING_CONFIG, StartupConfig.preset_running_config
+            )
+            or StartupConfig.preset_running_config,
+            default_llm_api_key=env_str(
+                ENV.DEFAULT_LLM_API_KEY, StartupConfig.default_llm_api_key
+            )
+            or StartupConfig.default_llm_api_key,
             default_llm_api_base_url=env_str(
                 ENV.DEFAULT_LLM_API_BASE_URL, StartupConfig.default_llm_api_base_url
             )
             or StartupConfig.default_llm_api_base_url,
-            default_llm_model_name=env_str(ENV.DEFAULT_LLM_MODEL_NAME, StartupConfig.default_llm_model_name) or StartupConfig.default_llm_model_name,
-            default_llm_max_tokens=env_int(ENV.DEFAULT_LLM_MAX_TOKENS, StartupConfig.default_llm_max_tokens),
-            default_llm_temperature=env_float(ENV.DEFAULT_LLM_TEMPERATURE, StartupConfig.default_llm_temperature),
-            default_llm_max_model_len=env_int(ENV.DEFAULT_LLM_MAX_MODEL_LEN, StartupConfig.default_llm_max_model_len),
-            default_llm_top_p=env_float(ENV.DEFAULT_LLM_TOP_P, StartupConfig.default_llm_top_p),
-            default_llm_presence_penalty=env_float(ENV.DEFAULT_LLM_PRESENCE_PENALTY, StartupConfig.default_llm_presence_penalty),
-            context_history_ratio=env_float(ENV.CONTEXT_HISTORY_RATIO, StartupConfig.context_history_ratio),
-            context_active_ratio=env_float(ENV.CONTEXT_ACTIVE_RATIO, StartupConfig.context_active_ratio),
-            context_max_new_message_ratio=env_float(ENV.CONTEXT_MAX_NEW_MESSAGE_RATIO, StartupConfig.context_max_new_message_ratio),
-            context_recent_turns=env_int(ENV.CONTEXT_RECENT_TURNS, StartupConfig.context_recent_turns),
-            jwt_key=env_str(ENV.JWT_KEY, StartupConfig.jwt_key) or StartupConfig.jwt_key,
-            jwt_expire_hours=env_int(ENV.JWT_EXPIRE_HOURS, StartupConfig.jwt_expire_hours),
-            refresh_token_secret=env_str(ENV.REFRESH_TOKEN_SECRET, StartupConfig.refresh_token_secret) or StartupConfig.refresh_token_secret,
+            default_llm_model_name=env_str(
+                ENV.DEFAULT_LLM_MODEL_NAME, StartupConfig.default_llm_model_name
+            )
+            or StartupConfig.default_llm_model_name,
+            default_llm_max_tokens=env_int(
+                ENV.DEFAULT_LLM_MAX_TOKENS, StartupConfig.default_llm_max_tokens
+            ),
+            default_llm_temperature=env_float(
+                ENV.DEFAULT_LLM_TEMPERATURE, StartupConfig.default_llm_temperature
+            ),
+            default_llm_max_model_len=env_int(
+                ENV.DEFAULT_LLM_MAX_MODEL_LEN, StartupConfig.default_llm_max_model_len
+            ),
+            default_llm_top_p=env_float(
+                ENV.DEFAULT_LLM_TOP_P, StartupConfig.default_llm_top_p
+            ),
+            default_llm_presence_penalty=env_float(
+                ENV.DEFAULT_LLM_PRESENCE_PENALTY,
+                StartupConfig.default_llm_presence_penalty,
+            ),
+            context_history_ratio=env_float(
+                ENV.CONTEXT_HISTORY_RATIO, StartupConfig.context_history_ratio
+            ),
+            context_active_ratio=env_float(
+                ENV.CONTEXT_ACTIVE_RATIO, StartupConfig.context_active_ratio
+            ),
+            context_max_new_message_ratio=env_float(
+                ENV.CONTEXT_MAX_NEW_MESSAGE_RATIO,
+                StartupConfig.context_max_new_message_ratio,
+            ),
+            context_recent_turns=env_int(
+                ENV.CONTEXT_RECENT_TURNS, StartupConfig.context_recent_turns
+            ),
+            jwt_key=env_str(ENV.JWT_KEY, StartupConfig.jwt_key)
+            or StartupConfig.jwt_key,
+            jwt_expire_hours=env_int(
+                ENV.JWT_EXPIRE_HOURS, StartupConfig.jwt_expire_hours
+            ),
+            refresh_token_secret=env_str(
+                ENV.REFRESH_TOKEN_SECRET, StartupConfig.refresh_token_secret
+            )
+            or StartupConfig.refresh_token_secret,
             embed_api_key=env_str(ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key),
-            embed_base_url=env_str(ENV.EMBEDDING_BASE_URL, StartupConfig.embed_base_url) or StartupConfig.embed_base_url,
-            embed_model=env_str(ENV.EMBEDDING_MODEL, StartupConfig.embed_model) or StartupConfig.embed_model,
+            embed_base_url=env_str(ENV.EMBEDDING_BASE_URL, StartupConfig.embed_base_url)
+            or StartupConfig.embed_base_url,
+            embed_model=env_str(ENV.EMBEDDING_MODEL, StartupConfig.embed_model)
+            or StartupConfig.embed_model,
             embed_dims=env_int(ENV.EMBEDDING_DIMS, StartupConfig.embed_dims),
             s3_endpoint=env_str(ENV.S3_ENDPOINT, StartupConfig.s3_endpoint),
             s3_access_key=env_str(ENV.S3_ACCESS_KEY, StartupConfig.s3_access_key),
             s3_secret_key=env_str(ENV.S3_SECRET_KEY, StartupConfig.s3_secret_key),
             s3_secure=env_bool(ENV.S3_SECURE, StartupConfig.s3_secure),
             s3_bucket_name=env_str(ENV.S3_BUCKET_NAME, StartupConfig.s3_bucket_name),
-            s3_public_base_url=env_str(ENV.S3_PUBLIC_BASE_URL, StartupConfig.s3_public_base_url),
+            s3_public_base_url=env_str(
+                ENV.S3_PUBLIC_BASE_URL, StartupConfig.s3_public_base_url
+            ),
         )
         return _normalize_paths(cfg)
 
     cfg = StartupConfig(
         app_mode="server",
         env=env_str(ENV.APP_ENV, StartupConfig.env) or StartupConfig.env,
-        auth_mode=env_str(ENV.AUTH_MODE, StartupConfig.auth_mode) or StartupConfig.auth_mode,
-        log_level=env_str(ENV.LOG_LEVEL, StartupConfig.log_level) or StartupConfig.log_level,
+        auth_mode=env_str(ENV.AUTH_MODE, StartupConfig.auth_mode)
+        or StartupConfig.auth_mode,
+        log_level=env_str(ENV.LOG_LEVEL, StartupConfig.log_level)
+        or StartupConfig.log_level,
         port=env_int(ENV.PORT, StartupConfig.port),
         logs_dir=env_str(ENV.LOGS_DIR, StartupConfig.logs_dir),
         session_dir=env_str(ENV.SESSION_DIR, StartupConfig.session_dir),
@@ -378,54 +437,129 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
         mysql_password=env_str(ENV.MYSQL_PASSWORD, StartupConfig.mysql_password),
         mysql_database=env_str(ENV.MYSQL_DATABASE, StartupConfig.mysql_database),
         mysql_charset=StartupConfig.mysql_charset,
-        default_llm_api_key=env_str(ENV.DEFAULT_LLM_API_KEY, StartupConfig.default_llm_api_key),
+        default_llm_api_key=env_str(
+            ENV.DEFAULT_LLM_API_KEY, StartupConfig.default_llm_api_key
+        ),
         default_llm_api_base_url=env_str(
             ENV.DEFAULT_LLM_API_BASE_URL, StartupConfig.default_llm_api_base_url
         )
         or StartupConfig.default_llm_api_base_url,
-        default_llm_model_name=env_str(ENV.DEFAULT_LLM_MODEL_NAME, StartupConfig.default_llm_model_name) or StartupConfig.default_llm_model_name,
-        default_llm_max_tokens=env_int(ENV.DEFAULT_LLM_MAX_TOKENS, StartupConfig.default_llm_max_tokens),
-        default_llm_temperature=env_float(ENV.DEFAULT_LLM_TEMPERATURE, StartupConfig.default_llm_temperature),
-        default_llm_max_model_len=env_int(ENV.DEFAULT_LLM_MAX_MODEL_LEN, StartupConfig.default_llm_max_model_len),
-        default_llm_top_p=env_float(ENV.DEFAULT_LLM_TOP_P, StartupConfig.default_llm_top_p),
-        default_llm_presence_penalty=env_float(ENV.DEFAULT_LLM_PRESENCE_PENALTY, StartupConfig.default_llm_presence_penalty),
-        context_history_ratio=env_float(ENV.CONTEXT_HISTORY_RATIO, StartupConfig.context_history_ratio),
-        context_active_ratio=env_float(ENV.CONTEXT_ACTIVE_RATIO, StartupConfig.context_active_ratio),
-        context_max_new_message_ratio=env_float(ENV.CONTEXT_MAX_NEW_MESSAGE_RATIO, StartupConfig.context_max_new_message_ratio),
-        context_recent_turns=env_int(ENV.CONTEXT_RECENT_TURNS, StartupConfig.context_recent_turns),
-        auth_providers_json=env_str(ENV.AUTH_PROVIDERS, StartupConfig.auth_providers_json),
+        default_llm_model_name=env_str(
+            ENV.DEFAULT_LLM_MODEL_NAME, StartupConfig.default_llm_model_name
+        )
+        or StartupConfig.default_llm_model_name,
+        default_llm_max_tokens=env_int(
+            ENV.DEFAULT_LLM_MAX_TOKENS, StartupConfig.default_llm_max_tokens
+        ),
+        default_llm_temperature=env_float(
+            ENV.DEFAULT_LLM_TEMPERATURE, StartupConfig.default_llm_temperature
+        ),
+        default_llm_max_model_len=env_int(
+            ENV.DEFAULT_LLM_MAX_MODEL_LEN, StartupConfig.default_llm_max_model_len
+        ),
+        default_llm_top_p=env_float(
+            ENV.DEFAULT_LLM_TOP_P, StartupConfig.default_llm_top_p
+        ),
+        default_llm_presence_penalty=env_float(
+            ENV.DEFAULT_LLM_PRESENCE_PENALTY, StartupConfig.default_llm_presence_penalty
+        ),
+        context_history_ratio=env_float(
+            ENV.CONTEXT_HISTORY_RATIO, StartupConfig.context_history_ratio
+        ),
+        context_active_ratio=env_float(
+            ENV.CONTEXT_ACTIVE_RATIO, StartupConfig.context_active_ratio
+        ),
+        context_max_new_message_ratio=env_float(
+            ENV.CONTEXT_MAX_NEW_MESSAGE_RATIO,
+            StartupConfig.context_max_new_message_ratio,
+        ),
+        context_recent_turns=env_int(
+            ENV.CONTEXT_RECENT_TURNS, StartupConfig.context_recent_turns
+        ),
+        auth_providers_json=env_str(
+            ENV.AUTH_PROVIDERS, StartupConfig.auth_providers_json
+        ),
         trusted_identity_proxy_ips=env_csv(ENV.TRUSTED_IDENTITY_PROXY_IPS),
-        bootstrap_admin_username=env_str(ENV.BOOTSTRAP_ADMIN_USERNAME, StartupConfig.bootstrap_admin_username) or StartupConfig.bootstrap_admin_username,
-        bootstrap_admin_password=env_str(ENV.BOOTSTRAP_ADMIN_PASSWORD, StartupConfig.bootstrap_admin_password) or StartupConfig.bootstrap_admin_password,
+        bootstrap_admin_username=env_str(
+            ENV.BOOTSTRAP_ADMIN_USERNAME, StartupConfig.bootstrap_admin_username
+        )
+        or StartupConfig.bootstrap_admin_username,
+        bootstrap_admin_password=env_str(
+            ENV.BOOTSTRAP_ADMIN_PASSWORD, StartupConfig.bootstrap_admin_password
+        )
+        or StartupConfig.bootstrap_admin_password,
         jwt_key=env_str(ENV.JWT_KEY, StartupConfig.jwt_key),
         jwt_expire_hours=env_int(ENV.JWT_EXPIRE_HOURS, StartupConfig.jwt_expire_hours),
-        refresh_token_secret=env_str(ENV.REFRESH_TOKEN_SECRET, StartupConfig.refresh_token_secret),
+        refresh_token_secret=env_str(
+            ENV.REFRESH_TOKEN_SECRET, StartupConfig.refresh_token_secret
+        ),
         session_secret=env_str(ENV.SESSION_SECRET, StartupConfig.session_secret),
-        session_cookie_name=env_str(ENV.SESSION_COOKIE_NAME, StartupConfig.session_cookie_name),
-        session_cookie_secure=env_bool(ENV.SESSION_COOKIE_SECURE, StartupConfig.session_cookie_secure),
-        session_cookie_same_site=(env_str(ENV.SESSION_COOKIE_SAME_SITE, StartupConfig.session_cookie_same_site) or StartupConfig.session_cookie_same_site).strip().lower(),
-        cors_allowed_origins=env_csv(ENV.CORS_ALLOWED_ORIGINS, StartupConfig().cors_allowed_origins),
-        cors_allow_credentials=env_bool(ENV.CORS_ALLOW_CREDENTIALS, StartupConfig.cors_allow_credentials),
-        cors_allow_methods=env_csv(ENV.CORS_ALLOW_METHODS, StartupConfig().cors_allow_methods),
-        cors_allow_headers=env_csv(ENV.CORS_ALLOW_HEADERS, StartupConfig().cors_allow_headers),
-        cors_expose_headers=env_csv(ENV.CORS_EXPOSE_HEADERS, StartupConfig().cors_expose_headers),
+        session_cookie_name=env_str(
+            ENV.SESSION_COOKIE_NAME, StartupConfig.session_cookie_name
+        ),
+        session_cookie_secure=env_bool(
+            ENV.SESSION_COOKIE_SECURE, StartupConfig.session_cookie_secure
+        ),
+        session_cookie_same_site=(
+            env_str(
+                ENV.SESSION_COOKIE_SAME_SITE, StartupConfig.session_cookie_same_site
+            )
+            or StartupConfig.session_cookie_same_site
+        )
+        .strip()
+        .lower(),
+        cors_allowed_origins=env_csv(
+            ENV.CORS_ALLOWED_ORIGINS, StartupConfig().cors_allowed_origins
+        ),
+        cors_allow_credentials=env_bool(
+            ENV.CORS_ALLOW_CREDENTIALS, StartupConfig.cors_allow_credentials
+        ),
+        cors_allow_methods=env_csv(
+            ENV.CORS_ALLOW_METHODS, StartupConfig().cors_allow_methods
+        ),
+        cors_allow_headers=env_csv(
+            ENV.CORS_ALLOW_HEADERS, StartupConfig().cors_allow_headers
+        ),
+        cors_expose_headers=env_csv(
+            ENV.CORS_EXPOSE_HEADERS, StartupConfig().cors_expose_headers
+        ),
         cors_max_age=env_int(ENV.CORS_MAX_AGE, StartupConfig.cors_max_age),
         web_base_path=env_str(ENV.WEB_BASE_PATH, StartupConfig.web_base_path),
-        oauth2_clients_json=env_str(ENV.OAUTH2_CLIENTS, StartupConfig.oauth2_clients_json),
+        oauth2_clients_json=env_str(
+            ENV.OAUTH2_CLIENTS, StartupConfig.oauth2_clients_json
+        ),
         oauth2_issuer=env_str(ENV.OAUTH2_ISSUER, StartupConfig.oauth2_issuer),
-        oauth2_access_token_expires_in=env_int(ENV.OAUTH2_ACCESS_TOKEN_EXPIRES_IN, StartupConfig.oauth2_access_token_expires_in),
-        eml_endpoint=env_str(ENV.EML_ENDPOINT, StartupConfig.eml_endpoint) or StartupConfig.eml_endpoint,
-        eml_access_key_id=env_str(ENV.EML_ACCESS_KEY_ID, StartupConfig.eml_access_key_id),
-        eml_access_key_secret=env_str(ENV.EML_ACCESS_KEY_SECRET, StartupConfig.eml_access_key_secret),
-        eml_security_token=env_str(ENV.EML_SECURITY_TOKEN, StartupConfig.eml_security_token),
+        oauth2_access_token_expires_in=env_int(
+            ENV.OAUTH2_ACCESS_TOKEN_EXPIRES_IN,
+            StartupConfig.oauth2_access_token_expires_in,
+        ),
+        eml_endpoint=env_str(ENV.EML_ENDPOINT, StartupConfig.eml_endpoint)
+        or StartupConfig.eml_endpoint,
+        eml_access_key_id=env_str(
+            ENV.EML_ACCESS_KEY_ID, StartupConfig.eml_access_key_id
+        ),
+        eml_access_key_secret=env_str(
+            ENV.EML_ACCESS_KEY_SECRET, StartupConfig.eml_access_key_secret
+        ),
+        eml_security_token=env_str(
+            ENV.EML_SECURITY_TOKEN, StartupConfig.eml_security_token
+        ),
         eml_account_name=env_str(ENV.EML_ACCOUNT_NAME, StartupConfig.eml_account_name),
         eml_template_id=env_str(ENV.EML_TEMPLATE_ID, StartupConfig.eml_template_id),
-        eml_register_subject=env_str(ENV.EML_REGISTER_SUBJECT, StartupConfig.eml_register_subject) or StartupConfig.eml_register_subject,
-        eml_address_type=env_int(ENV.EML_ADDRESS_TYPE, StartupConfig.eml_address_type) or StartupConfig.eml_address_type,
-        eml_reply_to_address=env_bool(ENV.EML_REPLY_TO_ADDRESS, StartupConfig.eml_reply_to_address),
+        eml_register_subject=env_str(
+            ENV.EML_REGISTER_SUBJECT, StartupConfig.eml_register_subject
+        )
+        or StartupConfig.eml_register_subject,
+        eml_address_type=env_int(ENV.EML_ADDRESS_TYPE, StartupConfig.eml_address_type)
+        or StartupConfig.eml_address_type,
+        eml_reply_to_address=env_bool(
+            ENV.EML_REPLY_TO_ADDRESS, StartupConfig.eml_reply_to_address
+        ),
         embed_api_key=env_str(ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key),
-        embed_base_url=env_str(ENV.EMBEDDING_BASE_URL, StartupConfig.embed_base_url) or StartupConfig.embed_base_url,
-        embed_model=env_str(ENV.EMBEDDING_MODEL, StartupConfig.embed_model) or StartupConfig.embed_model,
+        embed_base_url=env_str(ENV.EMBEDDING_BASE_URL, StartupConfig.embed_base_url)
+        or StartupConfig.embed_base_url,
+        embed_model=env_str(ENV.EMBEDDING_MODEL, StartupConfig.embed_model)
+        or StartupConfig.embed_model,
         embed_dims=env_int(ENV.EMBEDDING_DIMS, StartupConfig.embed_dims),
         es_url=env_str(ENV.ES_URL, StartupConfig.es_url),
         es_api_key=env_str(ENV.ES_API_KEY, StartupConfig.es_api_key),
@@ -436,15 +570,23 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
         s3_secret_key=env_str(ENV.S3_SECRET_KEY, StartupConfig.s3_secret_key),
         s3_secure=env_bool(ENV.S3_SECURE, StartupConfig.s3_secure),
         s3_bucket_name=env_str(ENV.S3_BUCKET_NAME, StartupConfig.s3_bucket_name),
-        s3_public_base_url=env_str(ENV.S3_PUBLIC_BASE_URL, StartupConfig.s3_public_base_url),
+        s3_public_base_url=env_str(
+            ENV.S3_PUBLIC_BASE_URL, StartupConfig.s3_public_base_url
+        ),
         trace_jaeger_endpoint=env_str(
             ENV.TRACE_JAEGER_URL,
             env_str(ENV.TRACE_JAEGER_ENDPOINT, StartupConfig.trace_jaeger_endpoint),
         ),
-        trace_jaeger_public_url=env_str(ENV.TRACE_JAEGER_PUBLIC_URL, StartupConfig.trace_jaeger_public_url),
+        trace_jaeger_public_url=env_str(
+            ENV.TRACE_JAEGER_PUBLIC_URL, StartupConfig.trace_jaeger_public_url
+        ),
     )
 
-    same_site = (cfg.session_cookie_same_site or StartupConfig.session_cookie_same_site).strip().lower()
+    same_site = (
+        (cfg.session_cookie_same_site or StartupConfig.session_cookie_same_site)
+        .strip()
+        .lower()
+    )
     if same_site not in {"lax", "strict", "none"}:
         cfg.session_cookie_same_site = StartupConfig.session_cookie_same_site
     if is_production_like(cfg):

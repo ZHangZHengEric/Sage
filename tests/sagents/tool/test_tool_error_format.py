@@ -1,4 +1,5 @@
 """make_tool_error 统一错误格式测试。"""
+
 from sagents.tool.error_codes import ToolErrorCode, make_tool_error
 
 

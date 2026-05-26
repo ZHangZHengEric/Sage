@@ -11,22 +11,23 @@ from .interface import SandboxType
 @dataclass
 class VolumeMount:
     """卷挂载配置（类似 docker -v）
-    
+
     Examples:
         VolumeMount(host_path="/shared/data", mount_path="/data")
         VolumeMount(host_path="/assets", mount_path="/assets")
     """
-    host_path: str       # 宿主机源路径
-    mount_path: str      # 沙箱内挂载路径（绝对路径）
+
+    host_path: str  # 宿主机源路径
+    mount_path: str  # 沙箱内挂载路径（绝对路径）
     read_only: bool = False
-    
+
     def __post_init__(self):
         # 确保路径是绝对路径
         self.host_path = os.path.abspath(self.host_path)
         if os.name == "nt" and os.path.isabs(self.mount_path):
             self.mount_path = os.path.abspath(self.mount_path)
-        elif not self.mount_path.startswith('/'):
-            self.mount_path = '/' + self.mount_path
+        elif not self.mount_path.startswith("/"):
+            self.mount_path = "/" + self.mount_path
 
     @property
     def sandbox_path(self) -> str:
@@ -104,10 +105,11 @@ class SandboxConfig:
             for mapping in mount_paths_env.split(","):
                 if ":" in mapping:
                     host_path, sandbox_path = mapping.split(":", 1)
-                    volume_mounts.append(VolumeMount(
-                        host_path=host_path.strip(),
-                        mount_path=sandbox_path.strip()
-                    ))
+                    volume_mounts.append(
+                        VolumeMount(
+                            host_path=host_path.strip(), mount_path=sandbox_path.strip()
+                        )
+                    )
 
         return cls(
             mode=mode,
@@ -117,12 +119,16 @@ class SandboxConfig:
             cpu_time_limit=int(os.environ.get("SAGE_LOCAL_CPU_TIME_LIMIT", "300")),
             memory_limit_mb=int(os.environ.get("SAGE_LOCAL_MEMORY_LIMIT_MB", "4096")),
             linux_isolation_mode=os.environ.get("SAGE_LOCAL_LINUX_ISOLATION", "bwrap"),
-            macos_isolation_mode=os.environ.get("SAGE_LOCAL_MACOS_ISOLATION", "seatbelt"),
+            macos_isolation_mode=os.environ.get(
+                "SAGE_LOCAL_MACOS_ISOLATION", "seatbelt"
+            ),
             # 远程配置
             remote_provider=os.environ.get("SAGE_REMOTE_PROVIDER", "opensandbox"),
             remote_server_url=os.environ.get("OPENSANDBOX_URL"),
             remote_api_key=os.environ.get("OPENSANDBOX_API_KEY"),
-            remote_image=os.environ.get("OPENSANDBOX_IMAGE", "opensandbox/code-interpreter:v1.0.2"),
+            remote_image=os.environ.get(
+                "OPENSANDBOX_IMAGE", "opensandbox/code-interpreter:v1.0.2"
+            ),
             remote_timeout=int(os.environ.get("OPENSANDBOX_TIMEOUT", "1800")),
         )
 
@@ -132,37 +138,52 @@ class SandboxConfig:
         try:
             import yaml
         except ImportError:
-            raise ImportError("PyYAML is required for YAML config. Install with: pip install pyyaml")
+            raise ImportError(
+                "PyYAML is required for YAML config. Install with: pip install pyyaml"
+            )
 
-        with open(config_path, 'r') as f:
+        with open(config_path, "r") as f:
             config = yaml.safe_load(f)
 
-        sandbox_config = config.get('sandbox', {})
+        sandbox_config = config.get("sandbox", {})
 
         # 解析路径映射
         volume_mounts = []
-        for mp in sandbox_config.get('volume_mounts', []):
-            volume_mounts.append(VolumeMount(
-                host_path=mp['host_path'],
-                mount_path=mp['mount_path']
-            ))
+        for mp in sandbox_config.get("volume_mounts", []):
+            volume_mounts.append(
+                VolumeMount(host_path=mp["host_path"], mount_path=mp["mount_path"])
+            )
 
         return cls(
-            mode=SandboxType(sandbox_config.get('mode', 'local')),
-            sandbox_id=sandbox_config.get('sandbox_id'),
+            mode=SandboxType(sandbox_config.get("mode", "local")),
+            sandbox_id=sandbox_config.get("sandbox_id"),
             volume_mounts=volume_mounts,
             # 本地配置
-            cpu_time_limit=sandbox_config.get('local', {}).get('cpu_time_limit', 300),
-            memory_limit_mb=sandbox_config.get('local', {}).get('memory_limit_mb', 4096),
-            linux_isolation_mode=sandbox_config.get('local', {}).get('linux_isolation_mode', 'bwrap'),
-            macos_isolation_mode=sandbox_config.get('local', {}).get('macos_isolation_mode', 'seatbelt'),
+            cpu_time_limit=sandbox_config.get("local", {}).get("cpu_time_limit", 300),
+            memory_limit_mb=sandbox_config.get("local", {}).get(
+                "memory_limit_mb", 4096
+            ),
+            linux_isolation_mode=sandbox_config.get("local", {}).get(
+                "linux_isolation_mode", "bwrap"
+            ),
+            macos_isolation_mode=sandbox_config.get("local", {}).get(
+                "macos_isolation_mode", "seatbelt"
+            ),
             # 远程配置
-            remote_provider=sandbox_config.get('remote', {}).get('provider', 'opensandbox'),
-            remote_server_url=sandbox_config.get('remote', {}).get('server_url'),
-            remote_api_key=sandbox_config.get('remote', {}).get('api_key'),
-            remote_image=sandbox_config.get('remote', {}).get('image', 'opensandbox/code-interpreter:v1.0.2'),
-            remote_timeout=sandbox_config.get('remote', {}).get('timeout', 1800),
-            remote_persistent=sandbox_config.get('remote', {}).get('persistent', True),
-            remote_sandbox_ttl=sandbox_config.get('remote', {}).get('sandbox_ttl', 3600),
-            remote_provider_config=sandbox_config.get('remote', {}).get('provider_config', {}),
+            remote_provider=sandbox_config.get("remote", {}).get(
+                "provider", "opensandbox"
+            ),
+            remote_server_url=sandbox_config.get("remote", {}).get("server_url"),
+            remote_api_key=sandbox_config.get("remote", {}).get("api_key"),
+            remote_image=sandbox_config.get("remote", {}).get(
+                "image", "opensandbox/code-interpreter:v1.0.2"
+            ),
+            remote_timeout=sandbox_config.get("remote", {}).get("timeout", 1800),
+            remote_persistent=sandbox_config.get("remote", {}).get("persistent", True),
+            remote_sandbox_ttl=sandbox_config.get("remote", {}).get(
+                "sandbox_ttl", 3600
+            ),
+            remote_provider_config=sandbox_config.get("remote", {}).get(
+                "provider_config", {}
+            ),
         )

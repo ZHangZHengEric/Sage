@@ -10,6 +10,7 @@ from common.services.llm_provider_probe_utils import friendly_provider_probe_err
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
+
 @dataclass
 class StubLLMProviderCreate:
     name: str | None = None
@@ -99,7 +100,9 @@ class StubLLMProvider:
 
 def _install_stub_modules():
     loguru_module = types.ModuleType("loguru")
-    loguru_module.logger = types.SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None)
+    loguru_module.logger = types.SimpleNamespace(
+        info=lambda *a, **k: None, warning=lambda *a, **k: None
+    )
     sys.modules["loguru"] = loguru_module
 
     models_module = types.ModuleType("common.models.llm_provider")
@@ -127,7 +130,9 @@ def _install_stub_modules():
 def _load_service_module():
     _install_stub_modules()
     module_path = REPO_ROOT / "common" / "services" / "llm_provider_service.py"
-    spec = importlib.util.spec_from_file_location("llm_provider_service_under_test", module_path)
+    spec = importlib.util.spec_from_file_location(
+        "llm_provider_service_under_test", module_path
+    )
     module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
     sys.modules[spec.name] = module
@@ -189,7 +194,9 @@ class TestLLMProviderProbeRequired(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertTrue(provider_id)
-        self.assertEqual(probe_calls, [("sk-test", "https://example.com/v1", "test-model")])
+        self.assertEqual(
+            probe_calls, [("sk-test", "https://example.com/v1", "test-model")]
+        )
         self.assertEqual(len(dao.saved), 1)
         self.assertEqual(dao.saved[0].base_url, "https://example.com/v1")
 
@@ -273,7 +280,9 @@ class TestLLMProviderProbeRequired(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIs(updated, existing)
-        self.assertEqual(probe_calls, [("sk-old", "https://new.example.com/v1", "new-model")])
+        self.assertEqual(
+            probe_calls, [("sk-old", "https://new.example.com/v1", "new-model")]
+        )
         self.assertEqual(existing.base_url, "https://new.example.com/v1")
         self.assertEqual(existing.model, "new-model")
         self.assertEqual(len(dao.saved), 1)
@@ -304,7 +313,10 @@ class TestLLMProviderProbeRequired(unittest.IsolatedAsyncioTestCase):
             allow_system_default_update=True,
         )
 
-        self.assertEqual(probe_calls, [("sk-stable", "https://stable.example.com/v1", "stable-model")])
+        self.assertEqual(
+            probe_calls,
+            [("sk-stable", "https://stable.example.com/v1", "stable-model")],
+        )
         self.assertEqual(existing.name, "renamed")
         self.assertEqual(len(dao.saved), 1)
 
@@ -402,8 +414,12 @@ class TestLLMProviderProbeRequired(unittest.IsolatedAsyncioTestCase):
 
 class TestProviderProbeFriendlyError(unittest.TestCase):
     def test_friendly_error_uses_subject_prefix(self):
-        message = friendly_provider_probe_error(RuntimeError("401 unauthorized"), subject="Default provider")
-        self.assertEqual(message, "Default provider authentication failed. Please check the API key.")
+        message = friendly_provider_probe_error(
+            RuntimeError("401 unauthorized"), subject="Default provider"
+        )
+        self.assertEqual(
+            message, "Default provider authentication failed. Please check the API key."
+        )
 
 
 if __name__ == "__main__":

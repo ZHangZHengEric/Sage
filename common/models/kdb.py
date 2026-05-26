@@ -4,7 +4,7 @@ import hashlib
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import JSON, String, Boolean, or_, select, Integer, func
+from sqlalchemy import JSON, String, select, Integer, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from common.models.base import Base, BaseDao, get_local_now
@@ -235,4 +235,3 @@ class KdbDocDao(BaseDao):
             res = await session.execute(stmt)
             rows = res.all()
             return {str(kdb_id): int(cnt or 0) for kdb_id, cnt in rows}
-

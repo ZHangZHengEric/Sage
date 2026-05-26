@@ -1,4 +1,3 @@
-import json
 import os
 
 from loguru import logger
@@ -112,14 +111,18 @@ async def initialize_global_clients(cfg: StartupConfig):
             logger.info("RustFS 客户端已初始化")
     except Exception as e:
         logger.error(f"RustFS 初始化失败: {e}")
-        
+
     try:
         api_key = cfg.embed_api_key or cfg.default_llm_api_key
         base_url = cfg.embed_base_url or cfg.default_llm_api_base_url
-        model = cfg.embed_model or cfg.default_llm_model_name or "text-embedding-3-large"
+        model = (
+            cfg.embed_model or cfg.default_llm_model_name or "text-embedding-3-large"
+        )
         dims = int(cfg.embed_dims or 1024)
 
-        embed_client = await init_embed_client(api_key=api_key, base_url=base_url, model_name=model, dims=dims)
+        embed_client = await init_embed_client(
+            api_key=api_key, base_url=base_url, model_name=model, dims=dims
+        )
         if embed_client is not None:
             logger.info("Embedding 客户端已初始化")
     except Exception as e:
@@ -136,7 +139,6 @@ async def initialize_global_clients(cfg: StartupConfig):
 async def initialize_tool_manager():
     """初始化工具管理器"""
     try:
-        from sagents.skill.skill_tool import SkillTool
         from sagents.tool.tool_manager import ToolManager
 
         tool_manager_instance = ToolManager.get_instance()
@@ -178,7 +180,7 @@ async def initialize_skill_manager(cfg: StartupConfig):
 
         # 2. 用户技能对话时，根据 user_id 注册用户技能目录 (users/{user_id}/skills/)
         # 3. Agent 技能对话时，根据 agent_id 注册 Agent 技能目录 (agents/{user_id}/{agent_id}/skills/)
-        
+
         return skill_manager_instance
     except Exception as e:
         logger.error(f"技能管理器初始化失败: {e}")
@@ -196,10 +198,11 @@ async def initialize_session_manager(cfg: StartupConfig):
     """初始化全局 SessionManager"""
     try:
         from sagents.session_runtime import initialize_global_session_manager
+
         # 使用 session_dir 作为会话根目录
         session_manager = initialize_global_session_manager(
             session_root_space=cfg.session_dir,
-            enable_obs=cfg.trace_jaeger_endpoint is not None
+            enable_obs=cfg.trace_jaeger_endpoint is not None,
         )
         logger.info(f"全局 SessionManager 已初始化，会话根目录: {cfg.session_dir}")
         return session_manager
@@ -244,13 +247,17 @@ async def validate_and_disable_mcp_servers():
             server_config["disabled"] = True
             await mcp_dao.save_mcp_server(name=srv.name, config=server_config)
             removed_count += 1
-    logger.info(f"MCP 验证完成：成功 {registered_count} 个，禁用 {removed_count} 个不可用服务器")
+    logger.info(
+        f"MCP 验证完成：成功 {registered_count} 个，禁用 {removed_count} 个不可用服务器"
+    )
 
 
 async def initialize_observability(cfg: StartupConfig):
     try:
         from opentelemetry import trace
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+            OTLPSpanExporter,
+        )
         from opentelemetry.sdk.resources import SERVICE_NAME, Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -268,7 +275,9 @@ async def initialize_observability(cfg: StartupConfig):
 
             # 2. OTLP Exporter (for Jaeger/external)
             if cfg and cfg.trace_jaeger_endpoint:
-                otlp_exporter = OTLPSpanExporter(endpoint=cfg.trace_jaeger_endpoint, insecure=True)
+                otlp_exporter = OTLPSpanExporter(
+                    endpoint=cfg.trace_jaeger_endpoint, insecure=True
+                )
                 otlp_processor = BatchSpanProcessor(otlp_exporter)
                 provider.add_span_processor(otlp_processor)
 
@@ -331,6 +340,7 @@ async def shutdown_scheduler():
             sched.shutdown(wait=False)
         finally:
             logger.info("Scheduler 已关闭")
+
 
 async def shutdown_clients():
     """关闭所有第三方客户端"""
@@ -397,7 +407,7 @@ async def ensure_system_init(cfg: StartupConfig):
                 username=bootstrap_admin.username,
                 password_hash=hashed,
                 role="admin",
-                email="admin@example.com"
+                email="admin@example.com",
             )
             await user_dao.save(admin_user)
             logger.info(format_bootstrap_admin_log(bootstrap_admin))
@@ -408,11 +418,15 @@ async def ensure_system_init(cfg: StartupConfig):
     dao = LLMProviderDao()
     default_provider = await dao.get_default()
     if not cfg.default_llm_api_key or not cfg.default_llm_api_base_url:
-        logger.warning("Environment variables for default LLM provider missing. Skipping default provider creation.")
+        logger.warning(
+            "Environment variables for default LLM provider missing. Skipping default provider creation."
+        )
         return
     api_key = cfg.default_llm_api_key.strip()
     if not api_key:
-        logger.warning("Default LLM API key is empty after trimming. Skipping default provider creation.")
+        logger.warning(
+            "Default LLM API key is empty after trimming. Skipping default provider creation."
+        )
         return
     # Models
     model = cfg.default_llm_model_name or "gpt-4o"
@@ -424,19 +438,20 @@ async def ensure_system_init(cfg: StartupConfig):
     presence_penalty = cfg.default_llm_presence_penalty or 0.0
     if not default_provider:
         import uuid
+
         provider_id = str(uuid.uuid4())
         provider = LLMProvider(
-            id=provider_id, 
-            name="Default LLM Provider", 
-            base_url=base_url, 
-            api_keys=[api_key], 
-            model=model, 
+            id=provider_id,
+            name="Default LLM Provider",
+            base_url=base_url,
+            api_keys=[api_key],
+            model=model,
             is_default=True,
             user_id="",
             temperature=temperature,
             top_p=top_p,
             presence_penalty=presence_penalty,
-            max_model_len=max_model_len
+            max_model_len=max_model_len,
         )
         if max_tokens is not None:
             provider.max_tokens = int(max_tokens)
@@ -447,11 +462,13 @@ async def ensure_system_init(cfg: StartupConfig):
         default_provider.base_url = base_url
         default_provider.api_keys = [api_key]
         default_provider.model = model
-        default_provider.max_tokens = int(max_tokens) if max_tokens is not None else None
+        default_provider.max_tokens = (
+            int(max_tokens) if max_tokens is not None else None
+        )
         default_provider.temperature = temperature
         default_provider.top_p = top_p
         default_provider.presence_penalty = presence_penalty
         default_provider.max_model_len = max_model_len
-            
+
         await dao.save(default_provider)
         logger.debug("Default LLM Provider updated.")

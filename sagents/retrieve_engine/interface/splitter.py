@@ -1,11 +1,12 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 
+
 class BaseSplitter(ABC):
     """
     Abstract base class for document splitters.
     """
-    
+
     @abstractmethod
     async def split_text(self, text: str, **kwargs) -> List[Dict[str, Any]]:
         """

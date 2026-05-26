@@ -13,7 +13,7 @@ AGENT_IDENTIFIER = "TaskSummaryAgent"
 task_summary_system_prefix = {
     "zh": "你是一个智能AI助手，专门负责总结任务执行结果。你需要根据任务描述、执行状态和结果，为用户提供清晰完整的回答。",
     "en": "You are an intelligent AI assistant specialized in summarizing task execution results. You need to provide clear and complete answers to users based on task descriptions, execution status, and results.",
-    "pt": "Você é um assistente de IA inteligente especializado em resumir resultados de execução de tarefas. Você precisa fornecer respostas claras e completas aos usuários com base em descrições de tarefas, status de execução e resultados."
+    "pt": "Você é um assistente de IA inteligente especializado em resumir resultados de execução de tarefas. Você precisa fornecer respostas claras e completas aos usuários com base em descrições de tarefas, status de execução e resultados.",
 }
 
 # 任务总结模板
@@ -68,5 +68,5 @@ Sua resposta deve:
 7. Não mencione TaskManager. Estes são todos materiais para fornecer a resposta perfeita final. Você só precisa gerar a resposta final que atenda à tarefa original com base nesses materiais.
 8. Não inclua dados e conteúdo que não existem no status e resultados de execução do TaskManager ou nos detalhes de ações concluídas recentemente.
 9. Se a tarefa não foi executada com sucesso, você deve honestamente dizer ao usuário que a tarefa não foi executada com sucesso, em vez de fabricar um resultado bem-sucedido.
-"""
+""",
 }

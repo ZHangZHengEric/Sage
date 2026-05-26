@@ -23,17 +23,29 @@ def _resolve_provider_create_data(
     from common.schemas.base import LLMProviderCreate
 
     cfg = init_cli_config(init_logging=False)
-    resolved_base_url = trim_optional_text(base_url) or trim_optional_text(cfg.default_llm_api_base_url)
-    resolved_api_key = trim_optional_text(api_key) or trim_optional_text(cfg.default_llm_api_key)
-    resolved_model = trim_optional_text(model) or trim_optional_text(cfg.default_llm_model_name)
+    resolved_base_url = trim_optional_text(base_url) or trim_optional_text(
+        cfg.default_llm_api_base_url
+    )
+    resolved_api_key = trim_optional_text(api_key) or trim_optional_text(
+        cfg.default_llm_api_key
+    )
+    resolved_model = trim_optional_text(model) or trim_optional_text(
+        cfg.default_llm_model_name
+    )
 
     next_steps = []
     if not resolved_api_key:
-        next_steps.append("Pass `--api-key`, or set `SAGE_DEFAULT_LLM_API_KEY` in `~/.sage/.sage_env` or local `.env`.")
+        next_steps.append(
+            "Pass `--api-key`, or set `SAGE_DEFAULT_LLM_API_KEY` in `~/.sage/.sage_env` or local `.env`."
+        )
     if not resolved_base_url:
-        next_steps.append("Pass `--base-url`, or set `SAGE_DEFAULT_LLM_API_BASE_URL` in `~/.sage/.sage_env` or local `.env`.")
+        next_steps.append(
+            "Pass `--base-url`, or set `SAGE_DEFAULT_LLM_API_BASE_URL` in `~/.sage/.sage_env` or local `.env`."
+        )
     if not resolved_model:
-        next_steps.append("Pass `--model`, or set `SAGE_DEFAULT_LLM_MODEL_NAME` in `~/.sage/.sage_env` or local `.env`.")
+        next_steps.append(
+            "Pass `--model`, or set `SAGE_DEFAULT_LLM_MODEL_NAME` in `~/.sage/.sage_env` or local `.env`."
+        )
     if next_steps:
         raise CLIError(
             "Provider configuration is incomplete for create/verify.",
@@ -152,7 +164,9 @@ async def query_cli_providers(
     if default_only:
         providers = [item for item in providers if bool(item.get("is_default"))]
     if normalized_model:
-        providers = [item for item in providers if item.get("model") == normalized_model]
+        providers = [
+            item for item in providers if item.get("model") == normalized_model
+        ]
     if normalized_name_query:
         providers = [
             item
@@ -172,7 +186,9 @@ async def query_cli_providers(
     }
 
 
-async def inspect_cli_provider(*, provider_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+async def inspect_cli_provider(
+    *, provider_id: str, user_id: Optional[str] = None
+) -> Dict[str, Any]:
     from common.models.llm_provider import LLMProviderDao
 
     resolved_user_id = user_id or get_default_cli_user_id()
@@ -185,7 +201,9 @@ async def inspect_cli_provider(*, provider_id: str, user_id: Optional[str] = Non
     if provider.user_id and provider.user_id != resolved_user_id:
         raise CLIError(
             f"Provider {provider_id} is not visible to user {resolved_user_id}",
-            next_steps=[f"Run `sage provider list --user-id {resolved_user_id}` to inspect visible providers."],
+            next_steps=[
+                f"Run `sage provider list --user-id {resolved_user_id}` to inspect visible providers."
+            ],
         )
     return {
         "user_id": resolved_user_id,
@@ -276,7 +294,9 @@ async def create_cli_provider(
         supports_structured_output=supports_structured_output,
         is_default=is_default,
     )
-    provider_id = await llm_provider_service.create_provider(resolved["data"], user_id=resolved_user_id)
+    provider_id = await llm_provider_service.create_provider(
+        resolved["data"], user_id=resolved_user_id
+    )
     providers = await llm_provider_service.list_providers(resolved_user_id)
     provider = next((item for item in providers if item.get("id") == provider_id), None)
     return {
@@ -338,7 +358,9 @@ async def update_cli_provider(
     }
 
 
-async def delete_cli_provider(*, provider_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+async def delete_cli_provider(
+    *, provider_id: str, user_id: Optional[str] = None
+) -> Dict[str, Any]:
     from common.services import llm_provider_service
 
     resolved_user_id = user_id or get_default_cli_user_id()
@@ -350,4 +372,3 @@ async def delete_cli_provider(*, provider_id: str, user_id: Optional[str] = None
         "provider_id": provider_id,
         "deleted": True,
     }
-

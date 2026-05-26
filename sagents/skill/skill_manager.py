@@ -1,6 +1,5 @@
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 import os
-import json
 import yaml
 import shutil
 
@@ -37,6 +36,7 @@ class SkillManager:
     is handled by SessionContext via the sandbox interface.
     (注意：此类只管理宿主机上的技能。将技能复制到沙箱由 SessionContext 通过沙箱接口处理。)
     """
+
     _instance = None
 
     def __new__(cls, skill_dirs: List[str] = None, isolated: bool = False):
@@ -47,7 +47,7 @@ class SkillManager:
         return cls._instance
 
     def __init__(self, skill_dirs: List[str] = None, isolated: bool = False):
-        if not isolated and getattr(self, '_initialized', False):
+        if not isolated and getattr(self, "_initialized", False):
             return
 
         self._initialize(skill_dirs)
@@ -68,10 +68,10 @@ class SkillManager:
         logger.debug("Initializing SkillManager")
         self.skills: Dict[str, SkillSchema] = {}
         # Base directory resolution (基础目录解析)
-        
+
         # Combine custom directories with the default workspace (合并自定义目录和默认工作区)
         dirs = skill_dirs or []
-             
+
         self.skill_dirs = list(dict.fromkeys(dirs))
         # Flag to track if skills cache is valid (标志：跟踪技能缓存是否有效)
         self._skills_cache_valid = False
@@ -107,13 +107,15 @@ class SkillManager:
         List detailed information for all skills.
         列出所有技能的详细信息。
         """
-        return  list(self.skills.values())
+        return list(self.skills.values())
 
-    def get_skill_description_lines(self, skills: Optional[List[str]] = None) -> List[str]:
+    def get_skill_description_lines(
+        self, skills: Optional[List[str]] = None
+    ) -> List[str]:
         """
         Get a list of formatted description lines for skills.
         获取技能的格式化描述行列表。
-        
+
         Format: "- {name}: {description}"
         """
         if skills is None:
@@ -125,30 +127,10 @@ class SkillManager:
             metadata = self.get_skill_metadata(name)
             if not metadata:
                 continue
-            lines.append(f"- skill name: {metadata['name']}, description: {metadata['description']}")
+            lines.append(
+                f"- skill name: {metadata['name']}, description: {metadata['description']}"
+            )
         return lines
-
-    def get_skill_metadata(self, name: str) -> Optional[Dict[str, Any]]:
-        """
-        Get metadata for a specific skill.
-        获取指定技能的元数据。
-        """
-        if name in self.skills:
-            skill = self.skills[name]
-            return {
-                "name": skill.name,
-                "description": skill.description
-            }
-        return None
-
-    def get_skill_instructions(self, name: str) -> str:
-        """
-        Get instructions for a specific skill.
-        获取指定技能的说明。
-        """
-        if name in self.skills:
-            return self.skills[name].instructions
-        return ""
 
     def get_skill_resource_path(self, name: str, resource_name: str) -> Optional[str]:
         """
@@ -160,14 +142,13 @@ class SkillManager:
         """
         if name not in self.skills:
             return None
-            
+
         skill_path = self.skills[name].path
         resource_path = os.path.join(skill_path, resource_name)
-        
+
         if os.path.exists(resource_path):
             return resource_path
         return None
-
 
     def _load_skills_from_workspace(self):
         """
@@ -184,7 +165,7 @@ class SkillManager:
         """
         # Check if cache is valid, if so, skip scanning (检查缓存是否有效，如果有效则跳过扫描)
         # 除了要判断 _skills_cache_valid 是否有效，还得看一下目录中的文件夹数量与已加载 skill 数量是否一致
-        if getattr(self, '_skills_cache_valid', False):
+        if getattr(self, "_skills_cache_valid", False):
             # 快速统计所有 skill_dirs 下的文件夹总数
             total_dirs = 0
             for workspace in self.skill_dirs:
@@ -192,7 +173,8 @@ class SkillManager:
                     continue
                 try:
                     total_dirs += sum(
-                        1 for item in os.listdir(workspace)
+                        1
+                        for item in os.listdir(workspace)
                         if os.path.isdir(os.path.join(workspace, item))
                     )
                 except Exception:
@@ -204,12 +186,12 @@ class SkillManager:
             else:
                 logger.debug("Skills cache is valid, skipping load_new_skills scan")
                 return
-        
+
         count = 0
-        
+
         # Build a set of existing skill paths for fast lookup
         existing_paths = {skill.path for skill in self.skills.values()}
-        
+
         # Iterate over all configured skill directories
         for workspace in self.skill_dirs:
             if not os.path.exists(workspace):
@@ -224,22 +206,25 @@ class SkillManager:
                         # Skip if path is already loaded
                         if skill_path in existing_paths:
                             continue
-                            
+
                         # Avoid duplicates if multiple workspaces have same skill name?
                         # Current logic: Last loaded overwrites previous if names collide.
-                        name = self._load_skill_from_dir(skill_path, skip_if_loaded=True)
+                        name = self._load_skill_from_dir(
+                            skill_path, skip_if_loaded=True
+                        )
                         if name:
                             count += 1
-                
+
             except Exception as e:
                 logger.error(f"Error scanning workspace {workspace}: {e}")
         logger.debug(f"Total skills loaded/checked: {count}")
-        
+
         # Mark cache as valid after successful loading (加载成功后标记缓存为有效)
         self._skills_cache_valid = True
 
-
-    def _generate_file_list(self, path: str, root_path: str, skill_name: str, indent: str = "") -> str:
+    def _generate_file_list(
+        self, path: str, root_path: str, skill_name: str, indent: str = ""
+    ) -> str:
         """
         Generate a compact tree representation of skill files using indentation.
         Similar to get_file_tree_compact in filesystem.py.
@@ -268,14 +253,35 @@ class SkillManager:
 
         # 需要过滤掉的缓存/临时文件夹和文件
         excluded_names = {
-            '__pycache__', '.pytest_cache', '.mypy_cache', '.tox', '.egg-info',
-            '.git', '.svn', '.hg', '.DS_Store', 'node_modules', 'dist', 'build',
-            '.idea', '.vscode', '.vs', '*.pyc', '*.pyo', '*.pyd', '.coverage',
-            '.nyc_output', '.cache', 'venv', '.venv', 'env', '.env'
+            "__pycache__",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".tox",
+            ".egg-info",
+            ".git",
+            ".svn",
+            ".hg",
+            ".DS_Store",
+            "node_modules",
+            "dist",
+            "build",
+            ".idea",
+            ".vscode",
+            ".vs",
+            "*.pyc",
+            "*.pyo",
+            "*.pyd",
+            ".coverage",
+            ".nyc_output",
+            ".cache",
+            "venv",
+            ".venv",
+            "env",
+            ".env",
         }
 
         # Filter items
-        items = [i for i in items if not i.startswith('.') and i not in excluded_names]
+        items = [i for i in items if not i.startswith(".") and i not in excluded_names]
 
         for item in items:
             full_path = os.path.join(path, item)
@@ -283,22 +289,32 @@ class SkillManager:
             if os.path.isdir(full_path):
                 # Directory: add with / suffix and recurse
                 lines.append(f"{indent}  {item}/")
-                lines.append(self._generate_file_list(full_path, root_path, skill_name, indent + "  "))
+                lines.append(
+                    self._generate_file_list(
+                        full_path, root_path, skill_name, indent + "  "
+                    )
+                )
             else:
                 # File: add without suffix
                 lines.append(f"{indent}  {item}")
 
         return "\n".join(filter(None, lines))
 
-    def _validate_skill_metadata(self, metadata: Dict[str, Any], skill_path: str) -> bool:
+    def _validate_skill_metadata(
+        self, metadata: Dict[str, Any], skill_path: str
+    ) -> bool:
         name = metadata.get("name")
         description = metadata.get("description")
         if not name or not description:
-            logger.warning(f"SkillManager: {skill_path} SKILL.md 缺少必要的元数据 (name, description)")
+            logger.warning(
+                f"SkillManager: {skill_path} SKILL.md 缺少必要的元数据 (name, description)"
+            )
             return False
         return True
 
-    def _load_skill_from_dir(self, skill_path: str, skip_if_loaded: bool = False) -> Optional[str]:
+    def _load_skill_from_dir(
+        self, skill_path: str, skip_if_loaded: bool = False
+    ) -> Optional[str]:
         """
         Load a skill from a directory on the HOST.
         Returns skill name if successful, None otherwise.
@@ -306,7 +322,7 @@ class SkillManager:
         skill_md_path = os.path.join(skill_path, "SKILL.md")
         if os.path.exists(skill_md_path):
             try:
-                with open(skill_md_path, 'r', encoding='utf-8') as f:
+                with open(skill_md_path, "r", encoding="utf-8") as f:
                     content = f.read()
 
                 # Parse frontmatter
@@ -329,13 +345,15 @@ class SkillManager:
                         return name
 
                     # Generate compact file tree with skill name as root
-                    file_list = f"{name}/\n" + self._generate_file_list(skill_path, skill_path, name)
+                    file_list = f"{name}/\n" + self._generate_file_list(
+                        skill_path, skill_path, name
+                    )
                     schema = SkillSchema(
                         name=name,
                         description=description,
                         path=skill_path,
                         instructions=content,
-                        file_list=file_list, 
+                        file_list=file_list,
                     )
                     self.skills[name] = schema
                     logger.debug(f"Successfully registered new skill: {name}")
@@ -348,10 +366,10 @@ class SkillManager:
         """
         Validate and register a new skill located in the skill workspace.
         If validation fails, the directory will be removed.
-        
+
         Args:
             skill_dir_name: The directory name of the skill in the workspace
-            
+
         Returns:
             Optional[str]: The skill name if successful, None otherwise
         """
@@ -367,7 +385,9 @@ class SkillManager:
                 skill_path = candidate
                 break
         if not skill_path:
-            logger.error(f"Skill directory not found for '{skill_dir_name}' in any skill workspace")
+            logger.error(
+                f"Skill directory not found for '{skill_dir_name}' in any skill workspace"
+            )
             return None
 
         skill_name = self._load_skill_from_dir(skill_path)
@@ -381,17 +401,19 @@ class SkillManager:
                 shutil.rmtree(skill_path)
                 logger.warning(f"Removed invalid skill directory: {skill_path}")
             except Exception as e:
-                logger.error(f"Failed to remove invalid skill directory {skill_path}: {e}")
+                logger.error(
+                    f"Failed to remove invalid skill directory {skill_path}: {e}"
+                )
             return None
 
     def reload_skill(self, skill_path: str) -> bool:
         """
         Reload an existing skill from the workspace.
         Does NOT delete the directory if validation fails.
-        
+
         Args:
             skill_dir_name: The directory name of the skill in the workspace
-            
+
         Returns:
             bool: True if successful, False otherwise
         """
@@ -419,7 +441,7 @@ class SkillManager:
             return {
                 "name": skill.name,
                 "description": skill.description,
-                "path": skill.path
+                "path": skill.path,
             }
         return None
 
@@ -434,10 +456,10 @@ class SkillManager:
         """
         Get a list of relative paths for all files in the skill.
         e.g., ["scripts/script.py", "data/config.json"]
-        
+
         Returns relative paths from the skill root directory.
         To get the sandbox path, use: {sandbox.workspace_path}/skills/{skill_name}/{relative_path}
-        
+
         (返回相对于技能根目录的相对路径。要获取沙箱路径，使用: {sandbox.workspace_path}/skills/{skill_name}/{relative_path})
         """
         skill = self.skills.get(name)
@@ -449,7 +471,7 @@ class SkillManager:
         if os.path.exists(base_path):
             for root, _, files in os.walk(base_path):
                 for file in files:
-                    if file.startswith('.') or file == 'SKILL.md':
+                    if file.startswith(".") or file == "SKILL.md":
                         continue
                     abs_path = os.path.join(root, file)
                     rel_path = os.path.relpath(abs_path, base_path)

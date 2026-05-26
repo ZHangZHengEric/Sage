@@ -4,9 +4,9 @@ Subprocess isolation strategy.
 直接使用 subprocess 执行，无文件系统隔离。
 Python 依赖通过 venv 隔离。
 """
+
 import subprocess
 import os
-import sys
 import platform
 import asyncio
 import pickle
@@ -346,7 +346,9 @@ def _spawn_background_process_sync(
                 env=env,
                 stdout=f_log,
                 stderr=subprocess.STDOUT,
-                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0,
+                creationflags=subprocess.CREATE_NO_WINDOW
+                if hasattr(subprocess, "CREATE_NO_WINDOW")
+                else 0,
             )
 
         return {
@@ -356,7 +358,7 @@ def _spawn_background_process_sync(
             "log_file": log_file,
         }
 
-    nohup_command = f"nohup env HOME=\"{original_home}\" {command} > /dev/null 2>&1 &"
+    nohup_command = f'nohup env HOME="{original_home}" {command} > /dev/null 2>&1 &'
     process = subprocess.Popen(
         nohup_command,
         cwd=actual_cwd,
@@ -376,7 +378,7 @@ def _spawn_background_process_sync(
 
 class SubprocessIsolation:
     """直接执行模式，无文件系统隔离"""
-    
+
     def __init__(
         self,
         venv_dir: str,
@@ -387,25 +389,29 @@ class SubprocessIsolation:
     ):
         self.venv_dir = venv_dir
         self.sandbox_agent_workspace = sandbox_agent_workspace
-        self.sandbox_runtime_dir = sandbox_runtime_dir or resolve_sandbox_runtime_dir(sandbox_agent_workspace) or os.path.join(sandbox_agent_workspace, ".sandbox")
+        self.sandbox_runtime_dir = (
+            sandbox_runtime_dir
+            or resolve_sandbox_runtime_dir(sandbox_agent_workspace)
+            or os.path.join(sandbox_agent_workspace, ".sandbox")
+        )
         self.volume_mounts = volume_mounts or []
         self.limits = limits or {}
-        
+
     async def execute(self, payload: Dict[str, Any], cwd: Optional[str] = None) -> Any:
         """
         执行 payload。
-        
+
         Args:
             payload: 执行内容，包含 mode, module_path, func_name 等
             cwd: 工作目录
-            
+
         Returns:
             执行结果
         """
-        logger.info(f"[SubprocessIsolation] 开始执行")
+        logger.info("[SubprocessIsolation] 开始执行")
         logger.info(f"  venv_dir: {self.venv_dir}")
         logger.info(f"  cwd: {cwd}")
-        
+
         # 创建临时文件
         run_id = str(uuid.uuid4())
         sandbox_dir = self.sandbox_runtime_dir
@@ -415,36 +421,38 @@ class SubprocessIsolation:
             run_id,
             payload,
         )
-        
+
         # 使用沙箱的 venv Python
         python_bin = os.path.join(self.venv_dir, "bin", "python")
         if platform.system() == "Windows":
-             python_bin = os.path.join(self.venv_dir, "Scripts", "python.exe")
-        
+            python_bin = os.path.join(self.venv_dir, "Scripts", "python.exe")
+
         cmd = [python_bin, launcher_path, input_pkl, output_pkl]
-        
+
         # 构建环境变量
         env = os.environ.copy()
-        
+
         # 设置 PATH，优先使用 venv
         venv_bin = os.path.join(self.venv_dir, "bin")
         if platform.system() == "Windows":
             venv_bin = os.path.join(self.venv_dir, "Scripts")
-            
+
         current_path = env.get("PATH", "")
         env["PATH"] = f"{venv_bin}{os.pathsep}{current_path}"
-        
+
         # 设置 PYTHONPATH
         pylibs_dir = os.path.join(sandbox_dir, ".pylibs")
         env["PIP_TARGET"] = pylibs_dir
         current_pythonpath = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = f"{pylibs_dir}{os.pathsep}{self.sandbox_agent_workspace}{os.pathsep}{current_pythonpath}"
-        
+        env["PYTHONPATH"] = (
+            f"{pylibs_dir}{os.pathsep}{self.sandbox_agent_workspace}{os.pathsep}{current_pythonpath}"
+        )
+
         # 保留原来的 HOME 目录
         env["HOME"] = os.environ.get("HOME", "")
-        
+
         logger.info(f"[SubprocessIsolation] 执行命令: {' '.join(cmd[:3])}...")
-        
+
         try:
             result = await asyncio.to_thread(
                 subprocess.run,
@@ -455,52 +463,54 @@ class SubprocessIsolation:
                 env=env,
                 timeout=300,  # 5分钟超时
             )
-            
+
             logger.info(f"[SubprocessIsolation] 返回码: {result.returncode}")
-            
+
             if result.returncode != 0:
                 logger.error(f"[SubprocessIsolation] 执行失败: {result.stderr[:500]}")
                 raise Exception(f"Subprocess execution failed: {result.stderr}")
-            
+
             res = await asyncio.to_thread(_load_pickle_output_sync, output_pkl)
-            
-            if res['status'] == 'success':
-                logger.info(f"[SubprocessIsolation] 执行成功")
-                return res['result']
+
+            if res["status"] == "success":
+                logger.info("[SubprocessIsolation] 执行成功")
+                return res["result"]
             else:
                 logger.error(f"[SubprocessIsolation] 执行错误: {res.get('error')}")
                 raise Exception(f"Error in subprocess: {res.get('error')}")
-                
+
         finally:
             # 清理临时文件
             try:
                 await asyncio.to_thread(_remove_file_if_exists_sync, input_pkl)
             except Exception:
                 pass
-                    
-    async def execute_background(self, command: str, cwd: Optional[str] = None) -> Dict[str, Any]:
+
+    async def execute_background(
+        self, command: str, cwd: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         后台执行命令。
-        
+
         Args:
             command: 要执行的命令
             cwd: 工作目录
-            
+
         Returns:
             包含进程信息的字典
         """
-        logger.info(f"[SubprocessIsolation.execute_background] 开始后台执行")
+        logger.info("[SubprocessIsolation.execute_background] 开始后台执行")
         logger.info(f"  command: {command}")
         logger.info(f"  cwd: {cwd}")
-        
+
         actual_cwd = cwd or self.sandbox_agent_workspace
-        
+
         # 构建环境变量
         env = os.environ.copy()
-        
+
         # 保留原来的 HOME 目录
         original_home = os.environ.get("HOME", "")
-        
+
         process_info = await asyncio.to_thread(
             _spawn_background_process_sync,
             command,
@@ -508,5 +518,7 @@ class SubprocessIsolation:
             env,
             original_home,
         )
-        logger.info(f"[SubprocessIsolation.execute_background] 进程已启动, PID: {process_info.get('pid')}")
+        logger.info(
+            f"[SubprocessIsolation.execute_background] 进程已启动, PID: {process_info.get('pid')}"
+        )
         return process_info

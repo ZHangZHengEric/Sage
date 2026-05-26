@@ -104,11 +104,15 @@ class StreamManager:
 
         await self._notify_session_list_changed()
 
-    async def start_session(self, session_id: str, query: str, generator, lock: asyncio.Lock):
+    async def start_session(
+        self, session_id: str, query: str, generator, lock: asyncio.Lock
+    ):
         if session_id in self._sessions:
             session = self._sessions[session_id]
             if not session.is_completed and session.task and not session.task.done():
-                logger.info(f"Session {session_id} already running, joining existing session.")
+                logger.info(
+                    f"Session {session_id} already running, joining existing session."
+                )
                 if lock and lock != session.lock:
                     await safe_release(lock, session_id, "复用会话释放新锁")
                 return
@@ -157,13 +161,17 @@ class StreamManager:
             except Exception as e:
                 logger.warning(f"Error closing generator for {session.session_id}: {e}")
             session.is_completed = True
-            logger.debug(f"Session {session.session_id} completed. Total chunks: {len(session.history)}")
+            logger.debug(
+                f"Session {session.session_id} completed. Total chunks: {len(session.history)}"
+            )
             for queue in list(session.subscribers):
                 await queue.put(None)
 
             if session.lock:
                 try:
-                    released = await safe_release(session.lock, session.session_id, "后台流结束清理")
+                    released = await safe_release(
+                        session.lock, session.session_id, "后台流结束清理"
+                    )
                     delete_session_run_lock(session.session_id)
                     if released:
                         logger.debug(f"Released lock for session {session.session_id}")
@@ -185,7 +193,9 @@ class StreamManager:
         session = self._sessions.get(session_id)
         if not session:
             return False
-        return bool(session.task and not session.task.done() and not session.is_completed)
+        return bool(
+            session.task and not session.task.done() and not session.is_completed
+        )
 
     async def get_session_query(self, session_id: str) -> Optional[str]:
         if session_id in self._sessions:
@@ -207,7 +217,9 @@ class StreamManager:
             task.cancel()
             try:
                 # 用 shield 包一层只是为了让 wait_for 超时后不再额外 cancel 一次（task 已经被 cancel）。
-                await asyncio.wait_for(asyncio.shield(task), timeout=self._STOP_SESSION_TIMEOUT)
+                await asyncio.wait_for(
+                    asyncio.shield(task), timeout=self._STOP_SESSION_TIMEOUT
+                )
             except asyncio.TimeoutError:
                 logger.warning(
                     f"stop_session: 等待 {session_id} 背景 task 取消超过 {self._STOP_SESSION_TIMEOUT}s，跳过等待"

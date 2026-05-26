@@ -17,54 +17,179 @@ MAX_RESULTS = 3
 CSV_CONFIG = {
     "style": {
         "file": "styles.csv",
-        "search_cols": ["Style Category", "Keywords", "Best For", "Type", "AI Prompt Keywords"],
-        "output_cols": ["Style Category", "Type", "Keywords", "Primary Colors", "Effects & Animation", "Best For", "Performance", "Accessibility", "Framework Compatibility", "Complexity", "AI Prompt Keywords", "CSS/Technical Keywords", "Implementation Checklist", "Design System Variables"]
+        "search_cols": [
+            "Style Category",
+            "Keywords",
+            "Best For",
+            "Type",
+            "AI Prompt Keywords",
+        ],
+        "output_cols": [
+            "Style Category",
+            "Type",
+            "Keywords",
+            "Primary Colors",
+            "Effects & Animation",
+            "Best For",
+            "Performance",
+            "Accessibility",
+            "Framework Compatibility",
+            "Complexity",
+            "AI Prompt Keywords",
+            "CSS/Technical Keywords",
+            "Implementation Checklist",
+            "Design System Variables",
+        ],
     },
     "color": {
         "file": "colors.csv",
         "search_cols": ["Product Type", "Notes"],
-        "output_cols": ["Product Type", "Primary (Hex)", "Secondary (Hex)", "CTA (Hex)", "Background (Hex)", "Text (Hex)", "Notes"]
+        "output_cols": [
+            "Product Type",
+            "Primary (Hex)",
+            "Secondary (Hex)",
+            "CTA (Hex)",
+            "Background (Hex)",
+            "Text (Hex)",
+            "Notes",
+        ],
     },
     "chart": {
         "file": "charts.csv",
-        "search_cols": ["Data Type", "Keywords", "Best Chart Type", "Accessibility Notes"],
-        "output_cols": ["Data Type", "Keywords", "Best Chart Type", "Secondary Options", "Color Guidance", "Accessibility Notes", "Library Recommendation", "Interactive Level"]
+        "search_cols": [
+            "Data Type",
+            "Keywords",
+            "Best Chart Type",
+            "Accessibility Notes",
+        ],
+        "output_cols": [
+            "Data Type",
+            "Keywords",
+            "Best Chart Type",
+            "Secondary Options",
+            "Color Guidance",
+            "Accessibility Notes",
+            "Library Recommendation",
+            "Interactive Level",
+        ],
     },
     "landing": {
         "file": "landing.csv",
-        "search_cols": ["Pattern Name", "Keywords", "Conversion Optimization", "Section Order"],
-        "output_cols": ["Pattern Name", "Keywords", "Section Order", "Primary CTA Placement", "Color Strategy", "Conversion Optimization"]
+        "search_cols": [
+            "Pattern Name",
+            "Keywords",
+            "Conversion Optimization",
+            "Section Order",
+        ],
+        "output_cols": [
+            "Pattern Name",
+            "Keywords",
+            "Section Order",
+            "Primary CTA Placement",
+            "Color Strategy",
+            "Conversion Optimization",
+        ],
     },
     "product": {
         "file": "products.csv",
-        "search_cols": ["Product Type", "Keywords", "Primary Style Recommendation", "Key Considerations"],
-        "output_cols": ["Product Type", "Keywords", "Primary Style Recommendation", "Secondary Styles", "Landing Page Pattern", "Dashboard Style (if applicable)", "Color Palette Focus"]
+        "search_cols": [
+            "Product Type",
+            "Keywords",
+            "Primary Style Recommendation",
+            "Key Considerations",
+        ],
+        "output_cols": [
+            "Product Type",
+            "Keywords",
+            "Primary Style Recommendation",
+            "Secondary Styles",
+            "Landing Page Pattern",
+            "Dashboard Style (if applicable)",
+            "Color Palette Focus",
+        ],
     },
     "ux": {
         "file": "ux-guidelines.csv",
         "search_cols": ["Category", "Issue", "Description", "Platform"],
-        "output_cols": ["Category", "Issue", "Platform", "Description", "Do", "Don't", "Code Example Good", "Code Example Bad", "Severity"]
+        "output_cols": [
+            "Category",
+            "Issue",
+            "Platform",
+            "Description",
+            "Do",
+            "Don't",
+            "Code Example Good",
+            "Code Example Bad",
+            "Severity",
+        ],
     },
     "typography": {
         "file": "typography.csv",
-        "search_cols": ["Font Pairing Name", "Category", "Mood/Style Keywords", "Best For", "Heading Font", "Body Font"],
-        "output_cols": ["Font Pairing Name", "Category", "Heading Font", "Body Font", "Mood/Style Keywords", "Best For", "Google Fonts URL", "CSS Import", "Tailwind Config", "Notes"]
+        "search_cols": [
+            "Font Pairing Name",
+            "Category",
+            "Mood/Style Keywords",
+            "Best For",
+            "Heading Font",
+            "Body Font",
+        ],
+        "output_cols": [
+            "Font Pairing Name",
+            "Category",
+            "Heading Font",
+            "Body Font",
+            "Mood/Style Keywords",
+            "Best For",
+            "Google Fonts URL",
+            "CSS Import",
+            "Tailwind Config",
+            "Notes",
+        ],
     },
     "icons": {
         "file": "icons.csv",
         "search_cols": ["Category", "Icon Name", "Keywords", "Best For"],
-        "output_cols": ["Category", "Icon Name", "Keywords", "Library", "Import Code", "Usage", "Best For", "Style"]
+        "output_cols": [
+            "Category",
+            "Icon Name",
+            "Keywords",
+            "Library",
+            "Import Code",
+            "Usage",
+            "Best For",
+            "Style",
+        ],
     },
     "react": {
         "file": "react-performance.csv",
         "search_cols": ["Category", "Issue", "Keywords", "Description"],
-        "output_cols": ["Category", "Issue", "Platform", "Description", "Do", "Don't", "Code Example Good", "Code Example Bad", "Severity"]
+        "output_cols": [
+            "Category",
+            "Issue",
+            "Platform",
+            "Description",
+            "Do",
+            "Don't",
+            "Code Example Good",
+            "Code Example Bad",
+            "Severity",
+        ],
     },
     "web": {
         "file": "web-interface.csv",
         "search_cols": ["Category", "Issue", "Keywords", "Description"],
-        "output_cols": ["Category", "Issue", "Platform", "Description", "Do", "Don't", "Code Example Good", "Code Example Bad", "Severity"]
-    }
+        "output_cols": [
+            "Category",
+            "Issue",
+            "Platform",
+            "Description",
+            "Do",
+            "Don't",
+            "Code Example Good",
+            "Code Example Bad",
+            "Severity",
+        ],
+    },
 }
 
 STACK_CONFIG = {
@@ -80,13 +205,23 @@ STACK_CONFIG = {
     "react-native": {"file": "stacks/react-native.csv"},
     "flutter": {"file": "stacks/flutter.csv"},
     "shadcn": {"file": "stacks/shadcn.csv"},
-    "jetpack-compose": {"file": "stacks/jetpack-compose.csv"}
+    "jetpack-compose": {"file": "stacks/jetpack-compose.csv"},
 }
 
 # Common columns for all stacks
 _STACK_COLS = {
     "search_cols": ["Category", "Guideline", "Description", "Do", "Don't"],
-    "output_cols": ["Category", "Guideline", "Description", "Do", "Don't", "Code Good", "Code Bad", "Severity", "Docs URL"]
+    "output_cols": [
+        "Category",
+        "Guideline",
+        "Description",
+        "Do",
+        "Don't",
+        "Code Good",
+        "Code Bad",
+        "Severity",
+        "Docs URL",
+    ],
 }
 
 AVAILABLE_STACKS = list(STACK_CONFIG.keys())
@@ -108,7 +243,7 @@ class BM25:
 
     def tokenize(self, text):
         """Lowercase, split, remove punctuation, filter short words"""
-        text = re.sub(r'[^\w\s]', ' ', str(text).lower())
+        text = re.sub(r"[^\w\s]", " ", str(text).lower())
         return [w for w in text.split() if len(w) > 2]
 
     def fit(self, documents):
@@ -147,7 +282,9 @@ class BM25:
                     tf = term_freqs[token]
                     idf = self.idf[token]
                     numerator = tf * (self.k1 + 1)
-                    denominator = tf + self.k1 * (1 - self.b + self.b * doc_len / self.avgdl)
+                    denominator = tf + self.k1 * (
+                        1 - self.b + self.b * doc_len / self.avgdl
+                    )
                     score += idf * numerator / denominator
 
             scores.append((idx, score))
@@ -158,7 +295,7 @@ class BM25:
 # ============ SEARCH FUNCTIONS ============
 def _load_csv(filepath):
     """Load CSV and return list of dicts"""
-    with open(filepath, 'r', encoding='utf-8') as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         return list(csv.DictReader(f))
 
 
@@ -193,18 +330,112 @@ def detect_domain(query):
 
     domain_keywords = {
         "color": ["color", "palette", "hex", "#", "rgb"],
-        "chart": ["chart", "graph", "visualization", "trend", "bar", "pie", "scatter", "heatmap", "funnel"],
-        "landing": ["landing", "page", "cta", "conversion", "hero", "testimonial", "pricing", "section"],
-        "product": ["saas", "ecommerce", "e-commerce", "fintech", "healthcare", "gaming", "portfolio", "crypto", "dashboard"],
-        "style": ["style", "design", "ui", "minimalism", "glassmorphism", "neumorphism", "brutalism", "dark mode", "flat", "aurora", "prompt", "css", "implementation", "variable", "checklist", "tailwind"],
-        "ux": ["ux", "usability", "accessibility", "wcag", "touch", "scroll", "animation", "keyboard", "navigation", "mobile"],
+        "chart": [
+            "chart",
+            "graph",
+            "visualization",
+            "trend",
+            "bar",
+            "pie",
+            "scatter",
+            "heatmap",
+            "funnel",
+        ],
+        "landing": [
+            "landing",
+            "page",
+            "cta",
+            "conversion",
+            "hero",
+            "testimonial",
+            "pricing",
+            "section",
+        ],
+        "product": [
+            "saas",
+            "ecommerce",
+            "e-commerce",
+            "fintech",
+            "healthcare",
+            "gaming",
+            "portfolio",
+            "crypto",
+            "dashboard",
+        ],
+        "style": [
+            "style",
+            "design",
+            "ui",
+            "minimalism",
+            "glassmorphism",
+            "neumorphism",
+            "brutalism",
+            "dark mode",
+            "flat",
+            "aurora",
+            "prompt",
+            "css",
+            "implementation",
+            "variable",
+            "checklist",
+            "tailwind",
+        ],
+        "ux": [
+            "ux",
+            "usability",
+            "accessibility",
+            "wcag",
+            "touch",
+            "scroll",
+            "animation",
+            "keyboard",
+            "navigation",
+            "mobile",
+        ],
         "typography": ["font", "typography", "heading", "serif", "sans"],
-        "icons": ["icon", "icons", "lucide", "heroicons", "symbol", "glyph", "pictogram", "svg icon"],
-        "react": ["react", "next.js", "nextjs", "suspense", "memo", "usecallback", "useeffect", "rerender", "bundle", "waterfall", "barrel", "dynamic import", "rsc", "server component"],
-        "web": ["aria", "focus", "outline", "semantic", "virtualize", "autocomplete", "form", "input type", "preconnect"]
+        "icons": [
+            "icon",
+            "icons",
+            "lucide",
+            "heroicons",
+            "symbol",
+            "glyph",
+            "pictogram",
+            "svg icon",
+        ],
+        "react": [
+            "react",
+            "next.js",
+            "nextjs",
+            "suspense",
+            "memo",
+            "usecallback",
+            "useeffect",
+            "rerender",
+            "bundle",
+            "waterfall",
+            "barrel",
+            "dynamic import",
+            "rsc",
+            "server component",
+        ],
+        "web": [
+            "aria",
+            "focus",
+            "outline",
+            "semantic",
+            "virtualize",
+            "autocomplete",
+            "form",
+            "input type",
+            "preconnect",
+        ],
     }
 
-    scores = {domain: sum(1 for kw in keywords if kw in query_lower) for domain, keywords in domain_keywords.items()}
+    scores = {
+        domain: sum(1 for kw in keywords if kw in query_lower)
+        for domain, keywords in domain_keywords.items()
+    }
     best = max(scores, key=scores.get)
     return best if scores[best] > 0 else "style"
 
@@ -220,28 +451,38 @@ def search(query, domain=None, max_results=MAX_RESULTS):
     if not filepath.exists():
         return {"error": f"File not found: {filepath}", "domain": domain}
 
-    results = _search_csv(filepath, config["search_cols"], config["output_cols"], query, max_results)
+    results = _search_csv(
+        filepath, config["search_cols"], config["output_cols"], query, max_results
+    )
 
     return {
         "domain": domain,
         "query": query,
         "file": config["file"],
         "count": len(results),
-        "results": results
+        "results": results,
     }
 
 
 def search_stack(query, stack, max_results=MAX_RESULTS):
     """Search stack-specific guidelines"""
     if stack not in STACK_CONFIG:
-        return {"error": f"Unknown stack: {stack}. Available: {', '.join(AVAILABLE_STACKS)}"}
+        return {
+            "error": f"Unknown stack: {stack}. Available: {', '.join(AVAILABLE_STACKS)}"
+        }
 
     filepath = DATA_DIR / STACK_CONFIG[stack]["file"]
 
     if not filepath.exists():
         return {"error": f"Stack file not found: {filepath}", "stack": stack}
 
-    results = _search_csv(filepath, _STACK_COLS["search_cols"], _STACK_COLS["output_cols"], query, max_results)
+    results = _search_csv(
+        filepath,
+        _STACK_COLS["search_cols"],
+        _STACK_COLS["output_cols"],
+        query,
+        max_results,
+    )
 
     return {
         "domain": "stack",
@@ -249,5 +490,5 @@ def search_stack(query, stack, max_results=MAX_RESULTS):
         "query": query,
         "file": STACK_CONFIG[stack]["file"],
         "count": len(results),
-        "results": results
+        "results": results,
     }

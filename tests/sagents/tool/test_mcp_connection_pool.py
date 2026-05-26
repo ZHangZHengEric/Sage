@@ -118,8 +118,9 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
             close_task = asyncio.current_task()
             self.closed = True
 
-        with patch.object(McpPooledConnection, "open", fake_open), patch.object(
-            McpPooledConnection, "close", fake_close
+        with (
+            patch.object(McpPooledConnection, "open", fake_open),
+            patch.object(McpPooledConnection, "close", fake_close),
         ):
             await pool.call_tool("server", server_params, "echo", {"i": 1})
             await pool.call_tool("server", server_params, "echo", {"i": 2})
@@ -271,8 +272,9 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
             self.closed = True
             closed_connections.append(self)
 
-        with patch.object(McpPooledConnection, "open", fake_open), patch.object(
-            McpPooledConnection, "close", fake_close
+        with (
+            patch.object(McpPooledConnection, "open", fake_open),
+            patch.object(McpPooledConnection, "close", fake_close),
         ):
             await pool.list_tools("server", server_params)
             old_entry = pool._entries["server"]

@@ -29,7 +29,9 @@ from .._progress_diff import diff_tail_for_progress as _diff_tail_for_progress
 from ..error_codes import ToolErrorCode, make_tool_error
 from sagents.utils.logger import logger
 from sagents.utils.sandbox._stdout_echo import echo_header, echo_footer
-from sagents.utils.agent_session_helper import get_session_sandbox as _get_session_sandbox_util
+from sagents.utils.agent_session_helper import (
+    get_session_sandbox as _get_session_sandbox_util,
+)
 
 
 _BG_DIR = "~/.sage/bg"
@@ -48,12 +50,14 @@ _BG_TASK_MAX_AGE_S = 12 * 3600
 
 
 _ERROR_KEYWORDS = re.compile(
-    r'error|exception|traceback|fatal|fail|stderr|critical|abort|killed|oom',
+    r"error|exception|traceback|fatal|fail|stderr|critical|abort|killed|oom",
     re.IGNORECASE,
 )
 
 
-def _truncate_tail_for_reminder(text: str, max_bytes: int = _REMINDER_TAIL_MAX_BYTES) -> str:
+def _truncate_tail_for_reminder(
+    text: str, max_bytes: int = _REMINDER_TAIL_MAX_BYTES
+) -> str:
     """对 reminder 用 tail 做尾部优先的截断，尾部全空行时补一条错误行。
 
     逻辑：
@@ -72,7 +76,7 @@ def _truncate_tail_for_reminder(text: str, max_bytes: int = _REMINDER_TAIL_MAX_B
     truncated = raw[-max_bytes:]
     nl = truncated.find(b"\n")
     if 0 <= nl < max_bytes - 1:
-        truncated = truncated[nl + 1:]
+        truncated = truncated[nl + 1 :]
     tail_str = truncated.decode("utf-8", errors="ignore")
     result = "...<truncated>...\n" + tail_str
 
@@ -87,6 +91,7 @@ def _truncate_tail_for_reminder(text: str, max_bytes: int = _REMINDER_TAIL_MAX_B
             result = f"[key line] {error_line}\n" + result
 
     return result
+
 
 # _BG_TASKS 的硬性最长存活时间。任何 task 自 ``started_at`` 起 12 小时未被消费会被
 # 强制 GC（_BG_TASKS / _COMPLETION_EVENTS / sandbox cleanup）。每次 spawn 触发一次扫描。
@@ -104,41 +109,61 @@ class SecurityManager:
 
     DANGEROUS_COMMANDS = {
         # 文件系统破坏 / 分区
-        'format', 'fdisk', 'mkfs', 'parted', 'wipefs',
+        "format",
+        "fdisk",
+        "mkfs",
+        "parted",
+        "wipefs",
         # 提权 / 账户
-        'sudo', 'su', 'passwd', 'visudo', 'useradd', 'userdel', 'usermod',
+        "sudo",
+        "su",
+        "passwd",
+        "visudo",
+        "useradd",
+        "userdel",
+        "usermod",
         # 系统状态
-        'shutdown', 'reboot', 'halt', 'poweroff', 'init',
-        'systemctl', 'service',
+        "shutdown",
+        "reboot",
+        "halt",
+        "poweroff",
+        "init",
+        "systemctl",
+        "service",
         # 直接写盘 / 调度
-        'dd', 'crontab', 'at', 'batch',
+        "dd",
+        "crontab",
+        "at",
+        "batch",
         # 内核/驱动
-        'insmod', 'rmmod', 'modprobe',
+        "insmod",
+        "rmmod",
+        "modprobe",
     }
 
     DANGEROUS_SUBSTRINGS = (
-        'rm -rf /',
-        'rm -rf /*',
-        'rm -rf ~',
-        ':() { :|:& };:',          # fork bomb
-        'mkfs.',
-        'chmod 777 /',
-        'chown -r root',
-        'mv / ',
-        'mv /* ',
-        '> /dev/sda',
-        '> /dev/sdb',
-        '> /dev/nvme',
-        'git push --force',
-        'git push -f ',
-        'git push --force-with-lease origin main',
-        'git push --force-with-lease origin master',
-        'git reset --hard origin',
+        "rm -rf /",
+        "rm -rf /*",
+        "rm -rf ~",
+        ":() { :|:& };:",  # fork bomb
+        "mkfs.",
+        "chmod 777 /",
+        "chown -r root",
+        "mv / ",
+        "mv /* ",
+        "> /dev/sda",
+        "> /dev/sdb",
+        "> /dev/nvme",
+        "git push --force",
+        "git push -f ",
+        "git push --force-with-lease origin main",
+        "git push --force-with-lease origin master",
+        "git reset --hard origin",
     )
 
     # 管道下载 + 直接执行的常见模式
     _PIPE_EXEC_RE = re.compile(
-        r'\b(curl|wget|fetch)\b[^|;&]+?\|\s*(sudo\s+)?(ba)?sh\b',
+        r"\b(curl|wget|fetch)\b[^|;&]+?\|\s*(sudo\s+)?(ba)?sh\b",
         re.IGNORECASE,
     )
 
@@ -159,12 +184,12 @@ class SecurityManager:
             return False, "危险命令被阻止：检测到 curl/wget ... | sh 类下载即执行模式"
 
         # 命令名前缀（按管道/分号切分逐段检查）
-        for segment in re.split(r'[|;&]+', lowered):
+        for segment in re.split(r"[|;&]+", lowered):
             parts = segment.strip().split()
             if not parts:
                 continue
-            base = parts[0].split('/')[-1]
-            if base in self.DANGEROUS_COMMANDS or base.startswith('mkfs.'):
+            base = parts[0].split("/")[-1]
+            if base in self.DANGEROUS_COMMANDS or base.startswith("mkfs."):
                 return False, f"危险命令被阻止: {base}"
 
         return True, "命令安全检查通过"
@@ -222,7 +247,9 @@ class ExecuteCommandTool:
         return list(bucket.values())
 
     @classmethod
-    def consume_completion_event(cls, session_id: str, task_id: str) -> Optional[Dict[str, Any]]:
+    def consume_completion_event(
+        cls, session_id: str, task_id: str
+    ) -> Optional[Dict[str, Any]]:
         """显式消费某 session 下指定 task_id 的事件（如果存在）。
 
         ``await_shell`` 显式拿到 completed 时调用，避免与 system_reminder 重复通知。
@@ -261,7 +288,9 @@ class ExecuteCommandTool:
         return _get_session_sandbox_util(session_id, log_prefix="ExecuteCommandTool")
 
     @staticmethod
-    def _get_agent_workspace_log_dir(sandbox: Any, fallback_workdir: Optional[str] = None) -> Optional[str]:
+    def _get_agent_workspace_log_dir(
+        sandbox: Any, fallback_workdir: Optional[str] = None
+    ) -> Optional[str]:
         """Return the current session agent workspace log directory.
 
         This intentionally uses the sandbox-visible workspace path. Providers
@@ -291,7 +320,9 @@ class ExecuteCommandTool:
                 logger.warning(f"env_vars 解析失败，忽略: {env_vars!r}")
         return None
 
-    async def _shell(self, sandbox: Any, cmd: str, timeout: int = 10) -> Tuple[int, str, str]:
+    async def _shell(
+        self, sandbox: Any, cmd: str, timeout: int = 10
+    ) -> Tuple[int, str, str]:
         try:
             r = await sandbox.execute_command(command=cmd, timeout=timeout)
             return (
@@ -345,7 +376,9 @@ class ExecuteCommandTool:
             # 多读一些再截断，保留尾部关键信息。
             raw_tail = await self._read_tail(sandbox, task_info, max_bytes=4096)
             short_tail = _truncate_tail_for_reminder(raw_tail or "")
-            elapsed_ms = int((time.time() - task_info.get("started_at", time.time())) * 1000)
+            elapsed_ms = int(
+                (time.time() - task_info.get("started_at", time.time())) * 1000
+            )
             self._emit_completion_event(
                 session_id=session_id,
                 task_id=task_id,
@@ -373,7 +406,8 @@ class ExecuteCommandTool:
         """
         now = time.time()
         stale = [
-            tid for tid, info in list(self._BG_TASKS.items())
+            tid
+            for tid, info in list(self._BG_TASKS.items())
             if now - info.get("started_at", now) > _BG_TASK_MAX_AGE_S
         ]
         for tid in stale:
@@ -387,7 +421,9 @@ class ExecuteCommandTool:
                 if sandbox and info.get("mode") == "native":
                     await sandbox.cleanup_background(tid)
             except Exception as exc:
-                logger.debug(f"GC: sandbox.cleanup_background({tid}) 失败（忽略）: {exc}")
+                logger.debug(
+                    f"GC: sandbox.cleanup_background({tid}) 失败（忽略）: {exc}"
+                )
             # 同步清理 _COMPLETION_EVENTS
             bucket = self.__class__._COMPLETION_EVENTS.get(sid)
             if bucket:
@@ -413,7 +449,9 @@ class ExecuteCommandTool:
         """
         # === 1) 原生路径（跨平台） ===
         if self._sandbox_supports_native_bg(sandbox):
-            log_dir = self._get_agent_workspace_log_dir(sandbox, fallback_workdir=workdir)
+            log_dir = self._get_agent_workspace_log_dir(
+                sandbox, fallback_workdir=workdir
+            )
             info = await sandbox.start_background(
                 command,
                 workdir=workdir,
@@ -436,13 +474,21 @@ class ExecuteCommandTool:
         # === 2) 兜底：bash 包装（仅 POSIX；Windows 主机会到不了这里，
         #     因为 PassthroughSandbox 已经走 native 了） ===
         task_id = _gen_task_id()
-        bg_dir_path = self._get_agent_workspace_log_dir(sandbox, fallback_workdir=workdir) or _BG_DIR
+        bg_dir_path = (
+            self._get_agent_workspace_log_dir(sandbox, fallback_workdir=workdir)
+            or _BG_DIR
+        )
         log_path = f"{bg_dir_path}/{task_id}.log"
         exit_path = f"{bg_dir_path}/{task_id}.exit"
 
         env_prefix = ""
         if env_vars:
-            env_prefix = " ".join(f"{shlex.quote(k)}={shlex.quote(v)}" for k, v in env_vars.items()) + " "
+            env_prefix = (
+                " ".join(
+                    f"{shlex.quote(k)}={shlex.quote(v)}" for k, v in env_vars.items()
+                )
+                + " "
+            )
 
         cd_prefix = f"cd {shlex.quote(workdir)} && " if workdir else ""
         bg_dir = shlex.quote(bg_dir_path)
@@ -478,7 +524,9 @@ class ExecuteCommandTool:
         ExecuteCommandTool._BG_TASKS[task_id] = task_info
         return task_info
 
-    async def _read_log_size(self, sandbox: Any, task_info: Dict[str, Any]) -> Optional[int]:
+    async def _read_log_size(
+        self, sandbox: Any, task_info: Dict[str, Any]
+    ) -> Optional[int]:
         """读取后台任务日志总字节数；不可用时返回 ``None``。"""
         if task_info.get("mode") == "native":
             try:
@@ -544,10 +592,14 @@ class ExecuteCommandTool:
             data = marker + data
         return data, total, truncated
 
-    async def _read_tail(self, sandbox: Any, task_info: Dict[str, Any], max_bytes: int = 8192) -> str:
+    async def _read_tail(
+        self, sandbox: Any, task_info: Dict[str, Any], max_bytes: int = 8192
+    ) -> str:
         if task_info.get("mode") == "native":
             try:
-                return await sandbox.read_background_output(task_info["task_id"], max_bytes=max_bytes)
+                return await sandbox.read_background_output(
+                    task_info["task_id"], max_bytes=max_bytes
+                )
             except Exception as exc:
                 logger.warning(f"read_background_output 失败: {exc}")
                 return ""
@@ -555,7 +607,9 @@ class ExecuteCommandTool:
         if not path:
             return ""
         rc, out, _ = await self._shell(
-            sandbox, f"tail -c {max_bytes} {shlex.quote(path)} 2>/dev/null || true", timeout=5
+            sandbox,
+            f"tail -c {max_bytes} {shlex.quote(path)} 2>/dev/null || true",
+            timeout=5,
         )
         return out
 
@@ -571,7 +625,9 @@ class ExecuteCommandTool:
         rc, _, _ = await self._shell(sandbox, f"kill -0 {pid} 2>/dev/null", timeout=3)
         return rc == 0
 
-    async def _read_exit(self, sandbox: Any, task_info: Dict[str, Any]) -> Optional[int]:
+    async def _read_exit(
+        self, sandbox: Any, task_info: Dict[str, Any]
+    ) -> Optional[int]:
         if task_info.get("mode") == "native":
             try:
                 return await sandbox.get_background_exit_code(task_info["task_id"])
@@ -580,7 +636,9 @@ class ExecuteCommandTool:
         exit_path = task_info.get("exit_path")
         if not exit_path:
             return None
-        rc, out, _ = await self._shell(sandbox, f"cat {shlex.quote(exit_path)} 2>/dev/null || true", timeout=3)
+        rc, out, _ = await self._shell(
+            sandbox, f"cat {shlex.quote(exit_path)} 2>/dev/null || true", timeout=3
+        )
         text = (out or "").strip()
         if not text:
             return None
@@ -642,7 +700,9 @@ class ExecuteCommandTool:
                                     max_bytes=1 << 20,  # 1MB / 次
                                 )
                             except Exception as range_exc:
-                                logger.debug(f"read_range fallback to tail-diff: {range_exc}")
+                                logger.debug(
+                                    f"read_range fallback to tail-diff: {range_exc}"
+                                )
                                 use_range = False
                                 delta_text, new_offset = "", emitted_offset
                             if delta_text:
@@ -655,7 +715,9 @@ class ExecuteCommandTool:
                         else:
                             use_range = False
                     if not pushed and not use_range:
-                        cur_tail = await self._read_tail(sandbox, task_info, max_bytes=65536)
+                        cur_tail = await self._read_tail(
+                            sandbox, task_info, max_bytes=65536
+                        )
                         delta = _diff_tail_for_progress(emitted_tail, cur_tail or "")
                         if delta:
                             await emit_tool_progress(delta, stream="stdout")
@@ -700,33 +762,51 @@ class ExecuteCommandTool:
         },
         param_description_i18n={
             "command": {"zh": "待执行的 Shell 命令", "en": "Shell command to execute"},
-            "workdir": {"zh": "执行目录（虚拟路径），默认沙箱工作区", "en": "Working directory (virtual path)"},
+            "workdir": {
+                "zh": "执行目录（虚拟路径），默认沙箱工作区",
+                "en": "Working directory (virtual path)",
+            },
             "block_until_ms": {
                 "zh": "阻塞等待毫秒数；0 表示立即后台运行；默认 30000",
                 "en": "Block this many ms; 0 means background immediately; default 30000",
             },
-            "env_vars": {"zh": "附加环境变量字典或 JSON 字符串", "en": "Additional env vars dict or JSON string"},
-            "session_id": {"zh": "会话ID（必填，自动注入）", "en": "Session ID (Required, Auto-injected)"},
+            "env_vars": {
+                "zh": "附加环境变量字典或 JSON 字符串",
+                "en": "Additional env vars dict or JSON string",
+            },
+            "session_id": {
+                "zh": "会话ID（必填，自动注入）",
+                "en": "Session ID (Required, Auto-injected)",
+            },
         },
         param_schema={
             "command": {"type": "string", "description": "Shell command to execute"},
-            "workdir": {"type": "string", "description": "Working directory (virtual path)"},
+            "workdir": {
+                "type": "string",
+                "description": "Working directory (virtual path)",
+            },
             "block_until_ms": {"type": "integer", "default": 30000},
-            "env_vars": {"type": "string", "description": "Additional env vars as JSON object string"},
+            "env_vars": {
+                "type": "string",
+                "description": "Additional env vars as JSON object string",
+            },
             "session_id": {"type": "string", "description": "Session ID"},
         },
         return_data={
             "type": "object",
             "properties": {
                 "success": {"type": "boolean"},
-                "status": {"type": "string", "description": "completed | running | error"},
+                "status": {
+                    "type": "string",
+                    "description": "completed | running | error",
+                },
                 "task_id": {"type": "string"},
                 "output_file": {"type": "string"},
                 "stdout": {"type": "string"},
                 "exit_code": {"type": "integer"},
             },
-            "required": ["success"]
-        }
+            "required": ["success"],
+        },
     )
     async def execute_shell_command(
         self,
@@ -740,7 +820,9 @@ class ExecuteCommandTool:
             raise ValueError("ExecuteCommandTool: session_id is required")
 
         parsed_env_vars = self._parse_env_vars(env_vars)
-        logger.info(f"🖥️ ExecuteCommandTool: {command[:100]}{'...' if len(command) > 100 else ''} block_until_ms={block_until_ms}")
+        logger.info(
+            f"🖥️ ExecuteCommandTool: {command[:100]}{'...' if len(command) > 100 else ''} block_until_ms={block_until_ms}"
+        )
 
         # 安全检查
         is_safe, reason = self.security_manager.is_command_safe(command)
@@ -765,7 +847,11 @@ class ExecuteCommandTool:
         echo_header(command)
         try:
             task_info = await self._spawn_background(
-                sandbox, command, workdir, parsed_env_vars or None, session_id=session_id
+                sandbox,
+                command,
+                workdir,
+                parsed_env_vars or None,
+                session_id=session_id,
             )
         except Exception as exc:
             echo_footer(None)
@@ -842,7 +928,9 @@ class ExecuteCommandTool:
                     "command": command,
                 }
             tail = await self._read_tail(sandbox, task_info, max_bytes=8192)
-            running_ms = int((time.time() - task_info.get("started_at", time.time())) * 1000)
+            running_ms = int(
+                (time.time() - task_info.get("started_at", time.time())) * 1000
+            )
             return {
                 "success": True,
                 "status": "running",
@@ -860,7 +948,9 @@ class ExecuteCommandTool:
                     "if_result_required": "call await_shell immediately",
                     "await_shell_args": {
                         "task_id": task_id,
-                        "block_until_ms": max(60000, _suggest_next_block_ms(running_ms)),
+                        "block_until_ms": max(
+                            60000, _suggest_next_block_ms(running_ms)
+                        ),
                     },
                     "do_not": "do not answer with waiting/progress text only",
                 },
@@ -900,13 +990,22 @@ class ExecuteCommandTool:
             ),
         },
         param_description_i18n={
-            "task_id": {"zh": "execute_shell_command 返回的 task_id", "en": "task_id returned by execute_shell_command"},
+            "task_id": {
+                "zh": "execute_shell_command 返回的 task_id",
+                "en": "task_id returned by execute_shell_command",
+            },
             "block_until_ms": {
                 "zh": "最多等待毫秒数；默认 600000（10 分钟）；建议按场景选择 60000+",
                 "en": "Max wait in ms; default 600000 (10min); pick 60000+ by scenario",
             },
-            "pattern": {"zh": "可选正则；命中时立即返回", "en": "Optional regex; return early when matched"},
-            "session_id": {"zh": "会话ID（必填，自动注入）", "en": "Session ID (Required, Auto-injected)"},
+            "pattern": {
+                "zh": "可选正则；命中时立即返回",
+                "en": "Optional regex; return early when matched",
+            },
+            "session_id": {
+                "zh": "会话ID（必填，自动注入）",
+                "en": "Session ID (Required, Auto-injected)",
+            },
         },
         param_schema={
             "task_id": {"type": "string"},
@@ -949,7 +1048,9 @@ class ExecuteCommandTool:
             )
 
         # 自适应改写：跑得越久，最低等待越长，避免反射性短间隔轮询
-        running_ms = int((time.time() - task_info.get("started_at", time.time())) * 1000)
+        running_ms = int(
+            (time.time() - task_info.get("started_at", time.time())) * 1000
+        )
         requested_block_until_ms = block_until_ms
         if running_ms > 30_000 and block_until_ms < 60_000:
             block_until_ms = 60_000
@@ -977,7 +1078,9 @@ class ExecuteCommandTool:
                 "output_file": task_info.get("log_path"),
             }
         tail = await self._read_tail(sandbox, task_info, max_bytes=8192)
-        running_ms_after = int((time.time() - task_info.get("started_at", time.time())) * 1000)
+        running_ms_after = int(
+            (time.time() - task_info.get("started_at", time.time())) * 1000
+        )
         next_block_ms = _suggest_next_block_ms(running_ms_after)
         return {
             "success": True,
@@ -1009,8 +1112,14 @@ class ExecuteCommandTool:
             "en": "Terminate a background shell task: SIGTERM first, escalate to SIGKILL if still alive after 2s.",
         },
         param_description_i18n={
-            "task_id": {"zh": "execute_shell_command 返回的 task_id", "en": "task_id returned by execute_shell_command"},
-            "session_id": {"zh": "会话ID（必填，自动注入）", "en": "Session ID (Required, Auto-injected)"},
+            "task_id": {
+                "zh": "execute_shell_command 返回的 task_id",
+                "en": "task_id returned by execute_shell_command",
+            },
+            "session_id": {
+                "zh": "会话ID（必填，自动注入）",
+                "en": "Session ID (Required, Auto-injected)",
+            },
         },
         param_schema={
             "task_id": {"type": "string"},
@@ -1051,10 +1160,18 @@ class ExecuteCommandTool:
             if not pid:
                 await self._cleanup_task(sandbox, task_id)
                 return {"success": True, "status": "missing_pid", "task_id": task_id}
-            await self._shell(sandbox, f"kill -- -{pid} 2>/dev/null; kill {pid} 2>/dev/null", timeout=5)
+            await self._shell(
+                sandbox,
+                f"kill -- -{pid} 2>/dev/null; kill {pid} 2>/dev/null",
+                timeout=5,
+            )
             await asyncio.sleep(2.0)
             if await self._is_alive(sandbox, task_info):
-                await self._shell(sandbox, f"kill -9 -- -{pid} 2>/dev/null; kill -9 {pid} 2>/dev/null", timeout=5)
+                await self._shell(
+                    sandbox,
+                    f"kill -9 -- -{pid} 2>/dev/null; kill -9 {pid} 2>/dev/null",
+                    timeout=5,
+                )
 
         tail = await self._read_tail(sandbox, task_info, max_bytes=2048)
         await self._cleanup_task(sandbox, task_id)

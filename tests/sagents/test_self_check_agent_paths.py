@@ -43,10 +43,14 @@ def _load_self_check_agent(monkeypatch):
 
     session_context_module = types.ModuleType("sagents.context.session_context")
     session_context_module.SessionContext = object
-    monkeypatch.setitem(sys.modules, "sagents.context.session_context", session_context_module)
+    monkeypatch.setitem(
+        sys.modules, "sagents.context.session_context", session_context_module
+    )
 
     logger_module = types.ModuleType("sagents.utils.logger")
-    logger_module.logger = SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+    logger_module.logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None
+    )
     monkeypatch.setitem(sys.modules, "sagents.utils.logger", logger_module)
 
     agent_base_module = types.ModuleType("sagents.agent.agent_base")
@@ -63,7 +67,9 @@ def _load_self_check_agent(monkeypatch):
 
     repo_root = Path(__file__).resolve().parent.parent.parent
     module_path = repo_root / "sagents" / "agent" / "self_check_agent.py"
-    spec = importlib.util.spec_from_file_location("sagents.agent.self_check_agent", module_path)
+    spec = importlib.util.spec_from_file_location(
+        "sagents.agent.self_check_agent", module_path
+    )
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, "sagents.agent.self_check_agent", module)
     assert spec.loader is not None
@@ -149,7 +155,9 @@ def test_absolute_markdown_link_checks_file_existence(monkeypatch):
         message_manager=SimpleNamespace(
             messages=[
                 _make_message("user", "请生成结果"),
-                _make_message("assistant", "[README.md](file:///tmp/project/README.md)"),
+                _make_message(
+                    "assistant", "[README.md](file:///tmp/project/README.md)"
+                ),
             ]
         ),
     )
@@ -167,7 +175,9 @@ def test_absolute_markdown_link_checks_file_existence(monkeypatch):
     assert chunks[0].message_type == "agent_execution_error"
 
 
-def test_absolute_markdown_link_outside_workspace_is_execution_error(monkeypatch, tmp_path):
+def test_absolute_markdown_link_outside_workspace_is_execution_error(
+    monkeypatch, tmp_path
+):
     self_check_agent = _load_self_check_agent(monkeypatch)
     agent = self_check_agent(model=None, model_config={})
 

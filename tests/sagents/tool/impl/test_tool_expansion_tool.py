@@ -32,7 +32,9 @@ def test_expands_tool_within_current_agent_allowed_boundary(monkeypatch):
     )
     _patch_ctx(monkeypatch, ctx)
 
-    out = asyncio.run(ToolExpansionTool().tool_expand_tools(["beta_tool"], session_id="s1"))
+    out = asyncio.run(
+        ToolExpansionTool().tool_expand_tools(["beta_tool"], session_id="s1")
+    )
 
     assert out["success"] is True
     assert out["expanded_tools"] == ["beta_tool"]
@@ -50,7 +52,9 @@ def test_invalid_tool_name_returns_available_expandable_tools(monkeypatch):
     )
     _patch_ctx(monkeypatch, ctx)
 
-    out = asyncio.run(ToolExpansionTool().tool_expand_tools(["missing_tool"], session_id="s1"))
+    out = asyncio.run(
+        ToolExpansionTool().tool_expand_tools(["missing_tool"], session_id="s1")
+    )
 
     assert out["success"] is False
     assert out["expanded_tools"] == []
@@ -68,7 +72,9 @@ def test_rejects_tool_outside_current_agent_allowed_boundary(monkeypatch):
     )
     _patch_ctx(monkeypatch, ctx)
 
-    out = asyncio.run(ToolExpansionTool().tool_expand_tools(["beta_tool"], session_id="s1"))
+    out = asyncio.run(
+        ToolExpansionTool().tool_expand_tools(["beta_tool"], session_id="s1")
+    )
 
     assert out["success"] is False
     assert out["expanded_tools"] == []
@@ -85,7 +91,9 @@ def test_reports_already_selected_tool_without_setting_refresh(monkeypatch):
     )
     _patch_ctx(monkeypatch, ctx)
 
-    out = asyncio.run(ToolExpansionTool().tool_expand_tools(["alpha_tool"], session_id="s1"))
+    out = asyncio.run(
+        ToolExpansionTool().tool_expand_tools(["alpha_tool"], session_id="s1")
+    )
 
     assert out["success"] is False
     assert out["already_selected_tools"] == ["alpha_tool"]
@@ -101,7 +109,9 @@ def test_accepts_single_string_tool_name(monkeypatch):
     )
     _patch_ctx(monkeypatch, ctx)
 
-    out = asyncio.run(ToolExpansionTool().tool_expand_tools("beta_tool", session_id="s1"))
+    out = asyncio.run(
+        ToolExpansionTool().tool_expand_tools("beta_tool", session_id="s1")
+    )
 
     assert out["success"] is True
     assert out["expanded_tools"] == ["beta_tool"]

@@ -85,8 +85,7 @@ class OpenSandboxProvider(RemoteSandboxProvider):
             from opensandbox.models import Mount
         except ImportError:
             raise ImportError(
-                "opensandbox package is required. "
-                "Install with: pip install opensandbox"
+                "opensandbox package is required. Install with: pip install opensandbox"
             )
 
         # 构建挂载配置
@@ -398,7 +397,9 @@ class OpenSandboxProvider(RemoteSandboxProvider):
         prefix_end = 0
         if lines and lines[0].startswith("#!"):
             prefix_end = 1
-        if len(lines) > prefix_end and re.match(r"^#.*coding[:=]\s*[-\w.]+", lines[prefix_end]):
+        if len(lines) > prefix_end and re.match(
+            r"^#.*coding[:=]\s*[-\w.]+", lines[prefix_end]
+        ):
             prefix_end += 1
 
         insert_after = 0
@@ -406,11 +407,19 @@ class OpenSandboxProvider(RemoteSandboxProvider):
             tree = ast.parse(code)
             if tree.body:
                 first = tree.body[0]
-                if isinstance(first, ast.Expr) and isinstance(getattr(first, "value", None), ast.Constant) and isinstance(first.value.value, str):
-                    insert_after = max(insert_after, getattr(first, "end_lineno", first.lineno))
+                if (
+                    isinstance(first, ast.Expr)
+                    and isinstance(getattr(first, "value", None), ast.Constant)
+                    and isinstance(first.value.value, str)
+                ):
+                    insert_after = max(
+                        insert_after, getattr(first, "end_lineno", first.lineno)
+                    )
                 for node in tree.body:
                     if isinstance(node, ast.ImportFrom) and node.module == "__future__":
-                        insert_after = max(insert_after, getattr(node, "end_lineno", node.lineno))
+                        insert_after = max(
+                            insert_after, getattr(node, "end_lineno", node.lineno)
+                        )
         except Exception:
             insert_after = 0
 

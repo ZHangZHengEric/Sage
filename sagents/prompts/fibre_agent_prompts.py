@@ -224,7 +224,7 @@ Você faz parte do **Fibre Agent System**, uma arquitetura multiagente avançada
   - **Profundidade**: precisa de conhecimento especializado.
   - **Paralelismo**: pode ser paralelizada para eficiência.
   - **Ambiguidade**: solicitações abertas que exigem exploração.
-"""
+""",
 }
 
 # Main Agent Extra Prompt (Orchestrator Role)
@@ -237,7 +237,7 @@ You are the **Main Orchestrator** of this system. Your primary role is to plan, 
 """,
     "pt": """## Função do agente principal: Orquestrador
 Você é o **orquestrador principal** deste sistema. Seu papel principal é planejar, decompor e delegar.
-"""
+""",
 }
 
 # Common Agent Rules (for both Main and Sub agents)
@@ -277,7 +277,7 @@ Quando receber uma tarefa de outro agente (seja do agente principal ou de outro 
 - O parâmetro `status` deve ser "success" ou "failure".
 - O parâmetro `result` deve conter um resumo completo do que foi realizado.
 - Isso garante que o agente que enviou a tarefa receba corretamente o resultado.
-"""
+""",
 }
 
 # Sub-Agent Extra Prompt (Strand Role) - Deprecated, use common_agent_rules instead
@@ -305,7 +305,7 @@ Ao mesmo tempo, você também possui capacidades completas de orquestração. Se
 ### Relato obrigatório
 - Você **DEVE** usar a ferramenta `sys_finish_task(status, result)` para informar o resultado final.
 - Responder apenas com texto não é suficiente; o sistema não capturará o resultado sem essa ferramenta.
-"""
+""",
 }
 
 # Sub-Agent Fallback Summary Prompt
@@ -340,8 +340,7 @@ Result:
 **分析结论**：<基于执行结果的最终判断或建议>
 
 【执行日志】
-{history_str}"""
-,
+{history_str}""",
     "pt": """O subagente concluiu a execução, mas não informou o resultado. Resuma o log abaixo em um resultado final usando um **tom profissional de relatório**.
 
 Formato:
@@ -354,7 +353,7 @@ Result:
 **Destaques da Execução**: <resumo breve dos passos principais>
 
 Log de Execução:
-{history_str}"""
+{history_str}""",
 }
 
 # FibreAgent Description (Comprehensive System Intro)
@@ -418,5 +417,5 @@ Você foi projetado para lidar com tarefas complexas e multifacetadas orquestran
 3. Seja rigoroso e não invente resultados.
 4. Entregue soluções completas, não parciais.
 5. Use o contexto existente e siga o padrão do código.
-"""
+""",
 }

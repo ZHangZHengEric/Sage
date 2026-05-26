@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 from typing import Dict, Any, List, Optional, Union
 from .tool_base import _DISCOVERED_TOOLS
 from .mcp_tool_base import _DISCOVERED_MCP_TOOLS
@@ -20,12 +21,10 @@ import re
 import copy
 from mcp import StdioServerParameters
 from mcp import Tool
-import traceback
 import time
 import os
 import sys
 import shutil
-import subprocess
 
 # 工具返回结果的最大 token 数限制
 MAX_TOOL_RESULT_TOKENS = 12000
@@ -45,7 +44,9 @@ def _copy_json_like(value: Any, fallback: Any) -> Any:
         return fallback
 
 
-def _get_display_input_schema(tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec]) -> Dict[str, Any]:
+def _get_display_input_schema(
+    tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec],
+) -> Dict[str, Any]:
     input_schema = getattr(tool, "input_schema", None)
     if isinstance(input_schema, dict):
         schema = _copy_json_like(input_schema, {})
@@ -64,7 +65,9 @@ def _get_display_input_schema(tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec
     }
 
 
-def _apply_localized_schema_descriptions(display_schema: Dict[str, Any], localized_schema: Dict[str, Any]) -> Dict[str, Any]:
+def _apply_localized_schema_descriptions(
+    display_schema: Dict[str, Any], localized_schema: Dict[str, Any]
+) -> Dict[str, Any]:
     """Overlay localized descriptions without changing the display schema shape."""
     if not isinstance(display_schema, dict) or not isinstance(localized_schema, dict):
         return display_schema
@@ -77,8 +80,12 @@ def _apply_localized_schema_descriptions(display_schema: Dict[str, Any], localiz
     if isinstance(display_properties, dict) and isinstance(localized_properties, dict):
         for name, display_property in display_properties.items():
             localized_property = localized_properties.get(name)
-            if isinstance(display_property, dict) and isinstance(localized_property, dict):
-                _apply_localized_schema_descriptions(display_property, localized_property)
+            if isinstance(display_property, dict) and isinstance(
+                localized_property, dict
+            ):
+                _apply_localized_schema_descriptions(
+                    display_property, localized_property
+                )
 
     display_items = display_schema.get("items")
     localized_items = localized_schema.get("items")
@@ -90,33 +97,33 @@ def _apply_localized_schema_descriptions(display_schema: Dict[str, Any], localiz
 
 def _truncate_result(result: str, max_tokens: int = MAX_TOOL_RESULT_TOKENS) -> str:
     """截断工具返回结果，限制在最大 token 数内
-    
+
     Args:
         result: 原始结果字符串
         max_tokens: 最大 token 数，默认 8000
-        
+
     Returns:
         截断后的结果，如果发生截断会添加提示信息
     """
     if not result:
         return result
-    
+
     # 使用 MessageManager 的 token 计算方法
-    from sagents.context.messages.message_manager import MessageManager
+
     estimated_tokens = MessageManager.calculate_str_token_length(result)
-    
+
     if estimated_tokens <= max_tokens:
         return result
-    
+
     # 需要截断，计算截断后的字符数
     # 使用动态 token 比例计算：字符数 = token 数 / 比例
     token_ratio = MessageManager.get_dynamic_token_ratio()
     max_chars = int(max_tokens / token_ratio)
     truncated = result[:max_chars]
-    
+
     # 添加截断提示
     truncation_notice = f"\n\n[结果已截断] 原始结果约 {estimated_tokens} tokens，超过最大限制 {max_tokens} tokens，仅显示前 {max_tokens} tokens。"
-    
+
     return truncated + truncation_notice
 
 
@@ -127,63 +134,76 @@ def _check_command_exists(command: str) -> bool:
 
 async def _install_uvx() -> bool:
     """自动安装 uvx (uv package manager)
-    
+
     Returns:
         bool: 安装是否成功
     """
     try:
         logger.info("[Auto Install] uvx not found, attempting to install uv...")
-        
+
         # 检查是否已经安装了 uv
         if _check_command_exists("uv"):
             logger.info("[Auto Install] uv is already installed")
             return True
-        
+
         # 尝试使用 pip 安装 uv
         logger.info("[Auto Install] Installing uv via pip...")
         process = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "pip", "install", "uv",
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "uv",
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await process.communicate()
-        
+
         if process.returncode == 0:
             logger.info("[Auto Install] Successfully installed uv via pip")
             # 刷新 PATH
             os.environ["PATH"] = os.environ.get("PATH", "")
             return True
         else:
-            logger.error(f"[Auto Install] Failed to install uv via pip: {stderr.decode()}")
-            
+            logger.error(
+                f"[Auto Install] Failed to install uv via pip: {stderr.decode()}"
+            )
+
             # 尝试使用官方安装脚本
             logger.info("[Auto Install] Trying to install uv via official installer...")
             import platform
+
             system = platform.system().lower()
-            
+
             if system == "darwin" or system == "linux":
                 # macOS 或 Linux
                 install_cmd = "curl -LsSf https://astral.sh/uv/install.sh | sh"
                 process = await asyncio.create_subprocess_shell(
                     install_cmd,
                     stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                    stderr=asyncio.subprocess.PIPE,
                 )
                 stdout, stderr = await process.communicate()
-                
+
                 if process.returncode == 0:
-                    logger.info("[Auto Install] Successfully installed uv via official installer")
+                    logger.info(
+                        "[Auto Install] Successfully installed uv via official installer"
+                    )
                     # 添加 uv 到 PATH (通常安装在 ~/.local/bin)
                     home = os.path.expanduser("~")
                     uv_bin_path = os.path.join(home, ".local", "bin")
                     if uv_bin_path not in os.environ.get("PATH", ""):
-                        os.environ["PATH"] = f"{uv_bin_path}{os.pathsep}{os.environ.get('PATH', '')}"
+                        os.environ["PATH"] = (
+                            f"{uv_bin_path}{os.pathsep}{os.environ.get('PATH', '')}"
+                        )
                     return True
                 else:
-                    logger.error(f"[Auto Install] Failed to install uv via official installer: {stderr.decode()}")
-            
+                    logger.error(
+                        f"[Auto Install] Failed to install uv via official installer: {stderr.decode()}"
+                    )
+
             return False
-            
+
     except Exception as e:
         logger.error(f"[Auto Install] Error during uvx installation: {e}")
         return False
@@ -191,16 +211,16 @@ async def _install_uvx() -> bool:
 
 def _ensure_command_available(command: str) -> bool:
     """确保命令可用，如果不存在则尝试安装
-    
+
     Args:
         command: 命令名称 (如 'uvx', 'npx' 等)
-        
+
     Returns:
         bool: 命令是否可用
     """
     if _check_command_exists(command):
         return True
-    
+
     # 特殊处理 uvx/uv
     if command in ["uvx", "uv"]:
         # 异步安装 uv
@@ -208,9 +228,11 @@ def _ensure_command_available(command: str) -> bool:
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 # 如果事件循环正在运行，创建新任务
-                future = asyncio.ensure_future(_install_uvx())
+                asyncio.ensure_future(_install_uvx())
                 # 这里不能直接等待，需要返回 False 让调用者重试
-                logger.info(f"[Auto Install] Installation of {command} started in background")
+                logger.info(
+                    f"[Auto Install] Installation of {command} started in background"
+                )
                 return False
             else:
                 # 如果事件循环未运行，可以直接运行
@@ -218,20 +240,29 @@ def _ensure_command_available(command: str) -> bool:
         except Exception as e:
             logger.error(f"[Auto Install] Error ensuring {command} available: {e}")
             return False
-    
+
     return False
+
+
 try:
     BaseExceptionGroup
 except NameError:
+
     class BaseExceptionGroup(BaseException):
         """Backport for Python < 3.11"""
+
         pass
+
+
 from .mcp_proxy import McpProxy
+
 
 class RegisteredToolList(list):
     """List of registered tools that evaluates to True for backward compatibility."""
+
     def __bool__(self):
         return True
+
 
 _GLOBAL_TOOL_MANAGER: Optional["ToolManager"] = None
 
@@ -292,7 +323,9 @@ def _resolve_session_context(session_id: str) -> Optional[SessionContext]:
         if session:
             return session.session_context
     except Exception as e:
-        logger.debug(f"Failed to resolve session_context for session_id={session_id}: {e}")
+        logger.debug(
+            f"Failed to resolve session_context for session_id={session_id}: {e}"
+        )
     return None
 
 
@@ -315,7 +348,7 @@ class ToolManager:
 
     def __init__(self, is_auto_discover=True, isolated=False):
         """初始化工具管理器"""
-        if not isolated and getattr(self, '_initialized', False):
+        if not isolated and getattr(self, "_initialized", False):
             return
 
         logger.debug(f"Initializing ToolManager (isolated={isolated})")
@@ -332,7 +365,7 @@ class ToolManager:
             # # 在测试环境中，我们不希望自动发现MCP工具
             # if not os.environ.get('TESTING'):
             #     logger.debug("Not in testing environment, discovering MCP tools")
-        
+
         if not isolated:
             self._initialized = True
             #     asyncio.run(self._discover_mcp_tools(mcp_setting_path=self._mcp_setting_path))
@@ -374,7 +407,9 @@ class ToolManager:
 
         if not root_found:
             # Fallback: treat package_path as the root package
-            logger.warning(f"Root package '{root_package}' not found in path {package_path}. Using {package_path.name} as root.")
+            logger.warning(
+                f"Root package '{root_package}' not found in path {package_path}. Using {package_path.name} as root."
+            )
             sys_path_dir = package_path.parent
             full_package_name = package_path.name
         else:
@@ -386,8 +421,11 @@ class ToolManager:
             if sys_path_str not in sys.path:
                 sys.path.append(sys_path_str)
 
-        logger.info(f"Discovering tools from package_path: {package_path}, module prefix: {full_package_name}")
+        logger.info(
+            f"Discovering tools from package_path: {package_path}, module prefix: {full_package_name}"
+        )
         import importlib
+
         # 遍历 .py 文件
         for py_file in package_path.rglob("*.py"):
             if py_file.name.startswith(("test_", "__")):
@@ -410,13 +448,15 @@ class ToolManager:
             if not mcp_servers_path.exists():
                 logger.warning(f"mcp_servers path not found: {mcp_servers_path}")
             else:
-                self._discover_import_path(path=mcp_servers_path, root_package="mcp_servers")
+                self._discover_import_path(
+                    path=mcp_servers_path, root_package="mcp_servers"
+                )
 
         # Register discovered tools
         count = 0
         for module_name, funcs in _DISCOVERED_MCP_TOOLS.items():
             for func in funcs:
-                if hasattr(func, '_mcp_tool_spec'):
+                if hasattr(func, "_mcp_tool_spec"):
                     self.register_tool(func._mcp_tool_spec)
                     count += 1
 
@@ -442,6 +482,7 @@ class ToolManager:
                 # does NOT load submodules and the @tool decorators never run.
                 # Explicitly import every known submodule so the decorators fire.
                 import importlib
+
                 _impl_modules = [
                     "sagents.tool.impl.execute_command_tool",
                     "sagents.tool.impl.file_system_tool",
@@ -504,16 +545,16 @@ class ToolManager:
         Register tools from an object instance or class.
         Automatically discovers methods decorated with @tool and registers them.
         If an instance is provided, methods are bound to the instance.
-        
+
         Args:
             obj: An object instance or class to scan for tools.
-            
+
         Returns:
             List[str]: List of names of successfully registered tools.
         """
         import inspect
         import copy
-        
+
         registered_tools = []
         logger.debug(f"Discovering tools from object: {obj}")
 
@@ -526,28 +567,28 @@ class ToolManager:
         for name, member in inspect.getmembers(obj):
             # Check if member has _tool_spec (added by @tool decorator)
             tool_spec = getattr(member, "_tool_spec", None)
-            
+
             # If not found directly, check underlying function for bound methods
             if not tool_spec and hasattr(member, "__func__"):
                 tool_spec = getattr(member.__func__, "_tool_spec", None)
-                
+
             if not tool_spec:
                 continue
-                
+
             # Skip if tool name already exists (subject to priority logic in register_tool)
             # But here we let register_tool handle the decision
-            
+
             # Handle instance binding
             # If obj is an instance (not a class), we need to ensure the func in spec is bound
             if not inspect.isclass(obj):
                 try:
                     # Create a copy of the spec to avoid modifying the original class-level spec
                     new_spec = copy.copy(tool_spec)
-                    
+
                     # member is already a bound method when accessed from instance via inspect.getmembers
                     # Verify it is bound
                     if inspect.ismethod(member) and member.__self__ is obj:
-                         new_spec.func = member
+                        new_spec.func = member
                     else:
                         # Fallback or strict check?
                         # If member is not bound but obj is instance, it might be a staticmethod or we need to bind it manually?
@@ -570,7 +611,7 @@ class ToolManager:
                 # For now, we just try to register as is.
                 self.register_tool(tool_spec)
                 registered_tools.append(tool_spec.name)
-                    
+
         return registered_tools
 
     def register_tool(self, tool_spec: Union[ToolSpec, McpToolSpec, SageMcpToolSpec]):
@@ -622,10 +663,14 @@ class ToolManager:
         # 工具不存在，直接注册
         self.tools[tool_spec.name] = tool_spec
         tool_type = type(tool_spec).__name__
-        logger.debug(f"Successfully registered new tool: {tool_spec.name} ({tool_type})")
+        logger.debug(
+            f"Successfully registered new tool: {tool_spec.name} ({tool_type})"
+        )
         return True
 
-    async def remove_tool_by_mcp(self, server_name: str, close_pool: bool = True) -> bool:
+    async def remove_tool_by_mcp(
+        self, server_name: str, close_pool: bool = True
+    ) -> bool:
         """
         Remove all tools registered from a specific MCP server.
 
@@ -717,7 +762,9 @@ class ToolManager:
             return bool_registered
         return bool_registered
 
-    async def register_mcp_server(self, server_name: str, config: dict, force: bool = False):
+    async def register_mcp_server(
+        self, server_name: str, config: dict, force: bool = False
+    ):
         """Register an MCP server directly with configuration
 
         Args:
@@ -738,7 +785,13 @@ class ToolManager:
             logger.debug(f"Server {server_name} is disabled, skipping")
             return bool_registered
         server_name = server_name.strip()
-        server_params: Optional[Union[StdioServerParameters, SseServerParameters, StreamableHttpServerParameters]] = None
+        server_params: Optional[
+            Union[
+                StdioServerParameters,
+                SseServerParameters,
+                StreamableHttpServerParameters,
+            ]
+        ] = None
         try:
             protocol_type = "stdio"
             if "sse_url" in config:
@@ -746,7 +799,7 @@ class ToolManager:
             elif "url" in config or "streamable_http_url" in config:
                 protocol_type = "streamable_http"
             logger.info(f"Detected protocol type for {server_name}: {protocol_type}")
-            
+
             if "sse_url" in config:
                 server_params = SseServerParameters(
                     url=config["sse_url"], api_key=config.get("api_key", None)
@@ -769,33 +822,45 @@ class ToolManager:
                 logger.debug(f"  command: {command}")
                 logger.debug(f"  args: {args}")
                 logger.debug(f"  env: {env}")
-                
+
                 if not command:
                     logger.error(f"Missing 'command' field in config for {server_name}")
                     logger.error(f"Available config keys: {list(config.keys())}")
                     return False
-                
+
                 # 检查命令是否存在，如果不存在尝试自动安装
                 if not _check_command_exists(command):
-                    logger.warning(f"Command '{command}' not found, attempting to install...")
+                    logger.warning(
+                        f"Command '{command}' not found, attempting to install..."
+                    )
                     if command in ["uvx", "uv"]:
                         # 对于 uvx/uv，尝试异步安装
                         install_success = await _install_uvx()
                         if not install_success:
-                            logger.error(f"Failed to install {command}. Please install it manually:")
-                            logger.error(f"  curl -LsSf https://astral.sh/uv/install.sh | sh")
-                            logger.error(f"  or: pip install uv")
+                            logger.error(
+                                f"Failed to install {command}. Please install it manually:"
+                            )
+                            logger.error(
+                                "  curl -LsSf https://astral.sh/uv/install.sh | sh"
+                            )
+                            logger.error("  or: pip install uv")
                             return False
                         # 安装成功后，再次检查命令是否存在
                         if not _check_command_exists(command):
-                            logger.error(f"Installation completed but '{command}' still not found in PATH")
-                            logger.error(f"Please restart the application or check your PATH configuration")
+                            logger.error(
+                                f"Installation completed but '{command}' still not found in PATH"
+                            )
+                            logger.error(
+                                "Please restart the application or check your PATH configuration"
+                            )
                             return False
                     else:
-                        logger.error(f"Command '{command}' not found and auto-installation is not supported")
-                        logger.error(f"Please install it manually")
+                        logger.error(
+                            f"Command '{command}' not found and auto-installation is not supported"
+                        )
+                        logger.error("Please install it manually")
                         return False
-                
+
                 server_params = StdioServerParameters(
                     command=command,
                     args=args,
@@ -825,7 +890,9 @@ class ToolManager:
                 registered_tools.append(mcp_tool)
         except KeyError as e:
             missing_key = str(e).strip("'")
-            logger.error(f"Missing required key '{missing_key}' in config for MCP server {server_name}")
+            logger.error(
+                f"Missing required key '{missing_key}' in config for MCP server {server_name}"
+            )
             logger.error(f"Full config: {config}")
             return bool_registered
         except Exception as e:
@@ -834,6 +901,7 @@ class ToolManager:
             logger.error(f"Exception type: {type(e).__name__}")
             logger.error(f"Full config: {config}")
             import traceback
+
             logger.error(f"Traceback: {traceback.format_exc()}")
             return bool_registered
         bool_registered = True
@@ -862,16 +930,30 @@ class ToolManager:
             input_schema = tool_info.get("inputSchema", {})
 
         # 兼容 MCP 的 i18n 元数据来源：优先从 _meta/meta 中读取；其次从顶层键读取；然后从 annotations 中读取；最后从 inputSchema.properties 聚合
-        meta = tool_info.get("_meta") or tool_info.get("meta") or {} or tool_info.get("annotations", {}) or {}
-        description_i18n = meta.get("description_i18n") or tool_info.get("description_i18n", {})
+        meta = (
+            tool_info.get("_meta")
+            or tool_info.get("meta")
+            or {}
+            or tool_info.get("annotations", {})
+            or {}
+        )
+        description_i18n = meta.get("description_i18n") or tool_info.get(
+            "description_i18n", {}
+        )
 
         # 参数多语言描述聚合
-        param_description_i18n = meta.get("param_description_i18n") or tool_info.get("param_description_i18n", {})
+        param_description_i18n = meta.get("param_description_i18n") or tool_info.get(
+            "param_description_i18n", {}
+        )
         try:
-            if not param_description_i18n and isinstance(input_schema.get("properties", {}), dict):
+            if not param_description_i18n and isinstance(
+                input_schema.get("properties", {}), dict
+            ):
                 aggregated: Dict[str, Any] = {}
                 for param_name, schema in input_schema.get("properties", {}).items():
-                    if isinstance(schema, dict) and isinstance(schema.get("description_i18n"), dict):
+                    if isinstance(schema, dict) and isinstance(
+                        schema.get("description_i18n"), dict
+                    ):
                         aggregated[param_name] = schema.get("description_i18n")
                 if aggregated:
                     param_description_i18n = aggregated
@@ -899,40 +981,58 @@ class ToolManager:
         logger.debug(f"Getting tool by name: {name}")
         return self.tools.get(name, None)
 
-    def list_tools(self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    def list_tools(
+        self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
         """List all available tools with metadata, supports language filtering via convert_spec_to_openai_format"""
         logger.debug(f"Listing all {len(self.tools)} tools with metadata")
 
         tools_list: List[Dict[str, Any]] = []
         for tool in self.tools.values():
-            spec = convert_spec_to_openai_format(tool, lang=lang, fallback_chain=fallback_chain)
+            spec = convert_spec_to_openai_format(
+                tool, lang=lang, fallback_chain=fallback_chain
+            )
             fn = spec.get("function", {})
             input_schema = _get_display_input_schema(tool)
             localized_parameters = fn.get("parameters", {})
             if isinstance(localized_parameters, dict):
                 _apply_localized_schema_descriptions(input_schema, localized_parameters)
             params = input_schema.get("properties", {})
-            tools_list.append({
-                "name": fn.get("name", getattr(tool, "name", "")),
-                "description": fn.get("description", getattr(tool, "description", "")),
-                "parameters": params if isinstance(params, dict) else {},
-                "required": input_schema.get("required", getattr(tool, "required", [])),
-                "input_schema": input_schema,
-            })
+            tools_list.append(
+                {
+                    "name": fn.get("name", getattr(tool, "name", "")),
+                    "description": fn.get(
+                        "description", getattr(tool, "description", "")
+                    ),
+                    "parameters": params if isinstance(params, dict) else {},
+                    "required": input_schema.get(
+                        "required", getattr(tool, "required", [])
+                    ),
+                    "input_schema": input_schema,
+                }
+            )
         return tools_list
 
-    def list_tools_simplified(self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    def list_tools_simplified(
+        self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
         """List all available tools with simplified metadata, using convert_spec_to_openai_format for i18n"""
         logger.debug(f"Listing all {len(self.tools)} tools with simplified metadata")
 
         simplified = []
         for tool in self.tools.values():
-            spec = convert_spec_to_openai_format(tool, lang=lang, fallback_chain=fallback_chain)
+            spec = convert_spec_to_openai_format(
+                tool, lang=lang, fallback_chain=fallback_chain
+            )
             fn = spec.get("function", {})
-            simplified.append({
-                "name": fn.get("name", getattr(tool, "name", "")),
-                "description": fn.get("description", getattr(tool, "description", "")),
-            })
+            simplified.append(
+                {
+                    "name": fn.get("name", getattr(tool, "name", "")),
+                    "description": fn.get(
+                        "description", getattr(tool, "description", "")
+                    ),
+                }
+            )
         return simplified
 
     def list_all_tools_name(self, lang: Optional[str] = None) -> List[str]:
@@ -940,7 +1040,9 @@ class ToolManager:
         logger.debug(f"Listing all {len(self.tools)} tools with name")
         return [tool.name for tool in self.tools.values()]
 
-    def list_tools_with_type(self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    def list_tools_with_type(
+        self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
         """List tools with type/source info, descriptions and parameters localized via convert_spec_to_openai_format"""
         logger.debug(f"Listing all {len(self.tools)} tools with type information")
 
@@ -966,7 +1068,9 @@ class ToolManager:
                 tool_type = "unknown"
                 source = "未知来源"
 
-            spec = convert_spec_to_openai_format(tool, lang=lang, fallback_chain=fallback_chain)
+            spec = convert_spec_to_openai_format(
+                tool, lang=lang, fallback_chain=fallback_chain
+            )
             fn = spec.get("function", {})
             input_schema = _get_display_input_schema(tool)
             localized_parameters = fn.get("parameters", {})
@@ -974,19 +1078,27 @@ class ToolManager:
                 _apply_localized_schema_descriptions(input_schema, localized_parameters)
             params = input_schema.get("properties", {})
 
-            tools_with_type.append({
-                "name": fn.get("name", getattr(tool, "name", "")),
-                "description": fn.get("description", getattr(tool, "description", "")),
-                "parameters": params if isinstance(params, dict) else {},
-                "required": input_schema.get("required", getattr(tool, "required", [])),
-                "input_schema": input_schema,
-                "type": tool_type,
-                "source": source,
-            })
+            tools_with_type.append(
+                {
+                    "name": fn.get("name", getattr(tool, "name", "")),
+                    "description": fn.get(
+                        "description", getattr(tool, "description", "")
+                    ),
+                    "parameters": params if isinstance(params, dict) else {},
+                    "required": input_schema.get(
+                        "required", getattr(tool, "required", [])
+                    ),
+                    "input_schema": input_schema,
+                    "type": tool_type,
+                    "source": source,
+                }
+            )
 
         return tools_with_type
 
-    def get_openai_tools(self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    def get_openai_tools(
+        self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
         """Get OpenAI-compatible function specs, localized via convert_spec_to_openai_format.
 
         ``tools`` 字段顺序参与多家 provider（Anthropic / 阿里云）的 prompt cache key，
@@ -997,10 +1109,14 @@ class ToolManager:
 
         tools_json: List[Dict[str, Any]] = []
         for tool in self.tools.values():
-            tools_json.append(convert_spec_to_openai_format(tool, lang=lang, fallback_chain=fallback_chain))
+            tools_json.append(
+                convert_spec_to_openai_format(
+                    tool, lang=lang, fallback_chain=fallback_chain
+                )
+            )
 
         if os.environ.get("SAGE_STABLE_TOOLS_ORDER", "true").lower() != "false":
-            tools_json.sort(key=lambda t: ((t.get("function") or {}).get("name") or ""))
+            tools_json.sort(key=lambda t: (t.get("function") or {}).get("name") or "")
         return tools_json
 
     async def run_tool_async(
@@ -1012,11 +1128,15 @@ class ToolManager:
     ) -> Any:
         """Execute a tool by name with provided arguments (async version)"""
         execution_start = time.time()
-        logger.debug(f"[Tool Execution] START | tool={tool_name} | session={session_id or 'NO_SESSION'}")
-        logger.debug(f"[Tool Execution] Arguments: {json.dumps(kwargs, ensure_ascii=False, default=str)[:500]}")
+        logger.debug(
+            f"[Tool Execution] START | tool={tool_name} | session={session_id or 'NO_SESSION'}"
+        )
+        logger.debug(
+            f"[Tool Execution] Arguments: {json.dumps(kwargs, ensure_ascii=False, default=str)[:500]}"
+        )
         session_context = _resolve_session_context(session_id)
         resolved_user_id = user_id or getattr(session_context, "user_id", None)
-        
+
         # Step 1: Tool Lookup
         tool = self.get_tool(tool_name)
         if not tool:
@@ -1055,6 +1175,7 @@ class ToolManager:
                 kwargs.pop("session_id", None)
                 if resolved_user_id and "user_id" not in kwargs:
                     import inspect
+
                     func_to_inspect = tool.func
                     has_user_id_param = False
                     try:
@@ -1062,53 +1183,90 @@ class ToolManager:
                         has_user_id_param = "user_id" in sig.parameters
                     except (ValueError, TypeError):
                         pass
-                    if not has_user_id_param and hasattr(tool, 'parameters') and tool.parameters:
-                        has_user_id_param = 'user_id' in tool.parameters
-                    if not has_user_id_param and hasattr(tool, 'required') and tool.required:
-                        has_user_id_param = 'user_id' in tool.required
+                    if (
+                        not has_user_id_param
+                        and hasattr(tool, "parameters")
+                        and tool.parameters
+                    ):
+                        has_user_id_param = "user_id" in tool.parameters
+                    if (
+                        not has_user_id_param
+                        and hasattr(tool, "required")
+                        and tool.required
+                    ):
+                        has_user_id_param = "user_id" in tool.required
                     if has_user_id_param:
                         kwargs["user_id"] = resolved_user_id
-                        logger.debug(f"[Tool Execution] Injected user_id for {tool.name}")
-                final_result = await self._execute_standard_tool_async(tool, session_id=session_id, **kwargs)
+                        logger.debug(
+                            f"[Tool Execution] Injected user_id for {tool.name}"
+                        )
+                final_result = await self._execute_standard_tool_async(
+                    tool, session_id=session_id, **kwargs
+                )
             elif isinstance(tool, ToolSpec):
                 # 检查必填参数
-                required_params = getattr(tool, 'required', []) or []
+                required_params = getattr(tool, "required", []) or []
                 # session_id 是系统注入的参数，如果不在 kwargs 中但工具需要，不算 missing
-                missing_params = [p for p in required_params if p != 'session_id' and (p not in kwargs or kwargs.get(p) is None)]
+                missing_params = [
+                    p
+                    for p in required_params
+                    if p != "session_id" and (p not in kwargs or kwargs.get(p) is None)
+                ]
                 if missing_params:
                     # 返回错误信息而不是 raise
-                    return json.dumps({
-                        "success": False,
-                        "error": f"缺少必填参数: {', '.join(missing_params)}",
-                        "required_params": required_params,
-                        "provided_params": list(kwargs.keys())
-                    }, ensure_ascii=False, indent=2)
-                
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": f"缺少必填参数: {', '.join(missing_params)}",
+                            "required_params": required_params,
+                            "provided_params": list(kwargs.keys()),
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+
                 # Tools run directly, they use sandbox internally if needed
                 try:
                     # Inject session_id if the tool function expects it
                     import inspect
+
                     func_to_inspect = tool.func
-                    
+
                     has_session_id_param = False
-                    
+
                     # For bound methods, check the bound method's signature directly
                     try:
                         sig = inspect.signature(func_to_inspect)
                         has_session_id_param = "session_id" in sig.parameters
-                        logger.debug(f"[Tool] Checking {tool.name} signature: {list(sig.parameters.keys())}, has_session_id: {has_session_id_param}")
+                        logger.debug(
+                            f"[Tool] Checking {tool.name} signature: {list(sig.parameters.keys())}, has_session_id: {has_session_id_param}"
+                        )
                     except (ValueError, TypeError) as e:
-                        logger.debug(f"[Tool] Failed to get signature for {tool.name}: {e}")
+                        logger.debug(
+                            f"[Tool] Failed to get signature for {tool.name}: {e}"
+                        )
                         pass
-                    
+
                     # Also check from tool spec as fallback
-                    if not has_session_id_param and hasattr(tool, 'parameters') and tool.parameters:
-                        has_session_id_param = 'session_id' in tool.parameters
-                        logger.debug(f"[Tool] Checked tool.parameters for {tool.name}: has_session_id={has_session_id_param}")
-                    if not has_session_id_param and hasattr(tool, 'required') and tool.required:
-                        has_session_id_param = 'session_id' in tool.required
-                        logger.debug(f"[Tool] Checked tool.required for {tool.name}: has_session_id={has_session_id_param}")
-                    
+                    if (
+                        not has_session_id_param
+                        and hasattr(tool, "parameters")
+                        and tool.parameters
+                    ):
+                        has_session_id_param = "session_id" in tool.parameters
+                        logger.debug(
+                            f"[Tool] Checked tool.parameters for {tool.name}: has_session_id={has_session_id_param}"
+                        )
+                    if (
+                        not has_session_id_param
+                        and hasattr(tool, "required")
+                        and tool.required
+                    ):
+                        has_session_id_param = "session_id" in tool.required
+                        logger.debug(
+                            f"[Tool] Checked tool.required for {tool.name}: has_session_id={has_session_id_param}"
+                        )
+
                     if has_session_id_param:
                         kwargs["session_id"] = session_id
                         logger.debug(f"[Tool] Injected session_id for {tool.name}")
@@ -1119,10 +1277,18 @@ class ToolManager:
                             has_user_id_param = "user_id" in sig.parameters
                         except Exception:
                             has_user_id_param = False
-                        if not has_user_id_param and hasattr(tool, 'parameters') and tool.parameters:
-                            has_user_id_param = 'user_id' in tool.parameters
-                        if not has_user_id_param and hasattr(tool, 'required') and tool.required:
-                            has_user_id_param = 'user_id' in tool.required
+                        if (
+                            not has_user_id_param
+                            and hasattr(tool, "parameters")
+                            and tool.parameters
+                        ):
+                            has_user_id_param = "user_id" in tool.parameters
+                        if (
+                            not has_user_id_param
+                            and hasattr(tool, "required")
+                            and tool.required
+                        ):
+                            has_user_id_param = "user_id" in tool.required
                         if has_user_id_param:
                             kwargs["user_id"] = resolved_user_id
                             logger.debug(f"[Tool] Injected user_id for {tool.name}")
@@ -1306,10 +1472,14 @@ class ToolManager:
                 else:
                     formatted_content = content
                 return json.dumps(
-                    {"content": make_serializable(formatted_content)}, ensure_ascii=False, indent=2
+                    {"content": make_serializable(formatted_content)},
+                    ensure_ascii=False,
+                    indent=2,
                 )
             else:
-                return json.dumps(make_serializable(result), ensure_ascii=False, indent=2)
+                return json.dumps(
+                    make_serializable(result), ensure_ascii=False, indent=2
+                )
 
         except Exception as e:
             if isinstance(e, BaseExceptionGroup):
@@ -1319,47 +1489,68 @@ class ToolManager:
             logger.error(f"MCP tool execution failed: {tool.name} - {str(e)}")
             raise
 
-    async def _execute_standard_tool_async(self, tool: ToolSpec, session_id: str = "", **kwargs) -> str:
+    async def _execute_standard_tool_async(
+        self, tool: ToolSpec, session_id: str = "", **kwargs
+    ) -> str:
         """Execute standard tool and format result (async version)"""
-        logger.debug(f"[_execute_standard_tool_async] START | tool={tool.name} | session={session_id or 'NO_SESSION'}")
+        logger.debug(
+            f"[_execute_standard_tool_async] START | tool={tool.name} | session={session_id or 'NO_SESSION'}"
+        )
         execute_start = time.perf_counter()
 
         try:
             # Inject session_id if the tool function expects it
             import inspect
+
             func_to_inspect = tool.func
-            
+
             has_session_id_param = False
-            
+
             # For bound methods, check the bound method's signature directly
             # Don't unwrap __wrapped__ because we need to see the actual signature
             # that will be used when calling the method
             try:
                 sig = inspect.signature(func_to_inspect)
                 has_session_id_param = "session_id" in sig.parameters
-                logger.debug(f"[_execute_standard_tool_async] Checking {tool.name} signature: {list(sig.parameters.keys())}, has_session_id: {has_session_id_param}")
+                logger.debug(
+                    f"[_execute_standard_tool_async] Checking {tool.name} signature: {list(sig.parameters.keys())}, has_session_id: {has_session_id_param}"
+                )
             except (ValueError, TypeError) as e:
-                logger.debug(f"[_execute_standard_tool_async] Failed to get signature for {tool.name}: {e}")
+                logger.debug(
+                    f"[_execute_standard_tool_async] Failed to get signature for {tool.name}: {e}"
+                )
                 pass
-            
+
             # Also check from tool spec parameters (as fallback)
-            if not has_session_id_param and hasattr(tool, 'parameters') and tool.parameters:
-                has_session_id_param = 'session_id' in tool.parameters
-                logger.debug(f"[_execute_standard_tool_async] Checked tool.parameters for {tool.name}: has_session_id={has_session_id_param}")
-            
+            if (
+                not has_session_id_param
+                and hasattr(tool, "parameters")
+                and tool.parameters
+            ):
+                has_session_id_param = "session_id" in tool.parameters
+                logger.debug(
+                    f"[_execute_standard_tool_async] Checked tool.parameters for {tool.name}: has_session_id={has_session_id_param}"
+                )
+
             # Also check from tool spec required params (as fallback)
-            if not has_session_id_param and hasattr(tool, 'required') and tool.required:
-                has_session_id_param = 'session_id' in tool.required
-                logger.debug(f"[_execute_standard_tool_async] Checked tool.required for {tool.name}: has_session_id={has_session_id_param}")
-            
+            if not has_session_id_param and hasattr(tool, "required") and tool.required:
+                has_session_id_param = "session_id" in tool.required
+                logger.debug(
+                    f"[_execute_standard_tool_async] Checked tool.required for {tool.name}: has_session_id={has_session_id_param}"
+                )
+
             if has_session_id_param:
                 kwargs["session_id"] = session_id
-                logger.debug(f"[_execute_standard_tool_async] Injected session_id for tool: {tool.name}")
+                logger.debug(
+                    f"[_execute_standard_tool_async] Injected session_id for tool: {tool.name}"
+                )
 
             # Execute the tool function
-            logger.debug(f"[_execute_standard_tool_async] Executing | tool={tool.name} | is_async={asyncio.iscoroutinefunction(tool.func)}")
+            logger.debug(
+                f"[_execute_standard_tool_async] Executing | tool={tool.name} | is_async={asyncio.iscoroutinefunction(tool.func)}"
+            )
             func_start = time.perf_counter()
-            
+
             if hasattr(tool.func, "__self__"):
                 # Bound method
                 if asyncio.iscoroutinefunction(tool.func):
@@ -1393,19 +1584,29 @@ class ToolManager:
                         result = await asyncio.to_thread(tool.func, **kwargs)
 
             func_cost = time.perf_counter() - func_start
-            logger.debug(f"[_execute_standard_tool_async] Function executed | tool={tool.name} | time={func_cost:.3f}s")
+            logger.debug(
+                f"[_execute_standard_tool_async] Function executed | tool={tool.name} | time={func_cost:.3f}s"
+            )
 
             # Format result - 避免双重JSON序列化
             execute_cost = time.perf_counter() - execute_start
             if execute_cost > 2.0:
-                logger.warning(f"[_execute_standard_tool_async] SLOW | tool={tool.name} | total_time={execute_cost:.3f}s")
+                logger.warning(
+                    f"[_execute_standard_tool_async] SLOW | tool={tool.name} | total_time={execute_cost:.3f}s"
+                )
             else:
-                logger.debug(f"[_execute_standard_tool_async] SUCCESS | tool={tool.name} | total_time={execute_cost:.3f}s")
-            return json.dumps({"content": make_serializable(result)}, ensure_ascii=False, indent=2)
+                logger.debug(
+                    f"[_execute_standard_tool_async] SUCCESS | tool={tool.name} | total_time={execute_cost:.3f}s"
+                )
+            return json.dumps(
+                {"content": make_serializable(result)}, ensure_ascii=False, indent=2
+            )
 
         except Exception as e:
             execute_cost = time.perf_counter() - execute_start
-            logger.error(f"[_execute_standard_tool_async] FAILED | tool={tool.name} | time={execute_cost:.3f}s | error={type(e).__name__}: {str(e)}")
+            logger.error(
+                f"[_execute_standard_tool_async] FAILED | tool={tool.name} | time={execute_cost:.3f}s | error={type(e).__name__}: {str(e)}"
+            )
             raise
 
     def _format_error_response(

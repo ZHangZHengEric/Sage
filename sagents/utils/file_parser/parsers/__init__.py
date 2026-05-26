@@ -12,7 +12,13 @@ from .html_parser import HTMLParser
 from .text_parser import TextParser
 
 __all__ = [
-    'BaseFileParser', 'ParseResult',
-    'PDFParser', 'DOCXParser', 'EMLParser', 'PPTXParser',
-    'ExcelParser', 'HTMLParser', 'TextParser'
+    "BaseFileParser",
+    "ParseResult",
+    "PDFParser",
+    "DOCXParser",
+    "EMLParser",
+    "PPTXParser",
+    "ExcelParser",
+    "HTMLParser",
+    "TextParser",
 ]

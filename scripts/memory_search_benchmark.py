@@ -86,13 +86,17 @@ def _build_queries():
     ]
 
 
-def run_benchmark(noise_files: int, chunk_size: int, chunk_overlap: int, top_k: int) -> int:
+def run_benchmark(
+    noise_files: int, chunk_size: int, chunk_overlap: int, top_k: int
+) -> int:
     module = _load_memory_index_module()
     MemoryIndex = module.MemoryIndex
 
     with TemporaryDirectory() as tmp_dir:
         index_path = Path(tmp_dir) / "memory_index.pkl"
-        idx = MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+        idx = MemoryIndex(
+            sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+        )
         idx.DEFAULT_CHUNK_SIZE = chunk_size
         idx.DEFAULT_CHUNK_OVERLAP = chunk_overlap
 
@@ -142,13 +146,34 @@ def run_benchmark(noise_files: int, chunk_size: int, chunk_overlap: int, top_k: 
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run a synthetic benchmark for memory search quality and latency.")
-    parser.add_argument("--noise-files", type=int, default=300, help="Number of unrelated synthetic files to index.")
-    parser.add_argument("--chunk-size", type=int, default=120, help="Chunk size for the benchmark index.")
-    parser.add_argument("--chunk-overlap", type=int, default=0, help="Chunk overlap for the benchmark index.")
-    parser.add_argument("--top-k", type=int, default=3, help="Top K results to fetch per query.")
+    parser = argparse.ArgumentParser(
+        description="Run a synthetic benchmark for memory search quality and latency."
+    )
+    parser.add_argument(
+        "--noise-files",
+        type=int,
+        default=300,
+        help="Number of unrelated synthetic files to index.",
+    )
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=120,
+        help="Chunk size for the benchmark index.",
+    )
+    parser.add_argument(
+        "--chunk-overlap",
+        type=int,
+        default=0,
+        help="Chunk overlap for the benchmark index.",
+    )
+    parser.add_argument(
+        "--top-k", type=int, default=3, help="Top K results to fetch per query."
+    )
     args = parser.parse_args()
-    return run_benchmark(args.noise_files, args.chunk_size, args.chunk_overlap, args.top_k)
+    return run_benchmark(
+        args.noise_files, args.chunk_size, args.chunk_overlap, args.top_k
+    )
 
 
 if __name__ == "__main__":

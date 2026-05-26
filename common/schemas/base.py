@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 # ===== LLM Provider Schemas =====
 
+
 def _validate_single_api_key(api_keys: List[str]) -> List[str]:
     normalized_keys = [key.strip() for key in api_keys if key and key.strip()]
     if len(normalized_keys) != 1:
@@ -124,8 +125,12 @@ class TokenUsageStatsRequest(BaseModel):
             raise ValueError("start_date and end_date must be provided together")
         if has_start and has_end and self.start_date > self.end_date:
             raise ValueError("start_date must be earlier than or equal to end_date")
-        if not (self.dimension == "session" and self.session_id) and not (has_start and has_end):
-            raise ValueError("start_date and end_date are required unless querying a specific session")
+        if not (self.dimension == "session" and self.session_id) and not (
+            has_start and has_end
+        ):
+            raise ValueError(
+                "start_date and end_date are required unless querying a specific session"
+            )
         return self
 
 

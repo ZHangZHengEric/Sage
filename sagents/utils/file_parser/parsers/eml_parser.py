@@ -6,6 +6,7 @@ EML文件解析器
 import email
 import email.utils
 from email.header import decode_header
+
 # from email.feedparser import headerRE # Removed as it is internal and might be missing
 from email import policy
 import traceback
@@ -20,7 +21,7 @@ import html2text
 from .base_parser import BaseFileParser, ParseResult
 
 # Define headerRE manually as it's not available in newer python versions or specific environments
-headerRE = re.compile(r'^(From |[\041-\071\073-\176]{1,}:|[\t ])')
+headerRE = re.compile(r"^(From |[\041-\071\073-\176]{1,}:|[\t ])")
 
 # 尝试导入flanker，如果没有则使用email.utils作为备选
 try:
@@ -42,7 +43,7 @@ except ImportError:
 
     def convert(x):
         return x  # 如果没有OpenCC，直接返回原文
-        
+
     print(
         "Warning: OpenCC not available, skipping traditional to simplified conversion"
     )
@@ -477,12 +478,12 @@ class EMLParser(BaseFileParser):
 
         # Ensure data is bytes
         if not isinstance(data, bytes):
-             if data is None:
-                 return ""
-             try:
-                 return str(data)
-             except Exception:
-                 return ""
+            if data is None:
+                return ""
+            try:
+                return str(data)
+            except Exception:
+                return ""
 
         # 扩展编码映射
         encoding_map = {
@@ -1351,7 +1352,6 @@ class EMLParser(BaseFileParser):
         """
         if not body_text:
             return ""
-
 
         # 先转换HTML（如果包含HTML标签）
         if "<" in body_text and ">" in body_text:

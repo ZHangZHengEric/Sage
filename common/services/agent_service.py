@@ -188,10 +188,12 @@ def _normalize_agent_mode(agent_config: Dict[str, Any]) -> Dict[str, Any]:
     return agent_config
 
 
-def _create_model_client(client_params: Dict[str, Any], *, randomize_keys: bool = False) -> Any:
+def _create_model_client(
+    client_params: Dict[str, Any], *, randomize_keys: bool = False
+) -> Any:
     """
     创建模型客户端
-    
+
     支持标准模型和快速模型双配置
     快速模型配置参数（可选）：
     - fast_api_key: 快速模型 API Key（默认使用标准模型的 key）
@@ -201,8 +203,8 @@ def _create_model_client(client_params: Dict[str, Any], *, randomize_keys: bool 
     api_key = client_params.get("api_key")
     base_url = client_params.get("base_url")
     model_name = client_params.get("model")
-    timeout = client_params.get("timeout", 60 * 30)
-    
+    client_params.get("timeout", 60 * 30)
+
     # 快速模型配置（可选）
     fast_api_key = client_params.get("fast_api_key")
     fast_base_url = client_params.get("fast_base_url")
@@ -218,7 +220,7 @@ def _create_model_client(client_params: Dict[str, Any], *, randomize_keys: bool 
         f"初始化Chat模型客户端: model={model_name}, base_url={base_url}, "
         f"fast_model={fast_model_name if fast_model_name else '未配置'}"
     )
-    
+
     from sagents.llm.chat import OpenAIChat
 
     # 使用 OpenAIChat 创建客户端（支持双模型）
@@ -230,7 +232,7 @@ def _create_model_client(client_params: Dict[str, Any], *, randomize_keys: bool 
         fast_base_url=fast_base_url,
         fast_model_name=fast_model_name,
     )
-    
+
     # 返回 SageAsyncOpenAI 实例
     return openai_chat.raw_client
 
@@ -238,7 +240,9 @@ def _create_model_client(client_params: Dict[str, Any], *, randomize_keys: bool 
 def _select_provider(providers: List[LLMProvider]) -> Optional[LLMProvider]:
     if not providers:
         return None
-    return next((provider for provider in providers if provider.is_default), providers[0])
+    return next(
+        (provider for provider in providers if provider.is_default), providers[0]
+    )
 
 
 async def _create_server_model_client_for_user(user_id: str) -> Tuple[Any, str]:
@@ -569,7 +573,9 @@ def delete_agent_workspace_on_host(agent_id: str, user_id: str = "") -> Dict[str
                 ensure_exists=False,
             )
         )
-        return _remove_agent_workspace_directory(workspace_path, agent_id, user_id or "")
+        return _remove_agent_workspace_directory(
+            workspace_path, agent_id, user_id or ""
+        )
 
     uid = (user_id or "").strip()
     if not uid:
@@ -625,8 +631,7 @@ async def delete_agent(
     try:
         await asyncio.to_thread(delete_agent_workspace_on_host, agent_id, owner_uid)
     except Exception as e:
-        logger.error(
-            f"删除 Agent 工作空间失败: agent_id={agent_id}, error={e}")
+        logger.error(f"删除 Agent 工作空间失败: agent_id={agent_id}, error={e}")
     logger.info(f"Agent {agent_id} 删除成功")
     return existing_config
 
@@ -837,21 +842,21 @@ def _copy_directory_contents(
 def _copy_docs_to_workspace(agent_workspace: Path) -> None:
     """
     将项目文档复制到 Agent 工作空间中
-    
+
     Args:
         agent_workspace: Agent 工作空间路径
     """
     # 获取项目根目录（假设当前文件在 common/services/ 下）
     project_root = Path(__file__).parent.parent.parent.parent
     docs_dir = project_root / "docs"
-    
+
     if not docs_dir.exists() or not docs_dir.is_dir():
         logger.warning(f"Docs 目录不存在: {docs_dir}")
         return
-    
+
     # 目标目录：workspace/docs
     target_docs_dir = agent_workspace / "docs"
-    
+
     try:
         # 只复制 en 和 zh 目录下的 markdown 文件
         for lang in ["en", "zh"]:
@@ -859,19 +864,21 @@ def _copy_docs_to_workspace(agent_workspace: Path) -> None:
             if lang_dir.exists() and lang_dir.is_dir():
                 target_lang_dir = target_docs_dir / lang
                 target_lang_dir.mkdir(parents=True, exist_ok=True)
-                
+
                 # 复制所有 .md 文件
                 for md_file in lang_dir.glob("*.md"):
                     target_file = target_lang_dir / md_file.name
                     shutil.copy2(md_file, target_file)
                     logger.debug(f"复制文档: {md_file.name} -> {target_file}")
-        
+
         logger.info(f"Docs 文档已复制到 Agent 工作空间: {target_docs_dir}")
     except Exception as e:
         logger.warning(f"复制 Docs 文档失败: {e}")
 
 
-def _link_openclaw_skills(agent_workspace: Path, skill_sources: Dict[str, Path]) -> List[str]:
+def _link_openclaw_skills(
+    agent_workspace: Path, skill_sources: Dict[str, Path]
+) -> List[str]:
     if not skill_sources:
         return []
 
@@ -926,7 +933,9 @@ def _sync_agent_skills_to_global(agent_workspace: Path) -> List[str]:
     return synced_skills
 
 
-def _load_openclaw_skill_sources_sync(openclaw_home: Path) -> Tuple[List[Path], Dict[str, Path], List[str]]:
+def _load_openclaw_skill_sources_sync(
+    openclaw_home: Path,
+) -> Tuple[List[Path], Dict[str, Path], List[str]]:
     skill_dirs = _detect_openclaw_skill_dirs(openclaw_home)
     skill_sources = _collect_openclaw_skill_sources(skill_dirs)
     available_skills = sorted(skill_sources.keys())
@@ -939,7 +948,9 @@ def _import_openclaw_workspace_assets_sync(
     skill_dirs: List[Path],
     skill_sources: Dict[str, Path],
 ) -> Tuple[List[str], List[str]]:
-    exclude_names = {"skills"} if (openclaw_workspace / "skills") in skill_dirs else set()
+    exclude_names = (
+        {"skills"} if (openclaw_workspace / "skills") in skill_dirs else set()
+    )
     _copy_directory_contents(openclaw_workspace, agent_workspace, exclude_names)
 
     linked_skills = _link_openclaw_skills(agent_workspace, skill_sources)
@@ -997,7 +1008,9 @@ async def import_openclaw_agent(user_id: str = "") -> Dict[str, Any]:
     agent_workspace: Optional[Path] = None
 
     try:
-        created_agent = await create_agent(DEFAULT_OPENCLAW_AGENT_NAME, agent_config, user_id=user_id)
+        created_agent = await create_agent(
+            DEFAULT_OPENCLAW_AGENT_NAME, agent_config, user_id=user_id
+        )
 
         agent_workspace = get_agent_workspace_root(
             created_agent.agent_id,
@@ -1047,7 +1060,9 @@ async def import_openclaw_agent(user_id: str = "") -> Dict[str, Any]:
         )
 
 
-async def get_agent_authorized_users(agent_id: str, user_id: str, role: str) -> List[str]:
+async def get_agent_authorized_users(
+    agent_id: str, user_id: str, role: str
+) -> List[str]:
     dao = AgentConfigDao()
     agent = await dao.get_by_id(agent_id)
     if not agent:
@@ -1159,7 +1174,9 @@ async def get_desktop_file_workspace(
     )
 
 
-async def download_desktop_agent_file(agent_id: str, file_path: str) -> Tuple[str, str, str]:
+async def download_desktop_agent_file(
+    agent_id: str, file_path: str
+) -> Tuple[str, str, str]:
     return await asyncio.to_thread(
         prepare_workspace_download,
         get_desktop_agent_workspace_path(agent_id),
@@ -1226,7 +1243,9 @@ async def generate_agent_abilities(
     startup_cfg = config.get_startup_config()
     llm_provider_id = agent_config.get("llm_provider_id")
     llm_provider_dao = LLMProviderDao()
-    provider = await llm_provider_dao.get_by_id(llm_provider_id) if llm_provider_id else None
+    provider = (
+        await llm_provider_dao.get_by_id(llm_provider_id) if llm_provider_id else None
+    )
 
     if provider:
         raw_keys = provider.api_keys
@@ -1290,7 +1309,9 @@ def resolve_workspace_file_path(workspace_path: str | Path, file_path: str) -> s
     full_file_abs = os.path.normcase(os.path.abspath(full_file_path))
 
     try:
-        in_workspace = os.path.commonpath([workspace_abs, full_file_abs]) == workspace_abs
+        in_workspace = (
+            os.path.commonpath([workspace_abs, full_file_abs]) == workspace_abs
+        )
     except ValueError:
         in_workspace = False
 
@@ -1327,11 +1348,15 @@ def _resolve_workspace_listing_path(
     if listing_path == ".":
         listing_path = ""
 
-    full_path = os.path.join(workspace_str, listing_path) if listing_path else workspace_str
+    full_path = (
+        os.path.join(workspace_str, listing_path) if listing_path else workspace_str
+    )
     full_path_abs = os.path.normcase(os.path.abspath(full_path))
 
     try:
-        in_workspace = os.path.commonpath([workspace_abs, full_path_abs]) == workspace_abs
+        in_workspace = (
+            os.path.commonpath([workspace_abs, full_path_abs]) == workspace_abs
+        )
     except ValueError:
         in_workspace = False
 
@@ -1360,7 +1385,9 @@ def list_workspace_files(
     listing_root = ""
     listing_path = os.fspath(path or "").strip()
     if workspace_str:
-        listing_root, listing_path = _resolve_workspace_listing_path(workspace_str, path)
+        listing_root, listing_path = _resolve_workspace_listing_path(
+            workspace_str, path
+        )
 
     if not workspace_str or not os.path.exists(workspace_str):
         return {
@@ -1533,7 +1560,9 @@ def _resolve_workspace_upload_path(
     if relative_dir == ".":
         relative_dir = ""
 
-    target_dir = os.path.join(workspace_str, relative_dir) if relative_dir else workspace_str
+    target_dir = (
+        os.path.join(workspace_str, relative_dir) if relative_dir else workspace_str
+    )
     file_path = os.path.join(target_dir, filename)
     file_abs = os.path.normcase(os.path.abspath(file_path))
 

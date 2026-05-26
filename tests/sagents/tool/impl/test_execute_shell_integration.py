@@ -3,9 +3,9 @@
 直接用 PassthroughSandboxProvider 跑命令，验证两段式后台执行链路确实能跑通。
 不依赖 docker / 远程沙箱，仅依赖本机 bash + 标准 POSIX 工具（mkdir/tail/cat/kill/setsid）。
 """
+
 from __future__ import annotations
 
-import asyncio
 import os
 import shutil
 import tempfile
@@ -14,7 +14,9 @@ import pytest
 
 from sagents.tool.impl.execute_command_tool import ExecuteCommandTool
 from sagents.utils.sandbox.config import VolumeMount
-from sagents.utils.sandbox.providers.passthrough.passthrough import PassthroughSandboxProvider
+from sagents.utils.sandbox.providers.passthrough.passthrough import (
+    PassthroughSandboxProvider,
+)
 
 
 def _same_real_path(left: str, right: str) -> bool:
@@ -34,7 +36,9 @@ pytestmark = [
 def shell_env(monkeypatch):
     """构造一个 ExecuteCommandTool + PassthroughSandbox，并把 _get_sandbox 打桩。"""
     tmpdir = tempfile.mkdtemp(prefix="sage_shell_test_")
-    sandbox = PassthroughSandboxProvider(sandbox_id="test", sandbox_agent_workspace=tmpdir)
+    sandbox = PassthroughSandboxProvider(
+        sandbox_id="test", sandbox_agent_workspace=tmpdir
+    )
     tool = ExecuteCommandTool()
     monkeypatch.setattr(tool, "_get_sandbox", lambda session_id: sandbox)
     # 隔离全局注册表，避免污染其他测试
@@ -44,6 +48,7 @@ def shell_env(monkeypatch):
 
 
 # ---- 1. 阻塞模式 ----
+
 
 async def test_blocking_echo_returns_completed_with_stdout(shell_env):
     tool, _, _ = shell_env
@@ -75,6 +80,7 @@ async def test_blocking_failing_command_reports_nonzero_exit(shell_env):
 
 # ---- 2. 安全检查 ----
 
+
 async def test_dangerous_command_blocked_before_spawn(shell_env):
     tool, _, _ = shell_env
     out = await tool.execute_shell_command(
@@ -101,6 +107,7 @@ async def test_pipe_to_shell_blocked(shell_env):
 
 # ---- 3. 后台模式 + await_shell ----
 
+
 async def test_background_then_await_completes(shell_env):
     tool, _, _ = shell_env
     started = await tool.execute_shell_command(
@@ -111,12 +118,19 @@ async def test_background_then_await_completes(shell_env):
     assert started["status"] == "running"
     task_id = started["task_id"]
     assert task_id in ExecuteCommandTool._BG_TASKS
-    assert started["next_action"]["if_result_required"] == "call await_shell immediately"
+    assert (
+        started["next_action"]["if_result_required"] == "call await_shell immediately"
+    )
     assert started["next_action"]["await_shell_args"]["task_id"] == task_id
     assert started["next_action"]["await_shell_args"]["block_until_ms"] >= 60000
-    assert started["next_action"]["do_not"] == "do not answer with waiting/progress text only"
+    assert (
+        started["next_action"]["do_not"]
+        == "do not answer with waiting/progress text only"
+    )
 
-    awaited = await tool.await_shell(task_id=task_id, block_until_ms=5000, session_id="s1")
+    awaited = await tool.await_shell(
+        task_id=task_id, block_until_ms=5000, session_id="s1"
+    )
     assert awaited["status"] == "completed"
     assert awaited["exit_code"] == 0
     assert "done" in awaited["stdout"]
@@ -142,7 +156,9 @@ async def test_await_shell_pattern_returns_early(shell_env):
     assert killed["success"] is True
 
 
-async def test_await_shell_reads_running_task_tail_from_agent_workspace_bg_log(shell_env):
+async def test_await_shell_reads_running_task_tail_from_agent_workspace_bg_log(
+    shell_env,
+):
     tool, _, tmpdir = shell_env
     started = await tool.execute_shell_command(
         command="printf 'phase1\\n'; sleep 5; printf 'phase2\\n'",
@@ -170,7 +186,9 @@ async def test_await_shell_reads_running_task_tail_from_agent_workspace_bg_log(s
     assert killed["success"] is True
 
 
-async def test_await_shell_reads_completed_stdout_from_agent_workspace_bg_log(shell_env):
+async def test_await_shell_reads_completed_stdout_from_agent_workspace_bg_log(
+    shell_env,
+):
     tool, _, tmpdir = shell_env
     started = await tool.execute_shell_command(
         command="printf 'phase1\\n'; sleep 0.2; printf 'phase2\\n'",
@@ -192,7 +210,9 @@ async def test_await_shell_reads_completed_stdout_from_agent_workspace_bg_log(sh
     assert completed["exit_code"] == 0
     assert _same_real_path(final_output_file, expected_output_file)
     assert os.path.isabs(final_output_file)
-    assert _same_real_path(os.path.dirname(final_output_file), os.path.join(tmpdir, "bg"))
+    assert _same_real_path(
+        os.path.dirname(final_output_file), os.path.join(tmpdir, "bg")
+    )
     assert os.path.basename(final_output_file) == f"{task_id}.log"
     assert "phase1" in completed["stdout"]
     assert "phase2" in completed["stdout"]
@@ -203,7 +223,9 @@ async def test_await_shell_reads_completed_stdout_from_agent_workspace_bg_log(sh
     assert task_id not in ExecuteCommandTool._BG_TASKS
 
 
-async def test_background_log_dir_virtual_workspace_is_restored_to_host_path(monkeypatch):
+async def test_background_log_dir_virtual_workspace_is_restored_to_host_path(
+    monkeypatch,
+):
     host_tmpdir = tempfile.mkdtemp(prefix="sage_shell_host_workspace_")
     sandbox_workspace = "/sandbox-agent-workspace"
     sandbox = PassthroughSandboxProvider(
@@ -224,7 +246,9 @@ async def test_background_log_dir_virtual_workspace_is_restored_to_host_path(mon
         expected_host_output_file = os.path.join(host_tmpdir, "bg", f"{task_id}.log")
 
         assert _same_real_path(started["output_file"], expected_host_output_file)
-        assert _same_real_path(os.path.dirname(started["output_file"]), os.path.join(host_tmpdir, "bg"))
+        assert _same_real_path(
+            os.path.dirname(started["output_file"]), os.path.join(host_tmpdir, "bg")
+        )
         assert not started["output_file"].startswith(sandbox_workspace)
 
         completed = await tool.await_shell(
@@ -252,7 +276,9 @@ async def test_blocking_deadline_returns_running_then_kill(shell_env):
     assert out["next_action"]["if_result_required"] == "call await_shell immediately"
     assert out["next_action"]["await_shell_args"]["task_id"] == out["task_id"]
     assert out["next_action"]["await_shell_args"]["block_until_ms"] >= 60000
-    assert out["next_action"]["do_not"] == "do not answer with waiting/progress text only"
+    assert (
+        out["next_action"]["do_not"] == "do not answer with waiting/progress text only"
+    )
 
     killed = await tool.kill_shell(task_id=out["task_id"], session_id="s1")
     assert killed["success"] is True
@@ -261,9 +287,12 @@ async def test_blocking_deadline_returns_running_then_kill(shell_env):
 
 # ---- 4. 错误码 ----
 
+
 async def test_await_shell_unknown_task_returns_not_found(shell_env):
     tool, _, _ = shell_env
-    out = await tool.await_shell(task_id="bg_doesnotexist", block_until_ms=100, session_id="s1")
+    out = await tool.await_shell(
+        task_id="bg_doesnotexist", block_until_ms=100, session_id="s1"
+    )
     assert out["success"] is False
     assert out["error_code"] == "NOT_FOUND"
 

@@ -197,7 +197,9 @@ class FileHandler:
     """文件处理器，支持本地文件和网络文件下载"""
 
     @staticmethod
-    async def get_file_path(file_path_or_url: str, is_url: bool, timeout: int = 30) -> str:
+    async def get_file_path(
+        file_path_or_url: str, is_url: bool, timeout: int = 30
+    ) -> str:
         """获取文件路径，如果是URL则下载到临时目录，保持原文件名"""
         try:
             if is_url:
@@ -218,9 +220,9 @@ class FileHandler:
                                 "Content-Disposition", ""
                             )
                             if "filename=" in content_disposition:
-                                filename = content_disposition.split("filename=")[1].strip(
-                                    '"'
-                                )
+                                filename = content_disposition.split("filename=")[
+                                    1
+                                ].strip('"')
                             else:
                                 filename = f"downloaded_file_{int(time.time())}"
                     except Exception:
@@ -230,7 +232,7 @@ class FileHandler:
 
                 # 下载文件
                 async with httpx.AsyncClient(timeout=timeout) as client:
-                    async with client.stream('GET', file_path_or_url) as response:
+                    async with client.stream("GET", file_path_or_url) as response:
                         response.raise_for_status()
                         async with aiofiles.open(temp_file_path, "wb") as f:
                             async for chunk in response.aiter_bytes(chunk_size=8192):
@@ -286,7 +288,9 @@ class TextProcessor:
         }
 
     @staticmethod
-    def replace_wrong_char(text: str, correct_dict: Optional[Dict[str, str]] = None) -> str:
+    def replace_wrong_char(
+        text: str, correct_dict: Optional[Dict[str, str]] = None
+    ) -> str:
         """替换错误字符"""
         if not text:
             return ""
@@ -561,8 +565,7 @@ class FileParser:
         try:
             # 验证文件路径或URL
             validation_result = await asyncio.to_thread(
-                FileValidator.validate_file_path_or_url,
-                file_path_or_url
+                FileValidator.validate_file_path_or_url, file_path_or_url
             )
             if not validation_result["valid"]:
                 return {
@@ -577,7 +580,9 @@ class FileParser:
             is_url = validation_result["is_url"]
 
             # 获取文件路径（如果是URL则下载）
-            file_path = await FileHandler.get_file_path(file_path_or_url, is_url, timeout)
+            file_path = await FileHandler.get_file_path(
+                file_path_or_url, is_url, timeout
+            )
             if is_url:
                 temp_file_path = file_path  # 记录临时文件路径用于清理
 
@@ -591,13 +596,17 @@ class FileParser:
             if parser is None:
                 # 如果没有找到任何解析器，尝试使用pandoc
                 try:
-                    extracted_text = await asyncio.to_thread(_pandoc_convert_file_sync, file_path)
+                    extracted_text = await asyncio.to_thread(
+                        _pandoc_convert_file_sync, file_path
+                    )
                     parse_result = ParseResult(
                         text=extracted_text,
                         metadata={
                             "file_type": "unknown",
                             "parser": "pandoc_fallback",
-                            "file_size": await asyncio.to_thread(_file_size_if_exists_sync, file_path),
+                            "file_size": await asyncio.to_thread(
+                                _file_size_if_exists_sync, file_path
+                            ),
                         },
                         success=True,
                     )
@@ -611,9 +620,13 @@ class FileParser:
                     # 如果是fallback解析器，跳过格式验证
                     if is_fallback:
                         print(f"🔄 使用fallback解析器跳过格式验证: {file_path}")
-                        parse_result = await asyncio.to_thread(_parse_file_sync, parser, file_path, True)
+                        parse_result = await asyncio.to_thread(
+                            _parse_file_sync, parser, file_path, True
+                        )
                     else:
-                        parse_result = await asyncio.to_thread(_parse_file_sync, parser, file_path, False)
+                        parse_result = await asyncio.to_thread(
+                            _parse_file_sync, parser, file_path, False
+                        )
 
                     if not parse_result.success:
                         print(f"⚠️ 解析器失败: {parse_result.error}")
@@ -629,7 +642,9 @@ class FileParser:
                                 metadata={
                                     "file_type": "unknown",
                                     "parser": "pypandoc_emergency_fallback",
-                                    "file_size": await asyncio.to_thread(_file_size_if_exists_sync, file_path),
+                                    "file_size": await asyncio.to_thread(
+                                        _file_size_if_exists_sync, file_path
+                                    ),
                                 },
                                 success=True,
                             )
@@ -646,13 +661,17 @@ class FileParser:
                     # 智能路由已经处理了文件类型检测，直接尝试pypandoc作为最后的fallback
                     try:
                         print("🔄 尝试使用pypandoc作为最后的fallback")
-                        extracted_text = await asyncio.to_thread(_pandoc_convert_file_sync, file_path)
+                        extracted_text = await asyncio.to_thread(
+                            _pandoc_convert_file_sync, file_path
+                        )
                         parse_result = ParseResult(
                             text=extracted_text,
                             metadata={
                                 "file_type": "unknown",
                                 "parser": "pypandoc_exception_fallback",
-                                "file_size": await asyncio.to_thread(_file_size_if_exists_sync, file_path),
+                                "file_size": await asyncio.to_thread(
+                                    _file_size_if_exists_sync, file_path
+                                ),
                             },
                             success=True,
                         )

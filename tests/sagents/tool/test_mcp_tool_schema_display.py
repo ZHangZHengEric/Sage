@@ -1,7 +1,11 @@
 import unittest
 
 from sagents.tool.tool_manager import ToolManager
-from sagents.tool.tool_schema import McpToolSpec, SageMcpToolSpec, StreamableHttpServerParameters
+from sagents.tool.tool_schema import (
+    McpToolSpec,
+    SageMcpToolSpec,
+    StreamableHttpServerParameters,
+)
 
 
 class TestMcpToolSchemaDisplay(unittest.TestCase):
@@ -32,7 +36,9 @@ class TestMcpToolSchemaDisplay(unittest.TestCase):
             parameters=input_schema["properties"],
             required=input_schema["required"],
             server_name="search",
-            server_params=StreamableHttpServerParameters(url="http://example.invalid/mcp"),
+            server_params=StreamableHttpServerParameters(
+                url="http://example.invalid/mcp"
+            ),
             input_schema=input_schema,
         )
         tm.tools[tool.name] = tool
@@ -67,7 +73,9 @@ class TestMcpToolSchemaDisplay(unittest.TestCase):
             parameters=input_schema["properties"],
             required=input_schema["required"],
             server_name="search",
-            server_params=StreamableHttpServerParameters(url="http://example.invalid/mcp"),
+            server_params=StreamableHttpServerParameters(
+                url="http://example.invalid/mcp"
+            ),
             input_schema=input_schema,
         )
         tm.tools[tool.name] = tool
@@ -109,7 +117,9 @@ class TestMcpToolSchemaDisplay(unittest.TestCase):
             parameters=input_schema["properties"],
             required=input_schema["required"],
             server_name="search",
-            server_params=StreamableHttpServerParameters(url="http://example.invalid/mcp"),
+            server_params=StreamableHttpServerParameters(
+                url="http://example.invalid/mcp"
+            ),
             input_schema=input_schema,
         )
         tm.tools[tool.name] = tool
@@ -117,8 +127,13 @@ class TestMcpToolSchemaDisplay(unittest.TestCase):
         display_tool = tm.list_tools_with_type(lang="zh", fallback_chain=["en"])[0]
 
         self.assertEqual(display_tool["description"], "搜索网页")
-        self.assertEqual(display_tool["parameters"]["query"]["description"], "搜索关键词。")
-        self.assertEqual(display_tool["input_schema"]["properties"]["query"]["description"], "搜索关键词。")
+        self.assertEqual(
+            display_tool["parameters"]["query"]["description"], "搜索关键词。"
+        )
+        self.assertEqual(
+            display_tool["input_schema"]["properties"]["query"]["description"],
+            "搜索关键词。",
+        )
         self.assertEqual(display_tool["input_schema"]["required"], ["query"])
 
     def test_sage_mcp_tool_i18n_reaches_openai_schema(self):

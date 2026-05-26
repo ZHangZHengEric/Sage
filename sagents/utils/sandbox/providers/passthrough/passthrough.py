@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 直通模式沙箱实现 - 直接在本机执行，无隔离
 
@@ -20,6 +18,8 @@ from __future__ import annotations
   4. 资源限制（CPU时间、内存）
   适用场景：生产环境、需要隔离的多租户场景
 """
+
+from __future__ import annotations
 
 import os
 import re
@@ -60,7 +60,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
 
         # 路径映射表，支持动态修改
         self._dynamic_mounts: Dict[str, str] = {}
-        
+
         # 添加 volume_mounts 到动态映射
         for mount in self._volume_mounts:
             self.add_mount(mount.host_path, mount.mount_path)
@@ -115,17 +115,26 @@ class PassthroughSandboxProvider(ISandboxHandle):
         roots: List[tuple[str, bool]] = []
         if self._dynamic_mounts:
             volume_read_only = {
-                os.path.realpath(os.path.abspath(mount.host_path)): bool(getattr(mount, "read_only", False))
+                os.path.realpath(os.path.abspath(mount.host_path)): bool(
+                    getattr(mount, "read_only", False)
+                )
                 for mount in self._volume_mounts
             }
             for host_path in self._dynamic_mounts.values():
                 root = os.path.realpath(os.path.abspath(host_path))
                 roots.append((root, volume_read_only.get(root, False)))
         elif self._sandbox_agent_workspace:
-            roots.append((os.path.realpath(os.path.abspath(self._sandbox_agent_workspace)), False))
+            roots.append(
+                (
+                    os.path.realpath(os.path.abspath(self._sandbox_agent_workspace)),
+                    False,
+                )
+            )
 
         for path in self._allowed_paths:
-            roots.append((os.path.realpath(os.path.abspath(os.path.expanduser(path))), False))
+            roots.append(
+                (os.path.realpath(os.path.abspath(os.path.expanduser(path))), False)
+            )
 
         deduped: Dict[str, bool] = {}
         for root, read_only in roots:
@@ -140,13 +149,17 @@ class PassthroughSandboxProvider(ISandboxHandle):
         except ValueError:
             return False
 
-    def _validate_host_path_allowed(self, host_path: str, operation: str = "read") -> str:
+    def _validate_host_path_allowed(
+        self, host_path: str, operation: str = "read"
+    ) -> str:
         actual = os.path.realpath(os.path.abspath(host_path))
         write_operation = operation in {"write", "delete", "mkdir"}
         for root, read_only in self._allowed_path_roots():
             if self._path_under_root(actual, root):
                 if write_operation and read_only:
-                    raise PermissionError(f"Path is read-only in passthrough sandbox: {host_path}")
+                    raise PermissionError(
+                        f"Path is read-only in passthrough sandbox: {host_path}"
+                    )
                 return actual
 
         allowed = ", ".join(root for root, _ in self._allowed_path_roots()) or "<none>"
@@ -159,7 +172,9 @@ class PassthroughSandboxProvider(ISandboxHandle):
         if not path:
             return False
         try:
-            self._validate_host_path_allowed(self.to_host_path(path), operation=operation)
+            self._validate_host_path_allowed(
+                self.to_host_path(path), operation=operation
+            )
             return True
         except PermissionError:
             return False
@@ -192,21 +207,31 @@ class PassthroughSandboxProvider(ISandboxHandle):
 
         for sandbox_path, host_path in self._iter_virtual_mappings():
             if normalized_path == sandbox_path:
-                logger.debug(f"PassthroughSandboxProvider: Path conversion: {virtual_path} -> {host_path}")
+                logger.debug(
+                    f"PassthroughSandboxProvider: Path conversion: {virtual_path} -> {host_path}"
+                )
                 return host_path
             for sep in ("/", os.sep):
                 if sep and normalized_path.startswith(sandbox_path + sep):
-                    rel_path = normalized_path[len(sandbox_path):].lstrip("/").lstrip(os.sep)
+                    rel_path = (
+                        normalized_path[len(sandbox_path) :].lstrip("/").lstrip(os.sep)
+                    )
                     result = os.path.join(host_path, rel_path)
-                    logger.debug(f"PassthroughSandboxProvider: Path conversion: {virtual_path} -> {result}")
+                    logger.debug(
+                        f"PassthroughSandboxProvider: Path conversion: {virtual_path} -> {result}"
+                    )
                     return result
 
         if os.path.isabs(normalized_path):
             return normalized_path
 
-        workspace_root = os.path.abspath(self.host_workspace_path or self.workspace_path)
+        workspace_root = os.path.abspath(
+            self.host_workspace_path or self.workspace_path
+        )
         result = os.path.join(workspace_root, normalized_path)
-        logger.debug(f"PassthroughSandboxProvider: Rooted relative path {virtual_path} -> {result}")
+        logger.debug(
+            f"PassthroughSandboxProvider: Rooted relative path {virtual_path} -> {result}"
+        )
         return result
 
     def to_virtual_path(self, host_path: str) -> str:
@@ -220,8 +245,12 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 return mapped_virtual
             for sep in (os.sep, "/"):
                 if sep and normalized_host.startswith(mapped_host + sep):
-                    rel_path = normalized_host[len(mapped_host):].lstrip(os.sep).lstrip("/")
-                    rel_posix = rel_path.replace(os.sep, "/") if os.sep != "/" else rel_path
+                    rel_path = (
+                        normalized_host[len(mapped_host) :].lstrip(os.sep).lstrip("/")
+                    )
+                    rel_posix = (
+                        rel_path.replace(os.sep, "/") if os.sep != "/" else rel_path
+                    )
                     base = mapped_virtual.rstrip("/")
                     return f"{base}/{rel_posix}" if base else f"/{rel_posix}"
         return host_path
@@ -250,13 +279,17 @@ class PassthroughSandboxProvider(ISandboxHandle):
     ) -> Dict[str, Any]:
         # 路径转换 + workdir 落到宿主机
         converted = self._convert_paths_in_command(command)
-        host_workdir = self.to_host_path(workdir) if workdir else self.to_host_path(
-            self._sandbox_agent_workspace
+        host_workdir = (
+            self.to_host_path(workdir)
+            if workdir
+            else self.to_host_path(self._sandbox_agent_workspace)
         )
         host_workdir = self._validate_host_path_allowed(host_workdir, operation="read")
         host_log_dir = self.to_host_path(log_dir) if log_dir else None
         if host_log_dir:
-            host_log_dir = self._validate_host_path_allowed(host_log_dir, operation="write")
+            host_log_dir = self._validate_host_path_allowed(
+                host_log_dir, operation="write"
+            )
         return self._bg_runner.start(
             converted,
             workdir=host_workdir,
@@ -273,7 +306,9 @@ class PassthroughSandboxProvider(ISandboxHandle):
     async def read_background_output_range(
         self, task_id: str, offset: int = 0, max_bytes: int = 1 << 20
     ):
-        return self._bg_runner.read_range_bytes(task_id, offset=offset, max_bytes=max_bytes)
+        return self._bg_runner.read_range_bytes(
+            task_id, offset=offset, max_bytes=max_bytes
+        )
 
     async def is_background_alive(self, task_id: str) -> bool:
         return self._bg_runner.is_alive(task_id)
@@ -295,7 +330,9 @@ class PassthroughSandboxProvider(ISandboxHandle):
 
     def remove_allowed_paths(self, paths: List[str]) -> None:
         """移除允许访问的路径列表"""
-        self._allowed_paths = [path for path in self._allowed_paths if path not in paths]
+        self._allowed_paths = [
+            path for path in self._allowed_paths if path not in paths
+        ]
 
     def get_allowed_paths(self) -> List[str]:
         """获取当前允许访问的路径列表"""
@@ -303,32 +340,32 @@ class PassthroughSandboxProvider(ISandboxHandle):
 
     def _convert_paths_in_command(self, command: str) -> str:
         """Convert virtual paths to host paths in command string
-        
+
         This method finds path-like patterns in the command and converts
         virtual paths to host paths.
         """
         if not command:
             return command
-            
+
         # Pattern to match common path patterns:
         # - Absolute paths starting with / (e.g., /sage-workspace, /tmp)
         # - Paths in quotes (single or double)
         # This is a simple heuristic and may need refinement
-        
+
         converted_command = command
-        
+
         # Find all potential paths (simplified approach)
         # Look for patterns like: /path/to/file, "/path/to/file", '/path/to/file'
         path_pattern = r'["\']?(/[a-zA-Z0-9_\-./]+)["\']?'
-        
+
         def replace_path(match):
             full_match = match.group(0)
             path = match.group(1)
-            
+
             # Check if this looks like a virtual path we should convert
             # Convert the path
             host_path = self.to_host_path(path)
-            
+
             # If conversion changed the path, replace it
             if host_path != path:
                 # Preserve quotes if they existed
@@ -339,34 +376,40 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 else:
                     return host_path
             return full_match
-        
+
         converted_command = re.sub(path_pattern, replace_path, converted_command)
         return converted_command
 
     def _read_file_sync(self, host_path: str, encoding: str) -> str:
-        with open(host_path, 'r', encoding=encoding) as f:
+        with open(host_path, "r", encoding=encoding) as f:
             return f.read()
 
-    def _write_file_sync(self, host_path: str, content: str, encoding: str, mode: str) -> None:
+    def _write_file_sync(
+        self, host_path: str, content: str, encoding: str, mode: str
+    ) -> None:
         os.makedirs(os.path.dirname(host_path), exist_ok=True)
         write_mode = "a" if mode == "append" else "w"
         with open(host_path, write_mode, encoding=encoding) as f:
             f.write(content)
 
-    def _list_directory_sync(self, host_path: str, include_hidden: bool) -> List[FileInfo]:
+    def _list_directory_sync(
+        self, host_path: str, include_hidden: bool
+    ) -> List[FileInfo]:
         result = []
         for entry in os.listdir(host_path):
             if not include_hidden and entry.startswith("."):
                 continue
             entry_path = os.path.join(host_path, entry)
             stat = os.stat(entry_path)
-            result.append(FileInfo(
-                path=self.to_virtual_path(entry_path),
-                is_file=os.path.isfile(entry_path),
-                is_dir=os.path.isdir(entry_path),
-                size=stat.st_size,
-                modified_time=stat.st_mtime,
-            ))
+            result.append(
+                FileInfo(
+                    path=self.to_virtual_path(entry_path),
+                    is_file=os.path.isfile(entry_path),
+                    is_dir=os.path.isdir(entry_path),
+                    size=stat.st_size,
+                    modified_time=stat.st_mtime,
+                )
+            )
         return result
 
     def _delete_path_sync(self, host_path: str) -> None:
@@ -409,7 +452,9 @@ class PassthroughSandboxProvider(ISandboxHandle):
         try:
             os.makedirs(npm_cache_dir, exist_ok=True)
         except Exception as e:
-            logger.warning(f"PassthroughSandboxProvider: Failed to create npm cache dir {npm_cache_dir}: {e}")
+            logger.warning(
+                f"PassthroughSandboxProvider: Failed to create npm cache dir {npm_cache_dir}: {e}"
+            )
 
         merged_env = {**os.environ, **(env_vars or {})}
         merged_env.setdefault("npm_config_cache", npm_cache_dir)
@@ -433,18 +478,20 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 while True:
                     try:
                         stdout_chunk = await asyncio.wait_for(
-                            process.stdout.read(4096),
-                            timeout=0.5
+                            process.stdout.read(4096), timeout=0.5
                         )
                         if stdout_chunk:
-                            collected_stdout.append(stdout_chunk.decode('utf-8', errors='replace'))
+                            collected_stdout.append(
+                                stdout_chunk.decode("utf-8", errors="replace")
+                            )
 
                         stderr_chunk = await asyncio.wait_for(
-                            process.stderr.read(4096),
-                            timeout=0.5
+                            process.stderr.read(4096), timeout=0.5
                         )
                         if stderr_chunk:
-                            collected_stderr.append(stderr_chunk.decode('utf-8', errors='replace'))
+                            collected_stderr.append(
+                                stderr_chunk.decode("utf-8", errors="replace")
+                            )
 
                         if not stdout_chunk and not stderr_chunk:
                             if process.returncode is not None:
@@ -454,10 +501,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
                         if process.returncode is not None:
                             break
                         continue
-                return (
-                    ''.join(collected_stdout),
-                    ''.join(collected_stderr)
-                )
+                return ("".join(collected_stdout), "".join(collected_stderr))
 
             try:
                 stdout_text, stderr_text = await asyncio.wait_for(
@@ -473,8 +517,8 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 )
             except asyncio.TimeoutError:
                 # 超时发生时，返回已收集的输出
-                stdout_text = ''.join(collected_stdout)
-                stderr_text = ''.join(collected_stderr)
+                stdout_text = "".join(collected_stdout)
+                stderr_text = "".join(collected_stderr)
                 if process:
                     try:
                         process.kill()
@@ -490,8 +534,8 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 )
         except Exception as e:
             # 其他异常，返回已收集的输出
-            stdout_text = ''.join(collected_stdout)
-            stderr_text = ''.join(collected_stderr)
+            stdout_text = "".join(collected_stdout)
+            stderr_text = "".join(collected_stderr)
             if process:
                 try:
                     process.kill()
@@ -522,7 +566,9 @@ class PassthroughSandboxProvider(ISandboxHandle):
         """写入文件"""
         host_path = self.to_host_path(path)
         host_path = self._validate_host_path_allowed(host_path, operation="write")
-        await asyncio.to_thread(self._write_file_sync, host_path, content, encoding, mode)
+        await asyncio.to_thread(
+            self._write_file_sync, host_path, content, encoding, mode
+        )
 
     async def file_exists(self, path: str) -> bool:
         """检查文件是否存在"""
@@ -542,11 +588,15 @@ class PassthroughSandboxProvider(ISandboxHandle):
             logger.debug(f"PassthroughSandboxProvider.get_mtime 失败 {path}: {e}")
             return 0
 
-    async def list_directory(self, path: str, include_hidden: bool = False) -> List[FileInfo]:
+    async def list_directory(
+        self, path: str, include_hidden: bool = False
+    ) -> List[FileInfo]:
         """列出目录内容"""
         host_path = self.to_host_path(path)
         host_path = self._validate_host_path_allowed(host_path, operation="read")
-        return await asyncio.to_thread(self._list_directory_sync, host_path, include_hidden)
+        return await asyncio.to_thread(
+            self._list_directory_sync, host_path, include_hidden
+        )
 
     async def ensure_directory(self, path: str) -> None:
         """确保目录存在"""
@@ -596,12 +646,16 @@ class PassthroughSandboxProvider(ISandboxHandle):
             await self.execute_command(pip_cmd, workdir=workdir, timeout=300)
 
         actual_workdir = (
-            self.to_host_path(workdir) if workdir else self.to_host_path(self._sandbox_agent_workspace)
+            self.to_host_path(workdir)
+            if workdir
+            else self.to_host_path(self._sandbox_agent_workspace)
         )
-        actual_workdir = self._validate_host_path_allowed(actual_workdir, operation="read")
+        actual_workdir = self._validate_host_path_allowed(
+            actual_workdir, operation="read"
+        )
 
         # 创建临时文件存储代码
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(code)
             temp_file = f.name
 
@@ -622,8 +676,10 @@ class PassthroughSandboxProvider(ISandboxHandle):
 
             return ExecutionResult(
                 success=process.returncode == 0,
-                output=stdout.decode('utf-8', errors='replace'),
-                error=stderr.decode('utf-8', errors='replace') if process.returncode != 0 else None,
+                output=stdout.decode("utf-8", errors="replace"),
+                error=stderr.decode("utf-8", errors="replace")
+                if process.returncode != 0
+                else None,
                 execution_time=0,
                 installed_packages=requirements or [],
             )
@@ -648,7 +704,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
             # 清理临时文件
             try:
                 os.remove(temp_file)
-            except:
+            except Exception:
                 pass
 
     async def execute_javascript(
@@ -664,15 +720,19 @@ class PassthroughSandboxProvider(ISandboxHandle):
             await self.execute_command(npm_cmd, workdir=workdir, timeout=300)
 
         actual_workdir = (
-            self.to_host_path(workdir) if workdir else self.to_host_path(self._sandbox_agent_workspace)
+            self.to_host_path(workdir)
+            if workdir
+            else self.to_host_path(self._sandbox_agent_workspace)
         )
-        actual_workdir = self._validate_host_path_allowed(actual_workdir, operation="read")
+        actual_workdir = self._validate_host_path_allowed(
+            actual_workdir, operation="read"
+        )
 
         # 检查是否有 node 环境
         try:
             process = await asyncio.create_subprocess_exec(
-                'node',
-                '-e',
+                "node",
+                "-e",
                 code,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -686,8 +746,10 @@ class PassthroughSandboxProvider(ISandboxHandle):
 
             return ExecutionResult(
                 success=process.returncode == 0,
-                output=stdout.decode('utf-8', errors='replace'),
-                error=stderr.decode('utf-8', errors='replace') if process.returncode != 0 else None,
+                output=stdout.decode("utf-8", errors="replace"),
+                error=stderr.decode("utf-8", errors="replace")
+                if process.returncode != 0
+                else None,
                 execution_time=0,
                 installed_packages=packages or [],
             )
@@ -737,9 +799,9 @@ class PassthroughSandboxProvider(ISandboxHandle):
             return ""
 
         # 使用 SandboxFileSystem 的 get_file_tree 方法
-        fs = SandboxFileSystem([
-            VolumeMount(self._sandbox_agent_workspace, self._sandbox_agent_workspace)
-        ])
+        fs = SandboxFileSystem(
+            [VolumeMount(self._sandbox_agent_workspace, self._sandbox_agent_workspace)]
+        )
         return await fs.get_file_tree_compact(
             include_hidden=include_hidden,
             root_path=target_path,

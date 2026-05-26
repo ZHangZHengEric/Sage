@@ -58,7 +58,8 @@ class BrowserBridgeHub:
                 {
                     "user_id": user_id,
                     "extension_id": extension_id or state.get("extension_id"),
-                    "extension_version": extension_version or state.get("extension_version"),
+                    "extension_version": extension_version
+                    or state.get("extension_version"),
                     "active_tab": active_tab or state.get("active_tab"),
                     "page_context": page_context or state.get("page_context"),
                     "capabilities": capabilities or state.get("capabilities") or [],
@@ -111,7 +112,9 @@ class BrowserBridgeHub:
                 "created_at": command.created_at,
             }
 
-    async def poll_command(self, *, user_id: str, timeout_seconds: float = 20.0) -> dict[str, Any] | None:
+    async def poll_command(
+        self, *, user_id: str, timeout_seconds: float = 20.0
+    ) -> dict[str, Any] | None:
         async with self._lock:
             queue = self._command_queues[user_id]
             if queue:
@@ -160,7 +163,9 @@ class BrowserBridgeHub:
                 waiter.set_result(payload)
             return payload
 
-    async def wait_command_result(self, *, command_id: str, timeout_seconds: float = 30.0) -> dict[str, Any] | None:
+    async def wait_command_result(
+        self, *, command_id: str, timeout_seconds: float = 30.0
+    ) -> dict[str, Any] | None:
         async with self._lock:
             existing = self._command_results.get(command_id)
             if existing is not None:
@@ -204,4 +209,3 @@ class BrowserBridgeHub:
             "args": command.args,
             "created_at": command.created_at,
         }
-

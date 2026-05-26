@@ -3,10 +3,7 @@ from pathlib import Path
 
 def test_desktop_pyinstaller_spec_collects_dynamic_model_imports():
     spec_path = (
-        Path(__file__).resolve().parents[3]
-        / "app"
-        / "desktop"
-        / "sage-desktop.spec"
+        Path(__file__).resolve().parents[3] / "app" / "desktop" / "sage-desktop.spec"
     )
 
     spec_text = spec_path.read_text()

@@ -14,8 +14,15 @@ def test_create_aiomysql_engine_forces_ping_reconnect_arg(monkeypatch):
 
     monkeypatch.setattr(db, "create_async_engine", fake_create_async_engine)
 
-    engine = db._create_aiomysql_engine("mysql+aiomysql://user:pass@host/db", future=True, pool_pre_ping=True)
+    engine = db._create_aiomysql_engine(
+        "mysql+aiomysql://user:pass@host/db", future=True, pool_pre_ping=True
+    )
 
     assert engine is fake_engine
     assert fake_dialect.__dict__["_send_false_to_ping"] is True
-    assert calls == [(("mysql+aiomysql://user:pass@host/db",), {"future": True, "pool_pre_ping": True})]
+    assert calls == [
+        (
+            ("mysql+aiomysql://user:pass@host/db",),
+            {"future": True, "pool_pre_ping": True},
+        )
+    ]

@@ -12,9 +12,15 @@ from loguru import logger
 
 from common.core import config
 from common.core.exceptions import SageHTTPException
-from common.core.middleware import register_cors_middleware, register_request_logging_middleware
+from common.core.middleware import (
+    register_cors_middleware,
+    register_request_logging_middleware,
+)
 from common.core.render import Response
-from app.server.services.prometheus_metrics import finish_http_request, start_http_request
+from app.server.services.prometheus_metrics import (
+    finish_http_request,
+    start_http_request,
+)
 from .auth import get_session_claims, parse_access_token
 
 # 白名单 API 路径
@@ -59,7 +65,11 @@ WHITELIST_API_PATHS = frozenset(
 
 def _compile_whitelist_regex(paths: frozenset[str]) -> Tuple[re.Pattern, ...]:
     """将带参数的路径转换为正则"""
-    return tuple(re.compile("^" + re.sub(r"\{[^}]+\}", r"[^/]+", p) + "$") for p in paths if "{" in p)
+    return tuple(
+        re.compile("^" + re.sub(r"\{[^}]+\}", r"[^/]+", p) + "$")
+        for p in paths
+        if "{" in p
+    )
 
 
 WHITELIST_API_REGEXES = _compile_whitelist_regex(WHITELIST_API_PATHS)
@@ -75,14 +85,18 @@ PROMETHEUS_HTTP_METRICS_IGNORED_PATHS = frozenset(
 
 def _is_whitelisted(path: str) -> bool:
     """判断路径是否在白名单"""
-    return path in WHITELIST_API_PATHS or any(r.match(path) for r in WHITELIST_API_REGEXES)
+    return path in WHITELIST_API_PATHS or any(
+        r.match(path) for r in WHITELIST_API_REGEXES
+    )
 
 
 def _should_record_prometheus_http_metrics(path: str) -> bool:
     return path not in PROMETHEUS_HTTP_METRICS_IGNORED_PATHS
 
 
-def _is_trusted_identity_proxy(host: str | None, trusted_proxy_ips: list[str] | None) -> bool:
+def _is_trusted_identity_proxy(
+    host: str | None, trusted_proxy_ips: list[str] | None
+) -> bool:
     """Trust identity passthrough only from configured proxy IPs/CIDRs."""
     if not host:
         return False
@@ -139,7 +153,9 @@ def register_middlewares(app):
             if request.method == "OPTIONS":
                 return await call_next(request)
             client_host = request.client.host if request.client else None
-            is_trusted_proxy_client = _is_trusted_identity_proxy(client_host, cfg.trusted_identity_proxy_ips)
+            is_trusted_proxy_client = _is_trusted_identity_proxy(
+                client_host, cfg.trusted_identity_proxy_ips
+            )
             is_whitelisted = _is_whitelisted(path)
             auth = request.headers.get("Authorization", "")
             auth_error = None
@@ -159,7 +175,11 @@ def register_middlewares(app):
                     request.state.user_claims = session_claims
 
             internal_user_id = request.headers.get("X-Sage-Internal-UserId")
-            if not getattr(request.state, "user_claims", None) and internal_user_id and is_trusted_proxy_client:
+            if (
+                not getattr(request.state, "user_claims", None)
+                and internal_user_id
+                and is_trusted_proxy_client
+            ):
                 userid = internal_user_id.strip()
                 if userid:
                     request.state.user_claims = {
@@ -167,13 +187,15 @@ def register_middlewares(app):
                         "username": userid,
                         "nickname": userid,
                         "role": "user",
-                    }      
+                    }
                 return await call_next(request)
 
             if not getattr(request.state, "user_claims", None) and not is_whitelisted:
                 if auth_error:
                     return await _unauthorized_response(*auth_error)
-                return await _unauthorized_response(401, "未授权", "missing auth session")
+                return await _unauthorized_response(
+                    401, "未授权", "missing auth session"
+                )
 
         return await call_next(request)
 

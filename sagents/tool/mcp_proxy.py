@@ -1,4 +1,9 @@
 from typing import Any, Dict, List, Optional, Union, cast
+
+try:
+    from builtins import BaseExceptionGroup
+except ImportError:  # pragma: no cover - Python < 3.11 compatibility
+    from exceptiongroup import BaseExceptionGroup
 from mcp import Tool, StdioServerParameters
 from mcp.types import TextContent
 
@@ -69,7 +74,9 @@ def _raise_innermost_exception(exc: BaseException) -> None:
 
 class McpProxy:
     def __init__(self, isolated: bool = False):
-        self._pool = McpConnectionPool() if isolated else get_global_mcp_connection_pool()
+        self._pool = (
+            McpConnectionPool() if isolated else get_global_mcp_connection_pool()
+        )
 
     async def run_mcp_tool(
         self,
@@ -82,16 +89,16 @@ class McpProxy:
         if not session_id:
             session_id = "default"
         # 只有当工具参数定义中包含 session_id / user_id 时才传递
-        tool_params = getattr(tool, 'parameters', {}) or {}
+        tool_params = getattr(tool, "parameters", {}) or {}
         is_anytool_server = getattr(tool, "server_name", "") == "AnyTool"
         if is_anytool_server:
             if session_id and "session_id" not in kwargs:
                 kwargs["session_id"] = session_id
             if user_id and "user_id" not in kwargs:
                 kwargs["user_id"] = user_id
-        if 'session_id' in tool_params:
+        if "session_id" in tool_params:
             kwargs["session_id"] = session_id
-        if user_id and 'user_id' in tool_params and 'user_id' not in kwargs:
+        if user_id and "user_id" in tool_params and "user_id" not in kwargs:
             kwargs["user_id"] = user_id
         try:
             if isinstance(tool.server_params, SseServerParameters):
@@ -101,7 +108,9 @@ class McpProxy:
             elif isinstance(tool.server_params, StdioServerParameters):
                 return await self._execute_stdio_mcp_tool(tool, **kwargs)
             else:
-                raise ValueError(f"Unknown server params type: {type(tool.server_params)}")
+                raise ValueError(
+                    f"Unknown server params type: {type(tool.server_params)}"
+                )
         except BaseExceptionGroup as eg:
             _raise_innermost_exception(eg)
 

@@ -3,6 +3,7 @@
 prompt cache key 在 Anthropic / 阿里云等多家 provider 上都对 ``tools`` 字段顺序
 敏感，这里要保证排序后顺序不变、且与字典序一致。
 """
+
 from __future__ import annotations
 
 from sagents.tool.tool_base import tool

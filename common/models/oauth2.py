@@ -158,9 +158,7 @@ class OAuth2TokenDao(BaseDao):
             where=[OAuth2Token.access_token == access_token],
         )
 
-    async def get_by_refresh_token(
-        self, refresh_token: str
-    ) -> Optional[OAuth2Token]:
+    async def get_by_refresh_token(self, refresh_token: str) -> Optional[OAuth2Token]:
         return await BaseDao.get_first(
             self,
             OAuth2Token,

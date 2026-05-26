@@ -21,7 +21,9 @@ def test_default_cors_configuration_uses_public_wildcard_without_credentials():
     config._GLOBAL_STARTUP_CONFIG = config.StartupConfig()
     app = _build_app()
 
-    cors_layers = [layer for layer in app.user_middleware if layer.cls is CORSMiddleware]
+    cors_layers = [
+        layer for layer in app.user_middleware if layer.cls is CORSMiddleware
+    ]
 
     assert len(cors_layers) == 1
     assert cors_layers[0].kwargs["allow_credentials"] is False
@@ -43,7 +45,9 @@ def test_cors_configuration_can_override_all_major_settings():
     )
     app = _build_app()
 
-    cors_layers = [layer for layer in app.user_middleware if layer.cls is CORSMiddleware]
+    cors_layers = [
+        layer for layer in app.user_middleware if layer.cls is CORSMiddleware
+    ]
 
     assert len(cors_layers) == 1
     assert cors_layers[0].kwargs["allow_origins"] == ["https://app.example.com"]

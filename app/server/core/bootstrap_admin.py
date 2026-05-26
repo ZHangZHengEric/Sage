@@ -17,7 +17,4 @@ def get_bootstrap_admin_spec(cfg) -> BootstrapAdminSpec | None:
 
 def format_bootstrap_admin_log(spec: BootstrapAdminSpec) -> str:
     masked_password = "*" * 3
-    return (
-        "初始化默认管理员用户. "
-        f"用户名: {spec.username}, 密码: {masked_password}"
-    )
+    return f"初始化默认管理员用户. 用户名: {spec.username}, 密码: {masked_password}"

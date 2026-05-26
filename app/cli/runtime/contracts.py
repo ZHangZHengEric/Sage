@@ -24,8 +24,13 @@ def _resolve_session_goal_fields(
         request_system_context = getattr(request, "system_context", None)
         if isinstance(request_system_context, dict):
             objective = str(request_system_context.get("active_goal") or "").strip()
-            status = str(request_system_context.get("goal_status") or "active").strip() or "active"
-            goal_mode = str(request_system_context.get("goal_mode") or "").strip().lower()
+            status = (
+                str(request_system_context.get("goal_status") or "active").strip()
+                or "active"
+            )
+            goal_mode = (
+                str(request_system_context.get("goal_mode") or "").strip().lower()
+            )
             if goal_mode == "true" and objective:
                 goal_payload = {
                     "objective": objective,
@@ -96,7 +101,9 @@ def _emit_json_session_event(
                 "agent_mode": getattr(request, "agent_mode", None),
                 "workspace": workspace,
                 "workspace_source": "explicit" if workspace else "default",
-                "requested_skills": list(getattr(request, "available_skills", None) or []),
+                "requested_skills": list(
+                    getattr(request, "available_skills", None) or []
+                ),
                 "max_loop_count": getattr(request, "max_loop_count", None),
                 "goal": goal_payload,
                 "has_prior_messages": prior_message_count > 0,

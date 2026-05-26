@@ -13,7 +13,6 @@ from dotenv import load_dotenv
 from app.cli.services.base import CLIError
 from common.core import config
 from common.schemas.chat import Message, StreamRequest
-from common.services.llm_provider_probe_utils import friendly_provider_probe_error
 
 
 def _load_cli_env_defaults() -> Dict[str, str]:
@@ -62,27 +61,43 @@ def collect_runtime_issues(cfg: config.StartupConfig) -> Dict[str, List[str]]:
     missing_deps = [name for name, present in deps.items() if not present]
     if missing_deps:
         errors.append(f"Missing Python dependencies: {', '.join(missing_deps)}")
-        next_steps.append("Install project dependencies first, for example: pip install -r requirements.txt")
-        next_steps.append("If only rank_bm25 is missing, install it directly with: pip install rank-bm25")
+        next_steps.append(
+            "Install project dependencies first, for example: pip install -r requirements.txt"
+        )
+        next_steps.append(
+            "If only rank_bm25 is missing, install it directly with: pip install rank-bm25"
+        )
 
     if not (cfg.default_llm_api_key or "").strip():
         errors.append("Missing SAGE_DEFAULT_LLM_API_KEY")
-        next_steps.append("Set SAGE_DEFAULT_LLM_API_KEY in your shell, ~/.sage/.sage_env, or local .env before using run/chat.")
+        next_steps.append(
+            "Set SAGE_DEFAULT_LLM_API_KEY in your shell, ~/.sage/.sage_env, or local .env before using run/chat."
+        )
 
     if not (cfg.default_llm_api_base_url or "").strip():
         errors.append("Missing SAGE_DEFAULT_LLM_API_BASE_URL")
-        next_steps.append("Set SAGE_DEFAULT_LLM_API_BASE_URL in your shell, ~/.sage/.sage_env, or local .env.")
+        next_steps.append(
+            "Set SAGE_DEFAULT_LLM_API_BASE_URL in your shell, ~/.sage/.sage_env, or local .env."
+        )
 
     if not (cfg.default_llm_model_name or "").strip():
         errors.append("Missing SAGE_DEFAULT_LLM_MODEL_NAME")
-        next_steps.append("Set SAGE_DEFAULT_LLM_MODEL_NAME in your shell, ~/.sage/.sage_env, or local .env.")
+        next_steps.append(
+            "Set SAGE_DEFAULT_LLM_MODEL_NAME in your shell, ~/.sage/.sage_env, or local .env."
+        )
 
     if cfg.db_type == "mysql":
-        warnings.append("CLI is using MySQL. For local development, file DB is usually simpler.")
-        next_steps.append("If you only need local development, consider setting SAGE_DB_TYPE=file.")
+        warnings.append(
+            "CLI is using MySQL. For local development, file DB is usually simpler."
+        )
+        next_steps.append(
+            "If you only need local development, consider setting SAGE_DB_TYPE=file."
+        )
 
     if cfg.auth_mode != "native":
-        warnings.append(f"Current auth mode is {cfg.auth_mode}. CLI currently works best with native/local setups.")
+        warnings.append(
+            f"Current auth mode is {cfg.auth_mode}. CLI currently works best with native/local setups."
+        )
 
     return {
         "errors": errors,
@@ -171,7 +186,9 @@ def _import_shared_model_modules() -> None:
 
 
 @asynccontextmanager
-async def cli_runtime(*, verbose: bool = False) -> AsyncGenerator[config.StartupConfig, None]:
+async def cli_runtime(
+    *, verbose: bool = False
+) -> AsyncGenerator[config.StartupConfig, None]:
     from app.server.bootstrap import (
         close_db_client,
         close_skill_manager,
@@ -210,7 +227,9 @@ async def cli_runtime(*, verbose: bool = False) -> AsyncGenerator[config.Startup
 
 
 @asynccontextmanager
-async def cli_db_runtime(*, verbose: bool = False) -> AsyncGenerator[config.StartupConfig, None]:
+async def cli_db_runtime(
+    *, verbose: bool = False
+) -> AsyncGenerator[config.StartupConfig, None]:
     from app.server.bootstrap import close_db_client, initialize_db_connection
 
     cfg = configure_cli_logging(verbose=verbose)
@@ -276,20 +295,30 @@ def validate_cli_request_options(
     if os.path.exists(workspace_path) and not os.path.isdir(workspace_path):
         raise CLIError(
             f"Workspace path is not a directory: {workspace_path}",
-            next_steps=["Choose a directory path for `--workspace`, or remove the conflicting file."],
+            next_steps=[
+                "Choose a directory path for `--workspace`, or remove the conflicting file."
+            ],
         )
 
-    parent_dir = workspace_path if os.path.isdir(workspace_path) else os.path.dirname(workspace_path) or os.getcwd()
+    parent_dir = (
+        workspace_path
+        if os.path.isdir(workspace_path)
+        else os.path.dirname(workspace_path) or os.getcwd()
+    )
     if not os.path.exists(parent_dir):
         raise CLIError(
             f"Workspace parent directory does not exist: {parent_dir}",
-            next_steps=["Create the parent directory first, or choose a different `--workspace` path."],
+            next_steps=[
+                "Create the parent directory first, or choose a different `--workspace` path."
+            ],
         )
 
     if not os.access(parent_dir, os.W_OK):
         raise CLIError(
             f"Workspace path is not writable: {parent_dir}",
-            next_steps=["Choose a writable `--workspace` path, or update directory permissions."],
+            next_steps=[
+                "Choose a writable `--workspace` path, or update directory permissions."
+            ],
         )
 
     return workspace_path
@@ -313,10 +342,12 @@ async def run_request_stream(
         workspace_path = os.path.abspath(workspace)
         os.makedirs(workspace_path, exist_ok=True)
         stream_service.agent_workspace = workspace_path
-        stream_service.skill_manager, stream_service.agent_skill_manager = create_skill_proxy(
-            request.available_skills,
-            user_id=request.user_id,
-            agent_workspace=workspace_path,
+        stream_service.skill_manager, stream_service.agent_skill_manager = (
+            create_skill_proxy(
+                request.available_skills,
+                user_id=request.user_id,
+                agent_workspace=workspace_path,
+            )
         )
         if request.system_context is None:
             request.system_context = {}
@@ -337,8 +368,7 @@ def validate_cli_runtime_requirements() -> config.StartupConfig:
     if issues["errors"]:
         detail = "\n".join(f"- {item}" for item in issues["errors"])
         raise CLIError(
-            "CLI runtime is not ready:\n"
-            f"{detail}",
+            f"CLI runtime is not ready:\n{detail}",
             next_steps=issues["next_steps"],
         )
     return cfg

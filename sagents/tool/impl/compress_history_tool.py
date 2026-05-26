@@ -7,12 +7,13 @@
 from typing import Dict, Any, List
 
 from sagents.utils.logger import logger
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.messages.message import MessageChunk, MessageRole
 from sagents.context.messages.message_manager import MessageManager
 
 
 class CompressHistoryError(Exception):
     """压缩历史消息异常"""
+
     pass
 
 
@@ -32,12 +33,13 @@ class CompressHistoryTool:
         self.compression_levels = {
             "light": {"tool_truncate": 1000, "assistant_summary": 800},
             "medium": {"tool_truncate": 500, "assistant_summary": 400},
-            "heavy": {"tool_truncate": 200, "assistant_summary": 200}
+            "heavy": {"tool_truncate": 200, "assistant_summary": 200},
         }
 
     def _get_session_context(self, session_id: str):
         """通过 session_id 获取会话上下文"""
         from sagents.utils.agent_session_helper import get_live_session
+
         session = get_live_session(session_id, log_prefix="CompressHistoryTool")
 
         if not session or not session.session_context:
@@ -52,10 +54,10 @@ class CompressHistoryTool:
 
     def _calculate_tokens(self, content) -> int:
         """计算内容的 token 数
-        
+
         Args:
             content: 消息内容，可能是字符串或列表（多模态消息）
-        
+
         Returns:
             int: token 数量
         """
@@ -69,7 +71,9 @@ class CompressHistoryTool:
         # 它会正确处理 tool_calls 等情况
         return MessageManager.convert_messages_to_str(messages)
 
-    async def _call_llm_for_compression(self, messages_text: str, session_id: str) -> str:
+    async def _call_llm_for_compression(
+        self, messages_text: str, session_id: str
+    ) -> str:
         """
         调用 LLM 生成压缩摘要（流式请求，禁用深度思考）
 
@@ -89,13 +93,13 @@ class CompressHistoryTool:
             raise CompressHistoryError("会话模型未初始化")
 
         # 移除非标准参数和与显式参数冲突的参数
-        model_config.pop('max_model_len', None)
-        model_config.pop('api_key', None)
-        model_config.pop('maxTokens', None)
-        model_config.pop('max_tokens', None)  # 移除可能存在的 max_tokens
-        model_config.pop('temperature', None)  # 移除可能存在的 temperature
-        model_config.pop('base_url', None)
-        model_name = model_config.pop('model', 'gpt-3.5-turbo')
+        model_config.pop("max_model_len", None)
+        model_config.pop("api_key", None)
+        model_config.pop("maxTokens", None)
+        model_config.pop("max_tokens", None)  # 移除可能存在的 max_tokens
+        model_config.pop("temperature", None)  # 移除可能存在的 temperature
+        model_config.pop("base_url", None)
+        model_name = model_config.pop("model", "gpt-3.5-turbo")
 
         # 构建压缩提示词 - 优化为更适合作为记忆供后续执行使用
         prompt = f"""请将以下对话历史压缩为执行记忆摘要。这个摘要将被后续 AI 助手读取，用于理解上下文并继续执行任务。
@@ -144,17 +148,14 @@ class CompressHistoryTool:
 
         try:
             # 构建 extra_body，禁用深度思考
-            extra_body = {
-                "top_k": 20,
-                "_step_name": "compress_history"
-            }
+            extra_body = {"top_k": 20, "_step_name": "compress_history"}
 
             # 判断是否为 OpenAI 推理模型
             is_openai_reasoning_model = (
-                model_name.startswith("o3-") or
-                model_name.startswith("o1-") or
-                "gpt-5.2" in model_name.lower() or
-                "gpt-5.1" in model_name.lower()
+                model_name.startswith("o3-")
+                or model_name.startswith("o1-")
+                or "gpt-5.2" in model_name.lower()
+                or "gpt-5.1" in model_name.lower()
             )
 
             if is_openai_reasoning_model:
@@ -164,20 +165,18 @@ class CompressHistoryTool:
                 # 其他模型使用 enable_thinking=False 禁用思考
                 extra_body["chat_template_kwargs"] = {"enable_thinking": False}
                 extra_body["enable_thinking"] = False
-                extra_body["thinking"] = {'type': "disabled"}
+                extra_body["thinking"] = {"type": "disabled"}
 
             # 流式请求 LLM
             stream = await model.chat.completions.create(
                 model=model_name,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
+                messages=[{"role": "user", "content": prompt}],
                 stream=True,
                 stream_options={"include_usage": True},
                 max_tokens=2000,
                 temperature=0.3,
                 extra_body=extra_body,
-                **model_config
+                **model_config,
             )
 
             # 收集流式响应内容
@@ -194,7 +193,9 @@ class CompressHistoryTool:
             logger.error(f"调用 LLM 压缩失败: {e}")
             raise CompressHistoryError(f"LLM 压缩失败: {e}")
 
-    def _determine_compression_range(self, messages: List[MessageChunk]) -> Dict[str, Any]:
+    def _determine_compression_range(
+        self, messages: List[MessageChunk]
+    ) -> Dict[str, Any]:
         """
         确定压缩范围
 
@@ -210,9 +211,9 @@ class CompressHistoryTool:
 
         # 找到所有 User 消息的索引（不包括 System 部分）
         user_indices = [
-            i for i, msg in enumerate(messages)
-            if i >= system_end and
-            msg.is_user_input_message()
+            i
+            for i, msg in enumerate(messages)
+            if i >= system_end and msg.is_user_input_message()
         ]
 
         if len(user_indices) == 0:
@@ -222,7 +223,7 @@ class CompressHistoryTool:
                 "to_compress_start": system_end,
                 "to_compress_end": system_end,
                 "total_messages": len(messages),
-                "reserved_rounds": 0
+                "reserved_rounds": 0,
             }
 
         if len(user_indices) == 1:
@@ -233,7 +234,7 @@ class CompressHistoryTool:
                 "to_compress_start": first_user_idx + 1,  # 从 User 之后开始
                 "to_compress_end": len(messages),  # 到结尾
                 "total_messages": len(messages),
-                "reserved_rounds": 1
+                "reserved_rounds": 1,
             }
         else:
             # 多个 User：压缩最后一个 User 之前的所有消息
@@ -243,13 +244,11 @@ class CompressHistoryTool:
                 "to_compress_start": system_end,  # 从 System 之后开始
                 "to_compress_end": last_user_idx,  # 到最后一个 User 之前
                 "total_messages": len(messages),
-                "reserved_rounds": len(user_indices)
+                "reserved_rounds": len(user_indices),
             }
 
     async def compress_conversation_history(
-        self,
-        messages: List[MessageChunk],
-        session_id: str
+        self, messages: List[MessageChunk], session_id: str
     ) -> Dict[str, Any]:
         """
         压缩历史会话消息
@@ -261,7 +260,9 @@ class CompressHistoryTool:
         Returns:
             Dict: 压缩结果，包含摘要和统计信息
         """
-        logger.info(f"🗜️ 开始压缩历史消息: session_id={session_id}, 消息数={len(messages)}")
+        logger.info(
+            f"🗜️ 开始压缩历史消息: session_id={session_id}, 消息数={len(messages)}"
+        )
 
         try:
             all_messages = messages
@@ -276,13 +277,15 @@ class CompressHistoryTool:
                         "original_messages_count": 0,
                         "original_tokens": 0,
                         "compressed_tokens": 0,
-                        "compression_ratio": 0
-                    }
+                        "compression_ratio": 0,
+                    },
                 }
 
             # 2. 确定压缩范围
             range_info = self._determine_compression_range(all_messages)
-            to_compress = all_messages[range_info["to_compress_start"]:range_info["to_compress_end"]]
+            to_compress = all_messages[
+                range_info["to_compress_start"] : range_info["to_compress_end"]
+            ]
 
             if not to_compress:
                 return {
@@ -294,17 +297,18 @@ class CompressHistoryTool:
                         "original_messages_count": len(all_messages),
                         "original_tokens": 0,
                         "compressed_tokens": 0,
-                        "compression_ratio": 0
-                    }
+                        "compression_ratio": 0,
+                    },
                 }
 
-            logger.info(f"压缩范围: 消息 {range_info['to_compress_start']} 到 {range_info['to_compress_end']}, "
-                       f"共 {len(to_compress)} 条消息")
+            logger.info(
+                f"压缩范围: 消息 {range_info['to_compress_start']} 到 {range_info['to_compress_end']}, "
+                f"共 {len(to_compress)} 条消息"
+            )
 
             # 3. 计算原始 token 数
             original_tokens = sum(
-                self._calculate_tokens(msg.get_content() or "")
-                for msg in to_compress
+                self._calculate_tokens(msg.get_content() or "") for msg in to_compress
             )
 
             # 4. 格式化消息并调用 LLM 压缩
@@ -313,10 +317,16 @@ class CompressHistoryTool:
 
             # 5. 计算压缩后的 token 数
             compressed_tokens = self._calculate_tokens(summary)
-            compression_ratio = (original_tokens - compressed_tokens) / original_tokens if original_tokens > 0 else 0
+            compression_ratio = (
+                (original_tokens - compressed_tokens) / original_tokens
+                if original_tokens > 0
+                else 0
+            )
 
-            logger.info(f"压缩完成: {original_tokens} tokens -> {compressed_tokens} tokens, "
-                       f"压缩率: {compression_ratio:.2%}")
+            logger.info(
+                f"压缩完成: {original_tokens} tokens -> {compressed_tokens} tokens, "
+                f"压缩率: {compression_ratio:.2%}"
+            )
 
             # 6. 构建压缩结果 - 简化为 message 格式
             compression_info = (
@@ -326,20 +336,15 @@ class CompressHistoryTool:
                 f"📝 历史摘要:\n{summary}"
             )
 
-            return {
-                "status": "success",
-                "message": compression_info
-            }
+            return {"status": "success", "message": compression_info}
 
         except CompressHistoryError as e:
             logger.error(f"压缩历史消息失败: {e}")
-            return {
-                "status": "error",
-                "message": f"❌ 压缩失败: {str(e)}"
-            }
+            return {"status": "error", "message": f"❌ 压缩失败: {str(e)}"}
         except Exception as e:
             logger.error(f"压缩历史消息时发生未知错误: {e}")
             import traceback
+
             logger.error(traceback.format_exc())
             return {
                 "status": "error",
@@ -350,6 +355,6 @@ class CompressHistoryTool:
                     "original_messages_count": 0,
                     "original_tokens": 0,
                     "compressed_tokens": 0,
-                    "compression_ratio": 0
-                }
+                    "compression_ratio": 0,
+                },
             }

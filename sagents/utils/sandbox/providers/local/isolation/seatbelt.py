@@ -3,6 +3,7 @@ Seatbelt isolation strategy (macOS sandbox-exec).
 
 使用 macOS 的 sandbox-exec 进行文件系统隔离。
 """
+
 import asyncio
 import subprocess
 import os
@@ -21,7 +22,7 @@ from .subprocess import (
 
 class SeatbeltIsolation:
     """macOS sandbox-exec 隔离模式"""
-    
+
     def __init__(
         self,
         venv_dir: str,
@@ -34,17 +35,25 @@ class SeatbeltIsolation:
         self.sandbox_agent_workspace = sandbox_agent_workspace
         self.volume_mounts = volume_mounts or []
         self.limits = limits or {}
-        self.sandbox_dir = sandbox_runtime_dir or resolve_sandbox_runtime_dir(sandbox_agent_workspace) or os.path.join(sandbox_agent_workspace, ".sandbox")
+        self.sandbox_dir = (
+            sandbox_runtime_dir
+            or resolve_sandbox_runtime_dir(sandbox_agent_workspace)
+            or os.path.join(sandbox_agent_workspace, ".sandbox")
+        )
         os.makedirs(self.sandbox_dir, exist_ok=True)
-        
-    def _generate_profile(self, output_pkl: str, additional_read_paths: list = None,
-                         additional_write_paths: list = None) -> str:
+
+    def _generate_profile(
+        self,
+        output_pkl: str,
+        additional_read_paths: list = None,
+        additional_write_paths: list = None,
+    ) -> str:
         """生成 seatbelt 配置文件"""
         import tempfile
 
         # 构建允许的路径
         allowed = [self.sandbox_agent_workspace, self.sandbox_dir, self.venv_dir]
-        
+
         # 添加 volume_mounts 中的路径
         for mount in self.volume_mounts:
             allowed.append(mount.host_path)
@@ -53,7 +62,7 @@ class SeatbeltIsolation:
             allowed.extend(additional_read_paths)
         if additional_write_paths:
             allowed.extend(additional_write_paths)
-        
+
         # 添加系统关键路径（用于 Rosetta 和动态库加载）
         system_paths = [
             "/usr/lib",
@@ -65,16 +74,16 @@ class SeatbeltIsolation:
             "/private/var/db/dyld",
         ]
         allowed.extend(system_paths)
-        
+
         # 添加 conda 环境路径（如果 Python 在 conda 中）
         conda_base = os.environ.get("CONDA_PREFIX") or os.environ.get("CONDA_ROOT")
         if conda_base:
             allowed.append(conda_base)
             allowed.append(os.path.dirname(conda_base))  # envs 目录
-        
+
         # 去重
         allowed = list(set(allowed))
-        
+
         # 构建 sandbox profile
         # 策略：
         #   - 系统调用 / IPC / 进程 / mach / sysctl / iokit 全部放行（否则
@@ -96,7 +105,7 @@ class SeatbeltIsolation:
             # 文件读全放开（保留 file-write 的细粒度限制即可）
             "(allow file-read*)",
             # /dev 下必备的写
-            '(allow file-write* '
+            "(allow file-write* "
             '(literal "/dev/null") (literal "/dev/zero") '
             '(literal "/dev/dtracehelper") (literal "/dev/tty") '
             '(literal "/dev/stdout") (literal "/dev/stderr"))',
@@ -110,25 +119,25 @@ class SeatbeltIsolation:
             if not path:
                 continue
             if os.path.isdir(path):
-                lines.append(f"(allow file-write* (subpath \"{path}\"))")
+                lines.append(f'(allow file-write* (subpath "{path}"))')
             elif os.path.isfile(path):
-                lines.append(f"(allow file-write* (literal \"{path}\"))")
-        
+                lines.append(f'(allow file-write* (literal "{path}"))')
+
         profile_content = "\n".join(lines)
-        
+
         # 写入临时文件
         profile_fd, profile_path = tempfile.mkstemp(suffix=".sb")
         with os.fdopen(profile_fd, "w") as f:
             f.write(profile_content)
-            
+
         return profile_path
-        
+
     async def execute(self, payload: Dict[str, Any], cwd: Optional[str] = None) -> Any:
         """
         使用 sandbox-exec 执行 payload。
         """
-        logger.info(f"[SeatbeltIsolation] 开始执行")
-        
+        logger.info("[SeatbeltIsolation] 开始执行")
+
         run_id = str(uuid.uuid4())
         input_pkl, output_pkl, launcher_path = await asyncio.to_thread(
             _prepare_payload_files_sync,
@@ -136,14 +145,16 @@ class SeatbeltIsolation:
             run_id,
             payload,
         )
-        
+
         # 使用沙箱的 venv Python（解析符号链接获取真实路径）
         python_bin = os.path.join(self.venv_dir, "bin", "python")
         python_bin_dir = None
         if os.path.islink(python_bin):
             python_bin = os.path.realpath(python_bin)
             python_bin_dir = os.path.dirname(python_bin)
-            logger.info(f"[SeatbeltIsolation] Python 是符号链接，已解析为真实路径: {python_bin}")
+            logger.info(
+                f"[SeatbeltIsolation] Python 是符号链接，已解析为真实路径: {python_bin}"
+            )
         additional_write = [cwd] if cwd else []
         additional_read = [input_pkl]
         if python_bin_dir:
@@ -154,15 +165,19 @@ class SeatbeltIsolation:
             additional_read_paths=additional_read,
             additional_write_paths=additional_write,
         )
-        
+
         cmd = [
-            "sandbox-exec", "-f", profile_path,
-            python_bin, launcher_path,
-            input_pkl, output_pkl
+            "sandbox-exec",
+            "-f",
+            profile_path,
+            python_bin,
+            launcher_path,
+            input_pkl,
+            output_pkl,
         ]
-        
+
         logger.info(f"[SeatbeltIsolation] 执行命令: {' '.join(cmd[:4])}...")
-        
+
         try:
             try:
                 # 用流式 helper：launcher 内部跑命令时实时把 stdout 转发到本进程
@@ -192,14 +207,14 @@ class SeatbeltIsolation:
                     f"stdout: {stdout_text[:500]}"
                 )
                 raise Exception(f"Seatbelt execution failed: {stderr_text}")
-            
+
             res = await asyncio.to_thread(_load_pickle_output_sync, output_pkl)
-            
-            if res['status'] == 'success':
-                return res['result']
+
+            if res["status"] == "success":
+                return res["result"]
             else:
                 raise Exception(f"Error in seatbelt: {res.get('error')}")
-                
+
         finally:
             try:
                 await asyncio.to_thread(_remove_file_if_exists_sync, input_pkl)
@@ -209,16 +224,21 @@ class SeatbeltIsolation:
                 await asyncio.to_thread(_remove_file_if_exists_sync, profile_path)
             except Exception:
                 pass
-                    
-    def execute_background(self, command: str, cwd: Optional[str] = None) -> Dict[str, Any]:
+
+    def execute_background(
+        self, command: str, cwd: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         后台执行命令。
         注意：seatbelt 模式下后台任务会受限。
         """
-        logger.warning(f"[SeatbeltIsolation.execute_background] seatbelt 模式下不建议使用后台任务")
-        
+        logger.warning(
+            "[SeatbeltIsolation.execute_background] seatbelt 模式下不建议使用后台任务"
+        )
+
         # 使用 subprocess 模式执行
         from .subprocess import SubprocessIsolation
+
         subproc = SubprocessIsolation(
             venv_dir=self.venv_dir,
             sandbox_agent_workspace=self.sandbox_agent_workspace,

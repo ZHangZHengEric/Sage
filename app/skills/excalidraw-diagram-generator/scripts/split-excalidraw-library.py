@@ -17,7 +17,6 @@ Example:
 """
 
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -34,16 +33,16 @@ def sanitize_filename(name: str) -> str:
         Sanitized filename safe for all platforms
     """
     # Replace spaces with hyphens
-    filename = name.replace(' ', '-')
+    filename = name.replace(" ", "-")
 
     # Remove or replace special characters
-    filename = re.sub(r'[^\w\-.]', '', filename)
+    filename = re.sub(r"[^\w\-.]", "", filename)
 
     # Remove multiple consecutive hyphens
-    filename = re.sub(r'-+', '-', filename)
+    filename = re.sub(r"-+", "-", filename)
 
     # Remove leading/trailing hyphens
-    filename = filename.strip('-')
+    filename = filename.strip("-")
 
     return filename
 
@@ -61,7 +60,7 @@ def find_library_file(directory: Path) -> Path:
     Raises:
         SystemExit: If no library file or multiple library files found
     """
-    library_files = list(directory.glob('*.excalidrawlib'))
+    library_files = list(directory.glob("*.excalidrawlib"))
 
     if len(library_files) == 0:
         print(f"Error: No .excalidrawlib file found in {directory}")
@@ -98,55 +97,54 @@ def split_library(library_dir: str) -> None:
     print(f"Found library: {library_path.name}")
 
     # Load library file
-    print(f"Loading library data...")
-    with open(library_path, 'r', encoding='utf-8') as f:
+    print("Loading library data...")
+    with open(library_path, "r", encoding="utf-8") as f:
         library_data = json.load(f)
 
     # Validate library structure
-    if 'libraryItems' not in library_data:
+    if "libraryItems" not in library_data:
         print("Error: Invalid library file format (missing 'libraryItems')")
         sys.exit(1)
 
     # Create icons directory
-    icons_dir = library_dir / 'icons'
+    icons_dir = library_dir / "icons"
     icons_dir.mkdir(exist_ok=True)
     print(f"Output directory: {library_dir}")
 
     # Process each library item (icon)
-    library_items = library_data['libraryItems']
+    library_items = library_data["libraryItems"]
     icon_list = []
 
     print(f"Processing {len(library_items)} icons...")
 
     for item in library_items:
         # Get icon name
-        icon_name = item.get('name', 'Unnamed')
+        icon_name = item.get("name", "Unnamed")
 
         # Create sanitized filename
-        filename = sanitize_filename(icon_name) + '.json'
+        filename = sanitize_filename(icon_name) + ".json"
 
         # Save icon data
         icon_path = icons_dir / filename
-        with open(icon_path, 'w', encoding='utf-8') as f:
+        with open(icon_path, "w", encoding="utf-8") as f:
             json.dump(item, f, ensure_ascii=False, indent=2)
 
         # Add to reference list
-        icon_list.append({
-            'name': icon_name,
-            'filename': filename
-        })
+        icon_list.append({"name": icon_name, "filename": filename})
 
         print(f"  ✓ {icon_name} → {filename}")
 
     # Sort icon list by name
-    icon_list.sort(key=lambda x: x['name'])
+    icon_list.sort(key=lambda x: x["name"])
 
     # Generate reference.md
     library_name = library_path.stem
-    reference_path = library_dir / 'reference.md'
-    with open(reference_path, 'w', encoding='utf-8') as f:
+    reference_path = library_dir / "reference.md"
+    with open(reference_path, "w", encoding="utf-8") as f:
         f.write(f"# {library_name} Reference\n\n")
-        f.write(f"This directory contains {len(icon_list)} icons extracted from `{library_path.name}`.\n\n")
+        f.write(
+            f"This directory contains {len(icon_list)} icons extracted from `{library_path.name}`.\n\n"
+        )
         f.write("## Available Icons\n\n")
         f.write("| Icon Name | Filename |\n")
         f.write("|-----------|----------|\n")
@@ -155,8 +153,12 @@ def split_library(library_dir: str) -> None:
             f.write(f"| {icon['name']} | `icons/{icon['filename']}` |\n")
 
         f.write("\n## Usage\n\n")
-        f.write("Each icon JSON file contains the complete `elements` array needed to render that icon in Excalidraw.\n")
-        f.write("You can copy the elements from these files into your Excalidraw diagrams.\n")
+        f.write(
+            "Each icon JSON file contains the complete `elements` array needed to render that icon in Excalidraw.\n"
+        )
+        f.write(
+            "You can copy the elements from these files into your Excalidraw diagrams.\n"
+        )
 
     print(f"\n✅ Successfully split library into {len(icon_list)} icons")
     print(f"📄 Reference file created: {reference_path}")
@@ -171,7 +173,9 @@ def main():
     if len(sys.argv) != 2:
         print("Usage: python split-excalidraw-library.py <path-to-library-directory>")
         print("\nExample:")
-        print("  python split-excalidraw-library.py skills/excalidraw-diagram-generator/libraries/aws-architecture-icons/")
+        print(
+            "  python split-excalidraw-library.py skills/excalidraw-diagram-generator/libraries/aws-architecture-icons/"
+        )
         print("\nNote: The directory should contain a .excalidrawlib file.")
         sys.exit(1)
 
@@ -179,5 +183,5 @@ def main():
     split_library(library_dir)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

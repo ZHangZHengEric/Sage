@@ -32,21 +32,20 @@ agent_custom_system_base_requirements = {
 - Ao explicar, use linguagem natural simples para descrever a funcionalidade sem revelar o nome real da ferramenta ou informações de ID.
 - Verifique cuidadosamente a lista de ferramentas para garantir que os nomes estejam corretos e os parâmetros estejam corretos; não chame ferramentas inexistentes.
 - Adira ao princípio de "Ação Primeiro": É estritamente proibido pedir opiniões do usuário antes que a tarefa seja concluída. Você deve se esforçar ao máximo para resolver problemas de forma independente, fazendo suposições razoáveis para progredir, se necessário. Somente pergunte ao usuário quando uma lacuna de informações graves tornar a tarefa completamente impossível. Convide a confirmação do usuário apenas após a conclusão da tarefa. Proíba a saída de expressões explícitas como "vou encerrar esta sessão".
-- Requisito de Saída de Arquivo: Ao gerar caminhos de arquivo ou endereços de arquivo, você DEVE usar o formato de link de arquivo Markdown, por exemplo, [nome_do_arquivo](file:///caminho/absoluto/para/arquivo). Não gere caminhos de arquivo simples e sempre use caminho absoluto de arquivo."""
+- Requisito de Saída de Arquivo: Ao gerar caminhos de arquivo ou endereços de arquivo, você DEVE usar o formato de link de arquivo Markdown, por exemplo, [nome_do_arquivo](file:///caminho/absoluto/para/arquivo). Não gere caminhos de arquivo simples e sempre use caminho absoluto de arquivo.""",
 }
 
 agent_custom_system_task_requirement = {
     "zh": "- 任务管理要求：收到任务时，首先必须使用 `todo_write` 工具创建任务清单（新任务默认 status=pending）。开始执行某条子任务前，必须先用 `todo_write` 把该任务的 status 标记为 in_progress；该子任务完成后，再用 `todo_write` 把 status 更新为 completed 并补充 conclusion。任意时刻最多只允许有一条任务处于 in_progress。**每次调用 `todo_write` 只传新增或本次需要变更的任务条目（更新仅传 id + 真正变更的字段，例如 id+status 切换状态、id+conclusion 补结论），未变化的任务严禁再次传入。**",
     "en": "- Task Management Requirements: When a task is received, you must first use the `todo_write` tool to create a task list (new tasks default to status=pending). Before you begin working on a subtask, you must first call `todo_write` to set its status to `in_progress`; once that subtask is finished, call `todo_write` again to set the status to `completed` and fill in a conclusion. At any moment, at most one task may be `in_progress`. **Each call to `todo_write` must include ONLY the tasks that are new or actually changing this turn (for an update, send just the id plus the truly changed fields, e.g. id+status to flip state, id+conclusion to add a conclusion). Never resend unchanged tasks.**",
-    "pt": "- Requisitos de Gerenciamento de Tarefas: Ao receber uma tarefa, você deve primeiro usar a ferramenta `todo_write` para criar uma lista de tarefas (novas tarefas têm status=pending por padrão). Antes de começar a trabalhar em uma subtarefa, você deve usar `todo_write` para definir seu status como `in_progress`; quando essa subtarefa for concluída, use `todo_write` novamente para defini-la como `completed` e preencher uma conclusão. A qualquer momento, no máximo uma tarefa pode estar `in_progress`. **Cada chamada de `todo_write` deve incluir APENAS as tarefas que são novas ou que realmente mudam neste turno (para uma atualização, envie apenas o id mais os campos realmente alterados, por exemplo id+status, id+conclusion). Nunca reenvie tarefas inalteradas.**"
+    "pt": "- Requisitos de Gerenciamento de Tarefas: Ao receber uma tarefa, você deve primeiro usar a ferramenta `todo_write` para criar uma lista de tarefas (novas tarefas têm status=pending por padrão). Antes de começar a trabalhar em uma subtarefa, você deve usar `todo_write` para definir seu status como `in_progress`; quando essa subtarefa for concluída, use `todo_write` novamente para defini-la como `completed` e preencher uma conclusão. A qualquer momento, no máximo uma tarefa pode estar `in_progress`. **Cada chamada de `todo_write` deve incluir APENAS as tarefas que são novas ou que realmente mudam neste turno (para uma atualização, envie apenas o id mais os campos realmente alterados, por exemplo id+status, id+conclusion). Nunca reenvie tarefas inalteradas.**",
 }
 
 agent_custom_system_turn_status_requirement = {
     "zh": "- 本轮状态契约：当你输出了面向用户的阶段说明、结果、问题、确认项或阻塞说明后，必须调用 `turn_status(status=task_done|need_user_input|blocked|continue_work)` 报告本轮状态。任务完成用 `task_done`；向用户提问/请求确认/等待上传或补充信息用 `need_user_input`；受阻无法继续用 `blocked`；如果刚才文字只是中间进度且还要继续执行，用 `continue_work`。禁止只调用 turn_status 而不写说明。",
     "en": "- Turn-status contract: after writing user-facing progress, result, question, confirmation request, or blocked-state explanation, you MUST call `turn_status(status=task_done|need_user_input|blocked|continue_work)`. Use `task_done` when complete; `need_user_input` when asking the user, requesting confirmation, or waiting for upload/input; `blocked` when unable to proceed; `continue_work` when the text is only intermediate progress and more work is needed. Calling turn_status WITHOUT preceding user-facing text will be rejected.",
-    "pt": "- Contrato de status do turno: depois de escrever para o usuário progresso, resultado, pergunta, item de confirmação ou explicação de bloqueio, você DEVE chamar `turn_status(status=task_done|need_user_input|blocked|continue_work)` para relatar o status deste turno. Use `task_done` quando concluir; `need_user_input` ao perguntar ao usuário, pedir confirmação ou aguardar upload/informação adicional; `blocked` quando não puder prosseguir; `continue_work` quando o texto for apenas progresso intermediário e ainda houver trabalho. Proibido chamar apenas `turn_status` sem texto para o usuário."
+    "pt": "- Contrato de status do turno: depois de escrever para o usuário progresso, resultado, pergunta, item de confirmação ou explicação de bloqueio, você DEVE chamar `turn_status(status=task_done|need_user_input|blocked|continue_work)` para relatar o status deste turno. Use `task_done` quando concluir; `need_user_input` ao perguntar ao usuário, pedir confirmação ou aguardar upload/informação adicional; `blocked` quando não puder prosseguir; `continue_work` quando o texto for apenas progresso intermediário e ainda houver trabalho. Proibido chamar apenas `turn_status` sem texto para o usuário.",
 }
-
 
 
 # turn_status 调用缺少前置说明时的拒绝反馈（写回 tool 结果，下一轮模型可见）
@@ -225,5 +224,5 @@ ou
     "task_interrupted": false
 }}
 ```
-"""
+""",
 }

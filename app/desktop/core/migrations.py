@@ -54,7 +54,12 @@ async def migrate_desktop_default_user_id() -> None:
 
         result = await session.execute(
             update(AgentAuthorization)
-            .where(or_(AgentAuthorization.user_id == "", AgentAuthorization.user_id.is_(None)))
+            .where(
+                or_(
+                    AgentAuthorization.user_id == "",
+                    AgentAuthorization.user_id.is_(None),
+                )
+            )
             .values(user_id=DEFAULT_DESKTOP_USER_ID)
         )
         migrated["agent_authorizations"] = int(result.rowcount or 0)

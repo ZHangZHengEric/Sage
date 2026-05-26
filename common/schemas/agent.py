@@ -125,7 +125,8 @@ def convert_config_to_agent(
         created_at=config.get("created_at"),
         updated_at=config.get("updated_at"),
         llm_provider_id=config.get("llm_provider_id"),
-        fast_llm_provider_id=config.get("fast_llm_provider_id") or config.get("fast_llm_provider_id"),
+        fast_llm_provider_id=config.get("fast_llm_provider_id")
+        or config.get("fast_llm_provider_id"),
     )
 
 

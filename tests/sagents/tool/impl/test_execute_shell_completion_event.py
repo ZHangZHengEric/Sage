@@ -9,6 +9,7 @@
 6. 12h GC：超期 task 被 _gc_stale_tasks 强制清理
 7. tail truncation：_truncate_tail_for_reminder 尾部优先截断
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -24,7 +25,9 @@ from sagents.tool.impl.execute_command_tool import (
     _truncate_tail_for_reminder,
     _BG_TASK_MAX_AGE_S,
 )
-from sagents.utils.sandbox.providers.passthrough.passthrough import PassthroughSandboxProvider
+from sagents.utils.sandbox.providers.passthrough.passthrough import (
+    PassthroughSandboxProvider,
+)
 
 
 pytestmark = [
@@ -39,7 +42,9 @@ pytestmark = [
 @pytest.fixture
 def shell_env(monkeypatch):
     tmpdir = tempfile.mkdtemp(prefix="sage_shell_evt_test_")
-    sandbox = PassthroughSandboxProvider(sandbox_id="test", sandbox_agent_workspace=tmpdir)
+    sandbox = PassthroughSandboxProvider(
+        sandbox_id="test", sandbox_agent_workspace=tmpdir
+    )
     tool = ExecuteCommandTool()
     monkeypatch.setattr(tool, "_get_sandbox", lambda session_id: sandbox)
     monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
@@ -60,6 +65,7 @@ async def _wait_event(session_id: str, task_id: str, timeout: float = 5.0) -> bo
 
 
 # ---- 1. watcher 完成事件写入 ----
+
 
 async def test_completion_event_emitted_after_finish(shell_env):
     tool, _, _ = shell_env
@@ -90,6 +96,7 @@ async def test_completion_event_emitted_after_finish(shell_env):
 
 # ---- 2. await_shell completed 时事件被消费（去重） ----
 
+
 async def test_await_shell_consumes_completion_event(shell_env):
     tool, _, _ = shell_env
     started = await tool.execute_shell_command(
@@ -99,7 +106,9 @@ async def test_await_shell_consumes_completion_event(shell_env):
     )
     task_id = started["task_id"]
 
-    awaited = await tool.await_shell(task_id=task_id, block_until_ms=5000, session_id="sid_A")
+    awaited = await tool.await_shell(
+        task_id=task_id, block_until_ms=5000, session_id="sid_A"
+    )
     assert awaited["status"] == "completed"
     assert awaited["exit_code"] == 0
 
@@ -111,6 +120,7 @@ async def test_await_shell_consumes_completion_event(shell_env):
 
 
 # ---- 3. 自适应改写 ----
+
 
 async def test_await_shell_adaptive_rewrite_under_30s_block(shell_env, monkeypatch):
     """已运行 >30s 且传入 block_until_ms<60s 时，应被改写到 60s。
@@ -126,7 +136,9 @@ async def test_await_shell_adaptive_rewrite_under_30s_block(shell_env, monkeypat
 
     captured: dict = {}
 
-    async def fake_wait(self, sandbox, info, block_until_ms, pattern=None, emit_progress=False):
+    async def fake_wait(
+        self, sandbox, info, block_until_ms, pattern=None, emit_progress=False
+    ):
         captured["block_until_ms"] = block_until_ms
         return False, None  # 强制 running
 
@@ -146,8 +158,13 @@ async def test_await_shell_adaptive_rewrite_under_30s_block(shell_env, monkeypat
     assert out["suggested_next_block_ms"] >= 30_000
     assert out["next_action"]["if_result_required"] == "call await_shell again"
     assert out["next_action"]["await_shell_args"]["task_id"] == task_id
-    assert out["next_action"]["await_shell_args"]["block_until_ms"] == out["suggested_next_block_ms"]
-    assert out["next_action"]["do_not"] == "do not answer with waiting/progress text only"
+    assert (
+        out["next_action"]["await_shell_args"]["block_until_ms"]
+        == out["suggested_next_block_ms"]
+    )
+    assert (
+        out["next_action"]["do_not"] == "do not answer with waiting/progress text only"
+    )
 
     await tool.kill_shell(task_id=task_id, session_id="sid_A")
 
@@ -161,6 +178,7 @@ def test_suggest_next_block_thresholds():
 
 
 # ---- 4. 多 session 隔离 ----
+
 
 async def test_completion_events_session_isolated(shell_env):
     tool, _, _ = shell_env
@@ -194,6 +212,7 @@ async def test_completion_events_session_isolated(shell_env):
 
 # ---- 5. await_shell 在 watcher 已写入事件后仍能正确返回 completed ----
 
+
 async def test_await_shell_returns_completed_when_event_present(shell_env):
     """watcher 已写入事件、_BG_TASKS 仍保留时，await_shell 正常拿到 completed
     并消费事件（去重保护）。"""
@@ -208,7 +227,9 @@ async def test_await_shell_returns_completed_when_event_present(shell_env):
     appeared = await _wait_event("sid_A", task_id, timeout=5.0)
     assert appeared
 
-    out = await tool.await_shell(task_id=task_id, block_until_ms=2000, session_id="sid_A")
+    out = await tool.await_shell(
+        task_id=task_id, block_until_ms=2000, session_id="sid_A"
+    )
     assert out["status"] == "completed"
     assert out["exit_code"] == 0
     assert "via_event" in out.get("stdout", "")
@@ -218,6 +239,7 @@ async def test_await_shell_returns_completed_when_event_present(shell_env):
 
 
 # ---- 6. NOT_FOUND 兜底从事件取（task_info 已被消费方清理但事件仍残留的极少情况） ----
+
 
 async def test_await_shell_not_found_falls_back_to_event(shell_env):
     """直接构造一个 task_info 不存在但事件存在的场景，
@@ -232,7 +254,9 @@ async def test_await_shell_not_found_falls_back_to_event(shell_env):
         elapsed_ms=12,
         tail="hi\n",
     )
-    out = await tool.await_shell(task_id=fake_task_id, block_until_ms=100, session_id="sid_A")
+    out = await tool.await_shell(
+        task_id=fake_task_id, block_until_ms=100, session_id="sid_A"
+    )
     assert out["status"] == "completed"
     assert out["exit_code"] == 0
     assert "hi" in out.get("stdout", "")
@@ -240,6 +264,7 @@ async def test_await_shell_not_found_falls_back_to_event(shell_env):
 
 
 # ---- 7. system_reminder 消费（pop）不误删 _BG_TASKS ----
+
 
 async def test_pop_events_does_not_remove_bg_task(shell_env):
     """pop_completion_events（system_reminder 路径）不应删除 _BG_TASKS 表项；
@@ -264,7 +289,9 @@ async def test_pop_events_does_not_remove_bg_task(shell_env):
     assert task_id in ExecuteCommandTool._BG_TASKS
 
     # await_shell 仍能正常拿到 completed
-    out = await tool.await_shell(task_id=task_id, block_until_ms=3000, session_id="sid_A")
+    out = await tool.await_shell(
+        task_id=task_id, block_until_ms=3000, session_id="sid_A"
+    )
     assert out["status"] == "completed"
     assert out["exit_code"] == 0
     assert "remain" in out.get("stdout", "")
@@ -274,6 +301,7 @@ async def test_pop_events_does_not_remove_bg_task(shell_env):
 
 
 # ---- 8. 12h GC：超期 task 被强制清理 ----
+
 
 async def test_gc_stale_tasks_removes_expired_entries(shell_env):
     """_gc_stale_tasks 应删除超过 _BG_TASK_MAX_AGE_S 的 _BG_TASKS 与对应事件。"""
@@ -310,7 +338,7 @@ async def test_gc_stale_tasks_removes_expired_entries(shell_env):
         "log_path": None,
         "exit_path": None,
         "command": "echo fresh",
-        "started_at": time.time() - 60,   # 只跑了 60s，远未到 12h
+        "started_at": time.time() - 60,  # 只跑了 60s，远未到 12h
         "mode": "shell",
     }
 
@@ -326,6 +354,7 @@ async def test_gc_stale_tasks_removes_expired_entries(shell_env):
 
 
 # ---- 9. tail truncation ----
+
 
 def test_truncate_tail_short_text_unchanged():
     text = "line1\nline2\n"
@@ -373,5 +402,7 @@ async def test_gc_also_triggered_in_await_shell(shell_env):
         "mode": "shell",
     }
     # await_shell 任意一个不存在的 task 来触发 GC
-    await tool.await_shell(task_id="shtask_nonexistent_xyz", block_until_ms=100, session_id="sid_A")
+    await tool.await_shell(
+        task_id="shtask_nonexistent_xyz", block_until_ms=100, session_id="sid_A"
+    )
     assert stale_id not in ExecuteCommandTool._BG_TASKS

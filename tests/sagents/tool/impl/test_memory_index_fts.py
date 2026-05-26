@@ -11,14 +11,10 @@ import pytest
 
 def _load_memory_index_module():
     repo_root = Path(__file__).resolve().parents[4]
-    module_path = (
-        repo_root
-        / "sagents"
-        / "tool"
-        / "impl"
-        / "memory_index.py"
+    module_path = repo_root / "sagents" / "tool" / "impl" / "memory_index.py"
+    spec = importlib.util.spec_from_file_location(
+        "memory_index_under_test", module_path
     )
-    spec = importlib.util.spec_from_file_location("memory_index_under_test", module_path)
     module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
     sys.modules[spec.name] = module
@@ -35,7 +31,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_fts_search_returns_focused_chunk_result(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
 
             content = "\n".join(
                 [
@@ -46,7 +44,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
                     "ordinary line 5",
                 ]
             )
-            idx._replace_file_documents("/workspace/p2_chunk_test.txt", content, 1.0, len(content))
+            idx._replace_file_documents(
+                "/workspace/p2_chunk_test.txt", content, 1.0, len(content)
+            )
             idx._sync_file_to_fts("/workspace/p2_chunk_test.txt")
             idx._save_index()
 
@@ -60,9 +60,13 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_init_clears_stale_fts_rows_when_sidecar_is_empty(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             content = "stale keyword"
-            idx._replace_file_documents("/workspace/stale.txt", content, 1.0, len(content))
+            idx._replace_file_documents(
+                "/workspace/stale.txt", content, 1.0, len(content)
+            )
             idx._sync_file_to_fts("/workspace/stale.txt")
             idx._save_index()
 
@@ -83,7 +87,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
                     f,
                 )
 
-            reloaded = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            reloaded = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
 
             self.assertEqual(reloaded.get_document_count(), 0)
             self.assertFalse(reloaded._fts_has_documents())
@@ -92,7 +98,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_search_prefers_file_with_multiple_relevant_chunks(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 60
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -116,8 +124,18 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/single_hit.txt", single_hit_content, 1.0, len(single_hit_content))
-            idx._replace_file_documents("/workspace/multi_hit.txt", multi_hit_content, 1.0, len(multi_hit_content))
+            idx._replace_file_documents(
+                "/workspace/single_hit.txt",
+                single_hit_content,
+                1.0,
+                len(single_hit_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/multi_hit.txt",
+                multi_hit_content,
+                1.0,
+                len(multi_hit_content),
+            )
             idx._sync_file_to_fts("/workspace/single_hit.txt")
             idx._sync_file_to_fts("/workspace/multi_hit.txt")
             idx._save_index()
@@ -132,7 +150,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_search_prefers_file_covering_more_query_terms_across_chunks(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 50
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -153,8 +173,18 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/split_terms.txt", split_terms_content, 1.0, len(split_terms_content))
-            idx._replace_file_documents("/workspace/single_term.txt", single_term_content, 1.0, len(single_term_content))
+            idx._replace_file_documents(
+                "/workspace/split_terms.txt",
+                split_terms_content,
+                1.0,
+                len(split_terms_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/single_term.txt",
+                single_term_content,
+                1.0,
+                len(single_term_content),
+            )
             idx._sync_file_to_fts("/workspace/split_terms.txt")
             idx._sync_file_to_fts("/workspace/single_term.txt")
             idx._save_index()
@@ -171,7 +201,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_search_prefers_query_coverage_over_single_term_repetition(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 45
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -194,13 +226,25 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/repeated_single_term.txt", repeated_single_term_content, 1.0, len(repeated_single_term_content))
-            idx._replace_file_documents("/workspace/full_query_coverage.txt", full_query_coverage_content, 1.0, len(full_query_coverage_content))
+            idx._replace_file_documents(
+                "/workspace/repeated_single_term.txt",
+                repeated_single_term_content,
+                1.0,
+                len(repeated_single_term_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/full_query_coverage.txt",
+                full_query_coverage_content,
+                1.0,
+                len(full_query_coverage_content),
+            )
             idx._sync_file_to_fts("/workspace/repeated_single_term.txt")
             idx._sync_file_to_fts("/workspace/full_query_coverage.txt")
             idx._save_index()
 
-            results = idx.search("AlphaBridgeUnique BetaSignalUnique GammaTraceUnique", top_k=2)
+            results = idx.search(
+                "AlphaBridgeUnique BetaSignalUnique GammaTraceUnique", top_k=2
+            )
 
             self.assertEqual(len(results), 2)
             self.assertEqual(results[0].path, "/workspace/full_query_coverage.txt")
@@ -209,7 +253,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_multi_term_preview_can_include_multiple_chunks(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 45
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -223,11 +269,15 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/multi_preview.txt", content, 1.0, len(content))
+            idx._replace_file_documents(
+                "/workspace/multi_preview.txt", content, 1.0, len(content)
+            )
             idx._sync_file_to_fts("/workspace/multi_preview.txt")
             idx._save_index()
 
-            results = idx.search("AlphaBridgeUnique BetaSignalUnique GammaTraceUnique", top_k=1)
+            results = idx.search(
+                "AlphaBridgeUnique BetaSignalUnique GammaTraceUnique", top_k=1
+            )
 
             self.assertEqual(len(results), 1)
             self.assertEqual(results[0].path, "/workspace/multi_preview.txt")
@@ -238,7 +288,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_search_prefers_nearby_term_clusters_over_scattered_hits(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 45
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -259,13 +311,25 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/clustered_terms.txt", clustered_content, 1.0, len(clustered_content))
-            idx._replace_file_documents("/workspace/scattered_terms.txt", scattered_content, 1.0, len(scattered_content))
+            idx._replace_file_documents(
+                "/workspace/clustered_terms.txt",
+                clustered_content,
+                1.0,
+                len(clustered_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/scattered_terms.txt",
+                scattered_content,
+                1.0,
+                len(scattered_content),
+            )
             idx._sync_file_to_fts("/workspace/clustered_terms.txt")
             idx._sync_file_to_fts("/workspace/scattered_terms.txt")
             idx._save_index()
 
-            results = idx.search("AlphaBridgeUnique BetaSignalUnique GammaTraceUnique", top_k=2)
+            results = idx.search(
+                "AlphaBridgeUnique BetaSignalUnique GammaTraceUnique", top_k=2
+            )
 
             self.assertEqual(len(results), 2)
             self.assertEqual(results[0].path, "/workspace/clustered_terms.txt")
@@ -274,7 +338,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_search_prefers_tighter_full_query_chunk_span(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 45
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -296,22 +362,38 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/tighter_span.txt", tighter_span_content, 1.0, len(tighter_span_content))
-            idx._replace_file_documents("/workspace/wider_span.txt", wider_span_content, 1.0, len(wider_span_content))
+            idx._replace_file_documents(
+                "/workspace/tighter_span.txt",
+                tighter_span_content,
+                1.0,
+                len(tighter_span_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/wider_span.txt",
+                wider_span_content,
+                1.0,
+                len(wider_span_content),
+            )
             idx._sync_file_to_fts("/workspace/tighter_span.txt")
             idx._sync_file_to_fts("/workspace/wider_span.txt")
             idx._save_index()
 
-            results = idx.search("AlphaBridgeUnique BetaSignalUnique GammaTraceUnique", top_k=2)
+            results = idx.search(
+                "AlphaBridgeUnique BetaSignalUnique GammaTraceUnique", top_k=2
+            )
 
             self.assertEqual(len(results), 2)
             self.assertEqual(results[0].path, "/workspace/tighter_span.txt")
             self.assertEqual(results[1].path, "/workspace/wider_span.txt")
 
-    def test_multi_term_candidate_fetch_prefers_full_matches_before_partial_matches(self):
+    def test_multi_term_candidate_fetch_prefers_full_matches_before_partial_matches(
+        self,
+    ):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 45
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -326,7 +408,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
                     ]
                 )
                 noisy_path = f"/workspace/noisy_alpha_{i}.txt"
-                idx._replace_file_documents(noisy_path, noisy_content, 1.0, len(noisy_content))
+                idx._replace_file_documents(
+                    noisy_path, noisy_content, 1.0, len(noisy_content)
+                )
                 idx._sync_file_to_fts(noisy_path)
 
             full_match_content = "\n".join(
@@ -337,11 +421,18 @@ class TestMemoryIndexFTS(unittest.TestCase):
                     "ordinary filler ending",
                 ]
             )
-            idx._replace_file_documents("/workspace/full_match.txt", full_match_content, 1.0, len(full_match_content))
+            idx._replace_file_documents(
+                "/workspace/full_match.txt",
+                full_match_content,
+                1.0,
+                len(full_match_content),
+            )
             idx._sync_file_to_fts("/workspace/full_match.txt")
             idx._save_index()
 
-            results = idx.search("AlphaBridgeUnique BetaSignalUnique GammaTraceUnique", top_k=3)
+            results = idx.search(
+                "AlphaBridgeUnique BetaSignalUnique GammaTraceUnique", top_k=3
+            )
 
             self.assertGreaterEqual(len(results), 1)
             self.assertEqual(results[0].path, "/workspace/full_match.txt")
@@ -349,7 +440,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_preview_row_selection_skips_redundant_overlapping_chunks(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
 
             rows = [
                 {
@@ -388,7 +481,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_search_can_use_directory_path_signal_as_tiebreaker(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 80
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -399,8 +494,15 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/app/cli/notes.txt", shared_content, 1.0, len(shared_content))
-            idx._replace_file_documents("/workspace/docs/misc/notes.txt", shared_content, 1.0, len(shared_content))
+            idx._replace_file_documents(
+                "/workspace/app/cli/notes.txt", shared_content, 1.0, len(shared_content)
+            )
+            idx._replace_file_documents(
+                "/workspace/docs/misc/notes.txt",
+                shared_content,
+                1.0,
+                len(shared_content),
+            )
             idx._sync_file_to_fts("/workspace/app/cli/notes.txt")
             idx._sync_file_to_fts("/workspace/docs/misc/notes.txt")
             idx._save_index()
@@ -414,7 +516,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_search_can_match_identifier_parts_from_snake_and_camel_case_tokens(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 80
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -426,28 +530,43 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/app/cli/memory_search.py", code_content, 1.0, len(code_content))
+            idx._replace_file_documents(
+                "/workspace/app/cli/memory_search.py",
+                code_content,
+                1.0,
+                len(code_content),
+            )
             idx._sync_file_to_fts("/workspace/app/cli/memory_search.py")
             idx._save_index()
 
             snake_results = idx.search("search memory user id", top_k=1)
             self.assertEqual(len(snake_results), 1)
-            self.assertEqual(snake_results[0].path, "/workspace/app/cli/memory_search.py")
+            self.assertEqual(
+                snake_results[0].path, "/workspace/app/cli/memory_search.py"
+            )
 
             camel_results = idx.search("session memory gamma", top_k=1)
             self.assertEqual(len(camel_results), 1)
-            self.assertEqual(camel_results[0].path, "/workspace/app/cli/memory_search.py")
+            self.assertEqual(
+                camel_results[0].path, "/workspace/app/cli/memory_search.py"
+            )
 
     def test_search_can_find_files_by_directory_terms_even_without_content_match(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 80
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
             content = "ordinary implementation notes with no directory keywords"
-            idx._replace_file_documents("/workspace/app/cli/notes.txt", content, 1.0, len(content))
-            idx._replace_file_documents("/workspace/docs/misc/notes.txt", content, 1.0, len(content))
+            idx._replace_file_documents(
+                "/workspace/app/cli/notes.txt", content, 1.0, len(content)
+            )
+            idx._replace_file_documents(
+                "/workspace/docs/misc/notes.txt", content, 1.0, len(content)
+            )
             idx._sync_file_to_fts("/workspace/app/cli/notes.txt")
             idx._sync_file_to_fts("/workspace/docs/misc/notes.txt")
             idx._save_index()
@@ -460,7 +579,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_realistic_query_prefers_cli_provider_implementation(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 90
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -487,9 +608,24 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/app/cli/provider_commands.py", cli_provider_content, 1.0, len(cli_provider_content))
-            idx._replace_file_documents("/workspace/common/services/llm_provider_service.py", service_provider_content, 1.0, len(service_provider_content))
-            idx._replace_file_documents("/workspace/docs/CLI.md", docs_provider_content, 1.0, len(docs_provider_content))
+            idx._replace_file_documents(
+                "/workspace/app/cli/provider_commands.py",
+                cli_provider_content,
+                1.0,
+                len(cli_provider_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/common/services/llm_provider_service.py",
+                service_provider_content,
+                1.0,
+                len(service_provider_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/docs/CLI.md",
+                docs_provider_content,
+                1.0,
+                len(docs_provider_content),
+            )
             idx._sync_file_to_fts("/workspace/app/cli/provider_commands.py")
             idx._sync_file_to_fts("/workspace/common/services/llm_provider_service.py")
             idx._sync_file_to_fts("/workspace/docs/CLI.md")
@@ -500,10 +636,14 @@ class TestMemoryIndexFTS(unittest.TestCase):
             self.assertEqual(len(results), 3)
             self.assertEqual(results[0].path, "/workspace/app/cli/provider_commands.py")
 
-    def test_realistic_query_prefers_memory_search_implementation_over_generic_notes(self):
+    def test_realistic_query_prefers_memory_search_implementation_over_generic_notes(
+        self,
+    ):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 90
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -525,8 +665,18 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/sagents/tool/impl/memory_index.py", impl_content, 1.0, len(impl_content))
-            idx._replace_file_documents("/workspace/docs/memory_notes.md", notes_content, 1.0, len(notes_content))
+            idx._replace_file_documents(
+                "/workspace/sagents/tool/impl/memory_index.py",
+                impl_content,
+                1.0,
+                len(impl_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/docs/memory_notes.md",
+                notes_content,
+                1.0,
+                len(notes_content),
+            )
             idx._sync_file_to_fts("/workspace/sagents/tool/impl/memory_index.py")
             idx._sync_file_to_fts("/workspace/docs/memory_notes.md")
             idx._save_index()
@@ -534,12 +684,16 @@ class TestMemoryIndexFTS(unittest.TestCase):
             results = idx.search("memory search", top_k=2)
 
             self.assertEqual(len(results), 2)
-            self.assertEqual(results[0].path, "/workspace/sagents/tool/impl/memory_index.py")
+            self.assertEqual(
+                results[0].path, "/workspace/sagents/tool/impl/memory_index.py"
+            )
 
     def test_realistic_query_prefers_session_user_id_implementation(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 90
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -560,8 +714,15 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/app/cli/session_store.py", impl_content, 1.0, len(impl_content))
-            idx._replace_file_documents("/workspace/docs/sessions.md", docs_content, 1.0, len(docs_content))
+            idx._replace_file_documents(
+                "/workspace/app/cli/session_store.py",
+                impl_content,
+                1.0,
+                len(impl_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/docs/sessions.md", docs_content, 1.0, len(docs_content)
+            )
             idx._sync_file_to_fts("/workspace/app/cli/session_store.py")
             idx._sync_file_to_fts("/workspace/docs/sessions.md")
             idx._save_index()
@@ -574,7 +735,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_realistic_query_prefers_provider_verify_model_implementation(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 90
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -594,8 +757,18 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/app/cli/provider_verify.py", impl_content, 1.0, len(impl_content))
-            idx._replace_file_documents("/workspace/docs/provider_verify.md", docs_content, 1.0, len(docs_content))
+            idx._replace_file_documents(
+                "/workspace/app/cli/provider_verify.py",
+                impl_content,
+                1.0,
+                len(impl_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/docs/provider_verify.md",
+                docs_content,
+                1.0,
+                len(docs_content),
+            )
             idx._sync_file_to_fts("/workspace/app/cli/provider_verify.py")
             idx._sync_file_to_fts("/workspace/docs/provider_verify.md")
             idx._save_index()
@@ -608,7 +781,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_realistic_query_prefers_memory_index_search_implementation(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 90
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -628,8 +803,18 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/sagents/tool/impl/memory_index.py", impl_content, 1.0, len(impl_content))
-            idx._replace_file_documents("/workspace/docs/search_overview.md", generic_content, 1.0, len(generic_content))
+            idx._replace_file_documents(
+                "/workspace/sagents/tool/impl/memory_index.py",
+                impl_content,
+                1.0,
+                len(impl_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/docs/search_overview.md",
+                generic_content,
+                1.0,
+                len(generic_content),
+            )
             idx._sync_file_to_fts("/workspace/sagents/tool/impl/memory_index.py")
             idx._sync_file_to_fts("/workspace/docs/search_overview.md")
             idx._save_index()
@@ -637,12 +822,16 @@ class TestMemoryIndexFTS(unittest.TestCase):
             results = idx.search("memory index search", top_k=2)
 
             self.assertEqual(len(results), 2)
-            self.assertEqual(results[0].path, "/workspace/sagents/tool/impl/memory_index.py")
+            self.assertEqual(
+                results[0].path, "/workspace/sagents/tool/impl/memory_index.py"
+            )
 
     def test_realistic_query_prefers_resume_session_user_implementation(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 90
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -662,8 +851,15 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/app/cli/resume_session.py", impl_content, 1.0, len(impl_content))
-            idx._replace_file_documents("/workspace/docs/resume_guide.md", docs_content, 1.0, len(docs_content))
+            idx._replace_file_documents(
+                "/workspace/app/cli/resume_session.py",
+                impl_content,
+                1.0,
+                len(impl_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/docs/resume_guide.md", docs_content, 1.0, len(docs_content)
+            )
             idx._sync_file_to_fts("/workspace/app/cli/resume_session.py")
             idx._sync_file_to_fts("/workspace/docs/resume_guide.md")
             idx._save_index()
@@ -676,7 +872,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_realistic_query_prefers_cli_chat_session_implementation(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 90
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -697,8 +895,15 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/app/cli/chat_session_runner.py", impl_content, 1.0, len(impl_content))
-            idx._replace_file_documents("/workspace/docs/cli_chat.md", docs_content, 1.0, len(docs_content))
+            idx._replace_file_documents(
+                "/workspace/app/cli/chat_session_runner.py",
+                impl_content,
+                1.0,
+                len(impl_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/docs/cli_chat.md", docs_content, 1.0, len(docs_content)
+            )
             idx._sync_file_to_fts("/workspace/app/cli/chat_session_runner.py")
             idx._sync_file_to_fts("/workspace/docs/cli_chat.md")
             idx._save_index()
@@ -706,12 +911,16 @@ class TestMemoryIndexFTS(unittest.TestCase):
             results = idx.search("cli chat session", top_k=2)
 
             self.assertEqual(len(results), 2)
-            self.assertEqual(results[0].path, "/workspace/app/cli/chat_session_runner.py")
+            self.assertEqual(
+                results[0].path, "/workspace/app/cli/chat_session_runner.py"
+            )
 
     def test_mixed_language_query_prefers_resume_session_user_implementation(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 90
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -732,8 +941,15 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/app/cli/resume_session.py", impl_content, 1.0, len(impl_content))
-            idx._replace_file_documents("/workspace/docs/resume_guide.md", docs_content, 1.0, len(docs_content))
+            idx._replace_file_documents(
+                "/workspace/app/cli/resume_session.py",
+                impl_content,
+                1.0,
+                len(impl_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/docs/resume_guide.md", docs_content, 1.0, len(docs_content)
+            )
             idx._sync_file_to_fts("/workspace/app/cli/resume_session.py")
             idx._sync_file_to_fts("/workspace/docs/resume_guide.md")
             idx._save_index()
@@ -746,7 +962,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_mixed_language_query_prefers_provider_verify_implementation(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 90
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -765,8 +983,18 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/app/cli/provider_verify.py", impl_content, 1.0, len(impl_content))
-            idx._replace_file_documents("/workspace/docs/provider_verify.md", docs_content, 1.0, len(docs_content))
+            idx._replace_file_documents(
+                "/workspace/app/cli/provider_verify.py",
+                impl_content,
+                1.0,
+                len(impl_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/docs/provider_verify.md",
+                docs_content,
+                1.0,
+                len(docs_content),
+            )
             idx._sync_file_to_fts("/workspace/app/cli/provider_verify.py")
             idx._sync_file_to_fts("/workspace/docs/provider_verify.md")
             idx._save_index()
@@ -779,7 +1007,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_mixed_language_query_prefers_memory_search_identifier_implementation(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 90
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -798,8 +1028,15 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/app/cli/memory_search.py", impl_content, 1.0, len(impl_content))
-            idx._replace_file_documents("/workspace/docs/memory_search.md", docs_content, 1.0, len(docs_content))
+            idx._replace_file_documents(
+                "/workspace/app/cli/memory_search.py",
+                impl_content,
+                1.0,
+                len(impl_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/docs/memory_search.md", docs_content, 1.0, len(docs_content)
+            )
             idx._sync_file_to_fts("/workspace/app/cli/memory_search.py")
             idx._sync_file_to_fts("/workspace/docs/memory_search.md")
             idx._save_index()
@@ -813,7 +1050,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_search_latency_stays_reasonable_on_moderate_synthetic_corpus(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 120
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -826,7 +1065,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
                     ]
                 )
                 path = f"/workspace/noise/file_{i}.txt"
-                idx._replace_file_documents(path, noisy_content, 1.0, len(noisy_content))
+                idx._replace_file_documents(
+                    path, noisy_content, 1.0, len(noisy_content)
+                )
                 idx._sync_file_to_fts(path)
 
             target_content = "\n".join(
@@ -837,7 +1078,12 @@ class TestMemoryIndexFTS(unittest.TestCase):
                     "    return {'session_id': session_id, 'user_id': user_id}",
                 ]
             )
-            idx._replace_file_documents("/workspace/app/cli/resume_session.py", target_content, 1.0, len(target_content))
+            idx._replace_file_documents(
+                "/workspace/app/cli/resume_session.py",
+                target_content,
+                1.0,
+                len(target_content),
+            )
             idx._sync_file_to_fts("/workspace/app/cli/resume_session.py")
             idx._save_index()
 
@@ -852,7 +1098,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_realistic_query_prefers_doctor_config_cli_implementation(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 90
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -873,8 +1121,15 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/app/cli/doctor_config.py", impl_content, 1.0, len(impl_content))
-            idx._replace_file_documents("/workspace/docs/doctor.md", docs_content, 1.0, len(docs_content))
+            idx._replace_file_documents(
+                "/workspace/app/cli/doctor_config.py",
+                impl_content,
+                1.0,
+                len(impl_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/docs/doctor.md", docs_content, 1.0, len(docs_content)
+            )
             idx._sync_file_to_fts("/workspace/app/cli/doctor_config.py")
             idx._sync_file_to_fts("/workspace/docs/doctor.md")
             idx._save_index()
@@ -887,7 +1142,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_realistic_query_prefers_sessions_inspect_latest_implementation(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 90
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -907,8 +1164,18 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/app/cli/sessions_inspect.py", impl_content, 1.0, len(impl_content))
-            idx._replace_file_documents("/workspace/docs/sessions_inspect.md", docs_content, 1.0, len(docs_content))
+            idx._replace_file_documents(
+                "/workspace/app/cli/sessions_inspect.py",
+                impl_content,
+                1.0,
+                len(impl_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/docs/sessions_inspect.md",
+                docs_content,
+                1.0,
+                len(docs_content),
+            )
             idx._sync_file_to_fts("/workspace/app/cli/sessions_inspect.py")
             idx._sync_file_to_fts("/workspace/docs/sessions_inspect.md")
             idx._save_index()
@@ -921,7 +1188,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_realistic_query_prefers_memory_report_scheduler_implementation(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 90
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -942,8 +1211,15 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/app/server/task_scheduler.py", impl_content, 1.0, len(impl_content))
-            idx._replace_file_documents("/workspace/docs/runtime_notes.md", docs_content, 1.0, len(docs_content))
+            idx._replace_file_documents(
+                "/workspace/app/server/task_scheduler.py",
+                impl_content,
+                1.0,
+                len(impl_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/docs/runtime_notes.md", docs_content, 1.0, len(docs_content)
+            )
             idx._sync_file_to_fts("/workspace/app/server/task_scheduler.py")
             idx._sync_file_to_fts("/workspace/docs/runtime_notes.md")
             idx._save_index()
@@ -956,7 +1232,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_mixed_language_query_prefers_doctor_config_implementation(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 90
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -977,8 +1255,15 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 ]
             )
 
-            idx._replace_file_documents("/workspace/app/cli/doctor_config.py", impl_content, 1.0, len(impl_content))
-            idx._replace_file_documents("/workspace/docs/doctor.md", docs_content, 1.0, len(docs_content))
+            idx._replace_file_documents(
+                "/workspace/app/cli/doctor_config.py",
+                impl_content,
+                1.0,
+                len(impl_content),
+            )
+            idx._replace_file_documents(
+                "/workspace/docs/doctor.md", docs_content, 1.0, len(docs_content)
+            )
             idx._sync_file_to_fts("/workspace/app/cli/doctor_config.py")
             idx._sync_file_to_fts("/workspace/docs/doctor.md")
             idx._save_index()
@@ -992,7 +1277,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
     def test_index_build_and_batch_search_latency_stay_reasonable(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
-            idx = self.MemoryIndex(sandbox=None, workspace_path="/workspace", index_path=str(index_path))
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
             idx.DEFAULT_CHUNK_SIZE = 120
             idx.DEFAULT_CHUNK_OVERLAP = 0
 
@@ -1006,7 +1293,9 @@ class TestMemoryIndexFTS(unittest.TestCase):
                     ]
                 )
                 path = f"/workspace/noise/batch_{i}.txt"
-                idx._replace_file_documents(path, noisy_content, 1.0, len(noisy_content))
+                idx._replace_file_documents(
+                    path, noisy_content, 1.0, len(noisy_content)
+                )
                 idx._sync_file_to_fts(path)
 
             target_files = {
