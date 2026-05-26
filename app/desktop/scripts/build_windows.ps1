@@ -47,13 +47,124 @@ function Find-CondaExe {
         $env:CONDA_EXE,
         "$env:USERPROFILE\miniconda3\Scripts\conda.exe",
         "$env:USERPROFILE\anaconda3\Scripts\conda.exe",
+        "$env:USERPROFILE\AppData\Local\miniconda3\Scripts\conda.exe",
+        "$env:USERPROFILE\AppData\Local\anaconda3\Scripts\conda.exe",
         "C:\ProgramData\miniconda3\Scripts\conda.exe",
-        "C:\ProgramData\anaconda3\Scripts\conda.exe"
+        "C:\ProgramData\anaconda3\Scripts\conda.exe",
+        "C:\ProgramData\Anaconda3\Scripts\conda.exe"
     )
     foreach ($p in $paths) {
         if ($p -and (Test-Path $p)) { return $p }
     }
+
+    $condaCmd = Get-Command conda.exe -ErrorAction SilentlyContinue
+    if ($condaCmd -and (Test-Path $condaCmd.Source)) {
+        return $condaCmd.Source
+    }
+
     return $null
+}
+
+function Resolve-CondaEnvPython {
+    param(
+        [string]$CondaExe,
+        [string]$EnvName,
+        [string]$CondaBase
+    )
+
+    $envListLines = & $CondaExe env list 2>$null
+    foreach ($line in $envListLines) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match '^#|^\s*$') { continue }
+        $parts = $trimmed -split '\s+', 3
+        if ($parts.Count -ge 2 -and $parts[0] -eq $EnvName) {
+            $envPath = $parts[-1]
+            $pythonExe = Join-Path $envPath "python.exe"
+            if (Test-Path $pythonExe) { return $pythonExe }
+        }
+    }
+
+    $defaultPython = Join-Path $CondaBase "envs\$EnvName\python.exe"
+    if (Test-Path $defaultPython) { return $defaultPython }
+
+    try {
+        $resolved = (& $CondaExe run -n $EnvName python -c "import sys; print(sys.executable)" 2>$null).Trim()
+        if ($resolved -and (Test-Path $resolved)) { return $resolved }
+    } catch {}
+
+    return $null
+}
+
+function Sync-CondaRuntimeToSidecar {
+    param(
+        [string]$SagePythonParam,
+        [string]$InternalDir
+    )
+
+    if (-not (Test-Path $InternalDir)) {
+        Write-Host "[Sidecar] WARN: _internal dir not found: $InternalDir" -ForegroundColor Yellow
+        return
+    }
+
+    $CondaEnvRoot = Split-Path -Parent $SagePythonParam
+    $CondaBin = Join-Path $CondaEnvRoot "Library\bin"
+    $CondaDlls = Join-Path $CondaEnvRoot "DLLs"
+
+    if (Test-Path $CondaBin) {
+        $RuntimeDlls = Get-ChildItem -Path $CondaBin -Filter "*.dll" -File
+        Write-Host "[Sidecar] Syncing $($RuntimeDlls.Count) Conda runtime DLL(s) from $CondaBin ..." -ForegroundColor Cyan
+        Copy-Item -Path (Join-Path $CondaBin "*.dll") -Destination $InternalDir -Force
+    } else {
+        Write-Host "[Sidecar] WARN: Conda Library\bin not found: $CondaBin" -ForegroundColor Yellow
+    }
+
+    # PyInstaller may pick mismatched stdlib extension modules from user site-packages.
+    $StdlibPyds = @(
+        "_ssl.pyd", "_ctypes.pyd", "_sqlite3.pyd", "_socket.pyd", "_hashlib.pyd",
+        "_bz2.pyd", "_lzma.pyd", "_decimal.pyd", "_elementtree.pyd", "_uuid.pyd"
+    )
+    foreach ($pydName in $StdlibPyds) {
+        $srcPyd = Join-Path $CondaDlls $pydName
+        if (Test-Path $srcPyd) {
+            Copy-Item -Path $srcPyd -Destination $InternalDir -Force
+        }
+    }
+
+    Write-Host "[Sidecar] Conda runtime synced to: $InternalDir" -ForegroundColor Green
+}
+
+function Stop-SageDesktopProcesses {
+    foreach ($procName in @("sage-desktop", "Sage")) {
+        Get-Process -Name $procName -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "[Build] Stopping $($procName) process (PID $($_.Id))..." -ForegroundColor Yellow
+            Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Start-Sleep -Seconds 1
+}
+
+function Remove-BuildDirectory {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) { return }
+
+    Stop-SageDesktopProcesses
+
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            return
+        } catch {
+            Write-Host "[Build] Cleanup attempt $attempt failed for: $Path" -ForegroundColor Yellow
+            Write-Host "         $($_.Exception.Message)" -ForegroundColor Yellow
+            Stop-SageDesktopProcesses
+            Start-Sleep -Seconds 2
+        }
+    }
+
+    Write-Host "[ERROR] Could not remove locked directory: $Path" -ForegroundColor Red
+    Write-Host "Close Sage Desktop, file explorer windows under dist/, then retry the build." -ForegroundColor Yellow
+    exit 1
 }
 
 $CondaExe = Find-CondaExe
@@ -63,26 +174,50 @@ if (-not $CondaExe) {
 }
 
 Write-Host "Found Conda: $CondaExe" -ForegroundColor Green
-& $CondaExe shell.powershell hook | Out-String | Invoke-Expression
 
-Write-Host "Activating Conda environment '$EnvName'..." -ForegroundColor Cyan
-
-$CurrentEnv = $env:CONDA_DEFAULT_ENV
-if ($CurrentEnv -ne $EnvName) {
-    conda activate $EnvName
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[ERROR] Failed to activate Conda environment" -ForegroundColor Red
-        exit 1
-    }
-} else {
-    Write-Host "Already in Conda environment '$EnvName'. Skipping activation." -ForegroundColor Green
+$CondaBase = & $CondaExe info --base 2>$null
+if (-not $CondaBase) {
+    Write-Host "[ERROR] Failed to get Conda base directory" -ForegroundColor Red
+    exit 1
 }
 
-Write-Host "Python: $(python --version)" -ForegroundColor Cyan
-Write-Host "Pip: $(pip --version)" -ForegroundColor Cyan
+$envExists = $false
+try {
+    $envList = & $CondaExe env list 2>$null
+    if ($envList -match $EnvName) { $envExists = $true }
+} catch {}
+
+if ($envExists) {
+    Write-Host "Conda environment '$EnvName' already exists." -ForegroundColor Green
+} else {
+    Write-Host "Creating Conda environment '$EnvName' (Python 3.11)..." -ForegroundColor Cyan
+    & $CondaExe create -n $EnvName python=3.11 -y
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Failed to create Conda environment" -ForegroundColor Red
+        exit 1
+    }
+}
+
+Write-Host "Resolving Python executable for Conda environment '$EnvName'..." -ForegroundColor Cyan
+$SagePython = Resolve-CondaEnvPython -CondaExe $CondaExe -EnvName $EnvName -CondaBase $CondaBase
+if (-not $SagePython) {
+    Write-Host "[ERROR] Python not found in Conda environment '$EnvName'. Check 'conda env list'." -ForegroundColor Red
+    exit 1
+}
+
+$env:SAGE_PYTHON = $SagePython
+$env:PYTHONNOUSERSITE = "1"
+$env:PIP_USER = "0"
+$EnvScriptsDir = Join-Path (Split-Path -Parent $SagePython) "Scripts"
+if (Test-Path $EnvScriptsDir) {
+    $env:PATH = "$EnvScriptsDir;$env:PATH"
+}
+
+Write-Host "Python: $(& $SagePython --version)" -ForegroundColor Cyan
+Write-Host "Pip: $(& $SagePython -m pip --version)" -ForegroundColor Cyan
 
 function Install-PythonDeps {
-    param($RootDirParam, $CacheDirParam, $EnvNameParam)
+    param($RootDirParam, $CacheDirParam, $SagePythonParam)
 
     $ReqFile = Join-Path $RootDirParam "requirements.txt"
     $HashFile = Join-Path $CacheDirParam ".requirements.hash"
@@ -94,7 +229,7 @@ function Install-PythonDeps {
     }
 
     $EnvOk = $false
-    $pipList = pip list
+    $pipList = & $SagePythonParam -m pip list 2>$null
     if ($pipList -match "requests") {
         $EnvOk = $true
     }
@@ -106,41 +241,43 @@ function Install-PythonDeps {
         $PipIndexUrl = if ($env:PIP_INDEX_URL) { $env:PIP_INDEX_URL } else { "https://mirrors.aliyun.com/pypi/simple" }
         Write-Host "Using pip index: $PipIndexUrl" -ForegroundColor Cyan
 
-        pip install --upgrade pip setuptools wheel --index-url $PipIndexUrl
+        & $SagePythonParam -m pip install --upgrade pip setuptools wheel --index-url $PipIndexUrl --no-user
 
         Write-Host "Installing deps..." -ForegroundColor Cyan
-        pip install -r $ReqFile --index-url $PipIndexUrl
+        & $SagePythonParam -m pip install -r $ReqFile --index-url $PipIndexUrl --no-user
 
         Write-Host "Replacing python-magic with python-magic-bin for Windows..." -ForegroundColor Cyan
-        pip uninstall -y python-magic
-        pip install python-magic-bin --index-url $PipIndexUrl
+        & $SagePythonParam -m pip uninstall -y python-magic 2>$null
+        & $SagePythonParam -m pip install python-magic-bin --index-url $PipIndexUrl --no-user
 
         Write-Host "Force reinstalling pure Python chardet..." -ForegroundColor Cyan
-        pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url $PipIndexUrl 
+        & $SagePythonParam -m pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url $PipIndexUrl --no-user
         if ($LASTEXITCODE -ne 0) {
             Write-Host "Falling back to official PyPI for chardet..." -ForegroundColor Yellow
-            pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url https://pypi.org/simple
+            & $SagePythonParam -m pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url https://pypi.org/simple --no-user
         }
 
-        if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) {
-            pip install pyinstaller --index-url $PipIndexUrl
+        & $SagePythonParam -c "import PyInstaller" 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            & $SagePythonParam -m pip install pyinstaller --index-url $PipIndexUrl --no-user
         }
+
+        Write-Host "Ensuring python-magic-bin is installed for unstructured..." -ForegroundColor Cyan
+        & $SagePythonParam -m pip install python-magic-bin --index-url $PipIndexUrl --no-user 2>$null
 
         $NewHash | Out-File -FilePath $HashFile -Encoding UTF8
     }
 }
 
-Install-PythonDeps -RootDirParam $RootDir -CacheDirParam $CacheDir -EnvNameParam $EnvName
+Install-PythonDeps -RootDirParam $RootDir -CacheDirParam $CacheDir -SagePythonParam $SagePython
 
 function Build-PythonSidecar {
-    param($DistDirParam, $TauriSidecarDirParam, $AppDirParam, $RootDirParam, $ModeParam, $CacheDirParam)
+    param($DistDirParam, $TauriSidecarDirParam, $AppDirParam, $RootDirParam, $ModeParam, $CacheDirParam, $SagePythonParam)
 
     Write-Host "[Sidecar] Building Python Sidecar (sage-desktop.spec)..." -ForegroundColor Cyan
 
     if ($ModeParam -eq "release") {
-        if (Test-Path $DistDirParam) {
-            Remove-Item -Recurse -Force $DistDirParam
-        }
+        Remove-BuildDirectory -Path $DistDirParam
     }
     if (-not (Test-Path $DistDirParam)) {
         New-Item -ItemType Directory -Force -Path $DistDirParam | Out-Null
@@ -169,7 +306,7 @@ function Build-PythonSidecar {
     }
     $pyiArgs += $specPath
 
-    & pyinstaller @pyiArgs
+    & $SagePythonParam -m PyInstaller @pyiArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] PyInstaller build failed" -ForegroundColor Red
         exit 1
@@ -185,6 +322,8 @@ function Build-PythonSidecar {
     if (Test-Path (Join-Path $DistDirParam "sage-desktop\_internal")) {
         $targetMcpDir = Join-Path $DistDirParam "sage-desktop\_internal"
     }
+
+    Sync-CondaRuntimeToSidecar -SagePythonParam $SagePythonParam -InternalDir $targetMcpDir
 
     $mcpServersSrc = Join-Path $RootDirParam "mcp_servers"
     if (Test-Path $mcpServersSrc) {
@@ -233,9 +372,7 @@ function Build-PythonSidecar {
     Set-Location $RootDirParam
 
     Write-Host "[Sidecar] Copying to Tauri Sidecar dir..." -ForegroundColor Cyan
-    if (Test-Path $TauriSidecarDirParam) {
-        Remove-Item -Recurse -Force $TauriSidecarDirParam
-    }
+    Remove-BuildDirectory -Path $TauriSidecarDirParam
     New-Item -ItemType Directory -Force -Path $TauriSidecarDirParam | Out-Null
 
     $srcDir = Join-Path $DistDirParam "sage-desktop"
@@ -346,7 +483,7 @@ function Prepare-BundledNodeRuntime {
 
 Write-Host ">>> Starting build tasks..." -ForegroundColor Cyan
 
-Build-PythonSidecar -DistDirParam $DistDir -TauriSidecarDirParam $TauriSidecarDir -AppDirParam $AppDir -RootDirParam $RootDir -ModeParam $Mode -CacheDirParam $CacheDir
+Build-PythonSidecar -DistDirParam $DistDir -TauriSidecarDirParam $TauriSidecarDir -AppDirParam $AppDir -RootDirParam $RootDir -ModeParam $Mode -CacheDirParam $CacheDir -SagePythonParam $SagePython
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] Sidecar build failed!" -ForegroundColor Red
     exit 1
@@ -393,11 +530,8 @@ if (Test-Path $LocalTauriCmd) {
 Write-Host "Tauri CLI: $TauriCmd" -ForegroundColor Cyan
 $env:CI = "true"
 $env:CARGO_TERM_COLOR = "never"
-# Skip signature for updater artifacts as keys are not provided
-# $env:TAURI_SKIP_SIGNATURE = "true"
-
-$env:TAURI_SIGNING_PRIVATE_KEY = $env:TAURI_SIGNING_PRIVATE_KEY
-$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+# Skip updater artifact signing when no private key is available (pubkey in tauri.conf.json is for runtime verify only)
+$env:TAURI_SKIP_SIGNATURE = "true"
 
 Write-Host "Building Tauri application (this may take a while)..." -ForegroundColor Cyan
 
