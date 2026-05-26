@@ -124,21 +124,51 @@ contains_service() {
   return 1
 }
 
-log_step() {
-  if [ "$SAGE_DEPLOY_OUTPUT" = "progress" ]; then
-    printf '[Sage 部署] %s\n' "$*" >&2
+timestamp() {
+  date '+%Y-%m-%d %H:%M:%S'
+}
+
+format_elapsed() {
+  local elapsed="$1"
+  local minutes=$((elapsed / 60))
+  local seconds=$((elapsed % 60))
+
+  if [ "$minutes" -gt 0 ]; then
+    printf '%dm%02ds' "$minutes" "$seconds"
+  else
+    printf '%ds' "$seconds"
   fi
 }
 
-log_done() {
+log_line() {
   if [ "$SAGE_DEPLOY_OUTPUT" = "progress" ]; then
-    printf '[Sage 部署] 完成：%s\n' "$*" >&2
+    printf '[%s] [Sage 部署] %s\n' "$(timestamp)" "$*" >&2
+  fi
+}
+
+log_step() {
+  log_line "开始：$*"
+}
+
+log_done() {
+  local message="$1"
+  local elapsed="${2:-}"
+
+  if [ -n "$elapsed" ]; then
+    log_line "完成：${message}（耗时 ${elapsed}）"
+  else
+    log_line "完成：${message}"
   fi
 }
 
 log_fail() {
-  if [ "$SAGE_DEPLOY_OUTPUT" = "progress" ]; then
-    printf '[Sage 部署] 失败：%s\n' "$*" >&2
+  local message="$1"
+  local elapsed="${2:-}"
+
+  if [ -n "$elapsed" ]; then
+    log_line "失败：${message}（耗时 ${elapsed}）"
+  else
+    log_line "失败：${message}"
   fi
 }
 
@@ -220,7 +250,7 @@ compose_config_services() {
     "COMPOSE_IGNORE_ORPHANS=${COMPOSE_IGNORE_ORPHANS:-true}"
   )
 
-  env "${compose_env[@]}" docker compose "$@" config --services
+  env "${compose_env[@]}" docker compose "$@" config --services 2>/dev/null
 }
 
 run_compose() {
@@ -247,7 +277,7 @@ run_compose() {
     return 0
   else
     local status=$?
-    echo "[Sage 部署] Docker Compose 执行失败，原始输出如下：" >&2
+    log_line "Docker Compose 执行失败，原始输出如下："
     cat "$log_file" >&2
     rm -f "$log_file"
     return "$status"
@@ -310,33 +340,42 @@ run_group_services() {
   local services=("$@")
   local action
   local service
+  local service_start
+  local elapsed
 
   action="$(up_action_label)"
 
   for service in "${services[@]}"; do
-    log_step "${action}：${group_label}服务：$service"
+    service_start=$SECONDS
+    log_step "${group_label}服务 ${service}（${action}）"
     case "$group" in
       env)
         if run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "${UP_ARGS[@]}" "$service"; then
-          log_done "${group_label}服务：$service"
+          elapsed="$(format_elapsed "$((SECONDS - service_start))")"
+          log_done "${group_label}服务 $service" "$elapsed"
         else
-          log_fail "${group_label}服务：$service"
+          elapsed="$(format_elapsed "$((SECONDS - service_start))")"
+          log_fail "${group_label}服务 $service" "$elapsed"
           return 1
         fi
         ;;
       shared)
         if start_shared "$shared_network" "${UP_ARGS[@]}" "$service"; then
-          log_done "${group_label}服务：$service"
+          elapsed="$(format_elapsed "$((SECONDS - service_start))")"
+          log_done "${group_label}服务 $service" "$elapsed"
         else
-          log_fail "${group_label}服务：$service"
+          elapsed="$(format_elapsed "$((SECONDS - service_start))")"
+          log_fail "${group_label}服务 $service" "$elapsed"
           return 1
         fi
         ;;
       observability)
         if start_observability "$shared_network" "${UP_ARGS[@]}" "$service"; then
-          log_done "${group_label}服务：$service"
+          elapsed="$(format_elapsed "$((SECONDS - service_start))")"
+          log_done "${group_label}服务 $service" "$elapsed"
         else
-          log_fail "${group_label}服务：$service"
+          elapsed="$(format_elapsed "$((SECONDS - service_start))")"
+          log_fail "${group_label}服务 $service" "$elapsed"
           return 1
         fi
         ;;
@@ -391,9 +430,10 @@ if [ "${1:-}" = "up" ]; then
     fi
   fi
 
-  log_step "准备共享网络：$SHARED_NETWORK"
+  network_start=$SECONDS
+  log_step "共享网络 ${SHARED_NETWORK}（准备）"
   ensure_shared_network
-  log_done "共享网络已就绪：$SHARED_NETWORK"
+  log_done "共享网络 ${SHARED_NETWORK}" "$(format_elapsed "$((SECONDS - network_start))")"
   shared_network="$SHARED_NETWORK"
 
   if [ "$RUN_SHARED_UP" = "true" ]; then
