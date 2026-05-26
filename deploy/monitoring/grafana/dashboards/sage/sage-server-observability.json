@@ -514,7 +514,7 @@
           "refId": "A"
         }
       ],
-      "title": "HTTP 请求量（按路径/状态）",
+      "title": "HTTP QPS（按路径/状态）",
       "type": "timeseries"
     },
     {
@@ -717,7 +717,7 @@
           "refId": "B"
         }
       ],
-      "title": "HTTP 4xx / 5xx",
+      "title": "HTTP 4xx / 5xx QPS",
       "type": "timeseries"
     },
     {
@@ -763,7 +763,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "topk(10, histogram_quantile(0.95, sum(rate(sage_server_http_request_duration_seconds_bucket{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\",path=~\"$path\"}[$__rate_interval])) by (le, path)))",
+          "expr": "topk(10, histogram_quantile(0.95, sum(increase(sage_server_http_request_duration_seconds_bucket{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\",path=~\"$path\"}[$__range])) by (le, path)) >= 0)",
           "format": "table",
           "instant": true,
           "legendFormat": "{{path}}",
@@ -771,8 +771,146 @@
           "refId": "A"
         }
       ],
-      "title": "最慢 HTTP 路径 P95",
-      "type": "table"
+      "title": "最慢 HTTP 路径 P95（范围）",
+      "type": "table",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "path": 0,
+              "Value": 1
+            },
+            "renameByName": {
+              "path": "path",
+              "Value": "P95"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "cellOptions": {
+              "type": "auto"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "最近请求时间"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "请求次数"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "id": 47,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "topk(20, sum(increase(sage_server_http_requests_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\",path=~\"$path\"}[$__range])) by (path, status) > 0)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{path}} {{status}}",
+          "range": false,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "max(sage_server_http_request_last_seen_timestamp_seconds{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\",path=~\"$path\"} * 1000) by (path, status) and on(path, status) (sum(increase(sage_server_http_requests_total{environment=~\"$environment\",job=~\"sage-server.*\",instance=~\"$instance\",path=~\"$path\"}[$__range])) by (path, status) > 0)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{path}} {{status}}",
+          "range": false,
+          "refId": "B"
+        }
+      ],
+      "title": "HTTP 请求总数与最近请求时间（按路径/状态）",
+      "type": "table",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true
+            },
+            "renameByName": {
+              "path": "path",
+              "status": "status",
+              "Value": "请求次数",
+              "Value #A": "请求次数",
+              "Value 1": "最近请求时间",
+              "Value #B": "最近请求时间"
+            }
+          }
+        }
+      ]
     },
     {
       "collapsed": false,
@@ -780,7 +918,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 20
+        "y": 27
       },
       "id": 20,
       "panels": [],
@@ -803,7 +941,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 21
+        "y": 28
       },
       "id": 21,
       "options": {
@@ -854,7 +992,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 21
+        "y": 28
       },
       "id": 23,
       "options": {
@@ -905,7 +1043,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 21
+        "y": 28
       },
       "id": 24,
       "options": {
@@ -997,7 +1135,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 29
+        "y": 36
       },
       "id": 31,
       "options": {
@@ -1061,7 +1199,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 29
+        "y": 36
       },
       "id": 33,
       "options": {
@@ -1118,7 +1256,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 29
+        "y": 36
       },
       "id": 34,
       "options": {
@@ -1176,7 +1314,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 37
+        "y": 44
       },
       "id": 40,
       "panels": [],
@@ -1199,7 +1337,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 38
+        "y": 45
       },
       "id": 41,
       "options": {
@@ -1249,7 +1387,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 38
+        "y": 45
       },
       "id": 42,
       "options": {
@@ -1309,7 +1447,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 38
+        "y": 45
       },
       "id": 43,
       "options": {
@@ -1380,7 +1518,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 46
+        "y": 53
       },
       "id": 45,
       "options": {
@@ -1451,7 +1589,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 46
+        "y": 53
       },
       "id": 46,
       "options": {
