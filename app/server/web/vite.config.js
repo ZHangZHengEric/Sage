@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
   const backendApiBaseUrl = 'http://127.0.0.1:30050'
 
   return {
-    base: mode === 'production' ? './' : '/',
+    base: mode === 'production' ? '/sage/' : '/',
     plugins: [
       vue(),
       {

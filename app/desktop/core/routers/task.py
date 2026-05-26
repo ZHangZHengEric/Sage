@@ -28,7 +28,22 @@ def _get_scheduler_scope_user_id(request: Request) -> str:
 
 
 def _serialize_task_items(items):
-    return [TaskResponse.model_validate(item).model_dump(mode="json") for item in items]
+    return [item.model_dump(mode="json") for item in _task_response_items(items)]
+
+
+def _task_response_items(items):
+    return [TaskResponse.model_validate(item) for item in items]
+
+
+def _serialize_recurring_task_items(items):
+    return [
+        RecurringTaskResponse.model_validate(item).model_dump(mode="json")
+        for item in items
+    ]
+
+
+def _recurring_task_response_items(items):
+    return [RecurringTaskResponse.model_validate(item) for item in items]
 
 
 task_router = APIRouter(prefix="/tasks", tags=["Tasks"])
@@ -54,7 +69,7 @@ async def list_one_time_tasks(
         f"[TaskRouter] list_one_time_tasks SUCCESS | count={len(items)} | total={total} | time={elapsed:.3f}s"
     )
     return OneTimeTaskListResponse(
-        items=items, total=total, page=page, page_size=page_size
+        items=_task_response_items(items), total=total, page=page, page_size=page_size
     )
 
 
@@ -141,7 +156,12 @@ async def list_recurring_tasks(
     logger.info(
         f"[TaskRouter] list_recurring_tasks SUCCESS | count={len(items)} | total={total} | time={elapsed:.3f}s"
     )
-    return TaskListResponse(items=items, total=total, page=page, page_size=page_size)
+    return TaskListResponse(
+        items=_recurring_task_response_items(items),
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @task_router.get("/recurring/{task_id}", response_model=RecurringTaskResponse)
@@ -247,7 +267,7 @@ async def get_task_history(
         f"[TaskRouter] get_task_history SUCCESS | task_id={task_id} | count={len(items)} | time={elapsed:.3f}s"
     )
     return TaskHistoryListResponse(
-        items=items, total=total, page=page, page_size=page_size
+        items=_task_response_items(items), total=total, page=page, page_size=page_size
     )
 
 
