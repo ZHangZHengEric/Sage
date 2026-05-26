@@ -44,6 +44,7 @@ services:
     depends_on:
       - sage-prometheus
       - sage-loki
+      - sage-jaeger
     mem_limit: 1g
     cpus: 0.5
     networks:
@@ -111,6 +112,26 @@ services:
     depends_on:
       - sage-loki
     mem_limit: 512m
+    cpus: 0.5
+    networks:
+      - shared
+
+  sage-jaeger:
+    image: docker.m.daocloud.io/jaegertracing/jaeger:2.16.0
+    container_name: sage-jaeger
+    restart: always
+    command:
+      - --config
+      - /etc/jaeger/config.yaml
+    volumes:
+      - ${SAGE_DEPLOY_DIR:-..}/images/jaeger/config.yaml:/etc/jaeger/config.yaml:ro
+    ports:
+      - "${SAGE_JAEGER_OTLP_GRPC_PORT:-4317}:4317"
+      - "${SAGE_JAEGER_OTLP_HTTP_PORT:-4318}:4318"
+    expose:
+      - "16686"
+      - "13133"
+    mem_limit: 1g
     cpus: 0.5
     networks:
       - shared

@@ -1,4 +1,5 @@
 import gc
+import hashlib
 import os
 import re
 import resource
@@ -36,8 +37,16 @@ class _OperationMetricState:
     active: dict[tuple[str, str], int] = field(default_factory=dict)
 
 
+@dataclass
+class _SseFailureMetricState:
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    failures_total: dict[tuple[str, str, str, str], int] = field(default_factory=dict)
+
+
 _HTTP_STATE = _HttpMetricState()
 _OPERATION_STATE = _OperationMetricState()
+_SSE_FAILURE_STATE = _SseFailureMetricState()
+_SSE_FAILURE_STATUSES = frozenset({"error", "cancelled", "fallback_missing"})
 
 
 def _reset_prometheus_metrics_state() -> None:
@@ -53,6 +62,8 @@ def _reset_prometheus_metrics_state() -> None:
         _OPERATION_STATE.duration_count.clear()
         _OPERATION_STATE.duration_buckets.clear()
         _OPERATION_STATE.active.clear()
+    with _SSE_FAILURE_STATE.lock:
+        _SSE_FAILURE_STATE.failures_total.clear()
 
 
 def _metric_line(name: str, value: int | float) -> str:
@@ -74,6 +85,10 @@ def _metric_block(name: str, description: str, metric_type: str, value: int | fl
 
 def _escape_label_value(value: str) -> str:
     return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+
+
+def _session_trace_id(session_id: str) -> str:
+    return hashlib.md5(str(session_id or "unknown").encode("utf-8")).hexdigest()
 
 
 def _route_template(path: str, route_path: str | None) -> str:
@@ -136,6 +151,22 @@ def finish_operation(started_at: float, category: str, name: str, status: str) -
                 _OPERATION_STATE.duration_buckets[bucket_key] = _OPERATION_STATE.duration_buckets.get(bucket_key, 0) + 1
         active = _OPERATION_STATE.active.get(key, 0)
         _OPERATION_STATE.active[key] = max(active - 1, 0)
+
+
+def record_sse_stream_failure(stream: str, session_id: str, status: str) -> None:
+    normalized_status = (status or "unknown").strip() or "unknown"
+    if normalized_status not in _SSE_FAILURE_STATUSES:
+        return
+    normalized_stream = (stream or "unknown").strip() or "unknown"
+    normalized_session_id = (session_id or "unknown").strip() or "unknown"
+    key = (
+        normalized_stream,
+        normalized_session_id,
+        _session_trace_id(normalized_session_id),
+        normalized_status,
+    )
+    with _SSE_FAILURE_STATE.lock:
+        _SSE_FAILURE_STATE.failures_total[key] = _SSE_FAILURE_STATE.failures_total.get(key, 0) + 1
 
 
 def _parse_proc_status() -> dict[str, int]:
@@ -417,6 +448,30 @@ def _render_operation_metrics() -> list[str]:
     return lines
 
 
+def _render_sse_failure_metrics() -> list[str]:
+    lines = [
+        "# HELP sage_server_sse_stream_failures_total SSE stream failures with session_id for drilldown.",
+        "# TYPE sage_server_sse_stream_failures_total counter",
+    ]
+    with _SSE_FAILURE_STATE.lock:
+        failures_total = dict(_SSE_FAILURE_STATE.failures_total)
+
+    for stream, session_id, trace_id, status in sorted(failures_total):
+        lines.append(
+            _labeled_metric_line(
+                "sage_server_sse_stream_failures_total",
+                {
+                    "stream": stream,
+                    "session_id": session_id,
+                    "trace_id": trace_id,
+                    "status": status,
+                },
+                failures_total[(stream, session_id, trace_id, status)],
+            )
+        )
+    return lines
+
+
 def render_prometheus_metrics() -> str:
     usage = resource.getrusage(resource.RUSAGE_SELF)
     proc_status = _parse_proc_status()
@@ -495,6 +550,7 @@ def render_prometheus_metrics() -> str:
     lines.extend(_render_python_metrics())
     lines.extend(_render_http_metrics())
     lines.extend(_render_operation_metrics())
+    lines.extend(_render_sse_failure_metrics())
     try:
         from sagents.observability.prometheus_handler import render_prometheus_trace_metrics
 
