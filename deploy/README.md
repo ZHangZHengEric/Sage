@@ -33,6 +33,8 @@ deploy/compose.sh test up -d
 
 `deploy/compose.sh` 默认使用 `prod` 环境；也可以通过第一个参数指定 `dev`、`prod` 或 `test`。脚本默认优先读取 `deploy/<env>/.env`；如果该文件不存在，则回退读取仓库根目录 `.env`。也可以通过 `ENV_FILE=/path/to/.env` 显式指定配置文件。
 
+`up` 部署流程默认隐藏 Docker Compose 原生 build/start 明细，按服务输出 `Sage 部署` 阶段进度；失败时会标出失败服务，并展开该次 Docker Compose 原始日志。需要直接查看原生输出时，可以加 `SAGE_DEPLOY_OUTPUT=raw`。
+
 `wiki`、`rustfs`、`redis` 使用共享 compose 文件 `deploy/docker-compose.shared.yml`，不再在 `dev`、`prod`、`test` 的 compose 文件中重复定义。`prometheus`、`grafana`、`cadvisor`、`loki`、`alloy`、`jaeger` 单独放在 `deploy/docker-compose.observability.yml`。
 
 执行 `deploy/compose.sh <env> up -d` 时，脚本会先确认 `sage_shared_default` Docker 网络存在；不存在则创建。随后脚本会用 `sage_shared` compose project 启动 shared 服务，再启动当前环境服务。Shared、环境服务和观测服务都会通过 `SAGE_SHARED_NETWORK=sage_shared_default` 接入同一个网络。Shared 和观测服务固定使用 `sage-*` 容器名。
