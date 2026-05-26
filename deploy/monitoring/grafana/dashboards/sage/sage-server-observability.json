@@ -784,7 +784,7 @@
       },
       "id": 20,
       "panels": [],
-      "title": "SAgents 对话执行 / SSE",
+      "title": "SAgents",
       "type": "row"
     },
     {
@@ -800,7 +800,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 6,
+        "w": 8,
         "x": 0,
         "y": 21
       },
@@ -827,66 +827,15 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(sagents_agent_runs_active{job=~\"$job\",instance=~\"$instance\"}) by (agent_id)",
+          "expr": "sum(rate(sagents_agent_starts_total{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (agent_id)",
           "legendFormat": "{{agent_id}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "当前进行中 Agent 执行",
+      "title": "Agent 调用速率（次/秒）",
       "type": "timeseries",
-      "description": "来自 SAgent 执行入口，按 agent_id 统计当前仍在运行的 Agent 会话；原始指标保留 session_id 方便排查。"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "unit": "suffix:次/秒"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 6,
-        "y": 21
-      },
-      "id": 22,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(sagents_agent_runs_total{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (agent_id, status)",
-          "legendFormat": "{{agent_id}} / {{status}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Agent 执行结束速率（次/秒）",
-      "type": "timeseries",
-      "description": "来自 SAgent 执行入口，按 agent_id 和 status 展示成功/失败结束速率；SSE 断开另看失败列表。"
+      "description": "每秒新启动的 Agent run 数，按 agent_id 聚合；用于观察入口流量和突增。"
     },
     {
       "datasource": {
@@ -937,7 +886,7 @@
       ],
       "title": "Agent 完整执行耗时 P95",
       "type": "timeseries",
-      "description": "来自 SAgent 执行入口，展示已结束 Agent run 的 95 分位完整执行耗时；不按 router/SSE 连接计时。"
+      "description": "展示已结束 Agent run 的完整执行耗时 P95，用于观察整体任务处理是否变慢。"
     },
     {
       "datasource": {
@@ -988,110 +937,7 @@
       ],
       "title": "首 token 耗时 P95（按 Agent）",
       "type": "timeseries",
-      "description": "从 SAgent run_stream 开始到第一次输出有内容的 assistant/tool chunk 的耗时 P95；按 agent_id 聚合。"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 29
-      },
-      "id": 30,
-      "panels": [],
-      "title": "SAgents / SSE / 工具",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "cellOptions": {
-              "type": "auto"
-            }
-          },
-          "mappings": []
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "session_id"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Explore logs by session_id",
-                    "url": "/explore?orgId=1&left=%7B%22datasource%22:%22sage-loki%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22expr%22:%22%7Bservice%3D~%5C%22sage-server.*%5C%22%7D%20%7C%20json%20%7C%20session_id%3D%5C%22${__data.fields.session_id}%5C%22%22%7D%5D,%22range%22:%7B%22from%22:%22${__from}%22,%22to%22:%22${__to}%22%7D%7D",
-                    "targetBlank": true
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "trace_id"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Explore Jaeger trace",
-                    "url": "/explore?orgId=1&left=%7B%22datasource%22:%22sage-jaeger%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22query%22:%22${__data.fields.trace_id}%22%7D%5D,%22range%22:%7B%22from%22:%22${__from}%22,%22to%22:%22${__to}%22%7D%7D",
-                    "targetBlank": true
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 30
-      },
-      "id": 31,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "increase(sage_server_sse_stream_failures_total{job=~\"$job\",instance=~\"$instance\",stream=~\"api_chat|api_stream|web_stream|resume_stream|rerun_stream\"}[$__range]) > 0",
-          "format": "table",
-          "instant": true,
-          "legendFormat": "",
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "SSE 失败列表",
-      "type": "table"
+      "description": "从 SAgent run_stream 开始到第一次输出有内容的 assistant/tool chunk 的耗时 P95，用于观察用户首次看到内容前的等待时间。"
     },
     {
       "datasource": {
@@ -1150,9 +996,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 30
+        "y": 29
       },
-      "id": 32,
+      "id": 31,
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -1172,142 +1018,30 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(sagents_agent_runs_total{job=~\"$job\",instance=~\"$instance\"}[$__range])) by (agent_id, status)",
+          "expr": "increase(sage_server_sse_stream_failures_total{job=~\"$job\",instance=~\"$instance\",stream=~\"api_chat|api_stream|web_stream|resume_stream|rerun_stream\"}[$__range]) > 0",
           "format": "table",
           "instant": true,
           "legendFormat": "",
           "range": false,
           "refId": "A"
-        }
-      ],
-      "title": "Agent 调用量",
-      "type": "table"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "unit": "suffix:次",
-          "decimals": 0
         },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 38
-      },
-      "id": 33,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(sagents_tool_calls_total{job=~\"$job\",instance=~\"$instance\"}[$__range])) by (tool_name, status)",
-          "legendFormat": "{{tool_name}} / {{status}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Tool 调用次数（本时间范围）",
-      "type": "timeseries",
-      "description": "按当前 Grafana 时间范围统计每个 tool 的调用次数；单位为次，不是每秒速率。"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "cellOptions": {
-              "type": "auto"
-            }
-          },
-          "decimals": 3,
-          "mappings": [],
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 38
-      },
-      "id": 34,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "topk(15, (histogram_quantile(0.95, sum(increase(sagents_tool_call_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[$__range])) by (le, tool_name)) and on(tool_name) (sum(increase(sagents_tool_call_duration_seconds_count{job=~\"$job\",instance=~\"$instance\"}[$__range])) by (tool_name) > 0)))",
+          "expr": "increase(sagents_tool_call_failures_total{job=~\"$job\",instance=~\"$instance\"}[$__range]) > 0",
           "format": "table",
           "instant": true,
           "legendFormat": "",
           "range": false,
-          "refId": "A"
+          "refId": "B"
         }
       ],
-      "title": "Tool 耗时 Top P95（本时间范围）",
+      "title": "失败列表（SSE / Tool）",
       "type": "table",
-      "description": "按当前 Grafana 时间范围内已完成的 tool 调用计算 P95；没有调用的 tool 会被过滤，避免空 bucket 显示 NaN。",
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true
-            },
-            "indexByName": {
-              "tool_name": 0,
-              "Value": 1
-            },
-            "renameByName": {
-              "tool_name": "tool_name",
-              "Value": "p95_seconds"
-            }
-          }
-        }
-      ]
+      "description": "SSE 和 Tool 失败明细，保留 session_id 和 trace_id；点击 session_id 查日志，点击 trace_id 查 Jaeger。"
     },
     {
       "datasource": {
@@ -1365,10 +1099,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
-        "y": 38
+        "x": 8,
+        "y": 21
       },
-      "id": 35,
+      "id": 32,
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -1388,7 +1122,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "increase(sagents_tool_call_failures_total{job=~\"$job\",instance=~\"$instance\"}[$__range]) > 0",
+          "expr": "sum(increase(sagents_agent_runs_total{job=~\"$job\",instance=~\"$instance\"}[$__range])) by (agent_id, status)",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -1396,8 +1130,135 @@
           "refId": "A"
         }
       ],
-      "title": "Tool 失败列表",
-      "type": "table"
+      "title": "Agent 调用量（本时间范围）",
+      "type": "table",
+      "description": "当前 Grafana 时间范围内已结束的 Agent run 数，按 agent_id 和 status 汇总；用于看调用总量和成功/失败分布。"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "suffix:次",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 29
+      },
+      "id": 33,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(increase(sagents_tool_calls_total{job=~\"$job\",instance=~\"$instance\"}[$__range])) by (tool_name, status)",
+          "legendFormat": "{{tool_name}} / {{status}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Tool 调用次数（本时间范围）",
+      "type": "timeseries",
+      "description": "当前 Grafana 时间范围内每个 tool 的成功/失败调用次数；用于看工具使用分布。"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "cellOptions": {
+              "type": "auto"
+            }
+          },
+          "decimals": 3,
+          "mappings": [],
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 29
+      },
+      "id": 34,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "topk(15, (histogram_quantile(0.95, sum(increase(sagents_tool_call_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[$__range])) by (le, tool_name)) and on(tool_name) (sum(increase(sagents_tool_call_duration_seconds_count{job=~\"$job\",instance=~\"$instance\"}[$__range])) by (tool_name) > 0)))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Tool 耗时 Top P95",
+      "type": "table",
+      "description": "当前时间范围内 tool 调用 P95 耗时 Top，用于定位慢工具；没有调用的 tool 会被过滤。",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "tool_name": 0,
+              "Value": 1
+            },
+            "renameByName": {
+              "tool_name": "tool_name",
+              "Value": "p95_seconds"
+            }
+          }
+        }
+      ]
     },
     {
       "collapsed": false,
@@ -1405,7 +1266,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 46
+        "y": 37
       },
       "id": 40,
       "panels": [],
@@ -1428,7 +1289,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 47
+        "y": 38
       },
       "id": 41,
       "options": {
@@ -1478,7 +1339,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 47
+        "y": 38
       },
       "id": 42,
       "options": {
@@ -1538,7 +1399,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 47
+        "y": 38
       },
       "id": 43,
       "options": {
@@ -1609,7 +1470,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 55
+        "y": 46
       },
       "id": 45,
       "options": {
@@ -1680,7 +1541,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 55
+        "y": 46
       },
       "id": 46,
       "options": {

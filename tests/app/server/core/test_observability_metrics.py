@@ -87,6 +87,7 @@ def test_prometheus_trace_handler_records_agent_and_tool_metrics():
 
     handler.on_agent_start("session-1", "SimpleAgent", agent_id="agent-demo")
     active_body = render_prometheus_trace_metrics()
+    assert 'sagents_agent_starts_total{agent_id="agent-demo"} 1.000000' in active_body
     assert 'sagents_agent_runs_active{agent_id="agent-demo",session_id="session-1"} 1.000000' in active_body
 
     handler.on_agent_end({"status": "finished"})

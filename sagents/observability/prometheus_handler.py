@@ -18,6 +18,7 @@ _OP_STACK: contextvars.ContextVar[tuple[tuple[str, str, str, float], ...]] = con
 @dataclass
 class _PrometheusTraceState:
     lock: threading.Lock = field(default_factory=threading.Lock)
+    agent_starts_total: dict[str, int] = field(default_factory=dict)
     agent_total: dict[tuple[str, str], int] = field(default_factory=dict)
     agent_active: dict[tuple[str, str], int] = field(default_factory=dict)
     agent_duration_sum: dict[tuple[str, str], float] = field(default_factory=dict)
@@ -81,6 +82,12 @@ def _record_agent(agent_id: str, status: str) -> None:
     key = (normalized_agent_id, normalized_status)
     with _STATE.lock:
         _STATE.agent_total[key] = _STATE.agent_total.get(key, 0) + 1
+
+
+def _record_agent_start(agent_id: str) -> None:
+    normalized_agent_id = _normalize_label_value(agent_id)
+    with _STATE.lock:
+        _STATE.agent_starts_total[normalized_agent_id] = _STATE.agent_starts_total.get(normalized_agent_id, 0) + 1
 
 
 def _increment_agent_active(agent_id: str, session_id: str) -> None:
@@ -172,6 +179,7 @@ def _agent_status(output: Any) -> str:
 
 def reset_prometheus_trace_metrics() -> None:
     with _STATE.lock:
+        _STATE.agent_starts_total.clear()
         _STATE.agent_total.clear()
         _STATE.agent_active.clear()
         _STATE.agent_duration_sum.clear()
@@ -190,6 +198,7 @@ def reset_prometheus_trace_metrics() -> None:
 
 def render_prometheus_trace_metrics() -> str:
     with _STATE.lock:
+        agent_starts_total = dict(_STATE.agent_starts_total)
         agent_total = dict(_STATE.agent_total)
         agent_active = dict(_STATE.agent_active)
         agent_duration_sum = dict(_STATE.agent_duration_sum)
@@ -205,9 +214,24 @@ def render_prometheus_trace_metrics() -> str:
         tool_failures = dict(_STATE.tool_failures)
 
     lines = [
-        "# HELP sagents_agent_runs_total Total SAgents agent runs by agent_id and status.",
-        "# TYPE sagents_agent_runs_total counter",
+        "# HELP sagents_agent_starts_total Total SAgents agent run starts by agent_id.",
+        "# TYPE sagents_agent_starts_total counter",
     ]
+    for agent_id in sorted(agent_starts_total):
+        lines.append(
+            _labeled_metric_line(
+                "sagents_agent_starts_total",
+                {"agent_id": agent_id},
+                agent_starts_total[agent_id],
+            )
+        )
+
+    lines.extend(
+        [
+            "# HELP sagents_agent_runs_total Total SAgents agent runs by agent_id and status.",
+            "# TYPE sagents_agent_runs_total counter",
+        ]
+    )
     for agent_id, status in sorted(agent_total):
         lines.append(
             _labeled_metric_line(
@@ -399,6 +423,7 @@ class PrometheusTraceHandler(BaseTraceHandler):
     def on_agent_start(self, session_id: str, agent_name: str, **kwargs: Any) -> Any:
         agent_id = _normalize_label_value(kwargs.get("agent_id") or agent_name)
         normalized_session_id = _normalize_label_value(session_id)
+        _record_agent_start(agent_id)
         _push_operation("agent", agent_id, normalized_session_id)
         _increment_agent_active(agent_id, normalized_session_id)
 
