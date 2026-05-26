@@ -270,7 +270,7 @@ run_compose() {
   fi
 
   local log_file
-  log_file="$(mktemp "${TMPDIR:-/tmp}/sage-compose.XXXXXX.log")"
+  log_file="$(mktemp "${TMPDIR:-/tmp}/sage-compose.XXXXXX")"
 
   if env "${compose_env[@]}" docker compose --ansi never --progress quiet "$@" >"$log_file" 2>&1; then
     rm -f "$log_file"
