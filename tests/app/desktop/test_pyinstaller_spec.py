@@ -26,4 +26,7 @@ def test_windows_build_uses_shared_pyinstaller_spec():
     script_text = script_path.read_text()
 
     assert "sage-desktop.spec" in script_text
-    assert "& pyinstaller @pyiArgs" in script_text
+    assert (
+        "& pyinstaller @pyiArgs" in script_text
+        or "-m PyInstaller @pyiArgs" in script_text
+    )
