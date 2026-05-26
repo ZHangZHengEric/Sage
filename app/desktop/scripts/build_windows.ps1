@@ -95,6 +95,32 @@ function Resolve-CondaEnvPython {
     return $null
 }
 
+function Ensure-PythonPackagingTools {
+    param(
+        [string]$CondaExe,
+        [string]$EnvName,
+        [string]$SagePythonParam
+    )
+
+    & $SagePythonParam -m pip --version 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        return
+    }
+
+    Write-Host "Pip is missing in Conda environment '$EnvName'. Installing packaging tools..." -ForegroundColor Yellow
+    & $CondaExe install -n $EnvName -y pip setuptools wheel
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Failed to install pip/setuptools/wheel into Conda environment '$EnvName'." -ForegroundColor Red
+        exit 1
+    }
+
+    & $SagePythonParam -m pip --version
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] pip is still unavailable in Conda environment '$EnvName'." -ForegroundColor Red
+        exit 1
+    }
+}
+
 function Sync-CondaRuntimeToSidecar {
     param(
         [string]$SagePythonParam,
@@ -191,7 +217,7 @@ if ($envExists) {
     Write-Host "Conda environment '$EnvName' already exists." -ForegroundColor Green
 } else {
     Write-Host "Creating Conda environment '$EnvName' (Python 3.11)..." -ForegroundColor Cyan
-    & $CondaExe create -n $EnvName python=3.11 -y
+    & $CondaExe create -n $EnvName python=3.11 pip setuptools wheel -y
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] Failed to create Conda environment" -ForegroundColor Red
         exit 1
@@ -212,6 +238,8 @@ $EnvScriptsDir = Join-Path (Split-Path -Parent $SagePython) "Scripts"
 if (Test-Path $EnvScriptsDir) {
     $env:PATH = "$EnvScriptsDir;$env:PATH"
 }
+
+Ensure-PythonPackagingTools -CondaExe $CondaExe -EnvName $EnvName -SagePythonParam $SagePython
 
 Write-Host "Python: $(& $SagePython --version)" -ForegroundColor Cyan
 Write-Host "Pip: $(& $SagePython -m pip --version)" -ForegroundColor Cyan
@@ -242,28 +270,52 @@ function Install-PythonDeps {
         Write-Host "Using pip index: $PipIndexUrl" -ForegroundColor Cyan
 
         & $SagePythonParam -m pip install --upgrade pip setuptools wheel --index-url $PipIndexUrl --no-user
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[ERROR] Failed to upgrade Python build tools" -ForegroundColor Red
+            exit 1
+        }
 
         Write-Host "Installing deps..." -ForegroundColor Cyan
         & $SagePythonParam -m pip install -r $ReqFile --index-url $PipIndexUrl --no-user
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[ERROR] Failed to install Python dependencies" -ForegroundColor Red
+            exit 1
+        }
 
         Write-Host "Replacing python-magic with python-magic-bin for Windows..." -ForegroundColor Cyan
         & $SagePythonParam -m pip uninstall -y python-magic 2>$null
         & $SagePythonParam -m pip install python-magic-bin --index-url $PipIndexUrl --no-user
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[ERROR] Failed to install python-magic-bin" -ForegroundColor Red
+            exit 1
+        }
 
         Write-Host "Force reinstalling pure Python chardet..." -ForegroundColor Cyan
         & $SagePythonParam -m pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url $PipIndexUrl --no-user
         if ($LASTEXITCODE -ne 0) {
             Write-Host "Falling back to official PyPI for chardet..." -ForegroundColor Yellow
             & $SagePythonParam -m pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url https://pypi.org/simple --no-user
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "[ERROR] Failed to install chardet/charset-normalizer" -ForegroundColor Red
+                exit 1
+            }
         }
 
         & $SagePythonParam -c "import PyInstaller" 2>$null
         if ($LASTEXITCODE -ne 0) {
             & $SagePythonParam -m pip install pyinstaller --index-url $PipIndexUrl --no-user
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "[ERROR] Failed to install PyInstaller" -ForegroundColor Red
+                exit 1
+            }
         }
 
         Write-Host "Ensuring python-magic-bin is installed for unstructured..." -ForegroundColor Cyan
-        & $SagePythonParam -m pip install python-magic-bin --index-url $PipIndexUrl --no-user 2>$null
+        & $SagePythonParam -m pip install python-magic-bin --index-url $PipIndexUrl --no-user
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[ERROR] Failed to verify python-magic-bin" -ForegroundColor Red
+            exit 1
+        }
 
         $NewHash | Out-File -FilePath $HashFile -Encoding UTF8
     }
