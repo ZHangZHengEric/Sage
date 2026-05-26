@@ -21,6 +21,7 @@ _DYNAMIC_PATH_SEGMENT_RE = re.compile(
 class _HttpMetricState:
     lock: threading.Lock = field(default_factory=threading.Lock)
     requests_total: dict[tuple[str, str, str], int] = field(default_factory=dict)
+    request_last_seen: dict[tuple[str, str, str], float] = field(default_factory=dict)
     duration_sum: dict[tuple[str, str], float] = field(default_factory=dict)
     duration_count: dict[tuple[str, str], int] = field(default_factory=dict)
     duration_buckets: dict[tuple[str, str, float], int] = field(default_factory=dict)
@@ -52,6 +53,7 @@ _SSE_FAILURE_STATUSES = frozenset({"error", "cancelled", "fallback_missing"})
 def _reset_prometheus_metrics_state() -> None:
     with _HTTP_STATE.lock:
         _HTTP_STATE.requests_total.clear()
+        _HTTP_STATE.request_last_seen.clear()
         _HTTP_STATE.duration_sum.clear()
         _HTTP_STATE.duration_count.clear()
         _HTTP_STATE.duration_buckets.clear()
@@ -129,6 +131,7 @@ def finish_http_request(
         _HTTP_STATE.requests_total[status_key] = (
             _HTTP_STATE.requests_total.get(status_key, 0) + 1
         )
+        _HTTP_STATE.request_last_seen[status_key] = time.time()
         _HTTP_STATE.duration_sum[key] = (
             _HTTP_STATE.duration_sum.get(key, 0.0) + duration
         )
@@ -299,6 +302,7 @@ def _render_http_metrics() -> list[str]:
     ]
     with _HTTP_STATE.lock:
         requests_total = dict(_HTTP_STATE.requests_total)
+        request_last_seen = dict(_HTTP_STATE.request_last_seen)
         duration_sum = dict(_HTTP_STATE.duration_sum)
         duration_count = dict(_HTTP_STATE.duration_count)
         duration_buckets = dict(_HTTP_STATE.duration_buckets)
@@ -310,6 +314,21 @@ def _render_http_metrics() -> list[str]:
                 "sage_server_http_requests_total",
                 {"method": method, "path": path, "status": status},
                 requests_total[(method, path, status)],
+            )
+        )
+
+    lines.extend(
+        [
+            "# HELP sage_server_http_request_last_seen_timestamp_seconds Unix timestamp of the most recent completed HTTP request by method, path, and status.",
+            "# TYPE sage_server_http_request_last_seen_timestamp_seconds gauge",
+        ]
+    )
+    for method, path, status in sorted(request_last_seen):
+        lines.append(
+            _labeled_metric_line(
+                "sage_server_http_request_last_seen_timestamp_seconds",
+                {"method": method, "path": path, "status": status},
+                request_last_seen[(method, path, status)],
             )
         )
 

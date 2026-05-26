@@ -63,6 +63,10 @@ def test_prometheus_metrics_records_http_request_counts_and_duration():
         in body
     )
     assert (
+        'sage_server_http_request_last_seen_timestamp_seconds{method="GET",path="/api/chat",status="200"}'
+        in body
+    )
+    assert (
         'sage_server_http_request_duration_seconds_count{method="GET",path="/api/chat"} 1.000000'
         in body
     )

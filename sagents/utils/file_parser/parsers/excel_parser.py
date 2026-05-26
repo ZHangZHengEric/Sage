@@ -22,6 +22,10 @@ class ExcelParser(BaseFileParser):
         "application/vnd.ms-excel",
     ]
 
+    @staticmethod
+    def _cell_to_text(value: Any) -> str:
+        return "" if pd.isna(value) else str(value)
+
     def parse(self, file_path: str, skip_validation: bool = False) -> ParseResult:
         """
         解析Excel文件
@@ -68,12 +72,17 @@ class ExcelParser(BaseFileParser):
             for sheet_name in excel_file.sheet_names:
                 try:
                     # 首先尝试正常读取（第一行作为列标题）
-                    df = pd.read_excel(target_path, sheet_name=sheet_name)
+                    df = pd.read_excel(
+                        target_path, sheet_name=sheet_name, keep_default_na=False
+                    )
 
                     # 如果DataFrame为空，尝试不使用header读取
                     if df.empty:
                         df_no_header = pd.read_excel(
-                            target_path, sheet_name=sheet_name, header=None
+                            target_path,
+                            sheet_name=sheet_name,
+                            header=None,
+                            keep_default_na=False,
                         )
                         if not df_no_header.empty:
                             # 如果不使用header能读到数据，说明只有标题行
@@ -84,8 +93,8 @@ class ExcelParser(BaseFileParser):
                     else:
                         has_header_only = False
 
-                    # 转换为字符串并处理NaN值
-                    df_str = df.astype(str).replace("nan", "")
+                    # 转换为字符串并处理空值
+                    df_str = df.map(self._cell_to_text)
 
                     # 构建工作表文本
                     sheet_text = f"--- 工作表: {sheet_name} ---\n"
@@ -97,8 +106,8 @@ class ExcelParser(BaseFileParser):
                                 "标题行: "
                                 + " | ".join(
                                     str(cell)
-                                    for cell in df.iloc[0].values
-                                    if str(cell).strip()
+                                    for cell in df_str.iloc[0].values
+                                    if cell.strip()
                                 )
                                 + "\n"
                             )
@@ -114,21 +123,22 @@ class ExcelParser(BaseFileParser):
 
                             # 添加数据行（限制显示行数以避免过长）
                             max_rows = 100  # 限制最多显示100行
-                            for i, row in df_str.iterrows():
-                                if i >= max_rows:
-                                    sheet_text += (
-                                        f"... (还有 {len(df) - max_rows} 行数据)\n"
-                                    )
-                                    break
+                            for row_num, row in enumerate(
+                                df_str.head(max_rows).itertuples(
+                                    index=False, name=None
+                                ),
+                                start=1,
+                            ):
                                 row_text = " | ".join(
-                                    str(cell)
-                                    for cell in row.values
-                                    if str(cell).strip()
+                                    cell for cell in row if cell.strip()
                                 )
                                 if row_text.strip():
-                                    sheet_text += f"第{i + 1}行: {row_text}\n"
+                                    sheet_text += f"第{row_num}行: {row_text}\n"
 
                             if len(df) > max_rows:
+                                sheet_text += (
+                                    f"... (还有 {len(df) - max_rows} 行数据)\n"
+                                )
                                 sheet_text += "\n"
                     else:
                         sheet_text += "(工作表为空)\n"
@@ -144,13 +154,13 @@ class ExcelParser(BaseFileParser):
                             "columns": len(df.columns),
                             "column_names": [
                                 str(cell)
-                                for cell in df.iloc[0].values
-                                if str(cell).strip()
+                                for cell in df_str.iloc[0].values
+                                if cell.strip()
                             ],
                             "has_data": True,  # 有标题行也算有数据
                             "has_header_only": True,
                             "non_empty_cells": sum(
-                                1 for cell in df.iloc[0].values if str(cell).strip()
+                                1 for cell in df_str.iloc[0].values if cell.strip()
                             ),
                         }
                     else:
@@ -162,7 +172,12 @@ class ExcelParser(BaseFileParser):
                             "column_names": df.columns.tolist(),
                             "has_data": not df.empty,
                             "has_header_only": False,
-                            "non_empty_cells": df.count().sum(),
+                            "non_empty_cells": sum(
+                                1
+                                for row in df_str.itertuples(index=False, name=None)
+                                for cell in row
+                                if cell.strip()
+                            ),
                         }
                     sheet_data.append(sheet_info)
 
