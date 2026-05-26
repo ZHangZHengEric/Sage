@@ -53,8 +53,6 @@ services:
       - ${SAGE_WEB_PORT:-30151}:80
     environment:
       TZ: 'Asia/Shanghai'
-    depends_on:
-      - sage-server-dev
     mem_limit: 512m
     cpus: 0.5
     networks:
