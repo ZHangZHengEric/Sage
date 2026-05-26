@@ -1,0 +1,7 @@
+# Copy this file to deploy/monitoring/prometheus.local.yml.
+# The local file is ignored by Git and appended under scrape_configs.
+
+  - job_name: custom-service
+    static_configs:
+      - targets:
+          - custom-service:9100

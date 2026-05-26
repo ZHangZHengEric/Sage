@@ -16,19 +16,38 @@ ref: env_vars
 > for default values; "—" means there is no static default (required, or
 > derived dynamically).
 
+## 0. Deployment Example Policy
+
+`deploy/dev|test|prod/.env.example` uses a minimal-required policy: it keeps only Compose/application values that are normally changed per environment, secrets, accounts, and external URLs. Kubernetes-only settings live in `deploy/k8s/env/*.env.example` instead of the shared environment templates. Stable defaults live in code, Compose, or the K8s deploy script.
+
+Variables intentionally kept in the examples:
+
+| Type | Variables |
+| --- | --- |
+| Environment and entrypoint | `SAGE_ENV`, `SAGE_ROOT` |
+| Secrets and accounts | `SAGE_JWT_KEY`, `SAGE_REFRESH_TOKEN_SECRET`, `SAGE_SESSION_SECRET`, MySQL/S3/Grafana passwords, LLM/Embedding API keys, email AK/SK |
+| External URLs | `SAGE_TRACE_JAEGER_PUBLIC_URL`, `SAGE_GRAFANA_PUBLIC_URL`, `SAGE_S3_PUBLIC_BASE_URL`, `SAGE_ELASTICSEARCH_URL` |
+
+Kubernetes templates separately keep `NAMESPACE`, `SAGE_HOST`, `SAGE_PUBLIC_URL`, `IMAGE_REGISTRY`, `IMAGE_PULL_POLICY`, `K8S_IMAGE_TARGET`, `CTR_BIN`, `CTR_NAMESPACE`, `STORAGE_CLASS`, `INGRESS_CLASS_NAME`, `TLS_SECRET_NAME`, `ENABLE_INGRESS`, `SAGE_WEB_SERVICE_TYPE`, `SAGE_WIKI_SERVICE_TYPE`, `SAGE_WEB_NODE_PORT`, and `SAGE_WIKI_NODE_PORT`.
+
+Advanced overrides are not listed in `.env.example` unless a deployment needs to change them. Common examples include Compose project/port overrides, `SAGE_WEB_BASE_PATH`, `SAGE_TRACE_JAEGER_URL`, `SAGE_LOKI_PUSH_URL`, `SAGE_MCP_*`, `OPENSANDBOX_IMAGE`, `OPENSANDBOX_TIMEOUT`, `SAGE_OPENSANDBOX_APPEND_MAX_BYTES`, default LLM/Embedding model parameters, and fixed email defaults.
+
 ## 1. LLM defaults
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SAGE_DEFAULT_LLM_API_KEY` | — | Default OpenAI-compatible API key |
-| `SAGE_DEFAULT_LLM_API_BASE_URL` | — | Default model base URL |
-| `SAGE_DEFAULT_LLM_MODEL_NAME` | — | Default model name |
+| `SAGE_DEFAULT_LLM_API_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1/` | Default model base URL |
+| `SAGE_DEFAULT_LLM_MODEL_NAME` | `deepseek-v3` | Default model name |
+| `SAGE_DEFAULT_LLM_MAX_TOKENS` | `4096` | Default max output tokens |
+| `SAGE_DEFAULT_LLM_TEMPERATURE` | `0.2` | Default sampling temperature |
+| `SAGE_DEFAULT_LLM_MAX_MODEL_LEN` | `52000` | Default context length |
 
 ## 2. Service ports & directories
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SAGE_HOST` | `0.0.0.0` | Server bind address |
+| `SAGE_HOST` | — | Public deployment hostname/IP, mainly used by K8s URL derivation; not the server bind address |
 | `SAGE_PORT` | `8001` (server) / dynamic (desktop) | Service port |
 | `SAGE_ROOT` | `~/.sage` | Root for sessions/agents/logs |
 | `SAGE_SESSIONS_PATH` | `$SAGE_ROOT/sessions` | Session persistence directory |
@@ -70,10 +89,19 @@ ref: env_vars
 | --- | --- | --- |
 | `OPENSANDBOX_URL` | — | OpenSandbox endpoint |
 | `OPENSANDBOX_API_KEY` | — | API key |
-| `OPENSANDBOX_IMAGE` | — | Default image |
-| `OPENSANDBOX_TIMEOUT` | — | Request timeout (s) |
-| `SAGE_OPENSANDBOX_APPEND_MAX_BYTES` | — | Max bytes per append call |
+| `OPENSANDBOX_IMAGE` | `opensandbox/code-interpreter:v1.0.2` | Default image |
+| `OPENSANDBOX_TIMEOUT` | `1800` | Request timeout (s) |
+| `SAGE_OPENSANDBOX_APPEND_MAX_BYTES` | `262144` | Max bytes per append call |
 | `SAGE_APPEND_PATH` / `SAGE_APPEND_B64` | — | Internal append-tool plumbing |
+
+## 4.2 Embedding defaults
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SAGE_EMBEDDING_API_KEY` | — | Embedding API key |
+| `SAGE_EMBEDDING_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1/` | Embedding base URL |
+| `SAGE_EMBEDDING_MODEL` | `text-embedding-v4` | Embedding model |
+| `SAGE_EMBEDDING_DIMS` | `1024` | Embedding dimensions |
 
 ## 5. Agent loop & prompt cache
 

@@ -3,9 +3,13 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 DEPLOY_DIR="$ROOT_DIR/deploy"
+K8S_DIR="$DEPLOY_DIR/k8s"
 DEPLOY_ENV="${DEPLOY_ENV:-prod}"
 ENV_DIR="$DEPLOY_DIR/$DEPLOY_ENV"
 ENV_FILE="${ENV_FILE:-$ENV_DIR/.env}"
+K8S_ENV_DIR="$K8S_DIR/env"
+K8S_ENV_FILE="${K8S_ENV_FILE:-$K8S_ENV_DIR/$DEPLOY_ENV.env}"
+K8S_ENV_EXAMPLE="$K8S_ENV_DIR/$DEPLOY_ENV.env.example"
 
 load_env_file() {
   local env_file="$1"
@@ -22,6 +26,11 @@ load_env_file() {
 }
 
 load_env_file "$ENV_FILE"
+if [ -f "$K8S_ENV_FILE" ]; then
+  load_env_file "$K8S_ENV_FILE"
+elif [ -f "$K8S_ENV_EXAMPLE" ]; then
+  load_env_file "$K8S_ENV_EXAMPLE"
+fi
 
 NAMESPACE="${NAMESPACE:-sage}"
 DELETE_PVCS="${DELETE_PVCS:-false}"

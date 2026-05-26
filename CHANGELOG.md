@@ -1,8 +1,44 @@
+2026-05-26 部署与观测持续收敛：`deploy/compose.sh` 优化单服务/分环境启动与原生输出；Prometheus/Loki/Grafana 面板与指标多轮调整，补环境与容器维度；去除 dev/test 部署冗余依赖；修复 Fibre agent 返回 agent 名称参数；Windows desktop 构建补 ensurepip。
+
+2026-05-26 server web 渲染改造：精简文件/Markdown/高亮渲染链路，移除多类重型嵌入式文档渲染组件，调整前端依赖与 wiki nginx 配置。
+
+2026-05-25 观测栈与部署修复：调整 Prometheus 容器发现、跨网卡抓取、容器指标与 Grafana 面板；Grafana datasource provisioning 支持跳过覆盖；health 日志降噪；减少 active_start_index 重复 debug 日志。
+
+2026-05-25 Agent 工作空间支持上传：server/desktop agent router 与 AgentService 增加 workspace upload 能力，并补充服务层回归测试。
+
+2026-05-25 Windows desktop 构建脚本与 PyInstaller spec 测试更新。
+
+2026-05-22 部署脚本支持单独部署 shared/env/observability 服务，`deploy/compose.sh` 可按服务名路由到正确 compose 文件并补充文档。
+
+2026-05-21 cAdvisor 升级并补 API 兼容说明；SimpleAgent 抑制 status-only 轮次文本；修复 desktop sidecar 模型导入与打包测试。
+
+2026-05-20 修复 DB client 版本兼容报错并补单测。
+
+2026-05-19 部署与观测体系大幅补强：新增 Sage Prometheus 指标、Grafana/Loki/Alloy 观测栈、nginx access log、容器命名与跨环境 shared 服务复用；调整 dashboard、job/container 指标、内部服务发现与 Loki/Alloy 配置；移除 GitHub 预编译前端镜像路径，改为部署时构建。
+
+2026-05-19 内置 MCP 工具补充多语言元数据，Agent 工具列表在语言切换时刷新；补 Sage MCP 工具多语言 schema 测试。
+
+2026-05-18 MCP 长连接池刷新与连接复用继续修复；ToolDetail 按页面语言返回工具详情；SimpleAgent 增加 self-check loop；修复断开/interrupt/aclose/stop_session 超时与 token 持久化 CPU 热点。
+
+2026-05-15 用户 injections 支持多模态消息录入；有消息队列时允许空消息通过；Agent workspace listing 增加 depth 控制。
+
+2026-05-14 server/desktop goal 层恢复到上游结构，CLI/TUI 裁剪 legacy goal runtime 事件管线；补 CLI session summary 缺 DB 处理；增强 sandbox path guard；新增 agent execution error message 类型。
+
+2026-05-13 修复工具 schema required/default 生成逻辑，覆盖 MCP 工具展示与上下文注入测试。
+
+2026-05-12 会话上下文预算配置支持更新与归一化，补 model length normalization 日志；优化 skill 页面服务端列表。
+
+2026-05-11 ChatService 填充 agent 配置时优先保留请求的响应语言，补 skill owner 相关测试。
+
+2026-05-11 新增设计文档：权限与确认方案（`docs/zh|en/architecture/DESIGN_PERMISSIONS_AND_CONFIRMATION.md`），架构章索引已链入；尚无代码实现。
+
 2026-05-09 10:22 MCP 工具调用增加默认 30 分钟超时，超时后丢弃对应长连接；示例环境变量补齐 MCP 连接池与调用超时配置。
 
 2026-05-09 10:20 MCP 长连接池优化：新增 McpProxy 内部连接池封装，每条长链默认承载 100 并发，满载后扩容新长链而非排队；ToolManager 不感知池实现；MCP 添加/更新/刷新失败保留旧工具与旧连接，AnyTool 改为 DB-first 注册；补充连接池与服务注册回归单测。
 
 2026-05-08 12:15 新增通用 tool_expand_tools：仅恢复 tool_suggestion 二次筛选遗漏，不突破 ToolProxy/agent_mode 边界；Simple/TaskExecutor 未提供工具拒绝提示走 PromptManager，并返回 available_expandable_tools；补单测与中英文架构文档。
+
+2026-05-07 execute_shell：工具文案与后台/超时返回增加 `next_action`，引导在必等结果时立即 `await_shell`；单测覆盖。
 
 2026-05-06 16:25 助手非空串才拼接；token 扣图后回灌 ratio 取末次；重复/拒绝下轮 auto；压缩兼容 max_completion_tokens。
 

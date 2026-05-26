@@ -114,9 +114,7 @@ deploy/compose.sh prod logs -f sage-web
 curl -sS http://127.0.0.1:30050/api/health
 ```
 
-**访问 Web** — 默认示例里常有 **基础路径**（`SAGE_WEB_BASE_PATH`，例如 `/sage`）。在示例 `.env` 下可尝试在浏览器打开 `http://127.0.0.1:30051` 并按你配置的路径（如 `/sage/`）进入；以团队实际部署的 nginx 路由为准。
-
-`.env` 中的 `SAGE_API_BASE_URL` 需与浏览器能访问到的 **API 根地址** 一致（本地映射端口时多为 `http://127.0.0.1:30050`）。
+**访问 Web** — Compose 默认通过 nginx 的 `/sage/` 提供前端，并通过同源 `/prod-api` 代理后端。在示例 `.env` 下可尝试在浏览器打开 `http://127.0.0.1:30051/sage/`；以团队实际部署的 nginx 路由为准。
 
 ### 停止
 
@@ -124,7 +122,7 @@ curl -sS http://127.0.0.1:30050/api/health
 deploy/compose.sh prod down
 ```
 
-**端口冲突：** 若 30050–30057 等被占用，可改 `deploy/prod/.env` 中的宿主机端口变量，并同步修改公网/浏览器可达 URL 与 `SAGE_API_BASE_URL`。
+**端口冲突：** 若 30050–30057 等被占用，可改 `deploy/prod/.env` 中的宿主机端口变量，并同步修改公网/浏览器可达 URL。
 
 ## 延伸阅读
 

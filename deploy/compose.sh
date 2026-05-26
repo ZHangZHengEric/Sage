@@ -16,6 +16,7 @@ Examples:
   deploy/compose.sh up -d
   deploy/compose.sh --observability up -d
   deploy/compose.sh --observability up -d sage-jaeger
+  deploy/compose.sh --observability up -d sage-grafana
   deploy/compose.sh up -d sage-redis
   deploy/compose.sh dev --observability up -d
   deploy/compose.sh dev up -d
@@ -29,9 +30,10 @@ For `up`, the script ensures the shared Docker network exists, starts shared
 services under the `sage_shared` compose project first, then starts the selected
 environment.
 
-Observability services (prometheus, grafana, cadvisor, loki, alloy, jaeger) are
-defined in deploy/docker-compose.observability.yml and are not started unless
---observability is set.
+Observability services (prometheus, cadvisor, loki, alloy, jaeger) are defined
+in deploy/docker-compose.observability.yml and are not started unless
+--observability is set. Grafana is optional and only starts when explicitly
+targeted.
 
 If deploy/<env>/.env is missing, it falls back to .env in the repo root.
 
@@ -59,6 +61,11 @@ fi
 COMPOSE_FILE="$DEPLOY_DIR/$DEPLOY_ENV/docker-compose.yml"
 SHARED_COMPOSE_FILE="$DEPLOY_DIR/docker-compose.shared.yml"
 OBSERVABILITY_COMPOSE_FILE="$DEPLOY_DIR/docker-compose.observability.yml"
+PROMETHEUS_BASE_CONFIG="$DEPLOY_DIR/monitoring/prometheus.yml"
+PROMETHEUS_LOCAL_CONFIG="${SAGE_PROMETHEUS_LOCAL_CONFIG_FILE:-$DEPLOY_DIR/monitoring/prometheus.local.yml}"
+PROMETHEUS_GENERATED_CONFIG="${SAGE_PROMETHEUS_GENERATED_CONFIG_FILE:-$DEPLOY_DIR/monitoring/prometheus.generated.yml}"
+PROMETHEUS_CONFIG_FILE="$PROMETHEUS_BASE_CONFIG"
+ENV_PROJECT_NAME="${SAGE_COMPOSE_PROJECT_NAME:-${COMPOSE_PROJECT_NAME:-sage_$DEPLOY_ENV}}"
 SHARED_PROJECT_NAME="${SAGE_SHARED_PROJECT_NAME:-sage_shared}"
 SHARED_NETWORK="${SAGE_SHARED_NETWORK:-sage_shared_default}"
 
@@ -98,8 +105,53 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-COMPOSE_ARGS=(--env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$SHARED_COMPOSE_FILE")
-ENV_COMPOSE_ARGS=(--env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+absolute_path() {
+  case "$1" in
+    /*)
+      printf '%s' "$1"
+      ;;
+    *)
+      printf '%s/%s' "$(pwd)" "$1"
+      ;;
+  esac
+}
+
+prepare_prometheus_config() {
+  if [ -n "${SAGE_PROMETHEUS_CONFIG_FILE:-}" ]; then
+    PROMETHEUS_CONFIG_FILE="$(absolute_path "$SAGE_PROMETHEUS_CONFIG_FILE")"
+    return 0
+  fi
+
+  PROMETHEUS_LOCAL_CONFIG="$(absolute_path "$PROMETHEUS_LOCAL_CONFIG")"
+  PROMETHEUS_GENERATED_CONFIG="$(absolute_path "$PROMETHEUS_GENERATED_CONFIG")"
+
+  if [ ! -f "$PROMETHEUS_BASE_CONFIG" ]; then
+    echo "Prometheus config not found: $PROMETHEUS_BASE_CONFIG" >&2
+    exit 1
+  fi
+
+  if [ -s "$PROMETHEUS_LOCAL_CONFIG" ]; then
+    local tmp_config
+    tmp_config="${PROMETHEUS_GENERATED_CONFIG}.tmp"
+    {
+      cat "$PROMETHEUS_BASE_CONFIG"
+      printf '\n\n# Local scrape jobs from %s\n' "$PROMETHEUS_LOCAL_CONFIG"
+      cat "$PROMETHEUS_LOCAL_CONFIG"
+      printf '\n'
+    } > "$tmp_config"
+    mv "$tmp_config" "$PROMETHEUS_GENERATED_CONFIG"
+    PROMETHEUS_CONFIG_FILE="$PROMETHEUS_GENERATED_CONFIG"
+  else
+    PROMETHEUS_CONFIG_FILE="$PROMETHEUS_BASE_CONFIG"
+  fi
+}
+
+if [ "$ENABLE_OBSERVABILITY" = "true" ]; then
+  prepare_prometheus_config
+fi
+
+COMPOSE_ARGS=(--env-file "$ENV_FILE" -p "$ENV_PROJECT_NAME" -f "$COMPOSE_FILE" -f "$SHARED_COMPOSE_FILE")
+ENV_COMPOSE_ARGS=(--env-file "$ENV_FILE" -p "$ENV_PROJECT_NAME" -f "$COMPOSE_FILE")
 SHARED_COMPOSE_ARGS=(--env-file "$ENV_FILE" -p "$SHARED_PROJECT_NAME" -f "$SHARED_COMPOSE_FILE")
 OBSERVABILITY_COMPOSE_ARGS=(--env-file "$ENV_FILE" -p "$SHARED_PROJECT_NAME" -f "$OBSERVABILITY_COMPOSE_FILE")
 if [ "$ENABLE_OBSERVABILITY" = "true" ]; then
@@ -283,6 +335,7 @@ compose_config_services() {
     "SAGE_DEPLOY_DIR=$DEPLOY_DIR"
     "SAGE_COMPOSE_ENV_FILE=$ENV_FILE"
     "SAGE_SHARED_NETWORK=$shared_network"
+    "SAGE_PROMETHEUS_CONFIG_FILE=$PROMETHEUS_CONFIG_FILE"
     "COMPOSE_IGNORE_ORPHANS=${COMPOSE_IGNORE_ORPHANS:-true}"
   )
 
@@ -297,6 +350,7 @@ run_compose() {
     "SAGE_DEPLOY_DIR=$DEPLOY_DIR"
     "SAGE_COMPOSE_ENV_FILE=$ENV_FILE"
     "SAGE_SHARED_NETWORK=$shared_network"
+    "SAGE_PROMETHEUS_CONFIG_FILE=$PROMETHEUS_CONFIG_FILE"
     "COMPOSE_IGNORE_ORPHANS=${COMPOSE_IGNORE_ORPHANS:-true}"
   )
 
@@ -344,6 +398,9 @@ configured_group_services() {
 
   while IFS= read -r service; do
     if [ -n "$service" ]; then
+      if [ "$group" = "observability" ] && [ "$service" = "sage-grafana" ]; then
+        continue
+      fi
       services+=("$service")
     fi
   done < <(compose_config_services "$shared_network" "$@")
