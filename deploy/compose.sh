@@ -108,9 +108,19 @@ OBSERVABILITY_COMPOSE_ARGS=(--env-file "$ENV_FILE" -p "$SHARED_PROJECT_NAME" -f 
 if [ "$ENABLE_OBSERVABILITY" = "true" ]; then
   COMPOSE_ARGS+=(-f "$OBSERVABILITY_COMPOSE_FILE")
 fi
-ENV_SERVICES=(sage-server sage-web sage-mysql sage-es)
 SHARED_SERVICES=(sage-wiki sage-rustfs sage-redis)
 OBSERVABILITY_SERVICES=(sage-prometheus sage-grafana sage-cadvisor sage-loki sage-alloy sage-jaeger)
+
+case "$DEPLOY_ENV" in
+  prod)
+    ENV_SERVICES=(sage-server sage-web sage-mysql sage-es)
+    ENV_SERVICE_ORDER=(sage-mysql sage-es sage-server sage-web)
+    ;;
+  dev|test)
+    ENV_SERVICES=("sage-server-$DEPLOY_ENV" "sage-web-$DEPLOY_ENV" "sage-mysql-$DEPLOY_ENV")
+    ENV_SERVICE_ORDER=("sage-mysql-$DEPLOY_ENV" "sage-server-$DEPLOY_ENV" "sage-web-$DEPLOY_ENV")
+    ;;
+esac
 
 contains_service() {
   local service="$1"
@@ -121,6 +131,32 @@ contains_service() {
       return 0
     fi
   done
+  return 1
+}
+
+normalize_env_service() {
+  local service="$1"
+
+  if contains_service "$service" "${ENV_SERVICES[@]}"; then
+    printf '%s' "$service"
+    return 0
+  fi
+
+  case "$DEPLOY_ENV:$service" in
+    dev:sage-server|test:sage-server)
+      printf 'sage-server-%s' "$DEPLOY_ENV"
+      return 0
+      ;;
+    dev:sage-web|test:sage-web)
+      printf 'sage-web-%s' "$DEPLOY_ENV"
+      return 0
+      ;;
+    dev:sage-mysql|test:sage-mysql)
+      printf 'sage-mysql-%s' "$DEPLOY_ENV"
+      return 0
+      ;;
+  esac
+
   return 1
 }
 
@@ -161,6 +197,10 @@ log_done() {
   fi
 }
 
+log_unchanged() {
+  log_line "无更新：$*"
+}
+
 log_fail() {
   local message="$1"
   local elapsed="${2:-}"
@@ -183,9 +223,9 @@ format_targets() {
 
 up_action_label() {
   local arg
-  for arg in "${UP_ARGS[@]}"; do
+  for arg in "${ACTIVE_UP_ARGS[@]}"; do
     if [ "$arg" = "--build" ]; then
-      printf '构建并启动'
+      printf '构建检查并启动'
       return 0
     fi
   done
@@ -195,10 +235,11 @@ up_action_label() {
 
 append_up_arg() {
   local arg="$1"
+  local env_service
 
-  if contains_service "$arg" "${ENV_SERVICES[@]}"; then
+  if env_service="$(normalize_env_service "$arg")"; then
     UP_HAS_TARGETS="true"
-    UP_ENV_TARGETS+=("$arg")
+    UP_ENV_TARGETS+=("$env_service")
     return 0
   fi
 
@@ -293,7 +334,7 @@ ordered_group_services() {
 
   case "$group" in
     env)
-      preferred=(sage-mysql sage-es sage-server sage-web)
+      preferred=("${ENV_SERVICE_ORDER[@]}")
       ;;
     shared)
       preferred=(sage-redis sage-rustfs sage-wiki)
@@ -341,6 +382,7 @@ run_group_services() {
   local action
   local service
   local service_start
+  local elapsed_seconds
   local elapsed
 
   action="$(up_action_label)"
@@ -350,9 +392,14 @@ run_group_services() {
     log_step "${group_label}服务 ${service}（${action}）"
     case "$group" in
       env)
-        if run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "${UP_ARGS[@]}" "$service"; then
-          elapsed="$(format_elapsed "$((SECONDS - service_start))")"
-          log_done "${group_label}服务 $service" "$elapsed"
+        if run_compose "$shared_network" "${ENV_COMPOSE_ARGS[@]}" "${ACTIVE_UP_ARGS[@]}" "$service"; then
+          elapsed_seconds=$((SECONDS - service_start))
+          if [ "$elapsed_seconds" -eq 0 ]; then
+            log_unchanged "${group_label}服务 $service"
+          else
+            elapsed="$(format_elapsed "$elapsed_seconds")"
+            log_done "${group_label}服务 $service" "$elapsed"
+          fi
         else
           elapsed="$(format_elapsed "$((SECONDS - service_start))")"
           log_fail "${group_label}服务 $service" "$elapsed"
@@ -360,9 +407,14 @@ run_group_services() {
         fi
         ;;
       shared)
-        if start_shared "$shared_network" "${UP_ARGS[@]}" "$service"; then
-          elapsed="$(format_elapsed "$((SECONDS - service_start))")"
-          log_done "${group_label}服务 $service" "$elapsed"
+        if start_shared "$shared_network" "${ACTIVE_UP_ARGS[@]}" "$service"; then
+          elapsed_seconds=$((SECONDS - service_start))
+          if [ "$elapsed_seconds" -eq 0 ]; then
+            log_unchanged "${group_label}服务 $service"
+          else
+            elapsed="$(format_elapsed "$elapsed_seconds")"
+            log_done "${group_label}服务 $service" "$elapsed"
+          fi
         else
           elapsed="$(format_elapsed "$((SECONDS - service_start))")"
           log_fail "${group_label}服务 $service" "$elapsed"
@@ -370,9 +422,14 @@ run_group_services() {
         fi
         ;;
       observability)
-        if start_observability "$shared_network" "${UP_ARGS[@]}" "$service"; then
-          elapsed="$(format_elapsed "$((SECONDS - service_start))")"
-          log_done "${group_label}服务 $service" "$elapsed"
+        if start_observability "$shared_network" "${ACTIVE_UP_ARGS[@]}" "$service"; then
+          elapsed_seconds=$((SECONDS - service_start))
+          if [ "$elapsed_seconds" -eq 0 ]; then
+            log_unchanged "${group_label}服务 $service"
+          else
+            elapsed="$(format_elapsed "$elapsed_seconds")"
+            log_done "${group_label}服务 $service" "$elapsed"
+          fi
         else
           elapsed="$(format_elapsed "$((SECONDS - service_start))")"
           log_fail "${group_label}服务 $service" "$elapsed"
@@ -402,6 +459,7 @@ start_observability() {
 if [ "${1:-}" = "up" ]; then
   FILTER_COMPOSE_OUTPUT="true"
   prepare_up_args "$@"
+  ACTIVE_UP_ARGS=("${UP_ARGS[@]}")
 
   if [ "${#UP_OBSERVABILITY_TARGETS[@]}" -gt 0 ] && [ "$ENABLE_OBSERVABILITY" != "true" ]; then
     echo "Observability service requested without --observability: ${UP_OBSERVABILITY_TARGETS[*]}" >&2
