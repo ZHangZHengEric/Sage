@@ -386,7 +386,9 @@ class TestMemoryTool(unittest.TestCase):
         self.assertEqual(len(result["long_term_memory"]), 1)
         self.assertEqual(len(result["session_history"]), 1)
 
-    def test_tool_manager_run_tool_async_injects_session_id_for_search_memory(self):
+    def test_tool_manager_run_tool_async_uses_system_context_session_id_for_search_memory(
+        self,
+    ):
         tool = self.MemoryTool()
         manager = self.ToolManager(is_auto_discover=False, isolated=True)
         manager.register_tools_from_object(tool)
@@ -404,6 +406,13 @@ class TestMemoryTool(unittest.TestCase):
         with (
             patch.object(tool, "_search_file_memory", fake_file_search),
             patch.object(tool, "_search_session_history", fake_history_search),
+            patch(
+                "sagents.tool.tool_manager._resolve_session_context",
+                return_value=types.SimpleNamespace(
+                    system_context={"session_id": "session-tool"},
+                    user_id=None,
+                ),
+            ),
         ):
             raw = asyncio.run(
                 manager.run_tool_async(
