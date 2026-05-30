@@ -1040,6 +1040,7 @@ class MessageManager:
                 MessageType.TASK_ANALYSIS.value,
                 MessageType.TOOL_CALL_RESULT.value,
                 MessageType.SKILL_OBSERVATION.value,
+                MessageType.AGENT_EXECUTION_ERROR.value,
             ]
 
         # 全量消息进入；后续靠 recent_turns + 上层压缩链路控制长度

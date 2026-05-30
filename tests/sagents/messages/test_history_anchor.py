@@ -274,6 +274,26 @@ class TestExtractIgnoresActiveStartIndex:
         assert "u2" in contents
         assert "a2" in contents
 
+    def test_agent_execution_error_stays_in_default_context(self):
+        """自检/执行错误必须进入下一轮 LLM 上下文，否则 agent 会看不到修复反馈。"""
+        mm = MessageManager()
+        mm.messages = [
+            _make(MessageRole.USER.value, "生成结果"),
+            _make(MessageRole.ASSISTANT.value, "结果: [missing](/tmp/missing.md)"),
+            _make(
+                MessageRole.ASSISTANT.value,
+                "自检发现以下问题，需要先修复后再继续",
+                msg_type=MessageType.AGENT_EXECUTION_ERROR.value,
+            ),
+        ]
+
+        result = mm.extract_all_context_messages(
+            recent_turns=0, last_turn_user_only=False
+        )
+        contents = [m.content for m in result]
+
+        assert "自检发现以下问题，需要先修复后再继续" in contents
+
     def test_compress_anchor_still_filters(self):
         """有压缩调用时仍然只保留 user + 最新压缩 + 之后"""
         mm = MessageManager()
