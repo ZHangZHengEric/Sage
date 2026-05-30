@@ -136,11 +136,15 @@ async def execute_tool(
                     error_detail="Permission denied",
                 )
 
+    safe_tool_params = dict(tool_params)
+    safe_tool_params.pop("session_id", None)
+    safe_tool_params.pop("user_id", None)
+
     tool_response = await tool_manager.run_tool_async(
         tool_name=tool_name,
         session_id="",
         user_id=user_id,
-        **tool_params,
+        **safe_tool_params,
     )
     if tool_response is not None:
         logger.info(f"执行工具成功: {tool_name}")
