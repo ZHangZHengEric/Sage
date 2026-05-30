@@ -1,11 +1,14 @@
 import json
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from common.services import tool_service
 from common.services.tool_service import execute_tool
+from sagents.agent.agent_base import AgentBase
 from sagents.tool.mcp_proxy import McpProxy
 from sagents.tool.tool_manager import ToolManager
+from sagents.tool.tool_proxy import ToolProxy
 from sagents.tool.tool_schema import (
     McpToolSpec,
     SageMcpToolSpec,
@@ -19,12 +22,22 @@ async def echo_kwargs(**kwargs):
     return kwargs
 
 
+async def echo_no_args():
+    return {"called": True}
+
+
+class _TestAgent(AgentBase):
+    async def run_stream(self, session_context):
+        if False:
+            yield []
+
+
 class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.tool_manager = ToolManager(is_auto_discover=False, isolated=True)
         self.tool_manager.tools = {}
 
-    async def test_standard_tool_injects_session_and_user_id(self):
+    async def test_standard_tool_uses_session_and_user_id_from_system_context(self):
         tool = ToolSpec(
             name="echo_tool",
             description="echo",
@@ -38,13 +51,21 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
             required=["foo"],
         )
         self.tool_manager.tools[tool.name] = tool
-
-        result = await self.tool_manager.run_tool_async(
-            tool_name="echo_tool",
-            session_id="session-1",
+        session_context = SimpleNamespace(
+            system_context={"session_id": "session-1", "user_id": "user-1"},
             user_id="user-1",
-            foo="bar",
         )
+
+        with patch(
+            "sagents.tool.tool_manager._resolve_session_context",
+            return_value=session_context,
+        ):
+            result = await self.tool_manager.run_tool_async(
+                tool_name="echo_tool",
+                session_id="runtime-session",
+                user_id="runtime-user",
+                foo="bar",
+            )
 
         payload = json.loads(result)
         self.assertEqual(
@@ -56,7 +77,9 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-    async def test_built_in_mcp_tool_injects_session_and_user_id(self):
+    async def test_built_in_mcp_tool_uses_session_and_user_id_from_system_context(
+        self,
+    ):
         tool = SageMcpToolSpec(
             name="builtin_echo",
             description="echo",
@@ -71,13 +94,21 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
             server_name="builtin",
         )
         self.tool_manager.tools[tool.name] = tool
-
-        result = await self.tool_manager.run_tool_async(
-            tool_name="builtin_echo",
-            session_id="session-2",
+        session_context = SimpleNamespace(
+            system_context={"session_id": "session-2", "user_id": "user-2"},
             user_id="user-2",
-            foo="bar",
         )
+
+        with patch(
+            "sagents.tool.tool_manager._resolve_session_context",
+            return_value=session_context,
+        ):
+            result = await self.tool_manager.run_tool_async(
+                tool_name="builtin_echo",
+                session_id="runtime-session",
+                user_id="runtime-user",
+                foo="bar",
+            )
 
         payload = json.loads(result)
         self.assertEqual(
@@ -89,7 +120,459 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-    async def test_mcp_tool_manager_passes_user_id_to_proxy(self):
+    async def test_standard_tool_uses_system_context_identity_when_present(self):
+        tool = ToolSpec(
+            name="echo_tool",
+            description="echo",
+            description_i18n={},
+            func=echo_kwargs,
+            parameters={
+                "foo": {"type": "string"},
+                "session_id": {"type": "string"},
+                "user_id": {"type": "string"},
+            },
+            required=["foo"],
+        )
+        self.tool_manager.tools[tool.name] = tool
+        session_context = SimpleNamespace(
+            system_context={
+                "session_id": "context-session",
+                "user_id": "context-user",
+            },
+            user_id="context-user",
+        )
+
+        with patch(
+            "sagents.tool.tool_manager._resolve_session_context",
+            return_value=session_context,
+        ):
+            result = await self.tool_manager.run_tool_async(
+                tool_name="echo_tool",
+                session_id="real-session",
+                user_id="real-user",
+                foo="bar",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(
+            payload["content"],
+            {
+                "foo": "bar",
+                "session_id": "context-session",
+                "user_id": "context-user",
+            },
+        )
+
+    async def test_standard_tool_system_context_overrides_model_argument(self):
+        tool = ToolSpec(
+            name="echo_tool",
+            description="echo",
+            description_i18n={},
+            func=echo_kwargs,
+            parameters={"foo": {"type": "string"}},
+            required=["foo"],
+        )
+        self.tool_manager.tools[tool.name] = tool
+        session_context = SimpleNamespace(
+            system_context={
+                "foo": "context-value",
+                "session_id": "context-session",
+                "user_id": "context-user",
+            },
+            user_id="context-user",
+        )
+
+        with patch(
+            "sagents.tool.tool_manager._resolve_session_context",
+            return_value=session_context,
+        ):
+            result = await self.tool_manager.run_tool_async(
+                tool_name="echo_tool",
+                session_id="session-ctx",
+                foo="model-value",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["content"], {"foo": "context-value"})
+
+    async def test_standard_tool_system_context_can_fill_required_argument(self):
+        tool = ToolSpec(
+            name="echo_tool",
+            description="echo",
+            description_i18n={},
+            func=echo_kwargs,
+            parameters={"foo": {"type": "string"}},
+            required=["foo"],
+        )
+        self.tool_manager.tools[tool.name] = tool
+        session_context = SimpleNamespace(
+            system_context={"foo": "context-value"}, user_id=None
+        )
+
+        with patch(
+            "sagents.tool.tool_manager._resolve_session_context",
+            return_value=session_context,
+        ):
+            result = await self.tool_manager.run_tool_async(
+                tool_name="echo_tool",
+                session_id="session-ctx",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["content"], {"foo": "context-value"})
+
+    async def test_standard_tool_system_context_none_does_not_override_model_argument(
+        self,
+    ):
+        tool = ToolSpec(
+            name="echo_tool",
+            description="echo",
+            description_i18n={},
+            func=echo_kwargs,
+            parameters={"foo": {"type": "string"}},
+            required=["foo"],
+        )
+        self.tool_manager.tools[tool.name] = tool
+        session_context = SimpleNamespace(system_context={"foo": None}, user_id=None)
+
+        with patch(
+            "sagents.tool.tool_manager._resolve_session_context",
+            return_value=session_context,
+        ):
+            result = await self.tool_manager.run_tool_async(
+                tool_name="echo_tool",
+                session_id="session-ctx",
+                foo="model-value",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["content"], {"foo": "model-value"})
+
+    async def test_standard_tool_does_not_leak_undeclared_system_context_keys(self):
+        tool = ToolSpec(
+            name="echo_tool",
+            description="echo",
+            description_i18n={},
+            func=echo_kwargs,
+            parameters={"foo": {"type": "string"}},
+            required=["foo"],
+        )
+        self.tool_manager.tools[tool.name] = tool
+        session_context = SimpleNamespace(
+            system_context={
+                "foo": "context-value",
+                "secret": "must-not-leak",
+                "session_id": "context-session",
+            },
+            user_id=None,
+        )
+
+        with patch(
+            "sagents.tool.tool_manager._resolve_session_context",
+            return_value=session_context,
+        ):
+            result = await self.tool_manager.run_tool_async(
+                tool_name="echo_tool",
+                session_id="runtime-session",
+                foo="model-value",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["content"], {"foo": "context-value"})
+
+    async def test_standard_tool_without_parameters_ignores_all_context(self):
+        tool = ToolSpec(
+            name="no_arg_tool",
+            description="echo",
+            description_i18n={},
+            func=echo_no_args,
+            parameters={},
+            required=[],
+        )
+        self.tool_manager.tools[tool.name] = tool
+        session_context = SimpleNamespace(
+            system_context={
+                "foo": "context-value",
+                "session_id": "context-session",
+                "user_id": "context-user",
+            },
+            user_id="context-user",
+        )
+
+        with patch(
+            "sagents.tool.tool_manager._resolve_session_context",
+            return_value=session_context,
+        ):
+            result = await self.tool_manager.run_tool_async(
+                tool_name="no_arg_tool",
+                session_id="runtime-session",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["content"], {"called": True})
+
+    async def test_declared_session_id_is_missing_without_system_context(self):
+        tool = ToolSpec(
+            name="echo_tool",
+            description="echo",
+            description_i18n={},
+            func=echo_kwargs,
+            parameters={
+                "foo": {"type": "string"},
+                "session_id": {"type": "string"},
+            },
+            required=["foo", "session_id"],
+        )
+        self.tool_manager.tools[tool.name] = tool
+        session_context = SimpleNamespace(system_context={}, user_id=None)
+
+        with patch(
+            "sagents.tool.tool_manager._resolve_session_context",
+            return_value=session_context,
+        ):
+            result = await self.tool_manager.run_tool_async(
+                tool_name="echo_tool",
+                session_id="runtime-session",
+                foo="bar",
+            )
+
+        payload = json.loads(result)
+        self.assertFalse(payload["success"])
+        self.assertIn("session_id", payload["error"])
+
+    async def test_agent_tool_call_drops_model_forged_identity_and_uses_system_context(
+        self,
+    ):
+        tool = ToolSpec(
+            name="echo_tool",
+            description="echo",
+            description_i18n={},
+            func=echo_kwargs,
+            parameters={
+                "foo": {"type": "string"},
+                "session_id": {"type": "string"},
+                "user_id": {"type": "string"},
+            },
+            required=["foo"],
+        )
+        self.tool_manager.tools[tool.name] = tool
+        session_context = SimpleNamespace(
+            system_context={
+                "session_id": "context-session",
+                "user_id": "context-user",
+            },
+            user_id="context-user",
+        )
+
+        with patch(
+            "sagents.tool.tool_manager._resolve_session_context",
+            return_value=session_context,
+        ):
+            chunks = []
+            async for chunk in _TestAgent()._execute_tool(
+                tool_call={
+                    "id": "tool-call-1",
+                    "function": {
+                        "name": "echo_tool",
+                        "arguments": json.dumps(
+                            {
+                                "foo": "bar",
+                                "session_id": "forged-session",
+                                "user_id": "forged-user",
+                            }
+                        ),
+                    },
+                },
+                tool_manager=self.tool_manager,
+                messages_input=[],
+                session_id="runtime-session",
+                session_context=session_context,  # pyright: ignore[reportArgumentType]
+            ):
+                chunks.extend(chunk)
+
+        content = json.loads(chunks[-1].content)  # pyright: ignore[arg-type]
+        self.assertEqual(
+            content,
+            {
+                "foo": "bar",
+                "session_id": "context-session",
+                "user_id": "context-user",
+            },
+        )
+
+    async def test_built_in_mcp_tool_system_context_overrides_and_identity_is_trusted(
+        self,
+    ):
+        tool = SageMcpToolSpec(
+            name="builtin_echo",
+            description="echo",
+            description_i18n={},
+            func=echo_kwargs,
+            parameters={
+                "foo": {"type": "string"},
+                "session_id": {"type": "string"},
+                "user_id": {"type": "string"},
+            },
+            required=["foo"],
+            server_name="builtin",
+        )
+        self.tool_manager.tools[tool.name] = tool
+        session_context = SimpleNamespace(
+            system_context={
+                "foo": "context-value",
+                "session_id": "context-session",
+                "user_id": "context-user",
+            },
+            user_id="context-user",
+        )
+
+        with patch(
+            "sagents.tool.tool_manager._resolve_session_context",
+            return_value=session_context,
+        ):
+            result = await self.tool_manager.run_tool_async(
+                tool_name="builtin_echo",
+                session_id="real-session",
+                user_id="real-user",
+                foo="model-value",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(
+            payload["content"],
+            {
+                "foo": "context-value",
+                "session_id": "context-session",
+                "user_id": "context-user",
+            },
+        )
+
+    async def test_remote_mcp_tool_system_context_overrides_model_argument(self):
+        tool = McpToolSpec(
+            name="remote_echo",
+            description="echo",
+            description_i18n={},
+            func=None,
+            parameters={
+                "foo": {"type": "string"},
+                "session_id": {"type": "string"},
+                "user_id": {"type": "string"},
+            },
+            required=["foo"],
+            server_name="remote",
+            server_params=StreamableHttpServerParameters(url="http://example.invalid"),
+        )
+        self.tool_manager.tools[tool.name] = tool
+        session_context = SimpleNamespace(
+            system_context={
+                "foo": "context-value",
+                "session_id": "context-session",
+                "user_id": "context-user",
+            },
+            user_id="context-user",
+        )
+
+        with (
+            patch(
+                "sagents.tool.tool_manager._resolve_session_context",
+                return_value=session_context,
+            ),
+            patch.object(
+                McpProxy,
+                "_execute_streamable_http_mcp_tool",
+                new_callable=AsyncMock,
+                return_value={"content": [{"text": "ok"}]},
+            ) as mock_execute,
+        ):
+            result = await self.tool_manager.run_tool_async(
+                tool_name="remote_echo",
+                session_id="real-session",
+                user_id="real-user",
+                foo="model-value",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["content"], "ok")
+        call_kwargs = mock_execute.await_args.kwargs  # pyright: ignore[reportOptionalMemberAccess]
+        self.assertEqual(call_kwargs["foo"], "context-value")
+        self.assertEqual(call_kwargs["session_id"], "context-session")
+        self.assertEqual(call_kwargs["user_id"], "context-user")
+
+    async def test_tool_proxy_applies_system_context_overrides(self):
+        tool = ToolSpec(
+            name="echo_tool",
+            description="echo",
+            description_i18n={},
+            func=echo_kwargs,
+            parameters={"foo": {"type": "string"}},
+            required=["foo"],
+        )
+        self.tool_manager.tools[tool.name] = tool
+        proxy = ToolProxy(self.tool_manager)
+        session_context = SimpleNamespace(
+            system_context={"foo": "context-value"}, user_id=None
+        )
+
+        with patch(
+            "sagents.tool.tool_manager._resolve_session_context",
+            return_value=session_context,
+        ):
+            result = await proxy.run_tool_async(
+                tool_name="echo_tool",
+                session_id="session-ctx",
+                foo="model-value",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["content"], {"foo": "context-value"})
+
+    async def test_remote_mcp_does_not_leak_undeclared_system_context_keys(self):
+        tool = McpToolSpec(
+            name="remote_echo",
+            description="echo",
+            description_i18n={},
+            func=None,
+            parameters={"foo": {"type": "string"}},
+            required=["foo"],
+            server_name="remote",
+            server_params=StreamableHttpServerParameters(url="http://example.invalid"),
+        )
+        self.tool_manager.tools[tool.name] = tool
+        session_context = SimpleNamespace(
+            system_context={
+                "foo": "context-value",
+                "secret": "must-not-leak",
+                "session_id": "context-session",
+            },
+            user_id=None,
+        )
+
+        with (
+            patch(
+                "sagents.tool.tool_manager._resolve_session_context",
+                return_value=session_context,
+            ),
+            patch.object(
+                McpProxy,
+                "_execute_streamable_http_mcp_tool",
+                new_callable=AsyncMock,
+                return_value={"content": [{"text": "ok"}]},
+            ) as mock_execute,
+        ):
+            result = await self.tool_manager.run_tool_async(
+                tool_name="remote_echo",
+                session_id="runtime-session",
+                foo="model-value",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["content"], "ok")
+        call_kwargs = mock_execute.await_args.kwargs  # pyright: ignore[reportOptionalMemberAccess]
+        self.assertEqual(call_kwargs["foo"], "context-value")
+        self.assertNotIn("secret", call_kwargs)
+        self.assertNotIn("session_id", call_kwargs)
+
+    async def test_mcp_tool_manager_does_not_use_runtime_identity_as_tool_args(self):
         tool = McpToolSpec(
             name="remote_echo",
             description="echo",
@@ -123,10 +606,12 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["content"], "ok")
         mock_run_mcp_tool.assert_awaited_once()
         call_kwargs = mock_run_mcp_tool.await_args.kwargs  # pyright: ignore[reportOptionalMemberAccess]
-        self.assertEqual(call_kwargs["user_id"], "user-3")
+        self.assertEqual(call_kwargs["runtime_user_id"], "user-3")
         self.assertEqual(call_kwargs["foo"], "bar")
+        self.assertNotIn("session_id", call_kwargs)
+        self.assertNotIn("user_id", call_kwargs)
 
-    async def test_mcp_proxy_injects_session_and_user_id_when_declared(self):
+    async def test_mcp_proxy_preserves_session_and_user_id_from_kwargs(self):
         tool = McpToolSpec(
             name="remote_echo",
             description="echo",
@@ -240,7 +725,7 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
         with patch.object(tool_service, "get_tool_manager", return_value=fake_manager):
             result = await execute_tool(
                 "basic_tool",
-                {"foo": "bar"},
+                {"foo": "bar", "session_id": "fake-session", "user_id": "fake-user"},
                 user_id="user-5",
                 role="user",
             )
@@ -252,6 +737,7 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
         call_kwargs = fake_manager.run_tool_async.await_args.kwargs  # pyright: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]
         self.assertEqual(call_kwargs["user_id"], "user-5")
         self.assertEqual(call_kwargs["foo"], "bar")
+        self.assertEqual(call_kwargs["session_id"], "")
 
 
 if __name__ == "__main__":

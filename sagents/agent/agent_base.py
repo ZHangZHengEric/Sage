@@ -1555,8 +1555,9 @@ class AgentBase(ABC):
 
             # 构造调用参数，确保 session_id 正确传递且不重复
             call_kwargs = arguments.copy()
-            # 如果 arguments 中有 session_id，移除它（因为会作为显式参数传递）
+            # 如果 arguments 中有保留身份字段，移除它们（因为会作为可信上下文传递）
             call_kwargs.pop("session_id", None)
+            call_kwargs.pop("user_id", None)
 
             with _bind_tool_progress_context(session_id, tool_call["id"]):
                 try:

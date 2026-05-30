@@ -1119,6 +1119,87 @@ class ToolManager:
             tools_json.sort(key=lambda t: (t.get("function") or {}).get("name") or "")
         return tools_json
 
+    def _get_declared_tool_param_names(
+        self, tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec]
+    ) -> set[str]:
+        """Collect top-level parameters that the tool declares."""
+        declared: set[str] = set()
+
+        parameters = getattr(tool, "parameters", None)
+        if isinstance(parameters, dict):
+            declared.update(str(name) for name in parameters.keys())
+
+        required = getattr(tool, "required", None)
+        if isinstance(required, list):
+            declared.update(str(name) for name in required)
+
+        func = getattr(tool, "func", None)
+        if func is not None:
+            try:
+                import inspect
+
+                sig = inspect.signature(func)
+                for name, param in sig.parameters.items():
+                    if name == "self":
+                        continue
+                    if param.kind in (
+                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        inspect.Parameter.KEYWORD_ONLY,
+                    ):
+                        declared.add(name)
+            except (ValueError, TypeError):
+                pass
+
+        return declared
+
+    def _build_trusted_tool_context(
+        self,
+        session_context: Optional[SessionContext],
+    ) -> Dict[str, Any]:
+        """Build trusted context used to override model-generated tool args."""
+        trusted_context: Dict[str, Any] = {}
+        system_context = getattr(session_context, "system_context", None)
+        if isinstance(system_context, dict):
+            trusted_context.update(system_context)
+
+        return trusted_context
+
+    def _apply_system_context_overrides(
+        self,
+        tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec],
+        kwargs: Dict[str, Any],
+        trusted_context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Apply trusted context to declared tool parameters only."""
+        declared_params = self._get_declared_tool_param_names(tool)
+        if not declared_params or not trusted_context:
+            return dict(kwargs)
+
+        merged = dict(kwargs)
+        for name in declared_params:
+            if name in trusted_context and trusted_context[name] is not None:
+                merged[name] = trusted_context[name]
+
+        return merged
+
+    def _prepare_tool_kwargs(
+        self,
+        tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec],
+        tool_name: str,
+        kwargs: Dict[str, Any],
+        trusted_context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Normalize model args, remove reserved identity fields, and overlay context."""
+        normalized = self._normalize_kwargs_by_schema(tool, tool_name, kwargs)
+        normalized = {k: v for k, v in normalized.items() if v is not None}
+
+        # The model must never supply identity fields directly. If system_context
+        # declares the same keys, they are reintroduced by the generic overlay.
+        normalized.pop("session_id", None)
+        normalized.pop("user_id", None)
+
+        return self._apply_system_context_overrides(tool, normalized, trusted_context)
+
     async def run_tool_async(
         self,
         tool_name: str,
@@ -1148,69 +1229,31 @@ class ToolManager:
 
         logger.debug(f"Found tool: {tool_name} (type: {type(tool).__name__})")
 
-        # Normalize arguments by tool parameter schema.
-        # Some models may emit nested JSON objects as escaped strings
-        # (e.g. updates="{\"start_at\":\"...\"}") which breaks MCP validation.
-        kwargs = self._normalize_kwargs_by_schema(tool, tool_name, kwargs)
-
-        # In strict mode the LLM passes null for optional parameters; strip them out
-        # so tools receive their Python default values instead of None.
-        kwargs = {k: v for k, v in kwargs.items() if v is not None}
+        trusted_context = self._build_trusted_tool_context(session_context)
+        kwargs = self._prepare_tool_kwargs(tool, tool_name, kwargs, trusted_context)
 
         # Step 2: Execute based on tool type (self-call prevention handled at agent level)
 
         try:
             # Step 3: Execute tool
             if isinstance(tool, McpToolSpec):
-                # For MCP tools, session_id is passed explicitly, so remove from kwargs
-                kwargs.pop("session_id", None)
                 final_result = await self._execute_mcp_tool(
                     tool,
-                    session_id,
-                    user_id=resolved_user_id,
+                    runtime_session_id=session_id,
+                    runtime_user_id=resolved_user_id,
                     **kwargs,
                 )
             elif isinstance(tool, SageMcpToolSpec):
-                # Ensure session_id is not in kwargs
-                kwargs.pop("session_id", None)
-                if resolved_user_id and "user_id" not in kwargs:
-                    import inspect
-
-                    func_to_inspect = tool.func
-                    has_user_id_param = False
-                    try:
-                        sig = inspect.signature(func_to_inspect)
-                        has_user_id_param = "user_id" in sig.parameters
-                    except (ValueError, TypeError):
-                        pass
-                    if (
-                        not has_user_id_param
-                        and hasattr(tool, "parameters")
-                        and tool.parameters
-                    ):
-                        has_user_id_param = "user_id" in tool.parameters
-                    if (
-                        not has_user_id_param
-                        and hasattr(tool, "required")
-                        and tool.required
-                    ):
-                        has_user_id_param = "user_id" in tool.required
-                    if has_user_id_param:
-                        kwargs["user_id"] = resolved_user_id
-                        logger.debug(
-                            f"[Tool Execution] Injected user_id for {tool.name}"
-                        )
                 final_result = await self._execute_standard_tool_async(
-                    tool, session_id=session_id, **kwargs
+                    tool, runtime_session_id=session_id, **kwargs
                 )
             elif isinstance(tool, ToolSpec):
                 # 检查必填参数
                 required_params = getattr(tool, "required", []) or []
-                # session_id 是系统注入的参数，如果不在 kwargs 中但工具需要，不算 missing
                 missing_params = [
                     p
                     for p in required_params
-                    if p != "session_id" and (p not in kwargs or kwargs.get(p) is None)
+                    if p not in kwargs or kwargs.get(p) is None
                 ]
                 if missing_params:
                     # 返回错误信息而不是 raise
@@ -1227,74 +1270,9 @@ class ToolManager:
 
                 # Tools run directly, they use sandbox internally if needed
                 try:
-                    # Inject session_id if the tool function expects it
-                    import inspect
-
-                    func_to_inspect = tool.func
-
-                    has_session_id_param = False
-
-                    # For bound methods, check the bound method's signature directly
-                    try:
-                        sig = inspect.signature(func_to_inspect)
-                        has_session_id_param = "session_id" in sig.parameters
-                        logger.debug(
-                            f"[Tool] Checking {tool.name} signature: {list(sig.parameters.keys())}, has_session_id: {has_session_id_param}"
-                        )
-                    except (ValueError, TypeError) as e:
-                        logger.debug(
-                            f"[Tool] Failed to get signature for {tool.name}: {e}"
-                        )
-                        pass
-
-                    # Also check from tool spec as fallback
-                    if (
-                        not has_session_id_param
-                        and hasattr(tool, "parameters")
-                        and tool.parameters
-                    ):
-                        has_session_id_param = "session_id" in tool.parameters
-                        logger.debug(
-                            f"[Tool] Checked tool.parameters for {tool.name}: has_session_id={has_session_id_param}"
-                        )
-                    if (
-                        not has_session_id_param
-                        and hasattr(tool, "required")
-                        and tool.required
-                    ):
-                        has_session_id_param = "session_id" in tool.required
-                        logger.debug(
-                            f"[Tool] Checked tool.required for {tool.name}: has_session_id={has_session_id_param}"
-                        )
-
-                    if has_session_id_param:
-                        kwargs["session_id"] = session_id
-                        logger.debug(f"[Tool] Injected session_id for {tool.name}")
-
-                    if resolved_user_id and "user_id" not in kwargs:
-                        has_user_id_param = False
-                        try:
-                            has_user_id_param = "user_id" in sig.parameters
-                        except Exception:
-                            has_user_id_param = False
-                        if (
-                            not has_user_id_param
-                            and hasattr(tool, "parameters")
-                            and tool.parameters
-                        ):
-                            has_user_id_param = "user_id" in tool.parameters
-                        if (
-                            not has_user_id_param
-                            and hasattr(tool, "required")
-                            and tool.required
-                        ):
-                            has_user_id_param = "user_id" in tool.required
-                        if has_user_id_param:
-                            kwargs["user_id"] = resolved_user_id
-                            logger.debug(f"[Tool] Injected user_id for {tool.name}")
-
-                    # Execute tool directly (tools use sandbox internally if needed)
-                    result = await self._execute_standard_tool_async(tool, **kwargs)
+                    result = await self._execute_standard_tool_async(
+                        tool, runtime_session_id=session_id, **kwargs
+                    )
                     # _execute_standard_tool_async 已经返回 JSON 字符串，直接使用
                     final_result = result
 
@@ -1447,8 +1425,8 @@ class ToolManager:
     async def _execute_mcp_tool(
         self,
         tool: McpToolSpec,
-        session_id: str,
-        user_id: Optional[str] = None,
+        runtime_session_id: str,
+        runtime_user_id: Optional[str] = None,
         **kwargs,
     ) -> str:
         """Execute MCP tool and format result"""
@@ -1456,8 +1434,8 @@ class ToolManager:
         try:
             result = await self._mcp_proxy.run_mcp_tool(
                 tool,
-                session_id,
-                user_id=user_id,
+                runtime_session_id=runtime_session_id,
+                runtime_user_id=runtime_user_id,
                 **kwargs,
             )
             logger.info(f"MCP tool {tool.name} execution completed successfully")
@@ -1490,61 +1468,15 @@ class ToolManager:
             raise
 
     async def _execute_standard_tool_async(
-        self, tool: ToolSpec, session_id: str = "", **kwargs
+        self, tool: ToolSpec, runtime_session_id: str = "", **kwargs
     ) -> str:
         """Execute standard tool and format result (async version)"""
         logger.debug(
-            f"[_execute_standard_tool_async] START | tool={tool.name} | session={session_id or 'NO_SESSION'}"
+            f"[_execute_standard_tool_async] START | tool={tool.name} | session={runtime_session_id or 'NO_SESSION'}"
         )
         execute_start = time.perf_counter()
 
         try:
-            # Inject session_id if the tool function expects it
-            import inspect
-
-            func_to_inspect = tool.func
-
-            has_session_id_param = False
-
-            # For bound methods, check the bound method's signature directly
-            # Don't unwrap __wrapped__ because we need to see the actual signature
-            # that will be used when calling the method
-            try:
-                sig = inspect.signature(func_to_inspect)
-                has_session_id_param = "session_id" in sig.parameters
-                logger.debug(
-                    f"[_execute_standard_tool_async] Checking {tool.name} signature: {list(sig.parameters.keys())}, has_session_id: {has_session_id_param}"
-                )
-            except (ValueError, TypeError) as e:
-                logger.debug(
-                    f"[_execute_standard_tool_async] Failed to get signature for {tool.name}: {e}"
-                )
-                pass
-
-            # Also check from tool spec parameters (as fallback)
-            if (
-                not has_session_id_param
-                and hasattr(tool, "parameters")
-                and tool.parameters
-            ):
-                has_session_id_param = "session_id" in tool.parameters
-                logger.debug(
-                    f"[_execute_standard_tool_async] Checked tool.parameters for {tool.name}: has_session_id={has_session_id_param}"
-                )
-
-            # Also check from tool spec required params (as fallback)
-            if not has_session_id_param and hasattr(tool, "required") and tool.required:
-                has_session_id_param = "session_id" in tool.required
-                logger.debug(
-                    f"[_execute_standard_tool_async] Checked tool.required for {tool.name}: has_session_id={has_session_id_param}"
-                )
-
-            if has_session_id_param:
-                kwargs["session_id"] = session_id
-                logger.debug(
-                    f"[_execute_standard_tool_async] Injected session_id for tool: {tool.name}"
-                )
-
             # Execute the tool function
             logger.debug(
                 f"[_execute_standard_tool_async] Executing | tool={tool.name} | is_async={asyncio.iscoroutinefunction(tool.func)}"
