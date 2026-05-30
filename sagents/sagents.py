@@ -503,14 +503,14 @@ class SAgent:
         )
 
         # 预定义简单模式
+        simple_agent_prelude = ParallelNode(
+            branches=[
+                AgentNode(agent_key="tool_suggestion"),
+                AgentNode(agent_key="memory_recall"),
+            ]
+        )
         simple_agent_core = SequenceNode(
             steps=[
-                ParallelNode(
-                    branches=[
-                        AgentNode(agent_key="tool_suggestion"),
-                        AgentNode(agent_key="memory_recall"),
-                    ]
-                ),
                 IfNode(
                     condition="enable_plan",
                     true_body=SequenceNode(
@@ -530,25 +530,30 @@ class SAgent:
                 ),
             ]
         )
-        simple_agent_body = LoopNode(
-            condition="self_check_should_retry",
-            max_loops=3,
-            body=SequenceNode(
-                steps=[
-                    simple_agent_core,
-                    AgentNode(agent_key="self_check"),
-                ]
-            ),
+        simple_agent_body = SequenceNode(
+            steps=[
+                simple_agent_prelude,
+                LoopNode(
+                    condition="self_check_should_retry",
+                    max_loops=3,
+                    body=SequenceNode(
+                        steps=[
+                            simple_agent_core,
+                            AgentNode(agent_key="self_check"),
+                        ]
+                    ),
+                ),
+            ]
         )
 
+        fib_agent_prelude = ParallelNode(
+            branches=[
+                AgentNode(agent_key="tool_suggestion"),
+                AgentNode(agent_key="memory_recall"),
+            ]
+        )
         fib_agent_core = SequenceNode(
             steps=[
-                ParallelNode(
-                    branches=[
-                        AgentNode(agent_key="tool_suggestion"),
-                        AgentNode(agent_key="memory_recall"),
-                    ]
-                ),
                 IfNode(
                     condition="enable_plan",
                     true_body=SequenceNode(
@@ -565,15 +570,20 @@ class SAgent:
             ]
         )
 
-        fib_agent_body = LoopNode(
-            condition="self_check_should_retry",
-            max_loops=3,
-            body=SequenceNode(
-                steps=[
-                    fib_agent_core,
-                    AgentNode(agent_key="self_check"),
-                ]
-            ),
+        fib_agent_body = SequenceNode(
+            steps=[
+                fib_agent_prelude,
+                LoopNode(
+                    condition="self_check_should_retry",
+                    max_loops=3,
+                    body=SequenceNode(
+                        steps=[
+                            fib_agent_core,
+                            AgentNode(agent_key="self_check"),
+                        ]
+                    ),
+                ),
+            ]
         )
 
         steps.append(
