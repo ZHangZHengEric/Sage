@@ -1,10 +1,16 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import ChatPage from '../views/Chat.vue'
 import AgentConfigPage from '../views/AgentList.vue'
 import ToolsPage from '../views/ToolList.vue'
 import HistoryPage from '../views/ChatHistory.vue'
 import SkillLibraryPage from '../views/SkillList.vue'
 import SystemSettingsPage from '../views/SystemSettings.vue'
+import ToolDetailPage from '../views/ToolDetail.vue'
+import SharedChatPage from '../views/SharedChat.vue'
+import TaskListPage from '../views/TaskList.vue'
+import ModelProviderListPage from '../views/ModelProviderList.vue'
+import MobileMePage from '../views/MobileMe.vue'
+import SetupPage from '../views/Setup.vue'
 
 
 const routes = [
@@ -35,7 +41,7 @@ const routes = [
   {
     path: '/agent/tools/:toolName',
     name: 'ToolDetailView',
-    component: () => import('../views/ToolDetail.vue'),
+    component: ToolDetailPage,
     meta: {
       title: 'tools.detailTitle'
     }
@@ -60,7 +66,7 @@ const routes = [
   {
     path: '/share/:sessionId',
     name: 'SharedChat',
-    component: () => import('../views/SharedChat.vue'),
+    component: SharedChatPage,
     meta: {
       title: 'chat.sharedChat',
       public: true
@@ -78,7 +84,7 @@ const routes = [
   {
     path: '/personal/tasks',
     name: 'TaskList',
-    component: () => import('../views/TaskList.vue'),
+    component: TaskListPage,
     meta: {
       title: 'scheduledTask.title'
     }
@@ -86,7 +92,7 @@ const routes = [
   {
     path: '/personal/model-providers',
     name: 'ModelProviderList',
-    component: () => import('../views/ModelProviderList.vue'),
+    component: ModelProviderListPage,
     meta: {
       title: 'modelProvider.title'
     }
@@ -94,7 +100,7 @@ const routes = [
   {
     path: '/me',
     name: 'MobileMe',
-    component: () => import('../views/MobileMe.vue'),
+    component: MobileMePage,
     meta: {
       title: 'sidebar.userProfile'
     }
@@ -102,7 +108,7 @@ const routes = [
   {
     path: '/setup',
     name: 'Setup',
-    component: () => import('../views/Setup.vue'),
+    component: SetupPage,
     meta: {
       title: 'common.setup',
       public: true
@@ -116,7 +122,7 @@ const routes = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
+  history: createWebHashHistory(import.meta.env.BASE_URL),
   routes
 })
 

@@ -97,6 +97,7 @@ async function resolveBackendTarget() {
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: './',
   plugins: [
     vue(),
     {
