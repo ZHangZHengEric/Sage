@@ -236,7 +236,7 @@
         :class="isCollapsed ? 'justify-center' : ''"
       >
         <div class="flex items-center gap-3 overflow-hidden">
-          <img :src="themeStore.isDark ? '/sage_logo.svg' : '/sage_logo_white.svg'" alt="Sage Logo" class="h-9 w-9 shrink-0 rounded-xl" />
+          <img :src="sidebarLogoSrc" alt="Sage Logo" class="h-9 w-9 shrink-0 rounded-xl" />
           <div v-if="!isCollapsed" class="min-w-0">
             <p class="truncate text-[14px] font-semibold tracking-[0.01em] text-foreground">Sage</p>
           </div>
@@ -601,6 +601,9 @@ const sidebarBottomGlowStyle = computed(() => ({
     ? 'radial-gradient(circle at bottom, rgba(255,255,255,0.03), transparent 60%)'
     : 'radial-gradient(circle at bottom, rgba(45,212,191,0.04), transparent 60%)'
 }))
+
+const publicAsset = (filename) => `${import.meta.env.BASE_URL}${filename}`
+const sidebarLogoSrc = computed(() => publicAsset(themeStore.isDark ? 'sage_logo.svg' : 'sage_logo_white.svg'))
 
 const interactiveSelector = [
   'button',

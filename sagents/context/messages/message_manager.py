@@ -29,6 +29,7 @@ from .message import MessageRole, MessageType, MessageChunk
 _global_token_ratio_samples: List[Dict[str, float]] = []  # 存储字符数和token数的样本
 _global_max_ratio_samples = 10  # 最多保留10个样本
 _global_default_token_ratio = 0.4  # 默认比例（中文约0.6，英文约0.25，混合约0.4）
+_max_base64_image_token_estimate = 3000  # base64 图片 token 估算上限
 
 # 协议性状态工具：可持久化在 messages.json，但不参与发往 LLM 的 tool_calls/tool 对（见 strip_turn_status_from_llm_context）
 TURN_STATUS_TOOL_NAME = "turn_status"
@@ -363,7 +364,9 @@ class MessageManager:
                         if url.startswith("data:"):
                             base64_data = url.split(",")[-1] if "," in url else url
                             estimated = max(500, int(len(base64_data) * 0.2))
-                            image_tokens += min(estimated, 2000)
+                            image_tokens += min(
+                                estimated, _max_base64_image_token_estimate
+                            )
                         else:
                             image_tokens += 1000
 
@@ -478,8 +481,8 @@ class MessageManager:
                             # 估算：base64长度 / 4 * 3 ≈ 原始字节数，再按一定比例算token
                             estimated_tokens = max(500, int(len(base64_data) * 0.2))
                             total_tokens += min(
-                                estimated_tokens, 2000
-                            )  # 上限2000 tokens
+                                estimated_tokens, _max_base64_image_token_estimate
+                            )
                         else:
                             # 远程URL：估算为固定值
                             total_tokens += 1000
