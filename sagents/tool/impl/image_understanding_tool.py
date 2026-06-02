@@ -13,7 +13,10 @@ import httpx
 
 from ..tool_base import tool
 from sagents.utils.logger import logger
-from sagents.utils.multimodal_image import get_mime_type as _get_mime_type_util
+from sagents.utils.multimodal_image import (
+    compress_image_to_jpeg_bytes_for_llm as _compress_image_to_jpeg_bytes_for_llm,
+    get_mime_type as _get_mime_type_util,
+)
 from sagents.utils.agent_session_helper import (
     get_session_sandbox as _get_session_sandbox_util,
 )
@@ -118,14 +121,14 @@ class ImageUnderstandingTool:
             raise ImageUnderstandingError(f"从沙箱读取图片失败: {e}")
 
     def _resize_image_if_needed(
-        self, image_data: bytes, max_resolution: int = 512
+        self, image_data: bytes, max_resolution: int = 1536
     ) -> bytes:
         """
-        调整图片大小，确保总分辨率不超过 max_resolution * max_resolution
+        调整图片大小，确保长边不超过 max_resolution，并用字节预算兜底
 
         Args:
             image_data: 图片二进制数据
-            max_resolution: 最大分辨率（默认512，即总分辨率不超过512*512）
+            max_resolution: 最大边长（默认1536）
 
         Returns:
             bytes: 调整后的图片数据
@@ -136,55 +139,15 @@ class ImageUnderstandingTool:
 
         try:
             # 从 bytes 加载图片
-            img = Image.open(io.BytesIO(image_data))
-
-            # 转换为 RGB 模式（处理 RGBA 等模式）
-            if img.mode in ("RGBA", "LA", "P"):
-                # 创建白色背景
-                background = Image.new("RGB", img.size, (255, 255, 255))
-                if img.mode == "P":
-                    img = img.convert("RGBA")
-                if img.mode in ("RGBA", "LA"):
-                    background.paste(
-                        img,
-                        mask=img.split()[-1] if img.mode in ("RGBA", "LA") else None,
-                    )
-                    img = background
-                else:
-                    img = img.convert("RGB")
-            elif img.mode != "RGB":
-                img = img.convert("RGB")
-
-            # 计算当前总分辨率
-            current_resolution = img.width * img.height
-            max_total_resolution = max_resolution * max_resolution
-
-            # 如果当前分辨率已经小于等于最大允许分辨率，直接返回
-            if current_resolution <= max_total_resolution:
-                logger.info(
-                    f"图片分辨率 {img.width}x{img.height} ({current_resolution}) 在限制范围内，无需压缩"
+            with Image.open(io.BytesIO(image_data)) as img:
+                compressed = _compress_image_to_jpeg_bytes_for_llm(
+                    img,
+                    max_edge=max_resolution,
                 )
-                buffer = io.BytesIO()
-                # 保存为 JPEG 格式，质量85%
-                img.save(buffer, format="JPEG", quality=85, optimize=True)
-                return buffer.getvalue()
-
-            # 计算缩放比例
-            scale_factor = (max_total_resolution / current_resolution) ** 0.5
-            new_width = int(img.width * scale_factor)
-            new_height = int(img.height * scale_factor)
-
-            logger.info(
-                f"图片压缩: {img.width}x{img.height} ({current_resolution}) -> {new_width}x{new_height} ({new_width * new_height})"
-            )
-
-            # 调整图片大小
-            resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-
-            # 保存到内存
-            buffer = io.BytesIO()
-            resized_img.save(buffer, format="JPEG", quality=85, optimize=True)
-            return buffer.getvalue()
+                logger.info(
+                    f"图片压缩: {img.width}x{img.height}, output_bytes={len(compressed)}"
+                )
+                return compressed
 
         except Exception as e:
             logger.warning(f"图片压缩失败: {e}，将使用原始图片")

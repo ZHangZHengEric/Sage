@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import unquote, urlparse
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from sagents.utils.logger import logger
 
@@ -27,10 +27,14 @@ _MIME_TYPES: Dict[str, str] = {
     ".svg": "image/svg+xml",
 }
 
-# 压缩到的最大边长（保持比例）
-_MAX_IMAGE_EDGE = 512
-# JPEG 质量
+# 压缩到的最大边长（保持比例）。1536 能保留截图/小字细节，同时接近主流视觉模型的有效输入范围。
+_MAX_IMAGE_EDGE = 1536
+# 压缩后单图目标字节数。base64 后约膨胀 33%，4MB 原图约对应 5.3MB 字符串。
+_TARGET_IMAGE_BYTES = 4 * 1024 * 1024
+# JPEG 初始质量
 _JPEG_QUALITY = 85
+_MIN_JPEG_QUALITY = 60
+_FALLBACK_IMAGE_EDGES = (1280, 1024, 768, 512)
 
 # 仅发往 LLM：user 多模态中 image_url 后若紧跟「仅一条 markdown 图片」的 text，在请求前插入此行；
 # 落库与前端展示不存此行，见 augment_multimodal_content_list_for_llm。
@@ -87,14 +91,67 @@ def resolve_local_sage_url(url: str) -> Optional[str]:
         return None
 
 
+def _normalize_image_for_jpeg(img: Image.Image) -> Image.Image:
+    """应用 EXIF 方向、铺白透明背景，并转换成 JPEG 友好的 RGB。"""
+    img = ImageOps.exif_transpose(img)
+    if img.mode in ("RGBA", "LA", "P"):
+        if img.mode == "P":
+            img = img.convert("RGBA")
+        background = Image.new("RGB", img.size, (255, 255, 255))
+        mask = img.split()[-1] if img.mode in ("RGBA", "LA") else None
+        background.paste(img.convert("RGBA"), mask=mask)
+        return background
+    if img.mode != "RGB":
+        return img.convert("RGB")
+    return img.copy()
+
+
+def _candidate_edges(max_edge: int) -> List[int]:
+    edges = [max_edge]
+    edges.extend(edge for edge in _FALLBACK_IMAGE_EDGES if edge < max_edge)
+    return list(dict.fromkeys(edge for edge in edges if edge > 0))
+
+
+def compress_image_to_jpeg_bytes_for_llm(
+    img: Image.Image,
+    *,
+    max_edge: int = _MAX_IMAGE_EDGE,
+    target_bytes: int = _TARGET_IMAGE_BYTES,
+    quality: int = _JPEG_QUALITY,
+) -> bytes:
+    """压缩为 JPEG：优先保留 1536 长边，超出字节预算时逐步降质/降分辨率。"""
+    base = _normalize_image_for_jpeg(img)
+    best: Optional[bytes] = None
+
+    for edge in _candidate_edges(max_edge):
+        resized = base.copy()
+        resized.thumbnail((edge, edge), Image.Resampling.LANCZOS)
+
+        for q in range(quality, _MIN_JPEG_QUALITY - 1, -5):
+            output = io.BytesIO()
+            resized.save(output, format="JPEG", quality=q)
+            data = output.getvalue()
+            if best is None or len(data) < len(best):
+                best = data
+            if len(data) <= target_bytes:
+                logger.debug(
+                    "Compressed image for LLM: "
+                    f"{base.width}x{base.height} -> {resized.width}x{resized.height}, "
+                    f"quality={q}, bytes={len(data)}"
+                )
+                return data
+
+    assert best is not None
+    logger.warning(
+        f"Compressed image still exceeds target bytes: bytes={len(best)}, "
+        f"target={target_bytes}; using smallest fallback"
+    )
+    return best
+
+
 def _compress_image_to_jpeg_bytes(img: Image.Image) -> bytes:
-    """RGB 化、缩放至最大边长、保存为 JPEG bytes。"""
-    if img.mode in ("RGBA", "P"):
-        img = img.convert("RGB")
-    img.thumbnail((_MAX_IMAGE_EDGE, _MAX_IMAGE_EDGE), Image.Resampling.LANCZOS)
-    output = io.BytesIO()
-    img.save(output, format="JPEG", quality=_JPEG_QUALITY)
-    return output.getvalue()
+    """RGB 化、按 LLM 请求预算压缩、保存为 JPEG bytes。"""
+    return compress_image_to_jpeg_bytes_for_llm(img)
 
 
 def _compress_base64_data_url(data_url: str) -> Optional[str]:
