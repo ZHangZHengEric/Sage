@@ -26,6 +26,8 @@ Examples:
 The script runs:
   docker compose --env-file deploy/<env>/.env -f deploy/<env>/docker-compose.yml ...
 
+If Docker Compose v2 is unavailable, the script falls back to docker-compose.
+
 For `up`, the script ensures the shared Docker network exists, starts shared
 services under the `sage_shared` compose project first, then starts the selected
 environment.
@@ -68,6 +70,24 @@ PROMETHEUS_CONFIG_FILE="$PROMETHEUS_BASE_CONFIG"
 ENV_PROJECT_NAME="${SAGE_COMPOSE_PROJECT_NAME:-${COMPOSE_PROJECT_NAME:-sage_$DEPLOY_ENV}}"
 SHARED_PROJECT_NAME="${SAGE_SHARED_PROJECT_NAME:-sage_shared}"
 SHARED_NETWORK="${SAGE_SHARED_NETWORK:-sage_shared_default}"
+COMPOSE_COMMAND=()
+
+detect_compose_command() {
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    COMPOSE_COMMAND=(docker compose)
+    return 0
+  fi
+
+  if command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE_COMMAND=(docker-compose)
+    return 0
+  fi
+
+  echo "Docker Compose not found. Install Docker Compose v2 or docker-compose." >&2
+  exit 1
+}
+
+detect_compose_command
 
 if [ -z "${ENV_FILE:-}" ]; then
   ENV_FILE="$DEPLOY_DIR/$DEPLOY_ENV/.env"
@@ -339,7 +359,7 @@ compose_config_services() {
     "COMPOSE_IGNORE_ORPHANS=${COMPOSE_IGNORE_ORPHANS:-true}"
   )
 
-  env "${compose_env[@]}" docker compose "$@" config --services 2>/dev/null
+  env "${compose_env[@]}" "${COMPOSE_COMMAND[@]}" "$@" config --services 2>/dev/null
 }
 
 run_compose() {
@@ -354,7 +374,7 @@ run_compose() {
     "COMPOSE_IGNORE_ORPHANS=${COMPOSE_IGNORE_ORPHANS:-true}"
   )
 
-  env "${compose_env[@]}" docker compose "$@"
+  env "${compose_env[@]}" "${COMPOSE_COMMAND[@]}" "$@"
 }
 
 ordered_group_services() {
