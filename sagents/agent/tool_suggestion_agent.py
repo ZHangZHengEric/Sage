@@ -6,6 +6,7 @@
 """
 
 import json
+import os
 import traceback
 import uuid
 from typing import Any, Dict, List, Optional, AsyncGenerator
@@ -18,6 +19,30 @@ from sagents.tool.tool_proxy import ToolProxy
 from sagents.tool.tool_baseline import augment_with_baseline_tools
 from sagents.utils.logger import logger
 from sagents.utils.prompt_manager import PromptManager
+
+DEFAULT_TOOL_SUGGESTION_DIRECT_THRESHOLD = 15
+TOOL_SUGGESTION_DIRECT_THRESHOLD_ENV = "SAGE_TOOL_SUGGESTION_DIRECT_THRESHOLD"
+
+
+def get_tool_suggestion_direct_threshold() -> int:
+    raw_value = os.environ.get(TOOL_SUGGESTION_DIRECT_THRESHOLD_ENV)
+    if raw_value is None or raw_value.strip() == "":
+        return DEFAULT_TOOL_SUGGESTION_DIRECT_THRESHOLD
+    try:
+        threshold = int(raw_value)
+    except ValueError:
+        logger.warning(
+            f"ToolSuggestionAgent: invalid {TOOL_SUGGESTION_DIRECT_THRESHOLD_ENV}={raw_value!r}, "
+            f"using default {DEFAULT_TOOL_SUGGESTION_DIRECT_THRESHOLD}"
+        )
+        return DEFAULT_TOOL_SUGGESTION_DIRECT_THRESHOLD
+    if threshold < 0:
+        logger.warning(
+            f"ToolSuggestionAgent: negative {TOOL_SUGGESTION_DIRECT_THRESHOLD_ENV}={threshold}, "
+            f"using default {DEFAULT_TOOL_SUGGESTION_DIRECT_THRESHOLD}"
+        )
+        return DEFAULT_TOOL_SUGGESTION_DIRECT_THRESHOLD
+    return threshold
 
 
 class ToolSuggestionAgent(AgentBase):
@@ -79,8 +104,11 @@ class ToolSuggestionAgent(AgentBase):
             )
         available_tools = tool_manager.list_tools_simplified(lang=language)  # pyright: ignore[reportOptionalMemberAccess]
 
-        if len(available_tools) <= 15:
-            logger.info("ToolSuggestionAgent: 可用工具数量小于等于15个，返回所有工具")
+        direct_threshold = get_tool_suggestion_direct_threshold()
+        if len(available_tools) <= direct_threshold:
+            logger.info(
+                f"ToolSuggestionAgent: 可用工具数量小于等于{direct_threshold}个，返回所有工具"
+            )
             tool_names = [
                 tool["name"]
                 for tool in available_tools
