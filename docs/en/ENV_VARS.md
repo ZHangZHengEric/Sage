@@ -111,6 +111,7 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 | `SAGE_CLI_MAX_LOOP_COUNT` | — | Max loops per CLI turn |
 | `SAGE_SPLIT_SYSTEM` | `true` | Split the system message into stable / semi_stable / volatile segments to maximise prompt-cache hit rate |
 | `SAGE_STABLE_TOOLS_ORDER` | `true` | Sort the `tools` field by function name to stabilise the cache key |
+| `SAGE_TOOL_SUGGESTION_DIRECT_THRESHOLD` | `15` | When the available tool count is at or below this value, skip the LLM tool-suggestion call and pass all available tools through |
 | `SAGE_AUTO_LINT` | `true` | Auto-run ruff/eslint/tsc after `file_write` / `file_update` and inline diagnostics |
 | `SAGE_EMIT_TOOL_CALL_ON_COMPLETE` | `true` | Re-emit tool_call chunks once the LLM stream completes |
 | `SAGE_ECHO_SHELL_OUTPUT` | `false` | Echo background-shell stdout/stderr into the main stream |
