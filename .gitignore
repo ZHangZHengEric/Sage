@@ -201,10 +201,12 @@ cython_debug/
 .pypirc
 .vscode
 *.db
+server_logs.txt
 agent_workspace
 .conda
 .claude/settings.local.json
 .idea
+/mysql/data/
 /data/
 deploy/data/
 deploy/*/data/
@@ -226,6 +228,8 @@ app/desktop/dist_nuitka/
 *.onefile-build/
 sidecar
 
+# Frontend documentation cache
+app/wiki/.vitepress/cache/
 
 # Certificates
 app/desktop/scripts/certs
