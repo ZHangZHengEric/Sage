@@ -20,6 +20,7 @@ from common.services import chat_service
 from common.services import conversation_service
 from common.schemas.chat import ChatRequest, StreamRequest, UserInputOptimizeRequest
 from app.server.services.prometheus_metrics import record_sse_stream_failure
+from app.server.utils.image_size_guard import ensure_image_url_within_size_limit
 from pydantic import BaseModel
 
 from ..services.chat.stream_manager import StreamManager
@@ -66,6 +67,73 @@ def _build_current_time_with_weekday() -> str:
     return now.strftime("%a, %d %b %Y %H:%M:%S %z")
 
 
+def _extract_multimodal_image_url(item: object) -> str:
+    if not isinstance(item, dict) or item.get("type") != "image_url":
+        return ""
+
+    image_url = item.get("image_url")
+    if isinstance(image_url, dict):
+        return str(image_url.get("url") or "").strip()
+    if isinstance(image_url, str):
+        return image_url.strip()
+    return str(item.get("url") or "").strip()
+
+
+def _set_multimodal_image_url(item: dict, url: str) -> None:
+    image_url = item.get("image_url")
+    if isinstance(image_url, dict):
+        image_url["url"] = url
+    elif isinstance(image_url, str):
+        item["image_url"] = url
+    elif "url" in item:
+        item["url"] = url
+    else:
+        item["image_url"] = {"url": url}
+
+
+def _replace_multimodal_image_text_refs(
+    content: list,
+    old_url: str,
+    new_url: str,
+) -> None:
+    for item in content:
+        if not isinstance(item, dict) or item.get("type") != "text":
+            continue
+        text = item.get("text")
+        if isinstance(text, str) and old_url in text:
+            item["text"] = text.replace(old_url, new_url)
+
+
+async def _guard_request_multimodal_images(
+    request: ChatRequest | StreamRequest,
+) -> None:
+    guarded_count = 0
+    for message in request.messages or []:
+        content = message.content
+        if not isinstance(content, list):
+            continue
+        for item in content:
+            image_url = _extract_multimodal_image_url(item)
+            if not image_url:
+                continue
+            try:
+                guarded_url = await ensure_image_url_within_size_limit(image_url)
+            except Exception as exc:
+                logger.bind(session_id=request.session_id).warning(
+                    f"多模态图片压缩失败，保留原图: {exc}"
+                )
+                continue
+            if guarded_url != image_url and isinstance(item, dict):
+                _set_multimodal_image_url(item, guarded_url)
+                _replace_multimodal_image_text_refs(content, image_url, guarded_url)
+                guarded_count += 1
+
+    if guarded_count:
+        logger.bind(session_id=request.session_id).info(
+            f"多模态图片已压缩并替换 URL: count={guarded_count}"
+        )
+
+
 async def _start_web_stream_session(
     request: StreamRequest,
     *,
@@ -86,6 +154,8 @@ async def _start_web_stream_session(
             )
         finally:
             await manager.stop_session(session_id)
+
+    await _guard_request_multimodal_images(request)
 
     await chat_service.populate_request_from_agent_config(
         request,
@@ -357,6 +427,7 @@ async def chat(request: ChatRequest, http_request: Request):
         http_request,
         allow_pending_guidance_flush=True,
     )
+    await _guard_request_multimodal_images(request)
 
     # 构建 StreamRequest
     inner_request = StreamRequest(
@@ -395,6 +466,7 @@ async def chat(request: ChatRequest, http_request: Request):
 async def stream_chat(request: StreamRequest, http_request: Request):
     """流式聊天接口， 与chat不同的是入参不能够指定agent_id"""
     validate_and_prepare_request(request, http_request)
+    await _guard_request_multimodal_images(request)
     chat_service.mark_request_execution(request, request_source="api/stream")
     await chat_service.populate_request_from_agent_config(
         request,
