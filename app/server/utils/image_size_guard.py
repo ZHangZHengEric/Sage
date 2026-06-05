@@ -6,7 +6,7 @@ import re
 import time
 from io import BytesIO
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, cast
 from uuid import uuid4
 
 import httpx
@@ -18,7 +18,12 @@ from common.core.exceptions import SageHTTPException
 
 DOUBAO_IMAGE_MAX_BYTES = 5 * 1024 * 1024
 _JPEG_QUALITY_STEPS = (88, 82, 76, 70, 64, 58)
-_RESAMPLE_LANCZOS = getattr(Image, "Resampling", Image).LANCZOS
+_IMAGE_MODULE: Any = Image
+_RESAMPLE_LANCZOS = (
+    _IMAGE_MODULE.Resampling.LANCZOS
+    if hasattr(_IMAGE_MODULE, "Resampling")
+    else _IMAGE_MODULE.LANCZOS
+)
 _HTTP_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 _DATA_IMAGE_PATTERN = re.compile(
     r"^data:(image/[a-zA-Z0-9.+-]+);base64,(?P<data>.+)$",
@@ -33,18 +38,21 @@ async def _upload_image_bytes_to_oss(
     filename_prefix: str,
 ) -> str:
     normalized_type = file_type.strip().lower().lstrip(".")
-    if normalized_type in {"jpg", "jpeg"}:
-        extension = "jpg"
-        content_type = "image/jpeg"
-    elif normalized_type == "png":
-        extension = "png"
-        content_type = "image/png"
-    else:
-        extension = normalized_type or "bin"
-        content_type = f"image/{extension}" if extension else "application/octet-stream"
+    extension, content_type = _resolve_image_file_type(normalized_type)
 
     base_name = f"{filename_prefix}{int(time.time() * 1000)}_{uuid4().hex}.{extension}"
     return await upload_kdb_file(base_name, image_bytes, content_type)
+
+
+def _resolve_image_file_type(file_type: str) -> tuple[str, str]:
+    normalized_type = file_type.strip().lower().lstrip(".")
+    if normalized_type in {"jpg", "jpeg"}:
+        return "jpg", "image/jpeg"
+    if normalized_type == "png":
+        return "png", "image/png"
+    extension = normalized_type or "bin"
+    content_type = f"image/{extension}" if extension else "application/octet-stream"
+    return extension, content_type
 
 
 def _encode_image_bytes_as_data_url(image_bytes: bytes, content_type: str) -> str:
@@ -74,7 +82,7 @@ async def _upload_image_bytes_to_oss_or_data_url(
     filename_prefix: str,
 ) -> str:
     normalized_type = file_type.strip().lower().lstrip(".")
-    content_type = "image/jpeg" if normalized_type in {"jpg", "jpeg"} else "image/png"
+    _, content_type = _resolve_image_file_type(normalized_type)
     try:
         return await _upload_image_bytes_to_oss(
             image_bytes,
@@ -164,7 +172,10 @@ def _flatten_to_rgb(image: Image.Image) -> Image.Image:
         return image.convert("RGB")
 
     rgba_image = image.convert("RGBA")
-    background = Image.new("RGBA", rgba_image.size, (255, 255, 255, 255))
+    background = cast(
+        Image.Image,
+        _IMAGE_MODULE.new("RGBA", rgba_image.size, (255, 255, 255, 255)),
+    )
     return Image.alpha_composite(background, rgba_image).convert("RGB")
 
 
@@ -173,7 +184,7 @@ def _compress_image_bytes_to_limit(
 ) -> bytes:
     try:
         with Image.open(BytesIO(image_bytes)) as source_image:
-            source_image = ImageOps.exif_transpose(source_image)
+            source_image = cast(Image.Image, ImageOps.exif_transpose(source_image))
             source_image.load()
             original_width, original_height = source_image.size
             if original_width <= 0 or original_height <= 0:
@@ -197,15 +208,21 @@ def _compress_image_bytes_to_limit(
                 candidate_image = _flatten_to_rgb(candidate_image)
                 for quality in _JPEG_QUALITY_STEPS:
                     buffer = BytesIO()
-                    save_kwargs = {
-                        "format": "JPEG",
-                        "quality": quality,
-                        "progressive": True,
-                    }
                     try:
-                        candidate_image.save(buffer, optimize=True, **save_kwargs)
+                        candidate_image.save(
+                            buffer,
+                            format="JPEG",
+                            quality=quality,
+                            progressive=True,
+                            optimize=True,
+                        )
                     except OSError:
-                        candidate_image.save(buffer, **save_kwargs)
+                        candidate_image.save(
+                            buffer,
+                            format="JPEG",
+                            quality=quality,
+                            progressive=True,
+                        )
                     if buffer.tell() <= max_bytes:
                         return buffer.getvalue()
 
