@@ -5,6 +5,7 @@ Test CompressHistoryTool
 """
 
 import asyncio
+import re
 import sys
 from datetime import datetime
 from typing import List, Dict, Optional
@@ -180,6 +181,49 @@ class TestCompressHistoryTool:
         )
         print("OK: compress_conversation_history no compression needed")
 
+    def test_compress_conversation_history_counts_tool_calls_in_original_tokens(self):
+        """Test: original token stats include tool_calls sent to compression."""
+        large_args = "X" * 4000
+        messages = [
+            self.create_message(MessageRole.SYSTEM.value, "System"),
+            self.create_message(MessageRole.USER.value, "User 1"),
+            self.create_message(
+                MessageRole.ASSISTANT.value,
+                "",
+                msg_type=MessageType.TOOL_CALL.value,
+                tool_calls=[
+                    {
+                        "id": "call_large",
+                        "type": "function",
+                        "function": {
+                            "name": "large_tool",
+                            "arguments": large_args,
+                        },
+                    }
+                ],
+            ),
+            self.create_message(MessageRole.USER.value, "User 2"),
+        ]
+
+        async def fake_call_llm(messages_text, session_id):
+            del messages_text, session_id
+            return "short summary"
+
+        self.tool._call_llm_for_compression = fake_call_llm  # type: ignore[method-assign]
+        result = asyncio.run(
+            self.tool.compress_conversation_history(messages, "test_session")
+        )
+
+        assert result["status"] == "success"
+        match = re.search(r"(\d+)\s*tokens\s*→", result["message"])
+        assert match is not None
+        original_tokens = int(match.group(1))
+        content_only_tokens = sum(
+            self.tool._calculate_tokens(msg.get_content() or "") for msg in messages[1:3]
+        )
+        assert original_tokens > content_only_tokens + 500
+        print("OK: compress_conversation_history counts tool_calls")
+
     def test_compression_levels_config(self):
         """Test: compression levels configuration"""
         assert "light" in self.tool.compression_levels
@@ -281,6 +325,10 @@ def run_tests():
         (
             "test_compress_conversation_history_no_compress_needed",
             test_class.test_compress_conversation_history_no_compress_needed,
+        ),
+        (
+            "test_compress_conversation_history_counts_tool_calls_in_original_tokens",
+            test_class.test_compress_conversation_history_counts_tool_calls_in_original_tokens,
         ),
         ("test_compression_levels_config", test_class.test_compression_levels_config),
         # Integration tests

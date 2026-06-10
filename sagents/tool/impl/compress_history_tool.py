@@ -306,13 +306,14 @@ class CompressHistoryTool:
                 f"共 {len(to_compress)} 条消息"
             )
 
-            # 3. 计算原始 token 数
-            original_tokens = sum(
-                self._calculate_tokens(msg.get_content() or "") for msg in to_compress
-            )
-
-            # 4. 格式化消息并调用 LLM 压缩
+            # 3. 格式化消息，并按实际送入压缩 prompt 的文本统计原始 token
             messages_text = self._format_messages_for_compression(to_compress)
+
+            # 不能只统计 MessageChunk.content，因为 assistant 的 tool_calls
+            # 可能没有 content，但会被 convert_messages_to_str 写入压缩输入。
+            original_tokens = self._calculate_tokens(messages_text)
+
+            # 4. 调用 LLM 压缩
             summary = await self._call_llm_for_compression(messages_text, session_id)
 
             # 5. 计算压缩后的 token 数
