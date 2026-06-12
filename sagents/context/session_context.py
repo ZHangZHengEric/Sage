@@ -63,6 +63,11 @@ class SessionContext:
         self.agent_id = agent_id
         self.system_context: Dict[str, Any] = system_context or {}
         self.session_root_space = session_root_space
+        # init_more() canonicalizes these paths, but restored/reused contexts can
+        # receive system_context updates before init_more() has run.
+        self.external_paths: List[str] = self._normalize_external_paths(
+            self.system_context.get("external_paths")
+        )
 
         # workspace 配置
         self.sandbox_agent_workspace: Optional[str] = (
@@ -1226,9 +1231,10 @@ class SessionContext:
         private_workspace = (
             self.system_context.get("private_workspace") or self.sandbox_agent_workspace
         )
-        permission_paths = [private_workspace]
-        if self.external_paths and isinstance(self.external_paths, list):
-            permission_paths.extend([str(p) for p in self.external_paths])
+        permission_paths = [str(private_workspace)] if private_workspace else []
+        external_paths = getattr(self, "external_paths", None)
+        if external_paths and isinstance(external_paths, list):
+            permission_paths.extend([str(p) for p in external_paths])
         paths_str = ", ".join(permission_paths)  # pyright: ignore[reportArgumentType,reportCallIssue]
         workspace = self.sandbox_agent_workspace
         self.system_context["file_permission"] = (
@@ -1251,7 +1257,9 @@ class SessionContext:
                 normalized_external_paths = self._normalize_external_paths(
                     external_paths_value
                 )
-                previous_external_paths = list(self.external_paths or [])
+                previous_external_paths = list(
+                    getattr(self, "external_paths", None) or []
+                )
                 self.external_paths = normalized_external_paths
                 self.system_context["external_paths"] = normalized_external_paths
                 # 更新沙箱的 allowed_paths
