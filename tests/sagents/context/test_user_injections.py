@@ -63,3 +63,16 @@ def test_delete_pending_user_injection(tmp_path):
     assert ctx.delete_user_injection("guidance-1") is True
     assert ctx.delete_user_injection("guidance-1") is False
     assert ctx.list_user_injections() == []
+
+
+def test_update_system_context_handles_legacy_context_without_external_paths(
+    tmp_path,
+):
+    ctx = _make_session(tmp_path)
+    if hasattr(ctx, "external_paths"):
+        delattr(ctx, "external_paths")
+
+    ctx.add_and_update_system_context({"external_paths": [str(tmp_path / "task")]})
+
+    assert ctx.external_paths == [str(tmp_path / "task")]
+    assert ctx.system_context["external_paths"] == [str(tmp_path / "task")]
