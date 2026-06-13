@@ -20,7 +20,6 @@ Sage 内置的核心工具集，包含系统级功能和常用操作：
 |----------|----------|----------|
 | **sys_spawn_agent** | 创建新的子 Agent | 4 |
 | **sys_delegate_task** | 将任务委派给子 Agent | 2 |
-| **sys_finish_task** | 向父 Agent 报告最终结果 | 2 |
 | **execute_shell_command** | 在指定目录执行 Shell 命令 | 6 |
 | **execute_python_code** | 在临时文件中运行 Python 代码 | 5 |
 | **execute_javascript_code** | 在临时文件中运行 JavaScript 代码 | 5 |

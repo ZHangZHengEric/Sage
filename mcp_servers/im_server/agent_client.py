@@ -582,7 +582,6 @@ class AgentClient:
             "add_task": lambda: f"添加任务: {args.get('title', '未命名')}",
             "sys_spawn_agent": lambda: f"创建子智能体: {args.get('name', '未命名')}",
             "sys_delegate_task": lambda: "分配任务给子智能体",
-            "sys_finish_task": lambda: "完成任务",
             "load_skill": lambda: f"加载技能: {args.get('skill_name', '未知技能')}",
             "search_memory": lambda: f"搜索记忆: {args.get('query', '未知查询')}",
             "generate_image": lambda: (

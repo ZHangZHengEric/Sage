@@ -25,6 +25,7 @@ from common.schemas.agent import (
 from common.services import agent_router_service, agent_service
 from common.services.agent_view_service import serialize_agent, serialize_agents
 from sagents.utils.agent_abilities import AgentAbilitiesGenerationError
+from app.desktop.core.sub_agent_selection import normalize_sub_agent_selection
 from ..user_context import get_desktop_user_id
 
 # 创建路由器
@@ -55,37 +56,7 @@ def _normalize_desktop_sub_agent_selection(
     *,
     current_agent_id: str | None = None,
 ) -> None:
-    agent_mode = agent.agentMode or "simple"
-    if agent_mode != "fibre":
-        agent.subAgentSelectionMode = None
-        if agent.availableSubAgentIds is None:
-            agent.availableSubAgentIds = []
-        return
-
-    if agent.subAgentSelectionMode not in {"auto_all", "manual"}:
-        existing_ids = [
-            sub_agent_id
-            for sub_agent_id in (agent.availableSubAgentIds or [])
-            if sub_agent_id and sub_agent_id != current_agent_id
-        ]
-        agent.subAgentSelectionMode = "manual" if existing_ids else "auto_all"
-
-    if agent.subAgentSelectionMode == "auto_all":
-        agent.availableSubAgentIds = []
-    else:
-        unique_ids: list[str] = []  # pyright: ignore[reportGeneralTypeIssues]
-        seen = set()
-        for sub_agent_id in agent.availableSubAgentIds or []:
-            normalized_id = str(sub_agent_id or "").strip()
-            if (
-                not normalized_id
-                or normalized_id == current_agent_id
-                or normalized_id in seen
-            ):
-                continue
-            seen.add(normalized_id)
-            unique_ids.append(normalized_id)
-        agent.availableSubAgentIds = unique_ids
+    normalize_sub_agent_selection(agent, current_agent_id=current_agent_id)
 
 
 @agent_router.get("/list")

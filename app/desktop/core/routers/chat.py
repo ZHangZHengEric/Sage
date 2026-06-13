@@ -67,7 +67,7 @@ def _build_current_time_with_weekday() -> str:
 
 
 async def _apply_desktop_auto_sub_agents(request: StreamRequest) -> None:
-    if not request.agent_id or request.agent_mode != "fibre":
+    if not request.agent_id or request.agent_mode not in {"fibre", "team"}:
         return
 
     agent = await AgentConfigDao().get_by_id(request.agent_id)
@@ -85,7 +85,7 @@ async def _apply_desktop_auto_sub_agents(request: StreamRequest) -> None:
     if selection_mode != "auto_all":
         return
 
-    if request.available_sub_agent_ids:
+    if request.available_sub_agent_ids is not None:
         return
 
     all_agents = await AgentConfigDao().get_all()
@@ -96,11 +96,11 @@ async def _apply_desktop_auto_sub_agents(request: StreamRequest) -> None:
     ]
 
 
-FIBRE_ONLY_TOOLS = ("sys_spawn_agent", "sys_delegate_task", "sys_finish_task")
+FIBRE_ONLY_TOOLS = ("sys_spawn_agent", "sys_delegate_task")
 
 
 def _sync_fibre_only_tools(request: StreamRequest) -> None:
-    """Fibre 专属工具（智能体委派/创建/完成）只允许在 fibre 模式下出现在 available_tools。
+    """Fibre 专属工具（智能体委派/创建）只允许在 fibre 模式下出现在 available_tools。
     其他模式下即便 agent 配置里残留也强制移除，避免 agent 误调用。
     """
     if request.agent_mode == "fibre":

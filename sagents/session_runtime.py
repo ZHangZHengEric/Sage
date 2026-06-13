@@ -11,6 +11,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Union, Type
 from sagents.agent import (
     AgentBase,
     FibreAgent,
+    TeamAgent,
     QuerySuggestAgent,
     SimpleAgent,
     TaskAnalysisAgent,
@@ -159,6 +160,7 @@ class Session:
             "query_suggest": QuerySuggestAgent,
             "tool_suggestion": ToolSuggestionAgent,
             "fibre": FibreAgent,
+            "team": TeamAgent,
             "memory_recall": MemoryRecallAgent,
             "plan": PlanAgent,
             "self_check": SelfCheckAgent,
@@ -668,7 +670,7 @@ class Session:
             return self._agents[agent_key]
 
         agent_cls = self._agent_registry[agent_key]
-        if agent_cls is FibreAgent:
+        if agent_cls in {FibreAgent, TeamAgent}:
             agent = agent_cls(
                 self.model,
                 self.model_config,
@@ -1534,7 +1536,10 @@ def build_conversation_messages_view(session_id: str) -> Dict[str, Any]:
             continue
 
         for tool_call in result["tool_calls"]:
-            if tool_call.get("function", {}).get("name") != "sys_delegate_task":
+            if tool_call.get("function", {}).get("name") not in {
+                "sys_delegate_task",
+                "sys_team_delegate_task",
+            }:
                 continue
 
             try:
