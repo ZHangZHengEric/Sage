@@ -8,7 +8,6 @@ Separates Agent Definition from Session Runtime:
 
 from __future__ import annotations
 import asyncio
-import json
 import os
 import random
 import string
@@ -24,11 +23,12 @@ from sagents.context.messages.message import MessageChunk, MessageRole
 from sagents.context.messages.message_manager import MessageManager
 from sagents.utils.prompt_manager import PromptManager
 from sagents.context.session_context import SessionContext, SessionStatus
-from sagents.tool import ToolManager, ToolProxy
+from sagents.tool import ToolManager
 from sagents.agent.fibre.tools import FibreTools
 from sagents.agent.fibre.agent_definition import AgentDefinition
 from sagents.agent.fibre.backend_client import FibreBackendClient
 from sagents.agent.simple_agent import SimpleAgent
+from sagents.utils.subtask_summary import summarize_subtask_history
 from sagents.utils.logger import logger
 
 
@@ -114,16 +114,12 @@ class FibreOrchestrator:
         # We need to adapt the logic to use Session objects.
 
         # 1.1 Load Custom Agents from Configuration
-        custom_sub_agents = (
-            getattr(session_context, "custom_sub_agents", None)
-            or session_context.agent_config.get("custom_sub_agents")
-            or session_context.system_context.get("custom_sub_agents")
-        )
+        custom_sub_agents = self._get_configured_sub_agents(session_context)
         logger.info(f"run_loop: custom_sub_agents={custom_sub_agents}")
 
         # If no custom_sub_agents, fetch from backend
         if (
-            not custom_sub_agents
+            custom_sub_agents is None
             and self.backend_client
             and await self.backend_client.check_health()
         ):
@@ -492,6 +488,18 @@ class FibreOrchestrator:
 
         return "\n\n".join(parts)
 
+    @staticmethod
+    def _get_configured_sub_agents(session_context: SessionContext):
+        if getattr(session_context, "custom_sub_agents", None) is not None:
+            return list(getattr(session_context, "custom_sub_agents") or [])
+        agent_config = session_context.agent_config or {}
+        if "custom_sub_agents" in agent_config:
+            return list(agent_config.get("custom_sub_agents") or [])
+        system_context = session_context.system_context or {}
+        if "custom_sub_agents" in system_context:
+            return list(system_context.get("custom_sub_agents") or [])
+        return None
+
     async def spawn_agent(
         self,
         parent_session_id: str,
@@ -551,6 +559,15 @@ class FibreOrchestrator:
 
         # 2. Get parent session for configuration
         parent_session = self.sub_session_manager.get_live_session(parent_session_id)
+        system_context = copy.deepcopy(system_context or {})
+        child_agent_mode = (
+            system_context.get("agent_mode")
+            or system_context.get("agentMode")
+            or "simple"
+        )
+        if child_agent_mode not in {"simple", "fibre", "team"}:
+            child_agent_mode = "simple"
+        system_context["agent_mode"] = child_agent_mode
         name = str(name or "").strip()
         if not name:
             parent_agent_name = (
@@ -653,14 +670,9 @@ class FibreOrchestrator:
                     logger.warning(f"Error creating LLM provider: {e}")
 
             # Create agent in backend (without system_prompt first, we'll update later if needed)
-            # Use a temporary system prompt
-            # Check if sub-agent will be a FibreAgent (inherit agent_mode from parent)
-            parent_agent_mode = (
-                parent_session.session_context.agent_config.get("agent_mode")
-                if parent_session and parent_session.session_context
-                else None
-            )
-            is_sub_agent_fibre = parent_agent_mode == "fibre"
+            # Use a temporary system prompt. Child mode is owned by the child
+            # definition, not inherited from the parent orchestrator mode.
+            is_sub_agent_fibre = child_agent_mode == "fibre"
 
             temp_system_prompt = system_prompt
             if parent_session:
@@ -696,6 +708,7 @@ class FibreOrchestrator:
                 else None,
                 llm_provider_id=llm_provider_id,
                 user_id=user_id,
+                agent_mode=child_agent_mode,
             )
             if backend_agent_id:
                 backend_stored = True
@@ -1199,8 +1212,7 @@ class FibreOrchestrator:
                         parent_session_context.system_context["response_language"]
                     )
 
-        # Collect response and process like internal execution
-        task_result = None
+        # Collect response and summarize the execution trace.
         all_content_chunks = []
 
         try:
@@ -1235,43 +1247,8 @@ class FibreOrchestrator:
                 if filtered_chunks:
                     all_content_chunks.extend(filtered_chunks)
 
-                for chunk in chunks:
-                    if chunk.tool_calls:
-                        for tc in chunk.tool_calls:
-                            func_name = (
-                                tc.get("function", {}).get("name")
-                                if isinstance(tc, dict)
-                                else getattr(
-                                    getattr(tc, "function", None), "name", None
-                                )
-                            )
-                            if func_name == "sys_finish_task":
-                                args_str = (
-                                    tc.get("function", {}).get("arguments", "")
-                                    if isinstance(tc, dict)
-                                    else getattr(
-                                        getattr(tc, "function", None), "arguments", ""
-                                    )
-                                )
-                                # 流式传输中 arguments 是按 chunk 累积的，可能为空或不完整 JSON；
-                                # 只在可解析为完整 JSON 时更新结果
-                                if not args_str or not args_str.strip():
-                                    continue
-                                try:
-                                    args = json.loads(args_str)
-                                except json.JSONDecodeError:
-                                    continue
-                                task_result = f"Task finished: {args.get('status')}. Result: {args.get('result')}"
-                                result_preview = str(args.get("result") or "")[:200]
-                                logger.info(
-                                    f"[Orchestrator] sys_finish_task called with status={args.get('status')}, result={result_preview}..."
-                                )
-
             if parent_session and parent_session.should_interrupt():
                 return f"SubSessionID: {session_id}\nInterrupted by parent session"
-
-            if task_result:
-                return f"SubSessionID: {session_id} , if you need to continue the task, please use this SubSessionID.\n{task_result}"
 
             content_texts = [
                 chunk.content for chunk in all_content_chunks if chunk.content
@@ -1312,36 +1289,16 @@ class FibreOrchestrator:
                     else "zh"
                 )
 
-            summary_prompt_template = PromptManager().get_agent_prompt(
-                agent="FibreAgent",
-                key="sub_agent_fallback_summary_prompt",
+            return await summarize_subtask_history(
+                agent=self.agent,
+                session_id=session_id,
+                summary_session_id=caller_session_id,
+                history_str=history_str,
                 language=language,
+                task_description=content,
+                subject_label="Sub-agent",
+                step_name="sub_agent_fallback_summary",
             )
-            prompt = summary_prompt_template.format(history_str=history_str)
-
-            messages_input = [{"role": "user", "content": prompt}]
-
-            try:
-                if self.agent and hasattr(self.agent, "_call_llm_streaming"):
-                    from sagents.session_runtime import session_scope
-
-                    with session_scope(caller_session_id):
-                        response_stream = self.agent._call_llm_streaming(
-                            messages=messages_input,
-                            session_id=caller_session_id,
-                            step_name="sub_agent_fallback_summary",
-                        )
-
-                        summary_content = ""
-                        async for chunk in response_stream:
-                            if chunk.choices and chunk.choices[0].delta.content:
-                                summary_content += chunk.choices[0].delta.content
-
-                    return f"SubSessionID: {session_id}, if you need to continue the task, please use this SubSessionID.\nSub-agent finished without calling 'sys_finish_task'. AI Summary:\n{summary_content}"
-                return f"SubSessionID: {session_id}, if you need to continue the task, please use this SubSessionID.\nSub-agent response:\n{history_str}"
-            except Exception as e:
-                logger.warning(f"Failed to generate summary via LLM: {e}")
-                return f"SubSessionID: {session_id}, if you need to continue the task, please use this SubSessionID.\nSub-agent response:\n{history_str}"
 
         except Exception as e:
             logger.error(
@@ -1416,7 +1373,6 @@ class FibreOrchestrator:
 
         sub_session.set_status(SessionStatus.RUNNING)
 
-        task_result = None
         all_filtered_chunks = []
 
         try:
@@ -1462,100 +1418,44 @@ class FibreOrchestrator:
                 if filtered_chunks:
                     all_filtered_chunks.extend(filtered_chunks)
 
-                # Check for sys_finish_task (if tools are used)
-                for chunk in chunks:
-                    if chunk.tool_calls:
-                        for tool_call in chunk.tool_calls:
-                            func_name = (
-                                tool_call.function.name  # pyright: ignore[reportAttributeAccessIssue]
-                                if hasattr(tool_call, "function")
-                                else tool_call.get("function", {}).get("name")
-                            )
-                            if func_name == "sys_finish_task":
-                                args_str = (
-                                    tool_call.function.arguments  # pyright: ignore[reportAttributeAccessIssue]
-                                    if hasattr(tool_call, "function")
-                                    else tool_call.get("function", {}).get("arguments")
-                                )
-                                try:
-                                    import json
-
-                                    args = json.loads(args_str)
-                                    task_result = f"Task finished: {args.get('status')}. Result: {args.get('result')}"
-                                except Exception as e:
-                                    logger.error(
-                                        f"Error parsing sys_finish_task arguments: {e}"
-                                    )
-
             if sub_session.should_interrupt():
                 return f"SubSessionID: {session_id}\nInterrupted by parent session"
 
-            # If sys_finish_task was called, return its result
-            if task_result:
-                sub_session.set_status(SessionStatus.COMPLETED)
-                return f"SubSessionID: {session_id}\n{task_result}"
-
-            # If sub-agent finished without calling sys_finish_task, generate summary using LLM
+            # Summarize the sub-agent's execution trace.
             accumulated_messages = []
-            try:
-                if all_filtered_chunks:
-                    accumulated_messages = (
-                        MessageManager.merge_new_messages_to_old_messages(
-                            all_filtered_chunks, []
-                        )
+            if all_filtered_chunks:
+                accumulated_messages = (
+                    MessageManager.merge_new_messages_to_old_messages(
+                        all_filtered_chunks, []
                     )
-                history_str = MessageManager.convert_messages_to_str(
-                    accumulated_messages
                 )
-
-                # Get prompt from PromptManager
-                language = (
-                    sub_session.session_context.get_language()  # pyright: ignore[reportOptionalMemberAccess]
-                    if hasattr(sub_session.session_context, "get_language")
-                    else "en"
-                )
-                summary_prompt_template = PromptManager().get_agent_prompt(
-                    agent="FibreAgent",
-                    key="sub_agent_fallback_summary_prompt",
-                    language=language,
-                )
-                prompt = summary_prompt_template.format(history_str=history_str)
-
-                # Use sub-agent's internal agent to generate summary
-                messages_input = [{"role": "user", "content": prompt}]
-
-                # Get agent from sub_session's agent registry
-                agent = (
-                    sub_session._get_agent("simple")
-                    if hasattr(sub_session, "_get_agent")
-                    else None
-                )
-                if agent:
-                    from sagents.session_runtime import session_scope
-
-                    with session_scope(session_id):
-                        response_stream = agent._call_llm_streaming(
-                            messages=messages_input,  # pyright: ignore[reportArgumentType]
-                            session_id=session_id,
-                            step_name="sub_agent_fallback_summary",
-                        )
-
-                        summary_content = ""
-                        async for chunk in response_stream:
-                            if chunk.choices and chunk.choices[0].delta.content:
-                                summary_content += chunk.choices[0].delta.content
-
-                    sub_session.set_status(SessionStatus.COMPLETED)
-                    return f"SubSessionID: {session_id}\nSub-agent finished without calling 'sys_finish_task'. AI Summary:\n{summary_content}"
-
-            except Exception as e:
-                sub_session.set_status(SessionStatus.ERROR)
-                return f"Error generating summary: {e},{traceback.format_exc()}"
+            history_str = MessageManager.convert_messages_to_str(accumulated_messages)
+            language = (
+                sub_session.session_context.get_language()  # pyright: ignore[reportOptionalMemberAccess]
+                if hasattr(sub_session.session_context, "get_language")
+                else "en"
+            )
+            agent = (
+                sub_session._get_agent("simple")
+                if hasattr(sub_session, "_get_agent")
+                else None
+            )
+            sub_session.set_status(SessionStatus.COMPLETED)
+            return await summarize_subtask_history(
+                agent=agent,
+                session_id=session_id,
+                summary_session_id=session_id,
+                history_str=history_str,
+                language=language,
+                task_description=content,
+                subject_label="Sub-agent",
+                step_name="sub_agent_fallback_summary",
+            )
 
             # Fallback: return aggregated response
             # result_content = "".join([c.content for c in accumulated_chunks if c.content])
             # sub_session.update_status("completed")
-            # return f"SubSessionID: {session_id}\nSub-agent finished without calling 'sys_finish_task'. Aggregated response:\n{result_content}"
+            # return f"SubSessionID: {session_id}\nSub-agent response:\n{result_content}"
 
         except asyncio.CancelledError:
             logger.warning(
@@ -1609,9 +1509,10 @@ class FibreOrchestrator:
         # Get parent session
         parent_session = self.session_manager.get_live_session(parent_session_id)
 
-        # Prepare system_context with shared workspace
-        # Use parent's sandbox_agent_workspace if available
-        parent_sandbox_agent_workspace = None
+        # Prepare a private child workspace. Fibre differs from Team here:
+        # the child does not run at the parent's workspace root; parent task
+        # directories are exposed through task_workspace/external_paths.
+        child_sandbox_agent_workspace = None
         tool_manager = None
         skill_manager = None
 
@@ -1619,35 +1520,20 @@ class FibreOrchestrator:
             parent_sandbox_agent_workspace = (
                 parent_session.session_context.sandbox_agent_workspace  # pyright: ignore[reportOptionalMemberAccess]
             )
+            if parent_sandbox_agent_workspace:
+                child_sandbox_agent_workspace = os.path.join(
+                    parent_sandbox_agent_workspace,
+                    ".sage",
+                    "fibre_subagents",
+                    agent_id,
+                    session_id,
+                )
             parent_tool_manager = parent_session.session_context.tool_manager  # pyright: ignore[reportOptionalMemberAccess]
             skill_manager = parent_session.session_context.skill_manager  # pyright: ignore[reportOptionalMemberAccess]
 
-            # 确保子会话有 tool_manager，继承父会话的工具
+            # 子会话按自己的可用工具工作，不再强制注入 Fibre 协议工具。
             if parent_tool_manager:
-                # 检查父会话是否有 sys_finish_task
-                parent_tools = (
-                    parent_tool_manager.list_all_tools_name()
-                    if hasattr(parent_tool_manager, "list_all_tools_name")
-                    else []
-                )
-                if "sys_finish_task" not in parent_tools:
-                    # 父会话没有 sys_finish_task，需要添加
-                    fibre_tools_impl = FibreTools()
-                    local_tool_manager = ToolManager(
-                        is_auto_discover=False, isolated=True
-                    )
-                    local_tool_manager.register_tools_from_object(fibre_tools_impl)
-                    if isinstance(parent_tool_manager, ToolManager):
-                        tool_manager = ToolProxy(
-                            [local_tool_manager, parent_tool_manager]
-                        )
-                    else:
-                        tool_manager = ToolProxy(
-                            [local_tool_manager] + parent_tool_manager.tool_managers
-                        )
-                else:
-                    # 父会话已有 sys_finish_task，直接继承
-                    tool_manager = parent_tool_manager
+                tool_manager = parent_tool_manager
             else:
                 # 父会话没有 tool_manager，创建新的
                 tool_manager = ToolManager()
@@ -1656,8 +1542,8 @@ class FibreOrchestrator:
 
         else:
             # Handle orphaned sub-sessions (no parent)
-            # For now we leave parent_sandbox_agent_workspace as None or we could initialize a new one if needed
-            # parent_sandbox_agent_workspace = ...
+            # For now we leave child_sandbox_agent_workspace as None or we could initialize a new one if needed
+            # child_sandbox_agent_workspace = ...
             pass
 
         # Create sub-session via global manager
@@ -1671,7 +1557,7 @@ class FibreOrchestrator:
             model_config=self.agent.model_config,
             system_prefix=agent_def.system_prompt or "",
             session_root_space=self.session_manager.session_root_space,
-            sandbox_agent_workspace=parent_sandbox_agent_workspace,
+            sandbox_agent_workspace=child_sandbox_agent_workspace,
         )
 
         # Initialize context if needed
@@ -1721,6 +1607,13 @@ class FibreOrchestrator:
             if parent_session and parent_session.session_context
             else {}
         )
+        child_agent_mode = (
+            sub_agent_system_context.get("agent_mode")
+            or sub_agent_system_context.get("agentMode")
+            or "simple"
+        )
+        if child_agent_mode not in {"simple", "fibre", "team"}:
+            child_agent_mode = "simple"
         sub_session.session_context.set_agent_config(
             model=parent_agent_config.get("llm_config", {}).get("model")
             or self.agent.model,
@@ -1731,7 +1624,7 @@ class FibreOrchestrator:
             system_context=sub_agent_system_context,
             available_workflows=parent_agent_config.get("available_workflows", {}),
             deep_thinking=parent_agent_config.get("deep_thinking", False),
-            agent_mode=parent_agent_config.get("agent_mode"),
+            agent_mode=child_agent_mode,
             more_suggest=parent_agent_config.get("more_suggest", False),
             max_loop_count=parent_agent_config.get("max_loop_count"),
             agent_id=agent_id,

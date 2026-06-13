@@ -102,10 +102,16 @@ def test_populate_request_records_agent_owner_user_id(tmp_path, monkeypatch):
     async def fake_register_extra_mcp_tools(request):
         return None
 
+    async def fake_populate_custom_sub_agents(request):
+        return None
+
     monkeypatch.setattr(chat_service, "AgentConfigDao", FakeAgentConfigDao)
     monkeypatch.setattr(chat_service, "LLMProviderDao", FakeLLMProviderDao)
     monkeypatch.setattr(
         chat_service, "_register_extra_mcp_tools", fake_register_extra_mcp_tools
+    )
+    monkeypatch.setattr(
+        chat_service, "_populate_custom_sub_agents", fake_populate_custom_sub_agents
     )
 
     request = StreamRequest(
@@ -118,7 +124,182 @@ def test_populate_request_records_agent_owner_user_id(tmp_path, monkeypatch):
 
     assert request.agent_owner_user_id == "owner_user"
     assert request.user_id == "caller_user"
-    assert request.available_skills == ["schedule-management"]
+
+
+def test_populate_request_preserves_team_manual_empty_sub_agents(tmp_path, monkeypatch):
+    cfg = _server_cfg(tmp_path)
+    monkeypatch.setattr(config, "_GLOBAL_STARTUP_CONFIG", cfg, raising=False)
+    agent = SimpleNamespace(
+        agent_id="leader",
+        user_id="owner_user",
+        name="Team Leader",
+        config={
+            "name": "Team Leader",
+            "agentMode": "team",
+            "maxLoopCount": 100,
+            "subAgentSelectionMode": "manual",
+            "availableSubAgentIds": [],
+        },
+    )
+    provider = SimpleNamespace(
+        base_url="http://model.local",
+        api_key="key",
+        model="model",
+        max_tokens=None,
+        temperature=0.3,
+        top_p=0.9,
+        presence_penalty=0.0,
+        max_model_len=64000,
+        supports_multimodal=True,
+        supports_structured_output=False,
+    )
+
+    class FakeAgentConfigDao:
+        async def get_by_id(self, agent_id):
+            return agent
+
+        async def get_all(self):
+            raise AssertionError("manual empty selection must not auto-populate")
+
+    class FakeLLMProviderDao:
+        async def get_default(self):
+            return provider
+
+    async def fake_register_extra_mcp_tools(request):
+        return None
+
+    async def fake_populate_custom_sub_agents(request):
+        return None
+
+    monkeypatch.setattr(chat_service, "AgentConfigDao", FakeAgentConfigDao)
+    monkeypatch.setattr(chat_service, "LLMProviderDao", FakeLLMProviderDao)
+    monkeypatch.setattr(
+        chat_service, "_register_extra_mcp_tools", fake_register_extra_mcp_tools
+    )
+    monkeypatch.setattr(
+        chat_service, "_populate_custom_sub_agents", fake_populate_custom_sub_agents
+    )
+
+    request = StreamRequest(
+        messages=[Message(role="user", content="hi")],
+        user_id="caller_user",
+        agent_id="leader",
+    )
+
+    asyncio.run(chat_service.populate_request_from_agent_config(request))
+
+    assert request.agent_mode == "team"
+    assert request.available_sub_agent_ids == []
+
+
+def test_populate_request_auto_all_populates_team_sub_agents(tmp_path, monkeypatch):
+    cfg = _server_cfg(tmp_path)
+    monkeypatch.setattr(config, "_GLOBAL_STARTUP_CONFIG", cfg, raising=False)
+    agent = SimpleNamespace(
+        agent_id="leader",
+        user_id="owner_user",
+        name="Team Leader",
+        config={
+            "name": "Team Leader",
+            "agentMode": "team",
+            "maxLoopCount": 100,
+            "subAgentSelectionMode": "auto_all",
+        },
+    )
+    provider = SimpleNamespace(
+        base_url="http://model.local",
+        api_key="key",
+        model="model",
+        max_tokens=None,
+        temperature=0.3,
+        top_p=0.9,
+        presence_penalty=0.0,
+        max_model_len=64000,
+        supports_multimodal=True,
+        supports_structured_output=False,
+    )
+
+    class FakeAgentConfigDao:
+        async def get_by_id(self, agent_id):
+            return agent
+
+        async def get_all(self):
+            return [
+                SimpleNamespace(agent_id="leader"),
+                SimpleNamespace(agent_id="member_1"),
+            ]
+
+    class FakeLLMProviderDao:
+        async def get_default(self):
+            return provider
+
+    async def fake_register_extra_mcp_tools(request):
+        return None
+
+    async def fake_populate_custom_sub_agents(request):
+        return None
+
+    monkeypatch.setattr(chat_service, "AgentConfigDao", FakeAgentConfigDao)
+    monkeypatch.setattr(chat_service, "LLMProviderDao", FakeLLMProviderDao)
+    monkeypatch.setattr(
+        chat_service, "_register_extra_mcp_tools", fake_register_extra_mcp_tools
+    )
+    monkeypatch.setattr(
+        chat_service, "_populate_custom_sub_agents", fake_populate_custom_sub_agents
+    )
+
+    request = StreamRequest(
+        messages=[Message(role="user", content="hi")],
+        user_id="caller_user",
+        agent_id="leader",
+    )
+
+    asyncio.run(chat_service.populate_request_from_agent_config(request))
+
+    assert request.available_sub_agent_ids == ["member_1"]
+
+
+def test_populate_custom_sub_agents_does_not_inject_member_skill_workspace(
+    tmp_path, monkeypatch
+):
+    cfg = _server_cfg(tmp_path)
+    monkeypatch.setattr(config, "_GLOBAL_STARTUP_CONFIG", cfg, raising=False)
+
+    member = SimpleNamespace(
+        agent_id="member_1",
+        name="Member",
+        user_id="member_owner",
+        config={
+            "description": "Uses its own skill",
+            "availableSkills": ["video-script"],
+            "availableTools": ["file_read"],
+            "availableWorkflows": {},
+            "systemContext": {"agent_mode": "simple"},
+            "agentMode": "simple",
+        },
+    )
+
+    class FakeAgentConfigDao:
+        async def get_by_ids(self, agent_ids):
+            assert agent_ids == ["member_1"]
+            return [member]
+
+    monkeypatch.setattr(chat_service, "AgentConfigDao", FakeAgentConfigDao)
+
+    request = StreamRequest(
+        messages=[Message(role="user", content="hi")],
+        user_id="leader_user",
+        agent_id="leader",
+        available_sub_agent_ids=["member_1"],
+    )
+
+    asyncio.run(chat_service._populate_custom_sub_agents(request))
+
+    assert request.custom_sub_agents
+    member_config = request.custom_sub_agents[0]
+    assert member_config.available_skills == ["video-script"]
+    assert member_config.agent_mode == "simple"
+    assert "team_member_skill_workspace" not in member_config.system_context
 
 
 def test_populate_request_prefers_agent_response_language_over_request(

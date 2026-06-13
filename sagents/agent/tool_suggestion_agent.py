@@ -141,14 +141,20 @@ class ToolSuggestionAgent(AgentBase):
         logger.info("ToolSuggestionAgent: 开始分析工具推荐")
 
         try:
-            # 如果是 ToolProxy 且处于 fibre 模式，动态添加 fibre 特有工具
+            # 如果是 ToolProxy 且处于 fibre/team 模式，动态添加对应系统工具
             if isinstance(session_context.tool_manager, ToolProxy):
-                if session_context.agent_config.get("agent_mode", "fibre") == "fibre":
+                agent_mode = session_context.agent_config.get("agent_mode", "fibre")
+                if agent_mode == "fibre":
                     session_context.tool_manager.allow_tools(
                         [
                             "sys_spawn_agent",
                             "sys_delegate_task",
-                            "sys_finish_task",
+                        ]
+                    )
+                elif agent_mode == "team":
+                    session_context.tool_manager.allow_tools(
+                        [
+                            "sys_team_delegate_task",
                         ]
                     )
 
@@ -253,7 +259,7 @@ class ToolSuggestionAgent(AgentBase):
             system_tools = [
                 "sys_spawn_agent",
                 "sys_delegate_task",
-                "sys_finish_task",
+                "sys_team_delegate_task",
                 "send_message_through_im",
                 "search_memory",
             ]

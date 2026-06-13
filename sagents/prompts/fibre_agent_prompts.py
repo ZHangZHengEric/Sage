@@ -245,38 +245,32 @@ common_agent_rules = {
     "en": """## Agent Role & Task Reporting
 You are an Agent working as part of the Fibre Agent System.
 
-### Mandatory Task Reporting
-When you receive a task from another agent (whether from the Main Agent or another Sub-Agent), you **MUST** use the `sys_finish_task(status, result)` tool to report your final result upon completion.
+### Task Reporting
+When you receive a task from another agent (whether from the Main Agent or another Sub-Agent), complete the task using your own available tools and provide a clear final response.
 
 **Important**:
-- Replying with text only is NOT sufficient; the system will not capture your result unless `sys_finish_task` is called.
-- The `status` parameter should be "success" or "failure".
-- The `result` parameter should contain a comprehensive summary of what was accomplished.
-- This allows the agent that sent you the task to receive your results properly.
+- Reply with a concise final report; the parent orchestrator will summarize your execution trace.
+- Your final report should include status, key deliverables, generated file paths, and any follow-up recommendations.
 """,
     "zh": """## 智能体角色与任务报告
 你是 Fibre Agent System 中的一个智能体。
 
-### 强制任务报告
-当你收到来自其他智能体的任务时（无论是来自主智能体还是其他子智能体），在任务完成后，你 **必须** 使用 `sys_finish_task(status, result)` 工具来报告你的最终结果。
+### 任务报告
+当你收到来自其他智能体的任务时（无论是来自主智能体还是其他子智能体），请使用你自身可用的工具完成任务，并给出清晰的最终回复。
 
 **重要提示**：
-- 仅回复文本是不够的；除非调用 `sys_finish_task` 工具，否则系统无法捕获你的结果。
-- `status` 参数应为 "success" 或 "failure"。
-- `result` 参数应包含已完成工作的全面总结。
-- 这让发送任务给你的智能体能够正确接收你的结果。
+- 请直接回复简洁的最终报告；父级 orchestrator 会根据你的执行轨迹整理结果。
+- 最终报告应包含状态、关键产出、生成文件路径以及必要的后续建议。
 """,
     "pt": """## Papel do agente e relatório de tarefas
 Você é um agente que faz parte do Fibre Agent System.
 
-### Relatório obrigatório
-Quando receber uma tarefa de outro agente (seja do agente principal ou de outro subagente), você **DEVE** usar a ferramenta `sys_finish_task(status, result)` para registrar o resultado final ao concluir.
+### Relatório da tarefa
+Quando receber uma tarefa de outro agente (seja do agente principal ou de outro subagente), conclua a tarefa usando suas próprias ferramentas disponíveis e forneça uma resposta final clara.
 
 **Importante**:
-- Responder apenas com texto não é suficiente; o sistema não captura o resultado sem `sys_finish_task`.
-- O parâmetro `status` deve ser "success" ou "failure".
-- O parâmetro `result` deve conter um resumo completo do que foi realizado.
-- Isso garante que o agente que enviou a tarefa receba corretamente o resultado.
+- Responda com um relatório final conciso; o orquestrador pai resumirá seu histórico de execução.
+- O relatório final deve incluir status, entregáveis principais, caminhos de arquivos gerados e recomendações de acompanhamento.
 """,
 }
 
@@ -286,31 +280,31 @@ sub_agent_extra_prompt = {
 You are a **Sub-Agent** (Strand) spawned by the Parent Agent to perform a specific assignment.
 However, you also possess full Orchestrator capabilities. Your role is to plan, decompose, and delegate if your assigned task is complex.
 
-### Mandatory Reporting
-- You **MUST** use the `sys_finish_task(status, result)` tool to report your final result.
-- Replying with text only is NOT sufficient; the system will not capture your result unless this tool is called.
+### Reporting
+- Provide a concise final report in text; the parent orchestrator will summarize your execution trace.
 """,
     "zh": """## 子智能体角色：Strand
 你是由父智能体创建的 **子智能体** (Strand)，用于执行特定任务。
 同时，你也拥有完整的编排者能力。如果分配给你的任务很复杂，你的职责也是规划、分解和委派。
 
-### 强制报告
-- 你 **必须** 使用 `sys_finish_task(status, result)` 工具来报告最终结果。
-- 仅回复文本是不够的；除非调用此工具，否则系统无法捕获你的结果。
+### 报告
+- 请直接用文本给出简洁的最终报告；父级 orchestrator 会根据你的执行轨迹整理结果。
 """,
     "pt": """## Função do subagente: Strand
 Você é um **subagente** (Strand) criado pelo agente pai para executar uma tarefa específica.
 Ao mesmo tempo, você também possui capacidades completas de orquestração. Se a tarefa atribuída for complexa, sua função também é planejar, decompor e delegar.
 
-### Relato obrigatório
-- Você **DEVE** usar a ferramenta `sys_finish_task(status, result)` para informar o resultado final.
-- Responder apenas com texto não é suficiente; o sistema não capturará o resultado sem essa ferramenta.
+### Relato
+- Forneça um relatório final conciso em texto; o orquestrador pai resumirá seu histórico de execução.
 """,
 }
 
 # Sub-Agent Fallback Summary Prompt
 sub_agent_fallback_summary_prompt = {
     "en": """The sub-agent completed the execution but did not report the result. Please summarize the following execution log into a final result using a **professional reporting tone** (as if reporting to a superior).
+
+Subtask Description:
+{task_description}
 
 Format:
 Status: success/failure
@@ -324,6 +318,9 @@ Result:
 Execution Log:
 {history_str}""",
     "zh": """子智能体任务执行完毕，但未通过标准接口提交最终报告。请根据下方执行日志，以**下级向上级汇报工作**的专业口吻，生成一份结构化总结。
+
+【子任务描述】
+{task_description}
 
 【汇报要求】
 1. **态度严谨**：语言简练、客观、专业，结论先行。
@@ -342,6 +339,9 @@ Result:
 【执行日志】
 {history_str}""",
     "pt": """O subagente concluiu a execução, mas não informou o resultado. Resuma o log abaixo em um resultado final usando um **tom profissional de relatório**.
+
+Descrição da subtarefa:
+{task_description}
 
 Formato:
 Status: success/failure

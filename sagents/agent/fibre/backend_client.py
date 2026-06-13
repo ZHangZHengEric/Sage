@@ -81,6 +81,7 @@ class FibreBackendClient:
         max_loop_count: Optional[int] = None,
         llm_provider_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        agent_mode: str = "simple",
     ) -> Optional[str]:
         """
         创建 Agent 到后端
@@ -113,7 +114,9 @@ class FibreBackendClient:
             "deepThinking": False,
             "llm_provider_id": llm_provider_id,
             "multiAgent": False,
-            "agentMode": "fibre",
+            "agentMode": agent_mode
+            if agent_mode in {"simple", "fibre", "team"}
+            else "simple",
         }
 
         # Use provided user_id or fallback to a default

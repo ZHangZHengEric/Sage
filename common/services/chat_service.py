@@ -614,18 +614,22 @@ async def _populate_custom_sub_agents(request: StreamRequest) -> None:
 
     sub_agent_dao = AgentConfigDao()
     sub_agents = await sub_agent_dao.get_by_ids(deduped_ids)
-    request.custom_sub_agents = [
-        CustomSubAgentConfig(
-            agent_id=sub_agent.agent_id,
-            name=sub_agent.name,
-            description=sub_agent.config.get("description", ""),
-            available_workflows=sub_agent.config.get("availableWorkflows", {}),
-            system_context=sub_agent.config.get("systemContext", {}),
-            available_tools=sub_agent.config.get("availableTools", []),
-            available_skills=sub_agent.config.get("availableSkills", []),
+    custom_sub_agents: List[CustomSubAgentConfig] = []
+    for sub_agent in sub_agents:
+        system_context = dict(sub_agent.config.get("systemContext", {}) or {})
+        custom_sub_agents.append(
+            CustomSubAgentConfig(
+                agent_id=sub_agent.agent_id,
+                name=sub_agent.name,
+                description=sub_agent.config.get("description", ""),
+                available_workflows=sub_agent.config.get("availableWorkflows", {}),
+                system_context=system_context,
+                available_tools=sub_agent.config.get("availableTools", []),
+                available_skills=sub_agent.config.get("availableSkills", []),
+                agent_mode=sub_agent.config.get("agentMode"),
+            )
         )
-        for sub_agent in sub_agents
-    ]
+    request.custom_sub_agents = custom_sub_agents
 
 
 async def populate_request_from_agent_config(
@@ -697,7 +701,10 @@ async def populate_request_from_agent_config(
 
         # auto_all: when subAgentSelectionMode is "auto_all" (or defaults to it),
         # auto-populate available_sub_agent_ids with all agents (excluding self)
-        if request.agent_mode == "fibre" and not request.available_sub_agent_ids:
+        if (
+            request.agent_mode in {"fibre", "team"}
+            and request.available_sub_agent_ids is None
+        ):
             selection_mode = agent_config.get(
                 "subAgentSelectionMode"
             ) or agent_config.get("sub_agent_selection_mode")
@@ -905,6 +912,26 @@ class SageStreamService:
             self.agent_workspace = str(self.agent_workspace_root)
 
         self.tool_manager = create_tool_proxy(request.available_tools)  # pyright: ignore[reportArgumentType]
+        if isinstance(request.system_context, dict) and request.system_context.get(
+            "team_workspace_mode"
+        ):
+            from sagents.agent.team.tools import TeamTools
+            from sagents.tool import ToolManager, ToolProxy
+
+            team_tool_manager = ToolManager(is_auto_discover=False, isolated=True)
+            team_tool_manager.register_tools_from_object(TeamTools())
+            team_tools = (
+                ["sys_team_delegate_task"] if request.agent_mode == "team" else []
+            )
+            existing_managers = (
+                list(self.tool_manager.tool_managers)
+                if hasattr(self.tool_manager, "tool_managers")
+                else [self.tool_manager]
+            )
+            self.tool_manager = ToolProxy(
+                [team_tool_manager] + existing_managers,
+                list(set((request.available_tools or []) + team_tools)),
+            )
         self.skill_manager, self.agent_skill_manager = create_skill_proxy(
             request.available_skills,  # pyright: ignore[reportArgumentType]
             user_id=self.skill_owner_user_id,
@@ -954,7 +981,15 @@ class SageStreamService:
         try:
             from sagents.utils.sandbox.config import VolumeMount
 
-            sandbox_agent_workspace = self.agent_workspace
+            team_workspace = None
+            if isinstance(
+                self.request.system_context, dict
+            ) and self.request.system_context.get("team_workspace_mode"):
+                raw_team_workspace = self.request.system_context.get("team_workspace")
+                if raw_team_workspace:
+                    team_workspace = str(raw_team_workspace)
+
+            sandbox_agent_workspace = team_workspace or self.agent_workspace
             volume_mounts = [
                 VolumeMount(
                     host_path=sandbox_agent_workspace,
@@ -991,6 +1026,12 @@ class SageStreamService:
                                 "agent_id": agent.agent_id,
                                 "name": agent.name,
                                 "description": agent.description,
+                                "system_prompt": agent.system_prompt,
+                                "available_tools": agent.available_tools,
+                                "available_skills": agent.available_skills,
+                                "available_workflows": agent.available_workflows,
+                                "system_context": agent.system_context,
+                                "agent_mode": agent.agent_mode,
                             }
                             for agent in (self.request.custom_sub_agents or [])
                         ]

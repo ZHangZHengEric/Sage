@@ -67,9 +67,27 @@ def enforce_required_tools(agent_config: Dict[str, Any]) -> Dict[str, Any]:
 
     agent_mode = agent_config.get("agentMode") or agent_config.get("agent_mode")
     if agent_mode == "fibre":
-        fibre_tools = {"sys_spawn_agent", "sys_delegate_task", "sys_finish_task"}
+        fibre_tools = {"sys_spawn_agent", "sys_delegate_task"}
+        team_tools = {"sys_team_delegate_task"}
         tools_set.update(fibre_tools)
+        tools_set.difference_update(team_tools)
         logger.info(f"Agent 策略为 fibre，强制添加 fibre 工具: {fibre_tools}")
+    elif agent_mode == "team":
+        team_tools = {"sys_team_delegate_task"}
+        fibre_tools = {
+            "sys_spawn_agent",
+            "sys_delegate_task",
+        }
+        tools_set.update(team_tools)
+        tools_set.difference_update(fibre_tools)
+        logger.info(f"Agent 策略为 team，强制添加 team 工具: {team_tools}")
+    else:
+        multi_agent_tools = {
+            "sys_spawn_agent",
+            "sys_delegate_task",
+            "sys_team_delegate_task",
+        }
+        tools_set.difference_update(multi_agent_tools)
 
     if tools_set != original_tools:
         new_tools = list(tools_set)
@@ -179,7 +197,7 @@ def _normalize_agent_mode(agent_config: Dict[str, Any]) -> Dict[str, Any]:
     raw_value = str(agent_config.get(mode_key) or "").strip().lower()
     if raw_value in {"", "auto"}:
         normalized_value = "simple"
-    elif raw_value in {"simple", "multi", "fibre"}:
+    elif raw_value in {"simple", "multi", "fibre", "team"}:
         normalized_value = raw_value
     else:
         normalized_value = "simple"

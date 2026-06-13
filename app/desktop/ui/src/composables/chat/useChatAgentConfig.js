@@ -5,6 +5,7 @@ import { isLoggedIn } from '@/utils/auth.js'
 const normalizeAgentMode = (mode) => {
   const normalized = String(mode || '').trim().toLowerCase()
   if (normalized === 'fibre') return 'fibre'
+  if (normalized === 'team') return 'team'
   return 'simple'
 }
 
@@ -35,11 +36,17 @@ export const useChatAgentConfig = ({
 
   const selectAgent = (agent, forceConfigUpdate = false) => {
     const isAgentChange = !selectedAgent.value || selectedAgent.value.id !== agent?.id
+    const isAgentConfigRefresh = (
+      !isAgentChange &&
+      selectedAgent.value?.updated_at &&
+      agent?.updated_at &&
+      selectedAgent.value.updated_at !== agent.updated_at
+    )
 
     // 切换到其他 agent 时，先清空当前会话里的临时覆盖值。
     // 这样对话页里的「深度思考」等开关会回到该 agent 自身的默认配置，
     // 而不是继续沿用上一个 agent / 会话留下来的覆盖状态。
-    if (isAgentChange) {
+    if (isAgentChange || isAgentConfigRefresh) {
       userConfigOverrides.value = {}
     }
 
@@ -88,7 +95,7 @@ export const useChatAgentConfig = ({
       const currentAgentExists = agentsList.find(agent => agent.id === selectedAgent.value.id)
       if (currentAgentExists) {
         // 刷新当前选中的 agent 对象，避免列表重拉后继续持有旧数据
-        selectAgent(currentAgentExists)
+        selectAgent(currentAgentExists, true)
         return
       }
     }

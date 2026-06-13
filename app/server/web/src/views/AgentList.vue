@@ -806,6 +806,7 @@ const getAgentModeIcon = (mode) => {
   const normalizedMode = normalizeAgentMode(mode, 'simple')
   const iconMap = {
     fibre: GitBranch,
+    team: UserPlus,
     simple: Cpu
   }
   return iconMap[normalizedMode] || Cpu
@@ -815,6 +816,7 @@ const getAgentModeLabel = (mode) => {
   const normalizedMode = normalizeAgentMode(mode, 'simple')
   const labelMap = {
     fibre: 'Fibre',
+    team: 'Team',
     simple: 'Simple'
   }
   return labelMap[normalizedMode] || 'Simple'
@@ -824,6 +826,7 @@ const getModeBadgeVariant = (mode) => {
   const normalizedMode = normalizeAgentMode(mode, 'simple')
   const variantMap = {
     fibre: 'default',
+    team: 'default',
     simple: 'secondary'
   }
   return variantMap[normalizedMode] || 'secondary'
