@@ -16,7 +16,8 @@ export const useChatAgentConfig = ({
     agentMode: 'simple',
     moreSuggest: false,
     maxLoopCount: null,
-    availableSubAgentIds: []
+    availableSubAgentIds: [],
+    subAgentSelectionMode: 'auto_all'
   })
   const userConfigOverrides = ref({})
 
@@ -29,8 +30,14 @@ export const useChatAgentConfig = ({
 
   const selectAgent = async (agent, forceConfigUpdate = false) => {
     const isAgentChange = !selectedAgent.value || selectedAgent.value.id !== agent?.id
+    const isAgentConfigRefresh = (
+      !isAgentChange &&
+      selectedAgent.value?.updated_at &&
+      agent?.updated_at &&
+      selectedAgent.value.updated_at !== agent.updated_at
+    )
 
-    if (isAgentChange) {
+    if (isAgentChange || isAgentConfigRefresh) {
       userConfigOverrides.value = {}
     }
 
@@ -58,7 +65,10 @@ export const useChatAgentConfig = ({
         maxLoopCount: userConfigOverrides.value.maxLoopCount !== undefined ? userConfigOverrides.value.maxLoopCount : agent.maxLoopCount,
         availableSubAgentIds: userConfigOverrides.value.availableSubAgentIds !== undefined
           ? userConfigOverrides.value.availableSubAgentIds
-          : (agent.availableSubAgentIds ?? [])
+          : (agent.availableSubAgentIds ?? []),
+        subAgentSelectionMode: userConfigOverrides.value.subAgentSelectionMode !== undefined
+          ? userConfigOverrides.value.subAgentSelectionMode
+          : (agent.subAgentSelectionMode ?? ((agent.availableSubAgentIds?.length ?? 0) > 0 ? 'manual' : 'auto_all'))
       }
       localStorage.setItem('selectedAgentId', agent.id)
     }
@@ -78,7 +88,10 @@ export const useChatAgentConfig = ({
     if (!agentsList || agentsList.length === 0) return
     if (selectedAgent.value) {
       const currentAgentExists = agentsList.find(agent => agent.id === selectedAgent.value.id)
-      if (currentAgentExists) return
+      if (currentAgentExists) {
+        await selectAgent(currentAgentExists, true)
+        return
+      }
     }
     const savedAgentId = localStorage.getItem('selectedAgentId')
     if (savedAgentId) {

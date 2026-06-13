@@ -219,7 +219,7 @@ class SAgent:
             agent_id: Agent ID，用于标识当前 Agent
             deep_thinking: 过时参数。请改用消息中的 <enable_deep_thinking>true/false</enable_deep_thinking> 控制
             max_loop_count: 最大循环次数，防止无限循环
-            agent_mode: Agent 模式，可选 "simple" | "multi" | "fibre"
+            agent_mode: Agent 模式，可选 "simple" | "multi" | "fibre" | "team"
             more_suggest: 是否启用更多建议功能
             force_summary: 是否强制生成总结
             system_context: 系统上下文字典，注入额外信息到提示词
@@ -586,11 +586,51 @@ class SAgent:
             ]
         )
 
+        team_agent_prelude = ParallelNode(
+            branches=[
+                AgentNode(agent_key="tool_suggestion"),
+                AgentNode(agent_key="memory_recall"),
+            ]
+        )
+        team_agent_core = SequenceNode(
+            steps=[
+                IfNode(
+                    condition="enable_plan",
+                    true_body=SequenceNode(
+                        steps=[
+                            AgentNode(agent_key="plan"),
+                            IfNode(
+                                condition="plan_should_start_execution",
+                                true_body=AgentNode(agent_key="team"),
+                            ),
+                        ]
+                    ),
+                    false_body=AgentNode(agent_key="team"),
+                ),
+            ]
+        )
+        team_agent_body = SequenceNode(
+            steps=[
+                team_agent_prelude,
+                LoopNode(
+                    condition="self_check_should_retry",
+                    max_loops=3,
+                    body=SequenceNode(
+                        steps=[
+                            team_agent_core,
+                            AgentNode(agent_key="self_check"),
+                        ]
+                    ),
+                ),
+            ]
+        )
+
         steps.append(
             SwitchNode(  # pyright: ignore[reportArgumentType]
                 variable="agent_mode",
                 cases={
                     "fibre": fib_agent_body,
+                    "team": team_agent_body,
                     "simple": simple_agent_body,
                     "multi": multi_agent_full,
                 },

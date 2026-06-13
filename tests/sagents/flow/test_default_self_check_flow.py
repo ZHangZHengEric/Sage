@@ -28,7 +28,11 @@ def test_simple_and_fibre_memory_recall_run_outside_self_check_retry_loop(tmp_pa
     )
     switch = flow.root.steps[1]
 
-    for mode, executor_key in [("simple", "simple"), ("fibre", "fibre")]:
+    for mode, executor_key in [
+        ("simple", "simple"),
+        ("fibre", "fibre"),
+        ("team", "team"),
+    ]:
         body = switch.cases[mode]
 
         assert isinstance(body, SequenceNode)

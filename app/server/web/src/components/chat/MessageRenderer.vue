@@ -288,7 +288,6 @@ import TaskAnalysisMessage from './TaskAnalysisMessage.vue'
 import ReasoningContentMessage from './ReasoningContentMessage.vue'
 import AgentCardMessage from './tools/AgentCardMessage.vue'
 import SysDelegateTaskMessage from './tools/SysDelegateTaskMessage.vue'
-import SysFinishTaskMessage from './tools/SysFinishTaskMessage.vue'
 import TodoTaskMessage from './tools/TodoTaskMessage.vue'
 import QuestionnaireCard from './tools/QuestionnaireCard.vue'
 import { useWorkbenchStore } from '@/stores/workbench.js'
@@ -303,7 +302,7 @@ import { buildClipboardTextFromMessageContent, normalizeMessageContentForCompose
 const TOOL_COMPONENT_MAP = {
   sys_spawn_agent: AgentCardMessage,
   sys_delegate_task: SysDelegateTaskMessage,
-  sys_finish_task: SysFinishTaskMessage,
+  sys_team_delegate_task: SysDelegateTaskMessage,
   todo_write: TodoTaskMessage,
   questionnaire: QuestionnaireCard,
 }

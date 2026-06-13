@@ -334,7 +334,7 @@
 
 2026-04-21 21:30 server 端登录页：当 allow_registration=false 时新增显眼提示——告知当前网页不允许创建新用户，推荐下载桌面版 [https://zavixai.com/html/sage.html，或自行从](https://zavixai.com/html/sage.html，或自行从) GitHub 部署 Web 版，并附微信联系方式 cfyz0814 / zhangzheng-thu。新增 zh/en 文案和 2 条 Login 单测，全部通过。
 
-2026-04-21 17:10 限制 Fibre 专属工具仅在 fibre 模式下可选：AgentEdit.vue 增加 isFibreOnlyToolUnavailable，非 fibre 模式下 sys_spawn_agent / sys_delegate_task / sys_finish_task 复选框禁用并打「仅 Fibre 模式」徽章 + 提示；模式切出 fibre 时自动从 availableTools 移除；后端 chat router 新增 _sync_fibre_only_tools 兜底，非 fibre 请求强制剔除这三个工具。
+2026-04-21 17:10 限制 Fibre 专属工具仅在 fibre 模式下可选：AgentEdit.vue 增加 isFibreOnlyToolUnavailable，非 fibre 模式下 Fibre 创建/委派工具复选框禁用并打「仅 Fibre 模式」徽章 + 提示；模式切出 fibre 时自动从 availableTools 移除；后端 chat router 新增 _sync_fibre_only_tools 兜底，非 fibre 请求强制剔除这些工具。
 
 2026-04-21 17:10 更新 docs/zh/DESIGN_AGENT_FLOW_PRODUCTIZATION.md：产品名定为「智能体画布」（内核仍叫 AgentFlow），重写 §9 IA 决策（智能体/智能体画布平级菜单、Router Agent 同列表加 tab、Chat 调用侧统一、旧「工作流」字段改名「任务步骤」），把 §11 替换为不带时间的 21 步递进式开发计划，附录 B 增加 UI 文案强约束表。
 

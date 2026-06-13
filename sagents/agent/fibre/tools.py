@@ -138,7 +138,7 @@ class FibreTools:
             tasks: A list of tasks, where each task is a dictionary containing 'agent_id', 'content', and optionally 'session_id'.
                    'session_id' is optional and only needed when continuing an existing child-agent conversation.
                    Never pass the current caller session ID for a new delegated task; leave it empty to auto-create a fresh child session.
-                   'content' should be detailed and specify exactly what information needs to be returned via sys_finish_task.
+                   'content' should be detailed and specify exactly what information needs to be returned.
             session_id: The current session ID (auto-injected)
         """
         logger.info(f"Tool Call: sys_delegate_task(tasks_count={len(tasks)})")
@@ -159,32 +159,3 @@ class FibreTools:
             tasks, caller_session_id=session_id
         )
         return response
-
-    @tool(
-        description_i18n={
-            "zh": "向父节点报告任务执行的最终结果。当子智能体完成所有任务后，使用此工具提交详细的执行结果和总结。",
-            "en": "Report the final result of task execution to the parent agent. Use this tool when the sub-agent has completed all tasks to submit detailed execution results and summary.",
-        },
-        param_description_i18n={
-            "status": {
-                "zh": "任务执行状态，可选值：'success'（成功）或 'failed'（失败）",
-                "en": "Task execution status, options: 'success' or 'failed'",
-            },
-            "result": {
-                "zh": "任务执行的详细结果总结。必须包含：1) 执行过程的关键步骤；2) 生成的资源文件路径（**必须是绝对路径**）；3) 数据分析结论；4) 建议或后续行动。支持 Markdown 格式，可以包含表格、列表等结构化内容。",
-                "en": "Detailed summary of task execution results. Must include: 1) Key execution steps; 2) Generated resource file paths (**must be ABSOLUTE paths**); 3) Data analysis conclusions; 4) Recommendations or follow-up actions. Supports Markdown format with tables, lists, etc.",
-            },
-        },
-    )
-    async def sys_finish_task(self, status: str, result: str) -> str:
-        """
-        Report final result to parent.
-
-        Args:
-            status: Task status (success/failed)
-            result: The detailed final result. Must include all information requested by the parent agent,
-                    including key execution steps, paths to generated resources, and specific conclusions.
-        """
-        # This is typically called by the sub-agent, not the parent.
-        # But if the parent calls it, it ends the main session?
-        return f"Task finished: {status}. Result had been reported to parent agent."
