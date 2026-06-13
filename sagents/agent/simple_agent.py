@@ -1369,7 +1369,7 @@ class SimpleAgent(AgentBase):
             )
             for tool_call_id, tool_call in tool_calls.items():
                 tname = tool_call["function"]["name"]
-                if tname in ["complete_task", "sys_finish_task"]:
+                if tname in ["complete_task"]:
                     termination_tool_ids.add(tool_call_id)
                 # 无论协议是否启用，模型主动调用 turn_status 时都应正常处理；
                 # SAGE_AGENT_STATUS_PROTOCOL_ENABLED=false 只禁止"强制 turn_status_only 轮"，
@@ -1412,7 +1412,7 @@ class SimpleAgent(AgentBase):
                 # chunk 是 (messages, is_complete)
                 messages, is_complete = chunk
 
-                # 终止类工具：complete_task / sys_finish_task / 通过校验且非 continue_work 的 turn_status → 标记完成
+                # 终止类工具：complete_task / 通过校验且非 continue_work 的 turn_status → 标记完成
                 if (termination_tool_ids or accept_turn_status_ids) and not is_complete:
                     for msg in messages:
                         if msg.role == MessageRole.TOOL.value and (

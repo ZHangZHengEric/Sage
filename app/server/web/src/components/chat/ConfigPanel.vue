@@ -34,6 +34,7 @@
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="fibre">{{ t('config.modeFibre') }}</SelectItem>
+            <SelectItem value="team">{{ t('config.modeTeam') }}</SelectItem>
             <SelectItem value="simple">{{ t('config.modeSimple') }}</SelectItem>
           </SelectContent>
         </Select>

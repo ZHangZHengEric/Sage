@@ -35,7 +35,8 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     availableSkills: [],
     availableKnowledgeBases: [],
     availableWorkflows: {},
-    availableSubAgentIds: []
+    availableSubAgentIds: [],
+    subAgentSelectionMode: 'auto_all'
   }
 
   const formData = ref(JSON.parse(JSON.stringify(defaultFormData)))
@@ -146,6 +147,10 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
       if (!Array.isArray(formData.value.availableSkills)) formData.value.availableSkills = []
       if (!Array.isArray(formData.value.availableKnowledgeBases)) formData.value.availableKnowledgeBases = []
       if (!Array.isArray(formData.value.availableSubAgentIds)) formData.value.availableSubAgentIds = []
+      if (!formData.value.subAgentSelectionMode) {
+        formData.value.subAgentSelectionMode =
+          formData.value.availableSubAgentIds.length > 0 ? 'manual' : 'auto_all'
+      }
       if (!formData.value.systemContext || typeof formData.value.systemContext !== 'object') formData.value.systemContext = {}
       if (!formData.value.availableWorkflows || typeof formData.value.availableWorkflows !== 'object') formData.value.availableWorkflows = {}
       if (!formData.value.llmConfig || typeof formData.value.llmConfig !== 'object') {

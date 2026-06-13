@@ -1037,12 +1037,24 @@ class SessionContext:
     def restrict_tools_for_mode(self, agent_mode: str):
         """
         根据 agent_mode 限制工具的使用。
-        如果不为 'fibre' 模式，屏蔽 Fibre 相关工具。
+        非 fibre/team 模式屏蔽多智能体系统工具；team 模式只允许 Team 委派工具。
         """
         if agent_mode == "fibre":
-            return
+            fibre_tools = ["sys_team_delegate_task"]
+        elif agent_mode == "team":
+            fibre_tools = [
+                "sys_spawn_agent",
+                "sys_delegate_task",
+            ]
+        else:
+            fibre_tools = [
+                "sys_spawn_agent",
+                "sys_delegate_task",
+                "sys_team_delegate_task",
+            ]
 
-        fibre_tools = ["sys_spawn_agent", "sys_delegate_task", "sys_finish_task"]
+        if not fibre_tools:
+            return
 
         # 避免循环引用
         from sagents.tool.tool_manager import ToolManager
@@ -1052,17 +1064,18 @@ class SessionContext:
         if not current_manager:
             return
 
-        # 获取基础管理器和当前可用工具
-        base_manager = None
+        # 获取基础管理器和当前可用工具。ToolProxy 可能包装多个 manager；
+        # 过滤时必须保留完整 manager 列表，否则会丢掉普通文件/代码/MCP 工具。
+        tool_managers = None
         available_tools = set()
 
         if isinstance(current_manager, ToolProxy):
-            base_manager = current_manager.tool_manager
+            tool_managers = list(current_manager.tool_managers)
             # ToolProxy.list_all_tools_name 返回的是当前 proxy 可用的工具名
             available_tools = set(current_manager.list_all_tools_name())
         elif isinstance(current_manager, ToolManager):
-            base_manager = current_manager
-            available_tools = set(base_manager.list_all_tools_name())
+            tool_managers = [current_manager]
+            available_tools = set(current_manager.list_all_tools_name())
         else:
             logger.warning(
                 f"SessionContext: Unknown tool manager type: {type(current_manager)}"
@@ -1077,7 +1090,7 @@ class SessionContext:
             new_available = list(available_tools - tools_to_remove)
 
             # 创建新的 ToolProxy
-            self.tool_manager = ToolProxy(base_manager, new_available)  # pyright: ignore[reportArgumentType]
+            self.tool_manager = ToolProxy(tool_managers, new_available)  # pyright: ignore[reportArgumentType]
             logger.info(
                 f"SessionContext: Restricted tools for mode '{agent_mode}'. Removed: {tools_to_remove}"
             )

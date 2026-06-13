@@ -320,6 +320,7 @@ import { isAbsoluteLocalPath, isRelativeWorkspacePath, normalizeFileReference, r
 const TOOL_COMPONENT_MAP = {
   sys_spawn_agent: AgentCardMessage,
   sys_delegate_task: SysDelegateTaskMessage,
+  sys_team_delegate_task: SysDelegateTaskMessage,
   todo_write: TodoTaskMessage,
   questionnaire: QuestionnaireCard,
 }

@@ -22,7 +22,7 @@ export const buildImportedAgentDraft = (importedConfig, importSuffix = '') => {
     || deepThinking === 'true'
     || deepThinking === 'enabled'
   const normalizedAgentMode = String(importedConfig.agentMode || importedConfig.agent_mode || 'simple').trim().toLowerCase()
-  const normalizedMode = normalizedAgentMode === 'fibre' ? 'fibre' : 'simple'
+  const normalizedMode = ['fibre', 'team'].includes(normalizedAgentMode) ? normalizedAgentMode : 'simple'
 
   return {
     name: `${importedConfig.name}${importSuffix}`,

@@ -132,13 +132,6 @@
         />
       </template>
 
-      <template v-else-if="isSysFinishTask">
-        <SysFinishTaskToolRenderer
-          :tool-args="toolArgs"
-          :tool-result="toolResult"
-        />
-      </template>
-
       <template v-else-if="isCodeExecution">
         <CodeExecutionToolRenderer
           :tool-args="toolArgs"
@@ -288,7 +281,6 @@ import LoadSkillToolRenderer from './toolcall/LoadSkillToolRenderer.vue'
 import TodoWriteToolRenderer from './toolcall/TodoWriteToolRenderer.vue'
 import SysSpawnAgentToolRenderer from './toolcall/SysSpawnAgentToolRenderer.vue'
 import SysDelegateTaskToolRenderer from './toolcall/SysDelegateTaskToolRenderer.vue'
-import SysFinishTaskToolRenderer from './toolcall/SysFinishTaskToolRenderer.vue'
 import CodeExecutionToolRenderer from './toolcall/CodeExecutionToolRenderer.vue'
 import SearchWebPageToolRenderer from './toolcall/SearchWebPageToolRenderer.vue'
 import SearchImageFromWebToolRenderer from './toolcall/SearchImageFromWebToolRenderer.vue'
@@ -402,8 +394,7 @@ const isFileUpdate = computed(() => toolName.value === 'file_update')
 const isCodeExecution = computed(() => toolName.value === 'execute_python_code' || toolName.value === 'execute_javascript_code')
 const isTodoWrite = computed(() => toolName.value === 'todo_write')
 const isSysSpawnAgent = computed(() => toolName.value === 'sys_spawn_agent')
-const isSysDelegateTask = computed(() => toolName.value === 'sys_delegate_task')
-const isSysFinishTask = computed(() => toolName.value === 'sys_finish_task')
+const isSysDelegateTask = computed(() => ['sys_delegate_task', 'sys_team_delegate_task'].includes(toolName.value))
 const isSearchWebPage = computed(() => toolName.value === 'search_web_page')
 const isSearchImageFromWeb = computed(() => toolName.value === 'search_image_from_web')
 const isSearchMemory = computed(() => toolName.value === 'search_memory' || toolName.value === 'memory_search')

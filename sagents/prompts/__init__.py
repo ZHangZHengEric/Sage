@@ -26,6 +26,7 @@ from . import task_planning_prompts
 from . import task_rewrite_prompts
 from . import task_stage_summary_prompts
 from . import task_summary_prompts
+from . import team_agent_prompts
 from . import tool_suggestion_prompts
 from . import workflow_select_prompts
 
@@ -49,6 +50,7 @@ __all__ = [
     "task_rewrite_prompts",
     "task_stage_summary_prompts",
     "task_summary_prompts",
+    "team_agent_prompts",
     "tool_suggestion_prompts",
     "workflow_select_prompts",
 ]
