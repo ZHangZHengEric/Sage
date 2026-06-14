@@ -10,8 +10,7 @@ impl App {
         self.session_id = session_id;
         self.clear_input();
         self.busy = false;
-        self.live_message = None;
-        self.live_message_had_history = false;
+        self.clear_live_response_state();
         self.request_started_at = None;
         self.first_output_latency = None;
         self.last_request_duration = None;

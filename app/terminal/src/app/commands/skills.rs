@@ -13,7 +13,7 @@ impl App {
         self.selected_skills.push(skill.clone());
         self.selected_skills.sort();
         self.backend_restart_requested = true;
-        self.queue_message(MessageKind::Tool, format!("skill enabled: {skill}"));
+        self.queue_message(MessageKind::System, format!("skill enabled: {skill}"));
         self.status = format!("skills  {}", self.session_id);
     }
 
@@ -26,7 +26,7 @@ impl App {
             return;
         }
         self.backend_restart_requested = true;
-        self.queue_message(MessageKind::Tool, format!("skill removed: {skill}"));
+        self.queue_message(MessageKind::System, format!("skill removed: {skill}"));
         self.status = format!("skills  {}", self.session_id);
     }
 
@@ -35,7 +35,7 @@ impl App {
         self.selected_skills.clear();
         self.backend_restart_requested = true;
         self.queue_message(
-            MessageKind::Tool,
+            MessageKind::System,
             format!("cleared {} active skill(s)", cleared),
         );
         self.status = format!("skills  {}", self.session_id);

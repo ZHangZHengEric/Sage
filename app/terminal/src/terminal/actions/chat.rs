@@ -12,8 +12,12 @@ pub(super) fn run_task(
     let request = BackendRequest {
         session_id: app.session_id.clone(),
         user_id: app.user_id.clone(),
-        agent_id: app.selected_agent_id.clone(),
         agent_config: app.agent_config_path.clone(),
+        agent_id: if app.agent_config_path.is_some() {
+            None
+        } else {
+            app.selected_agent_id.clone()
+        },
         agent_mode: if app.agent_config_path.is_none() || app.agent_mode_override {
             Some(app.agent_mode.clone())
         } else {
@@ -25,6 +29,7 @@ pub(super) fn run_task(
             None
         },
         workspace: app.workspace_override_path().map(|path| path.to_path_buf()),
+        sandbox_type: app.sandbox_type.clone(),
         skills: app.selected_skills.clone(),
         model_override: app.selected_model.clone(),
         task,

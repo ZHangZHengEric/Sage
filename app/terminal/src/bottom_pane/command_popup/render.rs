@@ -62,7 +62,7 @@ pub(super) fn popup_lines(props: &CommandPopupProps) -> Vec<Line<'static>> {
                     Style::default().fg(POPUP_HINT).bg(bg),
                 ),
                 Span::styled(
-                    format!("{:<width$}", item.command, width = command_width),
+                    pad_display_width(&item.command, command_width),
                     Style::default()
                         .fg(POPUP_COMMAND)
                         .bg(bg)
@@ -95,4 +95,13 @@ pub(super) fn popup_lines(props: &CommandPopupProps) -> Vec<Line<'static>> {
         ]));
     }
     lines
+}
+
+fn pad_display_width(text: &str, width: usize) -> String {
+    let used = UnicodeWidthStr::width(text);
+    if used >= width {
+        text.to_string()
+    } else {
+        format!("{text}{}", " ".repeat(width - used))
+    }
 }

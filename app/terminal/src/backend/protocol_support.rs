@@ -63,11 +63,8 @@ pub(super) fn live_message_kind(
         return None;
     }
 
-    if matches!(
-        event_type,
-        "thinking" | "reasoning_content" | "task_analysis" | "analysis" | "plan" | "observation"
-    ) {
-        return Some(MessageKind::Process);
+    if is_internal_reasoning_event(event_type) {
+        return None;
     }
 
     if matches!(
@@ -79,6 +76,39 @@ pub(super) fn live_message_kind(
     }
 
     None
+}
+
+pub(super) fn is_internal_reasoning_event(event_type: &str) -> bool {
+    matches!(
+        event_type,
+        "thinking" | "reasoning_content" | "task_analysis" | "analysis" | "plan" | "observation"
+    )
+}
+
+pub(super) fn sanitize_assistant_content(content: &str) -> String {
+    let mut cleaned = content.to_string();
+    strip_between(
+        &mut cleaned,
+        "Self-check: Repeating execution loop detected",
+        "clarification question.",
+    );
+    strip_between(
+        &mut cleaned,
+        "自检：检测到执行出现重复循环模式",
+        "最小必要澄清问题。",
+    );
+    cleaned
+}
+
+fn strip_between(text: &mut String, start_marker: &str, end_marker: &str) {
+    while let Some(start) = text.find(start_marker) {
+        let tail = &text[start..];
+        let end = tail
+            .find(end_marker)
+            .map(|index| start + index + end_marker.len())
+            .unwrap_or_else(|| text.len());
+        text.replace_range(start..end, "");
+    }
 }
 
 pub(super) fn summarize_tool_event(names: &[String], content: &str) -> Option<String> {

@@ -10,6 +10,7 @@ use crossterm::style::{
 use crossterm::terminal::Clear;
 use ratatui::layout::Position;
 use ratatui::style::{Color, Modifier};
+use unicode_width::UnicodeWidthStr;
 
 use super::diff::DrawCommand;
 
@@ -20,7 +21,7 @@ where
     let mut fg = Color::Reset;
     let mut bg = Color::Reset;
     let mut modifier = Modifier::empty();
-    let mut last_pos: Option<Position> = None;
+    let mut expected_cursor: Option<Position> = None;
 
     for command in commands {
         let (x, y) = match &command {
@@ -28,10 +29,9 @@ where
             DrawCommand::ClearToEnd { x, y, .. } => (*x, *y),
         };
 
-        if !matches!(last_pos, Some(pos) if x == pos.x + 1 && y == pos.y) {
+        if !matches!(expected_cursor, Some(pos) if x == pos.x && y == pos.y) {
             queue!(writer, MoveTo(x, y))?;
         }
-        last_pos = Some(Position { x, y });
 
         match command {
             DrawCommand::Put { cell, .. } => {
@@ -52,6 +52,10 @@ where
                     bg = cell.bg;
                 }
                 queue!(writer, Print(cell.symbol()))?;
+                expected_cursor = Some(Position {
+                    x: x.saturating_add(display_width(cell.symbol()).max(1) as u16),
+                    y,
+                });
             }
             DrawCommand::ClearToEnd { bg: clear_bg, .. } => {
                 queue!(writer, SetAttribute(CAttribute::Reset))?;
@@ -59,6 +63,7 @@ where
                 queue!(writer, SetBackgroundColor(clear_bg.into()))?;
                 bg = clear_bg;
                 queue!(writer, Clear(crossterm::terminal::ClearType::UntilNewLine))?;
+                expected_cursor = None;
             }
         }
     }
@@ -72,9 +77,82 @@ where
     Ok(())
 }
 
+fn display_width(text: &str) -> usize {
+    UnicodeWidthStr::width(text)
+}
+
 struct ModifierDiff {
     from: Modifier,
     to: Modifier,
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::buffer::Cell;
+    use ratatui::style::Color;
+
+    use super::super::diff::DrawCommand;
+    use super::draw_commands;
+
+    #[test]
+    fn draw_commands_repositions_after_wide_cells() {
+        let mut first = Cell::default();
+        first.set_symbol("你");
+        let mut second = Cell::default();
+        second.set_symbol("A");
+
+        let mut out = Vec::new();
+        draw_commands(
+            &mut out,
+            vec![
+                DrawCommand::Put {
+                    x: 0,
+                    y: 0,
+                    cell: first,
+                },
+                DrawCommand::Put {
+                    x: 1,
+                    y: 0,
+                    cell: second,
+                },
+            ]
+            .into_iter(),
+        )
+        .expect("draw should succeed");
+
+        let rendered = String::from_utf8_lossy(&out);
+        assert!(
+            rendered.contains("\x1b[1;2HA"),
+            "adjacent update after a wide cell must reposition explicitly: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn draw_commands_repositions_after_clear_to_end() {
+        let mut cell = Cell::default();
+        cell.set_symbol("A");
+
+        let mut out = Vec::new();
+        draw_commands(
+            &mut out,
+            vec![
+                DrawCommand::ClearToEnd {
+                    x: 0,
+                    y: 0,
+                    bg: Color::Reset,
+                },
+                DrawCommand::Put { x: 1, y: 0, cell },
+            ]
+            .into_iter(),
+        )
+        .expect("draw should succeed");
+
+        let rendered = String::from_utf8_lossy(&out);
+        assert!(
+            rendered.contains("\x1b[1;2HA"),
+            "update after clear should not rely on stale cursor position: {rendered:?}"
+        );
+    }
 }
 
 impl ModifierDiff {

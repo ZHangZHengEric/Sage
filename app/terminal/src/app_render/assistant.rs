@@ -273,13 +273,19 @@ fn render_table_row(row: &[String], widths: &[usize], style: Style) -> Line<'sta
         } else {
             spans.push(Span::styled(" │ ", style));
         }
-        spans.push(Span::styled(
-            format!("{:<width$}", cell, width = widths[idx]),
-            style,
-        ));
+        spans.push(Span::styled(pad_cell(cell, widths[idx]), style));
     }
     spans.push(Span::styled(" │", style));
     Line::from(spans)
+}
+
+fn pad_cell(cell: &str, width: usize) -> String {
+    let used = UnicodeWidthStr::width(cell);
+    if used >= width {
+        cell.to_string()
+    } else {
+        format!("{cell}{}", " ".repeat(width - used))
+    }
 }
 
 fn table_rule(widths: &[usize]) -> String {

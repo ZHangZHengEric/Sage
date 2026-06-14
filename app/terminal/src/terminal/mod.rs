@@ -1,5 +1,6 @@
 use std::io;
 use std::io::ErrorKind;
+use std::io::Write;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -31,7 +32,7 @@ use keys::handle_key;
 
 pub type AppTerminal = Terminal<BackendImpl>;
 const INLINE_VIEWPORT_IDLE_HEIGHT: u16 = 5;
-const INLINE_VIEWPORT_MAX_HEIGHT: u16 = 14;
+const INLINE_VIEWPORT_MAX_HEIGHT: u16 = 18;
 // Keep keyboard enhancement mode minimal.
 //
 // `DISAMBIGUATE_ESCAPE_CODES` is enough to let capable terminals distinguish
@@ -41,9 +42,13 @@ const KEYBOARD_ENHANCEMENT_FLAGS: KeyboardEnhancementFlags =
     KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES;
 
 pub fn setup_terminal(_app: &App) -> Result<AppTerminal> {
-    let startup_cursor = cursor::position()
-        .ok()
-        .map(|(x, y)| ratatui::layout::Position { x, y });
+    let mut startup_cursor = cursor::position().ok();
+    if matches!(startup_cursor, Some((x, _)) if x > 0) {
+        writeln!(io::stdout())?;
+        io::stdout().flush()?;
+        startup_cursor = cursor::position().ok();
+    }
+    let startup_cursor = startup_cursor.map(|(x, y)| ratatui::layout::Position { x, y });
     enable_raw_mode()?;
     execute!(io::stdout(), EnableBracketedPaste)?;
     ignore_unsupported(execute!(
@@ -65,16 +70,16 @@ pub fn restore_terminal(terminal: &mut AppTerminal) -> Result<()> {
     disable_raw_mode()?;
     let viewport = terminal.viewport_area();
     let backend = terminal.backend_mut();
-    ignore_unsupported(execute!(
+    ignore_unsupported(execute!(backend, PopKeyboardEnhancementFlags))?;
+    execute!(
         backend,
-        PopKeyboardEnhancementFlags,
         DisableBracketedPaste,
         crossterm::style::ResetColor,
         crossterm::cursor::Show,
         crossterm::cursor::MoveTo(0, viewport.y),
         Clear(ClearType::FromCursorDown),
         crossterm::cursor::MoveTo(0, viewport.y)
-    ))?;
+    )?;
     Ok(())
 }
 
@@ -106,12 +111,17 @@ pub fn run_with_startup_action(
 
         let width = terminal.size()?.width.max(1);
         app.materialize_pending_ui(width);
+        if app.take_clear_request() {
+            terminal.clear()?;
+            dirty = true;
+        }
+        dirty |= drain_backend(app, &mut backend);
+
         let elapsed_tick = app.live_elapsed_seconds();
         if elapsed_tick != last_elapsed_tick {
             dirty = true;
             last_elapsed_tick = elapsed_tick;
         }
-
         let desired_height = desired_viewport_height(
             app,
             width,
@@ -125,7 +135,6 @@ pub fn run_with_startup_action(
             dirty = true;
         }
 
-        dirty |= drain_backend(app, &mut backend);
         dirty |= flush_history(terminal, app)?;
         if dirty {
             terminal.draw(|frame| ui::render(frame, app))?;
@@ -142,7 +151,10 @@ pub fn run_with_startup_action(
                     dirty |= handle_key(app, key, &mut backend)?
                 }
                 Event::Paste(text) => {
-                    if !app.is_help_overlay_visible() && !app.is_session_picker_visible() {
+                    if matches!(
+                        app.active_surface_kind(),
+                        None | Some(crate::app::ActiveSurfaceKind::Popup)
+                    ) {
                         app.insert_text(&text);
                         sync_contextual_popup_data(app);
                         dirty = true;
@@ -181,10 +193,15 @@ fn drain_backend(app: &mut App, backend: &mut Option<BackendHandle>) -> bool {
                 BackendEvent::Stats(stats) => app.apply_backend_stats(stats),
                 BackendEvent::Error(message) => app.fail_request(message),
                 BackendEvent::Finished => {
-                    app.complete_request();
+                    if app.busy {
+                        app.complete_request();
+                    }
                 }
                 BackendEvent::Exited => {
                     backend.take();
+                    if app.busy {
+                        app.fail_request("backend process exited before completing request");
+                    }
                     break;
                 }
             }

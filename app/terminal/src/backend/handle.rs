@@ -7,8 +7,8 @@ use std::thread;
 
 use anyhow::{anyhow, Result};
 
-use crate::app::MessageKind;
-use crate::backend::protocol::{flush_complete_lines, parse_backend_line};
+use crate::backend::protocol::{flush_complete_lines, BackendProtocolState};
+use crate::backend::protocol_support::truncate;
 use crate::backend::runtime::{
     apply_state_env, prepare_state_root, resolve_cli_invoker, resolve_runtime_root, CliInvoker,
 };
@@ -30,6 +30,7 @@ struct BackendConfig {
     agent_mode: Option<String>,
     max_loop_count: Option<u32>,
     workspace: Option<PathBuf>,
+    sandbox_type: Option<String>,
     skills: Vec<String>,
     model_override: Option<String>,
 }
@@ -77,8 +78,16 @@ impl BackendHandle {
         if let Some(workspace) = &workspace {
             command.arg("--workspace").arg(workspace);
         }
-        if let Some(agent_id) = &request.agent_id {
-            command.arg("--agent-id").arg(agent_id);
+        if let Some(sandbox_type) = &request.sandbox_type {
+            command
+                .arg("--sandbox-type")
+                .arg(sandbox_type)
+                .env("SAGE_SANDBOX_MODE", sandbox_type);
+        }
+        if request.agent_config.is_none() {
+            if let Some(agent_id) = &request.agent_id {
+                command.arg("--agent-id").arg(agent_id);
+            }
         }
         if let Some(agent_config) = &request.agent_config {
             command.arg("--agent-config").arg(agent_config);
@@ -124,10 +133,9 @@ impl BackendHandle {
             for line in reader.lines() {
                 match line {
                     Ok(line) if !line.trim().is_empty() => {
-                        let _ = stderr_sender.send(BackendEvent::Message(
-                            MessageKind::System,
-                            format!("backend · {}", line.trim()),
-                        ));
+                        if let Some(event) = backend_stderr_event(&line) {
+                            let _ = stderr_sender.send(event);
+                        }
                     }
                     Ok(_) => {}
                     Err(err) => {
@@ -144,13 +152,15 @@ impl BackendHandle {
             let mut reader = BufReader::new(stdout);
             let mut chunk = [0_u8; 4096];
             let mut pending = Vec::<u8>::new();
+            let mut protocol_state = BackendProtocolState::default();
 
             loop {
                 match reader.read(&mut chunk) {
                     Ok(0) => break,
                     Ok(read) => {
                         pending.extend_from_slice(&chunk[..read]);
-                        if flush_complete_lines(&mut pending, &sender).is_err() {
+                        if flush_complete_lines(&mut pending, &sender, &mut protocol_state).is_err()
+                        {
                             return;
                         }
                     }
@@ -167,7 +177,7 @@ impl BackendHandle {
             if !pending.is_empty() {
                 let tail = String::from_utf8_lossy(&pending).trim().to_string();
                 if !tail.is_empty() {
-                    for event in parse_backend_line(&tail) {
+                    for event in protocol_state.parse_line(&tail) {
                         if sender.send(event).is_err() {
                             return;
                         }
@@ -200,6 +210,7 @@ impl BackendHandle {
                 agent_mode: request.agent_mode.clone(),
                 max_loop_count: request.max_loop_count,
                 workspace,
+                sandbox_type: request.sandbox_type.clone(),
                 skills: request.skills.clone(),
                 model_override: request.model_override.clone(),
             },
@@ -244,7 +255,79 @@ impl BackendHandle {
             && self.config.agent_mode == request.agent_mode
             && self.config.max_loop_count == request.max_loop_count
             && self.config.workspace == request.workspace
+            && self.config.sandbox_type == request.sandbox_type
             && self.config.skills == request.skills
             && self.config.model_override == request.model_override
+    }
+}
+
+fn backend_stderr_event(line: &str) -> Option<BackendEvent> {
+    let line = line.trim();
+    if line.is_empty() || is_ignored_backend_stderr(line) {
+        return None;
+    }
+
+    let summary = truncate(&line.split_whitespace().collect::<Vec<_>>().join(" "), 220);
+    Some(BackendEvent::Status(format!("backend log  {summary}")))
+}
+
+fn is_ignored_backend_stderr(line: &str) -> bool {
+    line.starts_with("Agent prompt加载完成:")
+        || line.starts_with("[working] ")
+        || line.contains("token_usage 落库失败")
+        || line.contains("token_usage.usage_payload")
+        || line.contains("[SQL: INSERT INTO token_usage")
+        || line.contains("sqlite3.IntegrityError")
+        || line.contains(r#""file": "db.py"#)
+        || line.contains(r#""file": "chat_service.py"#)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::backend_stderr_event;
+    use crate::backend::BackendEvent;
+
+    #[test]
+    fn backend_stderr_ignores_startup_prompt_notice() {
+        assert!(
+            backend_stderr_event("Agent prompt加载完成: 中文21个, 英文21个, 葡萄牙语21个")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn backend_stderr_ignores_nonfatal_token_usage_persistence_noise() {
+        assert!(backend_stderr_event(
+            r#"{"level":"ERROR","msg":"token_usage 落库失败: 数据库操作失败: token_usage.usage_payload"}"#
+        )
+        .is_none());
+        assert!(backend_stderr_event(
+            r#"{"level":"ERROR","file":"db.py:295","msg":"数据库操作失败: (sqlite3.IntegrityError) NOT NULL constraint failed: token_usage.usage_payload"}"#
+        )
+        .is_none());
+        assert!(backend_stderr_event(
+            r#"[SQL: INSERT INTO token_usage (id, session_id) VALUES (?, ?)]"#
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn backend_stderr_routes_plain_logs_to_status_instead_of_transcript() {
+        let event = backend_stderr_event("loaded optional backend cache").expect("event");
+
+        assert!(matches!(
+            event,
+            BackendEvent::Status(status) if status.contains("loaded optional backend cache")
+        ));
+    }
+
+    #[test]
+    fn backend_stderr_does_not_fail_requests_from_traceback_lines() {
+        let event = backend_stderr_event("Traceback (most recent call last):").expect("event");
+
+        assert!(matches!(
+            event,
+            BackendEvent::Status(status) if status.contains("Traceback")
+        ));
     }
 }

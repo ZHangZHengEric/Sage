@@ -1,4 +1,5 @@
 use super::super::App;
+use unicode_width::UnicodeWidthStr;
 
 #[test]
 fn welcome_banner_renders_in_idle_region_before_transcript() {
@@ -13,9 +14,49 @@ fn welcome_banner_renders_in_idle_region_before_transcript() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(rendered.contains("Sage Terminal"));
+    assert!(rendered.contains("agent mode: "));
     assert!(rendered.contains("display: "));
     assert!(rendered.contains("compact"));
+    assert!(rendered.contains("workspace: "));
     assert!(rendered.contains("Tip: "));
+}
+
+#[test]
+fn welcome_banner_uses_available_terminal_width() {
+    let app = App::new();
+    let lines = app.rendered_idle_lines(120);
+    let first_line = lines
+        .first()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .unwrap_or_default();
+
+    assert!(UnicodeWidthStr::width(first_line.as_str()) >= 110);
+}
+
+#[test]
+fn welcome_banner_labels_agent_config_owned_values() {
+    let mut app = App::new();
+    app.set_agent_config_path("coding".to_string());
+
+    let rendered = app
+        .rendered_idle_lines(120)
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("agent: "));
+    assert!(rendered.contains("config coding"));
+    assert!(rendered.contains("config default"));
+    assert!(!rendered.contains("agent: \n(default)"));
+    assert!(!rendered.contains("loop limit: \n50"));
 }
 
 #[test]
@@ -30,7 +71,7 @@ fn typing_input_keeps_welcome_banner_visible() {
 }
 
 #[test]
-fn submitting_message_hides_welcome_banner() {
+fn submitting_message_keeps_welcome_banner_as_idle_status() {
     let mut app = App::new();
     app.input = "hello".to_string();
     app.input_cursor = app.input.len();
@@ -38,11 +79,33 @@ fn submitting_message_hides_welcome_banner() {
     let _ = app.submit_input();
     app.materialize_pending_ui(120);
 
-    assert!(app.rendered_idle_lines(120).is_empty());
+    let rendered = app
+        .rendered_idle_lines(120)
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("Sage Terminal"));
+    assert!(rendered.contains("workspace: "));
 }
 
 #[test]
-fn first_transcript_materializes_welcome_into_history() {
+fn first_message_requests_clear_before_transcript_history_is_inserted() {
+    let mut app = App::new();
+    let _ = app.take_clear_request();
+    app.input = "hello".to_string();
+    app.input_cursor = app.input.len();
+
+    let _ = app.submit_input();
+    app.materialize_pending_ui(120);
+
+    assert!(app.take_clear_request());
+    assert!(!app.take_clear_request());
+}
+
+#[test]
+fn first_transcript_keeps_welcome_out_of_history_but_visible_when_idle() {
     let mut app = App::new();
     app.input = "hello".to_string();
     app.input_cursor = app.input.len();
@@ -57,10 +120,10 @@ fn first_transcript_materializes_welcome_into_history() {
         .map(|span| span.content.as_ref())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("Sage Terminal"));
-    assert!(rendered.contains("Tip: "));
+    assert!(!rendered.contains("Sage Terminal"));
+    assert!(!rendered.contains("Tip: "));
     assert!(rendered.contains("hello"));
-    assert!(app.rendered_idle_lines(120).is_empty());
+    assert!(!app.rendered_idle_lines(120).is_empty());
 }
 
 #[test]
@@ -90,6 +153,26 @@ fn help_command_topic_opens_detail_overlay() {
         .iter()
         .flat_map(|section| section.items.iter())
         .any(|item| item.value.contains("/provider create")));
+}
+
+#[test]
+fn help_agent_topic_mentions_config_commands() {
+    let mut app = App::new();
+    app.input = "/help agent".to_string();
+    app.input_cursor = app.input.len();
+
+    let action = app.submit_input();
+    assert!(matches!(action, super::super::SubmitAction::Handled));
+    let props = app.help_overlay_props().expect("help overlay should open");
+    assert_eq!(props.title, "Help  /agent");
+    let text = props
+        .sections
+        .iter()
+        .flat_map(|section| section.items.iter())
+        .map(|item| item.value.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("/agent config <path|coding>"));
 }
 
 #[test]

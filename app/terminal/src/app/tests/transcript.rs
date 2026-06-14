@@ -1,6 +1,7 @@
 use crate::app_render::render_assistant_body;
 use crate::display_policy::DisplayMode;
 use std::time::{Duration, Instant};
+use unicode_width::UnicodeWidthStr;
 
 use super::super::{App, MessageKind};
 use crate::backend::{BackendPhaseTiming, BackendStats, BackendToolStep};
@@ -46,6 +47,31 @@ fn assistant_tables_render_as_grid_lines() {
 }
 
 #[test]
+fn assistant_tables_align_cjk_and_emoji_by_display_width() {
+    let lines = render_assistant_body(
+        "| 语言/领域 | 能力 |\n| --- | --- |\n| 🦀 Rust | 写、改、编译、调试 |\n| 前端 | HTML/CSS/JS/TS |",
+    );
+    let widths = lines
+        .iter()
+        .map(|line| {
+            UnicodeWidthStr::width(
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+                    .as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(widths.len(), 4);
+    assert!(
+        widths.windows(2).all(|pair| pair[0] == pair[1]),
+        "table rows should have equal display width, got {widths:?}"
+    );
+}
+
+#[test]
 fn assistant_long_code_blocks_are_folded() {
     let code =
         "```rust\nline1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n```";
@@ -84,6 +110,114 @@ fn streamed_multiline_assistant_output_keeps_single_role_header() {
 }
 
 #[test]
+fn streamed_assistant_output_collapses_consecutive_duplicate_lines() {
+    let mut app = App::new();
+    app.append_assistant_chunk("Hello\nHello\n");
+    app.append_assistant_chunk("Ready\nReady\n");
+    app.complete_request();
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(rendered.matches("Hello").count(), 1, "{rendered}");
+    assert_eq!(rendered.matches("Ready").count(), 1, "{rendered}");
+}
+
+#[test]
+fn streamed_assistant_output_collapses_non_adjacent_duplicate_lines() {
+    let mut app = App::new();
+    app.append_assistant_chunk("Hello! 👋 我在，空闲待命中。有任务直接说。\n");
+    app.append_assistant_chunk("我是 Sage Terminal 里的 AI 执行助手。\n");
+    app.append_assistant_chunk("Hello! 👋 我在，空闲待命中。有任务直接说。\n");
+    app.complete_request();
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(rendered.matches("Hello!").count(), 1, "{rendered}");
+    assert!(rendered.contains("我是 Sage Terminal"));
+}
+
+#[test]
+fn streamed_assistant_output_collapses_adjacent_repeated_sentence_fragments() {
+    let mut app = App::new();
+    app.append_assistant_chunk(
+        "Hello! 👋 我在，空闲待命中。有任务直接说。Hello! 👋 我在，空闲待命中。有任务直接说。",
+    );
+    app.complete_request();
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(rendered.matches("Hello!").count(), 1);
+}
+
+#[test]
+fn streamed_assistant_output_hides_loop_diagnostics() {
+    let mut app = App::new();
+    app.append_assistant_chunk(
+        "我在。\nSelf-check: Repeating execution loop detected (period=3, cycles=3). Starting now, do not reuse the same path; you must change strategy: try different tools or parameters first; if still blocked, state the blocker clearly and ask one minimal clarification question.\n继续说。",
+    );
+    app.complete_request();
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("我在"));
+    assert!(rendered.contains("继续说"));
+    assert!(!rendered.contains("Self-check"));
+    assert!(!rendered.contains("Repeating execution loop"));
+}
+
+#[test]
+fn clear_command_resets_live_assistant_dedupe_state() {
+    let mut app = App::new();
+    app.begin_task_submission("stream".to_string(), true);
+    app.append_assistant_chunk("same line\n");
+
+    app.handle_command("/clear");
+    app.append_assistant_chunk("same line\n");
+    app.complete_request();
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("same line"), "{rendered}");
+}
+
+#[test]
 fn transcript_overlay_opens_after_history_is_committed() {
     let mut app = App::new();
     app.push_message(MessageKind::User, "hello");
@@ -112,7 +246,33 @@ fn transcript_overlay_scrolls_for_long_history() {
 }
 
 #[test]
-fn tool_messages_include_step_number_and_duration() {
+fn idle_main_region_does_not_repaint_committed_transcript() {
+    let mut app = App::new();
+    app.push_message(MessageKind::User, "hello");
+    app.push_message(MessageKind::Assistant, "ready");
+    app.materialize_pending_ui(90);
+    let _ = app.take_clear_request();
+    let _ = app.take_pending_history_lines();
+
+    let rendered = app
+        .rendered_main_lines(90)
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(!rendered.contains("hello"));
+    assert!(!rendered.contains("ready"));
+    assert!(rendered.contains("Sage Terminal"));
+}
+
+#[test]
+fn compact_mode_hides_tool_messages_from_transcript() {
     let mut app = App::new();
     app.request_started_at = Some(Instant::now() - Duration::from_secs(2));
     app.start_tool("read_file".to_string());
@@ -130,9 +290,46 @@ fn tool_messages_include_step_number_and_duration() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("running read_file"));
-    assert!(rendered.contains("completed read_file"));
+    assert!(!rendered.contains("running read_file"));
+    assert!(!rendered.contains("completed read_file"));
     assert!(!rendered.contains("step 1"));
+}
+
+#[test]
+fn compact_mode_keeps_running_tool_in_footer_hint() {
+    let mut app = App::new();
+    app.busy = true;
+    app.start_tool("read_file".to_string());
+
+    let hint = crate::ui_support::footer_hint(&app);
+
+    assert!(hint.contains("running read_file"));
+}
+
+#[test]
+fn busy_live_region_shows_current_output_without_repainting_transcript() {
+    let mut app = App::new();
+    app.push_message(MessageKind::User, "hello");
+    app.push_message(MessageKind::Assistant, "ready");
+    let _ = app.take_pending_history_lines();
+    app.busy = true;
+    app.append_assistant_chunk("working now");
+
+    let rendered = app
+        .rendered_live_lines()
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(!rendered.contains("hello"));
+    assert!(!rendered.contains("ready"));
+    assert!(rendered.contains("working now"));
 }
 
 #[test]
@@ -208,6 +405,53 @@ fn completed_request_queues_timing_summary_into_transcript() {
 }
 
 #[test]
+fn duplicate_finished_event_after_completion_is_ignored() {
+    let mut app = App::new();
+    app.busy = true;
+    app.request_started_at = Some(Instant::now() - Duration::from_millis(1500));
+    app.append_assistant_chunk("done");
+    app.complete_request();
+    app.complete_request();
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(rendered.matches("completed •").count(), 1);
+}
+
+#[test]
+fn duplicate_finished_event_after_failure_does_not_mark_completed() {
+    let mut app = App::new();
+    app.busy = true;
+    app.request_started_at = Some(Instant::now() - Duration::from_millis(1500));
+    app.fail_request("backend failed");
+    app.complete_request();
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("failed •"));
+    assert!(rendered.contains("backend failed"));
+    assert!(!rendered.contains("completed •"));
+}
+
+#[test]
 fn completed_request_prefers_backend_stats_for_summary() {
     let mut app = App::new();
     app.busy = true;
@@ -237,12 +481,12 @@ fn completed_request_prefers_backend_stats_for_summary() {
         .join("\n");
     assert!(rendered.contains("total 1.2s"));
     assert!(rendered.contains("ttft 180ms"));
-    assert!(rendered.contains("tokens 30"));
+    assert!(!rendered.contains("tokens 30"));
     assert!(!rendered.contains("total 9.0s"));
 }
 
 #[test]
-fn completed_request_renders_backend_tool_step_summary() {
+fn compact_completed_request_omits_backend_diagnostics() {
     let mut app = App::new();
     app.busy = true;
     app.apply_backend_stats(BackendStats {
@@ -303,14 +547,13 @@ fn completed_request_renders_backend_tool_step_summary() {
         .join("\n");
     assert_eq!(rendered.matches("Process").count(), 1);
     assert_eq!(rendered.matches("Tool").count(), 0);
-    assert!(rendered.contains("tools"));
-    assert!(rendered.contains("read_file 120ms"));
-    assert!(rendered.contains("grep 84ms"));
+    assert!(!rendered.contains("tools"));
+    assert!(!rendered.contains("read_file 120ms"));
+    assert!(!rendered.contains("grep 84ms"));
     assert!(!rendered.contains("completed read_file"));
-    assert!(rendered.contains("120ms"));
-    assert!(rendered.contains("84ms"));
-    assert!(rendered.contains("phases • planning 500ms"));
-    assert!(rendered.contains("response 400ms • 2 segments"));
+    assert!(!rendered.contains("phases • planning 500ms"));
+    assert!(!rendered.contains("response 400ms • 2 segments"));
+    assert!(rendered.contains("completed • total 1.2s • ttft 180ms"));
 }
 
 #[test]
@@ -387,9 +630,9 @@ fn completed_request_compacts_large_backend_tool_step_summary() {
         .join("\n");
     assert_eq!(rendered.matches("Process").count(), 1);
     assert_eq!(rendered.matches("Tool").count(), 0);
-    assert!(rendered.contains("tools • execute_shell_command • 60ms • internal tools ×4"));
-    assert!(rendered.contains("execute_shell_command"));
-    assert!(rendered.contains("internal tools ×4"));
+    assert!(!rendered.contains("tools • execute_shell_command • 60ms • internal tools ×4"));
+    assert!(!rendered.contains("execute_shell_command"));
+    assert!(!rendered.contains("internal tools ×4"));
     assert!(!rendered.contains("slowest"));
     assert!(!rendered.contains("step 1  completed search_memory"));
     assert!(!rendered.contains("turn_status ×2"));
@@ -493,9 +736,9 @@ fn completed_request_maps_internal_phase_names_to_user_labels() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("phases • planning 500ms"));
-    assert!(rendered.contains("memory 500ms"));
-    assert!(rendered.contains("response 700ms"));
+    assert!(!rendered.contains("phases • planning 500ms"));
+    assert!(!rendered.contains("memory 500ms"));
+    assert!(!rendered.contains("response 700ms"));
     assert!(!rendered.contains("SimpleAgent"));
     assert!(!rendered.contains("MemoryRecallAgent"));
 }
@@ -534,5 +777,6 @@ fn completed_request_keeps_raw_phase_names_in_verbose_mode() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(rendered.contains("phase • MemoryRecallAgent 500ms"));
+    assert!(rendered.contains("tokens 30"));
     assert!(!rendered.contains("phase • memory 500ms"));
 }

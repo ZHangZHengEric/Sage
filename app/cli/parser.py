@@ -60,6 +60,16 @@ def _add_provider_config_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_session_runtime_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--sandbox-type",
+        dest="sandbox_type",
+        choices=["local", "remote", "passthrough"],
+        default=None,
+        help="Sandbox mode for this CLI session (overrides SAGE_SANDBOX_MODE)",
+    )
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     from app.cli.service import get_default_cli_max_loop_count, get_default_cli_user_id
 
@@ -75,6 +85,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--agent-id", dest="agent_id")
     run_parser.add_argument("--agent-config", dest="agent_config", help="Load an agent config JSON path or preset name, e.g. coding")
     run_parser.add_argument("--workspace", dest="workspace", help="Use a specific local workspace directory")
+    _add_session_runtime_args(run_parser)
     run_parser.add_argument("--skill", dest="skills", action="append", default=[], help="Enable a skill by name (repeatable)")
     run_parser.add_argument(
         "--agent-mode",
@@ -99,6 +110,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     chat_parser.add_argument("--agent-id", dest="agent_id")
     chat_parser.add_argument("--agent-config", dest="agent_config", help="Load an agent config JSON path or preset name, e.g. coding")
     chat_parser.add_argument("--workspace", dest="workspace", help="Use a specific local workspace directory")
+    _add_session_runtime_args(chat_parser)
     chat_parser.add_argument("--skill", dest="skills", action="append", default=[], help="Enable a skill by name (repeatable)")
     chat_parser.add_argument(
         "--agent-mode",
@@ -123,6 +135,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     resume_parser.add_argument("--agent-id", dest="agent_id")
     resume_parser.add_argument("--agent-config", dest="agent_config", help="Load an agent config JSON path or preset name, e.g. coding")
     resume_parser.add_argument("--workspace", dest="workspace", help="Use a specific local workspace directory")
+    _add_session_runtime_args(resume_parser)
     resume_parser.add_argument("--skill", dest="skills", action="append", default=[], help="Enable a skill by name (repeatable)")
     resume_parser.add_argument(
         "--agent-mode",
@@ -198,7 +211,6 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     config_init_parser.add_argument("--force", action="store_true", help="Overwrite an existing config file")
     config_init_parser.add_argument("--json", action="store_true", help="Print init result as JSON")
-
     provider_parser = subparsers.add_parser("provider", help="Manage local LLM providers")
     provider_subparsers = provider_parser.add_subparsers(dest="provider_command", required=True)
 

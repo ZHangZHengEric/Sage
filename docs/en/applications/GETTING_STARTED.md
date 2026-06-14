@@ -224,7 +224,10 @@ The example configs that ship with `examples/` are:
 
 - `examples/mcp_setting.json`
 - `examples/preset_running_agent_config.json`
+- `examples/coding_agent_config.json`
 - `examples/preset_running_config.json`
+
+Use `sage chat --agent-config coding --workspace /path/to/repo` or `sage tui --agent-config coding --workspace /path/to/repo` to start from the bundled coding preset. The explicit workspace is required for this preset so repository tools are scoped to the project you intend to edit.
 
 ### Streamlit Demo
 

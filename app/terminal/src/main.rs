@@ -34,18 +34,10 @@ fn main() -> Result<()> {
             return Ok(());
         }
     };
-    let mut preferences = load_startup_preferences().unwrap_or_else(|err| {
+    let preferences = load_startup_preferences().unwrap_or_else(|err| {
         eprintln!("warning: failed to load terminal preferences: {err}");
         startup::StartupOptions::default()
     });
-    if startup_options.agent_config.is_some() {
-        if startup_options.agent_id.is_none() {
-            preferences.agent_id = None;
-        }
-        if startup_options.agent_mode.is_none() {
-            preferences.agent_mode = None;
-        }
-    }
     let startup_options = startup_options.with_fallbacks(preferences);
     let mut app = App::new();
     app.apply_startup_options(
@@ -54,6 +46,7 @@ fn main() -> Result<()> {
         startup_options.agent_mode,
         startup_options.display_mode,
         startup_options.workspace.map(PathBuf::from),
+        startup_options.sandbox_type,
     );
     let mut terminal = setup_terminal(&app)?;
     let result = match startup_action {

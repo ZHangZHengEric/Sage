@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::app::{normalize_agent_mode, App, MessageKind};
+use crate::app::{normalize_agent_mode, normalize_sandbox_type, App, MessageKind};
 use crate::backend::runtime::{prepare_state_root, resolve_runtime_root};
 use crate::display_policy::DisplayMode;
 use crate::startup::StartupOptions;
@@ -15,6 +15,7 @@ struct TerminalPreferences {
     agent_mode: Option<String>,
     display_mode: Option<DisplayMode>,
     workspace: Option<String>,
+    sandbox_type: Option<String>,
 }
 
 pub(crate) fn load_startup_preferences() -> Result<StartupOptions> {
@@ -42,6 +43,10 @@ pub(crate) fn load_startup_preferences() -> Result<StartupOptions> {
             .workspace
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty()),
+        sandbox_type: preferences
+            .sandbox_type
+            .as_deref()
+            .and_then(normalize_sandbox_type),
     })
 }
 
@@ -66,6 +71,7 @@ fn save_app_preferences(app: &App) -> Result<()> {
         workspace: app
             .workspace_override_path()
             .map(|path| path.display().to_string()),
+        sandbox_type: app.sandbox_type.clone(),
     };
     let payload = serde_json::to_string_pretty(&preferences)
         .map_err(|err| anyhow!("failed to encode terminal preferences: {err}"))?;
@@ -79,9 +85,7 @@ fn preferences_path() -> Result<PathBuf> {
 }
 
 fn should_skip_test_persistence() -> bool {
-    cfg!(test)
-        && std::env::var("SAGE_TERMINAL_STATE_ROOT").is_err()
-        && std::env::var("SAGE_TERMINAL_RUNTIME_ROOT").is_err()
+    cfg!(test) && std::env::var("SAGE_TERMINAL_TEST_PERSIST_PREFERENCES").is_err()
 }
 
 #[cfg(test)]
@@ -116,18 +120,21 @@ mod tests {
             "SAGE_TERMINAL_STATE_ROOT",
             &state_root.display().to_string(),
         );
+        let _persist_guard = EnvVarGuard::set("SAGE_TERMINAL_TEST_PERSIST_PREFERENCES", "1");
 
         let mut app = App::new();
         app.set_display_mode(DisplayMode::Verbose);
         app.set_selected_agent_id("agent_demo".to_string());
         app.set_agent_mode_selection("multi".to_string());
         app.set_workspace_selection("/tmp/demo-workspace".to_string());
+        app.set_sandbox_type_selection("local".to_string());
         let loaded = load_startup_preferences().expect("preferences should load");
 
         assert_eq!(loaded.agent_id.as_deref(), Some("agent_demo"));
         assert_eq!(loaded.agent_mode.as_deref(), Some("multi"));
         assert_eq!(loaded.display_mode, Some(DisplayMode::Verbose));
         assert_eq!(loaded.workspace.as_deref(), Some("/tmp/demo-workspace"));
+        assert_eq!(loaded.sandbox_type.as_deref(), Some("local"));
     }
 
     #[test]
@@ -150,12 +157,14 @@ mod tests {
             "SAGE_TERMINAL_STATE_ROOT",
             &state_root.display().to_string(),
         );
+        let _persist_guard = EnvVarGuard::set("SAGE_TERMINAL_TEST_PERSIST_PREFERENCES", "1");
 
         let mut original = App::new();
         original.set_display_mode(DisplayMode::Verbose);
         original.set_selected_agent_id("agent_demo".to_string());
         original.set_agent_mode_selection("multi".to_string());
         original.set_workspace_selection("/tmp/demo-workspace".to_string());
+        original.set_sandbox_type_selection("remote".to_string());
 
         let options = crate::startup::StartupOptions::default()
             .with_fallbacks(load_startup_preferences().expect("preferences should load"));
@@ -166,12 +175,14 @@ mod tests {
             options.agent_mode,
             options.display_mode,
             options.workspace.map(PathBuf::from),
+            options.sandbox_type,
         );
 
         assert_eq!(restored.selected_agent_id.as_deref(), Some("agent_demo"));
         assert_eq!(restored.agent_mode, "multi");
         assert_eq!(restored.display_mode, DisplayMode::Verbose);
         assert_eq!(restored.workspace_label, "/tmp/demo-workspace");
+        assert_eq!(restored.sandbox_type.as_deref(), Some("remote"));
     }
 
     #[test]
@@ -194,17 +205,52 @@ mod tests {
             "SAGE_TERMINAL_STATE_ROOT",
             &state_root.display().to_string(),
         );
+        let _persist_guard = EnvVarGuard::set("SAGE_TERMINAL_TEST_PERSIST_PREFERENCES", "1");
 
         let mut app = App::new();
         app.set_selected_agent_id("agent_demo".to_string());
         app.set_workspace_selection("/tmp/demo-workspace".to_string());
+        app.set_sandbox_type_selection("local".to_string());
         app.clear_selected_agent_id();
         app.clear_workspace_override_selection();
+        app.clear_sandbox_type_selection();
         persist_app_preferences_notice(&mut app);
 
         let loaded = load_startup_preferences().expect("preferences should load");
         assert!(loaded.agent_id.is_none());
         assert!(loaded.workspace.is_none());
+        assert!(loaded.sandbox_type.is_none());
+    }
+
+    #[test]
+    fn session_agent_config_does_not_clear_persisted_agent_default() {
+        let _env_lock = lock_env();
+        let runtime_root = unique_temp_dir("preferences-agent-config-runtime");
+        fs::create_dir_all(runtime_root.join("app").join("cli"))
+            .expect("runtime cli dir should exist");
+        fs::write(
+            runtime_root.join("app").join("cli").join("main.py"),
+            "# stub",
+        )
+        .expect("runtime entry should exist");
+        let state_root = unique_temp_dir("preferences-agent-config-state");
+        let _runtime_guard = EnvVarGuard::set(
+            "SAGE_TERMINAL_RUNTIME_ROOT",
+            &runtime_root.display().to_string(),
+        );
+        let _state_guard = EnvVarGuard::set(
+            "SAGE_TERMINAL_STATE_ROOT",
+            &state_root.display().to_string(),
+        );
+        let _persist_guard = EnvVarGuard::set("SAGE_TERMINAL_TEST_PERSIST_PREFERENCES", "1");
+
+        let mut app = App::new();
+        app.set_selected_agent_id("agent_demo".to_string());
+        app.set_agent_config_path("coding".to_string());
+
+        let loaded = load_startup_preferences().expect("preferences should load");
+        assert_eq!(loaded.agent_id.as_deref(), Some("agent_demo"));
+        assert_eq!(loaded.agent_config, None);
     }
 
     fn lock_env() -> MutexGuard<'static, ()> {
