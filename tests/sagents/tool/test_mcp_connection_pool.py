@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch
 
 import anyio
+import httpx
 from mcp import StdioServerParameters
 
 from sagents.tool.mcp_connection_pool import McpConnectionPool, McpPooledConnection
@@ -348,6 +349,39 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result, _FakeResult)
         self.assertEqual(open_count, 2)
         self.assertEqual(len(pool._entries["server"].connections), 1)  # pyright: ignore[reportAttributeAccessIssue]
+        await pool.close_all(drain=False)
+
+    async def test_streamable_http_retries_stale_session_http_400(self):
+        pool = McpConnectionPool()
+        server_params = StreamableHttpServerParameters(url="http://mcp.example")
+        open_count = 0
+
+        class FakeSession:
+            def __init__(self, fail=False):
+                self.fail = fail
+
+            async def call_tool(self, name, arguments):
+                if self.fail:
+                    request = httpx.Request("POST", "http://mcp.example")
+                    response = httpx.Response(400, request=request)
+                    raise httpx.HTTPStatusError(
+                        "400 Bad Request",
+                        request=request,
+                        response=response,
+                    )
+                return _FakeResult()
+
+        async def fake_open(self):
+            nonlocal open_count
+            open_count += 1
+            self.session = FakeSession(fail=open_count == 1)
+            return self
+
+        with patch.object(McpPooledConnection, "open", fake_open):
+            result = await pool.call_tool("server", server_params, "echo", {})
+
+        self.assertIsInstance(result, _FakeResult)
+        self.assertEqual(open_count, 2)
         await pool.close_all(drain=False)
 
 

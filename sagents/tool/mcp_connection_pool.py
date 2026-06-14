@@ -161,6 +161,11 @@ def config_fingerprint(
 def _is_connection_error(exc: BaseException) -> bool:
     if isinstance(exc, BaseExceptionGroup):
         return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if status_code in {400, 404, 409, 410}:
+            return True
     if isinstance(exc, (ConnectionError, EOFError, TimeoutError, OSError)):
         return True
     if isinstance(exc, httpx.TransportError):
