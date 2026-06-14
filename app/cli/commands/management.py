@@ -230,7 +230,12 @@ def config_show_command(args: argparse.Namespace) -> int:
                 continue
             for item in value:
                 if isinstance(item, dict):
-                    label = item.get("alias") or item.get("name") or item.get("path") or item
+                    label = (
+                        item.get("alias")
+                        or item.get("name")
+                        or item.get("path")
+                        or item
+                    )
                     print(f"  - {label}:")
                     for sub_key, sub_value in item.items():
                         print(f"      {sub_key}: {sub_value}")

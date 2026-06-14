@@ -241,7 +241,9 @@ class TestCliJsonContracts(unittest.TestCase):
         self.assertEqual(request.max_loop_count, 30)
         self.assertIn("grep", request.available_tools)
         self.assertEqual(request.llm_model_config["max_tokens"], 4096)
-        self.assertFalse(request.messages[0].content.startswith("<enable_deep_thinking>"))
+        self.assertFalse(
+            request.messages[0].content.startswith("<enable_deep_thinking>")
+        )
 
     def test_agent_config_blank_path_is_rejected(self):
         with self.assertRaises(cli_service.CLIError) as context:
@@ -318,7 +320,9 @@ class TestCliJsonContracts(unittest.TestCase):
         self.assertIn("not both", str(context.exception))
 
     def test_run_command_rejects_agent_id_and_agent_config_before_runtime(self):
-        with patch("app.cli.service.validate_cli_runtime_requirements") as runtime_check:
+        with patch(
+            "app.cli.service.validate_cli_runtime_requirements"
+        ) as runtime_check:
             stderr = io.StringIO()
             with patch("sys.stderr", stderr):
                 exit_code = cli_main.main(
@@ -336,8 +340,12 @@ class TestCliJsonContracts(unittest.TestCase):
         runtime_check.assert_not_called()
         self.assertIn("Use either `--agent-id` or `--agent-config`", stderr.getvalue())
 
-    def test_run_command_rejects_coding_agent_config_without_workspace_before_runtime(self):
-        with patch("app.cli.service.validate_cli_runtime_requirements") as runtime_check:
+    def test_run_command_rejects_coding_agent_config_without_workspace_before_runtime(
+        self,
+    ):
+        with patch(
+            "app.cli.service.validate_cli_runtime_requirements"
+        ) as runtime_check:
             stderr = io.StringIO()
             with patch("sys.stderr", stderr):
                 exit_code = cli_main.main(
@@ -356,7 +364,9 @@ class TestCliJsonContracts(unittest.TestCase):
     def test_run_command_loads_agent_config_before_runtime(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             missing_config = Path(tmp_dir) / "does-not-exist-agent-config.json"
-            with patch("app.cli.service.validate_cli_runtime_requirements") as runtime_check:
+            with patch(
+                "app.cli.service.validate_cli_runtime_requirements"
+            ) as runtime_check:
                 stderr = io.StringIO()
                 with patch("sys.stderr", stderr):
                     exit_code = cli_main.main(

@@ -60,7 +60,9 @@ def is_bundled_coding_agent_config(agent_config: Optional[str]) -> bool:
     if normalized == "coding":
         return True
     try:
-        return Path(normalized).expanduser().resolve() == BUNDLED_CODING_AGENT_CONFIG_PATH
+        return (
+            Path(normalized).expanduser().resolve() == BUNDLED_CODING_AGENT_CONFIG_PATH
+        )
     except OSError:
         return False
 
@@ -319,8 +321,7 @@ def _agent_config_custom_sub_agents(
     normalized_agents: List[Dict[str, Any]] = []
     for index, item in enumerate(items):
         normalized = {
-            key_aliases.get(key, key): item_value
-            for key, item_value in item.items()
+            key_aliases.get(key, key): item_value for key, item_value in item.items()
         }
         field_prefix = f"{field_name}[{index}]"
         name = _agent_config_string(normalized.get("name"), f"{field_prefix}.name")

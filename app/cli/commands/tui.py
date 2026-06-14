@@ -82,8 +82,12 @@ def _terminal_subprocess_env() -> dict[str, str]:
     return env
 
 
-def tui_command(args: argparse.Namespace, *, terminal_args: Optional[Iterable[str]] = None) -> int:
-    forwarded_args = list(terminal_args if terminal_args is not None else (args.terminal_args or []))
+def tui_command(
+    args: argparse.Namespace, *, terminal_args: Optional[Iterable[str]] = None
+) -> int:
+    forwarded_args = list(
+        terminal_args if terminal_args is not None else (args.terminal_args or [])
+    )
     terminal_entrypoint = resolve_terminal_binary(
         env_value=os.environ.get("SAGE_TERMINAL_BIN"),
         path_lookup=shutil.which("run-sage-terminal") or shutil.which("sage-terminal"),
