@@ -81,13 +81,19 @@ class TestCliTuiCommand(unittest.TestCase):
 
         self.assertEqual(exit_code, 1)
         self.assertIn("Sage Terminal TUI binary was not found.", stderr.getvalue())
-        self.assertIn("includes the Terminal TUI launcher and binary", stderr.getvalue())
+        self.assertIn(
+            "includes the Terminal TUI launcher and binary", stderr.getvalue()
+        )
 
     def test_terminal_resolver_prefers_packaged_launcher_before_source_target(self):
-        with patch("app.cli.commands.tui._package_terminal_candidates") as package_candidates:
+        with patch(
+            "app.cli.commands.tui._package_terminal_candidates"
+        ) as package_candidates:
             with patch("os.access", return_value=True):
                 with patch("pathlib.Path.is_file", return_value=True):
-                    package_candidates.return_value = [Path("/pkg/bin/run-sage-terminal.sh")]
+                    package_candidates.return_value = [
+                        Path("/pkg/bin/run-sage-terminal.sh")
+                    ]
 
                     result = tui.resolve_terminal_binary(
                         path_lookup=None,
@@ -97,7 +103,9 @@ class TestCliTuiCommand(unittest.TestCase):
         self.assertEqual(result, Path("/pkg/bin/run-sage-terminal.sh"))
 
     def test_terminal_resolver_keeps_explicit_env_override_first(self):
-        with patch("app.cli.commands.tui._package_terminal_candidates") as package_candidates:
+        with patch(
+            "app.cli.commands.tui._package_terminal_candidates"
+        ) as package_candidates:
             with patch("os.access", return_value=True):
                 with patch("pathlib.Path.is_file", return_value=True):
                     package_candidates.return_value = [Path("/pkg/bin/sage-terminal")]
