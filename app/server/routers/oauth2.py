@@ -74,11 +74,15 @@ async def oauth2_authorize(request: Request):
     claims = getattr(request.state, "user_claims", None) or {}
     user_id = str(claims.get("userid") or "").strip()
     if not user_id:
-        return RedirectResponse(url=build_web_login_redirect_path(request), status_code=302)
+        return RedirectResponse(
+            url=build_web_login_redirect_path(request), status_code=302
+        )
 
     user = await UserDao().get_by_id(user_id)
     if not user:
-        return RedirectResponse(url=build_web_login_redirect_path(request), status_code=302)
+        return RedirectResponse(
+            url=build_web_login_redirect_path(request), status_code=302
+        )
 
     if not context.client.skip_consent:
         error_url = build_authorization_error_redirect(
@@ -109,12 +113,16 @@ async def oauth2_token(request: Request):
 
         client, _ = await authenticate_token_endpoint_client(request.headers, params)
         if grant_type == "authorization_code":
-            token_payload, _ = await exchange_authorization_code_for_token(client, params)
+            token_payload, _ = await exchange_authorization_code_for_token(
+                client, params
+            )
             return _token_success_response(token_payload)
         if grant_type == "refresh_token":
             token_payload, _ = await refresh_oauth2_access_token(client, params)
             return _token_success_response(token_payload)
-        raise OAuth2ProtocolError("unsupported_grant_type", f"unsupported grant_type: {grant_type}")
+        raise OAuth2ProtocolError(
+            "unsupported_grant_type", f"unsupported grant_type: {grant_type}"
+        )
     except OAuth2ProtocolError as error:
         return _token_error_response(error)
 

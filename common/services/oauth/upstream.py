@@ -90,7 +90,9 @@ def _normalize_redirect_uri(
 ) -> str:
     if redirect_uri:
         parsed = urlparse(redirect_uri)
-        request_host = (request.headers.get("host") or request.url.netloc or "").strip().lower()
+        request_host = (
+            (request.headers.get("host") or request.url.netloc or "").strip().lower()
+        )
         redirect_host = (parsed.netloc or "").strip().lower()
         if parsed.scheme and redirect_host and redirect_host == request_host:
             return redirect_uri
@@ -124,12 +126,16 @@ def _default_native_provider() -> Dict[str, Any]:
     }
 
 
-def _normalize_provider(raw: Dict[str, Any], seen_ids: set[str]) -> Optional[Dict[str, Any]]:
+def _normalize_provider(
+    raw: Dict[str, Any], seen_ids: set[str]
+) -> Optional[Dict[str, Any]]:
     provider_type = str(raw.get("type") or "oidc").strip().lower()
     if provider_type not in {"native", "oidc"}:
         return None
 
-    fallback_id = "native" if provider_type == "native" else f"provider-{len(seen_ids) + 1}"
+    fallback_id = (
+        "native" if provider_type == "native" else f"provider-{len(seen_ids) + 1}"
+    )
     provider_id = _normalize_provider_id(raw.get("id") or raw.get("name"), fallback_id)
     if provider_type == "native" and "native" in seen_ids:
         return None
@@ -206,7 +212,9 @@ def get_auth_providers(include_internal: bool = False) -> list[Dict[str, Any]]:
             continue
         providers.append(provider)
 
-    providers.sort(key=lambda item: (0 if item["type"] == "native" else 1, item["name"].lower()))
+    providers.sort(
+        key=lambda item: (0 if item["type"] == "native" else 1, item["name"].lower())
+    )
 
     if include_internal:
         return providers
@@ -375,9 +383,7 @@ def _resolve_oauth_role(
     role_claim_value = _extract_claim(userinfo, provider.get("role_claim"))
     if isinstance(role_claim_value, (list, tuple, set)):
         role_values = {
-            str(item).strip().lower()
-            for item in role_claim_value
-            if str(item).strip()
+            str(item).strip().lower() for item in role_claim_value if str(item).strip()
         }
         if "admin" in role_values:
             return "admin"

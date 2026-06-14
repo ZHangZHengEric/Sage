@@ -18,10 +18,11 @@ const POPUP_DIVIDER: Color = Color::Rgb(88, 97, 92);
 pub(crate) fn popup_height(props: Option<&CommandPopupProps>) -> u16 {
     props
         .map(|props| {
+            let show_preview = props.items.len() == 1;
             props.items.iter().fold(0_u16, |height, item| {
                 height
                     + 1
-                    + if item.selected {
+                    + if show_preview && item.selected {
                         item.preview_lines.len() as u16
                     } else {
                         0
@@ -40,6 +41,7 @@ pub(crate) fn render(frame: &mut Frame, area: Rect, props: &CommandPopupProps) {
 }
 
 pub(super) fn popup_lines(props: &CommandPopupProps) -> Vec<Line<'static>> {
+    let show_preview = props.items.len() == 1;
     let command_width = props
         .items
         .iter()
@@ -73,7 +75,7 @@ pub(super) fn popup_lines(props: &CommandPopupProps) -> Vec<Line<'static>> {
                     Style::default().fg(POPUP_TEXT).bg(bg),
                 ),
             ])];
-            if item.selected {
+            if show_preview && item.selected {
                 for preview in &item.preview_lines {
                     lines.push(Line::from(vec![
                         Span::styled("  │ ", Style::default().fg(POPUP_HINT).bg(bg)),

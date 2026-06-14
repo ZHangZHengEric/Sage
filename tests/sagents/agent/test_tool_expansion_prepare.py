@@ -24,7 +24,7 @@ class _StubTools:
         return "beta"
 
     @tool()
-    def tool_expand_tools(self, tool_names: list[str] = None):
+    def tool_expand_tools(self, tool_names: list[str] = None):  # pyright: ignore[reportArgumentType]
         """expand"""
         return tool_names or []
 
@@ -50,7 +50,7 @@ def test_simple_agent_exposes_expansion_when_suggestion_narrows_allowed_tools():
     tools_json = SimpleAgent(_DummyModel(), {})._prepare_tools(
         _tool_manager(),
         ["alpha_tool"],
-        _session_context(),
+        _session_context(),  # pyright: ignore[reportArgumentType]
     )
 
     assert _names(tools_json) == ["alpha_tool", "tool_expand_tools"]
@@ -60,7 +60,7 @@ def test_simple_agent_does_not_expose_expansion_when_suggestion_is_not_narrowed(
     tools_json = SimpleAgent(_DummyModel(), {})._prepare_tools(
         _tool_manager(),
         ["alpha_tool", "beta_tool"],
-        _session_context(),
+        _session_context(),  # pyright: ignore[reportArgumentType]
     )
 
     assert _names(tools_json) == ["alpha_tool", "beta_tool"]
@@ -70,7 +70,7 @@ def test_task_executor_exposes_expansion_when_suggestion_narrows_allowed_tools()
     tools_json = TaskExecutorAgent(_DummyModel(), {})._prepare_tools(
         _tool_manager(),
         ["alpha_tool"],
-        _session_context(),
+        _session_context(),  # pyright: ignore[reportArgumentType]
     )
 
     assert _names(tools_json) == ["alpha_tool", "tool_expand_tools"]
@@ -78,7 +78,9 @@ def test_task_executor_exposes_expansion_when_suggestion_narrows_allowed_tools()
 
 def test_task_executor_rejects_tool_not_in_current_llm_tools(monkeypatch):
     agent = TaskExecutorAgent(_DummyModel(), {})
-    monkeypatch.setattr(agent, "_get_live_session_context", lambda session_id: _session_context())
+    monkeypatch.setattr(
+        agent, "_get_live_session_context", lambda session_id: _session_context()
+    )
 
     async def _fake_llm_streaming(*args, **kwargs):
         yield SimpleNamespace(
@@ -105,7 +107,8 @@ def test_task_executor_rejects_tool_not_in_current_llm_tools(monkeypatch):
     monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
     out = []
     tools_json = [
-        tool for tool in _tool_manager().get_openai_tools()
+        tool
+        for tool in _tool_manager().get_openai_tools()
         if tool["function"]["name"] in {"alpha_tool", "tool_expand_tools"}
     ]
 
@@ -120,7 +123,11 @@ def test_task_executor_rejects_tool_not_in_current_llm_tools(monkeypatch):
 
     asyncio.run(_collect_with_filtered_tools())
 
-    errors = [item for item in out if item.message_type == MessageType.AGENT_EXECUTION_ERROR.value]
+    errors = [
+        item
+        for item in out
+        if item.message_type == MessageType.AGENT_EXECUTION_ERROR.value
+    ]
     assert len(errors) == 1
     assert "tool_expand_tools" in errors[0].content
     assert "beta_tool" in errors[0].content

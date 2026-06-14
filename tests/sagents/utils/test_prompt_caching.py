@@ -6,6 +6,7 @@
 - 总断点不超过 max_breakpoints；
 - 老路径（cache_segments 缺省）保持单断点行为不破坏存量调用。
 """
+
 from __future__ import annotations
 
 import copy
@@ -52,7 +53,16 @@ def test_multi_breakpoints_respect_max():
         {"role": "system", "content": "extra stable segment " * 30},
         {"role": "system", "content": "extra semi segment " * 30},
     ]
-    segments = ["stable", "semi_stable", "volatile", None, None, None, "stable", "semi_stable"]
+    segments = [
+        "stable",
+        "semi_stable",
+        "volatile",
+        None,
+        None,
+        None,
+        "stable",
+        "semi_stable",
+    ]
     add_cache_control_to_messages(messages, cache_segments=segments, max_breakpoints=3)
     # 上限 3：会落在前 3 个 stable/semi 上，末尾 user 此时已无名额
     assert _count_cc(messages) == 3

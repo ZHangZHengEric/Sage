@@ -15,7 +15,9 @@ import app.cli.service as cli_service
 class TestCliJsonContracts(unittest.TestCase):
     def test_stream_contract_fixture_uses_supported_event_types(self):
         fixture_path = (
-            Path(__file__).resolve().parent / "fixtures" / "stream_contract_round_trip.jsonl"
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "stream_contract_round_trip.jsonl"
         )
         events = [
             json.loads(line)
@@ -33,6 +35,10 @@ class TestCliJsonContracts(unittest.TestCase):
         self.assertEqual(events[0]["has_prior_messages"], False)
         self.assertEqual(events[0]["prior_message_count"], 0)
         self.assertIsNone(events[0]["session_summary"])
+        self.assertEqual(
+            events[0]["goal"],
+            {"objective": "Ship the terminal goal MVP", "status": "active"},
+        )
         self.assertEqual(events[1], {"type": "cli_phase", "phase": "planning"})
         self.assertEqual(events[2]["type"], "analysis")
         self.assertEqual(events[3], {"type": "cli_phase", "phase": "tool"})
@@ -41,6 +47,10 @@ class TestCliJsonContracts(unittest.TestCase):
         self.assertEqual(events[7]["type"], "cli_tool")
         self.assertEqual(events[7]["action"], "finished")
         self.assertEqual(events[8], {"type": "cli_phase", "phase": "assistant_text"})
+        session_events = [event for event in events if event["type"] == "cli_session"]
+        self.assertEqual(session_events[-1]["type"], "cli_session")
+        self.assertEqual(session_events[-1]["session_state"], "existing")
+        self.assertEqual(session_events[-1]["prior_message_count"], 2)
         self.assertEqual(events[-1]["type"], "cli_stats")
         self.assertEqual(events[-1]["tool_steps"][0]["tool_name"], "read_file")
         self.assertEqual(events[-1]["phase_timings"][0]["phase"], "planning")
@@ -77,7 +87,9 @@ class TestCliJsonContracts(unittest.TestCase):
             "next_steps": ["Run `sage doctor`."],
         }
 
-        with patch.object(cli_service, "write_cli_config_file", return_value=fake_result):
+        with patch.object(
+            cli_service, "write_cli_config_file", return_value=fake_result
+        ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
                 exit_code = cli_main._config_init_command(args)
@@ -91,7 +103,15 @@ class TestCliJsonContracts(unittest.TestCase):
 
     def test_provider_verify_command_json_outputs_verification_payload(self):
         args = cli_main.build_argument_parser().parse_args(
-            ["provider", "verify", "--json", "--model", "demo-chat", "--base-url", "https://example.com/v1"]
+            [
+                "provider",
+                "verify",
+                "--json",
+                "--model",
+                "demo-chat",
+                "--base-url",
+                "https://example.com/v1",
+            ]
         )
         fake_result = {
             "status": "ok",
@@ -108,7 +128,9 @@ class TestCliJsonContracts(unittest.TestCase):
         }
 
         async def _run():
-            with patch.object(cli_service, "verify_cli_provider", return_value=fake_result):
+            with patch.object(
+                cli_service, "verify_cli_provider", return_value=fake_result
+            ):
                 stdout = io.StringIO()
                 with redirect_stdout(stdout):
                     exit_code = await cli_main._provider_command(args)

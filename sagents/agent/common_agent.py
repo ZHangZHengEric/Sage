@@ -14,12 +14,21 @@ from sagents.tool.tool_manager import ToolManager
 
 
 class CommonAgent(AgentBase):
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", tools_name: Optional[List[str]] = None, max_model_len: int = 64000):
+    def __init__(
+        self,
+        model: Any,
+        model_config: Dict[str, Any],
+        system_prefix: str = "",
+        tools_name: Optional[List[str]] = None,
+        max_model_len: int = 64000,
+    ):
         super().__init__(model, model_config, system_prefix)
         self.tools_name = tools_name if tools_name is not None else []
         self.max_history_context_length = max_model_len
 
-    async def run_stream(self, session_context: SessionContext) -> AsyncGenerator[List[MessageChunk], None]:
+    async def run_stream(
+        self, session_context: SessionContext
+    ) -> AsyncGenerator[List[MessageChunk], None]:
         """
         运行智能体，返回消息流
 
@@ -42,46 +51,61 @@ class CommonAgent(AgentBase):
             yield injected
 
         message_manager = session_context.message_manager
-        all_messages = message_manager.extract_all_context_messages(recent_turns=10, max_length=self.max_history_context_length, last_turn_user_only=False)
+        all_messages = message_manager.extract_all_context_messages(
+            recent_turns=10,
+            max_length=self.max_history_context_length,  # pyright: ignore[reportCallIssue]
+            last_turn_user_only=False,
+        )
 
         # all_messages  = message_manager.messages
         tool_manager = session_context.tool_manager
-        
-        tools_json = tool_manager.get_openai_tools(lang=session_context.get_language(), fallback_chain=["en"])
-        tools_json = [tools_json[tool_name] for tool_name in self.tools_name if tool_name in tools_json]
+
+        tools_json = tool_manager.get_openai_tools(
+            lang=session_context.get_language(), fallback_chain=["en"]
+        )
+        tools_json = [
+            tools_json[tool_name]  # pyright: ignore[reportArgumentType,reportCallIssue]
+            for tool_name in self.tools_name
+            if tool_name in tools_json
+        ]
 
         llm_request_message = [
-            *await self.prepare_unified_system_messages(session_id=session_id, language=session_context.get_language())
+            *await self.prepare_unified_system_messages(
+                session_id=session_id, language=session_context.get_language()
+            )
         ]
         llm_request_message.extend(all_messages)
         async for msg in self._call_llm_and_process_response(
             messages_input=llm_request_message,
             tools_json=tools_json,
-            tool_manager=tool_manager,
-            session_id=session_id
+            tool_manager=tool_manager,  # pyright: ignore[reportArgumentType]
+            session_id=session_id,
         ):
             yield msg
 
-    async def _call_llm_and_process_response(self,
-                                       messages_input: List[MessageChunk],
-                                       tools_json: List[Dict[str, Any]],
-                                       tool_manager: Optional[ToolManager],
-                                       session_id: str
-                                       ) -> AsyncGenerator[List[MessageChunk], None]:
+    async def _call_llm_and_process_response(
+        self,
+        messages_input: List[MessageChunk],
+        tools_json: List[Dict[str, Any]],
+        tool_manager: Optional[ToolManager],
+        session_id: str,
+    ) -> AsyncGenerator[List[MessageChunk], None]:
 
-        clean_message_input = MessageManager.convert_messages_to_dict_for_request(messages_input)
+        clean_message_input = MessageManager.convert_messages_to_dict_for_request(
+            messages_input
+        )
         logger.info(f"CommonAgent: 准备了 {len(clean_message_input)} 条消息用于LLM")
 
         # 准备模型配置覆盖，包含工具信息
         model_config_override = {}
         if len(tools_json) > 0:
-            model_config_override['tools'] = tools_json
+            model_config_override["tools"] = tools_json
 
         response = self._call_llm_streaming(
-            messages=clean_message_input,
+            messages=clean_message_input,  # pyright: ignore[reportArgumentType]
             session_id=session_id,
             step_name="task_execution",
-            model_config_override=model_config_override
+            model_config_override=model_config_override,
         )
 
         tool_calls = {}
@@ -96,85 +120,108 @@ class CommonAgent(AgentBase):
             if len(chunk.choices) == 0:
                 continue
             if chunk.choices[0].delta.tool_calls:
-                self._handle_tool_calls_chunk(chunk, tool_calls, last_tool_call_id)
+                self._handle_tool_calls_chunk(chunk, tool_calls, last_tool_call_id)  # pyright: ignore[reportArgumentType]
                 # 更新last_tool_call_id
                 for tool_call in chunk.choices[0].delta.tool_calls:
                     if tool_call.id is not None and len(tool_call.id) > 0:
                         last_tool_call_id = tool_call.id
                 # 根据环境变量控制是否流式返回工具调用消息
                 # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
-                emit_on_complete = os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
+                emit_on_complete = (
+                    os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower()
+                    == "true"
+                )
                 if not emit_on_complete:
                     # 流式返回工具调用消息，让前端先展示工具名并进入 loading。
-                    output_messages = [MessageChunk(
-                        role=MessageRole.ASSISTANT.value,
-                        tool_calls=chunk.choices[0].delta.tool_calls,
-                        message_id=tool_calls_messages_id,
-                        message_type=MessageType.TOOL_CALL.value
-                    )]
+                    output_messages = [
+                        MessageChunk(
+                            role=MessageRole.ASSISTANT.value,
+                            tool_calls=chunk.choices[0].delta.tool_calls,
+                            message_id=tool_calls_messages_id,
+                            message_type=MessageType.TOOL_CALL.value,
+                        )
+                    ]
                     yield output_messages
                 else:
                     # yield 一个空的消息块以避免生成器卡住
-                    output_messages = [MessageChunk(
-                        role=MessageRole.ASSISTANT.value,
-                        content="",
-                        message_id=content_response_message_id,
-                        message_type=MessageType.EMPTY.value
-                    )]
+                    output_messages = [
+                        MessageChunk(
+                            role=MessageRole.ASSISTANT.value,
+                            content="",
+                            message_id=content_response_message_id,
+                            message_type=MessageType.EMPTY.value,
+                        )
+                    ]
                     yield output_messages
 
             elif chunk.choices[0].delta.content:
                 if len(tool_calls) > 0:
-                    logger.info(f"CommonAgent: LLM响应包含 {len(tool_calls)} 个工具调用和内容，停止收集文本内容")
+                    logger.info(
+                        f"CommonAgent: LLM响应包含 {len(tool_calls)} 个工具调用和内容，停止收集文本内容"
+                    )
                     break
 
                 if len(chunk.choices[0].delta.content) > 0:
-                    output_messages = [MessageChunk(
-                        role=MessageRole.ASSISTANT.value,
-                        content=chunk.choices[0].delta.content,
-                        message_id=content_response_message_id,
-                        message_type=MessageType.DO_SUBTASK_RESULT.value
-                    )]
+                    output_messages = [
+                        MessageChunk(
+                            role=MessageRole.ASSISTANT.value,
+                            content=chunk.choices[0].delta.content,
+                            message_id=content_response_message_id,
+                            message_type=MessageType.DO_SUBTASK_RESULT.value,
+                        )
+                    ]
                     yield output_messages
             else:
                 # 先判断chunk.choices[0].delta 是否有reasoning_content 这个变量，并且不是none
-                if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content is not None:
-                    output_messages = [MessageChunk(
-                        role=MessageRole.ASSISTANT.value,
-                        content=chunk.choices[0].delta.reasoning_content,
-                        message_id=reasoning_content_response_message_id,
-                        message_type=MessageType.TASK_ANALYSIS.value
-                    )]
+                if (
+                    hasattr(chunk.choices[0].delta, "reasoning_content")
+                    and chunk.choices[0].delta.reasoning_content is not None
+                ):
+                    output_messages = [
+                        MessageChunk(
+                            role=MessageRole.ASSISTANT.value,
+                            content=chunk.choices[0].delta.reasoning_content,
+                            message_id=reasoning_content_response_message_id,
+                            message_type=MessageType.TASK_ANALYSIS.value,
+                        )
+                    ]
                     yield output_messages
         # 处理工具调用
         if len(tool_calls) > 0:
             # 根据环境变量控制 emit_tool_call_message
             # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
-            emit_on_complete = os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
+            emit_on_complete = (
+                os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower()
+                == "true"
+            )
             async for msg in self._handle_tool_calls(
                 tool_calls=tool_calls,
                 tool_manager=tool_manager,
-                messages_input=messages_input,
+                messages_input=messages_input,  # pyright: ignore[reportArgumentType]
                 session_id=session_id,
-                emit_tool_call_message=emit_on_complete
+                emit_tool_call_message=emit_on_complete,
             ):
                 yield msg
         else:
             # 发送换行消息（也包含usage信息）
-            output_messages = [MessageChunk(
-                role=MessageRole.ASSISTANT.value,
-                content='',
-                message_id=content_response_message_id,
-                message_type=MessageType.DO_SUBTASK_RESULT.value
-            )]
+            output_messages = [
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="",
+                    message_id=content_response_message_id,
+                    message_type=MessageType.DO_SUBTASK_RESULT.value,
+                )
+            ]
             yield output_messages
 
-    async def _handle_tool_calls(self,
-                           tool_calls: Dict[str, Any],
-                           tool_manager: Optional[Any],
-                           messages_input: List[Dict[str, Any]],
-                           session_id: str,
-                           emit_tool_call_message: bool = True) -> AsyncGenerator[List[MessageChunk], None]:
+    async def _handle_tool_calls(
+        self,
+        tool_calls: Dict[str, Any],
+        tool_manager: Optional[Any],
+        messages_input: List[Dict[str, Any]],
+        session_id: str,
+        emit_tool_call_message: bool = True,
+    ) -> AsyncGenerator[List[MessageChunk], None]:
         """
         处理工具调用
 
@@ -191,19 +238,21 @@ class CommonAgent(AgentBase):
         logger.info(f"CommonAgent: 工具调用: {tool_calls}")
 
         for tool_call_id, tool_call in tool_calls.items():
-            tool_name = tool_call['function']['name']
+            tool_name = tool_call["function"]["name"]
             logger.info(f"CommonAgent: 执行工具 {tool_name}")
             logger.info(f"CommonAgent: 参数 {tool_call['function']['arguments']}")
 
             # 检查是否为complete_task
-            if tool_name == 'complete_task':
+            if tool_name == "complete_task":
                 logger.info("CommonAgent: complete_task，停止执行")
-                yield [MessageChunk(
-                    role=MessageRole.ASSISTANT.value,
-                    content='已经完成了满足用户的所有要求',
-                    message_id=str(uuid.uuid4()),
-                    message_type=MessageType.DO_SUBTASK_RESULT.value
-                )]
+                yield [
+                    MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        content="已经完成了满足用户的所有要求",
+                        message_id=str(uuid.uuid4()),
+                        message_type=MessageType.DO_SUBTASK_RESULT.value,
+                    )
+                ]
                 return
 
             # 如果上游已经把 tool_call 以流式消息发出来了，这里就不要重复发卡片了。
@@ -216,12 +265,13 @@ class CommonAgent(AgentBase):
                 tool_call=tool_call,
                 tool_manager=tool_manager,
                 messages_input=messages_input,
-                session_id=session_id
+                session_id=session_id,
             ):
                 yield message_chunk_list
 
-
-    def process_tool_response(self, tool_response: str, tool_call_id: str) -> List[Dict[str, Any]]:
+    def process_tool_response(
+        self, tool_response: str, tool_call_id: str
+    ) -> List[Dict[str, Any]]:
         """
         处理工具执行响应
 
@@ -238,40 +288,49 @@ class CommonAgent(AgentBase):
             tool_response_dict = json.loads(tool_response)
 
             if "content" in tool_response_dict:
-                result = [MessageChunk(
-                    role=MessageRole.TOOL.value,
-                    content=tool_response,
-                    tool_call_id=tool_call_id,
-                    message_id=str(uuid.uuid4()),
-                    message_type=MessageType.TOOL_CALL_RESULT.value
-                )]
-            elif 'messages' in tool_response_dict:
-                result = [MessageChunk(
-                    role=MessageRole.TOOL.value,
-                    content=msg,
-                    tool_call_id=tool_call_id,
-                    message_id=str(uuid.uuid4()),
-                    message_type=MessageType.TOOL_CALL_RESULT.value
-                ) for msg in tool_response_dict['messages']]
+                result = [
+                    MessageChunk(
+                        role=MessageRole.TOOL.value,
+                        content=tool_response,
+                        tool_call_id=tool_call_id,
+                        message_id=str(uuid.uuid4()),
+                        message_type=MessageType.TOOL_CALL_RESULT.value,
+                    )
+                ]
+            elif "messages" in tool_response_dict:
+                result = [
+                    MessageChunk(
+                        role=MessageRole.TOOL.value,
+                        content=msg,
+                        tool_call_id=tool_call_id,
+                        message_id=str(uuid.uuid4()),
+                        message_type=MessageType.TOOL_CALL_RESULT.value,
+                    )
+                    for msg in tool_response_dict["messages"]
+                ]
             else:
                 # 默认处理
-                result = [MessageChunk(
-                    role=MessageRole.TOOL.value,
-                    content=tool_response,
-                    tool_call_id=tool_call_id,
-                    message_id=str(uuid.uuid4()),
-                    message_type=MessageType.TOOL_CALL_RESULT.value
-                )]
+                result = [
+                    MessageChunk(
+                        role=MessageRole.TOOL.value,
+                        content=tool_response,
+                        tool_call_id=tool_call_id,
+                        message_id=str(uuid.uuid4()),
+                        message_type=MessageType.TOOL_CALL_RESULT.value,
+                    )
+                ]
 
             logger.debug("CommonAgent: 工具响应处理成功")
-            return result
+            return result  # pyright: ignore[reportReturnType]
 
         except json.JSONDecodeError:
             logger.warning("CommonAgent: 处理工具响应时JSON解码错误，按普通文本处理")
-            return [MessageChunk(
-                role=MessageRole.TOOL.value,
-                content=tool_response,
-                tool_call_id=tool_call_id,
-                message_id=str(uuid.uuid4()),
-                message_type=MessageType.TOOL_CALL_RESULT.value
-            )]
+            return [
+                MessageChunk(  # pyright: ignore[reportReturnType]
+                    role=MessageRole.TOOL.value,
+                    content=tool_response,
+                    tool_call_id=tool_call_id,
+                    message_id=str(uuid.uuid4()),
+                    message_type=MessageType.TOOL_CALL_RESULT.value,
+                )
+            ]

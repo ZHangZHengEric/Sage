@@ -74,6 +74,7 @@ pub(super) fn collect_round_trip(handle: &BackendHandle) -> Vec<String> {
                 assistant_chunks.push(chunk)
             }
             Some(BackendEvent::LiveChunk(_, _))
+            | Some(BackendEvent::SessionHydrated(_))
             | Some(BackendEvent::Message(_, _))
             | Some(BackendEvent::Status(_))
             | Some(BackendEvent::PhaseChanged(_))

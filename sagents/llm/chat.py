@@ -12,6 +12,7 @@ class OpenAIChat:
     OpenAI Chat 客户端封装
     支持标准模型和快速模型双配置
     """
+
     def __init__(
         self,
         api_key: str,
@@ -25,10 +26,10 @@ class OpenAIChat:
     ):
         self.model_name = model_name
         self.model_capabilities = model_capabilities or {}
-        
+
         # 创建标准模型客户端
         self._standard_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-        
+
         # 创建快速模型客户端（如果配置了）
         self._fast_client = None
         if fast_model_name:
@@ -36,7 +37,7 @@ class OpenAIChat:
             fast_url = fast_base_url or base_url
             self._fast_client = AsyncOpenAI(api_key=fast_key, base_url=fast_url)
             logger.info(f"Fast model configured: {fast_model_name}")
-        
+
         # 创建 SageAsyncOpenAI 实例
         self._sage_client = SageAsyncOpenAI(
             standard_client=self._standard_client,
@@ -66,6 +67,7 @@ class ChatClientPool:
     Chat 客户端代理池
     支持多模型、多Provider、轮询
     """
+
     def __init__(self):
         # Map: model_name -> List[OpenAIChat]
         self._clients: Dict[str, List[OpenAIChat]] = defaultdict(list)
@@ -77,12 +79,16 @@ class ChatClientPool:
         if not client.model_name:
             logger.warning("Client has no model_name, skipping add to pool")
             return
-        
+
         self._clients[client.model_name].append(client)
-        
+
         # Reset iterator for this model to include new client
-        self._iterators[client.model_name] = itertools.cycle(self._clients[client.model_name])
-        logger.debug(f"Added client for model {client.model_name} to pool. Total: {len(self._clients[client.model_name])}")
+        self._iterators[client.model_name] = itertools.cycle(
+            self._clients[client.model_name]
+        )
+        logger.debug(
+            f"Added client for model {client.model_name} to pool. Total: {len(self._clients[client.model_name])}"
+        )
 
     def set_default_model(self, model_name: str):
         self.default_model_name = model_name
@@ -95,7 +101,7 @@ class ChatClientPool:
         :return: OpenAIChat 实例 or None
         """
         target_model = model_name or self.default_model_name
-        
+
         # 如果没有指定 target_model，且池子不为空，尝试取第一个模型
         if not target_model and self._clients:
             target_model = next(iter(self._clients.keys()))
@@ -106,15 +112,19 @@ class ChatClientPool:
 
         iterator = self._iterators.get(target_model)
         if not iterator:
-             # 如果请求的模型没有，尝试回退到默认模型
-             if self.default_model_name and self.default_model_name in self._iterators:
-                 logger.debug(f"Model {target_model} not found, falling back to default {self.default_model_name}")
-                 target_model = self.default_model_name
-                 iterator = self._iterators[target_model]
-             else:
-                 logger.warning(f"Model {target_model} not found in pool and no fallback available")
-                 return None
-        
+            # 如果请求的模型没有，尝试回退到默认模型
+            if self.default_model_name and self.default_model_name in self._iterators:
+                logger.debug(
+                    f"Model {target_model} not found, falling back to default {self.default_model_name}"
+                )
+                target_model = self.default_model_name
+                iterator = self._iterators[target_model]
+            else:
+                logger.warning(
+                    f"Model {target_model} not found in pool and no fallback available"
+                )
+                return None
+
         return next(iterator)
 
     async def close(self):

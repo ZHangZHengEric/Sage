@@ -14,7 +14,7 @@ from common.schemas.base import (
 from sagents.utils.logger import logger
 
 try:
-    from croniter import croniter
+    from croniter import croniter  # pyright: ignore[reportMissingModuleSource]
 except ImportError:
     croniter = None
 
@@ -31,10 +31,16 @@ class TaskService:
         user_id: str = "",
     ) -> Tuple[List[RecurringTask], int]:
         start_time = time.perf_counter()
-        logger.info(f"[TaskService] get_recurring_tasks START | page={page} | page_size={page_size} | agent_id={agent_id} | user_id={user_id}")
-        result = await self.dao.get_recurring_list(page, page_size, agent_id, user_id=user_id)
+        logger.info(
+            f"[TaskService] get_recurring_tasks START | page={page} | page_size={page_size} | agent_id={agent_id} | user_id={user_id}"
+        )
+        result = await self.dao.get_recurring_list(
+            page, page_size, agent_id, user_id=user_id
+        )
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] get_recurring_tasks SUCCESS | count={len(result[0])} | total={result[1]} | time={elapsed:.3f}s")
+        logger.info(
+            f"[TaskService] get_recurring_tasks SUCCESS | count={len(result[0])} | total={result[1]} | time={elapsed:.3f}s"
+        )
         return result
 
     async def create_recurring_task(
@@ -43,8 +49,10 @@ class TaskService:
         user_id: str = "",
     ) -> RecurringTask:
         start_time = time.perf_counter()
-        logger.info(f"[TaskService] create_recurring_task START | name='{data.name}' | agent_id={data.agent_id} | user_id={user_id}")
-        
+        logger.info(
+            f"[TaskService] create_recurring_task START | name='{data.name}' | agent_id={data.agent_id} | user_id={user_id}"
+        )
+
         session_id = "recurring-" + datetime.now().strftime("%Y%m%d%H%M%S")
         task = RecurringTask(
             user_id=user_id,
@@ -57,7 +65,9 @@ class TaskService:
         )
         result = await self.dao.create_recurring_task(task)
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] create_recurring_task SUCCESS | task_id={result.id} | time={elapsed:.3f}s")
+        logger.info(
+            f"[TaskService] create_recurring_task SUCCESS | task_id={result.id} | time={elapsed:.3f}s"
+        )
         return result
 
     async def create_one_time_task(
@@ -66,8 +76,10 @@ class TaskService:
         user_id: str = "",
     ) -> Task:
         start_time = time.perf_counter()
-        logger.info(f"[TaskService] create_one_time_task START | name='{data.name}' | agent_id={data.agent_id} | user_id={user_id}")
-        
+        logger.info(
+            f"[TaskService] create_one_time_task START | name='{data.name}' | agent_id={data.agent_id} | user_id={user_id}"
+        )
+
         session_id = "one-time-" + datetime.now().strftime("%Y%m%d%H%M%S")
         execute_at = data.execute_at
         if execute_at.tzinfo is None:
@@ -85,7 +97,9 @@ class TaskService:
         )
         result = await self.dao.create_one_time_task(task)
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] create_one_time_task SUCCESS | task_id={result.id} | time={elapsed:.3f}s")
+        logger.info(
+            f"[TaskService] create_one_time_task SUCCESS | task_id={result.id} | time={elapsed:.3f}s"
+        )
         return result
 
     async def update_one_time_task(
@@ -95,11 +109,19 @@ class TaskService:
         user_id: str = "",
     ) -> Task:
         start_time = time.perf_counter()
-        logger.info(f"[TaskService] update_one_time_task START | task_id={task_id} | user_id={user_id}")
-        
+        logger.info(
+            f"[TaskService] update_one_time_task START | task_id={task_id} | user_id={user_id}"
+        )
+
         task = await self.dao.get_one_time_task(task_id)
-        if not task or task.recurring_task_id != 0 or (user_id and task.user_id and task.user_id != user_id):
-            logger.warning(f"[TaskService] update_one_time_task FAILED | task_id={task_id} | error=Task not found")
+        if (
+            not task
+            or task.recurring_task_id != 0
+            or (user_id and task.user_id and task.user_id != user_id)
+        ):
+            logger.warning(
+                f"[TaskService] update_one_time_task FAILED | task_id={task_id} | error=Task not found"
+            )
             raise SageHTTPException(status_code=404, detail="Task not found")
 
         if data.name is not None:
@@ -116,20 +138,32 @@ class TaskService:
 
         result = await self.dao.update_one_time_task(task)
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] update_one_time_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s")
+        logger.info(
+            f"[TaskService] update_one_time_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
+        )
         return result
 
     async def delete_one_time_task(self, task_id: int, user_id: str = "") -> bool:
         start_time = time.perf_counter()
-        logger.info(f"[TaskService] delete_one_time_task START | task_id={task_id} | user_id={user_id}")
-        
+        logger.info(
+            f"[TaskService] delete_one_time_task START | task_id={task_id} | user_id={user_id}"
+        )
+
         task = await self.dao.get_one_time_task(task_id)
-        if not task or task.recurring_task_id != 0 or (user_id and task.user_id and task.user_id != user_id):
-            logger.warning(f"[TaskService] delete_one_time_task FAILED | task_id={task_id} | error=Task not found")
+        if (
+            not task
+            or task.recurring_task_id != 0
+            or (user_id and task.user_id and task.user_id != user_id)
+        ):
+            logger.warning(
+                f"[TaskService] delete_one_time_task FAILED | task_id={task_id} | error=Task not found"
+            )
             raise SageHTTPException(status_code=404, detail="Task not found")
         result = await self.dao.delete_one_time_task(task_id)
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] delete_one_time_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s")
+        logger.info(
+            f"[TaskService] delete_one_time_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
+        )
         return result
 
     async def update_recurring_task(
@@ -139,11 +173,15 @@ class TaskService:
         user_id: str = "",
     ) -> RecurringTask:
         start_time = time.perf_counter()
-        logger.info(f"[TaskService] update_recurring_task START | task_id={task_id} | user_id={user_id}")
-        
+        logger.info(
+            f"[TaskService] update_recurring_task START | task_id={task_id} | user_id={user_id}"
+        )
+
         task = await self.dao.get_recurring_task(task_id)
         if not task or (user_id and task.user_id and task.user_id != user_id):
-            logger.warning(f"[TaskService] update_recurring_task FAILED | task_id={task_id} | error=Task not found")
+            logger.warning(
+                f"[TaskService] update_recurring_task FAILED | task_id={task_id} | error=Task not found"
+            )
             raise SageHTTPException(status_code=404, detail="Task not found")
 
         if data.name is not None:
@@ -159,33 +197,49 @@ class TaskService:
 
         result = await self.dao.update_recurring_task(task)
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] update_recurring_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s")
+        logger.info(
+            f"[TaskService] update_recurring_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
+        )
         return result
 
     async def delete_recurring_task(self, task_id: int, user_id: str = "") -> bool:
         start_time = time.perf_counter()
-        logger.info(f"[TaskService] delete_recurring_task START | task_id={task_id} | user_id={user_id}")
-        
+        logger.info(
+            f"[TaskService] delete_recurring_task START | task_id={task_id} | user_id={user_id}"
+        )
+
         task = await self.dao.get_recurring_task(task_id)
         if not task or (user_id and task.user_id and task.user_id != user_id):
-            logger.warning(f"[TaskService] delete_recurring_task FAILED | task_id={task_id} | error=Task not found")
+            logger.warning(
+                f"[TaskService] delete_recurring_task FAILED | task_id={task_id} | error=Task not found"
+            )
             raise SageHTTPException(status_code=404, detail="Task not found")
         result = await self.dao.delete_recurring_task(task_id)
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] delete_recurring_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s")
+        logger.info(
+            f"[TaskService] delete_recurring_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
+        )
         return result
 
-    async def toggle_task_status(self, task_id: int, enabled: bool, user_id: str = "") -> RecurringTask:
+    async def toggle_task_status(
+        self, task_id: int, enabled: bool, user_id: str = ""
+    ) -> RecurringTask:
         start_time = time.perf_counter()
-        logger.info(f"[TaskService] toggle_task_status START | task_id={task_id} | enabled={enabled} | user_id={user_id}")
+        logger.info(
+            f"[TaskService] toggle_task_status START | task_id={task_id} | enabled={enabled} | user_id={user_id}"
+        )
         task = await self.dao.get_recurring_task(task_id)
         if not task or (user_id and task.user_id and task.user_id != user_id):
-            logger.warning(f"[TaskService] toggle_task_status FAILED | task_id={task_id} | error=Task not found")
+            logger.warning(
+                f"[TaskService] toggle_task_status FAILED | task_id={task_id} | error=Task not found"
+            )
             raise SageHTTPException(status_code=404, detail="Task not found")
         task.enabled = enabled
         result = await self.dao.update_recurring_task(task)
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] toggle_task_status SUCCESS | task_id={task_id} | enabled={enabled} | time={elapsed:.3f}s")
+        logger.info(
+            f"[TaskService] toggle_task_status SUCCESS | task_id={task_id} | enabled={enabled} | time={elapsed:.3f}s"
+        )
         return result
 
     async def get_task_history(
@@ -196,10 +250,16 @@ class TaskService:
         user_id: str = "",
     ) -> Tuple[List[Task], int]:
         start_time = time.perf_counter()
-        logger.info(f"[TaskService] get_task_history START | recurring_task_id={recurring_task_id} | page={page} | user_id={user_id}")
-        result = await self.dao.get_task_history(recurring_task_id, page, page_size, user_id=user_id)
+        logger.info(
+            f"[TaskService] get_task_history START | recurring_task_id={recurring_task_id} | page={page} | user_id={user_id}"
+        )
+        result = await self.dao.get_task_history(
+            recurring_task_id, page, page_size, user_id=user_id
+        )
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] get_task_history SUCCESS | count={len(result[0])} | time={elapsed:.3f}s")
+        logger.info(
+            f"[TaskService] get_task_history SUCCESS | count={len(result[0])} | time={elapsed:.3f}s"
+        )
         return result
 
     async def get_one_time_tasks(
@@ -210,32 +270,52 @@ class TaskService:
         user_id: str = "",
     ) -> Tuple[List[Task], int]:
         start_time = time.perf_counter()
-        logger.info(f"[TaskService] get_one_time_tasks START | page={page} | page_size={page_size} | agent_id={agent_id} | user_id={user_id}")
-        result = await self.dao.get_one_time_tasks(page, page_size, agent_id, user_id=user_id)
+        logger.info(
+            f"[TaskService] get_one_time_tasks START | page={page} | page_size={page_size} | agent_id={agent_id} | user_id={user_id}"
+        )
+        result = await self.dao.get_one_time_tasks(
+            page, page_size, agent_id, user_id=user_id
+        )
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] get_one_time_tasks SUCCESS | count={len(result[0])} | total={result[1]} | time={elapsed:.3f}s")
+        logger.info(
+            f"[TaskService] get_one_time_tasks SUCCESS | count={len(result[0])} | total={result[1]} | time={elapsed:.3f}s"
+        )
         return result
 
     async def get_one_time_task(self, task_id: int, user_id: str = "") -> Task:
         start_time = time.perf_counter()
-        logger.info(f"[TaskService] get_one_time_task START | task_id={task_id} | user_id={user_id}")
+        logger.info(
+            f"[TaskService] get_one_time_task START | task_id={task_id} | user_id={user_id}"
+        )
         task = await self.dao.get_one_time_task(task_id)
         if not task or (user_id and task.user_id and task.user_id != user_id):
-            logger.warning(f"[TaskService] get_one_time_task FAILED | task_id={task_id} | error=Task not found")
+            logger.warning(
+                f"[TaskService] get_one_time_task FAILED | task_id={task_id} | error=Task not found"
+            )
             raise SageHTTPException(status_code=404, detail="Task not found")
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] get_one_time_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s")
+        logger.info(
+            f"[TaskService] get_one_time_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
+        )
         return task
 
-    async def get_recurring_task(self, task_id: int, user_id: str = "") -> RecurringTask:
+    async def get_recurring_task(
+        self, task_id: int, user_id: str = ""
+    ) -> RecurringTask:
         start_time = time.perf_counter()
-        logger.info(f"[TaskService] get_recurring_task START | task_id={task_id} | user_id={user_id}")
+        logger.info(
+            f"[TaskService] get_recurring_task START | task_id={task_id} | user_id={user_id}"
+        )
         task = await self.dao.get_recurring_task(task_id)
         if not task or (user_id and task.user_id and task.user_id != user_id):
-            logger.warning(f"[TaskService] get_recurring_task FAILED | task_id={task_id} | error=Task not found")
+            logger.warning(
+                f"[TaskService] get_recurring_task FAILED | task_id={task_id} | error=Task not found"
+            )
             raise SageHTTPException(status_code=404, detail="Task not found")
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] get_recurring_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s")
+        logger.info(
+            f"[TaskService] get_recurring_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
+        )
         return task
 
     async def get_one_time_task_history(
@@ -246,11 +326,15 @@ class TaskService:
         limit: int = 20,
     ) -> List[TaskHistory]:
         start_time = time.perf_counter()
-        logger.info(f"[TaskService] get_one_time_task_history START | task_id={task_id} | limit={limit} | user_id={user_id}")
+        logger.info(
+            f"[TaskService] get_one_time_task_history START | task_id={task_id} | limit={limit} | user_id={user_id}"
+        )
         await self.get_one_time_task(task_id, user_id=user_id)
         result = await self.dao.get_one_time_task_history(task_id, limit=limit)
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] get_one_time_task_history SUCCESS | task_id={task_id} | count={len(result)} | time={elapsed:.3f}s")
+        logger.info(
+            f"[TaskService] get_one_time_task_history SUCCESS | task_id={task_id} | count={len(result)} | time={elapsed:.3f}s"
+        )
         return result
 
     async def get_due_pending_tasks(
@@ -259,15 +343,21 @@ class TaskService:
         user_id: str = "",
         limit: int = 100,
     ) -> List[Task]:
-        items = await self.dao.get_due_pending_tasks(user_id=user_id or None, limit=limit)
+        items = await self.dao.get_due_pending_tasks(
+            user_id=user_id or None, limit=limit
+        )
         return items
 
     async def claim_one_time_task(self, task_id: int, *, user_id: str = "") -> bool:
         start_time = time.perf_counter()
-        logger.info(f"[TaskService] claim_one_time_task START | task_id={task_id} | user_id={user_id}")
+        logger.info(
+            f"[TaskService] claim_one_time_task START | task_id={task_id} | user_id={user_id}"
+        )
         result = await self.dao.claim_one_time_task(task_id, user_id=user_id or None)
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] claim_one_time_task SUCCESS | task_id={task_id} | claimed={result} | time={elapsed:.3f}s")
+        logger.info(
+            f"[TaskService] claim_one_time_task SUCCESS | task_id={task_id} | claimed={result} | time={elapsed:.3f}s"
+        )
         return result
 
     async def complete_one_time_task(
@@ -278,14 +368,20 @@ class TaskService:
         response: Optional[str] = None,
     ) -> Task:
         start_time = time.perf_counter()
-        logger.info(f"[TaskService] complete_one_time_task START | task_id={task_id} | user_id={user_id}")
+        logger.info(
+            f"[TaskService] complete_one_time_task START | task_id={task_id} | user_id={user_id}"
+        )
         task = await self.dao.complete_one_time_task(task_id, user_id=user_id or None)
         if not task:
-            logger.warning(f"[TaskService] complete_one_time_task FAILED | task_id={task_id} | error=Task not found")
+            logger.warning(
+                f"[TaskService] complete_one_time_task FAILED | task_id={task_id} | error=Task not found"
+            )
             raise SageHTTPException(status_code=404, detail="Task not found")
         await self.dao.add_task_history(task_id, status="completed", response=response)
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] complete_one_time_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s")
+        logger.info(
+            f"[TaskService] complete_one_time_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
+        )
         return task
 
     async def fail_one_time_task(
@@ -296,7 +392,9 @@ class TaskService:
         error_message: Optional[str] = None,
     ) -> Task:
         start_time = time.perf_counter()
-        logger.info(f"[TaskService] fail_one_time_task START | task_id={task_id} | user_id={user_id}")
+        logger.info(
+            f"[TaskService] fail_one_time_task START | task_id={task_id} | user_id={user_id}"
+        )
         task = await self.get_one_time_task(task_id, user_id=user_id)
         retry = int(task.retry_count or 0) < int(task.max_retries or 0)
         updated = await self.dao.fail_one_time_task(
@@ -305,11 +403,17 @@ class TaskService:
             retry=retry,
         )
         if not updated:
-            logger.warning(f"[TaskService] fail_one_time_task FAILED | task_id={task_id} | error=Task not found")
+            logger.warning(
+                f"[TaskService] fail_one_time_task FAILED | task_id={task_id} | error=Task not found"
+            )
             raise SageHTTPException(status_code=404, detail="Task not found")
-        await self.dao.add_task_history(task_id, status="failed", error_message=error_message)
+        await self.dao.add_task_history(
+            task_id, status="failed", error_message=error_message
+        )
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] fail_one_time_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s")
+        logger.info(
+            f"[TaskService] fail_one_time_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
+        )
         return updated
 
     async def complete_recurring_task(
@@ -320,14 +424,22 @@ class TaskService:
         executed_at: Optional[datetime] = None,
     ) -> RecurringTask:
         start_time = time.perf_counter()
-        logger.info(f"[TaskService] complete_recurring_task START | task_id={task_id} | user_id={user_id}")
+        logger.info(
+            f"[TaskService] complete_recurring_task START | task_id={task_id} | user_id={user_id}"
+        )
         task = await self.get_recurring_task(task_id, user_id=user_id)
-        updated = await self.dao.update_recurring_task_last_executed(task.id, executed_at=executed_at)
+        updated = await self.dao.update_recurring_task_last_executed(
+            task.id, executed_at=executed_at
+        )
         if not updated:
-            logger.warning(f"[TaskService] complete_recurring_task FAILED | task_id={task_id} | error=Task not found")
+            logger.warning(
+                f"[TaskService] complete_recurring_task FAILED | task_id={task_id} | error=Task not found"
+            )
             raise SageHTTPException(status_code=404, detail="Task not found")
         elapsed = time.perf_counter() - start_time
-        logger.info(f"[TaskService] complete_recurring_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s")
+        logger.info(
+            f"[TaskService] complete_recurring_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
+        )
         return updated
 
     async def spawn_due_recurring_tasks(
@@ -346,12 +458,16 @@ class TaskService:
         - 首次见到（last_executed_at is None）只初始化游标到 now，不补派历史触发点
         """
         if croniter is None:
-            logger.warning("[TaskService] spawn_due_recurring_tasks SKIPPED | croniter not available")
+            logger.warning(
+                "[TaskService] spawn_due_recurring_tasks SKIPPED | croniter not available"
+            )
             return []
 
         now = get_local_now()
         spawned: List[Task] = []
-        recurring_tasks = await self.dao.get_enabled_recurring_tasks(user_id=user_id or None)
+        recurring_tasks = await self.dao.get_enabled_recurring_tasks(
+            user_id=user_id or None
+        )
 
         for recurring_task in recurring_tasks:
             try:
@@ -408,7 +524,9 @@ class TaskService:
                 await self.dao.create_one_time_task(task)
                 spawned.append(task)
             except Exception as e:
-                logger.error(f"[TaskService] spawn_due_recurring_tasks error | recurring_task_id={recurring_task.id} | error={e}")
+                logger.error(
+                    f"[TaskService] spawn_due_recurring_tasks error | recurring_task_id={recurring_task.id} | error={e}"
+                )
                 continue
         return spawned
 

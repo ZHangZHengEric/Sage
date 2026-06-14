@@ -7,22 +7,28 @@
 - 直通模式 (Passthrough): 无隔离，直接执行
 """
 
-from .interface import ISandboxHandle, SandboxType, CommandResult, ExecutionResult, FileInfo
+from .interface import (
+    ISandboxHandle,
+    SandboxType,
+    CommandResult,
+    ExecutionResult,
+    FileInfo,
+)
 from .config import SandboxConfig, MountPath
 from .factory import SandboxProviderFactory
 
 from .providers.local import Sandbox, SandboxFileSystem, VenvManager
 
 __all__ = [
-    'ISandboxHandle',
-    'SandboxType',
-    'CommandResult',
-    'ExecutionResult',
-    'FileInfo',
-    'SandboxConfig',
-    'MountPath',
-    'SandboxProviderFactory',
-    'Sandbox',
-    'SandboxFileSystem',
-    'VenvManager',
+    "ISandboxHandle",
+    "SandboxType",
+    "CommandResult",
+    "ExecutionResult",
+    "FileInfo",
+    "SandboxConfig",
+    "MountPath",
+    "SandboxProviderFactory",
+    "Sandbox",
+    "SandboxFileSystem",
+    "VenvManager",
 ]

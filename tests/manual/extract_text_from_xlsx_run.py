@@ -8,6 +8,7 @@
 运行示例：
   conda run -n zz python3 /Users/zhangzheng/zavixai/Sage/tests/test_extract_text_from_xlsx.py
 """
+
 import os
 import sys
 import types
@@ -22,15 +23,20 @@ def _inject_stubs():
         import pdfplumber  # noqa: F401
     except Exception:
         mod = types.ModuleType("pdfplumber")
+
         class _DummyPDF:
             def __enter__(self):
                 return self
+
             def __exit__(self, exc_type, exc, tb):
                 return False
+
             pages = []
+
         def _open(*args, **kwargs):
             return _DummyPDF()
-        mod.open = _open
+
+        mod.open = _open  # pyright: ignore[reportAttributeAccessIssue]
         sys.modules["pdfplumber"] = mod
 
     # pypandoc stub
@@ -38,9 +44,11 @@ def _inject_stubs():
         import pypandoc  # noqa: F401
     except Exception:
         mod = types.ModuleType("pypandoc")
+
         def _convert_file(*args, **kwargs):
             return ""
-        mod.convert_file = _convert_file
+
+        mod.convert_file = _convert_file  # pyright: ignore[reportAttributeAccessIssue]
         sys.modules["pypandoc"] = mod
 
     # pptx stub: from pptx import Presentation
@@ -48,10 +56,12 @@ def _inject_stubs():
         import pptx  # noqa: F401
     except Exception:
         mod = types.ModuleType("pptx")
+
         class Presentation:  # minimal stub
             def __init__(self, *args, **kwargs):
                 pass
-        mod.Presentation = Presentation
+
+        mod.Presentation = Presentation  # pyright: ignore[reportAttributeAccessIssue]
         sys.modules["pptx"] = mod
 
     # html2text stub
@@ -59,13 +69,16 @@ def _inject_stubs():
         import html2text  # noqa: F401
     except Exception:
         mod = types.ModuleType("html2text")
+
         class HTML2Text:
             def __init__(self):
                 self.ignore_links = True
                 self.bodywidth = 0
+
             def handle(self, content: str) -> str:
                 return content
-        mod.HTML2Text = HTML2Text
+
+        mod.HTML2Text = HTML2Text  # pyright: ignore[reportAttributeAccessIssue]
         sys.modules["html2text"] = mod
 
     # sagents.utils.logger stub，避免包初始化导致的循环导入
@@ -73,33 +86,40 @@ def _inject_stubs():
         import sagents.utils.logger  # noqa: F401
     except Exception:
         import logging
+
         # 创建分层模块：sagents -> sagents.utils -> sagents.utils.logger
         sagents_mod = sys.modules.get("sagents") or types.ModuleType("sagents")
-        utils_mod = getattr(sagents_mod, "utils", None) or types.ModuleType("sagents.utils")
+        utils_mod = getattr(sagents_mod, "utils", None) or types.ModuleType(
+            "sagents.utils"
+        )
         logger_mod = types.ModuleType("sagents.utils.logger")
         # 简单 logger
         logging.basicConfig(level=logging.INFO)
-        logger_mod.logger = logging.getLogger("sagents-test")
+        logger_mod.logger = logging.getLogger("sagents-test")  # pyright: ignore[reportAttributeAccessIssue]
         # 组装层级
-        utils_mod.logger = logger_mod
-        sagents_mod.utils = utils_mod
+        utils_mod.logger = logger_mod  # pyright: ignore[reportAttributeAccessIssue]
+        sagents_mod.utils = utils_mod  # pyright: ignore[reportAttributeAccessIssue]
         sys.modules["sagents"] = sagents_mod
         sys.modules["sagents.utils"] = utils_mod
         sys.modules["sagents.utils.logger"] = logger_mod
 
     # sagents.context.session_context stub，提供 SessionContext
     try:
-        from sagents.context.session_context import SessionContext  # noqa: F401
+        from sagents.context.session_context import SessionContext  # noqa: F401  # pyright: ignore[reportAssignmentType]
     except Exception:
         sagents_mod = sys.modules.get("sagents") or types.ModuleType("sagents")
-        context_mod = getattr(sagents_mod, "context", None) or types.ModuleType("sagents.context")
+        context_mod = getattr(sagents_mod, "context", None) or types.ModuleType(
+            "sagents.context"
+        )
         session_mod = types.ModuleType("sagents.context.session_context")
+
         class SessionContext:  # minimal stub
             def __init__(self):
                 self.session_id = "test"
-        session_mod.SessionContext = SessionContext
-        context_mod.session_context = session_mod
-        sagents_mod.context = context_mod
+
+        session_mod.SessionContext = SessionContext  # pyright: ignore[reportAttributeAccessIssue]
+        context_mod.session_context = session_mod  # pyright: ignore[reportAttributeAccessIssue]
+        sagents_mod.context = context_mod  # pyright: ignore[reportAttributeAccessIssue]
         sys.modules["sagents"] = sagents_mod
         sys.modules["sagents.context"] = context_mod
         sys.modules["sagents.context.session_context"] = session_mod
@@ -125,7 +145,7 @@ def main() -> bool:
 
     # 导入解析器
     try:
-        from Sage.sagents.tool.file_parser_tool import ExcelParser
+        from Sage.sagents.tool.file_parser_tool import ExcelParser  # pyright: ignore[reportMissingImports]
     except Exception as e:
         print(f"❌ 导入 ExcelParser 失败: {e}")
         return False

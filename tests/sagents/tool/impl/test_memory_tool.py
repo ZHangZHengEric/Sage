@@ -17,7 +17,7 @@ if "rank_bm25" not in sys.modules:
         def get_scores(self, query_tokens):
             return [1.0 for _ in self.corpus]
 
-    fake_rank_bm25.BM25Okapi = _FakeBM25Okapi
+    fake_rank_bm25.BM25Okapi = _FakeBM25Okapi  # pyright: ignore[reportAttributeAccessIssue]
     sys.modules["rank_bm25"] = fake_rank_bm25
 
 
@@ -82,7 +82,9 @@ class _FakeSessionMemoryManager:
         self.retrieve_message_ids.append([msg.message_id for msg in messages])
         return self.retrieved_messages
 
-    def retrieve(self, messages, query, history_budget, *, strategy=None, agent_config=None):
+    def retrieve(
+        self, messages, query, history_budget, *, strategy=None, agent_config=None
+    ):
         self.retrieve_calls.append((strategy, agent_config))
         if strategy == "grouped_chat":
             return self.retrieve_group_messages_by_chat(messages, query, history_budget)
@@ -141,12 +143,16 @@ class TestMemoryTool(unittest.TestCase):
     def test_search_memory_error_contract_is_stable(self):
         tool = self.MemoryTool()
 
-        missing_session = asyncio.run(tool.search_memory(query="hello", top_k=3, session_id=None))
+        missing_session = asyncio.run(
+            tool.search_memory(query="hello", top_k=3, session_id=None)
+        )
         self.assertEqual(missing_session["status"], "error")
         self.assertEqual(missing_session["long_term_memory"], [])
         self.assertEqual(missing_session["session_history"], [])
 
-        missing_query = asyncio.run(tool.search_memory(query=" ", top_k=3, session_id="s1"))
+        missing_query = asyncio.run(
+            tool.search_memory(query=" ", top_k=3, session_id="s1")
+        )
         self.assertEqual(missing_query["status"], "error")
         self.assertEqual(missing_query["long_term_memory"], [])
         self.assertEqual(missing_query["session_history"], [])
@@ -155,16 +161,24 @@ class TestMemoryTool(unittest.TestCase):
         tool = self.MemoryTool()
         messages = [_FakeMessage("m1", "user", "hello session")]
         history_messages = [_FakeMessage("h1", "assistant", "history snippet")]
-        message_manager = _FakeMessageManager(messages=messages, history_messages=history_messages)
-        session_memory_manager = _FakeSessionMemoryManager(retrieved_messages=history_messages)
+        message_manager = _FakeMessageManager(
+            messages=messages, history_messages=history_messages
+        )
+        session_memory_manager = _FakeSessionMemoryManager(
+            retrieved_messages=history_messages
+        )
         session_context = types.SimpleNamespace(
             message_manager=message_manager,
             agent_config={"name": "demo"},
             session_memory_manager=session_memory_manager,
         )
 
-        results1 = tool.session_history_retriever.search("history", 3, "session-1", session_context)
-        results2 = tool.session_history_retriever.search("history", 3, "session-1", session_context)
+        results1 = tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
+        results2 = tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
 
         self.assertEqual(message_manager.compute_calls, 1)
         self.assertEqual(session_memory_manager.calls, 2)
@@ -172,7 +186,9 @@ class TestMemoryTool(unittest.TestCase):
         self.assertEqual(len(results2), 1)
 
         messages.append(_FakeMessage("m2", "user", "new history"))
-        tool.session_history_retriever.search("history", 3, "session-1", session_context)
+        tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
         self.assertEqual(message_manager.compute_calls, 2)
 
     def test_session_history_retriever_invalidates_cache_on_agent_config_change(self):
@@ -184,21 +200,31 @@ class TestMemoryTool(unittest.TestCase):
                 history_messages=history_messages,
             ),
             agent_config={"name": "demo-v1"},
-            session_memory_manager=_FakeSessionMemoryManager(retrieved_messages=history_messages),
+            session_memory_manager=_FakeSessionMemoryManager(
+                retrieved_messages=history_messages
+            ),
         )
 
-        tool.session_history_retriever.search("history", 3, "session-1", session_context)
-        tool.session_history_retriever.search("history", 3, "session-1", session_context)
+        tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
+        tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
         self.assertEqual(session_context.message_manager.compute_calls, 1)
 
         session_context.agent_config = {"name": "demo-v2"}
-        tool.session_history_retriever.search("history", 3, "session-1", session_context)
+        tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
         self.assertEqual(session_context.message_manager.compute_calls, 2)
 
     def test_session_history_retriever_only_uses_history_anchor_scope(self):
         tool = self.MemoryTool()
         history_messages = [_FakeMessage("h1", "assistant", "history snippet")]
-        session_memory_manager = _FakeSessionMemoryManager(retrieved_messages=history_messages)
+        session_memory_manager = _FakeSessionMemoryManager(
+            retrieved_messages=history_messages
+        )
         session_context = types.SimpleNamespace(
             message_manager=_FakeMessageManager(
                 messages=[
@@ -211,7 +237,9 @@ class TestMemoryTool(unittest.TestCase):
             session_memory_manager=session_memory_manager,
         )
 
-        results = tool.session_history_retriever.search("history", 3, "session-1", session_context)
+        results = tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
 
         self.assertEqual(len(results), 1)
         self.assertEqual(session_memory_manager.retrieve_message_ids, [["h1"]])
@@ -224,39 +252,56 @@ class TestMemoryTool(unittest.TestCase):
             history_messages=history_messages,
         )
         message_manager._force_empty_anchor = True
-        session_memory_manager = _FakeSessionMemoryManager(retrieved_messages=history_messages)
+        session_memory_manager = _FakeSessionMemoryManager(
+            retrieved_messages=history_messages
+        )
         session_context = types.SimpleNamespace(
             message_manager=message_manager,
             agent_config={"name": "demo"},
             session_memory_manager=session_memory_manager,
         )
 
-        results = tool.session_history_retriever.search("history", 3, "session-1", session_context)
+        results = tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
 
         self.assertEqual(results, [])
         self.assertEqual(session_memory_manager.retrieve_message_ids, [])
 
-    def test_session_history_retriever_uses_grouped_chat_strategy_from_agent_config(self):
+    def test_session_history_retriever_uses_grouped_chat_strategy_from_agent_config(
+        self,
+    ):
         tool = self.MemoryTool()
         history_messages = [_FakeMessage("h1", "assistant", "history snippet")]
-        session_memory_manager = _FakeSessionMemoryManager(retrieved_messages=history_messages)
+        session_memory_manager = _FakeSessionMemoryManager(
+            retrieved_messages=history_messages
+        )
         session_context = types.SimpleNamespace(
             message_manager=_FakeMessageManager(
                 messages=[_FakeMessage("m1", "user", "hello session")],
                 history_messages=history_messages,
             ),
-            agent_config={"memory_backends": {"session_history_strategy": "grouped_chat"}},
+            agent_config={
+                "memory_backends": {"session_history_strategy": "grouped_chat"}
+            },
             session_memory_manager=session_memory_manager,
         )
 
-        results = tool.session_history_retriever.search("history", 3, "session-1", session_context)
+        results = tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
 
         self.assertEqual(len(results), 1)
         self.assertEqual(session_memory_manager.calls, 0)
         self.assertEqual(session_memory_manager.grouped_calls, 1)
         self.assertEqual(
             session_memory_manager.retrieve_calls,
-            [("grouped_chat", {"memory_backends": {"session_history_strategy": "grouped_chat"}})],
+            [
+                (
+                    "grouped_chat",
+                    {"memory_backends": {"session_history_strategy": "grouped_chat"}},
+                )
+            ],
         )
 
     def test_file_memory_retriever_reuses_scoped_index_and_refreshes_once(self):
@@ -269,8 +314,12 @@ class TestMemoryTool(unittest.TestCase):
         )
 
         with patch("sagents.tool.impl.memory_index.MemoryIndex", _FakeIndex):
-            results1 = asyncio.run(tool.file_memory_retriever.search("provider cli", 3, session_context))
-            results2 = asyncio.run(tool.file_memory_retriever.search("provider cli", 3, session_context))
+            results1 = asyncio.run(
+                tool.file_memory_retriever.search("provider cli", 3, session_context)
+            )
+            results2 = asyncio.run(
+                tool.file_memory_retriever.search("provider cli", 3, session_context)
+            )
 
         self.assertEqual(len(_FakeIndex.instances), 1)
         self.assertEqual(_FakeIndex.update_calls, 1)
@@ -289,7 +338,9 @@ class TestMemoryTool(unittest.TestCase):
         )
 
         with patch("sagents.tool.impl.memory_index.MemoryIndex", _FakeIndex):
-            asyncio.run(tool.file_memory_retriever.search("provider cli", 3, session_context))
+            asyncio.run(
+                tool.file_memory_retriever.search("provider cli", 3, session_context)
+            )
 
             scope_key = tool.file_memory_retriever._build_scope_key(
                 user_id="alice",
@@ -299,7 +350,9 @@ class TestMemoryTool(unittest.TestCase):
             cache_entry = tool.file_memory_retriever._index_cache[scope_key]
             cache_entry.last_refresh_at = 0.0
 
-            asyncio.run(tool.file_memory_retriever.search("provider cli", 3, session_context))
+            asyncio.run(
+                tool.file_memory_retriever.search("provider cli", 3, session_context)
+            )
 
         self.assertEqual(len(_FakeIndex.instances), 1)
         self.assertEqual(_FakeIndex.update_calls, 2)
@@ -308,20 +361,34 @@ class TestMemoryTool(unittest.TestCase):
         tool = self.MemoryTool()
 
         async def fake_file_search(query, top_k, session_id):
-            return [{"path": "/workspace/app/cli/example.py", "snippets": [{"line_number": 2, "text": "provider"}]}]
+            return [
+                {
+                    "path": "/workspace/app/cli/example.py",
+                    "snippets": [{"line_number": 2, "text": "provider"}],
+                }
+            ]
 
         async def fake_history_search(query, top_k, session_id):
-            return [{"role": "assistant", "content_preview": "history", "timestamp": 123}]
+            return [
+                {"role": "assistant", "content_preview": "history", "timestamp": 123}
+            ]
 
-        with patch.object(tool, "_search_file_memory", fake_file_search), patch.object(tool, "_search_session_history", fake_history_search):
-            result = asyncio.run(tool.search_memory(query="provider", top_k=3, session_id="session-1"))
+        with (
+            patch.object(tool, "_search_file_memory", fake_file_search),
+            patch.object(tool, "_search_session_history", fake_history_search),
+        ):
+            result = asyncio.run(
+                tool.search_memory(query="provider", top_k=3, session_id="session-1")
+            )
 
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["query"], "provider")
         self.assertEqual(len(result["long_term_memory"]), 1)
         self.assertEqual(len(result["session_history"]), 1)
 
-    def test_tool_manager_run_tool_async_injects_session_id_for_search_memory(self):
+    def test_tool_manager_run_tool_async_uses_system_context_session_id_for_search_memory(
+        self,
+    ):
         tool = self.MemoryTool()
         manager = self.ToolManager(is_auto_discover=False, isolated=True)
         manager.register_tools_from_object(tool)
@@ -332,9 +399,21 @@ class TestMemoryTool(unittest.TestCase):
 
         async def fake_history_search(query, top_k, session_id):
             self.assertEqual(session_id, "session-tool")
-            return [{"role": "assistant", "content_preview": "history", "timestamp": 123}]
+            return [
+                {"role": "assistant", "content_preview": "history", "timestamp": 123}
+            ]
 
-        with patch.object(tool, "_search_file_memory", fake_file_search), patch.object(tool, "_search_session_history", fake_history_search):
+        with (
+            patch.object(tool, "_search_file_memory", fake_file_search),
+            patch.object(tool, "_search_session_history", fake_history_search),
+            patch(
+                "sagents.tool.tool_manager._resolve_session_context",
+                return_value=types.SimpleNamespace(
+                    system_context={"session_id": "session-tool"},
+                    user_id=None,
+                ),
+            ),
+        ):
             raw = asyncio.run(
                 manager.run_tool_async(
                     tool_name="search_memory",

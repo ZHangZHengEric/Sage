@@ -100,6 +100,16 @@
               required
             />
           </div>
+
+          <div v-if="form.protocol === 'sse' || form.protocol === 'streamable_http'" class="space-y-2 animate-in slide-in-from-top-2 duration-200">
+            <Label for="api_key">{{ t('tools.apiKey') || 'API Key' }}</Label>
+            <Input
+              id="api_key"
+              v-model="form.api_key"
+              type="password"
+              :placeholder="t('tools.apiKeyPlaceholder') || 'sk-...'"
+            />
+          </div>
         </div>
 
         <div v-else class="space-y-6">
@@ -479,6 +489,7 @@ const form = reactive({
   args: '',
   sse_url: '',
   streamable_http_url: '',
+  api_key: '',
   description: '',
   tools: [newToolTemplate()],
   simulator: {
@@ -826,8 +837,10 @@ const handleSubmit = () => {
         }
       } else if (form.protocol === 'sse') {
         payload.sse_url = form.sse_url
+        payload.api_key = form.api_key
       } else if (form.protocol === 'streamable_http') {
         payload.streamable_http_url = form.streamable_http_url
+        payload.api_key = form.api_key
       }
     } else {
       payload.tools = buildAnyToolPayload()
@@ -857,6 +870,7 @@ const setFormData = (data) => {
   form.args = Array.isArray(data.args) ? data.args.join(' ') : (data.args || '')
   form.sse_url = data.sse_url || ''
   form.streamable_http_url = data.streamable_http_url || ''
+  form.api_key = data.api_key || ''
 
   const tools = Array.isArray(data.tools) && data.tools.length ? data.tools : [newToolTemplate()]
   form.tools = tools.map((tool) => ({
@@ -891,6 +905,7 @@ const resetForm = () => {
   form.args = ''
   form.sse_url = ''
   form.streamable_http_url = ''
+  form.api_key = ''
   form.description = ''
   form.tools = [newToolTemplate()]
   form.simulator = {

@@ -12,5 +12,7 @@ class NoopFileMemoryBackend:
     def clear_cache(self) -> None:
         return None
 
-    async def search(self, query: str, top_k: int, session_context) -> List[Dict[str, Any]]:
+    async def search(
+        self, query: str, top_k: int, session_context
+    ) -> List[Dict[str, Any]]:
         return []

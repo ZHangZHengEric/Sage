@@ -65,8 +65,12 @@ def normalize_anytool_tools(raw_tools: Any) -> List[Dict[str, Any]]:
                 "description": str(raw_tool.get("description", "")).strip(),
                 "parameters": parameters,
                 "returns": returns,
-                "prompt_template": raw_tool.get("prompt_template") or raw_tool.get("prompt") or "",
-                "example_input": raw_tool.get("example_input") or raw_tool.get("example") or {},
+                "prompt_template": raw_tool.get("prompt_template")
+                or raw_tool.get("prompt")
+                or "",
+                "example_input": raw_tool.get("example_input")
+                or raw_tool.get("example")
+                or {},
                 "example_output": raw_tool.get("example_output") or {},
                 "notes": raw_tool.get("notes") or "",
             }
@@ -206,7 +210,10 @@ async def _resolve_model_client(
         if provider is None and not prefer_first_provider:
             dao = LLMProviderDao()
             providers = await dao.get_list(user_id=user_id or None)
-            provider = next((item for item in providers if item.is_default), providers[0] if providers else None)
+            provider = next(
+                (item for item in providers if item.is_default),
+                providers[0] if providers else None,
+            )
         if not provider:
             if isinstance(simulator, dict):
                 api_key = simulator.get("api_key")
@@ -316,7 +323,9 @@ async def generate_anytool_result(
         message = getattr(choice, "message", None) if choice else None
         raw_text = getattr(message, "content", "") or ""
     except Exception as exc:
-        logger.warning(f"[AnyTool] JSON mode failed, retrying without response_format: {exc}")
+        logger.warning(
+            f"[AnyTool] JSON mode failed, retrying without response_format: {exc}"
+        )
         request_kwargs.pop("response_format", None)
         response = await model_client.chat.completions.create(**request_kwargs)
         choice = response.choices[0] if getattr(response, "choices", None) else None

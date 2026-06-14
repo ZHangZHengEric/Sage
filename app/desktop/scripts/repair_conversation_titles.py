@@ -15,7 +15,9 @@ def sanitize_title_text(text: str) -> str:
         cleaned,
         flags=re.IGNORECASE,
     )
-    cleaned = re.sub(r"^\s*<skill>.*?</skill>\s*", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(
+        r"^\s*<skill>.*?</skill>\s*", "", cleaned, flags=re.IGNORECASE | re.DOTALL
+    )
     cleaned = re.sub(
         r"<(?:skills|active_skills|available_skills)>[\s\S]*?</(?:skills|active_skills|available_skills)>",
         " ",
@@ -66,14 +68,20 @@ def looks_meaningful(text: str) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Repair malformed conversation titles in Sage desktop DB.")
+    parser = argparse.ArgumentParser(
+        description="Repair malformed conversation titles in Sage desktop DB."
+    )
     parser.add_argument(
         "--db-path",
         default=str(Path.home() / ".sage" / "sage.db"),
         help="Path to sqlite db (default: ~/.sage/sage.db)",
     )
-    parser.add_argument("--dry-run", action="store_true", help="Only print changes, do not write.")
-    parser.add_argument("--limit", type=int, default=0, help="Max rows to scan (0 = all).")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Only print changes, do not write."
+    )
+    parser.add_argument(
+        "--limit", type=int, default=0, help="Max rows to scan (0 = all)."
+    )
     args = parser.parse_args()
 
     db_path = Path(args.db_path).expanduser()
@@ -85,7 +93,9 @@ def main() -> int:
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
-    sql = "SELECT session_id, title, messages FROM conversations ORDER BY updated_at DESC"
+    sql = (
+        "SELECT session_id, title, messages FROM conversations ORDER BY updated_at DESC"
+    )
     if args.limit and args.limit > 0:
         sql += f" LIMIT {int(args.limit)}"
     rows = cur.execute(sql).fetchall()

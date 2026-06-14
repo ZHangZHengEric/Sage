@@ -45,13 +45,15 @@ def _extract_control_flags_from_text(text: str) -> Tuple[str, Dict[str, bool]]:
         plan_match = ENABLE_PLAN_TAG_RE.match(remaining)
         if plan_match:
             flags["enable_plan"] = plan_match.group(1).lower() == "true"
-            remaining = remaining[plan_match.end():]
+            remaining = remaining[plan_match.end() :]
             matched = True
 
         deep_thinking_match = ENABLE_DEEP_THINKING_TAG_RE.match(remaining)
         if deep_thinking_match:
-            flags["enable_deep_thinking"] = deep_thinking_match.group(1).lower() == "true"
-            remaining = remaining[deep_thinking_match.end():]
+            flags["enable_deep_thinking"] = (
+                deep_thinking_match.group(1).lower() == "true"
+            )
+            remaining = remaining[deep_thinking_match.end() :]
             matched = True
 
         if not matched:

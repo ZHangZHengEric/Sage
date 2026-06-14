@@ -11,6 +11,7 @@ import time
 
 _DISCOVERED_TOOLS = {}
 
+
 def tool(
     disabled: bool = False,
     description_i18n: Optional[Dict[str, str]] = None,
@@ -29,12 +30,17 @@ def tool(
     - return_properties_i18n: 返回对象的根级 description 的多语言描述（仅根描述）
     - param_schema: 参数的详细 Schema 定义，用于覆盖自动推断的类型或提供更复杂的结构（如 array items），形如 {param_name: {"type": "array", "items": {...}}}
     """
+
     def decorator(func):
         if disabled:
             logger.info(f"Tool {func.__name__} is disabled, not registering")
             return func
         logger.debug(f"Applying tool decorator to {func.__qualname__}")
-        _profile = os.environ.get("SAGENTS_PROFILING_TOOL_DECORATOR", "").lower() in ("1", "true", "yes")
+        _profile = os.environ.get("SAGENTS_PROFILING_TOOL_DECORATOR", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
         _t_total_start = time.perf_counter() if _profile else None
         docstring_text = inspect.getdoc(func) or ""
         parsed_docstring = None
@@ -109,17 +115,23 @@ def tool(
                     args = get_args(param.annotation)
                     if args:
                         item_type = _infer_json_type(args[0])
-                        param_info["items"] = {"type": item_type}
+                        param_info["items"] = {"type": item_type}  # pyright: ignore[reportArgumentType]
                     else:
-                        param_info["items"] = {"type": "string"}
+                        param_info["items"] = {"type": "string"}  # pyright: ignore[reportArgumentType]
 
             param_desc = doc_param_map.get(name, "")
             param_info["description"] = param_desc or f"The {name} parameter"
 
-            if name in _param_desc_i18n_map and isinstance(_param_desc_i18n_map[name], dict):
-                param_info["description_i18n"] = _param_desc_i18n_map[name]
+            if name in _param_desc_i18n_map and isinstance(
+                _param_desc_i18n_map[name], dict
+            ):
+                param_info["description_i18n"] = _param_desc_i18n_map[name]  # pyright: ignore[reportArgumentType]
 
-            if param_schema and name in param_schema and isinstance(param_schema[name], dict):
+            if (
+                param_schema
+                and name in param_schema
+                and isinstance(param_schema[name], dict)
+            ):
                 param_info.update(param_schema[name])
 
             if param.default == inspect.Parameter.empty:
@@ -143,7 +155,9 @@ def tool(
             else:
                 if parsed_docstring:
                     returns_obj = getattr(parsed_docstring, "returns", None)
-                    if returns_obj and (returns_obj.description or returns_obj.return_type_name):
+                    if returns_obj and (
+                        returns_obj.description or returns_obj.return_type_name
+                    ):
                         spec_return_data = {
                             "type": "object",
                             "description": (returns_obj.description or "").strip(),
@@ -155,7 +169,9 @@ def tool(
             if spec_return_data is not None:
                 root_i18n = None
                 if isinstance(return_properties_i18n, dict):
-                    if "description" in return_properties_i18n and isinstance(return_properties_i18n["description"], dict):
+                    if "description" in return_properties_i18n and isinstance(
+                        return_properties_i18n["description"], dict
+                    ):
                         root_i18n = return_properties_i18n["description"]
                 if root_i18n:
                     spec_return_data["description_i18n"] = root_i18n
@@ -178,10 +194,10 @@ def tool(
             _t_total_end = time.perf_counter()
             try:
                 logger.info(
-                    f"Tool decorator timing {tool_name}: parse={((_t_parse_end or 0)-(_t_parse_start or 0)):.3f}s, "
-                    f"sig_params={((_t_params_end or 0)-(_t_sig_start or 0)):.3f}s, "
-                    f"returns={((_t_returns_end or 0)-(_t_returns_start or 0)):.3f}s, "
-                    f"total={((_t_total_end or 0)-(_t_total_start or 0)):.3f}s"
+                    f"Tool decorator timing {tool_name}: parse={((_t_parse_end or 0) - (_t_parse_start or 0)):.3f}s, "
+                    f"sig_params={((_t_params_end or 0) - (_t_sig_start or 0)):.3f}s, "
+                    f"returns={((_t_returns_end or 0) - (_t_returns_start or 0)):.3f}s, "
+                    f"total={((_t_total_end or 0) - (_t_total_start or 0)):.3f}s"
                 )
             except Exception:
                 try:
@@ -190,13 +206,15 @@ def tool(
                     pass
 
         if inspect.iscoroutinefunction(func):
+
             @wraps(func)
-            async def wrapper(*args, **kwargs):
+            async def wrapper(*args, **kwargs):  # pyright: ignore[reportRedeclaration]
                 logger.debug(f"Calling async tool: {tool_name} with {len(kwargs)} args")
                 result = await func(*args, **kwargs)
                 logger.debug(f"Completed async tool: {tool_name}")
                 return result
         else:
+
             @wraps(func)
             def wrapper(*args, **kwargs):
                 logger.debug(f"Calling tool: {tool_name} with {len(kwargs)} args")
@@ -204,13 +222,13 @@ def tool(
                 logger.debug(f"Completed tool: {tool_name}")
                 return result
 
-        wrapper._tool_spec = spec
+        wrapper._tool_spec = spec  # pyright: ignore[reportAttributeAccessIssue]
         func._tool_spec = spec
         if "." in func.__qualname__:
             func._tool_owner_qualname = func.__qualname__.rsplit(".", 1)[0]
             func._tool_owner_module = func.__module__
-            wrapper._tool_owner_qualname = func._tool_owner_qualname
-            wrapper._tool_owner_module = func._tool_owner_module
+            wrapper._tool_owner_qualname = func._tool_owner_qualname  # pyright: ignore[reportAttributeAccessIssue]
+            wrapper._tool_owner_module = func._tool_owner_module  # pyright: ignore[reportAttributeAccessIssue]
 
         module_name = func.__module__
         if module_name not in _DISCOVERED_TOOLS:
@@ -218,4 +236,5 @@ def tool(
         _DISCOVERED_TOOLS[module_name].append(func)
 
         return wrapper
+
     return decorator

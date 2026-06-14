@@ -1,20 +1,30 @@
 import asyncio
 from typing import AsyncGenerator, List, Any, Optional
 from sagents.flow.schema import (
-    FlowNode, AgentNode, SequenceNode, ParallelNode, LoopNode, IfNode, SwitchNode
+    FlowNode,
+    AgentNode,
+    SequenceNode,
+    ParallelNode,
+    LoopNode,
+    IfNode,
+    SwitchNode,
 )
 from sagents.flow.conditions import ConditionRegistry
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk
-from sagents.tool import ToolManager, ToolProxy
-from sagents.tool.impl.todo_tool import ToDoTool
 from sagents.context.session_context import SessionStatus
 
 
 class FlowExecutor:
     """流程执行器：负责解析并执行 AgentFlow 定义"""
 
-    def __init__(self, tool_manager: Optional[Any], session_runtime: Any, session_id: str, session_manager: Any):
+    def __init__(
+        self,
+        tool_manager: Optional[Any],
+        session_runtime: Any,
+        session_id: str,
+        session_manager: Any,
+    ):
         self.tool_manager = tool_manager
         self.runtime = session_runtime
         self.session_id = session_id
@@ -37,7 +47,9 @@ class FlowExecutor:
 
     def _should_stop_now(self, session: Any, node_name: str) -> bool:
         if session.should_interrupt():
-            logger.info(f"FlowExecutor: session {self.session_id} interrupted before executing {node_name}")
+            logger.info(
+                f"FlowExecutor: session {self.session_id} interrupted before executing {node_name}"
+            )
             return True
         if self._is_terminal_session_state(session):
             logger.info(
@@ -50,20 +62,28 @@ class FlowExecutor:
     async def execute(self, node: FlowNode) -> AsyncGenerator[List[MessageChunk], None]:
         """递归执行流程节点"""
         if self.session_manager is None:
-            raise RuntimeError(f"FlowExecutor: session_manager 未初始化，session_id={self.session_id}")
+            raise RuntimeError(
+                f"FlowExecutor: session_manager 未初始化，session_id={self.session_id}"
+            )
         session = self.session_manager.get_live_session(self.session_id)
         if session is None:
-            raise RuntimeError(f"FlowExecutor: session 未绑定，session_id={self.session_id}")
+            raise RuntimeError(
+                f"FlowExecutor: session 未绑定，session_id={self.session_id}"
+            )
         ctx = session.get_context()
         if ctx is None:
-            raise RuntimeError(f"FlowExecutor: session_context 未绑定，session_id={self.session_id}")
+            raise RuntimeError(
+                f"FlowExecutor: session_context 未绑定，session_id={self.session_id}"
+            )
         if self._should_stop_now(session, getattr(node, "node_type", "unknown")):
             return
         logger.debug(f"FlowExecutor: Executing node type '{node.node_type}'")
 
         if isinstance(node, SequenceNode):
             for step in node.steps:
-                if self._should_stop_now(session, getattr(step, "node_type", "unknown")):
+                if self._should_stop_now(
+                    session, getattr(step, "node_type", "unknown")
+                ):
                     return
                 async for chunk in self.execute(step):
                     yield chunk
@@ -76,7 +96,9 @@ class FlowExecutor:
 
         elif isinstance(node, ParallelNode):
             # 并行执行所有分支
-            logger.info(f"FlowExecutor: Running {len(node.branches)} branches in parallel")
+            logger.info(
+                f"FlowExecutor: Running {len(node.branches)} branches in parallel"
+            )
 
             async def run_branch(branch: FlowNode) -> List[MessageChunk]:
                 """执行单个分支并收集所有消息"""
@@ -94,10 +116,12 @@ class FlowExecutor:
             # 处理结果（按分支顺序yield）
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
-                    logger.error(f"FlowExecutor: Branch {i} failed with error: {result}")
+                    logger.error(
+                        f"FlowExecutor: Branch {i} failed with error: {result}"
+                    )
                     continue
                 if result:
-                    yield result
+                    yield result  # pyright: ignore[reportReturnType]
 
             if self._is_terminal_session_state(session):
                 logger.info(
@@ -106,7 +130,9 @@ class FlowExecutor:
                 )
                 return
 
-            logger.info(f"FlowExecutor: Parallel execution completed for {len(node.branches)} branches")
+            logger.info(
+                f"FlowExecutor: Parallel execution completed for {len(node.branches)} branches"
+            )
 
         elif isinstance(node, LoopNode):
             loop_count = 0
@@ -116,10 +142,14 @@ class FlowExecutor:
                     break
                 # 在循环开始前检查条件
                 if not ConditionRegistry.check(node.condition, ctx, session=session):
-                    logger.info(f"FlowExecutor: Loop condition '{node.condition}' met (False), exiting loop.")
+                    logger.info(
+                        f"FlowExecutor: Loop condition '{node.condition}' met (False), exiting loop."
+                    )
                     break
 
-                logger.info(f"FlowExecutor: Loop iteration {loop_count + 1}/{node.max_loops}")
+                logger.info(
+                    f"FlowExecutor: Loop iteration {loop_count + 1}/{node.max_loops}"
+                )
                 async for chunk in self.execute(node.body):
                     yield chunk
                 if self._is_terminal_session_state(session):
@@ -131,11 +161,17 @@ class FlowExecutor:
                 loop_count += 1
 
             if loop_count >= node.max_loops:
-                logger.warning(f"FlowExecutor: Loop max iterations ({node.max_loops}) reached.")
+                logger.warning(
+                    f"FlowExecutor: Loop max iterations ({node.max_loops}) reached."
+                )
 
         elif isinstance(node, IfNode):
-            condition_met = ConditionRegistry.check(node.condition, ctx, session=session)
-            logger.debug(f"FlowExecutor: If condition '{node.condition}' -> {condition_met}")
+            condition_met = ConditionRegistry.check(
+                node.condition, ctx, session=session
+            )
+            logger.debug(
+                f"FlowExecutor: If condition '{node.condition}' -> {condition_met}"
+            )
 
             if condition_met:
                 async for chunk in self.execute(node.true_body):
@@ -156,7 +192,9 @@ class FlowExecutor:
                 logger.error(error_msg)
                 raise ValueError(error_msg)
 
-            logger.debug(f"FlowExecutor: Switch variable '{node.variable}' -> {variable_value}")
+            logger.debug(
+                f"FlowExecutor: Switch variable '{node.variable}' -> {variable_value}"
+            )
 
             target_node = node.cases.get(str(variable_value))
             if target_node:
@@ -166,7 +204,9 @@ class FlowExecutor:
                 async for chunk in self.execute(node.default):
                     yield chunk
             else:
-                logger.warning(f"FlowExecutor: No matching case for switch '{node.variable}'={variable_value}, and no default.")
+                logger.warning(
+                    f"FlowExecutor: No matching case for switch '{node.variable}'={variable_value}, and no default."
+                )
 
         elif isinstance(node, AgentNode):
             agent_key = node.agent_key
@@ -182,7 +222,9 @@ class FlowExecutor:
             try:
                 agent = self.runtime._get_agent(agent_key)
             except KeyError:
-                logger.error(f"FlowExecutor: Agent '{agent_key}' not found in registry.")
+                logger.error(
+                    f"FlowExecutor: Agent '{agent_key}' not found in registry."
+                )
                 return
 
             # 如果有特殊配置，可能需要应用到 Agent (暂未实现完全覆盖，因 Agent 通常是单例或池化)

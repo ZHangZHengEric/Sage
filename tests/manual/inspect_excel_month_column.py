@@ -28,7 +28,9 @@ def main():
         ws_data = wb_data[sname]
         ws_formula = wb_formula[sname]
         max_row, max_col = ws_data.max_row, ws_data.max_column
-        header = [str(ws_data.cell(1, c).value or "").strip() for c in range(1, max_col + 1)]
+        header = [
+            str(ws_data.cell(1, c).value or "").strip() for c in range(1, max_col + 1)
+        ]
         print(f"🧾 工作表: {sname} 表头: {header}")
         if "统计月份" not in header:
             continue

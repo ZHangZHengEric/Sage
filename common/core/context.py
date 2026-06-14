@@ -2,7 +2,9 @@ from contextvars import ContextVar
 from typing import Any, Optional
 
 # 使用 ContextVar 存储请求上下文，确保异步请求隔离。
-request_context: ContextVar[Optional[dict[str, Any]]] = ContextVar("request_context", default=None)
+request_context: ContextVar[Optional[dict[str, Any]]] = ContextVar(
+    "request_context", default=None
+)
 
 
 def set_request_context(request_id: str, request_logger: Any) -> None:

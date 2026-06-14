@@ -29,7 +29,9 @@ class UserConfigDao(BaseDao):
         obj = await BaseDao.get_by_id(self, UserConfig, user_id)
         return obj.config if obj else {}
 
-    async def update_config(self, user_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+    async def update_config(
+        self, user_id: str, updates: Dict[str, Any]
+    ) -> Dict[str, Any]:
         obj = await BaseDao.get_by_id(self, UserConfig, user_id)
         if not obj:
             obj = UserConfig(user_id=user_id, config=updates)

@@ -1,4 +1,5 @@
 import request from '../utils/request.js'
+import { getApiPrefix } from '../config/runtime.js'
 
 export const taskAPI = {
   getWorkspaceFiles: (agentId) => {
@@ -17,7 +18,7 @@ export const taskAPI = {
       return response.blob()
     }
 
-    const apiPrefix = import.meta.env.VITE_BACKEND_API_PREFIX || ''
+    const apiPrefix = getApiPrefix()
     const url = `${apiPrefix}/api/agent/${agentId}/file_workspace/download?file_path=${encodeURIComponent(filePath)}`
 
     const headers = {

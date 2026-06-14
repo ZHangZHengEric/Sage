@@ -13,6 +13,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 _PENDING_SESSION_CLOSE_TASKS: set[asyncio.Task] = set()
 
 
+def _create_aiomysql_engine(url: str, **kwargs):
+    engine = create_async_engine(url, **kwargs)
+    # SQLAlchemy's aiomysql dialect inherits PyMySQL ping detection, which can
+    # choose ping() even though aiomysql versions used by deployments require
+    # ping(reconnect).
+    engine.sync_engine.dialect.__dict__["_send_false_to_ping"] = True
+    return engine
+
+
 def _track_session_close_task(task: asyncio.Task) -> None:
     _PENDING_SESSION_CLOSE_TASKS.add(task)
 
@@ -68,7 +77,9 @@ def sync_database_schema(sync_conn, Base):
                             else:
                                 import datetime
 
-                                now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                now_str = datetime.datetime.now().strftime(
+                                    "%Y-%m-%d %H:%M:%S"
+                                )
                                 default_clause = f" DEFAULT '{now_str}'"
 
                     sql = f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}{default_clause}"
@@ -76,7 +87,9 @@ def sync_database_schema(sync_conn, Base):
                     sync_conn.execute(text(sql))
                     logger.info(f"[DB] 成功添加列 '{col_name}' 到表 '{table_name}'")
                 except Exception as e:
-                    logger.error(f"[DB] 无法自动添加列 '{col_name}' 到表 '{table_name}': {e}")
+                    logger.error(
+                        f"[DB] 无法自动添加列 '{col_name}' 到表 '{table_name}': {e}"
+                    )
         else:
             logger.debug(f"[DB] 表 '{table_name}' 结构正常")
 
@@ -91,7 +104,9 @@ def db_retry(max_retries: int = 3, delay: float = 1.0):
                     return await func(*args, **kwargs)
                 except (OperationalError, InterfaceError) as e:
                     last_err = e
-                    logger.warning(f"数据库操作异常 (尝试 {attempt + 1}/{max_retries}): {e}")
+                    logger.warning(
+                        f"数据库操作异常 (尝试 {attempt + 1}/{max_retries}): {e}"
+                    )
                     if attempt < max_retries - 1:
                         await asyncio.sleep(delay)
 
@@ -153,7 +168,7 @@ class SessionManager:
                     charset = self.mysql_config.get("charset", "utf8mb4")
 
                     url = f"mysql+aiomysql://{user}:{password}@{host}:{port}/{database}?charset={charset}"
-                    self._engine = create_async_engine(
+                    self._engine = _create_aiomysql_engine(
                         url,
                         future=True,
                         pool_size=100,
@@ -168,7 +183,9 @@ class SessionManager:
                     engine_kwargs = {
                         "pool_recycle": 1800,
                         "pool_pre_ping": True,
-                        "json_serializer": lambda obj: json.dumps(obj, ensure_ascii=False),
+                        "json_serializer": lambda obj: json.dumps(
+                            obj, ensure_ascii=False
+                        ),
                         "json_deserializer": json.loads,
                     }
 
@@ -179,14 +196,19 @@ class SessionManager:
                         engine_kwargs.update(
                             {
                                 "poolclass": StaticPool,
-                                "connect_args": {"check_same_thread": False, "timeout": 30},
+                                "connect_args": {
+                                    "check_same_thread": False,
+                                    "timeout": 30,
+                                },
                             }
                         )
                     else:
                         url = f"sqlite+aiosqlite:///{self.db_file}"
                         engine_kwargs["connect_args"] = {"timeout": 30}
 
-                    self._engine = create_async_engine(url, future=True, **engine_kwargs)
+                    self._engine = create_async_engine(
+                        url, future=True, **engine_kwargs
+                    )
 
                 self._SessionLocal = async_sessionmaker(
                     bind=self._engine,
@@ -201,10 +223,12 @@ class SessionManager:
                             await conn.execute(text("SELECT 1"))
                     except OperationalError as e:
                         if "1049" in str(e) or "Unknown database" in str(e):
-                            logger.warning(f"数据库 '{database}' 不存在，尝试自动创建...")
+                            logger.warning(
+                                f"数据库 '{database}' 不存在，尝试自动创建..."
+                            )
                             try:
                                 admin_url = f"mysql+aiomysql://{user}:{password}@{host}:{port}/?charset={charset}"
-                                admin_engine = create_async_engine(
+                                admin_engine = _create_aiomysql_engine(
                                     admin_url,
                                     isolation_level="AUTOCOMMIT",
                                     future=True,
@@ -212,7 +236,9 @@ class SessionManager:
 
                                 async with admin_engine.connect() as admin_conn:
                                     await admin_conn.execute(
-                                        text(f"CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET {charset}")
+                                        text(
+                                            f"CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET {charset}"
+                                        )
                                     )
                                     logger.info(f"数据库 '{database}' 创建成功")
 
@@ -248,7 +274,11 @@ class SessionManager:
             if hint:
                 logger.error(f"提示: {hint}")
 
-            raise RuntimeError(f"数据库初始化失败: {err_msg} | {hint}" if hint else f"数据库初始化失败: {err_msg}")
+            raise RuntimeError(
+                f"数据库初始化失败: {err_msg} | {hint}"
+                if hint
+                else f"数据库初始化失败: {err_msg}"
+            )
 
     async def close(self):
         async with self._lock:

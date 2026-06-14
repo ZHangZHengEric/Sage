@@ -22,7 +22,9 @@ class QwenProvider(BaseImageProvider):
     supports_reference_image = True  # 支持图生图
 
     # API 端点 (阿里云百炼)
-    API_ENDPOINT = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
+    API_ENDPOINT = (
+        "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
+    )
 
     # 支持的模型列表
     SUPPORTED_MODELS = {
@@ -84,7 +86,7 @@ export QWEN_MODEL=wanx2.1-t2i-plus"""
         prompt: str,
         aspect_ratio: str = "1:1",
         reference_image: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> GeneratedImage:
         """
         使用阿里云百炼生成图片
@@ -114,7 +116,7 @@ export QWEN_MODEL=wanx2.1-t2i-plus"""
             "parameters": {
                 "size": size,
                 "n": 1,  # 生成1张图片
-            }
+            },
         }
 
         # 如果提供了参考图且模型支持
@@ -125,14 +127,13 @@ export QWEN_MODEL=wanx2.1-t2i-plus"""
         async with httpx.AsyncClient() as client:
             # 第一步：提交任务
             response = await client.post(
-                self.API_ENDPOINT,
-                headers=headers,
-                json=payload,
-                timeout=30.0
+                self.API_ENDPOINT, headers=headers, json=payload, timeout=30.0
             )
 
             if response.status_code == 401 or response.status_code == 403:
-                raise Exception(f"阿里云百炼 API Key 无效或没有权限，请检查环境变量 {self.env_key}")
+                raise Exception(
+                    f"阿里云百炼 API Key 无效或没有权限，请检查环境变量 {self.env_key}"
+                )
 
             response.raise_for_status()
             data = response.json()
@@ -153,7 +154,7 @@ export QWEN_MODEL=wanx2.1-t2i-plus"""
                 result_response = await client.get(
                     result_url,
                     headers={"Authorization": f"Bearer {self.api_key}"},
-                    timeout=30.0
+                    timeout=30.0,
                 )
                 result_response.raise_for_status()
                 result_data = result_response.json()
@@ -172,12 +173,14 @@ export QWEN_MODEL=wanx2.1-t2i-plus"""
                                 is_base64=False,
                                 prompt=prompt,
                                 model=self.model,
-                                provider=self.name
+                                provider=self.name,
                             )
                     raise Exception("任务成功但未返回图片URL")
 
                 elif task_status == "FAILED":
-                    error_message = result_data.get("output", {}).get("message", "未知错误")
+                    error_message = result_data.get("output", {}).get(
+                        "message", "未知错误"
+                    )
                     raise Exception(f"图片生成任务失败: {error_message}")
 
                 # 继续轮询 (PENDING, RUNNING)

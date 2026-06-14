@@ -26,7 +26,9 @@ def copy_agent_inherit_to_workspace(agent_id: str, agent_workspace: str) -> None
 
     workspace_path = Path(agent_workspace)
     _copy_directory_contents(inherit_dir, workspace_path)
-    logger.info(f"已从 inherit 初始化 agent workspace: {inherit_dir} -> {workspace_path}")
+    logger.info(
+        f"已从 inherit 初始化 agent workspace: {inherit_dir} -> {workspace_path}"
+    )
 
 
 def _copy_directory_contents(source_dir: Path, target_dir: Path) -> None:

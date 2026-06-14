@@ -46,7 +46,11 @@ def available_file_memory_backend_names() -> tuple[str, ...]:
     return _FILE_MEMORY_REGISTRY.supported_names()
 
 
-def create_file_memory_backend(memory_tool, backend_name: Optional[str] = None, agent_config: Optional[Dict[str, Any]] = None):
+def create_file_memory_backend(
+    memory_tool,
+    backend_name: Optional[str] = None,
+    agent_config: Optional[Dict[str, Any]] = None,
+):
     """Build the file-memory backend for the configured implementation."""
     return _FILE_MEMORY_REGISTRY.create(
         backend_name=backend_name,

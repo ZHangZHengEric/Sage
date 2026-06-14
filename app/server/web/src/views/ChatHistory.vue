@@ -24,10 +24,19 @@
               <SelectTrigger class="h-8 w-[118px] rounded-xl border-border/50 bg-background/60 text-[12px] shadow-none dark:bg-background/20">
                 <SelectValue :placeholder="t('history.all')" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent
+                class="w-[min(24rem,calc(100vw-2rem))]"
+                viewport-class="!h-auto max-h-80 overflow-y-auto"
+              >
                 <SelectItem value="all">{{ t('history.all') }}</SelectItem>
-                <SelectItem v-for="agent in agents" :key="agent.id" :value="agent.id">
-                  {{ agent.name }}
+                <SelectItem
+                  v-for="agent in agents"
+                  :key="agent.id"
+                  :value="agent.id"
+                  :text-value="agent.name"
+                  class="min-h-8 py-1.5 pr-3 whitespace-normal"
+                >
+                  <span class="block whitespace-normal break-words leading-snug">{{ agent.name }}</span>
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -65,10 +74,19 @@
             <SelectTrigger class="h-8.5 w-[118px] rounded-xl border-border/50 bg-background/60 text-[12px] shadow-none dark:bg-background/20">
               <SelectValue :placeholder="t('history.all')" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent
+              class="w-[min(24rem,calc(100vw-2rem))]"
+              viewport-class="!h-auto max-h-80 overflow-y-auto"
+            >
               <SelectItem value="all">{{ t('history.all') }}</SelectItem>
-              <SelectItem v-for="agent in agents" :key="agent.id" :value="agent.id">
-                {{ agent.name }}
+              <SelectItem
+                v-for="agent in agents"
+                :key="agent.id"
+                :value="agent.id"
+                :text-value="agent.name"
+                class="min-h-8 py-1.5 pr-3 whitespace-normal"
+              >
+                <span class="block whitespace-normal break-words leading-snug">{{ agent.name }}</span>
               </SelectItem>
             </SelectContent>
           </Select>
@@ -393,6 +411,7 @@ import { chatAPI } from '@/api/chat.js'
 import { getCurrentUser } from '@/utils/auth.js'
 import { sanitizeSessionTitle } from '@/utils/sessionTitle'
 import { isTokenUsageMessage } from '@/utils/messageLabels.js'
+import { getWebBasePath } from '@/config/runtime.js'
 import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -575,8 +594,7 @@ const getAgentName = (agentId) => {
 
 const buildShareUrl = (sessionId) => {
   if (!sessionId) return ''
-  const rawBase = (import.meta.env?.BASE_URL || '/').toString()
-  const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`
+  const base = getWebBasePath()
   return `${window.location.origin}${base}share/${sessionId}`
 }
 

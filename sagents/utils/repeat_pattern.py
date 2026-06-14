@@ -18,7 +18,9 @@ def stable_json(raw: str) -> str:
         return ""
     try:
         parsed = json.loads(raw)
-        return json.dumps(parsed, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return json.dumps(
+            parsed, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
     except Exception:
         return normalize_text(raw)
 
@@ -41,20 +43,23 @@ def build_loop_signature(chunks: List[MessageChunk]) -> str:
                 fn = ""
                 args = ""
                 if isinstance(tool_call, dict):
-                    fn = ((tool_call.get("function") or {}).get("name") or "")
-                    args = ((tool_call.get("function") or {}).get("arguments") or "")
+                    fn = (tool_call.get("function") or {}).get("name") or ""
+                    args = (tool_call.get("function") or {}).get("arguments") or ""
                 else:
-                    fn = (getattr(getattr(tool_call, "function", None), "name", "") or "")
-                    args = (getattr(getattr(tool_call, "function", None), "arguments", "") or "")
+                    fn = getattr(getattr(tool_call, "function", None), "name", "") or ""
+                    args = (
+                        getattr(getattr(tool_call, "function", None), "arguments", "")
+                        or ""
+                    )
                 tool_call_parts.append(f"{fn}:{short_hash(stable_json(args))}")
 
-        if chunk.role == MessageRole.ASSISTANT.value and (chunk.content or "").strip():
+        if chunk.role == MessageRole.ASSISTANT.value and (chunk.content or "").strip():  # pyright: ignore[reportAttributeAccessIssue]
             if chunk.message_type != MessageType.REASONING_CONTENT.value:
-                text_parts.append(normalize_text(chunk.content))
+                text_parts.append(normalize_text(chunk.content))  # pyright: ignore[reportArgumentType]
 
         if chunk.role == MessageRole.TOOL.value:
             tool_name = (chunk.metadata or {}).get("tool_name", "")
-            tool_content_norm = normalize_text(chunk.content or "")
+            tool_content_norm = normalize_text(chunk.content or "")  # pyright: ignore[reportArgumentType]
             tool_result_parts.append(f"{tool_name}:{short_hash(tool_content_norm)}")
 
     signature_obj = {
@@ -88,10 +93,10 @@ def detect_repeat_pattern(
         if max_cycles < min_cycles:
             continue
 
-        pattern = signatures[n - period:n]
+        pattern = signatures[n - period : n]
         cycles = 1
         idx = n - period
-        while idx - period >= 0 and signatures[idx - period:idx] == pattern:
+        while idx - period >= 0 and signatures[idx - period : idx] == pattern:
             cycles += 1
             idx -= period
 

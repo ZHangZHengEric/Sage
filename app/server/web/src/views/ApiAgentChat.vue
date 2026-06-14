@@ -156,6 +156,7 @@
 import { computed, ref } from 'vue'
 import { Copy, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { messageTypeLabels } from '../utils/messageLabels.js'
+import { getBackendEndpoint } from '../config/runtime.js'
 import { useRouter } from 'vue-router'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -170,10 +171,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 
-const endpoint = (
-  import.meta.env.VITE_SAGE_API_BASE_URL ||
-  ''
-).replace(/\/+$/, '')
+const endpoint = getBackendEndpoint()
 
 const params = [
   { name: 'messages', type: 'Array<Object>', required: true, desc: '历史消息数组，至少包含一条用户消息', children: [
@@ -253,4 +251,3 @@ const scrollTo = (id) => {
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 </script>
-

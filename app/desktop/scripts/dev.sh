@@ -17,6 +17,7 @@ TAURI_BIN_DIR="$TAURI_DIR/bin"
 SAGE_HOME_DIR="${HOME}/.sage"
 SAGE_NODE_ENV_DIR="$SAGE_HOME_DIR/.sage_node_env"
 SAGE_NODE_RUNTIME_DIR="$SAGE_NODE_ENV_DIR/runtime"
+PYTHON_DEPS_MARKER="$SAGE_HOME_DIR/.desktop_python_requirements.sha256"
 
 NO_PYTHON_BUILD=1
 MODE="debug"
@@ -143,6 +144,7 @@ CONDA_BASE=$($CONDA_EXE info --base)
 source "$CONDA_BASE/etc/profile.d/conda.sh"
 
 ENV_NAME="sage-desktop-env"
+ENV_CREATED=0
 
 # Check if environment exists (more robust check)
 if conda env list | grep -E "^$ENV_NAME\s" > /dev/null 2>&1; then
@@ -154,6 +156,7 @@ else
   conda create -n "$ENV_NAME" python=3.11 -y || {
     echo "警告: 创建环境失败，可能已存在，尝试继续..."
   }
+  ENV_CREATED=1
 fi
 
 echo "正在激活 Conda 环境 '$ENV_NAME'..."
@@ -178,11 +181,40 @@ fi
 if [[ "$CONDA_EXE" == *"anaconda3"* ]]; then
     conda install -n "$ENV_NAME" numba -y
 fi
-echo "正在安装依赖..."
-pip install -r "$ROOT_DIR/requirements.txt" --index-url https://mirrors.aliyun.com/pypi/simple
 
-if ! command -v pyinstaller >/dev/null; then
-  pip install pyinstaller --index-url https://mirrors.aliyun.com/pypi/simple
+requirements_hash() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$ROOT_DIR/requirements.txt" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$ROOT_DIR/requirements.txt" | awk '{print $1}'
+  else
+    cksum "$ROOT_DIR/requirements.txt" | awk '{print $1}'
+  fi
+}
+
+CURRENT_REQUIREMENTS_HASH="$(requirements_hash)"
+INSTALLED_REQUIREMENTS_HASH=""
+if [ -f "$PYTHON_DEPS_MARKER" ]; then
+  INSTALLED_REQUIREMENTS_HASH="$(cat "$PYTHON_DEPS_MARKER" 2>/dev/null || true)"
+fi
+
+if [ "${SAGE_SKIP_PIP_INSTALL:-0}" = "1" ]; then
+  echo "已跳过 Python 依赖安装 (SAGE_SKIP_PIP_INSTALL=1)"
+elif [ "${SAGE_FORCE_PIP_INSTALL:-0}" != "1" ] && [ "$CURRENT_REQUIREMENTS_HASH" = "$INSTALLED_REQUIREMENTS_HASH" ] && command -v pyinstaller >/dev/null; then
+  echo "Python 依赖已是最新，跳过安装。"
+elif [ "${SAGE_FORCE_PIP_INSTALL:-0}" != "1" ] && [ "$ENV_CREATED" != "1" ] && [ -z "$INSTALLED_REQUIREMENTS_HASH" ]; then
+  echo "Conda 环境已存在但没有依赖安装标记，跳过自动 pip install 以避免开发启动卡住。"
+  echo "如需安装/修复 Python 依赖，请运行: SAGE_FORCE_PIP_INSTALL=1 ./app/desktop/scripts/dev.sh"
+else
+  echo "正在安装 Python 依赖..."
+  pip install -r "$ROOT_DIR/requirements.txt" --index-url https://mirrors.aliyun.com/pypi/simple
+
+  if ! command -v pyinstaller >/dev/null; then
+    pip install pyinstaller --index-url https://mirrors.aliyun.com/pypi/simple
+  fi
+
+  mkdir -p "$SAGE_HOME_DIR"
+  printf "%s" "$CURRENT_REQUIREMENTS_HASH" > "$PYTHON_DEPS_MARKER"
 fi
 
 ########################################

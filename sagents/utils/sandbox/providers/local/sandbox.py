@@ -7,6 +7,7 @@ Sandbox - 沙箱核心类
 
 注意：路径映射由外部通过 volume_mounts 配置，内部不做任何额外添加
 """
+
 import sys
 import os
 import asyncio
@@ -26,6 +27,7 @@ from sagents.utils.common_utils import (
 
 class SandboxError(Exception):
     """沙箱错误"""
+
     pass
 
 
@@ -53,22 +55,28 @@ class Sandbox:
         "/usr/local/lib/node_modules",
     ]
 
-    if sys.platform == 'win32':
-        DEFAULT_ALLOWED_PATHS.extend([
-            os.environ.get('SystemRoot', 'C:\\Windows'),
-            os.environ.get('ProgramFiles', 'C:\\Program Files'),
-            os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'),
-            os.environ.get('USERPROFILE', 'C:\\Users\\Default'),
-            os.path.join(os.environ.get('USERPROFILE', ''), '.sage'),
-        ])
+    if sys.platform == "win32":
+        DEFAULT_ALLOWED_PATHS.extend(
+            [
+                os.environ.get("SystemRoot", "C:\\Windows"),
+                os.environ.get("ProgramFiles", "C:\\Program Files"),
+                os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"),
+                os.environ.get("USERPROFILE", "C:\\Users\\Default"),
+                os.path.join(os.environ.get("USERPROFILE", ""), ".sage"),
+            ]
+        )
 
-    def __init__(self, cpu_time_limit: int = 60, memory_limit_mb: int = 1024,
-                 allowed_paths: Optional[List[str]] = None,
-                 sandbox_agent_workspace: Optional[str] = None,
-                 volume_mounts: Optional[List[VolumeMount]] = None,
-                 linux_isolation_mode: str = 'auto',
-                 macos_isolation_mode: str = 'seatbelt'):
-        logger.debug(f"初始化沙箱 Sandbox")
+    def __init__(
+        self,
+        cpu_time_limit: int = 60,
+        memory_limit_mb: int = 1024,
+        allowed_paths: Optional[List[str]] = None,
+        sandbox_agent_workspace: Optional[str] = None,
+        volume_mounts: Optional[List[VolumeMount]] = None,
+        linux_isolation_mode: str = "auto",
+        macos_isolation_mode: str = "seatbelt",
+    ):
+        logger.debug("初始化沙箱 Sandbox")
         logger.debug(f"  平台: {sys.platform}")
         logger.debug(f"  sandbox_agent_workspace: {sandbox_agent_workspace}")
         logger.debug(f"  volume_mounts: {len(volume_mounts) if volume_mounts else 0}")
@@ -76,7 +84,7 @@ class Sandbox:
         self.linux_isolation_mode = self._resolve_linux_mode(linux_isolation_mode)
         self.macos_isolation_mode = macos_isolation_mode
 
-        if sys.platform == 'darwin':
+        if sys.platform == "darwin":
             self.isolation_mode = self.macos_isolation_mode
         else:
             self.isolation_mode = self.linux_isolation_mode
@@ -84,9 +92,11 @@ class Sandbox:
         logger.debug(f"  隔离模式: {self.isolation_mode}")
 
         self.limits = {
-            'cpu_time': cpu_time_limit,
-            'memory': memory_limit_mb * 1024 * 1024,
-            'allowed_paths': list(set((allowed_paths or []) + self.DEFAULT_ALLOWED_PATHS))
+            "cpu_time": cpu_time_limit,
+            "memory": memory_limit_mb * 1024 * 1024,
+            "allowed_paths": list(
+                set((allowed_paths or []) + self.DEFAULT_ALLOWED_PATHS)
+            ),
         }
 
         # workspace 配置
@@ -102,7 +112,7 @@ class Sandbox:
         self._init_file_system()
         self._init_venv_and_isolation()
 
-        logger.debug(f"沙箱初始化完成")
+        logger.debug("沙箱初始化完成")
 
     def _init_file_system(self):
         """初始化文件系统，使用 volume_mounts"""
@@ -115,10 +125,12 @@ class Sandbox:
             volume_mounts = self.volume_mounts
         elif self.sandbox_agent_workspace:
             # 如果没有 volume_mounts，使用 sandbox_agent_workspace 作为直通模式
-            volume_mounts = [VolumeMount(
-                host_path=self.sandbox_agent_workspace,
-                mount_path=self.sandbox_agent_workspace
-            )]
+            volume_mounts = [
+                VolumeMount(
+                    host_path=self.sandbox_agent_workspace,
+                    mount_path=self.sandbox_agent_workspace,
+                )
+            ]
         else:
             # 当前工作目录：宿主机与沙箱内使用同一绝对路径，不生成虚拟路径映射
             _cwd = os.path.abspath(".")
@@ -150,14 +162,14 @@ class Sandbox:
         self._init_isolation()
 
     def _resolve_linux_mode(self, mode: str) -> str:
-        if sys.platform == 'win32':
-             return 'subprocess'
-        if mode != 'auto':
+        if sys.platform == "win32":
+            return "subprocess"
+        if mode != "auto":
             return mode
-        result = os.system('which bwrap > /dev/null 2>&1')
+        result = os.system("which bwrap > /dev/null 2>&1")
         if result == 0:
-            return 'bwrap'
-        return 'subprocess'
+            return "bwrap"
+        return "subprocess"
 
     def _ensure_venv_async(self):
         """在后台异步创建虚拟环境，不阻塞初始化"""
@@ -168,13 +180,13 @@ class Sandbox:
             try:
                 import venv
 
-                lock_path = os.path.join(os.path.dirname(self.venv_dir), ".venv.lock")
+                lock_path = os.path.join(os.path.dirname(self.venv_dir), ".venv.lock")  # pyright: ignore[reportArgumentType,reportCallIssue]
                 with file_lock(lock_path):
-                    if os.path.exists(self.venv_dir):
+                    if os.path.exists(self.venv_dir):  # pyright: ignore[reportArgumentType]
                         return
 
                     logger.info(f"后台创建虚拟环境: {self.venv_dir}")
-                    os.makedirs(os.path.dirname(self.venv_dir), exist_ok=True)
+                    os.makedirs(os.path.dirname(self.venv_dir), exist_ok=True)  # pyright: ignore[reportArgumentType,reportCallIssue]
 
                     # 获取正确的 Python 解释器路径（处理 PyInstaller 打包环境）
                     system_python = get_system_python_path()
@@ -183,8 +195,8 @@ class Sandbox:
                         return
 
                     logger.info(f"使用 Python 解释器创建 venv: {system_python}")
-                    venv.create(self.venv_dir, with_pip=True, executable=system_python)
-                    self._ensure_uv_in_venv(self.venv_dir)
+                    venv.create(self.venv_dir, with_pip=True, executable=system_python)  # pyright: ignore[reportCallIssue]
+                    self._ensure_uv_in_venv(self.venv_dir)  # pyright: ignore[reportArgumentType]
                     logger.info(f"虚拟环境创建完成: {self.venv_dir}")
             except Exception as e:
                 logger.error(f"创建虚拟环境失败: {self.venv_dir}, 错误: {e}")
@@ -198,26 +210,43 @@ class Sandbox:
         """在 venv 内预装 uv（失败不阻塞）。"""
         if not venv_dir:
             return
-        venv_python = os.path.join(venv_dir, "Scripts", "python.exe") if sys.platform == "win32" else os.path.join(venv_dir, "bin", "python")
+        venv_python = (
+            os.path.join(venv_dir, "Scripts", "python.exe")
+            if sys.platform == "win32"
+            else os.path.join(venv_dir, "bin", "python")
+        )
         if not os.path.exists(venv_python):
             return
 
         install_cmd = [
-            venv_python, "-m", "pip", "install", "-U", "uv",
-            "--index-url", "https://mirrors.aliyun.com/pypi/simple/",
-            "--trusted-host", "mirrors.aliyun.com",
+            venv_python,
+            "-m",
+            "pip",
+            "install",
+            "-U",
+            "uv",
+            "--index-url",
+            "https://mirrors.aliyun.com/pypi/simple/",
+            "--trusted-host",
+            "mirrors.aliyun.com",
         ]
-        result = subprocess.run(install_cmd, capture_output=True, text=True, timeout=180)
+        result = subprocess.run(
+            install_cmd, capture_output=True, text=True, timeout=180
+        )
         if result.returncode == 0:
             logger.info(f"[Sandbox] uv 已安装到 venv: {venv_dir}")
             return
 
         fallback_cmd = [venv_python, "-m", "pip", "install", "-U", "uv"]
-        fallback_result = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=180)
+        fallback_result = subprocess.run(
+            fallback_cmd, capture_output=True, text=True, timeout=180
+        )
         if fallback_result.returncode == 0:
             logger.info(f"[Sandbox] uv 已安装到 venv（默认源）: {venv_dir}")
         else:
-            logger.warning(f"[Sandbox] 预装 uv 失败，不影响运行: {fallback_result.stderr}")
+            logger.warning(
+                f"[Sandbox] 预装 uv 失败，不影响运行: {fallback_result.stderr}"
+            )
 
     def _init_isolation(self):
         from .isolation import SubprocessIsolation, SeatbeltIsolation, BwrapIsolation
@@ -228,23 +257,23 @@ class Sandbox:
             self.isolation = None
             return
 
-        if self.isolation_mode == 'subprocess':
+        if self.isolation_mode == "subprocess":
             self.isolation = SubprocessIsolation(
-                venv_dir=self.venv_dir,
+                venv_dir=self.venv_dir,  # pyright: ignore[reportArgumentType]
                 sandbox_agent_workspace=self.sandbox_agent_workspace,
                 sandbox_runtime_dir=self.sandbox_dir,
                 limits=self.limits,
             )
-        elif self.isolation_mode == 'seatbelt':
+        elif self.isolation_mode == "seatbelt":
             self.isolation = SeatbeltIsolation(
-                venv_dir=self.venv_dir,
+                venv_dir=self.venv_dir,  # pyright: ignore[reportArgumentType]
                 sandbox_agent_workspace=self.sandbox_agent_workspace,
                 sandbox_runtime_dir=self.sandbox_dir,
                 limits=self.limits,
             )
-        elif self.isolation_mode == 'bwrap':
+        elif self.isolation_mode == "bwrap":
             self.isolation = BwrapIsolation(
-                venv_dir=self.venv_dir,
+                venv_dir=self.venv_dir,  # pyright: ignore[reportArgumentType]
                 sandbox_agent_workspace=self.sandbox_agent_workspace,
                 sandbox_runtime_dir=self.sandbox_dir,
                 limits=self.limits,
@@ -252,7 +281,7 @@ class Sandbox:
         else:
             logger.warning(f"未知的隔离模式: {self.isolation_mode}，使用 subprocess")
             self.isolation = SubprocessIsolation(
-                venv_dir=self.venv_dir,
+                venv_dir=self.venv_dir,  # pyright: ignore[reportArgumentType]
                 sandbox_agent_workspace=self.sandbox_agent_workspace,
                 sandbox_runtime_dir=self.sandbox_dir,
                 limits=self.limits,
@@ -263,10 +292,10 @@ class Sandbox:
     def get_venv_python(self) -> Optional[str]:
         """获取沙箱 venv 的 Python 路径"""
         if self.venv_dir:
-            if sys.platform == 'win32':
-                venv_python = os.path.join(self.venv_dir, 'Scripts', 'python.exe')
+            if sys.platform == "win32":
+                venv_python = os.path.join(self.venv_dir, "Scripts", "python.exe")
             else:
-                venv_python = os.path.join(self.venv_dir, 'bin', 'python')
+                venv_python = os.path.join(self.venv_dir, "bin", "python")
 
             if os.path.exists(venv_python):
                 return venv_python
@@ -287,27 +316,31 @@ class Sandbox:
         """从输出中更新 CWD"""
         return stdout
 
-    async def run_tool(self, tool_func: Callable, kwargs: Dict[str, Any], tool_obj: Any = None) -> Any:
+    async def run_tool(
+        self, tool_func: Callable, kwargs: Dict[str, Any], tool_obj: Any = None
+    ) -> Any:
         """
         运行工具函数（异步版本）。
         """
-        import asyncio
-        logger.debug(f"[Sandbox.run_tool] 开始执行")
+
+        logger.debug("[Sandbox.run_tool] 开始执行")
 
         # 如果没有 tool_func，返回错误
         if tool_func is None:
             raise SandboxError("未提供 tool_func")
 
         # 检查是否是 bound method
-        if hasattr(tool_func, '__self__'):
+        if hasattr(tool_func, "__self__"):
             func_to_call = tool_func
         else:
-            tool_class = getattr(tool_func, '__objclass__', None)
+            tool_class = getattr(tool_func, "__objclass__", None)
             if tool_class:
                 instance = tool_class()
                 func_to_call = tool_func.__get__(instance)
             else:
-                raise SandboxError("tool_func 无法调用，需要 bound method 或提供 tool_obj")
+                raise SandboxError(
+                    "tool_func 无法调用，需要 bound method 或提供 tool_obj"
+                )
 
         is_async = asyncio.iscoroutinefunction(func_to_call)
 
@@ -322,20 +355,22 @@ class Sandbox:
 
         return result
 
-    async def _run_with_venv(self, tool_func: Callable, kwargs: Dict[str, Any], is_async: bool = False) -> Any:
+    async def _run_with_venv(
+        self, tool_func: Callable, kwargs: Dict[str, Any], is_async: bool = False
+    ) -> Any:
         """在沙箱 venv 环境中执行工具函数（异步版本）"""
         import os as _os
         import sys as _sys
 
-        original_path = _os.environ.get('PATH', '')
+        original_path = _os.environ.get("PATH", "")
 
         try:
-            if _sys.platform == 'win32':
-                venv_bin = _os.path.join(self.venv_dir, 'Scripts')
+            if _sys.platform == "win32":
+                venv_bin = _os.path.join(self.venv_dir, "Scripts")
             else:
-                venv_bin = _os.path.join(self.venv_dir, 'bin')
+                venv_bin = _os.path.join(self.venv_dir, "bin")  # pyright: ignore[reportArgumentType,reportCallIssue]
 
-            _os.environ['PATH'] = venv_bin + _os.pathsep + original_path
+            _os.environ["PATH"] = venv_bin + _os.pathsep + original_path
 
             logger.info(f"[_run_with_venv] 使用 venv: {self.venv_dir}")
 
@@ -346,4 +381,4 @@ class Sandbox:
             return result
 
         finally:
-            _os.environ['PATH'] = original_path
+            _os.environ["PATH"] = original_path

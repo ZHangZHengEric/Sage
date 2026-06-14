@@ -27,6 +27,7 @@ PLAN_ALLOWED_TOOLS = {
     "execute_shell_command",
 }
 
+
 class PlanAgent(AgentBase):
     """
     执行前规划智能体。
@@ -44,15 +45,21 @@ class PlanAgent(AgentBase):
     SimpleAgent 大循环行为带偏。
     """
 
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
+    def __init__(
+        self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""
+    ):
         super().__init__(model, model_config, system_prefix)
         self.agent_name = "PlanAgent"
-        self.agent_description = "执行前规划智能体，负责调研、澄清、生成计划并确认是否执行"
+        self.agent_description = (
+            "执行前规划智能体，负责调研、澄清、生成计划并确认是否执行"
+        )
         self._active_session_context: Optional[SessionContext] = None
         self._questionnaire_tool_call_ids: Set[str] = set()
         self._should_judge_after_tool_calls = False
 
-    async def run_stream(self, session_context: SessionContext) -> AsyncGenerator[List[MessageChunk], None]:
+    async def run_stream(
+        self, session_context: SessionContext
+    ) -> AsyncGenerator[List[MessageChunk], None]:
         """
         PlanAgent 的主入口。
 
@@ -71,7 +78,9 @@ class PlanAgent(AgentBase):
         self._reset_runtime_state(session_context)
 
         if not original_tool_manager:
-            logger.warning("PlanAgent: tool_manager is not available, skip planning phase")
+            logger.warning(
+                "PlanAgent: tool_manager is not available, skip planning phase"
+            )
             return
 
         plan_tool_manager = self._build_plan_tool_proxy(original_tool_manager)
@@ -109,7 +118,7 @@ class PlanAgent(AgentBase):
                 assistant_content_parts: List[str] = []
 
                 async for llm_chunk in self._call_llm_streaming(
-                    messages=llm_messages,
+                    messages=llm_messages,  # pyright: ignore[reportArgumentType]
                     session_id=session_id,
                     step_name="plan_agent",
                     model_config_override={"tools": plan_tools} if plan_tools else {},
@@ -122,32 +131,43 @@ class PlanAgent(AgentBase):
 
                     if delta.tool_calls:
                         made_progress = True
-                        self._handle_tool_calls_chunk(llm_chunk, tool_calls, last_tool_call_id)
+                        self._handle_tool_calls_chunk(
+                            llm_chunk, tool_calls, last_tool_call_id
+                        )
                         for tool_call in delta.tool_calls:
                             if tool_call.id:
                                 last_tool_call_id = tool_call.id
 
                         # 根据环境变量控制是否流式返回工具调用消息
                         # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
-                        emit_on_complete = os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
+                        emit_on_complete = (
+                            os.environ.get(
+                                "SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false"
+                            ).lower()
+                            == "true"
+                        )
                         if not emit_on_complete:
                             # 流式返回工具调用消息
-                            output_messages = [MessageChunk(
-                                role=MessageRole.ASSISTANT.value,
-                                tool_calls=delta.tool_calls,
-                                message_id=tool_calls_messages_id,
-                                message_type=MessageType.TOOL_CALL.value,
-                                agent_name=self.agent_name
-                            )]
+                            output_messages = [
+                                MessageChunk(
+                                    role=MessageRole.ASSISTANT.value,
+                                    tool_calls=delta.tool_calls,
+                                    message_id=tool_calls_messages_id,
+                                    message_type=MessageType.TOOL_CALL.value,
+                                    agent_name=self.agent_name,
+                                )
+                            ]
                             yield output_messages
                         else:
                             # yield 一个空的消息块以避免生成器卡住
-                            output_messages = [MessageChunk(
-                                role=MessageRole.ASSISTANT.value,
-                                content="",
-                                message_id=content_response_message_id,
-                                message_type=MessageType.EMPTY.value
-                            )]
+                            output_messages = [
+                                MessageChunk(
+                                    role=MessageRole.ASSISTANT.value,
+                                    content="",
+                                    message_id=content_response_message_id,
+                                    message_type=MessageType.EMPTY.value,
+                                )
+                            ]
                             yield output_messages
 
                     if delta.content:
@@ -192,7 +212,9 @@ class PlanAgent(AgentBase):
                         )
                         session_context.audit_status["plan_status"] = judged_status
                         if judged_status == "continue_plan":
-                            logger.info("PlanAgent: judge requested continue_plan after tool calls, continue loop")
+                            logger.info(
+                                "PlanAgent: judge requested continue_plan after tool calls, continue loop"
+                            )
                             continue
                         break
 
@@ -207,7 +229,9 @@ class PlanAgent(AgentBase):
                 session_context.audit_status["plan_status"] = judged_status
 
                 if judged_status == "continue_plan":
-                    logger.info("PlanAgent: judge requested continue_plan, continue loop")
+                    logger.info(
+                        "PlanAgent: judge requested continue_plan, continue loop"
+                    )
                     continue
 
                 if not made_progress:
@@ -256,12 +280,14 @@ class PlanAgent(AgentBase):
                 from sagents.observability.agent_runtime import ObservableToolManager
 
                 return ObservableToolManager(
-                    tool_proxy,
+                    tool_proxy,  # pyright: ignore[reportArgumentType]
                     observable_wrapper.observability_manager,
                     observable_wrapper.session_id,
                 )
             except Exception as e:
-                logger.warning(f"PlanAgent: failed to restore observable tool wrapper: {e}")
+                logger.warning(
+                    f"PlanAgent: failed to restore observable tool wrapper: {e}"
+                )
                 return tool_proxy
 
         if not all(
@@ -302,7 +328,9 @@ class PlanAgent(AgentBase):
 
         return with_observability(ToolProxy(managers, sorted(allowed)))
 
-    def _build_planning_history(self, session_context: SessionContext) -> List[MessageChunk]:
+    def _build_planning_history(
+        self, session_context: SessionContext
+    ) -> List[MessageChunk]:
         """
         构造 planning 专用历史消息。
 
@@ -397,18 +425,26 @@ class PlanAgent(AgentBase):
             tool_name = tool_call.get("function", {}).get("name")
             block_reason = self._get_blocked_plan_tool_reason(tool_call)
             if block_reason:
-                blocked_chunks.append(self._build_blocked_tool_result(tool_call_id, tool_name, block_reason))
+                blocked_chunks.append(
+                    self._build_blocked_tool_result(
+                        tool_call_id, tool_name, block_reason
+                    )
+                )
                 del tool_calls[tool_call_id]
                 continue
 
             if tool_name in {"file_write", "file_update"}:
-                self._record_plan_document_path(arguments=self._parse_tool_arguments(tool_call))
+                self._record_plan_document_path(
+                    arguments=self._parse_tool_arguments(tool_call)
+                )
 
             if tool_name == "questionnaire":
                 arguments = self._parse_tool_arguments(tool_call)
                 if arguments.get("questionnaire_kind") == "plan_confirmation":
                     self._should_judge_after_tool_calls = True
-                updated_tool_call = self._with_unique_questionnaire_session_id(tool_call, session_id, tool_call_id)
+                updated_tool_call = self._with_unique_questionnaire_session_id(
+                    tool_call, session_id, tool_call_id
+                )
                 self._register_questionnaire_call(tool_call_id, updated_tool_call)
                 tool_calls[tool_call_id] = updated_tool_call
 
@@ -420,13 +456,15 @@ class PlanAgent(AgentBase):
 
         # 根据环境变量控制 emit_tool_call_message
         # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
-        emit_on_complete = os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
+        emit_on_complete = (
+            os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
+        )
         async for messages, _ in self._handle_tool_calls(
             tool_calls=tool_calls,
             tool_manager=tool_manager,
             messages_input=working_messages,
             session_id=session_id,
-            emit_tool_call_message=emit_on_complete
+            emit_tool_call_message=emit_on_complete,
         ):
             yield messages
 
@@ -499,15 +537,22 @@ class PlanAgent(AgentBase):
         if session_context is None:
             return
 
-        raw_path = str(arguments.get("file_path") or arguments.get("path") or "").strip()
+        raw_path = str(
+            arguments.get("file_path") or arguments.get("path") or ""
+        ).strip()
         if not raw_path or not self._is_plan_document_path(raw_path):
             return
 
         normalized_path = raw_path.replace("\\", "/")
         if not normalized_path.startswith("/"):
-            workspace = session_context.sandbox_agent_workspace or session_context.system_context.get("private_workspace")
+            workspace = (
+                session_context.sandbox_agent_workspace
+                or session_context.system_context.get("private_workspace")
+            )
             if workspace:
-                normalized_path = posixpath.normpath(posixpath.join(str(workspace).replace("\\", "/"), normalized_path))
+                normalized_path = posixpath.normpath(
+                    posixpath.join(str(workspace).replace("\\", "/"), normalized_path)
+                )
 
         session_context.system_context["plan_document_path"] = normalized_path
         session_context.system_context["plan_document_instruction"] = (
@@ -519,7 +564,10 @@ class PlanAgent(AgentBase):
         if not command.strip():
             return False
 
-        if re.search(r"(^|[\s;&|])(?:mkdir|touch|rm|rmdir|mv|cp|chmod|chown|install|npm|pnpm|yarn|pip|python|python3|node|uv|cargo|go|make)\b", command):
+        if re.search(
+            r"(^|[\s;&|])(?:mkdir|touch|rm|rmdir|mv|cp|chmod|chown|install|npm|pnpm|yarn|pip|python|python3|node|uv|cargo|go|make)\b",
+            command,
+        ):
             return False
         if re.search(r">|>>|\btee\b|\bsed\s+-i\b", command):
             return False
@@ -532,11 +580,31 @@ class PlanAgent(AgentBase):
             return False
 
         executable = tokens[0]
-        readonly_commands = {"ls", "pwd", "find", "rg", "grep", "cat", "sed", "head", "tail", "wc", "tree"}
+        readonly_commands = {
+            "ls",
+            "pwd",
+            "find",
+            "rg",
+            "grep",
+            "cat",
+            "sed",
+            "head",
+            "tail",
+            "wc",
+            "tree",
+        }
         if executable in readonly_commands:
             return True
         if executable == "git":
-            return len(tokens) >= 2 and tokens[1] in {"status", "log", "diff", "show", "branch", "ls-files", "grep"}
+            return len(tokens) >= 2 and tokens[1] in {
+                "status",
+                "log",
+                "diff",
+                "show",
+                "branch",
+                "ls-files",
+                "grep",
+            }
         return False
 
     def _with_unique_questionnaire_session_id(
@@ -555,11 +623,16 @@ class PlanAgent(AgentBase):
         try:
             arguments = json.loads(arguments_raw)
         except Exception:
-            logger.warning("PlanAgent: failed to parse questionnaire arguments for unique session id")
+            logger.warning(
+                "PlanAgent: failed to parse questionnaire arguments for unique session id"
+            )
             return tool_call
 
         current_questionnaire_id = arguments.get("questionnaire_id")
-        if isinstance(current_questionnaire_id, str) and current_questionnaire_id.strip():
+        if (
+            isinstance(current_questionnaire_id, str)
+            and current_questionnaire_id.strip()
+        ):
             return cloned_tool_call
 
         arguments["questionnaire_id"] = f"{session_id}__questionnaire__{tool_call_id}"
@@ -567,7 +640,9 @@ class PlanAgent(AgentBase):
         cloned_tool_call["function"] = function_payload
         return cloned_tool_call
 
-    def process_tool_response(self, tool_response: str, tool_call_id: str) -> List[MessageChunk]:
+    def process_tool_response(
+        self, tool_response: str, tool_call_id: str
+    ) -> List[MessageChunk]:
         """
         在标准工具结果处理基础上，把 questionnaire 的结果标记回 planning 历史。
         """
@@ -581,7 +656,9 @@ class PlanAgent(AgentBase):
 
         return chunks
 
-    def _register_questionnaire_call(self, tool_call_id: str, tool_call: Dict[str, Any]) -> None:
+    def _register_questionnaire_call(
+        self, tool_call_id: str, tool_call: Dict[str, Any]
+    ) -> None:
         """
         识别 questionnaire 调用，确保工具结果能回到 planning 历史里。
         """
@@ -617,8 +694,12 @@ class PlanAgent(AgentBase):
         active_budget = 3000
         if budget_info:
             active_budget = min(budget_info.get("active_budget", 3000), 3000)
-        messages_for_judge = MessageManager.compress_messages(messages_for_judge, active_budget)
-        clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_for_judge)
+        messages_for_judge = MessageManager.compress_messages(
+            messages_for_judge, active_budget
+        )
+        clean_messages = MessageManager.convert_messages_to_dict_for_request(
+            messages_for_judge
+        )
 
         system_msg = await self.prepare_unified_system_message(
             session_context.session_id,
@@ -639,7 +720,10 @@ class PlanAgent(AgentBase):
             messages=json.dumps(clean_messages, ensure_ascii=False, indent=2),
         )
         response = self._call_llm_streaming(
-            messages=cast(List[Union[MessageChunk, Dict[str, Any]]], [{"role": "user", "content": prompt}]),
+            messages=cast(
+                List[Union[MessageChunk, Dict[str, Any]]],
+                [{"role": "user", "content": prompt}],
+            ),
             session_id=session_context.session_id,
             step_name="plan_status_judge",
         )
@@ -660,6 +744,10 @@ class PlanAgent(AgentBase):
         except json.JSONDecodeError:
             logger.warning("PlanAgent: 解析 plan status judge 响应时 JSON 解码错误")
 
-        if tool_manager and working_messages and working_messages[-1].role == MessageRole.TOOL.value:
+        if (
+            tool_manager
+            and working_messages
+            and working_messages[-1].role == MessageRole.TOOL.value
+        ):
             return "continue_plan"
         return "pause"

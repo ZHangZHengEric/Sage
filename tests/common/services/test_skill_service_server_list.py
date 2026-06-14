@@ -38,7 +38,9 @@ def test_collect_server_skills_reads_metadata_without_file_tree(tmp_path, monkey
     skill_service._invalidate_server_skills_cache()
 
     _write_skill(Path(cfg.skill_dir), "system-dir", "system-skill", "System skill")
-    _write_skill(Path(cfg.user_dir) / "user-a" / "skills", "user-dir", "user-skill", "User skill")
+    _write_skill(
+        Path(cfg.user_dir) / "user-a" / "skills", "user-dir", "user-skill", "User skill"
+    )
     _write_skill(
         Path(cfg.agents_dir) / "user-a" / "agent-a" / "skills",
         "agent-dir",
@@ -48,7 +50,11 @@ def test_collect_server_skills_reads_metadata_without_file_tree(tmp_path, monkey
 
     skills = skill_service._collect_server_skills()
 
-    assert {skill.name for skill in skills} == {"system-skill", "user-skill", "agent-skill"}
+    assert {skill.name for skill in skills} == {
+        "system-skill",
+        "user-skill",
+        "agent-skill",
+    }
     assert all(skill.file_list == "" for skill in skills)
 
 

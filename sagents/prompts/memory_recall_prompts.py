@@ -3,6 +3,7 @@ Memory Recall Agent Prompts
 
 专门用于记忆召回 Agent 的提示模板。
 """
+
 AGENT_IDENTIFIER = "MemoryRecallAgent"
 
 # 记忆召回主模板
@@ -40,7 +41,6 @@ memory_recall_template = {
 
 不要包含任何解释或额外文本，只返回搜索查询。
 """,
-
     "en": """
 Based on the user conversation history, generate a precise search query to recall the most relevant file memories from the workspace.
 
@@ -74,7 +74,6 @@ Format 2 - JSON:
 
 Do not include any explanations or additional text, only return the search query.
 """,
-
     "pt": """
 Com base no histórico de conversas do usuário, gere uma consulta de pesquisa precisa para recuperar as memórias de arquivo mais relevantes do espaço de trabalho.
 
@@ -107,7 +106,7 @@ Formato 2 - JSON:
 ```
 
 Não inclua nenhuma explicação ou texto adicional, retorne apenas a consulta de pesquisa.
-"""
+""",
 }
 
 # 记忆召回系统提示
@@ -119,7 +118,6 @@ memory_recall_system_prefix = {
 4. 帮助用户快速找到工作空间中的相关代码和文档
 
 请始终保持专业、准确，并优先考虑召回结果的相关性。""",
-
     "en": """You are Sage AI's memory recall expert. Your responsibilities are:
 1. Deeply understand user needs and conversation context
 2. Extract key concepts, technical terms, and keywords
@@ -127,14 +125,13 @@ memory_recall_system_prefix = {
 4. Help users quickly find relevant code and documents in their workspace
 
 Please always remain professional, accurate, and prioritize the relevance of recall results.""",
-
     "pt": """Você é o especialista em recuperação de memória do Sage AI. Suas responsabilidades são:
 1. Compreender profundamente as necessidades do usuário e o contexto da conversa
 2. Extrair conceitos-chave, termos técnicos e palavras-chave
 3. Gerar consultas de pesquisa precisas para recuperar as memórias de arquivo mais relevantes
 4. Ajudar os usuários a encontrar rapidamente código e documentos relevantes em seu espaço de trabalho
 
-Por favor, mantenha-se sempre profissional, preciso e priorize a relevância dos resultados de recuperação."""
+Por favor, mantenha-se sempre profissional, preciso e priorize a relevância dos resultados de recuperação.""",
 }
 
 # 记忆召回结果解释模板
@@ -144,16 +141,14 @@ memory_recall_result_template = {
 {memory_list}
 
 这些记忆可能对您当前的任务有帮助。""",
-
     "en": """Based on your request, I have recalled {count} relevant memories from the workspace:
 
 {memory_list}
 
 These memories may be helpful for your current task.""",
-
     "pt": """Com base na sua solicitação, recuperei {count} memórias relevantes do espaço de trabalho:
 
 {memory_list}
 
-Essas memórias podem ser úteis para sua tarefa atual."""
+Essas memórias podem ser úteis para sua tarefa atual.""",
 }

@@ -30,22 +30,27 @@ def _load_self_check_agent(monkeypatch):
 
     class MessageType:
         OBSERVATION = _EnumValue("observation")
+        AGENT_EXECUTION_ERROR = _EnumValue("agent_execution_error")
 
     class MessageChunk:
         def __init__(self, **kwargs):
             self.__dict__.update(kwargs)
 
-    message_module.MessageChunk = MessageChunk
-    message_module.MessageRole = MessageRole
-    message_module.MessageType = MessageType
+    message_module.MessageChunk = MessageChunk  # pyright: ignore[reportAttributeAccessIssue]
+    message_module.MessageRole = MessageRole  # pyright: ignore[reportAttributeAccessIssue]
+    message_module.MessageType = MessageType  # pyright: ignore[reportAttributeAccessIssue]
     monkeypatch.setitem(sys.modules, "sagents.context.messages.message", message_module)
 
     session_context_module = types.ModuleType("sagents.context.session_context")
-    session_context_module.SessionContext = object
-    monkeypatch.setitem(sys.modules, "sagents.context.session_context", session_context_module)
+    session_context_module.SessionContext = object  # pyright: ignore[reportAttributeAccessIssue]
+    monkeypatch.setitem(
+        sys.modules, "sagents.context.session_context", session_context_module
+    )
 
     logger_module = types.ModuleType("sagents.utils.logger")
-    logger_module.logger = SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+    logger_module.logger = SimpleNamespace(  # pyright: ignore[reportAttributeAccessIssue]
+        info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None
+    )
     monkeypatch.setitem(sys.modules, "sagents.utils.logger", logger_module)
 
     agent_base_module = types.ModuleType("sagents.agent.agent_base")
@@ -57,16 +62,18 @@ def _load_self_check_agent(monkeypatch):
         def _should_abort_due_to_session(self, session_context):
             return False
 
-    agent_base_module.AgentBase = AgentBase
+    agent_base_module.AgentBase = AgentBase  # pyright: ignore[reportAttributeAccessIssue]
     monkeypatch.setitem(sys.modules, "sagents.agent.agent_base", agent_base_module)
 
     repo_root = Path(__file__).resolve().parent.parent.parent
     module_path = repo_root / "sagents" / "agent" / "self_check_agent.py"
-    spec = importlib.util.spec_from_file_location("sagents.agent.self_check_agent", module_path)
-    module = importlib.util.module_from_spec(spec)
+    spec = importlib.util.spec_from_file_location(
+        "sagents.agent.self_check_agent", module_path
+    )
+    module = importlib.util.module_from_spec(spec)  # pyright: ignore[reportArgumentType]
     monkeypatch.setitem(sys.modules, "sagents.agent.self_check_agent", module)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
+    assert spec.loader is not None  # pyright: ignore[reportOptionalMemberAccess]
+    spec.loader.exec_module(module)  # pyright: ignore[reportOptionalMemberAccess]
     return module.SelfCheckAgent
 
 
@@ -131,6 +138,7 @@ def test_non_absolute_markdown_link_returns_guidance(monkeypatch):
     assert session_context.audit_status["self_check_passed"] is False
     assert "必须使用绝对路径 Markdown 链接" in chunks[0].content
     assert "`README.md`" in chunks[0].content
+    assert chunks[0].message_type == "agent_execution_error"
 
 
 def test_absolute_markdown_link_checks_file_existence(monkeypatch):
@@ -147,7 +155,9 @@ def test_absolute_markdown_link_checks_file_existence(monkeypatch):
         message_manager=SimpleNamespace(
             messages=[
                 _make_message("user", "请生成结果"),
-                _make_message("assistant", "[README.md](file:///tmp/project/README.md)"),
+                _make_message(
+                    "assistant", "[README.md](file:///tmp/project/README.md)"
+                ),
             ]
         ),
     )
@@ -162,3 +172,96 @@ def test_absolute_markdown_link_checks_file_existence(monkeypatch):
 
     assert session_context.audit_status["self_check_passed"] is False
     assert "文件不存在: /tmp/project/README.md" in chunks[0].content
+    assert chunks[0].message_type == "agent_execution_error"
+
+
+def test_absolute_markdown_link_outside_workspace_is_execution_error(
+    monkeypatch, tmp_path
+):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    workspace = tmp_path / "agents" / "user_1" / "agent_1"
+    outside = tmp_path / "agents" / "user_1" / "reports" / "out.md"
+
+    class DummySandbox:
+        def is_path_allowed(self, path, operation="read"):
+            return str(path).startswith(str(workspace))
+
+        async def file_exists(self, path):
+            return True
+
+        async def read_file(self, path, encoding="utf-8"):
+            return ""
+
+    session_context = SimpleNamespace(
+        audit_status={},
+        sandbox=DummySandbox(),
+        sandbox_agent_workspace=str(workspace),
+        system_context={"private_workspace": str(workspace)},
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "请生成结果"),
+                _make_message("assistant", f"[out.md](file://{outside})"),
+            ]
+        ),
+    )
+
+    async def collect():
+        chunks = []
+        async for batch in agent.run_stream(session_context):
+            chunks.extend(batch)
+        return chunks
+
+    chunks = asyncio.run(collect())
+
+    assert session_context.audit_status["self_check_passed"] is False
+    assert "文件路径超出可访问工作区" in chunks[0].content
+    assert str(outside) in chunks[0].content
+    assert chunks[0].message_type == "agent_execution_error"
+
+
+def test_broad_sandbox_permission_is_authoritative(monkeypatch, tmp_path):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    user_root = tmp_path / "agents" / "user_1"
+    workspace = user_root / "agent_1"
+    outside = user_root / "data" / "out.md"
+    outside.parent.mkdir(parents=True)
+    outside.write_text("ok", encoding="utf-8")
+
+    class BroadSandbox:
+        def is_path_allowed(self, path, operation="read"):
+            return str(path).startswith(str(user_root))
+
+        async def file_exists(self, path):
+            return True
+
+        async def read_file(self, path, encoding="utf-8"):
+            return ""
+
+    session_context = SimpleNamespace(
+        audit_status={},
+        sandbox=BroadSandbox(),
+        sandbox_agent_workspace=str(workspace),
+        system_context={"private_workspace": str(workspace)},
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "请生成结果"),
+                _make_message("assistant", f"[out.md](file://{outside})"),
+            ]
+        ),
+    )
+
+    async def collect():
+        chunks = []
+        async for batch in agent.run_stream(session_context):
+            chunks.extend(batch)
+        return chunks
+
+    chunks = asyncio.run(collect())
+
+    assert chunks == []
+    assert session_context.audit_status["self_check_passed"] is True
+    assert session_context.audit_status["self_check_checked_files"] == [str(outside)]

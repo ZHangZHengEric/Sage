@@ -14,7 +14,7 @@ if "rank_bm25" not in sys.modules:
         def get_scores(self, query_tokens):
             return [1.0 for _ in self.corpus]
 
-    fake_rank_bm25.BM25Okapi = _FakeBM25Okapi
+    fake_rank_bm25.BM25Okapi = _FakeBM25Okapi  # pyright: ignore[reportAttributeAccessIssue]
     sys.modules["rank_bm25"] = fake_rank_bm25
 
 
@@ -67,10 +67,10 @@ class TestSessionMemoryManager(unittest.TestCase):
 
     def test_manager_delegates_to_backend(self):
         backend = _FakeBackend()
-        manager = SessionMemoryManager(backend=backend)
+        manager = SessionMemoryManager(backend=backend)  # pyright: ignore[reportArgumentType]
 
-        history = manager.retrieve_history_messages(["m1"], "query", 200)
-        chats = manager.retrieve_group_messages_by_chat(["m1"], "query", 300)
+        history = manager.retrieve_history_messages(["m1"], "query", 200)  # pyright: ignore[reportArgumentType]
+        chats = manager.retrieve_group_messages_by_chat(["m1"], "query", 300)  # pyright: ignore[reportArgumentType]
 
         self.assertEqual(history, ["message-result"])
         self.assertEqual(chats, ["chat-result"])
@@ -84,7 +84,7 @@ class TestSessionMemoryManager(unittest.TestCase):
 
     def test_manager_clear_cache_forwards_to_backend(self):
         backend = _FakeBackend()
-        manager = SessionMemoryManager(backend=backend)
+        manager = SessionMemoryManager(backend=backend)  # pyright: ignore[reportArgumentType]
 
         manager.clear_cache()
 
@@ -92,9 +92,9 @@ class TestSessionMemoryManager(unittest.TestCase):
 
     def test_manager_retrieve_supports_grouped_chat_strategy(self):
         backend = _FakeBackend()
-        manager = SessionMemoryManager(backend=backend)
+        manager = SessionMemoryManager(backend=backend)  # pyright: ignore[reportArgumentType]
 
-        result = manager.retrieve(["m1"], "query", 200, strategy="grouped_chat")
+        result = manager.retrieve(["m1"], "query", 200, strategy="grouped_chat")  # pyright: ignore[reportArgumentType]
 
         self.assertEqual(result, ["chat-result"])
         self.assertEqual(backend.calls, [("chat", ["m1"], "query", 200)])
@@ -119,7 +119,9 @@ class TestSessionMemoryManager(unittest.TestCase):
         self.assertIsInstance(manager.backend, NoopSessionMemoryBackend)
 
     def test_factory_supports_legacy_agent_config_key(self):
-        manager = create_session_memory_manager(agent_config={"session_memory_backend": "noop"})
+        manager = create_session_memory_manager(
+            agent_config={"session_memory_backend": "noop"}
+        )
         self.assertIsInstance(manager.backend, NoopSessionMemoryBackend)
 
     def test_resolve_backend_name_prefers_explicit_argument(self):
@@ -132,7 +134,9 @@ class TestSessionMemoryManager(unittest.TestCase):
     def test_resolve_strategy_prefers_agent_config_then_env(self):
         with patch.dict("os.environ", {"SAGE_SESSION_MEMORY_STRATEGY": "messages"}):
             resolved = resolve_session_memory_strategy(
-                agent_config={"memory_backends": {"session_history_strategy": "grouped_chat"}}
+                agent_config={
+                    "memory_backends": {"session_history_strategy": "grouped_chat"}
+                }
             )
         self.assertEqual(resolved, "grouped_chat")
 
@@ -144,7 +148,9 @@ class TestSessionMemoryManager(unittest.TestCase):
 
     def test_resolve_strategy_rejects_unknown_strategy(self):
         with self.assertRaisesRegex(ValueError, "Unsupported session memory strategy"):
-            resolve_session_memory_strategy(agent_config={"session_memory_strategy": "unknown"})
+            resolve_session_memory_strategy(
+                agent_config={"session_memory_strategy": "unknown"}
+            )
 
     def test_factory_rejects_unknown_backend(self):
         with self.assertRaisesRegex(ValueError, "Unsupported session memory backend"):
@@ -154,11 +160,11 @@ class TestSessionMemoryManager(unittest.TestCase):
         backend = Bm25SessionMemoryBackend()
         messages = [_FakeMessage("m1", "user", "hello world")]
 
-        backend.retrieve_history_messages(messages, "hello", 200)
+        backend.retrieve_history_messages(messages, "hello", 200)  # pyright: ignore[reportArgumentType]
         self.assertIsNotNone(backend._message_bm25_cache_key)
         self.assertIsNotNone(backend._message_bm25_cache)
 
-        backend.retrieve_group_messages_by_chat(messages, "hello", 200)
+        backend.retrieve_group_messages_by_chat(messages, "hello", 200)  # pyright: ignore[reportArgumentType]
         self.assertIsNotNone(backend._chat_bm25_cache_key)
         self.assertIsNotNone(backend._chat_bm25_cache)
 

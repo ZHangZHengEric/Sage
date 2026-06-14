@@ -3,6 +3,149 @@ import sys
 import uuid
 from typing import Any, Callable, Dict, Optional
 
+GOAL_STATUS_ACTIVE = "active"
+GOAL_STATUS_COMPLETED = "completed"
+
+
+def _current_goal_payload(
+    session_summary: Optional[Dict[str, Any]], args: argparse.Namespace
+) -> Optional[Dict[str, Any]]:
+    if getattr(args, "clear_goal", False):
+        return None
+    if getattr(args, "goal_objective", None):
+        return {
+            "objective": args.goal_objective,
+            "status": getattr(args, "goal_status", None) or GOAL_STATUS_ACTIVE,
+        }
+    if session_summary:
+        raw_goal = session_summary.get("goal")
+        if isinstance(raw_goal, dict) and raw_goal.get("objective"):
+            payload = dict(raw_goal)
+            if getattr(args, "goal_status", None):
+                payload["status"] = args.goal_status
+            return payload
+    return None
+
+
+def _print_goal_status(
+    session_summary: Optional[Dict[str, Any]], args: argparse.Namespace
+) -> None:
+    goal = _current_goal_payload(session_summary, args)
+    if not goal:
+        print("goal: (none)")
+        return
+    print(f"goal: {goal.get('objective')}")
+    print(f"goal_status: {goal.get('status') or GOAL_STATUS_ACTIVE}")
+
+
+def _print_resume_goal_hint(session_summary: Optional[Dict[str, Any]]) -> None:
+    if not isinstance(session_summary, dict):
+        return
+    raw_goal = session_summary.get("goal")
+    if not isinstance(raw_goal, dict):
+        return
+    objective = str(raw_goal.get("objective") or "").strip()
+    if not objective:
+        return
+    status = (
+        str(raw_goal.get("status") or GOAL_STATUS_ACTIVE).strip() or GOAL_STATUS_ACTIVE
+    )
+    print(f"continuing goal: {objective} ({status})")
+
+
+def _handle_goal_command(
+    prompt: str, args: argparse.Namespace, session_summary: Optional[Dict[str, Any]]
+) -> Optional[str]:
+    parts = prompt.split(maxsplit=2)
+    if len(parts) == 1 or (len(parts) == 2 and parts[1] == "show"):
+        _print_goal_status(session_summary, args)
+        return None
+    if len(parts) >= 3 and parts[1] == "set":
+        objective = parts[2].strip()
+        if not objective:
+            print(
+                "Usage: /goal | /goal <objective> | /goal show | /goal set <objective> | /goal clear | /goal done"
+            )
+            return None
+        args.goal_objective = objective
+        args.goal_status = GOAL_STATUS_ACTIVE
+        args.clear_goal = False
+        print(f"goal set: {objective}")
+        return None
+    if len(parts) >= 2 and parts[1] not in {"show", "clear", "done"}:
+        objective = prompt[len("/goal") :].strip()
+        if not objective:
+            print(
+                "Usage: /goal | /goal <objective> | /goal show | /goal set <objective> | /goal clear | /goal done"
+            )
+            return None
+        args.goal_objective = objective
+        args.goal_status = GOAL_STATUS_ACTIVE
+        args.clear_goal = False
+        print(f"goal set: {objective}")
+        return objective
+    if len(parts) == 2 and parts[1] == "clear":
+        args.goal_objective = None
+        args.goal_status = None
+        args.clear_goal = True
+        print("goal clear queued")
+        return None
+    if len(parts) == 2 and parts[1] == "done":
+        if getattr(args, "goal_objective", None) and not (
+            session_summary
+            and isinstance(session_summary.get("goal"), dict)
+            and session_summary["goal"].get("objective")
+        ):
+            print("goal is queued and will exist after the next request")
+            return None
+        goal = _current_goal_payload(session_summary, args)
+        if not goal:
+            print("no active goal")
+            return None
+        args.goal_objective = None
+        args.goal_status = GOAL_STATUS_COMPLETED
+        args.clear_goal = False
+        print(f"goal marked complete: {goal.get('objective')}")
+        return None
+
+    print(
+        "Usage: /goal | /goal <objective> | /goal show | /goal set <objective> | /goal clear | /goal done"
+    )
+    return None
+
+
+def _apply_goal_mutation_to_summary(
+    session_summary: Optional[Dict[str, Any]], args: argparse.Namespace
+) -> Optional[Dict[str, Any]]:
+    if session_summary is None:
+        session_summary = {}
+
+    if getattr(args, "clear_goal", False):
+        session_summary["goal"] = None
+        return session_summary
+
+    if getattr(args, "goal_objective", None):
+        session_summary["goal"] = {
+            "objective": args.goal_objective,
+            "status": getattr(args, "goal_status", None) or GOAL_STATUS_ACTIVE,
+        }
+        return session_summary
+
+    if getattr(args, "goal_status", None):
+        raw_goal = session_summary.get("goal")
+        if isinstance(raw_goal, dict) and raw_goal.get("objective"):
+            session_summary["goal"] = {
+                **raw_goal,
+                "status": args.goal_status,
+            }
+    return session_summary
+
+
+def _clear_pending_goal_mutation(args: argparse.Namespace) -> None:
+    args.goal_objective = None
+    args.goal_status = None
+    args.clear_goal = False
+
 
 def _prepare_agent_config(args: argparse.Namespace) -> Dict[str, Any]:
     from app.cli.service import (
@@ -40,6 +183,16 @@ async def build_request(args: argparse.Namespace, task: str):
         workspace=args.workspace,
     )
 
+    goal = None
+    if getattr(args, "clear_goal", False):
+        goal = {"clear": True}
+    elif getattr(args, "goal_objective", None) or getattr(args, "goal_status", None):
+        goal = {
+            "objective": getattr(args, "goal_objective", None),
+            "status": getattr(args, "goal_status", None) or GOAL_STATUS_ACTIVE,
+            "clear": False,
+        }
+
     return build_run_request(
         task=task,
         session_id=args.session_id,
@@ -49,6 +202,7 @@ async def build_request(args: argparse.Namespace, task: str):
         available_skills=skills or None,
         max_loop_count=args.max_loop_count,
         agent_config=agent_config,
+        goal=goal,
     )
 
 
@@ -101,7 +255,6 @@ async def chat_command(
     chat_input_prompt: str,
 ) -> int:
     from app.cli.service import (
-        cli_db_runtime,
         cli_runtime,
         get_session_summary,
         validate_cli_request_options,
@@ -112,20 +265,10 @@ async def chat_command(
     session_summary: Optional[Dict[str, Any]] = None
     if not args.session_id:
         args.session_id = str(uuid.uuid4())
-    else:
-        async with cli_db_runtime(verbose=args.verbose):
-            session_summary = await get_session_summary(
-                session_id=args.session_id,
-                user_id=args.user_id,
-            )
-        if session_summary and not args.json:
-            print_session_summary_fn(session_summary, prefix="resume")
-            print()
 
     if not args.json:
         sys.stderr.write(
-            f"session_id: {args.session_id}\n"
-            "type /help for built-in commands\n"
+            f"session_id: {args.session_id}\ntype /help for built-in commands\n"
         )
         sys.stderr.flush()
 
@@ -137,9 +280,20 @@ async def chat_command(
     )
     try:
         async with cli_runtime(verbose=args.verbose):
+            if args.session_id:
+                session_summary = await get_session_summary(
+                    session_id=args.session_id,
+                    user_id=args.user_id,
+                )
+                if session_summary and not args.json:
+                    print_session_summary_fn(session_summary, prefix="resume")
+                    if command_mode == "resume":
+                        _print_resume_goal_hint(session_summary)
+                    print()
+
             while True:
                 try:
-                    prompt = read_chat_prompt_fn(chat_input_prompt)
+                    prompt = read_chat_prompt_fn("" if args.json else chat_input_prompt)
                     if prompt is None:
                         if not args.json:
                             sys.stdout.write("\n")
@@ -167,6 +321,11 @@ async def chat_command(
                 if prompt == "/session":
                     print(args.session_id)
                     continue
+                if prompt.startswith("/goal"):
+                    goal_task = _handle_goal_command(prompt, args, session_summary)
+                    if goal_task is None:
+                        continue
+                    prompt = goal_task
 
                 request = await build_request_fn(args, prompt)
                 stream_kwargs = {
@@ -182,6 +341,8 @@ async def chat_command(
                     args.stats,
                     **stream_kwargs,
                 )
+                session_summary = _apply_goal_mutation_to_summary(session_summary, args)
+                _clear_pending_goal_mutation(args)
     finally:
         emit_chat_exit_summary_fn(args.session_id, json_output=args.json)
     return 0

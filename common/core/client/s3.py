@@ -4,12 +4,15 @@ import asyncio
 import io
 import json
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from loguru import logger
 
 from common.core import config
 from common.core.exceptions import SageHTTPException
+
+if TYPE_CHECKING:
+    from minio import Minio
 
 S3_CLIENT: Optional["Minio"] = None
 

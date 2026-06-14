@@ -169,10 +169,13 @@ def get_oauth2_client_configs() -> list[dict[str, Any]]:
             )
 
         client_secret = str(raw.get("client_secret") or "").strip()
-        token_endpoint_auth_method = str(
-            raw.get("token_endpoint_auth_method")
-            or ("client_secret_basic" if client_secret else "none")
-        ).strip() or "none"
+        token_endpoint_auth_method = (
+            str(
+                raw.get("token_endpoint_auth_method")
+                or ("client_secret_basic" if client_secret else "none")
+            ).strip()
+            or "none"
+        )
 
         if token_endpoint_auth_method not in {
             "client_secret_basic",
@@ -310,7 +313,7 @@ def _normalize_code_challenge_method(value: Optional[str]) -> Optional[str]:
 
 
 async def build_authorization_context(
-    query_params: Mapping[str, Any]
+    query_params: Mapping[str, Any],
 ) -> AuthorizationRequestContext:
     response_type = str(query_params.get("response_type") or "").strip()
     if response_type != "code":
@@ -534,7 +537,10 @@ def _ensure_pkce_valid(
     if not code_verifier:
         raise OAuth2ProtocolError("invalid_request", "missing code_verifier")
     method = authorization_code.code_challenge_method or "plain"
-    if _pkce_challenge_from_verifier(code_verifier, method) != authorization_code.code_challenge:
+    if (
+        _pkce_challenge_from_verifier(code_verifier, method)
+        != authorization_code.code_challenge
+    ):
         raise OAuth2ProtocolError("invalid_grant", "code_verifier mismatch")
 
 
@@ -741,7 +747,9 @@ async def authenticate_access_token(
     access_token = _extract_bearer_token(request.headers.get("Authorization") or "")
     token = await OAuth2TokenDao().get_by_access_token(access_token)
     if not token:
-        raise OAuth2ProtocolError("invalid_token", "access token not found", status_code=401)
+        raise OAuth2ProtocolError(
+            "invalid_token", "access token not found", status_code=401
+        )
 
     client = await get_oauth2_client(token.client_id)
     user = await UserDao().get_by_id(token.user_id)

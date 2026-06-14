@@ -17,9 +17,6 @@ COPY --link app/wiki/package.json app/wiki/package-lock.json ./
 RUN --mount=type=cache,id=sage-wiki-npm-cache,target=/root/.npm,sharing=locked \
     npm ci --prefer-offline
 
-ARG VITE_SAGE_API_BASE_URL
-ENV VITE_SAGE_API_BASE_URL=${VITE_SAGE_API_BASE_URL}
-
 # Copy the rest of the app after dependencies are installed to maximize cache reuse
 COPY --link app/wiki/ .
 
@@ -28,7 +25,7 @@ RUN npm run build
 # --- Runtime stage: serve static files with Nginx ---
 FROM docker.m.daocloud.io/nginx:1.27-alpine
 
-ARG NGINX_CONF=deploy/prod/nginx/nginx_wiki.conf
+ARG NGINX_CONF=deploy/nginx/nginx_wiki.conf
 COPY --link ${NGINX_CONF} /etc/nginx/conf.d/default.conf
 
 # Copy build output to Nginx html directory
@@ -37,4 +34,4 @@ COPY --link --from=builder /app/.vitepress/dist /usr/share/nginx/html
 EXPOSE 80
 
 # Simple healthcheck to ensure Nginx responds
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -qO- http://localhost/ || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -qO- http://127.0.0.1/ || exit 1

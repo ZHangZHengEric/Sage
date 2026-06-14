@@ -11,7 +11,7 @@ pub(crate) use commands::agent::{normalize_agent_config_value, normalize_agent_m
 pub(crate) use commands::sandbox::normalize_sandbox_type;
 pub(crate) use state::{
     ActiveSurfaceKind, ActiveToolRecord, AgentCandidate, AgentPopupMode, App,
-    FilteredSessionPicker, MessageKind, ProviderCandidate, ProviderPopupMode, SessionPickerEntry,
-    SessionPickerMode, SessionPickerState, SkillCandidate, SkillPopupMode, SubmitAction,
-    TranscriptOverlayState,
+    FilteredSessionPicker, MessageKind, PendingGoalMutation, ProviderCandidate, ProviderPopupMode,
+    SessionPickerEntry, SessionPickerMode, SessionPickerState, SkillCandidate, SkillPopupMode,
+    SubmitAction, TranscriptOverlayState,
 };

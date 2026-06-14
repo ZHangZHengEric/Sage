@@ -18,22 +18,25 @@ Elasticsearch 不再由这套 Kubernetes 清单内置部署。需要知识库检
 - 可用 Kubernetes 集群
 - `kubectl` 已配置到目标集群
 - 可用 Ingress Controller，默认按 nginx ingress 生成注解
-- 可用默认 StorageClass，或在目标环境 `.env` 中设置 `STORAGE_CLASS`
+- 可用默认 StorageClass，或在 `deploy/k8s/env/<env>.env` 中设置 `STORAGE_CLASS`
 - 本地或 CI 环境有 Docker，用于构建 Sage 自有镜像
 
 `sage-server` 沿用 compose 中的沙箱能力要求，Deployment 默认添加 `SYS_ADMIN` capability、unconfined seccomp 和 AppArmor 注解。若集群启用了严格 Pod Security Admission，需要为 `sage` namespace 配置例外，或改用远程沙箱配置。
 
 ## 配置
 
-复制目标环境的变量模板：
+复制目标环境的应用变量模板和 Kubernetes 变量模板：
 
 ```bash
 cp deploy/dev/.env.example deploy/dev/.env
+cp deploy/k8s/env/dev.env.example deploy/k8s/env/dev.env
 cp deploy/prod/.env.example deploy/prod/.env
+cp deploy/k8s/env/prod.env.example deploy/k8s/env/prod.env
 cp deploy/test/.env.example deploy/test/.env
+cp deploy/k8s/env/test.env.example deploy/k8s/env/test.env
 ```
 
-部署脚本默认读取 `deploy/prod/.env`。通过 `DEPLOY_ENV=dev|prod|test` 可切换环境，也可以用 `ENV_FILE=/path/to/.env` 显式指定配置文件。
+部署脚本默认读取 `deploy/prod/.env` 和 `deploy/k8s/env/prod.env`。通过 `DEPLOY_ENV=dev|prod|test` 可切换环境，也可以用 `ENV_FILE=/path/to/.env` 或 `K8S_ENV_FILE=/path/to/k8s.env` 显式指定配置文件。
 
 至少修改：
 
@@ -68,7 +71,7 @@ DEPLOY_ENV=prod deploy/k8s/scripts/deploy.sh
 
 - `server` / `web` / `wiki`: 先本地 `docker build`，再用 `docker save` 和 `ctr -n k8s.io images import` 导入 containerd。
 - `mysql` / `rustfs` / `jaeger`: 先用 `ctr -n k8s.io images pull` 拉取外部镜像，再部署。
-- 默认 `K8S_IMAGE_TARGET=ctr`、`CTR_NAMESPACE=k8s.io`，可通过 `.env` 或环境变量覆盖。
+- 默认 `K8S_IMAGE_TARGET=ctr`、`CTR_NAMESPACE=k8s.io`，可通过 `deploy/k8s/env/<env>.env` 或环境变量覆盖。
 - Sage 自有镜像固定显式打 `latest` tag，不通过 `.env` 或环境变量配置。
 - 脚本只支持 `ctr` / `containerd` / `cri` 导入，不会 `docker push`，也不会导入到 Docker Desktop、kind、minikube 或 k3d。
 - 未设置 `IMAGE_REGISTRY` 时，containerd 可能以规范名显示镜像，例如 `docker.io/library/sage-web:latest`；Kubernetes 中仍可使用 `sage-web:latest`。
@@ -190,4 +193,4 @@ kubectl -n "${NAMESPACE:-sage-dev}" get pods,svc
 
 - MySQL 数据库 `SAGE_MYSQL_DATABASE` 由应用启动逻辑自动创建。
 - MySQL、RustFS 和 Jaeger 的内部 Service 名称保持为 compose 中的服务名，应用配置无需改成 Kubernetes FQDN。
-- `sage-web` 镜像构建时会写入 `VITE_SAGE_WEB_BASE_PATH=/sage/`，并通过镜像内 nginx 将 `/prod-api/api` 和 `/jaeger` 代理到后端与 Jaeger。
+- `sage-web` 前端固定使用 `/sage/` 和 `/prod-api`，镜像不需要前端运行时环境变量。

@@ -33,7 +33,7 @@ async def initialize_system(cfg: StartupConfig):
 
     # 1. 优先初始化数据库和数据
     await _require_initialized("db connection", initialize_db_connection(cfg))
-    
+
     # 2. 初始化观测链路上报 (Initialize Observability - needs DB)
     await initialize_observability(cfg)
 
@@ -62,7 +62,9 @@ def post_initialize_task():
 
 async def _post_initialize():
     await validate_and_disable_mcp_servers()
-    create_safe_task(_ensure_default_anytool_server_ready(), name="ensure_default_anytool_server")
+    create_safe_task(
+        _ensure_default_anytool_server_ready(), name="ensure_default_anytool_server"
+    )
     await _start_task_scheduler()
 
 
@@ -76,13 +78,17 @@ async def _ensure_default_anytool_server_ready():
             logger.info("默认 AnyTool MCP server 已激活")
             return
         except Exception as exc:
-            logger.warning(f"默认 AnyTool MCP server 激活失败（第 {attempt + 1} 次）: {exc}")
+            logger.warning(
+                f"默认 AnyTool MCP server 激活失败（第 {attempt + 1} 次）: {exc}"
+            )
 
 
 async def _start_task_scheduler():
     try:
         await asyncio.sleep(5)
-        from mcp_servers.task_scheduler.task_scheduler_server import ensure_scheduler_started
+        from mcp_servers.task_scheduler.task_scheduler_server import (
+            ensure_scheduler_started,
+        )
 
         started = ensure_scheduler_started()
         logger.info(f"Sage：TaskScheduler {'已启动' if started else '已存在'}")

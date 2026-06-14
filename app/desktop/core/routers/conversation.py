@@ -2,7 +2,7 @@
 会话管理接口路由模块
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
@@ -24,13 +24,13 @@ class EditLastUserMessageRequest(BaseModel):
 
 
 class InjectUserMessageRequest(BaseModel):
-    content: str
+    content: str | list[dict[str, Any]]
     guidance_id: Optional[str] = None
     metadata: Optional[dict] = None
 
 
 @conversation_router.post("/api/sessions/{session_id}/interrupt")
-async def interrupt(session_id: str, request: Request, body: InterruptRequest = None):
+async def interrupt(session_id: str, request: Request, body: InterruptRequest = None):  # pyright: ignore[reportArgumentType]
     """中断指定会话"""
     result = await conversation_router_service.build_interrupt_response(
         session_id,
@@ -40,7 +40,9 @@ async def interrupt(session_id: str, request: Request, body: InterruptRequest = 
 
 
 @conversation_router.post("/api/sessions/{session_id}/inject-user-message")
-async def inject_user_message(session_id: str, request: Request, body: InjectUserMessageRequest):
+async def inject_user_message(
+    session_id: str, request: Request, body: InjectUserMessageRequest
+):
     """向运行中的会话注入一条引导用户消息（非阻塞）。"""
     result = conversation_router_service.build_inject_user_message_response(
         session_id,
@@ -53,7 +55,7 @@ async def inject_user_message(session_id: str, request: Request, body: InjectUse
 
 
 class UpdateInjectUserMessageRequest(BaseModel):
-    content: str
+    content: str | list[dict[str, Any]]
 
 
 @conversation_router.get("/api/sessions/{session_id}/inject-user-message")
@@ -66,7 +68,9 @@ async def list_pending_user_injections(session_id: str, request: Request):
     return await Response.succ(message=result["message"], data=result["data"])
 
 
-@conversation_router.patch("/api/sessions/{session_id}/inject-user-message/{guidance_id}")
+@conversation_router.patch(
+    "/api/sessions/{session_id}/inject-user-message/{guidance_id}"
+)
 async def update_pending_user_injection(
     session_id: str,
     guidance_id: str,
@@ -83,7 +87,9 @@ async def update_pending_user_injection(
     return await Response.succ(message=result["message"], data=result["data"])
 
 
-@conversation_router.delete("/api/sessions/{session_id}/inject-user-message/{guidance_id}")
+@conversation_router.delete(
+    "/api/sessions/{session_id}/inject-user-message/{guidance_id}"
+)
 async def delete_pending_user_injection(
     session_id: str,
     guidance_id: str,
@@ -112,7 +118,9 @@ async def list_conversations(
     page_size: int = Query(10, ge=1, le=100, description="每页数量，最大100"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     agent_id: Optional[str] = Query(None, description="Agent ID过滤"),
-    sort_by: Optional[str] = Query("date", description="排序方式: date, title, messages"),
+    sort_by: Optional[str] = Query(
+        "date", description="排序方式: date, title, messages"
+    ),
 ):
     user_id = get_desktop_user_id(request)
     result = await conversation_router_service.build_list_conversations_response(
@@ -134,7 +142,9 @@ async def get_messages(session_id: str, request: Request):
 
 
 @conversation_router.post("/api/conversations/{session_id}/edit-last-user-message")
-async def edit_last_user_message(session_id: str, request: Request, body: EditLastUserMessageRequest):
+async def edit_last_user_message(
+    session_id: str, request: Request, body: EditLastUserMessageRequest
+):
     data = await conversation_service.edit_last_user_message(
         session_id=session_id,
         content=body.content,

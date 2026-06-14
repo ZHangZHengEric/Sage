@@ -175,6 +175,7 @@
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="fibre">{{ t('agent.modeFibre') }}</SelectItem>
+                      <SelectItem value="team">{{ t('agent.modeTeam') }}</SelectItem>
                       <SelectItem value="simple">{{ t('agent.modeSimple') }}</SelectItem>
                     </SelectContent>
                   </Select>
@@ -308,7 +309,7 @@
           </section>
 
           <!-- Sub Agent Section -->
-          <section id="subAgents" class="scroll-mt-6" v-if="store.formData.agentMode === 'fibre'">
+          <section id="subAgents" class="scroll-mt-6" v-if="['fibre', 'team'].includes(store.formData.agentMode)">
             <div class="flex items-center gap-2 mb-5">
               <div class="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
                 <Bot class="h-4 w-4 text-primary" />
@@ -2069,7 +2070,7 @@ const sections = computed(() => {
   ]
   
   // 仅在Fibre模式下显示子智能体导航
-  if (store.formData.agentMode === 'fibre') {
+  if (['fibre', 'team'].includes(store.formData.agentMode)) {
     const subAgentSection = { id: 'subAgents', label: t('agentEdit.subAgents'), icon: Bot }
     // 在model之后插入subAgents
     const modelIndex = baseSections.findIndex(s => s.id === 'model')
@@ -2577,7 +2578,15 @@ const REQUIRED_TOOLS_FOR_SKILLS = [
 const REQUIRED_TOOLS_FOR_USER_MEMORY = ['search_memory']
 
 // Fibre 策略必需的工具
-const REQUIRED_TOOLS_FOR_FIBRE = ['sys_spawn_agent', 'sys_delegate_task', 'sys_finish_task']
+const REQUIRED_TOOLS_FOR_FIBRE = ['sys_spawn_agent', 'sys_delegate_task']
+const REQUIRED_TOOLS_FOR_TEAM = ['sys_team_delegate_task']
+const FIBRE_MODE_TOOLS = ['sys_spawn_agent', 'sys_delegate_task']
+const TEAM_MODE_TOOLS = ['sys_team_delegate_task']
+const MULTI_AGENT_SYSTEM_TOOLS = [
+  'sys_spawn_agent',
+  'sys_delegate_task',
+  'sys_team_delegate_task'
+]
 
 // IM 频道必需的工具
 const REQUIRED_TOOLS_FOR_IM = ['send_message_through_im', 'send_file_through_im', 'send_image_through_im']
@@ -2586,9 +2595,12 @@ const isBrowserToolOffline = (toolName) => {
   return isBrowserTool(toolName) && !browserToolsOnline.value
 }
 
-// Fibre 专属工具（智能体委派 / 创建 / 完成）只在 fibre 模式下可用
+// 多智能体系统工具按模式开放：Fibre 可创建，Team 只能委派已有成员
 const isFibreOnlyToolUnavailable = (toolName) => {
-  return REQUIRED_TOOLS_FOR_FIBRE.includes(toolName) && store.formData.agentMode !== 'fibre'
+  if (!MULTI_AGENT_SYSTEM_TOOLS.includes(toolName)) return false
+  if (store.formData.agentMode === 'fibre') return !FIBRE_MODE_TOOLS.includes(toolName)
+  if (store.formData.agentMode === 'team') return !TEAM_MODE_TOOLS.includes(toolName)
+  return true
 }
 
 const isRequiredTool = (toolName) => {
@@ -2612,6 +2624,9 @@ const isRequiredTool = (toolName) => {
   const agentMode = store.formData.agentMode
   if (agentMode === 'fibre' && REQUIRED_TOOLS_FOR_FIBRE.includes(toolName)) {
     return 'fibre'
+  }
+  if (agentMode === 'team' && REQUIRED_TOOLS_FOR_TEAM.includes(toolName)) {
+    return 'team'
   }
 
   // 检查是否是 IM 频道必需的工具（使用 imConfig.value 而不是 store.formData.im_channels）
@@ -2726,8 +2741,7 @@ watch(() => store.formData.memoryType, (newMemoryType) => {
   }
 })
 
-// 监听 Agent 模式变化：fibre 模式下自动加入这三个工具；切出 fibre 模式时立即移除，
-// 避免后端收到「fibre 专属工具」却不在 fibre 策略下，造成 agent 误调用
+// 监听 Agent 模式变化：Fibre 可创建/委派，Team 只能委派已有成员。
 watch(() => store.formData.agentMode, (newAgentMode) => {
   if (newAgentMode === 'fibre') {
     REQUIRED_TOOLS_FOR_FIBRE.forEach(toolName => {
@@ -2735,8 +2749,26 @@ watch(() => store.formData.agentMode, (newAgentMode) => {
         store.formData.availableTools.push(toolName)
       }
     })
+    MULTI_AGENT_SYSTEM_TOOLS
+      .filter(toolName => !FIBRE_MODE_TOOLS.includes(toolName))
+      .forEach(toolName => {
+        const index = store.formData.availableTools.indexOf(toolName)
+        if (index > -1) store.formData.availableTools.splice(index, 1)
+      })
+  } else if (newAgentMode === 'team') {
+    REQUIRED_TOOLS_FOR_TEAM.forEach(toolName => {
+      if (!store.formData.availableTools.includes(toolName)) {
+        store.formData.availableTools.push(toolName)
+      }
+    })
+    MULTI_AGENT_SYSTEM_TOOLS
+      .filter(toolName => !TEAM_MODE_TOOLS.includes(toolName))
+      .forEach(toolName => {
+        const index = store.formData.availableTools.indexOf(toolName)
+        if (index > -1) store.formData.availableTools.splice(index, 1)
+      })
   } else {
-    REQUIRED_TOOLS_FOR_FIBRE.forEach(toolName => {
+    MULTI_AGENT_SYSTEM_TOOLS.forEach(toolName => {
       const index = store.formData.availableTools.indexOf(toolName)
       if (index > -1) {
         store.formData.availableTools.splice(index, 1)

@@ -77,6 +77,13 @@ jobs:
           channels: conda-forge,defaults
           channel-priority: flexible
 
+      - name: Ensure Windows Python Packaging Tools
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          conda install -n sage-desktop-env -y python=3.11 pip setuptools wheel
+          conda run -n sage-desktop-env python -m pip --version
+
       - name: Sync Tauri Version From Tag
         if: startsWith(github.ref, 'refs/tags/desktop-v')
         shell: bash

@@ -7,6 +7,7 @@ Current design:
 - chunk rows are stored in a local SQLite FTS5 database
 - lightweight metadata is still persisted in a pickle sidecar for incremental updates
 """
+
 import asyncio
 import os
 import pickle
@@ -23,12 +24,13 @@ from sagents.utils.logger import logger
 @dataclass
 class FileDocument:
     """File document"""
-    path: str           # Virtual file path (in sandbox)
-    content: str        # File content (text for BM25)
-    mtime: float        # Modification time
-    size: int           # File size
-    hash: str           # Content hash
-    doc_id: int         # Document ID (index in BM25)
+
+    path: str  # Virtual file path (in sandbox)
+    content: str  # File content (text for BM25)
+    mtime: float  # Modification time
+    size: int  # File size
+    hash: str  # Content hash
+    doc_id: int  # Document ID (index in BM25)
     chunk_index: int = 0
     line_start: int = 1
     line_end: int = 1
@@ -37,10 +39,11 @@ class FileDocument:
 @dataclass
 class SearchResult:
     """Search result"""
-    path: str           # File virtual path
-    score: float        # BM25 score
-    content: str        # Content preview
-    line_number: int    # Line number (if applicable)
+
+    path: str  # File virtual path
+    score: float  # BM25 score
+    content: str  # Content preview
+    line_number: int  # Line number (if applicable)
 
 
 @dataclass
@@ -67,31 +70,78 @@ class MemoryIndex:
 
     # Default blacklist directories
     DEFAULT_BLACKLIST: Set[str] = {
-        '.git', '.svn', '.hg',
-        'node_modules', 'vendor',
-        '__pycache__', '.pytest_cache', '.mypy_cache',
-        'venv', '.venv', 'env', '.env', 'virtualenv',
-        'dist', 'build', 'target', 'out',
-        '.idea', '.vscode', '.vs',
-        'coverage', '.coverage', 'htmlcov',
-        '.tox', '.eggs', '*.egg-info',
-        'migrations', 'alembic',
-        'logs', 'log', 'tmp', 'temp',
-        '.cache',
+        ".git",
+        ".svn",
+        ".hg",
+        "node_modules",
+        "vendor",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        "venv",
+        ".venv",
+        "env",
+        ".env",
+        "virtualenv",
+        "dist",
+        "build",
+        "target",
+        "out",
+        ".idea",
+        ".vscode",
+        ".vs",
+        "coverage",
+        ".coverage",
+        "htmlcov",
+        ".tox",
+        ".eggs",
+        "*.egg-info",
+        "migrations",
+        "alembic",
+        "logs",
+        "log",
+        "tmp",
+        "temp",
+        ".cache",
     }
 
     # Default file extension whitelist
     DEFAULT_EXTENSIONS: List[str] = [
-        '.py', '.js', '.ts', '.jsx', '.tsx',
-        '.md', '.txt', '.rst',
-        '.json', '.yaml', '.yml', '.toml',
-        '.html', '.css', '.scss', '.less',
-        '.vue', '.svelte',
-        '.sql', '.sh', '.bash', '.zsh',
-        '.java', '.kt', '.scala',
-        '.go', '.rs', '.swift',
-        '.c', '.cpp', '.h', '.hpp',
-        '.rb', '.php', '.pl',
+        ".py",
+        ".js",
+        ".ts",
+        ".jsx",
+        ".tsx",
+        ".md",
+        ".txt",
+        ".rst",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".html",
+        ".css",
+        ".scss",
+        ".less",
+        ".vue",
+        ".svelte",
+        ".sql",
+        ".sh",
+        ".bash",
+        ".zsh",
+        ".java",
+        ".kt",
+        ".scala",
+        ".go",
+        ".rs",
+        ".swift",
+        ".c",
+        ".cpp",
+        ".h",
+        ".hpp",
+        ".rb",
+        ".php",
+        ".pl",
     ]
     DEFAULT_FILE_PROCESS_CONCURRENCY = 8
     INDEX_SCHEMA_VERSION = 2
@@ -102,7 +152,13 @@ class MemoryIndex:
     DEFAULT_RERANK_LIMIT_MULTIPLIER = 3
     DEFAULT_CHUNK_ROW_LIMIT_MULTIPLIER = 4
 
-    def __init__(self, sandbox, workspace_path: str, index_path: str, blacklist: Optional[Set[str]] = None):
+    def __init__(
+        self,
+        sandbox,
+        workspace_path: str,
+        index_path: str,
+        blacklist: Optional[Set[str]] = None,
+    ):
         """
         Initialize memory index
 
@@ -115,22 +171,28 @@ class MemoryIndex:
         start_time = time.time()
 
         self.sandbox = sandbox
-        self.workspace_path = workspace_path.rstrip('/')
+        self.workspace_path = workspace_path.rstrip("/")
         self.index_path = Path(index_path)
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
         self.fts_index_path = self.index_path.with_suffix(".sqlite3")
-        logger.debug(f"MemoryIndex: Index path created: {self.index_path},workspace_path: {self.workspace_path}")
+        logger.debug(
+            f"MemoryIndex: Index path created: {self.index_path},workspace_path: {self.workspace_path}"
+        )
         # In-memory data
         self.bm25 = None
         self.documents: Dict[int, FileDocument] = {}
         self.path_to_doc_ids: Dict[str, List[int]] = {}
         self._next_doc_id = 0
-        self._path_token_cache: Dict[str, tuple[Set[str], Set[str], Set[str], Set[str]]] = {}
+        self._path_token_cache: Dict[
+            str, tuple[Set[str], Set[str], Set[str], Set[str]]
+        ] = {}
         self._row_token_cache: Dict[tuple[str, int, int, int], Set[str]] = {}
 
         # Directory mtime cache for incremental updates
         self._dir_mtime_cache: Dict[str, float] = {}
-        self._file_process_semaphore = asyncio.Semaphore(self.DEFAULT_FILE_PROCESS_CONCURRENCY)
+        self._file_process_semaphore = asyncio.Semaphore(
+            self.DEFAULT_FILE_PROCESS_CONCURRENCY
+        )
         self._fts_write_lock = asyncio.Lock()
 
         # Blacklist
@@ -156,13 +218,13 @@ class MemoryIndex:
 
         try:
             if self.index_path.exists():
-                with open(self.index_path, 'rb') as f:
+                with open(self.index_path, "rb") as f:
                     data = pickle.load(f)
 
                 self.bm25 = None
-                self.documents = data.get('documents', {})
-                self._dir_mtime_cache = data.get('dir_mtime_cache', {})
-                schema_version = data.get('schema_version', 1)
+                self.documents = data.get("documents", {})
+                self._dir_mtime_cache = data.get("dir_mtime_cache", {})
+                schema_version = data.get("schema_version", 1)
                 if schema_version != self.INDEX_SCHEMA_VERSION:
                     logger.info(
                         f"MemoryIndex: Index schema {schema_version} != {self.INDEX_SCHEMA_VERSION}, clearing cached index for rebuild"
@@ -174,20 +236,26 @@ class MemoryIndex:
                     self._dir_mtime_cache = {}
                     return False
 
-                self.path_to_doc_ids = data.get('path_to_doc_ids') or self._rebuild_path_to_doc_ids()
+                self.path_to_doc_ids = (
+                    data.get("path_to_doc_ids") or self._rebuild_path_to_doc_ids()
+                )
 
                 # Calculate next doc_id
                 if self.documents:
                     self._next_doc_id = max(self.documents.keys()) + 1
 
                 elapsed = time.time() - start_time
-                logger.info(f"MemoryIndex: Loaded {len(self.documents)} documents from {self.index_path} in {elapsed:.3f}s")
-                
+                logger.info(
+                    f"MemoryIndex: Loaded {len(self.documents)} documents from {self.index_path} in {elapsed:.3f}s"
+                )
+
                 # If documents is empty but mtime cache exists, clear mtime cache to force rescan
                 if not self.documents and self._dir_mtime_cache:
-                    logger.info("MemoryIndex: Documents empty but mtime cache exists, clearing mtime cache to force rescan")
+                    logger.info(
+                        "MemoryIndex: Documents empty but mtime cache exists, clearing mtime cache to force rescan"
+                    )
                     self._dir_mtime_cache = {}
-                
+
                 return True
         except Exception as e:
             logger.warning(f"MemoryIndex: Failed to load index: {e}")
@@ -212,19 +280,21 @@ class MemoryIndex:
 
         try:
             data = {
-                'schema_version': self.INDEX_SCHEMA_VERSION,
-                'bm25': None,
-                'documents': self.documents,
-                'path_to_doc_ids': self.path_to_doc_ids,
-                'dir_mtime_cache': self._dir_mtime_cache,
-                'document_count': len(self.documents)
+                "schema_version": self.INDEX_SCHEMA_VERSION,
+                "bm25": None,
+                "documents": self.documents,
+                "path_to_doc_ids": self.path_to_doc_ids,
+                "dir_mtime_cache": self._dir_mtime_cache,
+                "document_count": len(self.documents),
             }
 
-            with open(self.index_path, 'wb') as f:
+            with open(self.index_path, "wb") as f:
                 pickle.dump(data, f)
 
             elapsed = time.time() - start_time
-            logger.debug(f"MemoryIndex: Index saved to {self.index_path} in {elapsed:.3f}s")
+            logger.debug(
+                f"MemoryIndex: Index saved to {self.index_path} in {elapsed:.3f}s"
+            )
             return True
         except Exception as e:
             logger.error(f"MemoryIndex: Failed to save index: {e}")
@@ -248,14 +318,18 @@ class MemoryIndex:
             logger.warning(f"MemoryIndex: Error getting mtime for {dir_path}: {e}")
             return 0
 
-    async def _read_file_content(self, filepath: str, max_size: int = 10 * 1024 * 1024) -> str:
+    async def _read_file_content(
+        self, filepath: str, max_size: int = 10 * 1024 * 1024
+    ) -> str:
         """Read file content with size limit through sandbox"""
         try:
             # Get file info
             entries = await self.sandbox.list_directory(os.path.dirname(filepath))
             file_info = None
             for entry in entries:
-                if entry.path == filepath or entry.path.endswith(os.path.basename(filepath)):
+                if entry.path == filepath or entry.path.endswith(
+                    os.path.basename(filepath)
+                ):
                     file_info = entry
                     break
 
@@ -266,8 +340,7 @@ class MemoryIndex:
                 # For large files, read first max_size bytes
                 # Use head command through sandbox
                 result = await self.sandbox.execute_command(
-                    command=f"head -c {max_size} {filepath}",
-                    timeout=10
+                    command=f"head -c {max_size} {filepath}", timeout=10
                 )
                 if result.success:
                     return result.stdout + "\n[File too large, truncated]"
@@ -275,7 +348,7 @@ class MemoryIndex:
             else:
                 content = await self.sandbox.read_file(filepath)
                 if isinstance(content, bytes):
-                    return content.decode('utf-8', errors='ignore')
+                    return content.decode("utf-8", errors="ignore")
                 return content
         except Exception as e:
             logger.warning(f"MemoryIndex: Failed to read file {filepath}: {e}")
@@ -290,7 +363,7 @@ class MemoryIndex:
         """
         import re
 
-        raw_tokens = re.findall(r'[A-Za-z0-9_]+|[\u4e00-\u9fff]', text)
+        raw_tokens = re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]", text)
         tokens: List[str] = []
         seen: Set[str] = set()
 
@@ -304,7 +377,9 @@ class MemoryIndex:
         def split_identifier_parts(identifier: str) -> List[str]:
             parts: List[str] = []
             underscore_parts = [part for part in identifier.split("_") if part]
-            camel_pattern = re.compile(r'[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+|[0-9]+')
+            camel_pattern = re.compile(
+                r"[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+|[0-9]+"
+            )
             for part in underscore_parts or [identifier]:
                 matches = camel_pattern.findall(part)
                 if matches:
@@ -315,7 +390,7 @@ class MemoryIndex:
 
         for token in raw_tokens:
             add_token(token)
-            if re.fullmatch(r'[A-Za-z0-9_]+', token):
+            if re.fullmatch(r"[A-Za-z0-9_]+", token):
                 for part in split_identifier_parts(token):
                     add_token(part)
 
@@ -327,11 +402,13 @@ class MemoryIndex:
 
         lines = content.splitlines()
         if not lines:
-            return [{
-                "content": content,
-                "line_start": 1,
-                "line_end": 1,
-            }]
+            return [
+                {
+                    "content": content,
+                    "line_start": 1,
+                    "line_end": 1,
+                }
+            ]
 
         chunks: List[Dict[str, Any]] = []
         current_lines: List[str] = []
@@ -341,23 +418,30 @@ class MemoryIndex:
         for index, line in enumerate(lines, start=1):
             line_len = len(line) + 1
             if current_lines and current_chars + line_len > self.DEFAULT_CHUNK_SIZE:
-                chunks.append({
-                    "content": "\n".join(current_lines),
-                    "line_start": current_line_start,
-                    "line_end": current_line_start + len(current_lines) - 1,
-                })
+                chunks.append(
+                    {
+                        "content": "\n".join(current_lines),
+                        "line_start": current_line_start,
+                        "line_end": current_line_start + len(current_lines) - 1,
+                    }
+                )
 
                 overlap_lines: List[str] = []
                 overlap_chars = 0
                 for existing_line in reversed(current_lines):
                     existing_len = len(existing_line) + 1
-                    if overlap_lines and overlap_chars + existing_len > self.DEFAULT_CHUNK_OVERLAP:
+                    if (
+                        overlap_lines
+                        and overlap_chars + existing_len > self.DEFAULT_CHUNK_OVERLAP
+                    ):
                         break
                     overlap_lines.insert(0, existing_line)
                     overlap_chars += existing_len
 
                 current_lines = overlap_lines[:]
-                current_chars = sum(len(existing_line) + 1 for existing_line in current_lines)
+                current_chars = sum(
+                    len(existing_line) + 1 for existing_line in current_lines
+                )
                 current_line_start = index - len(current_lines)
 
             if not current_lines:
@@ -366,11 +450,13 @@ class MemoryIndex:
             current_chars += line_len
 
         if current_lines:
-            chunks.append({
-                "content": "\n".join(current_lines),
-                "line_start": current_line_start,
-                "line_end": current_line_start + len(current_lines) - 1,
-            })
+            chunks.append(
+                {
+                    "content": "\n".join(current_lines),
+                    "line_start": current_line_start,
+                    "line_end": current_line_start + len(current_lines) - 1,
+                }
+            )
 
         return chunks
 
@@ -389,8 +475,12 @@ class MemoryIndex:
 
     def _ensure_fts_schema(self) -> None:
         with self._fts_connection() as conn:
-            conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-            row = conn.execute("SELECT value FROM meta WHERE key = 'fts_schema_version'").fetchone()
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
+            row = conn.execute(
+                "SELECT value FROM meta WHERE key = 'fts_schema_version'"
+            ).fetchone()
             current_version = row["value"] if row else None
             if current_version != str(self.FTS_SCHEMA_VERSION):
                 conn.execute("DROP TABLE IF EXISTS memory_fts")
@@ -432,8 +522,12 @@ class MemoryIndex:
             return False
         try:
             with self._fts_connection() as conn:
-                chunk_row = conn.execute("SELECT COUNT(*) AS count FROM memory_fts").fetchone()
-                file_row = conn.execute("SELECT COUNT(*) AS count FROM memory_file_fts").fetchone()
+                chunk_row = conn.execute(
+                    "SELECT COUNT(*) AS count FROM memory_fts"
+                ).fetchone()
+                file_row = conn.execute(
+                    "SELECT COUNT(*) AS count FROM memory_file_fts"
+                ).fetchone()
                 return bool(
                     chunk_row
                     and file_row
@@ -527,7 +621,11 @@ class MemoryIndex:
             file_rows = []
             for filepath in sorted(self.path_to_doc_ids.keys()):
                 doc_ids = self.path_to_doc_ids[filepath]
-                docs = [self.documents[doc_id] for doc_id in doc_ids if doc_id in self.documents]
+                docs = [
+                    self.documents[doc_id]
+                    for doc_id in doc_ids
+                    if doc_id in self.documents
+                ]
                 if not docs:
                     continue
                 full_content = "\n".join(doc.content for doc in docs)
@@ -576,17 +674,18 @@ class MemoryIndex:
         """Check if path is in blacklist"""
         # Remove workspace prefix to get relative path
         if path.startswith(self.workspace_path):
-            rel_path = path[len(self.workspace_path):].lstrip('/')
+            rel_path = path[len(self.workspace_path) :].lstrip("/")
         else:
             rel_path = path
 
-        parts = rel_path.split('/')
+        parts = rel_path.split("/")
         for part in parts:
             if part in self.blacklist:
                 return True
             for pattern in self.blacklist:
-                if '*' in pattern:
+                if "*" in pattern:
                     import fnmatch
+
                     if fnmatch.fnmatch(part, pattern):
                         return True
         return False
@@ -596,7 +695,7 @@ class MemoryIndex:
         dir_path: str,
         file_extensions: List[str],
         stats: Dict[str, Any],
-        current_files: Set[str]
+        current_files: Set[str],
     ) -> None:
         """
         Recursively scan directory, skipping unchanged subdirectories
@@ -625,7 +724,7 @@ class MemoryIndex:
             # logger.debug(f"MemoryIndex: Skipping unchanged directory: {dir_path}")
             # Collect files from existing index that belong to this directory
             for filepath in self.path_to_doc_ids.keys():
-                if filepath.startswith(dir_path + '/') or filepath == dir_path:
+                if filepath.startswith(dir_path + "/") or filepath == dir_path:
                     current_files.add(filepath)
             return
 
@@ -635,7 +734,7 @@ class MemoryIndex:
         try:
             # List directory entries
             entries = await self.sandbox.list_directory(dir_path)
-            
+
             ext_set = set(ext.lower() for ext in file_extensions)
             file_tasks = []
 
@@ -658,13 +757,17 @@ class MemoryIndex:
                     current_files.add(entry.path)
 
                     # Process file
-                    file_tasks.append(asyncio.create_task(self._process_file(entry, stats)))
+                    file_tasks.append(
+                        asyncio.create_task(self._process_file(entry, stats))
+                    )
 
             if file_tasks:
                 await asyncio.gather(*file_tasks)
 
         except Exception as e:
-            logger.warning(f"MemoryIndex: Error scanning directory {dir_path}: {e}", exc_info=True)
+            logger.warning(
+                f"MemoryIndex: Error scanning directory {dir_path}: {e}", exc_info=True
+            )
 
     async def _process_file(self, entry, stats: Dict[str, Any]) -> None:
         """Process a single file - add, update, or skip"""
@@ -704,18 +807,22 @@ class MemoryIndex:
                 logger.warning(f"MemoryIndex: Failed to process file {filepath}: {e}")
                 stats["errors"] += 1
 
-    def _replace_file_documents(self, filepath: str, content: str, mtime: float, size: int) -> None:
+    def _replace_file_documents(
+        self, filepath: str, content: str, mtime: float, size: int
+    ) -> None:
         existing_doc_ids = self.path_to_doc_ids.pop(filepath, [])
         for doc_id in existing_doc_ids:
             self.documents.pop(doc_id, None)
 
         chunks = self._split_into_chunks(content)
         if not chunks:
-            chunks = [{
-                "content": "",
-                "line_start": 1,
-                "line_end": 1,
-            }]
+            chunks = [
+                {
+                    "content": "",
+                    "line_start": 1,
+                    "line_end": 1,
+                }
+            ]
 
         new_doc_ids: List[int] = []
         for chunk_index, chunk in enumerate(chunks):
@@ -736,7 +843,9 @@ class MemoryIndex:
 
         self.path_to_doc_ids[filepath] = new_doc_ids
 
-    async def update_index(self, file_extensions: Optional[List[str]] = None, force: bool = False) -> Dict[str, Any]:
+    async def update_index(
+        self, file_extensions: Optional[List[str]] = None, force: bool = False
+    ) -> Dict[str, Any]:
         """
         Update index (auto incremental with directory-level change detection)
 
@@ -762,7 +871,7 @@ class MemoryIndex:
             "build_time": 0.0,
             "save_time": 0.0,
             "total_time": 0.0,
-            "skipped": False
+            "skipped": False,
         }
 
         scan_start = time.time()
@@ -775,14 +884,13 @@ class MemoryIndex:
             self._dir_mtime_cache = {}
 
         # Start recursive scan from workspace root
-        logger.debug(f"MemoryIndex: Starting scan from workspace: {self.workspace_path}")
-        await self._scan_directory_recursive(
-            self.workspace_path,
-            file_extensions,
-            stats,
-            current_files
+        logger.debug(
+            f"MemoryIndex: Starting scan from workspace: {self.workspace_path}"
         )
-        
+        await self._scan_directory_recursive(
+            self.workspace_path, file_extensions, stats, current_files
+        )
+
         # logger.debug(f"MemoryIndex: Scan complete. Found {len(current_files)} current files, {len(self.path_to_doc_ids)} indexed files")
 
         # Check for deleted files
@@ -819,14 +927,20 @@ class MemoryIndex:
             stats["save_time"] = time.time() - save_start
 
             stats["total_time"] = time.time() - total_start_time
-            logger.debug(f"MemoryIndex: Index updated - added:{stats['added']}, updated:{stats['updated']}, removed:{stats['removed']}, unchanged:{stats['unchanged']}, scan:{stats['scan_time']:.3f}s, build:{stats['build_time']:.3f}s, save:{stats['save_time']:.3f}s, total:{stats['total_time']:.3f}s")
+            logger.debug(
+                f"MemoryIndex: Index updated - added:{stats['added']}, updated:{stats['updated']}, removed:{stats['removed']}, unchanged:{stats['unchanged']}, scan:{stats['scan_time']:.3f}s, build:{stats['build_time']:.3f}s, save:{stats['save_time']:.3f}s, total:{stats['total_time']:.3f}s"
+            )
         else:
             stats["total_time"] = time.time() - total_start_time
-            logger.debug(f"MemoryIndex: No file changes, unchanged:{stats['unchanged']}, scan:{stats['scan_time']:.3f}s, total:{stats['total_time']:.3f}s")
+            logger.debug(
+                f"MemoryIndex: No file changes, unchanged:{stats['unchanged']}, scan:{stats['scan_time']:.3f}s, total:{stats['total_time']:.3f}s"
+            )
 
         return stats
 
-    def _extract_snippets(self, content: str, query: str, snippet_size: int = 100) -> List[Dict[str, Any]]:
+    def _extract_snippets(
+        self, content: str, query: str, snippet_size: int = 100
+    ) -> List[Dict[str, Any]]:
         """
         Extract snippets containing query terms from content
 
@@ -850,7 +964,7 @@ class MemoryIndex:
         if not patterns:
             patterns = [re.escape(token) for token in query_tokens]
 
-        combined_pattern = '|'.join(patterns)
+        combined_pattern = "|".join(patterns)
 
         content_lower = content.lower()
 
@@ -863,7 +977,7 @@ class MemoryIndex:
         end_pos = min(len(content), match.end() + snippet_size // 2)
 
         # Find line number
-        line_num = content_lower[:match.start()].count('\n') + 1
+        line_num = content_lower[: match.start()].count("\n") + 1
 
         # Extract snippet
         snippet = content[start_pos:end_pos]
@@ -874,11 +988,13 @@ class MemoryIndex:
         if end_pos < len(content):
             snippet = snippet + "..."
 
-        return [{
-            "line_number": line_num,
-            "snippet": snippet.strip(),
-            "matched_term": match.group()
-        }]
+        return [
+            {
+                "line_number": line_num,
+                "snippet": snippet.strip(),
+                "matched_term": match.group(),
+            }
+        ]
 
     def _row_token_set(self, row: Any) -> Set[str]:
         """Tokenize both row content and row path for row-level reranking."""
@@ -910,7 +1026,9 @@ class MemoryIndex:
             self._row_token_cache[row_key] = row_tokens
         return row_tokens
 
-    def _get_path_token_sets(self, path: str) -> tuple[Set[str], Set[str], Set[str], Set[str]]:
+    def _get_path_token_sets(
+        self, path: str
+    ) -> tuple[Set[str], Set[str], Set[str], Set[str]]:
         cached = self._path_token_cache.get(path)
         if cached is not None:
             return cached
@@ -943,7 +1061,9 @@ class MemoryIndex:
             analyses.append(
                 RowAnalysis(
                     row=row,
-                    raw_score=-float(row["raw_score"]) if row["raw_score"] is not None else 0.0,
+                    raw_score=-float(row["raw_score"])
+                    if row["raw_score"] is not None
+                    else 0.0,
                     line_start=int(row["line_start"] or 1),
                     line_end=int(row["line_end"] or int(row["line_start"] or 1)),
                     chunk_index=int(row["chunk_index"] or 0),
@@ -952,15 +1072,19 @@ class MemoryIndex:
             )
         return analyses
 
-    def _build_result_preview(self, chunk_content: str, query: str, line_start: int) -> tuple[str, int]:
+    def _build_result_preview(
+        self, chunk_content: str, query: str, line_start: int
+    ) -> tuple[str, int]:
         """Build a preview and line number from the strongest chunk hit."""
         snippets = self._extract_snippets(chunk_content, query)
         if snippets:
             line_base = line_start - 1
-            preview = "\n\n".join([
-                f"[Line {line_base + s['line_number']}] {s['snippet']}"
-                for s in snippets
-            ])
+            preview = "\n\n".join(
+                [
+                    f"[Line {line_base + s['line_number']}] {s['snippet']}"
+                    for s in snippets
+                ]
+            )
             return preview, line_start + snippets[0]["line_number"] - 1
 
         preview = chunk_content[:500]
@@ -982,7 +1106,9 @@ class MemoryIndex:
             analyses = rows_or_analyses
             significant_tokens = query_tokens_or_significant_tokens
         else:
-            significant_tokens = self._significant_query_tokens(query_tokens_or_significant_tokens)
+            significant_tokens = self._significant_query_tokens(
+                query_tokens_or_significant_tokens
+            )
             analyses = self._analyze_rows(rows_or_analyses, significant_tokens)
 
         if not significant_tokens:
@@ -1022,7 +1148,9 @@ class MemoryIndex:
 
             selected.append(best_row)
             remaining_tokens -= best_row.matched_terms
-            remaining_rows = [analysis for analysis in remaining_rows if analysis is not best_row]
+            remaining_rows = [
+                analysis for analysis in remaining_rows if analysis is not best_row
+            ]
             if not remaining_tokens and len(selected) >= 2:
                 break
 
@@ -1091,23 +1219,32 @@ class MemoryIndex:
         for row in preview_rows:
             chunk_content = row["content"] or ""
             line_start = int(row["line_start"] or 1)
-            preview, resolved_line_number = self._build_result_preview(chunk_content, query, line_start)
+            preview, resolved_line_number = self._build_result_preview(
+                chunk_content, query, line_start
+            )
             if preview:
                 preview_parts.append(preview)
-                if first_line_number is None or resolved_line_number < first_line_number:
+                if (
+                    first_line_number is None
+                    or resolved_line_number < first_line_number
+                ):
                     first_line_number = resolved_line_number
 
         if not preview_parts:
             return "", int(preview_rows[0]["line_start"] or 1)
 
-        return "\n\n".join(preview_parts), first_line_number or int(preview_rows[0]["line_start"] or 1)
+        return "\n\n".join(preview_parts), first_line_number or int(
+            preview_rows[0]["line_start"] or 1
+        )
 
     def _filename_match_bonus(self, path: str, significant_tokens: List[str]) -> float:
         """Add a small bonus when the file path itself matches the query."""
         if not significant_tokens:
             return 0.0
 
-        basename_token_set, stem_token_set, directory_token_set, path_token_set = self._get_path_token_sets(path)
+        basename_token_set, stem_token_set, directory_token_set, path_token_set = (
+            self._get_path_token_sets(path)
+        )
         significant_token_set = set(significant_tokens)
         basename_matches = len(significant_token_set & basename_token_set)
         stem_matches = len(significant_token_set & stem_token_set)
@@ -1118,7 +1255,13 @@ class MemoryIndex:
         stem_coverage = stem_matches / len(significant_tokens)
         directory_coverage = directory_matches / len(significant_tokens)
         path_coverage = path_matches / len(significant_tokens)
-        return min(0.5, coverage * 0.18 + stem_coverage * 0.16 + directory_coverage * 0.08 + path_coverage * 0.08)
+        return min(
+            0.5,
+            coverage * 0.18
+            + stem_coverage * 0.16
+            + directory_coverage * 0.08
+            + path_coverage * 0.08,
+        )
 
     def _significant_query_tokens(self, query_tokens: List[str]) -> List[str]:
         significant_tokens = [token.lower() for token in query_tokens if len(token) > 1]
@@ -1126,14 +1269,18 @@ class MemoryIndex:
             significant_tokens = [token.lower() for token in query_tokens if token]
         return significant_tokens
 
-    def _extract_row_token_stats(self, analyses: List[RowAnalysis]) -> tuple[Set[str], Dict[int, Set[str]]]:
+    def _extract_row_token_stats(
+        self, analyses: List[RowAnalysis]
+    ) -> tuple[Set[str], Dict[int, Set[str]]]:
         matched_terms: Set[str] = set()
         chunk_matches: Dict[int, Set[str]] = {}
         for analysis in analyses:
             if not analysis.matched_terms:
                 continue
             matched_terms.update(analysis.matched_terms)
-            chunk_matches.setdefault(analysis.chunk_index, set()).update(analysis.matched_terms)
+            chunk_matches.setdefault(analysis.chunk_index, set()).update(
+                analysis.matched_terms
+            )
         return matched_terms, chunk_matches
 
     def _select_best_chunk_row(self, analyses: List[RowAnalysis]) -> Optional[Any]:
@@ -1192,7 +1339,11 @@ class MemoryIndex:
         if not target_terms:
             return 0.0
 
-        ordered_chunks = sorted((idx, terms & target_terms) for idx, terms in chunk_matches.items() if terms & target_terms)
+        ordered_chunks = sorted(
+            (idx, terms & target_terms)
+            for idx, terms in chunk_matches.items()
+            if terms & target_terms
+        )
         if not ordered_chunks:
             return 0.0
 
@@ -1202,7 +1353,7 @@ class MemoryIndex:
             if covered_terms == target_terms:
                 return 0.16
 
-            for end_idx, end_terms in ordered_chunks[start_pos + 1:]:
+            for end_idx, end_terms in ordered_chunks[start_pos + 1 :]:
                 covered_terms.update(end_terms)
                 if covered_terms != target_terms:
                     continue
@@ -1224,7 +1375,9 @@ class MemoryIndex:
         if not analyses:
             return 0.0, None
 
-        ranked_analyses = sorted(analyses, key=lambda analysis: analysis.raw_score, reverse=True)
+        ranked_analyses = sorted(
+            analyses, key=lambda analysis: analysis.raw_score, reverse=True
+        )
         chunk_scores = [analysis.raw_score for analysis in ranked_analyses[:3]]
         best_score = chunk_scores[0]
         second_score = chunk_scores[1] if len(chunk_scores) > 1 else 0.0
@@ -1273,13 +1426,17 @@ class MemoryIndex:
         elif best_chunk_row is not None:
             chunk_content = best_chunk_row["content"] or ""
             line_start = int(best_chunk_row["line_start"] or 1)
-            preview, line_number = self._build_result_preview(chunk_content, query, line_start)
+            preview, line_number = self._build_result_preview(
+                chunk_content, query, line_start
+            )
         else:
             doc_ids = self.path_to_doc_ids.get(path, [])
             if doc_ids:
                 first_doc = self.documents.get(doc_ids[0])
                 if first_doc:
-                    preview, line_number = self._build_result_preview(first_doc.content or "", query, first_doc.line_start)
+                    preview, line_number = self._build_result_preview(
+                        first_doc.content or "", query, first_doc.line_start
+                    )
 
         return SearchResult(
             path=path,
@@ -1297,9 +1454,13 @@ class MemoryIndex:
     ) -> tuple[float, Optional[Any], List[Any]]:
         """Score a file candidate without eagerly building preview text."""
         file_score_weight = 0.65 if len(significant_tokens) > 1 else 1.0
-        aggregate_score = file_score * file_score_weight + self._filename_match_bonus(path, significant_tokens)
+        aggregate_score = file_score * file_score_weight + self._filename_match_bonus(
+            path, significant_tokens
+        )
         analyses = self._analyze_rows(rows, significant_tokens)
-        chunk_boost, best_chunk_row = self._score_chunk_hits(analyses, significant_tokens)
+        chunk_boost, best_chunk_row = self._score_chunk_hits(
+            analyses, significant_tokens
+        )
         aggregate_score += chunk_boost
         preview_rows = self._select_preview_rows(analyses, significant_tokens)
         return aggregate_score, best_chunk_row, preview_rows
@@ -1425,21 +1586,34 @@ class MemoryIndex:
             match_expr = self._build_match_expr(query_tokens, operator="OR")
             file_limit = max(top_k * self.DEFAULT_FILE_SEARCH_LIMIT_MULTIPLIER, 20)
             with self._fts_connection() as conn:
-                file_rows = self._fetch_candidate_file_rows(conn, query_tokens, file_limit)
+                file_rows = self._fetch_candidate_file_rows(
+                    conn, query_tokens, file_limit
+                )
 
                 if not file_rows:
                     elapsed = time.time() - start_time
-                    logger.debug(f"MemoryIndex: Search '{query}' completed, found 0 results in {elapsed:.3f}s")
+                    logger.debug(
+                        f"MemoryIndex: Search '{query}' completed, found 0 results in {elapsed:.3f}s"
+                    )
                     return []
 
                 candidate_paths = [row["path"] for row in file_rows]
                 multi_term_query = len(query_tokens) > 1
 
                 if multi_term_query:
-                    rerank_limit = min(len(candidate_paths), max(top_k * self.DEFAULT_RERANK_LIMIT_MULTIPLIER, 12))
+                    rerank_limit = min(
+                        len(candidate_paths),
+                        max(top_k * self.DEFAULT_RERANK_LIMIT_MULTIPLIER, 12),
+                    )
                     rerank_paths = candidate_paths[:rerank_limit]
-                    chunk_limit = max(rerank_limit * self.DEFAULT_CHUNK_ROW_LIMIT_MULTIPLIER, top_k * 6, 20)
-                    chunk_rows = self._fetch_chunk_rows(conn, match_expr, rerank_paths, chunk_limit)
+                    chunk_limit = max(
+                        rerank_limit * self.DEFAULT_CHUNK_ROW_LIMIT_MULTIPLIER,
+                        top_k * 6,
+                        20,
+                    )
+                    chunk_rows = self._fetch_chunk_rows(
+                        conn, match_expr, rerank_paths, chunk_limit
+                    )
 
                     file_hits: Dict[str, List[Any]] = {}
                     for row in chunk_rows:
@@ -1449,22 +1623,34 @@ class MemoryIndex:
                     scored_candidates = []
                     for file_row in file_rows:
                         path = file_row["path"]
-                        file_score = -float(file_row["raw_file_score"]) if file_row["raw_file_score"] is not None else 0.0
-                        aggregate_score, best_chunk_row, preview_rows = self._score_file_candidate(
-                            path=path,
-                            file_score=file_score,
-                            rows=file_hits.get(path, []),
-                            significant_tokens=significant_tokens,
+                        file_score = (
+                            -float(file_row["raw_file_score"])
+                            if file_row["raw_file_score"] is not None
+                            else 0.0
                         )
-                        scored_candidates.append((aggregate_score, path, best_chunk_row, preview_rows))
+                        aggregate_score, best_chunk_row, preview_rows = (
+                            self._score_file_candidate(
+                                path=path,
+                                file_score=file_score,
+                                rows=file_hits.get(path, []),
+                                significant_tokens=significant_tokens,
+                            )
+                        )
+                        scored_candidates.append(
+                            (aggregate_score, path, best_chunk_row, preview_rows)
+                        )
 
                     scored_candidates.sort(key=lambda item: item[0], reverse=True)
                     top_candidates = scored_candidates[:top_k]
                 else:
                     preview_rerank_limit = min(len(candidate_paths), max(top_k * 2, 8))
                     preview_rerank_paths = candidate_paths[:preview_rerank_limit]
-                    preview_chunk_limit = max(len(preview_rerank_paths) * 2, top_k * 2, 8)
-                    preview_rows = self._fetch_chunk_rows(conn, match_expr, preview_rerank_paths, preview_chunk_limit)
+                    preview_chunk_limit = max(
+                        len(preview_rerank_paths) * 2, top_k * 2, 8
+                    )
+                    preview_rows = self._fetch_chunk_rows(
+                        conn, match_expr, preview_rerank_paths, preview_chunk_limit
+                    )
                     preview_hits: Dict[str, List[Any]] = {}
                     for row in preview_rows:
                         preview_hits.setdefault(row["path"], []).append(row)
@@ -1472,20 +1658,30 @@ class MemoryIndex:
                     scored_candidates = []
                     for file_row in file_rows:
                         path = file_row["path"]
-                        file_score = -float(file_row["raw_file_score"]) if file_row["raw_file_score"] is not None else 0.0
+                        file_score = (
+                            -float(file_row["raw_file_score"])
+                            if file_row["raw_file_score"] is not None
+                            else 0.0
+                        )
                         rows = preview_hits.get(path, [])
                         if rows:
-                            aggregate_score, best_chunk_row, preview_rows = self._score_file_candidate(
-                                path=path,
-                                file_score=file_score,
-                                rows=rows,
-                                significant_tokens=significant_tokens,
+                            aggregate_score, best_chunk_row, preview_rows = (
+                                self._score_file_candidate(
+                                    path=path,
+                                    file_score=file_score,
+                                    rows=rows,
+                                    significant_tokens=significant_tokens,
+                                )
                             )
                         else:
-                            aggregate_score = file_score + self._filename_match_bonus(path, significant_tokens)
+                            aggregate_score = file_score + self._filename_match_bonus(
+                                path, significant_tokens
+                            )
                             best_chunk_row = None
                             preview_rows = []
-                        scored_candidates.append((aggregate_score, path, best_chunk_row, preview_rows))
+                        scored_candidates.append(
+                            (aggregate_score, path, best_chunk_row, preview_rows)
+                        )
 
                     scored_candidates.sort(key=lambda item: item[0], reverse=True)
                     top_candidates = scored_candidates[:top_k]
@@ -1503,7 +1699,9 @@ class MemoryIndex:
             ]
 
             elapsed = time.time() - start_time
-            logger.debug(f"MemoryIndex: Search '{query}' completed, found {len(results)} results in {elapsed:.3f}s")
+            logger.debug(
+                f"MemoryIndex: Search '{query}' completed, found {len(results)} results in {elapsed:.3f}s"
+            )
             return results
 
         except Exception as e:

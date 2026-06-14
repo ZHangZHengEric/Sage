@@ -11,7 +11,7 @@ export const toolAPI = {
    * @returns {Promise<Array>}
    */
   getTools: async (params = {}) => {
-    return await request.get('/api/tools')
+    return await request.get('/api/tools', params)
   },
 
   getBrowserExtensionStatus: async () => {

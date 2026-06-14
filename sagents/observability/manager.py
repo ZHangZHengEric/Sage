@@ -3,6 +3,7 @@ from typing import List, Any, Dict, Union
 from .base import BaseTraceHandler
 from sagents.utils.logger import logger
 
+
 class ObservabilityManager(BaseTraceHandler):
     """
     Manager that dispatches events to multiple trace handlers.
@@ -11,16 +12,24 @@ class ObservabilityManager(BaseTraceHandler):
     def __init__(self, handlers: List[BaseTraceHandler] = []):
         self.handlers = handlers
 
-    def _log_handler_error(self, handler: BaseTraceHandler, event_name: str, error: Exception) -> None:
+    def _log_handler_error(
+        self, handler: BaseTraceHandler, event_name: str, error: Exception
+    ) -> None:
         message = str(error)
-        is_cross_context_detach = isinstance(error, ValueError) and "different Context" in message
+        is_cross_context_detach = (
+            isinstance(error, ValueError) and "different Context" in message
+        )
         is_cancellation = isinstance(error, (asyncio.CancelledError, GeneratorExit))
 
         if is_cross_context_detach or is_cancellation:
-            logger.debug(f"Ignore handler cleanup issue in {handler.__class__.__name__}.{event_name}: {error}")
+            logger.debug(
+                f"Ignore handler cleanup issue in {handler.__class__.__name__}.{event_name}: {error}"
+            )
             return
 
-        logger.error(f"Error in handler {handler.__class__.__name__}.{event_name}: {error}")
+        logger.error(
+            f"Error in handler {handler.__class__.__name__}.{event_name}: {error}"
+        )
 
     def add_handler(self, handler: BaseTraceHandler):
         self.handlers.append(handler)
@@ -67,10 +76,19 @@ class ObservabilityManager(BaseTraceHandler):
             except Exception as e:
                 self._log_handler_error(handler, "on_agent_error", e)
 
-    def on_llm_start(self, session_id: str, model_name: str, messages: List[Any], step_name: str = None, **kwargs: Any) -> Any:
+    def on_llm_start(
+        self,
+        session_id: str,
+        model_name: str,
+        messages: List[Any],
+        step_name: str = None,  # pyright: ignore[reportArgumentType]
+        **kwargs: Any,
+    ) -> Any:
         for handler in self.handlers:
             try:
-                handler.on_llm_start(session_id, model_name, messages, step_name, **kwargs)
+                handler.on_llm_start(
+                    session_id, model_name, messages, step_name, **kwargs
+                )
             except Exception as e:
                 self._log_handler_error(handler, "on_llm_start", e)
 
@@ -88,7 +106,13 @@ class ObservabilityManager(BaseTraceHandler):
             except Exception as e:
                 self._log_handler_error(handler, "on_llm_error", e)
 
-    def on_tool_start(self, session_id: str, tool_name: str, tool_input: Union[str, Dict], **kwargs: Any) -> Any:
+    def on_tool_start(
+        self,
+        session_id: str,
+        tool_name: str,
+        tool_input: Union[str, Dict],
+        **kwargs: Any,
+    ) -> Any:
         for handler in self.handlers:
             try:
                 handler.on_tool_start(session_id, tool_name, tool_input, **kwargs)

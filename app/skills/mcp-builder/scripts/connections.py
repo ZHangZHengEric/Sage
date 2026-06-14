@@ -28,7 +28,7 @@ class MCPConnection(ABC):
 
         try:
             ctx = self._create_context()
-            result = await self._stack.enter_async_context(ctx)
+            result = await self._stack.enter_async_context(ctx)  # pyright: ignore[reportArgumentType]
 
             if len(result) == 2:
                 read, write = result
@@ -54,7 +54,7 @@ class MCPConnection(ABC):
 
     async def list_tools(self) -> list[dict[str, Any]]:
         """Retrieve available tools from the MCP server."""
-        response = await self.session.list_tools()
+        response = await self.session.list_tools()  # pyright: ignore[reportOptionalMemberAccess]
         return [
             {
                 "name": tool.name,
@@ -66,14 +66,19 @@ class MCPConnection(ABC):
 
     async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         """Call a tool on the MCP server with provided arguments."""
-        result = await self.session.call_tool(tool_name, arguments=arguments)
+        result = await self.session.call_tool(tool_name, arguments=arguments)  # pyright: ignore[reportOptionalMemberAccess]
         return result.content
 
 
 class MCPConnectionStdio(MCPConnection):
     """MCP connection using standard input/output."""
 
-    def __init__(self, command: str, args: list[str] = None, env: dict[str, str] = None):
+    def __init__(
+        self,
+        command: str,
+        args: list[str] = None,  # pyright: ignore[reportArgumentType]
+        env: dict[str, str] = None,  # pyright: ignore[reportArgumentType]
+    ):
         super().__init__()
         self.command = command
         self.args = args or []
@@ -88,7 +93,7 @@ class MCPConnectionStdio(MCPConnection):
 class MCPConnectionSSE(MCPConnection):
     """MCP connection using Server-Sent Events."""
 
-    def __init__(self, url: str, headers: dict[str, str] = None):
+    def __init__(self, url: str, headers: dict[str, str] = None):  # pyright: ignore[reportArgumentType]
         super().__init__()
         self.url = url
         self.headers = headers or {}
@@ -100,7 +105,7 @@ class MCPConnectionSSE(MCPConnection):
 class MCPConnectionHTTP(MCPConnection):
     """MCP connection using Streamable HTTP."""
 
-    def __init__(self, url: str, headers: dict[str, str] = None):
+    def __init__(self, url: str, headers: dict[str, str] = None):  # pyright: ignore[reportArgumentType]
         super().__init__()
         self.url = url
         self.headers = headers or {}
@@ -111,11 +116,11 @@ class MCPConnectionHTTP(MCPConnection):
 
 def create_connection(
     transport: str,
-    command: str = None,
-    args: list[str] = None,
-    env: dict[str, str] = None,
-    url: str = None,
-    headers: dict[str, str] = None,
+    command: str = None,  # pyright: ignore[reportArgumentType]
+    args: list[str] = None,  # pyright: ignore[reportArgumentType]
+    env: dict[str, str] = None,  # pyright: ignore[reportArgumentType]
+    url: str = None,  # pyright: ignore[reportArgumentType]
+    headers: dict[str, str] = None,  # pyright: ignore[reportArgumentType]
 ) -> MCPConnection:
     """Factory function to create the appropriate MCP connection.
 
@@ -148,4 +153,6 @@ def create_connection(
         return MCPConnectionHTTP(url=url, headers=headers)
 
     else:
-        raise ValueError(f"Unsupported transport type: {transport}. Use 'stdio', 'sse', or 'http'")
+        raise ValueError(
+            f"Unsupported transport type: {transport}. Use 'stdio', 'sse', or 'http'"
+        )

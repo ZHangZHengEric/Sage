@@ -50,7 +50,7 @@ def test_session_persisted_state_restores_context_budget_config(tmp_path):
     session = Session(session_id="s1", enable_obs=False)
     assert session.load_persisted_state(str(tmp_path)) is True
 
-    manager = session.session_context.message_manager.context_budget_manager
+    manager = session.session_context.message_manager.context_budget_manager  # pyright: ignore[reportOptionalMemberAccess]
     assert manager.max_model_len == 210000
 
 
@@ -68,14 +68,16 @@ def test_reused_session_context_uses_model_config_max_model_len():
     session.session_context = context
 
     session.model_config = {"max_model_len": 64000}
-    asyncio.run(session._ensure_session_context(
-        session_id="s1",
-        user_id="u1",
-        system_context=None,
-        context_budget_config=None,
-        tool_manager=None,
-        skill_manager=None,
-    ))
+    asyncio.run(
+        session._ensure_session_context(
+            session_id="s1",
+            user_id="u1",
+            system_context=None,
+            context_budget_config=None,
+            tool_manager=None,
+            skill_manager=None,
+        )
+    )
 
     manager = session.session_context.message_manager.context_budget_manager
     assert manager.max_model_len == 64000
@@ -94,14 +96,16 @@ def test_reused_session_context_normalizes_camel_case_budget_config():
     context.sandbox = object()
     session.session_context = context
 
-    asyncio.run(session._ensure_session_context(
-        session_id="s1",
-        user_id="u1",
-        system_context=None,
-        context_budget_config={"maxModelLen": 128000},
-        tool_manager=None,
-        skill_manager=None,
-    ))
+    asyncio.run(
+        session._ensure_session_context(
+            session_id="s1",
+            user_id="u1",
+            system_context=None,
+            context_budget_config={"maxModelLen": 128000},
+            tool_manager=None,
+            skill_manager=None,
+        )
+    )
 
     manager = session.session_context.message_manager.context_budget_manager
     assert manager.max_model_len == 128000

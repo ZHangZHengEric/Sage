@@ -13,7 +13,7 @@ AGENT_IDENTIFIER = "TaskAnalysisAgent"
 task_analysis_system_prefix = {
     "zh": "你是一个专业的任务分析专家。你的核心职责不是直接回答用户，而是化身为特定的智能体角色（Persona），模拟其思考过程。你需要深度理解用户的最新需求，结合该角色可用的工具与技能，进行结构化的思维推演（Inner Monologue），为后续的任务执行提供清晰、可落地的分析蓝图。",
     "en": "You are a professional task analysis expert. Your core responsibility is not to answer the user directly, but to embody a specific Agent Persona and simulate its thought process. You need to deeply understand the user's latest needs, combine the tools and skills available to that persona, and perform a structured Inner Monologue to provide a clear, actionable analysis blueprint for subsequent task execution.",
-    "pt": "Você é um especialista profissional em análise de tarefas. Sua responsabilidade principal não é responder ao usuário diretamente, mas incorporar uma Persona de Agente específica e simular seu processo de pensamento. Você precisa entender profundamente as necessidades mais recentes do usuário, combinar as ferramentas e habilidades disponíveis para essa persona e realizar um Monólogo Interior estruturado para fornecer um plano de análise claro e acionável para a execução subsequente da tarefa."
+    "pt": "Você é um especialista profissional em análise de tarefas. Sua responsabilidade principal não é responder ao usuário diretamente, mas incorporar uma Persona de Agente específica e simular seu processo de pensamento. Você precisa entender profundamente as necessidades mais recentes do usuário, combinar as ferramentas e habilidades disponíveis para essa persona e realizar um Monólogo Interior estruturado para fornecer um plano de análise claro e acionável para a execução subsequente da tarefa.",
 }
 
 analysis_template = {
@@ -172,12 +172,12 @@ Por favor, analise seguindo este processo de pensamento (mantenha a primeira pes
 - **Integração Explícita de Ferramenta/Habilidade**: A análise deve refletir a consideração e aplicação específicas das ferramentas e habilidades disponíveis.
 - **Restrições de Formato**: Por favor, expresse sua análise em forma de parágrafo completo, tão natural e fluentemente quanto se estivesse explicando seu processo de pensamento para um colega. **Listas em Markdown (como - ou 1.) e títulos são ESTRITAMENTE PROIBIDOS**. Em vez disso, use linguagem coloquial para expressar seu processo de pensamento.
 - **Idioma**: Português.
-- **Saída Direta**: Produza a análise diretamente como se fosse um processo de pensamento, sem adicionar explicações ou anotações extras, e sem questionar ou perguntar de volta ao usuário. Seja o mais coloquial e detalhado possível. Não mencione os nomes originais das ferramentas ou IDs de banco de dados ou base de conhecimento. """
+- **Saída Direta**: Produza a análise diretamente como se fosse um processo de pensamento, sem adicionar explicações ou anotações extras, e sem questionar ou perguntar de volta ao usuário. Seja o mais coloquial e detalhado possível. Não mencione os nomes originais das ferramentas ou IDs de banco de dados ou base de conhecimento. """,
 }
 
 # 任务分析提示文本 - 用于显示给用户的分析开始提示
 task_analysis_prompt = {
     "zh": "任务分析：",
     "en": "Task Analysis:",
-    "pt": "Análise de Tarefa:"
+    "pt": "Análise de Tarefa:",
 }

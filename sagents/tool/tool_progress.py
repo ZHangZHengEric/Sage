@@ -102,7 +102,11 @@ def unregister_progress_queue(session_id: str) -> None:
     keys = [k for k in list(_pending_buffers.keys()) if k[0] == session_id]
     for k in keys:
         coalescer = _pending_buffers.pop(k, None)
-        if coalescer and coalescer.flush_task is not None and not coalescer.flush_task.done():
+        if (
+            coalescer
+            and coalescer.flush_task is not None
+            and not coalescer.flush_task.done()
+        ):
             coalescer.flush_task.cancel()
 
 
@@ -134,7 +138,9 @@ class _ToolProgressContextToken:
         return False
 
 
-def bind_tool_progress_context(session_id: Optional[str], tool_call_id: Optional[str]) -> _ToolProgressContextToken:
+def bind_tool_progress_context(
+    session_id: Optional[str], tool_call_id: Optional[str]
+) -> _ToolProgressContextToken:
     """绑定当前协程上下文中的 session_id / tool_call_id。
 
     用法::
@@ -172,7 +178,8 @@ def _flush_buffers_for_tool(session_id: str, tool_call_id: str) -> None:
     if not _pending_buffers:
         return
     keys = [
-        k for k in list(_pending_buffers.keys())
+        k
+        for k in list(_pending_buffers.keys())
         if k[0] == session_id and k[1] == tool_call_id
     ]
     for k in keys:
@@ -273,7 +280,9 @@ async def emit_tool_progress_closed(*, stream: str = "info") -> None:
         pass
 
 
-def _build_event(tool_call_id: str, text: str, stream: str, closed: bool) -> Dict[str, Any]:
+def _build_event(
+    tool_call_id: str, text: str, stream: str, closed: bool
+) -> Dict[str, Any]:
     return {
         "type": "tool_progress",
         "tool_call_id": tool_call_id,

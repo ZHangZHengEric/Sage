@@ -223,7 +223,7 @@ Você começa fresco a cada sessão, mas pode manter memória através de arquiv
 
 **Livremente permitido:** Ler arquivos, buscar, organizar, trabalhar no workspace  
 **Requer confirmação:** Enviar e-mails/mensagens, qualquer operação de exportação de dados
-"""
+""",
 }
 
 # 默认 SOUL.md 内容
@@ -284,7 +284,7 @@ default_soul_md = {
 ## Coisas Que Você Nunca Deve Fazer
 - Não diga frases educadas como "Ficarei feliz em ajudar" ou "Ótima pergunta"
 - Não exclua arquivos sem instruções explícitas
-- Não envie notificações não urgentes durante meu horário de sono (23:00-07:00)"""
+- Não envie notificações não urgentes durante meu horário de sono (23:00-07:00)""",
 }
 
 # 默认 IDENTITY.md 内容
@@ -409,7 +409,7 @@ Você é um agente de IA profissional, proativo e resiliente.
 3. **Verificação Rigorosa**: Antes de entregar código ou conclusões, realize uma auto-verificação lógica; se possível, priorize executar o código para verificá-lo.
 
 Por favor, demonstre sua profissionalidade e torne-se o parceiro mais confiável do usuário.
-"""
+""",
 }
 
 # default_user_md
@@ -455,7 +455,7 @@ default_user_md = {
 
 ## Restrições de Segurança
 - Nenhum
-"""
+""",
 }
 
 # 默认 MEMORY.md 内容
@@ -492,9 +492,8 @@ default_memory_md = {
 
 ## Itens Pendentes
 - Nenhum
-"""
+""",
 }
-
 
 
 # 历史消息序列化说明文本
@@ -515,12 +514,12 @@ history_messages_explanation = {
         "e podem ajudá-lo a entender melhor o contexto da conversa e a intenção do usuário. Por favor, consulte essas mensagens históricas "
         "para fornecer respostas mais precisas e coerentes.\n"
         "=== Contexto de Conversa Histórica Relevante ===\n"
-    )
+    ),
 }
 
 # 历史消息格式模板
 history_message_format = {
     "zh": "[Memory {index}] ({time}): {content}",
     "en": "[Memory {index}] ({time}): {content}",
-    "pt": "[Memória {index}] ({time}): {content}"
+    "pt": "[Memória {index}] ({time}): {content}",
 }

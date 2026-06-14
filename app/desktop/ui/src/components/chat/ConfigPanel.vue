@@ -36,6 +36,7 @@
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="fibre">{{ t('config.modeFibre') }}</SelectItem>
+            <SelectItem value="team">{{ t('config.modeTeam') }}</SelectItem>
             <SelectItem value="simple">{{ t('config.modeSimple') }}</SelectItem>
           </SelectContent>
         </Select>
@@ -44,7 +45,7 @@
         </p>
       </div>
 
-      <div v-if="(config.agentMode || 'simple') === 'fibre'" class="space-y-2">
+      <div v-if="['fibre', 'team'].includes(config.agentMode || 'simple')" class="space-y-2">
         <Label>{{ t('agentEdit.subAgents') }}</Label>
         <p class="text-xs text-muted-foreground">
           {{ t('config.subAgentsDesc') }}

@@ -149,9 +149,7 @@ You only need these when you enable knowledge-base, search, embedding, or object
 ## Observability
 
 - `SAGE_TRACE_JAEGER_ENDPOINT`
-- `SAGE_TRACE_JAEGER_UI_URL`
 - `SAGE_TRACE_JAEGER_PUBLIC_URL`
-- `SAGE_TRACE_JAEGER_BASE_PATH`
 
 These are optional unless you actively run observability infrastructure.
 

@@ -40,76 +40,76 @@ class SerperProvider(BaseSearchProvider):
         return """# Serper (Google搜索)
 export SERPER_API_KEY=your_api_key_here"""
 
-    async def search_web(self, query: str, count: int, time_range: str = "") -> List[SearchResult]:
+    async def search_web(
+        self, query: str, count: int, time_range: str = ""
+    ) -> List[SearchResult]:
         """使用 Serper (Google) 搜索"""
         endpoint = "https://google.serper.dev/search"
 
-        payload = {
-            "q": query,
-            "num": min(count, 50)
-        }
+        payload = {"q": query, "num": min(count, 50)}
 
         # 添加时间范围参数
         if time_range and time_range in self.TIME_RANGE_MAP:
             payload["tbs"] = self.TIME_RANGE_MAP[time_range]
 
-        headers = {
-            'X-API-KEY': self.api_key,
-            'Content-Type': 'application/json'
-        }
+        headers = {"X-API-KEY": self.api_key, "Content-Type": "application/json"}
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 endpoint, headers=headers, json=payload, timeout=10.0
             )
             if response.status_code == 401 or response.status_code == 403:
-                raise Exception(f"Serper API Key 无效或没有权限，请检查环境变量 {self.env_key}")
+                raise Exception(
+                    f"Serper API Key 无效或没有权限，请检查环境变量 {self.env_key}"
+                )
             response.raise_for_status()
             data = response.json()
 
             results = []
             for item in data.get("organic", []):
-                results.append(SearchResult(
-                    title=item.get("title", ""),
-                    url=item.get("link", ""),
-                    snippet=item.get("snippet", ""),
-                    source=item.get("source", "")
-                ))
+                results.append(
+                    SearchResult(
+                        title=item.get("title", ""),
+                        url=item.get("link", ""),
+                        snippet=item.get("snippet", ""),
+                        source=item.get("source", ""),
+                    )
+                )
             return results
-    
-    async def search_images(self, query: str, count: int, time_range: str = "") -> List[ImageResult]:
+
+    async def search_images(
+        self, query: str, count: int, time_range: str = ""
+    ) -> List[ImageResult]:
         """使用 Serper 搜索图片"""
         endpoint = "https://google.serper.dev/images"
 
-        payload = {
-            "q": query,
-            "num": min(count, 50)
-        }
+        payload = {"q": query, "num": min(count, 50)}
 
         # 添加时间范围参数
         if time_range and time_range in self.TIME_RANGE_MAP:
             payload["tbs"] = self.TIME_RANGE_MAP[time_range]
 
-        headers = {
-            'X-API-KEY': self.api_key,
-            'Content-Type': 'application/json'
-        }
+        headers = {"X-API-KEY": self.api_key, "Content-Type": "application/json"}
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 endpoint, headers=headers, json=payload, timeout=10.0
             )
             if response.status_code == 401 or response.status_code == 403:
-                raise Exception(f"Serper API Key 无效或没有权限，请检查环境变量 {self.env_key}")
+                raise Exception(
+                    f"Serper API Key 无效或没有权限，请检查环境变量 {self.env_key}"
+                )
             response.raise_for_status()
             data = response.json()
 
             results = []
             for item in data.get("images", []):
-                results.append(ImageResult(
-                    title=item.get("title", ""),
-                    image_url=item.get("imageUrl", ""),
-                    thumbnail_url=item.get("thumbnailUrl", ""),
-                    source=item.get("source", "")
-                ))
+                results.append(
+                    ImageResult(
+                        title=item.get("title", ""),
+                        image_url=item.get("imageUrl", ""),
+                        thumbnail_url=item.get("thumbnailUrl", ""),
+                        source=item.get("source", ""),
+                    )
+                )
             return results

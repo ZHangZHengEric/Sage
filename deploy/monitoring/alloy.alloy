@@ -1,0 +1,63 @@
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+discovery.docker "local" {
+  host = "unix:///var/run/docker.sock"
+
+  filter {
+    name   = "status"
+    values = ["running"]
+  }
+}
+
+discovery.relabel "docker" {
+  targets = discovery.docker.local.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/?(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_sage_environment"]
+    target_label  = "environment"
+  }
+}
+
+loki.source.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.docker.output
+  labels           = {"job" = "docker"}
+  refresh_interval = "5s"
+  forward_to       = [loki.process.docker_logs.receiver]
+}
+
+loki.process "docker_logs" {
+  stage.json {
+    expressions = {
+      level = "level",
+    }
+  }
+
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = sys.env("SAGE_LOKI_PUSH_URL")
+  }
+}

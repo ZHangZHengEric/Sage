@@ -91,72 +91,76 @@ def find_ide_skills() -> List[Tuple[Path, str]]:
     """Find all IDE skill folders that exist."""
     home = get_home_dir()
     found_skills = []
-    
+
     for rel_path, ide_name in IDE_SKILL_PATHS:
         skill_path = home / rel_path
         if skill_path.exists() and skill_path.is_dir():
             found_skills.append((skill_path, ide_name))
-    
+
     return found_skills
 
 
 def sync_skills() -> dict:
     """
     Synchronize IDE skills to Sage skills folder.
-    
+
     Returns:
         dict: Sync results with counts and details
     """
     sage_skills_dir = get_sage_skills_dir()
     ide_skills = find_ide_skills()
-    
+
     results = {
         "total_ide_folders": len(ide_skills),
         "copied": 0,
         "skipped": 0,
         "errors": [],
-        "details": []
+        "details": [],
     }
-    
+
     for ide_skill_path, ide_name in ide_skills:
         try:
             # Iterate through skills in the IDE folder using os.walk to find SKILL.md
             for root, dirs, files in os.walk(ide_skill_path):
                 # Check if SKILL.md exists in current directory (case-insensitive)
-                if any(f.lower() == 'skill.md' for f in files):
+                if any(f.lower() == "skill.md" for f in files):
                     skill_path = Path(root)
                     skill_name = skill_path.name
-                    
+
                     # Stop traversing deeper into this directory
                     dirs[:] = []
-                    
+
                     target_path = sage_skills_dir / skill_name
-                    
+
                     # Check if skill already exists in Sage
                     if target_path.exists():
                         results["skipped"] += 1
-                        results["details"].append({
-                            "skill": skill_name,
-                            "source": ide_name,
-                            "action": "skipped",
-                            "reason": "already exists in Sage"
-                        })
+                        results["details"].append(
+                            {
+                                "skill": skill_name,
+                                "source": ide_name,
+                                "action": "skipped",
+                                "reason": "already exists in Sage",
+                            }
+                        )
                     else:
                         # Copy the skill folder
                         shutil.copytree(skill_path, target_path)
                         results["copied"] += 1
-                        results["details"].append({
-                            "skill": skill_name,
-                            "source": ide_name,
-                            "action": "copied",
-                            "path": str(target_path)
-                        })
-                        
+                        results["details"].append(
+                            {
+                                "skill": skill_name,
+                                "source": ide_name,
+                                "action": "copied",
+                                "path": str(target_path),
+                            }
+                        )
+
         except Exception as e:
             error_msg = f"Error processing {ide_name} ({ide_skill_path}): {e}"
             results["errors"].append(error_msg)
             logger.error(error_msg)
-    
+
     return results
 
 
@@ -165,31 +169,33 @@ def sync_skills_with_logging():
     logger.debug("=" * 60)
     logger.debug("Sage Skill Synchronization")
     logger.debug("=" * 60)
-    
+
     results = sync_skills()
-    
+
     logger.debug(f"\nFound {results['total_ide_folders']} IDE skill folders")
     logger.debug(f"Skills copied: {results['copied']}")
     logger.debug(f"Skills skipped (already exist): {results['skipped']}")
-    
-    if results['details']:
+
+    if results["details"]:
         logger.debug("\nDetails:")
-        for detail in results['details']:
-            action = detail['action']
-            skill = detail['skill']
-            source = detail['source']
-            if action == 'copied':
+        for detail in results["details"]:
+            action = detail["action"]
+            skill = detail["skill"]
+            source = detail["source"]
+            if action == "copied":
                 logger.debug(f"  ✓ [{source}] {skill} -> copied")
             else:
-                logger.debug(f"  ⊘ [{source}] {skill} -> skipped ({detail.get('reason', '')})")
-    
-    if results['errors']:
+                logger.debug(
+                    f"  ⊘ [{source}] {skill} -> skipped ({detail.get('reason', '')})"
+                )
+
+    if results["errors"]:
         logger.debug("\nErrors:")
-        for error in results['errors']:
+        for error in results["errors"]:
             logger.debug(f"  ✗ {error}")
-    
+
     logger.debug("=" * 60)
-    
+
     return results
 
 

@@ -4,20 +4,23 @@ from sagents.utils.logger import logger
 from sagents.skill.skill_manager import SkillManager
 from sagents.skill.skill_schema import SkillSchema
 
+
 class SkillProxy:
     """
     SkillProxy (技能代理类)
-    
+
     Acts as a secure proxy for SkillManager, exposing only a subset of available skills.
     作为 SkillManager 的安全代理，仅暴露可用的技能子集。
-    
+
     Compatible with all skill-related interfaces of SkillManager.
     兼容 SkillManager 的所有技能相关接口。
     """
 
     def __init__(
         self,
-        skill_managers: Union["SkillManager", "SkillProxy", List[Union["SkillManager", "SkillProxy"]]],
+        skill_managers: Union[
+            "SkillManager", "SkillProxy", List[Union["SkillManager", "SkillProxy"]]
+        ],
         available_skills: Optional[List[str]] = None,
     ):
         """
@@ -37,7 +40,7 @@ class SkillProxy:
             self.skill_managers = skill_managers
         else:
             self.skill_managers = [skill_managers]
-            
+
         # Backward compatibility attribute (point to the highest priority one)
         self.skill_manager = self.skill_managers[0] if self.skill_managers else None
 
@@ -49,28 +52,32 @@ class SkillProxy:
         else:
             self._available_skills = set(available_skills)
             self._is_all_skills_mode = False
-            
+
             # Validate against current managers
             all_skills = set()
             for sm in self.skill_managers:
                 all_skills.update(sm.list_skills())
-                
+
             invalid_skills = self._available_skills - all_skills
             if invalid_skills:
-                logger.warning(f"SkillProxy: The following skills do not exist (以下技能不存在): {invalid_skills}")
+                logger.warning(
+                    f"SkillProxy: The following skills do not exist (以下技能不存在): {invalid_skills}"
+                )
                 self._available_skills -= invalid_skills
 
-    def add_skill_manager(self, skill_manager: Union["SkillManager", "SkillProxy"]) -> None:
+    def add_skill_manager(
+        self, skill_manager: Union["SkillManager", "SkillProxy"]
+    ) -> None:
         """
         Add a skill manager (or proxy) to the proxy with highest priority.
         All skills from this new manager will be automatically available.
-        
+
         Args:
             skill_manager: The skill manager or proxy to add.
         """
         self.skill_managers.insert(0, skill_manager)
-        self.skill_manager = self.skill_managers[0] # Update primary reference
-        
+        self.skill_manager = self.skill_managers[0]  # Update primary reference
+
         # Add all skills from the new manager to available skills
         new_skills = skill_manager.list_skills()
         self._available_skills.update(new_skills)
@@ -95,8 +102,10 @@ class SkillProxy:
         验证技能是否在此代理中可用。
         """
         if skill_name not in self._available_skills:
-            raise ValueError(f"Skill '{skill_name}' is not in the available skills list (技能 '{skill_name}' 不在可用技能列表中)")
-        
+            raise ValueError(
+                f"Skill '{skill_name}' is not in the available skills list (技能 '{skill_name}' 不在可用技能列表中)"
+            )
+
         # Check if any manager actually has it (it might have been deleted)
         found = False
         for sm in self.skill_managers:
@@ -104,18 +113,18 @@ class SkillProxy:
                 found = True
                 break
         if not found:
-             # It might be in _available_skills but not in any manager (e.g. deleted file but no reload)
-             # or logic error.
-             # But let's trust _available_skills for permission check, 
-             # and let actual retrieval fail if missing.
-             pass
+            # It might be in _available_skills but not in any manager (e.g. deleted file but no reload)
+            # or logic error.
+            # But let's trust _available_skills for permission check,
+            # and let actual retrieval fail if missing.
+            pass
 
     @property
     def skill_dirs(self) -> List[str]:
         dirs = []
         for sm in self.skill_managers:
             dirs.extend(sm.skill_dirs)
-        return list(set(dirs)) # dedup
+        return list(set(dirs))  # dedup
 
     @property
     def skills(self) -> Dict[str, SkillSchema]:
@@ -147,8 +156,7 @@ class SkillProxy:
         return list(self.skills.values())
 
     def get_skill_description_lines(
-        self,
-        skill_names: Optional[List[str]] = None 
+        self, skill_names: Optional[List[str]] = None
     ) -> List[str]:
         """
         Get formatted description lines for available skills.
@@ -158,11 +166,15 @@ class SkillProxy:
             target_skills = self.skills.values()
         else:
             all_skills = self.skills
-            target_skills = [all_skills[name] for name in skill_names if name in all_skills]
-            
+            target_skills = [
+                all_skills[name] for name in skill_names if name in all_skills
+            ]
+
         lines = []
         for skill in target_skills:
-            lines.append(f"- skill name: {skill.name}, description: {skill.description}")
+            lines.append(
+                f"- skill name: {skill.name}, description: {skill.description}"
+            )
         return lines
 
     def get_skill_metadata(self, name: str) -> Optional[Dict[str, Any]]:
@@ -183,7 +195,7 @@ class SkillProxy:
         """
         Get a list of relative paths for all files in the skill.
         e.g., ["scripts/script.py", "data/config.json"]
-        
+
         Returns relative paths from the skill root directory.
         To get the sandbox path, use: {sandbox.workspace_path}/skills/{skill_name}/{relative_path}
         """

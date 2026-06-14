@@ -17,9 +17,10 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-import defusedxml.minidom
+import defusedxml.minidom  # pyright: ignore[reportMissingModuleSource]
 
 from validators import DOCXSchemaValidator, PPTXSchemaValidator, RedliningValidator
+
 
 def pack(
     input_directory: str,

@@ -6,7 +6,9 @@ from ..tool_base import tool
 from ..error_codes import ToolErrorCode, make_tool_error
 from sagents.utils.file_content_validator import FileContentValidator
 from sagents.utils.logger import logger
-from sagents.utils.agent_session_helper import get_session_sandbox as _get_session_sandbox_util
+from sagents.utils.agent_session_helper import (
+    get_session_sandbox as _get_session_sandbox_util,
+)
 
 
 class FileSystemTool:
@@ -28,7 +30,9 @@ class FileSystemTool:
         lines = content.splitlines(keepends=True)
         total_lines = len(lines)
         normalized_start = 0 if start_line is None else max(0, start_line)
-        normalized_end = (total_lines - 1) if end_line is None else min(total_lines - 1, end_line)
+        normalized_end = (
+            (total_lines - 1) if end_line is None else min(total_lines - 1, end_line)
+        )
 
         if normalized_start > normalized_end:
             return make_tool_error(
@@ -48,10 +52,18 @@ class FileSystemTool:
         replacement_segment = replacement
         has_suffix = normalized_end_exclusive < total_lines
 
-        if has_suffix and replacement_segment and not replacement_segment.endswith(("\n", "\r")):
+        if (
+            has_suffix
+            and replacement_segment
+            and not replacement_segment.endswith(("\n", "\r"))
+        ):
             replacement_segment += "\n"
 
-        new_content = "".join(lines[:normalized_start]) + replacement_segment + "".join(lines[normalized_end_exclusive:])
+        new_content = (
+            "".join(lines[:normalized_start])
+            + replacement_segment
+            + "".join(lines[normalized_end_exclusive:])
+        )
         replace_count = 1 if original_segment != replacement_segment else 0
 
         if normalized_start == normalized_end and not replacement_segment:
@@ -67,7 +79,12 @@ class FileSystemTool:
         }
 
     @staticmethod
-    def _format_match_contexts(content: str, match_positions: List[int], context_chars: int = 40, max_items: int = 3) -> List[Dict[str, Any]]:
+    def _format_match_contexts(
+        content: str,
+        match_positions: List[int],
+        context_chars: int = 40,
+        max_items: int = 3,
+    ) -> List[Dict[str, Any]]:
         """根据字符位置列出匹配的行号与上下文片段，便于 LLM 理解多匹配场景。"""
         contexts: List[Dict[str, Any]] = []
         if not match_positions:
@@ -91,17 +108,23 @@ class FileSystemTool:
         for pos in match_positions[:max_items]:
             line_no = locate_line(pos)
             line_start = line_starts[line_no]
-            line_end = line_starts[line_no + 1] - 1 if line_no + 1 < len(line_starts) else len(content)
+            line_end = (
+                line_starts[line_no + 1] - 1
+                if line_no + 1 < len(line_starts)
+                else len(content)
+            )
             line_text = content[line_start:line_end]
             snippet_start = max(0, pos - context_chars)
             snippet_end = min(len(content), pos + context_chars)
             snippet = content[snippet_start:snippet_end].replace("\n", "\\n")
-            contexts.append({
-                "line": line_no,
-                "column": pos - line_start,
-                "line_text": line_text,
-                "snippet": snippet,
-            })
+            contexts.append(
+                {
+                    "line": line_no,
+                    "column": pos - line_start,
+                    "line_text": line_text,
+                    "snippet": snippet,
+                }
+            )
         return contexts
 
     @staticmethod
@@ -245,19 +268,34 @@ class FileSystemTool:
         return _get_session_sandbox_util(session_id, log_prefix="FileSystemTool")
 
     @staticmethod
-    async def _auto_lint(file_path: str, session_id: str, max_items: int = 20) -> Optional[Dict[str, Any]]:
+    async def _auto_lint(
+        file_path: str, session_id: str, max_items: int = 20
+    ) -> Optional[Dict[str, Any]]:
         """对刚写入的文件触发 lint，结果挂到上层返回。失败/跳过都返回结构化信息，从不抛异常。"""
         if not file_path or not session_id:
             return None
         ext = os.path.splitext(file_path)[1].lower()
-        if ext not in {".py", ".pyi", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".vue"}:
+        if ext not in {
+            ".py",
+            ".pyi",
+            ".js",
+            ".jsx",
+            ".mjs",
+            ".cjs",
+            ".ts",
+            ".tsx",
+            ".vue",
+        }:
             return None
         if os.environ.get("SAGE_AUTO_LINT", "true").lower() == "false":
             return None
         try:
             from .lint_tool import LintTool  # 本地引入避免循环依赖
+
             lt = LintTool()
-            result = await lt.read_lints(paths=[file_path], max_diagnostics=max_items, session_id=session_id)
+            result = await lt.read_lints(
+                paths=[file_path], max_diagnostics=max_items, session_id=session_id
+            )
             return result
         except Exception as exc:
             logger.warning(f"FileSystemTool: 自动 lint 失败 {file_path}: {exc}")
@@ -270,10 +308,22 @@ class FileSystemTool:
         },
         param_description_i18n={
             "file_path": {"zh": "文件虚拟路径", "en": "File virtual path"},
-            "start_line": {"zh": "开始行号，默认0", "en": "Start line number, default 0"},
-            "end_line": {"zh": "结束行号（不包含），默认400，None表示读取到文件末尾", "en": "End line number (exclusive), default 400, None means read to end"},
-            "include_line_numbers": {"zh": "是否在返回内容中附带行号，默认true", "en": "Whether to include line numbers in returned content, default true"},
-            "session_id": {"zh": "会话ID（必填，自动注入）", "en": "Session ID (Required, Auto-injected)"},
+            "start_line": {
+                "zh": "开始行号，默认0",
+                "en": "Start line number, default 0",
+            },
+            "end_line": {
+                "zh": "结束行号（不包含），默认400，None表示读取到文件末尾",
+                "en": "End line number (exclusive), default 400, None means read to end",
+            },
+            "include_line_numbers": {
+                "zh": "是否在返回内容中附带行号，默认true",
+                "en": "Whether to include line numbers in returned content, default true",
+            },
+            "session_id": {
+                "zh": "会话ID（必填，自动注入）",
+                "en": "Session ID (Required, Auto-injected)",
+            },
         },
         param_schema={
             "file_path": {"type": "string", "description": "File virtual path"},
@@ -281,7 +331,7 @@ class FileSystemTool:
             "end_line": {"type": "integer", "default": 400},
             "include_line_numbers": {"type": "boolean", "default": True},
             "session_id": {"type": "string", "description": "Session ID"},
-        }
+        },
     )
     async def file_read(
         self,
@@ -289,7 +339,7 @@ class FileSystemTool:
         start_line: int = 0,
         end_line: Optional[int] = 400,
         include_line_numbers: bool = True,
-        session_id: str = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         """读取文本文件指定行范围内容
 
@@ -324,7 +374,9 @@ class FileSystemTool:
             if include_line_numbers:
                 numbered_content = "\n".join(
                     f"{line_number + 1:>4} | {line_text}"
-                    for line_number, line_text in enumerate(selected_lines, start=start_line)
+                    for line_number, line_text in enumerate(
+                        selected_lines, start=start_line
+                    )
                 )
 
             return {
@@ -368,9 +420,18 @@ class FileSystemTool:
         },
         param_description_i18n={
             "file_path": {"zh": "文件虚拟路径", "en": "File virtual path"},
-            "mode": {"zh": "写入模式：overwrite 覆盖写入，append 追加到文件末尾", "en": "Write mode: overwrite replaces the file, append adds to the end of the file"},
-            "content": {"zh": "要写入的文本内容，不能超过 1000 个字；较长的代码或文档请分多次追加写入", "en": "Text content to write, must not exceed 1000 characters; for longer code or documents, use multiple append calls"},
-            "session_id": {"zh": "会话ID（必填，自动注入）", "en": "Session ID (Required, Auto-injected)"},
+            "mode": {
+                "zh": "写入模式：overwrite 覆盖写入，append 追加到文件末尾",
+                "en": "Write mode: overwrite replaces the file, append adds to the end of the file",
+            },
+            "content": {
+                "zh": "要写入的文本内容，不能超过 1000 个字；较长的代码或文档请分多次追加写入",
+                "en": "Text content to write, must not exceed 1000 characters; for longer code or documents, use multiple append calls",
+            },
+            "session_id": {
+                "zh": "会话ID（必填，自动注入）",
+                "en": "Session ID (Required, Auto-injected)",
+            },
         },
         param_schema={
             "file_path": {"type": "string", "description": "File virtual path"},
@@ -399,7 +460,10 @@ class FileSystemTool:
                         "enabled": {"type": "boolean"},
                         "skipped": {"type": "boolean"},
                         "passed": {"type": "boolean"},
-                        "status": {"type": "string", "description": "passed, warning, error, or skipped"},
+                        "status": {
+                            "type": "string",
+                            "description": "passed, warning, error, or skipped",
+                        },
                         "validator": {"type": "string"},
                         "file_extension": {"type": "string"},
                         "message": {"type": "string"},
@@ -415,7 +479,7 @@ class FileSystemTool:
         file_path: str,
         content: str,
         mode: str = "overwrite",
-        session_id: str = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         """写入文本到文件。
 
@@ -431,7 +495,9 @@ class FileSystemTool:
         if not session_id:
             raise ValueError("FileSystemTool: session_id is required")
         if mode not in {"overwrite", "append"}:
-            raise ValueError("FileSystemTool: mode must be one of ['overwrite', 'append']")
+            raise ValueError(
+                "FileSystemTool: mode must be one of ['overwrite', 'append']"
+            )
 
         sandbox = self._get_sandbox(session_id)
 
@@ -458,7 +524,9 @@ class FileSystemTool:
             result: Dict[str, Any] = {
                 "status": "success",
                 "success": True,
-                "message": "文件写入成功" if validation.get("status") in {"passed", "skipped"} else "文件写入成功，但校验发现问题",
+                "message": "文件写入成功"
+                if validation.get("status") in {"passed", "skipped"}
+                else "文件写入成功，但校验发现问题",
                 "file_path": file_path,
                 "content_length": len(content),
                 "mode": mode,
@@ -494,7 +562,10 @@ class FileSystemTool:
                 "zh": "替换操作列表。每项必须明确指定一种模式：search_replace 或 line_range。search_replace 只传 search_pattern + replacement，默认要求 search_pattern 在文件中唯一命中，多匹配会返回 MULTIPLE_MATCHES 错误；如确需批量替换，对该 operation 显式设置 replace_all=true。line_range 只传 start_line、end_line + replacement。按行替换时 start_line 和 end_line 都是包含边界（0-based），且二者必须同时提供。search_pattern 可以是普通文本，也可以是正则表达式；执行时会先按普通文本匹配，未命中再按正则处理。请不要用它整文件重写",
                 "en": "Replacement operations. Each item must explicitly choose one mode: search_replace or line_range. search_replace accepts only search_pattern + replacement and by default REQUIRES the pattern to match uniquely in the file; multi-match returns MULTIPLE_MATCHES error. Set replace_all=true on the operation to opt-in batch replace. line_range accepts only start_line, end_line + replacement. For line-range mode, both start_line and end_line are inclusive (0-based) and must be provided together. search_pattern can be plain text or a regex; execution first tries plain-text matching, then falls back to regex if not found. Do not use it to rewrite the whole file",
             },
-            "session_id": {"zh": "会话ID（必填，自动注入）", "en": "Session ID (Required, Auto-injected)"},
+            "session_id": {
+                "zh": "会话ID（必填，自动注入）",
+                "en": "Session ID (Required, Auto-injected)",
+            },
         },
         param_schema={
             "file_path": {"type": "string", "description": "File virtual path"},
@@ -507,28 +578,28 @@ class FileSystemTool:
                         "update_mode": {
                             "type": "string",
                             "enum": ["search_replace", "line_range"],
-                            "description": "Explicit update mode for this operation"
+                            "description": "Explicit update mode for this operation",
                         },
                         "search_pattern": {
                             "type": "string",
-                            "description": "Text or regex pattern to replace. Use only when update_mode is search_replace"
+                            "description": "Text or regex pattern to replace. Use only when update_mode is search_replace",
                         },
                         "replacement": {
                             "type": "string",
-                            "description": "Replacement content. Keep it small and local whenever possible"
+                            "description": "Replacement content. Keep it small and local whenever possible",
                         },
                         "start_line": {
                             "type": "integer",
-                            "description": "Start line number (inclusive, 0-based) for line-range replacement. Use only when update_mode is line_range"
+                            "description": "Start line number (inclusive, 0-based) for line-range replacement. Use only when update_mode is line_range",
                         },
                         "end_line": {
                             "type": "integer",
-                            "description": "End line number (inclusive, 0-based) for line-range replacement. Use only when update_mode is line_range"
+                            "description": "End line number (inclusive, 0-based) for line-range replacement. Use only when update_mode is line_range",
                         },
                         "replace_all": {
                             "type": "boolean",
                             "default": False,
-                            "description": "Search-replace only. Default false: requires unique match; multi-match returns MULTIPLE_MATCHES error. Set true to allow replacing all occurrences."
+                            "description": "Search-replace only. Default false: requires unique match; multi-match returns MULTIPLE_MATCHES error. Set true to allow replacing all occurrences.",
                         },
                     },
                 },
@@ -548,7 +619,10 @@ class FileSystemTool:
                         "enabled": {"type": "boolean"},
                         "skipped": {"type": "boolean"},
                         "passed": {"type": "boolean"},
-                        "status": {"type": "string", "description": "passed, warning, error, or skipped"},
+                        "status": {
+                            "type": "string",
+                            "description": "passed, warning, error, or skipped",
+                        },
                         "validator": {"type": "string"},
                         "file_extension": {"type": "string"},
                         "message": {"type": "string"},
@@ -563,7 +637,7 @@ class FileSystemTool:
         self,
         file_path: str,
         operations: Optional[List[Dict[str, Any]]] = None,
-        session_id: str = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         """更新单个文件内容。优先使用局部替换或按行区间替换，不要整文件重写。
 
@@ -588,7 +662,9 @@ class FileSystemTool:
             operation_summaries = []
             total_replacements = 0
 
-            normalized_operations = [op for op in (operations or []) if isinstance(op, dict)]
+            normalized_operations = [
+                op for op in (operations or []) if isinstance(op, dict)
+            ]
             if not normalized_operations:
                 return make_tool_error(
                     ToolErrorCode.INVALID_ARGUMENT,
@@ -618,17 +694,19 @@ class FileSystemTool:
                     )
                 is_line_range = mode_result["update_mode"] == "line_range"
                 if is_line_range:
-                    op_summary["start_line"] = op.get("start_line")
-                    op_summary["end_line"] = op.get("end_line")
+                    op_summary["start_line"] = op.get("start_line")  # pyright: ignore[reportArgumentType]
+                    op_summary["end_line"] = op.get("end_line")  # pyright: ignore[reportArgumentType]
                     line_range_ops.append((index, op, op_summary))
                 else:
-                    op_summary["search_pattern"] = op.get("search_pattern")
+                    op_summary["search_pattern"] = op.get("search_pattern")  # pyright: ignore[reportArgumentType]
                     other_ops.append((index, op, op_summary))
 
             for index, op, op_summary in sorted(
                 line_range_ops,
                 key=lambda item: (
-                    -1 if item[1].get("start_line") is None else -item[1].get("start_line"),
+                    -1
+                    if item[1].get("start_line") is None
+                    else -item[1].get("start_line"),
                     -1 if item[1].get("end_line") is None else -item[1].get("end_line"),
                 ),
             ):
@@ -665,13 +743,15 @@ class FileSystemTool:
                     )
                 current_content = step_result["content"]
                 total_replacements += step_result["replacements"]
-                op_summary.update({
-                    "update_mode": "line_range",
-                    "start_line": step_result["start_line"],
-                    "end_line": step_result["end_line"],
-                    "lines_replaced": step_result["lines_replaced"],
-                    "replacements": step_result["replacements"],
-                })
+                op_summary.update(
+                    {
+                        "update_mode": "line_range",
+                        "start_line": step_result["start_line"],
+                        "end_line": step_result["end_line"],
+                        "lines_replaced": step_result["lines_replaced"],
+                        "replacements": step_result["replacements"],
+                    }
+                )
                 operation_summaries.append(op_summary)
 
             for index, op, op_summary in other_ops:
@@ -697,12 +777,14 @@ class FileSystemTool:
                     )
                 current_content = step_result["content"]
                 total_replacements += step_result["replacements"]
-                op_summary.update({
-                    "update_mode": "search_replace",
-                    "match_mode": step_result["match_mode"],
-                    "replacements": step_result["replacements"],
-                    "replace_all": bool(op.get("replace_all", False)),
-                })
+                op_summary.update(
+                    {
+                        "update_mode": "search_replace",
+                        "match_mode": step_result["match_mode"],
+                        "replacements": step_result["replacements"],
+                        "replace_all": bool(op.get("replace_all", False)),
+                    }
+                )
                 operation_summaries.append(op_summary)
 
             if total_replacements == 0 and not line_range_ops:
@@ -724,11 +806,15 @@ class FileSystemTool:
                     ),
                     "replacements": 0,
                     "operations_applied": len(operation_summaries),
-                    "operations": sorted(operation_summaries, key=lambda item: item["index"]),
+                    "operations": sorted(
+                        operation_summaries, key=lambda item: item["index"]
+                    ),
                     "original_length": len(content),
                     "new_length": len(current_content),
                     "file_path": file_path,
-                    "update_mode": "batch" if len(operation_summaries) > 1 else operation_summaries[0]["update_mode"],
+                    "update_mode": "batch"
+                    if len(operation_summaries) > 1
+                    else operation_summaries[0]["update_mode"],
                     "validation": validation,
                 }
 
@@ -746,19 +832,28 @@ class FileSystemTool:
                 ),
                 "replacements": total_replacements,
                 "operations_applied": len(operation_summaries),
-                "operations": sorted(operation_summaries, key=lambda item: item["index"]),
+                "operations": sorted(
+                    operation_summaries, key=lambda item: item["index"]
+                ),
                 "original_length": len(content),
                 "new_length": len(current_content),
                 "file_path": file_path,
-                "update_mode": "batch" if len(operation_summaries) > 1 else operation_summaries[0]["update_mode"],
+                "update_mode": "batch"
+                if len(operation_summaries) > 1
+                else operation_summaries[0]["update_mode"],
                 "validation": validation,
             }
-            if len(operation_summaries) == 1 and operation_summaries[0]["update_mode"] == "line_range":
-                result.update({
-                    "start_line": operation_summaries[0]["start_line"],
-                    "end_line": operation_summaries[0]["end_line"],
-                    "lines_replaced": operation_summaries[0]["lines_replaced"],
-                })
+            if (
+                len(operation_summaries) == 1
+                and operation_summaries[0]["update_mode"] == "line_range"
+            ):
+                result.update(
+                    {
+                        "start_line": operation_summaries[0]["start_line"],
+                        "end_line": operation_summaries[0]["end_line"],
+                        "lines_replaced": operation_summaries[0]["lines_replaced"],
+                    }
+                )
             if lints is not None:
                 result["lints"] = lints
 

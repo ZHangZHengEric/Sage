@@ -28,10 +28,21 @@ pub(crate) fn resolve_python_command(runtime_root: &Path) -> PathBuf {
         return PathBuf::from(python);
     }
 
-    bundled_python_candidates(runtime_root)
+    if let Some(python) = bundled_python_candidates(runtime_root)
         .into_iter()
         .find(|path| path.is_file())
-        .unwrap_or_else(|| PathBuf::from("python3"))
+    {
+        return python;
+    }
+
+    if let Some(python) = active_python_candidates()
+        .into_iter()
+        .find(|path| path.is_file())
+    {
+        return python;
+    }
+
+    PathBuf::from("python3")
 }
 
 pub(crate) fn resolve_cli_invoker(runtime_root: &Path) -> CliInvoker {
@@ -142,6 +153,44 @@ fn bundled_python_candidates(runtime_root: &Path) -> Vec<PathBuf> {
     }
 
     candidates
+}
+
+fn active_python_candidates() -> Vec<PathBuf> {
+    let mut prefixes = Vec::<PathBuf>::new();
+
+    if let Ok(venv) = std::env::var("VIRTUAL_ENV") {
+        prefixes.push(PathBuf::from(venv));
+    }
+
+    let mut conda_prefixes = std::env::vars()
+        .filter_map(|(key, value)| {
+            if key == "CONDA_PREFIX" {
+                return Some((0_u32, PathBuf::from(value)));
+            }
+            key.strip_prefix("CONDA_PREFIX_")
+                .and_then(|suffix| suffix.parse::<u32>().ok())
+                .map(|priority| (priority, PathBuf::from(value)))
+        })
+        .collect::<Vec<_>>();
+    conda_prefixes.sort_by(|(left, _), (right, _)| right.cmp(left));
+    prefixes.extend(conda_prefixes.into_iter().map(|(_, path)| path));
+
+    let mut candidates = Vec::new();
+    for prefix in prefixes {
+        candidates.push(prefix.join("bin").join("python3"));
+        candidates.push(prefix.join("bin").join("python"));
+    }
+    dedupe_paths(candidates)
+}
+
+fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for path in paths {
+        if !out.iter().any(|existing| existing == &path) {
+            out.push(path);
+        }
+    }
+    out
 }
 
 fn bundled_cli_candidates(runtime_root: &Path) -> Vec<PathBuf> {

@@ -17,6 +17,7 @@ pub(crate) fn welcome_lines(
     max_loop_count: &str,
     workspace_label: &str,
     sandbox_type: &str,
+    goal: Option<(&str, &str)>,
 ) -> Vec<Line<'static>> {
     let max_inner_width = width.saturating_sub(4) as usize;
     let Some(inner_width) = card_inner_width(width, max_inner_width) else {
@@ -71,6 +72,20 @@ pub(crate) fn welcome_lines(
         Line::from(vec![
             Span::styled("sandbox: ", dim),
             Span::styled(sandbox_type.to_string(), subtle_body_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("goal: ", dim),
+            Span::styled(
+                goal.map(|(objective, status)| {
+                    format!(
+                        "{} ({})",
+                        truncate_middle(objective, inner_width.saturating_sub(14)),
+                        status
+                    )
+                })
+                .unwrap_or_else(|| "(none)".to_string()),
+                Style::default().fg(Color::Rgb(236, 240, 231)),
+            ),
         ]),
         Line::from(vec![
             Span::styled("loop limit: ", dim),

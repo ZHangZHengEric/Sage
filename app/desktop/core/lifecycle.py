@@ -69,7 +69,9 @@ def post_initialize_task():
 
 async def _post_initialize():
     await validate_and_disable_mcp_servers()
-    create_safe_task(_ensure_default_anytool_server_ready(), name="ensure_default_anytool_server")
+    create_safe_task(
+        _ensure_default_anytool_server_ready(), name="ensure_default_anytool_server"
+    )
     await _start_task_scheduler()
 
 
@@ -100,13 +102,17 @@ async def _ensure_default_anytool_server_ready():
                 f"（{per_attempt_timeout}s），稍后重试"
             )
         except Exception as exc:
-            logger.warning(f"sage-desktop：默认 AnyTool MCP server 激活失败（第 {attempt + 1} 次）: {exc}")
+            logger.warning(
+                f"sage-desktop：默认 AnyTool MCP server 激活失败（第 {attempt + 1} 次）: {exc}"
+            )
 
 
 async def _start_task_scheduler():
     try:
         await asyncio.sleep(5)
-        from mcp_servers.task_scheduler.task_scheduler_server import ensure_scheduler_started
+        from mcp_servers.task_scheduler.task_scheduler_server import (
+            ensure_scheduler_started,
+        )
 
         started = ensure_scheduler_started()
         logger.info(f"sage-desktop：TaskScheduler {'已启动' if started else '已存在'}")
@@ -129,7 +135,9 @@ def _host_process_is_alive(host_pid: int) -> bool:
             STILL_ACTIVE = 259  # 进程还活着时 GetExitCodeProcess 返回的占位码
 
             kernel32 = ctypes.windll.kernel32
-            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, host_pid)
+            handle = kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION, False, host_pid
+            )
             if not handle:
                 return False
             try:
@@ -285,7 +293,9 @@ def _start_memory_reporter():
     global _memory_reporter_task
     if _memory_reporter_task and not _memory_reporter_task.done():
         return
-    _memory_reporter_task = create_safe_task(_memory_reporter_loop(), name="sidecar_memory_reporter")
+    _memory_reporter_task = create_safe_task(
+        _memory_reporter_loop(), name="sidecar_memory_reporter"
+    )
 
 
 async def cleanup_system():

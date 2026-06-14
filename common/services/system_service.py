@@ -61,4 +61,6 @@ async def get_agent_usage_stats_data(
 
 async def update_allow_registration(allow_registration: bool) -> None:
     sys_dao = SystemInfoDao()
-    await sys_dao.set_value("allow_registration", "true" if allow_registration else "false")
+    await sys_dao.set_value(
+        "allow_registration", "true" if allow_registration else "false"
+    )

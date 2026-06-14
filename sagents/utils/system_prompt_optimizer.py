@@ -20,11 +20,13 @@ from datetime import datetime
 try:
     from sagents.utils.logger import logger
     from sagents.utils.prompt_manager import PromptManager
-    from sagents.prompts.common_util_prompts import system_prompt_optimizer_section_definitions
+    from sagents.prompts.common_util_prompts import (
+        system_prompt_optimizer_section_definitions,
+    )
 except ImportError:
     from logger import logger
     from prompt_manager import PromptManager
-    from common_util_prompts import system_prompt_optimizer_section_definitions
+    from common_util_prompts import system_prompt_optimizer_section_definitions  # pyright: ignore[reportMissingImports]
 
 
 class SystemPromptOptimizer:
@@ -45,7 +47,7 @@ class SystemPromptOptimizer:
             "content_preference": "### 结果内容偏好",
             "format_preference": "### 结果形式偏好",
             "terminology": "### 特殊名词定义",
-            "constraints": "## 限制"
+            "constraints": "## 限制",
         }
 
     async def optimize_system_prompt(
@@ -87,14 +89,26 @@ class SystemPromptOptimizer:
 
             # 2. 生成优化后的各个部分（默认使用分段生成，更精确）
             try:
-                sections: Dict[str, str] = await self._generate_optimized_sections_segmented(
-                    current_prompt, analysis, llm_client, model, optimization_goal, language=language
+                sections: Dict[
+                    str, str
+                ] = await self._generate_optimized_sections_segmented(
+                    current_prompt,
+                    analysis,
+                    llm_client,
+                    model,
+                    optimization_goal,
+                    language=language,
                 )
                 logger.info("完成分段内容生成")
             except Exception as e:
                 logger.warning(f"分段生成失败，尝试整体生成: {str(e)}")
                 sections = await self._generate_optimized_sections(
-                    current_prompt, analysis, llm_client, model, optimization_goal, language=language
+                    current_prompt,
+                    analysis,
+                    llm_client,
+                    model,
+                    optimization_goal,
+                    language=language,
                 )
                 logger.info("完成整体内容生成")
 
@@ -107,7 +121,7 @@ class SystemPromptOptimizer:
                 "optimized_prompt": optimized_prompt,
                 "analysis": analysis,
                 "sections": sections,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
 
             logger.info("系统指令优化完成")
@@ -120,10 +134,17 @@ class SystemPromptOptimizer:
                 "success": False,
                 "error": str(e),
                 "message": "系统指令优化失败",
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
 
-    async def _analyze_current_prompt(self, prompt: str, client, model: str, optimization_goal: Optional[str] = None, language: str = "en") -> Dict[str, Any]:
+    async def _analyze_current_prompt(
+        self,
+        prompt: str,
+        client,
+        model: str,
+        optimization_goal: Optional[str] = None,
+        language: str = "en",
+    ) -> Dict[str, Any]:
         """
         分析当前系统指令的内容和结构
 
@@ -146,13 +167,17 @@ class SystemPromptOptimizer:
 请在分析时特别关注与此目标相关的内容，并在分析结果中重点标注需要针对此目标进行改进的地方。
 """
 
-            analysis_prompt = PromptManager().get_prompt(
-                "system_prompt_optimizer_analysis_prompt",
-                agent="common_util",
-                language=language,
-            ).format(
-                prompt=prompt,
-                optimization_guidance=optimization_guidance,
+            analysis_prompt = (
+                PromptManager()
+                .get_prompt(
+                    "system_prompt_optimizer_analysis_prompt",
+                    agent="common_util",
+                    language=language,
+                )
+                .format(
+                    prompt=prompt,
+                    optimization_guidance=optimization_guidance,
+                )
             )
 
             response = await self._call_llm(client, analysis_prompt, model)
@@ -176,7 +201,7 @@ class SystemPromptOptimizer:
         client,
         model: str,
         optimization_goal: Optional[str] = None,
-        language: str = "en"
+        language: str = "en",
     ) -> Dict[str, str]:
         """
         生成优化后的各个部分内容
@@ -201,14 +226,18 @@ class SystemPromptOptimizer:
 请在生成各个部分时特别关注此优化目标，确保生成的内容能够更好地满足这个目标。
 """
 
-            sections_prompt = PromptManager().get_prompt(
-                "system_prompt_optimizer_sections_prompt",
-                agent="common_util",
-                language=language,
-            ).format(
-                original_prompt=original_prompt,
-                analysis_json=json.dumps(analysis, ensure_ascii=False, indent=2),
-                optimization_guidance=optimization_guidance,
+            sections_prompt = (
+                PromptManager()
+                .get_prompt(
+                    "system_prompt_optimizer_sections_prompt",
+                    agent="common_util",
+                    language=language,
+                )
+                .format(
+                    original_prompt=original_prompt,
+                    analysis_json=json.dumps(analysis, ensure_ascii=False, indent=2),
+                    optimization_guidance=optimization_guidance,
+                )
             )
 
             response = await self._call_llm(client, sections_prompt, model)
@@ -242,7 +271,7 @@ class SystemPromptOptimizer:
         client,
         model: str,
         optimization_goal: Optional[str] = None,
-        language: str = "en"
+        language: str = "en",
     ) -> Dict[str, str]:
         """
         分段生成优化后的各个部分，提高稳定性
@@ -276,59 +305,89 @@ class SystemPromptOptimizer:
             # 5. format_preference - 格式要求
             # 6. terminology - 专业术语
             # 7. constraints - 最后处理限制条件
-            generation_order = ["role", "skills", "tool_guidance", "content_preference", "format_preference", "terminology", "constraints"]
+            generation_order = [
+                "role",
+                "skills",
+                "tool_guidance",
+                "content_preference",
+                "format_preference",
+                "terminology",
+                "constraints",
+            ]
 
-            logger.info(f"计划生成 {len(generation_order)} 个部分，顺序: {generation_order}")
+            logger.info(
+                f"计划生成 {len(generation_order)} 个部分，顺序: {generation_order}"
+            )
 
             # 逐个生成每个部分，后续部分可以参考已生成的部分
             for i, section_key in enumerate(generation_order, 1):
                 try:
-                    logger.info(f"[{i}/{len(generation_order)}] 正在生成部分: {section_key}")
+                    logger.info(
+                        f"[{i}/{len(generation_order)}] 正在生成部分: {section_key}"
+                    )
 
-                    section_info = system_prompt_optimizer_section_definitions[section_key]
+                    section_info = system_prompt_optimizer_section_definitions[
+                        section_key
+                    ]
 
                     # 构建已生成部分的上下文信息
                     context_info = ""
                     if sections:
-                        context_info = "\n\n**已生成的其他部分（供参考，避免重复内容）**：\n"
+                        context_info = (
+                            "\n\n**已生成的其他部分（供参考，避免重复内容）**：\n"
+                        )
                         for existing_key, existing_content in sections.items():
                             if existing_content.strip() != "无":
                                 context_info += f"- {existing_key}: {existing_content[:100]}{'...' if len(existing_content) > 100 else ''}\n"
                         context_info += "\n**请确保当前生成的内容与上述部分不重复，各部分职责明确分离。**"
 
-                    section_prompt = PromptManager().get_prompt(
-                        "system_prompt_optimizer_section_prompt",
-                        agent="common_util",
-                        language=language,
-                    ).format(
-                        section_key=section_key,
-                        original_prompt=original_prompt,
-                        optimization_goal_block=f"Optimization goal: {optimization_goal}\nPlease pay special attention to this goal while generating each section, and ensure the content better satisfies it." if optimization_goal else "",
-                        section_description=section_info["description"],
-                        section_examples=section_info["examples"],
-                        section_avoid_confusion=section_info["avoid_confusion"],
-                        context_info=context_info,
+                    section_prompt = (
+                        PromptManager()
+                        .get_prompt(
+                            "system_prompt_optimizer_section_prompt",
+                            agent="common_util",
+                            language=language,
+                        )
+                        .format(
+                            section_key=section_key,
+                            original_prompt=original_prompt,
+                            optimization_goal_block=f"Optimization goal: {optimization_goal}\nPlease pay special attention to this goal while generating each section, and ensure the content better satisfies it."
+                            if optimization_goal
+                            else "",
+                            section_description=section_info["description"],
+                            section_examples=section_info["examples"],
+                            section_avoid_confusion=section_info["avoid_confusion"],
+                            context_info=context_info,
+                        )
                     )
 
-                    logger.info(f"[{section_key}] 发送prompt长度: {len(section_prompt)} 字符")
+                    logger.info(
+                        f"[{section_key}] 发送prompt长度: {len(section_prompt)} 字符"
+                    )
 
                     response = await self._call_llm(client, section_prompt, model)
 
                     logger.info(f"[{section_key}] 收到响应长度: {len(response)} 字符")
 
                     # 清理响应内容 - 移除多余的描述性文字
-                    content = self._clean_response_content(response.strip(), section_key)
+                    content = self._clean_response_content(
+                        response.strip(), section_key
+                    )
 
                     # 记录原始响应内容（截取前200字符用于日志）
-                    content_preview = content[:200] + "..." if len(content) > 200 else content
+                    content_preview = (
+                        content[:200] + "..." if len(content) > 200 else content
+                    )
                     logger.info(f"[{section_key}] 清理后内容预览: {content_preview}")
 
                     # 如果内容看起来像JSON数组，尝试解析
-                    if content.startswith('[') and content.endswith(']'):
+                    if content.startswith("[") and content.endswith("]"):
                         try:
                             parsed_content = json.loads(content)
                             if isinstance(parsed_content, list):
-                                logger.info(f"[{section_key}] 检测到JSON数组格式，转换为markdown列表")
+                                logger.info(
+                                    f"[{section_key}] 检测到JSON数组格式，转换为markdown列表"
+                                )
                                 content = self._format_list_content(parsed_content)
                         except json.JSONDecodeError:
                             logger.warning(f"[{section_key}] JSON解析失败，保持原内容")
@@ -338,26 +397,49 @@ class SystemPromptOptimizer:
                     sections[section_key] = content
 
                     # 记录最终内容状态
-                    if not content.strip() or content.strip().lower() in {"none", "n/a"}:
-                        logger.info(f"[{section_key}] ✓ Completed generation - no relevant content in the original prompt")
+                    if not content.strip() or content.strip().lower() in {
+                        "none",
+                        "n/a",
+                    }:
+                        logger.info(
+                            f"[{section_key}] ✓ Completed generation - no relevant content in the original prompt"
+                        )
                     else:
-                        logger.info(f"[{section_key}] ✓ Completed generation - final content length: {len(content)} characters")
+                        logger.info(
+                            f"[{section_key}] ✓ Completed generation - final content length: {len(content)} characters"
+                        )
 
                 except Exception as e:
                     logger.error(f"[{section_key}] ❌ 生成失败: {str(e)}")
                     logger.error(traceback.format_exc())
                     # 如果单个部分失败，使用默认内容
-                    sections[section_key] = f"[{section_key} section generation failed. Please edit manually.]"
+                    sections[section_key] = (
+                        f"[{section_key} section generation failed. Please edit manually.]"
+                    )
                     logger.warning(f"[{section_key}] Using default error content")
 
             # 统计生成结果
-            successful_sections = [k for k, v in sections.items() if not v.startswith("[") and not v.endswith("Please edit manually.]")]
-            empty_sections = [k for k, v in sections.items() if not v.strip() or v.strip().lower() in {"none", "n/a"}]
-            failed_sections = [k for k, v in sections.items() if v.startswith("[") and v.endswith("Please edit manually.]")]
+            successful_sections = [
+                k
+                for k, v in sections.items()
+                if not v.startswith("[") and not v.endswith("Please edit manually.]")
+            ]
+            empty_sections = [
+                k
+                for k, v in sections.items()
+                if not v.strip() or v.strip().lower() in {"none", "n/a"}
+            ]
+            failed_sections = [
+                k
+                for k, v in sections.items()
+                if v.startswith("[") and v.endswith("Please edit manually.]")
+            ]
 
             logger.info("=" * 50)
             logger.info("Segmented generation completed - statistics:")
-            logger.info(f"✓ Successful: {len(successful_sections)} sections {successful_sections}")
+            logger.info(
+                f"✓ Successful: {len(successful_sections)} sections {successful_sections}"
+            )
             logger.info(f"○ Empty: {len(empty_sections)} sections {empty_sections}")
             logger.info(f"❌ Failed: {len(failed_sections)} sections {failed_sections}")
             logger.info("=" * 50)
@@ -369,7 +451,9 @@ class SystemPromptOptimizer:
             logger.error(traceback.format_exc())
             raise
 
-    def _format_to_markdown(self, sections: Dict[str, str], language: str = "en") -> str:
+    def _format_to_markdown(
+        self, sections: Dict[str, str], language: str = "en"
+    ) -> str:
         """
         将各部分内容格式化为标准markdown格式
 
@@ -384,40 +468,60 @@ class SystemPromptOptimizer:
 
             # 角色部分 - 保持段落格式
             if sections.get("role"):
-                markdown_parts.append(f"{self.standard_template['role']}\n\n{sections['role']}")
+                markdown_parts.append(
+                    f"{self.standard_template['role']}\n\n{sections['role']}"
+                )
 
             # 技能部分 - 转换为列表格式
             if sections.get("skills"):
-                skills_content = self._format_list_content(sections['skills'])
-                markdown_parts.append(f"{self.standard_template['skills']}\n\n{skills_content}")
+                skills_content = self._format_list_content(sections["skills"])
+                markdown_parts.append(
+                    f"{self.standard_template['skills']}\n\n{skills_content}"
+                )
 
             # 偏好或者指导部分
             markdown_parts.append(f"{self.standard_template['preferences']}")
 
             # 工具使用指导 - 转换为列表格式
             if sections.get("tool_guidance"):
-                tool_guidance_content = self._format_list_content(sections['tool_guidance'])
-                markdown_parts.append(f"{self.standard_template['tool_guidance']}\n\n{tool_guidance_content}")
+                tool_guidance_content = self._format_list_content(
+                    sections["tool_guidance"]
+                )
+                markdown_parts.append(
+                    f"{self.standard_template['tool_guidance']}\n\n{tool_guidance_content}"
+                )
 
             # 结果内容偏好 - 转换为列表格式
             if sections.get("content_preference"):
-                content_preference_content = self._format_list_content(sections['content_preference'])
-                markdown_parts.append(f"{self.standard_template['content_preference']}\n\n{content_preference_content}")
+                content_preference_content = self._format_list_content(
+                    sections["content_preference"]
+                )
+                markdown_parts.append(
+                    f"{self.standard_template['content_preference']}\n\n{content_preference_content}"
+                )
 
             # 结果形式偏好 - 转换为列表格式
             if sections.get("format_preference"):
-                format_preference_content = self._format_list_content(sections['format_preference'])
-                markdown_parts.append(f"{self.standard_template['format_preference']}\n\n{format_preference_content}")
+                format_preference_content = self._format_list_content(
+                    sections["format_preference"]
+                )
+                markdown_parts.append(
+                    f"{self.standard_template['format_preference']}\n\n{format_preference_content}"
+                )
 
             # 特殊名词定义 - 转换为列表格式
             if sections.get("terminology"):
-                terminology_content = self._format_list_content(sections['terminology'])
-                markdown_parts.append(f"{self.standard_template['terminology']}\n\n{terminology_content}")
+                terminology_content = self._format_list_content(sections["terminology"])
+                markdown_parts.append(
+                    f"{self.standard_template['terminology']}\n\n{terminology_content}"
+                )
 
             # 限制部分 - 转换为列表格式
             if sections.get("constraints"):
-                constraints_content = self._format_list_content(sections['constraints'])
-                markdown_parts.append(f"{self.standard_template['constraints']}\n\n{constraints_content}")
+                constraints_content = self._format_list_content(sections["constraints"])
+                markdown_parts.append(
+                    f"{self.standard_template['constraints']}\n\n{constraints_content}"
+                )
 
             return "\n\n".join(markdown_parts)
 
@@ -442,24 +546,24 @@ class SystemPromptOptimizer:
                 cleaned_items = []
                 for item in content:
                     cleaned_item = str(item).strip()
-                    if cleaned_item.startswith('- '):
+                    if cleaned_item.startswith("- "):
                         cleaned_item = cleaned_item[2:]
                     cleaned_items.append(f"- {cleaned_item}")
-                return '\n'.join(cleaned_items)
+                return "\n".join(cleaned_items)
 
             # 如果是字符串，尝试解析为JSON数组
             if isinstance(content, str):
-                if content.strip().startswith('[') and content.strip().endswith(']'):
+                if content.strip().startswith("[") and content.strip().endswith("]"):
                     items = json.loads(content)
                     if isinstance(items, list):
                         # 清理每个项目，移除开头的"- "
                         cleaned_items = []
                         for item in items:
                             cleaned_item = str(item).strip()
-                            if cleaned_item.startswith('- '):
+                            if cleaned_item.startswith("- "):
                                 cleaned_item = cleaned_item[2:]
                             cleaned_items.append(f"- {cleaned_item}")
-                        return '\n'.join(cleaned_items)
+                        return "\n".join(cleaned_items)
 
                 # 如果不是JSON数组格式，直接返回原内容
                 return content
@@ -487,28 +591,30 @@ class SystemPromptOptimizer:
         try:
             # 移除常见的描述性前缀
             patterns_to_remove = [
-                r'^以下是优化后的.*?：\s*',
-                r'^优化后的.*?内容.*?：\s*',
-                r'^.*?内容如下.*?：\s*',
-                r'^.*?内容（.*?格式）.*?：\s*',
-                r'^根据.*?，.*?内容.*?：\s*',
-                r'^提取.*?内容.*?：\s*',
-                r'^.*?部分的内容.*?：\s*',
-                r'^.*?格式.*?：\s*',
-                r'^以下.*?：\s*',
-                r'^内容：\s*',
-                r'^结果：\s*',
-                r'^答案：\s*'
+                r"^以下是优化后的.*?：\s*",
+                r"^优化后的.*?内容.*?：\s*",
+                r"^.*?内容如下.*?：\s*",
+                r"^.*?内容（.*?格式）.*?：\s*",
+                r"^根据.*?，.*?内容.*?：\s*",
+                r"^提取.*?内容.*?：\s*",
+                r"^.*?部分的内容.*?：\s*",
+                r"^.*?格式.*?：\s*",
+                r"^以下.*?：\s*",
+                r"^内容：\s*",
+                r"^结果：\s*",
+                r"^答案：\s*",
             ]
 
             cleaned_content = content
 
             # 逐个应用清理模式
             for pattern in patterns_to_remove:
-                cleaned_content = re.sub(pattern, '', cleaned_content, flags=re.IGNORECASE | re.MULTILINE)
+                cleaned_content = re.sub(
+                    pattern, "", cleaned_content, flags=re.IGNORECASE | re.MULTILINE
+                )
 
             # 移除开头的空行
-            cleaned_content = cleaned_content.lstrip('\n\r ')
+            cleaned_content = cleaned_content.lstrip("\n\r ")
 
             # 如果清理后内容为空，返回原内容
             if not cleaned_content.strip():
@@ -517,7 +623,9 @@ class SystemPromptOptimizer:
 
             # 记录清理效果
             if cleaned_content != content:
-                logger.info(f"[{section_key}] 已清理描述性前缀，原长度: {len(content)}, 清理后: {len(cleaned_content)}")
+                logger.info(
+                    f"[{section_key}] 已清理描述性前缀，原长度: {len(content)}, 清理后: {len(cleaned_content)}"
+                )
 
             return cleaned_content
 
@@ -543,21 +651,19 @@ class SystemPromptOptimizer:
             logger.debug(f"准备调用LLM - 模型: {model}, prompt长度: {len(prompt)} 字符")
 
             # 根据不同的客户端类型调用相应的方法
-            if hasattr(client, 'chat'):
+            if hasattr(client, "chat"):
                 # OpenAI风格的客户端
                 logger.debug("使用OpenAI风格客户端调用")
                 response = await client.chat.completions.create(
                     model=model,
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ],
+                    messages=[{"role": "user", "content": prompt}],
                     temperature=0.7,
-                    max_tokens=2000
+                    max_tokens=2000,
                 )
                 result = response.choices[0].message.content
                 logger.debug(f"LLM响应成功 - 响应长度: {len(result)} 字符")
                 return result
-            elif hasattr(client, 'generate'):
+            elif hasattr(client, "generate"):
                 # 其他类型的客户端
                 logger.debug("使用generate方法调用")
                 response = client.generate(prompt, model=model)
@@ -585,9 +691,9 @@ class SystemPromptOptimizer:
         try:
             # 尝试多种JSON提取模式
             patterns = [
-                r'```json\s*(\{.*?\})\s*```',  # ```json {...} ```
-                r'```\s*(\{.*?\})\s*```',      # ``` {...} ```
-                r'(\{.*?\})',                   # 直接的JSON对象
+                r"```json\s*(\{.*?\})\s*```",  # ```json {...} ```
+                r"```\s*(\{.*?\})\s*```",  # ``` {...} ```
+                r"(\{.*?\})",  # 直接的JSON对象
             ]
 
             for pattern in patterns:
@@ -623,7 +729,7 @@ class SystemPromptOptimizer:
             "output_requirements": "Output requirement information",
             "constraints_info": "Constraint information",
             "terminology_info": "Terminology information",
-            "language_issues": "Language clarity and precision that need improvement"
+            "language_issues": "Language clarity and precision that need improvement",
         }
 
     def _get_default_sections(self, analysis: Dict[str, Any]) -> Dict[str, str]:
@@ -643,7 +749,7 @@ class SystemPromptOptimizer:
             "content_preference": "- Provide accurate, relevant, and valuable information and suggestions\n- Ensure professionalism and practicality in the content\n- Keep information timely and reliable",
             "format_preference": "- Use a clear structured format\n- Include appropriate headings, lists, and paragraph organization\n- Keep the content easy to read and understand",
             "terminology": "- Define relevant domain terminology based on the specific field\n- Provide clear explanations and usage notes for terms",
-            "constraints": "- Ensure information accuracy and reliability\n- Follow the user's specific requirements and preferences\n- Maintain a professional and friendly communication style\n- Avoid harmful or inappropriate content"
+            "constraints": "- Ensure information accuracy and reliability\n- Follow the user's specific requirements and preferences\n- Maintain a professional and friendly communication style\n- Avoid harmful or inappropriate content",
         }
 
     def _get_fallback_result(self, original_prompt: str) -> Dict[str, Any]:
@@ -661,10 +767,12 @@ class SystemPromptOptimizer:
             "analysis": {"error": "Analysis failed; returning the original content."},
             "sections": {"error": "Generation failed"},
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "status": "fallback"
+            "status": "fallback",
         }
 
-    def _get_fallback_markdown(self, sections: Dict[str, str], language: str = "en") -> str:
+    def _get_fallback_markdown(
+        self, sections: Dict[str, str], language: str = "en"
+    ) -> str:
         """
         获取备用markdown格式（当格式化失败时）
 
@@ -674,18 +782,26 @@ class SystemPromptOptimizer:
         Returns:
             备用markdown字符串
         """
-        return PromptManager().get_prompt(
-            "system_prompt_optimizer_fallback_markdown",
-            agent="common_util",
-            language=language,
-        ).format(
-            role=sections.get("role", "Role information"),
-            skills=sections.get("skills", "Skills information"),
-            tool_guidance=sections.get("tool_guidance", "Tool guidance"),
-            content_preference=sections.get("content_preference", "Content preference"),
-            format_preference=sections.get("format_preference", "Format preference"),
-            terminology=sections.get("terminology", "Terminology"),
-            constraints=sections.get("constraints", "Constraints"),
+        return (
+            PromptManager()
+            .get_prompt(
+                "system_prompt_optimizer_fallback_markdown",
+                agent="common_util",
+                language=language,
+            )
+            .format(
+                role=sections.get("role", "Role information"),
+                skills=sections.get("skills", "Skills information"),
+                tool_guidance=sections.get("tool_guidance", "Tool guidance"),
+                content_preference=sections.get(
+                    "content_preference", "Content preference"
+                ),
+                format_preference=sections.get(
+                    "format_preference", "Format preference"
+                ),
+                terminology=sections.get("terminology", "Terminology"),
+                constraints=sections.get("constraints", "Constraints"),
+            )
         )
 
     def save_optimized_prompt(self, result: Dict[str, Any], file_path: str) -> str:
@@ -701,8 +817,8 @@ class SystemPromptOptimizer:
         """
         try:
             # 保存markdown格式的优化指令
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(result['optimized_prompt'])
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(result["optimized_prompt"])
 
             logger.info(f"优化结果已保存到: {file_path}")
             return f"成功保存到 {file_path}"

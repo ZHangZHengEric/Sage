@@ -42,7 +42,11 @@ class UserInputOptimizer:
         language: str = "en",
     ) -> Dict[str, Any]:
         try:
-            prompt = self._build_prompt(current_input=current_input, history_messages=history_messages, language=language)
+            prompt = self._build_prompt(
+                current_input=current_input,
+                history_messages=history_messages,
+                language=language,
+            )
             optimized_input = (await self._call_llm(llm_client, prompt, model)).strip()
 
             if not optimized_input:
@@ -70,7 +74,11 @@ class UserInputOptimizer:
         model: str,
         language: str = "en",
     ) -> AsyncGenerator[str, None]:
-        prompt = self._build_prompt(current_input=current_input, history_messages=history_messages, language=language)
+        prompt = self._build_prompt(
+            current_input=current_input,
+            history_messages=history_messages,
+            language=language,
+        )
         logger.info(
             f"用户输入优化流式生成开始: model={model}, prompt_length={len(prompt)}, history_count={len(history_messages or [])}"
         )
@@ -78,7 +86,12 @@ class UserInputOptimizer:
             if chunk:
                 yield chunk
 
-    def _build_prompt(self, current_input: str, history_messages: List[Dict[str, str]], language: str = "en") -> str:
+    def _build_prompt(
+        self,
+        current_input: str,
+        history_messages: List[Dict[str, str]],
+        language: str = "en",
+    ) -> str:
         history_lines: List[str] = []
         for message in history_messages or []:
             role = (message.get("role") or "assistant").strip()
@@ -88,11 +101,15 @@ class UserInputOptimizer:
             history_lines.append(f"[{role}] {content}")
 
         history_text = "\n".join(history_lines) if history_lines else "None"
-        return PromptManager().get_prompt(
-            "user_input_optimizer_prompt",
-            agent="common_util",
-            language=language,
-        ).format(history_text=history_text, current_input=current_input)
+        return (
+            PromptManager()
+            .get_prompt(
+                "user_input_optimizer_prompt",
+                agent="common_util",
+                language=language,
+            )
+            .format(history_text=history_text, current_input=current_input)
+        )
 
     async def _call_llm(self, client: Any, prompt: str, model: str) -> str:
         if hasattr(client, "chat"):
@@ -128,7 +145,9 @@ class UserInputOptimizer:
                 extra_body=self._build_no_thinking_extra_body(model),
             )
             stream_ready_cost = time.perf_counter() - request_start
-            logger.info(f"用户输入优化流式请求已建立: model={model}, cost={stream_ready_cost:.3f}s")
+            logger.info(
+                f"用户输入优化流式请求已建立: model={model}, cost={stream_ready_cost:.3f}s"
+            )
             first_delta_cost = None
             chunk_count = 0
             async for chunk in response:

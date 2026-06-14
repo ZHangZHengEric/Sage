@@ -15,7 +15,7 @@ from .drivers.tool import ToolMemoryDriver
 
 class UserMemoryManager:
     """用户记忆管理器
-    
+
     作为统一的记忆管理入口，通过IMemoryDriver接口与具体的记忆后端交互。
     以user_id为索引，自动选择最佳的记忆工具实现。
     """
@@ -28,7 +28,7 @@ class UserMemoryManager:
     ):
         """
         初始化用户记忆管理器
-        
+
         Args:
             driver: 自定义的记忆驱动实例（可选，如果提供则优先使用）
             model: LLM模型实例（用于记忆提取）
@@ -38,19 +38,25 @@ class UserMemoryManager:
         if not self.memory_root:
             self.memory_root = os.path.join(workspace, "user_memory")
             os.environ["MEMORY_ROOT_PATH"] = self.memory_root
-            logger.info(f"UserMemoryManager: 未设置MEMORY_ROOT_PATH，使用默认路径: {self.memory_root}")
+            logger.info(
+                f"UserMemoryManager: 未设置MEMORY_ROOT_PATH，使用默认路径: {self.memory_root}"
+            )
         else:
-            logger.info(f"UserMemoryManager: 使用环境变量MEMORY_ROOT_PATH: {self.memory_root}")
+            logger.info(
+                f"UserMemoryManager: 使用环境变量MEMORY_ROOT_PATH: {self.memory_root}"
+            )
 
         self.driver = driver
         if not self.driver:
             logger.info("UserMemoryManager 初始化完成，使用默认驱动, ToolMemoryDriver")
         else:
-            logger.info(f"UserMemoryManager 初始化完成，使用自定义驱动: {self.driver.__class__.__name__}    ")
+            logger.info(
+                f"UserMemoryManager 初始化完成，使用自定义驱动: {self.driver.__class__.__name__}    "
+            )
 
     def _get_driver(self) -> Optional[IMemoryDriver]:
         """获取记忆驱动
-        
+
         优先使用初始化的driver，如果未初始化则尝试使用tool_manager创建ToolMemoryDriver
         """
         if self.driver:
@@ -81,41 +87,45 @@ class UserMemoryManager:
 **标签建议**: preference, work, learning, project, personal, requirement
 """
 
-    async def _safe_remember(self, memory: dict, user_id: str, session_id: str, session_context: Any) -> None:
+    async def _safe_remember(
+        self, memory: dict, user_id: str, session_id: str, session_context: Any
+    ) -> None:
         """辅助方法：安全地保存单条记忆"""
         try:
             logger.info(f"UserMemoryManager: 开始保存记忆 {memory['key']}")
             await self.remember(
                 user_id=user_id,
-                memory_key=memory['key'],
-                content=memory['content'],
-                memory_type=memory['type'],
-                tags=memory.get('tags', []),
+                memory_key=memory["key"],
+                content=memory["content"],
+                memory_type=memory["type"],
+                tags=memory.get("tags", []),
                 session_id=session_id,
-                session_context=session_context
+                session_context=session_context,
             )
         except Exception as e:
             logger.error(f"UserMemoryManager: 保存记忆失败 {memory.get('key')}: {e}")
 
-    async def _safe_forget(self, key: str, user_id: str, session_id: str, session_context: Any) -> None:
+    async def _safe_forget(
+        self, key: str, user_id: str, session_id: str, session_context: Any
+    ) -> None:
         """辅助方法：安全地删除单条记忆"""
         try:
             await self.forget(
                 user_id=user_id,
-                memory_key=key, 
-                session_id=session_id, 
+                memory_key=key,
+                session_id=session_id,
                 session_context=session_context,
-                tool_manager=session_context.tool_manager
+                tool_manager=session_context.tool_manager,
             )
         except Exception as e:
             logger.error(f"UserMemoryManager: 删除记忆失败 {key}: {e}")
 
     def _format_memories_for_llm(self, memories: List[MemoryEntry]) -> str:
         """将MemoryEntry列表格式化为大模型友好的字符串
-        
+
         Args:
             memories: MemoryEntry对象列表
-            
+
         Returns:
             格式化的字符串，便于大模型理解和使用
         """
@@ -142,9 +152,19 @@ class UserMemoryManager:
 
     # ========== 核心记忆操作接口 ==========
 
-    async def remember(self, user_id: str, memory_key: str, content: str, memory_type: str = "experience", tags: str = "", session_id: Optional[str] = None, session_context: Optional[Any] = None, tool_manager: Any = None) -> str:
+    async def remember(
+        self,
+        user_id: str,
+        memory_key: str,
+        content: str,
+        memory_type: str = "experience",
+        tags: str = "",
+        session_id: Optional[str] = None,
+        session_context: Optional[Any] = None,
+        tool_manager: Any = None,
+    ) -> str:
         """记住某个记忆
-        
+
         Args:
             user_id: 用户ID
             memory_key: 记忆键（唯一标识）
@@ -154,14 +174,14 @@ class UserMemoryManager:
             session_id: 会话ID
             session_context: 会话上下文
             tool_manager: 工具管理器（用于创建临时驱动）
-            
+
         Returns:
             操作结果描述
         """
         driver = self._get_active_driver()
         if not driver:
             logger.warning("记忆功能已禁用：未配置记忆存储路径且无可用的MCP记忆服务")
-            return
+            return  # pyright: ignore[reportReturnType]
 
         try:
             return await driver.remember(
@@ -171,16 +191,24 @@ class UserMemoryManager:
                 memory_type=memory_type,
                 tags=tags,
                 session_id=session_id,
-                session_context=session_context
+                session_context=session_context,
             )
 
         except Exception as e:
             logger.error(f"记住记忆失败: {e}")
             return f"记住记忆失败：{str(e)}"
 
-    async def recall(self, user_id: str, query: str, limit: int = 5, session_id: Optional[str] = None, session_context: Optional[Any] = None, tool_manager: Any = None) -> str:
+    async def recall(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 5,
+        session_id: Optional[str] = None,
+        session_context: Optional[Any] = None,
+        tool_manager: Any = None,
+    ) -> str:
         """获取相似的记忆
-        
+
         Args:
             user_id: 用户ID
             query: 查询内容（关键词）
@@ -188,7 +216,7 @@ class UserMemoryManager:
             session_id: 会话ID
             session_context: 会话上下文
             tool_manager: 工具管理器
-            
+
         Returns:
             格式化的记忆字符串，便于大模型理解和使用
         """
@@ -203,7 +231,7 @@ class UserMemoryManager:
                 query=query,
                 limit=limit,
                 session_id=session_id,
-                session_context=session_context
+                session_context=session_context,
             )
 
             if not memory_entries:
@@ -216,16 +244,23 @@ class UserMemoryManager:
             logger.error(f"回忆记忆失败: {e}")
             return f"回忆记忆失败：{str(e)}"
 
-    async def forget(self, user_id: str, memory_key: str, session_id: Optional[str] = None, session_context: Optional[Any] = None, tool_manager: Any = None) -> str:
+    async def forget(
+        self,
+        user_id: str,
+        memory_key: str,
+        session_id: Optional[str] = None,
+        session_context: Optional[Any] = None,
+        tool_manager: Any = None,
+    ) -> str:
         """忘掉某个记忆
-        
+
         Args:
             user_id: 用户ID
             memory_key: 要删除的记忆键
             session_id: 会话ID（可选）
             session_context: 会话上下文
             tool_manager: 工具管理器
-            
+
         Returns:
             操作结果描述
         """
@@ -238,14 +273,21 @@ class UserMemoryManager:
                 user_id=user_id,
                 memory_key=memory_key,
                 session_id=session_id,
-                session_context=session_context
+                session_context=session_context,
             )
 
         except Exception as e:
             logger.error(f"忘记记忆失败: {e}")
             return f"忘记记忆失败：{str(e)}"
 
-    async def _fetch_single_memory_type(self, driver: IMemoryDriver, user_id: str, memory_type: str, session_id: str, session_context: Any) -> Optional[tuple[str, str]]:
+    async def _fetch_single_memory_type(
+        self,
+        driver: IMemoryDriver,
+        user_id: str,
+        memory_type: str,
+        session_id: str,
+        session_context: Any,
+    ) -> Optional[tuple[str, str]]:
         """辅助方法：获取单个类型的记忆"""
         try:
             memories = await driver.recall_by_type(
@@ -254,7 +296,7 @@ class UserMemoryManager:
                 query="",
                 limit=10,
                 session_id=session_id,
-                session_context=session_context
+                session_context=session_context,
             )
 
             if memories:
@@ -271,15 +313,21 @@ class UserMemoryManager:
             logger.warning(f"查询 {memory_type} 类型记忆失败: {e}")
             return None
 
-    async def get_system_memories(self, user_id: str, session_id: Optional[str] = None, session_context: Optional[Any] = None, tool_manager: Any = None) -> dict:
+    async def get_system_memories(
+        self,
+        user_id: str,
+        session_id: Optional[str] = None,
+        session_context: Optional[Any] = None,
+        tool_manager: Any = None,
+    ) -> dict:
         """获取系统级记忆并格式化
-        
+
         Args:
             user_id: 用户ID
             session_id: 会话ID
             session_context: 会话上下文
             tool_manager: 工具管理器
-            
+
         Returns:
             格式化的系统级记忆字典
         """
@@ -290,13 +338,15 @@ class UserMemoryManager:
 
         try:
             # 系统级记忆类型
-            system_memory_types = ['preference', 'requirement', 'persona', 'constraint']
+            system_memory_types = ["preference", "requirement", "persona", "constraint"]
             system_memories = {}
             effective_session_id = session_id or f"memory_session_{user_id}"
 
             # 并发获取所有类型的记忆
             tasks = [
-                self._fetch_single_memory_type(driver, user_id, m_type, effective_session_id, session_context)
+                self._fetch_single_memory_type(
+                    driver, user_id, m_type, effective_session_id, session_context
+                )
                 for m_type in system_memory_types
             ]
 
@@ -317,10 +367,10 @@ class UserMemoryManager:
 
     def format_system_memories_for_context(self, system_memories: dict) -> str:
         """将系统级记忆格式化为适合注入system_context的字符串
-        
+
         Args:
             system_memories: 系统级记忆字典
-            
+
         Returns:
             格式化的记忆字符串
         """
@@ -329,28 +379,30 @@ class UserMemoryManager:
 
         memory_context = []
 
-        if 'preference' in system_memories:
+        if "preference" in system_memories:
             memory_context.append(f"## 用户偏好\n{system_memories['preference']}")
 
-        if 'requirement' in system_memories:
+        if "requirement" in system_memories:
             memory_context.append(f"## 用户要求\n{system_memories['requirement']}")
 
-        if 'persona' in system_memories:
+        if "persona" in system_memories:
             memory_context.append(f"## 用户人设\n{system_memories['persona']}")
 
-        if 'constraint' in system_memories:
+        if "constraint" in system_memories:
             memory_context.append(f"## 约束条件\n{system_memories['constraint']}")
 
         return "\n\n".join(memory_context) if memory_context else ""
 
-    async def get_system_memories_summary(self, user_id: str, session_id: Optional[str] = None, tool_manager: Any = None) -> str:
+    async def get_system_memories_summary(
+        self, user_id: str, session_id: Optional[str] = None, tool_manager: Any = None
+    ) -> str:
         """获取系统级记忆的摘要
-        
+
         Args:
             user_id: 用户ID
             session_id: 会话ID
             tool_manager: 工具管理器
-            
+
         Returns:
             系统级记忆的摘要字符串
         """

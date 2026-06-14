@@ -308,11 +308,12 @@ import { systemAPI } from '@/api/system.js'
 import { buildOAuthLoginUrl, loginAPI, registerAPI, sendRegisterVerificationCodeAPI } from '@/utils/auth.js'
 import { cn } from '@/utils/cn'
 import { useLanguage } from '@/utils/i18n.js'
+import { getAssetUrl } from '@/config/runtime.js'
 
 const router = useRouter()
 const route = useRoute()
 const { toggleLanguage, isZhCN, t } = useLanguage()
-const logoUrl = `${import.meta.env.BASE_URL}sage_logo.svg`
+const logoUrl = getAssetUrl('sage_logo.svg')
 
 const authProviders = ref([])
 const allowRegistration = ref(true)

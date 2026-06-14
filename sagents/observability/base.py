@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Union
 
+
 class BaseTraceHandler(ABC):
     """
     Base interface for observability handlers (tracers).
@@ -38,12 +39,12 @@ class BaseTraceHandler(ABC):
 
     @abstractmethod
     def on_llm_start(
-        self, 
-        session_id: str, 
-        model_name: str, 
-        messages: List[Any], 
-        step_name: str = None,
-        **kwargs: Any
+        self,
+        session_id: str,
+        model_name: str,
+        messages: List[Any],
+        step_name: str = None,  # pyright: ignore[reportArgumentType]
+        **kwargs: Any,
     ) -> Any:
         """Run when LLM starts."""
         pass
@@ -60,11 +61,11 @@ class BaseTraceHandler(ABC):
 
     @abstractmethod
     def on_tool_start(
-        self, 
-        session_id: str, 
-        tool_name: str, 
-        tool_input: Union[str, Dict], 
-        **kwargs: Any
+        self,
+        session_id: str,
+        tool_name: str,
+        tool_input: Union[str, Dict],
+        **kwargs: Any,
     ) -> Any:
         """Run when a tool starts."""
         pass

@@ -1,3 +1,6 @@
+x-sage-observability-labels: &sage-observability-labels
+  com.sage.environment: ${SAGE_OBSERVABILITY_ENV:-${SAGE_ENV:-production}}
+
 services:
   sage-server:
     restart: always
@@ -5,7 +8,7 @@ services:
       context: ../..
       dockerfile: deploy/images/Dockerfile.server
     image: sage-server:v1.0
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-server
+    container_name: sage-server
     volumes:
       - ${SAGE_ROOT}/sage-server/sessions:/app/sessions
       - ${SAGE_ROOT}/sage-server/agents:/app/agents
@@ -19,11 +22,12 @@ services:
       - ${SAGE_COMPOSE_ENV_FILE:-.env}
     environment:
       SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage}
-      SAGE_TRACE_JAEGER_UI_URL: ${SAGE_TRACE_JAEGER_UI_URL:-http://sage-jaeger:16686/jaeger}
+      SAGE_TRACE_JAEGER_URL: ${SAGE_TRACE_JAEGER_URL:-http://sage-jaeger:4317}
       SAGE_TRACE_JAEGER_PUBLIC_URL: ${SAGE_TRACE_JAEGER_PUBLIC_URL:-http://127.0.0.1:30051/jaeger}
-      SAGE_TRACE_JAEGER_BASE_PATH: ${SAGE_TRACE_JAEGER_BASE_PATH:-/api/observability/jaeger}
+      SAGE_LOG_LEVEL: ${SAGE_LOG_LEVEL:-DEBUG}
       SAGE_SESSION_DIR: /app/sessions
       SAGE_LOCAL_LINUX_ISOLATION: bwrap
+    labels: *sage-observability-labels
     cap_add:
       - SYS_ADMIN
     security_opt:
@@ -31,6 +35,9 @@ services:
       - apparmor=unconfined
     mem_limit: 16g
     cpus: 4.0
+    networks:
+      default: {}
+      shared: {}
 
   sage-web:
     restart: always
@@ -39,50 +46,29 @@ services:
       dockerfile: deploy/images/Dockerfile.web
       args:
         NGINX_CONF: deploy/prod/nginx/nginx.conf
-        VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
-        VITE_SAGE_TRACE_WEB_URL: ${SAGE_TRACE_WEB_URL}
-        VITE_SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage/}
+        VITE_SAGE_GRAFANA_URL: ${SAGE_GRAFANA_PUBLIC_URL:-http://127.0.0.1:30093}
     image: sage-web:v1.0
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-web
+    container_name: sage-web
     ports:
       - ${SAGE_WEB_PORT:-30051}:80
     environment:
       TZ: 'Asia/Shanghai'
-      VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
-      VITE_SAGE_TRACE_WEB_URL: ${SAGE_TRACE_WEB_URL}
-      VITE_SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage/}
-
-
-  sage-wiki:
-    restart: always
-    build:
-      context: ../..
-      dockerfile: deploy/images/Dockerfile.wiki
-      args:
-        NGINX_CONF: deploy/prod/nginx/nginx_wiki.conf
-        VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
-    image: sage-wiki:v1.0
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-wiki
-    ports:
-      - ${SAGE_WIKI_PORT:-30057}:80
-    environment:
-      TZ: 'Asia/Shanghai'
-      VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
-    depends_on:
-      - sage-server
-    mem_limit: 512m
-    cpus: 0.5
+    labels: *sage-observability-labels
+    networks:
+      default: {}
+      shared: {}
 
   sage-mysql:
     restart: always
     image: docker.m.daocloud.io/mysql:8.4
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-mysql
+    container_name: sage-mysql
     ports:
       - ${SAGE_MYSQL_PUBLISHED_PORT:-30052}:3306
     environment:
       TZ: 'Asia/Shanghai'
       MYSQL_ROOT_PASSWORD: ${SAGE_MYSQL_PASSWORD}
       MYSQL_ROOT_HOST: '%'
+    labels: *sage-observability-labels
     ulimits:
       memlock:
         soft: -1
@@ -93,12 +79,14 @@ services:
     mem_limit: 1g
     cpus: 1.0
   sage-es:
+    profiles:
+      - es
     restart: always
     build:
       context: ../..
       dockerfile: deploy/images/Dockerfile.es
     image: sage-es:v1.0
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-es
+    container_name: sage-es
     ports:
       - ${SAGE_ELASTICSEARCH_PUBLISHED_PORT:-30053}:9200
     environment:
@@ -108,6 +96,7 @@ services:
       - xpack.security.enabled=false
       - TAKE_FILE_OWNERSHIP=true
       - "ES_JAVA_OPTS=-Xms1024m -Xmx1024m"
+    labels: *sage-observability-labels
     ulimits:
       memlock:
         soft: -1
@@ -116,51 +105,8 @@ services:
       - ${SAGE_ROOT}/es/data/node:/usr/share/elasticsearch/data
     mem_limit: 2g
     cpus: 1.0
-  sage-rustfs:
-    image: docker.m.daocloud.io/rustfs/rustfs:latest
-    ports:
-      - ${SAGE_RUSTFS_API_PORT:-30054}:9000
-      - ${SAGE_RUSTFS_CONSOLE_PORT:-30055}:9001
-    volumes:
-      - ${SAGE_ROOT}/rustfs/data:/data
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-rustfs
-    restart: always
-    environment:
-      - RUSTFS_ADDRESS=0.0.0.0:9000
-      - RUSTFS_CONSOLE_ADDRESS=0.0.0.0:9001
-      - RUSTFS_CONSOLE_ENABLE=true
-      - RUSTFS_CORS_ALLOWED_ORIGINS=*
-      - RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS=*
-      - RUSTFS_ACCESS_KEY=${SAGE_S3_ACCESS_KEY}
-      - RUSTFS_SECRET_KEY=${SAGE_S3_SECRET_KEY}
-      - RUSTFS_OBS_LOGGER_LEVEL=info
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "sh", "-c",
-          "curl -f http://127.0.0.1:9000/health && curl -f http://127.0.0.1:9001/rustfs/console/health"
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    mem_limit: 1g
-    cpus: 0.5
-  sage-jaeger:
-    image: docker.m.daocloud.io/jaegertracing/jaeger:2.16.0
-    container_name: ${SAGE_CONTAINER_PREFIX:-sage}-jaeger
-    restart: always
-    command:
-      - --config
-      - /etc/jaeger/config.yaml
-    volumes:
-      - ../images/jaeger/config.yaml:/etc/jaeger/config.yaml:ro
-    ports:
-      - "${SAGE_JAEGER_OTLP_GRPC_PORT:-4317}:4317"   # OTLP gRPC
-      - "${SAGE_JAEGER_OTLP_HTTP_PORT:-4318}:4318"   # OTLP HTTP
-    expose:
-      - "16686"
-      - "13133"
-    mem_limit: 1g
-    cpus: 0.5
+
+networks:
+  shared:
+    name: ${SAGE_SHARED_NETWORK:-sage_shared_default}
+    external: true

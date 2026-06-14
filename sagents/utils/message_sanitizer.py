@@ -14,10 +14,10 @@ from sagents.context.messages.message import MessageRole
 
 def _get_tool_call_id(tool_call: Any) -> Any:
     """兼容 ChoiceDeltaToolCall 对象与字典两种形式取出 id。"""
-    if hasattr(tool_call, 'id'):
+    if hasattr(tool_call, "id"):
         return tool_call.id
     if isinstance(tool_call, dict):
-        return tool_call.get('id')
+        return tool_call.get("id")
     return None
 
 
@@ -27,24 +27,28 @@ def remove_orphan_tool_calls(messages: List[Dict[str, Any]]) -> List[Dict[str, A
     保持原顺序与对象引用。
     """
     matched_tool_call_ids = [
-        msg['tool_call_id']
+        msg["tool_call_id"]
         for msg in messages
-        if msg.get('role') == MessageRole.TOOL.value and 'tool_call_id' in msg
+        if msg.get("role") == MessageRole.TOOL.value and "tool_call_id" in msg
     ]
 
     new_messages: List[Dict[str, Any]] = []
     for msg in messages:
-        if msg.get('role') == MessageRole.ASSISTANT.value and 'tool_calls' in msg:
-            tool_calls = msg['tool_calls'] or []
-            if any(_get_tool_call_id(tc) not in matched_tool_call_ids for tc in tool_calls):
+        if msg.get("role") == MessageRole.ASSISTANT.value and "tool_calls" in msg:
+            tool_calls = msg["tool_calls"] or []
+            if any(
+                _get_tool_call_id(tc) not in matched_tool_call_ids for tc in tool_calls
+            ):
                 continue
         new_messages.append(msg)
     return new_messages
 
 
-def strip_content_when_tool_calls(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def strip_content_when_tool_calls(
+    messages: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
     """如果 assistant 消息包含 tool_calls，则就地移除 content 字段。返回同一个列表。"""
     for msg in messages:
-        if msg.get('role') == MessageRole.ASSISTANT.value and msg.get('tool_calls'):
-            msg.pop('content', None)
+        if msg.get("role") == MessageRole.ASSISTANT.value and msg.get("tool_calls"):
+            msg.pop("content", None)
     return messages

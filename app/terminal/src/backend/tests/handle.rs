@@ -27,6 +27,9 @@ fn backend_handle_supports_two_round_trips_without_respawn() {
         sandbox_type: None,
         skills: Vec::new(),
         model_override: None,
+        goal_objective: None,
+        goal_status: None,
+        clear_goal: false,
         task: "unused".to_string(),
     };
 
@@ -75,6 +78,9 @@ fn backend_handle_omits_workspace_flag_when_not_overridden() {
         sandbox_type: None,
         skills: Vec::new(),
         model_override: None,
+        goal_objective: None,
+        goal_status: None,
+        clear_goal: false,
         task: "unused".to_string(),
     };
 
@@ -114,6 +120,9 @@ fn backend_handle_forwards_agent_config_flag_without_agent_id() {
         sandbox_type: Some("local".to_string()),
         skills: Vec::new(),
         model_override: None,
+        goal_objective: None,
+        goal_status: None,
+        clear_goal: false,
         task: "unused".to_string(),
     };
 

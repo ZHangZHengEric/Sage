@@ -1,6 +1,8 @@
 // Cookie 处理已改为 js-cookie 库
 
-const apiPrefix = import.meta.env.VITE_BACKEND_API_PREFIX || '';  // 默认空字符串，如果没有设置前缀
+import { getApiPrefix } from '../config/runtime.js'
+
+const apiPrefix = getApiPrefix()
 
 // API基础配置
 const CONFIG = {

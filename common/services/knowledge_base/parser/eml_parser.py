@@ -31,7 +31,6 @@ ALLOW_ATTACH_FILE_EXTS = {
 
 
 class EmlParser(BaseParser):
-
     async def clear_old(self, index_name: str, doc: KdbDoc) -> List[str]:
         ids: List[str] = [doc.id]
         md = doc.meta_data or {}
@@ -41,10 +40,12 @@ class EmlParser(BaseParser):
         logger.info(f"[EmlParser] 计划清理旧文档：索引={index_name}，ID数量={len(ids)}")
         return ids
 
-    async def process(self, index_name: str, doc: KdbDoc, file: File) -> List["DocumentInput"]:
+    async def process(
+        self, index_name: str, doc: KdbDoc, file: File
+    ) -> List["DocumentInput"]:
         # Lazy import to avoid circular dependency at runtime
         from ..knowledge_base import DocumentInput
-        
+
         file_dao = FileDao()
         logger.info(f"[CommonParser] 处理开始：索引={index_name}, 文档ID={doc.id}")
         text, meta = await self.convert_file_to_text(file.path)
@@ -83,13 +84,13 @@ class EmlParser(BaseParser):
                     if not data_bytes:
                         logger.debug(f"[EmlParser] 附件跳过：名称={fname}，原因=无内容")
                         continue
-                    ext = os.path.splitext(fname)[1].lower()
+                    ext = os.path.splitext(fname)[1].lower()  # pyright: ignore[reportArgumentType,reportCallIssue]
                     if ext not in ALLOW_ATTACH_FILE_EXTS:
                         logger.debug(
                             f"[EmlParser] 附件跳过：名称={fname}，原因=不支持的文件类型"
                         )
                         continue
-                    path = await upload_kdb_file(fname, data_bytes, ctype)
+                    path = await upload_kdb_file(fname, data_bytes, ctype)  # pyright: ignore[reportArgumentType]
                     att = File(
                         id=gen_id(),
                         name=fname,
@@ -120,6 +121,6 @@ class EmlParser(BaseParser):
             doc.meta_data["attachments"] = []
         doc_dao = KdbDocDao()
         await doc_dao.update(doc)
-        
+
         logger.info(f"[EmlParser] 处理完成：索引={index_name}，生成文档数={len(docs)}")
         return docs

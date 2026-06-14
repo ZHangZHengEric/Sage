@@ -132,8 +132,9 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import EyeBall from './EyeBall.vue'
 import Pupil from './Pupil.vue'
 import { useLanguage } from '@/utils/i18n.js'
+import { getAssetUrl } from '@/config/runtime.js'
 
-const logoUrl = `${import.meta.env.BASE_URL}sage_logo.svg`
+const logoUrl = getAssetUrl('sage_logo.svg')
 const { t } = useLanguage()
 
 const props = defineProps({

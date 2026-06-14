@@ -1,6 +1,7 @@
 """
 BM25-backed session history retrieval backend.
 """
+
 import hashlib
 import json
 import re
@@ -20,7 +21,9 @@ class Bm25SessionMemoryBackend:
         self._message_bm25_cache_key: Optional[str] = None
         self._message_bm25_cache: Optional[Tuple[BM25Okapi, List[List[str]]]] = None
         self._chat_bm25_cache_key: Optional[str] = None
-        self._chat_bm25_cache: Optional[Tuple[BM25Okapi, List[List[str]], List[List[MessageChunk]]]] = None
+        self._chat_bm25_cache: Optional[
+            Tuple[BM25Okapi, List[List[str]], List[List[MessageChunk]]]
+        ] = None
 
     def clear_cache(self) -> None:
         self._message_bm25_cache_key = None
@@ -60,19 +63,25 @@ class Bm25SessionMemoryBackend:
         for msg in messages:
             content = self._serialize_content(msg.get_content())
             content_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
-            normalized_type = msg.normalized_message_type() if hasattr(msg, "normalized_message_type") else None
+            normalized_type = (
+                msg.normalized_message_type()
+                if hasattr(msg, "normalized_message_type")
+                else None
+            )
             digests.append(
                 f"{msg.message_id}|{msg.role}|{normalized_type or ''}|{content_hash}"
             )
         return hashlib.md5("\n".join(digests).encode("utf-8")).hexdigest()
 
     def _calculate_message_tokens(self, msg: MessageChunk) -> int:
-        return ContextBudgetManager.calculate_str_token_length(msg.get_content())
+        return ContextBudgetManager.calculate_str_token_length(msg.get_content())  # pyright: ignore[reportArgumentType]
 
     def _calculate_messages_tokens(self, messages: List[MessageChunk]) -> int:
         return sum(self._calculate_message_tokens(msg) for msg in messages)
 
-    def _group_messages_by_chat(self, messages: List[MessageChunk]) -> List[List[MessageChunk]]:
+    def _group_messages_by_chat(
+        self, messages: List[MessageChunk]
+    ) -> List[List[MessageChunk]]:
         if not messages:
             return []
 
@@ -90,12 +99,14 @@ class Bm25SessionMemoryBackend:
 
         return chats
 
-    def _get_or_build_message_bm25(self, messages: List[MessageChunk]) -> Optional[BM25Okapi]:
+    def _get_or_build_message_bm25(
+        self, messages: List[MessageChunk]
+    ) -> Optional[BM25Okapi]:
         cache_key = self._fingerprint_messages(messages)
         if self._message_bm25_cache_key == cache_key and self._message_bm25_cache:
             return self._message_bm25_cache[0]
 
-        corpus = [self._tokenize_text(msg.get_content()) for msg in messages]
+        corpus = [self._tokenize_text(msg.get_content()) for msg in messages]  # pyright: ignore[reportArgumentType]
         if not corpus:
             return None
 
@@ -147,7 +158,9 @@ class Bm25SessionMemoryBackend:
             query_tokens = self._tokenize_text(query)
             scores = bm25.get_scores(query_tokens)
 
-            scored_chats = sorted(zip(chat_list, scores), key=lambda x: x[1], reverse=True)
+            scored_chats = sorted(
+                zip(chat_list, scores), key=lambda x: x[1], reverse=True
+            )
             filtered = [(chat, score) for chat, score in scored_chats if score > 0.1]
             if not filtered:
                 filtered = scored_chats
@@ -193,7 +206,9 @@ class Bm25SessionMemoryBackend:
             query_tokens = self._tokenize_text(query)
             scores = bm25.get_scores(query_tokens)
 
-            scored_messages = sorted(zip(messages, scores), key=lambda x: x[1], reverse=True)
+            scored_messages = sorted(
+                zip(messages, scores), key=lambda x: x[1], reverse=True
+            )
             filtered = [(msg, score) for msg, score in scored_messages if score > 0.1]
             if not filtered:
                 filtered = scored_messages

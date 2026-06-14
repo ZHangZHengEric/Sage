@@ -130,7 +130,9 @@ class AgentConfigDao(BaseDao):
         async with db.get_session() as session:  # type: ignore[attr-defined]
             # Delete existing
             await session.execute(
-                delete(AgentAuthorization).where(AgentAuthorization.agent_id == agent_id)
+                delete(AgentAuthorization).where(
+                    AgentAuthorization.agent_id == agent_id
+                )
             )
             # Insert new
             if user_ids:

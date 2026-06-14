@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import JSON, String, Boolean, Integer, Float, func, select
+from sqlalchemy import JSON, String, Boolean, Integer, Float
 from sqlalchemy.orm import Mapped, mapped_column
 
 from common.models.base import Base, BaseDao, get_local_now
@@ -53,11 +53,11 @@ class LLMProvider(Base):
         self.base_url = base_url
         self.api_keys = self.normalize_api_keys(api_keys)
         self.model = model
-        self.max_tokens = max_tokens
-        self.temperature = temperature
-        self.top_p = top_p
-        self.presence_penalty = presence_penalty
-        self.max_model_len = max_model_len
+        self.max_tokens = max_tokens  # pyright: ignore[reportAttributeAccessIssue]
+        self.temperature = temperature  # pyright: ignore[reportAttributeAccessIssue]
+        self.top_p = top_p  # pyright: ignore[reportAttributeAccessIssue]
+        self.presence_penalty = presence_penalty  # pyright: ignore[reportAttributeAccessIssue]
+        self.max_model_len = max_model_len  # pyright: ignore[reportAttributeAccessIssue]
         self.supports_multimodal = supports_multimodal
         self.supports_structured_output = supports_structured_output
         self.is_default = is_default
@@ -153,7 +153,9 @@ class LLMProviderDao(BaseDao):
     async def delete_by_id(self, provider_id: str) -> bool:
         return await BaseDao.delete_by_id(self, LLMProvider, provider_id)
 
-    async def get_default(self, user_id: Optional[str] = None) -> Optional["LLMProvider"]:
+    async def get_default(
+        self, user_id: Optional[str] = None
+    ) -> Optional["LLMProvider"]:
         where = [LLMProvider.is_default == True]  # noqa: E712
         if user_id is not None:
             where.append(LLMProvider.user_id == user_id)

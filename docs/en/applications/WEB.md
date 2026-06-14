@@ -118,11 +118,7 @@ deploy/compose.sh prod logs -f sage-web
 curl -sS http://127.0.0.1:30050/api/health
 ```
 
-**Open the web UI** — the default example uses a base path (`SAGE_WEB_BASE_PATH`, often `/sage`). With the sample `.env.example` values, try:
-
-- `http://127.0.0.1:30051` (then navigate using your configured base path, e.g. `/sage/`), *or* the exact URL your team documents for the deployed nginx route.
-
-`SAGE_API_BASE_URL` in `.env` must match how the **browser** reaches the API (e.g. `http://127.0.0.1:30050` when developing locally against published ports).
+**Open the web UI** — Compose serves the SPA under `/sage/` and proxies the API through same-origin `/prod-api`. With the sample `.env.example` values, try `http://127.0.0.1:30051/sage/`, or the exact URL your team documents for the deployed nginx route.
 
 ### Stop
 
@@ -130,7 +126,7 @@ curl -sS http://127.0.0.1:30050/api/health
 deploy/compose.sh prod down
 ```
 
-**Port conflicts:** If another process uses 30050–30057, change the published port variables in `deploy/prod/.env` and update API URLs such as `SAGE_API_BASE_URL` consistently.
+**Port conflicts:** If another process uses 30050–30057, change the published port variables in `deploy/prod/.env` and update the public/browser-reachable URLs consistently.
 
 ## See also
 

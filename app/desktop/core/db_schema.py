@@ -48,15 +48,19 @@ def _migrate_agent_is_default(sync_conn):
         if default_count == 0:
             # 没有默认 Agent，将第一个（按创建时间）设为默认
             result = sync_conn.execute(
-                text("SELECT agent_id FROM agent_configs ORDER BY created_at ASC LIMIT 1")
+                text(
+                    "SELECT agent_id FROM agent_configs ORDER BY created_at ASC LIMIT 1"
+                )
             )
             first_agent = result.fetchone()
 
             if first_agent:
                 agent_id = first_agent[0]
                 sync_conn.execute(
-                    text("UPDATE agent_configs SET is_default = 1 WHERE agent_id = :agent_id"),
-                    {"agent_id": agent_id}
+                    text(
+                        "UPDATE agent_configs SET is_default = 1 WHERE agent_id = :agent_id"
+                    ),
+                    {"agent_id": agent_id},
                 )
                 logger.info(f"[DB] 已将 Agent '{agent_id}' 设为默认")
             else:
@@ -83,7 +87,9 @@ def _drop_unused_sqlite_columns(sync_conn, table_name, unused_columns):
             sync_conn.execute(text(sql))
             logger.info(f"[DB] 已清理表 '{table_name}' 的无用列 '{col_name}'")
         except Exception as e:
-            logger.error(f"[DB] 无法自动清理表 '{table_name}' 的无用列 '{col_name}': {e}")
+            logger.error(
+                f"[DB] 无法自动清理表 '{table_name}' 的无用列 '{col_name}': {e}"
+            )
 
 
 def sync_database_schema(sync_conn):
@@ -102,7 +108,7 @@ def sync_database_schema(sync_conn):
             continue
 
         # Get actual columns
-        actual_columns = {col['name'] for col in inspector.get_columns(table_name)}
+        actual_columns = {col["name"] for col in inspector.get_columns(table_name)}
         # Get expected columns from model
         expected_columns_map = {col.name: col for col in table.columns}
         expected_columns = set(expected_columns_map.keys())
@@ -136,7 +142,10 @@ def sync_database_schema(sync_conn):
                             # Let's try to be safe with a safe default or allow NULL temporarily?
                             # SQLite ALTER TABLE ADD COLUMN NOT NULL must have DEFAULT
                             import datetime
-                            now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+                            now_str = datetime.datetime.now().strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            )
                             default_clause = f" DEFAULT '{now_str}'"
 
                     # Construct ALTER TABLE statement
@@ -151,7 +160,9 @@ def sync_database_schema(sync_conn):
                         _migrate_agent_is_default(sync_conn)
 
                 except Exception as e:
-                    logger.error(f"[DB] 无法自动添加列 '{col_name}' 到表 '{table_name}': {e}")
+                    logger.error(
+                        f"[DB] 无法自动添加列 '{col_name}' 到表 '{table_name}': {e}"
+                    )
                     # If ALTER fails, we could fallback to DROP, but let's be safe and just log error
                     # The user can manually drop if needed.
         else:

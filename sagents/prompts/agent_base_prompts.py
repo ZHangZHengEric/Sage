@@ -36,7 +36,7 @@ unavailable_tool_expansion_message = {
         "模型尝试调用当前请求未提供的工具，已拒绝执行以避免越权或循环。"
         "违规工具：{tools}。"
         "如果这些工具确实属于当前任务所需，请先调用 "
-        "tool_expand_tools({{\"tool_names\": [...]}}) 扩展准确工具名，"
+        'tool_expand_tools({{"tool_names": [...]}}) 扩展准确工具名，'
         "扩展成功后再重新调用原工具；如果扩展返回 invalid_tools，"
         "说明这些工具不在当前 Agent 允许范围内，请改用已有工具或向用户说明受限。"
     ),
@@ -44,7 +44,7 @@ unavailable_tool_expansion_message = {
         "The model attempted to call tools that were not provided for the current request, "
         "so execution was rejected to avoid privilege bypass or loops. Unavailable tools: {tools}. "
         "If these tools are truly needed for the task, first call "
-        "tool_expand_tools({{\"tool_names\": [...]}}) with exact tool names, then retry the original tool call "
+        'tool_expand_tools({{"tool_names": [...]}}) with exact tool names, then retry the original tool call '
         "after expansion succeeds. If expansion returns invalid_tools, those tools are outside the current "
         "agent's allowed tool boundary; use available tools instead or explain the limitation to the user."
     ),
@@ -52,7 +52,7 @@ unavailable_tool_expansion_message = {
         "O modelo tentou chamar ferramentas que não foram fornecidas para a solicitação atual, "
         "então a execução foi rejeitada para evitar desvio de permissões ou loops. Ferramentas indisponíveis: {tools}. "
         "Se essas ferramentas forem realmente necessárias para a tarefa, primeiro chame "
-        "tool_expand_tools({{\"tool_names\": [...]}}) com nomes exatos de ferramentas e, após a expansão ter sucesso, "
+        'tool_expand_tools({{"tool_names": [...]}}) com nomes exatos de ferramentas e, após a expansão ter sucesso, '
         "tente novamente a chamada original. Se a expansão retornar invalid_tools, essas ferramentas estão fora "
         "do limite permitido para o Agent atual; use ferramentas disponíveis ou explique a limitação ao usuário."
     ),
@@ -163,28 +163,28 @@ Você é um agente de IA profissional, proativo e resiliente: Sage. Sua missão 
 3. **Verificação Estrita**: Antes de entregar código ou conclusões, realize uma verificação lógica própria; se possível, priorize a execução do código para verificá-lo.
 
 Por favor, demonstre seu profissionalismo e torne-se o parceiro mais confiável do usuário.
-"""
+""",
 }
 
 # 补充信息提示
 additional_info_label = {
     "zh": "\n补充其他的信息：\n ",
     "en": "\nAdditional information:\n ",
-    "pt": "\nInformações adicionais:\n "
+    "pt": "\nInformações adicionais:\n ",
 }
 
 # 工作空间文件情况提示
 workspace_files_label = {
     "zh": "\n当前工作空间 {workspace} 的文件情况：\n",
     "en": "\nFile status in current workspace {workspace}:\n",
-    "pt": "\nStatus dos arquivos no espaço de trabalho atual {workspace}:\n"
+    "pt": "\nStatus dos arquivos no espaço de trabalho atual {workspace}:\n",
 }
 
 # 无文件提示
 no_files_message = {
     "zh": "当前工作空间下没有文件。\n",
     "en": "There are no files in the current workspace.\n",
-    "pt": "Não há arquivos no espaço de trabalho atual.\n"
+    "pt": "Não há arquivos no espaço de trabalho atual.\n",
 }
 
 # 额外挂载路径（Fibre 子任务工作区等）说明，位于 <external_paths> 内、文件树之前
@@ -198,63 +198,63 @@ external_paths_intro = {
 task_manager_no_tasks = {
     "zh": "任务管理器中暂无任务",
     "en": "Task manager has no tasks",
-    "pt": "O gerenciador de tarefas não tem tarefas"
+    "pt": "O gerenciador de tarefas não tem tarefas",
 }
 
 task_manager_contains_tasks = {
     "zh": "任务管理器包含 {count} 个任务：",
     "en": "Task manager contains {count} tasks:",
-    "pt": "O gerenciador de tarefas contém {count} tarefas:"
+    "pt": "O gerenciador de tarefas contém {count} tarefas:",
 }
 
 task_manager_task_info = {
     "zh": "- 任务ID: {task_id}, 描述: {description}, 状态: {status}",
     "en": "- Task ID: {task_id}, Description: {description}, Status: {status}",
-    "pt": "- ID da Tarefa: {task_id}, Descrição: {description}, Status: {status}"
+    "pt": "- ID da Tarefa: {task_id}, Descrição: {description}, Status: {status}",
 }
 
 task_info_simple = {
     "zh": "- 任务ID: {task_id}, 描述: {description}",
     "en": "- Task ID: {task_id}, Description: {description}",
-    "pt": "- ID da Tarefa: {task_id}, Descrição: {description}"
+    "pt": "- ID da Tarefa: {task_id}, Descrição: {description}",
 }
 
 task_manager_status_failed = {
     "zh": "任务管理器状态获取失败: {error}",
     "en": "Failed to get task manager status: {error}",
-    "pt": "Falha ao obter status do gerenciador de tarefas: {error}"
+    "pt": "Falha ao obter status do gerenciador de tarefas: {error}",
 }
 
 task_manager_none = {
     "zh": "无任务管理器",
     "en": "No task manager",
-    "pt": "Sem gerenciador de tarefas"
+    "pt": "Sem gerenciador de tarefas",
 }
 
 # 任务分解相关文本
 task_decomposition_planning = {
     "zh": "任务拆解规划：",
     "en": "Task Decomposition Planning:",
-    "pt": "Planejamento de Decomposição de Tarefas:"
+    "pt": "Planejamento de Decomposição de Tarefas:",
 }
 
 task_decomposition_failed = {
     "zh": "任务分解失败: {error}",
     "en": "Task decomposition failed: {error}",
-    "pt": "Falha na decomposição de tarefas: {error}"
+    "pt": "Falha na decomposição de tarefas: {error}",
 }
 
 # 阶段性总结相关文本
 stage_summary_label = {
     "zh": "阶段性任务总结：",
     "en": "Stage Task Summary:",
-    "pt": "Resumo da Tarefa por Etapa:"
+    "pt": "Resumo da Tarefa por Etapa:",
 }
 
 no_generated_documents = {
     "zh": "本次执行过程中没有生成任何文件文档。",
     "en": "No file documents were generated during this execution.",
-    "pt": "Nenhum documento de arquivo foi gerado durante esta execução."
+    "pt": "Nenhum documento de arquivo foi gerado durante esta execução.",
 }
 
 # 技能使用提示 (load_skill)
@@ -331,21 +331,21 @@ Você **DEVE priorizar** o uso da ferramenta `load_skill` para carregar uma nova
 1. Analise a intenção do usuário.
 2. Use a ferramenta `load_skill` com uma `query` relevante.
 3. **IMPORTANTE**: Após o sucesso do `load_skill`, as novas instruções de habilidade (guia) e ferramentas são carregadas automaticamente. Você **DEVE** reler e seguir rigorosamente essas novas instruções para executar a tarefa.
-"""
+""",
 }
 
 # 技能列表提示
 skills_info_label = {
     "zh": "\n当前可用的技能列表 (Skills)，如需使用请调用 `load_skill` 工具加载：\n",
     "en": "\nAvailable Skills List (Skills), please use `load_skill` tool to load if needed:\n",
-    "pt": "\nLista de Habilidades Disponíveis (Skills), use a ferramenta `load_skill` para carregar se necessário:\n"
+    "pt": "\nLista de Habilidades Disponíveis (Skills), use a ferramenta `load_skill` para carregar se necessário:\n",
 }
 
 # 循环重复纠偏提示模板（用于过程内 assistant 自检消息）
 repeat_pattern_self_correction_template = {
     "zh": "自检：检测到执行出现重复循环模式（周期={period}，重复={cycles}轮）。从下一步开始禁止复用同一路径；必须改变执行策略：优先尝试不同工具或参数；若仍无法推进，先明确阻塞点并提出最小必要澄清问题。",
     "en": "Self-check: Repeating execution loop detected (period={period}, cycles={cycles}). Starting now, do not reuse the same path; you must change strategy: try different tools or parameters first; if still blocked, state the blocker clearly and ask one minimal clarification question.",
-    "pt": "Autoverificação: Foi detectado um loop de execução repetitivo (período={period}, ciclos={cycles}). A partir de agora, não reutilize o mesmo caminho; você deve mudar a estratégia: tente ferramentas ou parâmetros diferentes primeiro; se ainda houver bloqueio, descreva o impedimento e faça uma única pergunta mínima de esclarecimento."
+    "pt": "Autoverificação: Foi detectado um loop de execução repetitivo (período={period}, ciclos={cycles}). A partir de agora, não reutilize o mesmo caminho; você deve mudar a estratégia: tente ferramentas ou parâmetros diferentes primeiro; se ainda houver bloqueio, descreva o impedimento e faça uma única pergunta mínima de esclarecimento.",
 }
 
 # 工具建议模板
@@ -421,5 +421,5 @@ Formato de Saída:
 Notas:
 1. Os IDs das ferramentas devem ser os números da lista de ferramentas disponíveis.
 2. Retorne todos os IDs de ferramentas possíveis que possam ser usados. Não retorne ferramentas que provavelmente não serão usadas.
-3. Retorne o máximo possível de IDs de ferramentas relevantes, mas não exceda 15."""
+3. Retorne o máximo possível de IDs de ferramentas relevantes, mas não exceda 15.""",
 }
