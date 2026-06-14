@@ -1311,6 +1311,13 @@ class ToolManager:
 
             return final_result
 
+        except asyncio.CancelledError:
+            execution_time = time.time() - execution_start
+            logger.warning(
+                f"[Tool Execution] CANCELLED | tool={tool_name} | "
+                f"session={session_id or 'NO_SESSION'} | time={execution_time:.3f}s"
+            )
+            raise
         except Exception as e:
             execution_time = time.time() - execution_start
             error_detail = _innermost_exception_message(e)
@@ -1459,6 +1466,12 @@ class ToolManager:
                     make_serializable(result), ensure_ascii=False, indent=2
                 )
 
+        except asyncio.CancelledError:
+            logger.warning(
+                f"MCP tool execution cancelled: {tool.name} on server: "
+                f"{tool.server_name}, session={runtime_session_id or 'NO_SESSION'}"
+            )
+            raise
         except Exception as e:
             if isinstance(e, BaseExceptionGroup):
                 msg = _innermost_exception_message(e)
