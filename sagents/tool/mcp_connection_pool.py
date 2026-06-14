@@ -677,6 +677,24 @@ class McpConnectionPool:
             for attempt in range(attempts):
                 try:
                     return await entry.list_tools()
+                except asyncio.CancelledError:
+                    task = asyncio.current_task()
+                    if task is not None and task.cancelling():
+                        raise
+                    if attempt + 1 < attempts:
+                        await self._discard_http_worker_entry(key, entry)
+                        logger.warning(
+                            f"MCP {_server_protocol(server_params)} list_tools "
+                            f"cancelled by worker, retrying once: server={key}"
+                        )
+                        entry = await self._get_or_create_http_worker_entry(
+                            key,
+                            server_params,  # pyright: ignore[reportArgumentType]
+                            config,
+                            force=True,
+                        )
+                        continue
+                    raise
                 except Exception as exc:
                     if _is_connection_error(exc) and attempt + 1 < attempts:
                         await self._discard_http_worker_entry(key, entry)
@@ -751,6 +769,25 @@ class McpConnectionPool:
                     return await entry.call_tool(tool_name, arguments)
                 except TimeoutError:
                     await self._discard_http_worker_entry(key, entry)
+                    raise
+                except asyncio.CancelledError:
+                    task = asyncio.current_task()
+                    if task is not None and task.cancelling():
+                        raise
+                    if attempt + 1 < attempts:
+                        await self._discard_http_worker_entry(key, entry)
+                        logger.warning(
+                            f"MCP {_server_protocol(server_params)} call cancelled "
+                            f"by worker, retrying once: server={key}, "
+                            f"tool={tool_name}"
+                        )
+                        entry = await self._get_or_create_http_worker_entry(
+                            key,
+                            server_params,  # pyright: ignore[reportArgumentType]
+                            config,
+                            force=True,
+                        )
+                        continue
                     raise
                 except Exception as exc:
                     if _is_connection_error(exc) and attempt + 1 < attempts:
