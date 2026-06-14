@@ -358,6 +358,25 @@ class TestStatsToolDetection(unittest.TestCase):
 
         self.assertEqual(stderr.getvalue().count("[file] wrote to: /tmp/demo.py"), 1)
 
+    def test_print_plain_event_hides_internal_assistant_events(self):
+        from io import StringIO
+        from unittest.mock import patch
+
+        render_state = _empty_render_state()
+        event = {
+            "type": "task_analysis",
+            "role": "assistant",
+            "content": "Task Analysis: internal reasoning should stay hidden.",
+        }
+
+        stdout = StringIO()
+        stderr = StringIO()
+        with patch("sys.stdout", stdout), patch("sys.stderr", stderr):
+            _print_plain_event(event, render_state)
+
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(stderr.getvalue(), "")
+
     def test_emit_stream_idle_notice_format(self):
         from io import StringIO
         from unittest.mock import patch
@@ -474,6 +493,7 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
                 "session_id": "session-test",
                 "user_id": "user-test",
                 "agent_id": "agent-demo",
+                "agent_name": "Demo Agent",
                 "agent_mode": "simple",
                 "available_skills": ["search_memory"],
                 "max_loop_count": 50,
@@ -514,6 +534,7 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
                 "session_id": "session-test",
                 "user_id": "user-test",
                 "agent_id": "agent-demo",
+                "agent_name": "Demo Agent",
                 "agent_mode": "simple",
                 "workspace": "/tmp/demo-workspace",
                 "workspace_source": "explicit",
@@ -634,6 +655,61 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args.workspace, "/tmp/demo")
         self.assertEqual(captured["build_workspace"], "/tmp/demo")
         self.assertEqual(captured["stream_workspace"], "/tmp/demo")
+        self.assertEqual(captured["command_mode"], "run")
+
+    async def test_run_command_forwards_sandbox_type_to_stream_request(self):
+        args = cli_main.build_argument_parser().parse_args(
+            ["run", "--sandbox-type", "local", "hello"]
+        )
+        captured = {}
+
+        @asynccontextmanager
+        async def fake_cli_runtime(*, verbose=False):
+            del verbose
+            yield object()
+
+        async def fake_build_request(_args, task):
+            captured["task"] = task
+            return type(
+                "Request",
+                (),
+                {
+                    "session_id": "session-test",
+                    "user_id": "user-test",
+                    "agent_id": None,
+                    "agent_mode": "simple",
+                    "available_skills": [],
+                    "max_loop_count": 50,
+                },
+            )()
+
+        async def fake_stream_request(
+            request,
+            json_output,
+            stats_output,
+            workspace=None,
+            sandbox_type=None,
+            *,
+            command_mode="run",
+            session_summary=None,
+        ):
+            del request, json_output, stats_output, workspace, session_summary
+            captured["sandbox_type"] = sandbox_type
+            captured["command_mode"] = command_mode
+            return 0
+
+        with (
+            patch("app.cli.service.validate_cli_runtime_requirements"),
+            patch("app.cli.service.validate_cli_request_options", return_value=None),
+            patch("app.cli.service.cli_runtime", fake_cli_runtime),
+            patch("app.cli.main._build_request", fake_build_request),
+            patch("app.cli.main._stream_request", fake_stream_request),
+        ):
+            result = await cli_main._run_command(args)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(captured["task"], "hello")
+        self.assertEqual(captured["sandbox_type"], "local")
         self.assertEqual(captured["command_mode"], "run")
 
     async def test_chat_command_normalizes_workspace_before_stream_request(self):

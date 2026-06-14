@@ -3,7 +3,7 @@ layout: default
 title: TUI 使用指南
 parent: 应用入口
 nav_order: 3
-description: "从源码运行 Rust 版 Sage Terminal 预览"
+description: "使用 Sage Terminal TUI"
 lang: zh
 ref: tui-guide
 ---
@@ -12,9 +12,9 @@ ref: tui-guide
 
 # Sage Terminal TUI 使用指南
 
-`sage tui` 是 Sage 当前的 Rust 终端 UI 预览入口；底层二进制仍然叫 `sage-terminal`。
+`sage tui` 是 Sage 的终端 UI 入口。它通过 Sage Python CLI launcher 启动 Rust Terminal TUI。
 
-本文档只说明当前的源码运行方式，不涉及打包安装。
+本文档说明面向用户的启动命令，以及开发时从源码运行的方式。
 
 ## 它依赖什么
 
@@ -50,6 +50,17 @@ export SAGE_DB_TYPE="file"
 sage doctor
 ```
 
+## 安装后运行
+
+当 Sage 安装包包含 Terminal TUI 二进制时，用户不需要安装 Rust：
+
+```bash
+sage tui
+sage tui coding --workspace /path/to/repo
+```
+
+Python CLI 在这里是 launcher：它找到包内 Terminal TUI 二进制，并把后续参数转交给它。
+
 ## 从源码运行
 
 在仓库根目录执行：
@@ -65,7 +76,7 @@ cd app/terminal
 cargo run --quiet --offline
 ```
 
-## 构建并运行二进制
+## 开发时构建并运行二进制
 
 ```bash
 cd app/terminal
@@ -77,6 +88,8 @@ cargo build --release
 
 - `app/terminal/target/release/sage-terminal`
 
+这个二进制是开发和打包实现细节。面向用户的入口仍然是 `sage tui`。
+
 ## 当前支持的启动方式
 
 目前支持这些启动形式：
@@ -85,8 +98,11 @@ cargo build --release
 sage tui
 sage tui --display compact
 sage tui --display verbose
+sage tui --sandbox-type local
 sage tui --agent-id agent_demo
-sage tui --agent-config coding
+sage tui coding --workspace /path/to/project
+sage tui coding --sandbox-type local --workspace /path/to/project
+sage tui --agent-config coding --workspace /path/to/project
 sage tui --agent-id agent_demo --agent-mode fibre
 sage tui --workspace /path/to/project
 sage tui run "inspect this repo"
@@ -123,6 +139,7 @@ cargo run --quiet --offline -- resume
 - `/mode`
 - `/display`
 - `/workspace`
+- `/sandbox`
 - `/interrupt`
 - `/retry`
 - `/new`
@@ -148,38 +165,43 @@ TUI 现在可以覆盖运行时使用的 agent，但不会自己接管 agent 配
 
 - 启动参数：
   - `--agent-id <id>`
+  - `--agent-config <path|coding>`
   - `--agent-mode <simple|multi|fibre>`
   - `--display <compact|verbose>`
 - TUI 内命令：
   - `/agent`
   - `/agent set <agent_id>`
+  - `/agent config <path|coding>`
   - `/agent clear`
   - `/mode`
   - `/mode set <simple|multi|fibre>`
   - `/display`
   - `/display set <compact|verbose>`
 
-真正的 agent 定义、工具、skills 和行为仍然来自 Sage runtime 已保存的 agent 配置。
+`/agent set <agent_id>` 和 `/agent config <path|coding>` 在当前 TUI 会话里互斥。设置其中一个会清掉另一个，保证下一次后端请求只使用一个 Agent 配置来源。启动时如果同时传 `--agent-config` 和 `--agent-id`，TUI 也会优先使用 `--agent-config`。Agent config 路径只在当前会话生效，不会被保存成持久默认值。
+
+当 agent config 生效时，TUI 会直接显示 `agent_config: coding` 或 `agent: config coding`。由 config 接管的 mode 和 loop 设置显示为 `config default`。如果启动时显式传 `--agent-mode`，或在会话里执行 `/mode set <simple|multi|fibre>`，本次会话仍会用这个显式 mode 覆盖 config 里的 mode。
+
+真正的 agent 定义、工具、skills 和行为仍然来自 Sage runtime 已保存的 agent 配置，或本次会话显式传入的 `--agent-config` JSON。
 
 ### Coding Agent 预设
 
 仓库提供了一个可导入的 coding 场景 Agent 配置：
 
-- `examples/preset_running_coding_agent_config.json`
+- `examples/coding_agent_config.json`
 
-它面向仓库代码阅读、终端调试、文件编辑、代码 review 和迭代验证，行为参考 Codex CLI：读取仓库指引、保护脏工作区、做最小根因修复，并用最小相关检查验证。配置里的 `systemContext` 分成几块：
-
-- `codexCliDesignReference`：记录 Codex CLI 到 Sage TUI 的设计映射，包括 profile-like 配置、workspace-oriented 执行、工具 allow-list、search/edit/verify loop、轻量 planning、review mode 和 context management。
-- `codingAgentOperatingContract`：把启动检查、planning、编辑、命令执行、验证、review 和最终回复拆成更明确的行为规则。
-- `sageToolPlaybook`：说明如何优先使用 Sage 已有工具，比如 `grep`、`glob`、`list_dir`、`file_update`、`execute_shell_command`、`await_shell`、`read_lints`、`todo_write` 和 `search_memory`。
-
-它也说明 Codex 的 sandbox、approval、config layering、MCP approval、apply_patch 等 runtime 能力在当前 Sage JSON 预设里只能作为软约束。这个预设默认启用代码搜索、文件读写、shell、lint、todo、记忆搜索和网页抓取等工具。
+这个预设默认启用代码搜索、文件读写、shell、lint、todo、记忆搜索和网页抓取等工具。
 
 TUI 可以直接从这个预设启动本次会话，不需要先去 Web 或桌面端导入。内置 JSON 可以用 `coding` 短别名：
 
 ```bash
+sage tui coding --workspace /path/to/repo
 sage tui --agent-config coding --workspace /path/to/repo
 ```
+
+`sage tui coding --workspace /path/to/repo` 是直接的 TUI 快捷入口，等价于传入 `--agent-config coding`。
+
+内置 `coding` 预设要求显式指定 workspace。如果你在 TUI 里用 `/agent config coding` 设置它，也要先用 `/workspace set /path/to/repo` 指定仓库，再发送 coding 任务。
 
 同一个预设也可以直接用于普通 CLI：
 
@@ -188,7 +210,7 @@ sage chat --agent-config coding --workspace /path/to/repo
 sage run --agent-config coding --workspace /path/to/repo "inspect this repo"
 ```
 
-如果要复制并自定义 JSON，仍然可以使用完整路径：`--agent-config examples/preset_running_coding_agent_config.json`。
+如果要复制并自定义 JSON，仍然可以使用完整路径：`--agent-config examples/coding_agent_config.json`。
 
 如果已经把配置保存成 Agent，也可以继续用 `--agent-id <agent_id>` 选择已保存的 Agent。
 

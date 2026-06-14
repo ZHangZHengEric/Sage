@@ -66,6 +66,7 @@ flowchart TB
         Mcp[mcp_setting.json<br/>MCP demo config]
         Cfg1[preset_running_agent_config.json]
         Cfg2[preset_running_config.json]
+        Cfg3[coding_agent_config.json<br/>coding agent preset]
         Build[build_exec/<br/>single-file build sample]
     end
 
@@ -78,6 +79,7 @@ flowchart TB
     SCli -.read.-> Mcp
     SCli -.read.-> Cfg1
     SCli -.read.-> Cfg2
+    SCli -.read.-> Cfg3
 ```
 
 When to use:

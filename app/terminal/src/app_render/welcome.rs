@@ -8,18 +8,18 @@ use super::common::{
     with_border_with_inner_width,
 };
 
-const SESSION_HEADER_MAX_INNER_WIDTH: usize = 56;
-
 pub(crate) fn welcome_lines(
     width: u16,
     session_id: &str,
-    agent_id: Option<&str>,
+    agent_label: &str,
     agent_mode: &str,
     display_mode: DisplayMode,
-    max_loop_count: u32,
+    max_loop_count: &str,
     workspace_label: &str,
+    sandbox_type: &str,
 ) -> Vec<Line<'static>> {
-    let Some(inner_width) = card_inner_width(width, SESSION_HEADER_MAX_INNER_WIDTH) else {
+    let max_inner_width = width.saturating_sub(4) as usize;
+    let Some(inner_width) = card_inner_width(width, max_inner_width) else {
         return Vec::new();
     };
     let dim = Style::default()
@@ -40,33 +40,40 @@ pub(crate) fn welcome_lines(
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("mode: ", dim),
+            Span::styled("agent mode: ", dim),
             Span::styled(
                 agent_mode.to_string(),
                 Style::default().fg(Color::Rgb(236, 240, 231)),
             ),
+        ]),
+        Line::from(vec![
             Span::raw("   "),
             Span::styled("display: ", dim),
             Span::styled(display_mode_name(display_mode), accent_style()),
-            Span::raw("   "),
-            Span::styled("agent: ", dim),
-            Span::styled(
-                truncate_middle(agent_id.unwrap_or("(default)"), 18),
-                accent_style(),
-            ),
             Span::raw("   "),
             Span::styled("session: ", dim),
             Span::styled(session_id.to_string(), accent_style()),
         ]),
         Line::from(vec![
-            Span::styled("directory: ", dim),
+            Span::styled("agent: ", dim),
+            Span::styled(
+                truncate_middle(agent_label, inner_width.saturating_sub(7)),
+                accent_style(),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("workspace: ", dim),
             Span::styled(
                 truncate_middle(workspace_label, inner_width.saturating_sub(11)),
                 Style::default().fg(Color::Rgb(236, 240, 231)),
             ),
         ]),
         Line::from(vec![
-            Span::styled("loops: ", dim),
+            Span::styled("sandbox: ", dim),
+            Span::styled(sandbox_type.to_string(), subtle_body_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("loop limit: ", dim),
             Span::styled(max_loop_count.to_string(), subtle_body_style()),
             Span::raw("   "),
             Span::styled("/new", accent_style()),
@@ -74,7 +81,7 @@ pub(crate) fn welcome_lines(
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("next: ", dim),
+            Span::styled("start: ", dim),
             Span::styled("/help", accent_style()),
             Span::styled("  ", dim),
             Span::styled("/resume", accent_style()),

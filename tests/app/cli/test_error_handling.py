@@ -38,6 +38,30 @@ class TestCliErrorHandling(unittest.TestCase):
             validate_cli_request_options(workspace=None, max_loop_count=0)
         self.assertIn("Invalid max loop count", str(ctx.exception))
 
+    def test_validate_request_options_rejects_bool_loop_count(self):
+        with self.assertRaises(CLIError) as ctx:
+            validate_cli_request_options(workspace=None, max_loop_count=True)
+        self.assertIn("Invalid max loop count", str(ctx.exception))
+
+    def test_validate_request_options_rejects_non_numeric_loop_count(self):
+        with self.assertRaises(CLIError) as ctx:
+            validate_cli_request_options(workspace=None, max_loop_count="many")
+        self.assertIn("Invalid max loop count", str(ctx.exception))
+
+    def test_validate_request_options_rejects_non_integer_loop_count(self):
+        with self.assertRaises(CLIError) as ctx:
+            validate_cli_request_options(workspace=None, max_loop_count=3.5)
+        self.assertIn("Invalid max loop count", str(ctx.exception))
+
+    def test_validate_request_options_rejects_unknown_sandbox_type(self):
+        with self.assertRaises(CLIError) as ctx:
+            validate_cli_request_options(
+                workspace=None,
+                max_loop_count=50,
+                sandbox_type="unsafe",
+            )
+        self.assertIn("Unsupported sandbox type", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

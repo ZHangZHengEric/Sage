@@ -5,11 +5,10 @@ use std::io::Write;
 use crossterm::cursor::MoveTo;
 use crossterm::queue;
 use crossterm::style::{
-    Attribute as CAttribute, Colors, Print, SetAttribute, SetBackgroundColor, SetColors,
-    SetForegroundColor,
+    Attribute as CAttribute, Print, SetAttribute, SetBackgroundColor, SetForegroundColor,
 };
 use crossterm::terminal::{Clear, ClearType};
-use ratatui::style::Modifier;
+use ratatui::style::{Color as RatatuiColor, Modifier};
 use ratatui::text::{Line, Span};
 
 use crate::custom_terminal::{BackendImpl, Terminal};
@@ -74,16 +73,18 @@ pub fn insert_history_lines(
 fn write_history_line<W: Write>(writer: &mut W, line: &Line<'static>) -> io::Result<()> {
     queue!(
         writer,
-        SetColors(Colors::new(
+        SetForegroundColor(
             line.style
                 .fg
-                .map(Into::into)
-                .unwrap_or(crossterm::style::Color::Reset),
+                .map(to_crossterm_color)
+                .unwrap_or(crossterm::style::Color::Reset)
+        ),
+        SetBackgroundColor(
             line.style
                 .bg
-                .map(Into::into)
+                .map(to_crossterm_color)
                 .unwrap_or(crossterm::style::Color::Reset)
-        )),
+        ),
         Clear(ClearType::UntilNewLine)
     )?;
 
@@ -114,32 +115,49 @@ where
         if span
             .style
             .fg
-            .map(Into::into)
+            .map(to_crossterm_color)
             .unwrap_or(crossterm::style::Color::Reset)
             != fg
             || span
                 .style
                 .bg
-                .map(Into::into)
+                .map(to_crossterm_color)
                 .unwrap_or(crossterm::style::Color::Reset)
                 != bg
         {
             fg = span
                 .style
                 .fg
-                .map(Into::into)
+                .map(to_crossterm_color)
                 .unwrap_or(crossterm::style::Color::Reset);
             bg = span
                 .style
                 .bg
-                .map(Into::into)
+                .map(to_crossterm_color)
                 .unwrap_or(crossterm::style::Color::Reset);
-            queue!(writer, SetColors(Colors::new(fg, bg)))?;
+            queue!(writer, SetForegroundColor(fg), SetBackgroundColor(bg))?;
         }
 
         if span.style.add_modifier != modifier {
             queue!(writer, SetAttribute(CAttribute::Reset))?;
             modifier = span.style.add_modifier;
+            fg = crossterm::style::Color::Reset;
+            bg = crossterm::style::Color::Reset;
+            let next_fg = span
+                .style
+                .fg
+                .map(to_crossterm_color)
+                .unwrap_or(crossterm::style::Color::Reset);
+            let next_bg = span
+                .style
+                .bg
+                .map(to_crossterm_color)
+                .unwrap_or(crossterm::style::Color::Reset);
+            if next_fg != fg || next_bg != bg {
+                fg = next_fg;
+                bg = next_bg;
+                queue!(writer, SetForegroundColor(fg), SetBackgroundColor(bg))?;
+            }
             if modifier.contains(Modifier::BOLD) {
                 queue!(writer, SetAttribute(CAttribute::Bold))?;
             }
@@ -160,6 +178,30 @@ where
     Ok(())
 }
 
+fn to_crossterm_color(color: RatatuiColor) -> crossterm::style::Color {
+    match color {
+        RatatuiColor::Reset => crossterm::style::Color::Reset,
+        RatatuiColor::Black => crossterm::style::Color::Black,
+        RatatuiColor::Red => crossterm::style::Color::DarkRed,
+        RatatuiColor::Green => crossterm::style::Color::DarkGreen,
+        RatatuiColor::Yellow => crossterm::style::Color::DarkYellow,
+        RatatuiColor::Blue => crossterm::style::Color::DarkBlue,
+        RatatuiColor::Magenta => crossterm::style::Color::DarkMagenta,
+        RatatuiColor::Cyan => crossterm::style::Color::DarkCyan,
+        RatatuiColor::Gray => crossterm::style::Color::Grey,
+        RatatuiColor::DarkGray => crossterm::style::Color::DarkGrey,
+        RatatuiColor::LightRed => crossterm::style::Color::Red,
+        RatatuiColor::LightGreen => crossterm::style::Color::Green,
+        RatatuiColor::LightYellow => crossterm::style::Color::Yellow,
+        RatatuiColor::LightBlue => crossterm::style::Color::Blue,
+        RatatuiColor::LightMagenta => crossterm::style::Color::Magenta,
+        RatatuiColor::LightCyan => crossterm::style::Color::Cyan,
+        RatatuiColor::White => crossterm::style::Color::White,
+        RatatuiColor::Rgb(r, g, b) => crossterm::style::Color::Rgb { r, g, b },
+        RatatuiColor::Indexed(index) => crossterm::style::Color::AnsiValue(index),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SetScrollRegion(std::ops::Range<u16>);
 
@@ -170,7 +212,10 @@ impl crossterm::Command for SetScrollRegion {
 
     #[cfg(windows)]
     fn execute_winapi(&self) -> io::Result<()> {
-        panic!("SetScrollRegion requires ANSI");
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "SetScrollRegion requires ANSI terminal support",
+        ))
     }
 }
 
@@ -184,6 +229,44 @@ impl crossterm::Command for ResetScrollRegion {
 
     #[cfg(windows)]
     fn execute_winapi(&self) -> io::Result<()> {
-        panic!("ResetScrollRegion requires ANSI");
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "ResetScrollRegion requires ANSI terminal support",
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::{Line, Span};
+
+    use super::write_history_line;
+
+    #[test]
+    fn history_line_reapplies_color_after_modifier_reset() {
+        crossterm::style::Colored::set_ansi_color_disabled(false);
+        let line = Line::from(vec![
+            Span::styled("plain", Style::default().fg(Color::Rgb(143, 190, 246))),
+            Span::styled(
+                "bold",
+                Style::default()
+                    .fg(Color::Rgb(143, 190, 246))
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]);
+        let mut output = Vec::new();
+
+        write_history_line(&mut output, &line).expect("history line should render");
+
+        let rendered = String::from_utf8_lossy(&output);
+        let bold_start = rendered.find("bold").expect("bold text should render");
+        let before_bold = &rendered[..bold_start];
+        let reset_start = before_bold.rfind("\x1b[0m").expect("modifier reset");
+        let after_reset = &before_bold[reset_start..];
+        assert!(
+            after_reset.contains("\x1b[38;2;143;190;246m"),
+            "foreground color should be re-applied after reset: {rendered:?}"
+        );
     }
 }

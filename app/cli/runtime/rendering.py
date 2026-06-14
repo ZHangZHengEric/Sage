@@ -36,6 +36,24 @@ RAW_ASSISTANT_START_PATTERNS = (
     re.compile(r"(^|\n)\s*<tool_name>"),
     re.compile(r"(^|\n)\s*<｜DSML｜"),
 )
+INTERNAL_SELF_CHECK_PATTERNS = (
+    re.compile(
+        r"Self-check: Repeating execution loop detected.*?clarification question\.",
+        re.DOTALL,
+    ),
+    re.compile(
+        r"自检：检测到执行出现重复循环模式.*?最小必要澄清问题。",
+        re.DOTALL,
+    ),
+)
+INTERNAL_ASSISTANT_EVENT_TYPES = {
+    "analysis",
+    "observation",
+    "plan",
+    "reasoning_content",
+    "task_analysis",
+    "thinking",
+}
 
 
 def _empty_render_state() -> Dict[str, Any]:
@@ -51,7 +69,7 @@ def _empty_render_state() -> Dict[str, Any]:
 
 
 def _split_visible_assistant_content(buffer: str) -> tuple[str, str]:
-    working = buffer
+    working = _strip_internal_self_check(buffer)
     previous = None
     while working != previous:
         previous = working
@@ -69,6 +87,13 @@ def _split_visible_assistant_content(buffer: str) -> tuple[str, str]:
 
     split_at = min(start_positions)
     return working[:split_at], working[split_at:]
+
+
+def _strip_internal_self_check(text: str) -> str:
+    cleaned = text
+    for pattern in INTERNAL_SELF_CHECK_PATTERNS:
+        cleaned = pattern.sub("", cleaned)
+    return cleaned
 
 
 def _render_assistant_content_delta(render_state: Dict[str, Any], content: str) -> str:
@@ -174,6 +199,8 @@ def _buffer_has_skill_io_markup(buffer: str) -> bool:
 
 def _print_plain_event(event: Dict[str, Any], render_state: Dict[str, Any]) -> None:
     event_type = event.get("type")
+    if event_type in INTERNAL_ASSISTANT_EVENT_TYPES:
+        return
     if event_type == "stream_end":
         if not sys.stdout.isatty():
             return
@@ -269,4 +296,3 @@ def _read_chat_prompt(prompt_text: str) -> Optional[str]:
     if line == "":
         return None
     return line.rstrip("\r\n")
-

@@ -4,7 +4,7 @@ impl App {
     pub fn set_model_override(&mut self, model: String) {
         self.selected_model = Some(model.clone());
         self.backend_restart_requested = true;
-        self.queue_message(MessageKind::Tool, format!("model override set: {model}"));
+        self.queue_message(MessageKind::System, format!("model override set: {model}"));
         self.status = format!("model  {}", self.session_id);
     }
 
@@ -13,7 +13,7 @@ impl App {
             Some(model) => {
                 self.backend_restart_requested = true;
                 self.queue_message(
-                    MessageKind::Tool,
+                    MessageKind::System,
                     format!("cleared model override: {model}"),
                 );
             }

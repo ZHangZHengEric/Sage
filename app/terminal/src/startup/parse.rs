@@ -1,6 +1,9 @@
 use anyhow::{anyhow, Result};
 
-use crate::app::{normalize_agent_mode, SessionPickerMode, SubmitAction};
+use crate::app::{
+    normalize_agent_config_value, normalize_agent_mode, normalize_sandbox_type, SessionPickerMode,
+    SubmitAction,
+};
 use crate::display_policy::DisplayMode;
 
 use super::help::usage_text;
@@ -20,6 +23,7 @@ pub(crate) fn parse_startup_action(
         [flag] if matches!(flag.as_str(), "-h" | "--help" | "help") => {
             Ok(StartupBehavior::PrintHelp)
         }
+        [command, rest @ ..] if command == "coding" => parse_coding_shortcut(options, rest),
         [command, prompt @ ..] if matches!(command.as_str(), "run" | "chat") => {
             if prompt.is_empty() {
                 return Err(anyhow!("{command} requires a prompt"));
@@ -112,6 +116,22 @@ pub(crate) fn parse_startup_action(
     }
 }
 
+fn parse_coding_shortcut(
+    leading_options: StartupOptions,
+    rest: &[String],
+) -> Result<StartupBehavior> {
+    let (trailing_options, prompt) = parse_global_options(rest)?;
+    let mut options = trailing_options.with_fallbacks(leading_options);
+    options.agent_id = None;
+    options.agent_config = Some("coding".to_string());
+    let action = if prompt.is_empty() {
+        None
+    } else {
+        Some(SubmitAction::RunTask(prompt.join(" ")))
+    };
+    Ok(StartupBehavior::Run { action, options })
+}
+
 fn parse_global_options(args: &[String]) -> Result<(StartupOptions, Vec<String>)> {
     let mut options = StartupOptions::default();
     let mut idx = 0;
@@ -121,14 +141,22 @@ fn parse_global_options(args: &[String]) -> Result<(StartupOptions, Vec<String>)
                 let value = args
                     .get(idx + 1)
                     .ok_or_else(|| anyhow!("--agent-id requires a value"))?;
-                options.agent_id = Some(value.clone());
+                let normalized = value.trim();
+                if normalized.is_empty() {
+                    return Err(anyhow!("--agent-id requires a non-empty value"));
+                }
+                options.agent_id = Some(normalized.to_string());
                 idx += 2;
             }
             "--agent-config" => {
                 let value = args
                     .get(idx + 1)
                     .ok_or_else(|| anyhow!("--agent-config requires a value"))?;
-                options.agent_config = Some(value.clone());
+                let normalized = normalize_agent_config_value(value);
+                if normalized.is_empty() {
+                    return Err(anyhow!("--agent-config requires a non-empty value"));
+                }
+                options.agent_config = Some(normalized);
                 idx += 2;
             }
             "--agent-mode" => {
@@ -146,6 +174,15 @@ fn parse_global_options(args: &[String]) -> Result<(StartupOptions, Vec<String>)
                     .get(idx + 1)
                     .ok_or_else(|| anyhow!("--workspace requires a value"))?;
                 options.workspace = Some(value.clone());
+                idx += 2;
+            }
+            "--sandbox-type" => {
+                let value = args
+                    .get(idx + 1)
+                    .ok_or_else(|| anyhow!("--sandbox-type requires a value"))?;
+                options.sandbox_type = Some(normalize_sandbox_type(value).ok_or_else(|| {
+                    anyhow!("--sandbox-type must be one of: local, remote, passthrough")
+                })?);
                 idx += 2;
             }
             "--display" => {

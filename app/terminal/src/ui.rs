@@ -3,18 +3,17 @@ use crate::bottom_pane::command_popup;
 use crate::bottom_pane::{composer, footer, help_overlay, picker_overlay, transcript_overlay};
 use crate::custom_terminal::Frame;
 use crate::ui_support::{
-    command_popup_height, composer_props, footer_props, help_overlay_props, live_region_height,
-    picker_overlay_props, render_live_region, transcript_overlay_props,
+    command_popup_height, composer_props, footer_props, help_overlay_props, picker_overlay_props,
+    render_live_region, transcript_overlay_props,
 };
 use ratatui::layout::{Constraint, Direction, Layout};
 
 pub fn render(frame: &mut Frame, app: &App) {
     let composer_props = composer_props(app);
-    let live_region_height = live_region_height(app, frame.area().width);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(live_region_height),
+            Constraint::Min(1),
             Constraint::Length(composer::composer_height(
                 &composer_props,
                 frame.area().width,

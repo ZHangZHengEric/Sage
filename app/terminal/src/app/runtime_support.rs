@@ -28,6 +28,7 @@ pub(super) fn request_timing_summary(
     total: Option<Duration>,
     ttft: Option<Duration>,
     backend_stats: Option<&BackendStats>,
+    mode: DisplayMode,
 ) -> Option<String> {
     let mut parts = Vec::new();
     if let Some(total) = total {
@@ -36,8 +37,10 @@ pub(super) fn request_timing_summary(
     if let Some(ttft) = ttft {
         parts.push(format!("ttft {}", format_duration(ttft)));
     }
-    if let Some(total_tokens) = backend_stats.and_then(|stats| stats.total_tokens) {
-        parts.push(format!("tokens {total_tokens}"));
+    if matches!(mode, DisplayMode::Verbose) {
+        if let Some(total_tokens) = backend_stats.and_then(|stats| stats.total_tokens) {
+            parts.push(format!("tokens {total_tokens}"));
+        }
     }
     if parts.is_empty() {
         None

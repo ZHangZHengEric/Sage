@@ -26,23 +26,24 @@ pub(super) fn diff_buffers(previous: &Buffer, next: &Buffer) -> Vec<DrawCommand>
         let row = &next.content[row_start..row_end];
         let bg = row.last().map(|cell| cell.bg).unwrap_or(Color::Reset);
 
-        let mut last_nonblank_column = 0usize;
+        let mut last_nonblank_column = None;
         let mut column = 0usize;
         while column < row.len() {
             let cell = &row[column];
             let width = display_width(cell.symbol()).max(1);
             if cell.symbol() != " " || cell.bg != bg || cell.modifier != Modifier::empty() {
-                last_nonblank_column = column + (width.saturating_sub(1));
+                last_nonblank_column = Some(column + (width.saturating_sub(1)));
             }
             column += width;
         }
 
-        if last_nonblank_column + 1 < row.len() {
-            let (x, y) = previous.pos_of(row_start + last_nonblank_column + 1);
+        let clear_from = last_nonblank_column.map_or(0, |column| column + 1);
+        if clear_from < row.len() {
+            let (x, y) = previous.pos_of(row_start + clear_from);
             updates.push(DrawCommand::ClearToEnd { x, y, bg });
         }
 
-        last_nonblank_columns[y as usize] = last_nonblank_column as u16;
+        last_nonblank_columns[y as usize] = last_nonblank_column.unwrap_or(0) as u16;
     }
 
     let mut invalidated = 0usize;
@@ -69,6 +70,31 @@ pub(super) fn diff_buffers(previous: &Buffer, next: &Buffer) -> Vec<DrawCommand>
     }
 
     updates
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    use super::{diff_buffers, DrawCommand};
+
+    #[test]
+    fn diff_clears_from_first_column_when_row_becomes_blank() {
+        let area = Rect::new(0, 0, 8, 1);
+        let mut previous = Buffer::empty(area);
+        previous[(0, 0)].set_symbol("A");
+        let next = Buffer::empty(area);
+
+        let updates = diff_buffers(&previous, &next);
+
+        assert!(
+            updates
+                .iter()
+                .any(|command| matches!(command, DrawCommand::ClearToEnd { x: 0, y: 0, .. })),
+            "blank rows must clear from column 0: {updates:?}"
+        );
+    }
 }
 
 fn display_width(text: &str) -> usize {

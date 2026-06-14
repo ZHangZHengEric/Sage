@@ -158,6 +158,15 @@ fn agent_popup_matches_catalog_entries() {
 }
 
 #[test]
+fn agent_set_popup_requests_saved_agent_catalog_not_presets() {
+    let mut app = App::new();
+    app.input = "/agent set ag".to_string();
+    app.input_cursor = app.input.len();
+
+    assert!(app.needs_agent_catalog());
+}
+
+#[test]
 fn skill_add_popup_matches_catalog_entries() {
     let mut app = App::new();
     app.set_skill_catalog(vec![

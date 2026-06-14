@@ -61,13 +61,14 @@ pub(super) fn handle_key(
 
     match key.code {
         KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-            if app.busy {
-                return Ok(false);
-            }
             app.insert_newline();
         }
         KeyCode::Enter => {
             if app.busy && !app.input.starts_with('/') {
+                if !app.input.trim().is_empty() {
+                    app.set_status(format!("busy  {}  draft saved", app.session_id));
+                    return Ok(true);
+                }
                 return Ok(false);
             }
             if app.active_surface_kind() == Some(ActiveSurfaceKind::Popup) {
@@ -106,11 +107,7 @@ pub(super) fn handle_key(
             }
         }
         KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            if !app.busy {
-                app.open_transcript_overlay();
-            } else {
-                return Ok(false);
-            }
+            app.open_transcript_overlay();
         }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if app.busy {

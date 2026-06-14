@@ -1,6 +1,6 @@
 # Sage Terminal Boundary
 
-`sage-terminal` is a terminal-first frontend for Sage. It is not a second Sage runtime.
+`sage tui` is Sage's terminal-first frontend. The Rust implementation binary is `sage-terminal`, but that binary is an internal launch target rather than the primary user entrypoint.
 
 This document defines what belongs in the Rust TUI layer and what must remain in the CLI/runtime layer.
 
@@ -11,7 +11,7 @@ The Rust TUI owns:
 - terminal rendering
 - input editing and cursor behavior
 - popup / overlay / picker interaction
-- startup routing for `sage-terminal ...`
+- startup routing for `sage tui ...` arguments after the Python launcher forwards them
 - transcript presentation
 - local UI state
 - mapping structured backend results into terminal-friendly output
@@ -36,7 +36,7 @@ If behavior changes in any of those areas, it should be implemented in the CLI/r
 
 1. The TUI should prefer structured results over human-readable CLI text.
 2. The TUI should not parse presentation-oriented stdout when a JSON contract is available.
-3. New non-interactive entrypoints should be added to the CLI/runtime first, then exposed through `sage-terminal`.
+3. New non-interactive entrypoints should be added to the CLI/runtime first, then exposed through `sage tui`.
 4. TUI-only state must stay UI-local. Business state must stay in the runtime.
 
 ## What The TUI Currently Depends On

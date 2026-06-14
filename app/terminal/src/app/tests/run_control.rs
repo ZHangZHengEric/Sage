@@ -20,6 +20,114 @@ fn submit_input_tracks_last_and_current_task() {
 }
 
 #[test]
+fn insert_char_normalizes_carriage_return() {
+    let mut app = App::new();
+
+    app.insert_char('\r');
+
+    assert_eq!(app.input, "\n");
+    assert_eq!(app.input_cursor, app.input.len());
+}
+
+#[test]
+fn insert_text_normalizes_carriage_returns() {
+    let mut app = App::new();
+
+    app.insert_text("one\r\ntwo\rthree");
+
+    assert_eq!(app.input, "one\ntwo\nthree");
+    assert_eq!(app.input_cursor, app.input.len());
+}
+
+#[test]
+fn submit_input_handles_greetings_without_backend_task() {
+    let mut app = App::new();
+    app.input = "hello".to_string();
+    app.input_cursor = app.input.len();
+
+    let action = app.submit_input();
+
+    assert!(matches!(action, SubmitAction::Handled));
+    assert!(!app.busy);
+    assert!(app.current_task.is_none());
+    assert!(app.last_submitted_task.is_none());
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("hello"));
+    assert!(rendered.contains("我在。直接说任务就行。"));
+}
+
+#[test]
+fn submit_input_handles_identity_question_without_backend_task() {
+    let mut app = App::new();
+    app.input = "你是谁？".to_string();
+    app.input_cursor = app.input.len();
+
+    let action = app.submit_input();
+
+    assert!(matches!(action, SubmitAction::Handled));
+    assert!(!app.busy);
+    assert!(app.current_task.is_none());
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("Sage Terminal"));
+    assert!(rendered.contains("当前工作空间"));
+}
+
+#[test]
+fn submit_input_handles_mixed_greeting_identity_without_backend_task() {
+    let mut app = App::new();
+    app.input = "hello, 你是谁？".to_string();
+    app.input_cursor = app.input.len();
+
+    let action = app.submit_input();
+
+    assert!(matches!(action, SubmitAction::Handled));
+    assert!(!app.busy);
+    assert!(app.current_task.is_none());
+    assert!(app.last_submitted_task.is_none());
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("hello, 你是谁？"));
+    assert_eq!(rendered.matches("Sage Terminal").count(), 1);
+}
+
+#[test]
+fn submit_input_does_not_intercept_greeting_with_task_intent() {
+    let mut app = App::new();
+    app.input = "hello，帮我分析项目".to_string();
+    app.input_cursor = app.input.len();
+
+    let action = app.submit_input();
+
+    assert!(matches!(action, SubmitAction::RunTask(_)));
+    assert!(app.busy);
+    assert_eq!(app.current_task.as_deref(), Some("hello，帮我分析项目"));
+}
+
+#[test]
 fn interrupt_command_and_retry_command_parse_cleanly() {
     let mut app = App::new();
 

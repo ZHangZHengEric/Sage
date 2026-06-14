@@ -84,6 +84,7 @@ pub struct BackendRequest {
     pub agent_mode: Option<String>,
     pub max_loop_count: Option<u32>,
     pub workspace: Option<PathBuf>,
+    pub sandbox_type: Option<String>,
     pub skills: Vec<String>,
     pub model_override: Option<String>,
     pub task: String,

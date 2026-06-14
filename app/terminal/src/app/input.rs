@@ -14,6 +14,13 @@ impl App {
             return self.handle_command(&text);
         }
 
+        if let Some(reply) = local_conversation_reply(&text) {
+            self.queue_message(crate::app::MessageKind::User, text);
+            self.queue_message(crate::app::MessageKind::Assistant, reply);
+            self.status = format!("ready  {}", self.session_id);
+            return SubmitAction::Handled;
+        }
+
         self.begin_task_submission(text.clone(), true);
         SubmitAction::RunTask(text)
     }
@@ -27,6 +34,8 @@ impl App {
         self.busy = true;
         self.live_message = None;
         self.live_message_had_history = false;
+        self.assistant_live_seen_lines.clear();
+        self.assistant_live_in_code_block = false;
         self.request_started_at = Some(std::time::Instant::now());
         self.first_output_latency = None;
         self.last_request_duration = None;
@@ -39,9 +48,7 @@ impl App {
     }
 
     pub fn insert_char(&mut self, ch: char) {
-        if self.busy && !(self.input.starts_with('/') || ch == '/') {
-            return;
-        }
+        let ch = if ch == '\r' { '\n' } else { ch };
         self.input.insert(self.input_cursor, ch);
         self.input_cursor += ch.len_utf8();
         self.sync_slash_popup_selection();
@@ -51,10 +58,11 @@ impl App {
         if text.is_empty() {
             return;
         }
-        if self.busy && !(self.input.starts_with('/') || text.starts_with('/')) {
+        let text = normalize_inserted_text(text);
+        if text.is_empty() {
             return;
         }
-        self.input.insert_str(self.input_cursor, text);
+        self.input.insert_str(self.input_cursor, &text);
         self.input_cursor += text.len();
         self.sync_slash_popup_selection();
     }
@@ -64,7 +72,7 @@ impl App {
     }
 
     pub fn backspace(&mut self) {
-        if (self.busy && !self.input.starts_with('/')) || self.input_cursor == 0 {
+        if self.input_cursor == 0 {
             return;
         }
         let prev = previous_boundary(&self.input, self.input_cursor);
@@ -74,7 +82,7 @@ impl App {
     }
 
     pub fn delete(&mut self) {
-        if (self.busy && !self.input.starts_with('/')) || self.input_cursor >= self.input.len() {
+        if self.input_cursor >= self.input.len() {
             return;
         }
         let next = next_boundary(&self.input, self.input_cursor);
@@ -83,30 +91,18 @@ impl App {
     }
 
     pub fn move_cursor_left(&mut self) {
-        if self.busy && !self.input.starts_with('/') {
-            return;
-        }
         self.input_cursor = previous_boundary(&self.input, self.input_cursor);
     }
 
     pub fn move_cursor_right(&mut self) {
-        if self.busy && !self.input.starts_with('/') {
-            return;
-        }
         self.input_cursor = next_boundary(&self.input, self.input_cursor);
     }
 
     pub fn move_cursor_home(&mut self) {
-        if self.busy && !self.input.starts_with('/') {
-            return;
-        }
         self.input_cursor = 0;
     }
 
     pub fn move_cursor_end(&mut self) {
-        if self.busy && !self.input.starts_with('/') {
-            return;
-        }
         self.input_cursor = self.input.len();
     }
 
@@ -167,4 +163,59 @@ fn next_boundary(text: &str, index: usize) -> usize {
             .next()
             .map(|(offset, _)| offset)
             .unwrap_or(text[index..].len())
+}
+
+fn normalize_inserted_text(text: &str) -> String {
+    if !text.contains('\r') {
+        return text.to_string();
+    }
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn local_conversation_reply(text: &str) -> Option<&'static str> {
+    let normalized = normalize_conversation_text(text);
+    if normalized.is_empty() || normalized.chars().count() > 32 || contains_task_intent(&normalized)
+    {
+        return None;
+    }
+
+    let asks_identity = normalized.contains("你是谁")
+        || normalized.contains("你是")
+        || normalized.contains("whoareyou")
+        || normalized.contains("whatisyourname");
+    if asks_identity {
+        return Some("我是 Sage Terminal 里的 AI 执行助手，可以在当前工作空间里帮你看代码、改文件、跑命令和排查问题。");
+    }
+
+    let is_greeting = matches!(
+        normalized.as_str(),
+        "hello" | "hi" | "hey" | "你好" | "您好" | "在吗" | "你在吗"
+    );
+    is_greeting.then_some("我在。直接说任务就行。")
+}
+
+fn normalize_conversation_text(text: &str) -> String {
+    text.trim()
+        .trim_matches(is_conversation_punctuation)
+        .to_lowercase()
+        .chars()
+        .filter(|ch| !ch.is_whitespace() && !is_conversation_punctuation(*ch))
+        .collect()
+}
+
+fn is_conversation_punctuation(ch: char) -> bool {
+    ch.is_ascii_punctuation()
+        || matches!(
+            ch,
+            '。' | '，' | '？' | '！' | '、' | '：' | '；' | '“' | '”'
+        )
+}
+
+fn contains_task_intent(text: &str) -> bool {
+    [
+        "帮我", "修改", "分析", "检查", "运行", "执行", "创建", "写", "修", "解释", "说明", "测试",
+        "commit", "push", "run", "fix", "edit", "write", "test", "explain",
+    ]
+    .iter()
+    .any(|keyword| text.contains(keyword))
 }

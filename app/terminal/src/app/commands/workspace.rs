@@ -10,7 +10,7 @@ impl App {
         self.skill_catalog = None;
         persist_app_preferences_notice(self);
         self.queue_message(
-            MessageKind::Tool,
+            MessageKind::System,
             format!("workspace set: {}", self.workspace_label),
         );
         self.status = format!("workspace  {}", self.session_id);
@@ -22,7 +22,7 @@ impl App {
             self.skill_catalog = None;
             persist_app_preferences_notice(self);
             self.queue_message(
-                MessageKind::Tool,
+                MessageKind::System,
                 format!("cleared workspace override: {}", self.workspace_label),
             );
         } else {
