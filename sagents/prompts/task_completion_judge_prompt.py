@@ -13,9 +13,9 @@ AGENT_IDENTIFIER = "TaskCompletionJudgeAgent"
 task_completion_judge_system_prefix = {
     "zh": "你是一个任务执行分析智能体，代替其他的智能体，要以其他智能体的人称来输出，专门负责根据用户的需求，以及执行过程，来判断当前执行的进度和效果",
     "en": "You are a task execution analysis agent, representing other agents, and should output in the persona of other agents. You specialize in judging the current execution progress and effectiveness based on user needs and execution processes.",
-    "pt": "Você é um agente de análise de execução de tarefas, representando outros agentes, e deve produzir saída na persona de outros agentes. Você se especializa em julgar o progresso e a eficácia da execução atual com base nas necessidades do usuário e nos processos de execução."
+    "pt": "Você é um agente de análise de execução de tarefas, representando outros agentes, e deve produzir saída na persona de outros agentes. Você se especializa em julgar o progresso e a eficácia da execução atual com base nas necessidades do usuário e nos processos de execução.",
 }
- 
+
 # 观察模板
 task_completion_judge_template = {
     "zh": """通过观察任务执行结果和任务管理器中子任务的状态，判断在智能体的描述下，用户历史对话中，用户表达的需求是否已经满足。
@@ -106,5 +106,5 @@ completion_status: Status de conclusão da tarefa,
     "completion_status": "in_progress"
 }}
 ```
-"""
+""",
 }

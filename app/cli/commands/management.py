@@ -62,8 +62,12 @@ async def sessions_command(args: argparse.Namespace) -> int:
         print(f"created_at: {result.get('created_at')}")
         print(f"user_count: {result.get('user_count')}")
         print(f"agent_count: {result.get('agent_count')}")
-        _print_message_preview(result.get("last_user_message"), label="last_user_message")
-        _print_message_preview(result.get("last_assistant_message"), label="last_assistant_message")
+        _print_message_preview(
+            result.get("last_user_message"), label="last_user_message"
+        )
+        _print_message_preview(
+            result.get("last_assistant_message"), label="last_assistant_message"
+        )
         messages = result.get("recent_messages") or []
         print(f"recent_messages: {len(messages)}")
         if not messages:
@@ -284,9 +288,13 @@ async def provider_command(args: argparse.Namespace) -> int:
         print(f"total: {result['total']}")
         filters = result.get("filters") or {}
         active_filters = [
-            f"default_only={filters.get('default_only')}" if filters.get("default_only") else None,
+            f"default_only={filters.get('default_only')}"
+            if filters.get("default_only")
+            else None,
             f"model={filters.get('model')}" if filters.get("model") else None,
-            f"name_contains={filters.get('name_contains')}" if filters.get("name_contains") else None,
+            f"name_contains={filters.get('name_contains')}"
+            if filters.get("name_contains")
+            else None,
         ]
         active_filters = [item for item in active_filters if item]
         if active_filters:
@@ -306,7 +314,9 @@ async def provider_command(args: argparse.Namespace) -> int:
 
     if args.provider_command == "inspect":
         async with cli_db_runtime(verbose=args.verbose):
-            result = await inspect_cli_provider(provider_id=args.provider_id, user_id=args.user_id)
+            result = await inspect_cli_provider(
+                provider_id=args.provider_id, user_id=args.user_id
+            )
         if args.json:
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
@@ -344,7 +354,9 @@ async def provider_command(args: argparse.Namespace) -> int:
             )
     elif args.provider_command == "delete":
         async with cli_db_runtime(verbose=args.verbose):
-            result = await delete_cli_provider(provider_id=args.provider_id, user_id=args.user_id)
+            result = await delete_cli_provider(
+                provider_id=args.provider_id, user_id=args.user_id
+            )
     else:
         raise ValueError(f"Unsupported provider command: {args.provider_command}")
 

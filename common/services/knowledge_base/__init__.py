@@ -7,6 +7,7 @@ def add_doc_build_jobs(scheduler):
 
     return _add_doc_build_jobs(scheduler)
 
+
 __all__ = [
     "DocumentInput",
     "DocumentService",

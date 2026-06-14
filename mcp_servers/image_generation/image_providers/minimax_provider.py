@@ -70,7 +70,7 @@ export MINIMAX_MODEL=image-01"""
         prompt: str,
         aspect_ratio: str = "1:1",
         reference_image: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> GeneratedImage:
         """
         使用 Minimax 生成图片
@@ -86,7 +86,7 @@ export MINIMAX_MODEL=image-01"""
         # 构建请求头
         headers = {
             "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         # 构建请求体
@@ -99,7 +99,7 @@ export MINIMAX_MODEL=image-01"""
 
         # 如果提供了参考图，添加 subject_reference
         if reference_image and self.supports_reference_image:
-            payload["subject_reference"] = [
+            payload["subject_reference"] = [  # pyright: ignore[reportArgumentType]
                 {
                     "type": "character",
                     "image_file": reference_image,
@@ -111,11 +111,13 @@ export MINIMAX_MODEL=image-01"""
                 self.API_ENDPOINT,
                 headers=headers,
                 json=payload,
-                timeout=60.0  # 图片生成可能需要较长时间
+                timeout=60.0,  # 图片生成可能需要较长时间
             )
 
             if response.status_code == 401 or response.status_code == 403:
-                raise Exception(f"Minimax API Key 无效或没有权限，请检查环境变量 {self.env_key}")
+                raise Exception(
+                    f"Minimax API Key 无效或没有权限，请检查环境变量 {self.env_key}"
+                )
 
             response.raise_for_status()
             data = response.json()
@@ -133,5 +135,5 @@ export MINIMAX_MODEL=image-01"""
                 is_base64=True,
                 prompt=prompt,
                 model=self.model,
-                provider=self.name
+                provider=self.name,
             )

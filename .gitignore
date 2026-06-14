@@ -15,6 +15,8 @@ __pycache__/
 logs/
 workspace/
 agent_sessions
+deploy/monitoring/prometheus.local.yml
+deploy/monitoring/prometheus.generated.yml
 mcp_servers/search/api_doc
 *.py[cod]
 *$py.class
@@ -156,6 +158,8 @@ celerybeat.pid
 env/
 venv/
 ENV/
+!deploy/k8s/env/
+!deploy/k8s/env/*.env.example
 env.bak/
 venv.bak/
 
@@ -197,10 +201,12 @@ cython_debug/
 .pypirc
 .vscode
 *.db
+server_logs.txt
 agent_workspace
 .conda
 .claude/settings.local.json
 .idea
+/mysql/data/
 /data/
 deploy/data/
 deploy/*/data/
@@ -222,6 +228,8 @@ app/desktop/dist_nuitka/
 *.onefile-build/
 sidecar
 
+# Frontend documentation cache
+app/wiki/.vitepress/cache/
 
 # Certificates
 app/desktop/scripts/certs

@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from loguru import logger
 
@@ -23,7 +23,7 @@ async def build_interrupt_response(
 def build_inject_user_message_response(
     session_id: str,
     *,
-    content: str,
+    content: Union[str, List[Dict[str, Any]]],
     guidance_id: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
     user_id: Optional[str] = None,
@@ -60,7 +60,7 @@ def build_update_pending_user_injection_response(
     session_id: str,
     guidance_id: str,
     *,
-    content: str,
+    content: Union[str, List[Dict[str, Any]]],
     user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     data = conversation_service.update_pending_user_injection(

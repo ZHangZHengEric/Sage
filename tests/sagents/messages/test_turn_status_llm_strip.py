@@ -1,9 +1,10 @@
 """turn_status 不进 LLM 请求的单元测试。"""
 
-import pytest
-
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.context.messages.message_manager import MessageManager, TURN_STATUS_TOOL_NAME
+from sagents.context.messages.message_manager import (
+    MessageManager,
+    TURN_STATUS_TOOL_NAME,
+)
 
 
 def _tc(name: str, tc_id: str) -> dict:
@@ -241,14 +242,14 @@ def test_strip_keeps_rejected_when_not_last():
     out = MessageManager.strip_turn_status_from_llm_context(
         [a_rej, t_rej, a_mid, t_mid, a_last, t_last]
     )
-    kept_ids = [
-        m.tool_call_id
-        for m in out
-        if m.role == MessageRole.TOOL.value
-    ]
+    kept_ids = [m.tool_call_id for m in out if m.role == MessageRole.TOOL.value]
     assert kept_ids == ["rej_x", "last"]
     # 中间 mid 的 assistant 仅保留 content，tool_calls 被剔除
-    mids = [m for m in out if m.role == MessageRole.ASSISTANT.value and m.content == "中间普通一轮"]
+    mids = [
+        m
+        for m in out
+        if m.role == MessageRole.ASSISTANT.value and m.content == "中间普通一轮"
+    ]
     assert mids and mids[0].tool_calls is None
 
 
@@ -280,7 +281,9 @@ def test_strip_keeps_rejected_pair_inside_mixed_tool_calls():
         message_type=MessageType.TOOL_CALL_RESULT.value,
         metadata={"turn_status_rejected": True},
     )
-    out = MessageManager.strip_turn_status_from_llm_context([assistant, tool_g, tool_rej])
+    out = MessageManager.strip_turn_status_from_llm_context(
+        [assistant, tool_g, tool_rej]
+    )
     assert len(out) == 3
     names = [tc["function"]["name"] for tc in (out[0].tool_calls or [])]
     assert names == ["grep", TURN_STATUS_TOOL_NAME]

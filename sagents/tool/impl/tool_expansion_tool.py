@@ -58,11 +58,14 @@ class ToolExpansionTool:
             }
 
         requested = self._normalize_tool_names(tool_names)
-        allowed_tools = set(session_context.tool_manager.list_all_tools_name())
-        suggested_tools = list((session_context.audit_status or {}).get("suggested_tools") or [])
+        allowed_tools = set(session_context.tool_manager.list_all_tools_name())  # pyright: ignore[reportOptionalMemberAccess]
+        suggested_tools = list(
+            (session_context.audit_status or {}).get("suggested_tools") or []
+        )
         selected = set(suggested_tools)
         available_expandable_tools = sorted(
-            name for name in allowed_tools
+            name
+            for name in allowed_tools
             if name and name != TOOL_EXPAND_TOOLS and name not in selected
         )
 
@@ -100,7 +103,9 @@ class ToolExpansionTool:
             "invalid_tools": invalid_tools,
             "already_selected_tools": already_selected_tools,
             "available_expandable_tools": [
-                name for name in available_expandable_tools if name not in expanded_tools
+                name
+                for name in available_expandable_tools
+                if name not in expanded_tools
             ],
         }
 
@@ -127,5 +132,7 @@ class ToolExpansionTool:
 
             return get_live_session_context(session_id, log_prefix="ToolExpansionTool")
         except Exception as exc:
-            logger.warning(f"ToolExpansionTool: failed to resolve session_context: {exc}")
+            logger.warning(
+                f"ToolExpansionTool: failed to resolve session_context: {exc}"
+            )
             return None

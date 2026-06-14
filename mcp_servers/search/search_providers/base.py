@@ -9,6 +9,7 @@ from dataclasses import dataclass
 @dataclass
 class SearchResult:
     """统一的搜索结果格式"""
+
     title: str
     url: str
     snippet: str
@@ -18,6 +19,7 @@ class SearchResult:
 @dataclass
 class ImageResult:
     """统一的图片搜索结果格式"""
+
     title: str
     image_url: str
     source: str = ""
@@ -55,21 +57,25 @@ class BaseSearchProvider:
         """
         raise NotImplementedError
 
-    async def search_web(self, query: str, count: int, time_range: str = "") -> List[SearchResult]:
+    async def search_web(
+        self, query: str, count: int, time_range: str = ""
+    ) -> List[SearchResult]:
         """
         执行网页搜索，子类必须实现
-        
+
         Args:
             query: 搜索查询
             count: 返回结果数量
             time_range: 时间范围 (day, week, month, year, 空字符串表示不限)
         """
         raise NotImplementedError
-    
-    async def search_images(self, query: str, count: int, time_range: str = "") -> List[ImageResult]:
+
+    async def search_images(
+        self, query: str, count: int, time_range: str = ""
+    ) -> List[ImageResult]:
         """
         执行图片搜索，子类必须实现（如果 supports_images=True）
-        
+
         Args:
             query: 搜索查询
             count: 返回结果数量

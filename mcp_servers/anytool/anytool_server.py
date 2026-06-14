@@ -21,7 +21,9 @@ _HIDDEN_CONTEXT_PARAM_SCHEMAS: Dict[str, Dict[str, Any]] = {
 }
 
 
-def _ensure_object_schema(schema: Any, *, allow_any_properties: bool = False) -> Dict[str, Any]:
+def _ensure_object_schema(
+    schema: Any, *, allow_any_properties: bool = False
+) -> Dict[str, Any]:
     if not isinstance(schema, dict) or not schema:
         return {
             "type": "object",
@@ -34,15 +36,22 @@ def _ensure_object_schema(schema: Any, *, allow_any_properties: bool = False) ->
     if normalized.get("type") != "object":
         normalized = {
             "type": "object",
-            "properties": normalized.get("properties", {}) if isinstance(normalized.get("properties"), dict) else {},
-            "required": normalized.get("required", []) if isinstance(normalized.get("required"), list) else [],
+            "properties": normalized.get("properties", {})
+            if isinstance(normalized.get("properties"), dict)
+            else {},
+            "required": normalized.get("required", [])
+            if isinstance(normalized.get("required"), list)
+            else [],
         }
 
     if not isinstance(normalized.get("properties"), dict):
         normalized["properties"] = {}
     if not isinstance(normalized.get("required"), list):
         normalized["required"] = []
-    normalized.setdefault("additionalProperties", allow_any_properties if not normalized["properties"] else False)
+    normalized.setdefault(
+        "additionalProperties",
+        allow_any_properties if not normalized["properties"] else False,
+    )
     return normalized
 
 
@@ -55,14 +64,18 @@ def _ensure_anytool_input_schema(schema: Any) -> Dict[str, Any]:
     return normalized
 
 
-def _coerce_output_to_schema(parsed: Dict[str, Any], returns_schema: Any) -> Dict[str, Any]:
+def _coerce_output_to_schema(
+    parsed: Dict[str, Any], returns_schema: Any
+) -> Dict[str, Any]:
     if not isinstance(returns_schema, dict) or not returns_schema:
         return parsed
     properties = returns_schema.get("properties")
     if not isinstance(properties, dict) or not properties:
         return parsed
     allowed_keys = set(properties.keys())
-    coerced: Dict[str, Any] = {key: parsed[key] for key in parsed if key in allowed_keys}
+    coerced: Dict[str, Any] = {
+        key: parsed[key] for key in parsed if key in allowed_keys
+    }
     for required_key in returns_schema.get("required", []) or []:
         if isinstance(required_key, str) and required_key not in coerced:
             coerced[required_key] = None
@@ -74,8 +87,14 @@ def _build_tool_schema(tool_def: Dict[str, Any]) -> types.Tool:
     output_schema = None
     # 只有用户显式定义了 properties 才下发 outputSchema 做严格校验；
     # 否则 MCP 默认 additionalProperties=False + properties={} 会把任何键全部拒掉
-    if isinstance(returns_schema, dict) and isinstance(returns_schema.get("properties"), dict) and returns_schema["properties"]:
-        output_schema = _ensure_object_schema(returns_schema, allow_any_properties=False)
+    if (
+        isinstance(returns_schema, dict)
+        and isinstance(returns_schema.get("properties"), dict)
+        and returns_schema["properties"]
+    ):
+        output_schema = _ensure_object_schema(
+            returns_schema, allow_any_properties=False
+        )
     return types.Tool(
         name=str(tool_def.get("name", "")).strip(),
         title=str(tool_def.get("title", "")).strip() or None,
@@ -103,14 +122,22 @@ def build_anytool_server(server_name: str, server_config: Dict[str, Any]) -> Ser
 
     @server.list_tools()
     async def _list_tools() -> List[types.Tool]:
-        return [_build_tool_schema(tool_def) for tool_def in normalized_tools if tool_def.get("name")]
+        return [
+            _build_tool_schema(tool_def)
+            for tool_def in normalized_tools
+            if tool_def.get("name")
+        ]
 
     @server.call_tool()
     async def _call_tool(tool_name: str, arguments: Dict[str, Any]) -> Any:
-        tool_def = next((item for item in normalized_tools if item.get("name") == tool_name), None)
+        tool_def = next(
+            (item for item in normalized_tools if item.get("name") == tool_name), None
+        )
         if not tool_def:
             return types.CallToolResult(
-                content=[types.TextContent(type="text", text=f"AnyTool '{tool_name}' 不存在")],
+                content=[
+                    types.TextContent(type="text", text=f"AnyTool '{tool_name}' 不存在")
+                ],
                 isError=True,
             )
 

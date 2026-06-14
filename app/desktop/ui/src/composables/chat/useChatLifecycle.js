@@ -211,7 +211,7 @@ export const useChatLifecycle = ({
     if (!newMessages || newMessages.length === 0) return
     const lastMsg = newMessages[newMessages.length - 1]
     if (lastMsg.role === 'assistant' && lastMsg.tool_calls) {
-      const delegateCall = lastMsg.tool_calls.find(c => c.function?.name === 'sys_delegate_task')
+      const delegateCall = lastMsg.tool_calls.find(c => ['sys_delegate_task', 'sys_team_delegate_task'].includes(c.function?.name))
       if (delegateCall) {
         try {
           const args = typeof delegateCall.function.arguments === 'string'
@@ -224,7 +224,7 @@ export const useChatLifecycle = ({
             }
           }
         } catch (e) {
-          console.error('Failed to parse sys_delegate_task arguments:', e)
+          console.error('Failed to parse delegate task arguments:', e)
         }
       }
     }
@@ -234,7 +234,7 @@ export const useChatLifecycle = ({
         const msg = newMessages[i]
         if (msg.role === 'assistant' && msg.tool_calls) {
           const matchingCall = msg.tool_calls.find(c => c.id === toolCallId)
-          if (matchingCall && matchingCall.function?.name === 'sys_delegate_task') {
+          if (matchingCall && ['sys_delegate_task', 'sys_team_delegate_task'].includes(matchingCall.function?.name)) {
             try {
               const args = typeof matchingCall.function.arguments === 'string'
                 ? JSON.parse(matchingCall.function.arguments)

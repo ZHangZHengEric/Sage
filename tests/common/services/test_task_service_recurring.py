@@ -23,13 +23,17 @@ def _build_recurring_task(*, last_executed_at: datetime) -> RecurringTask:
     )
 
 
-@pytest.mark.skipif(task_service_module.croniter is None, reason="croniter not installed")
+@pytest.mark.skipif(
+    task_service_module.croniter is None, reason="croniter not installed"
+)
 def test_spawn_due_recurring_tasks_creates_only_one_catch_up_task(monkeypatch):
     fixed_now = datetime(2026, 4, 7, 15, 30, 0)
     monkeypatch.setattr(task_service_module, "get_local_now", lambda: fixed_now)
 
     service = TaskService()
-    recurring_task = _build_recurring_task(last_executed_at=datetime(2026, 4, 1, 9, 0, 0))
+    recurring_task = _build_recurring_task(
+        last_executed_at=datetime(2026, 4, 1, 9, 0, 0)
+    )
 
     service.dao.get_enabled_recurring_tasks = AsyncMock(return_value=[recurring_task])
     service.dao.advance_recurring_task_cursor = AsyncMock(return_value=True)
@@ -51,13 +55,17 @@ def test_spawn_due_recurring_tasks_creates_only_one_catch_up_task(monkeypatch):
     assert ckwargs.get("user_id") == recurring_task.user_id
 
 
-@pytest.mark.skipif(task_service_module.croniter is None, reason="croniter not installed")
+@pytest.mark.skipif(
+    task_service_module.croniter is None, reason="croniter not installed"
+)
 def test_spawn_due_recurring_tasks_does_not_backfill_when_pending_exists(monkeypatch):
     fixed_now = datetime(2026, 4, 7, 15, 30, 0)
     monkeypatch.setattr(task_service_module, "get_local_now", lambda: fixed_now)
 
     service = TaskService()
-    recurring_task = _build_recurring_task(last_executed_at=datetime(2026, 4, 1, 9, 0, 0))
+    recurring_task = _build_recurring_task(
+        last_executed_at=datetime(2026, 4, 1, 9, 0, 0)
+    )
 
     service.dao.get_enabled_recurring_tasks = AsyncMock(return_value=[recurring_task])
     service.dao.advance_recurring_task_cursor = AsyncMock(return_value=True)
@@ -73,7 +81,9 @@ def test_spawn_due_recurring_tasks_does_not_backfill_when_pending_exists(monkeyp
     service.dao.advance_recurring_task_cursor.assert_not_awaited()
 
 
-@pytest.mark.skipif(task_service_module.croniter is None, reason="croniter not installed")
+@pytest.mark.skipif(
+    task_service_module.croniter is None, reason="croniter not installed"
+)
 def test_spawn_due_recurring_tasks_does_not_spawn_early_within_one_minute(monkeypatch):
     fixed_now = datetime(2026, 4, 8, 11, 59, 14)
     monkeypatch.setattr(task_service_module, "get_local_now", lambda: fixed_now)

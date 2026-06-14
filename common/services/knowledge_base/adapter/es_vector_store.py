@@ -35,7 +35,12 @@ def _doc_mapping() -> Dict[str, Any]:
         "properties": {
             "doc_id": {"type": "keyword", "index": False},
             "doc_segment_id": {"type": "keyword", "index": False},
-            "doc_content": {"index": True, "type": "text", "analyzer": "my_ana", "similarity": "my_similarity"},
+            "doc_content": {
+                "index": True,
+                "type": "text",
+                "analyzer": "my_ana",
+                "similarity": "my_similarity",
+            },
             "emb": {"type": "dense_vector", "dims": dims(), "similarity": "cosine"},
             "end": {"type": "long"},
             "start": {"type": "long"},
@@ -48,7 +53,12 @@ def _doc_full_mapping() -> Dict[str, Any]:
     return {
         "properties": {
             "doc_id": {"type": "keyword", "index": False},
-            "full_content": {"index": True, "type": "text", "analyzer": "my_ana", "similarity": "my_similarity"},
+            "full_content": {
+                "index": True,
+                "type": "text",
+                "analyzer": "my_ana",
+                "similarity": "my_similarity",
+            },
             "origin_content": {"type": "text"},
             "path": {"type": "text"},
             "title": {"type": "text"},
@@ -62,26 +72,31 @@ class EsChunk(Chunk):
     ES 存储的分块数据模型，继承自 sagents.retrieve_engine.schema.Chunk
     对应索引: {index_name}_doc
     """
+
     # 继承字段: id, content, document_id, embedding, metadata, score
-    
+
     def to_es_source(self) -> Dict[str, Any]:
         """转换为 ES 存储格式"""
-        return _compact({
-            "doc_segment_id": self.id,
-            "doc_content": self.content,
-            "doc_id": self.document_id,
-            "emb": self.embedding,
-            "metadata": self.metadata,
-            # 兼容旧字段，如果 metadata 中有则提取，否则为 None
-            "start": self.metadata.get("start"),
-            "end": self.metadata.get("end"),
-            "path": self.metadata.get("path"),
-            "title": self.metadata.get("title"),
-            "main_doc_id": self.metadata.get("main_doc_id"),
-        })
+        return _compact(
+            {
+                "doc_segment_id": self.id,
+                "doc_content": self.content,
+                "doc_id": self.document_id,
+                "emb": self.embedding,
+                "metadata": self.metadata,
+                # 兼容旧字段，如果 metadata 中有则提取，否则为 None
+                "start": self.metadata.get("start"),
+                "end": self.metadata.get("end"),
+                "path": self.metadata.get("path"),
+                "title": self.metadata.get("title"),
+                "main_doc_id": self.metadata.get("main_doc_id"),
+            }
+        )
 
     @classmethod
-    def from_es_source(cls, source: Dict[str, Any], score: float | None = None) -> EsChunk:
+    def from_es_source(
+        cls, source: Dict[str, Any], score: float | None = None
+    ) -> EsChunk:
         """从 ES 结果构建对象"""
         metadata = source.get("metadata") or {}
         # 确保关键元数据存在
@@ -95,7 +110,7 @@ class EsChunk(Chunk):
             document_id=source.get("doc_id") or "",
             embedding=source.get("emb"),
             metadata=metadata,
-            score=score
+            score=score,
         )
 
 
@@ -104,8 +119,9 @@ class EsDocument(Document):
     ES 存储的完整文档模型，继承自 sagents.retrieve_engine.schema.Document
     对应索引: {index_name}_doc_full
     """
+
     # 继承字段: id, content, metadata, chunks
-    
+
     # 额外字段，用于兼容旧逻辑（如果需要）
     origin_content: Optional[str] = None
     path: Optional[str] = None
@@ -114,16 +130,19 @@ class EsDocument(Document):
 
     def to_es_source(self) -> Dict[str, Any]:
         """转换为 ES 存储格式"""
-        return _compact({
-            "doc_id": self.id,
-            "full_content": self.content,
-            "metadata": self.metadata,
-            # 提取显式定义的字段
-            "origin_content": self.origin_content or self.metadata.get("origin_content"),
-            "path": self.path or self.metadata.get("path"),
-            "title": self.title or self.metadata.get("title"),
-            "main_doc_id": self.main_doc_id or self.metadata.get("main_doc_id"),
-        })
+        return _compact(
+            {
+                "doc_id": self.id,
+                "full_content": self.content,
+                "metadata": self.metadata,
+                # 提取显式定义的字段
+                "origin_content": self.origin_content
+                or self.metadata.get("origin_content"),
+                "path": self.path or self.metadata.get("path"),
+                "title": self.title or self.metadata.get("title"),
+                "main_doc_id": self.main_doc_id or self.metadata.get("main_doc_id"),
+            }
+        )
 
     @classmethod
     def from_es_source(cls, source: Dict[str, Any]) -> EsDocument:
@@ -143,15 +162,23 @@ class EsVectorStore(VectorStore):
     """
     Adapter for the existing ElasticSearch service.
     """
+
     def __init__(self):
         self.post_processor = SearchResultPostProcessTool()
 
     async def create_collection(self, collection_name: str) -> None:
-        for suffix, mapping in {IndexSuffixDoc: _doc_mapping(), IndexSuffixDocFull: _doc_full_mapping()}.items():
+        for suffix, mapping in {
+            IndexSuffixDoc: _doc_mapping(),
+            IndexSuffixDocFull: _doc_full_mapping(),
+        }.items():
             if not await index_exists(index_name=f"{collection_name}_{suffix}"):
-                await index_create(index_name=f"{collection_name}_{suffix}", mapping=mapping)
+                await index_create(
+                    index_name=f"{collection_name}_{suffix}", mapping=mapping
+                )
 
-    async def add_documents(self, collection_name: str, documents: List[Document]) -> None:
+    async def add_documents(
+        self, collection_name: str, documents: List[Document]
+    ) -> None:
         es_chunks: List[EsChunk] = []
         es_docs: List[EsDocument] = []
 
@@ -182,7 +209,7 @@ class EsVectorStore(VectorStore):
                     document_id=doc.id,
                     embedding=chunk.embedding,
                     metadata=chunk_meta,
-                    score=chunk.score
+                    score=chunk.score,
                 )
                 es_chunks.append(es_chunk)
 
@@ -201,7 +228,9 @@ class EsVectorStore(VectorStore):
             if doc_sources:
                 await document_insert(full_index, doc_sources)
 
-    async def delete_documents(self, collection_name: str, document_ids: List[str]) -> None:
+    async def delete_documents(
+        self, collection_name: str, document_ids: List[str]
+    ) -> None:
         if not document_ids:
             return
         for suffix in doc_index_suffix:
@@ -218,40 +247,56 @@ class EsVectorStore(VectorStore):
             except Exception as e:
                 logger.error(f"Failed to clear index {idx}: {e}")
 
-    async def search(self, collection_name: str, query: str, embedding: List[float], top_k: int = 5) -> List[Chunk]:
+    async def search(
+        self, collection_name: str, query: str, embedding: List[float], top_k: int = 5
+    ) -> List[Chunk]:
         index_doc = f"{collection_name}_{IndexSuffixDoc}"
         if not await index_exists(index_doc):
             return []
 
         async def _vec() -> List[SearchResult]:
-            r = await es_search(index_doc, {
-                "_source": {"excludes": ["emb"]},
-                "knn": [{
-                    "field": "emb",
-                    "k": top_k,
-                    "num_candidates": 1000,
-                    "query_vector": embedding,
-                }],
-                "size": top_k,
-            })
+            r = await es_search(
+                index_doc,
+                {
+                    "_source": {"excludes": ["emb"]},
+                    "knn": [
+                        {
+                            "field": "emb",
+                            "k": top_k,
+                            "num_candidates": 1000,
+                            "query_vector": embedding,
+                        }
+                    ],
+                    "size": top_k,
+                },
+            )
             items: List[SearchResult] = []
             for h in r.get("hits", {}).get("hits", []):
                 s = h.get("_source", {})
                 chunk = EsChunk.from_es_source(s, score=h.get("_score"))
-                items.append(SearchResult(chunk=chunk, score=h.get("_score"), source="vector"))
+                items.append(
+                    SearchResult(chunk=chunk, score=h.get("_score"), source="vector")
+                )
             return items
 
         async def _bm25() -> List[SearchResult]:
-            r = await es_search(index_doc, {
-                "_source": {"excludes": ["emb"]},
-                "query": {"bool": {"must": [{"match": {"doc_content": {"query": query}}}]}},
-                "size": top_k,
-            })
+            r = await es_search(
+                index_doc,
+                {
+                    "_source": {"excludes": ["emb"]},
+                    "query": {
+                        "bool": {"must": [{"match": {"doc_content": {"query": query}}}]}
+                    },
+                    "size": top_k,
+                },
+            )
             items: List[SearchResult] = []
             for h in r.get("hits", {}).get("hits", []):
                 s = h.get("_source", {})
                 chunk = EsChunk.from_es_source(s, score=h.get("_score"))
-                items.append(SearchResult(chunk=chunk, score=h.get("_score"), source="bm25"))
+                items.append(
+                    SearchResult(chunk=chunk, score=h.get("_score"), source="bm25")
+                )
             return items
 
         # Run vector search and bm25 search in parallel
@@ -277,13 +322,18 @@ class EsVectorStore(VectorStore):
 
         return final_chunks
 
-    async def get_documents_by_ids(self, collection_name: str, document_ids: List[str]) -> List[Document]:
+    async def get_documents_by_ids(
+        self, collection_name: str, document_ids: List[str]
+    ) -> List[Document]:
         index_full = f"{collection_name}_{IndexSuffixDocFull}"
         documents = []
         if not document_ids:
             return documents
 
-        sr = await es_search(index_full, {"query": {"terms": {"doc_id": document_ids}}, "size": len(document_ids)})
+        sr = await es_search(
+            index_full,
+            {"query": {"terms": {"doc_id": document_ids}}, "size": len(document_ids)},
+        )
 
         for hit in sr.get("hits", {}).get("hits", []):
             src = hit.get("_source", {})

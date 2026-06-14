@@ -174,6 +174,7 @@
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="fibre">{{ t('agent.modeFibre') }}</SelectItem>
+                      <SelectItem value="team">{{ t('agent.modeTeam') }}</SelectItem>
                       <SelectItem value="simple">{{ t('agent.modeSimple') }}</SelectItem>
                     </SelectContent>
                   </Select>
@@ -302,7 +303,7 @@
           </section>
 
           <!-- Sub Agent Section -->
-          <section id="subAgents" class="scroll-mt-6" v-if="store.formData.agentMode === 'fibre'">
+          <section id="subAgents" class="scroll-mt-6" v-if="['fibre', 'team'].includes(store.formData.agentMode)">
             <div class="flex items-center gap-2 mb-5">
               <div class="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
                 <Bot class="h-4 w-4 text-primary" />
@@ -430,9 +431,9 @@
                       <div v-for="tool in displayedTools" :key="tool.name" class="flex items-start gap-3 p-3 rounded-lg border border-muted/50 hover:bg-accent/5 transition-colors">
                         <Checkbox 
                           :id="`tool-${tool.name}`" 
-                          :checked="isRequiredTool(tool.name) || store.formData.availableTools.includes(tool.name)" 
-                          :disabled="isRequiredTool(tool.name)"
-                          @update:checked="() => !isRequiredTool(tool.name) && store.toggleTool(tool.name)" 
+                          :checked="isToolChecked(tool.name)"
+                          :disabled="isToolLocked(tool.name)"
+                          @update:checked="() => !isToolLocked(tool.name) && store.toggleTool(tool.name)"
                           class="mt-0.5"
                         />
                         <div class="flex-1 min-w-0">
@@ -440,7 +441,8 @@
                             <label :for="`tool-${tool.name}`" class="text-sm font-medium cursor-pointer" :class="{ 'opacity-50': isRequiredTool(tool.name) }">
                               {{ tool.name }}
                             </label>
-                            <Badge v-if="isRequiredTool(tool.name)" variant="secondary" class="text-[10px] h-5 px-1.5">{{ t('agentEdit.badge.skillRequired') }}</Badge>
+                            <Badge v-if="isToolUnavailableForMode(tool.name)" variant="secondary" class="text-[10px] h-5 px-2 bg-gray-100 text-gray-500 whitespace-nowrap">{{ t('agentEdit.badge.fibreOnly') }}</Badge>
+                            <Badge v-else-if="isRequiredTool(tool.name)" variant="secondary" class="text-[10px] h-5 px-1.5">{{ t('agentEdit.badge.skillRequired') }}</Badge>
                           </div>
                           <p v-if="tool.description" class="text-xs text-muted-foreground line-clamp-2 mt-1">
                             {{ tool.description }}
@@ -1015,7 +1017,7 @@ const sections = computed(() => {
     { id: 'workflows', label: t('agent.workflows'), icon: Workflow },
   ]
 
-  if (store.formData.agentMode === 'fibre') {
+  if (['fibre', 'team'].includes(store.formData.agentMode)) {
     items.splice(3, 0, { id: 'subAgents', label: t('agentEdit.subAgents'), icon: Bot })
   }
 
@@ -1325,10 +1327,38 @@ const REQUIRED_TOOLS_FOR_SKILLS = [
   'file_read', 'execute_python_code', 'execute_javascript_code', 
   'execute_shell_command', 'file_write', 'file_update', 'load_skill'
 ]
+const REQUIRED_TOOLS_FOR_FIBRE = ['sys_spawn_agent', 'sys_delegate_task']
+const REQUIRED_TOOLS_FOR_TEAM = ['sys_team_delegate_task']
+const FIBRE_MODE_TOOLS = ['sys_spawn_agent', 'sys_delegate_task']
+const TEAM_MODE_TOOLS = ['sys_team_delegate_task']
+const MULTI_AGENT_SYSTEM_TOOLS = [
+  'sys_spawn_agent',
+  'sys_delegate_task',
+  'sys_team_delegate_task'
+]
 
 const isRequiredTool = (toolName) => {
   const hasSkills = store.formData.availableSkills?.length > 0
-  return hasSkills && REQUIRED_TOOLS_FOR_SKILLS.includes(toolName)
+  if (hasSkills && REQUIRED_TOOLS_FOR_SKILLS.includes(toolName)) return true
+  if (store.formData.agentMode === 'fibre' && REQUIRED_TOOLS_FOR_FIBRE.includes(toolName)) return true
+  if (store.formData.agentMode === 'team' && REQUIRED_TOOLS_FOR_TEAM.includes(toolName)) return true
+  return false
+}
+
+const isToolUnavailableForMode = (toolName) => {
+  if (!MULTI_AGENT_SYSTEM_TOOLS.includes(toolName)) return false
+  if (store.formData.agentMode === 'fibre') return !FIBRE_MODE_TOOLS.includes(toolName)
+  if (store.formData.agentMode === 'team') return !TEAM_MODE_TOOLS.includes(toolName)
+  return true
+}
+
+const isToolChecked = (toolName) => {
+  if (isToolUnavailableForMode(toolName)) return false
+  return Boolean(isRequiredTool(toolName)) || store.formData.availableTools.includes(toolName)
+}
+
+const isToolLocked = (toolName) => {
+  return isToolUnavailableForMode(toolName) || Boolean(isRequiredTool(toolName))
 }
 
 const filteredTools = computed(() => {
@@ -1362,6 +1392,7 @@ const displayedTools = computed(() => {
 const selectAllToolsInGroup = () => {
   const currentTools = displayedTools.value
   currentTools.forEach(tool => {
+    if (isToolUnavailableForMode(tool.name)) return
     if (!isRequiredTool(tool.name) && !store.formData.availableTools.includes(tool.name)) {
       store.formData.availableTools.push(tool.name)
     }
@@ -1399,6 +1430,28 @@ watch(() => store.formData.availableSkills, (newSkills) => {
     })
   }
 }, { deep: true })
+
+watch(() => store.formData.agentMode, (newAgentMode) => {
+  const required = newAgentMode === 'fibre'
+    ? REQUIRED_TOOLS_FOR_FIBRE
+    : newAgentMode === 'team'
+      ? REQUIRED_TOOLS_FOR_TEAM
+      : []
+  required.forEach(toolName => {
+    if (!store.formData.availableTools.includes(toolName)) {
+      store.formData.availableTools.push(toolName)
+    }
+  })
+  const unavailable = newAgentMode === 'fibre'
+    ? MULTI_AGENT_SYSTEM_TOOLS.filter(toolName => !FIBRE_MODE_TOOLS.includes(toolName))
+    : newAgentMode === 'team'
+      ? MULTI_AGENT_SYSTEM_TOOLS.filter(toolName => !TEAM_MODE_TOOLS.includes(toolName))
+      : MULTI_AGENT_SYSTEM_TOOLS
+  unavailable.forEach(toolName => {
+    const index = store.formData.availableTools.indexOf(toolName)
+    if (index > -1) store.formData.availableTools.splice(index, 1)
+  })
+})
 
 const getToolSourceLabel = (source) => {
   let displaySource = source

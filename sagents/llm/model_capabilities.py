@@ -25,7 +25,9 @@ _REASONING_MODEL_PREFIXES: tuple[str, ...] = (
 _REASONING_MODEL_EXACT: frozenset[str] = frozenset({"o1", "o3", "o4"})
 
 
-_VALID_REASONING_EFFORTS: frozenset[str] = frozenset({"minimal", "low", "medium", "high"})
+_VALID_REASONING_EFFORTS: frozenset[str] = frozenset(
+    {"minimal", "low", "medium", "high"}
+)
 
 
 def is_openai_reasoning_model(model_name: str) -> bool:
@@ -99,7 +101,9 @@ def _build_probe_extra_body(model: str) -> Dict[str, Any]:
     return extra_body
 
 
-async def _probe_optional_capability(capability: str, probe_coro: Awaitable[Dict[str, Any]]) -> Dict[str, Any]:
+async def _probe_optional_capability(
+    capability: str, probe_coro: Awaitable[Dict[str, Any]]
+) -> Dict[str, Any]:
     try:
         return await probe_coro
     except Exception as exc:
@@ -189,13 +193,17 @@ async def probe_multimodal(api_key: str, base_url: str, model: str) -> Dict[str,
         logger.info(
             f"[LLM Capability Probe] multimodal request | summary={summarize_chat_completion_request(model=model, messages=request_messages, request_kwargs=request_kwargs)}"
         )
-        response = await client.chat.completions.create(
+        response = await client.chat.completions.create(  # pyright: ignore[reportCallIssue]
             model=model,
-            messages=request_messages,
-            **request_kwargs,
+            messages=request_messages,  # pyright: ignore[reportArgumentType]
+            **request_kwargs,  # pyright: ignore[reportArgumentType]
         )
 
-        content = response.choices[0].message.content.lower() if response.choices[0].message.content else ""
+        content = (
+            response.choices[0].message.content.lower()
+            if response.choices[0].message.content
+            else ""
+        )
         recognized = any(keyword in content for keyword in _COLOR_KEYWORDS)
         supported = recognized
         logger.info(
@@ -210,7 +218,9 @@ async def probe_multimodal(api_key: str, base_url: str, model: str) -> Dict[str,
         await client.close()
 
 
-async def probe_structured_output(api_key: str, base_url: str, model: str) -> Dict[str, Any]:
+async def probe_structured_output(
+    api_key: str, base_url: str, model: str
+) -> Dict[str, Any]:
     logger.info(
         f"[LLM Capability Probe] structured_output | model={model} | base_url={base_url} | test=response_format=json_object"
     )
@@ -287,10 +297,10 @@ async def probe_structured_output(api_key: str, base_url: str, model: str) -> Di
         await client.close()
 
 
-async def probe_llm_capabilities(api_key: str, base_url: str, model: str) -> Dict[str, Any]:
-    logger.info(
-        f"[LLM Capability Probe] start | model={model} | base_url={base_url}"
-    )
+async def probe_llm_capabilities(
+    api_key: str, base_url: str, model: str
+) -> Dict[str, Any]:
+    logger.info(f"[LLM Capability Probe] start | model={model} | base_url={base_url}")
     connection = await probe_connection(api_key, base_url, model)
     multimodal = await _probe_optional_capability(
         "multimodal",

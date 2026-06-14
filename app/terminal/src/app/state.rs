@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::text::Line;
 
-use crate::backend::BackendStats;
+use crate::backend::{BackendGoal, BackendSessionMeta, BackendStats};
 use crate::display_policy::DisplayMode;
 
 #[derive(Debug)]
@@ -112,6 +112,13 @@ pub(crate) struct AgentCandidate {
     pub(crate) updated_at: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingGoalMutation {
+    pub objective: Option<String>,
+    pub status: Option<String>,
+    pub clear: bool,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProviderPopupMode {
     Inspect,
@@ -154,6 +161,8 @@ pub struct App {
     pub workspace_label: String,
     pub(crate) workspace_override: Option<PathBuf>,
     pub(crate) sandbox_type: Option<String>,
+    pub current_goal: Option<BackendGoal>,
+    pub pending_goal_mutation: Option<PendingGoalMutation>,
     pub status: String,
     pub busy: bool,
     pub should_quit: bool,
@@ -187,6 +196,9 @@ pub struct App {
     pub(crate) agent_catalog: Option<Vec<AgentCandidate>>,
     pub(crate) provider_catalog: Option<Vec<ProviderCandidate>>,
     pub(crate) skill_catalog: Option<Vec<SkillCandidate>>,
+    pub(crate) input_history: Vec<String>,
+    pub(crate) input_history_index: Option<usize>,
+    pub(crate) input_history_draft: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -196,11 +208,16 @@ pub(crate) struct ActiveToolRecord {
 }
 
 impl App {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new() -> Self {
+        Self::new_with_session_seq(1)
+    }
+
+    pub fn new_with_session_seq(session_seq: u32) -> Self {
         let mut app = Self {
             input: String::new(),
             input_cursor: 0,
-            session_seq: 1,
+            session_seq: session_seq.max(1),
             session_id: String::new(),
             user_id: "default_user".to_string(),
             selected_agent_id: None,
@@ -211,6 +228,8 @@ impl App {
             workspace_label: default_workspace_label(),
             workspace_override: None,
             sandbox_type: None,
+            current_goal: None,
+            pending_goal_mutation: None,
             status: String::new(),
             busy: false,
             should_quit: false,
@@ -244,6 +263,9 @@ impl App {
             agent_catalog: None,
             provider_catalog: None,
             skill_catalog: None,
+            input_history: Vec::new(),
+            input_history_index: None,
+            input_history_draft: None,
         };
         app.reset_session();
         app.clear_requested = false;
@@ -251,11 +273,12 @@ impl App {
     }
 
     pub fn reset_session(&mut self) {
-        self.session_id = format!("local-{:#06}", self.session_seq).replace("0x", "");
-        self.session_seq += 1;
+        self.session_id = pending_session_label().to_string();
         self.clear_input();
         self.busy = false;
         self.clear_live_response_state();
+        self.current_goal = None;
+        self.pending_goal_mutation = None;
         self.request_started_at = None;
         self.first_output_latency = None;
         self.last_request_duration = None;
@@ -279,8 +302,28 @@ impl App {
         self.agent_catalog = None;
         self.provider_catalog = None;
         self.skill_catalog = None;
-        self.status = format!("ready  {}", self.session_id);
+        self.status = format!("ready  {}", self.session_label());
         self.queue_welcome_banner();
+    }
+
+    pub fn session_label(&self) -> &str {
+        if self.session_id.is_empty() || self.session_id == pending_session_label() {
+            pending_session_label()
+        } else {
+            &self.session_id
+        }
+    }
+
+    pub fn has_materialized_session(&self) -> bool {
+        !(self.session_id.is_empty() || self.session_id == pending_session_label())
+    }
+
+    pub fn ensure_local_session(&mut self) {
+        if self.has_materialized_session() {
+            return;
+        }
+        self.session_id = format!("local-{:#06}", self.session_seq).replace("0x", "");
+        self.session_seq += 1;
     }
 
     pub fn set_workspace_override(&mut self, workspace: Option<PathBuf>) {
@@ -294,6 +337,19 @@ impl App {
 
     pub fn workspace_override_path(&self) -> Option<&Path> {
         self.workspace_override.as_deref()
+    }
+
+    pub fn apply_session_meta(&mut self, meta: BackendSessionMeta) {
+        self.session_id = meta.session_id;
+        if let Some(goal) = meta.goal {
+            self.current_goal = Some(goal);
+        }
+        self.pending_goal_mutation = None;
+        self.status = if meta.command_mode.as_deref() == Some("resume") {
+            format!("resumed  {}", self.session_id)
+        } else {
+            format!("ready  {}", self.session_id)
+        };
     }
 }
 
@@ -328,6 +384,10 @@ fn normalize_path_segments(path: PathBuf) -> PathBuf {
 
 fn default_workspace_label() -> String {
     "~/.sage".to_string()
+}
+
+fn pending_session_label() -> &'static str {
+    "new"
 }
 
 fn format_workspace_label(path: &Path) -> String {

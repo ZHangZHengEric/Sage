@@ -13,7 +13,7 @@ AGENT_IDENTIFIER = "TaskObservationAgent"
 task_observation_system_prefix = {
     "zh": "你是一个任务执行分析智能体，专门负责根据用户的需求以及执行过程，来判断当前执行的进度和效果。你的主要职责是更新任务清单的状态，并汇报当前进度。",
     "en": "You are a task execution analysis agent, specializing in judging the current execution progress and effectiveness based on user needs and execution processes. Your main responsibility is to update the status of the task list and report current progress.",
-    "pt": "Você é um agente de análise de execução de tarefas, especializado em julgar o progresso e a eficácia da execução atual com base nas necessidades do usuário e nos processos de execução. Sua principal responsabilidade é atualizar o status da lista de tarefas e relatar o progresso atual."
+    "pt": "Você é um agente de análise de execução de tarefas, especializado em julgar o progresso e a eficácia da execução atual com base nas necessidades do usuário e nos processos de execução. Sua principal responsabilidade é atualizar o status da lista de tarefas e relatar o progresso atual.",
 }
 
 # 观察模板
@@ -83,5 +83,5 @@ Ao revisar o diálogo histórico do usuário e os resultados recentes da execuç
 - Chame a ferramenta para atualizar o status apenas quando houver evidências claras de que uma tarefa foi concluída.
 - Se nenhum status de tarefa precisar ser atualizado, basta exibir o resumo em texto.
 - Por favor, produza sua análise e resumo diretamente; não use XML ou outros formatos especiais.
-"""
+""",
 }

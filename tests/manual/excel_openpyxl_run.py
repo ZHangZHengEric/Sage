@@ -7,6 +7,7 @@
 运行示例：
   conda run -n zz python3 /Users/zhangzheng/zavixai/Sage/tests/test_excel_openpyxl_only.py
 """
+
 import os
 import sys
 
@@ -40,7 +41,9 @@ def main() -> bool:
             ws = wb[sname]
             max_row, max_col = ws.max_row, ws.max_column
             # 假设第一行为表头
-            header = [str(ws.cell(1, c).value or "").strip() for c in range(1, max_col + 1)]
+            header = [
+                str(ws.cell(1, c).value or "").strip() for c in range(1, max_col + 1)
+            ]
             print(f"🧾 工作表: {sname} 表头: {header}")
 
             if "统计月份" not in header:

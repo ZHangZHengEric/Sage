@@ -19,13 +19,16 @@ system_router = APIRouter(prefix="/api", tags=["System"])
 async def get_system_info():
     return await Response.succ(
         data=await system_service.get_system_info_data(include_auth_config=True),
-        message="获取系统信息成功"
+        message="获取系统信息成功",
     )
+
 
 @system_router.post("/system/update_settings", response_model=BaseResponse[dict])
 async def update_system_settings(request: Request, req: SystemSettingsRequest):
     if get_request_role(request) != "admin":
-        return await Response.error(code=403, message="权限不足", error_detail="permission denied")
+        return await Response.error(
+            code=403, message="权限不足", error_detail="permission denied"
+        )
 
     await system_service.update_allow_registration(req.allow_registration)
     return await Response.succ(data={}, message="系统设置更新成功")

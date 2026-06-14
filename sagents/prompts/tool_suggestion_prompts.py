@@ -3,6 +3,7 @@ Tool Suggestion Agent Prompts
 
 专门用于工具推荐 Agent 的提示模板。
 """
+
 AGENT_IDENTIFIER = "ToolSuggestionAgent"
 
 # 工具推荐主模板
@@ -38,8 +39,6 @@ tool_suggestion_template = {
 ```
 不要包含任何额外的文本或解释。只返回 JSON 数组。
 """,
-
-
     "en": """By reviewing the user conversation history, current request, and your system requirements, recommend a tool combination that covers the task requirements.
 
 Selection goal: prioritize recall of critical tools. If a tool may be needed to complete the task, include it. A small amount of redundancy is acceptable, but do not miss critical tools.
@@ -69,7 +68,6 @@ Please strictly return in JSON array format containing the recommended tool numb
 ]
 ```
 Do not include any additional text or explanations. Only return the JSON array.""",
-
     "pt": """Ao revisar o histórico de conversas do usuário, a solicitação atual e os requisitos do sistema, recomende uma combinação de ferramentas que cubra os requisitos da tarefa.
 
 Objetivo de seleção: priorize a recuperação de ferramentas críticas. Se uma ferramenta pode ser necessária para concluir a tarefa, inclua-a. Uma pequena redundância é aceitável, mas não deixe de fora ferramentas críticas.
@@ -98,7 +96,7 @@ Por favor, retorne estritamente no formato de array JSON contendo os números da
     ...
 ]
 ```
-Não inclua nenhum texto ou explicação adicional. Retorne apenas o array JSON."""
+Não inclua nenhum texto ou explicação adicional. Retorne apenas o array JSON.""",
 }
 
 # 工具推荐系统提示
@@ -110,7 +108,6 @@ tool_suggestion_system_prefix = {
 4. 优先避免漏掉关键工具，允许少量必要冗余
 
 请始终保持专业、准确，并优先考虑用户体验。""",
-
     "en": """You are Sage AI's tool recommendation expert. Your responsibilities are:
 1. Deeply understand user needs and task objectives
 2. Intelligently select the most suitable combination from available tools
@@ -118,14 +115,13 @@ tool_suggestion_system_prefix = {
 4. Prioritize avoiding missed critical tools, allowing a small amount of necessary redundancy
 
 Please always remain professional, accurate, and prioritize user experience.""",
-
     "pt": """Você é o especialista em recomendação de ferramentas do Sage AI. Suas responsabilidades são:
 1. Compreender profundamente as necessidades do usuário e os objetivos da tarefa
 2. Selecionar inteligentemente a combinação mais adequada das ferramentas disponíveis
 3. Garantir que as ferramentas recomendadas possam completar as tarefas de forma eficiente e abrangente
 4. Priorizar evitar a perda de ferramentas críticas, permitindo uma pequena redundância necessária
 
-Por favor, mantenha-se sempre profissional, preciso e priorize a experiência do usuário."""
+Por favor, mantenha-se sempre profissional, preciso e priorize a experiência do usuário.""",
 }
 
 # 工具推荐结果解释模板
@@ -135,16 +131,14 @@ tool_suggestion_result_template = {
 {tool_list}
 
 这些工具将帮助您高效完成任务。如需调整，请告诉我。""",
-
     "en": """Based on analysis of your requirements, I have recommended {count} tools for you:
 
 {tool_list}
 
 These tools will help you complete your task efficiently. Let me know if you need adjustments.""",
-
     "pt": """Com base na análise dos seus requisitos, recomendei {count} ferramentas para você:
 
 {tool_list}
 
-Essas ferramentas ajudarão você a completar sua tarefa de forma eficiente. Avise-me se precisar de ajustes."""
+Essas ferramentas ajudarão você a completar sua tarefa de forma eficiente. Avise-me se precisar de ajustes.""",
 }

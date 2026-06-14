@@ -37,7 +37,9 @@ class BrowserBridgeTool:
         status = await self.hub.get_status(self.user_id)
         return bool(status.get("connected")), status
 
-    async def _dispatch(self, *, action: str, args: dict[str, Any], timeout_seconds: float) -> dict[str, Any]:
+    async def _dispatch(
+        self, *, action: str, args: dict[str, Any], timeout_seconds: float
+    ) -> dict[str, Any]:
         online, status = await self._require_online()
         if not online:
             return {
@@ -46,9 +48,13 @@ class BrowserBridgeTool:
                 "status": status,
             }
 
-        command = await self.hub.enqueue_command(user_id=self.user_id, action=action, args=args)
+        command = await self.hub.enqueue_command(
+            user_id=self.user_id, action=action, args=args
+        )
         command_id = command.get("command_id", "")
-        result = await self.hub.wait_command_result(command_id=command_id, timeout_seconds=timeout_seconds)
+        result = await self.hub.wait_command_result(
+            command_id=command_id, timeout_seconds=timeout_seconds
+        )
         if result is None:
             return {
                 "ok": False,
@@ -92,10 +98,15 @@ class BrowserBridgeTool:
         },
         param_description_i18n={
             "url": {"zh": "目标 URL", "en": "Target URL"},
-            "timeout_seconds": {"zh": "等待浏览器执行结果的超时时间（秒）", "en": "Timeout in seconds for browser action result"},
+            "timeout_seconds": {
+                "zh": "等待浏览器执行结果的超时时间（秒）",
+                "en": "Timeout in seconds for browser action result",
+            },
         },
     )
-    async def browser_navigate(self, url: str, timeout_seconds: float = 30.0) -> dict[str, Any]:
+    async def browser_navigate(
+        self, url: str, timeout_seconds: float = 30.0
+    ) -> dict[str, Any]:
         return await self._dispatch(
             action="navigate",
             args={"url": url},
@@ -112,7 +123,9 @@ class BrowserBridgeTool:
             "timeout_seconds": {"zh": "超时时间（秒）", "en": "Timeout in seconds"},
         },
     )
-    async def browser_find_text(self, text: str, timeout_seconds: float = 30.0) -> dict[str, Any]:
+    async def browser_find_text(
+        self, text: str, timeout_seconds: float = 30.0
+    ) -> dict[str, Any]:
         return await self._dispatch(
             action="find_text",
             args={"text": text},
@@ -125,12 +138,20 @@ class BrowserBridgeTool:
             "en": "Scroll page with direction down/up.",
         },
         param_description_i18n={
-            "direction": {"zh": "滚动方向：down 或 up", "en": "Scroll direction: down or up"},
-            "pages": {"zh": "滚动页数（可小数）", "en": "How many viewport pages to scroll"},
+            "direction": {
+                "zh": "滚动方向：down 或 up",
+                "en": "Scroll direction: down or up",
+            },
+            "pages": {
+                "zh": "滚动页数（可小数）",
+                "en": "How many viewport pages to scroll",
+            },
             "timeout_seconds": {"zh": "超时时间（秒）", "en": "Timeout in seconds"},
         },
     )
-    async def browser_scroll(self, direction: str = "down", pages: float = 1.0, timeout_seconds: float = 30.0) -> dict[str, Any]:
+    async def browser_scroll(
+        self, direction: str = "down", pages: float = 1.0, timeout_seconds: float = 30.0
+    ) -> dict[str, Any]:
         return await self._dispatch(
             action="scroll",
             args={"direction": direction, "pages": float(max(0.25, min(8.0, pages)))},
@@ -143,8 +164,14 @@ class BrowserBridgeTool:
             "en": "Send keys/text to focused element or an optional selector.",
         },
         param_description_i18n={
-            "keys": {"zh": "按键或文本，如 ENTER、hello", "en": "Keys or text, e.g. ENTER, hello"},
-            "selector": {"zh": "可选：目标元素 selector", "en": "Optional target selector"},
+            "keys": {
+                "zh": "按键或文本，如 ENTER、hello",
+                "en": "Keys or text, e.g. ENTER, hello",
+            },
+            "selector": {
+                "zh": "可选：目标元素 selector",
+                "en": "Optional target selector",
+            },
             "submit": {"zh": "是否提交表单", "en": "Whether to submit form"},
             "timeout_seconds": {"zh": "超时时间（秒）", "en": "Timeout in seconds"},
         },
@@ -172,7 +199,9 @@ class BrowserBridgeTool:
             "timeout_seconds": {"zh": "命令超时时间（秒）", "en": "Timeout in seconds"},
         },
     )
-    async def browser_wait(self, seconds: float = 1.0, timeout_seconds: float = 30.0) -> dict[str, Any]:
+    async def browser_wait(
+        self, seconds: float = 1.0, timeout_seconds: float = 30.0
+    ) -> dict[str, Any]:
         return await self._dispatch(
             action="wait",
             args={"seconds": float(max(0.1, min(30.0, seconds)))},
@@ -202,7 +231,10 @@ class BrowserBridgeTool:
         },
         param_description_i18n={
             "tab_id": {"zh": "标签页 ID", "en": "Target tab id"},
-            "tab_id_suffix": {"zh": "标签页 ID 后缀（方便短引用）", "en": "Suffix of target tab id"},
+            "tab_id_suffix": {
+                "zh": "标签页 ID 后缀（方便短引用）",
+                "en": "Suffix of target tab id",
+            },
             "timeout_seconds": {"zh": "超时时间（秒）", "en": "Timeout in seconds"},
         },
     )
@@ -230,7 +262,10 @@ class BrowserBridgeTool:
         },
         param_description_i18n={
             "text": {"zh": "选项文本或值", "en": "Option text or value"},
-            "selector": {"zh": "下拉元素选择器（可选）", "en": "Dropdown selector (optional)"},
+            "selector": {
+                "zh": "下拉元素选择器（可选）",
+                "en": "Dropdown selector (optional)",
+            },
             "index": {"zh": "下拉元素索引（可选）", "en": "Dropdown index (optional)"},
             "timeout_seconds": {"zh": "超时时间（秒）", "en": "Timeout in seconds"},
         },
@@ -260,10 +295,19 @@ class BrowserBridgeTool:
         },
         param_description_i18n={
             "file_name": {"zh": "文件名", "en": "File name"},
-            "file_data_base64": {"zh": "文件内容（base64）", "en": "File content in base64"},
+            "file_data_base64": {
+                "zh": "文件内容（base64）",
+                "en": "File content in base64",
+            },
             "file_mime_type": {"zh": "MIME 类型", "en": "MIME type"},
-            "selector": {"zh": "文件输入框 selector（可选）", "en": "File input selector (optional)"},
-            "index": {"zh": "文件输入框索引（可选）", "en": "File input index (optional)"},
+            "selector": {
+                "zh": "文件输入框 selector（可选）",
+                "en": "File input selector (optional)",
+            },
+            "index": {
+                "zh": "文件输入框索引（可选）",
+                "en": "File input index (optional)",
+            },
             "timeout_seconds": {"zh": "超时时间（秒）", "en": "Timeout in seconds"},
         },
     )
@@ -321,26 +365,62 @@ class BrowserBridgeTool:
         },
         param_description_i18n={
             "action": {"zh": "动作类型", "en": "Action type"},
-            "selector": {"zh": "DOM 选择器（click/fill/extract_text 时使用）", "en": "DOM selector for click/fill/extract_text"},
-            "dom_id": {"zh": "来自 browser_get_context 的 dom_id（如 d12）", "en": "dom_id from browser_get_context, e.g. d12"},
-            "value": {"zh": "填充文本（fill 时使用）", "en": "Input value for fill action"},
-            "submit": {"zh": "fill 后是否提交表单", "en": "Whether to submit form after fill"},
-            "max_chars": {"zh": "提取文本最大长度（extract_text）", "en": "Maximum extracted text length"},
-            "code": {"zh": "脚本代码（run_script）", "en": "Script code for run_script"},
+            "selector": {
+                "zh": "DOM 选择器（click/fill/extract_text 时使用）",
+                "en": "DOM selector for click/fill/extract_text",
+            },
+            "dom_id": {
+                "zh": "来自 browser_get_context 的 dom_id（如 d12）",
+                "en": "dom_id from browser_get_context, e.g. d12",
+            },
+            "value": {
+                "zh": "填充文本（fill 时使用）",
+                "en": "Input value for fill action",
+            },
+            "submit": {
+                "zh": "fill 后是否提交表单",
+                "en": "Whether to submit form after fill",
+            },
+            "max_chars": {
+                "zh": "提取文本最大长度（extract_text）",
+                "en": "Maximum extracted text length",
+            },
+            "code": {
+                "zh": "脚本代码（run_script）",
+                "en": "Script code for run_script",
+            },
             "text": {"zh": "查找文本（find_text）", "en": "Text for find_text"},
             "direction": {"zh": "滚动方向（scroll）", "en": "Scroll direction"},
             "pages": {"zh": "滚动页数（scroll）", "en": "Scroll pages"},
             "keys": {"zh": "按键或文本（send_keys）", "en": "Keys/text for send_keys"},
             "seconds": {"zh": "等待秒数（wait）", "en": "Seconds for wait"},
             "tab_id": {"zh": "标签页 ID（switch_tab）", "en": "Tab id for switch_tab"},
-            "tab_id_suffix": {"zh": "标签页后缀（switch_tab）", "en": "Tab id suffix for switch_tab"},
-            "index": {"zh": "元素索引（click/fill/select_dropdown/upload_file）", "en": "Element index"},
-            "file_name": {"zh": "文件名（upload_file）", "en": "File name for upload_file"},
-            "file_data_base64": {"zh": "文件 base64（upload_file）", "en": "Base64 file data for upload_file"},
-            "file_mime_type": {"zh": "文件 MIME（upload_file）", "en": "MIME type for upload_file"},
+            "tab_id_suffix": {
+                "zh": "标签页后缀（switch_tab）",
+                "en": "Tab id suffix for switch_tab",
+            },
+            "index": {
+                "zh": "元素索引（click/fill/select_dropdown/upload_file）",
+                "en": "Element index",
+            },
+            "file_name": {
+                "zh": "文件名（upload_file）",
+                "en": "File name for upload_file",
+            },
+            "file_data_base64": {
+                "zh": "文件 base64（upload_file）",
+                "en": "Base64 file data for upload_file",
+            },
+            "file_mime_type": {
+                "zh": "文件 MIME（upload_file）",
+                "en": "MIME type for upload_file",
+            },
             "format": {"zh": "截图格式（screenshot）", "en": "Screenshot format"},
             "quality": {"zh": "截图质量（screenshot）", "en": "Screenshot quality"},
-            "timeout_seconds": {"zh": "等待结果超时时间（秒）", "en": "Timeout in seconds"},
+            "timeout_seconds": {
+                "zh": "等待结果超时时间（秒）",
+                "en": "Timeout in seconds",
+            },
         },
     )
     async def browser_dom_action(

@@ -81,12 +81,11 @@ class OpenSandboxProvider(RemoteSandboxProvider):
     async def initialize(self) -> None:
         """初始化 OpenSandbox 远程沙箱"""
         try:
-            from opensandbox import Sandbox as OSSandbox
-            from opensandbox.models import Mount
+            from opensandbox import Sandbox as OSSandbox  # pyright: ignore[reportAttributeAccessIssue]
+            from opensandbox.models import Mount  # pyright: ignore[reportMissingImports]
         except ImportError:
             raise ImportError(
-                "opensandbox package is required. "
-                "Install with: pip install opensandbox"
+                "opensandbox package is required. Install with: pip install opensandbox"
             )
 
         # 构建挂载配置
@@ -162,8 +161,8 @@ class OpenSandboxProvider(RemoteSandboxProvider):
         if workdir:
             effective_command = f"cd {shlex.quote(workdir)} && {command}"
 
-        async with self._sdk:
-            execution = await self._sdk.commands.run(
+        async with self._sdk:  # pyright: ignore[reportOptionalContextManager]
+            execution = await self._sdk.commands.run(  # pyright: ignore[reportOptionalMemberAccess]
                 effective_command, timeout=timeout, env=env_vars or {}
             )
 
@@ -190,14 +189,14 @@ class OpenSandboxProvider(RemoteSandboxProvider):
             code = self._inject_workdir(code, workdir)
 
         try:
-            from code_interpreter import CodeInterpreter, SupportedLanguage
+            from code_interpreter import CodeInterpreter, SupportedLanguage  # pyright: ignore[reportMissingImports]
         except ImportError:
             raise ImportError(
                 "opensandbox-code-interpreter package is required. "
                 "Install with: pip install opensandbox-code-interpreter"
             )
 
-        async with self._sdk:
+        async with self._sdk:  # pyright: ignore[reportOptionalContextManager]
             interpreter = await CodeInterpreter.create(self._sdk)
 
             result = await interpreter.codes.run(
@@ -237,8 +236,8 @@ class OpenSandboxProvider(RemoteSandboxProvider):
         if not self._is_initialized:
             await self.initialize()
 
-        async with self._sdk:
-            return await self._sdk.files.read_file(path)
+        async with self._sdk:  # pyright: ignore[reportOptionalContextManager]
+            return await self._sdk.files.read_file(path)  # pyright: ignore[reportOptionalMemberAccess]
 
     async def write_file(
         self,
@@ -252,7 +251,7 @@ class OpenSandboxProvider(RemoteSandboxProvider):
             await self.initialize()
 
         try:
-            from opensandbox.models import WriteEntry
+            from opensandbox.models import WriteEntry  # pyright: ignore[reportMissingImports]
         except ImportError:
             raise ImportError("opensandbox package is required")
 
@@ -288,8 +287,8 @@ class OpenSandboxProvider(RemoteSandboxProvider):
             )
             return
 
-        async with self._sdk:
-            await self._sdk.files.write_files(
+        async with self._sdk:  # pyright: ignore[reportOptionalContextManager]
+            await self._sdk.files.write_files(  # pyright: ignore[reportOptionalMemberAccess]
                 [WriteEntry(path=path, data=content, mode=644)]
             )
 
@@ -347,7 +346,7 @@ class OpenSandboxProvider(RemoteSandboxProvider):
             logger.warning(
                 "OpenSandboxProvider.list_directory failed for %s: %s",
                 path,
-                sample or "no output",
+                sample or "no output",  # pyright: ignore[reportCallIssue]
             )
             return []
 
@@ -363,7 +362,7 @@ class OpenSandboxProvider(RemoteSandboxProvider):
             logger.warning(
                 "OpenSandboxProvider.list_directory JSON parse failed for %s: %s",
                 path,
-                sample or "empty output",
+                sample or "empty output",  # pyright: ignore[reportCallIssue]
             )
             return []
 
@@ -398,7 +397,9 @@ class OpenSandboxProvider(RemoteSandboxProvider):
         prefix_end = 0
         if lines and lines[0].startswith("#!"):
             prefix_end = 1
-        if len(lines) > prefix_end and re.match(r"^#.*coding[:=]\s*[-\w.]+", lines[prefix_end]):
+        if len(lines) > prefix_end and re.match(
+            r"^#.*coding[:=]\s*[-\w.]+", lines[prefix_end]
+        ):
             prefix_end += 1
 
         insert_after = 0
@@ -406,11 +407,19 @@ class OpenSandboxProvider(RemoteSandboxProvider):
             tree = ast.parse(code)
             if tree.body:
                 first = tree.body[0]
-                if isinstance(first, ast.Expr) and isinstance(getattr(first, "value", None), ast.Constant) and isinstance(first.value.value, str):
-                    insert_after = max(insert_after, getattr(first, "end_lineno", first.lineno))
+                if (
+                    isinstance(first, ast.Expr)
+                    and isinstance(getattr(first, "value", None), ast.Constant)
+                    and isinstance(first.value.value, str)  # pyright: ignore[reportAttributeAccessIssue]
+                ):
+                    insert_after = max(
+                        insert_after, getattr(first, "end_lineno", first.lineno)
+                    )
                 for node in tree.body:
                     if isinstance(node, ast.ImportFrom) and node.module == "__future__":
-                        insert_after = max(insert_after, getattr(node, "end_lineno", node.lineno))
+                        insert_after = max(
+                            insert_after, getattr(node, "end_lineno", node.lineno)
+                        )
         except Exception:
             insert_after = 0
 
@@ -434,14 +443,14 @@ class OpenSandboxProvider(RemoteSandboxProvider):
             await self.initialize()
 
         try:
-            from opensandbox.models import WriteEntry
+            from opensandbox.models import WriteEntry  # pyright: ignore[reportMissingImports]
         except ImportError:
             raise ImportError("opensandbox package is required")
 
         content = await asyncio.to_thread(_read_host_file_bytes_sync, host_path)
 
-        async with self._sdk:
-            await self._sdk.files.write_files(
+        async with self._sdk:  # pyright: ignore[reportOptionalContextManager]
+            await self._sdk.files.write_files(  # pyright: ignore[reportOptionalMemberAccess]
                 [WriteEntry(path=sandbox_path, data=content, mode=644)]
             )
 
@@ -452,8 +461,8 @@ class OpenSandboxProvider(RemoteSandboxProvider):
         if not self._is_initialized:
             await self.initialize()
 
-        async with self._sdk:
-            content = await self._sdk.files.read_file(sandbox_path)
+        async with self._sdk:  # pyright: ignore[reportOptionalContextManager]
+            content = await self._sdk.files.read_file(sandbox_path)  # pyright: ignore[reportOptionalMemberAccess]
 
         data = content.encode("utf-8") if isinstance(content, str) else content
 

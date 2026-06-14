@@ -21,15 +21,15 @@ from .extractor import MemoryExtractor
 
 
 __all__ = [
-    'MemoryType',
-    'MemoryBackend',
-    'MemoryEntry',
-    'UserMemoryManager',
-    'IMemoryDriver',
-    'ToolMemoryDriver',
-    'VectorMemoryDriver',
-    'MemoryExtractor'
+    "MemoryType",
+    "MemoryBackend",
+    "MemoryEntry",
+    "UserMemoryManager",
+    "IMemoryDriver",
+    "ToolMemoryDriver",
+    "VectorMemoryDriver",
+    "MemoryExtractor",
 ]
 
-__version__ = '1.0.0'
-__author__ = 'Eric ZZ'
+__version__ = "1.0.0"
+__author__ = "Eric ZZ"

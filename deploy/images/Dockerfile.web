@@ -17,16 +17,11 @@ COPY --link app/server/web/package.json app/server/web/package-lock.json ./
 RUN --mount=type=cache,id=sage-web-npm-cache,target=/root/.npm,sharing=locked \
     npm ci --prefer-offline
 
-ARG VITE_SAGE_API_BASE_URL
-ARG VITE_SAGE_TRACE_WEB_URL
-ARG VITE_SAGE_WEB_BASE_PATH
-ENV VITE_SAGE_API_BASE_URL=${VITE_SAGE_API_BASE_URL}
-ENV VITE_SAGE_TRACE_WEB_URL=${VITE_SAGE_TRACE_WEB_URL}
-ENV VITE_SAGE_WEB_BASE_PATH=${VITE_SAGE_WEB_BASE_PATH}
-
 # Copy the rest of the app after dependencies are installed to maximize cache reuse
 COPY --link app/server/web/ .
 
+ARG VITE_SAGE_GRAFANA_URL=http://127.0.0.1:30093
+ENV VITE_SAGE_GRAFANA_URL=${VITE_SAGE_GRAFANA_URL}
 
 RUN npm run build
 
@@ -42,4 +37,4 @@ COPY --link --from=builder /app/dist /usr/share/nginx/html
 EXPOSE 80
 
 # Simple healthcheck to ensure Nginx responds
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -qO- http://localhost/sage/ || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -qO- http://127.0.0.1/sage/ || exit 1

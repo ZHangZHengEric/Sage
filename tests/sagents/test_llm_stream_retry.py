@@ -117,12 +117,12 @@ def _attempt_yields(*chunks):
 @pytest.mark.asyncio
 async def test_streaming_call_does_not_retry_after_partial_chunk_is_yielded():
     client = FakeClient()
-    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})  # pyright: ignore[reportArgumentType]
     messages = [MessageChunk(role=MessageRole.USER.value, content="run")]
 
     chunks = []
     with pytest.raises(PartialStreamConsumedError):
-        async for chunk in agent._call_llm_streaming(messages, enable_thinking=False):
+        async for chunk in agent._call_llm_streaming(messages, enable_thinking=False):  # pyright: ignore[reportArgumentType]
             chunks.append(chunk)
 
     assert client.chat.completions.calls == 1
@@ -131,7 +131,9 @@ async def test_streaming_call_does_not_retry_after_partial_chunk_is_yielded():
 
 
 @pytest.mark.asyncio
-async def test_streaming_call_still_retries_if_timeout_happens_before_any_chunk(monkeypatch):
+async def test_streaming_call_still_retries_if_timeout_happens_before_any_chunk(
+    monkeypatch,
+):
     async def fast_sleep(_seconds):
         return None
 
@@ -142,11 +144,11 @@ async def test_streaming_call_still_retries_if_timeout_happens_before_any_chunk(
             _attempt_yields(_content_chunk("retry succeeded")),
         ]
     )
-    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})  # pyright: ignore[reportArgumentType]
     messages = [MessageChunk(role=MessageRole.USER.value, content="run")]
 
     chunks = []
-    async for chunk in agent._call_llm_streaming(messages, enable_thinking=False):
+    async for chunk in agent._call_llm_streaming(messages, enable_thinking=False):  # pyright: ignore[reportArgumentType]
         chunks.append(chunk)
 
     assert client.chat.completions.calls == 2
@@ -164,12 +166,12 @@ async def test_streaming_call_does_not_retry_after_text_chunk_is_yielded():
             _attempt_yields(_content_chunk("should not be used")),
         ]
     )
-    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})  # pyright: ignore[reportArgumentType]
     messages = [MessageChunk(role=MessageRole.USER.value, content="run")]
 
     chunks = []
     with pytest.raises(PartialStreamConsumedError):
-        async for chunk in agent._call_llm_streaming(messages, enable_thinking=False):
+        async for chunk in agent._call_llm_streaming(messages, enable_thinking=False):  # pyright: ignore[reportArgumentType]
             chunks.append(chunk)
 
     assert client.chat.completions.calls == 1
@@ -210,11 +212,15 @@ async def test_simple_agent_closes_streamed_partial_tool_call_when_stream_times_
     assert chunks[1].tool_call_id == "call_partial"
     assert "discarded" in chunks[1].content.lower()
     assert chunks[-1].role == "assistant"
-    assert len(MessageManager.convert_messages_to_dict_for_request(messages + chunks)) == 4
+    assert (
+        len(MessageManager.convert_messages_to_dict_for_request(messages + chunks)) == 4
+    )
 
 
 @pytest.mark.asyncio
-async def test_simple_agent_does_not_add_synthetic_tool_result_when_tool_call_was_not_streamed(monkeypatch):
+async def test_simple_agent_does_not_add_synthetic_tool_result_when_tool_call_was_not_streamed(
+    monkeypatch,
+):
     monkeypatch.setenv("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "true")
     client = FakeClient()
     agent = SimpleAgent(model=client, model_config={"model": "gpt-test"})
@@ -242,7 +248,9 @@ async def test_simple_agent_does_not_add_synthetic_tool_result_when_tool_call_wa
         if is_complete:
             break
 
-    non_empty = [chunk for chunk in chunks if chunk.message_type != MessageType.EMPTY.value]
+    non_empty = [
+        chunk for chunk in chunks if chunk.message_type != MessageType.EMPTY.value
+    ]
     assert client.chat.completions.calls == 1
     assert [chunk.role for chunk in non_empty] == ["assistant"]
     assert non_empty[0].message_type == MessageType.AGENT_EXECUTION_ERROR.value

@@ -1,36 +1,23 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
 import { fileURLToPath } from 'url'
 
 const projectRoot = fileURLToPath(new URL('.', import.meta.url))
 
-const normalizeBasePath = (value) => {
-  const raw = (value || '/sage/').trim()
-  if (!raw || raw === '/') return '/'
-  return `/${raw.replace(/^\/+|\/+$/g, '')}/`
-}
-
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  const envWeb = loadEnv(mode, projectRoot, '')
-  // 仅使用本包 .env* 与进程环境；勿读仓库根 .env。本地/Docker 在此设 VITE_SAGE_API_BASE_URL
-  const backendApiBaseUrl = (
-    envWeb.VITE_SAGE_API_BASE_URL ||
-    process.env.VITE_SAGE_API_BASE_URL ||
-    'http://127.0.0.1:8080'
-  )
-    .trim()
+  const backendApiBaseUrl = 'http://127.0.0.1:30050'
 
   return {
-    base: normalizeBasePath(envWeb.VITE_SAGE_WEB_BASE_PATH),
+    base: mode === 'production' ? '/sage/' : '/',
     plugins: [
       vue(),
       {
         name: 'sage-log-api-proxy',
         configureServer() {
           // eslint-disable-next-line no-console
-          console.log(`[vite] server/web: /dev-api -> ${backendApiBaseUrl}`)
+          console.log(`[vite] server/web: /prod-api -> ${backendApiBaseUrl}`)
         }
       }
     ],
@@ -41,10 +28,10 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       proxy: {
-        '/dev-api': {
+        '/prod-api': {
           target: backendApiBaseUrl,
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/dev-api/, '')
+          rewrite: (path) => path.replace(/^\/prod-api/, '')
         }
       }
     },
@@ -54,7 +41,15 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       sourcemap: false,
+      reportCompressedSize: false,
       rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('/node_modules/highlight.js/')) {
+              return 'vendor-highlight'
+            }
+          }
+        },
         onwarn(warning, warn) {
           if (warning.code === 'MODULE_LEVEL_DIRECTIVE') {
             return

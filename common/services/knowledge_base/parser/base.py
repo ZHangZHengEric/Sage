@@ -22,7 +22,9 @@ class BaseParser:
         logger.info(f"[Parser] clear_old: index_name={index_name}, doc_id={doc.id}")
         return []
 
-    async def process(self, index_name: str, doc: KdbDoc, file: File | None = None) -> List["DocumentInput"]:
+    async def process(
+        self, index_name: str, doc: KdbDoc, file: File | None = None
+    ) -> List["DocumentInput"]:
         """
         处理文档
         Returns:

@@ -21,6 +21,7 @@ from common.utils.id import gen_id
 
 DEFAULT_BATCH_SIZE = 5
 
+
 class KdbService:
     def __init__(self):
         self.kdb_dao = KdbDao()
@@ -74,7 +75,7 @@ class KdbService:
             update_map["setting"] = kdb_setting
         if update_map:
             await self.kdb_dao.update_by_id(kdb_id, update_map)
-            # Update in-memory object to return correct data if needed, 
+            # Update in-memory object to return correct data if needed,
             # though usually we just need user_id which doesn't change.
             for k, v in update_map.items():
                 setattr(kdb, k, v)
@@ -85,14 +86,14 @@ class KdbService:
         try:
             return await self._check_kdb_permission(kdb_id, user_id)
         except SageHTTPException:
-            # If not found or forbidden, we might return None or raise. 
+            # If not found or forbidden, we might return None or raise.
             # Original code returned None if not found, but we want to enforce permission.
             # If forbidden, we should probably raise or return None.
-            # But the router handles None by returning empty struct? 
-            # Let's see router usage. 
-            # Router checks `if not obj`. 
+            # But the router handles None by returning empty struct?
+            # Let's see router usage.
+            # Router checks `if not obj`.
             # If I raise exception, it returns 403/404. That is better.
-            raise 
+            raise
 
     async def list(
         self,
@@ -165,7 +166,9 @@ class KdbService:
         )
         return docs, total, kdb
 
-    async def doc_info(self, doc_id: str, user_id: Optional[str] = None) -> Tuple[Optional[KdbDoc], Optional[Kdb]]:
+    async def doc_info(
+        self, doc_id: str, user_id: Optional[str] = None
+    ) -> Tuple[Optional[KdbDoc], Optional[Kdb]]:
         d = await self.kdb_doc_dao.get_by_id(doc_id)
         kdb = None
         if d:
@@ -188,27 +191,38 @@ class KdbService:
             import openpyxl
 
             for uf in files:
-                filename = uf.filename.lower()
-                if not (filename.endswith(".csv") or filename.endswith(".xlsx") or filename.endswith(".xls")):
+                filename = uf.filename.lower()  # pyright: ignore[reportOptionalMemberAccess]
+                if not (
+                    filename.endswith(".csv")
+                    or filename.endswith(".xlsx")
+                    or filename.endswith(".xls")
+                ):
                     raise SageHTTPException(
                         detail=f"QA知识库仅支持CSV或Excel文件: {uf.filename}",
                     )
-                
+
                 content = await uf.read()
                 try:
-                    if filename.endswith(('.xlsx', '.xls')):
+                    if filename.endswith((".xlsx", ".xls")):
                         # 校验Excel内容
-                        wb = openpyxl.load_workbook(filename=io.BytesIO(content), read_only=True, data_only=True)
+                        wb = openpyxl.load_workbook(
+                            filename=io.BytesIO(content), read_only=True, data_only=True
+                        )
                         ws = wb.active
                         if ws:
                             count = 0
                             for row in ws.iter_rows(max_row=10, values_only=True):
                                 # Convert cells to string and filter None
-                                cleaned_row = [str(cell) if cell is not None else "" for cell in row]
+                                cleaned_row = [
+                                    str(cell) if cell is not None else ""
+                                    for cell in row
+                                ]
                                 if not any(cleaned_row):
                                     continue
                                 if len(cleaned_row) < 2:
-                                    raise ValueError(f"Excel row does not have at least 2 columns")
+                                    raise ValueError(
+                                        "Excel row does not have at least 2 columns"
+                                    )
                                 count += 1
                             if count == 0:
                                 raise ValueError("Empty Excel sheet")
@@ -221,14 +235,16 @@ class KdbService:
                         rows = list(reader)
                         if not rows:
                             raise ValueError("Empty CSV")
-                        
+
                         # 检查前几行，确保是2列
                         for i, row in enumerate(rows[:10]):
                             if not row:
                                 continue
                             if len(row) < 2:
-                                raise ValueError(f"Line {i+1} does not have at least 2 columns")
-                            
+                                raise ValueError(
+                                    f"Line {i + 1} does not have at least 2 columns"
+                                )
+
                 except Exception as e:
                     raise SageHTTPException(
                         detail=f"文件格式错误 {uf.filename}: {e} (QA库要求两列数据: Question, Answer)",
@@ -261,7 +277,9 @@ class KdbService:
         task_process = int((success / total) * 100) if total else 0
         return success, fail, in_progress, waiting, total, task_process, kdb
 
-    async def task_redo(self, kdb_id: str, task_id: str, user_id: Optional[str] = None) -> Kdb:
+    async def task_redo(
+        self, kdb_id: str, task_id: str, user_id: Optional[str] = None
+    ) -> Kdb:
         kdb = await self._check_kdb_permission(kdb_id, user_id)
         docs, _ = await self.kdb_doc_dao.get_kdb_docs_paginated(
             kdb_id, "", [], task_id, 1, 10000
@@ -288,13 +306,12 @@ class KdbService:
         if kdb_doc:
             kdb = await self._check_kdb_permission(kdb_doc.kdb_id, user_id)
         else:
-             # Should we raise if doc not found? Original code just logged info but check_kdb_permission was inside if.
-             # If doc not found, we can't find KDB.
-             pass
+            # Should we raise if doc not found? Original code just logged info but check_kdb_permission was inside if.
+            # If doc not found, we can't find KDB.
+            pass
         await self.kdb_doc_dao.batch_update_status([doc_id], KdbDocStatus.PENDING)
         logger.info(f"文档重做: {doc_id}")
-        return kdb
-
+        return kdb  # pyright: ignore[reportReturnType]
 
     async def _add_doc_by_files(
         self, kdb: Kdb, files: List[File], attach_map: Dict[str, List[File]]
@@ -327,17 +344,19 @@ class KdbService:
         logger.info(f"新增任务: {task_id}, 条数={len(files)}")
         return task_id
 
-    async def _upload_by_upload_file(self, uf: UploadFile, user_id: Optional[str] = None) -> File:
+    async def _upload_by_upload_file(
+        self, uf: UploadFile, user_id: Optional[str] = None
+    ) -> File:
         import mimetypes
 
         data = await uf.read()
         content_type = (
             uf.content_type
-            or mimetypes.guess_type(uf.filename)[0]
+            or mimetypes.guess_type(uf.filename)[0]  # pyright: ignore[reportArgumentType]
             or "application/octet-stream"
         )
         file_id = gen_id()
-        path = await upload_kdb_file(uf.filename, data, content_type)
+        path = await upload_kdb_file(uf.filename, data, content_type)  # pyright: ignore[reportArgumentType]
         f = File(
             id=file_id,
             name=uf.filename,
@@ -348,10 +367,8 @@ class KdbService:
         return f
 
     async def build_waiting_doc(self):
-        docs: List[KdbDoc] = (
-            await self.kdb_doc_dao.get_list_by_status_and_data_source(
-                KdbDocStatus.PENDING, ["file", "qa"], DEFAULT_BATCH_SIZE
-            )
+        docs: List[KdbDoc] = await self.kdb_doc_dao.get_list_by_status_and_data_source(
+            KdbDocStatus.PENDING, ["file", "qa"], DEFAULT_BATCH_SIZE
         )
         if not docs:
             return
@@ -391,14 +408,14 @@ class KdbService:
                 logger.error(f"文件不存在 - FileId: {doc.source_id}")
                 return
             # 3. 调用 DocumentService 同步文档（包含清理旧数据和处理新数据）
-            await DocumentService().sync_document(kdb.get_index_name(), doc, file, data_source=doc.data_source)
+            await DocumentService().sync_document(
+                kdb.get_index_name(), doc, file, data_source=doc.data_source
+            )
             # 调用知识库入库接口，
             await self.kdb_doc_dao.update_status(doc.id, KdbDocStatus.SUCCESS)
             logger.info(f"处理文档成功 - DocId: {doc.id}, docName: {doc.doc_name}")
         except Exception as e:
-            await self.kdb_doc_dao.update_status_and_retry(
-                doc.id, KdbDocStatus.FAILED
-            )
+            await self.kdb_doc_dao.update_status_and_retry(doc.id, KdbDocStatus.FAILED)
             logger.error(
                 f"处理文档失败 - DocId: {doc.id}, docName: {doc.doc_name}, err={e}, trace={traceback.format_exc()}"
             )

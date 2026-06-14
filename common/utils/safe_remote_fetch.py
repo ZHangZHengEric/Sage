@@ -57,7 +57,9 @@ async def resolve_host_ips_non_private(hostname: str) -> None:
     await asyncio.to_thread(_worker)
 
 
-def filename_hint_from_response(url: str, content_disposition: str | None, content_type: str | None) -> str:
+def filename_hint_from_response(
+    url: str, content_disposition: str | None, content_type: str | None
+) -> str:
     if content_disposition:
         cd = content_disposition
         if "filename*=" in cd:
@@ -67,7 +69,12 @@ def filename_hint_from_response(url: str, content_disposition: str | None, conte
                 flags=re.IGNORECASE,
             )
             if mstar:
-                name = unquote((mstar.group(1) or mstar.group(2) or "").strip().strip('"').split(";")[0])
+                name = unquote(
+                    (mstar.group(1) or mstar.group(2) or "")
+                    .strip()
+                    .strip('"')
+                    .split(";")[0]
+                )
                 if name:
                     return name[:240]
         m = re.search(r'filename=(?:"?)([^";]+)', cd, flags=re.IGNORECASE)
@@ -92,9 +99,11 @@ def filename_hint_from_response(url: str, content_disposition: str | None, conte
     return "import.bin"
 
 
-async def fetch_http_url_bytes_bounded(url: str, max_bytes: int = 25 * 1024 * 1024) -> Tuple[bytes, str, str]:
+async def fetch_http_url_bytes_bounded(
+    url: str, max_bytes: int = 25 * 1024 * 1024
+) -> Tuple[bytes, str, str]:
     parsed = parse_and_validate_public_http_url(url)
-    await resolve_host_ips_non_private(parsed.hostname)
+    await resolve_host_ips_non_private(parsed.hostname)  # pyright: ignore[reportArgumentType]
 
     try:
         import httpx
@@ -104,10 +113,14 @@ async def fetch_http_url_bytes_bounded(url: str, max_bytes: int = 25 * 1024 * 10
     timeout = httpx.Timeout(45.0, connect=10.0)
     headers = {"User-Agent": "Sage-OssImport/1.0"}
 
-    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout, headers=headers) as client:
+    async with httpx.AsyncClient(
+        follow_redirects=True, timeout=timeout, headers=headers
+    ) as client:
         async with client.stream("GET", url) as resp:
             resp.raise_for_status()
-            ct = (resp.headers.get("content-type") or "").split(";")[0].strip() or "application/octet-stream"
+            ct = (resp.headers.get("content-type") or "").split(";")[
+                0
+            ].strip() or "application/octet-stream"
             cd = resp.headers.get("content-disposition")
             cl = resp.headers.get("content-length")
             if cl is not None:

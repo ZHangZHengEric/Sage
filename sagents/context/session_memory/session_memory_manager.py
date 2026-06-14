@@ -4,6 +4,7 @@ Session-history retrieval manager.
 The manager keeps the public runtime contract stable while delegating the
 actual retrieval strategy to a backend implementation.
 """
+
 import os
 from typing import Any, Dict, List, Optional
 
@@ -79,14 +80,13 @@ class SessionMemoryManager:
             agent_config=agent_config,
         )
         if resolved_strategy == "grouped_chat":
-            return self.backend.retrieve_group_messages_by_chat(messages, query, history_budget)
+            return self.backend.retrieve_group_messages_by_chat(
+                messages, query, history_budget
+            )
         return self.backend.retrieve_history_messages(messages, query, history_budget)
 
     def retrieve_group_messages_by_chat(
-        self,
-        messages: List[MessageChunk],
-        query: str,
-        history_budget: int
+        self, messages: List[MessageChunk], query: str, history_budget: int
     ) -> List[MessageChunk]:
         return self.retrieve(
             messages,
@@ -94,12 +94,9 @@ class SessionMemoryManager:
             history_budget,
             strategy="grouped_chat",
         )
-    
+
     def retrieve_history_messages(
-        self,
-        messages: List[MessageChunk],
-        query: str,
-        history_budget: int
+        self, messages: List[MessageChunk], query: str, history_budget: int
     ) -> List[MessageChunk]:
         return self.retrieve(
             messages,

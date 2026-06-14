@@ -19,7 +19,9 @@ def _build_cfg(tmp_path: Path) -> config.StartupConfig:
     return cfg
 
 
-def test_delete_server_agent_workspace_deletes_existing_workspace(tmp_path, monkeypatch):
+def test_delete_server_agent_workspace_deletes_existing_workspace(
+    tmp_path, monkeypatch
+):
     cfg = _build_cfg(tmp_path)
     monkeypatch.setattr(config, "_GLOBAL_STARTUP_CONFIG", cfg, raising=False)
 
@@ -37,7 +39,9 @@ def test_delete_server_agent_workspace_deletes_existing_workspace(tmp_path, monk
     assert not workspace.exists()
 
 
-def test_delete_server_agent_workspace_returns_false_when_missing(tmp_path, monkeypatch):
+def test_delete_server_agent_workspace_returns_false_when_missing(
+    tmp_path, monkeypatch
+):
     cfg = _build_cfg(tmp_path)
     monkeypatch.setattr(config, "_GLOBAL_STARTUP_CONFIG", cfg, raising=False)
 

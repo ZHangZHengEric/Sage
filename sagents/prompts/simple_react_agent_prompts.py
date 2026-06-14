@@ -25,7 +25,7 @@ agent_custom_system_prefix = {
 - Antes de cada execução, você deve primeiro conduzir avaliação e planejamento, depois realmente responder perguntas ou executar tarefas.
 - Os usuários irão guiá-lo através do processo para completar tarefas, você precisa conduzir avaliação, planejamento e execução de acordo com a orientação do usuário.
 - Avaliação e planejamento não precisam de muitas palavras, mas devem ser concisos e claros, guiando a próxima ação.
-- Os usuários não podem ver os resultados da execução da ferramenta, você precisa informar os usuários através de resumos em linguagem natural."""
+- Os usuários não podem ver os resultados da execução da ferramenta, você precisa informar os usuários através de resumos em linguagem natural.""",
 }
 
 # 规划消息提示
@@ -38,7 +38,7 @@ plan_message_prompt = {
 - Don't do tasks that users haven't requested. When planning, only satisfy user requests, don't do too many extra things.""",
     "pt": """Avalie e planeje as ações que foram executadas, não é necessária confirmação do usuário, formato de saída: Atualmente***, o próximo passo é***.
 - Não produza os nomes reais das ferramentas, mas produza descrições das ferramentas.
-- Não faça tarefas que os usuários não solicitaram. Ao planejar, apenas satisfaça as solicitações do usuário, não faça muitas coisas extras."""
+- Não faça tarefas que os usuários não solicitaram. Ao planejar, apenas satisfaça as solicitações do usuário, não faça muitas coisas extras.""",
 }
 
 # 首次规划消息提示
@@ -54,7 +54,7 @@ first_plan_message_prompt = {
     "pt": """Em seguida, comece a avaliar e planejar para completar os requisitos do usuário, apenas conduza avaliação e planejamento, não execute, e não é necessária confirmação do usuário.
 - Não produza os nomes reais das ferramentas, mas produza descrições das ferramentas.
 - Ao avaliar e planejar, concentre-se na orientação do fluxo de trabalho recomendado.
-- Não faça tarefas que os usuários não solicitaram. Ao planejar, apenas satisfaça as solicitações do usuário, não faça muitas coisas extras."""
+- Não faça tarefas que os usuários não solicitaram. Ao planejar, apenas satisfaça as solicitações do usuário, não faça muitas coisas extras.""",
 }
 
 # 执行消息提示
@@ -73,7 +73,7 @@ Don't do the following behaviors:
 Não faça os seguintes comportamentos:
 1. Não explique o processo de execução no final, como: requisitos do usuário concluídos, encerrando sessão.
 2. Não produza planejamento sugerido subsequente, como: o próximo passo é***.
-3. Não chame ferramentas legadas de encerramento de sessão; ao relatar o status do turno, siga o contrato do sistema: escreva primeiro para o usuário e depois chame turn_status."""
+3. Não chame ferramentas legadas de encerramento de sessão; ao relatar o status do turno, siga o contrato do sistema: escreva primeiro para o usuário e depois chame turn_status.""",
 }
 
 # 工具建议模板
@@ -140,7 +140,7 @@ Formato de Saída:
 Notas:
 1. Os nomes das ferramentas devem ser da lista de ferramentas disponíveis.
 2. Retorne todos os nomes de ferramentas possíveis que possam ser usados. Para ferramentas que são completamente improváveis de serem usadas, não as retorne.
-3. Retorne no máximo 7 ferramentas possíveis."""
+3. Retorne no máximo 7 ferramentas possíveis.""",
 }
 
 # 任务完成判断模板
@@ -214,5 +214,5 @@ Formato de Saída:
 ```
 
 O motivo deve ser o mais simples possível, no máximo 20 caracteres
-```"""
+```""",
 }

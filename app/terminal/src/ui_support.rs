@@ -4,14 +4,13 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::app::{ActiveSurfaceKind, App};
 use crate::app_render::truncate_middle;
-use crate::bottom_pane::command_popup;
 use crate::bottom_pane::composer::ComposerProps;
 use crate::bottom_pane::footer::FooterProps;
 use crate::bottom_pane::help_overlay::HelpOverlayProps;
 use crate::bottom_pane::picker_overlay::PickerOverlayProps;
 use crate::bottom_pane::transcript_overlay::TranscriptOverlayProps;
 use crate::custom_terminal::Frame;
-use crate::wrap::wrap_lines;
+use crate::wrap::{wrap_lines, wrapped_height};
 
 pub(crate) fn render_live_region(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Clear, area);
@@ -46,16 +45,21 @@ fn visible_main_region_lines(
     }
 }
 
+pub(crate) fn live_region_height(app: &App, width: u16) -> u16 {
+    let lines = app.rendered_main_lines(width.max(1));
+    if lines.is_empty() {
+        1
+    } else {
+        wrapped_height(&lines, width.max(1)).max(1)
+    }
+}
+
 pub(crate) fn composer_props(app: &App) -> ComposerProps<'_> {
     ComposerProps {
         input: &app.input,
         input_cursor: app.input_cursor,
         busy: app.busy,
     }
-}
-
-pub(crate) fn command_popup_height(app: &App) -> u16 {
-    command_popup::popup_height(app.popup_props().as_ref())
 }
 
 pub(crate) fn help_overlay_props(app: &App) -> Option<HelpOverlayProps> {
@@ -116,6 +120,9 @@ pub(crate) fn footer_status_summary(app: &App) -> String {
     if let Some(sandbox_type) = app.sandbox_type.as_deref() {
         parts.push(format!("sandbox {sandbox_type}"));
     }
+    if let Some(goal) = app.current_goal.as_ref() {
+        parts.push(format!("goal {}", goal.status));
+    }
     parts.push(compact_workspace_label(&app.workspace_label));
     if app.busy {
         if let Some(phase) = app.active_phase_label() {
@@ -124,7 +131,7 @@ pub(crate) fn footer_status_summary(app: &App) -> String {
     }
     parts.push(normalize_footer_status(&app.footer_status()));
     if app.busy && app.active_tool_status().is_none() {
-        parts.push(app.session_id.clone());
+        parts.push(app.session_label().to_string());
     }
     parts.join(" • ")
 }
@@ -160,6 +167,7 @@ mod tests {
     #[test]
     fn footer_summary_does_not_leak_double_space_statuses() {
         let mut app = App::new();
+        app.ensure_local_session();
         app.status = format!("ready  {}", app.session_id);
 
         let summary = footer_status_summary(&app);

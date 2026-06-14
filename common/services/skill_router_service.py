@@ -137,7 +137,9 @@ async def build_sync_skill_to_agent_response(
     """
     构建同步技能到Agent的响应
     """
-    result = await skill_service.sync_skill_to_agent(skill_name, agent_id, user_id, role)
+    result = await skill_service.sync_skill_to_agent(
+        skill_name, agent_id, user_id, role
+    )
     return {
         "message": f"技能 '{skill_name}' 已成功同步到Agent工作空间",
         "data": result,

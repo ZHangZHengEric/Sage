@@ -3,15 +3,15 @@ import { describe, expect, it } from 'vitest'
 import { buildDeliveryDisplayItems, normalizeChatMessages } from '../chatDisplayItems.js'
 
 describe('chatDisplayItems normalizeChatMessages', () => {
-  it('keeps pending sys_finish_task tool calls visible when no tool result exists', () => {
+  it('returns chat messages unchanged', () => {
     const source = [{
       message_id: 'a1',
       role: 'assistant',
       tool_calls: [{
-        id: 'tc_finish_1',
+        id: 'tc_read_1',
         type: 'function',
         function: {
-          name: 'sys_finish_task',
+          name: 'file_read',
           arguments: '{}'
         }
       }]
@@ -21,8 +21,7 @@ describe('chatDisplayItems normalizeChatMessages', () => {
 
     expect(normalized).toHaveLength(1)
     expect(normalized[0].tool_calls).toHaveLength(1)
-    expect(normalized[0].tool_calls[0].function.name).toBe('sys_finish_task')
-    expect(normalized[0].metadata?.finish_task?.status).toBe('pending')
+    expect(normalized[0].tool_calls[0].function.name).toBe('file_read')
   })
 
   it('keeps agent_execution_error as a visible assistant message', () => {

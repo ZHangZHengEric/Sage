@@ -26,5 +26,31 @@ from . import task_planning_prompts
 from . import task_rewrite_prompts
 from . import task_stage_summary_prompts
 from . import task_summary_prompts
+from . import team_agent_prompts
 from . import tool_suggestion_prompts
 from . import workflow_select_prompts
+
+__all__ = [
+    "agent_base_prompts",
+    "common_util_prompts",
+    "fibre_agent_prompts",
+    "memory_extraction_prompts",
+    "memory_recall_prompts",
+    "plan_agent_prompts",
+    "query_suggest_prompts",
+    "session_context_prompts",
+    "simple_agent_prompts",
+    "simple_react_agent_prompts",
+    "task_analysis_prompts",
+    "task_completion_judge_prompt",
+    "task_decompose_prompts",
+    "task_executor_agent_prompts",
+    "task_observation_prompts",
+    "task_planning_prompts",
+    "task_rewrite_prompts",
+    "task_stage_summary_prompts",
+    "task_summary_prompts",
+    "team_agent_prompts",
+    "tool_suggestion_prompts",
+    "workflow_select_prompts",
+]

@@ -50,6 +50,7 @@ dependencies = [
   "unstructured",
   "loguru>=0.7.0",
   "rank-bm25>=0.2.2",
+  "exceptiongroup>=1.2.0; python_version < '3.11'",
 ]
 
 [project.urls]

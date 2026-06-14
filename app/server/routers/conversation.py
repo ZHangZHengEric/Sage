@@ -3,7 +3,7 @@
 """
 
 import os
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse
@@ -31,13 +31,13 @@ class InterruptRequest(BaseModel):
 
 
 class InjectUserMessageRequest(BaseModel):
-    content: str
+    content: str | list[dict[str, Any]]
     guidance_id: Optional[str] = None
     metadata: Optional[dict] = None
 
 
 @conversation_router.post("/api/sessions/{session_id}/interrupt")
-async def interrupt(session_id: str, request: Request, body: InterruptRequest = None):
+async def interrupt(session_id: str, request: Request, body: InterruptRequest = None):  # pyright: ignore[reportArgumentType]
     """中断指定会话"""
     result = await conversation_router_service.build_interrupt_response(
         session_id,
@@ -48,7 +48,9 @@ async def interrupt(session_id: str, request: Request, body: InterruptRequest = 
 
 
 @conversation_router.post("/api/sessions/{session_id}/inject-user-message")
-async def inject_user_message(session_id: str, request: Request, body: InjectUserMessageRequest):
+async def inject_user_message(
+    session_id: str, request: Request, body: InjectUserMessageRequest
+):
     """向运行中的会话注入一条引导用户消息（非阻塞）。
 
     返回 ``guidance_id``；前端的引导区按此 id 等待 SSE 中带 ``metadata.guidance_id`` 的
@@ -65,7 +67,7 @@ async def inject_user_message(session_id: str, request: Request, body: InjectUse
 
 
 class UpdateInjectUserMessageRequest(BaseModel):
-    content: str
+    content: str | list[dict[str, Any]]
 
 
 @conversation_router.get("/api/sessions/{session_id}/inject-user-message")
@@ -78,7 +80,9 @@ async def list_pending_user_injections(session_id: str, request: Request):
     return await Response.succ(message=result["message"], data=result["data"])
 
 
-@conversation_router.patch("/api/sessions/{session_id}/inject-user-message/{guidance_id}")
+@conversation_router.patch(
+    "/api/sessions/{session_id}/inject-user-message/{guidance_id}"
+)
 async def update_pending_user_injection(
     session_id: str,
     guidance_id: str,
@@ -95,7 +99,9 @@ async def update_pending_user_injection(
     return await Response.succ(message=result["message"], data=result["data"])
 
 
-@conversation_router.delete("/api/sessions/{session_id}/inject-user-message/{guidance_id}")
+@conversation_router.delete(
+    "/api/sessions/{session_id}/inject-user-message/{guidance_id}"
+)
 async def delete_pending_user_injection(
     session_id: str,
     guidance_id: str,
@@ -130,7 +136,9 @@ async def update_title(session_id: str, request: Request, body: UpdateTitleReque
 
 
 @conversation_router.post("/api/conversations/{session_id}/edit-last-user-message")
-async def edit_last_user_message(session_id: str, request: Request, body: EditLastUserMessageRequest):
+async def edit_last_user_message(
+    session_id: str, request: Request, body: EditLastUserMessageRequest
+):
     data = await conversation_service.edit_last_user_message(
         session_id=session_id,
         content=body.content,
@@ -157,7 +165,9 @@ async def list_conversations(
     user_id: Optional[str] = Query(None, description="用户ID过滤"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     agent_id: Optional[str] = Query(None, description="Agent ID过滤"),
-    sort_by: Optional[str] = Query("date", description="排序方式: date, title, messages"),
+    sort_by: Optional[str] = Query(
+        "date", description="排序方式: date, title, messages"
+    ),
 ):
     current_user_id = get_request_user_id(request, user_id or "")
     role = get_request_role(request)
@@ -165,7 +175,9 @@ async def list_conversations(
     if role == "admin":
         current_user_id = None
     elif role == "user" and not current_user_id:
-        return await Response.succ(data={"list": [], "total": 0}, message="获取会话列表成功")
+        return await Response.succ(
+            data={"list": [], "total": 0}, message="获取会话列表成功"
+        )
     result = await conversation_router_service.build_list_conversations_response(
         page=page,
         page_size=page_size,
@@ -190,7 +202,11 @@ async def get_messages(session_id: str, request: Request):
 async def download_session_folder(session_id: str, request: Request):
     """下载 session root 下指定 session 的完整文件夹压缩包。"""
     role = get_request_role(request)
-    path, filename, media_type = await conversation_service.prepare_session_folder_download(
+    (
+        path,
+        filename,
+        media_type,
+    ) = await conversation_service.prepare_session_folder_download(
         session_id,
         is_admin=role == "admin",
     )

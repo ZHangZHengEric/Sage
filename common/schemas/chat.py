@@ -43,6 +43,7 @@ class CustomSubAgentConfig(BaseModel):
     available_skills: Optional[List[str]] = None
     available_workflows: Optional[Dict[str, List[str]]] = None
     system_context: Optional[Dict[str, Any]] = None
+    agent_mode: Optional[str] = None
 
 
 class StreamRequest(BaseChatRequest):

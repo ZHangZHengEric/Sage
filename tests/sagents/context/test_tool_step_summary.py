@@ -22,7 +22,7 @@ def test_build_execution_timing_summary_records_tool_call_messages(tmp_path):
             {
                 "id": "call_1",
                 "type": "function",
-                "function": {"name": "read_file", "arguments": "{\"path\":\"a.txt\"}"},
+                "function": {"name": "read_file", "arguments": '{"path":"a.txt"}'},
             }
         ],
         message_id="assistant-tool-call",
@@ -65,7 +65,9 @@ def test_build_execution_timing_summary_records_tool_call_messages(tmp_path):
     assert summary["message_timings"][1]["duration_ms"] == pytest.approx(400.0)
     assert summary["message_intervals"][0]["from_message_id"] == "assistant-tool-call"
     assert summary["message_intervals"][0]["to_message_id"] == "tool-result"
-    assert summary["message_intervals"][0]["prev_end_to_cur_start_gap_ms"] == pytest.approx(100.0)
+    assert summary["message_intervals"][0][
+        "prev_end_to_cur_start_gap_ms"
+    ] == pytest.approx(100.0)
 
 
 def test_build_execution_timing_summary_includes_flow_node_end_events(tmp_path):

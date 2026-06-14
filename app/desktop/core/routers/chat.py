@@ -7,12 +7,10 @@ import json
 import time
 import uuid
 from datetime import datetime
-from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
-from sqlalchemy.orm import query
 
 from common.core.exceptions import SageHTTPException
 from common.models.agent import AgentConfigDao
@@ -34,14 +32,14 @@ from ..user_context import get_desktop_user_id
 chat_router = APIRouter()
 
 
-def _resolve_request_language(http_request: Request, language: str | None = None, default: str = "zh") -> str:
+def _resolve_request_language(
+    http_request: Request, language: str | None = None, default: str = "zh"
+) -> str:
     candidate = (language or "").strip()
     if not candidate:
         headers = http_request.headers
         candidate = (
-            headers.get("x-accept-language")
-            or headers.get("accept-language")
-            or ""
+            headers.get("x-accept-language") or headers.get("accept-language") or ""
         ).strip()
     lowered = candidate.lower()
     if lowered.startswith("pt"):
@@ -51,6 +49,7 @@ def _resolve_request_language(http_request: Request, language: str | None = None
     if lowered.startswith("zh") or lowered.startswith("cn"):
         return "zh"
     return default
+
 
 class RerunStreamRequest(BaseModel):
     agent_id: str | None = None
@@ -68,7 +67,7 @@ def _build_current_time_with_weekday() -> str:
 
 
 async def _apply_desktop_auto_sub_agents(request: StreamRequest) -> None:
-    if not request.agent_id or request.agent_mode != "fibre":
+    if not request.agent_id or request.agent_mode not in {"fibre", "team"}:
         return
 
     agent = await AgentConfigDao().get_by_id(request.agent_id)
@@ -76,7 +75,9 @@ async def _apply_desktop_auto_sub_agents(request: StreamRequest) -> None:
         return
 
     config = agent.config or {}
-    selection_mode = config.get("subAgentSelectionMode") or config.get("sub_agent_selection_mode")
+    selection_mode = config.get("subAgentSelectionMode") or config.get(
+        "sub_agent_selection_mode"
+    )
     configured_ids = config.get("availableSubAgentIds")
     if selection_mode is None:
         selection_mode = "manual" if configured_ids else "auto_all"
@@ -84,7 +85,7 @@ async def _apply_desktop_auto_sub_agents(request: StreamRequest) -> None:
     if selection_mode != "auto_all":
         return
 
-    if request.available_sub_agent_ids:
+    if request.available_sub_agent_ids is not None:
         return
 
     all_agents = await AgentConfigDao().get_all()
@@ -95,11 +96,11 @@ async def _apply_desktop_auto_sub_agents(request: StreamRequest) -> None:
     ]
 
 
-FIBRE_ONLY_TOOLS = ("sys_spawn_agent", "sys_delegate_task", "sys_finish_task")
+FIBRE_ONLY_TOOLS = ("sys_spawn_agent", "sys_delegate_task")
 
 
 def _sync_fibre_only_tools(request: StreamRequest) -> None:
-    """Fibre 专属工具（智能体委派/创建/完成）只允许在 fibre 模式下出现在 available_tools。
+    """Fibre 专属工具（智能体委派/创建）只允许在 fibre 模式下出现在 available_tools。
     其他模式下即便 agent 配置里残留也强制移除，避免 agent 误调用。
     """
     if request.agent_mode == "fibre":
@@ -171,7 +172,7 @@ async def _start_web_stream_session(
         logger.bind(session_id=session_id).info(interrupt_message)
         try:
             await conversation_service.interrupt_session(
-                session_id,
+                session_id,  # pyright: ignore[reportArgumentType]
                 interrupt_message,
             )
         finally:
@@ -187,7 +188,7 @@ async def _start_web_stream_session(
     stream_service, lock = await chat_service.prepare_session(request)
     session_id = request.session_id
     await manager.start_session(
-        session_id,
+        session_id,  # pyright: ignore[reportArgumentType]
         query,
         chat_service.execute_chat_session(
             mode="web-stream",
@@ -197,7 +198,7 @@ async def _start_web_stream_session(
     )
 
     return StreamingResponse(
-        stream_with_manager(session_id, last_index=0, resume=False),
+        stream_with_manager(session_id, last_index=0, resume=False),  # pyright: ignore[reportArgumentType]
         media_type="text/plain",
     )
 
@@ -224,14 +225,19 @@ async def optimize_chat_input(request: UserInputOptimizeRequest, http_request: R
 
 
 @chat_router.post("/api/chat/optimize-input/stream")
-async def optimize_chat_input_stream(request: UserInputOptimizeRequest, http_request: Request):
+async def optimize_chat_input_stream(
+    request: UserInputOptimizeRequest, http_request: Request
+):
     if not request.user_id:
         request.user_id = get_desktop_user_id(http_request)
     language = _resolve_request_language(http_request, request.language, default="zh")
+
     async def event_generator():
         async for chunk in chat_service.optimize_user_input_stream(
             current_input=request.current_input,
-            history_messages=[message.model_dump() for message in request.history_messages],
+            history_messages=[
+                message.model_dump() for message in request.history_messages
+            ],
             session_id=request.session_id or "",
             agent_id=request.agent_id or "",
             user_id=request.user_id or "",
@@ -242,7 +248,9 @@ async def optimize_chat_input_stream(request: UserInputOptimizeRequest, http_req
     return StreamingResponse(event_generator(), media_type="text/plain")
 
 
-async def stream_with_manager(session_id: str, last_index: int = 0, resume: bool = False):
+async def stream_with_manager(
+    session_id: str, last_index: int = 0, resume: bool = False
+):
     """
     通过 StreamManager 订阅会话流
     """
@@ -257,18 +265,23 @@ async def stream_with_manager(session_id: str, last_index: int = 0, resume: bool
         await conversation_service.get_conversation_messages(session_id)
     except Exception:
         return
-    yield json.dumps(
-        {
-            "type": "stream_end",
-            "session_id": session_id,
-            "timestamp": time.time(),
-            "resume_fallback": True,
-        },
-        ensure_ascii=False,
-    ) + "\n"
+    yield (
+        json.dumps(
+            {
+                "type": "stream_end",
+                "session_id": session_id,
+                "timestamp": time.time(),
+                "resume_fallback": True,
+            },
+            ensure_ascii=False,
+        )
+        + "\n"
+    )
 
 
-async def stream_api_with_disconnect_check(generator, request: Request, lock: asyncio.Lock, session_id: str):
+async def stream_api_with_disconnect_check(
+    generator, request: Request, lock: asyncio.Lock, session_id: str
+):
     """
     Wrap the generator to monitor client disconnection.
     If client disconnects, stop the generator (which triggers its finally block).
@@ -285,7 +298,9 @@ async def stream_api_with_disconnect_check(generator, request: Request, lock: as
         try:
             await conversation_service.interrupt_session(session_id, "客户端断开连接")
         except Exception as ex:
-            logger.bind(session_id=session_id).error(f"Error interrupting session: {ex}")
+            logger.bind(session_id=session_id).error(
+                f"Error interrupting session: {ex}"
+            )
 
         # 重新抛出异常，确保生成器正确关闭
         raise e
@@ -329,7 +344,11 @@ async def broadcast_generator(generator, session_id: str, query: str = ""):
 @chat_router.post("/api/chat")
 async def chat(request: ChatRequest, http_request: Request):
     """流式聊天接口"""
-    validate_and_prepare_request(request, http_request)
+    validate_and_prepare_request(
+        request,
+        http_request,
+        allow_pending_guidance_flush=True,
+    )
     # 构建 StreamRequest
     inner_request = StreamRequest(
         messages=request.messages,
@@ -354,7 +373,11 @@ async def chat(request: ChatRequest, http_request: Request):
     # 获取查询内容用于记录（尝试获取最后一条消息的内容）
     query = ""
     if inner_request.messages:
-        query = inner_request.messages[-1].content if hasattr(inner_request.messages[-1], "content") else str(inner_request.messages[-1])
+        query = (
+            inner_request.messages[-1].content
+            if hasattr(inner_request.messages[-1], "content")
+            else str(inner_request.messages[-1])
+        )
 
     return StreamingResponse(
         stream_api_with_disconnect_check(
@@ -363,20 +386,31 @@ async def chat(request: ChatRequest, http_request: Request):
                     mode="chat",
                     stream_service=stream_service,
                 ),
-                session_id,
-                query,
+                session_id,  # pyright: ignore[reportArgumentType]
+                query,  # pyright: ignore[reportArgumentType]
             ),
             http_request,
             lock,
-            session_id,
+            session_id,  # pyright: ignore[reportArgumentType]
         ),
         media_type="text/plain",
     )
 
 
-def validate_and_prepare_request(request: ChatRequest | StreamRequest, http_request: Request) -> None:
+def validate_and_prepare_request(
+    request: ChatRequest | StreamRequest,
+    http_request: Request,
+    *,
+    allow_pending_guidance_flush: bool = False,
+) -> None:
     """验证并准备请求参数"""
-    if not get_chat_client():
+    try:
+        chat_client = get_chat_client()
+    except RuntimeError as exc:
+        logger.bind(session_id=request.session_id).warning(f"模型客户端不可用: {exc}")
+        chat_client = None
+
+    if not chat_client:
         raise SageHTTPException(
             status_code=503,
             detail="模型客户端未配置或不可用",
@@ -385,7 +419,28 @@ def validate_and_prepare_request(request: ChatRequest | StreamRequest, http_requ
 
     # 验证请求参数
     if not request.messages or len(request.messages) == 0:
-        raise SageHTTPException(status_code=500, detail="消息列表不能为空")
+        if not allow_pending_guidance_flush or not _has_pending_user_injections(
+            request.session_id
+        ):
+            raise SageHTTPException(status_code=500, detail="消息列表不能为空")
+        logger.bind(session_id=request.session_id).info(
+            "允许空 messages 请求消费 pending guidance"
+        )
+
+
+def _has_pending_user_injections(session_id: str | None) -> bool:
+    normalized_session_id = (session_id or "").strip()
+    if not normalized_session_id:
+        return False
+    try:
+        data = conversation_service.list_pending_user_injections(normalized_session_id)
+    except Exception as exc:
+        logger.bind(session_id=normalized_session_id).debug(
+            f"空 messages pending guidance 检查失败: {exc}"
+        )
+        return False
+    items = data.get("items") if isinstance(data, dict) else None
+    return isinstance(items, list) and len(items) > 0
 
 
 @chat_router.post("/api/web-stream")
@@ -396,14 +451,13 @@ async def stream_chat_web(request: StreamRequest, http_request: Request):
         request.user_id = get_desktop_user_id(http_request)
     chat_service.mark_request_execution(request, request_source="api/web-stream")
 
-    session_id = request.session_id
     manager = StreamManager.get_instance()
     query = request.messages[0].content
     return await _start_web_stream_session(
         request,
         manager=manager,
         interrupt_message="同会话重入，先中断旧会话",
-        query=query,
+        query=query,  # pyright: ignore[reportArgumentType]
     )
 
 
@@ -414,7 +468,10 @@ async def resume_stream(session_id: str, last_index: int = 0):
     :param session_id: 会话ID
     :param last_index: 已收到的最后一条消息索引
     """
-    return StreamingResponse(stream_with_manager(session_id, last_index, resume=True), media_type="text/plain")
+    return StreamingResponse(
+        stream_with_manager(session_id, last_index, resume=True),
+        media_type="text/plain",
+    )
 
 
 @chat_router.get("/api/stream/active_sessions")
@@ -429,9 +486,11 @@ async def get_active_sessions(request: Request):
         try:
             async for sessions in manager.subscribe_active_sessions():
                 if await request.is_disconnected():
-                    logger.info(f"Client {client_host} disconnected active_sessions stream")
+                    logger.info(
+                        f"Client {client_host} disconnected active_sessions stream"
+                    )
                     break
-                
+
                 # 手动构建 SSE 格式
                 json_str = json.dumps(sessions, default=str, ensure_ascii=False)
                 # logger.debug(f"Yielding SSE data to {client_host}: {json_str[:100]}...")
@@ -460,11 +519,13 @@ async def rerun_conversation_stream(
     guidance_content = (rerun_request.guidance_content or "").strip()
     rerun_messages = []
     if guidance_content:
-        rerun_messages.append({
-            "message_id": rerun_request.guidance_id or str(uuid.uuid4()),
-            "role": "user",
-            "content": guidance_content,
-        })
+        rerun_messages.append(
+            {
+                "message_id": rerun_request.guidance_id or str(uuid.uuid4()),
+                "role": "user",
+                "content": guidance_content,
+            }
+        )
 
     request = StreamRequest(
         messages=rerun_messages,

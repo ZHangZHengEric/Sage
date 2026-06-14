@@ -21,8 +21,15 @@ def _run(cmd: list[str]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run memory search validation suite.")
-    parser.add_argument("--noise-files", type=int, default=120, help="Synthetic benchmark noise file count.")
-    parser.add_argument("--top-k", type=int, default=3, help="Top-k benchmark result count.")
+    parser.add_argument(
+        "--noise-files",
+        type=int,
+        default=120,
+        help="Synthetic benchmark noise file count.",
+    )
+    parser.add_argument(
+        "--top-k", type=int, default=3, help="Top-k benchmark result count."
+    )
     args = parser.parse_args()
 
     py_compile_targets = [

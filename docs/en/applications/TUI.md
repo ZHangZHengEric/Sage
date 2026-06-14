@@ -140,6 +140,7 @@ The current TUI preview includes these core commands:
 - `/display`
 - `/workspace`
 - `/sandbox`
+- `/goal`
 - `/interrupt`
 - `/retry`
 - `/new`
@@ -156,6 +157,16 @@ The current TUI preview includes these core commands:
 - `/transcript`
 - `/welcome`
 - `/exit`
+
+## Session Behavior
+
+The terminal no longer materializes a local `local-000xxx` session immediately on startup.
+
+- the welcome card starts with `session: new`
+- the first real task submission materializes a local session id
+- `/new` returns the terminal to that pending `new` state until the next task is submitted
+
+This keeps the TUI closer to Sage's workspace-first behavior instead of eagerly consuming a local session id at launch.
 
 ## Agent Selection
 
@@ -261,6 +272,35 @@ You can inspect or change the current terminal workspace from inside the TUI:
 /workspace set /path/to/project
 /workspace clear
 ```
+
+## Goal Control
+
+The terminal can carry a local goal through the CLI/TUI layer.
+
+```text
+/goal
+/goal <objective>
+/goal show
+/goal set <objective>
+/goal clear
+/goal done
+```
+
+`/goal <objective>` stores a local goal and immediately submits the same objective as the next task, matching the Codex-style flow.
+
+`/goal set` still queues the local goal without running anything yet.
+
+## Composer History And Slash Popup
+
+The terminal composer now supports shell-like input recall:
+
+- `Up`: recall the previous submitted input
+- `Down`: move forward in input history or restore the current draft
+
+Slash command popup behavior is also tighter now:
+
+- when a slash popup is visible and the current input is only a prefix, `Enter` first autocompletes the selected command
+- when the current input is already a complete command such as `/interrupt`, `Enter` executes it directly
 
 ## Run Control
 

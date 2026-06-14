@@ -11,7 +11,9 @@ class ContentProcessor:
 
     @classmethod
     def clean_content(cls, result: Dict[str, Any]) -> Dict[str, Any]:
-        if result.get("role") == MessageRole.ASSISTANT.value and result.get("tool_calls"):
+        if result.get("role") == MessageRole.ASSISTANT.value and result.get(
+            "tool_calls"
+        ):
             result.pop("content", None)
         if result.get("role") == "tool":
             content = result.get("content")
@@ -22,7 +24,11 @@ class ContentProcessor:
     @classmethod
     def _remove_base64_from_results(cls, data: Any) -> bool:
         modified = False
-        if isinstance(data, dict) and "results" in data and isinstance(data["results"], list):
+        if (
+            isinstance(data, dict)
+            and "results" in data
+            and isinstance(data["results"], list)
+        ):
             for item in data["results"]:
                 if isinstance(item, dict) and "image" in item:
                     val = item["image"]
@@ -59,7 +65,11 @@ class ContentProcessor:
 
     @classmethod
     def _truncate_large_fields(cls, data: Any, max_len: int = 5000) -> None:
-        if isinstance(data, dict) and "results" in data and isinstance(data["results"], list):
+        if (
+            isinstance(data, dict)
+            and "results" in data
+            and isinstance(data["results"], list)
+        ):
             for item in data["results"]:
                 if isinstance(item, dict):
                     for field in ["snippet", "description", "content"]:

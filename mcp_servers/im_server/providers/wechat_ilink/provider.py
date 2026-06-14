@@ -26,7 +26,7 @@ class WeChatPersonalPoller:
         self,
         message_handler: Callable[[Dict[str, Any]], None],
         bot_token: str,
-        base_url: str = "https://ilinkai.weixin.qq.com"
+        base_url: str = "https://ilinkai.weixin.qq.com",
     ):
         self.message_handler = message_handler
         self.bot_token = bot_token
@@ -58,7 +58,9 @@ class WeChatPersonalPoller:
         self.running = True
         self.poller_thread = threading.Thread(target=self._poll_loop, daemon=True)
         self.poller_thread.start()
-        logger.info(f"[WeChatPersonal] Poller started with bot_token={'***' if self.bot_token else 'MISSING'}")
+        logger.info(
+            f"[WeChatPersonal] Poller started with bot_token={'***' if self.bot_token else 'MISSING'}"
+        )
 
     def stop(self):
         """Stop polling."""
@@ -83,13 +85,13 @@ class WeChatPersonalPoller:
             async with httpx.AsyncClient(timeout=38.0) as client:
                 payload = {
                     "get_updates_buf": self._get_updates_buf,
-                    "base_info": {"channel_version": "1.0.2"}
+                    "base_info": {"channel_version": "1.0.2"},
                 }
 
                 response = await client.post(
                     f"{self.base_url}/ilink/bot/getupdates",
                     headers=self._build_headers(),
-                    json=payload
+                    json=payload,
                 )
 
                 if response.status_code == 200:
@@ -105,10 +107,12 @@ class WeChatPersonalPoller:
                         logger.info(f"[WeChatPersonal] Received {len(msgs)} messages")
                         for msg in msgs:
                             self._handle_message(msg)
-                    
+
                     # Log API errors but don't stop processing
                     if data.get("ret") != 0:
-                        logger.debug(f"[WeChatPersonal] API ret={data.get('ret')}, but messages may still be present")
+                        logger.debug(
+                            f"[WeChatPersonal] API ret={data.get('ret')}, but messages may still be present"
+                        )
                 else:
                     logger.error(f"[WeChatPersonal] HTTP error: {response.status_code}")
 
@@ -145,18 +149,20 @@ class WeChatPersonalPoller:
                 "context_token": msg.get("context_token"),
                 "timestamp": msg.get("create_time"),
                 "provider": "wechat_personal",
-                "raw_message": msg
+                "raw_message": msg,
             }
 
-            logger.info(f"[WeChatPersonal] New message from {message_data['user_id']}: {text[:50]}...")
+            logger.info(
+                f"[WeChatPersonal] New message from {message_data['user_id']}: {text[:50]}..."
+            )
 
             # Handle async message handler in a separate thread with its own event loop
             def run_async_handler():
                 try:
-                    asyncio.run(self.message_handler(message_data))
+                    asyncio.run(self.message_handler(message_data))  # pyright: ignore[reportArgumentType]
                 except Exception as e:
                     logger.error(f"[WeChatPersonal] Handler error: {e}")
-            
+
             threading.Thread(target=run_async_handler, daemon=True).start()
 
         except Exception as e:
@@ -197,25 +203,25 @@ class WeChatPersonalProvider(IMProviderBase):
         msg_type: str = "text",
     ) -> Dict[str, Any]:
         """Send message via iLink API.
-        
+
         Args:
             content: Message content
             chat_id: Context token (required for iLink)
             user_id: Recipient user ID
             msg_type: Message type (text)
-            
+
         Returns:
             Send result
         """
         if not chat_id:
             return {"success": False, "error": "chat_id (context_token) is required"}
-        
+
         if not user_id:
             return {"success": False, "error": "user_id is required"}
 
         try:
             client_id = f"msg-{uuid.uuid4()}"
-            
+
             payload = {
                 "msg": {
                     "from_user_id": "",  # Let system fill this
@@ -224,25 +230,27 @@ class WeChatPersonalProvider(IMProviderBase):
                     "message_type": 2,  # BOT message
                     "message_state": 2,  # FINISH
                     "context_token": chat_id,  # Required!
-                    "item_list": [{
-                        "type": 1,  # Text
-                        "text_item": {"text": content}
-                    }]
+                    "item_list": [
+                        {
+                            "type": 1,  # Text
+                            "text_item": {"text": content},
+                        }
+                    ],
                 },
-                "base_info": {
-                    "channel_version": "1.0.2"
-                }
+                "base_info": {"channel_version": "1.0.2"},
             }
 
             async with httpx.AsyncClient(timeout=10.0) as client:
-                logger.info(f"[WeChatPersonal] Sending request to {self.base_url}/ilink/bot/sendmessage")
+                logger.info(
+                    f"[WeChatPersonal] Sending request to {self.base_url}/ilink/bot/sendmessage"
+                )
                 logger.info(f"[WeChatPersonal] Headers: {self._build_headers()}")
                 logger.info(f"[WeChatPersonal] Payload: {payload}")
-                
+
                 response = await client.post(
                     f"{self.base_url}/ilink/bot/sendmessage",
                     headers=self._build_headers(),
-                    json=payload
+                    json=payload,
                 )
 
                 logger.info(f"[WeChatPersonal] Response status: {response.status_code}")
@@ -253,8 +261,11 @@ class WeChatPersonalProvider(IMProviderBase):
                         data = response.json()
                     except Exception as e:
                         logger.error(f"[WeChatPersonal] Failed to parse JSON: {e}")
-                        return {"success": False, "error": f"Invalid JSON response: {response.text}"}
-                    
+                        return {
+                            "success": False,
+                            "error": f"Invalid JSON response: {response.text}",
+                        }
+
                     ret = data.get("ret")
                     if ret == 0 or data == {}:
                         # ret=0 or empty response both mean success
@@ -266,12 +277,21 @@ class WeChatPersonalProvider(IMProviderBase):
                         logger.error(f"[WeChatPersonal] Context token expired: {data}")
                         return {"success": False, "error": error_msg}
                     else:
-                        error_msg = data.get("errmsg") or data.get("error") or f"API error (ret={ret}): {data}"
+                        error_msg = (
+                            data.get("errmsg")
+                            or data.get("error")
+                            or f"API error (ret={ret}): {data}"
+                        )
                         logger.error(f"[WeChatPersonal] Send failed: {error_msg}")
                         return {"success": False, "error": error_msg}
                 else:
-                    logger.error(f"[WeChatPersonal] HTTP error: {response.status_code}, body: {response.text}")
-                    return {"success": False, "error": f"HTTP {response.status_code}: {response.text[:200]}"}
+                    logger.error(
+                        f"[WeChatPersonal] HTTP error: {response.status_code}, body: {response.text}"
+                    )
+                    return {
+                        "success": False,
+                        "error": f"HTTP {response.status_code}: {response.text[:200]}",
+                    }
 
         except Exception as e:
             logger.error(f"[WeChatPersonal] Send error: {e}")
@@ -299,7 +319,7 @@ class WeChatPersonalProvider(IMProviderBase):
                 "content": text,
                 "chat_id": data.get("context_token"),
                 "timestamp": data.get("create_time"),
-                "provider": "wechat_personal"
+                "provider": "wechat_personal",
             }
         except Exception as e:
             logger.error(f"[WeChatPersonal] Parse error: {e}")

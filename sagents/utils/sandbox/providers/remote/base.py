@@ -7,9 +7,12 @@ import fnmatch
 import os
 from abc import abstractmethod
 from datetime import timedelta
-from typing import Dict, List, Optional
+from typing import List, Optional
 
-from ...interface import ISandboxHandle, SandboxType, CommandResult, ExecutionResult, FileInfo
+from ...interface import (
+    ISandboxHandle,
+    SandboxType,
+)
 from ...config import MountPath
 
 
@@ -32,7 +35,8 @@ def _walk_upload_files_sync(
     for root, dirs, files in os.walk(host_dir):
         if ignore_patterns:
             dirs[:] = [
-                d for d in dirs
+                d
+                for d in dirs
                 if not any(fnmatch.fnmatch(d, pattern) for pattern in ignore_patterns)
             ]
         for file_name in files:
@@ -58,7 +62,9 @@ class RemoteSandboxProvider(ISandboxHandle):
         timeout: timedelta = timedelta(minutes=30),
     ):
         self._sandbox_id = sandbox_id
-        self.workspace_mount = os.path.abspath(workspace_mount) if workspace_mount else None
+        self.workspace_mount = (
+            os.path.abspath(workspace_mount) if workspace_mount else None
+        )
         self.mount_paths = list(mount_paths or [])
         self._volume_mounts = list(self.mount_paths)
         self.timeout = timeout
@@ -113,7 +119,9 @@ class RemoteSandboxProvider(ISandboxHandle):
 
     def remove_allowed_paths(self, paths: List[str]) -> None:
         """移除允许访问的宿主机路径。"""
-        self._allowed_paths = [path for path in self._allowed_paths if path not in paths]
+        self._allowed_paths = [
+            path for path in self._allowed_paths if path not in paths
+        ]
 
     def get_allowed_paths(self) -> List[str]:
         """获取当前允许访问的宿主机路径列表。"""
@@ -156,7 +164,9 @@ class RemoteSandboxProvider(ISandboxHandle):
         for host_file, sandbox_file in upload_files:
             await self.upload_file(host_file, sandbox_file)
 
-    async def sync_directory_from_sandbox(self, sandbox_dir: str, host_dir: str) -> None:
+    async def sync_directory_from_sandbox(
+        self, sandbox_dir: str, host_dir: str
+    ) -> None:
         """
         从远程沙箱同步目录
 
@@ -171,7 +181,7 @@ class RemoteSandboxProvider(ISandboxHandle):
         self,
         host_source_path: str,
         sandbox_dest_path: str,
-        ignore_patterns: Optional[List[str]] = None
+        ignore_patterns: Optional[List[str]] = None,
     ) -> bool:
         """
         从宿主机复制文件/目录到远程沙箱。
@@ -201,7 +211,7 @@ class RemoteSandboxProvider(ISandboxHandle):
         root_path: Optional[str] = None,
         include_hidden: bool = False,
         max_depth: Optional[int] = None,
-        max_items_per_dir: int = 5
+        max_items_per_dir: int = 5,
     ) -> str:
         """
         基于 list_directory 生成紧凑文件树。
@@ -215,7 +225,9 @@ class RemoteSandboxProvider(ISandboxHandle):
                 return
 
             entries = await self.list_directory(path, include_hidden=include_hidden)
-            entries.sort(key=lambda entry: (not entry.is_dir, os.path.basename(entry.path)))
+            entries.sort(
+                key=lambda entry: (not entry.is_dir, os.path.basename(entry.path))
+            )
 
             if depth > 0 and len(entries) > max_items_per_dir:
                 shown_entries = entries[:max_items_per_dir]
@@ -240,13 +252,17 @@ class RemoteSandboxProvider(ISandboxHandle):
     def _iter_virtual_mappings(self) -> List[tuple[str, str]]:
         mappings: List[tuple[str, str]] = []
         if self.workspace_mount:
-            mappings.append((self._workspace_path.rstrip("/") or "/", self.workspace_mount))
+            mappings.append(
+                (self._workspace_path.rstrip("/") or "/", self.workspace_mount)
+            )
         for mount in self.mount_paths:
             mappings.append((mount.mount_path.rstrip("/") or "/", mount.host_path))
         return sorted(mappings, key=lambda item: len(item[0]), reverse=True)
 
     def _iter_host_mappings(self) -> List[tuple[str, str]]:
-        host_first = [(host, virtual) for virtual, host in self._iter_virtual_mappings()]
+        host_first = [
+            (host, virtual) for virtual, host in self._iter_virtual_mappings()
+        ]
         return sorted(host_first, key=lambda item: len(item[0]), reverse=True)
 
     def to_host_path(self, virtual_path: str) -> str:
@@ -255,7 +271,7 @@ class RemoteSandboxProvider(ISandboxHandle):
             if virtual_path == virtual_root:
                 return host_root
             if virtual_path.startswith(virtual_root + "/"):
-                rel_path = virtual_path[len(virtual_root):].lstrip("/")
+                rel_path = virtual_path[len(virtual_root) :].lstrip("/")
                 return os.path.join(host_root, rel_path)
         return virtual_path
 
@@ -266,6 +282,6 @@ class RemoteSandboxProvider(ISandboxHandle):
             if normalized_host == host_root:
                 return virtual_root
             if normalized_host.startswith(host_root + os.sep):
-                rel_path = normalized_host[len(host_root):].lstrip("/")
+                rel_path = normalized_host[len(host_root) :].lstrip("/")
                 return os.path.join(virtual_root, rel_path)
         return host_path

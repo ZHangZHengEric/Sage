@@ -17,7 +17,12 @@ class OssImportBody(BaseModel):
 
 class OssSandboxUploadBody(BaseModel):
     agent_id: str = Field(..., min_length=1, max_length=240, description="Agent 目录名")
-    filename: str = Field(..., min_length=1, max_length=480, description="upload_files 下文件名（仅 basename）")
+    filename: str = Field(
+        ...,
+        min_length=1,
+        max_length=480,
+        description="upload_files 下文件名（仅 basename）",
+    )
 
 
 @oss_router.post("/upload")
@@ -35,5 +40,7 @@ async def import_url(body: OssImportBody):
 @oss_router.post("/import_sandbox_upload")
 async def import_sandbox_upload(body: OssSandboxUploadBody):
     """从本机 ~/.sage/agents/<agent_id>/upload_files/<filename> 读取已上传文件并写入 OSS。"""
-    url, filename_hint = await import_sandbox_upload_file_to_oss(body.agent_id, body.filename)
+    url, filename_hint = await import_sandbox_upload_file_to_oss(
+        body.agent_id, body.filename
+    )
     return await Response.succ(data={"url": url, "filename": filename_hint})

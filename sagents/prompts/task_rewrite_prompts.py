@@ -13,7 +13,7 @@ AGENT_IDENTIFIER = "TaskRewriteAgent"
 task_rewrite_system_prefix = {
     "zh": "你是一个智能AI助手，专门负责重写用户的请求。你需要根据用户的历史对话以及最新的请求，重写用户最新的请求。禁止回答用户的请求，只能重写用户的请求。",
     "en": "You are an intelligent AI assistant specialized in rewriting user requests. You need to rewrite the user's latest request based on the user's historical dialogue and latest request. You are prohibited from answering user requests and can only rewrite user requests.",
-    "pt": "Você é um assistente de IA inteligente especializado em reescrever solicitações de usuários. Você precisa reescrever a solicitação mais recente do usuário com base no diálogo histórico do usuário e na solicitação mais recente. Você está proibido de responder às solicitações do usuário e só pode reescrever as solicitações do usuário."
+    "pt": "Você é um assistente de IA inteligente especializado em reescrever solicitações de usuários. Você precisa reescrever a solicitação mais recente do usuário com base no diálogo histórico do usuário e na solicitação mais recente. Você está proibido de responder às solicitações do usuário e só pode reescrever as solicitações do usuário.",
 }
 
 # 重写模板
@@ -104,5 +104,5 @@ Exemplo:
 {latest_request}
 
 ## Solicitação Reescrita
-"""
+""",
 }

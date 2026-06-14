@@ -7,8 +7,10 @@ import json
 import re
 from sagents.utils.logger import logger
 
+
 class MessageRole(Enum):
     """消息角色枚举"""
+
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
@@ -18,7 +20,9 @@ class MessageRole(Enum):
 LEGACY_NORMAL_MESSAGE_TYPE = "normal"
 
 
-def normalize_legacy_message_type(role: Optional[str], message_type: Optional[str]) -> Optional[str]:
+def normalize_legacy_message_type(
+    role: Optional[str], message_type: Optional[str]
+) -> Optional[str]:
     """兼容历史消息类型。
 
     仅用于读取旧数据：
@@ -27,13 +31,17 @@ def normalize_legacy_message_type(role: Optional[str], message_type: Optional[st
     """
     if role == MessageRole.USER.value:
         return MessageType.USER_INPUT.value
-    if role == MessageRole.ASSISTANT.value and message_type == LEGACY_NORMAL_MESSAGE_TYPE:
+    if (
+        role == MessageRole.ASSISTANT.value
+        and message_type == LEGACY_NORMAL_MESSAGE_TYPE
+    ):
         return MessageType.ASSISTANT_TEXT.value
     return message_type
 
 
 class MessageType(Enum):
     """消息类型枚举 - 与项目实际使用保持一致"""
+
     # 基础类型
     USER_INPUT = "user_input"
     ASSISTANT_TEXT = "assistant_text"
@@ -95,55 +103,55 @@ def is_execution_error_message_type(message_type: Optional[str]) -> bool:
 @dataclass
 class MessageChunk:
     """消息块结构类 - OpenAI兼容格式
-    
+
     定义Agent流式返回的单个消息块的结构，确保所有必要字段都存在。
     支持OpenAI消息格式和工具调用。
     """
-    
+
     # 必需字段 - OpenAI标准
     role: str  # 消息角色 (user, assistant, system, tool)
-    
+
     # 内容字段（content和tool_calls至少有一个）
     # content 可以是字符串或列表（支持多模态，如图片+文本）
     # 列表格式: [{"type": "text", "text": "..."}, {"type": "image_url", "image_url": {"url": "..."}}]
     content: Optional[Union[str, List[Dict[str, Any]]]] = None  # 消息内容
     tool_calls: Optional[List[Dict[str, Any]]] = None  # 工具调用列表（OpenAI格式）
-    
+
     # 消息标识
     message_id: Optional[str] = None  # 消息唯一标识符
-    
+
     # 工具调用ID（tool角色消息必需）
     tool_call_id: Optional[str] = None  # 工具调用ID（tool角色消息必需）
-    
+
     # 显示和类型字段
     type: Optional[str] = None  # 消息类型（兼容现有系统）
     message_type: Optional[str] = None  # 消息类型（备用字段）
-    
+
     # 时间戳
     timestamp: Optional[float] = None  # 时间戳
-    
+
     # 元数据字段
     agent_name: Optional[str] = None  # 生成消息的Agent名称
     agent_type: Optional[str] = None  # Agent类型
     chunk_id: Optional[str] = None  # 消息块ID（用于流式传输）
     is_final: bool = False  # 是否为最终消息块
     is_chunk: bool = False  # 是否为消息块
-    
+
     # 扩展字段
     metadata: Optional[Dict[str, Any]] = None  # 额外的元数据
-    error_info: Optional[Dict[str, Any]] = None # 错误信息
+    error_info: Optional[Dict[str, Any]] = None  # 错误信息
     session_id: Optional[str] = None  # 会话ID
-    
+
     # 其他兼容字段
     updated_at: Optional[str] = None  # 更新时间
-    
+
     def __post_init__(self):
         """初始化后处理"""
         if self.timestamp is None:
             self.timestamp = time.time()
         if self.chunk_id is None:
             self.chunk_id = str(uuid.uuid4())
-        if self.message_id is None :
+        if self.message_id is None:
             self.message_id = str(uuid.uuid4())
         if len(self.message_id) == 0:
             self.message_id = str(uuid.uuid4())
@@ -162,70 +170,73 @@ class MessageChunk:
         if role == MessageRole.USER.value:
             self.type = MessageType.USER_INPUT.value
             self.message_type = self.type
-        elif role == MessageRole.ASSISTANT.value and self.normalized_message_type() in {None, MessageType.ASSISTANT_TEXT.value}:
+        elif role == MessageRole.ASSISTANT.value and self.normalized_message_type() in {
+            None,
+            MessageType.ASSISTANT_TEXT.value,
+        }:
             self.type = MessageType.ASSISTANT_TEXT.value
             self.message_type = self.type
-        
+
         # 验证必需字段
         if role == MessageRole.TOOL.value and self.tool_call_id is None:
             raise ValueError("tool角色的消息必须包含tool_call_id字段")
-        
+
         if self.content is None and self.tool_calls is None:
             raise ValueError("消息必须包含content或tool_calls字段")
-        
+
         if self.metadata is None:
             self.metadata = {}
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式（保持向后兼容性）
-        
+
         Returns:
             Dict[str, Any]: 字典格式的消息块
         """
         result = asdict(self)
-        
+
         # 确保role字段是字符串 - 处理asdict后的枚举对象
-        if 'role' in result and hasattr(result['role'], 'value'):
-            result['role'] = result['role'].value
+        if "role" in result and hasattr(result["role"], "value"):
+            result["role"] = result["role"].value
         elif isinstance(self.role, MessageRole):
-            result['role'] = self.role.value
-            
+            result["role"] = self.role.value
+
         # 确保type和message_type字段是字符串 - 处理MessageType枚举
-        for field_name in ['type', 'message_type']:
+        for field_name in ["type", "message_type"]:
             if field_name in result and result[field_name] is not None:
-                if hasattr(result[field_name], 'value'):
+                if hasattr(result[field_name], "value"):
                     result[field_name] = result[field_name].value
                 elif isinstance(result[field_name], MessageType):
                     result[field_name] = result[field_name].value
-        
+
         # 处理 tool_calls 字段 - 转换为标准字典格式
-        if 'tool_calls' in result and result['tool_calls'] is not None:
-            result['tool_calls'] = self._serialize_tool_calls(result['tool_calls'])
-        
+        if "tool_calls" in result and result["tool_calls"] is not None:
+            result["tool_calls"] = self._serialize_tool_calls(result["tool_calls"])
+
         # 移除None值以保持简洁
         return {k: v for k, v in result.items() if v is not None}
-    
+
     def _serialize_tool_calls(self, tool_calls) -> List[Dict[str, Any]]:
         """序列化 tool_calls 为标准字典格式"""
         if tool_calls is None:
-            return None
-        
+            return None  # pyright: ignore[reportReturnType]
+
         result = []
         for tc in tool_calls:
-            if hasattr(tc, 'id') and hasattr(tc, 'function'):
+            if hasattr(tc, "id") and hasattr(tc, "function"):
                 # 对象形式 (如 ChoiceDeltaToolCall)
-                tc_dict = {'id': tc.id, 'type': getattr(tc, 'type', 'function')}
+                tc_dict = {"id": tc.id, "type": getattr(tc, "type", "function")}
                 # OpenAI 流式增量 delta 中 index 至关重要：同一条 assistant 消息里
                 # 多个 tool_call 在分片时仅靠 index 区分，丢失会导致前端把后续
                 # 工具的参数累加到上一个工具上，进而出现"参数收集不到"或"工具消失"。
-                tc_index = getattr(tc, 'index', None)
+                tc_index = getattr(tc, "index", None)
                 if tc_index is not None:
-                    tc_dict['index'] = tc_index
-                function = tc.function if hasattr(tc, 'function') else None
+                    tc_dict["index"] = tc_index
+                function = tc.function if hasattr(tc, "function") else None
                 if function:
-                    tc_dict['function'] = {
-                        'name': getattr(function, 'name', ''),
-                        'arguments': getattr(function, 'arguments', '')
+                    tc_dict["function"] = {
+                        "name": getattr(function, "name", ""),
+                        "arguments": getattr(function, "arguments", ""),
                     }
                 result.append(tc_dict)
             elif isinstance(tc, dict):
@@ -235,54 +246,54 @@ class MessageChunk:
                 # 其他形式，转换为字符串
                 result.append(str(tc))
         return result
-    
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'MessageChunk':
+    def from_dict(cls, data: Dict[str, Any]) -> "MessageChunk":
         """从字典创建MessageChunk实例
-        
+
         Args:
             data: 字典格式的消息数据
-            
+
         Returns:
             MessageChunk: 消息块实例
         """
         # 确保role字段存在
-        if 'role' not in data:
+        if "role" not in data:
             raise ValueError("Missing required field: role")
-        
+
         # 自动生成message_id如果不存在
-        if 'message_id' not in data or data['message_id'] is None:
-            data['message_id'] = str(uuid.uuid4())
-        
+        if "message_id" not in data or data["message_id"] is None:
+            data["message_id"] = str(uuid.uuid4())
+
         # 只传递类中定义的字段
         valid_fields = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
-        
+
         return cls(**valid_fields)
-    
+
     def validate(self) -> bool:
         """验证消息块的有效性
-        
+
         Returns:
             bool: 是否有效
         """
         # 检查必需字段
         if not all([self.role, self.message_id is not None]):
             return False
-        
+
         # 检查角色是否有效
         valid_roles = [role.value for role in MessageRole]
         if self.role not in valid_roles:
             return False
-        
+
         return True
 
     def get_content(self) -> Optional[str]:
         """获取消息内容
-        
+
         Returns:
             Optional[str]: 消息内容
         """
-        return self.content
+        return self.content  # pyright: ignore[reportReturnType]
 
     def normalized_message_type(self) -> Optional[str]:
         """返回规范化后的消息类型。
@@ -336,7 +347,7 @@ class MessageChunk:
             str: 提取的JSON内容，如果没有找到代码块则返回原始内容
         """
         logger.debug("AgentBase: 尝试从内容中提取JSON")
-        
+
         # 首先尝试直接解析
         try:
             json.loads(content)
@@ -344,7 +355,7 @@ class MessageChunk:
         except json.JSONDecodeError:
             pass
         # 尝试从markdown代码块中提取
-        code_block_pattern = r'```(?:json)?\n([\s\S]*?)\n```'
+        code_block_pattern = r"```(?:json)?\n([\s\S]*?)\n```"
         match = re.search(code_block_pattern, content)
         if match:
             try:

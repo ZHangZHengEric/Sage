@@ -6,6 +6,19 @@ needed for most callers. Use attribute access to load only the requested tool.
 """
 
 from importlib import import_module
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .codebase_tool import CodebaseTool
+    from .execute_command_tool import ExecuteCommandTool
+    from .file_system_tool import FileSystemTool
+    from .image_understanding_tool import ImageUnderstandingTool
+    from .lint_tool import LintTool
+    from .memory_tool import MemoryTool
+    from .questionnaire_tool import QuestionnaireTool
+    from .todo_tool import ToDoTool
+    from .turn_status_tool import TurnStatusTool
+    from .web_fetcher_tool import WebFetcherTool
 
 # 协议性内部工具：不下发到 SAgent.run_stream（即不进入 SSE/前端）。
 # 这些工具是 agent 控制信号（如 turn_status 报告本轮状态），非用户可见结果。

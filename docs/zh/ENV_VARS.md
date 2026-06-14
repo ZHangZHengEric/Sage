@@ -15,14 +15,33 @@ ref: env_vars
 > `os.environ.get` / `os.getenv` 调用。配置项语义以代码注释为准，本表只做摘要。
 > 默认值列写 "—" 表示未读到默认值（必填或动态推导）。
 
+## 0. 部署示例口径
+
+`deploy/dev|test|prod/.env.example` 采用最小必填口径：只保留 Compose/应用运行通常需要修改的部署参数、密钥、账号和外部地址。Kubernetes 专属配置放在 `deploy/k8s/env/*.env.example`，不混入通用环境模板。稳定默认值由代码、Compose 或 K8s 部署脚本提供。
+
+示例中保留的重点变量：
+
+| 类型 | 变量 |
+| --- | --- |
+| 环境与入口 | `SAGE_ENV`、`SAGE_ROOT` |
+| 密钥与账号 | `SAGE_JWT_KEY`、`SAGE_REFRESH_TOKEN_SECRET`、`SAGE_SESSION_SECRET`、MySQL/S3/Grafana 密码、LLM/Embedding API Key、邮件 AK/SK |
+| 外部地址 | `SAGE_TRACE_JAEGER_PUBLIC_URL`、`SAGE_GRAFANA_PUBLIC_URL`、`SAGE_S3_PUBLIC_BASE_URL`、`SAGE_ELASTICSEARCH_URL` |
+
+Kubernetes 模板单独保留 `NAMESPACE`、`SAGE_HOST`、`SAGE_PUBLIC_URL`、`IMAGE_REGISTRY`、`IMAGE_PULL_POLICY`、`K8S_IMAGE_TARGET`、`CTR_BIN`、`CTR_NAMESPACE`、`STORAGE_CLASS`、`INGRESS_CLASS_NAME`、`TLS_SECRET_NAME`、`ENABLE_INGRESS`、`SAGE_WEB_SERVICE_TYPE`、`SAGE_WIKI_SERVICE_TYPE`、`SAGE_WEB_NODE_PORT`、`SAGE_WIKI_NODE_PORT`。
+
+高级可覆盖变量不放入 `.env.example`，除非部署确实需要覆盖。常见项包括 Compose 项目名和端口覆盖、`SAGE_WEB_BASE_PATH`、`SAGE_TRACE_JAEGER_URL`、`SAGE_LOKI_PUSH_URL`、`SAGE_MCP_*`、`OPENSANDBOX_IMAGE`、`OPENSANDBOX_TIMEOUT`、`SAGE_OPENSANDBOX_APPEND_MAX_BYTES`、默认 LLM/Embedding 模型参数、邮件固定默认项。
+
 ## 1. LLM 与默认模型
 
 
 | 变量                              | 默认值 | 说明                      |
 | ------------------------------- | --- | ----------------------- |
 | `SAGE_DEFAULT_LLM_API_KEY`      | —   | 默认模型 API Key（OpenAI 兼容） |
-| `SAGE_DEFAULT_LLM_API_BASE_URL` | —   | 默认模型 base URL           |
-| `SAGE_DEFAULT_LLM_MODEL_NAME`   | —   | 默认模型名                   |
+| `SAGE_DEFAULT_LLM_API_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1/` | 默认模型 base URL |
+| `SAGE_DEFAULT_LLM_MODEL_NAME`   | `deepseek-v3` | 默认模型名 |
+| `SAGE_DEFAULT_LLM_MAX_TOKENS`   | `4096` | 默认最大输出 token |
+| `SAGE_DEFAULT_LLM_TEMPERATURE`  | `0.2` | 默认采样温度 |
+| `SAGE_DEFAULT_LLM_MAX_MODEL_LEN` | `52000` | 默认上下文长度 |
 
 
 ## 2. 服务端口与目录
@@ -30,7 +49,7 @@ ref: env_vars
 
 | 变量                     | 默认值                   | 说明                            |
 | ---------------------- | --------------------- | ----------------------------- |
-| `SAGE_HOST`            | `0.0.0.0`             | 服务端监听地址                       |
+| `SAGE_HOST`            | —                     | 部署对外访问域名/IP，主要用于 K8s 地址派生；不是服务端监听地址 |
 | `SAGE_PORT`            | `8001`（server）/ 桌面端动态 | 服务端口                          |
 | `SAGE_ROOT`            | `~/.sage`             | 全局根目录，下设 sessions/agents/logs |
 | `SAGE_SESSIONS_PATH`   | `$SAGE_ROOT/sessions` | 会话持久化目录                       |
@@ -78,10 +97,19 @@ ref: env_vars
 | -------------------------------------- | --- | ---------------- |
 | `OPENSANDBOX_URL`                      | —   | OpenSandbox 服务地址 |
 | `OPENSANDBOX_API_KEY`                  | —   | API Key          |
-| `OPENSANDBOX_IMAGE`                    | —   | 默认镜像             |
-| `OPENSANDBOX_TIMEOUT`                  | —   | 超时时间（秒）          |
-| `SAGE_OPENSANDBOX_APPEND_MAX_BYTES`    | —   | append 接口单次最大字节数 |
+| `OPENSANDBOX_IMAGE`                    | `opensandbox/code-interpreter:v1.0.2` | 默认镜像 |
+| `OPENSANDBOX_TIMEOUT`                  | `1800` | 超时时间（秒） |
+| `SAGE_OPENSANDBOX_APPEND_MAX_BYTES`    | `262144` | append 接口单次最大字节数 |
 | `SAGE_APPEND_PATH` / `SAGE_APPEND_B64` | —   | append 工具内部传参    |
+
+## 4.2 Embedding 默认
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `SAGE_EMBEDDING_API_KEY` | — | Embedding API Key |
+| `SAGE_EMBEDDING_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1/` | Embedding base URL |
+| `SAGE_EMBEDDING_MODEL` | `text-embedding-v4` | Embedding 模型 |
+| `SAGE_EMBEDDING_DIMS` | `1024` | 向量维度 |
 
 
 ## 5. Agent 主循环 & Prompt Cache
@@ -93,6 +121,7 @@ ref: env_vars
 | `SAGE_CLI_MAX_LOOP_COUNT`                      | —       | CLI 单轮最大循环次数                                                                                                                                                                 |
 | `SAGE_SPLIT_SYSTEM`                            | `true`  | 是否把 system message 拆成 stable / semi_stable / volatile 多段以提升 prompt cache 命中                                                                                              |
 | `SAGE_STABLE_TOOLS_ORDER`                      | `true`  | 是否对 `tools` 字段按 name 字典序排序，稳定 cache key                                                                                                                                      |
+| `SAGE_TOOL_SUGGESTION_DIRECT_THRESHOLD`        | `15`    | 可用工具数小于等于该值时跳过 LLM 工具推荐调用，直接透传所有可用工具                                                                                                                                            |
 | `SAGE_AUTO_LINT`                               | `true`  | `file_write/file_update` 完成后是否自动 lint 并 inline 返回诊断                                                                                                                      |
 | `SAGE_EMIT_TOOL_CALL_ON_COMPLETE`              | `true`  | LLM 完整产出后是否补发 tool_call chunk                                                                                                                                                |
 | `SAGE_ECHO_SHELL_OUTPUT`                       | `false` | 后台 shell 输出是否回显到主流                                                                                                                                                           |

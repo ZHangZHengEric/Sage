@@ -26,6 +26,7 @@ class StreamManager:
     _instance = None
     _sessions: Dict[str, SessionState] = {}
     _session_list_subscribers: Set[asyncio.Queue] = set()
+    _GENERATOR_ACLOSE_TIMEOUT = 5.0
 
     def __new__(cls):
         if cls._instance is None:
@@ -103,11 +104,15 @@ class StreamManager:
 
         await self._notify_session_list_changed()
 
-    async def start_session(self, session_id: str, query: str, generator, lock: asyncio.Lock):
+    async def start_session(
+        self, session_id: str, query: str, generator, lock: asyncio.Lock
+    ):
         if session_id in self._sessions:
             session = self._sessions[session_id]
             if not session.is_completed and session.task and not session.task.done():
-                logger.info(f"Session {session_id} already running, joining existing session.")
+                logger.info(
+                    f"Session {session_id} already running, joining existing session."
+                )
                 if lock and lock != session.lock:
                     await safe_release(lock, session_id, "复用会话释放新锁")
                 return
@@ -144,17 +149,29 @@ class StreamManager:
         finally:
             try:
                 if hasattr(generator, "aclose"):
-                    await generator.aclose()
+                    await asyncio.wait_for(
+                        generator.aclose(),
+                        timeout=self._GENERATOR_ACLOSE_TIMEOUT,
+                    )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"Background worker generator.aclose for {session.session_id} "
+                    f"exceeded {self._GENERATOR_ACLOSE_TIMEOUT}s, skipping wait"
+                )
             except Exception as e:
                 logger.warning(f"Error closing generator for {session.session_id}: {e}")
             session.is_completed = True
-            logger.debug(f"Session {session.session_id} completed. Total chunks: {len(session.history)}")
+            logger.debug(
+                f"Session {session.session_id} completed. Total chunks: {len(session.history)}"
+            )
             for queue in list(session.subscribers):
                 await queue.put(None)
 
             if session.lock:
                 try:
-                    released = await safe_release(session.lock, session.session_id, "后台流结束清理")
+                    released = await safe_release(
+                        session.lock, session.session_id, "后台流结束清理"
+                    )
                     delete_session_run_lock(session.session_id)
                     if released:
                         logger.debug(f"Released lock for session {session.session_id}")
@@ -176,12 +193,18 @@ class StreamManager:
         session = self._sessions.get(session_id)
         if not session:
             return False
-        return bool(session.task and not session.task.done() and not session.is_completed)
+        return bool(
+            session.task and not session.task.done() and not session.is_completed
+        )
 
     async def get_session_query(self, session_id: str) -> Optional[str]:
         if session_id in self._sessions:
             return self._sessions[session_id].query
         return None
+
+    # 防御性兜底：即使下层 generator 的 aclose / 持久化路径仍可能偶发卡住，
+    # 这里也不应该让 stop_session 无限期 await，否则会顶住整条会话中断链路。
+    _STOP_SESSION_TIMEOUT = 5.0
 
     async def stop_session(self, session_id: Optional[str]) -> None:
         if not session_id:
@@ -193,7 +216,14 @@ class StreamManager:
         if task and not task.done():
             task.cancel()
             try:
-                await task
+                # 用 shield 包一层只是为了让 wait_for 超时后不再额外 cancel 一次（task 已经被 cancel）。
+                await asyncio.wait_for(
+                    asyncio.shield(task), timeout=self._STOP_SESSION_TIMEOUT
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"stop_session: 等待 {session_id} 背景 task 取消超过 {self._STOP_SESSION_TIMEOUT}s，跳过等待"
+                )
             except asyncio.CancelledError:
                 pass
         session.status = "interrupted"

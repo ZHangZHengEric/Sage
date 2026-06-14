@@ -34,7 +34,7 @@ def test_shutdown_scheduler_supports_sync_shutdown_api():
 
     scheduler = FakeScheduler()
 
-    bootstrap.get_scheduler = lambda: scheduler
+    bootstrap.get_scheduler = lambda: scheduler  # pyright: ignore[reportAttributeAccessIssue]
 
     asyncio.run(bootstrap.shutdown_scheduler())
 

@@ -76,7 +76,11 @@ def _normalize_tool_result(tool_response: Any) -> Dict[str, Any]:
         if parsed is None:
             parsed = tool_response.get("result")
         if not raw_text:
-            raw_text = tool_response.get("content") if isinstance(tool_response.get("content"), str) else ""
+            raw_text = (
+                tool_response.get("content")
+                if isinstance(tool_response.get("content"), str)
+                else ""
+            )
     elif isinstance(tool_response, str):
         raw_text = tool_response
         parsed = tool_response
@@ -85,7 +89,7 @@ def _normalize_tool_result(tool_response: Any) -> Dict[str, Any]:
 
     parsed = _try_parse_json_like(parsed)
     if not raw_text:
-        raw_text = _format_result_text(parsed, raw_text)
+        raw_text = _format_result_text(parsed, raw_text)  # pyright: ignore[reportArgumentType]
     formatted_text = _format_result_text(parsed, raw_text)
 
     return {
@@ -120,7 +124,7 @@ async def execute_tool(
         )
 
     if role != "admin":
-        tool_info = tool_manager.get_tool_info(tool_name)
+        tool_info = tool_manager.get_tool_info(tool_name)  # pyright: ignore[reportAttributeAccessIssue]
         tool_type = tool_info.get("type", "basic")
         if tool_type == "mcp":
             source = normalize_tool_source(tool_info.get("source", "internal"))
@@ -132,11 +136,15 @@ async def execute_tool(
                     error_detail="Permission denied",
                 )
 
+    safe_tool_params = dict(tool_params)
+    safe_tool_params.pop("session_id", None)
+    safe_tool_params.pop("user_id", None)
+
     tool_response = await tool_manager.run_tool_async(
         tool_name=tool_name,
         session_id="",
         user_id=user_id,
-        **tool_params,
+        **safe_tool_params,
     )
     if tool_response is not None:
         logger.info(f"执行工具成功: {tool_name}")
@@ -155,6 +163,7 @@ async def list_tools(
     user_id: str = "",
     role: str = "user",
     tool_type: Optional[str] = None,
+    language: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     try:
         await ensure_default_anytool_server()
@@ -164,7 +173,10 @@ async def list_tools(
     if not tool_manager:
         return []
 
-    available_tools = tool_manager.list_tools_with_type()
+    available_tools = tool_manager.list_tools_with_type(
+        lang=language,
+        fallback_chain=["en"] if language != "en" else None,
+    )
     # 隐藏工具：
     # - turn_status：协议性内置工具，由 SimpleAgent 强制注入，不让用户单独勾选；
     # - await_shell / kill_shell：与 execute_shell_command 共享后台任务注册表，作为捆绑工具

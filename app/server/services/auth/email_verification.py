@@ -64,7 +64,8 @@ def validate_verification_code(code: str | None) -> str:
 
 def _purge_expired_codes(now: float) -> None:
     expired_emails = [
-        email for email, record in _REGISTER_VERIFICATION_CODES.items()
+        email
+        for email, record in _REGISTER_VERIFICATION_CODES.items()
         if record.expires_at <= now
     ]
     for email in expired_emails:
@@ -73,8 +74,7 @@ def _purge_expired_codes(now: float) -> None:
 
 def _generate_verification_code() -> str:
     return "".join(
-        secrets.choice("0123456789")
-        for _ in range(REGISTER_VERIFICATION_CODE_LENGTH)
+        secrets.choice("0123456789") for _ in range(REGISTER_VERIFICATION_CODE_LENGTH)
     )
 
 

@@ -51,21 +51,28 @@ class TestProviderHelpers(unittest.TestCase):
 
     def test_verify_cli_provider_maps_probe_errors_to_cli_error(self):
         original_init_cli_config = cli_service.init_cli_config
+        import app.cli.services.provider as provider_service
+
+        original_provider_init_cli_config = provider_service.init_cli_config
         original_common_services = sys.modules.get("common.services")
 
         async def _run():
             fake_common_services = types.ModuleType("common.services")
-            fake_common_services.llm_provider_service = types.SimpleNamespace(
+            fake_common_services.llm_provider_service = types.SimpleNamespace(  # pyright: ignore[reportAttributeAccessIssue]
                 verify_provider=_fake_verify_provider,
             )
             sys.modules["common.services"] = fake_common_services
             try:
                 cli_service.init_cli_config = lambda init_logging=False: StubConfig()
+                provider_service.init_cli_config = lambda init_logging=False: (
+                    StubConfig()
+                )
                 with self.assertRaises(CLIError) as ctx:
                     await cli_service.verify_cli_provider()
                 self.assertIn("Provider authentication failed", str(ctx.exception))
             finally:
                 cli_service.init_cli_config = original_init_cli_config
+                provider_service.init_cli_config = original_provider_init_cli_config
                 if original_common_services is None:
                     sys.modules.pop("common.services", None)
                 else:
@@ -98,11 +105,13 @@ class TestProviderHelpers(unittest.TestCase):
                 async def get_by_id(self, provider_id):
                     return _Provider()
 
-            fake_module.LLMProviderDao = _Dao
+            fake_module.LLMProviderDao = _Dao  # pyright: ignore[reportAttributeAccessIssue]
             sys.modules["common.models.llm_provider"] = fake_module
             try:
                 with self.assertRaises(CLIError) as ctx:
-                    await cli_service.inspect_cli_provider(provider_id="provider-1", user_id="alice")
+                    await cli_service.inspect_cli_provider(
+                        provider_id="provider-1", user_id="alice"
+                    )
                 self.assertIn("is not visible to user alice", str(ctx.exception))
             finally:
                 if original_common_models is None:
@@ -123,9 +132,24 @@ class TestProviderHelpers(unittest.TestCase):
                     "user_id": user_id or "alice",
                     "total": 3,
                     "list": [
-                        {"id": "p1", "name": "DeepSeek Main", "model": "deepseek-chat", "is_default": True},
-                        {"id": "p2", "name": "DeepSeek Backup", "model": "deepseek-chat", "is_default": False},
-                        {"id": "p3", "name": "Qwen Fast", "model": "qwen-max", "is_default": False},
+                        {
+                            "id": "p1",
+                            "name": "DeepSeek Main",
+                            "model": "deepseek-chat",
+                            "is_default": True,
+                        },
+                        {
+                            "id": "p2",
+                            "name": "DeepSeek Backup",
+                            "model": "deepseek-chat",
+                            "is_default": False,
+                        },
+                        {
+                            "id": "p3",
+                            "name": "Qwen Fast",
+                            "model": "qwen-max",
+                            "is_default": False,
+                        },
                     ],
                 }
 

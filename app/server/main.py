@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 """
 Sage Stream Service
 
@@ -5,12 +6,17 @@ Sage Stream Service
 提供简洁的 HTTP API 和 Server-Sent Events (SSE) 实时通信
 """
 
+import os
 import sys
 
 from dotenv import load_dotenv
 
 # 指定加载的 .env 文件（保持不动）
 load_dotenv(".env")
+
+# Server uses common.utils.logging for file sinks; do not let sagents create
+# the framework-level logs/sage_debug.log handlers during import.
+os.environ["SAGE_DISABLE_SAGENTS_FILE_LOGGING"] = "1"
 
 
 from contextlib import asynccontextmanager
@@ -93,6 +99,7 @@ def start_server(cfg: config.StartupConfig):
         log_config=None,
         reload=getattr(cfg, "reload", False),
         factory=True,
+        forwarded_allow_ips="*",
     )
     server = uvicorn.Server(config=un_cfg)
     server.run()

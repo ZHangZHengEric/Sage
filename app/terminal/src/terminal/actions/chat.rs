@@ -32,6 +32,19 @@ pub(super) fn run_task(
         sandbox_type: app.sandbox_type.clone(),
         skills: app.selected_skills.clone(),
         model_override: app.selected_model.clone(),
+        goal_objective: app
+            .pending_goal_mutation
+            .as_ref()
+            .and_then(|goal| goal.objective.clone()),
+        goal_status: app
+            .pending_goal_mutation
+            .as_ref()
+            .and_then(|goal| goal.status.clone()),
+        clear_goal: app
+            .pending_goal_mutation
+            .as_ref()
+            .map(|goal| goal.clear)
+            .unwrap_or(false),
         task,
     };
     let handle = ensure_backend(backend, &request)?;

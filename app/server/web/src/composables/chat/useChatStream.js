@@ -293,11 +293,13 @@ export const useChatStream = ({
         agent_mode: normalizeAgentMode(config.agentMode),
         more_suggest: config.moreSuggest,
         max_loop_count: config.maxLoopCount,
-        available_sub_agent_ids: Array.isArray(config.availableSubAgentIds) ? config.availableSubAgentIds : [],
         agent_id: selectedAgent.id,
         system_context: {
           response_language: normalizeResponseLanguage(language?.value)
         }
+      }
+      if (config.subAgentSelectionMode === 'manual') {
+        requestBody.available_sub_agent_ids = Array.isArray(config.availableSubAgentIds) ? config.availableSubAgentIds : []
       }
       const response = await chatAPI.streamChat(requestBody, abortControllerRef?.value)
       let streamLastIndex = 0
@@ -355,11 +357,13 @@ export const useChatStream = ({
         agent_mode: normalizeAgentMode(config?.agentMode),
         more_suggest: config?.moreSuggest,
         max_loop_count: config?.maxLoopCount,
-        available_sub_agent_ids: Array.isArray(config?.availableSubAgentIds) ? config.availableSubAgentIds : [],
         agent_id: selectedAgent?.id,
         system_context: {
           response_language: normalizeResponseLanguage(language?.value)
         }
+      }
+      if (config?.subAgentSelectionMode === 'manual') {
+        requestBody.available_sub_agent_ids = Array.isArray(config?.availableSubAgentIds) ? config.availableSubAgentIds : []
       }
       if (guidanceContent && String(guidanceContent).trim()) {
         requestBody.guidance_content = String(guidanceContent).trim()

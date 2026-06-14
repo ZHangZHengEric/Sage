@@ -67,6 +67,13 @@ class AgentConfigDTO(BaseModel):
     fast_llm_provider_id: Optional[str] = None  # 快速模型提供商ID（可选）
 
 
+def _first_present(config: Dict[str, Any], *keys: str):
+    for key in keys:
+        if key in config and config.get(key) is not None:
+            return config.get(key)
+    return None
+
+
 class AutoGenAgentRequest(BaseModel):
     agent_description: str
     available_tools: Optional[List[str]] = None
@@ -101,31 +108,36 @@ def convert_config_to_agent(
         id=agent_id,
         user_id=user_id,
         name=agent_name or config.get("name") or f"Agent {agent_id}",
-        systemPrefix=config.get("systemPrefix") or config.get("system_prefix"),
-        systemContext=config.get("systemContext") or config.get("system_context"),
-        availableWorkflows=config.get("availableWorkflows")
-        or config.get("available_workflows"),
-        availableTools=config.get("availableTools") or config.get("available_tools"),
-        availableSubAgentIds=config.get("availableSubAgentIds")
-        or config.get("available_sub_agent_ids"),
-        subAgentSelectionMode=config.get("subAgentSelectionMode")
-        or config.get("sub_agent_selection_mode"),
-        availableSkills=config.get("availableSkills") or config.get("available_skills"),
-        availableKnowledgeBases=config.get("availableKnowledgeBases")
-        or config.get("available_knowledge_bases"),
-        memoryType=config.get("memoryType") or config.get("memory_type"),
-        maxLoopCount=config.get("maxLoopCount") or config.get("max_loop_count"),
-        deepThinking=config.get("deepThinking") or config.get("deep_thinking", False),
-        enableMultimodal=config.get("enableMultimodal")
-        or config.get("enable_multimodal", False),
-        multiAgent=config.get("multiAgent") or config.get("multi_agent", False),
-        agentMode=config.get("agentMode") or config.get("agent_mode"),
+        systemPrefix=_first_present(config, "systemPrefix", "system_prefix"),
+        systemContext=_first_present(config, "systemContext", "system_context"),
+        availableWorkflows=_first_present(
+            config, "availableWorkflows", "available_workflows"
+        ),
+        availableTools=_first_present(config, "availableTools", "available_tools"),
+        availableSubAgentIds=_first_present(
+            config, "availableSubAgentIds", "available_sub_agent_ids"
+        ),
+        subAgentSelectionMode=_first_present(
+            config, "subAgentSelectionMode", "sub_agent_selection_mode"
+        ),
+        availableSkills=_first_present(config, "availableSkills", "available_skills"),
+        availableKnowledgeBases=_first_present(
+            config, "availableKnowledgeBases", "available_knowledge_bases"
+        ),
+        memoryType=_first_present(config, "memoryType", "memory_type"),
+        maxLoopCount=_first_present(config, "maxLoopCount", "max_loop_count"),
+        deepThinking=_first_present(config, "deepThinking", "deep_thinking") or False,
+        enableMultimodal=_first_present(config, "enableMultimodal", "enable_multimodal")
+        or False,
+        multiAgent=_first_present(config, "multiAgent", "multi_agent") or False,
+        agentMode=_first_present(config, "agentMode", "agent_mode"),
         description=config.get("description"),
         is_default=is_default,
         created_at=config.get("created_at"),
         updated_at=config.get("updated_at"),
         llm_provider_id=config.get("llm_provider_id"),
-        fast_llm_provider_id=config.get("fast_llm_provider_id") or config.get("fast_llm_provider_id"),
+        fast_llm_provider_id=config.get("fast_llm_provider_id")
+        or config.get("fast_llm_provider_id"),
     )
 
 

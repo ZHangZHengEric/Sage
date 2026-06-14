@@ -3,6 +3,7 @@ Fibre Backend API Client
 
 用于通过后端 API 管理子 Agent 和调用任务
 """
+
 import os
 import json
 import uuid
@@ -18,7 +19,9 @@ class FibreBackendClient:
 
     def __init__(self):
         self.port = self._get_backend_port()
-        self.base_url = f"http://{self.get_base_ip()}:{self.port}" if self.port else None
+        self.base_url = (
+            f"http://{self.get_base_ip()}:{self.port}" if self.port else None
+        )
         self._available = self.port is not None
 
     def get_base_ip(self) -> Optional[str]:
@@ -54,6 +57,7 @@ class FibreBackendClient:
             return False
         try:
             import aiohttp
+
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"{self.base_url}/active", timeout=5) as resp:
                     return resp.status == 200
@@ -77,6 +81,7 @@ class FibreBackendClient:
         max_loop_count: Optional[int] = None,
         llm_provider_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        agent_mode: str = "simple",
     ) -> Optional[str]:
         """
         创建 Agent 到后端
@@ -109,24 +114,31 @@ class FibreBackendClient:
             "deepThinking": False,
             "llm_provider_id": llm_provider_id,
             "multiAgent": False,
-            "agentMode": "fibre",
+            "agentMode": agent_mode
+            if agent_mode in {"simple", "fibre", "team"}
+            else "simple",
         }
 
         # Use provided user_id or fallback to a default
         headers_user_id = user_id if user_id else "unknown"
-        
-        logger.info(f"[Backend API] Creating agent: POST {self.base_url}/api/agent/create, payload: {json.dumps(payload, ensure_ascii=False)}")
+
+        logger.info(
+            f"[Backend API] Creating agent: POST {self.base_url}/api/agent/create, payload: {json.dumps(payload, ensure_ascii=False)}"
+        )
         try:
             import aiohttp
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{self.base_url}/api/agent/create",
                     json=payload,
                     headers={"X-Sage-Internal-UserId": headers_user_id},
-                    timeout=30
+                    timeout=30,
                 ) as resp:
                     resp_text = await resp.text()
-                    logger.info(f"[Backend API] Create agent response: status={resp.status}, body={resp_text}")
+                    logger.info(
+                        f"[Backend API] Create agent response: status={resp.status}, body={resp_text}"
+                    )
                     if resp.status == 200:
                         data = json.loads(resp_text)
                         is_success = data.get("success") or data.get("code") == 200
@@ -141,9 +153,13 @@ class FibreBackendClient:
                     # "已存在" means the agent is already stored in backend — treat as success
                     try:
                         err_data = json.loads(resp_text)
-                        err_msg = err_data.get("message", "") or err_data.get("error_detail", "")
+                        err_msg = err_data.get("message", "") or err_data.get(
+                            "error_detail", ""
+                        )
                         if "已存在" in err_msg:
-                            logger.info(f"[Backend API] Agent '{name}' already exists in backend, treating as stored")
+                            logger.info(
+                                f"[Backend API] Agent '{name}' already exists in backend, treating as stored"
+                            )
                             return agent_id
                     except (json.JSONDecodeError, AttributeError):
                         pass
@@ -153,7 +169,9 @@ class FibreBackendClient:
             logger.warning(f"Error creating agent via backend: {e}")
             return None
 
-    async def get_agent(self, agent_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    async def get_agent(
+        self, agent_id: str, user_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """获取 Agent 配置
 
         Args:
@@ -164,18 +182,23 @@ class FibreBackendClient:
             return None
 
         headers_user_id = user_id if user_id else "unknown"
-        
-        logger.info(f"[Backend API] Getting agent: GET {self.base_url}/api/agent/{agent_id}")
+
+        logger.info(
+            f"[Backend API] Getting agent: GET {self.base_url}/api/agent/{agent_id}"
+        )
         try:
             import aiohttp
+
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"{self.base_url}/api/agent/{agent_id}",
                     headers={"X-Sage-Internal-UserId": headers_user_id},
-                    timeout=10
+                    timeout=10,
                 ) as resp:
                     resp_text = await resp.text()
-                    logger.debug(f"[Backend API] Get agent response: status={resp.status}, body={resp_text}")
+                    logger.debug(
+                        f"[Backend API] Get agent response: status={resp.status}, body={resp_text}"
+                    )
                     if resp.status == 200:
                         data = json.loads(resp_text)
                         # Check success by "success" field or "code" field
@@ -205,14 +228,17 @@ class FibreBackendClient:
         logger.info(f"[Backend API] Listing agents: GET {self.base_url}/api/agent/list")
         try:
             import aiohttp
+
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"{self.base_url}/api/agent/list",
                     headers={"X-Sage-Internal-UserId": headers_user_id},
-                    timeout=10
+                    timeout=10,
                 ) as resp:
                     resp_text = await resp.text()
-                    logger.info(f"[Backend API] List agents response: status={resp.status}, body={resp_text}")
+                    logger.info(
+                        f"[Backend API] List agents response: status={resp.status}, body={resp_text}"
+                    )
                     if resp.status == 200:
                         data = await resp.json()
                         if data.get("success"):
@@ -235,11 +261,17 @@ class FibreBackendClient:
                                             "description": agent.get("description", ""),
                                             "system_prompt": agent.get("systemPrefix")
                                             or agent.get("system_prompt", ""),
-                                            "available_tools": agent.get("availableTools")
+                                            "available_tools": agent.get(
+                                                "availableTools"
+                                            )
                                             or agent.get("available_tools"),
-                                            "available_skills": agent.get("availableSkills")
+                                            "available_skills": agent.get(
+                                                "availableSkills"
+                                            )
                                             or agent.get("available_skills"),
-                                            "available_workflows": agent.get("availableWorkflows")
+                                            "available_workflows": agent.get(
+                                                "availableWorkflows"
+                                            )
                                             or agent.get("available_workflows"),
                                             "system_context": agent.get("systemContext")
                                             or agent.get("system_context"),
@@ -291,18 +323,23 @@ class FibreBackendClient:
 
         headers_user_id = user_id if user_id else "unknown"
 
-        logger.info(f"[Backend API] Creating LLM provider: POST {self.base_url}/api/llm-provider/create, payload: {json.dumps(payload, ensure_ascii=False)}")
+        logger.info(
+            f"[Backend API] Creating LLM provider: POST {self.base_url}/api/llm-provider/create, payload: {json.dumps(payload, ensure_ascii=False)}"
+        )
         try:
             import aiohttp
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{self.base_url}/api/llm-provider/create",
                     json=payload,
                     headers={"X-Sage-Internal-UserId": headers_user_id},
-                    timeout=30
+                    timeout=30,
                 ) as resp:
                     resp_text = await resp.text()
-                    logger.info(f"[Backend API] Create LLM provider response: status={resp.status}, body={resp_text}")
+                    logger.info(
+                        f"[Backend API] Create LLM provider response: status={resp.status}, body={resp_text}"
+                    )
                     if resp.status == 200:
                         data = json.loads(resp_text)
                         # Check success by "success" field or "code" field
@@ -311,7 +348,9 @@ class FibreBackendClient:
                             # 后端返回的 data 可能是对象或字符串
                             resp_data = data.get("data")
                             if isinstance(resp_data, dict):
-                                return resp_data.get("provider_id") or resp_data.get("id")
+                                return resp_data.get("provider_id") or resp_data.get(
+                                    "id"
+                                )
                             elif isinstance(resp_data, str):
                                 return resp_data
                     logger.warning(f"Failed to create LLM provider: {resp_text}")
@@ -346,7 +385,9 @@ class FibreBackendClient:
         if not self.available:
             raise RuntimeError("Backend not available")
         if max_loop_count is None:
-            raise ValueError("max_loop_count is required when streaming a Fibre sub-agent task")
+            raise ValueError(
+                "max_loop_count is required when streaming a Fibre sub-agent task"
+            )
 
         payload = {
             "agent_id": agent_id,
@@ -355,34 +396,43 @@ class FibreBackendClient:
             "system_context": system_context or {},
         }
         payload["max_loop_count"] = max_loop_count
-        
+
         headers_user_id = user_id if user_id else "unknown"
-        
-        logger.info(f"[Backend API] Stream chat: POST {self.base_url}/api/chat, payload: {json.dumps(payload, ensure_ascii=False)}")
+
+        logger.info(
+            f"[Backend API] Stream chat: POST {self.base_url}/api/chat, payload: {json.dumps(payload, ensure_ascii=False)}"
+        )
 
         import aiohttp
+
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{self.base_url}/api/chat",
                 json=payload,
                 headers={"X-Sage-Internal-UserId": headers_user_id},
-                timeout=None
+                timeout=None,
             ) as resp:
                 logger.info(f"[Backend API] Stream chat response: status={resp.status}")
                 # 用于缓存和合并 chunks
                 pending_messages: Dict[str, Dict[str, Any]] = {}
 
                 async for line in resp.content:
-                    if interrupt_event is not None and hasattr(interrupt_event, "is_set") and interrupt_event.is_set():
-                        logger.info(f"[Backend API] Stream chat interrupted for session={session_id}")
+                    if (
+                        interrupt_event is not None
+                        and hasattr(interrupt_event, "is_set")
+                        and interrupt_event.is_set()
+                    ):
+                        logger.info(
+                            f"[Backend API] Stream chat interrupted for session={session_id}"
+                        )
                         break
-                    line = line.decode('utf-8').strip()
+                    line = line.decode("utf-8").strip()
                     if not line:
                         continue
 
                     # 解析 SSE 数据
                     data = None
-                    if line.startswith('data:'):
+                    if line.startswith("data:"):
                         try:
                             data = json.loads(line[5:])  # 去掉 "data:" 前缀
                         except json.JSONDecodeError:
@@ -397,75 +447,91 @@ class FibreBackendClient:
                         continue
 
                     # 获取 message_id，如果没有则生成一个临时 ID
-                    message_id = data.get('message_id') or data.get('chunk_id') or str(uuid.uuid4())
+                    message_id = (
+                        data.get("message_id")
+                        or data.get("chunk_id")
+                        or str(uuid.uuid4())
+                    )
 
                     # 跳过没有 role 字段的消息（如 stream_end 元数据消息）
-                    if 'role' not in data:
+                    if "role" not in data:
                         continue
 
                     # 检查是否是新消息
                     if message_id not in pending_messages:
                         # 如果是完整消息（不是 chunk），直接 yield
-                        if not data.get('is_chunk', False):
+                        if not data.get("is_chunk", False):
                             chunk = MessageChunk.from_dict(data)
                             yield [chunk]
                             continue
 
                         # 初始化 pending message
                         pending_messages[message_id] = {
-                            'message_id': message_id,
-                            'role': data.get('role', 'assistant'),
-                            'content': data.get('content', '') or '',
-                            'tool_calls': data.get('tool_calls', []),
-                            'type': data.get('type'),
-                            'session_id': data.get('session_id', session_id),
-                            'agent_name': data.get('agent_name'),
-                            'timestamp': data.get('timestamp'),
-                            'metadata': data.get('metadata', {}),
-                            'is_final': data.get('is_final', False),
+                            "message_id": message_id,
+                            "role": data.get("role", "assistant"),
+                            "content": data.get("content", "") or "",
+                            "tool_calls": data.get("tool_calls", []),
+                            "type": data.get("type"),
+                            "session_id": data.get("session_id", session_id),
+                            "agent_name": data.get("agent_name"),
+                            "timestamp": data.get("timestamp"),
+                            "metadata": data.get("metadata", {}),
+                            "is_final": data.get("is_final", False),
                         }
                     else:
                         # 合并到已有消息
                         pending = pending_messages[message_id]
 
                         # 合并 content
-                        if data.get('content'):
-                            pending['content'] = (pending['content'] or '') + data['content']
+                        if data.get("content"):
+                            pending["content"] = (pending["content"] or "") + data[
+                                "content"
+                            ]
 
                         # 合并 tool_calls（流式工具调用需要合并）
-                        if data.get('tool_calls'):
-                            if not pending.get('tool_calls'):
-                                pending['tool_calls'] = data['tool_calls']
+                        if data.get("tool_calls"):
+                            if not pending.get("tool_calls"):
+                                pending["tool_calls"] = data["tool_calls"]
                             else:
                                 # 合并 tool_calls，避免覆盖已有数据
-                                existing_calls = {tc.get('id'): tc for tc in pending['tool_calls'] if tc.get('id')}
-                                for new_tc in data['tool_calls']:
-                                    tc_id = new_tc.get('id')
+                                existing_calls = {
+                                    tc.get("id"): tc
+                                    for tc in pending["tool_calls"]
+                                    if tc.get("id")
+                                }
+                                for new_tc in data["tool_calls"]:
+                                    tc_id = new_tc.get("id")
                                     if tc_id and tc_id in existing_calls:
                                         # 合并到现有的 tool_call
                                         existing_tc = existing_calls[tc_id]
-                                        if new_tc.get('function'):
-                                            if not existing_tc.get('function'):
-                                                existing_tc['function'] = {}
+                                        if new_tc.get("function"):
+                                            if not existing_tc.get("function"):
+                                                existing_tc["function"] = {}
                                             # 合并 function 字段
-                                            for key, value in new_tc['function'].items():
-                                                if key == 'arguments' and existing_tc['function'].get(key):
+                                            for key, value in new_tc[
+                                                "function"
+                                            ].items():
+                                                if key == "arguments" and existing_tc[
+                                                    "function"
+                                                ].get(key):
                                                     # 追加 arguments
-                                                    existing_tc['function'][key] += value
+                                                    existing_tc["function"][key] += (
+                                                        value
+                                                    )
                                                 else:
-                                                    existing_tc['function'][key] = value
+                                                    existing_tc["function"][key] = value
                                     else:
                                         # 新的 tool_call
-                                        pending['tool_calls'].append(new_tc)
+                                        pending["tool_calls"].append(new_tc)
 
                         # 更新其他字段
-                        if data.get('type'):
-                            pending['type'] = data['type']
-                        if data.get('is_final'):
-                            pending['is_final'] = True
+                        if data.get("type"):
+                            pending["type"] = data["type"]
+                        if data.get("is_final"):
+                            pending["is_final"] = True
 
                     # 检查是否是最终消息
-                    if data.get('is_final', False) or not data.get('is_chunk', False):
+                    if data.get("is_final", False) or not data.get("is_chunk", False):
                         if message_id in pending_messages:
                             msg_data = pending_messages.pop(message_id)
                             chunk = MessageChunk.from_dict(msg_data)
@@ -476,21 +542,26 @@ class FibreBackendClient:
                     chunk = MessageChunk.from_dict(message)
                     yield [chunk]
 
-    async def interrupt_session(self, session_id: str, user_id: Optional[str] = None) -> bool:
+    async def interrupt_session(
+        self, session_id: str, user_id: Optional[str] = None
+    ) -> bool:
         """请求后端中断指定会话。"""
         if not self.available:
             return False
 
         headers_user_id = user_id if user_id else "unknown"
-        logger.info(f"[Backend API] Interrupt session: POST {self.base_url}/api/sessions/{session_id}/interrupt")
+        logger.info(
+            f"[Backend API] Interrupt session: POST {self.base_url}/api/sessions/{session_id}/interrupt"
+        )
         try:
             import aiohttp
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{self.base_url}/api/sessions/{session_id}/interrupt",
                     json={"message": "用户请求中断"},
                     headers={"X-Sage-Internal-UserId": headers_user_id},
-                    timeout=10
+                    timeout=10,
                 ) as resp:
                     return resp.status == 200
         except Exception as e:

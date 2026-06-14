@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use anyhow::{anyhow, Result};
+use serde_json::Value;
 
 use crate::backend::protocol::{flush_complete_lines, BackendProtocolState};
 use crate::backend::protocol_support::truncate;
@@ -33,6 +34,48 @@ struct BackendConfig {
     sandbox_type: Option<String>,
     skills: Vec<String>,
     model_override: Option<String>,
+    goal_objective: Option<String>,
+    goal_status: Option<String>,
+    clear_goal: bool,
+}
+
+fn summarize_backend_stderr_line(line: &str) -> String {
+    let trimmed = line.trim();
+    let Ok(payload) = serde_json::from_str::<Value>(trimmed) else {
+        return format!("backend · {trimmed}");
+    };
+
+    let level = payload
+        .get("level")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("INFO");
+    let file = payload
+        .get("file")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("backend");
+    let mut message = payload
+        .get("msg")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or(trimmed)
+        .to_string();
+
+    if let Some((head, _)) = message.split_once(" Traceback") {
+        message = head.trim().to_string();
+    }
+    if let Some((head, _)) = message.split_once("Traceback (most recent call last):") {
+        message = head.trim().to_string();
+    }
+    if message.len() > 220 {
+        message.truncate(217);
+        message.push_str("...");
+    }
+
+    format!("backend · {level} {file} {message}")
 }
 
 impl BackendHandle {
@@ -94,6 +137,16 @@ impl BackendHandle {
         }
         if let Some(agent_mode) = &request.agent_mode {
             command.arg("--agent-mode").arg(agent_mode);
+        }
+        if request.clear_goal {
+            command.arg("--clear-goal");
+        } else {
+            if let Some(goal_objective) = &request.goal_objective {
+                command.arg("--goal").arg(goal_objective);
+            }
+            if let Some(goal_status) = &request.goal_status {
+                command.arg("--goal-status").arg(goal_status);
+            }
         }
         for skill in &request.skills {
             command.arg("--skill").arg(skill);
@@ -213,6 +266,9 @@ impl BackendHandle {
                 sandbox_type: request.sandbox_type.clone(),
                 skills: request.skills.clone(),
                 model_override: request.model_override.clone(),
+                goal_objective: request.goal_objective.clone(),
+                goal_status: request.goal_status.clone(),
+                clear_goal: request.clear_goal,
             },
         })
     }
@@ -258,6 +314,25 @@ impl BackendHandle {
             && self.config.sandbox_type == request.sandbox_type
             && self.config.skills == request.skills
             && self.config.model_override == request.model_override
+            && self.config.goal_objective == request.goal_objective
+            && self.config.goal_status == request.goal_status
+            && self.config.clear_goal == request.clear_goal
+    }
+}
+
+#[cfg(test)]
+mod stderr_filter_tests {
+    use super::summarize_backend_stderr_line;
+
+    #[test]
+    fn summarize_backend_stderr_line_compacts_structured_traceback_json() {
+        let rendered = summarize_backend_stderr_line(
+            r#"{"level":"ERROR","time":"2026-05-05 05:11:58.399","file":"tool/tool_manager.py:1046","msg":"Tool execution failed for turn_status: 'Session' object has no attribute 'pause_goal' Traceback: Traceback (most recent call last): ..."}"#,
+        );
+
+        assert!(rendered.contains("backend · ERROR tool/tool_manager.py:1046"));
+        assert!(rendered.contains("Tool execution failed for turn_status"));
+        assert!(!rendered.contains("most recent call last"));
     }
 }
 

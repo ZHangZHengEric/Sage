@@ -187,7 +187,6 @@
             class="text-foreground/90 overflow-hidden break-words w-full font-sans text-sm leading-6">
             <MarkdownRendererWithPreview
               :content="formatMessageContent(getTextContent(message.content))"
-              :components="markdownComponents"
               :message-id="message.message_id || message.id"
               />
           </div>
@@ -273,13 +272,11 @@
 </template>
 
 <script setup>
-import { computed, h, ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import MessageAvatar from './MessageAvatar.vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import MarkdownRendererWithPreview from './MarkdownRendererWithPreview.vue'
-import EChartsRenderer from './EChartsRenderer.vue'
-import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
 import { Terminal, FileText, Search, Zap, Copy, Check, Image, SquarePen, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { getMessageLabel, isTokenUsageMessage as isTokenUsageMessageValue } from '@/utils/messageLabels'
@@ -291,7 +288,6 @@ import TaskAnalysisMessage from './TaskAnalysisMessage.vue'
 import ReasoningContentMessage from './ReasoningContentMessage.vue'
 import AgentCardMessage from './tools/AgentCardMessage.vue'
 import SysDelegateTaskMessage from './tools/SysDelegateTaskMessage.vue'
-import SysFinishTaskMessage from './tools/SysFinishTaskMessage.vue'
 import TodoTaskMessage from './tools/TodoTaskMessage.vue'
 import QuestionnaireCard from './tools/QuestionnaireCard.vue'
 import { useWorkbenchStore } from '@/stores/workbench.js'
@@ -306,7 +302,7 @@ import { buildClipboardTextFromMessageContent, normalizeMessageContentForCompose
 const TOOL_COMPONENT_MAP = {
   sys_spawn_agent: AgentCardMessage,
   sys_delegate_task: SysDelegateTaskMessage,
-  sys_finish_task: SysFinishTaskMessage,
+  sys_team_delegate_task: SysDelegateTaskMessage,
   todo_write: TodoTaskMessage,
   questionnaire: QuestionnaireCard,
 }
@@ -464,48 +460,6 @@ const visibleToolCalls = computed(() => {
 
 const hasToolCalls = computed(() => visibleToolCalls.value.length > 0)
 
-
-// Markdown组件配置
-const markdownComponents = {
-  code: ({ node, inline, className, children, ...props }) => {
-    const match = /language-(\w+)/.exec(className || '')
-    const language = match ? match[1] : ''
-
-    // 处理 ECharts 代码块
-    if (!inline && (language === 'echarts' || language === 'echart')) {
-      try {
-        const chartOption = JSON.parse(String(children).replace(/\n$/, ''))
-        return h('div', { class: 'echarts-container', style: { margin: '16px 0' } }, [
-          h(EChartsRenderer, {
-            option: chartOption,
-            style: { height: '400px', width: '100%' },
-            opts: { renderer: 'canvas' }
-          })
-        ])
-      } catch (error) {
-        return h('div', {
-          class: 'p-4 bg-destructive/5 border border-destructive/20 rounded-lg text-destructive text-sm'
-        }, [
-          h('strong', { class: 'font-semibold block mb-1' }, 'ECharts 配置错误'),
-          h('div', { class: 'opacity-90' }, error.message),
-          h('pre', { class: 'mt-2 p-2 bg-black/5 rounded text-xs overflow-x-auto' }, String(children).replace(/\n$/, ''))
-        ])
-      }
-    }
-
-    // 普通代码块
-    if (!inline && match) {
-      return h(SyntaxHighlighter, {
-        language: match[1],
-        code: String(children).replace(/\n$/, ''),
-        ...props
-      })
-    }
-
-    // 行内代码
-    return h('code', { class: className, ...props }, children)
-  }
-}
 
 // 方法
 const formatMessageContent = (content) => {

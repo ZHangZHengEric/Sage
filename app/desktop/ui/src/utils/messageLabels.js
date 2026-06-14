@@ -32,7 +32,6 @@ export const messageTypeLabels = new Map([
   ['stage_summary', '阶段总结'],
   ['do_subtask', '子任务'],
   ['do_subtask_result', '执行结果'],
-  ['finish_task_content', '任务完成'],
   ['rewrite', '重写'],
   ['query_suggest', '查询建议'],
   ['chunk_start', '数据块开始'],
@@ -109,6 +108,7 @@ export const toolLabelKeys = {
   // Fibre Agent 工具
   'sys_spawn_agent': 'tools.sysSpawnAgent',
   'sys_delegate_task': 'tools.sysDelegateTask',
+  'sys_team_delegate_task': 'tools.sysTeamDelegateTask',
   // 任务调度工具
   'list_tasks': 'tools.listTasks',
   'add_task': 'tools.addTask',
@@ -140,7 +140,7 @@ export const toolLabelKeys = {
   'playwright_evaluate': 'tools.playwrightEvaluate',
   'sys_spawn_agent': 'tools.sysSpawnAgent',
   'sys_delegate_task': 'tools.sysDelegateTask',
-  'sys_finish_task': 'tools.sysFinishTask',
+  'sys_team_delegate_task': 'tools.sysTeamDelegateTask',
   'compress_conversation_history': 'tools.compressConversationHistory',
   'generate_image': 'tools.generateImage',
   'fetch_webpage': 'tools.fetchWebpage',
@@ -204,6 +204,7 @@ export const toolLabels = {
   // Fibre Agent 工具
   'sys_spawn_agent': '创建智能体',
   'sys_delegate_task': '任务委派',
+  'sys_team_delegate_task': 'Team 任务委派',
   // 任务调度工具
   'list_tasks': '列出任务',
   'add_task': '添加任务',
@@ -235,7 +236,7 @@ export const toolLabels = {
   'playwright_evaluate': 'JS执行',
   'sys_spawn_agent': '创建智能体',
   'sys_delegate_task': '任务委派',
-  'sys_finish_task': '任务完成',
+  'sys_team_delegate_task': 'Team 任务委派',
   'compress_conversation_history': '压缩历史消息',
   'generate_image': '生成图片',
   'execute_python_code': '执行Python',

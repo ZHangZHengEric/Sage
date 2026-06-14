@@ -24,8 +24,12 @@ class Question(BaseModel):
     id: str = Field(..., description="问题唯一标识符")
     type: str = Field(..., description="问题类型: single_choice, multiple_choice, text")
     title: str = Field(..., description="问题标题")
-    options: Optional[list[QuestionOption]] = Field(None, description="选项列表(单选/多选必填)")
-    default: Optional[Any] = Field(None, description="默认值，单选为字符串，多选为字符串数组，文本题为空字符串")
+    options: Optional[list[QuestionOption]] = Field(
+        None, description="选项列表(单选/多选必填)"
+    )
+    default: Optional[Any] = Field(
+        None, description="默认值，单选为字符串，多选为字符串数组，文本题为空字符串"
+    )
     placeholder: Optional[str] = Field(None, description="文本输入框占位提示")
     max_length: Optional[int] = Field(1000, description="最大输入长度")
 
@@ -35,7 +39,9 @@ class SubmitAnswersRequest(BaseModel):
 
     answers: Dict[str, Any] = Field(..., description="用户答案")
     title: Optional[str] = Field(None, description="问卷标题（首次提交时创建会话）")
-    questions: Optional[list[Dict[str, Any]]] = Field(None, description="问题列表（首次提交时创建会话）")
+    questions: Optional[list[Dict[str, Any]]] = Field(
+        None, description="问题列表（首次提交时创建会话）"
+    )
     wait_time: int = Field(300, description="等待时间(秒)（首次提交时创建会话）")
     is_auto_submit: bool = Field(False, description="是否为自动提交（超时自动提交）")
 
@@ -66,7 +72,9 @@ async def _get_or_create_session(
         return session
 
     if not data.title or not data.questions:
-        raise HTTPException(status_code=400, detail="会话不存在，需要提供 title 和 questions 来创建会话")
+        raise HTTPException(
+            status_code=400, detail="会话不存在，需要提供 title 和 questions 来创建会话"
+        )
 
     session = QuestionnaireSession(
         id=questionnaire_id,
@@ -113,7 +121,9 @@ async def submit_questionnaire(
     return SubmitResponse(success=True)
 
 
-@questionnaire_router.get("/{questionnaire_id}/results", response_model=QuestionnaireResponse)
+@questionnaire_router.get(
+    "/{questionnaire_id}/results", response_model=QuestionnaireResponse
+)
 async def get_questionnaire_results(
     questionnaire_id: str = Path(..., description="问卷ID"),
 ):

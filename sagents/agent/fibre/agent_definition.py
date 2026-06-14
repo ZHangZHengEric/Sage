@@ -3,6 +3,7 @@ Agent Definition Module
 
 Defines the AgentDefinition class - pure configuration without session info.
 """
+
 from typing import List, Optional, Dict, Any
 
 
@@ -26,7 +27,7 @@ class AgentDefinition:
         available_skills: Optional[List[str]] = None,
         available_workflows: Optional[List[str]] = None,
         system_context: Optional[Dict[str, Any]] = None,
-        backend_stored: bool = False
+        backend_stored: bool = False,
     ):
         """
         Initialize agent definition.
@@ -43,7 +44,9 @@ class AgentDefinition:
             backend_stored: Whether this agent is stored in backend (persisted)
         """
         if not str(name or "").strip():
-            raise ValueError(f"AgentDefinition.name is required for agent_id={agent_id}")
+            raise ValueError(
+                f"AgentDefinition.name is required for agent_id={agent_id}"
+            )
         self.agent_id = agent_id
         self.name = name
         self.system_prompt = system_prompt
@@ -65,15 +68,14 @@ class AgentDefinition:
             "available_skills": self.available_skills,
             "available_workflows": self.available_workflows,
             "system_context": self.system_context,
-            "backend_stored": self.backend_stored
+            "backend_stored": self.backend_stored,
         }
 
-    
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AgentDefinition":
         """Create from dictionary representation."""
         return cls(
-            agent_id=data.get("agent_id") or data.get("name"),
+            agent_id=data.get("agent_id") or data.get("name"),  # pyright: ignore[reportArgumentType]
             name=data.get("name", ""),
             system_prompt=data["system_prompt"],
             description=data.get("description", ""),
@@ -81,5 +83,5 @@ class AgentDefinition:
             available_skills=data.get("available_skills"),
             available_workflows=data.get("available_workflows"),
             system_context=data.get("system_context"),
-            backend_stored=data.get("backend_stored", False)
+            backend_stored=data.get("backend_stored", False),
         )

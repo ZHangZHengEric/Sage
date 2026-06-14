@@ -49,12 +49,15 @@ def get_agent_skill_dir(
     app_mode: Optional[str] = None,
     ensure_exists: bool = False,
 ) -> Path:
-    skill_dir = get_agent_workspace_root(
-        agent_id,
-        user_id=user_id,
-        app_mode=app_mode,
-        ensure_exists=ensure_exists,
-    ) / "skills"
+    skill_dir = (
+        get_agent_workspace_root(
+            agent_id,
+            user_id=user_id,
+            app_mode=app_mode,
+            ensure_exists=ensure_exists,
+        )
+        / "skills"
+    )
     if ensure_exists:
         skill_dir.mkdir(parents=True, exist_ok=True)
     return skill_dir
@@ -74,7 +77,11 @@ async def sync_selected_skills_to_workspace(
     """
     selected_skills = [
         str(name).strip()
-        for name in (agent_config.get("availableSkills") or agent_config.get("available_skills") or [])
+        for name in (
+            agent_config.get("availableSkills")
+            or agent_config.get("available_skills")
+            or []
+        )
         if str(name).strip()
     ]
     if not selected_skills:
@@ -98,7 +105,9 @@ async def sync_selected_skills_to_workspace(
             )
 
     if synced_skills:
-        logger.bind(agent_id=agent_id).info(f"已同步Agent工作空间skills: {synced_skills}")
+        logger.bind(agent_id=agent_id).info(
+            f"已同步Agent工作空间skills: {synced_skills}"
+        )
     return synced_skills
 
 
@@ -114,7 +123,11 @@ def cleanup_unselected_skills(
     """
     allowed_skills = set(
         str(name).strip()
-        for name in (agent_config.get("availableSkills") or agent_config.get("available_skills") or [])
+        for name in (
+            agent_config.get("availableSkills")
+            or agent_config.get("available_skills")
+            or []
+        )
         if str(name).strip()
     )
     if not allowed_skills:

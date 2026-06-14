@@ -1,3 +1,6 @@
+x-sage-observability-labels: &sage-observability-labels
+  com.sage.environment: ${SAGE_OBSERVABILITY_ENV:-${SAGE_ENV:-test}}
+
 services:
   sage-server-test:
     restart: always
@@ -14,16 +17,17 @@ services:
       - ${SAGE_ROOT}/sage-server/skills:/app/skills
       - ${SAGE_ROOT}/sage-server/users:/app/users
     ports:
-      - 30150:8080
+      - ${SAGE_SERVER_PORT:-32050}:8080
     env_file:
       - ${SAGE_COMPOSE_ENV_FILE:-.env}
     environment:
       SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage}
-      SAGE_TRACE_JAEGER_UI_URL: ${SAGE_TRACE_JAEGER_UI_URL:-http://sage-jaeger-test:16686/jaeger}
-      SAGE_TRACE_JAEGER_PUBLIC_URL: ${SAGE_TRACE_JAEGER_PUBLIC_URL:-http://127.0.0.1:30151/jaeger}
-      SAGE_TRACE_JAEGER_BASE_PATH: ${SAGE_TRACE_JAEGER_BASE_PATH:-/api/observability/jaeger}
+      SAGE_TRACE_JAEGER_URL: ${SAGE_TRACE_JAEGER_URL:-http://sage-jaeger:4317}
+      SAGE_TRACE_JAEGER_PUBLIC_URL: ${SAGE_TRACE_JAEGER_PUBLIC_URL:-http://127.0.0.1:32051/jaeger}
+      SAGE_LOG_LEVEL: ${SAGE_LOG_LEVEL:-DEBUG}
       SAGE_SESSION_DIR: /app/sessions
       SAGE_LOCAL_LINUX_ISOLATION: bwrap
+    labels: *sage-observability-labels
     cap_add:
       - SYS_ADMIN
     security_opt:
@@ -31,6 +35,11 @@ services:
       - apparmor=unconfined
     mem_limit: 16g
     cpus: 4.0
+    networks:
+      default:
+        aliases:
+          - sage-server
+      shared: {}
 
   sage-web-test:
     restart: always
@@ -38,54 +47,32 @@ services:
       context: ../..
       dockerfile: deploy/images/Dockerfile.web
       args:
-        NGINX_CONF: deploy/dev/nginx/nginx.conf
-        VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
-        VITE_SAGE_TRACE_WEB_URL: ${SAGE_TRACE_WEB_URL}
-        VITE_SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage/}
+        NGINX_CONF: deploy/test/nginx/nginx.conf
+        VITE_SAGE_GRAFANA_URL: ${SAGE_GRAFANA_PUBLIC_URL:-http://127.0.0.1:30093}
     image: sage-web-test:v1.0
     container_name: sage-web-test
     ports:
-      - 30151:80
+      - ${SAGE_WEB_PORT:-32051}:80
     environment:
       TZ: 'Asia/Shanghai'
-      VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
-      VITE_SAGE_TRACE_WEB_URL: ${SAGE_TRACE_WEB_URL}
-      VITE_SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage/}
-    depends_on:
-      - sage-server-test
+    labels: *sage-observability-labels
     mem_limit: 512m
     cpus: 0.5
-
-  sage-wiki-test:
-    restart: always
-    build:
-      context: ../..
-      dockerfile: deploy/images/Dockerfile.wiki
-      args:
-        NGINX_CONF: deploy/dev/nginx/nginx_wiki.conf
-        VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
-    image: sage-wiki-test:v1.0
-    container_name: sage-wiki-test
-    ports:
-      - 30157:80
-    environment:
-      TZ: 'Asia/Shanghai'
-      VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
-    depends_on:
-      - sage-server-test
-    mem_limit: 512m
-    cpus: 0.5
+    networks:
+      default: {}
+      shared: {}
 
   sage-mysql-test:
     restart: always
     image: docker.m.daocloud.io/mysql:8.4
     container_name: sage-mysql-test
     ports:
-      - 30152:3306
+      - ${SAGE_MYSQL_PUBLISHED_PORT:-32052}:3306
     environment:
       TZ: 'Asia/Shanghai'
       MYSQL_ROOT_PASSWORD: ${SAGE_MYSQL_PASSWORD}
       MYSQL_ROOT_HOST: '%'
+    labels: *sage-observability-labels
     ulimits:
       memlock:
         soft: -1
@@ -95,34 +82,8 @@ services:
       - ${SAGE_ROOT}/mysql/conf:/etc/mysql/conf.d
     mem_limit: 1g
     cpus: 1.0
-  sage-rustfs-test:
-    image: docker.m.daocloud.io/rustfs/rustfs:latest
-    ports:
-      - 30154:9000
-      - 30155:9001
-    volumes:
-      - ${SAGE_ROOT}/rustfs/data:/data
-    container_name: sage-rustfs-test
-    restart: always
-    environment:
-      - RUSTFS_ADDRESS=0.0.0.0:9000
-      - RUSTFS_CONSOLE_ADDRESS=0.0.0.0:9001
-      - RUSTFS_CONSOLE_ENABLE=true
-      - RUSTFS_CORS_ALLOWED_ORIGINS=*
-      - RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS=*
-      - RUSTFS_ACCESS_KEY=${SAGE_S3_ACCESS_KEY}
-      - RUSTFS_SECRET_KEY=${SAGE_S3_SECRET_KEY}
-      - RUSTFS_OBS_LOGGER_LEVEL=info
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "sh", "-c",
-          "curl -f http://127.0.0.1:9000/health && curl -f http://127.0.0.1:9001/rustfs/console/health"
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    mem_limit: 1g
-    cpus: 0.5
+
+networks:
+  shared:
+    name: ${SAGE_SHARED_NETWORK:-sage_shared_default}
+    external: true

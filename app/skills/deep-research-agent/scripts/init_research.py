@@ -33,20 +33,20 @@ def get_topic_from_path(project_path: str) -> str:
 def init_research_workspace(template_path: str, project_path: str) -> str:
     """
     初始化研究工作区
-    
+
     Args:
         template_path: 模板文件绝对路径
         project_path: 项目文件夹绝对路径
-    
+
     Returns:
         创建的项目路径
     """
     # 获取模板路径
-    template_path = resolve_template_path(template_path)
-    
+    template_path = resolve_template_path(template_path)  # pyright: ignore[reportAssignmentType]
+
     # 创建项目目录
     project_dir = Path(project_path)
-    
+
     if project_dir.exists():
         if not project_dir.is_dir():
             print(f"Error: Path exists and is not a directory: {project_dir}")
@@ -55,26 +55,26 @@ def init_research_workspace(template_path: str, project_path: str) -> str:
             print(f"Error: Directory already exists: {project_dir}")
             print("Please choose a different path or remove the existing directory.")
             sys.exit(1)
-    
+
     # 创建目录结构
     materials_dir = project_dir / "materials"
     materials_dir.mkdir(parents=True)
-    
+
     # 创建子目录
     (materials_dir / "raw").mkdir()
     (materials_dir / "notes").mkdir()
-    
+
     # 读取模板并替换占位符
-    template_content = template_path.read_text(encoding="utf-8")
+    template_content = template_path.read_text(encoding="utf-8")  # pyright: ignore[reportAttributeAccessIssue]
     topic = get_topic_from_path(project_path)
     today = datetime.now().strftime("%Y-%m-%d")
-    
+
     report_content = template_content.replace("{topic}", topic).replace("{date}", today)
-    
+
     # 写入报告文件
     report_path = project_dir / "report.md"
     report_path.write_text(report_content, encoding="utf-8")
-    
+
     return str(project_dir)
 
 
@@ -92,24 +92,24 @@ Examples:
   
   # 使用竞品分析模板
   python init_research.py /app/agent_workspace/session_1770980272542/agent_workspace/skills/deep-research-agent/templates/03-competitive.md /app/agent_workspace/session_1770980272542/agent_workspace/research/竞品分析报告
-        """
+        """,
     )
-    
+
     parser.add_argument("template", help="Absolute template path to use")
-    
+
     parser.add_argument(
         "project_path",
-        help="Absolute path for the research project directory (will be created)"
+        help="Absolute path for the research project directory (will be created)",
     )
-    
+
     args = parser.parse_args()
-    
+
     # 确保路径是绝对路径
     project_path = os.path.abspath(args.project_path)
-    
+
     # 创建工作区
     created_path = init_research_workspace(args.template, project_path)
-    
+
     print(f"✓ Research workspace created: {created_path}")
     print(f"  - Report: {created_path}/report.md")
     print(f"  - Materials: {created_path}/materials/")

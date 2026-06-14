@@ -51,7 +51,7 @@ class SandboxProviderFactory:
 
                 cls._remote_providers[provider_name] = FirecrackerSandboxProvider
 
-        return cls._remote_providers[provider_name]
+        return cls._remote_providers[provider_name]  # pyright: ignore[reportReturnType]
 
     @classmethod
     def _get_local_provider(cls) -> Type[ISandboxHandle]:
@@ -109,16 +109,18 @@ class SandboxProviderFactory:
         if config.mode == SandboxType.LOCAL:
             provider_class = cls._get_local_provider()
             if not config.sandbox_agent_workspace:
-                raise ValueError("sandbox_agent_workspace is required for local sandbox")
+                raise ValueError(
+                    "sandbox_agent_workspace is required for local sandbox"
+                )
             return provider_class(
-                sandbox_id=sandbox_id,
-                sandbox_agent_workspace=config.sandbox_agent_workspace,
-                volume_mounts=config.volume_mounts,
-                cpu_time_limit=config.cpu_time_limit,
-                memory_limit_mb=config.memory_limit_mb,
-                allowed_paths=config.allowed_paths,
-                linux_isolation_mode=config.linux_isolation_mode,
-                macos_isolation_mode=config.macos_isolation_mode,
+                sandbox_id=sandbox_id,  # pyright: ignore[reportCallIssue]
+                sandbox_agent_workspace=config.sandbox_agent_workspace,  # pyright: ignore[reportCallIssue]
+                volume_mounts=config.volume_mounts,  # pyright: ignore[reportCallIssue]
+                cpu_time_limit=config.cpu_time_limit,  # pyright: ignore[reportCallIssue]
+                memory_limit_mb=config.memory_limit_mb,  # pyright: ignore[reportCallIssue]
+                allowed_paths=config.allowed_paths,  # pyright: ignore[reportCallIssue]
+                linux_isolation_mode=config.linux_isolation_mode,  # pyright: ignore[reportCallIssue]
+                macos_isolation_mode=config.macos_isolation_mode,  # pyright: ignore[reportCallIssue]
             )
 
         elif config.mode == SandboxType.REMOTE:
@@ -131,7 +133,8 @@ class SandboxProviderFactory:
                 "sandbox_id": sandbox_id,
                 "workspace_mount": provider_config.pop("workspace_mount", None),
                 "mount_paths": config.volume_mounts,
-                "virtual_workspace": config.sandbox_agent_workspace or "/sage-workspace",
+                "virtual_workspace": config.sandbox_agent_workspace
+                or "/sage-workspace",
                 "timeout": timedelta(seconds=config.remote_timeout),
             }
 
@@ -141,36 +144,36 @@ class SandboxProviderFactory:
                     raise ValueError("OpenSandbox requires server_url")
                 return provider_class(
                     **common_kwargs,
-                    server_url=config.remote_server_url,
-                    api_key=config.remote_api_key,
-                    image=config.remote_image,
-                    persistent=config.remote_persistent,
-                    sandbox_ttl=config.remote_sandbox_ttl,
-                    **provider_config
+                    server_url=config.remote_server_url,  # pyright: ignore[reportCallIssue]
+                    api_key=config.remote_api_key,  # pyright: ignore[reportCallIssue]
+                    image=config.remote_image,  # pyright: ignore[reportCallIssue]
+                    persistent=config.remote_persistent,  # pyright: ignore[reportCallIssue]
+                    sandbox_ttl=config.remote_sandbox_ttl,  # pyright: ignore[reportCallIssue]
+                    **provider_config,
                 )
 
             elif config.remote_provider == "kubernetes":
                 return provider_class(
                     **common_kwargs,
-                    namespace=provider_config.get("namespace", "default"),
-                    image=config.remote_image,
-                    resources=provider_config.get("resources", {}),
+                    namespace=provider_config.get("namespace", "default"),  # pyright: ignore[reportCallIssue]
+                    image=config.remote_image,  # pyright: ignore[reportCallIssue]
+                    resources=provider_config.get("resources", {}),  # pyright: ignore[reportCallIssue]
                     **{
                         k: v
                         for k, v in provider_config.items()
                         if k not in ["namespace", "resources"]
-                    }
+                    },
                 )
 
             elif config.remote_provider == "firecracker":
                 return provider_class(
                     **common_kwargs,
-                    microvm_config=provider_config.get("microvm_config", {}),
+                    microvm_config=provider_config.get("microvm_config", {}),  # pyright: ignore[reportCallIssue]
                     **{
                         k: v
                         for k, v in provider_config.items()
                         if k != "microvm_config"
-                    }
+                    },
                 )
 
             else:
@@ -180,15 +183,19 @@ class SandboxProviderFactory:
         else:  # PASSTHROUGH
             provider_class = cls._get_passthrough_provider()
             if not config.sandbox_agent_workspace:
-                raise ValueError("sandbox_agent_workspace is required for passthrough sandbox")
+                raise ValueError(
+                    "sandbox_agent_workspace is required for passthrough sandbox"
+                )
             return provider_class(
-                sandbox_id=sandbox_id,
-                sandbox_agent_workspace=config.sandbox_agent_workspace,
-                volume_mounts=config.volume_mounts,
+                sandbox_id=sandbox_id,  # pyright: ignore[reportCallIssue]
+                sandbox_agent_workspace=config.sandbox_agent_workspace,  # pyright: ignore[reportCallIssue]
+                volume_mounts=config.volume_mounts,  # pyright: ignore[reportCallIssue]
             )
 
     @classmethod
-    def register_local_provider(cls, mode: SandboxType, provider_class: Type[ISandboxHandle]):
+    def register_local_provider(
+        cls, mode: SandboxType, provider_class: Type[ISandboxHandle]
+    ):
         """注册本地/直通模式提供者"""
         cls._providers[mode] = provider_class
 

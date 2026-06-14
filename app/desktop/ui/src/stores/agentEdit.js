@@ -141,7 +141,7 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     if (agentData) {
       // 将旧的 auto 值收敛为默认的 simple
       const processedData = { ...agentData }
-      if (!['simple', 'fibre'].includes(String(processedData.agentMode || '').toLowerCase())) {
+      if (!['simple', 'fibre', 'team'].includes(String(processedData.agentMode || '').toLowerCase())) {
         processedData.agentMode = 'simple'
       }
       formData.value = JSON.parse(JSON.stringify({ ...defaultFormData, ...processedData }))

@@ -1,23 +1,26 @@
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
-from typing import Any, Dict, List, AsyncGenerator, Optional
+from typing import Any, Dict, List, AsyncGenerator
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import SessionContext
-from sagents.tool.tool_manager import ToolManager
 
 from sagents.utils.prompt_manager import PromptManager
 import uuid
 
 
 class TaskSummaryAgent(AgentBase):
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
+    def __init__(
+        self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""
+    ):
         super().__init__(model, model_config, system_prefix)
         self.agent_name = "TaskSummaryAgent"
         self.agent_description = "任务总结智能体，专门负责生成任务执行的总结报告"
         logger.debug("TaskSummaryAgent 初始化完成")
 
-    async def run_stream(self, session_context: SessionContext) -> AsyncGenerator[List[MessageChunk], None]:
+    async def run_stream(
+        self, session_context: SessionContext
+    ) -> AsyncGenerator[List[MessageChunk], None]:
         if not session_context.tool_manager:
             raise ValueError("ToolManager is not initialized in SessionContext")
         session_id = session_context.session_id
@@ -26,46 +29,65 @@ class TaskSummaryAgent(AgentBase):
         message_manager = session_context.message_manager
 
         # 提取任务描述
-        if 'task_rewrite' in session_context.audit_status:
-            task_description_messages_str = MessageManager.convert_messages_to_str([MessageChunk(
-                role=MessageRole.USER.value,
-                content=session_context.audit_status['task_rewrite'],
-                message_type=MessageType.USER_INPUT.value
-            )])
+        if "task_rewrite" in session_context.audit_status:
+            MessageManager.convert_messages_to_str(
+                [
+                    MessageChunk(
+                        role=MessageRole.USER.value,
+                        content=session_context.audit_status["task_rewrite"],
+                        message_type=MessageType.USER_INPUT.value,
+                    )
+                ]
+            )
         else:
-            history_messages = message_manager.extract_all_context_messages(recent_turns=3)
+            history_messages = message_manager.extract_all_context_messages(
+                recent_turns=3
+            )
             # 根据 active_budget 压缩消息
             budget_info = message_manager.context_budget_manager.budget_info
             if budget_info:
-                history_messages = MessageManager.compress_messages(history_messages, min(budget_info.get('max_model_len', 20000)*0.6, 10000))
-            history_messages_str = MessageManager.convert_messages_to_str(history_messages)
+                history_messages = MessageManager.compress_messages(
+                    history_messages,
+                    min(budget_info.get("max_model_len", 20000) * 0.6, 10000),  # pyright: ignore[reportArgumentType]
+                )
+            history_messages_str = MessageManager.convert_messages_to_str(
+                history_messages
+            )
 
         # 使用PromptManager获取模板，传入语言参数
-        summary_template = PromptManager().get_agent_prompt_auto("task_summary_template", language=session_context.get_language())
+        summary_template = PromptManager().get_agent_prompt_auto(
+            "task_summary_template", language=session_context.get_language()
+        )
         prompt = summary_template.format(
             task_description=history_messages_str,
         )
         llm_request_message = [
-            *await self.prepare_unified_system_messages(session_id=session_id, language=session_context.get_language()),
+            *await self.prepare_unified_system_messages(
+                session_id=session_id, language=session_context.get_language()
+            ),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,
                 message_id=str(uuid.uuid4()),
-                message_type=MessageType.FINAL_ANSWER.value
-            )
+                message_type=MessageType.FINAL_ANSWER.value,
+            ),
         ]
 
         message_id = str(uuid.uuid4())
-        async for llm_repsonse_chunk in self._call_llm_streaming(messages=llm_request_message,
-                                                                 session_id=session_id,
-                                                                 step_name="final_answer",
-                                                                 enable_thinking=False):
+        async for llm_repsonse_chunk in self._call_llm_streaming(
+            messages=llm_request_message,  # pyright: ignore[reportArgumentType]
+            session_id=session_id,
+            step_name="final_answer",
+            enable_thinking=False,
+        ):
             if len(llm_repsonse_chunk.choices) == 0:
                 continue
             if llm_repsonse_chunk.choices[0].delta.content:
-                yield [MessageChunk(
-                    role=MessageRole.ASSISTANT.value,
-                    content=llm_repsonse_chunk.choices[0].delta.content,
-                    message_id=message_id,
-                    message_type=MessageType.FINAL_ANSWER.value
-                )]
+                yield [
+                    MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        content=llm_repsonse_chunk.choices[0].delta.content,
+                        message_id=message_id,
+                        message_type=MessageType.FINAL_ANSWER.value,
+                    )
+                ]

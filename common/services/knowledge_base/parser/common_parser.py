@@ -26,10 +26,12 @@ class CommonParser(BaseParser):
         )
         return ids
 
-    async def process(self, index_name: str, doc: KdbDoc, file: File) -> List["DocumentInput"]:
+    async def process(
+        self, index_name: str, doc: KdbDoc, file: File
+    ) -> List["DocumentInput"]:
         # Lazy import to avoid circular dependency at runtime
         from ..knowledge_base import DocumentInput
-        
+
         file_dao = FileDao()
         logger.info(f"[CommonParser] 处理开始：索引={index_name}, 文档ID={doc.id}")
         text, _ = await self.convert_file_to_text(file.path)
@@ -54,9 +56,9 @@ class CommonParser(BaseParser):
             attach_map: Dict[str, File] = await file_dao.get_by_ids(attach_ids)
             logger.info(f"[CommonParser] 发现附件：数量={len(attach_map)}")
             for att in attach_map.values():
-                if att.extension not in ALLOW_ATTACH_FILE_EXTS:
+                if att.extension not in ALLOW_ATTACH_FILE_EXTS:  # pyright: ignore[reportAttributeAccessIssue]
                     logger.debug(
-                        f"[CommonParser] 附件跳过：id={att.id}，扩展名={att.extension}"
+                        f"[CommonParser] 附件跳过：id={att.id}，扩展名={att.extension}"  # pyright: ignore[reportAttributeAccessIssue]
                     )
                     continue
                 att_text, _ = await self.convert_file_to_text(att.path)
@@ -67,11 +69,11 @@ class CommonParser(BaseParser):
                         doc_content=att_text,
                         origin_content=att_text,
                         path=att.path,
-                        title=att.name or att.origin_name,
+                        title=att.name or att.origin_name,  # pyright: ignore[reportAttributeAccessIssue]
                         metadata=metadata,
                     )
                 )
-        
+
         logger.info(
             f"[CommonParser] 处理完成：索引={index_name}，生成文档数={len(docs)}"
         )

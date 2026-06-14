@@ -2,7 +2,7 @@
 工具执行接口路由模块
 """
 
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from pydantic import BaseModel
@@ -11,6 +11,7 @@ from common.core.request_identity import get_request_role, get_request_user_id
 from common.core.render import Response
 from common.services import skill_router_service
 from loguru import logger
+
 # 创建路由器
 skill_router = APIRouter(prefix="/api/skills")
 
@@ -42,11 +43,11 @@ class SyncAgentWorkspacesSkillRequest(BaseModel):
 async def get_skills(
     http_request: Request,
     agent_id: Optional[str] = None,
-    dimension: Optional[str] = None
+    dimension: Optional[str] = None,
 ):
     """
     获取可用技能列表
-    
+
     Args:
         agent_id: 可选，过滤特定Agent的技能
         dimension: 可选，按维度过滤 (system, user, agent)
@@ -61,16 +62,13 @@ async def get_skills(
 
 
 @skill_router.get("/agent-available")
-async def get_agent_available_skills(
-    http_request: Request,
-    agent_id: str
-):
+async def get_agent_available_skills(http_request: Request, agent_id: str):
     """
     获取Agent可用的技能列表（带维度来源标签）
-    
+
     根据skill name去重，优先级：系统 < 用户 < Agent
     每个技能会标注其来源维度 (system, user, agent)
-    
+
     Args:
         agent_id: Agent ID（必填）
     """
@@ -88,7 +86,7 @@ async def upload_skill(
     file: UploadFile = File(...),
     is_system: bool = Form(False),
     is_agent: bool = Form(False),
-    agent_id: Optional[str] = Form(None)
+    agent_id: Optional[str] = Form(None),
 ):
     """
     通过上传 ZIP 文件导入技能
@@ -124,13 +122,11 @@ async def import_skill_from_url(request: UrlImportRequest, http_request: Request
 
 @skill_router.delete("")
 async def delete_skill(
-    name: str,
-    http_request: Request,
-    agent_id: Optional[str] = None
+    name: str, http_request: Request, agent_id: Optional[str] = None
 ):
     """
     删除技能
-    
+
     Args:
         name: 技能名称
         agent_id: 可选，如果提供则删除指定Agent工作空间下的skill
@@ -150,7 +146,7 @@ async def get_skill_content(name: str, http_request: Request):
     """
     获取技能内容 (SKILL.md)
     """
-    # name is query param, usually automatically decoded by FastAPI/Starlette, 
+    # name is query param, usually automatically decoded by FastAPI/Starlette,
     # but let's ensure it's handled if passed as part of query string.
     # Actually FastAPI decodes query params automatically.
     logger.info(f"get_skill_content name: {name}")
@@ -178,9 +174,7 @@ async def update_skill_content(request: SkillUpdateRequest, http_request: Reques
 
 @skill_router.post("/sync-to-agent")
 async def sync_skill_to_agent(
-    http_request: Request,
-    skill_name: str = Form(...),
-    agent_id: str = Form(...)
+    http_request: Request, skill_name: str = Form(...), agent_id: str = Form(...)
 ):
     """
     将技能同步到Agent工作空间

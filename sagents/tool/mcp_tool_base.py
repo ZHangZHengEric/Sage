@@ -16,16 +16,18 @@ except ImportError:
         Annotated = None
 
 try:
-    from pydantic.fields import FieldInfo
+    from pydantic.fields import FieldInfo  # pyright: ignore[reportAssignmentType]
 except ImportError:
+
     class FieldInfo:
         pass
+
 
 def get_json_schema_type(py_type, type_mapping):
     """Recursively map Python type to JSON schema type definition"""
     origin = get_origin(py_type)
     args = get_args(py_type)
-    
+
     # Handle Annotated
     if Annotated is not None and origin is Annotated:
         # First argument is the type
@@ -39,12 +41,12 @@ def get_json_schema_type(py_type, type_mapping):
         if non_none_types:
             # Use the first non-None type
             return get_json_schema_type(non_none_types[0], type_mapping)
-        return "string" # Fallback
+        return "string"  # Fallback
 
     # Direct mapping
     if py_type in type_mapping:
         return type_mapping[py_type]
-    
+
     # List/Array
     if origin is list or py_type is list:
         return "array"
@@ -53,13 +55,14 @@ def get_json_schema_type(py_type, type_mapping):
     if origin is dict or py_type is dict:
         return "object"
 
-    return "string" # Default fallback
+    return "string"  # Default fallback
+
 
 def get_detailed_schema(py_type, type_mapping):
     """Get detailed JSON schema including items/properties for nested types"""
     origin = get_origin(py_type)
     args = get_args(py_type)
-    
+
     schema = {}
 
     # Handle Annotated
@@ -68,23 +71,28 @@ def get_detailed_schema(py_type, type_mapping):
         if args:
             base_schema = get_detailed_schema(args[0], type_mapping)
             schema.update(base_schema)
-            
+
             # Extract info from Annotated metadata
             for metadata in args[1:]:
                 # Handle pydantic Field
                 if isinstance(metadata, FieldInfo):
-                    if metadata.description:
-                        schema["description"] = metadata.description
-                    if metadata.json_schema_extra:
-                        schema.update(metadata.json_schema_extra)
+                    if metadata.description:  # pyright: ignore[reportAttributeAccessIssue]
+                        schema["description"] = metadata.description  # pyright: ignore[reportAttributeAccessIssue]
+                    if metadata.json_schema_extra:  # pyright: ignore[reportAttributeAccessIssue]
+                        schema.update(metadata.json_schema_extra)  # pyright: ignore[reportAttributeAccessIssue]
                 # Fallback for generic objects with these attributes
-                elif hasattr(metadata, "description") or hasattr(metadata, "json_schema_extra"):
+                elif hasattr(metadata, "description") or hasattr(
+                    metadata, "json_schema_extra"
+                ):
                     if hasattr(metadata, "description") and metadata.description:
                         schema["description"] = metadata.description
-                    if hasattr(metadata, "json_schema_extra") and metadata.json_schema_extra:
+                    if (
+                        hasattr(metadata, "json_schema_extra")
+                        and metadata.json_schema_extra
+                    ):
                         schema.update(metadata.json_schema_extra)
         return schema
-    
+
     if origin is Union:
         non_none_types = [t for t in args if t is not type(None)]
         if non_none_types:
@@ -98,7 +106,7 @@ def get_detailed_schema(py_type, type_mapping):
             items_schema = {"type": item_type}
             items_schema.update(item_detailed)
             schema["items"] = items_schema
-            
+
     elif origin is dict or py_type is dict:
         if args and len(args) >= 2:
             # args[0] is key (must be str), args[1] is value
@@ -107,19 +115,20 @@ def get_detailed_schema(py_type, type_mapping):
             additional_props = {"type": value_type}
             additional_props.update(value_detailed)
             schema["additionalProperties"] = additional_props
-            
+
     return schema
+
 
 def sage_mcp_tool(
     server_name: str,
     name: Optional[str] = None,
     description: Optional[str] = None,
-    **kwargs
+    **kwargs,
 ):
     """
     Decorator to mark a function as a built-in MCP tool for sagents.
     This allows sagents to discover and register this tool without starting a separate MCP server.
-    
+
     Args:
         name: Tool name (default: function name)
         description: Tool description (default: docstring)
@@ -191,7 +200,9 @@ def sage_mcp_tool(
             spec_return_data = return_data
         else:
             returns_obj = getattr(parsed_docstring, "returns", None)
-            if returns_obj and (returns_obj.description or returns_obj.return_type_name):
+            if returns_obj and (
+                returns_obj.description or returns_obj.return_type_name
+            ):
                 spec_return_data = {
                     "type": "object",
                     "description": (returns_obj.description or "").strip(),
@@ -207,7 +218,7 @@ def sage_mcp_tool(
             required=required,
             return_data=spec_return_data,
             return_properties_i18n=return_properties_i18n,
-            param_description_i18n=param_description_i18n
+            param_description_i18n=param_description_i18n,
         )
 
         # Store ToolSpec on the function
@@ -224,8 +235,9 @@ def sage_mcp_tool(
         def wrapper(*args, **kwargs):
             return func(*args, **kwargs)
 
-        wrapper._mcp_tool_spec = spec
-        wrapper._is_sagents_mcp_tool = True
+        wrapper._mcp_tool_spec = spec  # pyright: ignore[reportAttributeAccessIssue]
+        wrapper._is_sagents_mcp_tool = True  # pyright: ignore[reportAttributeAccessIssue]
 
         return wrapper
+
     return decorator

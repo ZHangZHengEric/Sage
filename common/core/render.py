@@ -49,5 +49,9 @@ class Response:
         return StandardResponse(code=200, message=message, data=data)
 
     @staticmethod
-    async def error(code: int = 500, message: str = "操作失败", error_detail: str = None):
+    async def error(
+        code: int = 500,
+        message: str = "操作失败",
+        error_detail: str = None,  # pyright: ignore[reportArgumentType]
+    ):
         return ErrorResponse(code=code, message=message, error_detail=error_detail)

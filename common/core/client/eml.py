@@ -1,22 +1,28 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from loguru import logger
 
 from common.core import config
 from common.core.exceptions import SageHTTPException
 
-EML_CLIENT: Optional["Dm20151123Client"] = None # type: ignore
+if TYPE_CHECKING:
+    from alibabacloud_dm20151123.client import Client as Dm20151123Client
+
+EML_CLIENT: Optional["Dm20151123Client"] = None  # type: ignore
 
 
 def _has_eml_credentials(cfg: config.StartupConfig) -> bool:
-    return bool((cfg.eml_access_key_id or "").strip() and (cfg.eml_access_key_secret or "").strip())
+    return bool(
+        (cfg.eml_access_key_id or "").strip()
+        and (cfg.eml_access_key_secret or "").strip()
+    )
 
 
 async def init_eml_client(
     cfg: Optional[config.StartupConfig] = None,
-) -> Optional["Dm20151123Client"]: # pyright: ignore[reportUndefinedVariable]
+) -> Optional["Dm20151123Client"]:  # pyright: ignore[reportUndefinedVariable]
     global EML_CLIENT
     if EML_CLIENT is not None:
         return EML_CLIENT
@@ -53,10 +59,12 @@ async def init_eml_client(
         return None
 
 
-def get_eml_client() -> "Dm20151123Client": # type: ignore
+def get_eml_client() -> "Dm20151123Client":  # type: ignore
     global EML_CLIENT
     if EML_CLIENT is None:
-        raise SageHTTPException(detail="邮件客户端未初始化", error_detail="eml client not initialized")
+        raise SageHTTPException(
+            detail="邮件客户端未初始化", error_detail="eml client not initialized"
+        )
     return EML_CLIENT
 
 
@@ -85,7 +93,9 @@ async def send_register_verification_mail(to_address: str, code: str) -> None:
 
     client = EML_CLIENT or await init_eml_client(cfg)
     if client is None:
-        raise SageHTTPException(detail="邮件客户端不可用", error_detail="eml client unavailable")
+        raise SageHTTPException(
+            detail="邮件客户端不可用", error_detail="eml client unavailable"
+        )
 
     template = dm_20151123_models.SingleSendMailRequestTemplate(
         template_data={"code": code},
@@ -102,7 +112,7 @@ async def send_register_verification_mail(to_address: str, code: str) -> None:
     runtime = util_models.RuntimeOptions()
 
     try:
-        await client.single_send_mail_with_options_async(mail_request, runtime)
+        await client.single_send_mail_with_options_async(mail_request, runtime)  # pyright: ignore[reportArgumentType]
         logger.info(f"注册验证码邮件发送成功: {to_address}")
     except Exception as error:
         message = getattr(error, "message", "") or str(error)
@@ -110,8 +120,13 @@ async def send_register_verification_mail(to_address: str, code: str) -> None:
         data = getattr(error, "data", None)
         if isinstance(data, dict):
             recommend = str(data.get("Recommend") or "")
-        logger.error(f"注册验证码邮件发送失败: {to_address}, error={message}, recommend={recommend}")
-        if "unable to load credentials" in message.lower() or "credentialexception" in message.lower():
+        logger.error(
+            f"注册验证码邮件发送失败: {to_address}, error={message}, recommend={recommend}"
+        )
+        if (
+            "unable to load credentials" in message.lower()
+            or "credentialexception" in message.lower()
+        ):
             raise SageHTTPException(
                 detail="邮件凭据未配置，请在 .env 中设置 SAGE_EML_ACCESS_KEY_ID 和 SAGE_EML_ACCESS_KEY_SECRET",
                 error_detail=recommend or message,

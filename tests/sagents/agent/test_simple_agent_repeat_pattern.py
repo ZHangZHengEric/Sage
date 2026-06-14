@@ -161,9 +161,9 @@ def test_signature_normalizes_assistant_text_whitespace():
 def test_replay_detects_abab_text_loop():
     rounds = [
         [_assistant_text("让我读取技术架构报告的前 100 行：")],  # A
-        [_assistant_text("我先读取目录，再继续。")],            # B
+        [_assistant_text("我先读取目录，再继续。")],  # B
         [_assistant_text("让我读取技术架构报告的前 100 行：")],  # A
-        [_assistant_text("我先读取目录，再继续。")],            # B
+        [_assistant_text("我先读取目录，再继续。")],  # B
     ]
     hit_steps = _detect_steps_from_rounds(rounds)
     assert hit_steps and hit_steps[0] == 4

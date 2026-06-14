@@ -26,7 +26,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from ..tool_base import tool
 from ..error_codes import ToolErrorCode, make_tool_error
 from sagents.utils.logger import logger
-from sagents.utils.agent_session_helper import get_session_sandbox as _get_session_sandbox_util
+from sagents.utils.agent_session_helper import (
+    get_session_sandbox as _get_session_sandbox_util,
+)
 
 
 _DEFAULT_IGNORE_PATTERNS: Tuple[str, ...] = (
@@ -63,7 +65,9 @@ class CodebaseTool:
     def _get_sandbox(self, session_id: str):
         return _get_session_sandbox_util(session_id, log_prefix="CodebaseTool")
 
-    async def _run(self, sandbox: Any, command: str, timeout: int = 60) -> Tuple[int, str, str]:
+    async def _run(
+        self, sandbox: Any, command: str, timeout: int = 60
+    ) -> Tuple[int, str, str]:
         """在沙箱中执行命令，返回 (return_code, stdout, stderr)。失败时 return_code=-1。"""
         try:
             result = await sandbox.execute_command(command=command, timeout=timeout)
@@ -131,7 +135,9 @@ class CodebaseTool:
         return " ".join(parts)
 
     @staticmethod
-    def _parse_rg_json(stdout: str, head_limit: int) -> Tuple[List[Dict[str, Any]], bool]:
+    def _parse_rg_json(
+        stdout: str, head_limit: int
+    ) -> Tuple[List[Dict[str, Any]], bool]:
         """解析 ``rg --json`` 输出，返回结构化 match 列表。
 
         每个 match 形如 ``{file, line, col, match, before, after}``；
@@ -178,7 +184,11 @@ class CodebaseTool:
                     "file": file_path,
                     "line": line_no,
                     "col": col,
-                    "match": (matched_text_parts[0] if matched_text_parts else lines.rstrip("\n")),
+                    "match": (
+                        matched_text_parts[0]
+                        if matched_text_parts
+                        else lines.rstrip("\n")
+                    ),
                     "line_text": lines.rstrip("\n"),
                 }
                 if ctx:
@@ -354,13 +364,15 @@ class CodebaseTool:
                 line_no = int(line_no_str)
             except ValueError:
                 continue
-            matches.append({
-                "file": file_part,
-                "line": line_no,
-                "col": None,
-                "match": content,
-                "line_text": content,
-            })
+            matches.append(
+                {
+                    "file": file_part,
+                    "line": line_no,
+                    "col": None,
+                    "match": content,
+                    "line_text": content,
+                }
+            )
             if len(matches) >= head_limit:
                 break
         truncated = len(matches) >= head_limit
@@ -381,18 +393,45 @@ class CodebaseTool:
             "en": "Run a structured full-text search in the sandboxed codebase (ripgrep-based; falls back to grep when missing). Returns structured matches {file,line,col,match}. Prefer this over hand-written shell rg.",
         },
         param_description_i18n={
-            "pattern": {"zh": "正则表达式（默认 PCRE2 风格；ripgrep 缺失时按 ERE 解析）", "en": "Regex pattern (PCRE2-style by default; ERE when falling back to grep)"},
-            "path": {"zh": "搜索根路径（虚拟路径），缺省为沙箱工作区根", "en": "Search root path (virtual). Defaults to the sandbox workspace root"},
-            "glob": {"zh": "rg --glob 过滤，例如 '**/*.py' 或 '!**/dist/**'", "en": "rg --glob filter, e.g. '**/*.py' or '!**/dist/**'"},
-            "type": {"zh": "rg --type 过滤（py/js/ts/...）", "en": "rg --type filter (py/js/ts/...)"},
-            "output_mode": {"zh": "输出模式：content（默认，行+上下文）/ files_with_matches / count", "en": "Output mode: content (default, lines+context) / files_with_matches / count"},
+            "pattern": {
+                "zh": "正则表达式（默认 PCRE2 风格；ripgrep 缺失时按 ERE 解析）",
+                "en": "Regex pattern (PCRE2-style by default; ERE when falling back to grep)",
+            },
+            "path": {
+                "zh": "搜索根路径（虚拟路径），缺省为沙箱工作区根",
+                "en": "Search root path (virtual). Defaults to the sandbox workspace root",
+            },
+            "glob": {
+                "zh": "rg --glob 过滤，例如 '**/*.py' 或 '!**/dist/**'",
+                "en": "rg --glob filter, e.g. '**/*.py' or '!**/dist/**'",
+            },
+            "type": {
+                "zh": "rg --type 过滤（py/js/ts/...）",
+                "en": "rg --type filter (py/js/ts/...)",
+            },
+            "output_mode": {
+                "zh": "输出模式：content（默认，行+上下文）/ files_with_matches / count",
+                "en": "Output mode: content (default, lines+context) / files_with_matches / count",
+            },
             "case_insensitive": {"zh": "等价 rg -i", "en": "Equivalent to rg -i"},
-            "multiline": {"zh": "等价 rg -U --multiline-dotall，让 . 跨行", "en": "Equivalent to rg -U --multiline-dotall to let . match newlines"},
+            "multiline": {
+                "zh": "等价 rg -U --multiline-dotall，让 . 跨行",
+                "en": "Equivalent to rg -U --multiline-dotall to let . match newlines",
+            },
             "before_lines": {"zh": "等价 rg -B N", "en": "Equivalent to rg -B N"},
             "after_lines": {"zh": "等价 rg -A N", "en": "Equivalent to rg -A N"},
-            "context_lines": {"zh": "等价 rg -C N，与 before/after 互斥优先", "en": "Equivalent to rg -C N; takes precedence over before/after"},
-            "head_limit": {"zh": "结果上限（content 模式按 match 计；files/count 模式按条目计），默认 200", "en": "Result cap (matches in content mode; entries in files/count modes). Default 200"},
-            "session_id": {"zh": "会话ID（必填，自动注入）", "en": "Session ID (Required, Auto-injected)"},
+            "context_lines": {
+                "zh": "等价 rg -C N，与 before/after 互斥优先",
+                "en": "Equivalent to rg -C N; takes precedence over before/after",
+            },
+            "head_limit": {
+                "zh": "结果上限（content 模式按 match 计；files/count 模式按条目计），默认 200",
+                "en": "Result cap (matches in content mode; entries in files/count modes). Default 200",
+            },
+            "session_id": {
+                "zh": "会话ID（必填，自动注入）",
+                "en": "Session ID (Required, Auto-injected)",
+            },
         },
         param_schema={
             "pattern": {"type": "string", "description": "Regex pattern"},
@@ -426,7 +465,7 @@ class CodebaseTool:
         after_lines: Optional[int] = None,
         context_lines: Optional[int] = None,
         head_limit: int = 200,
-        session_id: str = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         if not session_id:
             raise ValueError("CodebaseTool: session_id is required")
@@ -498,6 +537,7 @@ class CodebaseTool:
             return True
         # ** 展开：转成正则
         import re as _re
+
         regex_parts: List[str] = []
         i = 0
         while i < len(pat):
@@ -567,10 +607,19 @@ class CodebaseTool:
             "en": "Find files by glob pattern. Supports ** for any depth and *.py-style wildcards. Results sorted by mtime desc and truncated by head_limit. Prefer this over shell find.",
         },
         param_description_i18n={
-            "pattern": {"zh": "glob 表达式，如 '**/*.tsx' 或 'src/**/test_*.py'", "en": "Glob, e.g. '**/*.tsx' or 'src/**/test_*.py'"},
-            "path": {"zh": "搜索根路径（虚拟路径），缺省为沙箱工作区根", "en": "Search root path (virtual). Defaults to the sandbox workspace root"},
+            "pattern": {
+                "zh": "glob 表达式，如 '**/*.tsx' 或 'src/**/test_*.py'",
+                "en": "Glob, e.g. '**/*.tsx' or 'src/**/test_*.py'",
+            },
+            "path": {
+                "zh": "搜索根路径（虚拟路径），缺省为沙箱工作区根",
+                "en": "Search root path (virtual). Defaults to the sandbox workspace root",
+            },
             "head_limit": {"zh": "返回上限，默认 200", "en": "Result cap, default 200"},
-            "session_id": {"zh": "会话ID（必填，自动注入）", "en": "Session ID (Required, Auto-injected)"},
+            "session_id": {
+                "zh": "会话ID（必填，自动注入）",
+                "en": "Session ID (Required, Auto-injected)",
+            },
         },
         param_schema={
             "pattern": {"type": "string", "description": "Glob pattern"},
@@ -584,7 +633,7 @@ class CodebaseTool:
         pattern: str,
         path: Optional[str] = None,
         head_limit: int = 200,
-        session_id: str = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         if not session_id:
             raise ValueError("CodebaseTool: session_id is required")
@@ -608,7 +657,9 @@ class CodebaseTool:
             )
         except Exception as exc:
             logger.error(f"CodebaseTool.glob: walk 失败: {exc}")
-            return make_tool_error(ToolErrorCode.INTERNAL_ERROR, f"glob 遍历失败: {exc}")
+            return make_tool_error(
+                ToolErrorCode.INTERNAL_ERROR, f"glob 遍历失败: {exc}"
+            )
 
         norm_pattern = self._to_pure_pattern(pattern)
         # 计算相对 root 的路径用于匹配，绝对路径用于返回
@@ -616,7 +667,11 @@ class CodebaseTool:
         matched: List[Tuple[str, float]] = []
         for fp, mtime in files:
             fp_norm = fp.replace("\\", "/")
-            rel = fp_norm[len(root_norm):].lstrip("/") if root_norm and fp_norm.startswith(root_norm) else fp_norm
+            rel = (
+                fp_norm[len(root_norm) :].lstrip("/")
+                if root_norm and fp_norm.startswith(root_norm)
+                else fp_norm
+            )
             if self._glob_match(rel, norm_pattern):
                 matched.append((fp, mtime))
 
@@ -640,11 +695,26 @@ class CodebaseTool:
             "en": "List directory structure as a compact text tree. Backed by sandbox get_file_tree; ignores .git/node_modules-style noise by default.",
         },
         param_description_i18n={
-            "path": {"zh": "目录虚拟路径，缺省为沙箱工作区根", "en": "Directory virtual path. Defaults to sandbox workspace root"},
-            "depth": {"zh": "最大遍历深度，默认 2", "en": "Max traversal depth, default 2"},
-            "max_items_per_dir": {"zh": "每个目录最多展示的条目数，默认 50", "en": "Max items per directory, default 50"},
-            "include_hidden": {"zh": "是否包含隐藏文件，默认 false", "en": "Include hidden files, default false"},
-            "session_id": {"zh": "会话ID（必填，自动注入）", "en": "Session ID (Required, Auto-injected)"},
+            "path": {
+                "zh": "目录虚拟路径，缺省为沙箱工作区根",
+                "en": "Directory virtual path. Defaults to sandbox workspace root",
+            },
+            "depth": {
+                "zh": "最大遍历深度，默认 2",
+                "en": "Max traversal depth, default 2",
+            },
+            "max_items_per_dir": {
+                "zh": "每个目录最多展示的条目数，默认 50",
+                "en": "Max items per directory, default 50",
+            },
+            "include_hidden": {
+                "zh": "是否包含隐藏文件，默认 false",
+                "en": "Include hidden files, default false",
+            },
+            "session_id": {
+                "zh": "会话ID（必填，自动注入）",
+                "en": "Session ID (Required, Auto-injected)",
+            },
         },
         param_schema={
             "path": {"type": "string", "description": "Directory virtual path"},
@@ -660,7 +730,7 @@ class CodebaseTool:
         depth: int = 2,
         max_items_per_dir: int = 50,
         include_hidden: bool = False,
-        session_id: str = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         if not session_id:
             raise ValueError("CodebaseTool: session_id is required")

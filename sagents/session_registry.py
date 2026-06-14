@@ -11,8 +11,6 @@ import threading
 import time
 from typing import Dict, Optional
 
-from sagents.utils.logger import logger
-
 
 class SessionRegistry:
     """Thread-safe SQLite registry that maps session_id to its workspace path.

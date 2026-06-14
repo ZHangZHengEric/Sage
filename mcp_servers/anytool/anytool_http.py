@@ -49,7 +49,9 @@ class AnyToolStreamableHTTPApp:
             await response(scope, receive, send)
             return
 
-        mcp_server: Server = build_anytool_server(server_name, {**server_config, "user_id": server.user_id})
+        mcp_server: Server = build_anytool_server(
+            server_name, {**server_config, "user_id": server.user_id}
+        )
         transport = StreamableHTTPServerTransport(
             mcp_session_id=None,
             is_json_response_enabled=True,

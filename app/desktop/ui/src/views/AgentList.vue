@@ -358,7 +358,7 @@ import { ref, onMounted, onUnmounted, computed, watch, Teleport } from 'vue'
 import { toast } from 'vue-sonner'
 import { 
   Plus, Edit, Trash2, FileBraces, Download, Upload, Copy, Loader, 
-  Sparkles, Wrench, Zap, GitBranch, Cpu, MoreHorizontal, X, Star, LayoutGrid, List
+  Sparkles, Wrench, Zap, GitBranch, Cpu, MoreHorizontal, X, Star, LayoutGrid, List, UserPlus
 } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { useLanguage } from '../utils/i18n.js'
@@ -923,9 +923,10 @@ const getModelShortName = (providerId) => {
 
 // 获取Agent模式图标
 const getAgentModeIcon = (mode) => {
-  const normalizedMode = mode === 'fibre' ? 'fibre' : 'simple'
+  const normalizedMode = ['fibre', 'team'].includes(mode) ? mode : 'simple'
   const iconMap = {
     'fibre': GitBranch,
+    'team': UserPlus,
     'simple': Cpu
   }
   return iconMap[normalizedMode] || Cpu
@@ -933,9 +934,10 @@ const getAgentModeIcon = (mode) => {
 
 // 获取Agent模式提示文字
 const getAgentModeTooltip = (mode) => {
-  const normalizedMode = mode === 'fibre' ? 'fibre' : 'simple'
+  const normalizedMode = ['fibre', 'team'].includes(mode) ? mode : 'simple'
   const tooltipMap = {
     'fibre': t('agent.modeFibre'),
+    'team': t('agent.modeTeam'),
     'simple': t('agent.modeSimple')
   }
   return tooltipMap[normalizedMode] || t('agent.modeSimple')
@@ -943,9 +945,10 @@ const getAgentModeTooltip = (mode) => {
 
 // 获取Agent模式标签文字
 const getAgentModeLabel = (mode) => {
-  const normalizedMode = mode === 'fibre' ? 'fibre' : 'simple'
+  const normalizedMode = ['fibre', 'team'].includes(mode) ? mode : 'simple'
   const labelMap = {
     'fibre': 'Fibre',
+    'team': 'Team',
     'simple': 'Simple'
   }
   return labelMap[normalizedMode] || 'Simple'
@@ -953,9 +956,10 @@ const getAgentModeLabel = (mode) => {
 
 // 获取Agent模式Badge样式
 const getModeBadgeVariant = (mode) => {
-  const normalizedMode = mode === 'fibre' ? 'fibre' : 'simple'
+  const normalizedMode = ['fibre', 'team'].includes(mode) ? mode : 'simple'
   const variantMap = {
     'fibre': 'default',
+    'team': 'default',
     'simple': 'secondary'
   }
   return variantMap[normalizedMode] || 'secondary'

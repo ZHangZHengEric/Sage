@@ -1,0 +1,46 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - sage-prometheus:9090
+
+  - job_name: sage-server-discovery
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 15s
+    metrics_path: /api/observability/metrics
+    relabel_configs:
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        regex: sage-server.*
+        action: keep
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: job
+      - source_labels: [__meta_docker_container_label_com_sage_environment]
+        target_label: environment
+      - source_labels: [__meta_docker_container_name]
+        regex: /?(.*)
+        target_label: container
+      - source_labels: [__meta_docker_container_name]
+        regex: /?(.*)
+        target_label: __address__
+        replacement: $1:8080
+
+  - job_name: docker-containers
+    scrape_interval: 30s
+    scrape_timeout: 25s
+    static_configs:
+      - targets:
+          - sage-cadvisor:8080
+    metric_relabel_configs:
+      - source_labels: [container_label_com_docker_compose_service]
+        regex: (.+)
+        target_label: job
+        replacement: $1
+      - source_labels: [container_label_com_sage_environment]
+        regex: (.+)
+        target_label: environment
+        replacement: $1

@@ -4,6 +4,7 @@
 - turn_status 在白名单模式下被自动注入；
 - {execute_shell_command, await_shell, kill_shell} 任意一个被勾选时三件套全部解锁。
 """
+
 from __future__ import annotations
 
 from sagents.tool.tool_base import tool
@@ -37,7 +38,7 @@ class _StubTurnStatus:
 
 class _StubToolExpansion:
     @tool()
-    def tool_expand_tools(self, tool_names: list[str] = None):
+    def tool_expand_tools(self, tool_names: list[str] = None):  # pyright: ignore[reportArgumentType]
         """expand"""
         return tool_names or []
 

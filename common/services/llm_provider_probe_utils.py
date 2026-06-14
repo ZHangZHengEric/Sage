@@ -1,7 +1,9 @@
 from typing import Optional
 
 
-def friendly_provider_probe_error(exc: Exception, *, subject: Optional[str] = None) -> str:
+def friendly_provider_probe_error(
+    exc: Exception, *, subject: Optional[str] = None
+) -> str:
     error_str = str(exc or "").strip()
     lower = error_str.lower()
     prefix = f"{subject} " if subject else ""

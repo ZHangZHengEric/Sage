@@ -1,9 +1,8 @@
 """System/version ORM + DAO (shared)."""
 
 from datetime import datetime
-from typing import Optional
 
-from sqlalchemy import Boolean, String, Text, DateTime, ForeignKey, Integer
+from sqlalchemy import String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from common.models.base import Base, BaseDao
