@@ -76,8 +76,11 @@
               class="overflow-hidden transition-[max-height] duration-200 ease-out"
               :class="{ 'max-h-[200px]': isUserContentCollapsed && isUserContentLong }"
             >
-              <MarkdownRenderer
+              <InlineQuestionnaireRenderer
                 :content="formatMessageContent(getTextContent(message.content))"
+                :message-id="message.message_id || message.id"
+                :agent-id="agentId"
+                :can-submit="false"
               />
             </div>
             <!-- 折叠时底部渐隐遮罩，提示有更多内容 -->
@@ -195,10 +198,12 @@
           <div
             v-if="getTextContent(message.content)"
             class="text-foreground/90 overflow-hidden break-words w-full font-sans text-sm leading-6">
-            <MarkdownRendererWithPreview
+            <InlineQuestionnaireRenderer
               :content="formatMessageContent(getTextContent(message.content))"
               :message-id="message.message_id || message.id"
               :agent-id="agentId"
+              :can-submit="!readonly && isLatestMessage"
+              @sendMessage="handleSendMessage"
             />
           </div>
           <!-- 兜底：没有 markdown 引用的孤立 image_url -->
@@ -292,8 +297,7 @@
 import { computed, h, ref, onMounted, watch } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import MessageAvatar from './MessageAvatar.vue'
-import MarkdownRenderer from './MarkdownRenderer.vue'
-import MarkdownRendererWithPreview from './MarkdownRendererWithPreview.vue'
+import InlineQuestionnaireRenderer from './InlineQuestionnaireRenderer.vue'
 import EChartsRenderer from './EChartsRenderer.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
@@ -662,8 +666,8 @@ const handleDownloadFile = (filePath) => {
   emit('downloadFile', filePath)
 }
 
-const handleSendMessage = (text) => {
-  emit('sendMessage', text)
+const handleSendMessage = (text, options) => {
+  emit('sendMessage', text, options)
 }
 
 const handleStartEditUserMessage = () => {
