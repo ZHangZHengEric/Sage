@@ -31,7 +31,7 @@ Use `sage run`, `sage chat`, and `sage doctor` when you need the fastest develop
 
 ### Terminal TUI
 
-Use `sage-terminal` when you want a terminal-first interactive experience on top of the same local Sage runtime, especially for session resume, slash-command workflows, and transcript browsing.
+Use `sage tui` when you want a terminal-first interactive experience on top of the same local Sage runtime, especially for session resume, slash-command workflows, and transcript browsing.
 
 ### Streamlit demo
 

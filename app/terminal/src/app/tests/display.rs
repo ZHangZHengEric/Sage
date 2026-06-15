@@ -10,6 +10,17 @@ fn display_command_updates_display_mode() {
         SubmitAction::Handled
     ));
     assert_eq!(app.display_mode, DisplayMode::Verbose);
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("Notice"));
+    assert!(rendered.contains("display mode set: verbose"));
+    assert!(!rendered.contains("Tool"));
 }
 
 #[test]

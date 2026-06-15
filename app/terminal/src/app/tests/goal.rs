@@ -44,8 +44,14 @@ fn goal_command_shorthand_sets_goal_and_runs_task() {
             .map(|goal| goal.objective.as_str()),
         Some("design a PK modeling roadmap")
     );
-    assert_eq!(app.last_submitted_task.as_deref(), Some("design a PK modeling roadmap"));
-    assert_eq!(app.current_task.as_deref(), Some("design a PK modeling roadmap"));
+    assert_eq!(
+        app.last_submitted_task.as_deref(),
+        Some("design a PK modeling roadmap")
+    );
+    assert_eq!(
+        app.current_task.as_deref(),
+        Some("design a PK modeling roadmap")
+    );
     assert!(app.busy);
 }
 

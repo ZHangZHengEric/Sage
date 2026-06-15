@@ -43,16 +43,16 @@ pub(crate) fn render(
 
     let inner = inner_area(area);
     let lines = composer_lines(props);
-    let wrapped = visible_wrapped_lines(&lines, inner.width.max(1));
+    let (wrapped, cursor) = visible_wrapped_lines_for_cursor(props, &lines, inner.width.max(1));
     frame.render_widget(
         Paragraph::new(wrapped.clone()).style(Style::default().bg(INPUT_BG)),
         inner,
     );
 
-    if props.busy {
+    if props.busy && props.input.is_empty() {
         None
     } else {
-        let (cursor_col, cursor_row) = cursor_position(props, inner.width.max(1));
+        let (cursor_col, cursor_row) = cursor;
         Some((inner.x + cursor_col, inner.y + cursor_row))
     }
 }
@@ -69,7 +69,7 @@ fn composer_lines(props: &ComposerProps<'_>) -> Vec<Line<'static>> {
             ),
             Span::styled(
                 if props.busy {
-                    "Sage is working..."
+                    "Sage is working... type to draft, /interrupt to stop"
                 } else {
                     "Ask Sage to inspect, edit, or explain this repo"
                 },
@@ -121,7 +121,25 @@ fn composer_lines(props: &ComposerProps<'_>) -> Vec<Line<'static>> {
     out
 }
 
-fn cursor_position(props: &ComposerProps<'_>, inner_width: u16) -> (u16, u16) {
+fn visible_wrapped_lines_for_cursor(
+    props: &ComposerProps<'_>,
+    lines: &[Line<'static>],
+    width: u16,
+) -> (Vec<Line<'static>>, (u16, u16)) {
+    let wrapped = wrap_lines(lines, width.max(1));
+    let (cursor_col, cursor_full_row) = cursor_position_in_wrapped_input(props, width.max(1));
+    let max_lines = MAX_COMPOSER_BODY_LINES as usize;
+    let window_start = visible_window_start(wrapped.len(), cursor_full_row as usize, max_lines);
+    let visible = if wrapped.len() <= max_lines {
+        wrapped
+    } else {
+        wrapped[window_start..window_start + max_lines].to_vec()
+    };
+    let cursor_row = cursor_full_row.saturating_sub(window_start as u16);
+    (visible, (cursor_col.min(width), cursor_row))
+}
+
+fn cursor_position_in_wrapped_input(props: &ComposerProps<'_>, inner_width: u16) -> (u16, u16) {
     let before_cursor = &props.input[..props.input_cursor];
     let lines = if before_cursor.is_empty() {
         vec![Line::from(vec![Span::styled(
@@ -144,7 +162,7 @@ fn cursor_position(props: &ComposerProps<'_>, inner_width: u16) -> (u16, u16) {
         out
     };
 
-    let wrapped = visible_wrapped_lines(&lines, inner_width.max(1));
+    let wrapped = wrap_lines(&lines, inner_width.max(1));
     let last = wrapped.last().cloned().unwrap_or_else(|| Line::from("› "));
     let col = line_width(&last).min(inner_width as usize) as u16;
     let row = wrapped.len().saturating_sub(1).min(u16::MAX as usize) as u16;
@@ -155,13 +173,13 @@ fn composer_body_lines(props: &ComposerProps<'_>, body_width: u16) -> u16 {
     wrapped_height(&composer_lines(props), body_width.max(1)).clamp(1, MAX_COMPOSER_BODY_LINES)
 }
 
-fn visible_wrapped_lines(lines: &[Line<'static>], width: u16) -> Vec<Line<'static>> {
-    let wrapped = wrap_lines(lines, width.max(1));
-    let max_lines = MAX_COMPOSER_BODY_LINES as usize;
-    if wrapped.len() <= max_lines {
-        wrapped
+fn visible_window_start(total_lines: usize, cursor_row: usize, max_lines: usize) -> usize {
+    if total_lines <= max_lines {
+        0
+    } else if cursor_row >= max_lines {
+        (cursor_row + 1 - max_lines).min(total_lines.saturating_sub(max_lines))
     } else {
-        wrapped[..max_lines].to_vec()
+        0
     }
 }
 
@@ -197,7 +215,7 @@ mod tests {
     use ratatui::widgets::{Paragraph, Widget};
 
     use super::{
-        composer_height, composer_lines, cursor_position, inner_area, visible_wrapped_lines,
+        composer_height, composer_lines, inner_area, visible_wrapped_lines_for_cursor,
         ComposerProps, INPUT_BG,
     };
 
@@ -207,14 +225,15 @@ mod tests {
             .style(Style::default().bg(INPUT_BG))
             .render(area, &mut buffer);
         let inner = inner_area(area);
-        let wrapped = visible_wrapped_lines(&composer_lines(props), inner.width.max(1));
+        let (wrapped, cursor) =
+            visible_wrapped_lines_for_cursor(props, &composer_lines(props), inner.width.max(1));
         Paragraph::new(wrapped)
             .style(Style::default().bg(INPUT_BG))
             .render(inner, &mut buffer);
-        let cursor = if props.busy {
+        let cursor = if props.busy && props.input.is_empty() {
             None
         } else {
-            let (cursor_col, cursor_row) = cursor_position(props, inner.width.max(1));
+            let (cursor_col, cursor_row) = cursor;
             Some((inner.x + cursor_col, inner.y + cursor_row))
         };
         let rows = (0..area.height)
@@ -250,6 +269,18 @@ mod tests {
         let (rows, cursor) = render_rows(&props, Rect::new(0, 0, 32, 3));
         assert!(rows.join("\n").contains("› Sage is working..."));
         assert_eq!(cursor, None);
+    }
+
+    #[test]
+    fn render_busy_draft_shows_cursor() {
+        let props = ComposerProps {
+            input: "next task",
+            input_cursor: "next task".len(),
+            busy: true,
+        };
+        let (rows, cursor) = render_rows(&props, Rect::new(0, 0, 40, 3));
+        assert!(rows.join("\n").contains("› next task"));
+        assert_eq!(cursor, Some((13, 1)));
     }
 
     #[test]
@@ -316,7 +347,26 @@ mod tests {
         let area = Rect::new(0, 0, 28, composer_height(&props, 28));
         let (rows, cursor) = render_rows(&props, area);
         let rendered = rows.join("\n");
-        assert!(rendered.contains("one"));
+        assert!(rendered.contains("seven"));
+        assert!(!rendered.contains("one"));
+        let (_, cursor_y) = cursor.expect("cursor should stay visible");
+        assert!(cursor_y < area.height);
+    }
+
+    #[test]
+    fn long_input_window_follows_cursor_to_middle() {
+        let input = "one\ntwo\nthree\nfour\nfive\nsix\nseven";
+        let cursor_at_four = input.find("four").expect("line exists") + "four".len();
+        let props = ComposerProps {
+            input,
+            input_cursor: cursor_at_four,
+            busy: false,
+        };
+        let area = Rect::new(0, 0, 28, composer_height(&props, 28));
+        let (rows, cursor) = render_rows(&props, area);
+        let rendered = rows.join("\n");
+
+        assert!(rendered.contains("four"));
         assert!(!rendered.contains("seven"));
         let (_, cursor_y) = cursor.expect("cursor should stay visible");
         assert!(cursor_y < area.height);

@@ -1,5 +1,6 @@
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 use crate::bottom_pane::{
     centered_rect, overlay_accent_style, overlay_background_style, overlay_block,
@@ -61,7 +62,7 @@ fn overlay_lines(props: &HelpOverlayProps) -> Vec<Line<'static>> {
         let label_width = section
             .items
             .iter()
-            .map(|item| item.label.len())
+            .map(|item| UnicodeWidthStr::width(item.label.as_str()))
             .max()
             .unwrap_or(0)
             .max(12);
@@ -75,7 +76,7 @@ fn overlay_lines(props: &HelpOverlayProps) -> Vec<Line<'static>> {
             }
             lines.push(Line::from(vec![
                 Span::styled(
-                    format!("{:<width$}", item.label, width = label_width),
+                    pad_display_width(&item.label, label_width),
                     overlay_accent_style(),
                 ),
                 Span::styled(item.value.clone(), overlay_body_style()),
@@ -90,8 +91,20 @@ fn overlay_lines(props: &HelpOverlayProps) -> Vec<Line<'static>> {
     )));
     lines
 }
+
+fn pad_display_width(text: &str, width: usize) -> String {
+    let used = UnicodeWidthStr::width(text);
+    if used >= width {
+        text.to_string()
+    } else {
+        format!("{text}{}", " ".repeat(width - used))
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use unicode_width::UnicodeWidthStr;
+
     use super::{overlay_lines, HelpItem, HelpOverlayProps, HelpSection};
 
     #[test]
@@ -137,5 +150,45 @@ mod tests {
         assert!(rendered.contains("/resume"));
         assert!(rendered.contains("Use /help provider"));
         assert!(rendered.contains("esc to close"));
+    }
+
+    #[test]
+    fn overlay_lines_pad_cjk_labels_by_display_width() {
+        let props = HelpOverlayProps {
+            title: "Help".to_string(),
+            sections: vec![HelpSection {
+                title: "Commands".to_string(),
+                items: vec![
+                    HelpItem {
+                        label: "/帮助".to_string(),
+                        value: "Show help".to_string(),
+                    },
+                    HelpItem {
+                        label: "/resume".to_string(),
+                        value: "Resume latest session".to_string(),
+                    },
+                ],
+            }],
+            footer_hint: "esc to close".to_string(),
+        };
+        let rows = overlay_lines(&props)
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .into_iter()
+                    .map(|span| span.content.into_owned())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+
+        let help_row = rows.iter().find(|row| row.contains("/帮助")).unwrap();
+        let resume_row = rows.iter().find(|row| row.contains("/resume")).unwrap();
+        let help_value_col = help_row.find("Show help").unwrap();
+        let resume_value_col = resume_row.find("Resume latest").unwrap();
+
+        assert_eq!(
+            UnicodeWidthStr::width(&help_row[..help_value_col]),
+            UnicodeWidthStr::width(&resume_row[..resume_value_col])
+        );
     }
 }

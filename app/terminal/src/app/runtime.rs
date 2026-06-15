@@ -61,6 +61,15 @@ impl App {
     }
 
     pub fn complete_request(&mut self) {
+        let had_active_request = self.busy
+            || self.current_task.is_some()
+            || self.request_started_at.is_some()
+            || self.live_message.is_some()
+            || self.pending_backend_stats.is_some();
+        if !had_active_request {
+            return;
+        }
+
         self.busy = false;
         self.current_task = None;
         let backend_stats = self.pending_backend_stats.take();
@@ -76,23 +85,27 @@ impl App {
             self.last_request_duration,
             self.last_first_output_latency,
             backend_stats.as_ref(),
+            self.display_mode,
         );
         self.request_started_at = None;
         self.first_output_latency = None;
         self.active_phase = None;
         self.active_tools.clear();
         self.flush_live_message();
+        self.reset_assistant_live_filter();
         let mut completion_lines = Vec::new();
-        if let Some(stats) = backend_stats.as_ref() {
-            if let Some(tool_summary) =
-                backend_tool_step_summary(&stats.tool_steps, self.display_mode)
-            {
-                completion_lines.push(tool_summary);
-            }
-            if let Some(phase_summary) =
-                backend_phase_timing_summary(&stats.phase_timings, self.display_mode)
-            {
-                completion_lines.push(phase_summary);
+        if matches!(self.display_mode, DisplayMode::Verbose) {
+            if let Some(stats) = backend_stats.as_ref() {
+                if let Some(tool_summary) =
+                    backend_tool_step_summary(&stats.tool_steps, self.display_mode)
+                {
+                    completion_lines.push(tool_summary);
+                }
+                if let Some(phase_summary) =
+                    backend_phase_timing_summary(&stats.phase_timings, self.display_mode)
+                {
+                    completion_lines.push(phase_summary);
+                }
             }
         }
         if let Some(summary) = completion_summary {
@@ -120,23 +133,27 @@ impl App {
             self.last_request_duration,
             self.last_first_output_latency,
             backend_stats.as_ref(),
+            self.display_mode,
         );
         self.request_started_at = None;
         self.first_output_latency = None;
         self.active_phase = None;
         self.active_tools.clear();
         self.flush_live_message();
+        self.reset_assistant_live_filter();
         let mut completion_lines = Vec::new();
-        if let Some(stats) = backend_stats.as_ref() {
-            if let Some(tool_summary) =
-                backend_tool_step_summary(&stats.tool_steps, self.display_mode)
-            {
-                completion_lines.push(tool_summary);
-            }
-            if let Some(phase_summary) =
-                backend_phase_timing_summary(&stats.phase_timings, self.display_mode)
-            {
-                completion_lines.push(phase_summary);
+        if matches!(self.display_mode, DisplayMode::Verbose) {
+            if let Some(stats) = backend_stats.as_ref() {
+                if let Some(tool_summary) =
+                    backend_tool_step_summary(&stats.tool_steps, self.display_mode)
+                {
+                    completion_lines.push(tool_summary);
+                }
+                if let Some(phase_summary) =
+                    backend_phase_timing_summary(&stats.phase_timings, self.display_mode)
+                {
+                    completion_lines.push(phase_summary);
+                }
             }
         }
         if let Some(summary) = completion_summary {
@@ -175,6 +192,7 @@ impl App {
             self.last_request_duration,
             self.last_first_output_latency,
             backend_stats.as_ref(),
+            self.display_mode,
         );
         self.busy = false;
         self.current_task = None;
@@ -183,6 +201,7 @@ impl App {
         self.active_phase = None;
         self.active_tools.clear();
         self.flush_live_message();
+        self.reset_assistant_live_filter();
 
         let mut lines = Vec::new();
         if let Some(summary) = completion_summary {
@@ -214,16 +233,20 @@ impl App {
                         false,
                     )
                 } else if let Some(phase) = self.active_phase_label() {
-                    format_message_continuation(
-                        MessageKind::Process,
-                        &format!("{phase}..."),
-                        false,
-                    )
+                    format_message_continuation(MessageKind::Process, &format!("{phase}..."), false)
                 } else {
                     format_message_continuation(MessageKind::Process, "working...", false)
                 }
             }
         }
+    }
+
+    pub fn rendered_main_lines(&self, width: u16) -> Vec<Line<'static>> {
+        if self.busy {
+            return self.rendered_live_lines();
+        }
+
+        self.rendered_idle_lines(width)
     }
 
     pub fn rendered_idle_lines(&self, width: u16) -> Vec<Line<'static>> {
@@ -234,14 +257,16 @@ impl App {
             return Vec::new();
         }
 
+        let agent_label = self.active_agent_label();
         welcome_lines(
             width,
-            self.session_label(),
-            self.selected_agent_id.as_deref(),
-            &self.agent_mode,
+            &self.session_id,
+            &agent_label,
+            &self.agent_mode_status_label(),
             self.display_mode,
-            self.max_loop_count,
+            &self.max_loop_count_status_label(),
             &self.workspace_label,
+            &self.sandbox_type_status_label(),
             self.current_goal
                 .as_ref()
                 .map(|goal| (goal.objective.as_str(), goal.status.as_str())),
@@ -334,18 +359,14 @@ impl App {
         let started_at = Instant::now();
         self.active_tools
             .insert(name.clone(), ActiveToolRecord { step, started_at });
-        if !show_detail {
+        if !show_detail || matches!(self.display_mode, DisplayMode::Compact) {
             return;
         }
         let since_request = self
             .request_started_at
             .map(|started| format!(" • +{}", format_duration(started.elapsed())))
             .unwrap_or_default();
-        let detail = if matches!(self.display_mode, DisplayMode::Verbose) {
-            format!("step {}  running {name}{since_request}", self.tool_step_seq)
-        } else {
-            format!("running {name}{since_request}")
-        };
+        let detail = format!("step {}  running {name}{since_request}", self.tool_step_seq);
         self.queue_message(MessageKind::Tool, detail);
     }
 
@@ -355,48 +376,33 @@ impl App {
             .active_tools
             .remove(&name)
             .map(|record| {
-                if matches!(self.display_mode, DisplayMode::Verbose) {
-                    format!(
-                        "step {}  completed {} • {}",
-                        record.step,
-                        name,
-                        format_duration(record.started_at.elapsed())
-                    )
-                } else {
-                    format!(
-                        "completed {} • {}",
-                        name,
-                        format_duration(record.started_at.elapsed())
-                    )
-                }
+                format!(
+                    "step {}  completed {} • {}",
+                    record.step,
+                    name,
+                    format_duration(record.started_at.elapsed())
+                )
             })
             .unwrap_or_else(|| format!("completed {name}"));
-        if !show_detail {
+        if !show_detail || matches!(self.display_mode, DisplayMode::Compact) {
             return;
         }
         self.queue_message(MessageKind::Tool, detail);
     }
 
-    pub(crate) fn materialize_pending_ui(&mut self, width: u16) {
-        if !self.pending_welcome_banner || self.pending_history_lines.is_empty() {
+    pub(crate) fn materialize_pending_ui(&mut self, _width: u16) {
+        if !self.pending_welcome_banner
+            || !self.committed_history_lines.is_empty()
+            || self.pending_history_lines.is_empty()
+        {
             return;
         }
 
-        let mut lines = welcome_lines(
-            width,
-            &self.session_id,
-            self.selected_agent_id.as_deref(),
-            &self.agent_mode,
-            self.display_mode,
-            self.max_loop_count,
-            &self.workspace_label,
-            self.current_goal
-                .as_ref()
-                .map(|goal| (goal.objective.as_str(), goal.status.as_str())),
-        );
-        lines.append(&mut self.pending_history_lines);
-        self.pending_history_lines = lines;
-        self.pending_welcome_banner = false;
+        self.clear_requested = true;
+    }
+
+    pub(crate) fn has_transcript_lines(&self) -> bool {
+        !self.committed_history_lines.is_empty() || !self.pending_history_lines.is_empty()
     }
 
     pub(super) fn append_live_chunk(&mut self, kind: MessageKind, chunk: &str) {
@@ -407,6 +413,14 @@ impl App {
         match self.live_message.as_mut() {
             Some((current_kind, text)) if *current_kind == kind => {
                 text.push_str(chunk);
+                if kind == MessageKind::Assistant {
+                    clean_assistant_live_text(text);
+                    filter_completed_duplicate_assistant_lines(
+                        text,
+                        &mut self.assistant_live_seen_lines,
+                        &mut self.assistant_live_in_code_block,
+                    );
+                }
                 self.live_message_had_history |= flush_completed_live_lines(
                     &mut self.pending_history_lines,
                     *current_kind,
@@ -417,6 +431,14 @@ impl App {
             Some(_) => {
                 self.flush_live_message();
                 let mut text = chunk.to_string();
+                if kind == MessageKind::Assistant {
+                    clean_assistant_live_text(&mut text);
+                    filter_completed_duplicate_assistant_lines(
+                        &mut text,
+                        &mut self.assistant_live_seen_lines,
+                        &mut self.assistant_live_in_code_block,
+                    );
+                }
                 self.live_message_had_history = flush_completed_live_lines(
                     &mut self.pending_history_lines,
                     kind,
@@ -427,6 +449,14 @@ impl App {
             }
             None => {
                 let mut text = chunk.to_string();
+                if kind == MessageKind::Assistant {
+                    clean_assistant_live_text(&mut text);
+                    filter_completed_duplicate_assistant_lines(
+                        &mut text,
+                        &mut self.assistant_live_seen_lines,
+                        &mut self.assistant_live_in_code_block,
+                    );
+                }
                 self.live_message_had_history = flush_completed_live_lines(
                     &mut self.pending_history_lines,
                     kind,
@@ -441,6 +471,18 @@ impl App {
     pub(super) fn flush_live_message(&mut self) {
         if let Some((kind, text)) = self.live_message.take() {
             if !text.trim().is_empty() {
+                let mut text = text;
+                if kind == MessageKind::Assistant {
+                    filter_final_duplicate_assistant_text(
+                        &mut text,
+                        &mut self.assistant_live_seen_lines,
+                        &mut self.assistant_live_in_code_block,
+                    );
+                }
+                if text.trim().is_empty() {
+                    self.live_message_had_history = false;
+                    return;
+                }
                 if self.live_message_had_history {
                     self.pending_history_lines
                         .extend(format_message_continuation(kind, &text, true));
@@ -450,6 +492,17 @@ impl App {
             }
         }
         self.live_message_had_history = false;
+    }
+
+    pub(crate) fn clear_live_response_state(&mut self) {
+        self.live_message = None;
+        self.live_message_had_history = false;
+        self.reset_assistant_live_filter();
+    }
+
+    fn reset_assistant_live_filter(&mut self) {
+        self.assistant_live_seen_lines.clear();
+        self.assistant_live_in_code_block = false;
     }
 
     pub(super) fn queue_message(&mut self, kind: MessageKind, text: impl Into<String>) {
@@ -472,4 +525,188 @@ impl App {
     pub fn apply_backend_stats(&mut self, stats: crate::backend::BackendStats) {
         self.pending_backend_stats = Some(stats);
     }
+}
+
+fn clean_assistant_live_text(text: &mut String) {
+    strip_loop_diagnostics(text);
+    dedupe_repeated_assistant_lines(text);
+    collapse_adjacent_repeated_phrases(text);
+}
+
+fn strip_loop_diagnostics(text: &mut String) {
+    strip_from_marker(
+        text,
+        "Self-check: Repeating execution loop detected",
+        "clarification question.",
+    );
+    strip_from_marker(text, "检测到任务进入重复循环", "继续。");
+}
+
+fn strip_from_marker(text: &mut String, start_marker: &str, end_marker: &str) {
+    while let Some(start) = text.find(start_marker) {
+        let tail = &text[start..];
+        let end = tail
+            .find(end_marker)
+            .map(|index| start + index + end_marker.len())
+            .unwrap_or_else(|| text.len());
+        text.replace_range(start..end, "");
+    }
+}
+
+fn dedupe_repeated_assistant_lines(text: &mut String) {
+    if !text.contains('\n') {
+        return;
+    }
+
+    let had_trailing_newline = text.ends_with('\n');
+    let mut deduped = Vec::new();
+    let mut seen_non_empty = std::collections::BTreeSet::new();
+    let mut changed = false;
+    let mut in_code_block = false;
+
+    for line in text.lines() {
+        let normalized = line.trim();
+        if normalized.starts_with("```") {
+            in_code_block = !in_code_block;
+            deduped.push(line);
+            continue;
+        }
+        if !in_code_block
+            && !normalized.is_empty()
+            && !seen_non_empty.insert(normalized.to_string())
+        {
+            changed = true;
+            continue;
+        }
+        deduped.push(line);
+    }
+
+    if !changed {
+        return;
+    }
+
+    *text = deduped.join("\n");
+    if had_trailing_newline {
+        text.push('\n');
+    }
+}
+
+fn filter_completed_duplicate_assistant_lines(
+    text: &mut String,
+    seen: &mut std::collections::BTreeSet<String>,
+    in_code_block: &mut bool,
+) {
+    let Some(split_at) = text.rfind('\n') else {
+        return;
+    };
+
+    let completed = text[..split_at].to_string();
+    let remainder = text[split_at + 1..].to_string();
+    let mut kept = Vec::new();
+    let mut changed = false;
+
+    for line in completed.lines() {
+        let normalized = line.trim();
+        if normalized.starts_with("```") {
+            *in_code_block = !*in_code_block;
+            kept.push(line);
+            continue;
+        }
+        if !*in_code_block && !normalized.is_empty() && !seen.insert(normalized.to_string()) {
+            changed = true;
+            continue;
+        }
+        kept.push(line);
+    }
+
+    if !changed {
+        return;
+    }
+
+    let mut filtered = kept.join("\n");
+    if !filtered.is_empty() {
+        filtered.push('\n');
+    }
+    filtered.push_str(&remainder);
+    *text = filtered;
+}
+
+fn filter_final_duplicate_assistant_text(
+    text: &mut String,
+    seen: &mut std::collections::BTreeSet<String>,
+    in_code_block: &mut bool,
+) {
+    if text.contains('\n') {
+        filter_completed_duplicate_assistant_lines(text, seen, in_code_block);
+    }
+
+    let normalized = text.trim();
+    if normalized.is_empty()
+        || normalized.starts_with("```")
+        || *in_code_block
+        || seen.insert(normalized.to_string())
+    {
+        return;
+    }
+
+    text.clear();
+}
+
+fn collapse_adjacent_repeated_phrases(text: &mut String) {
+    if text.contains("```") || text.chars().count() > 4_000 {
+        return;
+    }
+
+    let had_trailing_newline = text.ends_with('\n');
+    let mut collapsed = text
+        .lines()
+        .map(collapse_line_repeats)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if had_trailing_newline {
+        collapsed.push('\n');
+    }
+    if collapsed != *text {
+        *text = collapsed;
+    }
+}
+
+fn collapse_line_repeats(line: &str) -> String {
+    let chars = line.chars().collect::<Vec<_>>();
+    if chars.len() < 16 {
+        return line.to_string();
+    }
+
+    let mut output = Vec::with_capacity(chars.len());
+    let mut index = 0;
+    while index < chars.len() {
+        let remaining = chars.len() - index;
+        let max_len = (remaining / 2).min(160);
+        let mut collapsed = false;
+        for len in (8..=max_len).rev() {
+            let left = &chars[index..index + len];
+            let right = &chars[index + len..index + (len * 2)];
+            if left == right && repeated_phrase_is_user_text(left) {
+                output.extend_from_slice(left);
+                index += len * 2;
+                collapsed = true;
+                break;
+            }
+        }
+        if !collapsed {
+            output.push(chars[index]);
+            index += 1;
+        }
+    }
+
+    output.into_iter().collect()
+}
+
+fn repeated_phrase_is_user_text(chars: &[char]) -> bool {
+    let text = chars.iter().collect::<String>();
+    text.contains('。')
+        || text.contains('！')
+        || text.contains('？')
+        || text.contains("Hello")
+        || text.contains("hello")
 }

@@ -189,17 +189,21 @@ sage run "Say hello briefly."
 sage run --stats "Say hello briefly."
 sage run --json --stats "Say hello briefly."
 sage run --workspace /path/to/project --stats "Analyze this repository briefly."
+sage run --sandbox-type local --workspace /path/to/project "Inspect this repository safely."
+sage run --agent-config coding --workspace /path/to/project "Inspect this repository."
 ```
 
 Useful options:
 
 - `--user-id`
 - `--agent-id`
+- `--agent-config`
 - `--agent-mode`
 - `--goal`
 - `--goal-status`
 - `--clear-goal`
 - `--workspace`
+- `--sandbox-type local|remote|passthrough`
 - `--skill` (repeatable)
 - `--max-loop-count`
 - `--json`
@@ -220,6 +224,8 @@ Examples:
 sage chat
 sage chat --stats
 sage chat --workspace /path/to/project
+sage chat --sandbox-type local --workspace /path/to/project
+sage chat --agent-config coding --workspace /path/to/project
 sage chat --skill my_skill
 sage chat --goal "Ship the runtime goal contract"
 ```
@@ -259,6 +265,28 @@ sage resume --workspace /path/to/project <session_id>
 ```
 
 When session metadata is available, the CLI prints a short summary before entering the session.
+
+### Coding Agent Preset
+
+`--agent-config` accepts either a JSON file path or the built-in `coding` preset:
+
+```bash
+sage tui coding --workspace /path/to/repo
+sage chat --agent-config coding --workspace /path/to/repo
+sage run --agent-config coding --workspace /path/to/repo "review the latest changes"
+```
+
+`sage tui coding --workspace /path/to/repo` opens the Terminal TUI with the bundled coding config. It is equivalent to `sage tui --agent-config coding --workspace /path/to/repo`.
+
+The bundled `coding` preset requires an explicit workspace so file tools, shell commands, and repo context are scoped to the project you intend to edit.
+
+Use the full JSON path when you want to copy and customize the preset:
+
+```bash
+sage chat --agent-config examples/coding_agent_config.json --workspace /path/to/repo
+```
+
+Explicit CLI flags still win over the config where both are provided, for example `--agent-mode` and `--max-loop-count`. Use either `--agent-id` or `--agent-config` for a run, not both.
 
 ### `sage sessions`
 
@@ -394,6 +422,7 @@ The current summary includes:
 - `session_id`
 - `user_id`
 - `agent_id`
+- `agent_name`
 - `agent_mode`
 - `workspace`
 - `requested_skills`
@@ -417,7 +446,7 @@ The JSON stream now has four layers:
 
 The intended contract is:
 
-- `cli_session`: emitted before streamed runtime output; includes the resolved `session_id`, `command_mode`, `session_state`, `user_id`, `agent_id`, `agent_mode`, `workspace`, `workspace_source`, requested skills, `max_loop_count`, `has_prior_messages`, `prior_message_count`, and optional `session_summary` for resume hydration
+- `cli_session`: emitted before streamed runtime output; includes the resolved `session_id`, `command_mode`, `session_state`, `user_id`, `agent_id`, `agent_name`, `agent_mode`, `workspace`, `workspace_source`, requested skills, `max_loop_count`, `has_prior_messages`, `prior_message_count`, and optional `session_summary` for resume hydration
 - `cli_phase`: emitted when the CLI detects a phase transition such as `planning`, `tool`, or `assistant_text`
 - `cli_tool`: emitted when a tool step starts or finishes; includes `action`, `step`, `tool_name`, `tool_call_id`, and `status`
 - `cli_stats`: emitted once at the end; includes final `tool_steps`, `phase_timings`, timing summary, and token summary

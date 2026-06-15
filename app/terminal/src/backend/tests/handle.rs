@@ -20,9 +20,11 @@ fn backend_handle_supports_two_round_trips_without_respawn() {
         session_id: "local-0001".to_string(),
         user_id: "terminal-test".to_string(),
         agent_id: None,
-        agent_mode: "simple".to_string(),
-        max_loop_count: 3,
+        agent_config: None,
+        agent_mode: Some("simple".to_string()),
+        max_loop_count: Some(3),
         workspace: Some(temp_dir.clone()),
+        sandbox_type: None,
         skills: Vec::new(),
         model_override: None,
         goal_objective: None,
@@ -69,9 +71,11 @@ fn backend_handle_omits_workspace_flag_when_not_overridden() {
         session_id: "local-0002".to_string(),
         user_id: "terminal-test".to_string(),
         agent_id: None,
-        agent_mode: "simple".to_string(),
-        max_loop_count: 3,
+        agent_config: None,
+        agent_mode: Some("simple".to_string()),
+        max_loop_count: Some(3),
         workspace: None,
+        sandbox_type: None,
         skills: Vec::new(),
         model_override: None,
         goal_objective: None,
@@ -88,6 +92,57 @@ fn backend_handle_omits_workspace_flag_when_not_overridden() {
 
     let args = fs::read_to_string(&args_path).expect("backend args log should exist");
     assert!(!args.lines().any(|line| line == "--workspace"));
+
+    handle.stop();
+    let _ = wait_for_exit(&handle);
+}
+
+#[test]
+fn backend_handle_forwards_agent_config_flag_without_agent_id() {
+    let _env_lock = lock_env();
+    let temp_dir = unique_temp_dir("backend-agent-config");
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    let script_path = write_fake_backend_script(&temp_dir);
+    let args_path = temp_dir.join("backend-args.log");
+    let config_path = temp_dir.join("coding_config.json");
+    fs::write(&config_path, "{}").expect("config file should be created");
+    let _python_guard = EnvVarGuard::set("PYTHON", &script_path.display().to_string());
+    let _args_guard = EnvVarGuard::set("TEST_BACKEND_ARGS_LOG", &args_path.display().to_string());
+
+    let request = BackendRequest {
+        session_id: "local-0003".to_string(),
+        user_id: "terminal-test".to_string(),
+        agent_id: Some("agent_demo".to_string()),
+        agent_config: Some(config_path.clone()),
+        agent_mode: None,
+        max_loop_count: None,
+        workspace: None,
+        sandbox_type: Some("local".to_string()),
+        skills: Vec::new(),
+        model_override: None,
+        goal_objective: None,
+        goal_status: None,
+        clear_goal: false,
+        task: "unused".to_string(),
+    };
+
+    let handle = BackendHandle::spawn(&request).expect("backend should spawn");
+    handle
+        .send_prompt("first prompt")
+        .expect("prompt should be written");
+    let _ = collect_round_trip(&handle);
+
+    let args = fs::read_to_string(&args_path).expect("backend args log should exist");
+    let lines = args.lines().collect::<Vec<_>>();
+    assert!(lines.windows(2).any(|pair| {
+        pair[0] == "--agent-config" && pair[1] == config_path.display().to_string()
+    }));
+    assert!(!lines.iter().any(|line| *line == "--agent-id"));
+    assert!(!lines.iter().any(|line| *line == "--agent-mode"));
+    assert!(!lines.iter().any(|line| *line == "--max-loop-count"));
+    assert!(lines
+        .windows(2)
+        .any(|pair| pair[0] == "--sandbox-type" && pair[1] == "local"));
 
     handle.stop();
     let _ = wait_for_exit(&handle);

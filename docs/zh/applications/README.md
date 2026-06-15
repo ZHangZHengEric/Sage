@@ -31,7 +31,7 @@ ref: applications
 
 ### Terminal TUI
 
-当你希望在同一套本地 Sage runtime 之上获得终端优先的交互体验，尤其是会话恢复、slash 命令和 transcript 浏览时，使用 `sage-terminal`。
+当你希望在同一套本地 Sage runtime 之上获得终端优先的交互体验，尤其是会话恢复、slash 命令和 transcript 浏览时，使用 `sage tui`。
 
 ### Streamlit 演示
 

@@ -66,6 +66,7 @@ flowchart TB
         Mcp[mcp_setting.json<br/>演示用 MCP 配置]
         Cfg1[preset_running_agent_config.json]
         Cfg2[preset_running_config.json]
+        Cfg3[coding_agent_config.json<br/>coding agent 预设]
         Build[build_exec/<br/>单文件构建示例]
     end
 
@@ -78,6 +79,7 @@ flowchart TB
     SCli -.读.-> Mcp
     SCli -.读.-> Cfg1
     SCli -.读.-> Cfg2
+    SCli -.读.-> Cfg3
 ```
 
 什么时候用：

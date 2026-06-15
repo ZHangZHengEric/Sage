@@ -46,9 +46,11 @@ fn main() -> Result<()> {
     let mut app = App::new_with_session_seq(session_seq);
     app.apply_startup_options(
         startup_options.agent_id,
+        startup_options.agent_config.map(PathBuf::from),
         startup_options.agent_mode,
         startup_options.display_mode,
         startup_options.workspace.map(PathBuf::from),
+        startup_options.sandbox_type,
     );
     let mut terminal = setup_terminal(&app)?;
     let result = match startup_action {

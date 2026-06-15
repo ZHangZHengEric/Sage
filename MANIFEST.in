@@ -1,3 +1,5 @@
 include README.md
 include LICENSE
 recursive-include docs *.md
+recursive-include app/terminal/bin *
+recursive-include app/terminal/scripts *.sh

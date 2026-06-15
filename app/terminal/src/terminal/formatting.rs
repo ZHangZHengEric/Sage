@@ -230,8 +230,6 @@ fn scalar_to_string(value: &Value) -> String {
         Value::Bool(value) => value.to_string(),
         Value::Number(value) => value.to_string(),
         Value::String(value) => value.clone(),
-        Value::Array(_) | Value::Object(_) => {
-            unreachable!("composite value passed to scalar renderer")
-        }
+        Value::Array(_) | Value::Object(_) => value.to_string(),
     }
 }

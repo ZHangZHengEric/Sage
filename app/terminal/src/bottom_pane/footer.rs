@@ -108,6 +108,7 @@ mod tests {
     use ratatui::layout::Rect;
     use ratatui::style::Style;
     use ratatui::widgets::{Paragraph, Widget};
+    use unicode_width::UnicodeWidthStr;
 
     use super::{footer_line, truncate_left, FooterProps, FOOTER_BG};
 
@@ -183,6 +184,27 @@ mod tests {
         );
         assert_eq!(rendered.chars().count(), 40);
         assert!(rendered.contains("1.2s"));
+    }
+
+    #[test]
+    fn render_footer_row_stays_full_width_with_cjk_status() {
+        let rendered = line_text(footer_line(
+            &props(
+                "/help commands  •  enter send",
+                "simple • ~/项目 • ready • total 1.2s",
+            ),
+            40,
+        ));
+        assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 40);
+        assert!(rendered.contains("1.2s"));
+    }
+
+    #[test]
+    fn truncate_left_preserves_cjk_tail_with_display_width() {
+        let truncated = truncate_left("simple • ~/项目 • ready", 16);
+        assert!(UnicodeWidthStr::width(truncated.as_str()) <= 16);
+        assert!(truncated.starts_with('…'));
+        assert!(truncated.contains("ready"));
     }
 
     #[test]

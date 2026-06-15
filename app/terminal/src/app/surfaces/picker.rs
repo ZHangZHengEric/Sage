@@ -95,10 +95,6 @@ impl App {
         true
     }
 
-    pub fn is_session_picker_visible(&self) -> bool {
-        self.session_picker.is_some()
-    }
-
     pub fn select_next_session_picker_item(&mut self) -> bool {
         let visible = self
             .filtered_session_picker_items()

@@ -6,7 +6,7 @@ pub(crate) struct SlashCommandDef {
     pub(crate) example: &'static str,
 }
 
-const COMMANDS: [SlashCommandDef; 23] = [
+const COMMANDS: [SlashCommandDef; 24] = [
     SlashCommandDef {
         command: "/help",
         description: "Show available commands",
@@ -81,9 +81,9 @@ const COMMANDS: [SlashCommandDef; 23] = [
     },
     SlashCommandDef {
         command: "/agent",
-        description: "Show or override the current agent",
-        usage: "/agent | /agent show | /agent list | /agent set <agent_id> | /agent clear",
-        example: "/agent set agent_demo",
+        description: "Show or override the current agent or config",
+        usage: "/agent | /agent show | /agent list | /agent set <agent_id> | /agent config <path|coding> | /agent clear",
+        example: "/agent config coding",
     },
     SlashCommandDef {
         command: "/mode",
@@ -102,6 +102,12 @@ const COMMANDS: [SlashCommandDef; 23] = [
         description: "Show or override the current workspace",
         usage: "/workspace | /workspace show | /workspace set <path> | /workspace clear",
         example: "/workspace set /tmp/project",
+    },
+    SlashCommandDef {
+        command: "/sandbox",
+        description: "Show or override the current sandbox mode",
+        usage: "/sandbox | /sandbox show | /sandbox set <local|remote|passthrough> | /sandbox clear",
+        example: "/sandbox set local",
     },
     SlashCommandDef {
         command: "/goal",

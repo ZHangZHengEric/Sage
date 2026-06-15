@@ -1,4 +1,2 @@
 • Process
-  │ tools • execute_shell_command • 60ms • internal tools ×4
-  │ phases • planning 500ms • memory 500ms • response 700ms
-  │ completed • total 1.2s • ttft 180ms • tokens 30
+  │ completed • total 1.2s • ttft 180ms

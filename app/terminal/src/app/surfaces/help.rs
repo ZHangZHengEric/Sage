@@ -89,8 +89,4 @@ impl App {
         self.status = format!("ready  {}", self.session_id);
         true
     }
-
-    pub fn is_help_overlay_visible(&self) -> bool {
-        self.help_overlay_visible
-    }
 }

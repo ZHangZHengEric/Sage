@@ -1,4 +1,4 @@
-use super::{parse_startup_action, StartupBehavior};
+use super::{help::usage_text, parse_startup_action, StartupBehavior};
 use crate::app::{SessionPickerMode, SubmitAction};
 use crate::display_policy::DisplayMode;
 
@@ -44,6 +44,97 @@ fn parse_startup_action_supports_run_and_chat_prompts() {
         chat_action,
         StartupBehavior::Run { action: Some(SubmitAction::RunTask(prompt)), .. }
             if prompt == "hello"
+    ));
+}
+
+#[test]
+fn parse_startup_action_supports_agent_config_option() {
+    let action = parse_startup_action(vec![
+        "--agent-config".to_string(),
+        "examples/coding_agent_config.json".to_string(),
+        "chat".to_string(),
+        "hello".to_string(),
+    ])
+    .expect("parse");
+    assert!(matches!(
+        action,
+        StartupBehavior::Run {
+            action: Some(SubmitAction::RunTask(prompt)),
+            options,
+        } if prompt == "hello"
+            && options.agent_config.as_deref()
+                == Some("examples/coding_agent_config.json")
+    ));
+}
+
+#[test]
+fn parse_startup_action_supports_coding_shortcut() {
+    let action = parse_startup_action(vec![
+        "coding".to_string(),
+        "--workspace".to_string(),
+        "/tmp/demo-workspace".to_string(),
+    ])
+    .expect("parse");
+    assert!(matches!(
+        action,
+        StartupBehavior::Run { action: None, options }
+            if options.agent_config.as_deref() == Some("coding")
+            && options.agent_id.is_none()
+            && options.workspace.as_deref() == Some("/tmp/demo-workspace")
+    ));
+}
+
+#[test]
+fn parse_startup_action_supports_coding_shortcut_prompt() {
+    let action = parse_startup_action(vec![
+        "--agent-id".to_string(),
+        "agent_demo".to_string(),
+        "coding".to_string(),
+        "--workspace".to_string(),
+        "/tmp/demo-workspace".to_string(),
+        "inspect".to_string(),
+        "repo".to_string(),
+    ])
+    .expect("parse");
+    assert!(matches!(
+        action,
+        StartupBehavior::Run { action: Some(SubmitAction::RunTask(prompt)), options }
+            if prompt == "inspect repo"
+            && options.agent_config.as_deref() == Some("coding")
+            && options.agent_id.is_none()
+            && options.workspace.as_deref() == Some("/tmp/demo-workspace")
+    ));
+}
+
+#[test]
+fn parse_startup_action_normalizes_agent_id_option() {
+    let action = parse_startup_action(vec![
+        "--agent-id".to_string(),
+        "  agent_demo  ".to_string(),
+        "chat".to_string(),
+        "hello".to_string(),
+    ])
+    .expect("parse");
+    assert!(matches!(
+        action,
+        StartupBehavior::Run { options, .. }
+            if options.agent_id.as_deref() == Some("agent_demo")
+    ));
+}
+
+#[test]
+fn parse_startup_action_normalizes_agent_config_value() {
+    let action = parse_startup_action(vec![
+        "--agent-config".to_string(),
+        "\"/tmp/My Project/coding agent.json\"".to_string(),
+        "chat".to_string(),
+        "hello".to_string(),
+    ])
+    .expect("parse");
+    assert!(matches!(
+        action,
+        StartupBehavior::Run { options, .. }
+            if options.agent_config.as_deref() == Some("/tmp/My Project/coding agent.json")
     ));
 }
 
@@ -250,6 +341,23 @@ fn parse_startup_action_supports_workspace_option() {
 }
 
 #[test]
+fn parse_startup_action_supports_sandbox_type_option() {
+    let action = parse_startup_action(vec![
+        "--sandbox-type".to_string(),
+        "LOCAL".to_string(),
+        "run".to_string(),
+        "inspect".to_string(),
+    ])
+    .expect("parse");
+    assert!(matches!(
+        action,
+        StartupBehavior::Run { action: Some(SubmitAction::RunTask(prompt)), options }
+            if prompt == "inspect"
+            && options.sandbox_type.as_deref() == Some("local")
+    ));
+}
+
+#[test]
 fn parse_startup_action_supports_display_option() {
     let action = parse_startup_action(vec![
         "--display".to_string(),
@@ -267,24 +375,90 @@ fn parse_startup_action_supports_display_option() {
 }
 
 #[test]
-fn startup_options_merge_with_persisted_fallbacks() {
+fn startup_options_merge_drops_agent_fallbacks_when_config_present() {
     let merged = super::StartupOptions {
         agent_id: None,
-        agent_mode: Some("fibre".to_string()),
+        agent_config: None,
+        agent_mode: None,
         display_mode: None,
         workspace: None,
+        sandbox_type: None,
     }
     .with_fallbacks(super::StartupOptions {
         agent_id: Some("agent_demo".to_string()),
+        agent_config: Some("/tmp/coding_config.json".to_string()),
         agent_mode: Some("multi".to_string()),
         display_mode: Some(DisplayMode::Verbose),
         workspace: Some("/tmp/demo-workspace".to_string()),
+        sandbox_type: Some("local".to_string()),
+    });
+
+    assert_eq!(merged.agent_id.as_deref(), None);
+    assert_eq!(
+        merged.agent_config.as_deref(),
+        Some("/tmp/coding_config.json")
+    );
+    assert_eq!(merged.agent_mode, None);
+    assert_eq!(merged.display_mode, Some(DisplayMode::Verbose));
+    assert_eq!(merged.workspace.as_deref(), Some("/tmp/demo-workspace"));
+    assert_eq!(merged.sandbox_type.as_deref(), Some("local"));
+}
+
+#[test]
+fn startup_options_merge_uses_agent_fallbacks_without_config() {
+    let merged = super::StartupOptions {
+        agent_id: None,
+        agent_config: None,
+        agent_mode: Some("fibre".to_string()),
+        display_mode: None,
+        workspace: None,
+        sandbox_type: Some("remote".to_string()),
+    }
+    .with_fallbacks(super::StartupOptions {
+        agent_id: Some("agent_demo".to_string()),
+        agent_config: None,
+        agent_mode: Some("multi".to_string()),
+        display_mode: Some(DisplayMode::Verbose),
+        workspace: Some("/tmp/demo-workspace".to_string()),
+        sandbox_type: Some("local".to_string()),
     });
 
     assert_eq!(merged.agent_id.as_deref(), Some("agent_demo"));
+    assert_eq!(merged.agent_config, None);
     assert_eq!(merged.agent_mode.as_deref(), Some("fibre"));
     assert_eq!(merged.display_mode, Some(DisplayMode::Verbose));
     assert_eq!(merged.workspace.as_deref(), Some("/tmp/demo-workspace"));
+    assert_eq!(merged.sandbox_type.as_deref(), Some("remote"));
+}
+
+#[test]
+fn startup_options_merge_keeps_explicit_mode_with_config() {
+    let merged = super::StartupOptions {
+        agent_id: Some("agent_demo".to_string()),
+        agent_config: Some("/tmp/coding_config.json".to_string()),
+        agent_mode: Some("multi".to_string()),
+        display_mode: None,
+        workspace: None,
+        sandbox_type: None,
+    }
+    .with_fallbacks(super::StartupOptions {
+        agent_id: Some("persisted_agent".to_string()),
+        agent_config: None,
+        agent_mode: Some("fibre".to_string()),
+        display_mode: Some(DisplayMode::Verbose),
+        workspace: Some("/tmp/demo-workspace".to_string()),
+        sandbox_type: Some("passthrough".to_string()),
+    });
+
+    assert_eq!(merged.agent_id, None);
+    assert_eq!(
+        merged.agent_config.as_deref(),
+        Some("/tmp/coding_config.json")
+    );
+    assert_eq!(merged.agent_mode.as_deref(), Some("multi"));
+    assert_eq!(merged.display_mode, Some(DisplayMode::Verbose));
+    assert_eq!(merged.workspace.as_deref(), Some("/tmp/demo-workspace"));
+    assert_eq!(merged.sandbox_type.as_deref(), Some("passthrough"));
 }
 
 #[test]
@@ -295,10 +469,31 @@ fn parse_startup_action_rejects_invalid_agent_mode() {
 }
 
 #[test]
+fn parse_startup_action_rejects_blank_agent_id() {
+    let err = parse_startup_action(vec!["--agent-id".to_string(), "   ".to_string()])
+        .expect_err("should fail");
+    assert!(err.to_string().contains("non-empty"));
+}
+
+#[test]
+fn parse_startup_action_rejects_blank_agent_config() {
+    let err = parse_startup_action(vec!["--agent-config".to_string(), "   ".to_string()])
+        .expect_err("should fail");
+    assert!(err.to_string().contains("non-empty"));
+}
+
+#[test]
 fn parse_startup_action_rejects_invalid_display_mode() {
     let err = parse_startup_action(vec!["--display".to_string(), "loud".to_string()])
         .expect_err("should fail");
     assert!(err.to_string().contains("compact, verbose"));
+}
+
+#[test]
+fn parse_startup_action_rejects_invalid_sandbox_type() {
+    let err = parse_startup_action(vec!["--sandbox-type".to_string(), "unsafe".to_string()])
+        .expect_err("should fail");
+    assert!(err.to_string().contains("local, remote, passthrough"));
 }
 
 #[test]
@@ -324,6 +519,13 @@ fn parse_startup_action_rejects_missing_run_prompt() {
 fn parse_startup_action_supports_help_flag() {
     let action = parse_startup_action(vec!["--help".to_string()]).expect("parse");
     assert!(matches!(action, StartupBehavior::PrintHelp));
+}
+
+#[test]
+fn startup_usage_shows_public_sage_tui_entrypoint() {
+    let usage = usage_text();
+    assert!(usage.contains("sage tui"));
+    assert!(!usage.contains("sage-terminal"));
 }
 
 impl StartupBehavior {

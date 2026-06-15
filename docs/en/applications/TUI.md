@@ -3,7 +3,7 @@ layout: default
 title: TUI Guide
 parent: Applications
 nav_order: 3
-description: "Run the Rust Sage Terminal preview from source"
+description: "Use Sage Terminal TUI"
 lang: en
 ref: tui-guide
 ---
@@ -12,9 +12,9 @@ ref: tui-guide
 
 # Sage Terminal TUI Guide
 
-`sage-terminal` is the Rust terminal UI preview for Sage.
+`sage tui` is Sage's terminal UI entrypoint. It starts the Rust Terminal TUI through the Sage Python CLI launcher.
 
-This page documents the current source-run workflow. It is not packaged yet.
+This page documents the user-facing command and the source-run workflow used during development.
 
 ## What It Depends On
 
@@ -50,6 +50,17 @@ If the normal CLI is not ready, fix that first:
 sage doctor
 ```
 
+## Install And Run
+
+When Sage is installed from a package that includes the Terminal TUI binary, users start it without installing Rust:
+
+```bash
+sage tui
+sage tui coding --workspace /path/to/repo
+```
+
+The Python CLI acts as a launcher: it finds the packaged Terminal TUI binary and forwards the remaining arguments to it.
+
 ## Run From Source
 
 From the repository root:
@@ -65,7 +76,7 @@ cd app/terminal
 cargo run --quiet --offline
 ```
 
-## Build And Run
+## Build And Run During Development
 
 ```bash
 cd app/terminal
@@ -77,34 +88,40 @@ The compiled binary is:
 
 - `app/terminal/target/release/sage-terminal`
 
+The compiled binary is an implementation detail for development and packaging. The user-facing entrypoint remains `sage tui`.
+
 ## Supported Startup Commands
 
 Currently supported startup forms:
 
 ```bash
-sage-terminal
-sage-terminal --display compact
-sage-terminal --display verbose
-sage-terminal --agent-id agent_demo
-sage-terminal --agent-id agent_demo --agent-mode fibre
-sage-terminal --workspace /path/to/project
-sage-terminal run "inspect this repo"
-sage-terminal --workspace /path/to/project run "inspect this repo"
-sage-terminal chat "hello"
-sage-terminal config init
-sage-terminal config init /tmp/.sage_env --force
-sage-terminal doctor
-sage-terminal doctor probe-provider
-sage-terminal provider verify
-sage-terminal provider verify model=deepseek-chat base=https://api.deepseek.com/v1
-sage-terminal sessions
-sage-terminal sessions 25
-sage-terminal sessions inspect latest
-sage-terminal sessions inspect <session_id>
-sage-terminal resume
-sage-terminal resume latest
-sage-terminal resume <session_id>
-sage-terminal --help
+sage tui
+sage tui --display compact
+sage tui --display verbose
+sage tui --sandbox-type local
+sage tui --agent-id agent_demo
+sage tui coding --workspace /path/to/project
+sage tui coding --sandbox-type local --workspace /path/to/project
+sage tui --agent-config coding --workspace /path/to/project
+sage tui --agent-id agent_demo --agent-mode fibre
+sage tui --workspace /path/to/project
+sage tui run "inspect this repo"
+sage tui --workspace /path/to/project run "inspect this repo"
+sage tui chat "hello"
+sage tui config init
+sage tui config init /tmp/.sage_env --force
+sage tui doctor
+sage tui doctor probe-provider
+sage tui provider verify
+sage tui provider verify model=deepseek-chat base=https://api.deepseek.com/v1
+sage tui sessions
+sage tui sessions 25
+sage tui sessions inspect latest
+sage tui sessions inspect <session_id>
+sage tui resume
+sage tui resume latest
+sage tui resume <session_id>
+sage tui --help
 ```
 
 When using `cargo run`, pass arguments after `--`:
@@ -122,6 +139,7 @@ The current TUI preview includes these core commands:
 - `/mode`
 - `/display`
 - `/workspace`
+- `/sandbox`
 - `/goal`
 - `/interrupt`
 - `/retry`
@@ -158,18 +176,54 @@ Supported entrypoints:
 
 - startup flags:
   - `--agent-id <id>`
+  - `--agent-config <path|coding>`
   - `--agent-mode <simple|multi|fibre>`
   - `--display <compact|verbose>`
 - in-app commands:
   - `/agent`
   - `/agent set <agent_id>`
+  - `/agent config <path|coding>`
   - `/agent clear`
   - `/mode`
   - `/mode set <simple|multi|fibre>`
   - `/display`
   - `/display set <compact|verbose>`
 
-The actual agent definition, tools, skills, and behavior still come from the Sage runtime's stored agent configuration.
+`/agent set <agent_id>` and `/agent config <path|coding>` are mutually exclusive for the current TUI session. Setting one clears the other so the next backend request uses a single source of agent configuration. At startup, `--agent-config` also takes precedence over `--agent-id` if both are supplied. Agent config paths are session-scoped and are not saved as persistent defaults.
+
+When an agent config is active, the TUI shows it directly as `agent_config: coding` or `agent: config coding`. Config-owned mode and loop settings are shown as `config default`. An explicit startup `--agent-mode` or in-session `/mode set <simple|multi|fibre>` still overrides the config's mode for the current session.
+
+The actual agent definition, tools, skills, and behavior still come from the Sage runtime's stored agent configuration or the explicit `--agent-config` JSON used for this session.
+
+### Coding Agent Preset
+
+The repository includes an importable coding-oriented agent config:
+
+- `examples/coding_agent_config.json`
+
+It enables code search, file read/write, shell, lint, todo, memory search, and webpage fetching tools by default.
+
+The TUI can start the current session directly from this preset; importing it through the Web or desktop app first is not required. Use the built-in `coding` alias for the bundled JSON:
+
+```bash
+sage tui coding --workspace /path/to/repo
+sage tui --agent-config coding --workspace /path/to/repo
+```
+
+`sage tui coding --workspace /path/to/repo` is the direct TUI shortcut. It is equivalent to passing `--agent-config coding`.
+
+The bundled `coding` preset requires an explicit workspace. If you set it inside TUI with `/agent config coding`, also set the repository with `/workspace set /path/to/repo` before sending coding tasks.
+
+The same preset can also be used with the plain CLI:
+
+```bash
+sage chat --agent-config coding --workspace /path/to/repo
+sage run --agent-config coding --workspace /path/to/repo "inspect this repo"
+```
+
+Use the full path, `--agent-config examples/coding_agent_config.json`, when you want to copy and customize the JSON.
+
+If the config has already been saved as an agent, `--agent-id <agent_id>` remains supported.
 
 ## Persistent Defaults
 
@@ -185,7 +239,7 @@ Runtime commands such as `/agent set`, `/mode set`, `/display set`, and `/worksp
 Startup flags still win for the current launch. For example, if you have a saved verbose display mode, running:
 
 ```bash
-sage-terminal --display compact
+sage tui --display compact
 ```
 
 will use `compact` only for that invocation.
@@ -200,7 +254,7 @@ Terminal transcript rendering supports two presentation modes:
 You can choose the mode either at startup or inside the TUI:
 
 ```bash
-sage-terminal --display verbose
+sage tui --display verbose
 ```
 
 ```text
@@ -260,7 +314,7 @@ When an interruption happens, the transcript keeps any partial output that alrea
 
 ## Workspace Behavior
 
-By default, `sage-terminal` does not force the current repository into `--workspace`.
+By default, `sage tui` does not force the current repository into `--workspace`.
 
 That means:
 

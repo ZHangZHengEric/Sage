@@ -3,6 +3,7 @@ use anyhow::Result;
 use crate::backend::contract::{
     expect_array_field, optional_bool_field, optional_str_field, run_cli_command, CliJsonCommand,
 };
+
 use crate::backend::{ConfigInfo, ConfigInitInfo};
 
 pub(crate) fn read_config() -> Result<ConfigInfo> {
