@@ -663,6 +663,16 @@ class Session:
         await self.session_context.init_more()
 
         self._cache_session_workspace(session_id, self.session_context)
+        if not self.session_context.message_manager.messages:
+            persisted_messages = self._load_persisted_messages()
+            if persisted_messages:
+                self.session_context.message_manager.messages = list(
+                    persisted_messages
+                )
+                logger.debug(
+                    f"SessionRuntime: restored {len(persisted_messages)} persisted "
+                    f"messages before merging new input, session_id={session_id}"
+                )
         return self.session_context
 
     def _get_agent(self, agent_key: str) -> AgentBase:
