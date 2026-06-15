@@ -27,7 +27,7 @@
         :extract-workbench-items="false"
         :hide-assistant-avatar="true"
         @download-file="$emit('downloadFile', $event)"
-        @sendMessage="$emit('sendMessage', $event)"
+        @sendMessage="(...args) => $emit('sendMessage', ...args)"
         @openSubSession="$emit('openSubSession', $event)"
       />
     </div>
