@@ -1,4 +1,8 @@
 import time
+from types import SimpleNamespace
+
+import pytest
+
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.utils.repeat_pattern import build_loop_signature, detect_repeat_pattern
 
@@ -27,6 +31,57 @@ def _assistant_tool_call(name: str, arguments: str) -> MessageChunk:
         ],
         message_type=MessageType.TOOL_CALL.value,
     )
+
+
+def _assistant_tool_calls(tool_calls) -> MessageChunk:
+    return MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content="",
+        tool_calls=tool_calls,
+        message_type=MessageType.TOOL_CALL.value,
+    )
+
+
+def _assistant_tool_call_delta(
+    *,
+    call_id: str = "",
+    index: int = 0,
+    name: str = "",
+    arguments: str = "",
+) -> MessageChunk:
+    return MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content="",
+        tool_calls=[
+            SimpleNamespace(
+                id=call_id,
+                index=index,
+                type="function",
+                function=SimpleNamespace(name=name, arguments=arguments),
+            )
+        ],
+        message_type=MessageType.TOOL_CALL.value,
+    )
+
+
+def _dict_tool_call(
+    *,
+    call_id: str = "call_1",
+    name: str,
+    arguments,
+    index=None,
+) -> dict:
+    tool_call = {
+        "id": call_id,
+        "type": "function",
+        "function": {
+            "name": name,
+            "arguments": arguments,
+        },
+    }
+    if index is not None:
+        tool_call["index"] = index
+    return tool_call
 
 
 def _tool_result(content: str, tool_name: str = "unknown_tool") -> MessageChunk:
@@ -101,6 +156,22 @@ def test_detect_repeat_pattern_abcaabca():
     assert pattern["cycles"] == 2
 
 
+def test_detect_repeat_pattern_adjacent_repeat_after_different_signature():
+    signatures = [
+        build_loop_signature([_assistant_text("先查一下今天的消息。")]),
+        build_loop_signature(
+            [_assistant_tool_call("web_search", '{"query":"智谱 02513 今天"}')]
+        ),
+        build_loop_signature(
+            [_assistant_tool_call("web_search", '{"query":"智谱 02513 今天"}')]
+        ),
+    ]
+    pattern = detect_repeat_pattern(signatures)
+    assert pattern is not None
+    assert pattern["period"] == 1
+    assert pattern["cycles"] == 2
+
+
 def test_no_false_positive_for_non_repeating_sequence():
     signatures = ["A", "B", "C", "D", "E", "F", "G"]
     pattern = detect_repeat_pattern(signatures)
@@ -138,6 +209,250 @@ def test_signature_distinguishes_tool_name_even_same_args():
     sig_1 = build_loop_signature(chunks_1)
     sig_2 = build_loop_signature(chunks_2)
     assert sig_1 != sig_2
+
+
+def test_signature_coalesces_streamed_tool_call_deltas():
+    chunks_1 = [
+        _assistant_tool_call_delta(
+            call_id="call_1",
+            index=0,
+            name="web_search",
+            arguments='{"query":"智谱',
+        ),
+        _assistant_tool_call_delta(
+            index=0,
+            arguments=' 02513 今天","count":10',
+        ),
+        _assistant_tool_call_delta(
+            index=0,
+            arguments=',"recency_filter":"oneDay"}',
+        ),
+    ]
+    chunks_2 = [
+        _assistant_tool_call_delta(
+            call_id="call_2",
+            index=0,
+            name="web_search",
+            arguments='{"query":"智谱 02513 今天",',
+        ),
+        _assistant_tool_call_delta(
+            index=0,
+            arguments='"count":10,"recency_filter":"oneDay"}',
+        ),
+    ]
+
+    assert build_loop_signature(chunks_1) == build_loop_signature(chunks_2)
+
+
+@pytest.mark.parametrize(
+    ("left_chunks", "right_chunks"),
+    [
+        pytest.param(
+            [
+                _assistant_tool_call(
+                    "web_search",
+                    '{"query":"智谱 02513 今天","count":10,"recency_filter":"oneDay"}',
+                )
+            ],
+            [
+                _assistant_tool_call(
+                    "web_search",
+                    '{"recency_filter":"oneDay","count":10,"query":"智谱 02513 今天"}',
+                )
+            ],
+            id="dict-tool-call-json-key-order",
+        ),
+        pytest.param(
+            [
+                _assistant_tool_calls(
+                    [
+                        _dict_tool_call(
+                            name="web_search",
+                            arguments={
+                                "query": "智谱 02513 今天",
+                                "count": 10,
+                                "recency_filter": "oneDay",
+                            },
+                        )
+                    ]
+                )
+            ],
+            [
+                _assistant_tool_call(
+                    "web_search",
+                    '{"query":"智谱 02513 今天","count":10,"recency_filter":"oneDay"}',
+                )
+            ],
+            id="dict-arguments-vs-json-string",
+        ),
+        pytest.param(
+            [
+                _assistant_tool_call_delta(
+                    call_id="call_1",
+                    index=0,
+                    name="web_search",
+                    arguments='{"query":"智谱',
+                ),
+                _assistant_tool_call_delta(
+                    index=0,
+                    arguments=' 02513 今天","count":10',
+                ),
+                _assistant_tool_call_delta(
+                    index=0,
+                    arguments=',"recency_filter":"oneDay"}',
+                ),
+            ],
+            [
+                _assistant_tool_call_delta(
+                    call_id="call_2",
+                    index=0,
+                    name="web_search",
+                    arguments='{"query":"智谱 02513 今天",',
+                ),
+                _assistant_tool_call_delta(
+                    index=0,
+                    arguments='"count":10,"recency_filter":"oneDay"}',
+                ),
+            ],
+            id="object-streamed-different-splits",
+        ),
+        pytest.param(
+            [
+                _assistant_tool_call_delta(
+                    index=0,
+                    name="web_search",
+                    arguments='{"query":"智谱 02513 今天"',
+                ),
+                _assistant_tool_call_delta(
+                    index=0,
+                    arguments=',"count":10}',
+                ),
+            ],
+            [
+                _assistant_tool_call_delta(
+                    index=0,
+                    name="web_search",
+                    arguments='{"count":10,',
+                ),
+                _assistant_tool_call_delta(
+                    index=0,
+                    arguments='"query":"智谱 02513 今天"}',
+                ),
+            ],
+            id="streamed-without-id-by-index",
+        ),
+        pytest.param(
+            [
+                _assistant_tool_calls(
+                    [
+                        _dict_tool_call(
+                            call_id="call_a",
+                            name="web_search",
+                            arguments='{"query":"智谱"}',
+                        ),
+                        _dict_tool_call(
+                            call_id="call_b",
+                            name="fetch_webpages",
+                            arguments='{"urls":["https://example.com"]}',
+                        ),
+                    ]
+                )
+            ],
+            [
+                _assistant_tool_calls(
+                    [
+                        _dict_tool_call(
+                            call_id="call_x",
+                            name="web_search",
+                            arguments='{"query":"智谱"}',
+                        ),
+                        _dict_tool_call(
+                            call_id="call_y",
+                            name="fetch_webpages",
+                            arguments='{"urls":["https://example.com"]}',
+                        ),
+                    ]
+                )
+            ],
+            id="multi-tool-same-order-different-call-ids",
+        ),
+    ],
+)
+def test_signature_equivalence_matrix_for_tool_calls(left_chunks, right_chunks):
+    assert build_loop_signature(left_chunks) == build_loop_signature(right_chunks)
+
+
+@pytest.mark.parametrize(
+    ("left_chunks", "right_chunks"),
+    [
+        pytest.param(
+            [_assistant_tool_call("web_search", '{"query":"智谱"}')],
+            [_assistant_tool_call("web_search", '{"query":"阿里"}')],
+            id="same-tool-different-args",
+        ),
+        pytest.param(
+            [_assistant_tool_call("web_search", '{"query":"智谱"}')],
+            [_assistant_tool_call("memory_recall", '{"query":"智谱"}')],
+            id="same-args-different-tool",
+        ),
+        pytest.param(
+            [
+                _assistant_tool_calls(
+                    [
+                        _dict_tool_call(
+                            call_id="call_a",
+                            name="web_search",
+                            arguments='{"query":"智谱"}',
+                        ),
+                        _dict_tool_call(
+                            call_id="call_b",
+                            name="fetch_webpages",
+                            arguments='{"urls":["https://example.com"]}',
+                        ),
+                    ]
+                )
+            ],
+            [
+                _assistant_tool_calls(
+                    [
+                        _dict_tool_call(
+                            call_id="call_y",
+                            name="fetch_webpages",
+                            arguments='{"urls":["https://example.com"]}',
+                        ),
+                        _dict_tool_call(
+                            call_id="call_x",
+                            name="web_search",
+                            arguments='{"query":"智谱"}',
+                        ),
+                    ]
+                )
+            ],
+            id="multi-tool-order-is-significant",
+        ),
+        pytest.param(
+            [
+                _assistant_tool_call_delta(
+                    call_id="call_1",
+                    index=0,
+                    name="web_search",
+                    arguments='{"query":"智谱"}',
+                )
+            ],
+            [
+                _assistant_tool_call_delta(
+                    call_id="call_2",
+                    index=0,
+                    name="web_search",
+                    arguments='{"query":"智谱","count":10}',
+                )
+            ],
+            id="streamed-same-tool-different-final-args",
+        ),
+    ],
+)
+def test_signature_distinction_matrix_for_tool_calls(left_chunks, right_chunks):
+    assert build_loop_signature(left_chunks) != build_loop_signature(right_chunks)
 
 
 def test_signature_distinguishes_tool_result_tool_name():
@@ -179,6 +494,38 @@ def test_replay_detects_tool_call_cycle():
     ]
     hit_steps = _detect_steps_from_rounds(rounds)
     assert hit_steps and hit_steps[0] == 4
+
+
+def test_replay_detects_repeated_streamed_tool_call_with_same_args():
+    rounds = [
+        [_assistant_text("先查一下今天的消息。")],
+        [
+            _assistant_tool_call_delta(
+                call_id="call_1",
+                index=0,
+                name="web_search",
+                arguments='{"query":"智谱 02513 今天","count":',
+            ),
+            _assistant_tool_call_delta(
+                index=0,
+                arguments='10,"recency_filter":"oneDay"}',
+            ),
+        ],
+        [
+            _assistant_tool_call_delta(
+                call_id="call_2",
+                index=0,
+                name="web_search",
+                arguments='{"query":"智谱 02513 今天",',
+            ),
+            _assistant_tool_call_delta(
+                index=0,
+                arguments='"count":10,"recency_filter":"oneDay"}',
+            ),
+        ],
+    ]
+    hit_steps = _detect_steps_from_rounds(rounds)
+    assert hit_steps == [3]
 
 
 def test_replay_not_detected_for_progressive_tool_plan():
