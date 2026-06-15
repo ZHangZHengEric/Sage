@@ -666,9 +666,7 @@ class Session:
         if not self.session_context.message_manager.messages:
             persisted_messages = self._load_persisted_messages()
             if persisted_messages:
-                self.session_context.message_manager.messages = list(
-                    persisted_messages
-                )
+                self.session_context.message_manager.messages = list(persisted_messages)
                 logger.debug(
                     f"SessionRuntime: restored {len(persisted_messages)} persisted "
                     f"messages before merging new input, session_id={session_id}"
