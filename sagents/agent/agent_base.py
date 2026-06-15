@@ -92,7 +92,17 @@ class AgentBase(ABC):
         # 实际的上下文长度由 SessionContext 中的 context_budget_manager 动态管理
         # 这里只是作为兜底的安全阈值
 
-        self.max_model_input_len = 1000000
+        configured_max_input = None
+        configured_max_model = None
+        if isinstance(model_config, dict):
+            configured_max_input = model_config.get("max_model_input_len")
+            configured_max_model = model_config.get("max_model_len")
+        env_max_input = os.getenv("SAGE_MAX_MODEL_INPUT_LEN")
+        max_model_len = int(configured_max_model or 64000)
+        requested_max_input = int(
+            configured_max_input or env_max_input or max_model_len
+        )
+        self.max_model_input_len = min(requested_max_input, max_model_len)
 
         logger.debug(
             f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}, 最大输入长度（安全阈值）: {self.max_model_input_len}"

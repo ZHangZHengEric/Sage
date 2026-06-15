@@ -736,6 +736,81 @@ class SimpleAgent(AgentBase):
             )
             return False
 
+    def _resolve_raw_context_limit(self, session_context: SessionContext) -> int:
+        configured = None
+        if getattr(session_context, "agent_config", None):
+            configured = session_context.agent_config.get("max_model_input_len")
+        max_model_len = int(self.model_config.get("max_model_len", 64000))
+        requested_limit = int(configured or self.max_model_input_len)
+        return min(requested_limit, max_model_len)
+
+    def _resolve_persistent_compression_threshold(
+        self, session_context: SessionContext, raw_context_limit: int
+    ) -> int:
+        configured = None
+        if getattr(session_context, "agent_config", None):
+            configured = session_context.agent_config.get(
+                "persistent_compression_threshold"
+            )
+        if configured is None and isinstance(self.model_config, dict):
+            configured = self.model_config.get("persistent_compression_threshold")
+        if configured is None:
+            configured = os.getenv("SAGE_PERSISTENT_COMPRESSION_THRESHOLD")
+        max_model_len = int(self.model_config.get("max_model_len", 64000))
+        upper_limit = min(raw_context_limit, max_model_len)
+        if configured:
+            return min(int(configured), upper_limit)
+        return max(1, int(upper_limit * 0.75))
+
+    async def _persistently_compress_raw_messages_if_needed(
+        self,
+        messages_input: List[MessageChunk],
+        session_id: str,
+        limit: int,
+        *,
+        force: bool = False,
+        message_manager: Optional[MessageManager] = None,
+    ) -> tuple[List[MessageChunk], List[MessageChunk], bool]:
+        current_tokens = MessageManager.calculate_messages_token_length(
+            cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input)
+        )
+        if not force and current_tokens <= limit:
+            return messages_input, [], False
+
+        logger.info(
+            "SimpleAgent: 开始持久压缩raw消息上下文。"
+            f"当前: {current_tokens}, limit: {limit}, force: {force}"
+        )
+        emitted_chunks: List[MessageChunk] = []
+        async for messages_chunk in self._compress_messages_with_tool(
+            messages_input, session_id
+        ):
+            emitted_chunks.extend(messages_chunk)
+
+        if not emitted_chunks:
+            logger.warning("SimpleAgent: 持久压缩未产生任何工具消息")
+            return messages_input, [], current_tokens > limit
+
+        if message_manager is not None:
+            message_manager.add_messages(emitted_chunks)
+
+        messages_with_compression = MessageManager.merge_new_messages_to_old_messages(
+            cast(List[Union[MessageChunk, Dict[str, Any]]], emitted_chunks),
+            cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input),
+        )
+        compacted_messages = MessageManager.extract_messages_for_inference(
+            messages_with_compression
+        )
+        compacted_tokens = MessageManager.calculate_messages_token_length(
+            compacted_messages
+        )
+        logger.info(
+            "SimpleAgent: raw消息持久压缩完成。"
+            f"{current_tokens} -> {compacted_tokens} tokens, "
+            f"消息数 {len(messages_input)} -> {len(compacted_messages)}"
+        )
+        return compacted_messages, emitted_chunks, compacted_tokens > limit
+
     async def _execute_loop(
         self,
         messages_input: List[MessageChunk],
@@ -780,6 +855,12 @@ class SimpleAgent(AgentBase):
         logger.debug(f"SimpleAgent: 加载历史签名 {len(recent_signatures)} 个")
         force_tool_choice_auto_next = False
         turn_status_only_next = False
+        raw_context_limit = self._resolve_raw_context_limit(session_context)
+        persistent_compression_threshold = (
+            self._resolve_persistent_compression_threshold(
+                session_context, raw_context_limit
+            )
+        )
         while True:
             if self._should_abort_due_to_session(session_context):
                 break
@@ -861,6 +942,38 @@ class SimpleAgent(AgentBase):
                     "SimpleAgent: 工具扩展后已刷新本轮工具列表: "
                     f"{[tool['function']['name'] for tool in tools_json]}"
                 )
+
+            current_raw_tokens = MessageManager.calculate_messages_token_length(
+                cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input)
+            )
+            if current_raw_tokens > persistent_compression_threshold:
+                logger.info(
+                    "SimpleAgent: raw上下文达到持久压缩阈值，尝试压缩。"
+                    f"当前: {current_raw_tokens}, 阈值: {persistent_compression_threshold}, "
+                    f"硬上限: {raw_context_limit}"
+                )
+                (
+                    messages_input,
+                    compression_chunks,
+                    still_over_limit,
+                ) = await self._persistently_compress_raw_messages_if_needed(
+                    messages_input,
+                    session_id,
+                    raw_context_limit,
+                    force=True,
+                    message_manager=message_manager,
+                )
+                if compression_chunks:
+                    yield compression_chunks
+                if still_over_limit and current_raw_tokens > raw_context_limit:
+                    yield [
+                        MessageChunk(
+                            role=MessageRole.ASSISTANT.value,
+                            content=f"消息长度超过最大长度：{raw_context_limit},是否需要继续执行？",
+                            type=MessageType.AGENT_EXECUTION_ERROR.value,
+                        )
+                    ]
+                    break
 
             # 调用LLM
             should_break = False
@@ -1024,16 +1137,35 @@ class SimpleAgent(AgentBase):
                 MessageManager.calculate_messages_token_length(
                     cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input)
                 )
-                > self.max_model_input_len
+                > raw_context_limit
             ):
                 logger.warning(
-                    f"SimpleAgent: 消息长度超过 {self.max_model_input_len}，截断消息"
+                    f"SimpleAgent: 消息长度超过 {raw_context_limit}，先尝试持久压缩"
+                )
+                (
+                    messages_input,
+                    compression_chunks,
+                    still_over_limit,
+                ) = await self._persistently_compress_raw_messages_if_needed(
+                    messages_input,
+                    session_id,
+                    raw_context_limit,
+                    force=True,
+                    message_manager=message_manager,
+                )
+                if compression_chunks:
+                    yield compression_chunks
+                if not still_over_limit:
+                    continue
+
+                logger.warning(
+                    f"SimpleAgent: 持久压缩后消息长度仍超过 {raw_context_limit}，暂停执行"
                 )
                 # 任务暂停，返回一个超长的错误消息块
                 yield [
                     MessageChunk(
                         role=MessageRole.ASSISTANT.value,
-                        content=f"消息长度超过最大长度：{self.max_model_input_len},是否需要继续执行？",
+                        content=f"消息长度超过最大长度：{raw_context_limit},是否需要继续执行？",
                         type=MessageType.AGENT_EXECUTION_ERROR.value,
                     )
                 ]
