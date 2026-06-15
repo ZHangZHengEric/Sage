@@ -56,9 +56,7 @@ def _function_attr(function: Any, name: str, default: Any = "") -> Any:
     return getattr(function, name, default)
 
 
-def _append_tool_call_signature(
-    tool_call_parts: List[str], fn: Any, args: Any
-) -> None:
+def _append_tool_call_signature(tool_call_parts: List[str], fn: Any, args: Any) -> None:
     fn_norm = normalize_text(str(fn or ""))
     tool_call_parts.append(f"{fn_norm}:{short_hash(stable_json(args))}")
 
