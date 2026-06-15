@@ -960,7 +960,13 @@ class Session:
                 raise ValueError("SAgent: run_stream_safe 必须提供 flow 参数")
         except Exception as e:
             if self.observability_manager:
-                self.observability_manager.on_chain_error(e, session_id=session_id)
+                self.observability_manager.on_chain_error(
+                    e,
+                    session_id=session_id,
+                    final_system_context=getattr(
+                        self.session_context, "system_context", None
+                    ),
+                )
             session_context = self.session_context
             if session_context:
                 self.set_status(SessionStatus.ERROR)
@@ -1002,7 +1008,11 @@ class Session:
 
             if self.observability_manager:
                 self.observability_manager.on_chain_end(
-                    output_data={"status": "finished"}, session_id=session_id
+                    output_data={"status": "finished"},
+                    session_id=session_id,
+                    final_system_context=getattr(
+                        session_context, "system_context", None
+                    ),
                 )
             self._cache_session_workspace(session_id, session_context)
 

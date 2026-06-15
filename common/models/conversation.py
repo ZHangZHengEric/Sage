@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import json
-from sqlalchemy import JSON, String, Text, func, select, update
+from sqlalchemy import JSON, String, Text, func, or_, select, update
 from sqlalchemy.orm import Mapped, mapped_column
 
 from common.models.base import Base, BaseDao, get_local_now
@@ -146,7 +146,9 @@ class ConversationDao(BaseDao):
             where.append(Conversation.agent_id == agent_id)
         if search:
             like = f"%{search}%"
-            where.append((Conversation.title.like(like)))
+            where.append(
+                or_(Conversation.title.like(like), Conversation.session_id.like(like))
+            )
 
         if sort_by == "title":
             order = Conversation.title.asc()
