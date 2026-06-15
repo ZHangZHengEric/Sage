@@ -44,6 +44,41 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
             return output.lower(), ""
         return "finished", ""
 
+    def _serialize_attribute_value(self, value: Any) -> str:
+        if isinstance(value, (dict, list)):
+
+            def default_serializer(obj):
+                if dataclasses.is_dataclass(obj):
+                    return dataclasses.asdict(obj)  # pyright: ignore[reportArgumentType]
+                if hasattr(obj, "to_dict"):
+                    return obj.to_dict()
+                if hasattr(obj, "__dict__"):
+                    return obj.__dict__
+                return str(obj)
+
+            return json.dumps(
+                redact_base64_data_urls_in_value(value),
+                ensure_ascii=False,
+                default=default_serializer,
+            )
+        return str(value)
+
+    def _set_serialized_attribute(self, span: trace.Span, key: str, value: Any) -> None:
+        try:
+            span.set_attribute(key, self._serialize_attribute_value(value))
+        except Exception as e:
+            logger.error(f"Error setting {key} attribute: {e}")
+
+    def _set_final_system_context_attribute(
+        self, span: Optional[trace.Span], **kwargs: Any
+    ) -> None:
+        if not span:
+            return
+        final_system_context = kwargs.get("final_system_context")
+        if final_system_context is None:
+            return
+        self._set_serialized_attribute(span, "system_context", final_system_context)
+
     def _safe_detach(self, token: Any) -> bool:
         token_id = id(token)
         if token_id in self._detached_token_ids:
@@ -176,27 +211,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         # Use specific attributes instead of SERVICE_NAME (which is Resource-level)
         span.set_attribute("session_id", session_id)
 
-        try:
-            if isinstance(input_data, (dict, list)):
-
-                def default_serializer(obj):
-                    if dataclasses.is_dataclass(obj):
-                        return dataclasses.asdict(obj)  # pyright: ignore[reportArgumentType]
-                    if hasattr(obj, "to_dict"):
-                        return obj.to_dict()
-                    if hasattr(obj, "__dict__"):
-                        return obj.__dict__
-                    return str(obj)
-
-                input_str = json.dumps(
-                    input_data, ensure_ascii=False, default=default_serializer
-                )
-            else:
-                input_str = str(input_data)
-            span.set_attribute("input", input_str)
-        except Exception as e:
-            logger.error(f"Error setting input attribute: {e}")
-            pass
+        self._set_serialized_attribute(span, "input", input_data)
 
         self._push_span(span)
 
@@ -205,31 +220,13 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         if not span:
             return
 
-        try:
-            if isinstance(output_data, (dict, list)):
-
-                def default_serializer(obj):
-                    if dataclasses.is_dataclass(obj):
-                        return dataclasses.asdict(obj)  # pyright: ignore[reportArgumentType]
-                    if hasattr(obj, "to_dict"):
-                        return obj.to_dict()
-                    if hasattr(obj, "__dict__"):
-                        return obj.__dict__
-                    return str(obj)
-
-                output_str = json.dumps(
-                    output_data, ensure_ascii=False, default=default_serializer
-                )
-            else:
-                output_str = str(output_data)
-            span.set_attribute("output", str(output_str))
-        except Exception as e:
-            logger.error(f"Error setting output attribute: {e}")
-            pass
+        self._set_serialized_attribute(span, "output", output_data)
+        self._set_final_system_context_attribute(span, **kwargs)
         span.set_status(Status(StatusCode.OK))
         self._pop_span()
 
     def on_chain_error(self, error: Exception, **kwargs: Any) -> Any:
+        self._set_final_system_context_attribute(self._get_current_span(), **kwargs)
         self._end_span_on_error(error)
 
     def on_agent_start(self, session_id: str, agent_name: str, **kwargs: Any) -> Any:
