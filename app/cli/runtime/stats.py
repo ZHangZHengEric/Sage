@@ -14,6 +14,7 @@ def _empty_stats(*, request, workspace: Optional[str]) -> Dict[str, Any]:
         "session_id": getattr(request, "session_id", None),
         "user_id": getattr(request, "user_id", None),
         "agent_id": getattr(request, "agent_id", None),
+        "agent_name": getattr(request, "agent_name", None),
         "agent_mode": getattr(request, "agent_mode", None),
         "workspace": workspace,
         "requested_skills": list(getattr(request, "available_skills", None) or []),
@@ -298,6 +299,7 @@ def _print_stats(stats: Dict[str, Any], *, json_output: bool) -> None:
                     "session_id": stats.get("session_id"),
                     "user_id": stats.get("user_id"),
                     "agent_id": stats.get("agent_id"),
+                    "agent_name": stats.get("agent_name"),
                     "agent_mode": stats.get("agent_mode"),
                     "workspace": stats.get("workspace"),
                     "requested_skills": stats.get("requested_skills") or [],
@@ -327,6 +329,8 @@ def _print_stats(stats: Dict[str, Any], *, json_output: bool) -> None:
     ]
     if stats.get("agent_id"):
         output_lines.append(f"agent_id: {stats.get('agent_id')}")
+    if stats.get("agent_name"):
+        output_lines.append(f"agent_name: {stats.get('agent_name')}")
     if stats.get("workspace"):
         output_lines.append(f"workspace: {stats.get('workspace')}")
     first_output = stats.get("first_output_seconds")

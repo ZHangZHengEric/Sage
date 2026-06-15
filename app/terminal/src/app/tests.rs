@@ -10,6 +10,8 @@ mod golden;
 mod popup;
 #[path = "tests/run_control.rs"]
 mod run_control;
+#[path = "tests/sandbox.rs"]
+mod sandbox;
 #[path = "tests/sessions.rs"]
 mod sessions;
 #[path = "tests/surfaces.rs"]

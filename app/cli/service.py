@@ -19,6 +19,7 @@ from app.cli.services.provider import (
     verify_cli_provider,
 )
 from app.cli.services.runtime import (
+    AGENT_CONFIG_PRESETS as AGENT_CONFIG_PRESETS,
     collect_runtime_issues as _collect_runtime_issues,
     cli_db_runtime,
     cli_runtime,
@@ -27,7 +28,13 @@ from app.cli.services.runtime import (
     get_default_cli_max_loop_count,
     get_default_cli_user_id,
     init_cli_config,
+    is_bundled_coding_agent_config as is_bundled_coding_agent_config,
+    load_agent_config_file as load_agent_config_file,
+    normalize_sandbox_type as normalize_sandbox_type,
+    resolve_agent_config_path as resolve_agent_config_path,
     run_request_stream,
+    validate_agent_config_workspace as validate_agent_config_workspace,
+    validate_agent_selection_options as validate_agent_selection_options,
     validate_cli_request_options,
     validate_cli_runtime_requirements,
     build_run_request,

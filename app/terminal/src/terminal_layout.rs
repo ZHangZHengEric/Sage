@@ -33,6 +33,7 @@ pub(crate) fn desired_viewport_height(
             inline_max_height.max(transcript_overlay::required_height(&props)),
         );
     }
+
     let chrome_height = composer_height
         .saturating_add(1)
         .saturating_add(popup_height);
@@ -66,4 +67,87 @@ fn composer_required_height(app: &App, width: u16) -> u16 {
         busy: app.busy,
     };
     composer_height(&props, width)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::desired_viewport_height;
+    use crate::app::{App, MessageKind, SessionPickerEntry, SessionPickerMode, SessionPickerState};
+
+    fn app_with_committed_transcript() -> App {
+        let mut app = App::new();
+        app.push_message(MessageKind::User, "hello");
+        app.push_message(MessageKind::Assistant, "ready");
+        let _ = app.take_pending_history_lines();
+        app
+    }
+
+    #[test]
+    fn help_overlay_can_expand_viewport_after_transcript_exists() {
+        let mut app = app_with_committed_transcript();
+        app.input = "/help".to_string();
+        app.input_cursor = app.input.len();
+        let _ = app.submit_input();
+
+        let height = desired_viewport_height(&app, 100, 5, 14);
+
+        assert!(height > 14, "height should fit help overlay, got {height}");
+    }
+
+    #[test]
+    fn session_picker_can_expand_viewport_after_transcript_exists() {
+        let mut app = app_with_committed_transcript();
+        app.session_picker = Some(SessionPickerState {
+            mode: SessionPickerMode::Browse,
+            items: (0..8)
+                .map(|idx| SessionPickerEntry {
+                    session_id: format!("session-{idx}"),
+                    title: format!("Session {idx}"),
+                    message_count: idx,
+                    updated_at: "now".to_string(),
+                    preview: Some("preview".to_string()),
+                })
+                .collect(),
+            filter_query: String::new(),
+            selected: 0,
+        });
+
+        let height = desired_viewport_height(&app, 100, 5, 14);
+
+        assert!(
+            height > 14,
+            "height should fit session picker, got {height}"
+        );
+    }
+
+    #[test]
+    fn transcript_overlay_can_expand_viewport_after_transcript_exists() {
+        let mut app = app_with_committed_transcript();
+        for idx in 0..30 {
+            app.push_message(MessageKind::Assistant, format!("line {idx}"));
+        }
+        let _ = app.take_pending_history_lines();
+        app.open_transcript_overlay();
+
+        let height = desired_viewport_height(&app, 100, 5, 14);
+
+        assert!(
+            height > 14,
+            "height should fit transcript overlay, got {height}"
+        );
+    }
+
+    #[test]
+    fn busy_viewport_uses_current_live_content_height() {
+        let mut app = App::new();
+        app.begin_task_submission("work".to_string(), true);
+        app.materialize_pending_ui(100);
+        let _ = app.take_clear_request();
+        let _ = app.take_pending_history_lines();
+
+        let height = desired_viewport_height(&app, 100, 5, 18);
+
+        assert!(height < 18, "height should not leave large blank space");
+        assert!(height >= 5);
+    }
 }

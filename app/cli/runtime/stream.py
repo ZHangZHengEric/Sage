@@ -89,6 +89,7 @@ async def _stream_request(
     json_output: bool,
     stats_output: bool,
     workspace: Optional[str] = None,
+    sandbox_type: Optional[str] = None,
     *,
     command_mode: str = "run",
     session_summary: Optional[Dict[str, Any]] = None,
@@ -100,7 +101,10 @@ async def _stream_request(
 
     async def _pump_stream_events() -> None:
         try:
-            async for event in run_request_stream(request, workspace=workspace):
+            stream_kwargs: Dict[str, Any] = {"workspace": workspace}
+            if sandbox_type:
+                stream_kwargs["sandbox_type"] = sandbox_type
+            async for event in run_request_stream(request, **stream_kwargs):
                 await event_queue.put(("event", event))
         except Exception as exc:  # noqa: BLE001
             await event_queue.put(("error", exc))

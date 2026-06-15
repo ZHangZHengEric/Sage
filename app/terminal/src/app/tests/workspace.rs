@@ -14,6 +14,17 @@ fn workspace_command_sets_override() {
         Some("/tmp/demo-workspace".to_string())
     );
     assert_eq!(app.workspace_label, "/tmp/demo-workspace");
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("Notice"));
+    assert!(rendered.contains("workspace set: /tmp/demo-workspace"));
+    assert!(!rendered.contains("Tool"));
 }
 
 #[test]

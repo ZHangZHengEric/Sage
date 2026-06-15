@@ -186,17 +186,21 @@ sage run "用一句话介绍你自己。"
 sage run --stats "用一句话介绍你自己。"
 sage run --json --stats "用一句话介绍你自己。"
 sage run --workspace /path/to/project --stats "简单分析一下这个仓库。"
+sage run --sandbox-type local --workspace /path/to/project "安全检查一下这个仓库。"
+sage run --agent-config coding --workspace /path/to/project "检查一下这个仓库。"
 ```
 
 常用参数：
 
 - `--user-id`
 - `--agent-id`
+- `--agent-config`
 - `--agent-mode`
 - `--goal`
 - `--goal-status`
 - `--clear-goal`
 - `--workspace`
+- `--sandbox-type local|remote|passthrough`
 - `--skill`（可重复）
 - `--max-loop-count`
 - `--json`
@@ -217,6 +221,8 @@ sage run --workspace /path/to/project --stats "简单分析一下这个仓库。
 sage chat
 sage chat --stats
 sage chat --workspace /path/to/project
+sage chat --sandbox-type local --workspace /path/to/project
+sage chat --agent-config coding --workspace /path/to/project
 sage chat --skill my_skill
 sage chat --goal "完成 runtime goal contract"
 ```
@@ -246,6 +252,28 @@ sage resume --workspace /path/to/project <session_id>
 ```
 
 如果当前数据库里有该会话的元信息，CLI 会在进入会话前先打印一段简短摘要。
+
+### Coding Agent 预设
+
+`--agent-config` 可以接收 JSON 文件路径，也可以接收内置的 `coding` 预设：
+
+```bash
+sage tui coding --workspace /path/to/repo
+sage chat --agent-config coding --workspace /path/to/repo
+sage run --agent-config coding --workspace /path/to/repo "review the latest changes"
+```
+
+`sage tui coding --workspace /path/to/repo` 会用内置 coding config 打开 Terminal TUI。它等价于 `sage tui --agent-config coding --workspace /path/to/repo`。
+
+内置 `coding` 预设要求显式传入 workspace，这样文件工具、shell 命令和仓库上下文都会限定在你要编辑的项目里。
+
+如果要复制并自定义这个预设，可以传完整 JSON 路径：
+
+```bash
+sage chat --agent-config examples/coding_agent_config.json --workspace /path/to/repo
+```
+
+当命令行参数和 config 同时设置同一个行为时，命令行参数优先，例如 `--agent-mode` 和 `--max-loop-count`。同一次运行里请在 `--agent-id` 和 `--agent-config` 之间二选一，不要同时传。
 
 ### `sage sessions`
 
@@ -381,6 +409,7 @@ sage chat --skill my_skill
 - `session_id`
 - `user_id`
 - `agent_id`
+- `agent_name`
 - `agent_mode`
 - `workspace`
 - `requested_skills`
@@ -404,7 +433,7 @@ sage chat --skill my_skill
 
 建议按下面这套 contract 来消费：
 
-- `cli_session`：在流式运行输出前先发出，包含最终解析后的 `session_id`、`command_mode`、`session_state`、`user_id`、`agent_id`、`agent_mode`、`workspace`、`workspace_source`、requested skills、`max_loop_count`、`has_prior_messages`、`prior_message_count`，以及用于 resume hydration 的可选 `session_summary`
+- `cli_session`：在流式运行输出前先发出，包含最终解析后的 `session_id`、`command_mode`、`session_state`、`user_id`、`agent_id`、`agent_name`、`agent_mode`、`workspace`、`workspace_source`、requested skills、`max_loop_count`、`has_prior_messages`、`prior_message_count`，以及用于 resume hydration 的可选 `session_summary`
 - `cli_phase`：CLI 检测到阶段切换时发出，例如 `planning`、`tool`、`assistant_text`
 - `cli_tool`：工具 step 开始或结束时发出，包含 `action`、`step`、`tool_name`、`tool_call_id`、`status`
 - `cli_stats`：只在结束时发出一次，包含最终 `tool_steps`、`phase_timings`、时延摘要和 token 摘要

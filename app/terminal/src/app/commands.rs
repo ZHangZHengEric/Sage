@@ -8,6 +8,8 @@ mod display;
 mod goal;
 #[path = "commands/model.rs"]
 mod model;
+#[path = "commands/sandbox.rs"]
+pub(crate) mod sandbox;
 #[path = "commands/session.rs"]
 mod session;
 #[path = "commands/skills.rs"]

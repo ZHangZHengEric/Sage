@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use crate::backend::contract::{expect_array_field, parse_stream_event, CliJsonCommand};
-use crate::backend::protocol::parse_backend_line;
+use crate::backend::protocol::{parse_backend_line, BackendProtocolState};
 use crate::backend::BackendEvent;
 
 #[test]
@@ -139,6 +139,174 @@ fn parse_backend_line_turns_cli_tool_into_tool_events() {
     assert!(matches!(
         finished.first(),
         Some(BackendEvent::ToolFinished(name)) if name == "read_file"
+    ));
+}
+
+#[test]
+fn protocol_state_converts_cumulative_assistant_content_to_delta() {
+    let mut state = BackendProtocolState::default();
+
+    let first = state.parse_line(
+        r#"{"type":"do_subtask_result","role":"assistant","message_id":"msg-1","content":"Hello!"}"#,
+    );
+    let duplicate = state.parse_line(
+        r#"{"type":"do_subtask_result","role":"assistant","message_id":"msg-1","content":"Hello!"}"#,
+    );
+    let cumulative = state.parse_line(
+        r#"{"type":"do_subtask_result","role":"assistant","message_id":"msg-1","content":"Hello! World"}"#,
+    );
+
+    assert!(matches!(
+        first.first(),
+        Some(BackendEvent::LiveChunk(crate::app::MessageKind::Assistant, content))
+            if content == "Hello!"
+    ));
+    assert!(duplicate.is_empty());
+    assert!(matches!(
+        cumulative.first(),
+        Some(BackendEvent::LiveChunk(crate::app::MessageKind::Assistant, content))
+            if content == " World"
+    ));
+}
+
+#[test]
+fn protocol_state_converts_cumulative_content_across_message_ids_to_delta() {
+    let mut state = BackendProtocolState::default();
+
+    let first = state.parse_line(
+        r#"{"type":"do_subtask_result","role":"assistant","message_id":"msg-1","content":"Hello! This is the first answer."}"#,
+    );
+    let cumulative = state.parse_line(
+        r#"{"type":"do_subtask_result","role":"assistant","message_id":"msg-2","content":"Hello! This is the first answer. More text."}"#,
+    );
+    let duplicate = state.parse_line(
+        r#"{"type":"do_subtask_result","role":"assistant","message_id":"msg-3","content":"Hello! This is the first answer. More text."}"#,
+    );
+
+    assert!(matches!(
+        first.first(),
+        Some(BackendEvent::LiveChunk(crate::app::MessageKind::Assistant, content))
+            if content == "Hello! This is the first answer."
+    ));
+    assert!(matches!(
+        cumulative.first(),
+        Some(BackendEvent::LiveChunk(crate::app::MessageKind::Assistant, content))
+            if content == " More text."
+    ));
+    assert!(duplicate.is_empty());
+}
+
+#[test]
+fn protocol_state_converts_short_cumulative_content_across_message_ids_to_delta() {
+    let mut state = BackendProtocolState::default();
+
+    let first = state.parse_line(
+        r#"{"type":"do_subtask_result","role":"assistant","message_id":"msg-1","content":"Hi!"}"#,
+    );
+    let cumulative = state.parse_line(
+        r#"{"type":"do_subtask_result","role":"assistant","message_id":"msg-2","content":"Hi! Ready."}"#,
+    );
+
+    assert!(matches!(
+        first.first(),
+        Some(BackendEvent::LiveChunk(crate::app::MessageKind::Assistant, content))
+            if content == "Hi!"
+    ));
+    assert!(matches!(
+        cumulative.first(),
+        Some(BackendEvent::LiveChunk(crate::app::MessageKind::Assistant, content))
+            if content == " Ready."
+    ));
+}
+
+#[test]
+fn protocol_state_keeps_plain_delta_streams_unchanged() {
+    let mut state = BackendProtocolState::default();
+
+    let first = state.parse_line(
+        r#"{"type":"do_subtask_result","role":"assistant","message_id":"msg-1","content":"Hel"}"#,
+    );
+    let second = state.parse_line(
+        r#"{"type":"do_subtask_result","role":"assistant","message_id":"msg-1","content":"lo"}"#,
+    );
+
+    assert!(matches!(
+        first.first(),
+        Some(BackendEvent::LiveChunk(crate::app::MessageKind::Assistant, content))
+            if content == "Hel"
+    ));
+    assert!(matches!(
+        second.first(),
+        Some(BackendEvent::LiveChunk(crate::app::MessageKind::Assistant, content))
+            if content == "lo"
+    ));
+}
+
+#[test]
+fn protocol_state_removes_overlapping_delta_for_same_message_id() {
+    let mut state = BackendProtocolState::default();
+
+    let first = state.parse_line(
+        r#"{"type":"do_subtask_result","role":"assistant","message_id":"msg-1","content":"Hello, Sage is ready"}"#,
+    );
+    let overlap = state.parse_line(
+        r#"{"type":"do_subtask_result","role":"assistant","message_id":"msg-1","content":"ready for coding."}"#,
+    );
+
+    assert!(matches!(
+        first.first(),
+        Some(BackendEvent::LiveChunk(crate::app::MessageKind::Assistant, content))
+            if content == "Hello, Sage is ready"
+    ));
+    assert!(matches!(
+        overlap.first(),
+        Some(BackendEvent::LiveChunk(crate::app::MessageKind::Assistant, content))
+            if content == " for coding."
+    ));
+}
+
+#[test]
+fn protocol_state_removes_overlapping_delta_across_message_ids() {
+    let mut state = BackendProtocolState::default();
+
+    let first = state.parse_line(
+        r#"{"type":"do_subtask_result","role":"assistant","message_id":"msg-1","content":"当然能。当前项目就是 Rust"}"#,
+    );
+    let overlap = state.parse_line(
+        r#"{"type":"do_subtask_result","role":"assistant","message_id":"msg-2","content":"就是 Rust，可以继续改。"}"#,
+    );
+
+    assert!(matches!(
+        first.first(),
+        Some(BackendEvent::LiveChunk(crate::app::MessageKind::Assistant, content))
+            if content == "当然能。当前项目就是 Rust"
+    ));
+    assert!(matches!(
+        overlap.first(),
+        Some(BackendEvent::LiveChunk(crate::app::MessageKind::Assistant, content))
+            if content == "，可以继续改。"
+    ));
+}
+
+#[test]
+fn parse_backend_line_hides_internal_reasoning_events() {
+    let events = parse_backend_line(
+        r#"{"type":"task_analysis","role":"assistant","content":"internal analysis"}"#,
+    );
+
+    assert!(events.is_empty());
+}
+
+#[test]
+fn parse_backend_line_strips_internal_loop_self_check_text() {
+    let events = parse_backend_line(
+        r#"{"type":"do_subtask_result","role":"assistant","message_id":"msg-1","content":"Hello. Self-check: Repeating execution loop detected (period=3, cycles=8). Starting now, do not reuse the same path; you must change strategy: try different tools or parameters first; if still blocked, state the blocker clearly and ask one minimal clarification question. Done."}"#,
+    );
+
+    assert!(matches!(
+        events.first(),
+        Some(BackendEvent::LiveChunk(crate::app::MessageKind::Assistant, content))
+            if content == "Hello.  Done."
     ));
 }
 

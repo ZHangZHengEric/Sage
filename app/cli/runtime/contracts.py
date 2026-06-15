@@ -98,6 +98,7 @@ def _emit_json_session_event(
                 "session_id": getattr(request, "session_id", None),
                 "user_id": getattr(request, "user_id", None),
                 "agent_id": getattr(request, "agent_id", None),
+                "agent_name": getattr(request, "agent_name", None),
                 "agent_mode": getattr(request, "agent_mode", None),
                 "workspace": workspace,
                 "workspace_source": "explicit" if workspace else "default",

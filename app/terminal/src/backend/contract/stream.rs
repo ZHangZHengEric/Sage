@@ -4,6 +4,7 @@ use super::optional_f64_field;
 
 pub(crate) struct CliStreamEvent {
     pub(crate) event_type: String,
+    pub(crate) message_id: Option<String>,
     pub(crate) command_mode: Option<String>,
     pub(crate) session_state: Option<String>,
     pub(crate) session_id: Option<String>,
@@ -155,6 +156,10 @@ pub(crate) fn parse_stream_event(line: &str) -> Option<CliStreamEvent> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string(),
+        message_id: object
+            .get("message_id")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
         command_mode: object
             .get("command_mode")
             .and_then(Value::as_str)

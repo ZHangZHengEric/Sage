@@ -67,7 +67,8 @@ fn slash_popup_selection_can_reach_commands_beyond_first_visible_page() {
         .clone();
     assert_eq!(app.slash_popup_selected, 4);
     assert_eq!(
-        props.items
+        props
+            .items
             .iter()
             .find(|item| item.selected)
             .map(|item| item.command.as_str()),
@@ -160,6 +161,15 @@ fn agent_popup_matches_catalog_entries() {
         .preview_lines
         .iter()
         .any(|line| line.contains("updated: 2026-04-28T10:00:00")));
+}
+
+#[test]
+fn agent_set_popup_requests_saved_agent_catalog_not_presets() {
+    let mut app = App::new();
+    app.input = "/agent set ag".to_string();
+    app.input_cursor = app.input.len();
+
+    assert!(app.needs_agent_catalog());
 }
 
 #[test]

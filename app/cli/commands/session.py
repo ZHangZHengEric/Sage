@@ -147,8 +147,34 @@ def _clear_pending_goal_mutation(args: argparse.Namespace) -> None:
     args.clear_goal = False
 
 
+def _prepare_agent_config(args: argparse.Namespace) -> Dict[str, Any]:
+    from app.cli.service import (
+        load_agent_config_file,
+        validate_agent_config_workspace,
+        validate_agent_selection_options,
+    )
+
+    agent_config_path = getattr(args, "agent_config", None)
+    validate_agent_selection_options(
+        agent_id=getattr(args, "agent_id", None),
+        agent_config=agent_config_path,
+    )
+    validate_agent_config_workspace(
+        agent_config=agent_config_path,
+        workspace=getattr(args, "workspace", None),
+    )
+    if not hasattr(args, "_loaded_agent_config"):
+        args._loaded_agent_config = load_agent_config_file(agent_config_path)
+    return args._loaded_agent_config
+
+
 async def build_request(args: argparse.Namespace, task: str):
-    from app.cli.service import build_run_request, validate_requested_skills
+    from app.cli.service import (
+        build_run_request,
+        validate_requested_skills,
+    )
+
+    agent_config = _prepare_agent_config(args)
 
     skills = await validate_requested_skills(
         requested_skills=args.skills,
@@ -175,6 +201,7 @@ async def build_request(args: argparse.Namespace, task: str):
         agent_mode=args.agent_mode,
         available_skills=skills or None,
         max_loop_count=args.max_loop_count,
+        agent_config=agent_config,
         goal=goal,
     )
 
@@ -191,19 +218,26 @@ async def run_command(
         validate_cli_runtime_requirements,
     )
 
+    _prepare_agent_config(args)
     validate_cli_runtime_requirements()
     args.workspace = validate_cli_request_options(
         workspace=args.workspace,
         max_loop_count=args.max_loop_count,
+        sandbox_type=getattr(args, "sandbox_type", None),
     )
     async with cli_runtime(verbose=args.verbose):
         request = await build_request_fn(args, args.task)
+        stream_kwargs = {
+            "workspace": args.workspace,
+            "command_mode": "run",
+        }
+        if getattr(args, "sandbox_type", None):
+            stream_kwargs["sandbox_type"] = args.sandbox_type
         await stream_request_fn(
             request,
             args.json,
             args.stats,
-            workspace=args.workspace,
-            command_mode="run",
+            **stream_kwargs,
         )
     return 0
 
@@ -227,6 +261,7 @@ async def chat_command(
         validate_cli_runtime_requirements,
     )
 
+    _prepare_agent_config(args)
     session_summary: Optional[Dict[str, Any]] = None
     if not args.session_id:
         args.session_id = str(uuid.uuid4())
@@ -241,6 +276,7 @@ async def chat_command(
     args.workspace = validate_cli_request_options(
         workspace=args.workspace,
         max_loop_count=args.max_loop_count,
+        sandbox_type=getattr(args, "sandbox_type", None),
     )
     try:
         async with cli_runtime(verbose=args.verbose):
@@ -292,13 +328,18 @@ async def chat_command(
                     prompt = goal_task
 
                 request = await build_request_fn(args, prompt)
+                stream_kwargs = {
+                    "workspace": args.workspace,
+                    "command_mode": command_mode,
+                    "session_summary": session_summary,
+                }
+                if getattr(args, "sandbox_type", None):
+                    stream_kwargs["sandbox_type"] = args.sandbox_type
                 await stream_request_fn(
                     request,
                     args.json,
                     args.stats,
-                    workspace=args.workspace,
-                    command_mode=command_mode,
-                    session_summary=session_summary,
+                    **stream_kwargs,
                 )
                 session_summary = _apply_goal_mutation_to_summary(session_summary, args)
                 _clear_pending_goal_mutation(args)

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -154,10 +154,13 @@ pub struct App {
     pub session_id: String,
     pub user_id: String,
     pub selected_agent_id: Option<String>,
+    pub(crate) agent_config_path: Option<PathBuf>,
     pub agent_mode: String,
+    pub(crate) agent_mode_override: bool,
     pub max_loop_count: u32,
     pub workspace_label: String,
     pub(crate) workspace_override: Option<PathBuf>,
+    pub(crate) sandbox_type: Option<String>,
     pub current_goal: Option<BackendGoal>,
     pub pending_goal_mutation: Option<PendingGoalMutation>,
     pub status: String,
@@ -172,6 +175,8 @@ pub struct App {
     pub(crate) committed_history_lines: Vec<Line<'static>>,
     pub live_message: Option<(MessageKind, String)>,
     pub(crate) live_message_had_history: bool,
+    pub(crate) assistant_live_seen_lines: BTreeSet<String>,
+    pub(crate) assistant_live_in_code_block: bool,
     pub(crate) request_started_at: Option<Instant>,
     pub(crate) first_output_latency: Option<Duration>,
     pub(crate) last_request_duration: Option<Duration>,
@@ -216,10 +221,13 @@ impl App {
             session_id: String::new(),
             user_id: "default_user".to_string(),
             selected_agent_id: None,
+            agent_config_path: None,
             agent_mode: "simple".to_string(),
+            agent_mode_override: false,
             max_loop_count: 50,
             workspace_label: default_workspace_label(),
             workspace_override: None,
+            sandbox_type: None,
             current_goal: None,
             pending_goal_mutation: None,
             status: String::new(),
@@ -234,6 +242,8 @@ impl App {
             committed_history_lines: Vec::new(),
             live_message: None,
             live_message_had_history: false,
+            assistant_live_seen_lines: BTreeSet::new(),
+            assistant_live_in_code_block: false,
             request_started_at: None,
             first_output_latency: None,
             last_request_duration: None,
@@ -266,10 +276,9 @@ impl App {
         self.session_id = pending_session_label().to_string();
         self.clear_input();
         self.busy = false;
+        self.clear_live_response_state();
         self.current_goal = None;
         self.pending_goal_mutation = None;
-        self.live_message = None;
-        self.live_message_had_history = false;
         self.request_started_at = None;
         self.first_output_latency = None;
         self.last_request_duration = None;
@@ -345,13 +354,32 @@ impl App {
 }
 
 fn normalize_workspace_path(path: PathBuf) -> PathBuf {
-    if path.is_absolute() {
+    let absolute = if path.is_absolute() {
         path
     } else {
         std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(path)
+    };
+    absolute
+        .canonicalize()
+        .unwrap_or_else(|_| normalize_path_segments(absolute))
+}
+
+fn normalize_path_segments(path: PathBuf) -> PathBuf {
+    use std::path::Component;
+
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
     }
+    normalized
 }
 
 fn default_workspace_label() -> String {
