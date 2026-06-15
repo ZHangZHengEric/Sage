@@ -211,6 +211,17 @@ marked.setOptions({
 
 // 检测视频链接的正则表达式
 const videoExtensions = /\.(mp4|webm|ogg|mov|avi|mkv)$/i
+const audioExtensions = /\.(mp3|wav|ogg|m4a|aac|flac)(?:[?#].*)?$/i
+
+const getAudioMimeType = (url) => {
+  const cleanUrl = String(url || '').split(/[?#]/)[0].toLowerCase()
+  if (cleanUrl.endsWith('.wav')) return 'audio/wav'
+  if (cleanUrl.endsWith('.ogg')) return 'audio/ogg'
+  if (cleanUrl.endsWith('.m4a')) return 'audio/mp4'
+  if (cleanUrl.endsWith('.aac')) return 'audio/aac'
+  if (cleanUrl.endsWith('.flac')) return 'audio/flac'
+  return 'audio/mpeg'
+}
 
 // 下载图片函数
 const downloadImage = (url, filename) => {
@@ -302,11 +313,32 @@ const convertVideoLinks = (html) => {
   return html
 }
 
+const convertAudioLinks = (html) => {
+  html = html.replace(/<a[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/g, (match, url) => {
+    if (audioExtensions.test(url)) {
+      const type = getAudioMimeType(url)
+      return `<audio controls class="w-full rounded-lg my-4 border bg-background">
+        <source src="${url}" type="${type}">
+        您的浏览器不支持音频播放。
+      </audio>`
+    }
+    return match
+  })
+  html = html.replace(/(?<!src="|href=")https?:\/\/[^\s<>"]+\.(mp3|wav|ogg|m4a|aac|flac)(?:\?[^\s<>"]*)?/gi, (match) => {
+    const type = getAudioMimeType(match)
+    return `<audio controls class="w-full rounded-lg my-4 border bg-background">
+      <source src="${match}" type="${type}">
+      您的浏览器不支持音频播放。
+    </audio>`
+  })
+  return html
+}
+
 const preprocessContent = (content) => {
   if (!content) return ''
   content = typeof content === 'string' ? content : String(content ?? '')
   return content.replace(
-    /(https?:\/\/[^\n\r"<>)]+?\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar|7z|tar|gz|bz2|txt|csv|json|xml|md|jpg|jpeg|png|gif|svg|webp|mp4|webm|mp3|wav))/gi,
+    /(https?:\/\/[^\n\r"<>)]+?\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar|7z|tar|gz|bz2|txt|csv|json|xml|md|jpg|jpeg|png|gif|svg|webp|mp4|webm|mp3|wav|ogg|m4a|aac|flac))/gi,
     (match) => match.replace(/\s/g, '%20')
   )
 }
@@ -320,6 +352,7 @@ const renderedContent = computed(() => {
     let html = marked(preprocessed)
 
     // Post-processing
+    html = convertAudioLinks(html)
     html = convertVideoLinks(html)
     html = convertHttpLinksToDownload(html)
     html = addImageDownloadButton(html)
@@ -333,7 +366,7 @@ const renderedContent = computed(() => {
         'a', 'img',
         'table', 'thead', 'tbody', 'tr', 'th', 'td',
         'div', 'span', 'button', 'svg', 'path', 'polyline', 'line', 'rect',
-        'video', 'source'
+        'video', 'audio', 'source'
       ],
       ALLOWED_ATTR: [
         'href', 'src', 'alt', 'title', 'class', 'id',

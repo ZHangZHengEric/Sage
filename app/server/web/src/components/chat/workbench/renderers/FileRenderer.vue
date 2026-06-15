@@ -81,6 +81,9 @@
       <!-- 视频预览 -->
       <VideoRenderer v-else-if="fileType === 'video'" :file-url="blobUrl || filePath" :file-name="displayFileName" />
 
+      <!-- 音频预览 -->
+      <AudioRenderer v-else-if="fileType === 'audio'" :file-url="blobUrl || filePath" :file-name="displayFileName" />
+
       <!-- HTML 预览 -->
       <HtmlRenderer v-else-if="fileType === 'html'" :file-path="filePath" :content="fileContent" />
 
@@ -168,6 +171,7 @@ import {
 
 const HtmlRenderer = defineAsyncComponent(() => import('./filerender/HtmlRenderer.vue'))
 const VideoRenderer = defineAsyncComponent(() => import('./filerender/VideoRenderer.vue'))
+const AudioRenderer = defineAsyncComponent(() => import('./filerender/AudioRenderer.vue'))
 const MarkdownRenderer = defineAsyncComponent(() => import('./filerender/MarkdownRenderer.vue'))
 const CodeRenderer = defineAsyncComponent(() => import('./filerender/CodeRenderer.vue'))
 
@@ -294,7 +298,7 @@ const canCopy = computed(() => {
 })
 
 const canInlinePreview = computed(() => {
-  return ['pdf', 'image', 'video', 'html', 'markdown', 'code', 'text'].includes(fileType.value)
+  return ['pdf', 'image', 'video', 'audio', 'html', 'markdown', 'code', 'text'].includes(fileType.value)
 })
 
 const canPreviewInDialog = computed(() => {
