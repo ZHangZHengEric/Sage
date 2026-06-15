@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full flex flex-col p-6 space-y-6">
+  <div class="h-full min-h-0 overflow-y-auto overscroll-contain p-6 space-y-6">
     <div class="flex items-center justify-between">
       <div class="space-y-1">
         <h2 class="text-lg font-medium">{{ t('modelProvider.title') }}</h2>
