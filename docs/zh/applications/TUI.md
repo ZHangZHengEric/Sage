@@ -214,6 +214,9 @@ sage tui --agent-config coding --workspace /path/to/repo
 
 内置 `coding` 预设要求显式指定 workspace。如果你在 TUI 里用 `/agent config coding` 设置它，也要先用 `/workspace set /path/to/repo` 指定仓库，再发送 coding 任务。
 
+这个预设会启用 `workspaceGuidance`。如果 workspace 根目录存在 `AGENT.md` 或 `AGENTS.md`，Sage 会把这些指令注入到使用该 configured agent 的请求上下文里。普通 Agent 不会因为 TUI 启动而默认加载 workspace guidance，除非它自己的 JSON config 显式启用。
+其中 `maxBytes` 是所有已加载 workspace guidance 文件共享的总字节预算。
+
 同一个预设也可以直接用于普通 CLI：
 
 ```bash
@@ -286,7 +289,7 @@ Terminal 现在可以携带共享 Sage runtime 的 session goal contract。
 /goal done
 ```
 
-`/goal <objective>` 会设置当前本地目标，并立即把同一句 objective 作为下一条任务提交，行为上对齐 Codex 风格。
+`/goal <objective>` 会设置当前本地目标，并立即把同一句 objective 作为下一条任务提交。
 
 `/goal set` 仍然只会把本地目标排入下一次请求，本身不会立刻开始执行。
 

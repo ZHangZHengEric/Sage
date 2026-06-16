@@ -34,6 +34,7 @@ from app.cli.services.runtime import (
     resolve_agent_config_path as resolve_agent_config_path,
     run_request_stream,
     validate_agent_config_workspace as validate_agent_config_workspace,
+    validate_agent_config_workspace_guidance as validate_agent_config_workspace_guidance,
     validate_agent_selection_options as validate_agent_selection_options,
     validate_cli_request_options,
     validate_cli_runtime_requirements,
