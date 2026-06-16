@@ -409,10 +409,6 @@ impl App {
         self.clear_requested = true;
     }
 
-    pub(crate) fn has_transcript_lines(&self) -> bool {
-        !self.committed_history_lines.is_empty() || !self.pending_history_lines.is_empty()
-    }
-
     pub(super) fn append_live_chunk(&mut self, kind: MessageKind, chunk: &str) {
         if chunk.is_empty() {
             return;
