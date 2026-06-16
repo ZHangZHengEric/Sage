@@ -726,7 +726,10 @@ async def populate_request_from_agent_config(
         request.llm_model_config = {}
 
     provider_dao = LLMProviderDao()
-    provider_id = agent_config.get("llm_provider_id") if agent_config else None
+    request_provider_id = str(getattr(request, "provider_id", "") or "").strip()
+    provider_id = request_provider_id or (
+        agent_config.get("llm_provider_id") if agent_config else None
+    )
     if provider_id:
         provider = await provider_dao.get_by_id(provider_id)
         if provider is None:
