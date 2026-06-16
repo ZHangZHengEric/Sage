@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use anyhow::{anyhow, Result};
+#[cfg(test)]
 use serde_json::Value;
 
 use crate::backend::protocol::{flush_complete_lines, BackendProtocolState};
@@ -39,6 +40,7 @@ struct BackendConfig {
     clear_goal: bool,
 }
 
+#[cfg(test)]
 fn summarize_backend_stderr_line(line: &str) -> String {
     let trimmed = line.trim();
     let Ok(payload) = serde_json::from_str::<Value>(trimmed) else {
