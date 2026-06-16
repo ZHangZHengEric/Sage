@@ -1,5 +1,6 @@
 use std::io;
 use std::io::ErrorKind;
+use std::io::Write;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -9,6 +10,7 @@ use crossterm::event::{
     KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
+use crossterm::style::ResetColor;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -43,38 +45,43 @@ const KEYBOARD_ENHANCEMENT_FLAGS: KeyboardEnhancementFlags =
 
 pub fn setup_terminal(_app: &App) -> Result<AppTerminal> {
     enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    write!(stdout, "\x1b[r\x1b[0m")?;
     execute!(
-        io::stdout(),
+        stdout,
         EnterAlternateScreen,
+        cursor::MoveTo(0, 0),
         Clear(ClearType::All),
+        Clear(ClearType::Purge),
         cursor::MoveTo(0, 0),
         EnableBracketedPaste
     )?;
     ignore_unsupported(execute!(
-        io::stdout(),
+        stdout,
         PushKeyboardEnhancementFlags(KEYBOARD_ENHANCEMENT_FLAGS)
     ))?;
-    let backend = BackendImpl::new(io::stdout());
-    Terminal::with_viewport_height_and_cursor(
+    stdout.flush()?;
+    let backend = BackendImpl::new(stdout);
+    let mut terminal = Terminal::with_viewport_height_and_cursor(
         backend,
         u16::MAX,
         ratatui::layout::Position { x: 0, y: 0 },
-    )
-    .map_err(Into::into)
+    )?;
+    let size = terminal.size()?;
+    terminal.set_viewport_area(ratatui::layout::Rect::new(0, 0, size.width, size.height));
+    terminal.clear()?;
+    Ok(terminal)
 }
 
 pub fn restore_terminal(terminal: &mut AppTerminal) -> Result<()> {
     disable_raw_mode()?;
-    let viewport = terminal.viewport_area();
     let backend = terminal.backend_mut();
     ignore_unsupported(execute!(backend, PopKeyboardEnhancementFlags))?;
     execute!(
         backend,
         DisableBracketedPaste,
-        crossterm::style::ResetColor,
+        ResetColor,
         crossterm::cursor::Show,
-        crossterm::cursor::MoveTo(0, viewport.y),
-        Clear(ClearType::FromCursorDown),
         LeaveAlternateScreen
     )?;
     Ok(())
