@@ -267,6 +267,9 @@ sage run --agent-config coding --workspace /path/to/repo "review the latest chan
 
 内置 `coding` 预设要求显式传入 workspace，这样文件工具、shell 命令和仓库上下文都会限定在你要编辑的项目里。
 
+这个预设也会启用 `workspaceGuidance`。如果 workspace 根目录存在 `AGENT.md` 或 `AGENTS.md`，Sage 会把这些内容注入到本次 configured agent 的请求上下文里。普通 Agent 不会默认加载这些文件，除非它自己的 JSON config 显式启用 `workspaceGuidance`。
+其中 `maxBytes` 是所有已加载 workspace guidance 文件共享的总字节预算。
+
 如果要复制并自定义这个预设，可以传完整 JSON 路径：
 
 ```bash

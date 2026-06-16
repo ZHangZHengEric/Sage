@@ -19,6 +19,10 @@ AGENT_CONFIG_PRESETS = {
     "coding": "examples/coding_agent_config.json",
 }
 SUPPORTED_SANDBOX_TYPES = {"local", "remote", "passthrough"}
+DEFAULT_WORKSPACE_GUIDANCE_MAX_BYTES = 32 * 1024
+WORKSPACE_GUIDANCE_CONTEXT_KEY = "workspace_guidance"
+WORKSPACE_GUIDANCE_FILES_CONTEXT_KEY = "workspace_guidance_files"
+WORKSPACE_GUIDANCE_ROOT_CONTEXT_KEY = "workspace_guidance_root"
 
 BUNDLED_CODING_AGENT_CONFIG_PATH = (
     Path(__file__).resolve().parents[3] / AGENT_CONFIG_PRESETS["coding"]
@@ -83,6 +87,36 @@ def validate_agent_config_workspace(
             "Use a custom JSON agent config path if you intentionally do not need a repo workspace.",
         ],
     )
+
+
+def validate_agent_config_workspace_guidance(
+    *,
+    agent_config: Optional[Dict[str, Any]],
+    workspace: Optional[str],
+) -> None:
+    if not agent_config:
+        return
+    guidance = _workspace_guidance_config(
+        _agent_config_value(agent_config, "workspaceGuidance", "workspace_guidance")
+    )
+    if not guidance["enabled"]:
+        return
+    if not workspace or not workspace.strip():
+        raise CLIError(
+            "Agent config `workspaceGuidance` requires `--workspace`.",
+            next_steps=[
+                "Pass `--workspace /path/to/project`, or disable `workspaceGuidance` in the agent config."
+            ],
+        )
+    if not guidance["files"]:
+        raise CLIError(
+            "Agent config `workspaceGuidance.files` must list at least one file when enabled.",
+            next_steps=[
+                "Add workspace-root file names such as `AGENT.md` or `AGENTS.md`."
+            ],
+        )
+    for file_name in guidance["files"]:
+        _validate_workspace_guidance_file_name(file_name)
 
 
 def _agent_config_value(agent_config: Dict[str, Any], *keys: str) -> Any:
@@ -199,6 +233,175 @@ def _agent_config_positive_int(value: Any, field_name: str) -> Optional[int]:
             debug_detail=f"{field_name}={value!r}",
         )
     return value
+
+
+def _workspace_guidance_config(value: Any) -> Dict[str, Any]:
+    if value is None:
+        return {"enabled": False}
+    if not isinstance(value, dict):
+        raise CLIError(
+            "Agent config `workspaceGuidance` must be a JSON object.",
+            next_steps=["Fix the agent config JSON, then run the command again."],
+            debug_detail=f"workspaceGuidance={value!r}",
+        )
+
+    enabled = _agent_config_bool(value.get("enabled"), "workspaceGuidance.enabled")
+    if enabled is None:
+        enabled = False
+    if not enabled:
+        return {"enabled": False}
+
+    files = list(
+        dict.fromkeys(_agent_config_list(value.get("files"), "workspaceGuidance.files"))
+    )
+    max_bytes = _agent_config_positive_int(
+        value.get("maxBytes") if "maxBytes" in value else value.get("max_bytes"),
+        "workspaceGuidance.maxBytes",
+    )
+    if max_bytes is None:
+        max_bytes = DEFAULT_WORKSPACE_GUIDANCE_MAX_BYTES
+
+    inject_as = _agent_config_string(
+        value.get("injectAs") if "injectAs" in value else value.get("inject_as"),
+        "workspaceGuidance.injectAs",
+    )
+    if inject_as is None:
+        inject_as = "systemContext"
+    if inject_as != "systemContext":
+        raise CLIError(
+            "Agent config `workspaceGuidance.injectAs` currently supports only `systemContext`.",
+            next_steps=["Set `workspaceGuidance.injectAs` to `systemContext`."],
+            debug_detail=f"workspaceGuidance.injectAs={inject_as!r}",
+        )
+
+    return {
+        "enabled": enabled,
+        "files": files,
+        "max_bytes": max_bytes,
+    }
+
+
+def _validate_workspace_guidance_file_name(file_name: str) -> None:
+    if file_name != Path(file_name).name:
+        raise CLIError(
+            "Agent config `workspaceGuidance.files` currently supports workspace-root file names only.",
+            next_steps=[
+                "Use file names such as `AGENT.md` or `AGENTS.md`, without directories."
+            ],
+            debug_detail=f"workspaceGuidance file={file_name!r}",
+        )
+    if file_name in {".", ".."}:
+        raise CLIError(
+            "Agent config `workspaceGuidance.files` contains an invalid file name.",
+            next_steps=["Use a normal workspace-root file name."],
+            debug_detail=f"workspaceGuidance file={file_name!r}",
+        )
+
+
+def _read_workspace_guidance_file(path: Path, *, max_bytes: int) -> tuple[str, int]:
+    with path.open("rb") as handle:
+        content = handle.read(max_bytes + 1)
+    truncated = len(content) > max_bytes
+    if truncated:
+        content = content[:max_bytes]
+    bytes_read = len(content)
+    text = content.decode("utf-8", errors="replace").strip()
+    if truncated:
+        text = f"{text}\n\n[truncated at {max_bytes} bytes]"
+    return text, bytes_read
+
+
+def load_workspace_guidance(
+    *,
+    agent_config: Dict[str, Any],
+    workspace: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    guidance = _workspace_guidance_config(
+        _agent_config_value(agent_config, "workspaceGuidance", "workspace_guidance")
+    )
+    if not guidance["enabled"]:
+        return None
+
+    if not workspace or not workspace.strip():
+        raise CLIError(
+            "Agent config `workspaceGuidance` requires `--workspace`.",
+            next_steps=[
+                "Pass `--workspace /path/to/project`, or disable `workspaceGuidance` in the agent config."
+            ],
+        )
+
+    files = guidance["files"]
+    if not files:
+        raise CLIError(
+            "Agent config `workspaceGuidance.files` must list at least one file when enabled.",
+            next_steps=[
+                "Add workspace-root file names such as `AGENT.md` or `AGENTS.md`."
+            ],
+        )
+
+    workspace_path = Path(workspace).expanduser().resolve()
+    remaining_bytes = guidance["max_bytes"]
+    sections = []
+    loaded_files = []
+    for file_name in files:
+        if remaining_bytes == 0:
+            break
+        _validate_workspace_guidance_file_name(file_name)
+        path = workspace_path / file_name
+        if not path.exists():
+            continue
+        if not path.is_file():
+            continue
+        resolved_path = path.resolve()
+        if not resolved_path.is_relative_to(workspace_path):
+            raise CLIError(
+                f"Workspace guidance file must stay inside the workspace: {path}",
+                next_steps=[
+                    "Replace the symlink with a regular workspace file, or remove it from `workspaceGuidance.files`."
+                ],
+                debug_detail=f"resolved_path={resolved_path}",
+            )
+        try:
+            content, bytes_read = _read_workspace_guidance_file(
+                resolved_path,
+                max_bytes=remaining_bytes,
+            )
+        except OSError as exc:
+            raise CLIError(
+                f"Failed to read workspace guidance file: {path}",
+                next_steps=[
+                    "Check file permissions, or remove the file from `workspaceGuidance.files`."
+                ],
+                debug_detail=str(exc),
+            ) from exc
+        if not content:
+            continue
+        loaded_files.append(file_name)
+        sections.append(f"## {file_name}\n{content}")
+        remaining_bytes = max(0, remaining_bytes - bytes_read)
+
+    if not sections:
+        return None
+
+    return {
+        "content": "\n\n".join(sections),
+        "files": loaded_files,
+        "workspace": str(workspace_path),
+    }
+
+
+def apply_workspace_guidance_to_system_context(
+    system_context: Dict[str, Any],
+    *,
+    agent_config: Dict[str, Any],
+    workspace: Optional[str],
+) -> None:
+    guidance = load_workspace_guidance(agent_config=agent_config, workspace=workspace)
+    if guidance is None:
+        return
+    system_context[WORKSPACE_GUIDANCE_CONTEXT_KEY] = guidance["content"]
+    system_context[WORKSPACE_GUIDANCE_FILES_CONTEXT_KEY] = guidance["files"]
+    system_context[WORKSPACE_GUIDANCE_ROOT_CONTEXT_KEY] = guidance["workspace"]
 
 
 def _cli_positive_int(value: Any, *, next_steps: List[str]) -> int:
@@ -699,6 +902,7 @@ def build_run_request(
     max_loop_count: Optional[int] = None,
     goal: Optional[Dict[str, Any]] = None,
     agent_config: Optional[Dict[str, Any]] = None,
+    workspace: Optional[str] = None,
 ) -> StreamRequest:
     if agent_config is None:
         agent_config = {}
@@ -764,15 +968,21 @@ def build_run_request(
     ):
         task = "<enable_deep_thinking>true</enable_deep_thinking>\n" + task
 
-    system_context = (
+    config_system_context = (
         _agent_config_dict(
             _agent_config_value(agent_config, "systemContext", "system_context"),
             "systemContext",
         )
         or {}
     )
+    system_context = dict(config_system_context)
     if not system_context:
         system_context["response_language"] = "zh-CN"
+    apply_workspace_guidance_to_system_context(
+        system_context,
+        agent_config=agent_config,
+        workspace=workspace,
+    )
     if isinstance(goal, dict) and not goal.get("clear"):
         objective = str(goal.get("objective") or "").strip()
         status = str(goal.get("status") or "active").strip() or "active"
@@ -898,8 +1108,8 @@ def validate_cli_request_options(
     if not workspace:
         return None
 
-    workspace_path = os.path.abspath(workspace)
-    if os.path.exists(workspace_path) and not os.path.isdir(workspace_path):
+    workspace_path = Path(workspace).expanduser().resolve()
+    if workspace_path.exists() and not workspace_path.is_dir():
         raise CLIError(
             f"Workspace path is not a directory: {workspace_path}",
             next_steps=[
@@ -909,10 +1119,10 @@ def validate_cli_request_options(
 
     parent_dir = (
         workspace_path
-        if os.path.isdir(workspace_path)
-        else os.path.dirname(workspace_path) or os.getcwd()
+        if workspace_path.is_dir()
+        else workspace_path.parent or Path.cwd()
     )
-    if not os.path.exists(parent_dir):
+    if not parent_dir.exists():
         raise CLIError(
             f"Workspace parent directory does not exist: {parent_dir}",
             next_steps=[
@@ -928,7 +1138,7 @@ def validate_cli_request_options(
             ],
         )
 
-    return workspace_path
+    return str(workspace_path)
 
 
 async def run_request_stream(

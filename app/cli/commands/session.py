@@ -151,6 +151,7 @@ def _prepare_agent_config(args: argparse.Namespace) -> Dict[str, Any]:
     from app.cli.service import (
         load_agent_config_file,
         validate_agent_config_workspace,
+        validate_agent_config_workspace_guidance,
         validate_agent_selection_options,
     )
 
@@ -165,6 +166,10 @@ def _prepare_agent_config(args: argparse.Namespace) -> Dict[str, Any]:
     )
     if not hasattr(args, "_loaded_agent_config"):
         args._loaded_agent_config = load_agent_config_file(agent_config_path)
+    validate_agent_config_workspace_guidance(
+        agent_config=args._loaded_agent_config,
+        workspace=getattr(args, "workspace", None),
+    )
     return args._loaded_agent_config
 
 
@@ -203,6 +208,7 @@ async def build_request(args: argparse.Namespace, task: str):
         max_loop_count=args.max_loop_count,
         agent_config=agent_config,
         goal=goal,
+        workspace=args.workspace,
     )
 
 
@@ -218,13 +224,13 @@ async def run_command(
         validate_cli_runtime_requirements,
     )
 
-    _prepare_agent_config(args)
-    validate_cli_runtime_requirements()
     args.workspace = validate_cli_request_options(
         workspace=args.workspace,
         max_loop_count=args.max_loop_count,
         sandbox_type=getattr(args, "sandbox_type", None),
     )
+    _prepare_agent_config(args)
+    validate_cli_runtime_requirements()
     async with cli_runtime(verbose=args.verbose):
         request = await build_request_fn(args, args.task)
         stream_kwargs = {
@@ -261,6 +267,11 @@ async def chat_command(
         validate_cli_runtime_requirements,
     )
 
+    args.workspace = validate_cli_request_options(
+        workspace=args.workspace,
+        max_loop_count=args.max_loop_count,
+        sandbox_type=getattr(args, "sandbox_type", None),
+    )
     _prepare_agent_config(args)
     session_summary: Optional[Dict[str, Any]] = None
     if not args.session_id:
@@ -273,11 +284,6 @@ async def chat_command(
         sys.stderr.flush()
 
     validate_cli_runtime_requirements()
-    args.workspace = validate_cli_request_options(
-        workspace=args.workspace,
-        max_loop_count=args.max_loop_count,
-        sandbox_type=getattr(args, "sandbox_type", None),
-    )
     try:
         async with cli_runtime(verbose=args.verbose):
             if args.session_id:

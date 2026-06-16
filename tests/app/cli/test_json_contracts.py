@@ -4,7 +4,7 @@ import io
 import json
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import asynccontextmanager, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -205,6 +205,10 @@ class TestCliJsonContracts(unittest.TestCase):
         self.assertEqual(loaded["name"], "Sage Coding Agent")
         self.assertIn("grep", loaded["availableTools"])
         self.assertEqual(loaded["systemContext"], {})
+        self.assertEqual(
+            loaded["workspaceGuidance"]["files"],
+            ["AGENT.md", "AGENTS.md"],
+        )
         prompt = loaded["systemPrefix"]
         self.assertIn("AGENTS.md", prompt)
         self.assertIn("git log", prompt)
@@ -229,12 +233,14 @@ class TestCliJsonContracts(unittest.TestCase):
         )
 
     def test_agent_config_coding_preset_builds_request(self):
-        loaded = cli_service.load_agent_config_file("coding")
-        request = cli_service.build_run_request(
-            task="inspect repo",
-            user_id="user-demo",
-            agent_config=loaded,
-        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            loaded = cli_service.load_agent_config_file("coding")
+            request = cli_service.build_run_request(
+                task="inspect repo",
+                user_id="user-demo",
+                agent_config=loaded,
+                workspace=tmp_dir,
+            )
 
         self.assertEqual(request.agent_name, "Sage Coding Agent")
         self.assertEqual(request.agent_mode, "simple")
@@ -244,6 +250,292 @@ class TestCliJsonContracts(unittest.TestCase):
         self.assertFalse(
             request.messages[0].content.startswith("<enable_deep_thinking>")
         )
+        self.assertNotIn("workspace_guidance", request.system_context)
+
+    def test_workspace_guidance_is_opt_in(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            Path(tmp_dir, "AGENT.md").write_text("Use local rules.", encoding="utf-8")
+            request = cli_service.build_run_request(
+                task="inspect repo",
+                user_id="user-demo",
+                agent_config={"systemContext": {"role": "demo"}},
+                workspace=tmp_dir,
+            )
+
+        self.assertEqual(request.system_context, {"role": "demo"})
+
+    def test_workspace_guidance_loads_root_files_when_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            Path(tmp_dir, "AGENT.md").write_text("Use local rules.", encoding="utf-8")
+            Path(tmp_dir, "AGENTS.md").write_text(
+                "Prefer tests before summary.",
+                encoding="utf-8",
+            )
+            request = cli_service.build_run_request(
+                task="inspect repo",
+                user_id="user-demo",
+                agent_config={
+                    "workspaceGuidance": {
+                        "enabled": True,
+                        "files": ["AGENT.md", "AGENTS.md"],
+                    }
+                },
+                workspace=tmp_dir,
+            )
+
+        self.assertEqual(
+            request.system_context["workspace_guidance_files"],
+            ["AGENT.md", "AGENTS.md"],
+        )
+        self.assertIn("## AGENT.md", request.system_context["workspace_guidance"])
+        self.assertIn("Use local rules.", request.system_context["workspace_guidance"])
+        self.assertIn("## AGENTS.md", request.system_context["workspace_guidance"])
+        self.assertIn(
+            "Prefer tests before summary.",
+            request.system_context["workspace_guidance"],
+        )
+
+    def test_workspace_guidance_does_not_mutate_agent_config_system_context(self):
+        agent_config = {
+            "systemContext": {"role": "demo"},
+            "workspaceGuidance": {
+                "enabled": True,
+                "files": ["AGENT.md"],
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            Path(tmp_dir, "AGENT.md").write_text("Use local rules.", encoding="utf-8")
+            request = cli_service.build_run_request(
+                task="inspect repo",
+                user_id="user-demo",
+                agent_config=agent_config,
+                workspace=tmp_dir,
+            )
+
+        self.assertEqual(agent_config["systemContext"], {"role": "demo"})
+        self.assertEqual(request.system_context["role"], "demo")
+        self.assertIn("workspace_guidance", request.system_context)
+
+    def test_workspace_guidance_deduplicates_files(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            Path(tmp_dir, "AGENT.md").write_text("Use local rules.", encoding="utf-8")
+            request = cli_service.build_run_request(
+                task="inspect repo",
+                user_id="user-demo",
+                agent_config={
+                    "workspaceGuidance": {
+                        "enabled": True,
+                        "files": ["AGENT.md", "AGENT.md"],
+                    }
+                },
+                workspace=tmp_dir,
+            )
+
+        self.assertEqual(
+            request.system_context["workspace_guidance_files"], ["AGENT.md"]
+        )
+        self.assertEqual(
+            request.system_context["workspace_guidance"].count("## AGENT.md"), 1
+        )
+
+    def test_workspace_guidance_requires_workspace_when_enabled(self):
+        with self.assertRaises(cli_service.CLIError) as context:
+            cli_service.build_run_request(
+                task="inspect repo",
+                user_id="user-demo",
+                agent_config={
+                    "workspaceGuidance": {
+                        "enabled": True,
+                        "files": ["AGENT.md"],
+                    }
+                },
+            )
+
+        self.assertIn("requires `--workspace`", str(context.exception))
+
+    def test_run_command_rejects_workspace_guidance_without_workspace_before_runtime(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "agent.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "workspaceGuidance": {
+                            "enabled": True,
+                            "files": ["AGENT.md"],
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch(
+                "app.cli.service.validate_cli_runtime_requirements"
+            ) as runtime_check:
+                stderr = io.StringIO()
+                with patch("sys.stderr", stderr):
+                    exit_code = cli_main.main(
+                        [
+                            "run",
+                            "--agent-config",
+                            str(config_path),
+                            "inspect repo",
+                        ]
+                    )
+
+        self.assertEqual(exit_code, 1)
+        runtime_check.assert_not_called()
+        self.assertIn("workspaceGuidance", stderr.getvalue())
+        self.assertIn("requires `--workspace`", stderr.getvalue())
+
+    def test_run_command_uses_normalized_workspace_for_workspace_guidance(self):
+        captured = {}
+
+        @asynccontextmanager
+        async def fake_cli_runtime(*, verbose=False):
+            del verbose
+            yield object()
+
+        async def fake_stream_request(
+            request,
+            json_output,
+            stats_output,
+            workspace=None,
+            **kwargs,
+        ):
+            del json_output, stats_output, kwargs
+            captured["stream_workspace"] = workspace
+            captured["guidance_root"] = request.system_context[
+                "workspace_guidance_root"
+            ]
+            captured["guidance"] = request.system_context["workspace_guidance"]
+            return 0
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir) / "repo"
+            workspace.mkdir()
+            (workspace / "AGENT.md").write_text("Use local rules.", encoding="utf-8")
+            config_path = Path(tmp_dir) / "agent.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "workspaceGuidance": {
+                            "enabled": True,
+                            "files": ["AGENT.md"],
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = cli_main.build_argument_parser().parse_args(
+                [
+                    "run",
+                    "--agent-config",
+                    str(config_path),
+                    "--workspace",
+                    str(workspace / "."),
+                    "inspect repo",
+                ]
+            )
+
+            with (
+                patch("app.cli.service.validate_cli_runtime_requirements"),
+                patch("app.cli.service.cli_runtime", fake_cli_runtime),
+                patch("app.cli.main._stream_request", fake_stream_request),
+            ):
+                exit_code = asyncio.run(cli_main._run_command(args))
+
+            resolved_workspace = str(workspace.resolve())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(captured["stream_workspace"], resolved_workspace)
+        self.assertEqual(captured["guidance_root"], resolved_workspace)
+        self.assertIn("Use local rules.", captured["guidance"])
+
+    def test_workspace_guidance_truncates_large_files(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            Path(tmp_dir, "AGENT.md").write_text("abcdef", encoding="utf-8")
+            request = cli_service.build_run_request(
+                task="inspect repo",
+                user_id="user-demo",
+                agent_config={
+                    "workspaceGuidance": {
+                        "enabled": True,
+                        "files": ["AGENT.md"],
+                        "maxBytes": 3,
+                    }
+                },
+                workspace=tmp_dir,
+            )
+
+        self.assertIn("abc", request.system_context["workspace_guidance"])
+        self.assertIn(
+            "[truncated at 3 bytes]",
+            request.system_context["workspace_guidance"],
+        )
+
+    def test_workspace_guidance_max_bytes_is_total_budget(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            Path(tmp_dir, "AGENT.md").write_text("abcdef", encoding="utf-8")
+            Path(tmp_dir, "AGENTS.md").write_text("second file", encoding="utf-8")
+            request = cli_service.build_run_request(
+                task="inspect repo",
+                user_id="user-demo",
+                agent_config={
+                    "workspaceGuidance": {
+                        "enabled": True,
+                        "files": ["AGENT.md", "AGENTS.md"],
+                        "maxBytes": 3,
+                    }
+                },
+                workspace=tmp_dir,
+            )
+
+        self.assertEqual(
+            request.system_context["workspace_guidance_files"], ["AGENT.md"]
+        )
+        self.assertIn("## AGENT.md", request.system_context["workspace_guidance"])
+        self.assertNotIn("## AGENTS.md", request.system_context["workspace_guidance"])
+
+    def test_workspace_guidance_rejects_nested_paths(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with self.assertRaises(cli_service.CLIError) as context:
+                cli_service.build_run_request(
+                    task="inspect repo",
+                    user_id="user-demo",
+                    agent_config={
+                        "workspaceGuidance": {
+                            "enabled": True,
+                            "files": ["docs/AGENT.md"],
+                        }
+                    },
+                    workspace=tmp_dir,
+                )
+
+        self.assertIn("workspace-root file names", str(context.exception))
+
+    def test_workspace_guidance_rejects_symlinks_outside_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir) / "workspace"
+            outside = Path(tmp_dir) / "outside"
+            workspace.mkdir()
+            outside.write_text("outside guidance", encoding="utf-8")
+            (workspace / "AGENT.md").symlink_to(outside)
+
+            with self.assertRaises(cli_service.CLIError) as context:
+                cli_service.build_run_request(
+                    task="inspect repo",
+                    user_id="user-demo",
+                    agent_config={
+                        "workspaceGuidance": {
+                            "enabled": True,
+                            "files": ["AGENT.md"],
+                        }
+                    },
+                    workspace=str(workspace),
+                )
+
+        self.assertIn("must stay inside the workspace", str(context.exception))
 
     def test_agent_config_blank_path_is_rejected(self):
         with self.assertRaises(cli_service.CLIError) as context:
