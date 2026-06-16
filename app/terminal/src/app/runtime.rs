@@ -253,6 +253,7 @@ impl App {
         if !self.pending_welcome_banner
             || self.help_overlay_visible
             || self.session_picker.is_some()
+            || self.has_transcript_lines()
         {
             return Vec::new();
         }
