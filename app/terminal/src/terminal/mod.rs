@@ -17,11 +17,8 @@ use crossterm::terminal::{Clear, ClearType};
 use crate::app::{App, MessageKind, SubmitAction};
 use crate::backend::{BackendEvent, BackendHandle, BackendRequest};
 use crate::custom_terminal::{BackendImpl, Terminal};
-use crate::history::insert_history_lines;
-use crate::terminal_layout::desired_viewport_height;
 use crate::terminal_support::sync_contextual_popup_data;
 use crate::ui;
-use crate::wrap::wrap_lines;
 
 mod actions;
 mod keys;
@@ -32,7 +29,9 @@ use actions::handle_submit_action;
 use keys::handle_key;
 
 pub type AppTerminal = Terminal<BackendImpl>;
+#[cfg(test)]
 const INLINE_VIEWPORT_IDLE_HEIGHT: u16 = 5;
+#[cfg(test)]
 const INLINE_VIEWPORT_MAX_HEIGHT: u16 = 18;
 // Keep keyboard enhancement mode minimal.
 //
@@ -58,7 +57,7 @@ pub fn setup_terminal(_app: &App) -> Result<AppTerminal> {
     let backend = BackendImpl::new(io::stdout());
     Terminal::with_viewport_height_and_cursor(
         backend,
-        INLINE_VIEWPORT_IDLE_HEIGHT,
+        u16::MAX,
         ratatui::layout::Position { x: 0, y: 0 },
     )
     .map_err(Into::into)
@@ -107,7 +106,8 @@ pub fn run_with_startup_action(
             stop_backend(backend.take());
         }
 
-        let width = terminal.size()?.width.max(1);
+        let screen_size = terminal.size()?;
+        let width = screen_size.width.max(1);
         app.materialize_pending_ui(width);
         if app.take_clear_request() {
             terminal.clear()?;
@@ -120,12 +120,7 @@ pub fn run_with_startup_action(
             dirty = true;
             last_elapsed_tick = elapsed_tick;
         }
-        let desired_height = desired_viewport_height(
-            app,
-            width,
-            INLINE_VIEWPORT_IDLE_HEIGHT,
-            INLINE_VIEWPORT_MAX_HEIGHT,
-        );
+        let desired_height = screen_size.height.max(1);
         if desired_height != viewport_height {
             terminal.set_viewport_height(desired_height)?;
             terminal.clear()?;
@@ -223,14 +218,9 @@ fn drain_backend(app: &mut App, backend: &mut Option<BackendHandle>) -> bool {
     changed
 }
 
-fn flush_history(terminal: &mut AppTerminal, app: &mut App) -> Result<bool> {
+fn flush_history(_terminal: &mut AppTerminal, app: &mut App) -> Result<bool> {
     let lines = app.take_pending_history_lines();
-    if lines.is_empty() {
-        return Ok(false);
-    }
-    let wrapped = wrap_lines(&lines, terminal.size()?.width.max(1));
-    insert_history_lines(terminal, &wrapped)?;
-    Ok(true)
+    Ok(!lines.is_empty())
 }
 
 fn ensure_backend<'a>(
