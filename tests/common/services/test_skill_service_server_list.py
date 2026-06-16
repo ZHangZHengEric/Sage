@@ -53,7 +53,6 @@ def test_collect_server_skills_reads_metadata_without_file_tree(tmp_path, monkey
     assert {skill.name for skill in skills} == {
         "system-skill",
         "user-skill",
-        "agent-skill",
     }
     assert all(skill.file_list == "" for skill in skills)
 
@@ -114,5 +113,37 @@ def test_collect_server_skills_scopes_private_skills_to_current_user(
     assert {skill.name for skill in skills} == {
         "system-skill",
         "user-a-skill",
-        "agent-a-skill",
     }
+
+
+def test_collect_server_skills_only_returns_agent_skills_when_explicit(
+    tmp_path, monkeypatch
+):
+    cfg = _server_cfg(tmp_path)
+    monkeypatch.setattr(config, "_GLOBAL_STARTUP_CONFIG", cfg, raising=False)
+    skill_service._invalidate_server_skills_cache()
+
+    _write_skill(Path(cfg.skill_dir), "system-dir", "system-skill", "System skill")
+    _write_skill(
+        Path(cfg.user_dir) / "user-a" / "skills", "user-a-dir", "user-a-skill", "A"
+    )
+    _write_skill(
+        Path(cfg.agents_dir) / "user-a" / "agent-a" / "skills",
+        "agent-a-dir",
+        "agent-a-skill",
+        "Agent A",
+    )
+    _write_skill(
+        Path(cfg.agents_dir) / "user-b" / "agent-b" / "skills",
+        "agent-b-dir",
+        "agent-b-skill",
+        "Agent B",
+    )
+
+    skills = skill_service._collect_server_skills(
+        current_user_id="user-a",
+        role="user",
+        dimension="agent",
+    )
+
+    assert {skill.name for skill in skills} == {"agent-a-skill"}
