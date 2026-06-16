@@ -342,6 +342,7 @@ async def get_conversations_paginated(
     search: Optional[str] = None,
     agent_id: Optional[str] = None,
     sort_by: str = "date",
+    include_messages: bool = True,
 ) -> Tuple[List[Conversation], int]:
     dao = ConversationDao()
     return await dao.get_conversations_paginated(
@@ -351,6 +352,7 @@ async def get_conversations_paginated(
         search=search,
         agent_id=agent_id,
         sort_by=sort_by or "date",
+        include_messages=include_messages,
     )
 
 
@@ -362,10 +364,21 @@ def build_conversation_list_result(
     page_size: int,
     include_user_id: bool = False,
     context_user_id: Optional[str] = None,
+    include_message_counts: bool = True,
 ) -> Dict[str, Any]:
     conversation_items: List[ConversationInfo] = []
     for conv in conversations:
-        message_count = conv.get_message_count()
+        if include_message_counts:
+            message_count = conv.get_message_count()
+            total_messages = message_count.get("user_count", 0) + message_count.get(
+                "agent_count", 0
+            )
+            user_count = message_count.get("user_count", 0)
+            agent_count = message_count.get("agent_count", 0)
+        else:
+            total_messages = 0
+            user_count = 0
+            agent_count = 0
         trace_id = _build_session_trace_id(conv.session_id)
         trace_url = _build_session_trace_url(conv.session_id)
         conversation_items.append(
@@ -375,10 +388,9 @@ def build_conversation_list_result(
                 agent_id=conv.agent_id,
                 agent_name=conv.agent_name,
                 title=conv.title,
-                message_count=message_count.get("user_count", 0)
-                + message_count.get("agent_count", 0),
-                user_count=message_count.get("user_count", 0),
-                agent_count=message_count.get("agent_count", 0),
+                message_count=total_messages,
+                user_count=user_count,
+                agent_count=agent_count,
                 created_at=conv.created_at.isoformat() if conv.created_at else "",
                 updated_at=conv.updated_at.isoformat() if conv.updated_at else "",
                 trace_id=trace_id,
