@@ -23,17 +23,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const filteredItems = computed(() => {
     const validItems = items.value.filter(item => item && item.type)
     if (!currentSessionId.value) {
-        console.log('[Workbench] filteredItems: no session id, returning all', validItems.length)
         return validItems
     }
-    const filtered = validItems.filter(item => item.sessionId === currentSessionId.value)
-    console.log('[Workbench] filteredItems:', {
-        currentSessionId: currentSessionId.value,
-        total: validItems.length,
-        filtered: filtered.length,
-        firstItemSessionId: validItems[0]?.sessionId
-    })
-    return filtered
+    return validItems.filter(item => item.sessionId === currentSessionId.value)
   })
 
   const totalItems = computed(() => filteredItems.value.length)
@@ -179,7 +171,6 @@ export const useWorkbenchStore = defineStore('workbench', () => {
 
       // 如果存在但没有 agentId，更新它
       if (!existingItem.agentId && item.agentId) {
-        console.log('[Workbench] Updating missing agentId for existing item:', item.agentId)
         existingItem.agentId = item.agentId
       }
       
@@ -189,15 +180,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
          const index = filteredItems.value.indexOf(existingItem)
          if (index !== -1 && index !== currentIndex.value) {
             currentIndex.value = index
-            console.log('[Workbench] Auto-jump to existing item index:', index)
          }
       }
 
-      console.log('[Workbench] Item already exists, skipping:', {
-        type: item.type,
-        filePath: item.data?.filePath,
-        toolCallId: item.data?.id
-      })
       return existingItem
     }
 
@@ -212,23 +197,11 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     }
     items.value.push(newItem)
 
-    console.log('[Workbench] addItem:', {
-      id: newItem.id,
-      type: newItem.type,
-      sessionId: newItem.sessionId,
-      hasToolResult: !!newItem.toolResult,
-      toolResultKeys: newItem.toolResult ? Object.keys(newItem.toolResult) : [],
-      currentSessionId: currentSessionId.value,
-      totalItems: items.value.length,
-      filteredItemsCount: filteredItems.value.length
-    })
-
     // 如果在实时模式，自动跳转到最新
     // 只有当新添加的 item 属于当前会话时才跳转
     if (isRealtime.value && newItem.sessionId === currentSessionId.value) {
       const filteredLength = filteredItems.value.length
       currentIndex.value = Math.max(0, filteredLength - 1)
-      console.log('[Workbench] Auto-jump to index:', currentIndex.value)
     }
 
     // tool_call item 落地后，把可能先到的 progress 缓存灌进去
@@ -384,16 +357,6 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     // 优先使用传入的 agentId，其次是 message 中的 agent_id
     const finalAgentId = agentId || message.agent_id
 
-    console.log('[Workbench] extractFromMessage:', {
-      messageId,
-      role,
-      sessionId,
-      agentId: finalAgentId,
-      currentSessionId: currentSessionId.value,
-      hasToolCalls: !!(message.tool_calls && message.tool_calls.length > 0),
-      toolCallsCount: message.tool_calls?.length || 0
-    })
-
     // 处理工具调用
     // 协议性内置工具（如 turn_status）只是 agent 控制信号，不进入工作台 timeline。
     const HIDDEN_WORKBENCH_TOOL_NAMES = new Set(['turn_status'])
@@ -406,7 +369,6 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         if (HIDDEN_WORKBENCH_TOOL_NAMES.has(toolCall.function?.name)) {
           return
         }
-        console.log('[Workbench] Adding tool_call:', idx, toolCall.function?.name)
         const toolStableKey = messageId ? `tool:${messageId}:${idx}` : (toolCall.id ? `tool:${toolCall.id}` : null)
         addItem({
           type: 'tool_call',
@@ -424,11 +386,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
 
     // 处理文件引用
     const fileMatches = extractFileReferences(message.content)
-    if (fileMatches.length > 0) {
-      console.log('[Workbench] Found files:', fileMatches.length)
-    }
     fileMatches.forEach((file, idx) => {
-      console.log('[Workbench] Adding file:', idx, file.fileName, file.filePath)
       addItem({
         type: 'file',
         role: role,
@@ -442,11 +400,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
 
     // 处理代码块
     const codeBlocks = extractCodeBlocks(message.content)
-    if (codeBlocks.length > 0) {
-      console.log('[Workbench] Found code blocks:', codeBlocks.length)
-    }
     codeBlocks.forEach((code, idx) => {
-      console.log('[Workbench] Adding code block:', idx, code.language)
       addItem({
         type: 'code',
         role: role,
@@ -461,16 +415,13 @@ export const useWorkbenchStore = defineStore('workbench', () => {
 
   // 更新工具结果 - 简化逻辑，直接更新，不依赖 pendingToolResults
   const updateToolResult = (toolCallId, result) => {
-    console.log('[Workbench] updateToolResult called with:', toolCallId, result)
     const item = items.value.find(i =>
       i.type === 'tool_call' && (i.data.id === toolCallId || i.data.tool_call_id === toolCallId)
     )
     if (item) {
       item.toolResult = result
-      console.log('[Workbench] Tool result updated for:', toolCallId)
       return true
     } else {
-      console.log('[Workbench] Tool call item not found for:', toolCallId)
       return false
     }
   }
