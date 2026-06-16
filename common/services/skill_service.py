@@ -26,8 +26,8 @@ from common.services.agent_workspace import get_agent_skill_dir
 
 _SERVER_SKILLS_CACHE_TTL_SECONDS = 5.0
 _server_skills_cache_lock = threading.Lock()
-_server_skills_cache_expires_at = 0.0
-_server_skills_cache: List[SkillSchema] = []
+_server_skills_cache_expires_at: Dict[Tuple[str, str, str], float] = {}
+_server_skills_cache: Dict[Tuple[str, str, str], List[SkillSchema]] = {}
 
 
 def _calculate_skill_hash(skill_path: str) -> str:
@@ -445,8 +445,8 @@ def _sync_desktop_agent_skills() -> None:
 def _invalidate_server_skills_cache() -> None:
     global _server_skills_cache_expires_at, _server_skills_cache
     with _server_skills_cache_lock:
-        _server_skills_cache_expires_at = 0.0
-        _server_skills_cache = []
+        _server_skills_cache_expires_at = {}
+        _server_skills_cache = {}
 
 
 def _load_server_skill_info_from_dir(skill_path: str) -> Optional[SkillSchema]:
@@ -501,19 +501,35 @@ def _collect_skill_infos_from_workspace(workspace: str) -> List[SkillSchema]:
     return list(skills_by_name.values())
 
 
-def _collect_server_skills_uncached() -> List[SkillSchema]:
+def _collect_server_skills_uncached(
+    current_user_id: str = "",
+    role: str = "admin",
+    dimension: Optional[str] = None,
+) -> List[SkillSchema]:
     cfg = _get_cfg()
     skill_dir = cfg.skill_dir
     user_dir = cfg.user_dir
     agents_dir = cfg.agents_dir
     all_skills: List[SkillSchema] = []
+    scan_all_private_scopes = role == "admin"
+    normalized_dimension = dimension or "all"
+    include_system = normalized_dimension in {"all", "system"}
+    include_user = normalized_dimension in {"all", "user"}
+    include_agent = normalized_dimension in {"all", "agent"}
 
-    if os.path.exists(skill_dir):
+    if include_system and os.path.exists(skill_dir):
         all_skills.extend(_collect_skill_infos_from_workspace(skill_dir))
 
-    if os.path.exists(user_dir):
+    if include_user and os.path.exists(user_dir):
         try:
-            for user_folder in os.listdir(user_dir):
+            if scan_all_private_scopes:
+                user_folders = os.listdir(user_dir)
+            elif current_user_id:
+                user_folders = [current_user_id]
+            else:
+                user_folders = []
+
+            for user_folder in user_folders:
                 user_skills_path = os.path.join(user_dir, user_folder, "skills")
                 if os.path.isdir(user_skills_path):
                     all_skills.extend(
@@ -522,9 +538,16 @@ def _collect_server_skills_uncached() -> List[SkillSchema]:
         except Exception as e:
             logger.warning(f"扫描用户技能目录失败: {e}")
 
-    if os.path.exists(agents_dir):
+    if include_agent and os.path.exists(agents_dir):
         try:
-            for user_folder in os.listdir(agents_dir):
+            if scan_all_private_scopes:
+                user_folders = os.listdir(agents_dir)
+            elif current_user_id:
+                user_folders = [current_user_id]
+            else:
+                user_folders = []
+
+            for user_folder in user_folders:
                 user_agents_path = os.path.join(agents_dir, user_folder)
                 if os.path.isdir(user_agents_path):
                     for agent_folder in os.listdir(user_agents_path):
@@ -543,18 +566,33 @@ def _collect_server_skills_uncached() -> List[SkillSchema]:
     return all_skills
 
 
-def _collect_server_skills() -> List[SkillSchema]:
+def _server_skills_cache_key(
+    current_user_id: str = "",
+    role: str = "admin",
+    dimension: Optional[str] = None,
+) -> Tuple[str, str, str]:
+    normalized_role = "admin" if role == "admin" else "user"
+    normalized_user_id = "" if normalized_role == "admin" else current_user_id
+    return (normalized_role, normalized_user_id, dimension or "all")
+
+
+def _collect_server_skills(
+    current_user_id: str = "",
+    role: str = "admin",
+    dimension: Optional[str] = None,
+) -> List[SkillSchema]:
     global _server_skills_cache_expires_at, _server_skills_cache
 
     now = time.monotonic()
+    cache_key = _server_skills_cache_key(current_user_id, role, dimension)
     with _server_skills_cache_lock:
-        if now < _server_skills_cache_expires_at:
-            return list(_server_skills_cache)
+        if now < _server_skills_cache_expires_at.get(cache_key, 0.0):
+            return list(_server_skills_cache.get(cache_key, []))
 
-    skills = _collect_server_skills_uncached()
+    skills = _collect_server_skills_uncached(current_user_id, role, dimension)
     with _server_skills_cache_lock:
-        _server_skills_cache = list(skills)
-        _server_skills_cache_expires_at = (
+        _server_skills_cache[cache_key] = list(skills)
+        _server_skills_cache_expires_at[cache_key] = (
             time.monotonic() + _SERVER_SKILLS_CACHE_TTL_SECONDS
         )
     return skills
@@ -599,7 +637,9 @@ async def list_skills(
     if _is_desktop_mode():
         return await asyncio.to_thread(_list_desktop_skills_sync, current_user_id)
 
-    all_skills = await asyncio.to_thread(_collect_server_skills)
+    all_skills = await asyncio.to_thread(
+        _collect_server_skills, current_user_id, role, dimension
+    )
     allowed_skills = None
     if filter_agent_id:
         agent_dao = AgentConfigDao()
@@ -609,10 +649,8 @@ async def list_skills(
                 "available_skills"
             )
 
-    agent_dao = AgentConfigDao()
-    all_agents = await agent_dao.get_list()
-    agent_name_map = {agent.agent_id: agent.name for agent in all_agents}
-
+    pending_skills: List[Tuple[SkillSchema, Dict[str, Any]]] = []
+    agent_ids: set[str] = set()
     skills: List[Dict[str, Any]] = []
     for skill in all_skills:
         name = skill.name
@@ -621,14 +659,25 @@ async def list_skills(
 
         dimension_info = _get_skill_dimension(skill.path)
         skill_dimension = dimension_info["dimension"]
-        if dimension and dimension != "all" and skill_dimension != dimension:
-            continue
 
         if role != "admin" and skill_dimension in {"user", "agent"}:
             if dimension_info["owner_user_id"] != current_user_id:
                 continue
 
         agent_id = dimension_info["agent_id"]
+        if agent_id:
+            agent_ids.add(agent_id)
+        pending_skills.append((skill, dimension_info))
+
+    agent_name_map: Dict[str, str] = {}
+    if agent_ids:
+        agent_dao = AgentConfigDao()
+        agents = await agent_dao.get_by_ids(list(agent_ids))
+        agent_name_map = {agent.agent_id: agent.name for agent in agents}
+
+    for skill, dimension_info in pending_skills:
+        agent_id = dimension_info["agent_id"]
+        skill_dimension = dimension_info["dimension"]
         skills.append(
             {
                 "name": skill.name,
