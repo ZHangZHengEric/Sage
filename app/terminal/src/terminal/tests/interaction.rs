@@ -9,7 +9,9 @@ use crate::app::{ActiveSurfaceKind, App, MessageKind, SubmitAction};
 use crate::backend::tests::lock_env;
 use crate::slash_command;
 
-use super::super::{handle_key, INLINE_VIEWPORT_IDLE_HEIGHT, INLINE_VIEWPORT_MAX_HEIGHT};
+use super::super::{
+    event_poll_interval, handle_key, INLINE_VIEWPORT_IDLE_HEIGHT, INLINE_VIEWPORT_MAX_HEIGHT,
+};
 use crate::terminal_layout::desired_viewport_height;
 
 #[test]
@@ -19,6 +21,19 @@ fn terminal_loop_accepts_repeat_key_events_for_submission() {
     assert!(!super::super::should_handle_key_event(
         KeyEventKind::Release
     ));
+}
+
+#[test]
+fn event_polling_is_slow_when_idle_and_fast_when_busy() {
+    let mut app = App::new();
+    let idle = event_poll_interval(&app, false);
+
+    app.busy = true;
+    let busy = event_poll_interval(&app, false);
+    let backend_active = event_poll_interval(&App::new(), true);
+
+    assert!(idle > busy);
+    assert_eq!(busy, backend_active);
 }
 
 #[test]
