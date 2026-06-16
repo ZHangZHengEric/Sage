@@ -39,6 +39,23 @@ def _resolve_api_key(api_keys: Optional[List[str]]) -> str:
     return api_key
 
 
+def _mask_api_key(api_key: str) -> str:
+    key = str(api_key or "").strip()
+    if len(key) <= 8:
+        return "***" if key else ""
+    return f"{key[:4]}***{key[-4:]}"
+
+
+def _mask_api_keys(api_keys: Optional[List[str]]) -> List[str]:
+    return [_mask_api_key(api_key) for api_key in api_keys or []]
+
+
+def _provider_to_client_dict(provider: LLMProvider) -> Dict[str, Any]:
+    data = provider.to_dict()
+    data["api_keys"] = _mask_api_keys(provider.api_keys)
+    return data
+
+
 async def _probe_provider_or_raise(
     *, api_keys: Optional[List[str]], base_url: Optional[str], model: str, action: str
 ) -> None:
@@ -94,7 +111,62 @@ async def verify_capabilities(data: LLMProviderCreate) -> Dict[str, Any]:
 
 async def list_providers(user_id: str) -> List[Dict[str, Any]]:
     providers = await LLMProviderDao().get_list(user_id=user_id)
-    return [provider.to_dict() for provider in providers]
+    return [_provider_to_client_dict(provider) for provider in providers]
+
+
+async def _get_editable_provider_or_raise(
+    dao: LLMProviderDao,
+    provider_id: str,
+    *,
+    user_id: str,
+    allow_system_default_update: bool,
+) -> LLMProvider:
+    provider = await dao.get_by_id(provider_id)
+    if not provider:
+        raise ValueError("Provider not found")
+    if provider.user_id and provider.user_id != user_id:
+        raise PermissionError("Permission denied")
+    if not allow_system_default_update and not provider.user_id:
+        raise PermissionError("Cannot modify system default provider")
+    return provider
+
+
+def _merge_provider_update_config(
+    provider: LLMProvider, data: LLMProviderUpdate
+) -> tuple[Optional[str], Optional[List[str]], str]:
+    effective_base_url = (
+        _normalize_base_url(data.base_url)
+        if data.base_url is not None
+        else provider.base_url
+    )
+    effective_api_keys = (
+        data.api_keys if data.api_keys is not None else provider.api_keys
+    )
+    effective_model = data.model if data.model is not None else provider.model
+    return effective_base_url, effective_api_keys, effective_model
+
+
+async def verify_update_capabilities(
+    provider_id: str,
+    data: LLMProviderUpdate,
+    *,
+    user_id: str,
+    allow_system_default_update: bool,
+) -> Dict[str, Any]:
+    dao = LLMProviderDao()
+    provider = await _get_editable_provider_or_raise(
+        dao,
+        provider_id,
+        user_id=user_id,
+        allow_system_default_update=allow_system_default_update,
+    )
+    effective_base_url, effective_api_keys, effective_model = (
+        _merge_provider_update_config(provider, data)
+    )
+    api_key = _resolve_api_key(effective_api_keys)
+    return await probe_llm_capabilities(
+        api_key, effective_base_url or "", effective_model
+    )
 
 
 async def create_provider(
@@ -113,11 +185,11 @@ async def create_provider(
         f"[LLMProvider] Checking existing providers for base_url={normalized_base_url}, "
         f"model={data.model}, user_id={user_id}, found {len(existing_providers)} candidates"
     )
-    logger.info(f"[LLMProvider] Request api_keys: {data.api_keys}")
+    logger.info(f"[LLMProvider] Request api_keys: {_mask_api_keys(data.api_keys)}")
 
     for provider in existing_providers:
         logger.info(
-            f"[LLMProvider] Comparing with provider {provider.id}: api_keys={provider.api_keys}"
+            f"[LLMProvider] Comparing with provider {provider.id}: api_keys={_mask_api_keys(provider.api_keys)}"
         )
         if sorted(provider.api_keys) == sorted(data.api_keys):
             logger.info(f"[LLMProvider] Found matching provider: {provider.id}")
@@ -163,23 +235,15 @@ async def update_provider(
     allow_system_default_update: bool,
 ) -> LLMProvider:
     dao = LLMProviderDao()
-    provider = await dao.get_by_id(provider_id)
-    if not provider:
-        raise ValueError("Provider not found")
-    if provider.user_id and provider.user_id != user_id:
-        raise PermissionError("Permission denied")
-    if not allow_system_default_update and not provider.user_id:
-        raise PermissionError("Cannot modify system default provider")
-
-    effective_base_url = (
-        _normalize_base_url(data.base_url)
-        if data.base_url is not None
-        else provider.base_url
+    provider = await _get_editable_provider_or_raise(
+        dao,
+        provider_id,
+        user_id=user_id,
+        allow_system_default_update=allow_system_default_update,
     )
-    effective_api_keys = (
-        data.api_keys if data.api_keys is not None else provider.api_keys
+    effective_base_url, effective_api_keys, effective_model = (
+        _merge_provider_update_config(provider, data)
     )
-    effective_model = data.model if data.model is not None else provider.model
 
     await _probe_provider_or_raise(
         api_keys=effective_api_keys,

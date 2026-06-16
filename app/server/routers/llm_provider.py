@@ -31,6 +31,28 @@ async def verify_capabilities(data: LLMProviderCreate):
         return await Response.error(message=f"验证失败: {str(e)}")
 
 
+@router.post("/verify-capabilities/{provider_id}")
+async def verify_update_capabilities(
+    provider_id: str, data: LLMProviderUpdate, request: Request
+):
+    """
+    验证编辑中的模型提供商配置，未提交 api_keys 时沿用数据库中的真实 key。
+    """
+    user_id = get_request_user_id(request)
+    try:
+        result = await llm_provider_service.verify_update_capabilities(
+            provider_id,
+            data,
+            user_id=user_id,
+            allow_system_default_update=False,
+        )
+        return await Response.succ(message="能力验证成功", data=result)
+    except PermissionError as e:
+        return await Response.error(message=str(e))
+    except Exception as e:
+        return await Response.error(message=f"验证失败: {str(e)}")
+
+
 @router.post("/verify-multimodal")
 async def verify_multimodal(data: LLMProviderCreate):
     """

@@ -482,9 +482,12 @@ const apiKeyCount = computed(() => buildApiKeys().length)
 const hasRequiredFields = computed(() =>
   Boolean(form.name.trim() && form.base_url.trim() && buildApiKeys().length > 0 && form.model.trim())
 )
+const apiKeyChanged = computed(() =>
+  !isEdit.value || form.api_keys_str !== originalValues.api_keys_str
+)
 const configChanged = computed(() =>
   form.base_url !== originalValues.base_url ||
-  form.api_keys_str !== originalValues.api_keys_str ||
+  apiKeyChanged.value ||
   form.model !== originalValues.model
 )
 const needsCapabilityVerification = computed(() => {
@@ -558,19 +561,24 @@ const optionalNumber = (value) => {
   return Number.isFinite(num) ? num : null
 }
 
-const buildProviderPayload = () => ({
-  name: form.name,
-  base_url: form.base_url,
-  api_keys: buildApiKeys(),
-  model: form.model,
-  max_tokens: optionalNumber(form.maxTokens),
-  temperature: optionalNumber(form.temperature),
-  top_p: optionalNumber(form.topP),
-  presence_penalty: optionalNumber(form.presencePenalty),
-  max_model_len: optionalNumber(form.maxModelLen),
-  supports_multimodal: form.supportsMultimodal,
-  supports_structured_output: form.supportsStructuredOutput
-})
+const buildProviderPayload = () => {
+  const payload = {
+    name: form.name,
+    base_url: form.base_url,
+    model: form.model,
+    max_tokens: optionalNumber(form.maxTokens),
+    temperature: optionalNumber(form.temperature),
+    top_p: optionalNumber(form.topP),
+    presence_penalty: optionalNumber(form.presencePenalty),
+    max_model_len: optionalNumber(form.maxModelLen),
+    supports_multimodal: form.supportsMultimodal,
+    supports_structured_output: form.supportsStructuredOutput
+  }
+  if (apiKeyChanged.value) {
+    payload.api_keys = buildApiKeys()
+  }
+  return payload
+}
 const resetCapabilityState = () => {
   verified.value = false
   capabilityChecked.value = false
@@ -686,11 +694,6 @@ const handleEdit = (provider) => {
   selectedProvider.value = known ? known.name : 'Custom'
 
   form.base_url = provider.base_url
-  // api_keys are not returned in list usually for security?
-  // But DTO has them. The backend router returns them.
-  // Ideally we should mask them.
-  // But for editing we need them.
-  // The backend router returns full DTO.
   let keys = provider.api_keys
   if (!Array.isArray(keys)) {
     keys = (typeof keys === 'string' && keys) ? [keys] : []
@@ -736,14 +739,16 @@ const handleVerify = async () => {
   if (saving.value) return
   const data = buildProviderPayload()
 
-  if (!data.name || !data.base_url || !data.api_keys.length || !data.model) {
+  if (!hasRequiredFields.value) {
      toast.error(t('common.fillRequired'))
      return
   }
 
   verifying.value = true
   try {
-    const res = await modelProviderAPI.verifyModelProvider(data)
+    const res = isEdit.value && currentId.value && !apiKeyChanged.value
+      ? await modelProviderAPI.verifyModelProviderUpdate(currentId.value, data)
+      : await modelProviderAPI.verifyModelProvider(data)
     verified.value = true
     form.supportsMultimodal = Boolean(res?.supports_multimodal)
     form.supportsStructuredOutput = Boolean(res?.supports_structured_output)
