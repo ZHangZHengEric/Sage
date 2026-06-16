@@ -108,7 +108,7 @@ fn typing_input_keeps_welcome_banner_visible() {
 }
 
 #[test]
-fn submitting_message_hides_welcome_banner() {
+fn submitting_message_keeps_welcome_banner_as_idle_status() {
     let mut app = App::new();
     app.input = "hello".to_string();
     app.input_cursor = app.input.len();
@@ -116,7 +116,15 @@ fn submitting_message_hides_welcome_banner() {
     let _ = app.submit_input();
     app.materialize_pending_ui(120);
 
-    assert!(app.rendered_idle_lines(120).is_empty());
+    let rendered = app
+        .rendered_idle_lines(120)
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("Sage Terminal"));
+    assert!(rendered.contains("workspace: "));
 }
 
 #[test]
@@ -134,7 +142,7 @@ fn first_message_requests_clear_before_transcript_history_is_inserted() {
 }
 
 #[test]
-fn first_transcript_keeps_welcome_out_of_history_and_hides_idle_banner() {
+fn first_transcript_keeps_welcome_out_of_history_but_visible_when_idle() {
     let mut app = App::new();
     app.input = "hello".to_string();
     app.input_cursor = app.input.len();
@@ -152,11 +160,11 @@ fn first_transcript_keeps_welcome_out_of_history_and_hides_idle_banner() {
     assert!(!rendered.contains("Sage Terminal"));
     assert!(!rendered.contains("Tip: "));
     assert!(rendered.contains("hello"));
-    assert!(app.rendered_idle_lines(120).is_empty());
+    assert!(!app.rendered_idle_lines(120).is_empty());
 }
 
 #[test]
-fn status_command_hides_welcome_banner() {
+fn status_command_keeps_welcome_banner_visible() {
     let mut app = App::new();
     app.input = "/status".to_string();
     app.input_cursor = app.input.len();
@@ -174,7 +182,7 @@ fn status_command_hides_welcome_banner() {
     assert!(rendered.contains("Notice"));
     assert!(rendered.contains("session: "));
     assert!(rendered.contains("workspace: "));
-    assert!(app.rendered_idle_lines(120).is_empty());
+    assert!(!app.rendered_idle_lines(120).is_empty());
 }
 
 #[test]
