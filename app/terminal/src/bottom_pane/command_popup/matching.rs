@@ -2,6 +2,7 @@ use crate::slash_command::SlashCommandDef;
 
 use super::model::{CommandMatch, CommandPopupItem, CommandPopupProps, PopupAction};
 
+#[cfg(test)]
 pub(crate) const MAX_POPUP_ROWS: usize = 6;
 
 pub(crate) fn popup_query(input: &str) -> Option<&str> {
@@ -54,6 +55,7 @@ pub(crate) fn matching_commands(
     exact
 }
 
+#[cfg(test)]
 pub(crate) fn props_from_matches(
     matches: &[CommandMatch],
     selected: usize,

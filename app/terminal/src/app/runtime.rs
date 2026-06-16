@@ -242,11 +242,19 @@ impl App {
     }
 
     pub fn rendered_main_lines(&self, width: u16) -> Vec<Line<'static>> {
-        if self.busy {
-            return self.rendered_live_lines();
+        let mut lines = self.rendered_idle_lines(width);
+        if !lines.is_empty() && !self.committed_history_lines.is_empty() {
+            lines.push(Line::from(""));
         }
-
-        self.rendered_idle_lines(width)
+        lines.extend(self.committed_history_lines.clone());
+        if self.busy {
+            let live_lines = self.rendered_live_lines();
+            if !lines.is_empty() && !live_lines.is_empty() {
+                lines.push(Line::from(""));
+            }
+            lines.extend(live_lines);
+        }
+        lines
     }
 
     pub fn rendered_idle_lines(&self, width: u16) -> Vec<Line<'static>> {

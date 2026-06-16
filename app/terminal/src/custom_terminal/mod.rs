@@ -133,10 +133,6 @@ where
         self.viewport_area
     }
 
-    pub fn last_known_cursor_pos(&self) -> Position {
-        self.last_known_cursor_pos
-    }
-
     pub fn set_viewport_area(&mut self, area: Rect) {
         self.viewport_area = area;
         self.current_buffer_mut().resize(area);

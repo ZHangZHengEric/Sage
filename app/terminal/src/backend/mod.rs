@@ -5,7 +5,7 @@ mod protocol;
 mod protocol_support;
 pub(crate) mod runtime;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 mod types;
 
 pub(crate) use api::{
