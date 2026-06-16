@@ -20,6 +20,7 @@ class BaseChatRequest(BaseModel):
     # server 有 user_id，desktop 目前没有；这里以 server 为准，并设为可选
     user_id: Optional[str] = None
     system_context: Optional[Dict[str, Any]] = None
+    provider_id: Optional[str] = None
 
     def __init__(self, **data: Any):  # type: ignore[override]
         super().__init__(**data)
