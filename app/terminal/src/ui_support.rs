@@ -10,7 +10,7 @@ use crate::bottom_pane::help_overlay::HelpOverlayProps;
 use crate::bottom_pane::picker_overlay::PickerOverlayProps;
 use crate::bottom_pane::transcript_overlay::TranscriptOverlayProps;
 use crate::custom_terminal::Frame;
-use crate::wrap::{wrap_lines, wrapped_height};
+use crate::wrap::wrap_lines;
 
 pub(crate) fn render_live_region(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Clear, area);
@@ -24,7 +24,7 @@ pub(crate) fn render_live_region(frame: &mut Frame, area: Rect, app: &App) {
     let visible = visible_main_region_lines(
         &wrapped,
         area.height,
-        app.pending_welcome_banner && !app.busy && !app.has_transcript_lines(),
+        app.pending_welcome_banner && !app.busy,
     );
     frame.render_widget(Paragraph::new(visible), area);
 }
@@ -42,15 +42,6 @@ fn visible_main_region_lines(
         wrapped[..height].to_vec()
     } else {
         wrapped[wrapped.len().saturating_sub(height)..].to_vec()
-    }
-}
-
-pub(crate) fn live_region_height(app: &App, width: u16) -> u16 {
-    let lines = app.rendered_main_lines(width.max(1));
-    if lines.is_empty() {
-        1
-    } else {
-        wrapped_height(&lines, width.max(1)).max(1)
     }
 }
 
