@@ -97,6 +97,24 @@ class StubLLMProvider:
         self.is_default = is_default
         self.user_id = user_id
 
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "base_url": self.base_url,
+            "api_keys": self.api_keys,
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "presence_penalty": self.presence_penalty,
+            "max_model_len": self.max_model_len,
+            "supports_multimodal": self.supports_multimodal,
+            "supports_structured_output": self.supports_structured_output,
+            "is_default": self.is_default,
+            "user_id": self.user_id,
+        }
+
 
 def _install_stub_modules():
     loguru_module = types.ModuleType("loguru")
@@ -141,11 +159,17 @@ def _load_service_module():
 
 
 class FakeDao:
-    def __init__(self, *, providers_by_config=None, provider_by_id=None):
+    def __init__(
+        self, *, providers_by_config=None, provider_by_id=None, providers=None
+    ):
         self.providers_by_config = list(providers_by_config or [])
         self.provider_by_id = provider_by_id
+        self.providers = list(providers or [])
         self.saved = []
         self.cleared_defaults = []
+
+    async def get_list(self, **kwargs):
+        return list(self.providers)
 
     async def get_by_config(self, **kwargs):
         return list(self.providers_by_config)
@@ -199,6 +223,27 @@ class TestLLMProviderProbeRequired(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(dao.saved), 1)
         self.assertEqual(dao.saved[0].base_url, "https://example.com/v1")
+
+    async def test_list_providers_masks_api_keys_for_client_response(self):
+        dao = FakeDao(
+            providers=[
+                StubLLMProvider(
+                    id="provider-0",
+                    name="provider",
+                    base_url="https://example.com/v1",
+                    api_keys=["sk-1234567890abcdef"],
+                    model="test-model",
+                    user_id="alice",
+                )
+            ]
+        )
+
+        self.module.LLMProviderDao = lambda: dao  # pyright: ignore[reportAttributeAccessIssue]
+
+        providers = await self.module.list_providers(user_id="alice")
+
+        self.assertEqual(providers[0]["api_keys"], ["sk-1***cdef"])
+        self.assertNotIn("sk-1234567890abcdef", str(providers))
 
     async def test_create_provider_blocks_save_when_probe_fails(self):
         dao = FakeDao()
@@ -286,6 +331,52 @@ class TestLLMProviderProbeRequired(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(existing.base_url, "https://new.example.com/v1")
         self.assertEqual(existing.model, "new-model")
         self.assertEqual(len(dao.saved), 1)
+
+    async def test_verify_update_capabilities_uses_existing_key_when_api_keys_omitted(
+        self,
+    ):
+        existing = StubLLMProvider(
+            id="provider-verify",
+            name="old-name",
+            base_url="https://old.example.com/v1",
+            api_keys=["sk-existing"],
+            model="old-model",
+            user_id="alice",
+        )
+        dao = FakeDao(provider_by_id=existing)
+        probe_calls = []
+
+        async def fake_probe_capabilities(api_key, base_url, model):
+            probe_calls.append((api_key, base_url, model))
+            return {
+                "supports_multimodal": True,
+                "supports_structured_output": True,
+            }
+
+        self.module.LLMProviderDao = lambda: dao  # pyright: ignore[reportAttributeAccessIssue]
+        self.module.probe_llm_capabilities = fake_probe_capabilities  # pyright: ignore[reportAttributeAccessIssue]
+
+        result = await self.module.verify_update_capabilities(
+            "provider-verify",
+            self.module.LLMProviderUpdate(
+                base_url="https://new.example.com/v1/",
+                model="new-model",
+            ),
+            user_id="alice",
+            allow_system_default_update=True,
+        )
+
+        self.assertEqual(
+            probe_calls, [("sk-existing", "https://new.example.com/v1", "new-model")]
+        )
+        self.assertEqual(
+            result,
+            {
+                "supports_multimodal": True,
+                "supports_structured_output": True,
+            },
+        )
+        self.assertEqual(dao.saved, [])
 
     async def test_update_provider_name_only_still_requires_probe(self):
         existing = StubLLMProvider(

@@ -47,6 +47,16 @@ export const modelProviderAPI = {
   },
 
   /**
+   * 验证编辑中的模型提供商
+   * @param {string} id
+   * @param {Object} data
+   * @returns {Promise<Object>}
+   */
+  verifyModelProviderUpdate: async (id, data) => {
+    return await request.post(`/api/llm-provider/verify-capabilities/${id}`, data)
+  },
+
+  /**
    * 验证模型提供商是否支持多模态
    * @param {Object} data
    * @returns {Promise<Object>}
