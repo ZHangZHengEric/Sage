@@ -87,12 +87,6 @@ where
         F: FnOnce(&mut Frame),
     {
         self.autoresize()?;
-        self.backend
-            .set_cursor_position(self.viewport_area.as_position())?;
-        self.backend
-            .clear_region(ratatui::backend::ClearType::AfterCursor)?;
-        self.current_buffer_mut().reset();
-        self.previous_buffer_mut().reset();
 
         let cursor_position = {
             let mut frame = Frame {
