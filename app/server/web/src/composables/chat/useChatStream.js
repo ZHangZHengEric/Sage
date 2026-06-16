@@ -106,6 +106,10 @@ const normalizeResponseLanguage = (language) => {
   return 'en-US'
 }
 
+const STREAM_PROCESS_BUDGET_MS = 12
+
+const yieldToBrowser = () => new Promise(resolve => setTimeout(resolve, 0))
+
 export const useChatStream = ({
   chatAPI,
   toast,
@@ -157,6 +161,7 @@ export const useChatStream = ({
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
+        let batchStartedAt = performance.now()
         for (const line of lines) {
           if (line.trim() === '') continue
           try {
@@ -165,7 +170,12 @@ export const useChatStream = ({
           } catch (e) {
             console.error('JSON Parse Error', e)
           }
+          if (performance.now() - batchStartedAt > STREAM_PROCESS_BUDGET_MS) {
+            await yieldToBrowser()
+            batchStartedAt = performance.now()
+          }
         }
+        await yieldToBrowser()
       }
       if (onComplete) onComplete()
     } catch (e) {
