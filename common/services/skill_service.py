@@ -515,7 +515,7 @@ def _collect_server_skills_uncached(
     normalized_dimension = dimension or "all"
     include_system = normalized_dimension in {"all", "system"}
     include_user = normalized_dimension in {"all", "user"}
-    include_agent = normalized_dimension in {"all", "agent"}
+    include_agent = normalized_dimension == "agent"
 
     if include_system and os.path.exists(skill_dir):
         all_skills.extend(_collect_skill_infos_from_workspace(skill_dir))
