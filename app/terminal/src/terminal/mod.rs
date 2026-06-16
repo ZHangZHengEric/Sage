@@ -42,6 +42,8 @@ const INLINE_VIEWPORT_MAX_HEIGHT: u16 = 18;
 // real-world IME regressions, especially for Chinese input methods.
 const KEYBOARD_ENHANCEMENT_FLAGS: KeyboardEnhancementFlags =
     KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES;
+const BUSY_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(16);
+const IDLE_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 pub fn setup_terminal(_app: &App) -> Result<AppTerminal> {
     enable_raw_mode()?;
@@ -145,7 +147,7 @@ pub fn run_with_startup_action(
             break;
         }
 
-        if event::poll(Duration::from_millis(16))? {
+        if event::poll(event_poll_interval(app, backend.is_some()))? {
             match event::read()? {
                 Event::Key(key) if should_handle_key_event(key.kind) => {
                     dirty |= handle_key(app, key, &mut backend)?
@@ -228,6 +230,14 @@ fn drain_backend(app: &mut App, backend: &mut Option<BackendHandle>) -> bool {
 fn flush_history(_terminal: &mut AppTerminal, app: &mut App) -> Result<bool> {
     let lines = app.take_pending_history_lines();
     Ok(!lines.is_empty())
+}
+
+fn event_poll_interval(app: &App, backend_active: bool) -> Duration {
+    if app.busy || backend_active {
+        BUSY_EVENT_POLL_INTERVAL
+    } else {
+        IDLE_EVENT_POLL_INTERVAL
+    }
 }
 
 fn ensure_backend<'a>(

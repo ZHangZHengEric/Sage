@@ -24,7 +24,7 @@ use anyhow::Result;
 use app::App;
 use preferences::{load_next_local_session_sequence, load_startup_preferences};
 use startup::{parse_startup_action, print_usage, StartupBehavior};
-use terminal::{restore_terminal, run, run_with_startup_action, setup_terminal};
+use terminal::{restore_terminal, run, run_with_startup_action, setup_terminal, AppTerminal};
 
 fn main() -> Result<()> {
     let (startup_action, startup_options) = match parse_startup_action(env::args().skip(1))? {
@@ -52,11 +52,45 @@ fn main() -> Result<()> {
         startup_options.workspace.map(PathBuf::from),
         startup_options.sandbox_type,
     );
-    let mut terminal = setup_terminal(&app)?;
+    let terminal = setup_terminal(&app)?;
+    let mut terminal_guard = TerminalRestoreGuard::new(terminal);
     let result = match startup_action {
-        Some(action) => run_with_startup_action(&mut terminal, &mut app, Some(action)),
-        None => run(&mut terminal, &mut app),
+        Some(action) => {
+            run_with_startup_action(terminal_guard.terminal_mut(), &mut app, Some(action))
+        }
+        None => run(terminal_guard.terminal_mut(), &mut app),
     };
-    restore_terminal(&mut terminal)?;
+    terminal_guard.restore()?;
     result
+}
+
+struct TerminalRestoreGuard {
+    terminal: Option<AppTerminal>,
+}
+
+impl TerminalRestoreGuard {
+    fn new(terminal: AppTerminal) -> Self {
+        Self {
+            terminal: Some(terminal),
+        }
+    }
+
+    fn terminal_mut(&mut self) -> &mut AppTerminal {
+        self.terminal
+            .as_mut()
+            .expect("terminal should exist until restored")
+    }
+
+    fn restore(&mut self) -> Result<()> {
+        if let Some(mut terminal) = self.terminal.take() {
+            restore_terminal(&mut terminal)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for TerminalRestoreGuard {
+    fn drop(&mut self) {
+        let _ = self.restore();
+    }
 }
