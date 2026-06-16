@@ -1,6 +1,5 @@
 use std::io;
 use std::io::ErrorKind;
-use std::io::Write;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -10,7 +9,9 @@ use crossterm::event::{
     KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
 use crossterm::terminal::{Clear, ClearType};
 
 use crate::app::{App, MessageKind, SubmitAction};
@@ -42,28 +43,25 @@ const KEYBOARD_ENHANCEMENT_FLAGS: KeyboardEnhancementFlags =
     KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES;
 
 pub fn setup_terminal(_app: &App) -> Result<AppTerminal> {
-    let mut startup_cursor = cursor::position().ok();
-    if matches!(startup_cursor, Some((x, _)) if x > 0) {
-        writeln!(io::stdout())?;
-        io::stdout().flush()?;
-        startup_cursor = cursor::position().ok();
-    }
-    let startup_cursor = startup_cursor.map(|(x, y)| ratatui::layout::Position { x, y });
     enable_raw_mode()?;
-    execute!(io::stdout(), EnableBracketedPaste)?;
+    execute!(
+        io::stdout(),
+        EnterAlternateScreen,
+        Clear(ClearType::All),
+        cursor::MoveTo(0, 0),
+        EnableBracketedPaste
+    )?;
     ignore_unsupported(execute!(
         io::stdout(),
         PushKeyboardEnhancementFlags(KEYBOARD_ENHANCEMENT_FLAGS)
     ))?;
     let backend = BackendImpl::new(io::stdout());
-    Ok(match startup_cursor {
-        Some(position) => Terminal::with_viewport_height_and_cursor(
-            backend,
-            INLINE_VIEWPORT_IDLE_HEIGHT,
-            position,
-        )?,
-        None => Terminal::with_viewport_height(backend, INLINE_VIEWPORT_IDLE_HEIGHT)?,
-    })
+    Terminal::with_viewport_height_and_cursor(
+        backend,
+        INLINE_VIEWPORT_IDLE_HEIGHT,
+        ratatui::layout::Position { x: 0, y: 0 },
+    )
+    .map_err(Into::into)
 }
 
 pub fn restore_terminal(terminal: &mut AppTerminal) -> Result<()> {
@@ -78,7 +76,7 @@ pub fn restore_terminal(terminal: &mut AppTerminal) -> Result<()> {
         crossterm::cursor::Show,
         crossterm::cursor::MoveTo(0, viewport.y),
         Clear(ClearType::FromCursorDown),
-        crossterm::cursor::MoveTo(0, viewport.y)
+        LeaveAlternateScreen
     )?;
     Ok(())
 }

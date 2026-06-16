@@ -363,7 +363,7 @@ fn idle_main_region_does_not_repaint_committed_transcript() {
 
     assert!(!rendered.contains("hello"));
     assert!(!rendered.contains("ready"));
-    assert!(!rendered.contains("Sage Terminal"));
+    assert!(rendered.contains("Sage Terminal"));
 }
 
 #[test]

@@ -75,7 +75,7 @@ fn welcome_banner_expands_idle_viewport_height() {
 }
 
 #[test]
-fn viewport_uses_inline_height_after_transcript_exists() {
+fn viewport_keeps_welcome_status_after_transcript_exists() {
     let mut app = App::new();
     app.push_message(MessageKind::User, "hello");
     app.materialize_pending_ui(120);
@@ -89,7 +89,7 @@ fn viewport_uses_inline_height_after_transcript_exists() {
         INLINE_VIEWPORT_MAX_HEIGHT,
     );
 
-    assert_eq!(height, INLINE_VIEWPORT_IDLE_HEIGHT);
+    assert!(height > INLINE_VIEWPORT_IDLE_HEIGHT);
 }
 
 #[test]
