@@ -259,21 +259,11 @@
                     <div class="relative">
                       <Input
                         v-model="form.api_keys_str"
-                        class="h-10 rounded-xl pr-11"
-                        :type="showApiKey ? 'text' : 'password'"
+                        class="h-10 rounded-xl"
+                        type="password"
                         :placeholder="t('modelProvider.apiKeyPlaceholder')"
                         @update:model-value="handleApiKeyChange"
                       />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        class="absolute right-1 top-1 h-8 w-8 rounded-lg text-muted-foreground"
-                        @click="showApiKey = !showApiKey"
-                      >
-                        <Eye v-if="showApiKey" class="h-4 w-4" />
-                        <EyeOff v-else class="h-4 w-4" />
-                      </Button>
                     </div>
                   </div>
 
@@ -394,7 +384,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
-import { Plus, Edit, Trash2, Bot, ArrowRight, Loader, Eye, EyeOff, ChevronDown, ChevronsUpDown, Link2, CircleHelp } from 'lucide-vue-next'
+import { Plus, Edit, Trash2, Bot, ArrowRight, Loader, ChevronDown, ChevronsUpDown, Link2, CircleHelp } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -450,7 +440,6 @@ const verifying = ref(false)
 const saving = ref(false)
 const verified = ref(false)
 const capabilityChecked = ref(false)
-const showApiKey = ref(false)
 const advancedOpen = ref(false)
 
 // Basic form state
@@ -674,7 +663,6 @@ const handleCreate = () => {
   form.supportsStructuredOutput = false
   verified.value = false
   capabilityChecked.value = false
-  showApiKey.value = false
   advancedOpen.value = false
   // 清空原始值
   originalValues.base_url = ''
@@ -716,7 +704,6 @@ const handleEdit = (provider) => {
   // 编辑模式初始状态设为已验证（如果没有变化）
   verified.value = true
   capabilityChecked.value = true
-  showApiKey.value = false
   advancedOpen.value = false
 
   saving.value = false
