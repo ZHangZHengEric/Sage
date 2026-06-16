@@ -120,6 +120,7 @@ async def build_list_conversations_response(
     sort_by: Optional[str],
     include_user_id: bool = False,
     context_user_id: Optional[str] = None,
+    include_message_counts: bool = False,
 ) -> Dict[str, Any]:
     conversations, total_count = await conversation_service.get_conversations_paginated(
         page=page,
@@ -128,6 +129,7 @@ async def build_list_conversations_response(
         search=search,
         agent_id=agent_id,
         sort_by=sort_by or "date",
+        include_messages=include_message_counts,
     )
     return conversation_service.build_conversation_list_result(
         conversations=conversations,
@@ -136,6 +138,7 @@ async def build_list_conversations_response(
         page_size=page_size,
         include_user_id=include_user_id,
         context_user_id=context_user_id,
+        include_message_counts=include_message_counts,
     )
 
 

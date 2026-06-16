@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import json
 from sqlalchemy import JSON, String, Text, func, or_, select, update
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, load_only, mapped_column
 
 from common.models.base import Base, BaseDao, get_local_now
 
@@ -138,6 +138,7 @@ class ConversationDao(BaseDao):
         search: Optional[str] = None,
         agent_id: Optional[str] = None,
         sort_by: str = "date",
+        include_messages: bool = True,
     ) -> tuple[List[Conversation], int]:
         where = []
         if user_id:
@@ -178,6 +179,18 @@ class ConversationDao(BaseDao):
                 return [], total
 
             data_stmt = select(Conversation).where(Conversation.session_id.in_(ids))
+            if not include_messages:
+                data_stmt = data_stmt.options(
+                    load_only(
+                        Conversation.session_id,
+                        Conversation.user_id,
+                        Conversation.agent_id,
+                        Conversation.agent_name,
+                        Conversation.title,
+                        Conversation.created_at,
+                        Conversation.updated_at,
+                    )
+                )
             res = await session.execute(data_stmt)
             items = list(res.scalars().all())
             order_index = {sid: idx for idx, sid in enumerate(ids)}
