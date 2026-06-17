@@ -86,12 +86,8 @@ def _compression_pair(
         "commands_run": [],
         "important_errors": [],
         "user_requirements": [],
-        "source_range": {
-            "start_message_id": source_ids[0],
-            "end_message_id": source_ids[-1],
-        },
-        "source_message_ids": source_ids,
         "original_content_paths": [],
+        "stats": {"source_message_count": len(source_ids)},
     }
     tool_result = _msg(
         MessageRole.TOOL.value,
