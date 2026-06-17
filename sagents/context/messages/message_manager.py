@@ -15,9 +15,11 @@ MessageManager 优化版消息管理器
 """
 
 import datetime
+import json
 import time
 import re
 import uuid
+import os
 from typing import Dict, List, Optional, Any, Union, Sequence, Tuple
 from copy import deepcopy
 from dataclasses import replace
@@ -33,6 +35,10 @@ _max_base64_image_token_estimate = 3000  # base64 图片 token 估算上限
 
 # 协议性状态工具：可持久化在 messages.json，但不参与发往 LLM 的 tool_calls/tool 对（见 strip_turn_status_from_llm_context）
 TURN_STATUS_TOOL_NAME = "turn_status"
+COMPRESS_HISTORY_TOOL_NAME = "compress_conversation_history"
+DEFAULT_RULE_PROTECTION_COUNT = 20
+DEFAULT_LLM_PROTECTION_COUNT = 12
+DEFAULT_RULE_OFFLOAD_TOKEN_THRESHOLD = 4096
 
 
 class MessageManager:
@@ -80,6 +86,11 @@ class MessageManager:
 
         # 消息存储（只存储非system消息）
         self.messages: List[MessageChunk] = []
+        # 最近一次发往 LLM 前构造出的 inference view。
+        # self.messages 始终是原始 ledger；规则 artifact offload 只写入这个视图。
+        self.inference_messages: List[MessageChunk] = []
+        # 从 compression anchors 派生的调试/审计索引，不作为推理真相源。
+        self.compact_manifest: Dict[str, Any] = {}
 
         # 兼容性：保留pending_chunks属性（现在已不使用）
         self.pending_chunks: List[Any] = []
@@ -121,6 +132,10 @@ class MessageManager:
                     self.messages[i] = message
                     break
 
+    def store_inference_messages(self, messages: List[MessageChunk]) -> None:
+        """保存最近一次推理视图快照，不影响原始消息 ledger。"""
+        self.inference_messages = deepcopy(messages)
+
     def set_active_start_index(self, index: Optional[int]) -> None:
         """
         设置活跃消息的起始索引
@@ -144,7 +159,7 @@ class MessageManager:
         """计算 token 预算并刷新历史锚点。
 
         说明：active_start_index 不再由 token budget 驱动（避免在 LLM 上下文层做硬截断）。
-        其语义已变更为：指向"最近一次 compress_conversation_history 工具调用"的位置，
+        其语义已变更为：指向"最近一次成功 compress_conversation_history anchor"的位置，
         仅供 memory 工具划定 RAG 检索范围使用；没有压缩调用时为 None。
         本方法保留以维持 budget_info 计算（多个辅助 Agent 仍依赖它做局部规则压缩）。
         """
@@ -153,21 +168,33 @@ class MessageManager:
         return {"budget_info": budget_info}
 
     def compute_history_anchor_index(self) -> Optional[int]:
-        """扫描 self.messages 找到最近一次 compress_conversation_history 调用的位置。
+        """扫描 self.messages 找到最近一次成功 compression anchor 的位置。
 
         Returns:
             该 Assistant 调用消息的索引；未找到时返回 None。
             索引之前的消息视为"已被工具总结过的历史"，可作为 memory 检索范围；
             索引及之后的消息（含工具结果）视为活跃段。
         """
-        for i in range(len(self.messages) - 1, -1, -1):
-            if self._is_compress_history_tool_call(self.messages[i]):
-                return i
+        pairs = MessageManager._expanded_compression_pairs(self.messages)
+        visible_pairs = [pair for pair in pairs if not pair.get("covered_by_later")]
+        if not visible_pairs:
+            return None
+        return max(pair["assistant_idx"] for pair in visible_pairs)
         return None
 
     def _refresh_history_anchor_index(self) -> None:
-        """根据最新压缩工具调用位置刷新 active_start_index（仅供 memory 使用）。"""
+        """根据最新成功 compression anchor 位置刷新 active_start_index（仅供 memory 使用）。"""
+        self.refresh_compact_manifest()
         self.set_active_start_index(self.compute_history_anchor_index())
+
+    def refresh_compact_manifest(self) -> Dict[str, Any]:
+        """刷新 compact manifest；manifest 只从 self.messages 派生。"""
+        self.compact_manifest = MessageManager.build_compact_manifest(self.messages)
+        return self.compact_manifest
+
+    def get_compact_manifest(self) -> Dict[str, Any]:
+        """返回最新 compact manifest，便于保存和调试。"""
+        return self.refresh_compact_manifest()
 
     def get_recent_loop_signatures(self) -> List[str]:
         """
@@ -804,10 +831,621 @@ class MessageManager:
             else:
                 tool_name = None
 
-            if tool_name == "compress_conversation_history":
+            if tool_name == COMPRESS_HISTORY_TOOL_NAME:
                 return True
 
         return False
+
+    @staticmethod
+    def _compress_tool_call_ids(msg: MessageChunk) -> List[str]:
+        if msg.role != MessageRole.ASSISTANT.value or not msg.tool_calls:
+            return []
+        ids: List[str] = []
+        for tool_call in msg.tool_calls:
+            name, tid = MessageManager._tool_call_entry_name_and_id(tool_call)
+            if name == COMPRESS_HISTORY_TOOL_NAME and tid:
+                ids.append(tid)
+        return ids
+
+    @staticmethod
+    def _is_successful_compression_result(msg: MessageChunk) -> bool:
+        metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+        return (
+            msg.role == MessageRole.TOOL.value
+            and metadata.get("tool_name") == COMPRESS_HISTORY_TOOL_NAME
+            and metadata.get("status") == "success"
+            and metadata.get("compression_anchor") is True
+        )
+
+    @staticmethod
+    def _is_artifact_reference_message(msg: MessageChunk) -> bool:
+        metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+        return metadata.get("context_artifact_ref") is True
+
+    @staticmethod
+    def _compression_pairs(
+        messages: List[MessageChunk],
+    ) -> List[Dict[str, Any]]:
+        """Return valid compression pairs with source coverage metadata."""
+        id_to_index = {
+            msg.message_id: idx
+            for idx, msg in enumerate(messages)
+            if msg.message_id is not None
+        }
+        pairs: List[Dict[str, Any]] = []
+        for assistant_idx, assistant_msg in enumerate(messages):
+            tool_call_ids = MessageManager._compress_tool_call_ids(assistant_msg)
+            if not tool_call_ids:
+                continue
+            result_indices: List[int] = []
+            for idx in range(assistant_idx + 1, len(messages)):
+                msg = messages[idx]
+                if msg.role == MessageRole.ASSISTANT.value and msg.tool_calls:
+                    break
+                if (
+                    msg.role == MessageRole.TOOL.value
+                    and msg.tool_call_id in tool_call_ids
+                    and MessageManager._is_successful_compression_result(msg)
+                ):
+                    result_indices.append(idx)
+                    break
+            if not result_indices:
+                continue
+            result_msg = messages[result_indices[0]]
+            metadata = (
+                result_msg.metadata if isinstance(result_msg.metadata, dict) else {}
+            )
+            source_ids = [
+                mid
+                for mid in metadata.get("source_message_ids", [])
+                if isinstance(mid, str)
+            ]
+            covered_indices = {
+                id_to_index[mid] for mid in source_ids if mid in id_to_index
+            }
+            start_id = metadata.get("source_start_message_id")
+            end_id = metadata.get("source_end_message_id")
+            if (
+                not covered_indices
+                and start_id in id_to_index
+                and end_id in id_to_index
+            ):
+                start_idx = id_to_index[start_id]
+                end_idx = id_to_index[end_id]
+                if start_idx <= end_idx:
+                    covered_indices.update(range(start_idx, end_idx + 1))
+            if not covered_indices:
+                continue
+            pair_indices = {assistant_idx, *result_indices}
+            pairs.append(
+                {
+                    "assistant_idx": assistant_idx,
+                    "result_indices": result_indices,
+                    "pair_indices": pair_indices,
+                    "covered_indices": covered_indices,
+                    "insert_idx": max(pair_indices),
+                }
+            )
+        return pairs
+
+    @staticmethod
+    def _expanded_compression_pairs(
+        messages: List[MessageChunk],
+    ) -> List[Dict[str, Any]]:
+        pairs = MessageManager._compression_pairs(messages)
+        if not pairs:
+            return []
+        changed = True
+        while changed:
+            changed = False
+            for pair in pairs:
+                expanded = set(pair["covered_indices"])
+                for other in pairs:
+                    if other is pair:
+                        continue
+                    if expanded.intersection(other["pair_indices"]):
+                        expanded.update(other["covered_indices"])
+                        expanded.update(other["pair_indices"])
+                if expanded != pair["covered_indices"]:
+                    pair["covered_indices"] = expanded
+                    changed = True
+        for pair in pairs:
+            pair["covered_by_later"] = any(
+                other["assistant_idx"] > pair["assistant_idx"]
+                and pair["pair_indices"].issubset(other["covered_indices"])
+                for other in pairs
+                if other is not pair
+            )
+        return pairs
+
+    @staticmethod
+    def _safe_parse_compression_payload(content: Any) -> Dict[str, Any]:
+        if not isinstance(content, str) or not content.strip():
+            return {}
+        try:
+            payload = json.loads(content)
+        except Exception:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def build_compact_manifest(messages: List[MessageChunk]) -> Dict[str, Any]:
+        """Build a derived index for compression anchors and their coverage.
+
+        The manifest is for audit/debugging only. Inference still recomputes the
+        coverage graph directly from messages.
+        """
+        pairs = MessageManager._expanded_compression_pairs(messages)
+        message_id_by_index = {
+            idx: msg.message_id
+            for idx, msg in enumerate(messages)
+            if msg.message_id is not None
+        }
+        pair_entries: List[Dict[str, Any]] = []
+        covered_message_ids: set[str] = set()
+        visible_result_ids: List[str] = []
+
+        for pair in pairs:
+            result_indices = pair.get("result_indices", [])
+            result_idx = result_indices[0] if result_indices else None
+            result_msg = (
+                messages[result_idx]
+                if isinstance(result_idx, int) and 0 <= result_idx < len(messages)
+                else None
+            )
+            assistant_idx = pair.get("assistant_idx")
+            assistant_msg = (
+                messages[assistant_idx]
+                if isinstance(assistant_idx, int) and 0 <= assistant_idx < len(messages)
+                else None
+            )
+            metadata = (
+                result_msg.metadata
+                if result_msg and isinstance(result_msg.metadata, dict)
+                else {}
+            )
+            payload = MessageManager._safe_parse_compression_payload(
+                result_msg.get_content() if result_msg else None
+            )
+            stats = (
+                payload.get("stats") if isinstance(payload.get("stats"), dict) else {}
+            )
+            summary = (
+                payload.get("summary")
+                if isinstance(payload.get("summary"), str)
+                else ""
+            )
+            pair_message_ids = [
+                message_id_by_index[idx]
+                for idx in sorted(pair.get("pair_indices", set()))
+                if idx in message_id_by_index
+            ]
+            pair_covered_ids = [
+                message_id_by_index[idx]
+                for idx in sorted(pair.get("covered_indices", set()))
+                if idx in message_id_by_index
+            ]
+            covered_message_ids.update(pair_covered_ids)
+            is_visible = not pair.get("covered_by_later")
+            if is_visible and result_msg and result_msg.message_id:
+                visible_result_ids.append(result_msg.message_id)
+            entry = {
+                "assistant_message_id": assistant_msg.message_id
+                if assistant_msg
+                else None,
+                "assistant_index": assistant_idx,
+                "result_message_ids": [
+                    message_id_by_index[idx]
+                    for idx in result_indices
+                    if idx in message_id_by_index
+                ],
+                "pair_message_ids": pair_message_ids,
+                "source_start_message_id": metadata.get("source_start_message_id"),
+                "source_end_message_id": metadata.get("source_end_message_id"),
+                "source_message_ids": metadata.get("source_message_ids", []),
+                "source_message_count": metadata.get("source_message_count"),
+                "covered_message_ids": pair_covered_ids,
+                "covered_message_count": len(pair_covered_ids),
+                "covered_by_later": bool(pair.get("covered_by_later")),
+                "visible": is_visible,
+                "insert_index": pair.get("insert_idx"),
+                "status": metadata.get("status"),
+                "stats": {
+                    key: stats[key]
+                    for key in (
+                        "original_tokens",
+                        "compressed_tokens",
+                        "compression_ratio",
+                        "source_message_count",
+                        "summary_parse_status",
+                    )
+                    if key in stats
+                },
+                "summary_preview": summary[:240],
+            }
+            pair_entries.append(entry)
+
+        ordered_covered_ids = [
+            msg.message_id for msg in messages if msg.message_id in covered_message_ids
+        ]
+        return {
+            "version": 1,
+            "generated_at": datetime.datetime.now().isoformat(),
+            "total_messages": len(messages),
+            "compression_pair_count": len(pair_entries),
+            "visible_pair_count": sum(1 for pair in pair_entries if pair["visible"]),
+            "covered_message_count": len(ordered_covered_ids),
+            "covered_message_ids": ordered_covered_ids,
+            "visible_compression_result_message_ids": visible_result_ids,
+            "pairs": pair_entries,
+        }
+
+    @staticmethod
+    def _tool_result_ids_for_assistant(msg: MessageChunk) -> set[str]:
+        ids: set[str] = set()
+        if msg.role != MessageRole.ASSISTANT.value or not msg.tool_calls:
+            return ids
+        for tool_call in msg.tool_calls:
+            _, tid = MessageManager._tool_call_entry_name_and_id(tool_call)
+            if tid:
+                ids.add(tid)
+        return ids
+
+    @staticmethod
+    def _pair_safe_protected_indices(
+        messages: List[MessageChunk], recent_count: int
+    ) -> set[int]:
+        if recent_count <= 0 or not messages:
+            return set()
+        start = max(0, len(messages) - recent_count)
+        protected = set(range(start, len(messages)))
+        changed = True
+        while changed:
+            changed = False
+            protected_ids: set[str] = set()
+            for idx in list(protected):
+                msg = messages[idx]
+                if msg.role == MessageRole.ASSISTANT.value and msg.tool_calls:
+                    protected_ids.update(
+                        MessageManager._tool_result_ids_for_assistant(msg)
+                    )
+                elif msg.role == MessageRole.TOOL.value and msg.tool_call_id:
+                    for prev_idx in range(idx - 1, -1, -1):
+                        prev_msg = messages[prev_idx]
+                        if (
+                            prev_msg.role == MessageRole.ASSISTANT.value
+                            and msg.tool_call_id
+                            in MessageManager._tool_result_ids_for_assistant(prev_msg)
+                        ):
+                            if prev_idx not in protected:
+                                protected.add(prev_idx)
+                                changed = True
+                            break
+            for idx, msg in enumerate(messages):
+                if (
+                    msg.role == MessageRole.TOOL.value
+                    and msg.tool_call_id in protected_ids
+                    and idx not in protected
+                ):
+                    protected.add(idx)
+                    changed = True
+        return protected
+
+    @staticmethod
+    def _artifact_root(session_id: Optional[str], artifact_root: Optional[str]) -> str:
+        root = artifact_root
+        if not root:
+            raise ValueError("artifact_root is required for rule artifact offload")
+        safe_session_id = session_id or "unknown_session"
+        return os.path.join(root, safe_session_id)
+
+    @staticmethod
+    def _write_context_artifact(
+        msg: MessageChunk,
+        session_id: Optional[str],
+        artifact_root: Optional[str],
+    ) -> Tuple[str, str]:
+        root = MessageManager._artifact_root(session_id, artifact_root)
+        os.makedirs(root, exist_ok=True)
+        message_id = msg.message_id or str(uuid.uuid4())
+        path = os.path.join(root, f"{message_id}.txt")
+        content = msg.get_content()
+        if isinstance(content, (list, dict)):
+            content_text = json.dumps(content, ensure_ascii=False, indent=2)
+        else:
+            content_text = str(content or "")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content_text)
+        safe_session_id = session_id or "unknown_session"
+        display_path = os.path.join(
+            ".sage", "context", "artifacts", safe_session_id, f"{message_id}.txt"
+        )
+        return path, display_path
+
+    @staticmethod
+    def _artifact_reference_content(
+        msg: MessageChunk,
+        path: str,
+        token_estimate: int,
+        abs_path: Optional[str] = None,
+    ) -> str:
+        metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+        tool_name = metadata.get("tool_name")
+        first_line = ""
+        content = msg.get_content()
+        if isinstance(content, str):
+            first_line = content.strip().splitlines()[0] if content.strip() else ""
+        brief_parts = [
+            f"role: {msg.role}",
+            f"message_type: {msg.message_type}",
+        ]
+        if tool_name:
+            brief_parts.append(f"tool_name: {tool_name}")
+        if first_line:
+            brief_parts.append(f"first_line: {first_line[:200]}")
+        lines = [
+            f"[Content moved to context artifact]\noriginal_content_path: {path}\n"
+        ]
+        if abs_path:
+            lines.append(f"original_content_abs_path: {abs_path}\n")
+        lines.extend(
+            [
+                f"message_id: {msg.message_id}\n",
+                f"role: {msg.role}\n",
+                f"message_type: {msg.message_type}\n",
+                f"token_estimate: {token_estimate}\n",
+                f"brief: {'; '.join(brief_parts)}",
+            ]
+        )
+        return "".join(lines)
+
+    @staticmethod
+    def _should_rule_offload(
+        msg: MessageChunk,
+        protected_indices: set[int],
+        idx: int,
+        max_model_len: int,
+    ) -> bool:
+        if idx in protected_indices:
+            return False
+        if msg.role in {MessageRole.USER.value, MessageRole.SYSTEM.value}:
+            return False
+        if msg.role == MessageRole.ASSISTANT.value and msg.tool_calls:
+            return False
+        if MessageManager._is_artifact_reference_message(msg):
+            return False
+        if MessageManager._is_compress_history_tool_call(msg):
+            return False
+        metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+        if metadata.get("tool_name") == COMPRESS_HISTORY_TOOL_NAME:
+            return False
+        content = msg.get_content()
+        if not content:
+            return False
+        token_estimate = MessageManager.calculate_str_token_length(content)
+        return (
+            token_estimate > DEFAULT_RULE_OFFLOAD_TOKEN_THRESHOLD
+            or token_estimate > int(max_model_len * 0.1)
+        )
+
+    @staticmethod
+    def _apply_rule_artifact_offload(
+        messages: List[MessageChunk],
+        session_id: Optional[str],
+        max_model_len: int,
+        artifact_root: Optional[str],
+        protection_count: int = DEFAULT_RULE_PROTECTION_COUNT,
+    ) -> List[MessageChunk]:
+        if not messages:
+            return []
+        if not artifact_root:
+            logger.debug(
+                "MessageManager: artifact_root 未设置，跳过规则 artifact offload"
+            )
+            return deepcopy(messages)
+        protected = MessageManager._pair_safe_protected_indices(
+            messages, protection_count
+        )
+        out = deepcopy(messages)
+        for idx, msg in enumerate(out):
+            if not MessageManager._should_rule_offload(
+                msg, protected, idx, max_model_len
+            ):
+                continue
+            token_estimate = MessageManager.calculate_str_token_length(
+                msg.get_content()
+            )
+            path, display_path = MessageManager._write_context_artifact(
+                msg, session_id, artifact_root
+            )
+            msg.content = MessageManager._artifact_reference_content(
+                msg, display_path, token_estimate, abs_path=path
+            )
+            if msg.metadata is None:
+                msg.metadata = {}
+            msg.metadata.update(
+                {
+                    "context_artifact_ref": True,
+                    "original_content_path": display_path,
+                    "original_content_abs_path": path,
+                    "original_token_estimate": token_estimate,
+                }
+            )
+        return out
+
+    @staticmethod
+    def _base_inference_view(messages: List[MessageChunk]) -> List[MessageChunk]:
+        if not messages:
+            return []
+        filtered_messages = [
+            msg
+            for msg in messages
+            if not msg.matches_message_types([MessageType.REASONING_CONTENT.value])
+        ]
+        pairs = MessageManager._expanded_compression_pairs(filtered_messages)
+        covered_by_visible: set[int] = set()
+        hidden_pairs: set[int] = set()
+        for pair in pairs:
+            if pair.get("covered_by_later"):
+                hidden_pairs.update(pair["pair_indices"])
+                continue
+            covered_by_visible.update(pair["covered_indices"])
+        out: List[MessageChunk] = []
+        for idx, msg in enumerate(filtered_messages):
+            if idx in hidden_pairs:
+                continue
+            if idx in covered_by_visible:
+                if any(
+                    idx in pair["pair_indices"] and not pair.get("covered_by_later")
+                    for pair in pairs
+                ):
+                    out.append(msg)
+                continue
+            out.append(msg)
+        return MessageManager.strip_turn_status_from_llm_context(out)
+
+    @staticmethod
+    def build_inference_view(
+        messages: List[MessageChunk],
+        session_id: Optional[str] = None,
+        max_model_len: int = 128000,
+        artifact_root: Optional[str] = None,
+        rule_protection_count: int = DEFAULT_RULE_PROTECTION_COUNT,
+        apply_rule_compression: bool = True,
+    ) -> List[MessageChunk]:
+        base = MessageManager._base_inference_view(messages)
+        if not apply_rule_compression:
+            return base
+        return MessageManager._apply_rule_artifact_offload(
+            base,
+            session_id=session_id,
+            max_model_len=max_model_len,
+            artifact_root=artifact_root,
+            protection_count=rule_protection_count,
+        )
+
+    def insert_messages_after(
+        self, message_id: str, messages: Union[MessageChunk, List[MessageChunk]]
+    ) -> bool:
+        if isinstance(messages, MessageChunk):
+            messages = [messages]
+        incoming_ids = {
+            message.message_id for message in messages if message.message_id is not None
+        }
+        if incoming_ids:
+            self.messages = [
+                message
+                for message in self.messages
+                if message.message_id not in incoming_ids
+            ]
+        insert_at = None
+        for idx, message in enumerate(self.messages):
+            if message.message_id == message_id:
+                insert_at = idx + 1
+                break
+        if insert_at is None:
+            logger.warning(
+                "MessageManager: 未找到 compression 插入锚点 message_id=%s，跳过写入，避免追加到会话末尾",
+                message_id,
+            )
+            return False
+        for offset, message in enumerate(messages):
+            if message.role == MessageRole.SYSTEM.value:
+                self.stats["system_messages_rejected"] += 1
+                continue
+            self.messages.insert(insert_at + offset, message)
+        self.stats["total_messages"] = len(self.messages)
+        self.stats["total_chunks"] += len(messages)
+        self.stats["last_updated"] = datetime.datetime.now().isoformat()
+        self._refresh_history_anchor_index()
+        return True
+
+    @staticmethod
+    def select_llm_compression_segment(
+        messages: List[MessageChunk],
+        max_model_len: int,
+        active_protection_count: int = DEFAULT_LLM_PROTECTION_COUNT,
+    ) -> Optional[List[MessageChunk]]:
+        effective = MessageManager._base_inference_view(messages)
+        if not effective:
+            return None
+        protected = MessageManager._pair_safe_protected_indices(
+            effective, active_protection_count
+        )
+        current_user_ids = [
+            msg.message_id for msg in effective if msg.role == MessageRole.USER.value
+        ]
+        if current_user_ids:
+            last_user_id = next(
+                reversed([mid for mid in current_user_ids if mid]), None
+            )
+        else:
+            last_user_id = None
+        target_min = int(max_model_len * 0.25)
+        target_max = int(max_model_len * 0.35)
+        segment: List[MessageChunk] = []
+        tokens = 0
+        for idx, msg in enumerate(effective):
+            if idx in protected:
+                continue
+            if msg.role == MessageRole.SYSTEM.value:
+                continue
+            if last_user_id and msg.message_id == last_user_id:
+                continue
+            has_value = (
+                msg.role in {MessageRole.ASSISTANT.value, MessageRole.TOOL.value}
+                or MessageManager._is_successful_compression_result(msg)
+                or MessageManager._is_compress_history_tool_call(msg)
+            )
+            if not has_value and msg.role != MessageRole.USER.value:
+                continue
+            segment.append(msg)
+            tokens += MessageManager.calculate_str_token_length(msg.get_content())
+            if tokens >= target_min:
+                break
+            if tokens >= target_max:
+                break
+        if not any(
+            msg.role in {MessageRole.ASSISTANT.value, MessageRole.TOOL.value}
+            for msg in segment
+        ):
+            return None
+        segment_ids = {msg.message_id for msg in segment if msg.message_id}
+        expanded_segment = list(segment)
+        for msg in effective:
+            if msg.role == MessageRole.ASSISTANT.value and msg.tool_calls:
+                result_ids = set(MessageManager._tool_result_ids_for_assistant(msg))
+                if result_ids and result_ids.intersection(
+                    item.tool_call_id
+                    for item in segment
+                    if item.role == MessageRole.TOOL.value
+                ):
+                    if msg.message_id and msg.message_id not in segment_ids:
+                        expanded_segment.append(msg)
+                        segment_ids.add(msg.message_id)
+                continue
+            if msg.role != MessageRole.TOOL.value or not msg.tool_call_id:
+                continue
+            for assistant in effective:
+                if (
+                    assistant.role == MessageRole.ASSISTANT.value
+                    and assistant.tool_calls
+                    and msg.tool_call_id
+                    in MessageManager._tool_result_ids_for_assistant(assistant)
+                    and assistant.message_id in segment_ids
+                ):
+                    if msg.message_id and msg.message_id not in segment_ids:
+                        expanded_segment.append(msg)
+                        segment_ids.add(msg.message_id)
+                    break
+
+        order = {
+            msg.message_id: idx
+            for idx, msg in enumerate(effective)
+            if msg.message_id is not None
+        }
+        expanded_segment.sort(key=lambda msg: order.get(msg.message_id, 10**9))
+        return expanded_segment or None
 
     @staticmethod
     def _tool_call_entry_name_and_id(tc: Any) -> Tuple[Optional[str], Optional[str]]:
@@ -939,9 +1577,9 @@ class MessageManager:
 
         策略：
         1. 过滤掉 REASONING_CONTENT 类型的消息
-        2. 检测 compress_conversation_history 工具调用
-        3. 如果找到，保留该工具调用对应的 User 消息、最后一个压缩工具及之后的消息
-        4. 如果没找到，返回过滤后的所有消息
+        2. 检测成功的 compress_conversation_history anchor pair
+        3. 按 source coverage 隐藏已被成功 summary 覆盖的旧消息
+        4. 保留未被更高层 summary 覆盖的 compression pair 作为摘要节点
 
         Args:
             messages: 原始消息列表
@@ -949,63 +1587,10 @@ class MessageManager:
         Returns:
             List[MessageChunk]: 提取后的消息列表
         """
-        if not messages:
-            return []
-
-        # 过滤掉 REASONING_CONTENT 类型的消息
-        filtered_messages = [
-            msg
-            for msg in messages
-            if not msg.matches_message_types([MessageType.REASONING_CONTENT.value])
-        ]
-
-        # 从后往前查找最新的压缩工具调用
-        compression_tool_index = None
-        compression_tool_user_index = None
-
-        for i in range(len(filtered_messages) - 1, -1, -1):
-            msg = filtered_messages[i]
-            if MessageManager._is_compress_history_tool_call(msg):
-                compression_tool_index = i
-                # 找到该工具调用对应的 User 消息（往前找）
-                for j in range(i - 1, -1, -1):
-                    if filtered_messages[j].is_user_input_message():
-                        compression_tool_user_index = j
-                        break
-                break
-
-        # 如果找到了压缩工具调用，构建新的消息列表
-        if (
-            compression_tool_index is not None
-            and compression_tool_user_index is not None
-        ):
-            logger.info(
-                f"MessageManager: 检测到压缩工具调用，保留 User 索引 {compression_tool_user_index} 及最后一个压缩工具"
-            )
-            # 收集所有 System 消息（必须在最前面）
-            system_messages = [
-                msg for msg in filtered_messages if msg.role == MessageRole.SYSTEM.value
-            ]
-            # 构建新列表：System 消息 + User + 最后一个压缩工具及之后
-            # 注意：如果 User 消息在压缩工具之后（不应该发生），避免重复
-            if compression_tool_user_index >= compression_tool_index:
-                # User 消息在压缩工具之后，只返回从 User 开始的消息
-                merged = (
-                    system_messages + filtered_messages[compression_tool_user_index:]
-                )
-            else:
-                # 正常情况：User 消息在压缩工具之前
-                merged = (
-                    system_messages  # System 消息（保留）
-                    + [filtered_messages[compression_tool_user_index]]  # User 消息
-                    + filtered_messages[
-                        compression_tool_index:
-                    ]  # 最后一个压缩工具及之后
-                )
-            return MessageManager.strip_turn_status_from_llm_context(merged)
-
-        # 没找到压缩工具，返回过滤后的所有消息
-        return MessageManager.strip_turn_status_from_llm_context(filtered_messages)
+        return MessageManager.build_inference_view(
+            messages,
+            apply_rule_compression=False,
+        )
 
     def extract_all_context_messages(
         self,
@@ -1017,11 +1602,9 @@ class MessageManager:
         提取所有有意义的上下文消息，包括用户消息和助手消息，最后一个消息对话，可选是否只提取用户消息，如果只提取用户消息，即是本次请求的上下文，否则带上本次执行已有内容
 
         注意：本方法不再按 active_start_index 做硬截断。
-        发往 LLM 的最终长度控制完全交给 SimpleAgent._prepare_messages_for_llm
-        中的 compress_messages / compress_conversation_history 链路统一处理。
+        发往 LLM 的最终长度控制由统一 context builder 处理；这里会先解析
+        compress_conversation_history 覆盖图，隐藏已被成功压缩锚点覆盖的旧消息。
         本方法仍会按 recent_turns 限制对话轮数（辅助 Agent 依赖此行为）。
-
-        说明：检测 compress_conversation_history 工具调用，只取最新的压缩工具对应的 User 消息及之后的消息
 
         Args:
             recent_turns: 最近的对话轮数，0表示不限制
@@ -1046,50 +1629,12 @@ class MessageManager:
                 MessageType.AGENT_EXECUTION_ERROR.value,
             ]
 
-        # 全量消息进入；后续靠 recent_turns + 上层压缩链路控制长度
-        active_messages = self.messages
-
-        # --- 新增：检测 compress_conversation_history 工具调用 ---
-        # 从后往前查找最新的压缩工具调用
-        # 策略：找到最后一个压缩工具调用，然后往前找到对应的 User 消息
-        # 保留该 User 消息、最后一个压缩工具及之后的消息
-        # 过滤掉该 User 和最后一个压缩工具之间的其他消息（包括前面的压缩工具）
-        compression_tool_index = None
-        compression_tool_user_index = None
-
-        for i in range(len(active_messages) - 1, -1, -1):
-            msg = active_messages[i]
-            if self._is_compress_history_tool_call(msg):
-                compression_tool_index = i
-                # 找到该工具调用对应的 User 消息（往前找）
-                for j in range(i - 1, -1, -1):
-                    if active_messages[j].is_user_input_message():
-                        compression_tool_user_index = j
-                        break
-                break
-
-        # 如果找到了压缩工具调用，构建新的消息列表
-        # 保留：User 消息 + 最后一个压缩工具及之后的消息
-        # 过滤掉：User 和最后一个压缩工具之间的其他消息
-        if (
-            compression_tool_index is not None
-            and compression_tool_user_index is not None
-        ):
-            logger.info(
-                f"MessageManager: 检测到压缩工具调用，保留 User 索引 {compression_tool_user_index} 及最后一个压缩工具"
-            )
-            # 构建新列表：User + 最后一个压缩工具及之后
-            # 注意：如果 User 消息在压缩工具之后（不应该发生），避免重复
-            if compression_tool_user_index >= compression_tool_index:
-                # User 消息在压缩工具之后，只保留从 User 开始的消息
-                active_messages = active_messages[compression_tool_user_index:]
-            else:
-                # 正常情况：User 消息在压缩工具之前
-                active_messages = (
-                    [active_messages[compression_tool_user_index]]  # User 消息
-                    + active_messages[compression_tool_index:]  # 最后一个压缩工具及之后
-                )
-        # --- 检测结束 ---
+        # 全量消息进入；压缩覆盖关系由 build_inference_view 统一处理。
+        active_messages = MessageManager.build_inference_view(
+            self.messages,
+            session_id=self.session_id,
+            apply_rule_compression=False,
+        )
 
         for msg in active_messages:
             if msg.is_user_input_message():
@@ -1241,164 +1786,85 @@ class MessageManager:
         return groups
 
     @staticmethod
-    def compress_messages(
+    def build_token_budget_view(
         messages: List[MessageChunk],
         budget_limit: int,
-        time_limit_hours: float = 24.0,
         recent_messages_count: int = 0,
     ) -> List[MessageChunk]:
-        """
-        根据预算限制压缩消息列表（分层压缩策略）。
+        """构造辅助 agent 使用的局部 token 压缩视图。
 
-        策略详情：
-        Level 0 (保护区):
-            - System Message: 永久保留，不做任何处理。
-            - User Message Content: User 消息的内容在 Level 1/2 阶段不被修改（受保护内容）。
-            - Recent Messages (最近消息): 强制保护消息列表末尾的 recent_messages_count 条消息，
-              不论其 Token 大小，始终不压缩、不截断。默认保护最近 5 条消息。
-
-        Level 0.5 (老化策略):
-            - 规则: 超过 time_limit_hours (默认24小时) 的非保护区消息。
-            - 动作: 直接应用 Level 2 (强力压缩)，优先释放陈旧消息的空间。
-
-        Level 1 (轻度压缩):
-            - Tool Output: 截断保留前 100 字符 + 后 100 字符，中间省略。
-            - Assistant: 移除 <thinking>...</thinking> 思考过程，保留核心回复。
-
-        Level 2 (强力压缩):
-            - 触发: Level 1 处理后仍超出 Budget。
-            - Tool Output: 仅保留前 100 字符 + 占位符 "...[Tool output omitted...]"。
-            - Assistant: 仅保留前 100 字符 + 占位符 "...[Content truncated]"。
-
-        Args:
-            messages: 原始消息列表。
-            budget_limit: 预算限制 (Token 数)。
-            time_limit_hours: 老化时间阈值 (小时)，默认 24.0。
-            recent_messages_count: 末尾强制保护的消息条数，默认 5。设为 0 则不强制保护。
-
-        Returns:
-            List[MessageChunk]: 压缩后的消息列表副本。
+        该方法只返回副本，不处理会话级压缩状态。它适用于把历史消息塞进
+        任务分析、完成判断、工具推荐等辅助 prompt 前做局部降 token。
         """
         if not messages:
             return []
 
-        # 复制消息列表 (浅拷贝列表，元素在修改时 deepcopy)
-        working_messages = deepcopy(messages)
+        working_messages = deepcopy(MessageManager._base_inference_view(messages))
+        protected = MessageManager._pair_safe_protected_indices(
+            working_messages, recent_messages_count
+        )
 
-        # 辅助函数：计算当前 Token
-        def current_usage():
+        def current_usage() -> int:
             return MessageManager.calculate_messages_token_length(working_messages)
 
-        current_tokens = current_usage()
-        logger.debug(
-            f"MessageManager: compress_messages 初始token长度为{current_tokens}, budget_limit={budget_limit}"
-        )
-        if current_tokens <= budget_limit:
+        def can_reduce(idx: int, msg: MessageChunk) -> bool:
+            if idx in protected:
+                return False
+            if msg.role in {MessageRole.USER.value, MessageRole.SYSTEM.value}:
+                return False
+            if msg.role == MessageRole.ASSISTANT.value and msg.tool_calls:
+                return False
+            metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+            if metadata.get("tool_name") == COMPRESS_HISTORY_TOOL_NAME:
+                return False
+            return bool(msg.get_content())
+
+        def truncate_text(text: str, head: int, tail: int, label: str) -> str:
+            if len(text) <= head + tail:
+                return text
+            return (
+                text[:head]
+                + f"\n...[{label}, original chars: {len(text)}]...\n"
+                + (text[-tail:] if tail > 0 else "")
+            )
+
+        if current_usage() <= budget_limit:
             return working_messages
 
-        # --- 1. 分组与保护区识别 ---
-        # 将消息按 User 分组，每组包含一个 User 和其后的 Followers (Assistant/Tool)
-        groups = MessageManager._group_messages_indices(working_messages)
+        # Pass 1: remove assistant thinking and shrink long tool outputs.
+        for idx, msg in enumerate(working_messages):
+            if not can_reduce(idx, msg):
+                continue
+            content = msg.get_content()
+            if not isinstance(content, str):
+                continue
+            if msg.role == MessageRole.TOOL.value:
+                msg.content = truncate_text(content, 500, 500, "tool output truncated")
+            elif msg.role == MessageRole.ASSISTANT.value:
+                stripped = re.sub(
+                    r"<thinking>.*?</thinking>", "", content, flags=re.DOTALL
+                ).strip()
+                msg.content = truncate_text(
+                    stripped or content, 800, 200, "assistant content truncated"
+                )
+            if current_usage() <= budget_limit:
+                return working_messages
 
-        protected_indices = set()
-        protected_group_indices = set()
-
-        # 1.1 System Group 保护 (如果第一组以 System 开头)
-        if groups and working_messages[groups[0][0]].role == MessageRole.SYSTEM.value:
-            protected_group_indices.add(0)
-            # System 消息内容受保护
-            for idx in groups[0]:
-                if working_messages[idx].role == MessageRole.SYSTEM.value:
-                    protected_indices.add(idx)
-
-        # 1.2 User 消息内容保护 (在压缩阶段不截断 User 内容)
-        for i, msg in enumerate(working_messages):
-            if msg.role == MessageRole.USER.value:
-                protected_indices.add(i)
-
-        # 1.3 近期消息保护 - 按条数强制保护末尾 N 条消息
-        # 策略：从消息列表末尾取最后 recent_messages_count 条，无论 token 大小，全部加入保护区
-        if recent_messages_count > 0:
-            recent_start_idx = max(0, len(working_messages) - recent_messages_count)
-            for i in range(recent_start_idx, len(working_messages)):
-                protected_indices.add(i)
-
-        # 同步更新 protected_group_indices（用于日志与分组级操作）
-        for gi, group_indices in enumerate(groups):
-            if any(idx in protected_indices for idx in group_indices):
-                protected_group_indices.add(gi)
-
-        # 调试日志：显示保护信息
-        logger.debug(
-            f"MessageManager: 总组数={len(groups)}, 受保护组数={len(protected_group_indices)}, 受保护消息数={len(protected_indices)}"
-        )
-        logger.debug(
-            f"MessageManager: 受保护组索引={sorted(protected_group_indices)}, 可压缩组索引={sorted(set(range(len(groups))) - protected_group_indices)}"
-        )
-
-        # --- Level 0.5 & 1 & 2: 消息级压缩 ---
-        now = time.time()
-        aging_threshold = now - (time_limit_hours * 3600)
-        aged_indices = set()
-
-        def apply_levels(level_to_apply):
-            # 遍历所有消息
-            for i, msg in enumerate(working_messages):
-                if i in protected_indices:
-                    continue
-
-                # Level 0.5: 老化策略 (直接应用 Level 2)
-                if level_to_apply == 0.5:
-                    if msg.timestamp and msg.timestamp < aging_threshold:
-                        working_messages[i] = MessageManager._apply_compression_level(
-                            msg, 2
-                        )
-                        aged_indices.add(i)
-                # Level 1: 轻度压缩
-                elif level_to_apply == 1:
-                    if i in aged_indices:
-                        continue
-                    working_messages[i] = MessageManager._apply_compression_level(
-                        working_messages[i], 1
-                    )
-                # Level 2: 强力压缩
-                elif level_to_apply == 2:
-                    if i in aged_indices:
-                        continue
-                    working_messages[i] = MessageManager._apply_compression_level(
-                        working_messages[i], 2
-                    )
-
-        # 应用 Level 0.5 (老化)
-        apply_levels(0.5)
-        current_tokens = current_usage()
-        logger.debug(
-            f"MessageManager: compress_messages 应用Level 0.5后的token长度为{current_tokens}"
-        )
-        if current_tokens <= budget_limit:
-            return working_messages
-
-        # 应用 Level 1 (轻度)
-        apply_levels(1)
-        current_tokens = current_usage()
-        logger.debug(
-            f"MessageManager: compress_messages 应用Level 1后的token长度为{current_tokens}"
-        )
-        if current_tokens <= budget_limit:
-            return working_messages
-
-        # 应用 Level 2 (强力)
-        apply_levels(2)
-        current_tokens = current_usage()
-        logger.debug(
-            f"MessageManager: compress_messages 应用Level 2后的token长度为{current_tokens}"
-        )
-
-        # 返回压缩后的消息（不再进行 Level 3 丢弃）
-        final_tokens = MessageManager.calculate_messages_token_length(working_messages)
-        logger.debug(
-            f"MessageManager: compress_messages 完成，最终token长度={final_tokens}, 消息数={len(working_messages)}"
-        )
+        # Pass 2: stronger local truncation for old assistant/tool content.
+        for idx, msg in enumerate(working_messages):
+            if not can_reduce(idx, msg):
+                continue
+            content = msg.get_content()
+            if not isinstance(content, str):
+                continue
+            if msg.role == MessageRole.TOOL.value:
+                msg.content = truncate_text(content, 200, 0, "tool output omitted")
+            elif msg.role == MessageRole.ASSISTANT.value:
+                msg.content = truncate_text(
+                    content, 300, 0, "assistant content omitted"
+                )
+            if current_usage() <= budget_limit:
+                return working_messages
 
         return working_messages
 

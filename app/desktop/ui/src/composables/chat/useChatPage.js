@@ -15,6 +15,7 @@ import { useWorkbenchStore } from '@/stores/workbench.js'
 import { usePanelStore } from '@/stores/panel.js'
 import { isToolResultMessage } from '@/utils/messageLabels.js'
 import { mergeToolFunctionArguments } from '@/utils/mergeToolFunctionArguments.js'
+import { getSessionMessageIndexKey } from '@/utils/sessionStreamEvents.js'
 
 // 全局按 Agent 缓存能力结果，在整个应用生命周期内共享
 const abilityCacheByAgentGlobal = ref({})
@@ -256,11 +257,16 @@ export const useChatPage = (props) => {
     activeSubSessionId.value = null
   }
 
+  const getMessageIndexKey = (message = {}) => {
+    return getSessionMessageIndexKey(message, currentSessionId.value || '')
+  }
+
   const rebuildMessageIdIndexMap = () => {
     const next = new Map()
     messages.value.forEach((item, index) => {
-      if (item?.message_id) {
-        next.set(item.message_id, index)
+      const key = getMessageIndexKey(item)
+      if (key) {
+        next.set(key, index)
       }
     })
     messageIdIndexMap.value = next
@@ -478,6 +484,7 @@ export const useChatPage = (props) => {
       return
     }
     const messageId = messageData.message_id
+    const messageIndexKey = getMessageIndexKey(messageData)
 
     const extractWorkbenchFromMessage = (message) => {
       if (!message) return
@@ -519,8 +526,8 @@ export const useChatPage = (props) => {
       pendingToolCalls.value.delete(messageData.tool_call_id)
     }
     
-    if (messageId && messageIdIndexMap.value.has(messageId)) {
-      const targetIndex = messageIdIndexMap.value.get(messageId)
+    if (messageIndexKey && messageIdIndexMap.value.has(messageIndexKey)) {
+      const targetIndex = messageIdIndexMap.value.get(messageIndexKey)
       const existing = messages.value[targetIndex]
       if (!existing) {
         rebuildMessageIdIndexMap()
@@ -561,8 +568,9 @@ export const useChatPage = (props) => {
       timestamp: messageData.timestamp || Date.now()
     }
     messages.value.push(appended)
-    if (appended.message_id) {
-      messageIdIndexMap.value.set(appended.message_id, messages.value.length - 1)
+    const appendedKey = getMessageIndexKey(appended)
+    if (appendedKey) {
+      messageIdIndexMap.value.set(appendedKey, messages.value.length - 1)
     }
     extractWorkbenchFromMessage(appended)
     // 不要强制重置 shouldAutoScroll，也不要强制滚动
@@ -586,7 +594,7 @@ export const useChatPage = (props) => {
       timestamp: Date.now()
     }
     messages.value.push(userMessage)
-    messageIdIndexMap.value.set(userMessage.message_id, messages.value.length - 1)
+    messageIdIndexMap.value.set(getMessageIndexKey(userMessage), messages.value.length - 1)
     
     // 用户发送新消息时，清理所有 pending 的工具调用
     clearPendingToolCalls('用户发送了新消息')
@@ -632,7 +640,7 @@ export const useChatPage = (props) => {
       timestamp: Date.now()
     }
     messages.value.push(errorMessage)
-    messageIdIndexMap.value.set(errorMessage.message_id, messages.value.length - 1)
+    messageIdIndexMap.value.set(getMessageIndexKey(errorMessage), messages.value.length - 1)
   }
 
   const clearMessages = () => {

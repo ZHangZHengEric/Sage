@@ -4,7 +4,7 @@ Test history anchor / active_start_index 的新语义。
 
 覆盖 2026-04-22 上下文收口改造后的关键不变量：
 1. active_start_index 不再由 token budget 驱动
-2. 仅由"最近一次 compress_conversation_history 工具调用"位置决定
+2. 仅由"最近一次成功 compress_conversation_history anchor"位置决定
 3. extract_all_context_messages 不再按 active_start_index 硬截断
 4. add_messages 自动刷新锚点
 5. memory 工具历史边界以锚点划分
@@ -57,6 +57,23 @@ def _compress_tc(idx: int = 1) -> List[Dict]:
     ]
 
 
+def _valid_compress_result(
+    idx: int,
+    source_ids: List[str],
+    content: str = "summary",
+) -> MessageChunk:
+    msg = _make(MessageRole.TOOL.value, content, tool_call_id=f"call_compress_{idx}")
+    msg.metadata = {
+        "tool_name": "compress_conversation_history",
+        "status": "success",
+        "compression_anchor": True,
+        "source_message_ids": source_ids,
+        "source_start_message_id": source_ids[0],
+        "source_end_message_id": source_ids[-1],
+    }
+    return msg
+
+
 # ---------- compute_history_anchor_index ----------
 
 
@@ -76,43 +93,48 @@ class TestComputeHistoryAnchorIndex:
 
     def test_single_compress_tool_returns_its_index(self):
         mm = MessageManager()
+        u1 = _make(MessageRole.USER.value, "u1")
+        u1.message_id = "u1"
         mm.messages = [
-            _make(MessageRole.USER.value, "u1"),
+            u1,
             _make(
                 MessageRole.ASSISTANT.value,
                 "",
                 msg_type=MessageType.TOOL_CALL.value,
                 tool_calls=_compress_tc(1),
             ),  # idx=1
-            _make(MessageRole.TOOL.value, "summary", tool_call_id="call_compress_1"),
+            _valid_compress_result(1, ["u1"]),
             _make(MessageRole.USER.value, "u2"),
         ]
         assert mm.compute_history_anchor_index() == 1
 
     def test_multiple_compress_tools_returns_latest(self):
         mm = MessageManager()
+        u1 = _make(MessageRole.USER.value, "u1")
+        u1.message_id = "u1"
+        u2 = _make(MessageRole.USER.value, "u2")
+        u2.message_id = "u2"
         mm.messages = [
-            _make(MessageRole.USER.value, "u1"),
+            u1,
             _make(
                 MessageRole.ASSISTANT.value,
                 "",
                 msg_type=MessageType.TOOL_CALL.value,
                 tool_calls=_compress_tc(1),
             ),  # idx=1
-            _make(MessageRole.TOOL.value, "s1", tool_call_id="call_compress_1"),
-            _make(MessageRole.USER.value, "u2"),
+            _valid_compress_result(1, ["u1"], content="s1"),
+            u2,
             _make(
                 MessageRole.ASSISTANT.value,
                 "",
                 msg_type=MessageType.TOOL_CALL.value,
                 tool_calls=_compress_tc(2),
             ),  # idx=4 (latest)
-            _make(MessageRole.TOOL.value, "s2", tool_call_id="call_compress_2"),
+            _valid_compress_result(2, ["u2"], content="s2"),
         ]
         assert mm.compute_history_anchor_index() == 4
 
-    def test_anchor_at_index_zero(self):
-        """边界：第一条就是压缩工具调用（不常见但允许）"""
+    def test_incomplete_compress_tool_does_not_count(self):
         mm = MessageManager()
         mm.messages = [
             _make(
@@ -123,7 +145,7 @@ class TestComputeHistoryAnchorIndex:
             ),  # idx=0
             _make(MessageRole.TOOL.value, "s", tool_call_id="call_compress_1"),
         ]
-        assert mm.compute_history_anchor_index() == 0
+        assert mm.compute_history_anchor_index() is None
 
     def test_other_tool_calls_do_not_count(self):
         """其它工具调用（非 compress_conversation_history）不应被识别为锚点"""
@@ -169,9 +191,11 @@ class TestAddMessagesRefreshesAnchor:
 
         debug.assert_not_called()
 
-    def test_adding_compress_tool_call_sets_anchor(self):
+    def test_adding_successful_compress_pair_sets_anchor(self):
         mm = MessageManager()
-        mm.add_messages(_make(MessageRole.USER.value, "u1"))
+        u1 = _make(MessageRole.USER.value, "u1")
+        u1.message_id = "u1"
+        mm.add_messages(u1)
         mm.add_messages(_make(MessageRole.ASSISTANT.value, "a1"))
         # 第三条加入压缩工具调用
         mm.add_messages(
@@ -182,11 +206,15 @@ class TestAddMessagesRefreshesAnchor:
                 tool_calls=_compress_tc(1),
             )
         )
+        assert mm.active_start_index is None
+        mm.add_messages(_valid_compress_result(1, ["u1"]))
         assert mm.active_start_index == 2
 
     def test_adding_more_after_compress_keeps_anchor(self):
         mm = MessageManager()
-        mm.add_messages(_make(MessageRole.USER.value, "u1"))
+        u1 = _make(MessageRole.USER.value, "u1")
+        u1.message_id = "u1"
+        mm.add_messages(u1)
         mm.add_messages(
             _make(
                 MessageRole.ASSISTANT.value,
@@ -195,16 +223,18 @@ class TestAddMessagesRefreshesAnchor:
                 tool_calls=_compress_tc(1),
             )
         )
-        mm.add_messages(
-            _make(MessageRole.TOOL.value, "s", tool_call_id="call_compress_1")
-        )
+        mm.add_messages(_valid_compress_result(1, ["u1"], content="s"))
         mm.add_messages(_make(MessageRole.USER.value, "u2"))
         # anchor 仍指向 idx=1（最近的压缩调用），不会跟着新消息漂移
         assert mm.active_start_index == 1
 
     def test_second_compress_call_advances_anchor(self):
         mm = MessageManager()
-        mm.add_messages(_make(MessageRole.USER.value, "u1"))
+        u1 = _make(MessageRole.USER.value, "u1")
+        u1.message_id = "u1"
+        u2 = _make(MessageRole.USER.value, "u2")
+        u2.message_id = "u2"
+        mm.add_messages(u1)
         mm.add_messages(
             _make(
                 MessageRole.ASSISTANT.value,
@@ -213,12 +243,10 @@ class TestAddMessagesRefreshesAnchor:
                 tool_calls=_compress_tc(1),
             )
         )
-        mm.add_messages(
-            _make(MessageRole.TOOL.value, "s1", tool_call_id="call_compress_1")
-        )
+        mm.add_messages(_valid_compress_result(1, ["u1"], content="s1"))
         assert mm.active_start_index == 1
 
-        mm.add_messages(_make(MessageRole.USER.value, "u2"))
+        mm.add_messages(u2)
         mm.add_messages(
             _make(
                 MessageRole.ASSISTANT.value,
@@ -227,6 +255,7 @@ class TestAddMessagesRefreshesAnchor:
                 tool_calls=_compress_tc(2),
             )
         )
+        mm.add_messages(_valid_compress_result(2, ["u2"], content="s2"))
         # anchor 推进到新的压缩调用位置
         assert mm.active_start_index == 4
 
@@ -295,19 +324,39 @@ class TestExtractIgnoresActiveStartIndex:
         assert "自检发现以下问题，需要先修复后再继续" in contents
 
     def test_compress_anchor_still_filters(self):
-        """有压缩调用时仍然只保留 user + 最新压缩 + 之后"""
+        """有效压缩 anchor 会隐藏 metadata 指定的旧消息"""
         mm = MessageManager()
+        u1 = _make(MessageRole.USER.value, "u1")
+        u1.message_id = "u1"
+        a1 = _make(MessageRole.ASSISTANT.value, "a1")
+        a1.message_id = "a1"
+        u2 = _make(MessageRole.USER.value, "u2")
+        u2.message_id = "u2"
+        compress_call = _make(
+            MessageRole.ASSISTANT.value,
+            "",
+            msg_type=MessageType.TOOL_CALL.value,
+            tool_calls=_compress_tc(1),
+        )
+        compress_call.message_id = "compress-call"
+        compress_result = _make(
+            MessageRole.TOOL.value, "summary", tool_call_id="call_compress_1"
+        )
+        compress_result.message_id = "compress-result"
+        compress_result.metadata = {
+            "tool_name": "compress_conversation_history",
+            "status": "success",
+            "compression_anchor": True,
+            "source_message_ids": ["u1", "a1"],
+            "source_start_message_id": "u1",
+            "source_end_message_id": "a1",
+        }
         mm.messages = [
-            _make(MessageRole.USER.value, "u1"),
-            _make(MessageRole.ASSISTANT.value, "a1"),
-            _make(MessageRole.USER.value, "u2"),
-            _make(
-                MessageRole.ASSISTANT.value,
-                "",
-                msg_type=MessageType.TOOL_CALL.value,
-                tool_calls=_compress_tc(1),
-            ),
-            _make(MessageRole.TOOL.value, "summary", tool_call_id="call_compress_1"),
+            u1,
+            a1,
+            u2,
+            compress_call,
+            compress_result,
             _make(MessageRole.USER.value, "u3"),
         ]
         result = mm.extract_all_context_messages(
@@ -339,14 +388,17 @@ class TestPrepareHistorySplit:
 
     def test_refreshes_anchor_when_compress_tool_present(self):
         mm = MessageManager()
+        u1 = _make(MessageRole.USER.value, "u1")
+        u1.message_id = "u1"
         mm.messages = [
-            _make(MessageRole.USER.value, "u1"),
+            u1,
             _make(
                 MessageRole.ASSISTANT.value,
                 "",
                 msg_type=MessageType.TOOL_CALL.value,
                 tool_calls=_compress_tc(1),
             ),
+            _valid_compress_result(1, ["u1"]),
         ]
         # 故意先设错的值
         mm.set_active_start_index(99)
@@ -438,17 +490,23 @@ class TestMemoryToolHistoryBoundary:
         )
 
         mm = MessageManager()
+        u1 = _make(MessageRole.USER.value, "u1")
+        u1.message_id = "u1"
+        a1 = _make(MessageRole.ASSISTANT.value, "a1")
+        a1.message_id = "a1"
+        u2 = _make(MessageRole.USER.value, "u2")
+        u2.message_id = "u2"
         mm.messages = [
-            _make(MessageRole.USER.value, "u1"),
-            _make(MessageRole.ASSISTANT.value, "a1"),
-            _make(MessageRole.USER.value, "u2"),
+            u1,
+            a1,
+            u2,
             _make(
                 MessageRole.ASSISTANT.value,
                 "",
                 msg_type=MessageType.TOOL_CALL.value,
                 tool_calls=_compress_tc(1),
             ),  # anchor 在 idx=3
-            _make(MessageRole.TOOL.value, "summary", tool_call_id="call_compress_1"),
+            _valid_compress_result(1, ["u1", "a1", "u2"]),
             _make(MessageRole.USER.value, "u3"),
         ]
         ctx = self._build_session_context(mm)

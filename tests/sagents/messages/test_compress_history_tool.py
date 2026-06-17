@@ -5,6 +5,7 @@ Test CompressHistoryTool
 """
 
 import asyncio
+import json
 import sys
 from datetime import datetime
 from typing import List, Dict, Optional
@@ -87,71 +88,40 @@ class TestCompressHistoryTool:
         assert "Assistant response" in result
         print("OK: _format_messages_for_compression")
 
-    def test_determine_compression_range_single_user(self):
-        """Test: _determine_compression_range with single user"""
+    def test_compress_conversation_history_uses_caller_range_metadata(self):
+        """Test: caller-selected range is recorded in structured output"""
         messages = [
-            self.create_message(MessageRole.SYSTEM.value, "System prompt"),
             self.create_message(MessageRole.USER.value, "User message 1"),
             self.create_message(MessageRole.ASSISTANT.value, "Assistant response 1"),
-            self.create_message(
-                MessageRole.TOOL.value, "Tool result", tool_call_id="call_1"
-            ),
         ]
+        messages[0].message_id = "u1"
+        messages[1].message_id = "a1"
 
-        result = self.tool._determine_compression_range(messages)
+        async def fake_call(messages_text, session_id):
+            assert "User message 1" in messages_text
+            assert session_id == "test_session"
+            return "summary text"
 
-        # Should compress from after User to end (non-User messages after single User)
-        assert result["system_end"] == 1
-        assert result["to_compress_start"] == 2  # After User
-        assert result["to_compress_end"] == 4  # To end
-        assert result["reserved_rounds"] == 1
-        print("OK: _determine_compression_range single user")
+        self.tool._call_llm_for_compression = fake_call
+        result = asyncio.run(
+            self.tool.compress_conversation_history(
+                messages,
+                "test_session",
+                source_message_ids=["u1", "a1"],
+                source_start_message_id="u1",
+                source_end_message_id="a1",
+            )
+        )
 
-    def test_determine_compression_range_multiple_users(self):
-        """Test: _determine_compression_range with multiple users"""
-        messages = [
-            self.create_message(MessageRole.SYSTEM.value, "System prompt"),
-            self.create_message(MessageRole.USER.value, "User message 1"),
-            self.create_message(MessageRole.ASSISTANT.value, "Assistant response 1"),
-            self.create_message(MessageRole.USER.value, "User message 2"),
-            self.create_message(MessageRole.ASSISTANT.value, "Assistant response 2"),
-            self.create_message(MessageRole.USER.value, "User message 3"),
-        ]
-
-        result = self.tool._determine_compression_range(messages)
-
-        # Should compress from after System to before last User
-        assert result["system_end"] == 1
-        assert result["to_compress_start"] == 1  # After System
-        assert result["to_compress_end"] == 5  # Before last User (index 5)
-        assert result["reserved_rounds"] == 3
-        print("OK: _determine_compression_range multiple users")
-
-    def test_determine_compression_range_no_user(self):
-        """Test: _determine_compression_range with no user messages"""
-        messages = [
-            self.create_message(MessageRole.SYSTEM.value, "System prompt"),
-            self.create_message(MessageRole.ASSISTANT.value, "Assistant only"),
-        ]
-
-        result = self.tool._determine_compression_range(messages)
-
-        # No compression when no user
-        assert result["to_compress_start"] == result["to_compress_end"]
-        print("OK: _determine_compression_range no user")
-
-    def test_determine_compression_range_only_system(self):
-        """Test: _determine_compression_range with only system message"""
-        messages = [
-            self.create_message(MessageRole.SYSTEM.value, "System prompt"),
-        ]
-
-        result = self.tool._determine_compression_range(messages)
-
-        # No compression when only system
-        assert result["to_compress_start"] == 1
-        assert result["to_compress_end"] == 1
-        print("OK: _determine_compression_range only system")
+        assert result["status"] == "success"
+        payload = result["data"]
+        assert payload["summary"] == "summary text"
+        assert payload["source_message_ids"] == ["u1", "a1"]
+        assert payload["source_range"] == {
+            "start_message_id": "u1",
+            "end_message_id": "a1",
+        }
+        assert '"summary": "summary text"' in result["message"]
 
     def test_compress_conversation_history_empty_messages(self):
         """Test: compress_conversation_history with empty messages"""
@@ -163,22 +133,79 @@ class TestCompressHistoryTool:
         assert "没有消息需要压缩" in result["message"]
         print("OK: compress_conversation_history empty messages")
 
-    def test_compress_conversation_history_no_compress_needed(self):
-        """Test: compress_conversation_history when no compression needed"""
+    def test_compress_conversation_history_compresses_caller_input(self):
+        """Test: non-empty caller input is passed to the summarizer"""
         messages = [
-            self.create_message(MessageRole.SYSTEM.value, "System"),
             self.create_message(MessageRole.USER.value, "User"),
+            self.create_message(MessageRole.ASSISTANT.value, "Assistant"),
         ]
 
+        async def fake_call(messages_text, session_id):
+            assert "User" in messages_text
+            assert "Assistant" in messages_text
+            return "short summary"
+
+        self.tool._call_llm_for_compression = fake_call
         result = asyncio.run(
             self.tool.compress_conversation_history(messages, "test_session")
         )
 
         assert result["status"] == "success"
-        assert (
-            "无需压缩" in result["message"] or "没有消息需要压缩" in result["message"]
+        assert result["data"]["summary"] == "short summary"
+        assert len(result["data"]["source_message_ids"]) == 2
+        print("OK: compress_conversation_history caller input")
+
+    def test_compress_conversation_history_uses_structured_json_output(self):
+        """Test: JSON compact output populates structured fields."""
+        messages = [
+            self.create_message(MessageRole.USER.value, "User"),
+            self.create_message(MessageRole.ASSISTANT.value, "Assistant"),
+        ]
+
+        async def fake_call(messages_text, session_id):
+            return json.dumps(
+                {
+                    "summary": "structured summary",
+                    "decisions": ["use manifest"],
+                    "open_tasks": ["run matrix tests"],
+                    "files_touched": ["sagents/context/messages/message_manager.py"],
+                    "commands_run": ["pytest"],
+                    "important_errors": ["none"],
+                    "user_requirements": ["do not fail on non-json"],
+                },
+                ensure_ascii=False,
+            )
+
+        self.tool._call_llm_for_compression = fake_call
+        result = asyncio.run(
+            self.tool.compress_conversation_history(messages, "test_session")
         )
-        print("OK: compress_conversation_history no compression needed")
+
+        assert result["status"] == "success"
+        assert result["data"]["summary"] == "structured summary"
+        assert result["data"]["decisions"] == ["use manifest"]
+        assert result["data"]["open_tasks"] == ["run matrix tests"]
+        assert result["data"]["stats"]["summary_parse_status"] == "json"
+
+    def test_compress_conversation_history_falls_back_when_output_is_not_json(self):
+        """Test: non-JSON compact output is still a successful compression."""
+        messages = [
+            self.create_message(MessageRole.USER.value, "User"),
+            self.create_message(MessageRole.ASSISTANT.value, "Assistant"),
+        ]
+
+        async def fake_call(messages_text, session_id):
+            return "plain summary without json"
+
+        self.tool._call_llm_for_compression = fake_call
+        result = asyncio.run(
+            self.tool.compress_conversation_history(messages, "test_session")
+        )
+
+        assert result["status"] == "success"
+        assert result["data"]["summary"] == "plain summary without json"
+        assert result["data"]["decisions"] == []
+        assert result["data"]["stats"]["summary_parse_status"] == "fallback_text"
 
     def test_compression_levels_config(self):
         """Test: compression levels configuration"""
@@ -225,19 +252,10 @@ class TestCompressHistoryToolIntegration:
             self.create_message(MessageRole.USER.value, "Can you show me an example?"),
         ]
 
-        # Test compression range determination
-        range_info = tool._determine_compression_range(messages)
-
-        # Should compress messages before last User
-        assert range_info["system_end"] == 1
-        assert range_info["to_compress_start"] == 1
-        assert range_info["to_compress_end"] == 5  # Before last User
-
-        # Verify the messages to be compressed
-        to_compress = messages[
-            range_info["to_compress_start"] : range_info["to_compress_end"]
-        ]
-        assert len(to_compress) == 4  # System not included, last User not included
+        formatted = tool._format_messages_for_compression(messages[1:5])
+        assert "Hello, can you help me with Python?" in formatted
+        assert "List comprehensions are a concise way" in formatted
+        assert "Can you show me an example?" not in formatted
 
         print("OK: End-to-end compression flow")
 
@@ -259,28 +277,16 @@ def run_tests():
             test_class.test_format_messages_for_compression,
         ),
         (
-            "test_determine_compression_range_single_user",
-            test_class.test_determine_compression_range_single_user,
-        ),
-        (
-            "test_determine_compression_range_multiple_users",
-            test_class.test_determine_compression_range_multiple_users,
-        ),
-        (
-            "test_determine_compression_range_no_user",
-            test_class.test_determine_compression_range_no_user,
-        ),
-        (
-            "test_determine_compression_range_only_system",
-            test_class.test_determine_compression_range_only_system,
+            "test_compress_conversation_history_uses_caller_range_metadata",
+            test_class.test_compress_conversation_history_uses_caller_range_metadata,
         ),
         (
             "test_compress_conversation_history_empty_messages",
             test_class.test_compress_conversation_history_empty_messages,
         ),
         (
-            "test_compress_conversation_history_no_compress_needed",
-            test_class.test_compress_conversation_history_no_compress_needed,
+            "test_compress_conversation_history_compresses_caller_input",
+            test_class.test_compress_conversation_history_compresses_caller_input,
         ),
         ("test_compression_levels_config", test_class.test_compression_levels_config),
         # Integration tests

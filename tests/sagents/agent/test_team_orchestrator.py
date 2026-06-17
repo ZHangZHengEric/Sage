@@ -305,6 +305,7 @@ def test_team_delegate_prompt_does_not_force_task_workspace(monkeypatch):
         "sagents.agent.team.orchestrator.summarize_subtask_history",
         fake_summarize_subtask_history,
     )
+    orchestrator.output_queue = asyncio.Queue()
 
     result = asyncio.run(
         orchestrator._delegate_task_internal(
@@ -318,8 +319,11 @@ def test_team_delegate_prompt_does_not_force_task_workspace(monkeypatch):
     )
 
     sub_session = orchestrator.session_manager.created["child"]
+    streamed_chunks = orchestrator.output_queue.get_nowait()
     prompt = sub_session.run_stream_kwargs["input_messages"][0].content
     assert result == "summary"
+    assert streamed_chunks[0].session_id == "child"
+    assert streamed_chunks[0].content == "done"
     assert "【Team 共享工作空间】" in prompt
     assert "【子任务工作目录】" not in prompt
     assert "/results/" not in prompt

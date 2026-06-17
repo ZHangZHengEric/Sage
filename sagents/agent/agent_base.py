@@ -92,7 +92,14 @@ class AgentBase(ABC):
         # 实际的上下文长度由 SessionContext 中的 context_budget_manager 动态管理
         # 这里只是作为兜底的安全阈值
 
-        self.max_model_input_len = 1000000
+        configured_max_input = None
+        configured_max_model = None
+        if isinstance(model_config, dict):
+            configured_max_input = model_config.get("max_model_input_len")
+            configured_max_model = model_config.get("max_model_len")
+        max_model_len = int(configured_max_model or 128000)
+        requested_max_input = int(configured_max_input or max_model_len)
+        self.max_model_input_len = min(requested_max_input, max_model_len)
 
         logger.debug(
             f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}, 最大输入长度（安全阈值）: {self.max_model_input_len}"
@@ -178,6 +185,294 @@ class AgentBase(ABC):
         ``sagents.utils.multimodal_image.get_mime_type``。
         """
         return _get_mime_type_util(file_extension)
+
+    def _resolve_raw_context_limit(
+        self, session_context: Optional[SessionContext] = None
+    ) -> int:
+        configured_max_input = None
+        configured_max_model = None
+        if isinstance(self.model_config, dict):
+            configured_max_input = self.model_config.get("max_model_input_len")
+            configured_max_model = self.model_config.get("max_model_len")
+        max_model_len = int(configured_max_model or 128000)
+        requested_limit = int(configured_max_input or self.max_model_input_len)
+        return min(requested_limit, max_model_len)
+
+    def _resolve_persistent_compression_threshold(
+        self,
+        session_context: Optional[SessionContext],
+        raw_context_limit: int,
+    ) -> int:
+        configured_max_model = (
+            self.model_config.get("max_model_len", 128000)
+            if isinstance(self.model_config, dict)
+            else 128000
+        )
+        upper_limit = min(raw_context_limit, int(configured_max_model or 128000))
+        return max(1, int(upper_limit * 0.85))
+
+    @staticmethod
+    def _compression_chunks_succeeded(chunks: List[MessageChunk]) -> bool:
+        for chunk in chunks:
+            metadata = chunk.metadata if isinstance(chunk.metadata, dict) else {}
+            if (
+                chunk.role == MessageRole.TOOL.value
+                and metadata.get("tool_name") == "compress_conversation_history"
+                and metadata.get("status") == "success"
+            ):
+                return True
+        return False
+
+    async def _compress_messages_with_tool(
+        self,
+        messages: List[MessageChunk],
+        session_id: str,
+        source_message_ids: Optional[List[str]] = None,
+        source_start_message_id: Optional[str] = None,
+        source_end_message_id: Optional[str] = None,
+    ) -> AsyncGenerator[List[MessageChunk], None]:
+        tool_call_id = f"auto_compress_{uuid.uuid4().hex[:8]}"
+        source_message_ids = source_message_ids or [
+            msg.message_id for msg in messages if msg.message_id
+        ]
+        source_start_message_id = source_start_message_id or (
+            source_message_ids[0] if source_message_ids else None
+        )
+        source_end_message_id = source_end_message_id or (
+            source_message_ids[-1] if source_message_ids else None
+        )
+        try:
+            assistant_tool_call = MessageChunk(
+                role=MessageRole.ASSISTANT.value,
+                content="",
+                tool_calls=[
+                    {
+                        "id": tool_call_id,
+                        "type": "function",
+                        "function": {
+                            "name": "compress_conversation_history",
+                            "arguments": json.dumps({"session_id": session_id}),
+                        },
+                    }
+                ],
+                type=MessageType.TOOL_CALL.value,
+                metadata={
+                    "tool_name": "compress_conversation_history",
+                    "auto_generated": True,
+                    "compression_anchor": True,
+                    "source_start_message_id": source_start_message_id,
+                    "source_end_message_id": source_end_message_id,
+                    "source_message_ids": source_message_ids,
+                    "source_message_count": len(source_message_ids),
+                },
+            )
+            logger.info(f"{self.agent_name}: yield 压缩工具的 tool_calls")
+            yield [assistant_tool_call]
+
+            from sagents.tool.impl.compress_history_tool import CompressHistoryTool
+
+            tool = CompressHistoryTool()
+            result = await tool.compress_conversation_history(
+                messages,
+                session_id,
+                source_message_ids=source_message_ids,
+                source_start_message_id=source_start_message_id,
+                source_end_message_id=source_end_message_id,
+            )
+
+            compression_result = MessageChunk(
+                role=MessageRole.TOOL.value,
+                content=result.get("message", ""),
+                tool_call_id=tool_call_id,
+                type=MessageType.TOOL_CALL_RESULT.value,
+                metadata={
+                    "tool_name": "compress_conversation_history",
+                    "auto_generated": True,
+                    "status": result.get("status", "unknown"),
+                    "compression_anchor": result.get("status") == "success",
+                    "source_start_message_id": source_start_message_id,
+                    "source_end_message_id": source_end_message_id,
+                    "source_message_ids": source_message_ids,
+                    "source_message_count": len(source_message_ids),
+                },
+            )
+            if result.get("status") == "success":
+                logger.info(f"{self.agent_name}: yield 压缩工具的 tool result")
+            else:
+                logger.warning(
+                    f"{self.agent_name}: 工具压缩失败 - {result.get('message', '未知错误')}"
+                )
+            yield [compression_result]
+
+        except Exception as exc:
+            logger.error(f"{self.agent_name}: 调用压缩工具失败: {exc}")
+            logger.error(traceback.format_exc())
+            yield [
+                MessageChunk(
+                    role=MessageRole.TOOL.value,
+                    content=f"压缩失败: {str(exc)}",
+                    tool_call_id=tool_call_id,
+                    type=MessageType.TOOL_CALL_RESULT.value,
+                    metadata={
+                        "tool_name": "compress_conversation_history",
+                        "auto_generated": True,
+                        "status": "error",
+                        "compression_anchor": False,
+                        "source_start_message_id": source_start_message_id,
+                        "source_end_message_id": source_end_message_id,
+                        "source_message_ids": source_message_ids,
+                        "source_message_count": len(source_message_ids),
+                    },
+                )
+            ]
+
+    @staticmethod
+    def _insert_chunks_after_message_id(
+        messages: List[MessageChunk],
+        message_id: Optional[str],
+        chunks: List[MessageChunk],
+    ) -> List[MessageChunk]:
+        if not message_id:
+            return list(messages)
+        for idx, message in enumerate(messages):
+            if message.message_id == message_id:
+                return (
+                    list(messages[: idx + 1]) + list(chunks) + list(messages[idx + 1 :])
+                )
+        return list(messages)
+
+    def _context_artifact_root(
+        self, session_context: Optional[SessionContext]
+    ) -> Optional[str]:
+        workspace = None
+        if session_context is not None:
+            workspace = getattr(
+                session_context, "sandbox_agent_workspace", None
+            ) or getattr(session_context, "system_context", {}).get("private_workspace")
+        if not workspace:
+            return None
+        return os.path.join(str(workspace), ".sage", "context", "artifacts")
+
+    def _context_over_limit_error_chunk(
+        self, current_tokens: int, limit: int
+    ) -> MessageChunk:
+        return MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=(
+                f"当前上下文压缩后仍超过模型输入限制：{current_tokens} > {limit}。"
+                "请缩小当前请求范围，或允许我先整理/归档更早的执行过程后继续。"
+            ),
+            type=MessageType.AGENT_EXECUTION_ERROR.value,
+            agent_name=self.agent_name,
+        )
+
+    async def _prepare_context_messages_for_llm(
+        self,
+        messages_input: List[MessageChunk],
+        session_id: str,
+    ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
+        try:
+            session_context = self._get_live_session_context(session_id)
+        except Exception:
+            session_context = None
+        message_manager = (
+            session_context.message_manager if session_context is not None else None
+        )
+        max_model_len = int(
+            self.model_config.get("max_model_len", 128000)
+            if isinstance(self.model_config, dict)
+            else 128000
+        )
+        trigger_limit = int(max_model_len * 0.85)
+        artifact_root = self._context_artifact_root(session_context)
+        working_messages = list(messages_input)
+
+        for _ in range(20):
+            view = MessageManager.build_inference_view(
+                working_messages,
+                session_id=session_id,
+                max_model_len=max_model_len,
+                artifact_root=artifact_root,
+                apply_rule_compression=True,
+            )
+            if message_manager is not None:
+                message_manager.store_inference_messages(view)
+            current_tokens = MessageManager.calculate_messages_token_length(view)
+            if current_tokens <= trigger_limit:
+                yield (view, True)
+                return
+
+            segment = MessageManager.select_llm_compression_segment(
+                working_messages,
+                max_model_len=max_model_len,
+                active_protection_count=12,
+            )
+            if not segment:
+                logger.warning(
+                    f"{self.agent_name}: 无可压缩历史段，当前上下文仍为 {current_tokens} tokens"
+                )
+                yield (
+                    [
+                        self._context_over_limit_error_chunk(
+                            current_tokens, trigger_limit
+                        )
+                    ],
+                    False,
+                )
+                return
+
+            source_ids = [msg.message_id for msg in segment if msg.message_id]
+            source_start = source_ids[0] if source_ids else None
+            source_end = source_ids[-1] if source_ids else None
+            emitted_chunks: List[MessageChunk] = []
+            async for messages_chunk in self._compress_messages_with_tool(
+                segment,
+                session_id,
+                source_message_ids=source_ids,
+                source_start_message_id=source_start,
+                source_end_message_id=source_end,
+            ):
+                emitted_chunks.extend(messages_chunk)
+                yield (messages_chunk, False)
+
+            if not self._compression_chunks_succeeded(emitted_chunks):
+                logger.warning(f"{self.agent_name}: 大模型压缩失败，停止继续压缩")
+                view = MessageManager.build_inference_view(
+                    working_messages,
+                    session_id=session_id,
+                    max_model_len=max_model_len,
+                    artifact_root=artifact_root,
+                    apply_rule_compression=True,
+                )
+                if message_manager is not None:
+                    message_manager.store_inference_messages(view)
+                yield (view, True)
+                return
+
+            working_messages = self._insert_chunks_after_message_id(
+                working_messages, source_end, emitted_chunks
+            )
+            if message_manager is not None and source_end:
+                message_manager.insert_messages_after(source_end, emitted_chunks)
+
+        logger.warning(f"{self.agent_name}: 大模型压缩达到最大轮数，返回当前上下文")
+        final_view = MessageManager.build_inference_view(
+            working_messages,
+            session_id=session_id,
+            max_model_len=max_model_len,
+            artifact_root=artifact_root,
+            apply_rule_compression=True,
+        )
+        if message_manager is not None:
+            message_manager.store_inference_messages(final_view)
+        final_tokens = MessageManager.calculate_messages_token_length(final_view)
+        if final_tokens > trigger_limit:
+            yield (
+                [self._context_over_limit_error_chunk(final_tokens, trigger_limit)],
+                False,
+            )
+            return
+        yield (final_view, True)
 
     async def _call_llm_streaming(
         self,

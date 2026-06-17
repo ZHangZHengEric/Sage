@@ -31,6 +31,8 @@ from sagents.agent.simple_agent import SimpleAgent
 from sagents.utils.subtask_summary import summarize_subtask_history
 from sagents.utils.logger import logger
 
+StreamPayload = Union[MessageChunk, Dict[str, Any]]
+
 
 class FibreOrchestrator:
     """
@@ -66,6 +68,69 @@ class FibreOrchestrator:
         self.output_queue: Optional[asyncio.Queue] = None
 
     @staticmethod
+    def _payload_session_id(payload: StreamPayload) -> Optional[str]:
+        if isinstance(payload, MessageChunk):
+            return payload.session_id
+        if isinstance(payload, dict):
+            value = payload.get("session_id")
+            return str(value) if value is not None else None
+        return None
+
+    @staticmethod
+    def _payload_role(payload: StreamPayload) -> Optional[str]:
+        if isinstance(payload, MessageChunk):
+            return payload.role
+        if isinstance(payload, dict):
+            value = payload.get("role")
+            return str(value) if value is not None else None
+        return None
+
+    @staticmethod
+    def _payload_type(payload: StreamPayload) -> Optional[str]:
+        if isinstance(payload, MessageChunk):
+            return payload.type
+        if isinstance(payload, dict):
+            value = payload.get("type") or payload.get("message_type")
+            return str(value) if value is not None else None
+        return None
+
+    @staticmethod
+    def _payload_content(payload: StreamPayload) -> Any:
+        if isinstance(payload, MessageChunk):
+            return payload.content
+        if isinstance(payload, dict):
+            return payload.get("content")
+        return None
+
+    async def _publish_child_stream_chunks(self, chunks: List[StreamPayload]) -> None:
+        output_queue = getattr(self, "output_queue", None)
+        if not chunks or output_queue is None:
+            return
+        await output_queue.put(list(chunks))
+
+    def _summary_content_chunks(
+        self,
+        chunks: List[StreamPayload],
+        session_id: str,
+        *,
+        require_content: bool = False,
+    ) -> List[MessageChunk]:
+        filtered: List[MessageChunk] = []
+        for chunk in chunks:
+            if not isinstance(chunk, MessageChunk):
+                continue
+            if self._payload_session_id(chunk) != session_id:
+                continue
+            if self._payload_role(chunk) != MessageRole.ASSISTANT.value:
+                continue
+            if self._payload_type(chunk) in ("token_usage", "stream_end"):
+                continue
+            if require_content and not self._payload_content(chunk):
+                continue
+            filtered.append(chunk)
+        return filtered
+
+    @staticmethod
     def _resolve_agent_name(agent_cfg: Any, agent_id: Optional[str]) -> str:
         if isinstance(agent_cfg, dict):
             name = agent_cfg.get("name") or agent_cfg.get("display_name")
@@ -89,7 +154,7 @@ class FibreOrchestrator:
         Similar to the original run_loop but uses the new architecture.
         """
         # Initialize Output Queue for merging streams
-        output_queue: asyncio.Queue[Optional[List[MessageChunk]]] = asyncio.Queue()
+        output_queue: asyncio.Queue[Optional[List[StreamPayload]]] = asyncio.Queue()
         self.output_queue = output_queue
 
         # Initialize Main Session Context
@@ -1237,13 +1302,8 @@ class FibreOrchestrator:
                         session_id, user_id=user_id
                     )
                     break
-                filtered_chunks = [
-                    c
-                    for c in chunks
-                    if c.session_id == session_id
-                    and c.role == MessageRole.ASSISTANT.value
-                    and c.type not in ("token_usage", "stream_end")
-                ]
+                await self._publish_child_stream_chunks(chunks)
+                filtered_chunks = self._summary_content_chunks(chunks, session_id)
                 if filtered_chunks:
                     all_content_chunks.extend(filtered_chunks)
 
@@ -1409,12 +1469,8 @@ class FibreOrchestrator:
                         f"[DelegateTask Internal] session {session_id} interrupted, stopping sub-session stream"
                     )
                     break
-                filtered_chunks = [
-                    c
-                    for c in chunks
-                    if c.session_id == session_id
-                    and c.role == MessageRole.ASSISTANT.value
-                ]
+                await self._publish_child_stream_chunks(chunks)
+                filtered_chunks = self._summary_content_chunks(chunks, session_id)
                 if filtered_chunks:
                     all_filtered_chunks.extend(filtered_chunks)
 

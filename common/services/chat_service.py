@@ -1061,7 +1061,10 @@ class SageStreamService:
                 if not isinstance(chunk, (list, tuple)):
                     continue
                 for message in chunk:
-                    result = message.to_dict()
+                    if isinstance(message, dict):
+                        result = message.copy()
+                    else:
+                        result = message.to_dict()
                     result = ContentProcessor.clean_content(result)
                     yield result
         except Exception as e:
@@ -1168,9 +1171,10 @@ async def execute_chat_session(
                 continue
 
             result = payload
-            token_usage_payload = (
-                _extract_token_usage_payload(result) or token_usage_payload
-            )
+            if result.get("session_id") == session_id:
+                token_usage_payload = (
+                    _extract_token_usage_payload(result) or token_usage_payload
+                )
 
             yield_result = result.copy()
             yield_result.pop("message_type", None)
