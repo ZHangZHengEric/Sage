@@ -82,12 +82,33 @@ class _FakeStreamService:
             "role": "assistant",
             "content": "hello",
             "message_id": "m-1",
+            "session_id": "session-web-stream",
+        }
+        yield {
+            "type": "token_usage",
+            "role": "assistant",
+            "content": "",
+            "message_id": "m-child-token",
+            "session_id": "child-session",
+            "metadata": {
+                "token_usage": {
+                    "total_info": {
+                        "prompt_tokens": 100,
+                        "completion_tokens": 50,
+                        "total_tokens": 150,
+                    },
+                    "per_step_info": [
+                        {"step_name": "child_execution", "usage": {"total_tokens": 150}}
+                    ],
+                }
+            },
         }
         yield {
             "type": "token_usage",
             "role": "assistant",
             "content": "",
             "message_id": "m-token",
+            "session_id": "session-web-stream",
             "metadata": {
                 "token_usage": {
                     "total_info": {
@@ -127,6 +148,8 @@ def test_execute_chat_session_persists_token_usage_when_generator_closes_early(
         assert '"type": "assistant_text"' in first_chunk
         second_chunk = await generator.__anext__()
         assert '"type": "token_usage"' in second_chunk
+        third_chunk = await generator.__anext__()
+        assert '"type": "token_usage"' in third_chunk
         await generator.aclose()
 
     asyncio.run(_run())

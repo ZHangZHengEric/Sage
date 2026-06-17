@@ -1,5 +1,6 @@
 import unittest
 import time
+import tempfile
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 
@@ -50,58 +51,65 @@ class TestMessageCompression(unittest.TestCase):
         print("=" * 60)
 
     def test_level_1_compression(self):
-        """测试 Level 1: Tool 截断和 Thinking 移除"""
+        """规则压缩将旧的大 tool result 可逆 offload 到 artifact"""
         messages = [
             self.create_message(MessageRole.SYSTEM.value, "System Prompt"),
             self.create_message(MessageRole.USER.value, "User Request"),
-            self.create_message(MessageRole.TOOL.value, self.tool_output),
+            self.create_message(MessageRole.TOOL.value, "T" * 20000),
             self.create_message(MessageRole.ASSISTANT.value, self.thinking_content),
-            self.create_message(
-                MessageRole.USER.value, "Next User Request"
-            ),  # Ensure Assistant is not the last message (which is protected)
+            *[
+                self.create_message(MessageRole.ASSISTANT.value, f"tail {idx}")
+                for idx in range(20)
+            ],
         ]
 
-        # 预算设为足够小以触发 Level 1，但不足以触发 Level 2
-        # 原始 Token 约: Sys(2) + User(2) + Tool(800) + Asst(20) ~ 850
-        # 设限制 200，迫使 Tool 截断 (变成200) 和 Thinking 移除
-        budget = 200
-
-        compressed = self.manager.compress_messages(messages, budget_limit=budget)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            compressed = MessageManager.build_inference_view(
+                messages,
+                session_id="sess-test",
+                max_model_len=2000,
+                artifact_root=tmpdir,
+                apply_rule_compression=True,
+            )
         self.print_messages("Level 1 Compression Result", compressed)
 
-        # 验证 Tool 截断
-        self.assertIn("...[Tool output truncated", compressed[2].content)  # pyright: ignore[reportArgumentType]
-        self.assertTrue(
-            len(compressed[2].content) < 300  # pyright: ignore[reportArgumentType]
-        )  # 100+100+提示语  # pyright: ignore[reportArgumentType]
+        self.assertIn("[Content moved to context artifact]", compressed[2].content)  # pyright: ignore[reportArgumentType]
+        self.assertTrue(compressed[2].metadata["context_artifact_ref"])
 
-        # 验证 Thinking 移除
-        self.assertNotIn("<thinking>", compressed[3].content)  # pyright: ignore[reportArgumentType]
+        # 规则压缩不再做不可逆 thinking 删除。
+        self.assertIn("<thinking>", compressed[3].content)  # pyright: ignore[reportArgumentType]
         self.assertIn("The answer is 42", compressed[3].content)  # pyright: ignore[reportArgumentType]
 
     def test_level_2_aging(self):
-        """测试 Level 0.5: 老化消息直接 Level 2"""
+        """规则压缩不再因为 aging 做不可逆截断，只做 artifact offload"""
         old_time = time.time() - 25 * 3600  # 25 hours ago
         messages = [
             self.create_message(MessageRole.SYSTEM.value, "System Prompt"),
             self.create_message(MessageRole.USER.value, "Old User"),
             self.create_message(
                 MessageRole.ASSISTANT.value,
-                "Old Assistant Long Content " * 20,
+                "Old Assistant Long Content " * 400,
                 timestamp=old_time,
-            ),  # Should be heavily compressed
+            ),
             self.create_message(MessageRole.USER.value, "New User"),
+            *[
+                self.create_message(MessageRole.ASSISTANT.value, f"tail {idx}")
+                for idx in range(20)
+            ],
         ]
 
-        # 预算很大，理论上不需要压缩，但因为老化策略，中间的 Assistant 应该被压缩
-        budget = 100
-
-        compressed = self.manager.compress_messages(messages, budget_limit=budget)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            compressed = MessageManager.build_inference_view(
+                messages,
+                session_id="sess-aging",
+                max_model_len=2000,
+                artifact_root=tmpdir,
+                apply_rule_compression=True,
+            )
         self.print_messages("Aging Strategy Result", compressed)
 
-        # 验证老化压缩
-        self.assertIn("...[Content truncated]", compressed[2].content)  # pyright: ignore[reportArgumentType]
-        self.assertTrue(len(compressed[2].content) <= 200)  # pyright: ignore[reportArgumentType]
+        self.assertIn("[Content moved to context artifact]", compressed[2].content)  # pyright: ignore[reportArgumentType]
+        self.assertNotIn("...[Content truncated]", compressed[2].content)  # pyright: ignore[reportArgumentType]
 
     def test_level_3_history_drop(self):
         """测试 Level 3: 历史分组丢弃"""
@@ -125,7 +133,9 @@ class TestMessageCompression(unittest.TestCase):
         # 极小预算，迫使丢弃
         budget = 50
 
-        compressed = self.manager.compress_messages(messages, budget_limit=budget)
+        compressed = MessageManager.build_token_budget_view(
+            messages, budget_limit=budget
+        )
         self.print_messages("Level 3 Drop Result", compressed)
 
         # System 应该在
@@ -162,7 +172,7 @@ class TestMessageCompression(unittest.TestCase):
         # Mock calculation to ensure our test logic holds
         # 实际运行依赖 calculate_str_token_length
 
-        compressed = self.manager.compress_messages(
+        compressed = MessageManager.build_token_budget_view(
             messages, budget_limit=1000
         )  # Give tight budget to force compression on unprotected
         self.print_messages("Recent Protection Result", compressed)
@@ -173,7 +183,7 @@ class TestMessageCompression(unittest.TestCase):
         self.assertNotIn("omitted", tool_msg.content)  # pyright: ignore[reportArgumentType]
 
     def test_recent_messages_count_protection(self):
-        """测试 recent_messages_count 按条数强制保护末尾 N 条消息"""
+        """测试规则保护区按条数保护末尾 N 条消息"""
         # 构造场景：最近的 tool output 非常大，远超 token budget
         very_long_tool_output = "X" * 5000  # 很长的 tool 输出
         messages = [
@@ -188,18 +198,30 @@ class TestMessageCompression(unittest.TestCase):
 
         tiny_budget = 50
 
-        # 不保护（recent_messages_count=0）：最近的大 tool output 会被压缩
-        compressed_no_protect = self.manager.compress_messages(
-            messages, budget_limit=tiny_budget, recent_messages_count=0
-        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            compressed_no_protect = MessageManager.build_inference_view(
+                messages,
+                session_id="sess-no-protect",
+                max_model_len=tiny_budget,
+                artifact_root=tmpdir,
+                rule_protection_count=0,
+                apply_rule_compression=True,
+            )
         self.print_messages("No recent protection", compressed_no_protect)
-        # tool output 应该被截断
-        self.assertIn("omitted", compressed_no_protect[-1].content)  # pyright: ignore[reportArgumentType]
+        self.assertIn(
+            "[Content moved to context artifact]", compressed_no_protect[-1].content
+        )  # pyright: ignore[reportArgumentType]
 
         # 保护末尾 2 条（recent_messages_count=2）：User 2 和 Tool 不被压缩
-        compressed_with_protect = self.manager.compress_messages(
-            messages, budget_limit=tiny_budget, recent_messages_count=2
-        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            compressed_with_protect = MessageManager.build_inference_view(
+                messages,
+                session_id="sess-protect",
+                max_model_len=tiny_budget,
+                artifact_root=tmpdir,
+                rule_protection_count=2,
+                apply_rule_compression=True,
+            )
         self.print_messages("With recent_messages_count=2", compressed_with_protect)
 
         # 验证最近的 tool output 不被截断
@@ -211,6 +233,145 @@ class TestMessageCompression(unittest.TestCase):
         # 验证 User 2（倒数第 2 条）也被保护
         user2_msg = compressed_with_protect[-2]
         self.assertEqual(user2_msg.content, "User 2 (Recent)")
+
+    def test_token_budget_view_is_prompt_local_and_preserves_originals(self):
+        messages = [
+            self.create_message(MessageRole.USER.value, "U" * 5000),
+            self.create_message(MessageRole.SYSTEM.value, "S" * 5000),
+            self.create_message(MessageRole.ASSISTANT.value, "A" * 5000),
+            self.create_message(MessageRole.TOOL.value, "T" * 5000),
+        ]
+
+        compressed = MessageManager.build_token_budget_view(messages, budget_limit=100)
+
+        self.assertEqual(messages[0].content, "U" * 5000)
+        self.assertEqual(messages[1].content, "S" * 5000)
+        self.assertEqual(messages[2].content, "A" * 5000)
+        self.assertEqual(messages[3].content, "T" * 5000)
+        self.assertEqual(compressed[0].content, "U" * 5000)
+        self.assertEqual(compressed[1].content, "S" * 5000)
+        self.assertIn("assistant content omitted", compressed[2].content)  # pyright: ignore[reportArgumentType]
+        self.assertIn("tool output omitted", compressed[3].content)  # pyright: ignore[reportArgumentType]
+        self.assertFalse(compressed[2].metadata.get("context_artifact_ref"))
+        self.assertFalse(compressed[3].metadata.get("context_artifact_ref"))
+
+    def test_token_budget_view_preserves_tool_call_arguments(self):
+        tool_call = MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="",
+            type=MessageType.TOOL_CALL.value,
+            tool_calls=[
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "demo_tool",
+                        "arguments": '{"payload": "' + "X" * 5000 + '"}',
+                    },
+                }
+            ],
+        )
+        tool_result = MessageChunk(
+            role=MessageRole.TOOL.value,
+            content="T" * 5000,
+            type=MessageType.TOOL_CALL_RESULT.value,
+            tool_call_id="call-1",
+        )
+
+        compressed = MessageManager.build_token_budget_view(
+            [tool_call, tool_result], budget_limit=100
+        )
+
+        self.assertEqual(
+            compressed[0].tool_calls[0]["function"]["arguments"],
+            '{"payload": "' + "X" * 5000 + '"}',
+        )
+        self.assertIn("tool output omitted", compressed[1].content)  # pyright: ignore[reportArgumentType]
+
+    def test_token_budget_view_pair_safe_recent_protection(self):
+        tool_call = MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="",
+            type=MessageType.TOOL_CALL.value,
+            tool_calls=[
+                {
+                    "id": "call-a",
+                    "type": "function",
+                    "function": {"name": "a", "arguments": "{}"},
+                },
+                {
+                    "id": "call-b",
+                    "type": "function",
+                    "function": {"name": "b", "arguments": "{}"},
+                },
+            ],
+        )
+        result_a = MessageChunk(
+            role=MessageRole.TOOL.value,
+            content="A" * 5000,
+            type=MessageType.TOOL_CALL_RESULT.value,
+            tool_call_id="call-a",
+        )
+        result_b = MessageChunk(
+            role=MessageRole.TOOL.value,
+            content="B" * 5000,
+            type=MessageType.TOOL_CALL_RESULT.value,
+            tool_call_id="call-b",
+        )
+
+        compressed = MessageManager.build_token_budget_view(
+            [tool_call, result_a, result_b],
+            budget_limit=100,
+            recent_messages_count=1,
+        )
+
+        self.assertEqual(compressed[1].content, "A" * 5000)
+        self.assertEqual(compressed[2].content, "B" * 5000)
+
+    def test_token_budget_view_keeps_visible_compression_pair_summary(self):
+        raw = self.create_message(MessageRole.ASSISTANT.value, "raw")
+        raw.message_id = "raw"
+        tool_call = MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="",
+            type=MessageType.TOOL_CALL.value,
+            message_id="compress-call",
+            tool_calls=[
+                {
+                    "id": "compress-1",
+                    "type": "function",
+                    "function": {
+                        "name": "compress_conversation_history",
+                        "arguments": "{}",
+                    },
+                }
+            ],
+            metadata={"tool_name": "compress_conversation_history"},
+        )
+        tool_result = MessageChunk(
+            role=MessageRole.TOOL.value,
+            content="summary " * 1000,
+            type=MessageType.TOOL_CALL_RESULT.value,
+            message_id="compress-result",
+            tool_call_id="compress-1",
+            metadata={
+                "tool_name": "compress_conversation_history",
+                "status": "success",
+                "compression_anchor": True,
+                "source_message_ids": ["raw"],
+                "source_start_message_id": "raw",
+                "source_end_message_id": "raw",
+            },
+        )
+
+        compressed = MessageManager.build_token_budget_view(
+            [raw, tool_call, tool_result], budget_limit=100
+        )
+
+        self.assertEqual(
+            [msg.message_id for msg in compressed], ["compress-call", "compress-result"]
+        )
+        self.assertEqual(compressed[1].content, "summary " * 1000)
 
 
 if __name__ == "__main__":

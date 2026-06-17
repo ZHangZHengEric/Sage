@@ -7,7 +7,7 @@ Fibre Backend API Client
 import os
 import json
 import uuid
-from typing import Optional, Dict, Any, AsyncGenerator, List
+from typing import Optional, Dict, Any, AsyncGenerator, List, Union
 
 from sagents.utils.logger import logger
 
@@ -370,7 +370,7 @@ class FibreBackendClient:
         user_id: Optional[str] = None,
         max_loop_count: Optional[int] = None,
         interrupt_event: Any = None,
-    ) -> AsyncGenerator[List[MessageChunk], None]:
+    ) -> AsyncGenerator[List[Union[MessageChunk, Dict[str, Any]]], None]:
         """
         流式执行 Agent 任务，解析 SSE 返回结构化数据并合并 chunks
 
@@ -453,8 +453,10 @@ class FibreBackendClient:
                         or str(uuid.uuid4())
                     )
 
-                    # 跳过没有 role 字段的消息（如 stream_end 元数据消息）
+                    # 没有 role 的控制事件（如 stream_end）也要原样透传给父流。
                     if "role" not in data:
+                        data.setdefault("session_id", session_id)
+                        yield [data]
                         continue
 
                     # 检查是否是新消息
