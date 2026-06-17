@@ -42,14 +42,13 @@ class TestCompressionIntegration(unittest.TestCase):
             self.mock_messages
         )
 
-        # Mock compress_messages
+        # Mock prompt-local token budget compression
         self.mock_compressed_messages = [MagicMock()]
-        # We need to patch MessageManager.compress_messages because it's a static method called on the class
-        self.compress_patcher = patch(
-            "sagents.context.messages.message_manager.MessageManager.compress_messages"
+        self.token_view_patcher = patch(
+            "sagents.context.messages.message_manager.MessageManager.build_token_budget_view"
         )
-        self.mock_compress = self.compress_patcher.start()
-        self.mock_compress.return_value = self.mock_compressed_messages
+        self.mock_token_view = self.token_view_patcher.start()
+        self.mock_token_view.return_value = self.mock_compressed_messages
 
         # Mock convert methods to avoid errors
         self.convert_str_patcher = patch(
@@ -63,7 +62,7 @@ class TestCompressionIntegration(unittest.TestCase):
         self.mock_convert_dict = self.convert_dict_patcher.start()
 
     def tearDown(self):
-        self.compress_patcher.stop()
+        self.token_view_patcher.stop()
         self.convert_str_patcher.stop()
         self.convert_dict_patcher.stop()
 
@@ -90,11 +89,11 @@ class TestCompressionIntegration(unittest.TestCase):
 
         # Verify extract called
         self.mock_message_manager.extract_all_context_messages.assert_called()
-        # Verify compress called with correct budget
-        self.mock_compress.assert_called_with(self.mock_messages, 4000)
+        # Verify prompt-local token budget view called with correct budget
+        self.mock_token_view.assert_called_with(self.mock_messages, 4000)
 
     def test_common_agent_does_not_compress_in_run_stream(self):
-        """CommonAgent.run_stream 仅拉取历史，不调用 MessageManager.compress_messages。"""
+        """CommonAgent.run_stream 仅拉取历史，不调用 token budget view。"""
         agent = CommonAgent(self.mock_model, self.mock_config)
 
         async def mock_call_llm(*args, **kwargs):
@@ -116,7 +115,7 @@ class TestCompressionIntegration(unittest.TestCase):
 
         asyncio.run(run_test())
 
-        self.mock_compress.assert_not_called()
+        self.mock_token_view.assert_not_called()
         self.mock_message_manager.extract_all_context_messages.assert_called()
 
     def test_no_compression_when_no_budget_info(self):
@@ -142,8 +141,8 @@ class TestCompressionIntegration(unittest.TestCase):
 
         asyncio.run(run_test())
 
-        # Verify compress NOT called
-        self.mock_compress.assert_not_called()
+        # Verify token budget view NOT called
+        self.mock_token_view.assert_not_called()
 
 
 if __name__ == "__main__":

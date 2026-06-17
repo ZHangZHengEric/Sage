@@ -118,13 +118,12 @@ class TestExtractAllContextMessages:
             recent_turns=0, last_turn_user_only=False
         )
 
-        # Should start from "User message 2" (User corresponding to compression tool)
-        # User-2, Assistant(with tool), Tool, User-3, Assistant-3
-        assert len(result) == 5
+        # Without success metadata/source ids this is not a valid compression anchor.
+        assert len(result) == 7
         assert result[0].role == MessageRole.USER.value
-        assert result[0].content == "User message 2"
-        assert result[1].role == MessageRole.ASSISTANT.value
-        assert result[1].tool_calls is not None
+        assert result[0].content == "User message 1"
+        assert result[3].role == MessageRole.ASSISTANT.value
+        assert result[3].tool_calls is not None
         print("OK: Single compression tool - extract from corresponding User")
 
     def test_multiple_compression_tools_same_user(self):
@@ -185,13 +184,11 @@ class TestExtractAllContextMessages:
             recent_turns=0, last_turn_user_only=False
         )
 
-        # Should start from "User message 1", keep User and last compression tool and after
-        # User-1, Assistant-3(with tool), Tool-3, User-2, Assistant-2
-        assert len(result) == 5
+        # Without success metadata/source ids these are not valid compression anchors.
+        assert len(result) == 9
         assert result[0].role == MessageRole.USER.value
         assert result[0].content == "User message 1"
-        # Check it's the 3rd compression tool (last one)
-        assert result[1].tool_calls[0]["id"] == "call_compress_3"  # pyright: ignore[reportOptionalSubscript]
+        assert result[1].tool_calls[0]["id"] == "call_compress_1"  # pyright: ignore[reportOptionalSubscript]
         print("OK: Multiple compression tools - keep User and last tool")
 
     def test_compression_tool_with_other_tools(self):
@@ -241,9 +238,9 @@ class TestExtractAllContextMessages:
             recent_turns=0, last_turn_user_only=False
         )
 
-        # Should start from "User message 2"
+        # Invalid compression metadata should not hide earlier tool history.
         assert result[0].role == MessageRole.USER.value
-        assert result[0].content == "User message 2"
+        assert result[0].content == "User message 1"
         print("OK: Compression tool mixed with other tools")
 
     def test_is_compress_history_tool_call(self):
@@ -350,11 +347,11 @@ class TestExtractAllContextMessages:
             self.create_message(MessageRole.USER.value, "User 3"),
         ]
         result = MessageManager.extract_messages_for_inference(messages)
-        # Should keep User-2 + compression tool + User-3
-        assert len(result) == 3
-        assert result[0].content == "User 2"
-        assert result[1].tool_calls is not None
-        assert result[2].content == "User 3"
+        # Tool call without a successful tool result metadata is not an anchor.
+        assert len(result) == 5
+        assert result[0].content == "User 1"
+        assert result[3].tool_calls is not None
+        assert result[4].content == "User 3"
 
         print("OK: extract_messages_for_inference static method")
 

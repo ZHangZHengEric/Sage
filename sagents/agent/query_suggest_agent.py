@@ -37,7 +37,7 @@ class QuerySuggestAgent(AgentBase):
         # 根据 active_budget 压缩消息
         budget_info = message_manager.context_budget_manager.budget_info
         if budget_info:
-            conversation_messages = MessageManager.compress_messages(
+            conversation_messages = MessageManager.build_token_budget_view(
                 conversation_messages, min(budget_info.get("active_budget", 8000), 4000)
             )
         recent_message_str = MessageManager.convert_messages_to_str(
