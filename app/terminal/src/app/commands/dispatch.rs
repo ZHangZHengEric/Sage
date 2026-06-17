@@ -434,76 +434,52 @@ impl App {
                 }
             },
             "/status" => {
-                let mut lines = vec![
-                    format!("session: {}", self.session_id),
-                    format!("busy: {}", self.busy),
-                ];
+                let mut lines = vec![format!(
+                    "status: {}",
+                    if self.busy { "working" } else { "ready" }
+                )];
+                lines.push(format!("session: {}", self.session_id));
                 if let Some(agent_config) = self.agent_config_path.as_ref() {
-                    lines.push(format!("agent_config: {}", agent_config.display()));
+                    lines.push(format!("agent: config {}", agent_config.display()));
                 } else {
-                    lines.push(format!("agent_id: {}", self.agent_id_status_label()));
+                    lines.push(format!("agent: {}", self.agent_id_status_label()));
                 }
                 lines.extend([
-                    format!("agent_mode: {}", self.agent_mode_status_label()),
-                    format!("sandbox_type: {}", self.sandbox_type_status_label()),
-                    format!("display_mode: {}", display_mode_name(self.display_mode)),
+                    format!("mode: {}", self.agent_mode_status_label()),
                     format!("workspace: {}", self.workspace_label),
-                    format!(
-                        "goal: {}",
-                        self.current_goal
-                            .as_ref()
-                            .map(|goal| goal.objective.clone())
-                            .unwrap_or_else(|| "(none)".to_string())
-                    ),
-                    format!(
-                        "goal_status: {}",
-                        self.current_goal
-                            .as_ref()
-                            .map(|goal| goal.status.clone())
-                            .unwrap_or_else(|| "(none)".to_string())
-                    ),
-                    format!(
-                        "goal_pending: {}",
-                        self.pending_goal_mutation
-                            .as_ref()
-                            .map(|pending| {
-                                if pending.clear {
-                                    "clear".to_string()
-                                } else if let Some(objective) = &pending.objective {
-                                    format!(
-                                        "set:{} ({})",
-                                        objective,
-                                        pending
-                                            .status
-                                            .clone()
-                                            .unwrap_or_else(|| "active".to_string())
-                                    )
-                                } else {
-                                    pending
-                                        .status
-                                        .clone()
-                                        .unwrap_or_else(|| "(none)".to_string())
-                                }
-                            })
-                            .unwrap_or_else(|| "(none)".to_string())
-                    ),
-                    format!("max_loop_count: {}", self.max_loop_count_status_label()),
-                    format!(
-                        "skills: {}",
-                        if self.selected_skills.is_empty() {
-                            "(none)".to_string()
-                        } else {
-                            self.selected_skills.join(", ")
-                        }
-                    ),
-                    format!(
-                        "model_override: {}",
-                        self.selected_model
-                            .clone()
-                            .unwrap_or_else(|| "(none)".to_string())
-                    ),
-                    format!("input: {} chars", self.input.chars().count()),
+                    format!("sandbox: {}", self.sandbox_type_status_label()),
+                    format!("display: {}", display_mode_name(self.display_mode)),
+                    format!("loop limit: {}", self.max_loop_count_status_label()),
                 ]);
+                if let Some(goal) = &self.current_goal {
+                    lines.push(format!("goal: {} ({})", goal.objective, goal.status));
+                }
+                if let Some(pending) = &self.pending_goal_mutation {
+                    let pending_label = if pending.clear {
+                        "clear".to_string()
+                    } else if let Some(objective) = &pending.objective {
+                        format!(
+                            "set:{} ({})",
+                            objective,
+                            pending
+                                .status
+                                .clone()
+                                .unwrap_or_else(|| "active".to_string())
+                        )
+                    } else {
+                        pending
+                            .status
+                            .clone()
+                            .unwrap_or_else(|| "pending".to_string())
+                    };
+                    lines.push(format!("goal pending: {}", pending_label));
+                }
+                if !self.selected_skills.is_empty() {
+                    lines.push(format!("skills: {}", self.selected_skills.join(", ")));
+                }
+                if let Some(model) = &self.selected_model {
+                    lines.push(format!("model: {}", model));
+                }
                 self.queue_message(MessageKind::System, lines.join("\n"));
                 self.status = format!("status  {}", self.session_id);
                 SubmitAction::Handled

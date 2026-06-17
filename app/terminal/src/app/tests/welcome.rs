@@ -192,6 +192,21 @@ fn status_command_keeps_welcome_banner_visible() {
     assert!(rendered.contains("Notice"));
     assert!(rendered.contains("session: "));
     assert!(rendered.contains("workspace: "));
+    assert!(rendered.contains("status: ready"));
+    assert!(rendered.contains("agent: "));
+    assert!(rendered.contains("mode: "));
+    assert!(rendered.contains("sandbox: "));
+    assert!(rendered.contains("display: "));
+    assert!(!rendered.contains("busy: false"));
+    assert!(!rendered.contains("agent_id: "));
+    assert!(!rendered.contains("agent_mode: "));
+    assert!(!rendered.contains("sandbox_type: "));
+    assert!(!rendered.contains("display_mode: "));
+    assert!(!rendered.contains("goal: (none)"));
+    assert!(!rendered.contains("goal_pending: "));
+    assert!(!rendered.contains("skills: (none)"));
+    assert!(!rendered.contains("model_override: "));
+    assert!(!rendered.contains("input: 0 chars"));
     assert!(!app.rendered_idle_lines(120).is_empty());
 }
 
