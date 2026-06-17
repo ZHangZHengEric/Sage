@@ -13,6 +13,24 @@ from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
 from sagents.llm.capabilities import create_chat_completion_with_fallback
 
+MAX_COMPACT_SUMMARY_CHARS = 5000
+COMPACT_LIST_LIMITS = {
+    "decisions": 20,
+    "open_tasks": 20,
+    "files_touched": 40,
+    "commands_run": 20,
+    "important_errors": 20,
+    "user_requirements": 30,
+}
+COMPACT_ITEM_CHAR_LIMITS = {
+    "decisions": 500,
+    "open_tasks": 500,
+    "files_touched": 300,
+    "commands_run": 800,
+    "important_errors": 1000,
+    "user_requirements": 500,
+}
+
 
 class CompressHistoryError(Exception):
     """压缩历史消息异常"""
@@ -138,6 +156,8 @@ class CompressHistoryTool:
 - summary 使用简洁、明确的语言，避免模糊描述。
 - 保留具体技术细节：真实路径、名称、数值、命令、错误文本。
 - 文件路径优先使用原文中的绝对路径；没有绝对路径时使用相对路径或文件名；禁止编造路径。
+- 列表只保留最重要的条目：commands_run 最多 20 条，files_touched 最多 40 条，其他列表最多 20-30 条。
+- 单条命令/路径/错误过长时必须摘要，不要整段粘贴超长输出。
 - 按优先级排序，重要信息在前。
 - 总长度控制在 8000 字以内（非严格限制）。"""
 
@@ -191,7 +211,59 @@ class CompressHistoryTool:
             raise CompressHistoryError(f"LLM 压缩失败: {e}")
 
     @staticmethod
-    def _parse_structured_summary(raw_summary: str) -> Tuple[Dict[str, Any], str]:
+    def _truncate_text(text: str, limit: int) -> Tuple[str, bool]:
+        if len(text) <= limit:
+            return text, False
+        return text[: max(0, limit - 15)].rstrip() + "... [truncated]", True
+
+    @staticmethod
+    def _bounded_list(
+        key: str,
+        values: List[str],
+    ) -> Tuple[List[str], Dict[str, int]]:
+        limit = COMPACT_LIST_LIMITS[key]
+        item_limit = COMPACT_ITEM_CHAR_LIMITS[key]
+        out: List[str] = []
+        truncated_items = 0
+        for item in values[:limit]:
+            truncated, was_truncated = CompressHistoryTool._truncate_text(
+                item, item_limit
+            )
+            out.append(truncated)
+            if was_truncated:
+                truncated_items += 1
+        stats: Dict[str, int] = {}
+        if len(values) > limit:
+            stats["omitted_count"] = len(values) - limit
+        if truncated_items:
+            stats["truncated_item_count"] = truncated_items
+        return out, stats
+
+    @staticmethod
+    def _bound_summary_payload(
+        payload: Dict[str, Any],
+    ) -> Tuple[Dict[str, Any], Dict[str, Dict[str, int]]]:
+        truncation_stats: Dict[str, Dict[str, int]] = {}
+        summary, summary_truncated = CompressHistoryTool._truncate_text(
+            str(payload.get("summary") or ""), MAX_COMPACT_SUMMARY_CHARS
+        )
+        bounded: Dict[str, Any] = {"summary": summary}
+        if summary_truncated:
+            truncation_stats["summary"] = {"truncated": 1}
+
+        for key in COMPACT_LIST_LIMITS:
+            bounded_list, stats = CompressHistoryTool._bounded_list(
+                key, payload.get(key, [])
+            )
+            bounded[key] = bounded_list
+            if stats:
+                truncation_stats[key] = stats
+        return bounded, truncation_stats
+
+    @staticmethod
+    def _parse_structured_summary(
+        raw_summary: str,
+    ) -> Tuple[Dict[str, Any], str, Dict[str, Dict[str, int]]]:
         """Parse compact output as JSON when possible, otherwise keep raw text."""
         raw_summary = raw_summary or ""
         text = raw_summary.strip()
@@ -234,7 +306,10 @@ class CompressHistoryTool:
             "important_errors": _as_list(parsed.get("important_errors")),
             "user_requirements": _as_list(parsed.get("user_requirements")),
         }
-        return payload, parse_status
+        bounded_payload, truncation_stats = CompressHistoryTool._bound_summary_payload(
+            payload
+        )
+        return bounded_payload, parse_status, truncation_stats
 
     async def compress_conversation_history(
         self,
@@ -262,26 +337,22 @@ class CompressHistoryTool:
             to_compress = messages
 
             if not to_compress:
+                content_payload = {
+                    "summary": "没有消息需要压缩",
+                    "decisions": [],
+                    "open_tasks": [],
+                    "files_touched": [],
+                    "commands_run": [],
+                    "important_errors": [],
+                    "user_requirements": [],
+                    "original_content_paths": [],
+                    "stats": {
+                        "source_message_count": 0,
+                    },
+                }
                 return {
                     "status": "success",
-                    "message": json.dumps(
-                        {
-                            "summary": "没有消息需要压缩",
-                            "decisions": [],
-                            "open_tasks": [],
-                            "files_touched": [],
-                            "commands_run": [],
-                            "important_errors": [],
-                            "user_requirements": [],
-                            "source_range": {
-                                "start_message_id": source_start_message_id,
-                                "end_message_id": source_end_message_id,
-                            },
-                            "source_message_ids": source_message_ids or [],
-                            "original_content_paths": [],
-                        },
-                        ensure_ascii=False,
-                    ),
+                    "message": json.dumps(content_payload, ensure_ascii=False),
                     "data": {
                         "compressed": False,
                         "summary": "",
@@ -289,6 +360,11 @@ class CompressHistoryTool:
                         "original_tokens": 0,
                         "compressed_tokens": 0,
                         "compression_ratio": 0,
+                        "source_range": {
+                            "start_message_id": source_start_message_id,
+                            "end_message_id": source_end_message_id,
+                        },
+                        "source_message_ids": source_message_ids or [],
                     },
                 }
 
@@ -304,7 +380,9 @@ class CompressHistoryTool:
             raw_summary = await self._call_llm_for_compression(
                 messages_text, session_id
             )
-            summary_payload, parse_status = self._parse_structured_summary(raw_summary)
+            summary_payload, parse_status, truncation_stats = (
+                self._parse_structured_summary(raw_summary)
+            )
 
             # 5. 计算压缩后的 token 数
             compressed_tokens = self._calculate_tokens(
@@ -332,11 +410,6 @@ class CompressHistoryTool:
             )
             compression_payload = {
                 **summary_payload,
-                "source_range": {
-                    "start_message_id": source_start_message_id,
-                    "end_message_id": source_end_message_id,
-                },
-                "source_message_ids": source_message_ids,
                 "original_content_paths": [],
                 "stats": {
                     "original_tokens": original_tokens,
@@ -344,7 +417,16 @@ class CompressHistoryTool:
                     "compression_ratio": compression_ratio,
                     "source_message_count": len(to_compress),
                     "summary_parse_status": parse_status,
+                    "output_truncation": truncation_stats,
                 },
+            }
+            compression_data = {
+                **compression_payload,
+                "source_range": {
+                    "start_message_id": source_start_message_id,
+                    "end_message_id": source_end_message_id,
+                },
+                "source_message_ids": source_message_ids,
             }
             compression_info = json.dumps(
                 compression_payload, ensure_ascii=False, indent=2
@@ -353,7 +435,7 @@ class CompressHistoryTool:
             return {
                 "status": "success",
                 "message": compression_info,
-                "data": compression_payload,
+                "data": compression_data,
             }
 
         except CompressHistoryError as e:

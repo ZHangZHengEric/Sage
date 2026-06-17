@@ -122,6 +122,8 @@ class TestCompressHistoryTool:
             "end_message_id": "a1",
         }
         assert '"summary": "summary text"' in result["message"]
+        assert "source_message_ids" not in result["message"]
+        assert "source_range" not in result["message"]
 
     def test_compress_conversation_history_empty_messages(self):
         """Test: compress_conversation_history with empty messages"""
@@ -153,6 +155,7 @@ class TestCompressHistoryTool:
         assert result["status"] == "success"
         assert result["data"]["summary"] == "short summary"
         assert len(result["data"]["source_message_ids"]) == 2
+        assert "source_message_ids" not in result["message"]
         print("OK: compress_conversation_history caller input")
 
     def test_compress_conversation_history_uses_structured_json_output(self):
@@ -186,6 +189,43 @@ class TestCompressHistoryTool:
         assert result["data"]["decisions"] == ["use manifest"]
         assert result["data"]["open_tasks"] == ["run matrix tests"]
         assert result["data"]["stats"]["summary_parse_status"] == "json"
+
+    def test_compress_conversation_history_bounds_long_output_lists(self):
+        """Test: compact tool result content does not grow without bounds."""
+        messages = [
+            self.create_message(MessageRole.USER.value, "User"),
+            self.create_message(MessageRole.ASSISTANT.value, "Assistant"),
+        ]
+        commands = [f"cmd-{idx} " + ("x" * 1200) for idx in range(50)]
+        files = [f"/tmp/file-{idx}.txt" for idx in range(80)]
+
+        async def fake_call(messages_text, session_id):
+            return json.dumps(
+                {
+                    "summary": "S" * 6000,
+                    "commands_run": commands,
+                    "files_touched": files,
+                },
+                ensure_ascii=False,
+            )
+
+        self.tool._call_llm_for_compression = fake_call
+        result = asyncio.run(
+            self.tool.compress_conversation_history(messages, "test_session")
+        )
+
+        payload = json.loads(result["message"])
+        assert len(payload["summary"]) <= 5000
+        assert len(payload["commands_run"]) == 20
+        assert len(payload["files_touched"]) == 40
+        assert all(len(command) <= 800 for command in payload["commands_run"])
+        assert payload["stats"]["output_truncation"]["commands_run"] == {
+            "omitted_count": 30,
+            "truncated_item_count": 20,
+        }
+        assert payload["stats"]["output_truncation"]["files_touched"] == {
+            "omitted_count": 40
+        }
 
     def test_compress_conversation_history_falls_back_when_output_is_not_json(self):
         """Test: non-JSON compact output is still a successful compression."""
