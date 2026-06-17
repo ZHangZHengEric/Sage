@@ -141,8 +141,8 @@ class CompressHistoryTool:
 - 总长度控制在 8000 字以内（非严格限制）。"""
 
         try:
-            # 构建 extra_body，禁用深度思考
-            extra_body = {"top_k": 20, "_step_name": "compress_history"}
+            # 构建 extra_body，禁用深度思考。不要传 top_k：OpenAI 兼容接口会拒绝该参数。
+            extra_body = {"_step_name": "compress_history"}
 
             # 判断是否为 OpenAI 推理模型
             is_openai_reasoning_model = (
