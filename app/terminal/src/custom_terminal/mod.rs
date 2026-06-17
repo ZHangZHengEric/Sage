@@ -6,6 +6,7 @@ use std::io;
 use std::io::Write;
 
 use crossterm::queue;
+use crossterm::style::{Attribute as CAttribute, ResetColor, SetAttribute};
 use crossterm::terminal::ScrollUp;
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::buffer::Buffer;
@@ -121,6 +122,13 @@ where
 
     pub fn clear(&mut self) -> io::Result<()> {
         self.clear_after_position(self.viewport_area.as_position())
+    }
+
+    pub fn clear_viewport_for_exit(&mut self) -> io::Result<()> {
+        queue!(self.backend, ResetColor, SetAttribute(CAttribute::Reset))?;
+        self.clear_after_position(self.viewport_area.as_position())?;
+        Backend::flush(&mut self.backend)?;
+        Ok(())
     }
 
     pub fn clear_after_position(&mut self, position: Position) -> io::Result<()> {
@@ -313,5 +321,118 @@ impl crossterm::Command for ResetScrollRegion {
             io::ErrorKind::Unsupported,
             "ResetScrollRegion requires ANSI terminal support",
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::io::Write;
+
+    use ratatui::backend::{Backend, ClearType, WindowSize};
+    use ratatui::buffer::Cell;
+    use ratatui::layout::{Position, Size};
+
+    use super::Terminal;
+
+    #[derive(Default)]
+    struct RecordingBackend {
+        out: Vec<u8>,
+        size: Size,
+        cursor: Position,
+        clear_region: Option<ClearType>,
+        flushed: bool,
+    }
+
+    impl RecordingBackend {
+        fn new(width: u16, height: u16) -> Self {
+            Self {
+                size: Size { width, height },
+                ..Self::default()
+            }
+        }
+    }
+
+    impl Write for RecordingBackend {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.out.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.flushed = true;
+            Ok(())
+        }
+    }
+
+    impl Backend for RecordingBackend {
+        fn draw<'a, I>(&mut self, _content: I) -> io::Result<()>
+        where
+            I: Iterator<Item = (u16, u16, &'a Cell)>,
+        {
+            Ok(())
+        }
+
+        fn hide_cursor(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn show_cursor(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn get_cursor_position(&mut self) -> io::Result<Position> {
+            Ok(self.cursor)
+        }
+
+        fn set_cursor_position<P: Into<Position>>(&mut self, position: P) -> io::Result<()> {
+            self.cursor = position.into();
+            Ok(())
+        }
+
+        fn clear(&mut self) -> io::Result<()> {
+            self.clear_region = Some(ClearType::All);
+            Ok(())
+        }
+
+        fn clear_region(&mut self, clear_type: ClearType) -> io::Result<()> {
+            self.clear_region = Some(clear_type);
+            Ok(())
+        }
+
+        fn size(&self) -> io::Result<Size> {
+            Ok(self.size)
+        }
+
+        fn window_size(&mut self) -> io::Result<WindowSize> {
+            Ok(WindowSize {
+                columns_rows: self.size,
+                pixels: Size::default(),
+            })
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Write::flush(self)
+        }
+    }
+
+    #[test]
+    fn clear_viewport_for_exit_resets_style_and_clears_from_viewport_top() {
+        let backend = RecordingBackend::new(80, 24);
+        let mut terminal =
+            Terminal::with_viewport_height_and_cursor(backend, 5, Position { x: 0, y: 10 })
+                .expect("terminal");
+
+        terminal.clear_viewport_for_exit().expect("clear exit");
+
+        let backend = terminal.backend_mut();
+        let rendered = String::from_utf8_lossy(&backend.out);
+        assert!(
+            rendered.contains("\x1b[0m"),
+            "exit cleanup should reset attributes before clearing: {rendered:?}"
+        );
+        assert_eq!(backend.cursor, Position { x: 0, y: 10 });
+        assert_eq!(backend.clear_region, Some(ClearType::AfterCursor));
+        assert!(backend.flushed);
     }
 }

@@ -69,16 +69,26 @@ pub fn setup_terminal(_app: &App) -> Result<AppTerminal> {
 }
 
 pub fn restore_terminal(terminal: &mut AppTerminal) -> Result<()> {
-    disable_raw_mode()?;
+    let mut first_error = terminal.clear_viewport_for_exit().err();
+    if let Err(err) = disable_raw_mode() {
+        first_error.get_or_insert(err);
+    }
     let backend = terminal.backend_mut();
-    ignore_unsupported(execute!(backend, PopKeyboardEnhancementFlags))?;
-    execute!(
+    if let Err(err) = ignore_unsupported(execute!(backend, PopKeyboardEnhancementFlags)) {
+        first_error.get_or_insert(err);
+    }
+    if let Err(err) = execute!(
         backend,
         DisableBracketedPaste,
         ResetColor,
         crossterm::cursor::Show
-    )?;
-    Ok(())
+    ) {
+        first_error.get_or_insert(err);
+    }
+    match first_error {
+        Some(err) => Err(err.into()),
+        None => Ok(()),
+    }
 }
 
 pub fn run(terminal: &mut AppTerminal, app: &mut App) -> Result<()> {
