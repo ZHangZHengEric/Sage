@@ -341,7 +341,7 @@ fn transcript_overlay_scrolls_for_long_history() {
 }
 
 #[test]
-fn idle_main_region_renders_welcome_then_committed_transcript() {
+fn idle_main_region_renders_committed_transcript_without_welcome() {
     let mut app = App::new();
     app.push_message(MessageKind::User, "hello");
     app.push_message(MessageKind::Assistant, "ready");
@@ -361,13 +361,9 @@ fn idle_main_region_renders_welcome_then_committed_transcript() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    assert!(rendered.contains("Sage Terminal"));
+    assert!(!rendered.contains("Sage Terminal"));
     assert!(rendered.contains("hello"));
     assert!(rendered.contains("ready"));
-    assert!(
-        rendered.find("Sage Terminal") < rendered.find("hello"),
-        "welcome should render before transcript: {rendered:?}"
-    );
 }
 
 #[test]

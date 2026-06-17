@@ -161,6 +161,14 @@ fn first_transcript_keeps_welcome_out_of_history_but_visible_when_idle() {
     assert!(!rendered.contains("Tip: "));
     assert!(rendered.contains("hello"));
     assert!(!app.rendered_idle_lines(120).is_empty());
+    let main_rendered = app
+        .rendered_main_lines(120)
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!main_rendered.contains("Sage Terminal"));
 }
 
 #[test]
