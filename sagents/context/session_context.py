@@ -907,6 +907,7 @@ class SessionContext:
                         self.message_manager.messages = [
                             MessageChunk.from_dict(msg) for msg in messages_data
                         ]
+                        self.message_manager.refresh_compact_manifest()
                         logger.debug(
                             f"SessionContext: Loaded {len(self.message_manager.messages)} messages from messages.json"
                         )
@@ -1635,6 +1636,25 @@ class SessionContext:
                     json.dump(serializable_messages, f, ensure_ascii=False, indent=4)
             except Exception as e:
                 logger.error(f"SessionContext: Failed to save messages.json: {e}")
+
+            # 2. 保存 compact_manifest.json（派生索引，仅用于审计/调试）
+            try:
+                compact_manifest = self.message_manager.get_compact_manifest()
+                with open(
+                    os.path.join(self.session_workspace, "compact_manifest.json"),
+                    "w",
+                    encoding="utf-8",
+                ) as f:
+                    json.dump(
+                        make_serializable(compact_manifest),
+                        f,
+                        ensure_ascii=False,
+                        indent=4,
+                    )
+            except Exception as e:
+                logger.error(
+                    f"SessionContext: Failed to save compact_manifest.json: {e}"
+                )
 
             # 3. 保存 session_context.json (仅保存最新状态)
             # 包含 system_context, audit_status, token_usage, 基本元数据

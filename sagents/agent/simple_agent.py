@@ -669,7 +669,7 @@ class SimpleAgent(AgentBase):
             session_context.message_manager.context_budget_manager.budget_info or {}
         )
         budget = min(budget_info.get("active_budget", 3000), 3000)
-        messages_for_complete = MessageManager.compress_messages(
+        messages_for_complete = MessageManager.build_token_budget_view(
             messages_for_complete, budget
         )
 
@@ -1020,24 +1020,6 @@ class SimpleAgent(AgentBase):
             )
             all_new_response_chunks = []
 
-            if (
-                MessageManager.calculate_messages_token_length(
-                    cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input)
-                )
-                > self.max_model_input_len
-            ):
-                logger.warning(
-                    f"SimpleAgent: 消息长度超过 {self.max_model_input_len}，截断消息"
-                )
-                # 任务暂停，返回一个超长的错误消息块
-                yield [
-                    MessageChunk(
-                        role=MessageRole.ASSISTANT.value,
-                        content=f"消息长度超过最大长度：{self.max_model_input_len},是否需要继续执行？",
-                        type=MessageType.AGENT_EXECUTION_ERROR.value,
-                    )
-                ]
-                break
             if self._should_abort_due_to_session(session_context):
                 break
             # 检查任务是否完成
@@ -1539,90 +1521,6 @@ class SimpleAgent(AgentBase):
 
         return False
 
-    async def _compress_messages_with_tool(
-        self, messages: List[MessageChunk], session_id: str
-    ) -> AsyncGenerator[List[MessageChunk], None]:
-        """
-        使用 compress_conversation_history 工具压缩消息
-        只 yield tool_calls 和 tool 结果，让上层处理消息列表
-
-        Args:
-            messages: 要压缩的消息列表
-            session_id: 会话ID
-
-        Yields:
-            List[MessageChunk]: 消息列表
-                - 首先 yield Assistant 的 tool_calls
-                - 然后 yield Tool 的结果
-        """
-        try:
-            # 生成唯一的 tool_call_id
-            tool_call_id = f"auto_compress_{uuid.uuid4().hex[:8]}"
-
-            # 1. 首先 yield Assistant 的 tool_calls
-            assistant_tool_call = MessageChunk(
-                role=MessageRole.ASSISTANT.value,
-                content="",
-                tool_calls=[
-                    {
-                        "id": tool_call_id,
-                        "type": "function",
-                        "function": {
-                            "name": "compress_conversation_history",
-                            "arguments": json.dumps({"session_id": session_id}),
-                        },
-                    }
-                ],
-                type=MessageType.TOOL_CALL.value,
-            )
-            logger.info("SimpleAgent: yield 压缩工具的 tool_calls")
-            yield [assistant_tool_call]
-
-            # 2. 调用压缩工具获取结果
-            from sagents.tool.impl.compress_history_tool import CompressHistoryTool
-
-            tool = CompressHistoryTool()
-            result = await tool.compress_conversation_history(messages, session_id)
-
-            # 3. yield Tool 的结果（无论成功或失败都返回）
-            compression_result = MessageChunk(
-                role=MessageRole.TOOL.value,
-                content=result.get("message", ""),
-                tool_call_id=tool_call_id,
-                type=MessageType.TOOL_CALL_RESULT.value,
-                metadata={
-                    "tool_name": "compress_conversation_history",
-                    "auto_generated": True,
-                    "status": result.get("status", "unknown"),
-                },
-            )
-            if result.get("status") == "success":
-                logger.info("SimpleAgent: yield 压缩工具的 tool result")
-            else:
-                logger.warning(
-                    f"SimpleAgent: 工具压缩失败 - {result.get('message', '未知错误')}"
-                )
-            yield [compression_result]
-
-        except Exception as e:
-            logger.error(f"SimpleAgent: 调用压缩工具失败: {e}")
-            import traceback
-
-            logger.error(traceback.format_exc())
-            # 即使异常也返回 tool result
-            compression_result = MessageChunk(
-                role=MessageRole.TOOL.value,
-                content=f"压缩失败: {str(e)}",
-                tool_call_id=tool_call_id,
-                type=MessageType.TOOL_CALL_RESULT.value,
-                metadata={
-                    "tool_name": "compress_conversation_history",
-                    "auto_generated": True,
-                    "status": "error",
-                },
-            )
-            yield [compression_result]
-
     async def _prepare_messages_for_llm(
         self, messages_input: List[MessageChunk], session_id: str
     ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
@@ -1642,85 +1540,7 @@ class SimpleAgent(AgentBase):
                 - 可能 yield 压缩工具的 tool result (is_final=False)
                 - 最后 yield 最终的消息列表 (is_final=True)
         """
-        # 1. 提取可用消息（检测压缩工具）
-        extracted_messages = MessageManager.extract_messages_for_inference(
-            messages_input
-        )
-        logger.debug(f"SimpleAgent: 提取后消息数量: {len(extracted_messages)}")
-
-        # 2. 检查是否需要压缩
-        max_model_len = self.model_config.get("max_model_len", 64000)
-        max_new_tokens = (
-            self.model_config.get("max_tokens")
-            or self.model_config.get("max_completion_tokens")
-            or 20000
-        )
-        should_compress, current_tokens, max_model_len = (
-            MessageManager.should_compress_messages(
-                extracted_messages, max_model_len, max_new_tokens
-            )
-        )
-
-        if not should_compress:
-            logger.debug(
-                f"SimpleAgent: 消息长度符合要求 ({current_tokens} tokens)，无需压缩"
-            )
-            yield (extracted_messages, True)
-            return
-
-        # 3. 先尝试使用 compress_messages 进行压缩
-        # 计算 system 消息的 token 长度
-        system_messages = [
-            m for m in extracted_messages if m.role == MessageRole.SYSTEM.value
-        ]
-        system_tokens = MessageManager.calculate_messages_token_length(system_messages)
-        # 压缩目标：max_model_len 减去 system 消息后，剩余部分的 30%
-        budget_limit = int((max_model_len - system_tokens) * 0.3)
-        # 强制保护末尾 5 条消息（覆盖当前轮的 user/tool/assistant），避免最新消息被压缩
-        compressed_messages = MessageManager.compress_messages(
-            extracted_messages, budget_limit, recent_messages_count=5
-        )
-        new_tokens = MessageManager.calculate_messages_token_length(compressed_messages)
-
-        logger.info(
-            f"SimpleAgent: compress_messages 压缩后: {current_tokens} -> {new_tokens} tokens"
-        )
-
-        # 4. 检查压缩后是否满足要求
-        should_compress_after, _, _ = MessageManager.should_compress_messages(
-            compressed_messages, max_model_len, max_new_tokens
-        )
-
-        if not should_compress_after:
-            logger.info("SimpleAgent: compress_messages 压缩后满足要求")
-            yield (compressed_messages, True)
-            return
-
-        # 5. 如果仍不满足，调用 compress_conversation_history 工具进行深度压缩
-        # 目标与 compress_messages 一致：max_model_len 减去 system 消息后，剩余部分的 30%
-        target_tokens = int((max_model_len - system_tokens) * 0.3)
-        logger.info(
-            f"SimpleAgent: compress_messages 压缩后仍不满足要求，调用工具进行深度压缩。当前: {new_tokens} tokens, 目标: <= {target_tokens} tokens (max_model_len: {max_model_len}, system_tokens: {system_tokens})"
-        )
-
-        # 通过生成器获取工具调用的中间结果（tool_calls 和 tool result）
-        tool_results = []
-        async for messages_chunk in self._compress_messages_with_tool(
-            compressed_messages, session_id
+        async for messages_chunk, is_final in self._prepare_context_messages_for_llm(
+            messages_input, session_id
         ):
-            # 将 tool_calls 和 tool result 向上传递
-            yield (messages_chunk, False)
-            tool_results.extend(messages_chunk)
-
-        # 将 tool 结果添加到压缩后的消息列表中
-        messages_with_tool = compressed_messages + tool_results
-
-        # 6. 重新提取（因为添加了压缩工具结果）
-        final_messages = MessageManager.extract_messages_for_inference(
-            messages_with_tool
-        )
-        final_tokens = MessageManager.calculate_messages_token_length(final_messages)
-        logger.info(
-            f"SimpleAgent: 最终消息数量: {len(final_messages)}, token数: {final_tokens}"
-        )
-        yield (final_messages, True)
+            yield (messages_chunk, is_final)

@@ -375,7 +375,7 @@ class PlanAgent(AgentBase):
 
         budget_info = message_manager.context_budget_manager.budget_info
         if budget_info:
-            filtered_messages = MessageManager.compress_messages(
+            filtered_messages = MessageManager.build_token_budget_view(
                 filtered_messages,
                 min(budget_info.get("active_budget", 8000), 3500),
             )
@@ -694,7 +694,7 @@ class PlanAgent(AgentBase):
         active_budget = 3000
         if budget_info:
             active_budget = min(budget_info.get("active_budget", 3000), 3000)
-        messages_for_judge = MessageManager.compress_messages(
+        messages_for_judge = MessageManager.build_token_budget_view(
             messages_for_judge, active_budget
         )
         clean_messages = MessageManager.convert_messages_to_dict_for_request(

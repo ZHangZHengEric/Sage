@@ -47,7 +47,7 @@ class TeamOrchestrator(FibreOrchestrator):
         session_context: SessionContext,
         max_loop_count: int,
     ) -> AsyncGenerator[List[MessageChunk], None]:
-        output_queue: asyncio.Queue[Optional[List[MessageChunk]]] = asyncio.Queue()
+        output_queue: asyncio.Queue[Optional[List[Any]]] = asyncio.Queue()
         self.output_queue = output_queue
 
         session_context.orchestrator = self
@@ -391,15 +391,13 @@ class TeamOrchestrator(FibreOrchestrator):
                         session_id, user_id=user_id
                     )
                     break
+                await self._publish_child_stream_chunks(chunks)
                 all_content_chunks.extend(
-                    [
-                        chunk
-                        for chunk in chunks
-                        if chunk.session_id == session_id
-                        and chunk.role == MessageRole.ASSISTANT.value
-                        and chunk.content
-                        and chunk.type not in ("token_usage", "stream_end")
-                    ]
+                    self._summary_content_chunks(
+                        chunks,
+                        session_id,
+                        require_content=True,
+                    )
                 )
 
             if parent_session and parent_session.should_interrupt():
@@ -503,12 +501,8 @@ class TeamOrchestrator(FibreOrchestrator):
             ):
                 if sub_session.should_interrupt():
                     break
-                filtered_chunks = [
-                    c
-                    for c in chunks
-                    if c.session_id == session_id
-                    and c.role == MessageRole.ASSISTANT.value
-                ]
+                await self._publish_child_stream_chunks(chunks)
+                filtered_chunks = self._summary_content_chunks(chunks, session_id)
                 if filtered_chunks:
                     all_filtered_chunks.extend(filtered_chunks)
 
