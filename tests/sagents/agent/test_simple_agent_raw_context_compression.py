@@ -710,9 +710,11 @@ async def test_prepare_messages_for_llm_inserts_successful_pair_after_source_tai
     )
     monkeypatch.setattr(
         "sagents.agent.agent_base.MessageManager.calculate_messages_token_length",
-        lambda messages: 2000
-        if not any(msg.message_id == "compress-result" for msg in messages)
-        else 100,
+        lambda messages: (
+            2000
+            if not any(msg.message_id == "compress-result" for msg in messages)
+            else 100
+        ),
     )
 
     tool_call, tool_result = _compression_pair(
