@@ -351,7 +351,14 @@ class TestExtractIgnoresActiveStartIndex:
             "source_start_message_id": "u1",
             "source_end_message_id": "a1",
         }
-        mm.messages = [u1, a1, u2, compress_call, compress_result, _make(MessageRole.USER.value, "u3")]
+        mm.messages = [
+            u1,
+            a1,
+            u2,
+            compress_call,
+            compress_result,
+            _make(MessageRole.USER.value, "u3"),
+        ]
         result = mm.extract_all_context_messages(
             recent_turns=0, last_turn_user_only=False
         )

@@ -112,7 +112,9 @@ def _compression_pair(
     return tool_call, tool_result
 
 
-def test_rule_artifact_offload_keeps_main_ledger_and_protects_user_and_tool_args(tmp_path):
+def test_rule_artifact_offload_keeps_main_ledger_and_protects_user_and_tool_args(
+    tmp_path,
+):
     old_user = _msg(
         MessageRole.USER.value,
         "U" * 30_000,
@@ -151,8 +153,10 @@ def test_rule_artifact_offload_keeps_main_ledger_and_protects_user_and_tool_args
     assert "original_content_abs_path:" in view[2].content
     original_content_path = view[2].metadata["original_content_path"]
     assert original_content_path == ".sage/context/artifacts/sess-artifact/t-old.txt"
-    assert view[2].metadata["original_content_abs_path"].endswith(
-        "/sess-artifact/t-old.txt"
+    assert (
+        view[2]
+        .metadata["original_content_abs_path"]
+        .endswith("/sess-artifact/t-old.txt")
     )
     assert (tmp_path / "sess-artifact" / "t-old.txt").read_text() == "T" * 30_000
 
@@ -227,8 +231,10 @@ def test_rule_artifact_offload_role_matrix(
 
     if should_offload:
         assert "[Content moved to context artifact]" in view[0].content
-        assert view[0].metadata["original_content_path"].startswith(
-            ".sage/context/artifacts/sess-matrix/"
+        assert (
+            view[0]
+            .metadata["original_content_path"]
+            .startswith(".sage/context/artifacts/sess-matrix/")
         )
     else:
         assert view[0].content == "X" * 30_000
@@ -331,7 +337,9 @@ def test_invalid_compression_pair_metadata_does_not_hide_raw_messages(metadata):
         MessageType.ASSISTANT_TEXT.value,
         message_id="raw-a",
     )
-    tool_call = _tool_call("compress-call", "compress-1", "compress_conversation_history")
+    tool_call = _tool_call(
+        "compress-call", "compress-1", "compress_conversation_history"
+    )
     tool_result = _msg(
         MessageRole.TOOL.value,
         "summary",
@@ -580,9 +588,7 @@ def test_compact_manifest_indexes_visible_and_covered_compression_pairs():
     assert manifest["compression_pair_count"] == 2
     assert manifest["visible_pair_count"] == 1
     assert manifest["visible_compression_result_message_ids"] == ["outer-result"]
-    pairs_by_call = {
-        pair["assistant_message_id"]: pair for pair in manifest["pairs"]
-    }
+    pairs_by_call = {pair["assistant_message_id"]: pair for pair in manifest["pairs"]}
     assert pairs_by_call["inner-call"]["covered_by_later"] is True
     assert pairs_by_call["inner-call"]["visible"] is False
     assert pairs_by_call["outer-call"]["covered_by_later"] is False
@@ -699,7 +705,9 @@ async def test_prepare_messages_for_llm_inserts_successful_pair_after_source_tai
         sandbox_agent_workspace=None,
         system_context={},
     )
-    monkeypatch.setattr(agent, "_get_live_session_context", lambda session_id: session_context)
+    monkeypatch.setattr(
+        agent, "_get_live_session_context", lambda session_id: session_context
+    )
     monkeypatch.setattr(
         "sagents.agent.agent_base.MessageManager.calculate_messages_token_length",
         lambda messages: 2000
@@ -793,7 +801,9 @@ async def test_prepare_messages_for_llm_failed_compression_does_not_modify_manag
         sandbox_agent_workspace=None,
         system_context={},
     )
-    monkeypatch.setattr(agent, "_get_live_session_context", lambda session_id: session_context)
+    monkeypatch.setattr(
+        agent, "_get_live_session_context", lambda session_id: session_context
+    )
     monkeypatch.setattr(
         "sagents.agent.agent_base.MessageManager.calculate_messages_token_length",
         lambda messages: 2000,
@@ -847,7 +857,9 @@ async def test_prepare_messages_for_llm_returns_error_when_no_compressible_segme
         sandbox_agent_workspace=None,
         system_context={},
     )
-    monkeypatch.setattr(agent, "_get_live_session_context", lambda session_id: session_context)
+    monkeypatch.setattr(
+        agent, "_get_live_session_context", lambda session_id: session_context
+    )
     monkeypatch.setattr(
         "sagents.agent.agent_base.MessageManager.calculate_messages_token_length",
         lambda messages: 2000,
@@ -855,7 +867,9 @@ async def test_prepare_messages_for_llm_returns_error_when_no_compressible_segme
 
     chunks = [
         item
-        async for item in agent._prepare_messages_for_llm(raw_messages, "sess-over-limit")
+        async for item in agent._prepare_messages_for_llm(
+            raw_messages, "sess-over-limit"
+        )
     ]
 
     assert len(chunks) == 1

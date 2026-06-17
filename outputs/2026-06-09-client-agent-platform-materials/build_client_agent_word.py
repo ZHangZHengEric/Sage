@@ -125,7 +125,9 @@ def set_run_font(run, size=None, bold=None, color=None) -> None:
     r_fonts.set(qn("w:hAnsi"), "Calibri")
 
 
-def add_runs_with_inline_code(paragraph, text: str, size=11, color=INK, bold=False) -> None:
+def add_runs_with_inline_code(
+    paragraph, text: str, size=11, color=INK, bold=False
+) -> None:
     parts = re.split(r"(`[^`]+`)", text)
     for part in parts:
         if not part:
@@ -260,7 +262,11 @@ def add_header_footer(doc: Document) -> None:
 def parse_table(lines: list[str], start: int) -> tuple[list[list[str]], int] | None:
     rows = []
     i = start
-    while i < len(lines) and lines[i].strip().startswith("|") and lines[i].strip().endswith("|"):
+    while (
+        i < len(lines)
+        and lines[i].strip().startswith("|")
+        and lines[i].strip().endswith("|")
+    ):
         row = [c.strip() for c in lines[i].strip().strip("|").split("|")]
         rows.append(row)
         i += 1
@@ -375,7 +381,13 @@ def add_markdown_file(doc: Document, title: str, path: Path, first=False) -> Non
             else:
                 style = "Heading 3"
             p = doc.add_paragraph(style=style)
-            add_runs_with_inline_code(p, text, size=13 if style == "Heading 2" else 12, color=BLUE if style == "Heading 2" else DARK_BLUE, bold=True)
+            add_runs_with_inline_code(
+                p,
+                text,
+                size=13 if style == "Heading 2" else 12,
+                color=BLUE if style == "Heading 2" else DARK_BLUE,
+                bold=True,
+            )
             i += 1
             continue
 

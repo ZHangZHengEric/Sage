@@ -9,7 +9,7 @@ import json
 import re
 
 from sagents.utils.logger import logger
-from sagents.context.messages.message import MessageChunk, MessageRole
+from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
 
 
@@ -298,7 +298,9 @@ class CompressHistoryTool:
 
             # 4. 格式化消息并调用 LLM 压缩
             messages_text = self._format_messages_for_compression(to_compress)
-            raw_summary = await self._call_llm_for_compression(messages_text, session_id)
+            raw_summary = await self._call_llm_for_compression(
+                messages_text, session_id
+            )
             summary_payload, parse_status = self._parse_structured_summary(raw_summary)
 
             # 5. 计算压缩后的 token 数
@@ -319,13 +321,11 @@ class CompressHistoryTool:
             source_message_ids = source_message_ids or [
                 msg.message_id for msg in to_compress if msg.message_id
             ]
-            source_start_message_id = (
-                source_start_message_id
-                or (source_message_ids[0] if source_message_ids else None)
+            source_start_message_id = source_start_message_id or (
+                source_message_ids[0] if source_message_ids else None
             )
-            source_end_message_id = (
-                source_end_message_id
-                or (source_message_ids[-1] if source_message_ids else None)
+            source_end_message_id = source_end_message_id or (
+                source_message_ids[-1] if source_message_ids else None
             )
             compression_payload = {
                 **summary_payload,

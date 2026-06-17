@@ -53,7 +53,9 @@ class _FakeClientSession:
 @pytest.mark.asyncio
 async def test_backend_client_preserves_roleless_control_events(monkeypatch):
     lines = [
-        json.dumps({"type": "stream_end", "session_id": "child", "total_stream_count": 2}),
+        json.dumps(
+            {"type": "stream_end", "session_id": "child", "total_stream_count": 2}
+        ),
         json.dumps(
             {
                 "role": "assistant",
