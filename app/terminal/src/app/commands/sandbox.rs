@@ -35,7 +35,7 @@ impl App {
     pub fn queue_sandbox_status(&mut self) {
         self.queue_message(
             MessageKind::System,
-            format!("sandbox_type: {}", self.sandbox_type_status_label()),
+            format!("sandbox: {}", self.sandbox_type_status_label()),
         );
         self.status = format!("sandbox  {}", self.session_id);
     }

@@ -40,7 +40,8 @@ fn sandbox_show_reports_current_override() {
         .map(|span| span.content.as_ref())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("sandbox_type: remote"));
+    assert!(rendered.contains("sandbox: remote"));
+    assert!(!rendered.contains("sandbox_type:"));
 }
 
 #[test]

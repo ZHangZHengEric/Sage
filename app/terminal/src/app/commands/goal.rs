@@ -71,10 +71,10 @@ impl App {
     pub fn queue_goal_status(&mut self) {
         let goal_text = match (&self.current_goal, &self.pending_goal_mutation) {
             (_, Some(pending)) if pending.clear => {
-                "goal: (clearing on next request)\ngoal_pending: clear".to_string()
+                "goal: clearing on next request\npending: clear".to_string()
             }
             (_, Some(pending)) if pending.objective.is_some() => format!(
-                "goal: {}\ngoal_status: {}\ngoal_pending: set",
+                "goal: {}\nstatus: {}\npending: set",
                 pending.objective.clone().unwrap_or_default(),
                 pending
                     .status
@@ -82,13 +82,13 @@ impl App {
                     .unwrap_or_else(|| "active".to_string())
             ),
             (Some(goal), Some(pending)) if pending.status.is_some() => format!(
-                "goal: {}\ngoal_status: {}\ngoal_pending: {}",
+                "goal: {}\nstatus: {}\npending: {}",
                 goal.objective,
                 goal.status,
                 pending.status.clone().unwrap_or_default()
             ),
-            (Some(goal), _) => format!("goal: {}\ngoal_status: {}", goal.objective, goal.status),
-            (None, _) => "goal: (none)".to_string(),
+            (Some(goal), _) => format!("goal: {}\nstatus: {}", goal.objective, goal.status),
+            (None, _) => "goal: not set".to_string(),
         };
 
         self.queue_message(MessageKind::System, goal_text);
