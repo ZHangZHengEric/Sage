@@ -1,6 +1,9 @@
+import httpx
 import pytest
+from openai import BadRequestError
 
 from sagents.utils.llm_request_utils import (
+    create_chat_completion_with_fallback,
     redact_base64_data_urls_in_value,
     sanitize_model_request_kwargs,
     uses_max_completion_tokens,
@@ -196,3 +199,63 @@ def test_sanitize_keeps_temperature_for_gpt4_with_reasoning_effort_in_body() -> 
         model="gpt-4o",
     )
     assert out["temperature"] == 0.7
+
+
+def _unknown_parameter_error(param: str) -> BadRequestError:
+    request = httpx.Request("POST", "https://example.test/v1/chat/completions")
+    response = httpx.Response(400, request=request)
+    return BadRequestError(
+        f"Error code: 400 - Unknown parameter: '{param}'.",
+        response=response,
+        body={
+            "error": {
+                "message": f"Unknown parameter: '{param}'.",
+                "type": "invalid_request_error",
+                "param": param,
+                "code": "unknown_parameter",
+            }
+        },
+    )
+
+
+class _FakeCompletions:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def create(self, **kwargs):
+        self.calls.append(kwargs)
+        extra_body = kwargs.get("extra_body") or {}
+        if "chat_template_kwargs" in extra_body:
+            raise _unknown_parameter_error("chat_template_kwargs")
+        if "enable_thinking" in extra_body:
+            raise _unknown_parameter_error("enable_thinking")
+        return {"ok": True, "kwargs": kwargs}
+
+
+class _FakeClient:
+    def __init__(self) -> None:
+        self.chat = type("Chat", (), {"completions": _FakeCompletions()})()
+
+
+@pytest.mark.asyncio
+async def test_create_chat_completion_drops_unknown_extra_body_params() -> None:
+    client = _FakeClient()
+
+    response = await create_chat_completion_with_fallback(
+        client,
+        model="gpt-4o",
+        messages=[{"role": "user", "content": "hi"}],
+        stream=True,
+        extra_body={
+            "_step_name": "compact",
+            "chat_template_kwargs": {"enable_thinking": False},
+            "enable_thinking": False,
+            "thinking": {"type": "disabled"},
+        },
+    )
+
+    assert response["ok"] is True
+    assert len(client.chat.completions.calls) == 3
+    assert "chat_template_kwargs" not in response["kwargs"]["extra_body"]
+    assert "enable_thinking" not in response["kwargs"]["extra_body"]
+    assert response["kwargs"]["extra_body"]["thinking"] == {"type": "disabled"}

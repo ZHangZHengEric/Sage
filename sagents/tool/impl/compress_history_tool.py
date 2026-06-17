@@ -11,6 +11,7 @@ import re
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
+from sagents.llm.capabilities import create_chat_completion_with_fallback
 
 
 class CompressHistoryError(Exception):
@@ -161,10 +162,12 @@ class CompressHistoryTool:
                 extra_body["enable_thinking"] = False
                 extra_body["thinking"] = {"type": "disabled"}
 
-            # 流式请求 LLM
-            stream = await model.chat.completions.create(
+            # 流式请求 LLM：复用主 Agent 的请求清洗与兼容 fallback。
+            stream = await create_chat_completion_with_fallback(
+                model,
                 model=model_name,
                 messages=[{"role": "user", "content": prompt}],
+                model_config=model_config,
                 stream=True,
                 stream_options={"include_usage": True},
                 max_tokens=2000,
