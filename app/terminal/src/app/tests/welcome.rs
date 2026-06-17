@@ -108,7 +108,7 @@ fn typing_input_keeps_welcome_banner_visible() {
 }
 
 #[test]
-fn submitting_message_keeps_welcome_banner_as_idle_status() {
+fn submitting_message_moves_welcome_banner_into_history() {
     let mut app = App::new();
     app.input = "hello".to_string();
     app.input_cursor = app.input.len();
@@ -117,7 +117,7 @@ fn submitting_message_keeps_welcome_banner_as_idle_status() {
     app.materialize_pending_ui(120);
 
     let rendered = app
-        .rendered_idle_lines(120)
+        .pending_history_lines
         .iter()
         .flat_map(|line| line.spans.iter())
         .map(|span| span.content.as_ref())
@@ -125,6 +125,8 @@ fn submitting_message_keeps_welcome_banner_as_idle_status() {
         .join("\n");
     assert!(rendered.contains("Sage Terminal"));
     assert!(rendered.contains("workspace: "));
+    assert!(app.rendered_idle_lines(120).is_empty());
+    assert!(app.take_clear_request());
 }
 
 #[test]
@@ -142,7 +144,7 @@ fn first_message_requests_clear_before_transcript_history_is_inserted() {
 }
 
 #[test]
-fn first_transcript_keeps_welcome_out_of_history_but_visible_when_idle() {
+fn first_transcript_preserves_welcome_in_history_and_removes_idle_banner() {
     let mut app = App::new();
     app.input = "hello".to_string();
     app.input_cursor = app.input.len();
@@ -157,10 +159,10 @@ fn first_transcript_keeps_welcome_out_of_history_but_visible_when_idle() {
         .map(|span| span.content.as_ref())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(!rendered.contains("Sage Terminal"));
-    assert!(!rendered.contains("Tip: "));
+    assert!(rendered.contains("Sage Terminal"));
+    assert!(rendered.contains("Tip: "));
     assert!(rendered.contains("hello"));
-    assert!(!app.rendered_idle_lines(120).is_empty());
+    assert!(app.rendered_idle_lines(120).is_empty());
     let main_rendered = app
         .rendered_main_lines(120)
         .iter()

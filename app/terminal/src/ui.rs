@@ -2,6 +2,7 @@ use crate::app::{ActiveSurfaceKind, App};
 use crate::bottom_pane::command_popup;
 use crate::bottom_pane::{composer, footer, help_overlay, picker_overlay, transcript_overlay};
 use crate::custom_terminal::Frame;
+use crate::terminal_layout::INLINE_POPUP_MAX_ROWS;
 use crate::ui_support::{
     composer_props, footer_props, help_overlay_props, picker_overlay_props, render_live_region,
     transcript_overlay_props,
@@ -16,6 +17,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         .height
         .saturating_sub(composer_height)
         .saturating_sub(1) as usize;
+    let popup_max_rows = popup_max_rows.min(INLINE_POPUP_MAX_ROWS);
     let popup_props = app.popup_props_for_rows(popup_max_rows);
     let popup_height = command_popup::popup_height(popup_props.as_ref());
     let chunks = Layout::default()
