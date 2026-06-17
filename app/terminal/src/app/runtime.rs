@@ -249,7 +249,6 @@ impl App {
         } else {
             self.rendered_idle_lines(width)
         };
-        lines.extend(self.committed_history_lines.clone());
         if self.busy {
             let live_lines = self.rendered_live_lines();
             if !lines.is_empty() && !live_lines.is_empty() {
@@ -401,7 +400,7 @@ impl App {
         self.queue_message(MessageKind::Tool, detail);
     }
 
-    pub(crate) fn materialize_pending_ui(&mut self, _width: u16) {
+    pub(crate) fn materialize_pending_ui(&mut self, width: u16) {
         if !self.pending_welcome_banner
             || !self.committed_history_lines.is_empty()
             || self.pending_history_lines.is_empty()
@@ -409,6 +408,10 @@ impl App {
             return;
         }
 
+        let mut lines = self.rendered_idle_lines(width);
+        lines.extend(std::mem::take(&mut self.pending_history_lines));
+        self.pending_history_lines = lines;
+        self.pending_welcome_banner = false;
         self.clear_requested = true;
     }
 

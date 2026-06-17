@@ -341,7 +341,7 @@ fn transcript_overlay_scrolls_for_long_history() {
 }
 
 #[test]
-fn idle_main_region_renders_committed_transcript_without_welcome() {
+fn idle_main_region_omits_committed_transcript_after_scrollback_flush() {
     let mut app = App::new();
     app.push_message(MessageKind::User, "hello");
     app.push_message(MessageKind::Assistant, "ready");
@@ -362,8 +362,8 @@ fn idle_main_region_renders_committed_transcript_without_welcome() {
         .join("\n");
 
     assert!(!rendered.contains("Sage Terminal"));
-    assert!(rendered.contains("hello"));
-    assert!(rendered.contains("ready"));
+    assert!(!rendered.contains("hello"));
+    assert!(!rendered.contains("ready"));
 }
 
 #[test]

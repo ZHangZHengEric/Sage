@@ -5,12 +5,12 @@ mod backend;
 mod bottom_pane;
 mod custom_terminal;
 mod display_policy;
+mod history;
 mod markdown;
 mod preferences;
 mod slash_command;
 mod startup;
 mod terminal;
-#[cfg(test)]
 mod terminal_layout;
 mod terminal_support;
 mod ui;

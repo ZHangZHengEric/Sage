@@ -1,10 +1,11 @@
 mod diff;
 mod draw;
 
+use std::fmt;
 use std::io;
 use std::io::Write;
 
-use crossterm::execute;
+use crossterm::queue;
 use crossterm::terminal::ScrollUp;
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::buffer::Buffer;
@@ -48,6 +49,7 @@ where
     viewport_height: u16,
     last_known_screen_size: Size,
     last_known_cursor_pos: Position,
+    visible_history_rows: u16,
 }
 
 impl<B> Drop for Terminal<B>
@@ -79,6 +81,7 @@ where
             viewport_height: viewport_height.max(1),
             last_known_screen_size: screen_size,
             last_known_cursor_pos: cursor_pos,
+            visible_history_rows: cursor_pos.y,
         })
     }
 
@@ -117,8 +120,11 @@ where
     }
 
     pub fn clear(&mut self) -> io::Result<()> {
-        self.backend
-            .set_cursor_position(self.viewport_area.as_position())?;
+        self.clear_after_position(self.viewport_area.as_position())
+    }
+
+    pub fn clear_after_position(&mut self, position: Position) -> io::Result<()> {
+        self.backend.set_cursor_position(position)?;
         self.backend
             .clear_region(ratatui::backend::ClearType::AfterCursor)?;
         self.previous_buffer_mut().reset();
@@ -133,8 +139,17 @@ where
         self.viewport_area
     }
 
+    pub fn last_known_cursor_pos(&self) -> Position {
+        self.last_known_cursor_pos
+    }
+
+    pub fn invalidate_viewport(&mut self) {
+        self.previous_buffer_mut().reset();
+    }
+
     pub fn set_viewport_area(&mut self, area: Rect) {
         self.viewport_area = area;
+        self.visible_history_rows = self.visible_history_rows.min(area.top());
         self.current_buffer_mut().resize(area);
         self.previous_buffer_mut().resize(area);
         self.current_buffer_mut().reset();
@@ -145,16 +160,43 @@ where
         self.viewport_height = viewport_height.max(1);
         let size = self.size()?;
         self.last_known_screen_size = size;
-        let next_area = viewport_rect(size, self.viewport_height, self.viewport_area.y);
-        if self.viewport_height > self.viewport_area.height && next_area.y < self.viewport_area.y {
-            execute!(
-                self.backend,
-                ScrollUp(self.viewport_area.y.saturating_sub(next_area.y))
-            )?;
+        let mut next_area = self.viewport_area;
+        next_area.width = size.width;
+        next_area.height = self.viewport_height.min(size.height.max(1));
+
+        let history_anchor = self.visible_history_rows.min(size.height.saturating_sub(1));
+        if history_anchor > 0 || self.viewport_area.y <= history_anchor {
+            next_area.y = history_anchor.min(size.height.saturating_sub(next_area.height));
+            if next_area.bottom() > size.height {
+                let overflow = next_area.bottom().saturating_sub(size.height);
+                scroll_region_up(&mut self.backend, 0..next_area.y, overflow)?;
+                next_area.y = size.height.saturating_sub(next_area.height);
+                self.visible_history_rows = self.visible_history_rows.saturating_sub(overflow);
+            }
+        } else {
+            next_area = viewport_rect(size, self.viewport_height, self.viewport_area.y);
+        }
+        if next_area != self.viewport_area {
+            if next_area.height > self.viewport_area.height && next_area.y < self.viewport_area.y {
+                scroll_region_up(
+                    &mut self.backend,
+                    0..self.viewport_area.y,
+                    self.viewport_area.y.saturating_sub(next_area.y),
+                )?;
+            }
+            let clear_y = self.viewport_area.y.min(next_area.y);
+            self.clear_after_position(Position { x: 0, y: clear_y })?;
         }
         self.set_viewport_area(next_area);
         self.previous_buffer_mut().reset();
         Ok(())
+    }
+
+    pub fn note_history_rows_inserted(&mut self, rows: u16) {
+        self.visible_history_rows = self
+            .visible_history_rows
+            .saturating_add(rows)
+            .min(self.viewport_area.top());
     }
 
     pub fn set_cursor_position<P: Into<Position>>(&mut self, position: P) -> io::Result<()> {
@@ -220,5 +262,56 @@ where
     fn swap_buffers(&mut self) {
         self.previous_buffer_mut().reset();
         self.current = 1 - self.current;
+    }
+}
+
+fn scroll_region_up<W: Write>(
+    writer: &mut W,
+    region: std::ops::Range<u16>,
+    amount: u16,
+) -> io::Result<()> {
+    if amount == 0 || region.is_empty() {
+        return Ok(());
+    }
+    queue!(
+        writer,
+        SetScrollRegion(region.start.saturating_add(1)..region.end),
+        ScrollUp(amount),
+        ResetScrollRegion
+    )?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SetScrollRegion(std::ops::Range<u16>);
+
+impl crossterm::Command for SetScrollRegion {
+    fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
+        write!(f, "\x1b[{};{}r", self.0.start, self.0.end)
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "SetScrollRegion requires ANSI terminal support",
+        ))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ResetScrollRegion;
+
+impl crossterm::Command for ResetScrollRegion {
+    fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
+        write!(f, "\x1b[r")
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "ResetScrollRegion requires ANSI terminal support",
+        ))
     }
 }
