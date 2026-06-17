@@ -190,8 +190,8 @@ class TestCompressHistoryTool:
         assert result["data"]["open_tasks"] == ["run matrix tests"]
         assert result["data"]["stats"]["summary_parse_status"] == "json"
 
-    def test_compress_conversation_history_limits_output_list_counts(self):
-        """Test: compact tool result content limits list counts only."""
+    def test_compress_conversation_history_limits_output_lists_and_long_commands(self):
+        """Test: compact output limits list counts and very long commands."""
         messages = [
             self.create_message(MessageRole.USER.value, "User"),
             self.create_message(MessageRole.ASSISTANT.value, "Assistant"),
@@ -218,10 +218,12 @@ class TestCompressHistoryTool:
         assert payload["summary"] == "S" * 6000
         assert len(payload["commands_run"]) == 20
         assert len(payload["files_touched"]) == 40
-        assert payload["commands_run"][0] == commands[0]
-        assert len(payload["commands_run"][0]) > 800
+        assert payload["commands_run"][0].endswith("... [truncated]")
+        assert len(payload["commands_run"][0]) <= 1000
+        assert payload["files_touched"][0] == files[0]
         assert payload["stats"]["output_omission"]["commands_run"] == {
             "omitted_count": 30,
+            "truncated_item_count": 20,
         }
         assert payload["stats"]["output_omission"]["files_touched"] == {
             "omitted_count": 40

@@ -21,6 +21,7 @@ COMPACT_LIST_LIMITS = {
     "important_errors": 20,
     "user_requirements": 30,
 }
+MAX_COMPACT_COMMAND_CHARS = 1000
 
 
 class CompressHistoryError(Exception):
@@ -206,10 +207,26 @@ class CompressHistoryTool:
         values: List[str],
     ) -> Tuple[List[str], Dict[str, int]]:
         limit = COMPACT_LIST_LIMITS[key]
+        bounded_values = values[:limit]
         stats: Dict[str, int] = {}
         if len(values) > limit:
             stats["omitted_count"] = len(values) - limit
-        return values[:limit], stats
+        if key == "commands_run":
+            truncated_values: List[str] = []
+            truncated_count = 0
+            for value in bounded_values:
+                if len(value) > MAX_COMPACT_COMMAND_CHARS:
+                    truncated_values.append(
+                        value[: MAX_COMPACT_COMMAND_CHARS - 15].rstrip()
+                        + "... [truncated]"
+                    )
+                    truncated_count += 1
+                else:
+                    truncated_values.append(value)
+            if truncated_count:
+                stats["truncated_item_count"] = truncated_count
+            bounded_values = truncated_values
+        return bounded_values, stats
 
     @staticmethod
     def _bound_summary_payload(
