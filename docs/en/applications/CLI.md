@@ -241,7 +241,7 @@ Interactive chat also supports lightweight built-in goal commands:
 /goal done
 ```
 
-`/goal <objective>` stores a local CLI goal and immediately submits the same objective as the next task, matching the Codex-style flow.
+`/goal <objective>` stores a local CLI goal and immediately submits the same objective as the next task.
 
 `/goal set` still stores the local goal for the next request without submitting a task immediately.
 
@@ -279,6 +279,9 @@ sage run --agent-config coding --workspace /path/to/repo "review the latest chan
 `sage tui coding --workspace /path/to/repo` opens the Terminal TUI with the bundled coding config. It is equivalent to `sage tui --agent-config coding --workspace /path/to/repo`.
 
 The bundled `coding` preset requires an explicit workspace so file tools, shell commands, and repo context are scoped to the project you intend to edit.
+
+The preset also enables `workspaceGuidance`. When `AGENT.md` or `AGENTS.md` exists in the workspace root, Sage injects that content into the request context for this configured agent. Normal agents do not load these files unless their own JSON config explicitly enables `workspaceGuidance`.
+Its `maxBytes` value is a total byte budget shared by all loaded workspace guidance files.
 
 Use the full JSON path when you want to copy and customize the preset:
 

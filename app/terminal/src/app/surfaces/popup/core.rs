@@ -19,6 +19,7 @@ impl App {
         )
     }
 
+    #[cfg(test)]
     pub fn popup_props(&self) -> Option<command_popup::CommandPopupProps> {
         let matches = self.popup_matches();
         command_popup::props_from_matches(&matches, self.slash_popup_selected)

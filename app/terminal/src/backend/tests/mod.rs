@@ -17,7 +17,7 @@ use crate::backend::{BackendEvent, BackendHandle};
 
 static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
-pub(super) fn lock_env() -> MutexGuard<'static, ()> {
+pub(crate) fn lock_env() -> MutexGuard<'static, ()> {
     ENV_LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()

@@ -18,6 +18,22 @@ Edit them in place if you want to enable MCP servers or customize agent behavior
 
 `coding_agent_config.json` is the bundled coding preset for repository work, shell-driven debugging, targeted edits, code review, and iterative verification in Sage Terminal TUI.
 Because this preset is repo-oriented, use it with an explicit workspace so Sage scopes file and shell tools to the intended project.
+The preset enables `workspaceGuidance`, so root-level `AGENT.md` and `AGENTS.md` files are injected only when this config is active.
+
+Custom configs can opt into the same generic guidance mechanism:
+
+```json
+{
+  "workspaceGuidance": {
+    "enabled": true,
+    "files": ["AGENT.md", "AGENTS.md"],
+    "maxBytes": 32768
+  }
+}
+```
+
+Configs that omit `workspaceGuidance` do not load workspace guidance files.
+`maxBytes` is the total byte budget shared by all loaded guidance files.
 
 For Sage Terminal TUI, pass the bundled preset through the unified CLI entrypoint:
 

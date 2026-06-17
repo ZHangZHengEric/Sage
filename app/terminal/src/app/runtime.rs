@@ -242,11 +242,22 @@ impl App {
     }
 
     pub fn rendered_main_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let has_transcript =
+            !self.committed_history_lines.is_empty() || !self.pending_history_lines.is_empty();
+        let mut lines = if has_transcript || self.busy {
+            Vec::new()
+        } else {
+            self.rendered_idle_lines(width)
+        };
+        lines.extend(self.committed_history_lines.clone());
         if self.busy {
-            return self.rendered_live_lines();
+            let live_lines = self.rendered_live_lines();
+            if !lines.is_empty() && !live_lines.is_empty() {
+                lines.push(Line::from(""));
+            }
+            lines.extend(live_lines);
         }
-
-        self.rendered_idle_lines(width)
+        lines
     }
 
     pub fn rendered_idle_lines(&self, width: u16) -> Vec<Line<'static>> {
@@ -399,10 +410,6 @@ impl App {
         }
 
         self.clear_requested = true;
-    }
-
-    pub(crate) fn has_transcript_lines(&self) -> bool {
-        !self.committed_history_lines.is_empty() || !self.pending_history_lines.is_empty()
     }
 
     pub(super) fn append_live_chunk(&mut self, kind: MessageKind, chunk: &str) {

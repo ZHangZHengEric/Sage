@@ -46,6 +46,7 @@ fn welcome_banner_uses_available_terminal_width() {
 fn welcome_banner_labels_agent_config_owned_values() {
     let mut app = App::new();
     app.set_agent_config_path("coding".to_string());
+    app.pending_history_lines.clear();
 
     let rendered = app
         .rendered_idle_lines(120)
@@ -80,6 +81,7 @@ fn welcome_banner_renders_current_goal_when_present() {
     let mut app = App::new();
     app.set_goal_selection("ship the runtime goal contract".to_string());
     app.pending_goal_mutation = None;
+    app.pending_history_lines.clear();
 
     let lines = app.rendered_idle_lines(120);
     let rendered = lines
@@ -158,6 +160,36 @@ fn first_transcript_keeps_welcome_out_of_history_but_visible_when_idle() {
     assert!(!rendered.contains("Sage Terminal"));
     assert!(!rendered.contains("Tip: "));
     assert!(rendered.contains("hello"));
+    assert!(!app.rendered_idle_lines(120).is_empty());
+    let main_rendered = app
+        .rendered_main_lines(120)
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!main_rendered.contains("Sage Terminal"));
+}
+
+#[test]
+fn status_command_keeps_welcome_banner_visible() {
+    let mut app = App::new();
+    app.input = "/status".to_string();
+    app.input_cursor = app.input.len();
+
+    let action = app.submit_input();
+
+    assert!(matches!(action, super::super::SubmitAction::Handled));
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("Notice"));
+    assert!(rendered.contains("session: "));
+    assert!(rendered.contains("workspace: "));
     assert!(!app.rendered_idle_lines(120).is_empty());
 }
 
