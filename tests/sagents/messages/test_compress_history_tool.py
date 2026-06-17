@@ -207,6 +207,60 @@ class TestCompressHistoryTool:
         assert result["data"]["decisions"] == []
         assert result["data"]["stats"]["summary_parse_status"] == "fallback_text"
 
+    def test_call_llm_for_compression_uses_shared_request_fallback(self, monkeypatch):
+        """Test: compact LLM calls use the shared request compatibility layer."""
+        captured = {}
+
+        class FakeSession:
+            model = object()
+            model_config = {"model": "gpt-4o", "api_key": "secret"}
+
+        class FakeDelta:
+            content = "shared summary"
+
+        class FakeChoice:
+            delta = FakeDelta()
+
+        class FakeChunk:
+            choices = [FakeChoice()]
+
+        class FakeStream:
+            def __aiter__(self):
+                self._items = iter([FakeChunk()])
+                return self
+
+            async def __anext__(self):
+                try:
+                    return next(self._items)
+                except StopIteration:
+                    raise StopAsyncIteration
+
+        async def fake_fallback(client, **kwargs):
+            captured["model"] = client
+            captured["kwargs"] = kwargs
+            return FakeStream()
+
+        monkeypatch.setattr(
+            "sagents.utils.agent_session_helper.get_live_session",
+            lambda session_id, log_prefix=None: FakeSession(),
+        )
+        monkeypatch.setattr(
+            "sagents.tool.impl.compress_history_tool.create_chat_completion_with_fallback",
+            fake_fallback,
+        )
+
+        result = asyncio.run(
+            self.tool._call_llm_for_compression("messages", "test_session")
+        )
+
+        assert result == "shared summary"
+        assert captured["model"] is FakeSession.model
+        assert captured["kwargs"]["model"] == "gpt-4o"
+        assert captured["kwargs"]["model_config"] == {}
+        assert captured["kwargs"]["extra_body"]["chat_template_kwargs"] == {
+            "enable_thinking": False
+        }
+
     def test_compression_levels_config(self):
         """Test: compression levels configuration"""
         assert "light" in self.tool.compression_levels

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import Any, Dict, Mapping, Optional
 
@@ -222,6 +223,51 @@ def is_unsupported_input_format_error(exc: Exception) -> bool:
     )
 
 
+def _unknown_parameter_name(exc: Exception) -> Optional[str]:
+    body = getattr(exc, "body", None)
+    if isinstance(body, Mapping):
+        error = body.get("error")
+        if isinstance(error, Mapping):
+            code = str(error.get("code") or "").lower()
+            param = error.get("param")
+            message = str(error.get("message") or "")
+            if code == "unknown_parameter" and isinstance(param, str) and param:
+                return param
+            match = re.search(r"Unknown parameter:\s*'([^']+)'", message)
+            if match:
+                return match.group(1)
+    param = getattr(exc, "param", None)
+    if isinstance(param, str) and param:
+        error_text = str(exc).lower()
+        if "unknown parameter" in error_text or "unknown_parameter" in error_text:
+            return param
+    match = re.search(r"Unknown parameter:\s*'([^']+)'", str(exc))
+    if match:
+        return match.group(1)
+    return None
+
+
+def _drop_unknown_request_parameter(
+    request_kwargs: Dict[str, Any], param: str
+) -> bool:
+    if not param:
+        return False
+    candidates = [param, param.split(".")[-1]]
+    for key in candidates:
+        if key in request_kwargs:
+            request_kwargs.pop(key, None)
+            return True
+    extra_body = request_kwargs.get("extra_body")
+    if isinstance(extra_body, dict):
+        for key in candidates:
+            if key in extra_body:
+                request_kwargs["extra_body"] = {
+                    k: v for k, v in extra_body.items() if k != key
+                }
+                return True
+    return False
+
+
 def format_api_error_details(exc: APIError) -> str:
     parts = [f"type={type(exc).__name__}", f"message={exc}"]
     code = getattr(exc, "code", None)
@@ -395,29 +441,41 @@ async def create_chat_completion_with_fallback(
         f"[LLM Request] chat.completions.create | summary={summarize_chat_completion_request(model=model, messages=messages, request_kwargs=request_kwargs, model_config=model_config)}"
     )
 
-    try:
-        return await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            **request_kwargs,
-        )
-    except APIError as exc:
-        if (
-            response_format is not None
-            and "response_format" in request_kwargs
-            and is_unsupported_input_format_error(exc)
-        ):
-            logger.warning(
-                f"模型后端不支持 structured output，自动移除 response_format 后重试: model={model}, details={format_api_error_details(exc)}"
-            )
-            retry_kwargs = dict(request_kwargs)
-            retry_kwargs.pop("response_format", None)
-            logger.debug(
-                f"[LLM Request] chat.completions.create retry_without_response_format | summary={summarize_chat_completion_request(model=model, messages=messages, request_kwargs=retry_kwargs, model_config=model_config)}"
-            )
+    unknown_parameter_retry_count = 0
+    structured_output_fallback_used = False
+    while True:
+        try:
             return await client.chat.completions.create(
                 model=model,
                 messages=messages,
-                **retry_kwargs,
+                **request_kwargs,
             )
-        raise
+        except APIError as exc:
+            if (
+                response_format is not None
+                and not structured_output_fallback_used
+                and "response_format" in request_kwargs
+                and is_unsupported_input_format_error(exc)
+            ):
+                structured_output_fallback_used = True
+                request_kwargs = dict(request_kwargs)
+                request_kwargs.pop("response_format", None)
+                logger.warning(
+                    f"模型后端不支持 structured output，自动移除 response_format 后重试: model={model}, details={format_api_error_details(exc)}"
+                )
+                logger.debug(
+                    f"[LLM Request] chat.completions.create retry_without_response_format | summary={summarize_chat_completion_request(model=model, messages=messages, request_kwargs=request_kwargs, model_config=model_config)}"
+                )
+                continue
+
+            unknown_param = _unknown_parameter_name(exc)
+            if unknown_param and unknown_parameter_retry_count < 5:
+                retry_kwargs = dict(request_kwargs)
+                if _drop_unknown_request_parameter(retry_kwargs, unknown_param):
+                    unknown_parameter_retry_count += 1
+                    request_kwargs = retry_kwargs
+                    logger.warning(
+                        f"模型后端不支持请求参数，已移除后重试: model={model}, param={unknown_param}, details={format_api_error_details(exc)}"
+                    )
+                    continue
+            raise
