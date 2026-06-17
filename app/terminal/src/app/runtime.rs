@@ -242,10 +242,13 @@ impl App {
     }
 
     pub fn rendered_main_lines(&self, width: u16) -> Vec<Line<'static>> {
-        let mut lines = self.rendered_idle_lines(width);
-        if !lines.is_empty() && !self.committed_history_lines.is_empty() {
-            lines.push(Line::from(""));
-        }
+        let has_transcript =
+            !self.committed_history_lines.is_empty() || !self.pending_history_lines.is_empty();
+        let mut lines = if has_transcript || self.busy {
+            Vec::new()
+        } else {
+            self.rendered_idle_lines(width)
+        };
         lines.extend(self.committed_history_lines.clone());
         if self.busy {
             let live_lines = self.rendered_live_lines();

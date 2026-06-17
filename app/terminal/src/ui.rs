@@ -6,6 +6,7 @@ use crate::ui_support::{
     composer_props, footer_props, help_overlay_props, picker_overlay_props, render_live_region,
     transcript_overlay_props,
 };
+use crate::wrap::wrapped_height;
 use ratatui::layout::{Constraint, Direction, Layout};
 
 pub fn render(frame: &mut Frame, app: &App) {
@@ -18,12 +19,20 @@ pub fn render(frame: &mut Frame, app: &App) {
         .saturating_sub(1) as usize;
     let popup_props = app.popup_props_for_rows(popup_max_rows);
     let popup_height = command_popup::popup_height(popup_props.as_ref());
+    let main_constraint = main_region_constraint(
+        app,
+        frame.area().width,
+        frame.area().height,
+        composer_height,
+        popup_height,
+    );
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(1),
+            main_constraint,
             Constraint::Length(composer_height),
             Constraint::Length(popup_height),
+            Constraint::Min(0),
             Constraint::Length(1),
         ])
         .split(frame.area());
@@ -36,7 +45,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         command_popup::render(frame, chunks[2], &popup_props);
     }
     let footer_props = footer_props(app);
-    footer::render(frame, chunks[3], &footer_props);
+    footer::render(frame, chunks[4], &footer_props);
     match app.active_surface_kind() {
         Some(ActiveSurfaceKind::Help) => {
             if let Some(props) = help_overlay_props(app) {
@@ -57,11 +66,41 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 }
 
+fn main_region_constraint(
+    app: &App,
+    width: u16,
+    height: u16,
+    composer_height: u16,
+    popup_height: u16,
+) -> Constraint {
+    if !is_empty_welcome_state(app) {
+        return Constraint::Min(1);
+    }
+
+    let available = height
+        .saturating_sub(composer_height)
+        .saturating_sub(popup_height)
+        .saturating_sub(1)
+        .max(1);
+    let content_height = wrapped_height(&app.rendered_main_lines(width.max(1)), width.max(1));
+    Constraint::Length(content_height.clamp(1, available))
+}
+
+fn is_empty_welcome_state(app: &App) -> bool {
+    app.pending_welcome_banner
+        && !app.busy
+        && app.committed_history_lines.is_empty()
+        && app.pending_history_lines.is_empty()
+}
+
 #[cfg(test)]
 mod tests {
     use crate::app::App;
     use crate::display_policy::DisplayMode;
     use crate::ui_support::{footer_hint, footer_status_summary};
+    use ratatui::layout::Constraint;
+
+    use super::{is_empty_welcome_state, main_region_constraint};
 
     #[test]
     fn busy_footer_hint_prefers_active_phase() {
@@ -71,6 +110,30 @@ mod tests {
         app.set_active_phase("planning");
 
         assert_eq!(footer_hint(&app), "planning... output is streaming");
+    }
+
+    #[test]
+    fn empty_welcome_state_uses_content_sized_main_region() {
+        let app = App::new();
+
+        assert!(is_empty_welcome_state(&app));
+        assert!(matches!(
+            main_region_constraint(&app, 120, 60, 3, 0),
+            Constraint::Length(_)
+        ));
+    }
+
+    #[test]
+    fn transcript_state_uses_flexible_main_region() {
+        let mut app = App::new();
+        app.push_message(crate::app::MessageKind::User, "hello");
+        let _ = app.take_pending_history_lines();
+
+        assert!(!is_empty_welcome_state(&app));
+        assert_eq!(
+            main_region_constraint(&app, 120, 60, 3, 0),
+            Constraint::Min(1)
+        );
     }
 
     #[test]
