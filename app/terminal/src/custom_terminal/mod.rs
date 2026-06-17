@@ -63,13 +63,6 @@ impl<B> Terminal<B>
 where
     B: Backend + Write,
 {
-    pub fn with_viewport_height(mut backend: B, viewport_height: u16) -> io::Result<Self> {
-        let cursor_pos = backend
-            .get_cursor_position()
-            .unwrap_or(Position { x: 0, y: 0 });
-        Self::with_viewport_height_and_cursor(backend, viewport_height, cursor_pos)
-    }
-
     pub fn with_viewport_height_and_cursor(
         backend: B,
         viewport_height: u16,
@@ -138,10 +131,6 @@ where
 
     pub fn viewport_area(&self) -> Rect {
         self.viewport_area
-    }
-
-    pub fn last_known_cursor_pos(&self) -> Position {
-        self.last_known_cursor_pos
     }
 
     pub fn set_viewport_area(&mut self, area: Rect) {

@@ -2,14 +2,16 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::app::{ActiveSurfaceKind, App, MessageKind, SubmitAction};
+use crate::backend::tests::lock_env;
 use crate::slash_command;
 
-use super::super::{handle_key, INLINE_VIEWPORT_IDLE_HEIGHT, INLINE_VIEWPORT_MAX_HEIGHT};
+use super::super::{
+    event_poll_interval, handle_key, INLINE_VIEWPORT_IDLE_HEIGHT, INLINE_VIEWPORT_MAX_HEIGHT,
+};
 use crate::terminal_layout::desired_viewport_height;
 
 #[test]
@@ -19,6 +21,19 @@ fn terminal_loop_accepts_repeat_key_events_for_submission() {
     assert!(!super::super::should_handle_key_event(
         KeyEventKind::Release
     ));
+}
+
+#[test]
+fn event_polling_is_slow_when_idle_and_fast_when_busy() {
+    let mut app = App::new();
+    let idle = event_poll_interval(&app, false);
+
+    app.busy = true;
+    let busy = event_poll_interval(&app, false);
+    let backend_active = event_poll_interval(&App::new(), true);
+
+    assert!(idle > busy);
+    assert_eq!(busy, backend_active);
 }
 
 #[test]
@@ -537,14 +552,6 @@ fn retry_command_resubmits_last_task_through_backend() {
     wait_for_prompt_log(&log_path, "retry me");
     let prompts = fs::read_to_string(&log_path).expect("backend log should exist");
     assert_eq!(prompts.lines().collect::<Vec<_>>(), vec!["retry me"]);
-}
-
-fn lock_env() -> MutexGuard<'static, ()> {
-    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    ENV_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 struct EnvVarGuard {

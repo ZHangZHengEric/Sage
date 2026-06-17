@@ -10,7 +10,7 @@ use crate::bottom_pane::help_overlay::HelpOverlayProps;
 use crate::bottom_pane::picker_overlay::PickerOverlayProps;
 use crate::bottom_pane::transcript_overlay::TranscriptOverlayProps;
 use crate::custom_terminal::Frame;
-use crate::wrap::{wrap_lines, wrapped_height};
+use crate::wrap::wrap_lines;
 
 pub(crate) fn render_live_region(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Clear, area);
@@ -21,12 +21,15 @@ pub(crate) fn render_live_region(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     let wrapped = wrap_lines(&lines, area.width.max(1));
-    let visible = visible_main_region_lines(
-        &wrapped,
-        area.height,
-        app.pending_welcome_banner && !app.busy && !app.has_transcript_lines(),
-    );
+    let visible = visible_main_region_lines(&wrapped, area.height, pin_main_region_to_top(app));
     frame.render_widget(Paragraph::new(visible), area);
+}
+
+fn pin_main_region_to_top(app: &App) -> bool {
+    app.pending_welcome_banner
+        && !app.busy
+        && app.committed_history_lines.is_empty()
+        && app.pending_history_lines.is_empty()
 }
 
 fn visible_main_region_lines(
@@ -42,15 +45,6 @@ fn visible_main_region_lines(
         wrapped[..height].to_vec()
     } else {
         wrapped[wrapped.len().saturating_sub(height)..].to_vec()
-    }
-}
-
-pub(crate) fn live_region_height(app: &App, width: u16) -> u16 {
-    let lines = app.rendered_main_lines(width.max(1));
-    if lines.is_empty() {
-        1
-    } else {
-        wrapped_height(&lines, width.max(1)).max(1)
     }
 }
 
@@ -154,7 +148,10 @@ mod tests {
     use crate::wrap::wrap_lines;
     use ratatui::text::Line;
 
-    use super::{footer_status_summary, normalize_footer_status, visible_main_region_lines};
+    use super::{
+        footer_status_summary, normalize_footer_status, pin_main_region_to_top,
+        visible_main_region_lines,
+    };
 
     #[test]
     fn normalize_footer_status_collapses_internal_spacing() {
@@ -208,5 +205,17 @@ mod tests {
 
         assert!(visible.contains("line 11"));
         assert!(!visible.contains("line 0"));
+    }
+
+    #[test]
+    fn welcome_pins_only_before_transcript_exists() {
+        let mut app = App::new();
+        assert!(pin_main_region_to_top(&app));
+
+        app.push_message(crate::app::MessageKind::User, "hello");
+        assert!(!pin_main_region_to_top(&app));
+
+        let _ = app.take_pending_history_lines();
+        assert!(!pin_main_region_to_top(&app));
     }
 }

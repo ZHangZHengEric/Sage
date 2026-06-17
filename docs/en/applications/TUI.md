@@ -214,6 +214,9 @@ sage tui --agent-config coding --workspace /path/to/repo
 
 The bundled `coding` preset requires an explicit workspace. If you set it inside TUI with `/agent config coding`, also set the repository with `/workspace set /path/to/repo` before sending coding tasks.
 
+The preset enables `workspaceGuidance`. When the workspace root contains `AGENT.md` or `AGENTS.md`, Sage injects those instructions into requests made with this configured agent. The TUI does not load workspace guidance for normal agents unless their JSON config explicitly enables it.
+Its `maxBytes` value is a total byte budget shared by all loaded workspace guidance files.
+
 The same preset can also be used with the plain CLI:
 
 ```bash
@@ -286,7 +289,7 @@ The terminal can carry a local goal through the CLI/TUI layer.
 /goal done
 ```
 
-`/goal <objective>` stores a local goal and immediately submits the same objective as the next task, matching the Codex-style flow.
+`/goal <objective>` stores a local goal and immediately submits the same objective as the next task.
 
 `/goal set` still queues the local goal without running anything yet.
 
