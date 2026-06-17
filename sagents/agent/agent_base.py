@@ -235,12 +235,11 @@ class AgentBase(ABC):
         source_message_ids = source_message_ids or [
             msg.message_id for msg in messages if msg.message_id
         ]
-        source_start_message_id = (
-            source_start_message_id
-            or (source_message_ids[0] if source_message_ids else None)
+        source_start_message_id = source_start_message_id or (
+            source_message_ids[0] if source_message_ids else None
         )
-        source_end_message_id = (
-            source_end_message_id or (source_message_ids[-1] if source_message_ids else None)
+        source_end_message_id = source_end_message_id or (
+            source_message_ids[-1] if source_message_ids else None
         )
         try:
             assistant_tool_call = MessageChunk(
@@ -337,7 +336,9 @@ class AgentBase(ABC):
             return list(messages)
         for idx, message in enumerate(messages):
             if message.message_id == message_id:
-                return list(messages[: idx + 1]) + list(chunks) + list(messages[idx + 1 :])
+                return (
+                    list(messages[: idx + 1]) + list(chunks) + list(messages[idx + 1 :])
+                )
         return list(messages)
 
     def _context_artifact_root(
@@ -345,10 +346,9 @@ class AgentBase(ABC):
     ) -> Optional[str]:
         workspace = None
         if session_context is not None:
-            workspace = (
-                getattr(session_context, "sandbox_agent_workspace", None)
-                or getattr(session_context, "system_context", {}).get("private_workspace")
-            )
+            workspace = getattr(
+                session_context, "sandbox_agent_workspace", None
+            ) or getattr(session_context, "system_context", {}).get("private_workspace")
         if not workspace:
             return None
         return os.path.join(str(workspace), ".sage", "context", "artifacts")
@@ -411,7 +411,14 @@ class AgentBase(ABC):
                 logger.warning(
                     f"{self.agent_name}: 无可压缩历史段，当前上下文仍为 {current_tokens} tokens"
                 )
-                yield ([self._context_over_limit_error_chunk(current_tokens, trigger_limit)], False)
+                yield (
+                    [
+                        self._context_over_limit_error_chunk(
+                            current_tokens, trigger_limit
+                        )
+                    ],
+                    False,
+                )
                 return
 
             source_ids = [msg.message_id for msg in segment if msg.message_id]
@@ -460,7 +467,10 @@ class AgentBase(ABC):
             message_manager.store_inference_messages(final_view)
         final_tokens = MessageManager.calculate_messages_token_length(final_view)
         if final_tokens > trigger_limit:
-            yield ([self._context_over_limit_error_chunk(final_tokens, trigger_limit)], False)
+            yield (
+                [self._context_over_limit_error_chunk(final_tokens, trigger_limit)],
+                False,
+            )
             return
         yield (final_view, True)
 

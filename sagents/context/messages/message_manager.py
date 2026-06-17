@@ -892,7 +892,9 @@ class MessageManager:
             if not result_indices:
                 continue
             result_msg = messages[result_indices[0]]
-            metadata = result_msg.metadata if isinstance(result_msg.metadata, dict) else {}
+            metadata = (
+                result_msg.metadata if isinstance(result_msg.metadata, dict) else {}
+            )
             source_ids = [
                 mid
                 for mid in metadata.get("source_message_ids", [])
@@ -903,7 +905,11 @@ class MessageManager:
             }
             start_id = metadata.get("source_start_message_id")
             end_id = metadata.get("source_end_message_id")
-            if not covered_indices and start_id in id_to_index and end_id in id_to_index:
+            if (
+                not covered_indices
+                and start_id in id_to_index
+                and end_id in id_to_index
+            ):
                 start_idx = id_to_index[start_id]
                 end_idx = id_to_index[end_id]
                 if start_idx <= end_idx:
@@ -1024,7 +1030,9 @@ class MessageManager:
             if is_visible and result_msg and result_msg.message_id:
                 visible_result_ids.append(result_msg.message_id)
             entry = {
-                "assistant_message_id": assistant_msg.message_id if assistant_msg else None,
+                "assistant_message_id": assistant_msg.message_id
+                if assistant_msg
+                else None,
                 "assistant_index": assistant_idx,
                 "result_message_ids": [
                     message_id_by_index[idx]
@@ -1058,9 +1066,7 @@ class MessageManager:
             pair_entries.append(entry)
 
         ordered_covered_ids = [
-            msg.message_id
-            for msg in messages
-            if msg.message_id in covered_message_ids
+            msg.message_id for msg in messages if msg.message_id in covered_message_ids
         ]
         return {
             "version": 1,
@@ -1100,7 +1106,9 @@ class MessageManager:
             for idx in list(protected):
                 msg = messages[idx]
                 if msg.role == MessageRole.ASSISTANT.value and msg.tool_calls:
-                    protected_ids.update(MessageManager._tool_result_ids_for_assistant(msg))
+                    protected_ids.update(
+                        MessageManager._tool_result_ids_for_assistant(msg)
+                    )
                 elif msg.role == MessageRole.TOOL.value and msg.tool_call_id:
                     for prev_idx in range(idx - 1, -1, -1):
                         prev_msg = messages[prev_idx]
@@ -1176,8 +1184,7 @@ class MessageManager:
         if first_line:
             brief_parts.append(f"first_line: {first_line[:200]}")
         lines = [
-            "[Content moved to context artifact]\n"
-            f"original_content_path: {path}\n"
+            f"[Content moved to context artifact]\noriginal_content_path: {path}\n"
         ]
         if abs_path:
             lines.append(f"original_content_abs_path: {abs_path}\n")
@@ -1216,8 +1223,9 @@ class MessageManager:
         if not content:
             return False
         token_estimate = MessageManager.calculate_str_token_length(content)
-        return token_estimate > DEFAULT_RULE_OFFLOAD_TOKEN_THRESHOLD or token_estimate > int(
-            max_model_len * 0.1
+        return (
+            token_estimate > DEFAULT_RULE_OFFLOAD_TOKEN_THRESHOLD
+            or token_estimate > int(max_model_len * 0.1)
         )
 
     @staticmethod
@@ -1244,7 +1252,9 @@ class MessageManager:
                 msg, protected, idx, max_model_len
             ):
                 continue
-            token_estimate = MessageManager.calculate_str_token_length(msg.get_content())
+            token_estimate = MessageManager.calculate_str_token_length(
+                msg.get_content()
+            )
             path, display_path = MessageManager._write_context_artifact(
                 msg, session_id, artifact_root
             )
@@ -1285,7 +1295,10 @@ class MessageManager:
             if idx in hidden_pairs:
                 continue
             if idx in covered_by_visible:
-                if any(idx in pair["pair_indices"] and not pair.get("covered_by_later") for pair in pairs):
+                if any(
+                    idx in pair["pair_indices"] and not pair.get("covered_by_later")
+                    for pair in pairs
+                ):
                     out.append(msg)
                 continue
             out.append(msg)
@@ -1360,12 +1373,12 @@ class MessageManager:
             effective, active_protection_count
         )
         current_user_ids = [
-            msg.message_id
-            for msg in effective
-            if msg.role == MessageRole.USER.value
+            msg.message_id for msg in effective if msg.role == MessageRole.USER.value
         ]
         if current_user_ids:
-            last_user_id = next(reversed([mid for mid in current_user_ids if mid]), None)
+            last_user_id = next(
+                reversed([mid for mid in current_user_ids if mid]), None
+            )
         else:
             last_user_id = None
         target_min = int(max_model_len * 0.25)
@@ -1847,7 +1860,9 @@ class MessageManager:
             if msg.role == MessageRole.TOOL.value:
                 msg.content = truncate_text(content, 200, 0, "tool output omitted")
             elif msg.role == MessageRole.ASSISTANT.value:
-                msg.content = truncate_text(content, 300, 0, "assistant content omitted")
+                msg.content = truncate_text(
+                    content, 300, 0, "assistant content omitted"
+                )
             if current_usage() <= budget_limit:
                 return working_messages
 

@@ -208,7 +208,9 @@ class TestMessageCompression(unittest.TestCase):
                 apply_rule_compression=True,
             )
         self.print_messages("No recent protection", compressed_no_protect)
-        self.assertIn("[Content moved to context artifact]", compressed_no_protect[-1].content)  # pyright: ignore[reportArgumentType]
+        self.assertIn(
+            "[Content moved to context artifact]", compressed_no_protect[-1].content
+        )  # pyright: ignore[reportArgumentType]
 
         # 保护末尾 2 条（recent_messages_count=2）：User 2 和 Tool 不被压缩
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -240,9 +242,7 @@ class TestMessageCompression(unittest.TestCase):
             self.create_message(MessageRole.TOOL.value, "T" * 5000),
         ]
 
-        compressed = MessageManager.build_token_budget_view(
-            messages, budget_limit=100
-        )
+        compressed = MessageManager.build_token_budget_view(messages, budget_limit=100)
 
         self.assertEqual(messages[0].content, "U" * 5000)
         self.assertEqual(messages[1].content, "S" * 5000)
@@ -368,7 +368,9 @@ class TestMessageCompression(unittest.TestCase):
             [raw, tool_call, tool_result], budget_limit=100
         )
 
-        self.assertEqual([msg.message_id for msg in compressed], ["compress-call", "compress-result"])
+        self.assertEqual(
+            [msg.message_id for msg in compressed], ["compress-call", "compress-result"]
+        )
         self.assertEqual(compressed[1].content, "summary " * 1000)
 
 
