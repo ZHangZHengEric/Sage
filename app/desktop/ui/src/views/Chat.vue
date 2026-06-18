@@ -277,7 +277,7 @@
       </div>
 
       <!-- 右侧面板区域 -->
-      <Transition name="panel">
+      <Transition name="panel" mode="out-in">
         <WorkspacePanel
           v-if="showWorkspace"
           ref="workspacePanelRef"
@@ -293,14 +293,14 @@
         />
       </Transition>
 
-      <Transition name="panel">
+      <Transition name="panel" mode="out-in">
         <WorkbenchPreview
           v-if="showWorkbench && currentSessionId"
           :key="`workbench-${currentSessionId}`"
           :messages="filteredMessages"
           :session-id="currentSessionId"
           :is-loading="isCurrentSessionLoading"
-          @close="showWorkbench = false"
+          @close="closeWorkbenchPanel"
           @quote-path="handleQuotePath"
         />
       </Transition>
@@ -432,7 +432,8 @@ const {
   retryAbilityFetch,
   onAbilityCardClick,
   submitEditedLastUserMessage,
-  applyGuidanceNow
+  applyGuidanceNow,
+  closeWorkbenchPanel
 } = useChatPage(props)
 
 const normalizedMessages = computed(() => normalizeChatMessages(filteredMessages.value))
