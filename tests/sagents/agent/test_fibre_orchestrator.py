@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from sagents.agent.fibre.agent_definition import AgentDefinition
 from sagents.agent.fibre.orchestrator import FibreOrchestrator
+from sagents.context.messages.message import MessageChunk
 from sagents.context.session_context import SessionContext
 from sagents.tool import ToolManager
 
@@ -97,6 +98,33 @@ def test_get_configured_sub_agents_returns_none_when_unconfigured():
     )
 
     assert FibreOrchestrator._get_configured_sub_agents(session_context) is None
+
+
+def test_publish_child_stream_coerces_roleless_stream_end_to_message_chunk():
+    orchestrator = FibreOrchestrator.__new__(FibreOrchestrator)
+    orchestrator.output_queue = asyncio.Queue()
+
+    asyncio.run(
+        orchestrator._publish_child_stream_chunks(
+            [
+                {
+                    "type": "stream_end",
+                    "session_id": "child",
+                    "total_stream_count": 2,
+                }
+            ]
+        )
+    )
+
+    published = orchestrator.output_queue.get_nowait()
+
+    assert len(published) == 1
+    assert isinstance(published[0], MessageChunk)
+    assert published[0].session_id == "child"
+    assert published[0].type == "stream_end"
+    assert published[0].message_type == "stream_end"
+    assert published[0].content == ""
+    assert published[0].metadata["raw_stream_payload"]["total_stream_count"] == 2
 
 
 class _FakeFibreSession:
