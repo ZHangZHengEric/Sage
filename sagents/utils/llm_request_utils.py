@@ -247,9 +247,7 @@ def _unknown_parameter_name(exc: Exception) -> Optional[str]:
     return None
 
 
-def _drop_unknown_request_parameter(
-    request_kwargs: Dict[str, Any], param: str
-) -> bool:
+def _drop_unknown_request_parameter(request_kwargs: Dict[str, Any], param: str) -> bool:
     if not param:
         return False
     candidates = [param, param.split(".")[-1]]

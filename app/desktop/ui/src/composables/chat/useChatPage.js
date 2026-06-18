@@ -77,6 +77,7 @@ export const useChatPage = (props) => {
   /** 进入历史会话前能力面板是否打开（含加载中），从历史回新会话时恢复，避免「点你能做什么→加载中→进历史→回来」动画/结果丢失 */
   const abilityPanelOpenBeforeHistory = ref(false)
   const autoSendingGuidanceSessionId = ref(null)
+  const suppressWorkbenchAutoOpen = ref(false)
 
   // 打开工作台（统一方法）
   const openWorkbench = (options = {}) => {
@@ -86,6 +87,7 @@ export const useChatPage = (props) => {
       : null
 
     // 打开工作台
+    suppressWorkbenchAutoOpen.value = false
     panelStore.openWorkbench()
 
     // 对齐当前会话，避免 filteredItems 过滤到错误会话导致定位失败
@@ -194,11 +196,21 @@ export const useChatPage = (props) => {
     }
   }
 
+  const closeWorkbenchPanel = () => {
+    suppressWorkbenchAutoOpen.value = true
+    workbenchStore.setRealtime(false)
+    panelStore.closeAll()
+  }
+
   // 切换面板（互斥）
   const togglePanel = (panel) => {
     if (panel === 'workbench') {
-      // 使用统一方法打开工作台
-      openWorkbench()
+      if (panelStore.showWorkbench) {
+        closeWorkbenchPanel()
+      } else {
+        // 使用统一方法打开工作台
+        openWorkbench()
+      }
     } else if (panel === 'workspace') {
       if (panelStore.activePanel === 'workspace') {
         panelStore.closeAll()
@@ -901,6 +913,8 @@ export const useChatPage = (props) => {
     console.log('[ChatPage] Reset workbench state for new session')
     // 关闭工作台 panel
     panelStore.closeAll()
+    // 新会话允许工作台按实时模式重新自动弹出（清除上一会话的手动关闭抑制）
+    suppressWorkbenchAutoOpen.value = false
     console.log('[ChatPage] Closed panel for new session')
     // 新会话：重置能力入口状态
     showAbilityPanel.value = false
@@ -923,6 +937,8 @@ export const useChatPage = (props) => {
     // 从历史回新会话：重置工作台状态并关闭面板（避免工作台带入新会话）
     workbenchStore.resetState()
     panelStore.closeAll()
+    // 新会话允许工作台按实时模式重新自动弹出（清除上一会话的手动关闭抑制）
+    suppressWorkbenchAutoOpen.value = false
     isViewingHistorySession.value = false
     showAbilityButton.value = abilityButtonVisibleBeforeHistory.value
     if (abilityButtonVisibleBeforeHistory.value) hasUsedAbilityEntryInSession.value = false
@@ -1128,7 +1144,7 @@ export const useChatPage = (props) => {
   watch(() => workbenchStore.filteredItems.length, (newLength, oldLength) => {
     if (newLength > oldLength && workbenchStore.isRealtime) {
       // 有新 item 添加且处于实时模式，自动打开工作台
-      if (!panelStore.showWorkbench) {
+      if (!panelStore.showWorkbench && !suppressWorkbenchAutoOpen.value) {
         console.log('[ChatPage] New workbench item added, auto-opening workbench')
         panelStore.openWorkbench()
       }
@@ -1141,6 +1157,8 @@ export const useChatPage = (props) => {
     if (newSessionId !== oldSessionId) {
       // Session ID 变化，重置工作台
       workbenchStore.resetState()
+      // 切换会话视为新的上下文，解除上一会话的手动关闭抑制
+      suppressWorkbenchAutoOpen.value = false
       // 如果 session id 为 null，关闭工作台弹窗
       if (!newSessionId) {
         panelStore.closeAll()
@@ -1184,6 +1202,7 @@ export const useChatPage = (props) => {
     handleWorkspacePanel,
     togglePanel,
     openWorkbench,
+    closeWorkbenchPanel,
     handleShare,
     handleScroll,
     handleSendMessage,
