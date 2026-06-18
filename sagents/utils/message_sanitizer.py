@@ -2,6 +2,7 @@
 LLM 请求前的消息清洗工具，纯函数无状态。
 
 - ``remove_orphan_tool_calls``：去掉 tool_call_id 没有匹配 tool 消息回复的 assistant tool_calls 消息；
+- ``drop_orphan_tool_messages``：去掉没有匹配 assistant tool_calls 的孤儿 tool 消息；
 - ``strip_content_when_tool_calls``：当 assistant 消息带有 tool_calls 时，去掉 content 字段。
 """
 
@@ -39,6 +40,39 @@ def remove_orphan_tool_calls(messages: List[Dict[str, Any]]) -> List[Dict[str, A
             if any(
                 _get_tool_call_id(tc) not in matched_tool_call_ids for tc in tool_calls
             ):
+                continue
+        new_messages.append(msg)
+    return new_messages
+
+
+def drop_orphan_tool_messages(
+    messages: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """移除 ``role='tool'`` 但其 ``tool_call_id`` 在前序 assistant ``tool_calls`` 中
+    找不到归属的孤儿 tool 消息。
+
+    OpenAI 约束：每条 ``role='tool'`` 消息都必须是某条带 ``tool_calls`` 的 assistant
+    消息的回复，否则返回
+    ``messages with role 'tool' must be a response to a preceeding message with 'tool_calls'``。
+
+    压缩覆盖隐藏、规则 offload、turn_status 剔除或 ``remove_orphan_tool_calls`` 丢弃
+    多调用 assistant 后，都可能让对应的 tool 结果失去归属。此函数作为发往 LLM 前的
+    最后一道保证，应在 ``remove_orphan_tool_calls`` 之后调用（届时 assistant 侧已稳定）。
+
+    保持原顺序与对象引用。
+    """
+    valid_tool_call_ids = set()
+    for msg in messages:
+        if msg.get("role") == MessageRole.ASSISTANT.value and msg.get("tool_calls"):
+            for tool_call in msg["tool_calls"] or []:
+                tid = _get_tool_call_id(tool_call)
+                if tid is not None:
+                    valid_tool_call_ids.add(tid)
+
+    new_messages: List[Dict[str, Any]] = []
+    for msg in messages:
+        if msg.get("role") == MessageRole.TOOL.value:
+            if msg.get("tool_call_id") not in valid_tool_call_ids:
                 continue
         new_messages.append(msg)
     return new_messages
