@@ -61,7 +61,9 @@ pub(super) fn enable_skill(app: &mut App, skill: String) -> Result<bool> {
             } else {
                 app.push_message(
                     MessageKind::System,
-                    format!("unknown skill: {skill}\nRun /skills to inspect visible skills."),
+                    format!(
+                        "unknown skill: {skill}\nRun /skills to inspect visible skills, then use /skill add <name>."
+                    ),
                 );
                 app.set_status(format!("skills  {}", app.session_id));
             }
