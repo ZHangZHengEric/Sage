@@ -8,6 +8,7 @@ Separates Agent Definition from Session Runtime:
 
 from __future__ import annotations
 import asyncio
+import json
 import os
 import random
 import string
@@ -102,11 +103,64 @@ class FibreOrchestrator:
             return payload.get("content")
         return None
 
+    @staticmethod
+    def _coerce_child_stream_chunk(payload: StreamPayload) -> MessageChunk:
+        if isinstance(payload, MessageChunk):
+            return payload
+
+        if not isinstance(payload, dict):
+            return MessageChunk(
+                role=MessageRole.ASSISTANT.value,
+                content=str(payload),
+                type="stream_event",
+                message_type="stream_event",
+            )
+
+        data = dict(payload)
+        if data.get("role"):
+            if data.get("content") is None and not data.get("tool_calls"):
+                data["content"] = ""
+            return MessageChunk.from_dict(data)
+
+        message_type = str(
+            data.get("type") or data.get("message_type") or "stream_event"
+        )
+        content = data.get("content")
+        if content is None:
+            content = ""
+        elif isinstance(content, dict):
+            content = json.dumps(content, ensure_ascii=False)
+        elif not isinstance(content, (str, list)):
+            content = str(content)
+
+        metadata = dict(data.get("metadata") or {})
+        metadata.setdefault("raw_stream_payload", data)
+
+        return MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=content,
+            message_id=data.get("message_id"),
+            type=message_type,
+            message_type=message_type,
+            timestamp=data.get("timestamp"),
+            agent_name=data.get("agent_name"),
+            agent_type=data.get("agent_type"),
+            chunk_id=data.get("chunk_id"),
+            is_final=bool(data.get("is_final", False)),
+            is_chunk=bool(data.get("is_chunk", False)),
+            metadata=metadata,
+            error_info=data.get("error_info"),
+            session_id=data.get("session_id"),
+            updated_at=data.get("updated_at"),
+        )
+
     async def _publish_child_stream_chunks(self, chunks: List[StreamPayload]) -> None:
         output_queue = getattr(self, "output_queue", None)
         if not chunks or output_queue is None:
             return
-        await output_queue.put(list(chunks))
+        await output_queue.put(
+            [self._coerce_child_stream_chunk(chunk) for chunk in chunks]
+        )
 
     def _summary_content_chunks(
         self,

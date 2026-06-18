@@ -31,6 +31,7 @@ from sagents.utils.multimodal_image import (
 )
 from sagents.utils.message_sanitizer import (
     remove_orphan_tool_calls as _remove_orphan_tool_calls_util,
+    drop_orphan_tool_messages as _drop_orphan_tool_messages_util,
     strip_content_when_tool_calls as _strip_content_when_tool_calls_util,
 )
 from sagents.utils.stream_merger import (
@@ -158,6 +159,14 @@ class AgentBase(ABC):
         ``sagents.utils.message_sanitizer.remove_orphan_tool_calls``。
         """
         return _remove_orphan_tool_calls_util(messages)
+
+    def _drop_orphan_tool_messages(
+        self, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """移除没有归属 assistant tool_calls 的孤儿 tool 消息。详见
+        ``sagents.utils.message_sanitizer.drop_orphan_tool_messages``。
+        """
+        return _drop_orphan_tool_messages_util(messages)
 
     def _remove_content_if_tool_calls(
         self, messages: List[Dict[str, Any]]
@@ -692,6 +701,12 @@ class AgentBase(ABC):
 
                 # 需要处理 serializable_messages 中，如果有tool call ，但是没有后续的tool call id,需要去掉这条消息
                 serializable_messages = self._remove_tool_call_without_id(
+                    serializable_messages
+                )
+                # 反向保证：去掉没有归属 assistant tool_calls 的孤儿 tool 消息，
+                # 避免压缩覆盖/offload/上一步丢弃多调用 assistant 后触发 OpenAI 400
+                # "messages with role 'tool' must be a response to a preceeding message with 'tool_calls'"
+                serializable_messages = self._drop_orphan_tool_messages(
                     serializable_messages
                 )
                 # 如果针对带有 tool_calls 的assistant 的消息，要删除content 这个字段
