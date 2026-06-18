@@ -13,6 +13,7 @@ fn welcome_banner_renders_in_idle_region_before_transcript() {
         .map(|span| span.content.as_ref())
         .collect::<Vec<_>>()
         .join("\n");
+    assert!(!rendered.contains(">_"));
     assert!(rendered.contains("Sage Terminal"));
     assert!(rendered.contains("agent mode: "));
     assert!(rendered.contains("display: "));
