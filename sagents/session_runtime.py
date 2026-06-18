@@ -865,6 +865,14 @@ class Session:
                 session_manager=get_global_session_manager(),
             )
             async for message_chunks in executor.execute(flow.root):
+                for message_chunk in message_chunks:
+                    if isinstance(message_chunk, MessageChunk):
+                        if not message_chunk.session_id:
+                            message_chunk.session_id = session_id
+                    elif isinstance(message_chunk, dict) and not message_chunk.get(
+                        "session_id"
+                    ):
+                        message_chunk["session_id"] = session_id
                 yield message_chunks
 
             # --- 会话结束处理 (原 run_stream 尾部逻辑) ---
