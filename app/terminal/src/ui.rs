@@ -72,7 +72,7 @@ mod tests {
         let _ = app.submit_input();
         app.set_active_phase("planning");
 
-        assert_eq!(footer_hint(&app), "planning... output is streaming");
+        assert_eq!(footer_hint(&app), "working: planning");
     }
 
     #[test]
@@ -106,7 +106,8 @@ mod tests {
 
         let hint = footer_hint(&app);
         assert!(hint.contains("running read_file"));
-        assert!(!hint.contains("planning..."));
+        assert!(hint.contains("tool"));
+        assert!(!hint.contains("working: planning"));
     }
 
     #[test]
@@ -117,7 +118,7 @@ mod tests {
         app.set_active_phase("planning");
         app.start_tool("search_memory".to_string());
 
-        assert_eq!(footer_hint(&app), "planning... output is streaming");
+        assert_eq!(footer_hint(&app), "working: planning");
     }
 
     #[test]
@@ -128,7 +129,7 @@ mod tests {
         let _ = app.submit_input();
         app.set_active_phase("assistant_text");
 
-        assert_eq!(footer_hint(&app), "assistant text... output is streaming");
+        assert_eq!(footer_hint(&app), "working: assistant text");
     }
 
     #[test]
@@ -138,5 +139,14 @@ mod tests {
         let _ = app.submit_input();
 
         assert_eq!(footer_hint(&app), "working... output is streaming");
+    }
+
+    #[test]
+    fn footer_summary_includes_default_sandbox_context() {
+        let app = App::new();
+
+        let summary = footer_status_summary(&app);
+
+        assert!(summary.contains("sandbox default"));
     }
 }

@@ -70,6 +70,7 @@ impl App {
                     let active = self.selected_skills.iter().any(|item| item == &skill.name);
                     let item = command_popup::CommandMatch {
                         command: skill.name.clone(),
+                        category: "Skill".to_string(),
                         description: format!(
                             "{}{}",
                             skill.source,
@@ -143,6 +144,7 @@ impl App {
 
                     let item = command_popup::CommandMatch {
                         command: name.clone(),
+                        category: "Skill".to_string(),
                         description: format!("{source}  •  active"),
                         preview_lines: vec![
                             format!("source: {source}"),

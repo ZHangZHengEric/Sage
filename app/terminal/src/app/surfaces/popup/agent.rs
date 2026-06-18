@@ -71,6 +71,7 @@ impl App {
 
             let item = command_popup::CommandMatch {
                 command: agent.id.clone(),
+                category: "Agent".to_string(),
                 description: format!(
                     "{}  •  {}{}",
                     agent.name,

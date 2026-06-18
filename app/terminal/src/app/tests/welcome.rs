@@ -260,6 +260,27 @@ fn help_agent_topic_mentions_config_commands() {
 }
 
 #[test]
+fn help_sandbox_topic_explains_modes_and_restart() {
+    let mut app = App::new();
+    app.input = "/help sandbox".to_string();
+    app.input_cursor = app.input.len();
+
+    let action = app.submit_input();
+    assert!(matches!(action, super::super::SubmitAction::Handled));
+    let props = app.help_overlay_props().expect("help overlay should open");
+    assert_eq!(props.title, "Help  /sandbox");
+    let text = props
+        .sections
+        .iter()
+        .flat_map(|section| section.items.iter())
+        .map(|item| item.value.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("local runs work in a local sandbox"));
+    assert!(text.contains("restarts the backend"));
+}
+
+#[test]
 fn doctor_command_returns_doctor_action() {
     let mut app = App::new();
     app.input = "/doctor probe-provider".to_string();

@@ -94,6 +94,7 @@ impl App {
             };
             let item = command_popup::CommandMatch {
                 command: provider.id.clone(),
+                category: "Provider".to_string(),
                 description,
                 preview_lines: vec![
                     format!("name: {}", provider.name),
