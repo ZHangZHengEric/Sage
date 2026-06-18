@@ -477,15 +477,18 @@ class Session:
 
     def configure_runtime(
         self,
-        model: Any,
+        model: Any = None,
         model_config: Optional[Dict[str, Any]] = None,
         system_prefix: str = "",
         session_root_space: str = "./sage_sessions",
+        session_space: Optional[str] = None,
         sandbox_agent_workspace: Optional[str] = None,
         volume_mounts: Optional[List[VolumeMount]] = None,
         sandbox_id: Optional[str] = None,
         agent_id: Optional[str] = None,
     ):
+        if session_space is not None:
+            session_root_space = session_space
         runtime_signature = (
             id(model),
             str(model_config or {}),
@@ -862,9 +865,19 @@ class Session:
                 tool_manager,
                 self,
                 session_id,  # pyright: ignore[reportArgumentType]
-                session_manager=get_global_session_manager(),
+                session_manager=get_global_session_manager(
+                    self.session_root_space, enable_obs=self.enable_obs
+                ),
             )
             async for message_chunks in executor.execute(flow.root):
+                for message_chunk in message_chunks:
+                    if isinstance(message_chunk, MessageChunk):
+                        if not message_chunk.session_id:
+                            message_chunk.session_id = session_id
+                    elif isinstance(message_chunk, dict) and not message_chunk.get(
+                        "session_id"
+                    ):
+                        message_chunk["session_id"] = session_id
                 yield message_chunks
 
             # --- 会话结束处理 (原 run_stream 尾部逻辑) ---
