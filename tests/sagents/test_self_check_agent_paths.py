@@ -175,6 +175,189 @@ def test_absolute_markdown_link_checks_file_existence(monkeypatch):
     assert chunks[0].message_type == "agent_execution_error"
 
 
+def test_artifacts_tag_relative_path_checks_file_existence(monkeypatch, tmp_path):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    workspace = tmp_path / "workspace"
+    artifact = workspace / "reports" / "out.md"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("ok", encoding="utf-8")
+
+    class DummySandbox:
+        def is_path_allowed(self, path, operation="read"):
+            return str(path).startswith(str(workspace))
+
+        async def file_exists(self, path):
+            return Path(path).exists()
+
+        async def read_file(self, path, encoding="utf-8"):
+            return Path(path).read_text(encoding=encoding)
+
+    session_context = SimpleNamespace(
+        audit_status={},
+        sandbox=DummySandbox(),
+        sandbox_agent_workspace=str(workspace),
+        system_context={"private_workspace": str(workspace)},
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "请生成结果"),
+                _make_message(
+                    "assistant",
+                    '<movo-artifacts>{"items":[{"title":"报告","path":"reports/out.md","status":"created"}]}</movo-artifacts>',
+                ),
+            ]
+        ),
+    )
+
+    async def collect():
+        chunks = []
+        async for batch in agent.run_stream(session_context):
+            chunks.extend(batch)
+        return chunks
+
+    chunks = asyncio.run(collect())
+
+    assert chunks == []
+    assert session_context.audit_status["self_check_passed"] is True
+    assert session_context.audit_status["self_check_checked_files"] == [str(artifact)]
+
+
+def test_artifacts_tag_escaped_payload_checks_file_existence(monkeypatch, tmp_path):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    workspace = tmp_path / "workspace"
+    artifact = workspace / "reports" / "escaped.md"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("ok", encoding="utf-8")
+
+    class DummySandbox:
+        def is_path_allowed(self, path, operation="read"):
+            return str(path).startswith(str(workspace))
+
+        async def file_exists(self, path):
+            return Path(path).exists()
+
+        async def read_file(self, path, encoding="utf-8"):
+            return Path(path).read_text(encoding=encoding)
+
+    session_context = SimpleNamespace(
+        audit_status={},
+        sandbox=DummySandbox(),
+        sandbox_agent_workspace=str(workspace),
+        system_context={"private_workspace": str(workspace)},
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "请生成结果"),
+                _make_message(
+                    "assistant",
+                    r"&lt;ling-artifacts&gt;{\"items\":[{\"title\":\"报告\",\"path\":\"reports/escaped.md\",\"status\":\"created\"}]}<\/ling-artifacts&gt;",
+                ),
+            ]
+        ),
+    )
+
+    async def collect():
+        chunks = []
+        async for batch in agent.run_stream(session_context):
+            chunks.extend(batch)
+        return chunks
+
+    chunks = asyncio.run(collect())
+
+    assert chunks == []
+    assert session_context.audit_status["self_check_passed"] is True
+    assert session_context.audit_status["self_check_checked_files"] == [str(artifact)]
+
+
+def test_artifacts_tag_missing_path_is_execution_error(monkeypatch, tmp_path):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    missing = workspace / "reports" / "missing.pdf"
+
+    class MissingSandbox:
+        def is_path_allowed(self, path, operation="read"):
+            return str(path).startswith(str(workspace))
+
+        async def file_exists(self, path):
+            return False
+
+    session_context = SimpleNamespace(
+        audit_status={},
+        sandbox=MissingSandbox(),
+        sandbox_agent_workspace=str(workspace),
+        system_context={"private_workspace": str(workspace)},
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "请生成结果"),
+                _make_message(
+                    "assistant",
+                    '<sage-artifacts>{"items":[{"title":"报告","path":"reports/missing.pdf","status":"created"}]}</sage-artifacts>',
+                ),
+            ]
+        ),
+    )
+
+    async def collect():
+        chunks = []
+        async for batch in agent.run_stream(session_context):
+            chunks.extend(batch)
+        return chunks
+
+    chunks = asyncio.run(collect())
+
+    assert session_context.audit_status["self_check_passed"] is False
+    assert session_context.audit_status["self_check_checked_files"] == [str(missing)]
+    assert "文件不存在: reports/missing.pdf" in chunks[0].content
+    assert chunks[0].message_type == "agent_execution_error"
+
+
+def test_artifacts_tag_http_path_is_ignored(monkeypatch, tmp_path):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class DummySandbox:
+        async def file_exists(self, path):
+            raise AssertionError("HTTP artifact URLs should not be checked")
+
+    session_context = SimpleNamespace(
+        audit_status={},
+        sandbox=DummySandbox(),
+        sandbox_agent_workspace=str(workspace),
+        system_context={"private_workspace": str(workspace)},
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "请生成结果"),
+                _make_message(
+                    "assistant",
+                    '<artifacts>{"items":[{"title":"网页","path":"https://example.com/report.pdf","status":"created"}]}</artifacts>',
+                ),
+            ]
+        ),
+    )
+
+    async def collect():
+        chunks = []
+        async for batch in agent.run_stream(session_context):
+            chunks.extend(batch)
+        return chunks
+
+    chunks = asyncio.run(collect())
+
+    assert chunks == []
+    assert session_context.audit_status["self_check_passed"] is True
+    assert session_context.audit_status["self_check_summary"] == (
+        "skip: no candidate files detected"
+    )
+
+
 def test_absolute_markdown_link_outside_workspace_is_execution_error(
     monkeypatch, tmp_path
 ):
