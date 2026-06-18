@@ -28,13 +28,22 @@ pub(crate) fn matching_commands(
 
     for command in commands {
         let name = command.command.trim_start_matches('/');
+        let mut preview_lines = vec![
+            format!("category: {}", command.category()),
+            format!("usage: {}", command.usage),
+            format!("example: {}", command.example),
+        ];
+        preview_lines.extend(
+            command
+                .detail_lines()
+                .iter()
+                .map(|line| format!("note: {line}")),
+        );
         let item = CommandMatch {
             command: command.command.to_string(),
+            category: command.category().to_string(),
             description: command.description.to_string(),
-            preview_lines: vec![
-                format!("usage: {}", command.usage),
-                format!("example: {}", command.example),
-            ],
+            preview_lines,
             autocomplete: format!("{} ", command.command),
             action: PopupAction::HandleCommand(command.command.to_string()),
         };
@@ -84,6 +93,7 @@ pub(crate) fn props_from_matches_for_rows(
                 let idx = window_start + offset;
                 CommandPopupItem {
                     command: item.command.to_string(),
+                    category: item.category.to_string(),
                     description: item.description.to_string(),
                     preview_lines: item.preview_lines.clone(),
                     selected: idx == selected,
