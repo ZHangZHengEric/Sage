@@ -229,13 +229,19 @@ where
     fn autoresize(&mut self) -> io::Result<()> {
         let size = self.size()?;
         if size != self.last_known_screen_size {
+            let previous_size = self.last_known_screen_size;
+            let previous_area = self.viewport_area;
+            let was_bottom_aligned = previous_area.bottom() == previous_size.height;
             self.last_known_screen_size = size;
-            self.set_viewport_area(viewport_rect(
-                size,
-                self.viewport_height,
-                self.viewport_area.y,
-            ));
-            self.previous_buffer_mut().reset();
+            let mut next_area = viewport_rect(size, self.viewport_height, previous_area.y);
+            if size.height > previous_size.height && was_bottom_aligned {
+                next_area.y = size.height.saturating_sub(next_area.height);
+            }
+            if next_area != previous_area {
+                let clear_y = previous_area.y.min(next_area.y);
+                self.clear_after_position(Position { x: 0, y: clear_y })?;
+                self.set_viewport_area(next_area);
+            }
         }
         Ok(())
     }
@@ -434,5 +440,31 @@ mod tests {
         assert_eq!(backend.cursor, Position { x: 0, y: 10 });
         assert_eq!(backend.clear_region, Some(ClearType::AfterCursor));
         assert!(backend.flushed);
+    }
+
+    #[test]
+    fn autoresize_keeps_bottom_aligned_viewport_pinned_after_height_growth() {
+        let backend = RecordingBackend::new(80, 24);
+        let mut terminal =
+            Terminal::with_viewport_height_and_cursor(backend, 5, Position { x: 0, y: 19 })
+                .expect("terminal");
+        assert_eq!(
+            terminal.viewport_area(),
+            ratatui::layout::Rect::new(0, 19, 80, 5)
+        );
+
+        terminal.backend_mut().size = Size {
+            width: 80,
+            height: 30,
+        };
+        terminal.draw(|_| {}).expect("draw after resize");
+
+        assert_eq!(
+            terminal.viewport_area(),
+            ratatui::layout::Rect::new(0, 25, 80, 5)
+        );
+        let backend = terminal.backend_mut();
+        assert_eq!(backend.cursor, Position { x: 0, y: 19 });
+        assert_eq!(backend.clear_region, Some(ClearType::AfterCursor));
     }
 }
