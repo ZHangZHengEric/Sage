@@ -35,8 +35,9 @@ impl SlashCommandDef {
             ],
             "/sandbox" => &[
                 "Controls the sandbox mode passed to the backend for future requests.",
-                "local runs work in a local sandbox, remote requests a remote sandbox, passthrough uses the backend default path.",
-                "Changing sandbox mode restarts the backend before the next task.",
+                "local uses the local sandbox provider with workspace path checks; remote asks the remote sandbox provider; passthrough uses direct backend workspace access.",
+                "Changing sandbox mode marks the backend for restart before the next task.",
+                "Run /sandbox show for the effective mode, workspace, restart state, and next-step guidance.",
             ],
             "/display" => &[
                 "compact hides internal tool and phase detail from the transcript.",

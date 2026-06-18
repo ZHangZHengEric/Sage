@@ -448,6 +448,14 @@ impl App {
                     format!("mode: {}", self.agent_mode_status_label()),
                     format!("workspace: {}", self.workspace_label),
                     format!("sandbox: {}", self.sandbox_type_status_label()),
+                    format!(
+                        "sandbox restart: {}",
+                        if self.backend_restart_requested {
+                            "pending"
+                        } else {
+                            "not pending"
+                        }
+                    ),
                     format!("display: {}", display_mode_name(self.display_mode)),
                     format!("loop limit: {}", self.max_loop_count_status_label()),
                 ]);

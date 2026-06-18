@@ -197,6 +197,7 @@ fn status_command_keeps_welcome_banner_visible() {
     assert!(rendered.contains("agent: "));
     assert!(rendered.contains("mode: "));
     assert!(rendered.contains("sandbox: "));
+    assert!(rendered.contains("sandbox restart: "));
     assert!(rendered.contains("display: "));
     assert!(!rendered.contains("busy: false"));
     assert!(!rendered.contains("agent_id: "));
@@ -277,8 +278,9 @@ fn help_sandbox_topic_explains_modes_and_restart() {
         .map(|item| item.value.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("local runs work in a local sandbox"));
-    assert!(text.contains("restarts the backend"));
+    assert!(text.contains("local uses the local sandbox provider"));
+    assert!(text.contains("marks the backend for restart"));
+    assert!(text.contains("/sandbox show"));
 }
 
 #[test]
