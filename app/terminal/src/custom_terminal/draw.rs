@@ -4,8 +4,7 @@ use std::io::Write;
 use crossterm::cursor::MoveTo;
 use crossterm::queue;
 use crossterm::style::{
-    Attribute as CAttribute, Colors, Print, SetAttribute, SetBackgroundColor, SetColors,
-    SetForegroundColor,
+    Attribute as CAttribute, Print, SetAttribute, SetBackgroundColor, SetForegroundColor,
 };
 use crossterm::terminal::Clear;
 use ratatui::layout::Position;
@@ -46,7 +45,8 @@ where
                 if cell.fg != fg || cell.bg != bg {
                     queue!(
                         writer,
-                        SetColors(Colors::new(cell.fg.into(), cell.bg.into()))
+                        SetForegroundColor(to_crossterm_color(cell.fg)),
+                        SetBackgroundColor(to_crossterm_color(cell.bg))
                     )?;
                     fg = cell.fg;
                     bg = cell.bg;
@@ -60,7 +60,8 @@ where
             DrawCommand::ClearToEnd { bg: clear_bg, .. } => {
                 queue!(writer, SetAttribute(CAttribute::Reset))?;
                 modifier = Modifier::empty();
-                queue!(writer, SetBackgroundColor(clear_bg.into()))?;
+                fg = Color::Reset;
+                queue!(writer, SetBackgroundColor(to_crossterm_color(clear_bg)))?;
                 bg = clear_bg;
                 queue!(writer, Clear(crossterm::terminal::ClearType::UntilNewLine))?;
                 expected_cursor = None;
@@ -79,6 +80,30 @@ where
 
 fn display_width(text: &str) -> usize {
     UnicodeWidthStr::width(text)
+}
+
+fn to_crossterm_color(color: Color) -> crossterm::style::Color {
+    match color {
+        Color::Reset => crossterm::style::Color::Reset,
+        Color::Black => crossterm::style::Color::Black,
+        Color::Red => crossterm::style::Color::DarkRed,
+        Color::Green => crossterm::style::Color::DarkGreen,
+        Color::Yellow => crossterm::style::Color::DarkYellow,
+        Color::Blue => crossterm::style::Color::DarkBlue,
+        Color::Magenta => crossterm::style::Color::DarkMagenta,
+        Color::Cyan => crossterm::style::Color::DarkCyan,
+        Color::Gray => crossterm::style::Color::Grey,
+        Color::DarkGray => crossterm::style::Color::DarkGrey,
+        Color::LightRed => crossterm::style::Color::Red,
+        Color::LightGreen => crossterm::style::Color::Green,
+        Color::LightYellow => crossterm::style::Color::Yellow,
+        Color::LightBlue => crossterm::style::Color::Blue,
+        Color::LightMagenta => crossterm::style::Color::Magenta,
+        Color::LightCyan => crossterm::style::Color::Cyan,
+        Color::White => crossterm::style::Color::White,
+        Color::Rgb(r, g, b) => crossterm::style::Color::Rgb { r, g, b },
+        Color::Indexed(index) => crossterm::style::Color::AnsiValue(index),
+    }
 }
 
 struct ModifierDiff {
@@ -151,6 +176,51 @@ mod tests {
         assert!(
             rendered.contains("\x1b[1;2HA"),
             "update after clear should not rely on stale cursor position: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn draw_commands_reapplies_foreground_after_clear_reset() {
+        let mut before_clear = Cell::default();
+        before_clear.set_symbol("A");
+        before_clear.fg = Color::Rgb(174, 220, 121);
+        let mut after_clear = Cell::default();
+        after_clear.set_symbol("B");
+        after_clear.fg = Color::Rgb(174, 220, 121);
+
+        let mut out = Vec::new();
+        draw_commands(
+            &mut out,
+            vec![
+                DrawCommand::Put {
+                    x: 0,
+                    y: 0,
+                    cell: before_clear,
+                },
+                DrawCommand::ClearToEnd {
+                    x: 1,
+                    y: 0,
+                    bg: Color::Reset,
+                },
+                DrawCommand::Put {
+                    x: 2,
+                    y: 0,
+                    cell: after_clear,
+                },
+            ]
+            .into_iter(),
+        )
+        .expect("draw should succeed");
+
+        let rendered = String::from_utf8_lossy(&out);
+        let before_second_cell = rendered
+            .split("\x1b[1;3H")
+            .nth(1)
+            .and_then(|tail| tail.split('B').next())
+            .unwrap_or_default();
+        assert!(
+            before_second_cell.contains("\x1b["),
+            "clear reset should force foreground color to be emitted again: {rendered:?}"
         );
     }
 }
