@@ -6,6 +6,7 @@ from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
+from sagents.tool.impl.todo_tool import ToDoTool
 import uuid
 
 
@@ -126,9 +127,13 @@ class TaskObservationAgent(AgentBase):
             }
         )
 
-        # 检查是否所有任务都已完成
-        # 重新获取最新的 todo_list (因为工具调用可能更新了它)
-        latest_todo_list = session_context.system_context.get("todo_list", [])
+        # 检查是否所有任务都已完成；ToDo 不再同步到 system_context，
+        # 因此直接读取 session todo 文件作为状态源。
+        latest_todo_list = []
+        try:
+            latest_todo_list = await ToDoTool().read_tasks(session_context.session_id)
+        except Exception as exc:
+            logger.warning(f"ObservationAgent: 读取 ToDo 状态失败: {exc}")
         if latest_todo_list:
             statuses = [todo.get("status") or "pending" for todo in latest_todo_list]
             all_completed = all(s == "completed" for s in statuses)

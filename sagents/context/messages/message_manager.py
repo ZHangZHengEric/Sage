@@ -36,6 +36,7 @@ _max_base64_image_token_estimate = 3000  # base64 图片 token 估算上限
 # 协议性状态工具：可持久化在 messages.json，但不参与发往 LLM 的 tool_calls/tool 对（见 strip_turn_status_from_llm_context）
 TURN_STATUS_TOOL_NAME = "turn_status"
 COMPRESS_HISTORY_TOOL_NAME = "compress_conversation_history"
+TODO_WRITE_TOOL_NAME = "todo_write"
 DEFAULT_RULE_PROTECTION_COUNT = 20
 DEFAULT_LLM_PROTECTION_COUNT = 12
 DEFAULT_RULE_OFFLOAD_TOKEN_THRESHOLD = 4096
@@ -1154,8 +1155,9 @@ class MessageManager:
             content_text = json.dumps(content, ensure_ascii=False, indent=2)
         else:
             content_text = str(content or "")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(content_text)
+        if not os.path.exists(path):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content_text)
         safe_session_id = session_id or "unknown_session"
         display_path = os.path.join(
             ".sage", "context", "artifacts", safe_session_id, f"{message_id}.txt"
@@ -1166,7 +1168,6 @@ class MessageManager:
     def _artifact_reference_content(
         msg: MessageChunk,
         path: str,
-        token_estimate: int,
         abs_path: Optional[str] = None,
     ) -> str:
         metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
@@ -1193,7 +1194,6 @@ class MessageManager:
                 f"message_id: {msg.message_id}\n",
                 f"role: {msg.role}\n",
                 f"message_type: {msg.message_type}\n",
-                f"token_estimate: {token_estimate}\n",
                 f"brief: {'; '.join(brief_parts)}",
             ]
         )
@@ -1229,6 +1229,31 @@ class MessageManager:
         )
 
     @staticmethod
+    def _last_tool_call_result_index(
+        messages: List[MessageChunk],
+        tool_name: str,
+    ) -> Optional[int]:
+        """Return the matching tool-result index for the last assistant tool call."""
+        last_tool_call_id: Optional[str] = None
+        for msg in messages:
+            if msg.role != MessageRole.ASSISTANT.value or not msg.tool_calls:
+                continue
+            for tc in msg.tool_calls:
+                name, tid = MessageManager._tool_call_entry_name_and_id(tc)
+                if name == tool_name and tid:
+                    last_tool_call_id = tid
+        if not last_tool_call_id:
+            return None
+        for idx in range(len(messages) - 1, -1, -1):
+            msg = messages[idx]
+            if (
+                msg.role == MessageRole.TOOL.value
+                and msg.tool_call_id == last_tool_call_id
+            ):
+                return idx
+        return None
+
+    @staticmethod
     def _apply_rule_artifact_offload(
         messages: List[MessageChunk],
         session_id: Optional[str],
@@ -1246,6 +1271,11 @@ class MessageManager:
         protected = MessageManager._pair_safe_protected_indices(
             messages, protection_count
         )
+        last_todo_result_idx = MessageManager._last_tool_call_result_index(
+            messages, TODO_WRITE_TOOL_NAME
+        )
+        if last_todo_result_idx is not None:
+            protected.add(last_todo_result_idx)
         out = deepcopy(messages)
         for idx, msg in enumerate(out):
             if not MessageManager._should_rule_offload(
@@ -1259,7 +1289,7 @@ class MessageManager:
                 msg, session_id, artifact_root
             )
             msg.content = MessageManager._artifact_reference_content(
-                msg, display_path, token_estimate, abs_path=path
+                msg, display_path, abs_path=path
             )
             if msg.metadata is None:
                 msg.metadata = {}
@@ -1804,6 +1834,11 @@ class MessageManager:
         protected = MessageManager._pair_safe_protected_indices(
             working_messages, recent_messages_count
         )
+        last_todo_result_idx = MessageManager._last_tool_call_result_index(
+            working_messages, TODO_WRITE_TOOL_NAME
+        )
+        if last_todo_result_idx is not None:
+            protected.add(last_todo_result_idx)
 
         def current_usage() -> int:
             return MessageManager.calculate_messages_token_length(working_messages)
