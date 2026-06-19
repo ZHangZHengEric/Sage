@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+import os
 import re
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
+import httpx
+from openai import APIConnectionError, APIError, RateLimitError
+
+from sagents.llm.capabilities import create_chat_completion_with_fallback
+from sagents.llm.model_capabilities import (
+    is_openai_reasoning_model,
+    resolve_reasoning_effort,
+)
 from sagents.utils.logger import logger
 from sagents.utils.prompt_manager import PromptManager
 
@@ -12,6 +22,38 @@ CHUNK_CHAR_BUDGET = 32000
 IMPORTANT_LINES_BUDGET = 4000
 HEAD_BUDGET = 6000
 TAIL_BUDGET = 14000
+
+
+_MODEL_CONFIG_INTERNAL_KEYS = {
+    "api_key",
+    "base_url",
+    "fast_api_key",
+    "fast_base_url",
+    "fast_model_name",
+    "max_model_len",
+    "maxTokens",
+}
+
+_SUMMARY_MAX_RETRIES = 3
+
+
+def _build_summary_extra_body(model_name: str, step_name: str) -> Dict[str, Any]:
+    extra_body: Dict[str, Any] = {"_step_name": step_name}
+    if is_openai_reasoning_model(model_name):
+        extra_body["reasoning_effort"] = resolve_reasoning_effort(
+            enable_thinking=False,
+            env_value=os.environ.get("SAGE_REASONING_EFFORT_OFF"),
+            default_off="low",
+        )
+    else:
+        extra_body["chat_template_kwargs"] = {"enable_thinking": False}
+        extra_body["enable_thinking"] = False
+        extra_body["thinking"] = {"type": "disabled"}
+    return extra_body
+
+
+def _retry_delay(attempt: int) -> float:
+    return min(0.5 * (2**attempt), 4.0)
 
 
 def _important_lines(history: str, max_chars: int = IMPORTANT_LINES_BUDGET) -> str:
@@ -113,7 +155,10 @@ async def _summarize_once(
     task_description: str,
     step_name: str,
 ) -> Optional[str]:
-    if not agent or not hasattr(agent, "_call_llm_streaming"):
+    if not agent:
+        return None
+    model = getattr(agent, "model", None)
+    if model is None:
         return None
 
     summary_prompt_template = PromptManager().get_agent_prompt(
@@ -127,19 +172,50 @@ async def _summarize_once(
     )
     messages_input = [{"role": "user", "content": prompt}]
 
+    final_config: Dict[str, Any] = dict(getattr(agent, "model_config", {}) or {})
+    model_name = str(
+        final_config.pop("model", None)
+        or getattr(model, "model_name", None)
+        or "gpt-3.5-turbo"
+    )
+    for key in _MODEL_CONFIG_INTERNAL_KEYS:
+        final_config.pop(key, None)
+    if model.__class__.__name__ != "SageAsyncOpenAI":
+        final_config.pop("model_type", None)
+    extra_body = _build_summary_extra_body(model_name, step_name)
+
     from sagents.session_runtime import session_scope
 
     with session_scope(summary_session_id):
-        response_stream = agent._call_llm_streaming(
-            messages=messages_input,
-            session_id=summary_session_id,
-            step_name=step_name,
-        )
-
         summary_content = ""
-        async for chunk in response_stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                summary_content += chunk.choices[0].delta.content
+        for attempt in range(_SUMMARY_MAX_RETRIES):
+            try:
+                response_stream = await create_chat_completion_with_fallback(
+                    model,
+                    model=model_name,
+                    messages=messages_input,
+                    model_config=final_config,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                    extra_body=extra_body,
+                    **final_config,
+                )
+
+                async for chunk in response_stream:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        summary_content += chunk.choices[0].delta.content
+                break
+            except (
+                RateLimitError,
+                APIError,
+                APIConnectionError,
+                httpx.ReadTimeout,
+                httpx.ConnectTimeout,
+                httpx.ReadError,
+            ) as exc:
+                if summary_content or attempt >= _SUMMARY_MAX_RETRIES - 1:
+                    raise
+                await asyncio.sleep(_retry_delay(attempt))
 
     return summary_content.strip() or None
 

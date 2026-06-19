@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, AsyncGenerator
+from typing import Any, Dict, List, Optional, AsyncGenerator, Union, cast
 import json
 import uuid
 import os
@@ -69,12 +69,11 @@ class CommonAgent(AgentBase):
             if tool_name in tools_json
         ]
 
-        llm_request_message = [
-            *await self.prepare_unified_system_messages(
-                session_id=session_id, language=session_context.get_language()
-            )
-        ]
-        llm_request_message.extend(all_messages)
+        llm_request_message = await self.prepare_llm_request_messages(
+            session_id=session_id,
+            history_messages=all_messages,
+            language=session_context.get_language(),
+        )
         async for msg in self._call_llm_and_process_response(
             messages_input=llm_request_message,
             tools_json=tools_json,
@@ -102,7 +101,7 @@ class CommonAgent(AgentBase):
             model_config_override["tools"] = tools_json
 
         response = self._call_llm_streaming(
-            messages=clean_message_input,  # pyright: ignore[reportArgumentType]
+            messages=cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input),
             session_id=session_id,
             step_name="task_execution",
             model_config_override=model_config_override,

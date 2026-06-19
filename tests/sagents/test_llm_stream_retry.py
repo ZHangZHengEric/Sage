@@ -179,6 +179,42 @@ async def test_streaming_call_does_not_retry_after_text_chunk_is_yielded():
 
 
 @pytest.mark.asyncio
+async def test_streaming_call_rejects_raw_dict_system_messages():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("unused"))])
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})  # pyright: ignore[reportArgumentType]
+
+    with pytest.raises(ValueError, match="Raw dict system messages"):
+        async for _ in agent._call_llm_streaming(
+            [
+                {"role": "system", "content": "stale system"},
+                {"role": "user", "content": "run"},
+            ],
+            enable_thinking=False,
+        ):
+            pass
+
+    assert client.chat.completions.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_streaming_call_rejects_non_leading_system_message_chunks():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("unused"))])
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})  # pyright: ignore[reportArgumentType]
+
+    with pytest.raises(ValueError, match="leading request prefix"):
+        async for _ in agent._call_llm_streaming(
+            [
+                MessageChunk(role=MessageRole.USER.value, content="run"),
+                MessageChunk(role=MessageRole.SYSTEM.value, content="late system"),
+            ],
+            enable_thinking=False,
+        ):
+            pass
+
+    assert client.chat.completions.calls == 0
+
+
+@pytest.mark.asyncio
 async def test_simple_agent_closes_streamed_partial_tool_call_when_stream_times_out():
     client = FakeClient()
     agent = SimpleAgent(model=client, model_config={"model": "gpt-test"})

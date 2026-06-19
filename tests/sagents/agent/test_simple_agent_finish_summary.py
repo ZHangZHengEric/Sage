@@ -461,9 +461,9 @@ def test_task_complete_judge_uses_composed_system_prefix_when_protocol_disabled(
     async def _never_must_continue(messages):
         return False
 
-    async def _fake_system_message(session_id, custom_prefix, language):
-        captured["custom_prefix"] = custom_prefix
-        return custom_prefix
+    async def _fake_system_messages(**kwargs):
+        captured["custom_prefix"] = kwargs["custom_prefix"]
+        return [MessageChunk(role="system", content=kwargs["custom_prefix"])]
 
     async def _fake_llm_streaming(*args, **kwargs):
         captured["llm_messages"] = kwargs["messages"]
@@ -478,7 +478,7 @@ def test_task_complete_judge_uses_composed_system_prefix_when_protocol_disabled(
         )
 
     monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
-    monkeypatch.setattr(agent, "prepare_unified_system_message", _fake_system_message)
+    monkeypatch.setattr(agent, "prepare_unified_system_messages", _fake_system_messages)
     monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
 
     msg_manager = SimpleNamespace(

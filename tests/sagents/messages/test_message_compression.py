@@ -73,12 +73,13 @@ class TestMessageCompression(unittest.TestCase):
             )
         self.print_messages("Level 1 Compression Result", compressed)
 
-        self.assertIn("[Content moved to context artifact]", compressed[2].content)  # pyright: ignore[reportArgumentType]
-        self.assertTrue(compressed[2].metadata["context_artifact_ref"])
+        self.assertTrue(all(msg.role != MessageRole.SYSTEM.value for msg in compressed))
+        self.assertIn("[Content moved to context artifact]", compressed[1].content)  # pyright: ignore[reportArgumentType]
+        self.assertTrue(compressed[1].metadata["context_artifact_ref"])
 
         # 规则压缩不再做不可逆 thinking 删除。
-        self.assertIn("<thinking>", compressed[3].content)  # pyright: ignore[reportArgumentType]
-        self.assertIn("The answer is 42", compressed[3].content)  # pyright: ignore[reportArgumentType]
+        self.assertIn("<thinking>", compressed[2].content)  # pyright: ignore[reportArgumentType]
+        self.assertIn("The answer is 42", compressed[2].content)  # pyright: ignore[reportArgumentType]
 
     def test_level_2_aging(self):
         """规则压缩不再因为 aging 做不可逆截断，只做 artifact offload"""
@@ -108,8 +109,9 @@ class TestMessageCompression(unittest.TestCase):
             )
         self.print_messages("Aging Strategy Result", compressed)
 
-        self.assertIn("[Content moved to context artifact]", compressed[2].content)  # pyright: ignore[reportArgumentType]
-        self.assertNotIn("...[Content truncated]", compressed[2].content)  # pyright: ignore[reportArgumentType]
+        self.assertTrue(all(msg.role != MessageRole.SYSTEM.value for msg in compressed))
+        self.assertIn("[Content moved to context artifact]", compressed[1].content)  # pyright: ignore[reportArgumentType]
+        self.assertNotIn("...[Content truncated]", compressed[1].content)  # pyright: ignore[reportArgumentType]
 
     def test_level_3_history_drop(self):
         """测试 Level 3: 历史分组丢弃"""
@@ -138,8 +140,8 @@ class TestMessageCompression(unittest.TestCase):
         )
         self.print_messages("Level 3 Drop Result", compressed)
 
-        # System 应该在
-        self.assertEqual(compressed[0].role, MessageRole.SYSTEM.value)
+        # System 不进入 prompt-local history view；每次 LLM 请求前由 AgentBase 单独构造。
+        self.assertTrue(all(msg.role != MessageRole.SYSTEM.value for msg in compressed))
 
         # Group 1 应该完全消失 (Step B executed)
         # Group 2 应该部分消失 (Step A executed, User 2 保留但 Followers 变占位符)
@@ -249,11 +251,11 @@ class TestMessageCompression(unittest.TestCase):
         self.assertEqual(messages[2].content, "A" * 5000)
         self.assertEqual(messages[3].content, "T" * 5000)
         self.assertEqual(compressed[0].content, "U" * 5000)
-        self.assertEqual(compressed[1].content, "S" * 5000)
-        self.assertIn("assistant content omitted", compressed[2].content)  # pyright: ignore[reportArgumentType]
-        self.assertIn("tool output omitted", compressed[3].content)  # pyright: ignore[reportArgumentType]
+        self.assertTrue(all(msg.role != MessageRole.SYSTEM.value for msg in compressed))
+        self.assertIn("assistant content omitted", compressed[1].content)  # pyright: ignore[reportArgumentType]
+        self.assertIn("tool output omitted", compressed[2].content)  # pyright: ignore[reportArgumentType]
+        self.assertFalse(compressed[1].metadata.get("context_artifact_ref"))
         self.assertFalse(compressed[2].metadata.get("context_artifact_ref"))
-        self.assertFalse(compressed[3].metadata.get("context_artifact_ref"))
 
     def test_token_budget_view_preserves_tool_call_arguments(self):
         tool_call = MessageChunk(

@@ -1280,7 +1280,8 @@ class MessageManager:
         filtered_messages = [
             msg
             for msg in messages
-            if not msg.matches_message_types([MessageType.REASONING_CONTENT.value])
+            if msg.role != MessageRole.SYSTEM.value
+            and not msg.matches_message_types([MessageType.REASONING_CONTENT.value])
         ]
         pairs = MessageManager._expanded_compression_pairs(filtered_messages)
         covered_by_visible: set[int] = set()

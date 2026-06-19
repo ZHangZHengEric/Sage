@@ -362,6 +362,101 @@ class AgentBase(ABC):
             return None
         return os.path.join(str(workspace), ".sage", "context", "artifacts")
 
+    @staticmethod
+    def _without_system_messages(messages: Optional[List[MessageChunk]]) -> List[MessageChunk]:
+        """Return only conversation/history messages.
+
+        System messages are generated fresh for every LLM request and must not be
+        reused from history, compression views, or caller-provided message lists.
+        """
+        return [
+            message
+            for message in (messages or [])
+            if message.role != MessageRole.SYSTEM.value
+        ]
+
+    async def prepare_llm_request_messages(
+        self,
+        *,
+        session_id: Optional[str] = None,
+        history_messages: Optional[List[MessageChunk]] = None,
+        extra_messages: Optional[List[MessageChunk]] = None,
+        custom_prefix: Optional[str] = None,
+        language: Optional[str] = None,
+        system_prefix_override: Optional[str] = None,
+        include_sections: Optional[List[str]] = None,
+    ) -> List[MessageChunk]:
+        """Build a final LLM request as fresh system + non-system payload.
+
+        ``MessageManager`` owns only the non-system ledger. Any system messages
+        found in ``history_messages`` or ``extra_messages`` are treated as stale
+        request artifacts and dropped before fresh system segments are prepended.
+        """
+        system_messages = await self.prepare_unified_system_messages(
+            session_id=session_id,
+            custom_prefix=custom_prefix,
+            language=language,
+            system_prefix_override=system_prefix_override,
+            include_sections=include_sections,
+        )
+        return (
+            list(system_messages)
+            + self._without_system_messages(history_messages)
+            + self._without_system_messages(extra_messages)
+        )
+
+    async def prepare_llm_system_prompt_text(
+        self,
+        *,
+        session_id: Optional[str] = None,
+        custom_prefix: Optional[str] = None,
+        language: Optional[str] = None,
+        system_prefix_override: Optional[str] = None,
+        include_sections: Optional[List[str]] = None,
+    ) -> str:
+        """Build fresh system prompt text for judge prompts that embed it."""
+        system_messages = await self.prepare_unified_system_messages(
+            session_id=session_id,
+            custom_prefix=custom_prefix,
+            language=language,
+            system_prefix_override=system_prefix_override,
+            include_sections=include_sections,
+        )
+        return "".join(message.content or "" for message in system_messages)
+
+    @staticmethod
+    def _message_role_for_request_guard(
+        message: Union[MessageChunk, Dict[str, Any]],
+    ) -> Optional[str]:
+        if isinstance(message, MessageChunk):
+            return message.role
+        if isinstance(message, dict):
+            role = message.get("role")
+            return str(role) if role is not None else None
+        return None
+
+    @classmethod
+    def _validate_llm_request_system_messages(
+        cls,
+        messages: List[Union[MessageChunk, Dict[str, Any]]],
+    ) -> None:
+        seen_non_system = False
+        for message in messages:
+            role = cls._message_role_for_request_guard(message)
+            if role != MessageRole.SYSTEM.value:
+                seen_non_system = True
+                continue
+            if isinstance(message, dict):
+                raise ValueError(
+                    "Raw dict system messages are not accepted by _call_llm_streaming; "
+                    "build fresh MessageChunk system messages via prepare_llm_request_messages."
+                )
+            if seen_non_system:
+                raise ValueError(
+                    "System messages must be the leading request prefix; "
+                    "build requests via prepare_llm_request_messages."
+                )
+
     def _context_over_limit_error_chunk(
         self, current_tokens: int, limit: int
     ) -> MessageChunk:
@@ -521,6 +616,7 @@ class AgentBase(ABC):
                     f"{self.__class__.__name__}: 跳过模型调用，session已中断，会话ID: {session_id}"
                 )
                 return
+        self._validate_llm_request_system_messages(messages)
         # 确定最终的模型配置
         final_config = {**self.model_config}
         if model_config_override:

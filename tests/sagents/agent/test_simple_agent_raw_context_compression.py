@@ -232,6 +232,8 @@ def test_rule_artifact_offload_role_matrix(
             .metadata["original_content_path"]
             .startswith(".sage/context/artifacts/sess-matrix/")
         )
+    elif role == MessageRole.SYSTEM.value:
+        assert all(msg.role != MessageRole.SYSTEM.value for msg in view)
     else:
         assert view[0].content == "X" * 30_000
 
@@ -389,6 +391,43 @@ def test_inference_view_keeps_visible_compression_pair_and_hides_covered_raw_mes
         "compress-result",
         "current",
     ]
+
+
+def test_inference_view_excludes_system_message_before_compression_coverage():
+    system = _msg(
+        MessageRole.SYSTEM.value,
+        "system instructions",
+        MessageType.SYSTEM.value,
+        message_id="sys-1",
+    )
+    raw_user = _msg(
+        MessageRole.USER.value,
+        "first request",
+        MessageType.USER_INPUT.value,
+        message_id="raw-u",
+    )
+    raw_assistant = _msg(
+        MessageRole.ASSISTANT.value,
+        "old answer",
+        MessageType.ASSISTANT_TEXT.value,
+        message_id="raw-a",
+    )
+    tool_call, tool_result = _compression_pair(
+        call_message_id="compress-call",
+        result_message_id="compress-result",
+        call_id="compress-1",
+        source_ids=["sys-1", "raw-u", "raw-a"],
+    )
+
+    view = MessageManager.extract_messages_for_inference(
+        [system, raw_user, raw_assistant, tool_call, tool_result]
+    )
+
+    assert [msg.message_id for msg in view] == [
+        "compress-call",
+        "compress-result",
+    ]
+    assert all(msg.role != MessageRole.SYSTEM.value for msg in view)
 
 
 def test_nested_compression_keeps_outer_pair_and_hides_inner_pair():
@@ -660,6 +699,46 @@ def test_select_llm_compression_segment_preserves_tool_pair_and_current_user():
     assert "t-old" in ids
 
 
+def test_select_llm_compression_segment_never_includes_system_message():
+    system = _msg(
+        MessageRole.SYSTEM.value,
+        "S" * 4000,
+        MessageType.SYSTEM.value,
+        message_id="sys-old",
+    )
+    old_user = _msg(
+        MessageRole.USER.value,
+        "old request",
+        MessageType.USER_INPUT.value,
+        message_id="u-old",
+    )
+    old_assistant = _msg(
+        MessageRole.ASSISTANT.value,
+        "A" * 4000,
+        MessageType.ASSISTANT_TEXT.value,
+        message_id="a-old",
+    )
+    tail = [
+        _msg(
+            MessageRole.ASSISTANT.value,
+            f"tail-{idx}",
+            MessageType.ASSISTANT_TEXT.value,
+            message_id=f"tail-{idx}",
+        )
+        for idx in range(12)
+    ]
+
+    segment = MessageManager.select_llm_compression_segment(
+        [system, old_user, old_assistant, *tail],
+        max_model_len=2000,
+        active_protection_count=12,
+    )
+
+    assert segment is not None
+    assert all(msg.role != MessageRole.SYSTEM.value for msg in segment)
+    assert "sys-old" not in [msg.message_id for msg in segment]
+
+
 @pytest.mark.asyncio
 async def test_prepare_messages_for_llm_inserts_successful_pair_after_source_tail(
     monkeypatch,
@@ -876,3 +955,68 @@ async def test_prepare_messages_for_llm_returns_error_when_no_compressible_segme
     assert error_chunks[0].message_type == MessageType.AGENT_EXECUTION_ERROR.value
     assert "压缩后仍超过模型输入限制" in error_chunks[0].content
     assert manager.messages == raw_messages
+
+
+@pytest.mark.asyncio
+async def test_simple_agent_prepares_fresh_system_after_compressed_history_view(
+    monkeypatch,
+):
+    agent = SimpleAgent(model=None, model_config={"max_model_len": 1000})
+    captured: dict[str, list] = {}
+
+    system_chunk = _msg(
+        MessageRole.SYSTEM.value,
+        "fresh system",
+        MessageType.SYSTEM.value,
+        message_id="sys-fresh",
+    )
+    compressed_call, compressed_result = _compression_pair(
+        call_message_id="compress-call",
+        result_message_id="compress-result",
+        call_id="compress-1",
+        source_ids=["old-u", "old-a"],
+    )
+    async def fake_prepare_system_messages(*args, **kwargs):
+        return [system_chunk]
+
+    async def fake_prepare_messages_for_llm(messages_input, session_id):
+        assert all(msg.role != MessageRole.SYSTEM.value for msg in messages_input)
+        yield ([compressed_call, compressed_result], True)
+
+    async def fake_llm_streaming(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        if False:
+            yield None
+
+    monkeypatch.setattr(
+        "sagents.agent.simple_agent._get_system_prefix", lambda *args, **kwargs: ""
+    )
+    monkeypatch.setattr(
+        agent, "prepare_unified_system_messages", fake_prepare_system_messages
+    )
+    monkeypatch.setattr(
+        agent, "_prepare_messages_for_llm", fake_prepare_messages_for_llm
+    )
+    monkeypatch.setattr(agent, "_call_llm_streaming", fake_llm_streaming)
+    monkeypatch.setattr(
+        agent,
+        "_get_live_session_context",
+        lambda session_id: SimpleNamespace(get_language=lambda: "zh"),
+    )
+
+    [
+        chunk
+        async for chunk, _ in agent._call_llm_and_process_response(
+            messages_input=[compressed_call, compressed_result],
+            tools_json=[],
+            tool_manager=None,
+            session_id="sess-loop-system",
+        )
+    ]
+
+    assert [msg.role for msg in captured["messages"][:3]] == [
+        MessageRole.SYSTEM.value,
+        MessageRole.ASSISTANT.value,
+        MessageRole.TOOL.value,
+    ]
+    assert captured["messages"][0].content == "fresh system"
