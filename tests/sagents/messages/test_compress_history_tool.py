@@ -125,6 +125,43 @@ class TestCompressHistoryTool:
         assert "source_message_ids" not in result["message"]
         assert "source_range" not in result["message"]
 
+    def test_compress_conversation_history_filters_system_messages(self):
+        """Test: system messages are never compressed or recorded as covered source."""
+        messages = [
+            self.create_message(MessageRole.SYSTEM.value, "System instructions"),
+            self.create_message(MessageRole.USER.value, "User message 1"),
+            self.create_message(MessageRole.ASSISTANT.value, "Assistant response 1"),
+        ]
+        messages[0].message_id = "sys1"
+        messages[1].message_id = "u1"
+        messages[2].message_id = "a1"
+
+        async def fake_call(messages_text, session_id):
+            assert "System instructions" not in messages_text
+            assert "User message 1" in messages_text
+            assert "Assistant response 1" in messages_text
+            return "summary text"
+
+        self.tool._call_llm_for_compression = fake_call
+        result = asyncio.run(
+            self.tool.compress_conversation_history(
+                messages,
+                "test_session",
+                source_message_ids=["sys1", "u1", "a1"],
+                source_start_message_id="sys1",
+                source_end_message_id="a1",
+            )
+        )
+
+        assert result["status"] == "success"
+        payload = result["data"]
+        assert payload["source_message_ids"] == ["u1", "a1"]
+        assert payload["source_range"] == {
+            "start_message_id": "u1",
+            "end_message_id": "a1",
+        }
+        assert payload["stats"]["source_message_count"] == 2
+
     def test_compress_conversation_history_empty_messages(self):
         """Test: compress_conversation_history with empty messages"""
         result = asyncio.run(

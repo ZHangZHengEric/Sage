@@ -65,17 +65,18 @@ class WorkflowSelectAgent(AgentBase):
             agent_description=self.system_prefix,
         )
 
-        llm_request_message = [
-            *await self.prepare_unified_system_messages(
-                session_id=session_id, language=session_context.get_language()
-            ),
-            MessageChunk(
+        llm_request_message = await self.prepare_llm_request_messages(
+            session_id=session_id,
+            language=session_context.get_language(),
+            extra_messages=[
+                MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,
                 message_id=str(uuid.uuid4()),
                 message_type=MessageType.GUIDE.value,
-            ),
-        ]
+                )
+            ],
+        )
         all_content = ""
         async for llm_repsonse_chunk in self._call_llm_streaming(
             messages=llm_request_message,  # pyright: ignore[reportArgumentType]

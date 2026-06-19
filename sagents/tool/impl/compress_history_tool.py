@@ -9,7 +9,7 @@ import json
 import re
 
 from sagents.utils.logger import logger
-from sagents.context.messages.message import MessageChunk
+from sagents.context.messages.message import MessageChunk, MessageRole
 from sagents.context.messages.message_manager import MessageManager
 from sagents.llm.capabilities import create_chat_completion_with_fallback
 
@@ -318,7 +318,29 @@ class CompressHistoryTool:
         )
 
         try:
-            to_compress = messages
+            to_compress = [
+                msg for msg in messages if msg.role != MessageRole.SYSTEM.value
+            ]
+            if len(to_compress) != len(messages):
+                logger.info(
+                    "compress_conversation_history: 已跳过 %d 条 system 消息，system 不参与压缩",
+                    len(messages) - len(to_compress),
+                )
+            source_message_ids = [
+                mid
+                for mid in (source_message_ids or [])
+                if any(msg.message_id == mid for msg in to_compress)
+            ]
+            if not source_message_ids:
+                source_message_ids = [
+                    msg.message_id for msg in to_compress if msg.message_id
+                ]
+            source_start_message_id = (
+                source_message_ids[0] if source_message_ids else None
+            )
+            source_end_message_id = (
+                source_message_ids[-1] if source_message_ids else None
+            )
 
             if not to_compress:
                 content_payload = {
@@ -383,15 +405,6 @@ class CompressHistoryTool:
                 f"压缩率: {compression_ratio:.2%}"
             )
 
-            source_message_ids = source_message_ids or [
-                msg.message_id for msg in to_compress if msg.message_id
-            ]
-            source_start_message_id = source_start_message_id or (
-                source_message_ids[0] if source_message_ids else None
-            )
-            source_end_message_id = source_end_message_id or (
-                source_message_ids[-1] if source_message_ids else None
-            )
             compression_payload = {
                 **summary_payload,
                 "original_content_paths": [],

@@ -189,23 +189,23 @@ class ToolSuggestionAgent(AgentBase):
                 available_tools_str=available_tools_str,
                 messages=json.dumps(clean_messages, ensure_ascii=False, indent=2),
             )
-            llm_request_messages = [
-                *await self.prepare_unified_system_messages(
-                    session_id=session_context.session_id,
-                    language=session_context.get_language(),
-                    include_sections=[
-                        "role_definition",
-                        "system_context",
-                        "available_skills",
-                    ],
-                ),
-                MessageChunk(
-                    role=MessageRole.USER.value,
-                    content=prompt,
-                    message_id=str(uuid.uuid4()),
-                    message_type=MessageType.GUIDE.value,
-                ),
-            ]
+            llm_request_messages = await self.prepare_llm_request_messages(
+                session_id=session_context.session_id,
+                language=session_context.get_language(),
+                include_sections=[
+                    "role_definition",
+                    "system_context",
+                    "available_skills",
+                ],
+                extra_messages=[
+                    MessageChunk(
+                        role=MessageRole.USER.value,
+                        content=prompt,
+                        message_id=str(uuid.uuid4()),
+                        message_type=MessageType.GUIDE.value,
+                    )
+                ],
+            )
             # 调用LLM获取建议，最大重试3次
             max_retries = 3
             retry_count = 0

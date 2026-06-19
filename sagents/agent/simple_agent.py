@@ -212,14 +212,6 @@ class SimpleAgent(AgentBase):
             suggested_tools = []
         # 准备工具列表
         tools_json = self._prepare_tools(tool_manager, suggested_tools, session_context)
-        # 将 system message 拆成多段（stable / semi_stable / volatile）前置到 history，
-        # 配合 add_cache_control_to_messages 的多断点策略最大化 prompt cache 命中。
-        system_messages = await self.prepare_unified_system_messages(
-            session_id,
-            custom_prefix=current_system_prefix,
-            language=session_context.get_language(),
-        )
-        history_messages = list(system_messages) + list(history_messages)
         async for chunks in self._execute_loop(
             messages_input=history_messages,
             tools_json=tools_json,
@@ -680,15 +672,15 @@ class SimpleAgent(AgentBase):
         task_complete_template = PromptManager().get_agent_prompt_auto(
             "task_complete_template", language=session_context.get_language()
         )
-        system_msg = await self.prepare_unified_system_message(
-            session_id,
+        system_prompt = await self.prepare_llm_system_prompt_text(
+            session_id=session_id,
             custom_prefix=_get_system_prefix(
                 tool_manager, session_context.get_language()
             ),
             language=session_context.get_language(),
         )
         prompt = task_complete_template.format(
-            system_prompt=system_msg,
+            system_prompt=system_prompt,
             messages=json.dumps(clean_messages, ensure_ascii=False, indent=2),
         )
         llm_input_messages: List[Dict[str, Any]] = [{"role": "user", "content": prompt}]
@@ -815,22 +807,6 @@ class SimpleAgent(AgentBase):
             current_system_prefix = _get_system_prefix(
                 tool_manager, session_context.get_language()
             )
-
-            # 更新system message，确保包含最新的子智能体列表等上下文信息
-            if messages_input and messages_input[0].role == MessageRole.SYSTEM.value:
-                # 把开头连续的多段 system 全部替换为新一轮的分段 system
-                head = 0
-                while (
-                    head < len(messages_input)
-                    and messages_input[head].role == MessageRole.SYSTEM.value
-                ):
-                    head += 1
-                new_system_messages = await self.prepare_unified_system_messages(
-                    session_id,
-                    custom_prefix=current_system_prefix,
-                    language=session_context.get_language(),
-                )
-                messages_input = list(new_system_messages) + list(messages_input[head:])
 
             current_turn_status_only = turn_status_only_next
             turn_status_only_next = False
@@ -1065,6 +1041,18 @@ class SimpleAgent(AgentBase):
             logger.error("SimpleAgent: 准备消息失败，没有获得最终消息列表")
             return
 
+        try:
+            live_context = self._get_live_session_context(session_id)
+            language = live_context.get_language() if live_context else "en"
+        except Exception:
+            language = "en"
+        prepared_messages = await self.prepare_llm_request_messages(
+            session_id=session_id,
+            history_messages=prepared_messages,
+            custom_prefix=_get_system_prefix(tool_manager, language),
+            language=language,
+        )
+
         clean_message_input = MessageManager.convert_messages_to_dict_for_request(
             prepared_messages
         )
@@ -1095,7 +1083,7 @@ class SimpleAgent(AgentBase):
         )
         response = self._call_llm_streaming(
             messages=cast(
-                List[Union[MessageChunk, Dict[str, Any]]], clean_message_input
+                List[Union[MessageChunk, Dict[str, Any]]], prepared_messages
             ),
             session_id=session_id,
             step_name="direct_execution",
