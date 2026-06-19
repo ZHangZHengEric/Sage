@@ -103,24 +103,24 @@ class TaskAnalysisAgent(AgentBase):
             )
         ]
 
-        llm_request_message = [
-            *await self.prepare_unified_system_messages(
-                session_id=session_id,
-                language=session_context.get_language(),
-                system_prefix_override=current_system_prefix,
-                include_sections=[
-                    "role_definition",
-                    "system_context",
-                    "workspace_files",
-                ],
-            ),
-            MessageChunk(
-                role=MessageRole.USER.value,
-                content=prompt,
-                message_id=str(uuid.uuid4()),
-                message_type=MessageType.TASK_ANALYSIS.value,
-            ),
-        ]
+        llm_request_message = await self.prepare_llm_request_messages(
+            session_id=session_id,
+            language=session_context.get_language(),
+            system_prefix_override=current_system_prefix,
+            include_sections=[
+                "role_definition",
+                "system_context",
+                "workspace_files",
+            ],
+            extra_messages=[
+                MessageChunk(
+                    role=MessageRole.USER.value,
+                    content=prompt,
+                    message_id=str(uuid.uuid4()),
+                    message_type=MessageType.TASK_ANALYSIS.value,
+                )
+            ],
+        )
         all_analysis_chunks_content = ""
         async for llm_repsonse_chunk in self._call_llm_streaming(
             messages=llm_request_message,  # pyright: ignore[reportArgumentType]

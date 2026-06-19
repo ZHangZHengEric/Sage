@@ -59,19 +59,19 @@ class TaskObservationAgent(AgentBase):
             )
         )
 
-        llm_request_message = [
-            *await self.prepare_unified_system_messages(
-                session_id=session_id,
-                language=session_context.get_language(),
-                system_prefix_override=current_system_prefix,
-            ),
-            MessageChunk(
-                role=MessageRole.USER.value,
-                content=prompt,
-                message_id=str(uuid.uuid4()),
-                message_type=MessageType.OBSERVATION.value,
-            ),
-        ]
+        llm_request_message = await self.prepare_llm_request_messages(
+            session_id=session_id,
+            language=session_context.get_language(),
+            system_prefix_override=current_system_prefix,
+            extra_messages=[
+                MessageChunk(
+                    role=MessageRole.USER.value,
+                    content=prompt,
+                    message_id=str(uuid.uuid4()),
+                    message_type=MessageType.OBSERVATION.value,
+                )
+            ],
+        )
 
         # 准备工具 - 只使用 todo_write
         tools_json = []
