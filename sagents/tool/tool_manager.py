@@ -1103,7 +1103,7 @@ class ToolManager:
 
         ``tools`` 字段顺序参与多家 provider（Anthropic / 阿里云）的 prompt cache key，
         这里强制按 ``function.name`` 字典序排序，避免不同调用顺序导致 cache 频繁
-        失效。可通过环境变量 ``SAGE_STABLE_TOOLS_ORDER=false`` 关闭兜底。
+        失效。
         """
         logger.debug(f"Getting OpenAI tool specifications for {len(self.tools)} tools")
 
@@ -1115,8 +1115,7 @@ class ToolManager:
                 )
             )
 
-        if os.environ.get("SAGE_STABLE_TOOLS_ORDER", "true").lower() != "false":
-            tools_json.sort(key=lambda t: (t.get("function") or {}).get("name") or "")
+        tools_json.sort(key=lambda t: (t.get("function") or {}).get("name") or "")
         return tools_json
 
     def _get_declared_tool_param_names(

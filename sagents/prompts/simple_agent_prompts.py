@@ -10,7 +10,7 @@ SimpleAgent指令定义
 AGENT_IDENTIFIER = "SimpleAgent"
 
 # SimpleAgent system prefix fragments. The agent composes these at runtime
-# based on available tools and SAGE_AGENT_STATUS_PROTOCOL_ENABLED.
+# based on available tools and SAGE_TASK_COMPLETION_MODE.
 agent_custom_system_base_requirements = {
     "zh": """## 其他执行的基本要求：
 - 当调用完工具后，一定要用面向用户的需求用自然语言描述工具调用的结果，不要直接结束任务。
