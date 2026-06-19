@@ -451,6 +451,25 @@ def test_system_prefix_includes_turn_status_contract_when_protocol_enabled(monke
     assert "Task Management Requirements" in prompt
 
 
+def test_task_completion_mode_turn_status_wins_over_legacy_env(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "turn_status")
+    monkeypatch.setenv("SAGE_COMPLETE_ON_NO_TOOL_CALL", "true")
+    monkeypatch.setenv("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "false")
+
+    prompt = _get_system_prefix(_ToolNameManager(["turn_status"]), "en")  # pyright: ignore[reportArgumentType]
+
+    assert "turn_status" in prompt
+    assert _agent()._turn_status_enabled() is True
+
+
+def test_task_completion_mode_llm_judge_disables_turn_status_contract(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    tool_manager = SimpleNamespace(list_all_tools_name=lambda: ["turn_status"])
+
+    assert "turn_status" not in _get_system_prefix(tool_manager, "zh")
+    assert _agent()._turn_status_enabled() is False
+
+
 def test_task_complete_judge_uses_composed_system_prefix_when_protocol_disabled(
     monkeypatch,
 ):
@@ -526,6 +545,81 @@ def test_turn_status_tools_only_filters_action_tools():
     assert _agent()._turn_status_tools_only(tools_json) == [
         {"function": {"name": "turn_status"}}
     ]
+
+
+def test_complete_on_no_tool_call_mode_disables_turn_status_contract(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "no_tool_call")
+    tool_manager = SimpleNamespace(list_all_tools_name=lambda: ["turn_status"])
+
+    assert "turn_status" not in _get_system_prefix(tool_manager, "zh")
+    assert _agent()._turn_status_enabled() is False
+
+
+def test_complete_on_no_tool_call_mode_filters_turn_status_tools(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "no_tool_call")
+    tools_json = [
+        {"function": {"name": "todo_write"}},
+        {"function": {"name": "turn_status"}},
+    ]
+
+    assert _agent()._filter_tools_for_completion_mode(tools_json) == [
+        {"function": {"name": "todo_write"}}
+    ]
+
+
+def test_llm_judge_mode_filters_turn_status_tools(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    tools_json = [
+        {"function": {"name": "todo_write"}},
+        {"function": {"name": "turn_status"}},
+    ]
+
+    assert _agent()._filter_tools_for_completion_mode(tools_json) == [
+        {"function": {"name": "todo_write"}}
+    ]
+
+
+def test_complete_on_no_tool_call_mode_marks_plain_text_response_complete(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "no_tool_call")
+    agent = _agent()
+    messages = _base_messages()
+    completions = []
+    captured_configs = []
+    _patch_prepared_messages(monkeypatch, agent, messages)
+    monkeypatch.setattr(
+        "sagents.agent.simple_agent.save_agent_response_content",
+        lambda content, session_id: None,
+    )
+
+    def _fake_call_llm_streaming(*args, **kwargs):
+        captured_configs.append(kwargs.get("model_config_override") or {})
+
+        async def _gen():
+            yield _llm_chunk(content="已经完成。")
+
+        return _gen()
+
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_call_llm_streaming)
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks, is_complete in agent._call_llm_and_process_response(
+            messages_input=messages,
+            tools_json=[{"function": {"name": "turn_status"}}],
+            tool_manager=None,
+            session_id="s1",
+        ):
+            chunks.extend(yielded_chunks)
+            completions.append(is_complete)
+            if is_complete:
+                break
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert any(chunk.content == "已经完成。" for chunk in chunks)
+    assert completions[-1] is True
+    assert "tools" not in captured_configs[0]
 
 
 def test_coerce_invalid_status_only_returns_continue_work_with_metadata():
