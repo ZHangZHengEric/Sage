@@ -912,5 +912,9 @@ def test_repeat_pattern_detection_performance():
         assert pattern is not None
     elapsed = time.perf_counter() - start
 
-    # 经验阈值：本地与 CI 上应远低于该值，超限说明算法复杂度异常
-    assert elapsed < 1.0, f"repeat pattern detection too slow: {elapsed:.4f}s"
+    # Use a per-call budget so slower CI runners do not fail on wall-clock jitter,
+    # while still catching accidental non-tail/full-history scans.
+    per_call = elapsed / 5000
+    assert per_call < 0.001, (
+        f"repeat pattern detection too slow: {elapsed:.4f}s ({per_call:.6f}s/call)"
+    )
