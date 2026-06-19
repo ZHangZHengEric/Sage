@@ -2,6 +2,11 @@ from typing import List, Dict, Any, Optional, Union
 from .tool_manager import ToolManager
 from .tool_expansion import TOOL_EXPAND_TOOLS
 from sagents.utils.logger import logger
+from sagents.utils.completion_mode import is_turn_status_mode
+
+
+def _should_expose_turn_status() -> bool:
+    return is_turn_status_mode()
 
 
 class ToolProxy:
@@ -47,14 +52,9 @@ class ToolProxy:
                 logger.warning(f"ToolProxy: 以下工具不存在: {invalid_tools}")
                 self._available_tools -= invalid_tools
 
-            # 强制注入：turn_status 是 agent 状态协议的一部分，无论上游 availableTools
-            # 是否勾选都必须可用，否则模型只能退化到旧的 LLM 完成判定。前端列表里隐藏即可。
-            import os as _os
-
-            if (
-                _os.environ.get("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "true").lower()
-                != "false"
-            ):
+            # 强制注入：turn_status 是 agent 状态协议模式的一部分，无论上游
+            # availableTools 是否勾选都必须可用。其他完成模式不暴露该协议工具。
+            if _should_expose_turn_status():
                 if "turn_status" in all_tools_names:
                     self._available_tools.add("turn_status")
 
@@ -107,16 +107,15 @@ class ToolProxy:
             tools = tm.get_openai_tools(lang=lang, fallback_chain=fallback_chain)
             for tool in tools:
                 name = tool["function"]["name"]
+                if not _should_expose_turn_status() and name == "turn_status":
+                    continue
                 if self._available_tools is None or name in self._available_tools:
                     all_tools_map[name] = tool
 
         # 与 ToolManager.get_openai_tools 保持一致：按 function.name 字典序排序，
         # 使 tools 字段在多次调用间稳定，提升 prompt cache 命中率。
-        import os as _os
-
         ordered = list(all_tools_map.values())
-        if _os.environ.get("SAGE_STABLE_TOOLS_ORDER", "true").lower() != "false":
-            ordered.sort(key=lambda t: (t.get("function") or {}).get("name") or "")
+        ordered.sort(key=lambda t: (t.get("function") or {}).get("name") or "")
         return ordered
 
     def list_tools_simplified(
@@ -129,6 +128,8 @@ class ToolProxy:
         for tm in reversed(self.tool_managers):
             tools = tm.list_tools_simplified(lang=lang, fallback_chain=fallback_chain)
             for tool in tools:
+                if not _should_expose_turn_status() and tool["name"] == "turn_status":
+                    continue
                 if (
                     self._available_tools is None
                     or tool["name"] in self._available_tools
@@ -147,6 +148,8 @@ class ToolProxy:
         for tm in reversed(self.tool_managers):
             tools = tm.list_tools(lang=lang, fallback_chain=fallback_chain)
             for tool in tools:
+                if not _should_expose_turn_status() and tool["name"] == "turn_status":
+                    continue
                 if (
                     self._available_tools is None
                     or tool["name"] in self._available_tools
@@ -162,6 +165,8 @@ class ToolProxy:
         all_names = set()
         for tm in self.tool_managers:
             names = tm.list_all_tools_name(lang=lang)
+            if not _should_expose_turn_status():
+                names = [n for n in names if n != "turn_status"]
             if self._available_tools is None:
                 all_names.update(names)
             else:
@@ -178,6 +183,8 @@ class ToolProxy:
         for tm in reversed(self.tool_managers):
             tools = tm.list_tools_with_type(lang=lang, fallback_chain=fallback_chain)
             for tool in tools:
+                if not _should_expose_turn_status() and tool["name"] == "turn_status":
+                    continue
                 if (
                     self._available_tools is None
                     or tool["name"] in self._available_tools

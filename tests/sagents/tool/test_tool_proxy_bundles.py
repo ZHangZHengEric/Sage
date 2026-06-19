@@ -84,3 +84,52 @@ def test_no_bundle_when_none_selected():
     assert "kill_shell" not in names
     # 但 turn_status 始终注入
     assert "turn_status" in names
+
+
+def test_complete_on_no_tool_call_mode_does_not_force_inject_turn_status(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "no_tool_call")
+
+    proxy = _build_proxy(available=["execute_shell_command"])
+    names = {t["name"] for t in proxy.list_tools()}
+    openai_names = {t["function"]["name"] for t in proxy.get_openai_tools()}
+
+    assert "turn_status" not in names
+    assert "turn_status" not in openai_names
+
+
+def test_llm_judge_mode_does_not_force_inject_turn_status(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+
+    proxy = _build_proxy(available=["execute_shell_command"])
+    names = {t["name"] for t in proxy.list_tools()}
+    openai_names = {t["function"]["name"] for t in proxy.get_openai_tools()}
+
+    assert "turn_status" not in names
+    assert "turn_status" not in openai_names
+
+
+def test_turn_status_mode_wins_over_legacy_no_tool_env(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "turn_status")
+    monkeypatch.setenv("SAGE_COMPLETE_ON_NO_TOOL_CALL", "true")
+
+    proxy = _build_proxy(available=["execute_shell_command"])
+    names = {t["name"] for t in proxy.list_tools()}
+
+    assert "turn_status" in names
+
+
+def test_complete_on_no_tool_call_mode_filters_turn_status_without_whitelist(
+    monkeypatch,
+):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "no_tool_call")
+    tm = ToolManager(isolated=True, is_auto_discover=False)
+    tm.register_tools_from_object(_StubTurnStatus())
+    tm.register_tools_from_object(_StubShellTools())
+
+    proxy = ToolProxy(tool_managers=[tm])
+
+    assert "turn_status" not in {t["name"] for t in proxy.list_tools()}
+    assert "turn_status" not in {
+        t["function"]["name"] for t in proxy.get_openai_tools()
+    }
+    assert "turn_status" not in set(proxy.list_all_tools_name())
