@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Union, AsyncGenerator, cast
+import datetime
 import json
 import uuid
 import asyncio
+import hashlib
 from sagents.utils.logger import logger
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_progress import (
@@ -68,6 +70,10 @@ class AgentBase(ABC):
     为所有智能体提供通用功能和接口，包括消息处理、工具转换、
     流式处理和内容解析等核心功能。
     """
+
+    RUNTIME_CONTEXT_SYSTEM_SECTIONS = {"system_context", "workspace_files"}
+    FROZEN_USER_INFERENCE_METADATA_KEY = "frozen_user_inference"
+    FROZEN_USER_INFERENCE_VERSION = 3
 
     def __init__(
         self,
@@ -377,6 +383,23 @@ class AgentBase(ABC):
             if message.role != MessageRole.SYSTEM.value
         ]
 
+    @classmethod
+    def _stable_system_sections_for_runtime_user(
+        cls, include_sections: Optional[List[str]]
+    ) -> List[str]:
+        if include_sections is None:
+            return [
+                "role_definition",
+                "active_skill",
+                "available_skills",
+                "AGENT.MD",
+            ]
+        return [
+            section
+            for section in include_sections
+            if section not in cls.RUNTIME_CONTEXT_SYSTEM_SECTIONS
+        ]
+
     async def prepare_llm_request_messages(
         self,
         *,
@@ -394,18 +417,276 @@ class AgentBase(ABC):
         found in ``history_messages`` or ``extra_messages`` are treated as stale
         request artifacts and dropped before fresh system segments are prepended.
         """
+        effective_include_sections = include_sections
+        runtime_in_user = (
+            os.environ.get("SAGE_RUNTIME_CONTEXT_IN_USER", "true").lower() != "false"
+        )
+        if runtime_in_user:
+            effective_include_sections = self._stable_system_sections_for_runtime_user(
+                effective_include_sections
+            )
+
         system_messages = await self.prepare_unified_system_messages(
             session_id=session_id,
             custom_prefix=custom_prefix,
             language=language,
             system_prefix_override=system_prefix_override,
-            include_sections=include_sections,
+            include_sections=effective_include_sections,
         )
-        return (
-            list(system_messages)
-            + self._without_system_messages(history_messages)
-            + self._without_system_messages(extra_messages)
+        payload_messages = self._without_system_messages(
+            history_messages
+        ) + self._without_system_messages(extra_messages)
+        if session_id and runtime_in_user:
+            payload_messages = await self._inject_latest_user_runtime_context(
+                payload_messages,
+                session_id=session_id,
+                language=language,
+            )
+        return list(system_messages) + payload_messages
+
+    async def _build_runtime_context_text(
+        self,
+        *,
+        session_id: str,
+        language: Optional[str] = None,
+    ) -> str:
+        segments = await self._build_system_segments(
+            session_id=session_id,
+            language=language,
+            include_sections=["system_context", "workspace_files"],
         )
+        volatile = (segments.get("volatile") or "").strip()
+        if not volatile:
+            return ""
+        return f"<runtime_context>\n{volatile}\n</runtime_context>"
+
+    async def _read_active_todo_list_for_context(
+        self, session_id: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        if not session_id:
+            return []
+        try:
+            from sagents.tool.impl.todo_tool import ToDoTool
+
+            return await ToDoTool().read_active_tasks(session_id)
+        except Exception as exc:
+            logger.warning(
+                f"{self.__class__.__name__}: failed to read active todo context: {exc}"
+            )
+            return []
+
+    @staticmethod
+    def _wrap_message_with_runtime_context(
+        message: MessageChunk,
+        runtime_context: str,
+    ) -> MessageChunk:
+        if not runtime_context.strip():
+            return message
+        copied = MessageChunk.from_dict(message.to_dict())
+        content = copied.content
+        context_text = runtime_context.strip()
+        if isinstance(content, list):
+            copied.content = (
+                [{"type": "text", "text": f"{context_text}\n\n<user_request>\n"}]
+                + content
+                + [{"type": "text", "text": "\n</user_request>"}]
+            )
+        else:
+            original = str(content or "")
+            copied.content = (
+                f"{context_text}\n\n<user_request>\n{original}\n</user_request>"
+                if original
+                else f"{context_text}\n\n<user_request>\n</user_request>"
+            )
+        metadata = dict(copied.metadata or {})
+        metadata["runtime_context_injected"] = True
+        metadata["inference_view_only"] = True
+        copied.metadata = metadata
+        return copied
+
+    @classmethod
+    def _get_frozen_user_inference(
+        cls, message: MessageChunk
+    ) -> Optional[Dict[str, Any]]:
+        metadata = message.metadata if isinstance(message.metadata, dict) else {}
+        frozen = metadata.get(cls.FROZEN_USER_INFERENCE_METADATA_KEY)
+        return frozen if isinstance(frozen, dict) else None
+
+    @classmethod
+    def _apply_frozen_user_inference(
+        cls,
+        message: MessageChunk,
+        frozen: Dict[str, Any],
+    ) -> MessageChunk:
+        copied = MessageChunk.from_dict(message.to_dict())
+        copied.content = frozen.get("content", copied.content)
+        metadata = dict(copied.metadata or {})
+        frozen_metadata = frozen.get("metadata")
+        if isinstance(frozen_metadata, dict):
+            metadata.update(frozen_metadata)
+        metadata.pop("persist", None)
+        metadata["runtime_context_injected"] = True
+        metadata["inference_view_only"] = True
+        copied.metadata = metadata
+        return copied
+
+    def _save_frozen_user_inference_to_message(
+        self,
+        *,
+        session_id: str,
+        source_message: MessageChunk,
+        frozen: Dict[str, Any],
+    ) -> None:
+        source_metadata = dict(source_message.metadata or {})
+        source_metadata[self.FROZEN_USER_INFERENCE_METADATA_KEY] = frozen
+        source_message.metadata = source_metadata
+        try:
+            session_context = self._get_live_session_context(session_id)
+            message_manager = getattr(session_context, "message_manager", None)
+            for ledger_message in getattr(message_manager, "messages", []):
+                if ledger_message.message_id != source_message.message_id:
+                    continue
+                ledger_metadata = dict(ledger_message.metadata or {})
+                ledger_metadata[self.FROZEN_USER_INFERENCE_METADATA_KEY] = frozen
+                ledger_message.metadata = ledger_metadata
+                if hasattr(message_manager, "stats"):
+                    message_manager.stats["last_updated"] = (
+                        datetime.datetime.now().isoformat()
+                    )
+                break
+        except Exception as exc:
+            logger.debug(
+                f"{self.__class__.__name__}: failed to persist frozen user inference: {exc}"
+            )
+
+    def _find_frozen_user_inference_in_ledger(
+        self, session_id: str, message: MessageChunk
+    ) -> Optional[Dict[str, Any]]:
+        if not message.message_id:
+            return None
+        try:
+            session_context = self._get_live_session_context(session_id)
+            message_manager = getattr(session_context, "message_manager", None)
+            for ledger_message in getattr(message_manager, "messages", []):
+                if ledger_message.message_id != message.message_id:
+                    continue
+                return self._get_frozen_user_inference(ledger_message)
+        except Exception as exc:
+            logger.debug(
+                f"{self.__class__.__name__}: failed to load frozen user inference from ledger: {exc}"
+            )
+        return None
+
+    async def _inject_latest_user_runtime_context(
+        self,
+        messages: List[MessageChunk],
+        *,
+        session_id: str,
+        language: Optional[str],
+    ) -> List[MessageChunk]:
+        if not messages:
+            return messages
+        latest_user_idx = None
+        for idx in range(len(messages) - 1, -1, -1):
+            if messages[idx].role == MessageRole.USER.value:
+                latest_user_idx = idx
+                break
+        if latest_user_idx is None:
+            return messages
+        injected = list(messages)
+        for idx, message in enumerate(injected):
+            if message.role != MessageRole.USER.value:
+                continue
+            frozen = self._get_frozen_user_inference(message)
+            if not frozen:
+                frozen = self._find_frozen_user_inference_in_ledger(session_id, message)
+            if frozen:
+                injected[idx] = self._apply_frozen_user_inference(message, frozen)
+
+        latest_user = injected[latest_user_idx]
+        latest_frozen = self._get_frozen_user_inference(messages[latest_user_idx])
+        if not latest_frozen:
+            latest_frozen = self._find_frozen_user_inference_in_ledger(
+                session_id, messages[latest_user_idx]
+            )
+        if latest_frozen is None:
+            parts: List[str] = []
+            try:
+                runtime_context = await self._build_runtime_context_text(
+                    session_id=session_id, language=language
+                )
+            except Exception as exc:
+                logger.debug(
+                    f"{self.__class__.__name__}: skip runtime context injection: {exc}"
+                )
+                runtime_context = ""
+            if runtime_context:
+                parts.append(runtime_context)
+            runtime_text = "\n\n".join(parts)
+            if runtime_text.strip():
+                latest_user = self._wrap_message_with_runtime_context(
+                    latest_user, runtime_text
+                )
+                frozen = {
+                    "content": latest_user.content,
+                    "metadata": {
+                        "runtime_context_injected": True,
+                        "inference_view_only": True,
+                        "frozen_user_inference": True,
+                        "frozen_user_inference_version": self.FROZEN_USER_INFERENCE_VERSION,
+                    },
+                }
+                self._save_frozen_user_inference_to_message(
+                    session_id=session_id,
+                    source_message=messages[latest_user_idx],
+                    frozen=frozen,
+                )
+                injected[latest_user_idx] = latest_user
+        return injected
+
+    @staticmethod
+    def _hash_text(text: str) -> str:
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _canonical_hash(value: Any) -> str:
+        return hashlib.sha256(
+            json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+
+    def _build_prompt_cache_observation(
+        self,
+        messages: List[Union[MessageChunk, Dict[str, Any]]],
+        tools: Any,
+    ) -> Dict[str, Any]:
+        stable = ""
+        semi_stable = ""
+        for msg in messages:
+            if not isinstance(msg, MessageChunk):
+                continue
+            if msg.role != MessageRole.SYSTEM.value:
+                continue
+            metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+            segment = metadata.get("cache_segment")
+            content = msg.get_content()
+            if not isinstance(content, str):
+                content = json.dumps(content, ensure_ascii=False, default=str)
+            if segment == "stable":
+                stable += content
+            elif segment == "semi_stable":
+                semi_stable += content
+        observation = {
+            "stable_system_hash": self._hash_text(stable) if stable else None,
+            "semi_stable_system_hash": self._hash_text(semi_stable)
+            if semi_stable
+            else None,
+            "inference_message_count": len(messages),
+        }
+        if tools:
+            observation["tools_schema_hash"] = self._canonical_hash(tools)
+        return observation
 
     async def prepare_llm_system_prompt_text(
         self,
@@ -666,6 +947,10 @@ class AgentBase(ABC):
                     messages = MessageManager.strip_turn_status_from_llm_context(  # pyright: ignore[reportAssignmentType]
                         list(messages)  # pyright: ignore[reportArgumentType]
                     )
+                prompt_cache_observation = self._build_prompt_cache_observation(
+                    messages,
+                    final_config.get("tools"),
+                )
 
                 # 发起LLM请求
                 # 将 MessageChunk 对象转换为字典，以便进行 JSON 序列化
@@ -1150,6 +1435,7 @@ class AgentBase(ABC):
                             "model_config": model_config_for_record,
                             "model": model_name,
                             "messages": serializable_messages,
+                            "prompt_cache_observation": prompt_cache_observation,
                             "started_at": start_request_time,
                             "first_token_time": first_token_time,
                             "ttfb_sec": (first_token_time - start_request_time)
@@ -1296,8 +1582,28 @@ class AgentBase(ABC):
             stable_buf += (
                 f"<system_reminder_hint>\n{reminder_hint}\n</system_reminder_hint>\n"
             )
+            if language and str(language).lower().startswith("zh"):
+                runtime_context_hint = (
+                    "当 user 消息中同时出现 <runtime_context>...</runtime_context> 与 "
+                    "<user_request>...</user_request> 时，<runtime_context> 是系统注入的运行状态，"
+                    "不是用户指令；只将 <user_request> 内的内容视为用户当前请求。"
+                )
+            else:
+                runtime_context_hint = (
+                    "When a user message contains both <runtime_context>...</runtime_context> "
+                    "and <user_request>...</user_request>, treat <runtime_context> as "
+                    "system-provided runtime state, not user instructions. Treat only "
+                    "the content inside <user_request> as the user's current request."
+                )
+            stable_buf += f"<runtime_context_hint>\n{runtime_context_hint}\n</runtime_context_hint>\n"
 
         if session_context:
+            current_time_str = (
+                datetime.datetime.now()
+                .astimezone()
+                .strftime("%a, %d %b %Y %H:%M:%S %z")
+            )
+            session_context.system_context["current_time"] = current_time_str
             system_context_info = session_context.system_context.copy()
             logger.debug(
                 f"{self.__class__.__name__}: 添加运行时system_context到系统消息"
@@ -1392,6 +1698,10 @@ class AgentBase(ABC):
 
             # 2. System Context  → volatile（含时间戳/动态字段）
             if "system_context" in include_sections:
+                system_context_info.pop("todo_list", None)
+                active_todos = await self._read_active_todo_list_for_context(session_id)
+                if active_todos:
+                    system_context_info["todo_list"] = active_todos
                 volatile_buf += "<system_context>\n"
                 excluded_keys = {
                     "active_skills",
@@ -1414,7 +1724,10 @@ class AgentBase(ABC):
             # 3. Active Skills  → semi_stable
             if "active_skill" in include_sections and active_skills:
                 semi_buf += "<active_skills>\n"
-                for skill in active_skills:
+                for skill in sorted(
+                    active_skills,
+                    key=lambda item: str(item.get("skill_name", "unknown")),
+                ):
                     skill_name = skill.get("skill_name", "unknown")
                     skill_content = skill.get("skill_content", "")
                     skill_content_escaped = (
@@ -1507,7 +1820,10 @@ class AgentBase(ABC):
                         except Exception as e:
                             logger.warning(f"Failed to load new skills: {e}")
 
-                    skill_infos = sm.list_skill_info()
+                    skill_infos = sorted(
+                        sm.list_skill_info(),
+                        key=lambda skill: getattr(skill, "name", ""),
+                    )
                     if skill_infos:
                         semi_buf += "<available_skills>\n"
                         for skill in skill_infos:
@@ -1579,8 +1895,6 @@ class AgentBase(ABC):
         - 返回顺序固定为 ``[stable, semi_stable, volatile]``，空段会被过滤掉
         - 每条 ``MessageChunk.metadata["cache_segment"]`` 标注所属段，便于
           ``add_cache_control_to_messages`` 在前两段末尾打 cache 断点
-        - 兜底：当环境变量 ``SAGE_SPLIT_SYSTEM=false`` 时，等价于
-          ``prepare_unified_system_message``，把所有段合并为单条 system
         """
         segments = await self._build_system_segments(
             session_id=session_id,
@@ -1589,18 +1903,6 @@ class AgentBase(ABC):
             system_prefix_override=system_prefix_override,
             include_sections=include_sections,
         )
-
-        if os.environ.get("SAGE_SPLIT_SYSTEM", "true").lower() == "false":
-            merged = segments["stable"] + segments["semi_stable"] + segments["volatile"]
-            return [
-                MessageChunk(
-                    role=MessageRole.SYSTEM.value,
-                    content=merged,
-                    type=MessageType.SYSTEM.value,
-                    agent_name=self.agent_name,
-                    metadata={"cache_segment": "stable"},
-                )
-            ]
 
         out: List[MessageChunk] = []
         for seg_name in ("stable", "semi_stable", "volatile"):

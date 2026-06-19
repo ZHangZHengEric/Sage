@@ -539,6 +539,11 @@ const presetEnvVars = [
     { key: 'QWEN_MODEL', descriptionKey: 'system.presetEnvVar.image.qwenModel', category: 'image' },
     { key: 'SEEDREAM_API_KEY', descriptionKey: 'system.presetEnvVar.image.seedreamApiKey', category: 'image' },
     { key: 'SEEDREAM_MODEL', descriptionKey: 'system.presetEnvVar.image.seedreamModel', category: 'image' },
+    // Agent runtime controls
+    { key: 'SAGE_TASK_COMPLETION_MODE', descriptionKey: 'system.presetEnvVar.agent.taskCompletionMode', category: 'agent' },
+    { key: 'SAGE_FORCE_TOOL_CHOICE_REQUIRED', descriptionKey: 'system.presetEnvVar.agent.forceToolChoiceRequired', category: 'agent' },
+    { key: 'SAGE_TOOL_PROGRESS_ENABLED', descriptionKey: 'system.presetEnvVar.agent.toolProgressEnabled', category: 'agent' },
+    { key: 'SAGE_EMIT_TOOL_CALL_ON_COMPLETE', descriptionKey: 'system.presetEnvVar.agent.emitToolCallOnComplete', category: 'agent' },
     // 代理设置 (Tauri 读取用于系统代理配置)
     { key: 'HTTP_PROXY', descriptionKey: 'system.presetEnvVar.proxy.http', category: 'proxy' },
     { key: 'HTTPS_PROXY', descriptionKey: 'system.presetEnvVar.proxy.https', category: 'proxy' },

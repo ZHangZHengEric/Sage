@@ -287,8 +287,6 @@ class FileSystemTool:
             ".vue",
         }:
             return None
-        if os.environ.get("SAGE_AUTO_LINT", "true").lower() == "false":
-            return None
         try:
             from .lint_tool import LintTool  # 本地引入避免循环依赖
 
