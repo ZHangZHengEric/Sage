@@ -254,10 +254,10 @@ class MemoryRecallAgent(AgentBase):
             include_sections=["role_definition", "system_context"],
             extra_messages=[
                 MessageChunk(
-                role=MessageRole.USER.value,
-                content=prompt,
-                message_id=str(uuid.uuid4()),
-                message_type=MessageType.GUIDE.value,
+                    role=MessageRole.USER.value,
+                    content=prompt,
+                    message_id=str(uuid.uuid4()),
+                    message_type=MessageType.GUIDE.value,
                 )
             ],
         )

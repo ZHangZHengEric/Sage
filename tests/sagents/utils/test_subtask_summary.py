@@ -108,7 +108,9 @@ def test_summarize_subtask_history_retries_before_stream_yields(monkeypatch):
 
         async def _stream():
             yield SimpleNamespace(
-                choices=[SimpleNamespace(delta=SimpleNamespace(content="retry summary"))]
+                choices=[
+                    SimpleNamespace(delta=SimpleNamespace(content="retry summary"))
+                ]
             )
 
         return _stream()

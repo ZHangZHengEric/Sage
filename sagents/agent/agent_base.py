@@ -363,7 +363,9 @@ class AgentBase(ABC):
         return os.path.join(str(workspace), ".sage", "context", "artifacts")
 
     @staticmethod
-    def _without_system_messages(messages: Optional[List[MessageChunk]]) -> List[MessageChunk]:
+    def _without_system_messages(
+        messages: Optional[List[MessageChunk]],
+    ) -> List[MessageChunk]:
         """Return only conversation/history messages.
 
         System messages are generated fresh for every LLM request and must not be

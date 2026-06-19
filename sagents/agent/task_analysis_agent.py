@@ -114,10 +114,10 @@ class TaskAnalysisAgent(AgentBase):
             ],
             extra_messages=[
                 MessageChunk(
-                role=MessageRole.USER.value,
-                content=prompt,
-                message_id=str(uuid.uuid4()),
-                message_type=MessageType.TASK_ANALYSIS.value,
+                    role=MessageRole.USER.value,
+                    content=prompt,
+                    message_id=str(uuid.uuid4()),
+                    message_type=MessageType.TASK_ANALYSIS.value,
                 )
             ],
         )

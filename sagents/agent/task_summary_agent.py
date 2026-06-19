@@ -66,10 +66,10 @@ class TaskSummaryAgent(AgentBase):
             language=session_context.get_language(),
             extra_messages=[
                 MessageChunk(
-                role=MessageRole.USER.value,
-                content=prompt,
-                message_id=str(uuid.uuid4()),
-                message_type=MessageType.FINAL_ANSWER.value,
+                    role=MessageRole.USER.value,
+                    content=prompt,
+                    message_id=str(uuid.uuid4()),
+                    message_type=MessageType.FINAL_ANSWER.value,
                 )
             ],
         )

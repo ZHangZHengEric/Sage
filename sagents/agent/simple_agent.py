@@ -182,12 +182,6 @@ class SimpleAgent(AgentBase):
             return
         tool_manager = session_context.tool_manager
 
-        # 重新获取agent_custom_system_prefix以支持动态语言切换
-        current_system_prefix = _get_system_prefix(
-            tool_manager,  # pyright: ignore[reportArgumentType]
-            session_context.get_language(),  # pyright: ignore[reportArgumentType]
-        )
-
         # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
         # 从消息管理实例中，获取满足context 长度限制的消息
@@ -804,9 +798,6 @@ class SimpleAgent(AgentBase):
                 cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input),
             )
             all_new_response_chunks = []
-            current_system_prefix = _get_system_prefix(
-                tool_manager, session_context.get_language()
-            )
 
             current_turn_status_only = turn_status_only_next
             turn_status_only_next = False
@@ -1082,9 +1073,7 @@ class SimpleAgent(AgentBase):
             force_tool_choice_required,
         )
         response = self._call_llm_streaming(
-            messages=cast(
-                List[Union[MessageChunk, Dict[str, Any]]], prepared_messages
-            ),
+            messages=cast(List[Union[MessageChunk, Dict[str, Any]]], prepared_messages),
             session_id=session_id,
             step_name="direct_execution",
             model_config_override=model_config_override,
