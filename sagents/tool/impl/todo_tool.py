@@ -262,26 +262,13 @@ class ToDoTool:
     async def _sync_to_system_context(
         self, tasks: List[Dict[str, Any]], session_id: Optional[str] = None
     ):
-        """同步任务列表到 session_context.system_context"""
-        session_context = self._get_session_context(session_id)
-        if not session_context:
-            logger.warning(
-                f"Cannot sync todo list: session_context not found for session_id={session_id}"
-            )
-            return
+        """Legacy no-op.
 
-        try:
-            if not hasattr(session_context, "system_context") or not isinstance(
-                session_context.system_context, dict
-            ):
-                logger.warning("session_context.system_context is invalid")
-                return
-
-            # 更新 todo_list
-            session_context.system_context["todo_list"] = tasks
-            logger.info(f"Synced todo list to system_context. Tasks: {len(tasks)}")
-        except Exception as e:
-            logger.warning(f"Failed to sync todo list to system_context: {e}")
+        ToDo state is kept in the session todo file and injected into inference
+        views on demand. Keeping it out of system_context prevents active task
+        changes from invalidating the stable system prompt cache prefix.
+        """
+        return
 
     @tool(
         description_i18n={
@@ -639,9 +626,6 @@ class ToDoTool:
         file_path = self._get_todo_path(session_id)
         tasks = await self._read_todo_file(file_path, session_id)
 
-        # 同步到 system_context
-        await self._sync_to_system_context(tasks, session_id)
-
         unfinished = [
             t for t in tasks if self._normalize_status(t.get("status")) != "completed"
         ]
@@ -659,3 +643,19 @@ class ToDoTool:
             result += "\n"
 
         return result
+
+    async def read_tasks(self, session_id: str) -> List[Dict[str, Any]]:
+        """Read all tasks for a session without mutating system_context."""
+        file_path = self._get_todo_path(session_id)
+        return await self._read_todo_file(file_path, session_id)
+
+    async def read_active_tasks(self, session_id: str) -> List[Dict[str, Any]]:
+        """Read active tasks for prompt-context injection.
+
+        Active means pending or in_progress. This method intentionally does not
+        mutate system_context.
+        """
+        tasks = await self.read_tasks(session_id)
+        return [
+            t for t in tasks if self._normalize_status(t.get("status")) != "completed"
+        ]

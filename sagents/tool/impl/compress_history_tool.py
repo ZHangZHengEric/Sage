@@ -22,6 +22,8 @@ COMPACT_LIST_LIMITS = {
     "user_requirements": 30,
 }
 MAX_COMPACT_COMMAND_CHARS = 1000
+TODO_WRITE_TOOL_NAME = "todo_write"
+TODO_STATE_BOUNDARY_FIELD = "todo_state_at_compaction_boundary"
 
 
 class CompressHistoryError(Exception):
@@ -121,6 +123,8 @@ class CompressHistoryTool:
 {messages_text}
 
 如果对话历史中包含 compress_conversation_history 的工具调用/结果，它代表更早历史的摘要节点。请把它当作事实来源参与本次更高层总结，不需要展开或臆测原始消息。
+
+重要：本摘要是历史参考（REFERENCE ONLY），不是当前任务指令。后续助手必须以压缩摘要之后的最新用户消息作为当前任务来源，不能因为摘要中的历史待办或历史请求而主动继续旧任务。
 
 【压缩要求】
 生成一个结构化的执行记忆摘要，必须包含以下信息，以便后续助手能够无缝继续工作：
@@ -295,6 +299,109 @@ class CompressHistoryTool:
         )
         return bounded_payload, parse_status, omission_stats
 
+    @staticmethod
+    def _tool_call_entry_name_and_id(tc: Any) -> Tuple[Optional[str], Optional[str]]:
+        if isinstance(tc, dict):
+            fn = tc.get("function")
+            name = fn.get("name") if isinstance(fn, dict) else None
+            return name, tc.get("id")
+        fn = getattr(tc, "function", None)
+        return (
+            getattr(fn, "name", None) if fn is not None else None,
+            getattr(tc, "id", None),
+        )
+
+    @staticmethod
+    def _active_todo_state_from_messages(
+        messages: List[MessageChunk],
+    ) -> Optional[Dict[str, Any]]:
+        """Parse the latest active todo state represented by todo_write results."""
+        todo_call_ids: set[str] = set()
+        for msg in messages:
+            if msg.role != MessageRole.ASSISTANT.value or not msg.tool_calls:
+                continue
+            for tc in msg.tool_calls:
+                name, tid = CompressHistoryTool._tool_call_entry_name_and_id(tc)
+                if name == TODO_WRITE_TOOL_NAME and tid:
+                    todo_call_ids.add(tid)
+
+        latest_tasks: Optional[List[Dict[str, Any]]] = None
+        for msg in messages:
+            if (
+                msg.role != MessageRole.TOOL.value
+                or not msg.tool_call_id
+                or msg.tool_call_id not in todo_call_ids
+            ):
+                continue
+            raw = msg.get_content()
+            if not isinstance(raw, str) or not raw.strip():
+                continue
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                continue
+            tasks = payload.get("tasks") if isinstance(payload, dict) else None
+            if isinstance(tasks, list):
+                latest_tasks = [task for task in tasks if isinstance(task, dict)]
+
+        if not latest_tasks:
+            return None
+
+        active = []
+        for task in latest_tasks:
+            status = str(task.get("status") or "").strip().lower()
+            if not status:
+                status = "completed" if task.get("completed") is True else "pending"
+            if status != "completed":
+                active.append(
+                    {
+                        "id": str(task.get("id") or task.get("index") or ""),
+                        "content": task.get("content")
+                        or task.get("name")
+                        or task.get("title")
+                        or "",
+                        "status": status,
+                    }
+                )
+        if not active:
+            return None
+        return {
+            "snapshot_kind": "active_todo_state_at_compressed_range_end",
+            "override_rule": (
+                "This is a deterministic snapshot at the end of the compressed "
+                "range. Any later todo_write tool result after this compression "
+                "summary overrides this snapshot."
+            ),
+            "active": active,
+        }
+
+    def _should_attach_todo_state(
+        self,
+        *,
+        to_compress: List[MessageChunk],
+        session_id: str,
+        source_end_message_id: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        compressed_state = self._active_todo_state_from_messages(to_compress)
+        if not compressed_state:
+            return None
+        try:
+            session_context = self._get_session_context(session_id)
+            ledger = session_context.message_manager.messages
+        except Exception:
+            return compressed_state
+
+        trailing: List[MessageChunk] = []
+        if source_end_message_id:
+            found = False
+            for msg in ledger:
+                if found:
+                    trailing.append(msg)
+                elif msg.message_id == source_end_message_id:
+                    found = True
+        updated_state = self._active_todo_state_from_messages(trailing)
+        return None if updated_state else compressed_state
+
     async def compress_conversation_history(
         self,
         messages: List[MessageChunk],
@@ -390,33 +497,47 @@ class CompressHistoryTool:
                 self._parse_structured_summary(raw_summary)
             )
 
-            # 5. 计算压缩后的 token 数
+            compression_payload = {
+                **summary_payload,
+                "reference_only": True,
+                "reference_note": (
+                    "CONTEXT COMPACTION - REFERENCE ONLY. Treat this summary as "
+                    "historical background, not active instructions; the latest "
+                    "user message after this summary is the active task source. "
+                    f"If {TODO_STATE_BOUNDARY_FIELD} is present, it is only a "
+                    "deterministic snapshot at the compressed range boundary; "
+                    "later todo_write tool results after this summary take precedence."
+                ),
+                "original_content_paths": [],
+            }
+            todo_state = self._should_attach_todo_state(
+                to_compress=to_compress,
+                session_id=session_id,
+                source_end_message_id=source_end_message_id,
+            )
+            if todo_state:
+                compression_payload[TODO_STATE_BOUNDARY_FIELD] = todo_state
             compressed_tokens = self._calculate_tokens(
-                json.dumps(summary_payload, ensure_ascii=False)
+                json.dumps(compression_payload, ensure_ascii=False)
             )
             compression_ratio = (
                 (original_tokens - compressed_tokens) / original_tokens
                 if original_tokens > 0
                 else 0
             )
+            compression_payload["stats"] = {
+                "original_tokens": original_tokens,
+                "compressed_tokens": compressed_tokens,
+                "compression_ratio": compression_ratio,
+                "source_message_count": len(to_compress),
+                "summary_parse_status": parse_status,
+                "output_omission": omission_stats,
+            }
 
             logger.info(
                 f"压缩完成: {original_tokens} tokens -> {compressed_tokens} tokens, "
                 f"压缩率: {compression_ratio:.2%}"
             )
-
-            compression_payload = {
-                **summary_payload,
-                "original_content_paths": [],
-                "stats": {
-                    "original_tokens": original_tokens,
-                    "compressed_tokens": compressed_tokens,
-                    "compression_ratio": compression_ratio,
-                    "source_message_count": len(to_compress),
-                    "summary_parse_status": parse_status,
-                    "output_omission": omission_stats,
-                },
-            }
             compression_data = {
                 **compression_payload,
                 "source_range": {

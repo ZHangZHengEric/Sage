@@ -14,6 +14,11 @@ from sagents.utils.prompt_manager import PromptManager
 from sagents.utils.content_saver import save_agent_response_content
 from sagents.tool.tool_baseline import augment_with_baseline_tools
 from sagents.tool.tool_expansion import TOOL_EXPAND_TOOLS, should_expose_tool_expansion
+from sagents.utils.completion_mode import (
+    is_llm_judge_mode,
+    is_no_tool_call_mode,
+    is_turn_status_mode,
+)
 import json
 import uuid
 from copy import deepcopy
@@ -44,9 +49,6 @@ def _get_system_prefix(tool_manager: Optional[ToolManager], language: str) -> st
         # tools_json = tool_manager.get_openai_tools(lang=language, fallback_chain=["en"])
         # tool_names = [tool['function']['name'] for tool in tools_json]
 
-    turn_status_enabled = (
-        os.environ.get("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "true").lower() != "false"
-    )
     prompt_manager = PromptManager()
     parts = [
         prompt_manager.get_agent_prompt(
@@ -65,7 +67,7 @@ def _get_system_prefix(tool_manager: Optional[ToolManager], language: str) -> st
             )
         )
 
-    if turn_status_enabled:
+    if is_turn_status_mode():
         parts.append(
             prompt_manager.get_agent_prompt(
                 "SimpleAgent",
@@ -244,6 +246,7 @@ class SimpleAgent(AgentBase):
         tools_json = tool_manager.get_openai_tools(
             lang=session_context.get_language(), fallback_chain=["en"]
         )
+        tools_json = self._filter_tools_for_completion_mode(tools_json)
 
         # 根据建议过滤工具，并补齐基础工作台工具（仅限当前工具管理器真实可用的工具）。
         # 当状态协议启用时，ToolProxy 会把 turn_status 纳入可用工具；协议禁用时，
@@ -265,8 +268,7 @@ class SimpleAgent(AgentBase):
             tools_json = tools_suggest_json
 
         # 与 ToolManager/ToolProxy 一致：再排一次序，保证经过筛选后顺序仍稳定。
-        if os.environ.get("SAGE_STABLE_TOOLS_ORDER", "true").lower() != "false":
-            tools_json.sort(key=lambda t: (t.get("function") or {}).get("name") or "")
+        tools_json.sort(key=lambda t: (t.get("function") or {}).get("name") or "")
 
         tool_names = [tool["function"]["name"] for tool in tools_json]
         logger.debug(f"SimpleAgent: 准备了 {len(tools_json)} 个工具: {tool_names}")
@@ -420,10 +422,18 @@ class SimpleAgent(AgentBase):
         return False
 
     def _turn_status_enabled(self) -> bool:
-        return (
-            os.environ.get("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "true").lower()
-            != "false"
-        )
+        return is_turn_status_mode()
+
+    def _filter_tools_for_completion_mode(
+        self, tools_json: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        if is_turn_status_mode():
+            return tools_json
+        return [
+            tool
+            for tool in tools_json or []
+            if ((tool.get("function") or {}).get("name") or "") != "turn_status"
+        ]
 
     def _tools_include(self, tools_json: List[Dict[str, Any]], tool_name: str) -> bool:
         for tool in tools_json or []:
@@ -992,12 +1002,9 @@ class SimpleAgent(AgentBase):
             # 检查任务是否完成
             # 状态工具启用时由模型主动调用 turn_status 工具报告本轮状态，
             # 不再走老的 LLM 任务完成判定，避免重复消耗 token 且与状态协议互相冲突。
-            # 仅当状态协议被显式禁用 (SAGE_AGENT_STATUS_PROTOCOL_ENABLED=false) 时回退到旧路径。
-            turn_status_enabled = (
-                os.environ.get("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "true").lower()
-                != "false"
-            )
-            if not turn_status_enabled:
+            # 仅在 llm_judge 模式回退到旧路径；turn_status / no_tool_call
+            # 都有自己的结束信号，避免多消耗一次完成判定请求。
+            if is_llm_judge_mode():
                 if await self._is_task_complete(
                     messages_input, session_id, tool_manager, session_context
                 ):
@@ -1051,6 +1058,7 @@ class SimpleAgent(AgentBase):
 
         # 准备模型配置覆盖，包含工具信息
         model_config_override = {}
+        tools_json = self._filter_tools_for_completion_mode(tools_json)
 
         if len(tools_json) > 0:
             model_config_override["tools"] = tools_json
@@ -1322,17 +1330,12 @@ class SimpleAgent(AgentBase):
             termination_tool_ids = set()
             turn_status_tool_ids = set()
             continue_turn_status_ids = set()
-            (  # pyright: ignore[reportUnusedExpression]
-                os.environ.get("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "true").lower()
-                != "false"
-            )
             for tool_call_id, tool_call in tool_calls.items():
                 tname = tool_call["function"]["name"]
                 if tname in ["complete_task"]:
                     termination_tool_ids.add(tool_call_id)
-                # 无论协议是否启用，模型主动调用 turn_status 时都应正常处理；
-                # SAGE_AGENT_STATUS_PROTOCOL_ENABLED=false 只禁止"强制 turn_status_only 轮"，
-                # 不禁止接受模型的主动调用，否则拒绝→错误→循环→文本重复。
+                # 非 turn_status 模式不会下发该工具；如果历史上下文或兼容模型仍主动调用，
+                # 这里继续按协议结果处理，避免拒绝→错误→循环→文本重复。
                 if tname in self._turn_status_tool_names():
                     turn_status_tool_ids.add(tool_call_id)
                     if self._turn_status_from_tool_call(tool_call) == "continue_work":
@@ -1441,7 +1444,7 @@ class SimpleAgent(AgentBase):
                     agent_name=self.agent_name,
                 )
             ]
-            yield (output_messages, False)
+            yield (output_messages, is_no_tool_call_mode())
 
     def _classify_error_category(self, error_chunks: List[MessageChunk]) -> str:
         """

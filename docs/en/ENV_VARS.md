@@ -107,12 +107,11 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SAGE_AGENT_STATUS_PROTOCOL_ENABLED` | `true` | Enable the agent turn-status protocol. When enabled, Sage injects `turn_status` and task completion is decided by the model calling that tool (`task_done`, `need_user_input`, `blocked`, or `continue_work`). When set to `false`, SimpleAgent falls back to the legacy rule-first + LLM `task_complete_judge` completion check. |
+| `SAGE_TASK_COMPLETION_MODE` | `turn_status` | Select how SimpleAgent decides that a turn is complete. `turn_status` exposes the `turn_status` protocol tool and lets the model report `task_done` / `need_user_input` / `blocked` / `continue_work`; `llm_judge` disables `turn_status` and uses the legacy rule-first + LLM `task_complete_judge` check; `no_tool_call` disables `turn_status` and treats an LLM response without tool calls as complete. |
+| `SAGE_AGENT_STATUS_PROTOCOL_ENABLED` | — | Deprecated compatibility fallback. Used only when `SAGE_TASK_COMPLETION_MODE` is unset; `false` maps to `llm_judge`. |
+| `SAGE_COMPLETE_ON_NO_TOOL_CALL` | — | Deprecated compatibility fallback. Used only when `SAGE_TASK_COMPLETION_MODE` is unset; `true` maps to `no_tool_call`. |
 | `SAGE_CLI_MAX_LOOP_COUNT` | — | Max loops per CLI turn |
-| `SAGE_SPLIT_SYSTEM` | `true` | Split the system message into stable / semi_stable / volatile segments to maximise prompt-cache hit rate |
-| `SAGE_STABLE_TOOLS_ORDER` | `true` | Sort the `tools` field by function name to stabilise the cache key |
 | `SAGE_TOOL_SUGGESTION_DIRECT_THRESHOLD` | `15` | When the available tool count is at or below this value, skip the LLM tool-suggestion call and pass all available tools through |
-| `SAGE_AUTO_LINT` | `true` | Auto-run ruff/eslint/tsc after `file_write` / `file_update` and inline diagnostics |
 | `SAGE_EMIT_TOOL_CALL_ON_COMPLETE` | `true` | Re-emit tool_call chunks once the LLM stream completes |
 | `SAGE_ECHO_SHELL_OUTPUT` | `false` | Echo background-shell stdout/stderr into the main stream |
 | `SAGE_FORCE_TOOL_CHOICE_REQUIRED` | `false` | Force `tool_choice=required` on every LLM call that carries `tools`. Off by default to avoid `unsupported_parameter` errors on models such as OpenAI o1/o3; enable explicitly with `1/true/yes/on` |

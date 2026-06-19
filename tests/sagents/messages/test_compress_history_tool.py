@@ -227,6 +227,113 @@ class TestCompressHistoryTool:
         assert result["data"]["open_tasks"] == ["run matrix tests"]
         assert result["data"]["stats"]["summary_parse_status"] == "json"
 
+    def _todo_pair(self, call_id: str, status: str, message_prefix: str):
+        assistant = self.create_message(
+            MessageRole.ASSISTANT.value,
+            "",
+            tool_calls=[
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": "todo_write", "arguments": "{}"},
+                }
+            ],
+        )
+        tool = self.create_message(
+            MessageRole.TOOL.value,
+            json.dumps(
+                {
+                    "summary": "todo updated",
+                    "tasks": [
+                        {
+                            "id": "t1",
+                            "name": f"{message_prefix} task",
+                            "status": status,
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            tool_call_id=call_id,
+        )
+        return assistant, tool
+
+    def test_compress_conversation_history_preserves_active_todo_when_not_updated_later(
+        self,
+    ):
+        assistant, tool = self._todo_pair("todo-call-1", "pending", "old")
+        assistant.message_id = "a1"
+        tool.message_id = "t1"
+
+        async def fake_call(messages_text, session_id):
+            return "summary"
+
+        self.tool._call_llm_for_compression = fake_call
+        result = asyncio.run(
+            self.tool.compress_conversation_history(
+                [assistant, tool],
+                "test_session",
+                source_message_ids=["a1", "t1"],
+                source_end_message_id="t1",
+            )
+        )
+
+        assert result["status"] == "success"
+        todo_snapshot = result["data"]["todo_state_at_compaction_boundary"]
+        assert (
+            todo_snapshot["snapshot_kind"]
+            == "active_todo_state_at_compressed_range_end"
+        )
+        assert "later todo_write" in todo_snapshot["override_rule"]
+        assert todo_snapshot["active"][0]["status"] == "pending"
+        assert "todo_state_at_compaction_boundary" in result["data"]["reference_note"]
+        assert result["data"]["reference_only"] is True
+
+    def test_compress_conversation_history_skips_todo_state_when_updated_later(self):
+        old_assistant, old_tool = self._todo_pair("todo-call-1", "pending", "old")
+        old_assistant.message_id = "a1"
+        old_tool.message_id = "t1"
+        new_assistant, new_tool = self._todo_pair("todo-call-2", "in_progress", "new")
+        new_assistant.message_id = "a2"
+        new_tool.message_id = "t2"
+
+        class _Manager:
+            messages = [old_assistant, old_tool, new_assistant, new_tool]
+
+        class _Context:
+            message_manager = _Manager()
+
+        async def fake_call(messages_text, session_id):
+            return "summary"
+
+        self.tool._call_llm_for_compression = fake_call
+        self.tool._get_session_context = lambda session_id: _Context()
+        result = asyncio.run(
+            self.tool.compress_conversation_history(
+                [old_assistant, old_tool],
+                "test_session",
+                source_message_ids=["a1", "t1"],
+                source_end_message_id="t1",
+            )
+        )
+
+        assert result["status"] == "success"
+        assert "todo_state_at_compaction_boundary" not in result["data"]
+
+    def test_compress_conversation_history_skips_todo_state_without_active_todo(self):
+        assistant, tool = self._todo_pair("todo-call-1", "completed", "done")
+
+        async def fake_call(messages_text, session_id):
+            return "summary"
+
+        self.tool._call_llm_for_compression = fake_call
+        result = asyncio.run(
+            self.tool.compress_conversation_history([assistant, tool], "test_session")
+        )
+
+        assert result["status"] == "success"
+        assert "todo_state_at_compaction_boundary" not in result["data"]
+
     def test_compress_conversation_history_limits_output_lists_and_long_commands(self):
         """Test: compact output limits list counts and very long commands."""
         messages = [
