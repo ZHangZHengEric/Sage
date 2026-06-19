@@ -212,7 +212,7 @@ async def _summarize_once(
                 httpx.ReadTimeout,
                 httpx.ConnectTimeout,
                 httpx.ReadError,
-            ) as exc:
+            ):
                 if summary_content or attempt >= _SUMMARY_MAX_RETRIES - 1:
                     raise
                 await asyncio.sleep(_retry_delay(attempt))

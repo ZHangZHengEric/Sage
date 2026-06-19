@@ -190,8 +190,20 @@ def test_detect_repeat_pattern_adjacent_repeat_after_different_signature():
 def test_detect_repeat_pattern_adjacent_pure_text_repeat_after_different_signature():
     signatures = [
         build_loop_signature([_assistant_text("先补充图片参考。")]),
-        build_loop_signature([_assistant_text("继续执行中：我下一步会先补产地酒层与都市母女两组关键参考，再进入第一批镜头生成。")]),
-        build_loop_signature([_assistant_text("继续执行中：我下一步会先补产地酒层与都市母女两组关键参考，再进入第一批镜头生成。")]),
+        build_loop_signature(
+            [
+                _assistant_text(
+                    "继续执行中：我下一步会先补产地酒层与都市母女两组关键参考，再进入第一批镜头生成。"
+                )
+            ]
+        ),
+        build_loop_signature(
+            [
+                _assistant_text(
+                    "继续执行中：我下一步会先补产地酒层与都市母女两组关键参考，再进入第一批镜头生成。"
+                )
+            ]
+        ),
     ]
     pattern = detect_repeat_pattern(signatures)
     assert pattern is not None
@@ -514,8 +526,16 @@ def test_replay_detects_abab_text_loop():
 def test_replay_detects_adjacent_text_loop_on_second_repeat():
     rounds = [
         [_assistant_text("我先补齐图片参考。")],
-        [_assistant_text("继续执行中：我下一步会先补产地酒层与都市母女两组关键参考，再进入第一批镜头生成。")],
-        [_assistant_text("继续执行中：我下一步会先补产地酒层与都市母女两组关键参考，再进入第一批镜头生成。")],
+        [
+            _assistant_text(
+                "继续执行中：我下一步会先补产地酒层与都市母女两组关键参考，再进入第一批镜头生成。"
+            )
+        ],
+        [
+            _assistant_text(
+                "继续执行中：我下一步会先补产地酒层与都市母女两组关键参考，再进入第一批镜头生成。"
+            )
+        ],
     ]
     hit_steps = _detect_steps_from_rounds(rounds)
     assert hit_steps == [3]
@@ -663,11 +683,19 @@ def test_build_loop_signature_preserves_real_text_tool_event_order():
         [
             _assistant_text("A"),
             _assistant_tool_calls(
-                [_dict_tool_call(call_id="call_a", name="read_file", arguments='{"path":"a.md"}')]
+                [
+                    _dict_tool_call(
+                        call_id="call_a", name="read_file", arguments='{"path":"a.md"}'
+                    )
+                ]
             ),
             _assistant_text("A"),
             _assistant_tool_calls(
-                [_dict_tool_call(call_id="call_b", name="read_file", arguments='{"path":"a.md"}')]
+                [
+                    _dict_tool_call(
+                        call_id="call_b", name="read_file", arguments='{"path":"a.md"}'
+                    )
+                ]
             ),
         ]
     )
@@ -708,14 +736,24 @@ def test_event_detection_ignores_varying_tool_results_for_same_call_params():
     signatures = [
         build_loop_signature(
             [
-                _assistant_tool_call("fetch_webpages", '{"urls":["https://example.com"]}'),
-                _tool_result("request_id=aaa elapsed=10ms same substantive result", "fetch_webpages"),
+                _assistant_tool_call(
+                    "fetch_webpages", '{"urls":["https://example.com"]}'
+                ),
+                _tool_result(
+                    "request_id=aaa elapsed=10ms same substantive result",
+                    "fetch_webpages",
+                ),
             ]
         ),
         build_loop_signature(
             [
-                _assistant_tool_call("fetch_webpages", '{"urls":["https://example.com"]}'),
-                _tool_result("request_id=bbb elapsed=20ms same substantive result", "fetch_webpages"),
+                _assistant_tool_call(
+                    "fetch_webpages", '{"urls":["https://example.com"]}'
+                ),
+                _tool_result(
+                    "request_id=bbb elapsed=20ms same substantive result",
+                    "fetch_webpages",
+                ),
             ]
         ),
     ]

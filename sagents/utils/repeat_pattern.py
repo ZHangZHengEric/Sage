@@ -403,8 +403,7 @@ def _detect_suffix_duplicate_substring(
 
     def window_hash(start: int, length: int) -> int:
         return (
-            prefix_hashes[start + length]
-            - (prefix_hashes[start] * powers[length])
+            prefix_hashes[start + length] - (prefix_hashes[start] * powers[length])
         ) & _ROLLING_HASH_MASK
 
     def windows_equal(left: int, right: int, length: int) -> bool:
@@ -586,7 +585,6 @@ def _format_pattern_kind(pattern: Dict[str, int]) -> str:
     if pattern.get("partial"):
         return f"{mode} partial-loop prefix={pattern.get('partial_prefix', 0)}"
     return str(mode)
-
 
 
 def build_self_correction_message(pattern: Dict[str, int]) -> str:

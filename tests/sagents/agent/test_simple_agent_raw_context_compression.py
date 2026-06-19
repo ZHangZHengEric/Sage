@@ -976,6 +976,7 @@ async def test_simple_agent_prepares_fresh_system_after_compressed_history_view(
         call_id="compress-1",
         source_ids=["old-u", "old-a"],
     )
+
     async def fake_prepare_system_messages(*args, **kwargs):
         return [system_chunk]
 

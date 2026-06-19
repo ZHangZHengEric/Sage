@@ -158,7 +158,9 @@ class FibreOrchestrator:
         output_queue = getattr(self, "output_queue", None)
         if not chunks or output_queue is None:
             return
-        await output_queue.put([self._coerce_child_stream_chunk(chunk) for chunk in chunks])
+        await output_queue.put(
+            [self._coerce_child_stream_chunk(chunk) for chunk in chunks]
+        )
 
     def _summary_content_chunks(
         self,
