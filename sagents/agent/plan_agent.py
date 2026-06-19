@@ -398,13 +398,13 @@ class PlanAgent(AgentBase):
             agent="PlanAgent",
             language=session_context.get_language(),
         )
-        system_messages = await self.prepare_unified_system_messages(
+        return await self.prepare_llm_request_messages(
             session_id=session_context.session_id,
             system_prefix_override=planning_prefix,
             language=session_context.get_language(),
             include_sections=["role_definition", "system_context"],
+            history_messages=working_messages,
         )
-        return list(system_messages) + working_messages
 
     async def _execute_tool_calls(
         self,
@@ -701,8 +701,8 @@ class PlanAgent(AgentBase):
             messages_for_judge
         )
 
-        system_msg = await self.prepare_unified_system_message(
-            session_context.session_id,
+        system_prompt = await self.prepare_llm_system_prompt_text(
+            session_id=session_context.session_id,
             system_prefix_override=PromptManager().get_prompt(
                 "plan_system_prefix",
                 agent="PlanAgent",
@@ -716,7 +716,7 @@ class PlanAgent(AgentBase):
             language=session_context.get_language(),
         )
         prompt = judge_template.format(
-            system_prompt=system_msg.content,
+            system_prompt=system_prompt,
             messages=json.dumps(clean_messages, ensure_ascii=False, indent=2),
         )
         response = self._call_llm_streaming(

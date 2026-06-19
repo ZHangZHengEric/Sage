@@ -96,19 +96,19 @@ class TaskDecomposeAgent(AgentBase):
                 agent_description=self.system_prefix,
             )
         )
-        llm_request_message = [
-            *await self.prepare_unified_system_messages(
-                session_id=session_id,
-                language=session_context.get_language(),
-                system_prefix_override=current_system_prefix,
-            ),
-            MessageChunk(
-                role=MessageRole.USER.value,
-                content=prompt,
-                message_id=str(uuid.uuid4()),
-                message_type=MessageType.TASK_DECOMPOSITION.value,
-            ),
-        ]
+        llm_request_message = await self.prepare_llm_request_messages(
+            session_id=session_id,
+            language=session_context.get_language(),
+            system_prefix_override=current_system_prefix,
+            extra_messages=[
+                MessageChunk(
+                    role=MessageRole.USER.value,
+                    content=prompt,
+                    message_id=str(uuid.uuid4()),
+                    message_type=MessageType.TASK_DECOMPOSITION.value,
+                )
+            ],
+        )
 
         model_config_override = {}
         if tools_json:

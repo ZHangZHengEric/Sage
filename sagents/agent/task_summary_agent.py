@@ -61,17 +61,18 @@ class TaskSummaryAgent(AgentBase):
         prompt = summary_template.format(
             task_description=history_messages_str,
         )
-        llm_request_message = [
-            *await self.prepare_unified_system_messages(
-                session_id=session_id, language=session_context.get_language()
-            ),
-            MessageChunk(
-                role=MessageRole.USER.value,
-                content=prompt,
-                message_id=str(uuid.uuid4()),
-                message_type=MessageType.FINAL_ANSWER.value,
-            ),
-        ]
+        llm_request_message = await self.prepare_llm_request_messages(
+            session_id=session_id,
+            language=session_context.get_language(),
+            extra_messages=[
+                MessageChunk(
+                    role=MessageRole.USER.value,
+                    content=prompt,
+                    message_id=str(uuid.uuid4()),
+                    message_type=MessageType.FINAL_ANSWER.value,
+                )
+            ],
+        )
 
         message_id = str(uuid.uuid4())
         async for llm_repsonse_chunk in self._call_llm_streaming(

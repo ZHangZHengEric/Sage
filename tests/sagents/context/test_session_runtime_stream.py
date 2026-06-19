@@ -2,7 +2,7 @@ import pytest
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.flow.schema import AgentFlow, AgentNode
-from sagents.session_runtime import Session
+from sagents.session_runtime import Session, initialize_global_session_manager
 
 
 @pytest.mark.asyncio
@@ -28,9 +28,11 @@ async def test_run_stream_with_flow_fills_missing_session_id(monkeypatch, tmp_pa
 
     monkeypatch.setattr("sagents.session_runtime.FlowExecutor", FakeFlowExecutor)
 
+    initialize_global_session_manager(str(tmp_path), enable_obs=False)
     session = Session(session_id="child-session", enable_obs=False)
     session.configure_runtime(
-        session_space=str(tmp_path),
+        model=object(),
+        session_root_space=str(tmp_path),
         sandbox_agent_workspace=str(tmp_path / "workspace"),
     )
 
