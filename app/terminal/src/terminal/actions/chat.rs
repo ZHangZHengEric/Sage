@@ -90,7 +90,11 @@ pub(super) fn retry_last_task(app: &mut App, backend: &mut Option<BackendHandle>
     };
 
     app.begin_task_submission(task.clone(), true);
-    run_task(app, backend, task)
+    let result = run_task(app, backend, task);
+    if result.is_ok() {
+        app.clear_pending_sandbox_approval();
+    }
+    result
 }
 
 pub(super) fn approve_sandbox_command(
