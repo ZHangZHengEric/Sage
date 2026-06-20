@@ -120,6 +120,24 @@ class AgentBase(ABC):
             session_id, log_prefix=self.__class__.__name__
         )
 
+    @staticmethod
+    def _timezone_from_current_time(value: Any) -> Optional[datetime.timezone]:
+        if not isinstance(value, str):
+            return None
+
+        _, _, offset = value.rpartition(" ")
+        if len(offset) != 5 or offset[0] not in "+-" or not offset[1:].isdigit():
+            return None
+
+        hours = int(offset[1:3])
+        minutes = int(offset[3:5])
+        if hours > 23 or minutes > 59:
+            return None
+
+        sign = 1 if offset[0] == "+" else -1
+        delta = datetime.timedelta(hours=hours, minutes=minutes)
+        return datetime.timezone(sign * delta)
+
     def _consume_user_injections(
         self, session_context: Optional[SessionContext]
     ) -> List[MessageChunk]:
@@ -1598,11 +1616,16 @@ class AgentBase(ABC):
             stable_buf += f"<runtime_context_hint>\n{runtime_context_hint}\n</runtime_context_hint>\n"
 
         if session_context:
-            current_time_str = (
-                datetime.datetime.now()
-                .astimezone()
-                .strftime("%a, %d %b %Y %H:%M:%S %z")
+            current_time_tz = self._timezone_from_current_time(
+                session_context.system_context.get("current_time")
             )
+            if current_time_tz is not None:
+                current_time = datetime.datetime.now(datetime.timezone.utc).astimezone(
+                    current_time_tz
+                )
+            else:
+                current_time = datetime.datetime.now().astimezone()
+            current_time_str = current_time.strftime("%a, %d %b %Y %H:%M:%S %z")
             session_context.system_context["current_time"] = current_time_str
             system_context_info = session_context.system_context.copy()
             logger.debug(
