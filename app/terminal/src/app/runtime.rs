@@ -8,6 +8,7 @@ use crate::app::runtime_support::{
 };
 use crate::app::{ActiveToolRecord, App, MessageKind};
 use crate::app_render::{format_message, format_message_continuation, welcome_lines};
+use crate::backend::SandboxApprovalRequest;
 use crate::display_policy::{is_visible_tool, DisplayMode};
 
 impl App {
@@ -49,6 +50,52 @@ impl App {
 
     pub fn set_status(&mut self, status: impl Into<String>) {
         self.status = status.into();
+    }
+
+    pub fn apply_sandbox_approval_request(&mut self, request: SandboxApprovalRequest) {
+        let command = truncate_for_status(&request.command, 120);
+        let mut lines = vec![
+            "sandbox approval required".to_string(),
+            format!("command: {command}"),
+            format!("approval_id: {}", request.approval_id),
+        ];
+        if let Some(category) = request.category.as_ref() {
+            lines.push(format!("category: {category}"));
+        }
+        if let Some(reason) = request.reason.as_ref() {
+            lines.push(format!("reason: {reason}"));
+        }
+        if let Some(hint) = request.hint.as_ref() {
+            lines.push(format!("next: {hint}"));
+        }
+        lines.push("Use /approve to run it once, or /deny to skip it.".to_string());
+        self.pending_sandbox_approval = Some(request);
+        self.queue_message(MessageKind::Tool, lines.join("\n"));
+        self.status = format!("approval required  {}", self.session_label());
+    }
+
+    pub fn build_sandbox_approval_prompt(&mut self) -> Option<String> {
+        let request = self.pending_sandbox_approval.take()?;
+        Some(format!(
+            "User confirmed sandbox approval {approval_id}. Retry the previously blocked shell command exactly once by calling execute_shell_command with approval_id={approval_id} and this exact command:\n\n{command}\n\nDo not change the command before retrying. After the command finishes, report the result.",
+            approval_id = request.approval_id,
+            command = request.command,
+        ))
+    }
+
+    pub fn deny_pending_sandbox_approval(&mut self) -> bool {
+        let Some(request) = self.pending_sandbox_approval.take() else {
+            return false;
+        };
+        self.queue_message(
+            MessageKind::Tool,
+            format!(
+                "sandbox approval denied\ncommand: {}",
+                truncate_for_status(&request.command, 120)
+            ),
+        );
+        self.status = format!("ready  {}", self.session_label());
+        true
     }
 
     pub fn set_active_phase(&mut self, phase: impl Into<String>) {
@@ -114,7 +161,11 @@ impl App {
         if !completion_lines.is_empty() {
             self.queue_message(MessageKind::Process, completion_lines.join("\n"));
         }
-        self.status = format!("ready  {}", self.session_label());
+        if self.pending_sandbox_approval.is_some() {
+            self.status = format!("approval required  {}", self.session_label());
+        } else {
+            self.status = format!("ready  {}", self.session_label());
+        }
     }
 
     pub fn fail_request(&mut self, message: impl Into<String>) {
@@ -532,6 +583,16 @@ impl App {
     pub fn apply_backend_stats(&mut self, stats: crate::backend::BackendStats) {
         self.pending_backend_stats = Some(stats);
     }
+}
+
+fn truncate_for_status(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    text.chars()
+        .take(max_chars.saturating_sub(3))
+        .collect::<String>()
+        + "..."
 }
 
 fn clean_assistant_live_text(text: &mut String) {

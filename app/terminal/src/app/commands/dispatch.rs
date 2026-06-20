@@ -453,6 +453,22 @@ impl App {
                     SubmitAction::Handled
                 }
             },
+            "/approve" => match (parts.next(), parts.next()) {
+                (None, None) => SubmitAction::ApproveSandboxCommand,
+                _ => {
+                    self.queue_message(MessageKind::System, "Usage: /approve");
+                    self.status = format!("invalid command  {}", self.session_id);
+                    SubmitAction::Handled
+                }
+            },
+            "/deny" => match (parts.next(), parts.next()) {
+                (None, None) => SubmitAction::DenySandboxCommand,
+                _ => {
+                    self.queue_message(MessageKind::System, "Usage: /deny");
+                    self.status = format!("invalid command  {}", self.session_id);
+                    SubmitAction::Handled
+                }
+            },
             "/status" => {
                 let mut lines = vec![
                     format!("session: {}", self.session_id),
@@ -509,6 +525,13 @@ impl App {
                                         .unwrap_or_else(|| "(none)".to_string())
                                 }
                             })
+                            .unwrap_or_else(|| "(none)".to_string())
+                    ),
+                    format!(
+                        "sandbox_approval_pending: {}",
+                        self.pending_sandbox_approval
+                            .as_ref()
+                            .map(|request| request.approval_id.clone())
                             .unwrap_or_else(|| "(none)".to_string())
                     ),
                     format!("max_loop_count: {}", self.max_loop_count_status_label()),

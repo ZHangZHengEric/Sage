@@ -1,4 +1,5 @@
 use super::super::{App, SubmitAction};
+use crate::backend::SandboxApprovalRequest;
 
 #[test]
 fn sandbox_command_sets_override_and_requests_restart() {
@@ -92,4 +93,77 @@ fn sandbox_clear_removes_override() {
 
     assert_eq!(app.sandbox_type, None);
     assert!(app.take_backend_restart_request());
+}
+
+#[test]
+fn sandbox_approval_request_sets_pending_status() {
+    let mut app = App::new();
+    app.apply_sandbox_approval_request(SandboxApprovalRequest {
+        command: "git push origin main".to_string(),
+        approval_id: "shapproval_demo".to_string(),
+        category: Some("git-push".to_string()),
+        reason: Some("git push changes remote state".to_string()),
+        approval_mode: Some("on-request".to_string()),
+        hint: Some("Ask the user for confirmation.".to_string()),
+    });
+
+    assert_eq!(
+        app.pending_sandbox_approval
+            .as_ref()
+            .map(|request| request.approval_id.as_str()),
+        Some("shapproval_demo")
+    );
+    assert!(app.status.contains("approval required"));
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("sandbox approval required"));
+    assert!(rendered.contains("Use /approve to run it once"));
+}
+
+#[test]
+fn approve_command_submits_confirmation_prompt() {
+    let mut app = App::new();
+    app.apply_sandbox_approval_request(SandboxApprovalRequest {
+        command: "git push origin main".to_string(),
+        approval_id: "shapproval_demo".to_string(),
+        category: None,
+        reason: None,
+        approval_mode: None,
+        hint: None,
+    });
+
+    let action = app.handle_command("/approve");
+
+    assert!(matches!(action, SubmitAction::ApproveSandboxCommand));
+    let prompt = app
+        .build_sandbox_approval_prompt()
+        .expect("approval prompt");
+    assert!(prompt.contains("shapproval_demo"));
+    assert!(prompt.contains("git push origin main"));
+    assert!(app.pending_sandbox_approval.is_none());
+}
+
+#[test]
+fn deny_command_clears_pending_approval() {
+    let mut app = App::new();
+    app.apply_sandbox_approval_request(SandboxApprovalRequest {
+        command: "git push origin main".to_string(),
+        approval_id: "shapproval_demo".to_string(),
+        category: None,
+        reason: None,
+        approval_mode: None,
+        hint: None,
+    });
+
+    assert!(matches!(
+        app.handle_command("/deny"),
+        SubmitAction::DenySandboxCommand
+    ));
+    assert!(app.deny_pending_sandbox_approval());
+    assert!(app.pending_sandbox_approval.is_none());
 }

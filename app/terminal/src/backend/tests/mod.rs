@@ -79,6 +79,7 @@ pub(super) fn collect_round_trip(handle: &BackendHandle) -> Vec<String> {
             | Some(BackendEvent::Status(_))
             | Some(BackendEvent::PhaseChanged(_))
             | Some(BackendEvent::ToolStarted(_))
+            | Some(BackendEvent::SandboxApprovalRequested(_))
             | Some(BackendEvent::Stats(_))
             | Some(BackendEvent::ToolFinished(_)) => {}
             Some(BackendEvent::Finished) => return assistant_chunks,
