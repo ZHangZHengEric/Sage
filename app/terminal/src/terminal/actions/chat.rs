@@ -92,3 +92,40 @@ pub(super) fn retry_last_task(app: &mut App, backend: &mut Option<BackendHandle>
     app.begin_task_submission(task.clone(), true);
     run_task(app, backend, task)
 }
+
+pub(super) fn approve_sandbox_command(
+    app: &mut App,
+    backend: &mut Option<BackendHandle>,
+) -> Result<bool> {
+    if app.busy {
+        app.push_message(
+            crate::app::MessageKind::System,
+            "request still running; wait for it to finish before approving",
+        );
+        app.set_status(format!("busy  {}", app.session_id));
+        return Ok(true);
+    }
+
+    let Some(task) = app.build_sandbox_approval_prompt() else {
+        app.push_message(
+            crate::app::MessageKind::System,
+            "no pending sandbox approval",
+        );
+        app.set_status(format!("approval unavailable  {}", app.session_id));
+        return Ok(true);
+    };
+
+    app.begin_task_submission(task.clone(), true);
+    run_task(app, backend, task)
+}
+
+pub(super) fn deny_sandbox_command(app: &mut App) -> Result<bool> {
+    if !app.deny_pending_sandbox_approval() {
+        app.push_message(
+            crate::app::MessageKind::System,
+            "no pending sandbox approval",
+        );
+        app.set_status(format!("ready  {}", app.session_id));
+    }
+    Ok(true)
+}

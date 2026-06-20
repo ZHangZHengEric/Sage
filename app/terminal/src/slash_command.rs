@@ -6,7 +6,7 @@ pub(crate) struct SlashCommandDef {
     pub(crate) example: &'static str,
 }
 
-const COMMANDS: [SlashCommandDef; 24] = [
+const COMMANDS: [SlashCommandDef; 26] = [
     SlashCommandDef {
         command: "/help",
         description: "Show available commands",
@@ -126,6 +126,18 @@ const COMMANDS: [SlashCommandDef; 24] = [
         description: "Retry the last submitted task",
         usage: "/retry",
         example: "/retry",
+    },
+    SlashCommandDef {
+        command: "/approve",
+        description: "Approve the pending sandbox command once",
+        usage: "/approve",
+        example: "/approve",
+    },
+    SlashCommandDef {
+        command: "/deny",
+        description: "Deny the pending sandbox command",
+        usage: "/deny",
+        example: "/deny",
     },
     SlashCommandDef {
         command: "/status",

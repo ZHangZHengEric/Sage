@@ -2,8 +2,10 @@ use crate::app::MessageKind;
 use crate::backend::contract::CliStreamEvent;
 use crate::backend::{
     BackendGoal, BackendPhaseTiming, BackendSessionMeta, BackendStats, BackendToolStep,
+    SandboxApprovalRequest,
 };
 use crate::display_policy::{internal_tool_count, visible_tool_names, DisplayMode};
+use serde_json::Value;
 
 pub(super) fn backend_stats_from_event(event: CliStreamEvent) -> BackendStats {
     BackendStats {
@@ -176,6 +178,59 @@ pub(super) fn collect_tool_names(event: &CliStreamEvent) -> Vec<String> {
     names
 }
 
+pub(super) fn sandbox_approval_from_event(
+    event: &CliStreamEvent,
+) -> Option<SandboxApprovalRequest> {
+    if event.event_type != "tool_result" {
+        return None;
+    }
+    let tool_names = collect_tool_names(event);
+    if !tool_names
+        .iter()
+        .any(|name| name == "execute_shell_command")
+    {
+        return None;
+    }
+
+    let payload = serde_json::from_str::<Value>(&event.content).ok()?;
+    if payload
+        .get("error_code")
+        .and_then(Value::as_str)
+        .filter(|value| *value == "SAFETY_BLOCKED")
+        .is_none()
+    {
+        return None;
+    }
+    if payload
+        .get("policy_action")
+        .and_then(Value::as_str)
+        .filter(|value| *value == "ask")
+        .is_none()
+    {
+        return None;
+    }
+
+    let approval_id = payload
+        .get("approval_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let command = payload
+        .get("command")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+
+    Some(SandboxApprovalRequest {
+        command: command.to_string(),
+        approval_id: approval_id.to_string(),
+        category: string_field(&payload, "policy_category"),
+        reason: string_field(&payload, "policy_reason"),
+        approval_mode: string_field(&payload, "policy_approval_mode"),
+        hint: string_field(&payload, "hint"),
+    })
+}
+
 pub(super) fn truncate(text: &str, max_len: usize) -> String {
     if text.chars().count() <= max_len {
         return text.to_string();
@@ -188,4 +243,13 @@ pub(super) fn truncate(text: &str, max_len: usize) -> String {
 
 fn clean_single_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn string_field(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
 }

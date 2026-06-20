@@ -42,12 +42,15 @@ fn slash_popup_selection_wraps() {
     app.input_cursor = app.input.len();
 
     assert_eq!(app.slash_popup_selected, 0);
-    assert!(app.select_next_popup_item());
-    assert_eq!(app.slash_popup_selected, 1);
+    let match_count = app.popup_matches().len();
+    for expected in 1..match_count {
+        assert!(app.select_next_popup_item());
+        assert_eq!(app.slash_popup_selected, expected);
+    }
     assert!(app.select_next_popup_item());
     assert_eq!(app.slash_popup_selected, 0);
     assert!(app.select_previous_popup_item());
-    assert_eq!(app.slash_popup_selected, 1);
+    assert_eq!(app.slash_popup_selected, match_count - 1);
 }
 
 #[test]
