@@ -25,6 +25,7 @@ fn backend_handle_supports_two_round_trips_without_respawn() {
         max_loop_count: Some(3),
         workspace: Some(temp_dir.clone()),
         sandbox_type: None,
+        sandbox_approval_mode: "on-request".to_string(),
         skills: Vec::new(),
         model_override: None,
         goal_objective: None,
@@ -76,6 +77,7 @@ fn backend_handle_omits_workspace_flag_when_not_overridden() {
         max_loop_count: Some(3),
         workspace: None,
         sandbox_type: None,
+        sandbox_approval_mode: "on-request".to_string(),
         skills: Vec::new(),
         model_override: None,
         goal_objective: None,
@@ -104,10 +106,12 @@ fn backend_handle_forwards_agent_config_flag_without_agent_id() {
     fs::create_dir_all(&temp_dir).expect("temp dir should be created");
     let script_path = write_fake_backend_script(&temp_dir);
     let args_path = temp_dir.join("backend-args.log");
+    let env_path = temp_dir.join("backend-env.log");
     let config_path = temp_dir.join("coding_config.json");
     fs::write(&config_path, "{}").expect("config file should be created");
     let _python_guard = EnvVarGuard::set("PYTHON", &script_path.display().to_string());
     let _args_guard = EnvVarGuard::set("TEST_BACKEND_ARGS_LOG", &args_path.display().to_string());
+    let _env_guard = EnvVarGuard::set("TEST_BACKEND_ENV_LOG", &env_path.display().to_string());
 
     let request = BackendRequest {
         session_id: "local-0003".to_string(),
@@ -118,6 +122,7 @@ fn backend_handle_forwards_agent_config_flag_without_agent_id() {
         max_loop_count: None,
         workspace: None,
         sandbox_type: Some("local".to_string()),
+        sandbox_approval_mode: "untrusted".to_string(),
         skills: Vec::new(),
         model_override: None,
         goal_objective: None,
@@ -143,6 +148,9 @@ fn backend_handle_forwards_agent_config_flag_without_agent_id() {
     assert!(lines
         .windows(2)
         .any(|pair| pair[0] == "--sandbox-type" && pair[1] == "local"));
+    let env = fs::read_to_string(&env_path).expect("backend env log should exist");
+    assert!(env.contains("SAGE_APPROVAL_MODE=untrusted"));
+    assert!(env.contains("SAGE_SANDBOX_MODE=local"));
 
     handle.stop();
     let _ = wait_for_exit(&handle);

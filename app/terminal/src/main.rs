@@ -51,6 +51,7 @@ fn main() -> Result<()> {
         startup_options.display_mode,
         startup_options.workspace.map(PathBuf::from),
         startup_options.sandbox_type,
+        startup_options.sandbox_approval_mode,
     );
     let terminal = setup_terminal(&app)?;
     let mut terminal_guard = TerminalRestoreGuard::new(terminal);

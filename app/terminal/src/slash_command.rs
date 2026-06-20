@@ -105,9 +105,9 @@ const COMMANDS: [SlashCommandDef; 24] = [
     },
     SlashCommandDef {
         command: "/sandbox",
-        description: "Show or override the current sandbox mode",
-        usage: "/sandbox | /sandbox show | /sandbox set <local|remote|passthrough> | /sandbox clear",
-        example: "/sandbox set local",
+        description: "Show or override sandbox type and approval mode",
+        usage: "/sandbox | /sandbox show | /sandbox set <local|remote|passthrough> | /sandbox approval set <untrusted|on-request|never> | /sandbox clear",
+        example: "/sandbox approval set untrusted",
     },
     SlashCommandDef {
         command: "/goal",

@@ -5,7 +5,7 @@ use crate::slash_command;
 
 use super::agent::normalize_agent_mode;
 use super::display::parse_display_mode;
-use super::sandbox::normalize_sandbox_type;
+use super::sandbox::{normalize_sandbox_approval_mode, normalize_sandbox_type};
 
 impl App {
     pub(crate) fn handle_command(&mut self, command: &str) -> SubmitAction {
@@ -342,6 +342,26 @@ impl App {
                     self.queue_sandbox_status();
                     SubmitAction::Handled
                 }
+                (Some("approval"), None, None) | (Some("approval"), Some("show"), None) => {
+                    self.queue_sandbox_status();
+                    SubmitAction::Handled
+                }
+                (Some("approval"), Some("set"), Some(approval_mode)) => {
+                    match normalize_sandbox_approval_mode(approval_mode) {
+                        Some(approval_mode) => {
+                            self.set_sandbox_approval_mode_selection(approval_mode);
+                            SubmitAction::Handled
+                        }
+                        None => {
+                            self.queue_message(
+                                MessageKind::System,
+                                "Usage: /sandbox approval set <untrusted|on-request|never>",
+                            );
+                            self.status = format!("invalid command  {}", self.session_id);
+                            SubmitAction::Handled
+                        }
+                    }
+                }
                 (Some("set"), Some(sandbox_type), None) => {
                     match normalize_sandbox_type(sandbox_type) {
                         Some(sandbox_type) => {
@@ -351,7 +371,7 @@ impl App {
                         None => {
                             self.queue_message(
                             MessageKind::System,
-                            "Usage: /sandbox | /sandbox show | /sandbox set <local|remote|passthrough> | /sandbox clear",
+                            "Usage: /sandbox | /sandbox show | /sandbox set <local|remote|passthrough> | /sandbox approval set <untrusted|on-request|never> | /sandbox clear",
                         );
                             self.status = format!("invalid command  {}", self.session_id);
                             SubmitAction::Handled
@@ -365,7 +385,7 @@ impl App {
                 _ => {
                     self.queue_message(
                         MessageKind::System,
-                        "Usage: /sandbox | /sandbox show | /sandbox set <local|remote|passthrough> | /sandbox clear",
+                        "Usage: /sandbox | /sandbox show | /sandbox set <local|remote|passthrough> | /sandbox approval set <untrusted|on-request|never> | /sandbox clear",
                     );
                     self.status = format!("invalid command  {}", self.session_id);
                     SubmitAction::Handled
@@ -446,6 +466,10 @@ impl App {
                 lines.extend([
                     format!("agent_mode: {}", self.agent_mode_status_label()),
                     format!("sandbox_type: {}", self.sandbox_type_status_label()),
+                    format!(
+                        "approval_mode: {}",
+                        self.sandbox_approval_mode_status_label()
+                    ),
                     format!("display_mode: {}", display_mode_name(self.display_mode)),
                     format!("workspace: {}", self.workspace_label),
                     format!(

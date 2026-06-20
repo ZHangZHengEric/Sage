@@ -33,6 +33,7 @@ struct BackendConfig {
     max_loop_count: Option<u32>,
     workspace: Option<PathBuf>,
     sandbox_type: Option<String>,
+    sandbox_approval_mode: String,
     skills: Vec<String>,
     model_override: Option<String>,
     goal_objective: Option<String>,
@@ -129,6 +130,7 @@ impl BackendHandle {
                 .arg(sandbox_type)
                 .env("SAGE_SANDBOX_MODE", sandbox_type);
         }
+        command.env("SAGE_APPROVAL_MODE", &request.sandbox_approval_mode);
         if request.agent_config.is_none() {
             if let Some(agent_id) = &request.agent_id {
                 command.arg("--agent-id").arg(agent_id);
@@ -266,6 +268,7 @@ impl BackendHandle {
                 max_loop_count: request.max_loop_count,
                 workspace,
                 sandbox_type: request.sandbox_type.clone(),
+                sandbox_approval_mode: request.sandbox_approval_mode.clone(),
                 skills: request.skills.clone(),
                 model_override: request.model_override.clone(),
                 goal_objective: request.goal_objective.clone(),
@@ -314,6 +317,7 @@ impl BackendHandle {
             && self.config.max_loop_count == request.max_loop_count
             && self.config.workspace == request.workspace
             && self.config.sandbox_type == request.sandbox_type
+            && self.config.sandbox_approval_mode == request.sandbox_approval_mode
             && self.config.skills == request.skills
             && self.config.model_override == request.model_override
             && self.config.goal_objective == request.goal_objective
