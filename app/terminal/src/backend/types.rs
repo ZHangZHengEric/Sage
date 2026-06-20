@@ -99,6 +99,7 @@ pub struct BackendRequest {
     pub max_loop_count: Option<u32>,
     pub workspace: Option<PathBuf>,
     pub sandbox_type: Option<String>,
+    pub sandbox_approval_mode: String,
     pub skills: Vec<String>,
     pub model_override: Option<String>,
     pub goal_objective: Option<String>,

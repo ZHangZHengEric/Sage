@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::app::{normalize_agent_mode, normalize_sandbox_type, App, MessageKind};
+use crate::app::{
+    normalize_agent_mode, normalize_sandbox_approval_mode, normalize_sandbox_type, App, MessageKind,
+};
 use crate::backend::runtime::{prepare_state_root, resolve_runtime_root};
 use crate::display_policy::DisplayMode;
 use crate::startup::StartupOptions;
@@ -16,6 +18,7 @@ struct TerminalPreferences {
     display_mode: Option<DisplayMode>,
     workspace: Option<String>,
     sandbox_type: Option<String>,
+    sandbox_approval_mode: Option<String>,
 }
 
 pub(crate) fn load_startup_preferences() -> Result<StartupOptions> {
@@ -47,6 +50,10 @@ pub(crate) fn load_startup_preferences() -> Result<StartupOptions> {
             .sandbox_type
             .as_deref()
             .and_then(normalize_sandbox_type),
+        sandbox_approval_mode: preferences
+            .sandbox_approval_mode
+            .as_deref()
+            .and_then(normalize_sandbox_approval_mode),
     })
 }
 
@@ -106,6 +113,7 @@ fn save_app_preferences(app: &App) -> Result<()> {
             .workspace_override_path()
             .map(|path| path.display().to_string()),
         sandbox_type: app.sandbox_type.clone(),
+        sandbox_approval_mode: Some(app.sandbox_approval_mode.clone()),
     };
     let payload = serde_json::to_string_pretty(&preferences)
         .map_err(|err| anyhow!("failed to encode terminal preferences: {err}"))?;
@@ -162,6 +170,7 @@ mod tests {
         app.set_agent_mode_selection("multi".to_string());
         app.set_workspace_selection("/tmp/demo-workspace".to_string());
         app.set_sandbox_type_selection("local".to_string());
+        app.set_sandbox_approval_mode_selection("untrusted".to_string());
         let loaded = load_startup_preferences().expect("preferences should load");
 
         assert_eq!(loaded.agent_id.as_deref(), Some("agent_demo"));
@@ -169,6 +178,7 @@ mod tests {
         assert_eq!(loaded.display_mode, Some(DisplayMode::Verbose));
         assert_eq!(loaded.workspace.as_deref(), Some("/tmp/demo-workspace"));
         assert_eq!(loaded.sandbox_type.as_deref(), Some("local"));
+        assert_eq!(loaded.sandbox_approval_mode.as_deref(), Some("untrusted"));
     }
 
     #[test]
@@ -199,6 +209,7 @@ mod tests {
         original.set_agent_mode_selection("multi".to_string());
         original.set_workspace_selection("/tmp/demo-workspace".to_string());
         original.set_sandbox_type_selection("remote".to_string());
+        original.set_sandbox_approval_mode_selection("never".to_string());
 
         let options = crate::startup::StartupOptions::default()
             .with_fallbacks(load_startup_preferences().expect("preferences should load"));
@@ -210,6 +221,7 @@ mod tests {
             options.display_mode,
             options.workspace.map(PathBuf::from),
             options.sandbox_type,
+            options.sandbox_approval_mode,
         );
 
         assert_eq!(restored.selected_agent_id.as_deref(), Some("agent_demo"));
@@ -217,6 +229,7 @@ mod tests {
         assert_eq!(restored.display_mode, DisplayMode::Verbose);
         assert_eq!(restored.workspace_label, "/tmp/demo-workspace");
         assert_eq!(restored.sandbox_type.as_deref(), Some("remote"));
+        assert_eq!(restored.sandbox_approval_mode, "never");
     }
 
     #[test]

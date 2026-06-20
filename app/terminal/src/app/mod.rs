@@ -8,7 +8,7 @@ mod surfaces;
 mod tests;
 
 pub(crate) use commands::agent::{normalize_agent_config_value, normalize_agent_mode};
-pub(crate) use commands::sandbox::normalize_sandbox_type;
+pub(crate) use commands::sandbox::{normalize_sandbox_approval_mode, normalize_sandbox_type};
 pub(crate) use state::{
     ActiveSurfaceKind, ActiveToolRecord, AgentCandidate, AgentPopupMode, App,
     FilteredSessionPicker, MessageKind, PendingGoalMutation, ProviderCandidate, ProviderPopupMode,

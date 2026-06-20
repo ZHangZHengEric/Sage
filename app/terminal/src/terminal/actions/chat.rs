@@ -30,6 +30,7 @@ pub(super) fn run_task(
         },
         workspace: app.workspace_override_path().map(|path| path.to_path_buf()),
         sandbox_type: app.sandbox_type.clone(),
+        sandbox_approval_mode: app.sandbox_approval_mode.clone(),
         skills: app.selected_skills.clone(),
         model_override: app.selected_model.clone(),
         goal_objective: app

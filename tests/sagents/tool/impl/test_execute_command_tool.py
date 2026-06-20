@@ -116,6 +116,109 @@ def test_execute_shell_command_uses_provider_default_workdir(monkeypatch):
     ]
 
 
+def test_execute_shell_command_blocks_policy_ask_before_spawn(monkeypatch):
+    monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
+
+    tool = ExecuteCommandTool()
+    result = asyncio.run(
+        tool.execute_shell_command(
+            command="git push origin feature-x",
+            session_id="session-1",
+            block_until_ms=0,
+        )
+    )
+
+    assert result["success"] is False
+    assert result["error_code"] == "SAFETY_BLOCKED"
+    assert result["policy_action"] == "ask"
+    assert result["policy_category"] == "git_remote_write"
+    assert result["policy_approval_mode"] == "on-request"
+    assert result["approval_id"].startswith("shapproval_")
+    assert ExecuteCommandTool._BG_TASKS == {}
+
+
+def test_execute_shell_command_uses_one_shot_approval_before_spawn(monkeypatch):
+    fake_sandbox = _FakeBackgroundSandbox("/sage-workspace")
+    fake_manager = _FakeSessionManager(fake_sandbox)
+    monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
+
+    import sagents.session_runtime
+
+    monkeypatch.setattr(
+        sagents.session_runtime,
+        "get_global_session_manager",
+        lambda: fake_manager,
+    )
+
+    tool = ExecuteCommandTool()
+    blocked = asyncio.run(
+        tool.execute_shell_command(
+            command="git push origin feature-x",
+            session_id="session-1",
+            block_until_ms=0,
+        )
+    )
+    approval_id = blocked["approval_id"]
+
+    started = asyncio.run(
+        tool.execute_shell_command(
+            command="git push origin feature-x",
+            session_id="session-1",
+            block_until_ms=0,
+            approval_id=approval_id,
+        )
+    )
+
+    assert started["success"] is True
+    assert started["status"] == "running"
+    assert fake_sandbox.bg_calls[0]["command"] == "git push origin feature-x"
+    assert ExecuteCommandTool._PENDING_APPROVALS == {}
+
+    reused = asyncio.run(
+        tool.execute_shell_command(
+            command="git push origin feature-x",
+            session_id="session-1",
+            block_until_ms=0,
+            approval_id=approval_id,
+        )
+    )
+    assert reused["success"] is False
+    assert reused["policy_action"] == "ask"
+    assert reused["approval_id"] != approval_id
+
+
+def test_execute_shell_command_approval_id_must_match_command(monkeypatch):
+    monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
+
+    tool = ExecuteCommandTool()
+    blocked = asyncio.run(
+        tool.execute_shell_command(
+            command="git push origin feature-x",
+            session_id="session-1",
+            block_until_ms=0,
+        )
+    )
+
+    mismatch = asyncio.run(
+        tool.execute_shell_command(
+            command="git push origin other-branch",
+            session_id="session-1",
+            block_until_ms=0,
+            approval_id=blocked["approval_id"],
+        )
+    )
+
+    assert mismatch["success"] is False
+    assert mismatch["policy_action"] == "ask"
+    assert mismatch["approval_id"] != blocked["approval_id"]
+
+
 def test_execute_shell_command_passes_tool_env_to_background_runner(monkeypatch):
     fake_sandbox = _FakeBackgroundSandbox("/sage-workspace")
     fake_manager = _FakeSessionManager(fake_sandbox)

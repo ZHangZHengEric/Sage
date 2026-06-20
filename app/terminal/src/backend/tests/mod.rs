@@ -117,6 +117,7 @@ import sys
 count = 0
 log_path = os.environ.get("TEST_BACKEND_LOG")
 args_path = os.environ.get("TEST_BACKEND_ARGS_LOG")
+env_path = os.environ.get("TEST_BACKEND_ENV_LOG")
 
 for raw in sys.stdin:
     prompt = raw.rstrip("\n")
@@ -127,6 +128,10 @@ for raw in sys.stdin:
     if args_path:
         with open(args_path, "w", encoding="utf-8") as handle:
             handle.write("\n".join(sys.argv[1:]))
+    if env_path:
+        with open(env_path, "w", encoding="utf-8") as handle:
+            handle.write("SAGE_APPROVAL_MODE=" + os.environ.get("SAGE_APPROVAL_MODE", "") + "\n")
+            handle.write("SAGE_SANDBOX_MODE=" + os.environ.get("SAGE_SANDBOX_MODE", "") + "\n")
     print(json.dumps({
         "type": "cli_phase",
         "phase": "planning",
