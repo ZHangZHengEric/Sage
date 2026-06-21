@@ -35,6 +35,10 @@ class AuthorizationRequest(BaseModel):
     user_ids: List[str]
 
 
+class FileWorkspaceStatRequest(BaseModel):
+    paths: List[str]
+
+
 class DeleteAgentWorkspaceRequest(BaseModel):
     agent_id: str
     user_id: str
@@ -184,6 +188,7 @@ __all__ = [
     "DeleteAgentWorkspaceRequest",
     "AgentConfigDTO",
     "AutoGenAgentRequest",
+    "FileWorkspaceStatRequest",
     "SystemPromptOptimizeRequest",
     "AsyncTaskResponse",
     "convert_config_to_agent",

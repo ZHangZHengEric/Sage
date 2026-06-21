@@ -1,6 +1,7 @@
 import asyncio
 import mimetypes
 import os
+import posixpath
 import random
 import shutil
 import tempfile
@@ -1159,6 +1160,24 @@ async def download_server_agent_file(
     )
 
 
+async def stat_server_agent_files(
+    agent_id: str,
+    user_id: str,
+    paths: List[str],
+    *,
+    session_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    sandbox_result = await _stat_live_session_sandbox_files(session_id, paths)
+    if sandbox_result is not None:
+        return sandbox_result
+
+    return await asyncio.to_thread(
+        stat_workspace_files,
+        get_server_agent_workspace_path(agent_id, user_id),
+        paths,
+    )
+
+
 async def delete_server_agent_file(agent_id: str, user_id: str, file_path: str) -> bool:
     return await asyncio.to_thread(
         delete_workspace_entry,
@@ -1199,6 +1218,23 @@ async def download_desktop_agent_file(
         prepare_workspace_download,
         get_desktop_agent_workspace_path(agent_id),
         file_path,
+    )
+
+
+async def stat_desktop_agent_files(
+    agent_id: str,
+    paths: List[str],
+    *,
+    session_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    sandbox_result = await _stat_live_session_sandbox_files(session_id, paths)
+    if sandbox_result is not None:
+        return sandbox_result
+
+    return await asyncio.to_thread(
+        stat_workspace_files,
+        get_desktop_agent_workspace_path(agent_id),
+        paths,
     )
 
 
@@ -1302,7 +1338,9 @@ async def generate_agent_abilities(
     return [AgentAbilityItem(**item) for item in raw_items]
 
 
-def resolve_workspace_file_path(workspace_path: str | Path, file_path: str) -> str:
+def _resolve_workspace_file_path_candidate(
+    workspace_path: str | Path, file_path: str
+) -> Tuple[str, str]:
     if not workspace_path or not file_path:
         raise SageHTTPException(
             detail="缺少必要的路径参数",
@@ -1338,6 +1376,14 @@ def resolve_workspace_file_path(workspace_path: str | Path, file_path: str) -> s
             detail="访问被拒绝：文件路径超出工作空间范围",
             error_detail="Access denied: file path outside workspace",
         )
+
+    return full_file_abs, normalized_file_path
+
+
+def resolve_workspace_file_path(workspace_path: str | Path, file_path: str) -> str:
+    full_file_abs, normalized_file_path = _resolve_workspace_file_path_candidate(
+        workspace_path, file_path
+    )
 
     if not os.path.exists(full_file_abs):
         raise SageHTTPException(
@@ -1488,6 +1534,221 @@ def list_workspace_files(
         "truncated_by_depth": truncated_by_depth,
         "message": "获取文件列表成功",
     }
+
+
+def _workspace_stat_error_item(
+    path: str,
+    *,
+    error_code: str,
+    message: str,
+) -> Dict[str, Any]:
+    return {
+        "path": path,
+        "exists": False,
+        "is_directory": False,
+        "error_code": error_code,
+        "message": message,
+    }
+
+
+async def _stat_live_session_sandbox_files(
+    session_id: Optional[str],
+    paths: List[str],
+) -> Optional[Dict[str, Any]]:
+    if not session_id:
+        return None
+
+    try:
+        from sagents.utils.agent_session_helper import get_live_session_context
+
+        session_context = get_live_session_context(
+            session_id,
+            log_prefix="FileWorkspaceStat",
+        )
+    except Exception:
+        return None
+
+    sandbox = getattr(session_context, "sandbox", None) if session_context else None
+    sandbox_workspace = (
+        getattr(session_context, "sandbox_agent_workspace", None)
+        if session_context
+        else None
+    )
+    if not sandbox or not sandbox_workspace:
+        return None
+
+    return await stat_sandbox_workspace_files(sandbox, sandbox_workspace, paths)
+
+
+def _resolve_sandbox_workspace_file_path(
+    sandbox_workspace: str,
+    file_path: str,
+) -> Tuple[str, str]:
+    if not sandbox_workspace or not file_path:
+        raise SageHTTPException(
+            detail="缺少必要的路径参数",
+            error_detail="workspace_path or file_path missing",
+        )
+
+    workspace_abs = posixpath.normpath(str(sandbox_workspace))
+    normalized_file_path = str(file_path).strip()
+    if posixpath.isabs(normalized_file_path):
+        full_file_path = normalized_file_path
+    else:
+        full_file_path = posixpath.join(workspace_abs, normalized_file_path)
+
+    full_file_abs = posixpath.normpath(full_file_path)
+    try:
+        in_workspace = posixpath.commonpath([workspace_abs, full_file_abs]) == workspace_abs
+    except ValueError:
+        in_workspace = False
+
+    if not in_workspace:
+        raise SageHTTPException(
+            detail="访问被拒绝：文件路径超出工作空间范围",
+            error_detail="Access denied: file path outside workspace",
+        )
+
+    return full_file_abs, normalized_file_path
+
+
+async def stat_sandbox_workspace_files(
+    sandbox: Any,
+    sandbox_workspace: str,
+    paths: List[str],
+) -> Dict[str, Any]:
+    files: List[Dict[str, Any]] = []
+
+    for requested_path in paths or []:
+        normalized_path = os.fspath(requested_path or "").strip()
+        try:
+            full_path, display_path = _resolve_sandbox_workspace_file_path(
+                sandbox_workspace,
+                normalized_path,
+            )
+        except SageHTTPException as exc:
+            files.append(
+                _workspace_stat_error_item(
+                    normalized_path,
+                    error_code=(
+                        "ACCESS_DENIED"
+                        if "outside workspace" in (exc.error_detail or "")
+                        else "INVALID_PATH"
+                    ),
+                    message=str(exc.detail),
+                )
+            )
+            continue
+
+        parent = posixpath.dirname(full_path.rstrip("/")) or sandbox_workspace
+        target = full_path.rstrip("/")
+        try:
+            entries = await sandbox.list_directory(parent, include_hidden=True)
+        except Exception:
+            files.append(
+                _workspace_stat_error_item(
+                    display_path,
+                    error_code="FILE_NOT_FOUND",
+                    message=f"文件不存在: {display_path}",
+                )
+            )
+            continue
+
+        matched = next(
+            (entry for entry in entries if str(entry.path).rstrip("/") == target),
+            None,
+        )
+        if matched is None:
+            files.append(
+                _workspace_stat_error_item(
+                    display_path,
+                    error_code="FILE_NOT_FOUND",
+                    message=f"文件不存在: {display_path}",
+                )
+            )
+            continue
+
+        is_directory = bool(matched.is_dir)
+        if is_directory:
+            content_type = "inode/directory"
+        else:
+            content_type, _ = mimetypes.guess_type(full_path)
+            if content_type is None:
+                content_type = "application/octet-stream"
+
+        files.append(
+            {
+                "path": display_path,
+                "exists": True,
+                "is_directory": is_directory,
+                "size": int(matched.size or 0),
+                "modified_time": float(matched.modified_time or 0),
+                "content_type": content_type,
+            }
+        )
+
+    return {"files": files}
+
+
+def stat_workspace_files(
+    workspace_path: str | Path,
+    paths: List[str],
+) -> Dict[str, Any]:
+    files: List[Dict[str, Any]] = []
+
+    for requested_path in paths or []:
+        normalized_path = os.fspath(requested_path or "").strip()
+        try:
+            full_path, display_path = _resolve_workspace_file_path_candidate(
+                workspace_path,
+                normalized_path,
+            )
+        except SageHTTPException as exc:
+            files.append(
+                _workspace_stat_error_item(
+                    normalized_path,
+                    error_code=(
+                        "ACCESS_DENIED"
+                        if "outside workspace" in (exc.error_detail or "")
+                        else "INVALID_PATH"
+                    ),
+                    message=str(exc.detail),
+                )
+            )
+            continue
+
+        try:
+            file_stat = os.stat(full_path)
+        except FileNotFoundError:
+            files.append(
+                _workspace_stat_error_item(
+                    display_path,
+                    error_code="FILE_NOT_FOUND",
+                    message=f"文件不存在: {display_path}",
+                )
+            )
+            continue
+
+        is_directory = os.path.isdir(full_path)
+        if is_directory:
+            content_type = "inode/directory"
+        else:
+            content_type, _ = mimetypes.guess_type(full_path)
+            if content_type is None:
+                content_type = "application/octet-stream"
+
+        files.append(
+            {
+                "path": display_path,
+                "exists": True,
+                "is_directory": is_directory,
+                "size": file_stat.st_size,
+                "modified_time": file_stat.st_mtime,
+                "content_type": content_type,
+            }
+        )
+
+    return {"files": files}
 
 
 def prepare_workspace_download(

@@ -19,6 +19,7 @@ from common.schemas.agent import (
     AgentAbilitiesRequest,
     AgentConfigDTO,
     AutoGenAgentRequest,
+    FileWorkspaceStatRequest,
     SystemPromptOptimizeRequest,
     convert_agent_to_config,
 )
@@ -495,6 +496,21 @@ async def download_file(agent_id: str, request: Request):
     except Exception as e:
         logger.bind(agent_id=agent_id).error(f"Download failed: {e}")
         raise
+
+
+@agent_router.post("/{agent_id}/file_workspace/stat")
+async def stat_files(
+    agent_id: str,
+    body: FileWorkspaceStatRequest,
+    request: Request,
+    session_id: Optional[str] = None,
+):
+    result = await agent_service.stat_desktop_agent_files(
+        agent_id,
+        body.paths,
+        session_id=session_id,
+    )
+    return await Response.succ(message="获取文件元信息成功", data=result)
 
 
 @agent_router.get("/{agent_id}/file_workspace/stream")
