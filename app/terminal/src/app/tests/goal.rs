@@ -71,7 +71,29 @@ fn goal_show_reports_local_goal_state() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(rendered.contains("goal: ship the terminal goal MVP"));
-    assert!(rendered.contains("goal_status: active"));
+    assert!(rendered.contains("status: active"));
+    assert!(!rendered.contains("goal_status:"));
+    assert!(!rendered.contains("goal_pending:"));
+}
+
+#[test]
+fn goal_show_without_goal_uses_plain_status_text() {
+    let mut app = App::new();
+
+    assert!(matches!(
+        app.handle_command("/goal show"),
+        SubmitAction::Handled
+    ));
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("goal: not set"));
+    assert!(!rendered.contains("goal: (none)"));
 }
 
 #[test]

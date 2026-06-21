@@ -2,6 +2,10 @@ use std::time::Instant;
 
 use ratatui::text::Line;
 
+use crate::app::live_filter::{
+    clean_assistant_live_text, filter_completed_duplicate_assistant_lines,
+    filter_final_duplicate_assistant_text,
+};
 use crate::app::runtime_support::{
     backend_phase_timing_summary, backend_tool_step_summary, duration_from_seconds,
     flush_completed_live_lines, format_duration, normalize_phase_label, request_timing_summary,
@@ -70,47 +74,7 @@ impl App {
             return;
         }
 
-        self.busy = false;
-        self.current_task = None;
-        let backend_stats = self.pending_backend_stats.take();
-        self.last_request_duration = backend_stats
-            .as_ref()
-            .and_then(|stats| duration_from_seconds(stats.elapsed_seconds))
-            .or_else(|| self.request_started_at.map(|started| started.elapsed()));
-        self.last_first_output_latency = backend_stats
-            .as_ref()
-            .and_then(|stats| duration_from_seconds(stats.first_output_seconds))
-            .or(self.first_output_latency);
-        let completion_summary = request_timing_summary(
-            self.last_request_duration,
-            self.last_first_output_latency,
-            backend_stats.as_ref(),
-            self.display_mode,
-        );
-        self.request_started_at = None;
-        self.first_output_latency = None;
-        self.active_phase = None;
-        self.active_tools.clear();
-        self.flush_live_message();
-        self.reset_assistant_live_filter();
-        let mut completion_lines = Vec::new();
-        if matches!(self.display_mode, DisplayMode::Verbose) {
-            if let Some(stats) = backend_stats.as_ref() {
-                if let Some(tool_summary) =
-                    backend_tool_step_summary(&stats.tool_steps, self.display_mode)
-                {
-                    completion_lines.push(tool_summary);
-                }
-                if let Some(phase_summary) =
-                    backend_phase_timing_summary(&stats.phase_timings, self.display_mode)
-                {
-                    completion_lines.push(phase_summary);
-                }
-            }
-        }
-        if let Some(summary) = completion_summary {
-            completion_lines.push(format!("completed • {summary}"));
-        }
+        let completion_lines = self.finish_request_state("completed");
         if !completion_lines.is_empty() {
             self.queue_message(MessageKind::Process, completion_lines.join("\n"));
         }
@@ -118,47 +82,7 @@ impl App {
     }
 
     pub fn fail_request(&mut self, message: impl Into<String>) {
-        self.busy = false;
-        self.current_task = None;
-        let backend_stats = self.pending_backend_stats.take();
-        self.last_request_duration = backend_stats
-            .as_ref()
-            .and_then(|stats| duration_from_seconds(stats.elapsed_seconds))
-            .or_else(|| self.request_started_at.map(|started| started.elapsed()));
-        self.last_first_output_latency = backend_stats
-            .as_ref()
-            .and_then(|stats| duration_from_seconds(stats.first_output_seconds))
-            .or(self.first_output_latency);
-        let completion_summary = request_timing_summary(
-            self.last_request_duration,
-            self.last_first_output_latency,
-            backend_stats.as_ref(),
-            self.display_mode,
-        );
-        self.request_started_at = None;
-        self.first_output_latency = None;
-        self.active_phase = None;
-        self.active_tools.clear();
-        self.flush_live_message();
-        self.reset_assistant_live_filter();
-        let mut completion_lines = Vec::new();
-        if matches!(self.display_mode, DisplayMode::Verbose) {
-            if let Some(stats) = backend_stats.as_ref() {
-                if let Some(tool_summary) =
-                    backend_tool_step_summary(&stats.tool_steps, self.display_mode)
-                {
-                    completion_lines.push(tool_summary);
-                }
-                if let Some(phase_summary) =
-                    backend_phase_timing_summary(&stats.phase_timings, self.display_mode)
-                {
-                    completion_lines.push(phase_summary);
-                }
-            }
-        }
-        if let Some(summary) = completion_summary {
-            completion_lines.push(format!("failed • {summary}"));
-        }
+        let completion_lines = self.finish_request_state("failed");
         if !completion_lines.is_empty() {
             self.queue_message(MessageKind::Process, completion_lines.join("\n"));
         }
@@ -218,6 +142,52 @@ impl App {
         self.status = format!("interrupted  {}", self.session_label());
     }
 
+    fn finish_request_state(&mut self, outcome: &str) -> Vec<String> {
+        self.busy = false;
+        self.current_task = None;
+        let backend_stats = self.pending_backend_stats.take();
+        self.last_request_duration = backend_stats
+            .as_ref()
+            .and_then(|stats| duration_from_seconds(stats.elapsed_seconds))
+            .or_else(|| self.request_started_at.map(|started| started.elapsed()));
+        self.last_first_output_latency = backend_stats
+            .as_ref()
+            .and_then(|stats| duration_from_seconds(stats.first_output_seconds))
+            .or(self.first_output_latency);
+        let completion_summary = request_timing_summary(
+            self.last_request_duration,
+            self.last_first_output_latency,
+            backend_stats.as_ref(),
+            self.display_mode,
+        );
+        self.request_started_at = None;
+        self.first_output_latency = None;
+        self.active_phase = None;
+        self.active_tools.clear();
+        self.flush_live_message();
+        self.reset_assistant_live_filter();
+
+        let mut completion_lines = Vec::new();
+        if matches!(self.display_mode, DisplayMode::Verbose) {
+            if let Some(stats) = backend_stats.as_ref() {
+                if let Some(tool_summary) =
+                    backend_tool_step_summary(&stats.tool_steps, self.display_mode)
+                {
+                    completion_lines.push(tool_summary);
+                }
+                if let Some(phase_summary) =
+                    backend_phase_timing_summary(&stats.phase_timings, self.display_mode)
+                {
+                    completion_lines.push(phase_summary);
+                }
+            }
+        }
+        if let Some(summary) = completion_summary {
+            completion_lines.push(format!("{outcome} • {summary}"));
+        }
+        completion_lines
+    }
+
     pub fn rendered_live_lines(&self) -> Vec<Line<'static>> {
         if !self.busy {
             return Vec::new();
@@ -249,7 +219,6 @@ impl App {
         } else {
             self.rendered_idle_lines(width)
         };
-        lines.extend(self.committed_history_lines.clone());
         if self.busy {
             let live_lines = self.rendered_live_lines();
             if !lines.is_empty() && !live_lines.is_empty() {
@@ -401,7 +370,7 @@ impl App {
         self.queue_message(MessageKind::Tool, detail);
     }
 
-    pub(crate) fn materialize_pending_ui(&mut self, _width: u16) {
+    pub(crate) fn materialize_pending_ui(&mut self, width: u16) {
         if !self.pending_welcome_banner
             || !self.committed_history_lines.is_empty()
             || self.pending_history_lines.is_empty()
@@ -409,6 +378,10 @@ impl App {
             return;
         }
 
+        let mut lines = self.rendered_idle_lines(width);
+        lines.extend(std::mem::take(&mut self.pending_history_lines));
+        self.pending_history_lines = lines;
+        self.pending_welcome_banner = false;
         self.clear_requested = true;
     }
 
@@ -532,188 +505,4 @@ impl App {
     pub fn apply_backend_stats(&mut self, stats: crate::backend::BackendStats) {
         self.pending_backend_stats = Some(stats);
     }
-}
-
-fn clean_assistant_live_text(text: &mut String) {
-    strip_loop_diagnostics(text);
-    dedupe_repeated_assistant_lines(text);
-    collapse_adjacent_repeated_phrases(text);
-}
-
-fn strip_loop_diagnostics(text: &mut String) {
-    strip_from_marker(
-        text,
-        "Self-check: Repeating execution loop detected",
-        "clarification question.",
-    );
-    strip_from_marker(text, "检测到任务进入重复循环", "继续。");
-}
-
-fn strip_from_marker(text: &mut String, start_marker: &str, end_marker: &str) {
-    while let Some(start) = text.find(start_marker) {
-        let tail = &text[start..];
-        let end = tail
-            .find(end_marker)
-            .map(|index| start + index + end_marker.len())
-            .unwrap_or_else(|| text.len());
-        text.replace_range(start..end, "");
-    }
-}
-
-fn dedupe_repeated_assistant_lines(text: &mut String) {
-    if !text.contains('\n') {
-        return;
-    }
-
-    let had_trailing_newline = text.ends_with('\n');
-    let mut deduped = Vec::new();
-    let mut seen_non_empty = std::collections::BTreeSet::new();
-    let mut changed = false;
-    let mut in_code_block = false;
-
-    for line in text.lines() {
-        let normalized = line.trim();
-        if normalized.starts_with("```") {
-            in_code_block = !in_code_block;
-            deduped.push(line);
-            continue;
-        }
-        if !in_code_block
-            && !normalized.is_empty()
-            && !seen_non_empty.insert(normalized.to_string())
-        {
-            changed = true;
-            continue;
-        }
-        deduped.push(line);
-    }
-
-    if !changed {
-        return;
-    }
-
-    *text = deduped.join("\n");
-    if had_trailing_newline {
-        text.push('\n');
-    }
-}
-
-fn filter_completed_duplicate_assistant_lines(
-    text: &mut String,
-    seen: &mut std::collections::BTreeSet<String>,
-    in_code_block: &mut bool,
-) {
-    let Some(split_at) = text.rfind('\n') else {
-        return;
-    };
-
-    let completed = text[..split_at].to_string();
-    let remainder = text[split_at + 1..].to_string();
-    let mut kept = Vec::new();
-    let mut changed = false;
-
-    for line in completed.lines() {
-        let normalized = line.trim();
-        if normalized.starts_with("```") {
-            *in_code_block = !*in_code_block;
-            kept.push(line);
-            continue;
-        }
-        if !*in_code_block && !normalized.is_empty() && !seen.insert(normalized.to_string()) {
-            changed = true;
-            continue;
-        }
-        kept.push(line);
-    }
-
-    if !changed {
-        return;
-    }
-
-    let mut filtered = kept.join("\n");
-    if !filtered.is_empty() {
-        filtered.push('\n');
-    }
-    filtered.push_str(&remainder);
-    *text = filtered;
-}
-
-fn filter_final_duplicate_assistant_text(
-    text: &mut String,
-    seen: &mut std::collections::BTreeSet<String>,
-    in_code_block: &mut bool,
-) {
-    if text.contains('\n') {
-        filter_completed_duplicate_assistant_lines(text, seen, in_code_block);
-    }
-
-    let normalized = text.trim();
-    if normalized.is_empty()
-        || normalized.starts_with("```")
-        || *in_code_block
-        || seen.insert(normalized.to_string())
-    {
-        return;
-    }
-
-    text.clear();
-}
-
-fn collapse_adjacent_repeated_phrases(text: &mut String) {
-    if text.contains("```") || text.chars().count() > 4_000 {
-        return;
-    }
-
-    let had_trailing_newline = text.ends_with('\n');
-    let mut collapsed = text
-        .lines()
-        .map(collapse_line_repeats)
-        .collect::<Vec<_>>()
-        .join("\n");
-    if had_trailing_newline {
-        collapsed.push('\n');
-    }
-    if collapsed != *text {
-        *text = collapsed;
-    }
-}
-
-fn collapse_line_repeats(line: &str) -> String {
-    let chars = line.chars().collect::<Vec<_>>();
-    if chars.len() < 16 {
-        return line.to_string();
-    }
-
-    let mut output = Vec::with_capacity(chars.len());
-    let mut index = 0;
-    while index < chars.len() {
-        let remaining = chars.len() - index;
-        let max_len = (remaining / 2).min(160);
-        let mut collapsed = false;
-        for len in (8..=max_len).rev() {
-            let left = &chars[index..index + len];
-            let right = &chars[index + len..index + (len * 2)];
-            if left == right && repeated_phrase_is_user_text(left) {
-                output.extend_from_slice(left);
-                index += len * 2;
-                collapsed = true;
-                break;
-            }
-        }
-        if !collapsed {
-            output.push(chars[index]);
-            index += 1;
-        }
-    }
-
-    output.into_iter().collect()
-}
-
-fn repeated_phrase_is_user_text(chars: &[char]) -> bool {
-    let text = chars.iter().collect::<String>();
-    text.contains('。')
-        || text.contains('！')
-        || text.contains('？')
-        || text.contains("Hello")
-        || text.contains("hello")
 }

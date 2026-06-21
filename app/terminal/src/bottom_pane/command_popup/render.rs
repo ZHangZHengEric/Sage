@@ -14,6 +14,7 @@ const POPUP_COMMAND: Color = Color::Rgb(174, 220, 121);
 const POPUP_TEXT: Color = Color::Rgb(205, 211, 207);
 const POPUP_HINT: Color = Color::Rgb(117, 127, 122);
 const POPUP_DIVIDER: Color = Color::Rgb(88, 97, 92);
+const POPUP_CATEGORY: Color = Color::Rgb(149, 191, 179);
 
 pub(crate) fn popup_height(props: Option<&CommandPopupProps>) -> u16 {
     props
@@ -70,6 +71,11 @@ pub(super) fn popup_lines(props: &CommandPopupProps) -> Vec<Line<'static>> {
                         .bg(bg)
                         .add_modifier(Modifier::BOLD),
                 ),
+                Span::styled(
+                    item.category.clone(),
+                    Style::default().fg(POPUP_CATEGORY).bg(bg),
+                ),
+                Span::styled(" · ", Style::default().fg(POPUP_HINT).bg(bg)),
                 Span::styled(
                     item.description.clone(),
                     Style::default().fg(POPUP_TEXT).bg(bg),

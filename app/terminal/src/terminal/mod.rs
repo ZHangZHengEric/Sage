@@ -11,14 +11,13 @@ use crossterm::event::{
 };
 use crossterm::execute;
 use crossterm::style::ResetColor;
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
-use crossterm::terminal::{Clear, ClearType};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
 
 use crate::app::{App, MessageKind, SubmitAction};
 use crate::backend::{BackendEvent, BackendHandle, BackendRequest};
 use crate::custom_terminal::{BackendImpl, Terminal};
+use crate::history::insert_history_lines;
+use crate::terminal_layout::desired_viewport_height;
 use crate::terminal_support::sync_contextual_popup_data;
 use crate::ui;
 
@@ -31,9 +30,7 @@ use actions::handle_submit_action;
 use keys::handle_key;
 
 pub type AppTerminal = Terminal<BackendImpl>;
-#[cfg(test)]
 const INLINE_VIEWPORT_IDLE_HEIGHT: u16 = 5;
-#[cfg(test)]
 const INLINE_VIEWPORT_MAX_HEIGHT: u16 = 18;
 // Keep keyboard enhancement mode minimal.
 //
@@ -49,15 +46,13 @@ pub fn setup_terminal(_app: &App) -> Result<AppTerminal> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     write!(stdout, "\x1b[r\x1b[0m")?;
+    let cursor_position = ratatui::layout::Position { x: 0, y: 0 };
     execute!(
         stdout,
-        EnterAlternateScreen,
-        cursor::MoveTo(0, 0),
         Clear(ClearType::All),
-        Clear(ClearType::Purge),
-        cursor::MoveTo(0, 0),
-        EnableBracketedPaste
+        cursor::MoveTo(cursor_position.x, cursor_position.y)
     )?;
+    execute!(stdout, EnableBracketedPaste)?;
     ignore_unsupported(execute!(
         stdout,
         PushKeyboardEnhancementFlags(KEYBOARD_ENHANCEMENT_FLAGS)
@@ -66,27 +61,34 @@ pub fn setup_terminal(_app: &App) -> Result<AppTerminal> {
     let backend = BackendImpl::new(stdout);
     let mut terminal = Terminal::with_viewport_height_and_cursor(
         backend,
-        u16::MAX,
-        ratatui::layout::Position { x: 0, y: 0 },
+        INLINE_VIEWPORT_IDLE_HEIGHT,
+        cursor_position,
     )?;
-    let size = terminal.size()?;
-    terminal.set_viewport_area(ratatui::layout::Rect::new(0, 0, size.width, size.height));
     terminal.clear()?;
     Ok(terminal)
 }
 
 pub fn restore_terminal(terminal: &mut AppTerminal) -> Result<()> {
-    disable_raw_mode()?;
+    let mut first_error = terminal.clear_viewport_for_exit().err();
+    if let Err(err) = disable_raw_mode() {
+        first_error.get_or_insert(err);
+    }
     let backend = terminal.backend_mut();
-    ignore_unsupported(execute!(backend, PopKeyboardEnhancementFlags))?;
-    execute!(
+    if let Err(err) = ignore_unsupported(execute!(backend, PopKeyboardEnhancementFlags)) {
+        first_error.get_or_insert(err);
+    }
+    if let Err(err) = execute!(
         backend,
         DisableBracketedPaste,
         ResetColor,
-        crossterm::cursor::Show,
-        LeaveAlternateScreen
-    )?;
-    Ok(())
+        crossterm::cursor::Show
+    ) {
+        first_error.get_or_insert(err);
+    }
+    match first_error {
+        Some(err) => Err(err.into()),
+        None => Ok(()),
+    }
 }
 
 pub fn run(terminal: &mut AppTerminal, app: &mut App) -> Result<()> {
@@ -129,7 +131,12 @@ pub fn run_with_startup_action(
             dirty = true;
             last_elapsed_tick = elapsed_tick;
         }
-        let desired_height = screen_size.height.max(1);
+        let desired_height = desired_viewport_height(
+            app,
+            width,
+            INLINE_VIEWPORT_IDLE_HEIGHT,
+            INLINE_VIEWPORT_MAX_HEIGHT.min(screen_size.height.max(1)),
+        );
         if desired_height != viewport_height {
             terminal.set_viewport_height(desired_height)?;
             terminal.clear()?;
@@ -227,9 +234,14 @@ fn drain_backend(app: &mut App, backend: &mut Option<BackendHandle>) -> bool {
     changed
 }
 
-fn flush_history(_terminal: &mut AppTerminal, app: &mut App) -> Result<bool> {
+fn flush_history(terminal: &mut AppTerminal, app: &mut App) -> Result<bool> {
     let lines = app.take_pending_history_lines();
-    Ok(!lines.is_empty())
+    if lines.is_empty() {
+        return Ok(false);
+    }
+    insert_history_lines(terminal, &lines)?;
+    terminal.invalidate_viewport();
+    Ok(true)
 }
 
 fn event_poll_interval(app: &App, backend_active: bool) -> Duration {

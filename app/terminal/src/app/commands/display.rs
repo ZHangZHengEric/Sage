@@ -17,7 +17,7 @@ impl App {
         self.queue_message(
             MessageKind::System,
             format!(
-                "display_mode: {}\nworkspace: {}",
+                "display: {}\nworkspace: {}",
                 display_mode_name(self.display_mode),
                 self.workspace_label
             ),

@@ -12,6 +12,7 @@ use ratatui::style::{Color as RatatuiColor, Modifier};
 use ratatui::text::{Line, Span};
 
 use crate::custom_terminal::{BackendImpl, Terminal};
+use crate::wrap::wrap_lines;
 
 pub fn insert_history_lines(
     terminal: &mut Terminal<BackendImpl>,
@@ -24,7 +25,8 @@ pub fn insert_history_lines(
     let screen_size = terminal.size()?;
     let mut area = terminal.viewport_area();
     let last_cursor_pos = terminal.last_known_cursor_pos();
-    let wrapped_lines = lines.len().min(u16::MAX as usize) as u16;
+    let wrapped = wrap_history_lines(lines, area.width.max(1));
+    let wrapped_lines = wrapped.len().min(u16::MAX as usize) as u16;
     let writer = terminal.backend_mut();
 
     let cursor_top = if area.bottom() < screen_size.height {
@@ -52,7 +54,7 @@ pub fn insert_history_lines(
     }
     queue!(writer, MoveTo(0, cursor_top))?;
 
-    for line in lines {
+    for line in &wrapped {
         queue!(writer, Print("\r\n"))?;
         write_history_line(writer, line)?;
     }
@@ -66,8 +68,13 @@ pub fn insert_history_lines(
     if area != terminal.viewport_area() {
         terminal.set_viewport_area(area);
     }
+    terminal.note_history_rows_inserted(wrapped_lines);
 
     Ok(())
+}
+
+fn wrap_history_lines(lines: &[Line<'static>], width: u16) -> Vec<Line<'static>> {
+    wrap_lines(lines, width.max(1))
 }
 
 fn write_history_line<W: Write>(writer: &mut W, line: &Line<'static>) -> io::Result<()> {
@@ -241,7 +248,7 @@ mod tests {
     use ratatui::style::{Color, Modifier, Style};
     use ratatui::text::{Line, Span};
 
-    use super::write_history_line;
+    use super::{wrap_history_lines, write_history_line};
 
     #[test]
     fn history_line_reapplies_color_after_modifier_reset() {
@@ -268,5 +275,20 @@ mod tests {
             after_reset.contains("\x1b[38;2;143;190;246m"),
             "foreground color should be re-applied after reset: {rendered:?}"
         );
+    }
+
+    #[test]
+    fn history_lines_are_pre_wrapped_to_viewport_width() {
+        let lines = vec![Line::from("abcdef")];
+
+        let wrapped = wrap_history_lines(&lines, 3);
+
+        let rendered = wrapped
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .filter(|content| !content.is_empty())
+            .collect::<Vec<_>>();
+        assert_eq!(rendered, vec!["abc", "def"]);
     }
 }

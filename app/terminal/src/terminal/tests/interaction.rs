@@ -9,9 +9,7 @@ use crate::app::{ActiveSurfaceKind, App, MessageKind, SubmitAction};
 use crate::backend::tests::lock_env;
 use crate::slash_command;
 
-use super::super::{
-    event_poll_interval, handle_key, INLINE_VIEWPORT_IDLE_HEIGHT, INLINE_VIEWPORT_MAX_HEIGHT,
-};
+use super::super::{event_poll_interval, handle_key, INLINE_VIEWPORT_IDLE_HEIGHT};
 use crate::terminal_layout::desired_viewport_height;
 
 #[test]
@@ -80,31 +78,22 @@ fn welcome_banner_expands_idle_viewport_height() {
     let app = App::new();
 
     assert!(
-        desired_viewport_height(
-            &app,
-            120,
-            INLINE_VIEWPORT_IDLE_HEIGHT,
-            INLINE_VIEWPORT_MAX_HEIGHT
-        ) > INLINE_VIEWPORT_IDLE_HEIGHT
+        desired_viewport_height(&app, 120, INLINE_VIEWPORT_IDLE_HEIGHT, 18)
+            > INLINE_VIEWPORT_IDLE_HEIGHT
     );
 }
 
 #[test]
-fn viewport_keeps_welcome_status_after_transcript_exists() {
+fn viewport_collapses_to_composer_after_transcript_is_in_scrollback() {
     let mut app = App::new();
     app.push_message(MessageKind::User, "hello");
     app.materialize_pending_ui(120);
     let _ = app.take_clear_request();
     let _ = app.take_pending_history_lines();
 
-    let height = desired_viewport_height(
-        &app,
-        120,
-        INLINE_VIEWPORT_IDLE_HEIGHT,
-        INLINE_VIEWPORT_MAX_HEIGHT,
-    );
+    let height = desired_viewport_height(&app, 120, INLINE_VIEWPORT_IDLE_HEIGHT, 18);
 
-    assert!(height > INLINE_VIEWPORT_IDLE_HEIGHT);
+    assert_eq!(height, INLINE_VIEWPORT_IDLE_HEIGHT);
 }
 
 #[test]
@@ -210,7 +199,7 @@ fn help_popup_submit_escape_and_welcome_flow_stays_consistent() {
         .map(|span| span.content.as_ref())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(!rendered.contains("Sage Terminal"));
+    assert!(rendered.contains("Sage Terminal"));
     assert!(rendered.contains("hello"));
 }
 
