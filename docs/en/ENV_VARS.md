@@ -237,8 +237,7 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 
 | Variable | Replacement / status |
 | --- | --- |
-| `SAGE_AGENT_STATUS_PROTOCOL_ENABLED` | Deprecated. Used only when `SAGE_TASK_COMPLETION_MODE` is unset; `false` maps to `llm_judge`. |
-| `SAGE_COMPLETE_ON_NO_TOOL_CALL` | Deprecated. Used only when `SAGE_TASK_COMPLETION_MODE` is unset; `true` maps to `no_tool_call`. |
+| `SAGE_COMPLETE_ON_NO_TOOL_CALL` | Removed and ignored. Use `SAGE_TASK_COMPLETION_MODE=no_tool_call`. |
 | `SAGE_SPLIT_SYSTEM` | Deprecated and ignored. Split system messages are always enabled. |
 | `SAGE_STABLE_TOOLS_ORDER` | Deprecated and ignored. Tools are always sorted by `function.name` before LLM requests. |
 | `SAGE_AUTO_LINT` | Deprecated and ignored. File-tool linting is always enabled. |
