@@ -425,7 +425,6 @@ def _has_pending_user_injections(session_id: str | None) -> bool:
 
 @chat_router.post("/api/chat")
 async def chat(request: ChatRequest, http_request: Request):
-    logger.bind(session_id=request.session_id).info("Received chat request")
     """流式聊天接口"""
     validate_and_prepare_request(
         request,

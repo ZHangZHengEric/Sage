@@ -95,24 +95,28 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(pool._entries["server"].connections), 1)  # pyright: ignore[reportAttributeAccessIssue]
         await pool.close_all(drain=False)
 
-    async def _assert_http_transport_reuses_pooled_connection(self, server_params):
+    async def _assert_http_transport_reuses_worker_connection(self, server_params):
         pool = McpConnectionPool()
         open_count = 0
         close_count = 0
+        open_task = None
+        close_task = None
 
         class FakeSession:
             async def call_tool(self, name, arguments):
                 return _FakeResult()
 
         async def fake_open(self):
-            nonlocal open_count
+            nonlocal open_count, open_task
             open_count += 1
+            open_task = asyncio.current_task()
             self.session = FakeSession()
             return self
 
         async def fake_close(self):
-            nonlocal close_count
+            nonlocal close_count, close_task
             close_count += 1
+            close_task = asyncio.current_task()
             self.closed = True
 
         with (
@@ -126,78 +130,16 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
             self.assertIn("server", pool._entries)
             await pool.close_all(drain=True)
             self.assertEqual(close_count, 1)
+            self.assertIs(close_task, open_task)
             self.assertNotIn("server", pool._entries)
 
-    async def test_streamable_http_reuses_pooled_connection(self):
-        await self._assert_http_transport_reuses_pooled_connection(
+    async def test_streamable_http_reuses_worker_connection(self):
+        await self._assert_http_transport_reuses_worker_connection(
             StreamableHttpServerParameters(url="http://mcp.example")
         )
 
-    async def test_sse_reuses_pooled_connection(self):
-        await self._assert_http_transport_reuses_pooled_connection(
-            SseServerParameters(url="http://mcp.example")
-        )
-
-    async def _assert_http_transport_opens_next_connection_after_100(self, server_params):
-        pool = McpConnectionPool()
-        release = asyncio.Event()
-        condition = asyncio.Condition()
-        started = 0
-        open_count = 0
-
-        class FakeSession:
-            async def call_tool(self, name, arguments):
-                nonlocal started
-                async with condition:
-                    started += 1
-                    condition.notify_all()
-                await release.wait()
-                return _FakeResult()
-
-        async def fake_open(self):
-            nonlocal open_count
-            open_count += 1
-            self.session = FakeSession()
-            return self
-
-        async def wait_until_started(expected):
-            async with condition:
-                await asyncio.wait_for(
-                    condition.wait_for(lambda: started >= expected),
-                    timeout=2,
-                )
-
-        with patch.object(McpPooledConnection, "open", fake_open):
-            tasks = [
-                asyncio.create_task(
-                    pool.call_tool(
-                        "server",
-                        server_params,
-                        "echo",
-                        {"i": i},
-                        config={"per_connection_concurrency": 1},
-                    )
-                )
-                for i in range(101)
-            ]
-            await wait_until_started(101)
-            self.assertEqual(open_count, 2)
-            entry = pool._entries["server"]
-            self.assertEqual(entry.per_connection_concurrency, 100)
-            self.assertEqual(entry.max_connections_per_server, 0)
-            self.assertEqual(len(entry.connections), 2)
-            release.set()
-            await asyncio.gather(*tasks)
-
-        await pool.close_all(drain=False)
-
-    async def test_streamable_http_opens_next_connection_after_100(self):
-        await self._assert_http_transport_opens_next_connection_after_100(
-            StreamableHttpServerParameters(url="http://mcp.example")
-        )
-
-    async def test_sse_opens_next_connection_after_100(self):
-        await self._assert_http_transport_opens_next_connection_after_100(
+    async def test_sse_reuses_worker_connection(self):
+        await self._assert_http_transport_reuses_worker_connection(
             SseServerParameters(url="http://mcp.example")
         )
 
@@ -442,7 +384,7 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(open_count, 2)
         await pool.close_all(drain=False)
 
-    async def test_streamable_http_retries_connection_cancelled_call(self):
+    async def test_streamable_http_retries_worker_cancelled_call(self):
         pool = McpConnectionPool()
         server_params = StreamableHttpServerParameters(url="http://mcp.example")
         open_count = 0

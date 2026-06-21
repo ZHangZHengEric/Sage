@@ -137,33 +137,22 @@ def config_fingerprint(
     server_params: ServerParams,
     config: Optional[Dict[str, Any]] = None,
 ) -> str:
-    if isinstance(server_params, (SseServerParameters, StreamableHttpServerParameters)):
-        per_connection_concurrency = 100
-        max_connections_per_server = 0
-        fingerprint_config = dict(config or {})
-        fingerprint_config.pop("per_connection_concurrency", None)
-        fingerprint_config.pop("max_concurrency", None)
-        fingerprint_config.pop("max_connections_per_server", None)
-    else:
-        per_connection_concurrency = _get_config_int(
+    payload = {
+        "server_name": server_name.strip(),
+        "server_params": _server_params_payload(server_params),
+        "config": config or {},
+        "per_connection_concurrency": _get_config_int(
             config,
             ["per_connection_concurrency", "max_concurrency"],
             _env_int("SAGE_MCP_PER_CONNECTION_CONCURRENCY", 100, minimum=1),
             minimum=1,
-        )
-        max_connections_per_server = _get_config_int(
+        ),
+        "max_connections_per_server": _get_config_int(
             config,
             ["max_connections_per_server"],
             _env_int("SAGE_MCP_MAX_CONNECTIONS_PER_SERVER", 0, minimum=0),
             minimum=0,
-        )
-        fingerprint_config = config or {}
-    payload = {
-        "server_name": server_name.strip(),
-        "server_params": _server_params_payload(server_params),
-        "config": fingerprint_config,
-        "per_connection_concurrency": per_connection_concurrency,
-        "max_connections_per_server": max_connections_per_server,
+        ),
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -277,25 +266,18 @@ class McpServerPoolEntry:
         self.server_params = server_params
         self.fingerprint = fingerprint
         self.config = dict(config or {})
-        if isinstance(
-            server_params,
-            (SseServerParameters, StreamableHttpServerParameters),
-        ):
-            self.per_connection_concurrency = 100
-            self.max_connections_per_server = 0
-        else:
-            self.per_connection_concurrency = _get_config_int(
-                self.config,
-                ["per_connection_concurrency", "max_concurrency"],
-                _env_int("SAGE_MCP_PER_CONNECTION_CONCURRENCY", 100, minimum=1),
-                minimum=1,
-            )
-            self.max_connections_per_server = _get_config_int(
-                self.config,
-                ["max_connections_per_server"],
-                _env_int("SAGE_MCP_MAX_CONNECTIONS_PER_SERVER", 0, minimum=0),
-                minimum=0,
-            )
+        self.per_connection_concurrency = _get_config_int(
+            self.config,
+            ["per_connection_concurrency", "max_concurrency"],
+            _env_int("SAGE_MCP_PER_CONNECTION_CONCURRENCY", 100, minimum=1),
+            minimum=1,
+        )
+        self.max_connections_per_server = _get_config_int(
+            self.config,
+            ["max_connections_per_server"],
+            _env_int("SAGE_MCP_MAX_CONNECTIONS_PER_SERVER", 0, minimum=0),
+            minimum=0,
+        )
         self.idle_ttl_seconds = _env_float(
             "SAGE_MCP_SESSION_IDLE_TTL_SECONDS", 1800.0, minimum=0.0
         )
@@ -337,20 +319,6 @@ class McpServerPoolEntry:
                             f"server={self.server_name}, error={exc}"
                         )
                         continue
-                raise
-            except asyncio.CancelledError as exc:
-                task = asyncio.current_task()
-                if task is not None and task.cancelling():
-                    raise
-                last_error = exc
-                if connection is not None:
-                    await self.discard_connection(connection)
-                if attempt + 1 < attempts:
-                    logger.warning(
-                        f"MCP list_tools cancelled by connection, retrying once: "
-                        f"server={self.server_name}"
-                    )
-                    continue
                 raise
             except BaseExceptionGroup as exc:
                 last_error = exc
@@ -402,20 +370,6 @@ class McpServerPoolEntry:
                             f"server={self.server_name}, tool={tool_name}, error={exc}"
                         )
                         continue
-                raise
-            except asyncio.CancelledError as exc:
-                task = asyncio.current_task()
-                if task is not None and task.cancelling():
-                    raise
-                last_error = exc
-                if connection is not None:
-                    await self.discard_connection(connection)
-                if attempt + 1 < attempts:
-                    logger.warning(
-                        f"MCP call cancelled by connection, retrying once: "
-                        f"server={self.server_name}, tool={tool_name}"
-                    )
-                    continue
                 raise
             except BaseExceptionGroup as exc:
                 last_error = exc
@@ -515,9 +469,177 @@ class McpServerPoolEntry:
         )
 
 
+HttpWorkerServerParams = Union[SseServerParameters, StreamableHttpServerParameters]
+
+
+def _is_http_worker_server_params(server_params: ServerParams) -> bool:
+    return isinstance(
+        server_params, (SseServerParameters, StreamableHttpServerParameters)
+    )
+
+
+class McpHttpWorkerPoolEntry:
+    def __init__(
+        self,
+        server_name: str,
+        server_params: HttpWorkerServerParams,
+        fingerprint: str,
+        config: Optional[Dict[str, Any]] = None,
+    ):
+        self.server_name = server_name
+        self.server_params = server_params
+        self.fingerprint = fingerprint
+        self.config = dict(config or {})
+        self.drain_timeout_seconds = _env_float(
+            "SAGE_MCP_REFRESH_DRAIN_TIMEOUT_SECONDS", 30.0, minimum=0.0
+        )
+        self.call_timeout_seconds = _get_config_float(
+            self.config,
+            ["call_timeout_seconds"],
+            _env_float("SAGE_MCP_CALL_TIMEOUT_SECONDS", 1800.0, minimum=0.0),
+            minimum=0.0,
+        )
+        self.tools_cache: Optional[List[Tool]] = None
+        self.draining = False
+        self._queue: asyncio.Queue = asyncio.Queue()
+        self._task: Optional[asyncio.Task] = None
+        self._lock = asyncio.Lock()
+        self._closed = False
+
+    @property
+    def closed(self) -> bool:
+        return self._closed or (self._task is not None and self._task.done())
+
+    async def list_tools(self) -> List[Tool]:
+        tools = await self._submit("list_tools", None)
+        self.tools_cache = tools
+        return tools
+
+    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
+        return await self._submit(
+            "call_tool",
+            {
+                "tool_name": tool_name,
+                "arguments": arguments,
+            },
+        )
+
+    async def close(self, drain: bool = True) -> None:
+        close_future = None
+        async with self._lock:
+            self.draining = True
+            if self._task is None or self._task.done():
+                self._closed = True
+                return
+            close_future = asyncio.get_running_loop().create_future()
+            await self._queue.put(("close", None, close_future))
+
+        if not drain:
+            return
+
+        try:
+            if self.drain_timeout_seconds > 0:
+                await asyncio.wait_for(
+                    close_future,
+                    timeout=self.drain_timeout_seconds,
+                )
+            else:
+                await close_future
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"MCP {_server_protocol(self.server_params)} close timed out; "
+                f"close remains queued: "
+                f"server={self.server_name}"
+            )
+
+    async def _submit(self, operation: str, payload: Any) -> Any:
+        async with self._lock:
+            if self.draining or self._closed:
+                raise RuntimeError(
+                    f"MCP {_server_protocol(self.server_params)} worker is draining: "
+                    f"{self.server_name}"
+                )
+            if self._task is None or self._task.done():
+                self._closed = False
+                self._task = asyncio.create_task(self._run())
+            future = asyncio.get_running_loop().create_future()
+            await self._queue.put((operation, payload, future))
+
+        return await future
+
+    async def _run(self) -> None:
+        connection = McpPooledConnection(self.server_name, self.server_params)
+        current_future: Optional[asyncio.Future] = None
+        close_future: Optional[asyncio.Future] = None
+        try:
+            await connection.open()
+            while True:
+                operation, payload, current_future = await self._queue.get()
+                if operation == "close":
+                    close_future = current_future
+                    current_future = None
+                    break
+
+                try:
+                    assert connection.session is not None
+                    if operation == "list_tools":
+                        response = await connection.session.list_tools()
+                        result = response.tools
+                        self.tools_cache = result
+                    elif operation == "call_tool":
+                        call = connection.session.call_tool(
+                            payload["tool_name"],
+                            payload["arguments"],
+                        )
+                        if self.call_timeout_seconds > 0:
+                            result = await asyncio.wait_for(
+                                call,
+                                timeout=self.call_timeout_seconds,
+                            )
+                        else:
+                            result = await call
+                    else:
+                        raise RuntimeError(f"Unknown MCP worker operation: {operation}")
+                except asyncio.TimeoutError:
+                    timeout_error = TimeoutError(
+                        f"MCP tool call timed out after {self.call_timeout_seconds:g}s: "
+                        f"server={self.server_name}, tool={payload['tool_name']}"
+                    )
+                    if not current_future.cancelled():  # pyright: ignore[reportOptionalMemberAccess]
+                        current_future.set_exception(timeout_error)  # pyright: ignore[reportOptionalMemberAccess]
+                    break
+                except BaseException as exc:
+                    if not current_future.cancelled():  # pyright: ignore[reportOptionalMemberAccess]
+                        current_future.set_exception(exc)  # pyright: ignore[reportOptionalMemberAccess]
+                    break
+                else:
+                    if not current_future.cancelled():  # pyright: ignore[reportOptionalMemberAccess]
+                        current_future.set_result(result)  # pyright: ignore[reportOptionalMemberAccess]
+        except BaseException as exc:
+            if current_future is not None and not current_future.done():
+                current_future.set_exception(exc)
+        finally:
+            self._closed = True
+            await connection.close()
+            if close_future is not None and not close_future.cancelled():
+                close_future.set_result(None)
+            await self._fail_pending_requests()
+
+    async def _fail_pending_requests(self) -> None:
+        while not self._queue.empty():
+            _operation, _payload, future = await self._queue.get()
+            if not future.done():
+                future.set_exception(
+                    RuntimeError(
+                        f"MCP {_server_protocol(self.server_params)} worker closed: "
+                        f"{self.server_name}"
+                    )
+                )
+
+
 class McpConnectionPool:
     def __init__(self):
-        self._entries: Dict[str, McpServerPoolEntry] = {}
+        self._entries: Dict[str, Union[McpServerPoolEntry, McpHttpWorkerPoolEntry]] = {}
         self._lock = asyncio.Lock()
 
     def get_cached_tools(
@@ -541,6 +663,54 @@ class McpConnectionPool:
         force: bool = False,
     ) -> List[Tool]:
         key = server_name.strip()
+        if _is_http_worker_server_params(server_params):
+            entry = await self._get_or_create_http_worker_entry(
+                key,
+                server_params,  # pyright: ignore[reportArgumentType]
+                config,
+                force=force,
+            )
+            retry_enabled = _env_bool(
+                "SAGE_MCP_LIST_TOOLS_RETRY_ON_CONNECTION_ERROR", True
+            )
+            attempts = 2 if retry_enabled else 1
+            for attempt in range(attempts):
+                try:
+                    return await entry.list_tools()
+                except asyncio.CancelledError:
+                    task = asyncio.current_task()
+                    if task is not None and task.cancelling():
+                        raise
+                    if attempt + 1 < attempts:
+                        await self._discard_http_worker_entry(key, entry)
+                        logger.warning(
+                            f"MCP {_server_protocol(server_params)} list_tools "
+                            f"cancelled by worker, retrying once: server={key}"
+                        )
+                        entry = await self._get_or_create_http_worker_entry(
+                            key,
+                            server_params,  # pyright: ignore[reportArgumentType]
+                            config,
+                            force=True,
+                        )
+                        continue
+                    raise
+                except Exception as exc:
+                    if _is_connection_error(exc) and attempt + 1 < attempts:
+                        await self._discard_http_worker_entry(key, entry)
+                        logger.warning(
+                            f"MCP {_server_protocol(server_params)} list_tools failed, "
+                            f"retrying once: server={key}, error={exc}"
+                        )
+                        entry = await self._get_or_create_http_worker_entry(
+                            key,
+                            server_params,  # pyright: ignore[reportArgumentType]
+                            config,
+                            force=True,
+                        )
+                        continue
+                    raise
+
         fingerprint = config_fingerprint(key, server_params, config)
         current = self._entries.get(key)
 
@@ -585,8 +755,102 @@ class McpConnectionPool:
         arguments: Dict[str, Any],
         config: Optional[Dict[str, Any]] = None,
     ) -> Any:
+        if _is_http_worker_server_params(server_params):
+            key = server_name.strip()
+            entry = await self._get_or_create_http_worker_entry(
+                key,
+                server_params,  # pyright: ignore[reportArgumentType]
+                config,
+            )
+            retry_enabled = _env_bool("SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR", True)
+            attempts = 2 if retry_enabled else 1
+            for attempt in range(attempts):
+                try:
+                    return await entry.call_tool(tool_name, arguments)
+                except TimeoutError:
+                    await self._discard_http_worker_entry(key, entry)
+                    raise
+                except asyncio.CancelledError:
+                    task = asyncio.current_task()
+                    if task is not None and task.cancelling():
+                        raise
+                    if attempt + 1 < attempts:
+                        await self._discard_http_worker_entry(key, entry)
+                        logger.warning(
+                            f"MCP {_server_protocol(server_params)} call cancelled "
+                            f"by worker, retrying once: server={key}, "
+                            f"tool={tool_name}"
+                        )
+                        entry = await self._get_or_create_http_worker_entry(
+                            key,
+                            server_params,  # pyright: ignore[reportArgumentType]
+                            config,
+                            force=True,
+                        )
+                        continue
+                    raise
+                except Exception as exc:
+                    if _is_connection_error(exc) and attempt + 1 < attempts:
+                        await self._discard_http_worker_entry(key, entry)
+                        logger.warning(
+                            f"MCP {_server_protocol(server_params)} call failed, "
+                            f"retrying once: server={key}, tool={tool_name}, "
+                            f"error={exc}"
+                        )
+                        entry = await self._get_or_create_http_worker_entry(
+                            key,
+                            server_params,  # pyright: ignore[reportArgumentType]
+                            config,
+                            force=True,
+                        )
+                        continue
+                    raise
         entry = await self._get_or_create_entry(server_name, server_params, config)
         return await entry.call_tool(tool_name, arguments)
+
+    async def _get_or_create_http_worker_entry(
+        self,
+        key: str,
+        server_params: HttpWorkerServerParams,
+        config: Optional[Dict[str, Any]] = None,
+        force: bool = False,
+    ) -> McpHttpWorkerPoolEntry:
+        fingerprint = config_fingerprint(key, server_params, config)
+        async with self._lock:
+            current = self._entries.get(key)
+            if (
+                not force
+                and isinstance(current, McpHttpWorkerPoolEntry)
+                and current.fingerprint == fingerprint
+                and not current.draining
+                and not current.closed
+            ):
+                return current
+            candidate = McpHttpWorkerPoolEntry(
+                key,
+                server_params,
+                fingerprint,
+                config,
+            )
+            old = self._entries.get(key)
+            if old is not None and old is not candidate:
+                old.draining = True
+            self._entries[key] = candidate
+
+        if old is not None and old is not candidate:
+            await old.close(drain=False)
+        return candidate
+
+    async def _discard_http_worker_entry(
+        self,
+        key: str,
+        entry: McpHttpWorkerPoolEntry,
+    ) -> None:
+        async with self._lock:
+            current = self._entries.get(key)
+            if current is entry:
+                self._entries.pop(key, None)
+        await entry.close(drain=False)
 
     async def _get_or_create_entry(
         self,
