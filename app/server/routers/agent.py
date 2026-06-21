@@ -19,6 +19,7 @@ from common.schemas.agent import (
     AgentConfigDTO,
     AutoGenAgentRequest,
     DeleteAgentWorkspaceRequest,
+    FileWorkspaceStatRequest,
     AuthorizationRequest,
     SystemPromptOptimizeRequest,
     convert_agent_to_config,
@@ -358,6 +359,31 @@ async def download_file(
     except Exception as e:
         logger.error(f"Download failed: {e}")
         raise
+
+
+@agent_router.post("/{agent_id}/file_workspace/stat")
+async def stat_files(
+    agent_id: str,
+    body: FileWorkspaceStatRequest,
+    request: Request,
+    session_id: Optional[str] = None,
+):
+    user_id = get_request_user_id(request)
+    role = get_request_role(request)
+
+    if role == "admin" and session_id:
+        dao = ConversationDao()
+        conversation = await dao.get_by_session_id(session_id)
+        if conversation:
+            user_id = conversation.user_id
+
+    result = await agent_service.stat_server_agent_files(
+        agent_id,
+        user_id,
+        body.paths,
+        session_id=session_id,
+    )
+    return await Response.succ(message="获取文件元信息成功", data=result)
 
 
 @agent_router.delete("/{agent_id}/file_workspace/delete")
