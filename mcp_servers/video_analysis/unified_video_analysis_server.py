@@ -98,15 +98,15 @@ class QwenVideoProvider(BaseVideoProvider):
     @classmethod
     def base_url(cls) -> str:
         return (
-            os.environ.get("QWEN_VIDEO_BASE_URL") or cls.default_base_url
-        ).strip().rstrip("/")
+            (os.environ.get("QWEN_VIDEO_BASE_URL") or cls.default_base_url)
+            .strip()
+            .rstrip("/")
+        )
 
     async def analyze(self, video: VideoInput, prompt: str) -> str:
         video_url = video.source if video.is_url else video.data_url
         if not video_url:
-            raise VideoAnalysisError(
-                "本地视频无法转换为模型可读取的 data URL"
-            )
+            raise VideoAnalysisError("本地视频无法转换为模型可读取的 data URL")
 
         payload = {
             "model": self.model(),
@@ -133,9 +133,7 @@ class QwenVideoProvider(BaseVideoProvider):
                 json=payload,
             )
         if response.status_code in {401, 403}:
-            raise VideoAnalysisError(
-                "Qwen 视频分析 API Key 无效或没有模型权限"
-            )
+            raise VideoAnalysisError("Qwen 视频分析 API Key 无效或没有模型权限")
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -173,8 +171,10 @@ class GeminiVideoProvider(BaseVideoProvider):
     @classmethod
     def base_url(cls) -> str:
         return (
-            os.environ.get("GEMINI_VIDEO_BASE_URL") or cls.default_base_url
-        ).strip().rstrip("/")
+            (os.environ.get("GEMINI_VIDEO_BASE_URL") or cls.default_base_url)
+            .strip()
+            .rstrip("/")
+        )
 
     async def analyze(self, video: VideoInput, prompt: str) -> str:
         if video.is_url:
@@ -186,9 +186,7 @@ class GeminiVideoProvider(BaseVideoProvider):
             }
         else:
             if not video.base64_data:
-                raise VideoAnalysisError(
-                    "本地视频无法转换为 Gemini inline_data"
-                )
+                raise VideoAnalysisError("本地视频无法转换为 Gemini inline_data")
             video_part = {
                 "inline_data": {
                     "mime_type": video.mime_type,
@@ -215,9 +213,7 @@ class GeminiVideoProvider(BaseVideoProvider):
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(url, headers=headers, json=payload)
         if response.status_code in {401, 403}:
-            raise VideoAnalysisError(
-                "Gemini 视频分析 API Key 无效或没有模型权限"
-            )
+            raise VideoAnalysisError("Gemini 视频分析 API Key 无效或没有模型权限")
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -260,9 +256,7 @@ def _validate_video_extension(path_or_url: str) -> None:
     suffix = Path(urlparse(path_or_url).path).suffix.lower()
     if suffix and suffix not in SUPPORTED_VIDEO_EXTENSIONS:
         supported = ", ".join(sorted(SUPPORTED_VIDEO_EXTENSIONS))
-        raise VideoAnalysisError(
-            f"不支持的视频格式: {suffix}，支持的格式: {supported}"
-        )
+        raise VideoAnalysisError(f"不支持的视频格式: {suffix}，支持的格式: {supported}")
 
 
 def _read_local_video_base64(video_path: str) -> str:
