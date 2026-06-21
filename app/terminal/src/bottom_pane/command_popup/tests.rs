@@ -76,6 +76,7 @@ fn popup_height_counts_selected_preview_and_status() {
     let props = CommandPopupProps {
         items: vec![CommandPopupItem {
             command: "/help".to_string(),
+            category: "Help".to_string(),
             description: "Show help".to_string(),
             preview_lines: vec!["usage: /help".to_string(), "example: /help".to_string()],
             selected: true,
@@ -90,6 +91,7 @@ fn popup_lines_render_selected_preview_and_window_status() {
     let props = CommandPopupProps {
         items: vec![CommandPopupItem {
             command: "/help".to_string(),
+            category: "Help".to_string(),
             description: "Show help".to_string(),
             preview_lines: vec!["usage: /help".to_string()],
             selected: true,
@@ -107,6 +109,7 @@ fn popup_lines_render_selected_preview_and_window_status() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(rendered.contains("/help"));
+    assert!(rendered.contains("Help"));
     assert!(rendered.contains("usage: /help"));
     assert!(rendered.contains("1-1 of 1"));
 }
@@ -117,12 +120,14 @@ fn popup_height_skips_preview_lines_when_multiple_matches_are_visible() {
         items: vec![
             CommandPopupItem {
                 command: "/help".to_string(),
+                category: "Help".to_string(),
                 description: "Show help".to_string(),
                 preview_lines: vec!["usage: /help".to_string(), "example: /help".to_string()],
                 selected: true,
             },
             CommandPopupItem {
                 command: "/status".to_string(),
+                category: "Control".to_string(),
                 description: "Show status".to_string(),
                 preview_lines: vec!["usage: /status".to_string()],
                 selected: false,
@@ -139,12 +144,14 @@ fn popup_lines_hide_selected_preview_when_browsing_multiple_matches() {
         items: vec![
             CommandPopupItem {
                 command: "/help".to_string(),
+                category: "Help".to_string(),
                 description: "Show help".to_string(),
                 preview_lines: vec!["usage: /help".to_string()],
                 selected: true,
             },
             CommandPopupItem {
                 command: "/status".to_string(),
+                category: "Control".to_string(),
                 description: "Show status".to_string(),
                 preview_lines: vec!["usage: /status".to_string()],
                 selected: false,

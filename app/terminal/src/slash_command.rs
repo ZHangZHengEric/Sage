@@ -6,6 +6,68 @@ pub(crate) struct SlashCommandDef {
     pub(crate) example: &'static str,
 }
 
+impl SlashCommandDef {
+    pub(crate) fn category(&self) -> &'static str {
+        match self.command {
+            "/new" | "/clear" | "/sessions" | "/resume" | "/transcript" | "/welcome" | "/exit" => {
+                "Session"
+            }
+            "/agent" | "/mode" | "/workspace" | "/sandbox" | "/model" | "/display" | "/goal" => {
+                "Runtime"
+            }
+            "/skills" | "/skill" | "/config" | "/doctor" | "/providers" | "/provider" => "Setup",
+            "/interrupt" | "/retry" | "/status" => "Control",
+            _ => "Help",
+        }
+    }
+
+    pub(crate) fn detail_lines(&self) -> &'static [&'static str] {
+        match self.command {
+            "/agent" => &[
+                "Use an agent id for a saved backend agent, or an agent config path for a local config file.",
+                "Setting an agent config clears the explicit agent id; clearing returns to the runtime default.",
+                "Coding configs usually need a repo workspace set with /workspace set <path>.",
+            ],
+            "/workspace" => &[
+                "Controls the repo or directory the backend should use for future requests.",
+                "Changing the workspace refreshes workspace-scoped skills and affects new backend work.",
+                "Use /workspace clear to return to the default Sage workspace.",
+            ],
+            "/sandbox" => &[
+                "Controls the sandbox mode passed to the backend for future requests.",
+                "local uses the local sandbox provider with workspace path checks; remote asks the remote sandbox provider; passthrough uses direct backend workspace access.",
+                "Changing sandbox mode marks the backend for restart before the next task.",
+                "Run /sandbox show for the effective mode, workspace, restart state, and next-step guidance.",
+            ],
+            "/display" => &[
+                "compact hides internal tool and phase detail from the transcript.",
+                "verbose keeps more backend detail visible for debugging.",
+            ],
+            "/goal" => &[
+                "Use /goal <objective> to set the goal and immediately run it as a task.",
+                "/goal set only updates local goal state; /goal done marks the current goal complete locally.",
+            ],
+            "/status" => &[
+                "Shows the current session, runtime selection, workspace, sandbox, display mode, and goal state.",
+                "Use this when the footer is too narrow to show all active runtime context.",
+            ],
+            "/help" => &[
+                "Open /help for the command list, or /help <command> for focused usage notes.",
+            ],
+            "/provider" => &[
+                "Use provider commands to inspect, verify, create, update, delete, or switch defaults.",
+                "Run /provider help for the full provider field reference.",
+            ],
+            "/skills" | "/skill" => &[
+                "Skills are selected per terminal session and sent to the backend with future tasks.",
+            ],
+            "/interrupt" => &["Stops the active backend request while keeping any partial output visible."],
+            "/retry" => &["Resubmits the last task with the current runtime selections."],
+            _ => &[],
+        }
+    }
+}
+
 const COMMANDS: [SlashCommandDef; 24] = [
     SlashCommandDef {
         command: "/help",

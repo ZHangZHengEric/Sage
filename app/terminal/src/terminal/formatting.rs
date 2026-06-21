@@ -37,18 +37,39 @@ pub(crate) fn format_skills_list(skills: &[SkillInfo], active_skills: &[String])
 
     let mut lines = vec![
         format!("active skills: {active}"),
+        format!("visible skills: {}", skills.len()),
         String::new(),
         "visible skills".to_string(),
     ];
 
     for skill in skills {
         lines.push(format!("{}  [{}]", skill.name, skill.source));
-        if !skill.description.trim().is_empty() {
-            lines.push(format!("  {}", skill.description.trim()));
+        let summary = compact_skill_description(&skill.description);
+        if !summary.is_empty() {
+            lines.push(format!("  {summary}"));
         }
     }
+    lines.extend([
+        String::new(),
+        "Tip: use /skill add <name> to activate one, or type /skill add for searchable previews."
+            .to_string(),
+    ]);
 
     lines.join("\n")
+}
+
+fn compact_skill_description(description: &str) -> String {
+    const MAX_LEN: usize = 96;
+    let summary = description.split_whitespace().collect::<Vec<_>>().join(" ");
+    if summary.chars().count() <= MAX_LEN {
+        return summary;
+    }
+    let mut out = summary
+        .chars()
+        .take(MAX_LEN.saturating_sub(3))
+        .collect::<String>();
+    out.push_str("...");
+    out
 }
 
 pub(crate) fn format_agents_list(agents: &[AgentInfo], selected_agent_id: Option<&str>) -> String {
