@@ -25,12 +25,12 @@ Variables intentionally kept in the examples:
 | Type | Variables |
 | --- | --- |
 | Environment and entrypoint | `SAGE_ENV`, `SAGE_ROOT` |
-| Secrets and accounts | `SAGE_JWT_KEY`, `SAGE_REFRESH_TOKEN_SECRET`, `SAGE_SESSION_SECRET`, MySQL/S3/Grafana passwords, LLM/Embedding API keys, email AK/SK |
+| Secrets and accounts | `SAGE_JWT_KEY`, `SAGE_REFRESH_TOKEN_SECRET`, `SAGE_SESSION_SECRET`, MySQL/S3/Grafana passwords, LLM/Embedding/video-analysis API keys, email AK/SK |
 | External URLs | `SAGE_TRACE_JAEGER_PUBLIC_URL`, `SAGE_GRAFANA_PUBLIC_URL`, `SAGE_S3_PUBLIC_BASE_URL`, `SAGE_ELASTICSEARCH_URL` |
 
 Kubernetes templates separately keep `NAMESPACE`, `SAGE_HOST`, `SAGE_PUBLIC_URL`, `IMAGE_REGISTRY`, `IMAGE_PULL_POLICY`, `K8S_IMAGE_TARGET`, `CTR_BIN`, `CTR_NAMESPACE`, `STORAGE_CLASS`, `INGRESS_CLASS_NAME`, `TLS_SECRET_NAME`, `ENABLE_INGRESS`, `SAGE_WEB_SERVICE_TYPE`, `SAGE_WIKI_SERVICE_TYPE`, `SAGE_WEB_NODE_PORT`, and `SAGE_WIKI_NODE_PORT`.
 
-Advanced overrides are not listed in `.env.example` unless a deployment needs to change them. Common examples include Compose project/port overrides, `SAGE_WEB_BASE_PATH`, `SAGE_TRACE_JAEGER_URL`, `SAGE_LOKI_PUSH_URL`, `SAGE_MCP_*`, `OPENSANDBOX_IMAGE`, `OPENSANDBOX_TIMEOUT`, `SAGE_OPENSANDBOX_APPEND_MAX_BYTES`, default LLM/Embedding model parameters, and fixed email defaults.
+Advanced overrides are not listed in `.env.example` unless a deployment needs to change them. Common examples include Compose project/port overrides, `SAGE_WEB_BASE_PATH`, `SAGE_TRACE_JAEGER_URL`, `SAGE_LOKI_PUSH_URL`, `SAGE_MCP_*`, `OPENSANDBOX_IMAGE`, `OPENSANDBOX_TIMEOUT`, `SAGE_OPENSANDBOX_APPEND_MAX_BYTES`, default LLM/Embedding model parameters, video-analysis model parameters, and fixed email defaults.
 
 ## 1. LLM defaults
 

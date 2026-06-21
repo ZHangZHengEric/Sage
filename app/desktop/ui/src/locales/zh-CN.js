@@ -806,6 +806,7 @@ export default {
   'tools.browserDomAction': 'DOM 操作',
   // 图片理解工具
   'tools.analyzeImage': '图片理解',
+  'tools.analyzeVideo': '视频理解',
   // 任务清单工具
   'tools.todoWrite': '待办任务',
   'tools.todoRead': '读取待办',
@@ -1078,6 +1079,7 @@ export default {
   'tools.basicTools': '基础工具',
   'mcp.server.unified_search_server': '统一搜索',
   'mcp.server.unified_image_generation_server': '统一图片生成',
+  'mcp.server.unified_video_analysis_server': '统一视频分析',
   'mcp.server.task_scheduler': '任务调度',
   'mcp.server.im_service': '即时通信服务',
   'mcp.server.im_server': '即时通信服务',
