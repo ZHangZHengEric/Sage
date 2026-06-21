@@ -518,10 +518,14 @@ async def _register_extra_mcp_tools(request: StreamRequest) -> None:
         logger.warning("ToolManager not available, cannot register MCP servers")
         return
 
-    logger.info(f"Registering {len(extra_mcp_config)} extra MCP servers")
+    session_id = request.session_id or ""
+    total_start = time.perf_counter()
+    logger.bind(session_id=session_id).info(
+        f"[ChatMCP] extra_mcp_config registration start: count={len(extra_mcp_config)}"
+    )
     for key, value in extra_mcp_config.items():
         if not isinstance(value, dict):
-            logger.warning(
+            logger.bind(session_id=session_id).warning(
                 f"Invalid MCP config for {key}: expected dict, got {type(value)}"
             )
             continue
@@ -533,7 +537,7 @@ async def _register_extra_mcp_tools(request: StreamRequest) -> None:
             field in value
             for field in ["command", "sse_url", "url", "streamable_http_url"]
         ):
-            logger.warning(
+            logger.bind(session_id=session_id).warning(
                 f"Invalid MCP config for {key}: missing connection parameters"
             )
             continue
@@ -541,9 +545,28 @@ async def _register_extra_mcp_tools(request: StreamRequest) -> None:
         from common.utils.mcp_anytool_url import coalesce_anytool_streamable_url
 
         value = coalesce_anytool_streamable_url(key, value)
+        server_start = time.perf_counter()
+        logger.bind(session_id=session_id).info(
+            f"[ChatMCP] register_mcp_server start: server={key}"
+        )
         registered_tools = await tm.register_mcp_server(key, value)
+        server_cost = time.perf_counter() - server_start
         if not registered_tools:
-            logger.warning(f"Failed to register MCP server {key} with tools")
+            logger.bind(session_id=session_id).warning(
+                f"[ChatMCP] register_mcp_server finished with no tools: "
+                f"server={key}, cost={server_cost:.3f}s"
+            )
+        else:
+            logger.bind(session_id=session_id).info(
+                f"[ChatMCP] register_mcp_server done: "
+                f"server={key}, tools={len(registered_tools)}, cost={server_cost:.3f}s"
+            )
+
+    total_cost = time.perf_counter() - total_start
+    logger.bind(session_id=session_id).info(
+        f"[ChatMCP] extra_mcp_config registration done: "
+        f"count={len(extra_mcp_config)}, cost={total_cost:.3f}s"
+    )
 
     if "extra_mcp_config" in request.system_context:  # pyright: ignore[reportOperatorIssue]
         del request.system_context["extra_mcp_config"]  # pyright: ignore[reportOptionalSubscript]

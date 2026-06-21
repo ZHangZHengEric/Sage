@@ -878,11 +878,21 @@ class ToolManager:
                 logger.info(f"MCP server {server_name} unchanged, reused cached tools")
                 return registered_tools
 
+            list_tools_start = time.perf_counter()
+            logger.info(
+                f"[MCPRegister] list_tools start: "
+                f"server={server_name}, protocol={protocol_type}, force={force}"
+            )
             mcp_tools = await self._mcp_proxy.get_mcp_tools(
                 server_name,
                 server_params,
                 config=config,
                 force=force,
+            )
+            list_tools_cost = time.perf_counter() - list_tools_start
+            logger.info(
+                f"[MCPRegister] list_tools done: "
+                f"server={server_name}, tools={len(mcp_tools)}, cost={list_tools_cost:.3f}s"
             )
             await self.remove_tool_by_mcp(server_name, close_pool=False)
             for mcp_tool in mcp_tools:
