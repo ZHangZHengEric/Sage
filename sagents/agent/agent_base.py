@@ -201,6 +201,28 @@ class AgentBase(ABC):
         """
         return _get_mime_type_util(file_extension)
 
+    @staticmethod
+    def _refresh_current_time(
+        previous_current_time: Optional[str] = None,
+    ) -> str:
+        """Return the current time, preserving an existing system-context offset."""
+
+        now = datetime.datetime.now()
+        if previous_current_time:
+            try:
+                previous_dt = datetime.datetime.strptime(
+                    previous_current_time,
+                    "%a, %d %b %Y %H:%M:%S %z",
+                )
+                if previous_dt.tzinfo is not None:
+                    return now.astimezone(previous_dt.tzinfo).strftime(
+                        "%a, %d %b %Y %H:%M:%S %z"
+                    )
+            except ValueError:
+                pass
+
+        return now.astimezone().strftime("%a, %d %b %Y %H:%M:%S %z")
+
     def _resolve_raw_context_limit(
         self, session_context: Optional[SessionContext] = None
     ) -> int:
@@ -1598,10 +1620,8 @@ class AgentBase(ABC):
             stable_buf += f"<runtime_context_hint>\n{runtime_context_hint}\n</runtime_context_hint>\n"
 
         if session_context:
-            current_time_str = (
-                datetime.datetime.now()
-                .astimezone()
-                .strftime("%a, %d %b %Y %H:%M:%S %z")
+            current_time_str = self._refresh_current_time(
+                session_context.system_context.get("current_time")
             )
             session_context.system_context["current_time"] = current_time_str
             system_context_info = session_context.system_context.copy()
