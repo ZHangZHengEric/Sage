@@ -806,6 +806,7 @@ export default {
   'tools.browserDomAction': 'DOM Action',
   // Image Understanding Tools
   'tools.analyzeImage': 'Analyze Image',
+  'tools.analyzeVideo': 'Analyze Video',
   // Todo Tools
   'tools.todoWrite': 'Todo Write',
   'tools.todoRead': 'Todo Read',
@@ -1024,6 +1025,7 @@ export default {
   'tools.basicTools': 'Basic Tools',
   'mcp.server.unified_search_server': 'Unified Search',
   'mcp.server.unified_image_generation_server': 'Unified Image Generation',
+  'mcp.server.unified_video_analysis_server': 'Unified Video Analysis',
   'mcp.server.task_scheduler': 'Task Scheduler',
   'mcp.server.im_service': 'IM Service',
   'mcp.server.im_server': 'IM Service',

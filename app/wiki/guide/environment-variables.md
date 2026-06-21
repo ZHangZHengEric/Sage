@@ -96,6 +96,36 @@ HTTPS_PROXY=http://127.0.0.1:7890
 
 获取地址：[console.volcengine.com/ark](https://console.volcengine.com/ark)
 
+### 视频分析 API Keys
+
+用于统一视频分析服务，让 Agent 能够通过一个 `analyze_video` 工具分析视频内容。
+工具参数只暴露视频路径/URL 和可选提示词；API Key、Base URL 和模型名通过环境变量选择。
+
+#### 阿里云百炼 / Qwen
+
+| 环境变量 | 说明 | 示例值 |
+|---------|------|--------|
+| `QWEN_VIDEO_API_KEY` | 阿里云百炼视频分析 API Key | `your_qwen_api_key` |
+| `QWEN_VIDEO_MODEL` | 可分析视频的 Qwen 模型 | `qwen3.5-omni-flash` |
+| `QWEN_VIDEO_BASE_URL` | OpenAI 兼容接口 Base URL（可选） | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+
+`QWEN_VIDEO_MODEL` 可配置为账号下可用的视频/多模态模型，例如 Qwen Omni 或支持视频输入的 Qwen 系列模型。
+
+#### Gemini
+
+| 环境变量 | 说明 | 示例值 |
+|---------|------|--------|
+| `GEMINI_VIDEO_API_KEY` | Gemini 视频分析 API Key | `your_gemini_api_key` |
+| `GEMINI_VIDEO_MODEL` | 可分析视频的 Gemini 模型 | `gemini-3.5-flash` |
+| `GEMINI_VIDEO_BASE_URL` | Gemini API Base URL（可选） | `https://generativelanguage.googleapis.com/v1beta` |
+
+#### 提供商选择
+
+| 环境变量 | 说明 | 示例值 |
+|---------|------|--------|
+| `SAGE_VIDEO_ANALYSIS_PROVIDER` | 优先使用的视频分析提供商（可选） | `qwen` 或 `gemini` |
+| `VIDEO_ANALYSIS_INLINE_MAX_BYTES` | 本地视频 inline 上传大小上限（可选） | `20971520` |
+
 ### 代理设置
 
 用于配置系统代理，影响所有网络请求。
