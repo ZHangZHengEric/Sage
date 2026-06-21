@@ -433,8 +433,8 @@ class _ToolNameManager:
         return self._names
 
 
-def test_system_prefix_omits_turn_status_contract_when_protocol_disabled(monkeypatch):
-    monkeypatch.setenv("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "false")
+def test_system_prefix_omits_turn_status_contract_in_llm_judge_mode(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
 
     prompt = _get_system_prefix(_ToolNameManager(["dudu_generate_route_scheme"]), "en")  # pyright: ignore[reportArgumentType]
 
@@ -442,8 +442,8 @@ def test_system_prefix_omits_turn_status_contract_when_protocol_disabled(monkeyp
     assert "Task Management Requirements" not in prompt
 
 
-def test_system_prefix_includes_turn_status_contract_when_protocol_enabled(monkeypatch):
-    monkeypatch.setenv("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "true")
+def test_system_prefix_includes_turn_status_contract_in_turn_status_mode(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "turn_status")
 
     prompt = _get_system_prefix(_ToolNameManager(["todo_write"]), "en")  # pyright: ignore[reportArgumentType]
 
@@ -451,10 +451,8 @@ def test_system_prefix_includes_turn_status_contract_when_protocol_enabled(monke
     assert "Task Management Requirements" in prompt
 
 
-def test_task_completion_mode_turn_status_wins_over_legacy_env(monkeypatch):
+def test_task_completion_mode_turn_status_enables_turn_status_contract(monkeypatch):
     monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "turn_status")
-    monkeypatch.setenv("SAGE_COMPLETE_ON_NO_TOOL_CALL", "true")
-    monkeypatch.setenv("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "false")
 
     prompt = _get_system_prefix(_ToolNameManager(["turn_status"]), "en")  # pyright: ignore[reportArgumentType]
 
@@ -470,10 +468,10 @@ def test_task_completion_mode_llm_judge_disables_turn_status_contract(monkeypatc
     assert _agent()._turn_status_enabled() is False
 
 
-def test_task_complete_judge_uses_composed_system_prefix_when_protocol_disabled(
+def test_task_complete_judge_uses_composed_system_prefix_in_llm_judge_mode(
     monkeypatch,
 ):
-    monkeypatch.setenv("SAGE_AGENT_STATUS_PROTOCOL_ENABLED", "false")
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
     agent = _agent()
     captured = {}
 

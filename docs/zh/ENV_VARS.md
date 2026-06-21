@@ -254,8 +254,7 @@ Kubernetes 模板单独保留 `NAMESPACE`、`SAGE_HOST`、`SAGE_PUBLIC_URL`、`I
 
 | 变量 | 替代方案 / 状态 |
 | --- | --- |
-| `SAGE_AGENT_STATUS_PROTOCOL_ENABLED` | 已废弃。仅当 `SAGE_TASK_COMPLETION_MODE` 未设置时读取；`false` 映射为 `llm_judge`。 |
-| `SAGE_COMPLETE_ON_NO_TOOL_CALL` | 已废弃。仅当 `SAGE_TASK_COMPLETION_MODE` 未设置时读取；`true` 映射为 `no_tool_call`。 |
+| `SAGE_COMPLETE_ON_NO_TOOL_CALL` | 已移除并忽略。请使用 `SAGE_TASK_COMPLETION_MODE=no_tool_call`。 |
 | `SAGE_SPLIT_SYSTEM` | 已废弃且忽略。system message 拆分现在固定开启。 |
 | `SAGE_STABLE_TOOLS_ORDER` | 已废弃且忽略。LLM 请求前 tools 固定按 `function.name` 排序。 |
 | `SAGE_AUTO_LINT` | 已废弃且忽略。file tool lint 固定开启。 |
