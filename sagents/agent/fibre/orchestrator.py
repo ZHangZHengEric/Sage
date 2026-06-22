@@ -137,9 +137,11 @@ class FibreOrchestrator:
         metadata.setdefault("raw_stream_payload", data)
 
         return MessageChunk(
-            role=MessageRole.ASSISTANT.value,
+            role=data.get("role") or MessageRole.ASSISTANT.value,
             content=content,
+            tool_calls=data.get("tool_calls"),
             message_id=data.get("message_id"),
+            tool_call_id=data.get("tool_call_id"),
             type=message_type,
             message_type=message_type,
             timestamp=data.get("timestamp"),

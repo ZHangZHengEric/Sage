@@ -816,7 +816,7 @@ onMounted(async () => {
     console.log('[MessageRenderer] Processing tool result message:', messageId, 'tool_call_id:', props.message.tool_call_id)
     // 更新工作台中的工具结果
     const plainToolResult = JSON.parse(JSON.stringify(props.message))
-    const updateResult = workbenchStore.updateToolResult(props.message.tool_call_id, plainToolResult)
+    const updateResult = workbenchStore.updateToolResult(props.message.tool_call_id, plainToolResult, sessionId)
     console.log('[MessageRenderer] updateToolResult for tool message:', props.message.tool_call_id, 'result:', updateResult)
     return
   }
@@ -833,6 +833,7 @@ onMounted(async () => {
       console.log(`[MessageRenderer] Adding tool_call ${index}:`, toolCall.id)
       const toolStableKey = messageId ? `tool:${messageId}:${index}` : (toolCall.id ? `tool:${toolCall.id}` : null)
       const existingToolItem = workbenchStore.items.find(item =>
+        item.sessionId === sessionId &&
         item.type === 'tool_call' && (
           item.data?.id === toolCall.id ||
           item.data?.tool_call_id === toolCall.id ||
@@ -863,6 +864,7 @@ onMounted(async () => {
   const fileMatches = await extractFileReferences(props.message.content, props.agentId)
   fileMatches.forEach((file) => {
     const existingFileItem = workbenchStore.items.find(item =>
+      item.sessionId === sessionId &&
       item.messageId === messageId &&
       item.type === (file.isImage ? 'image' : 'file') &&
       (item.data?.filePath === file.filePath || item.data?.src === file.filePath)
@@ -889,6 +891,7 @@ onMounted(async () => {
   const codeBlocks = extractCodeBlocks(props.message.content)
   codeBlocks.forEach((code) => {
     const existingCodeItem = workbenchStore.items.find(item =>
+      item.sessionId === sessionId &&
       item.messageId === messageId &&
       item.type === 'code' &&
       item.data?.code === code.code
@@ -923,6 +926,7 @@ watch(() => props.message, async (newMessage, oldMessage) => {
       const toolIndex = newMessage.tool_calls.indexOf(toolCall)
       const toolStableKey = messageId ? `tool:${messageId}:${toolIndex}` : (toolCall.id ? `tool:${toolCall.id}` : null)
       const existingToolItem = workbenchStore.items.find(item =>
+        item.sessionId === sessionId &&
         item.type === 'tool_call' && (
           item.data?.id === toolCall.id ||
           item.data?.tool_call_id === toolCall.id ||
@@ -949,7 +953,7 @@ watch(() => props.message, async (newMessage, oldMessage) => {
         // 将 Proxy 转换为普通对象
         const plainToolResult = JSON.parse(JSON.stringify(toolResult))
         console.log('[MessageRenderer] Calling updateToolResult with id:', toolCall.id)
-        workbenchStore.updateToolResult(toolCall.id, plainToolResult)
+        workbenchStore.updateToolResult(toolCall.id, plainToolResult, sessionId)
       }
     })
   }
@@ -961,6 +965,7 @@ watch(() => props.message, async (newMessage, oldMessage) => {
     fileMatches.forEach((file) => {
       // 检查该文件是否已经在该消息中添加过
       const existingFileItem = workbenchStore.items.find(item =>
+        item.sessionId === sessionId &&
         item.messageId === messageId &&
         item.type === (file.isImage ? 'image' : 'file') &&
         (item.data?.filePath === file.filePath || item.data?.src === file.filePath)
@@ -992,6 +997,7 @@ watch(() => props.message, async (newMessage, oldMessage) => {
     codeBlocks.forEach((code) => {
       // 检查该代码块是否已经在该消息中添加过
       const existingCodeItem = workbenchStore.items.find(item =>
+        item.sessionId === sessionId &&
         item.messageId === messageId &&
         item.type === 'code' &&
         item.data?.code === code.code

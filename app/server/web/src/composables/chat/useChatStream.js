@@ -1,4 +1,5 @@
 import { normalizeAgentMode } from '@/utils/agentMode.js'
+import { isCurrentSessionStreamEnd } from '@/utils/sessionStreamEvents.js'
 
 const ENABLE_PLAN_TAG_RE = /^\s*<enable_plan>\s*(true|false)\s*<\/enable_plan>\s*/i
 const ENABLE_DEEP_THINKING_TAG_RE = /^\s*<enable_deep_thinking>\s*(true|false)\s*<\/enable_deep_thinking>\s*/i
@@ -204,7 +205,7 @@ export const useChatStream = ({
           resumeLastIndex += 1
           updateActiveSessionLastIndex(sessionId, resumeLastIndex)
           if (resumeLastIndex % 20 === 0) updateActiveSessionLastIndex(sessionId, resumeLastIndex, true)
-          if (data.type === 'stream_end') {
+          if (isCurrentSessionStreamEnd(data, sessionId)) {
             updateActiveSessionLastIndex(sessionId, resumeLastIndex, true)
             resumedAndCompleted = true
             markCompletedAndCleanupCurrentSession(sessionId)
@@ -319,7 +320,7 @@ export const useChatStream = ({
           streamLastIndex += 1
           updateActiveSessionLastIndex(sessionId, streamLastIndex)
           if (streamLastIndex % 20 === 0) updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
-          if (data.type === 'stream_end') {
+          if (isCurrentSessionStreamEnd(data, sessionId)) {
             updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
             markCompletedAndCleanupCurrentSession(sessionId)
           }
@@ -388,7 +389,7 @@ export const useChatStream = ({
           streamLastIndex += 1
           updateActiveSessionLastIndex(sessionId, streamLastIndex)
           if (streamLastIndex % 20 === 0) updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
-          if (data.type === 'stream_end') {
+          if (isCurrentSessionStreamEnd(data, sessionId)) {
             updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
             markCompletedAndCleanupCurrentSession(sessionId)
           }
