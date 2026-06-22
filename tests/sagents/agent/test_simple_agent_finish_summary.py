@@ -697,20 +697,6 @@ def test_direct_tool_call_response_records_tool_activity_state(monkeypatch):
 
     monkeypatch.setattr(agent, "_call_llm_streaming", _fake_call_llm_streaming)
 
-    async def _collect():
-        chunks = []
-        async for yielded_chunks, _ in agent._call_llm_and_process_response(
-            messages_input=messages,
-            tools_json=[{"function": {"name": "todo_write"}}],
-            tool_manager=None,
-            session_id="s1",
-            direct_response_state=direct_response_state,
-        ):
-            chunks.extend(yielded_chunks)
-        return chunks
-
-    chunks = asyncio.run(_collect())
-
     assert seen_tool_calls
     assert direct_response_state["had_tool_calls"] is True
 
