@@ -103,9 +103,7 @@ def repair_interleaved_tool_messages(
         repaired.append(msg)
         i += 1
 
-        if msg.get("role") != MessageRole.ASSISTANT.value or not msg.get(
-            "tool_calls"
-        ):
+        if msg.get("role") != MessageRole.ASSISTANT.value or not msg.get("tool_calls"):
             continue
 
         expected_ids = [
