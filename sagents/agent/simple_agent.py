@@ -994,7 +994,9 @@ class SimpleAgent(AgentBase):
             else:
                 repeat_pattern_hits = 0
 
-            had_direct_tool_activity = direct_response_state.get("had_tool_calls", False)
+            had_direct_tool_activity = direct_response_state.get(
+                "had_tool_calls", False
+            )
 
             messages_input = MessageManager.merge_new_messages_to_old_messages(
                 cast(
