@@ -29,6 +29,10 @@ ServerParams = Union[
 ]
 
 
+class McpWorkerClosedError(ConnectionError):
+    """Raised when a pooled MCP worker is closed locally during replacement."""
+
+
 def _env_int(name: str, default: int, minimum: int = 0) -> int:
     raw = os.environ.get(name)
     if raw is None:
@@ -290,7 +294,7 @@ class McpServerPoolEntry:
         self.call_timeout_seconds = _get_config_float(
             self.config,
             ["call_timeout_seconds"],
-            _env_float("SAGE_MCP_CALL_TIMEOUT_SECONDS", 1800.0, minimum=0.0),
+            _env_float("SAGE_MCP_CALL_TIMEOUT_SECONDS", 300.0, minimum=0.0),
             minimum=0.0,
         )
         self.connections: List[McpPooledConnection] = []
@@ -499,7 +503,7 @@ class McpHttpWorkerPoolEntry:
         self.call_timeout_seconds = _get_config_float(
             self.config,
             ["call_timeout_seconds"],
-            _env_float("SAGE_MCP_CALL_TIMEOUT_SECONDS", 1800.0, minimum=0.0),
+            _env_float("SAGE_MCP_CALL_TIMEOUT_SECONDS", 300.0, minimum=0.0),
             minimum=0.0,
         )
         self.tools_cache: Optional[List[Tool]] = None
@@ -579,6 +583,7 @@ class McpHttpWorkerPoolEntry:
         connection = McpPooledConnection(self.server_name, self.server_params)
         current_future: Optional[asyncio.Future] = None
         close_future: Optional[asyncio.Future] = None
+        worker_error: Optional[BaseException] = None
         try:
             await connection.open()
             while True:
@@ -631,6 +636,7 @@ class McpHttpWorkerPoolEntry:
                 if self._closed:
                     break
         except BaseException as exc:
+            worker_error = exc
             if current_future is not None and not current_future.done():
                 current_future.set_exception(exc)
         finally:
@@ -638,10 +644,10 @@ class McpHttpWorkerPoolEntry:
             await connection.close()
             if close_future is not None and not close_future.done():
                 close_future.set_result(None)
-            await self._fail_pending_requests()
+            await self._fail_pending_requests(worker_error)
 
-    def _worker_closed_error(self) -> RuntimeError:
-        return RuntimeError(
+    def _worker_closed_error(self) -> McpWorkerClosedError:
+        return McpWorkerClosedError(
             f"MCP {_server_protocol(self.server_params)} worker closed: "
             f"{self.server_name}"
         )
@@ -650,11 +656,13 @@ class McpHttpWorkerPoolEntry:
         if self._current_future is not None and not self._current_future.done():
             self._current_future.set_exception(self._worker_closed_error())
 
-    async def _fail_pending_requests(self) -> None:
+    async def _fail_pending_requests(
+        self, error: Optional[BaseException] = None
+    ) -> None:
         while not self._queue.empty():
             _operation, _payload, future = await self._queue.get()
             if not future.done():
-                future.set_exception(self._worker_closed_error())
+                future.set_exception(error or self._worker_closed_error())
 
 
 class McpConnectionPool:
@@ -693,16 +701,20 @@ class McpConnectionPool:
             retry_enabled = _env_bool(
                 "SAGE_MCP_LIST_TOOLS_RETRY_ON_CONNECTION_ERROR", True
             )
-            attempts = 2 if retry_enabled else 1
-            for attempt in range(attempts):
+            max_connection_retries = 1 if retry_enabled else 0
+            max_worker_replacements = 2 if retry_enabled else 0
+            connection_retries_used = 0
+            worker_replacements_used = 0
+            while True:
                 try:
                     return await entry.list_tools()
                 except asyncio.CancelledError:
                     task = asyncio.current_task()
                     if task is not None and task.cancelling():
                         raise
-                    if attempt + 1 < attempts:
-                        await self._discard_http_worker_entry(key, entry)
+                    if connection_retries_used < max_connection_retries:
+                        connection_retries_used += 1
+                        await self._retire_http_worker_entry(key, entry)
                         logger.warning(
                             f"MCP {_server_protocol(server_params)} list_tools "
                             f"cancelled by worker, retrying once: server={key}"
@@ -715,10 +727,27 @@ class McpConnectionPool:
                         continue
                     raise
                 except Exception as exc:
-                    if _is_connection_error(exc) and attempt + 1 < attempts:
-                        await self._discard_http_worker_entry(key, entry)
+                    if not _is_connection_error(exc):
+                        raise
+                    worker_closed = isinstance(exc, McpWorkerClosedError)
+                    can_retry_worker = (
+                        worker_closed
+                        and worker_replacements_used < max_worker_replacements
+                    )
+                    can_retry_connection = (
+                        not worker_closed
+                        and connection_retries_used < max_connection_retries
+                    )
+                    if can_retry_worker or can_retry_connection:
+                        if worker_closed:
+                            worker_replacements_used += 1
+                        else:
+                            connection_retries_used += 1
+                        await self._retire_http_worker_entry(key, entry)
+                        retry_reason = "worker closed" if worker_closed else "failed"
                         logger.warning(
-                            f"MCP {_server_protocol(server_params)} list_tools failed, "
+                            f"MCP {_server_protocol(server_params)} list_tools "
+                            f"{retry_reason}, "
                             f"retrying once: server={key}, error={exc}"
                         )
                         entry = await self._get_or_create_http_worker_entry(
@@ -781,8 +810,11 @@ class McpConnectionPool:
                 config,
             )
             retry_enabled = _env_bool("SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR", True)
-            attempts = 2 if retry_enabled else 1
-            for attempt in range(attempts):
+            max_connection_retries = 1 if retry_enabled else 0
+            max_worker_replacements = 2 if retry_enabled else 0
+            connection_retries_used = 0
+            worker_replacements_used = 0
+            while True:
                 try:
                     return await entry.call_tool(tool_name, arguments)
                 except TimeoutError:
@@ -792,8 +824,9 @@ class McpConnectionPool:
                     task = asyncio.current_task()
                     if task is not None and task.cancelling():
                         raise
-                    if attempt + 1 < attempts:
-                        await self._discard_http_worker_entry(key, entry)
+                    if connection_retries_used < max_connection_retries:
+                        connection_retries_used += 1
+                        await self._retire_http_worker_entry(key, entry)
                         logger.warning(
                             f"MCP {_server_protocol(server_params)} call cancelled "
                             f"by worker, retrying once: server={key}, "
@@ -807,10 +840,27 @@ class McpConnectionPool:
                         continue
                     raise
                 except Exception as exc:
-                    if _is_connection_error(exc) and attempt + 1 < attempts:
-                        await self._discard_http_worker_entry(key, entry)
+                    if not _is_connection_error(exc):
+                        raise
+                    worker_closed = isinstance(exc, McpWorkerClosedError)
+                    can_retry_worker = (
+                        worker_closed
+                        and worker_replacements_used < max_worker_replacements
+                    )
+                    can_retry_connection = (
+                        not worker_closed
+                        and connection_retries_used < max_connection_retries
+                    )
+                    if can_retry_worker or can_retry_connection:
+                        if worker_closed:
+                            worker_replacements_used += 1
+                        else:
+                            connection_retries_used += 1
+                        await self._retire_http_worker_entry(key, entry)
+                        retry_reason = "worker closed" if worker_closed else "failed"
                         logger.warning(
-                            f"MCP {_server_protocol(server_params)} call failed, "
+                            f"MCP {_server_protocol(server_params)} call "
+                            f"{retry_reason}, "
                             f"retrying once: server={key}, tool={tool_name}, "
                             f"error={exc}"
                         )
@@ -866,6 +916,16 @@ class McpConnectionPool:
             current = self._entries.get(key)
             if current is entry:
                 self._entries.pop(key, None)
+        await entry.close(drain=False)
+
+    async def _retire_http_worker_entry(
+        self,
+        key: str,
+        entry: McpHttpWorkerPoolEntry,
+    ) -> None:
+        if self._entries.get(key) is entry:
+            await self._discard_http_worker_entry(key, entry)
+            return
         await entry.close(drain=False)
 
     async def _get_or_create_entry(
