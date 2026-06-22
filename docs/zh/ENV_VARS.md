@@ -215,7 +215,7 @@ Kubernetes 模板单独保留 `NAMESPACE`、`SAGE_HOST`、`SAGE_PUBLIC_URL`、`I
 | `SAGE_MCP_MAX_CONNECTIONS_PER_SERVER` | `0` | 每个 MCP server 的最大连接数；`0` 表示不固定限制 |
 | `SAGE_MCP_SESSION_IDLE_TTL_SECONDS` | `1800` | MCP pooled session 空闲 TTL |
 | `SAGE_MCP_REFRESH_DRAIN_TIMEOUT_SECONDS` | `30` | MCP 连接刷新时 draining 宽限时间 |
-| `SAGE_MCP_CALL_TIMEOUT_SECONDS` | `1800` | MCP 工具调用超时 |
+| `SAGE_MCP_CALL_TIMEOUT_SECONDS` | `300` | MCP 工具调用超时 |
 | `SAGE_MCP_LIST_TOOLS_RETRY_ON_CONNECTION_ERROR` | `true` | MCP `list_tools` 遇到连接类错误时重试一次 |
 | `SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR` | `true` | MCP 工具调用遇到连接类错误时重试一次 |
 

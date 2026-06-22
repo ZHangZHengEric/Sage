@@ -202,7 +202,7 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 | `SAGE_MCP_MAX_CONNECTIONS_PER_SERVER` | `0` | Max pooled MCP connections per server; `0` means no fixed cap |
 | `SAGE_MCP_SESSION_IDLE_TTL_SECONDS` | `1800` | Idle TTL for MCP pooled sessions |
 | `SAGE_MCP_REFRESH_DRAIN_TIMEOUT_SECONDS` | `30` | Grace period while draining refreshed MCP connections |
-| `SAGE_MCP_CALL_TIMEOUT_SECONDS` | `1800` | MCP tool call timeout |
+| `SAGE_MCP_CALL_TIMEOUT_SECONDS` | `300` | MCP tool call timeout |
 | `SAGE_MCP_LIST_TOOLS_RETRY_ON_CONNECTION_ERROR` | `true` | Retry MCP `list_tools` once on connection-like errors |
 | `SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR` | `true` | Retry MCP tool calls once on connection-like errors |
 
