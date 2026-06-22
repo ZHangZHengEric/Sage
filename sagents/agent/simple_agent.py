@@ -76,6 +76,15 @@ def _get_system_prefix(tool_manager: Optional[ToolManager], language: str) -> st
             )
         )
 
+    if is_no_tool_call_mode():
+        parts.append(
+            prompt_manager.get_agent_prompt(
+                "SimpleAgent",
+                "agent_custom_system_no_tool_call_requirement",
+                language=language,
+            )
+        )
+
     return "\n".join(parts)
 
 
