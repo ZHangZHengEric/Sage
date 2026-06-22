@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional, List, Union
 from enum import Enum
 from concurrent.futures import ThreadPoolExecutor
 
-from sagents.context.messages.message import MessageChunk
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_memory import create_session_memory_manager
 from sagents.skill import SkillProxy, SkillManager
@@ -405,10 +405,137 @@ class SessionContext:
             if msg_session_id is None or msg_session_id == self.session_id:
                 valid_messages.append(msg)
 
-        if valid_messages:
-            for msg in valid_messages:
-                self._record_message_timing(msg)
-            self.message_manager.add_messages(valid_messages)
+        for msg in valid_messages:
+            if self._get_message_role(msg) == MessageRole.USER.value:
+                self._normalize_tool_call_pairs_before_user_message()
+            if self._get_message_role(msg) == MessageRole.TOOL.value:
+                if self._replace_synthetic_tool_result(msg):
+                    self._record_message_timing(msg)
+                    continue
+            self._record_message_timing(msg)
+            self.message_manager.add_messages(msg)
+
+    @staticmethod
+    def _get_message_role(message: Union[MessageChunk, Dict[str, Any]]) -> Optional[str]:
+        if isinstance(message, MessageChunk):
+            return message.role
+        if isinstance(message, dict):
+            role = message.get("role")
+            return role.value if hasattr(role, "value") else role
+        return None
+
+    @staticmethod
+    def _get_tool_call_id_from_call(tool_call: Any) -> Optional[str]:
+        if isinstance(tool_call, dict):
+            tid = tool_call.get("id")
+            return str(tid) if tid else None
+        tid = getattr(tool_call, "id", None)
+        return str(tid) if tid else None
+
+    def _normalize_tool_call_pairs_before_user_message(self) -> None:
+        """Keep ledger protocol-clean before appending a new user turn."""
+        messages = list(getattr(self.message_manager, "messages", []) or [])
+        if not messages:
+            return
+
+        remaining = list(messages)
+        normalized: List[MessageChunk] = []
+        changed = False
+
+        while remaining:
+            message = remaining.pop(0)
+            normalized.append(message)
+            if message.role != MessageRole.ASSISTANT.value or not message.tool_calls:
+                continue
+
+            expected_ids = [
+                tid
+                for tid in (
+                    self._get_tool_call_id_from_call(tool_call)
+                    for tool_call in message.tool_calls
+                )
+                if tid
+            ]
+            if not expected_ids:
+                continue
+
+            expected_set = set(expected_ids)
+            moved_by_id: Dict[str, MessageChunk] = {}
+            idx = 0
+            while idx < len(remaining):
+                candidate = remaining[idx]
+                if (
+                    candidate.role == MessageRole.TOOL.value
+                    and candidate.tool_call_id in expected_set
+                ):
+                    moved_by_id[str(candidate.tool_call_id)] = candidate
+                    del remaining[idx]
+                    changed = True
+                    if expected_set.issubset(moved_by_id.keys()):
+                        break
+                    continue
+                idx += 1
+
+            for tool_call_id in expected_ids:
+                moved = moved_by_id.get(tool_call_id)
+                if moved is not None:
+                    normalized.append(moved)
+                    continue
+                normalized.append(self._create_interrupted_tool_result(tool_call_id))
+                changed = True
+
+        if changed:
+            self.message_manager.messages = normalized
+            self.message_manager.stats["total_messages"] = len(normalized)
+            self.message_manager.stats["last_updated"] = datetime.datetime.now().isoformat()
+            self.message_manager.refresh_compact_manifest()
+            logger.info(
+                f"SessionContext: normalized tool call pairs before user message "
+                f"session={self.session_id} total_messages={len(normalized)}"
+            )
+
+    def _create_interrupted_tool_result(self, tool_call_id: str) -> MessageChunk:
+        return MessageChunk(
+            role=MessageRole.TOOL.value,
+            content=json.dumps(
+                {
+                    "status": "interrupted",
+                    "message": (
+                        "Tool execution was interrupted before a result was recorded; "
+                        "a newer user message started the next turn."
+                    ),
+                },
+                ensure_ascii=False,
+            ),
+            tool_call_id=tool_call_id,
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+            session_id=self.session_id,
+            metadata={"synthetic_interrupted_tool_result": True},
+        )
+
+    def _replace_synthetic_tool_result(
+        self, message: Union[MessageChunk, Dict[str, Any]]
+    ) -> bool:
+        if isinstance(message, dict):
+            message = MessageChunk.from_dict(message)
+        if not message.tool_call_id:
+            return False
+        for idx, existing in enumerate(self.message_manager.messages):
+            metadata = existing.metadata if isinstance(existing.metadata, dict) else {}
+            if (
+                existing.role == MessageRole.TOOL.value
+                and existing.tool_call_id == message.tool_call_id
+                and metadata.get("synthetic_interrupted_tool_result") is True
+            ):
+                self.message_manager.messages[idx] = message
+                self.message_manager.stats["last_updated"] = datetime.datetime.now().isoformat()
+                self.message_manager.refresh_compact_manifest()
+                logger.info(
+                    f"SessionContext: replaced synthetic interrupted tool result "
+                    f"session={self.session_id} tool_call_id={message.tool_call_id}"
+                )
+                return True
+        return False
 
     def get_messages(self) -> List[MessageChunk]:
         """
@@ -466,6 +593,12 @@ class SessionContext:
         """pop 全部 pending 引导消息：写入 message_manager，并返回供 yield 给 SSE 的列表。"""
         if not self.pending_user_injections:
             return []
+        if self._has_unclosed_tool_call_tail():
+            logger.info(
+                f"SessionContext: defer user injections because tool call tail is open "
+                f"session={self.session_id} pending_total={len(self.pending_user_injections)}"
+            )
+            return []
         drained = self.pending_user_injections
         self.pending_user_injections = []
         self.add_messages(drained)
@@ -473,6 +606,26 @@ class SessionContext:
             f"SessionContext: flush user injections session={self.session_id} count={len(drained)}"
         )
         return drained
+
+    def _has_unclosed_tool_call_tail(self) -> bool:
+        """Return True when the ledger currently ends inside an assistant tool_call pair."""
+        messages = getattr(self.message_manager, "messages", None) or []
+        trailing_tool_call_ids = set()
+        for message in reversed(messages):
+            role = message.role
+            if role == MessageRole.TOOL.value:
+                if message.tool_call_id:
+                    trailing_tool_call_ids.add(message.tool_call_id)
+                continue
+            if role == MessageRole.ASSISTANT.value and message.tool_calls:
+                expected_ids = {
+                    tool_call.get("id")
+                    for tool_call in message.tool_calls
+                    if isinstance(tool_call, dict) and tool_call.get("id")
+                }
+                return not expected_ids.issubset(trailing_tool_call_ids)
+            return False
+        return False
 
     def list_user_injections(self) -> List[Dict[str, Any]]:
         """快照当前 pending 引导消息列表（仅用于查询/调试，不修改状态）。"""
