@@ -301,7 +301,9 @@ def test_desktop_workspace_route_passes_listing_depth_params(monkeypatch):
 def test_server_workspace_stat_route_passes_user_and_paths(monkeypatch):
     calls = {}
 
-    async def fake_stat_server_agent_files(agent_id, user_id, paths, *, session_id=None):
+    async def fake_stat_server_agent_files(
+        agent_id, user_id, paths, *, session_id=None
+    ):
         calls.update(
             {
                 "agent_id": agent_id,

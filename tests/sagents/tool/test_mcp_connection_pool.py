@@ -384,6 +384,33 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(open_count, 2)
         await pool.close_all(drain=False)
 
+    async def test_streamable_http_retries_session_terminated_error(self):
+        pool = McpConnectionPool()
+        server_params = StreamableHttpServerParameters(url="http://mcp.example")
+        open_count = 0
+
+        class FakeSession:
+            def __init__(self, fail=False):
+                self.fail = fail
+
+            async def call_tool(self, name, arguments):
+                if self.fail:
+                    raise RuntimeError("Session terminated")
+                return _FakeResult()
+
+        async def fake_open(self):
+            nonlocal open_count
+            open_count += 1
+            self.session = FakeSession(fail=open_count == 1)
+            return self
+
+        with patch.object(McpPooledConnection, "open", fake_open):
+            result = await pool.call_tool("server", server_params, "echo", {})
+
+        self.assertIsInstance(result, _FakeResult)
+        self.assertEqual(open_count, 2)
+        await pool.close_all(drain=False)
+
     async def test_streamable_http_retries_worker_cancelled_call(self):
         pool = McpConnectionPool()
         server_params = StreamableHttpServerParameters(url="http://mcp.example")
@@ -406,6 +433,45 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(McpPooledConnection, "open", fake_open):
             result = await pool.call_tool("server", server_params, "echo", {})
+
+        self.assertIsInstance(result, _FakeResult)
+        self.assertEqual(open_count, 2)
+        await pool.close_all(drain=False)
+
+    async def test_streamable_http_force_refresh_releases_blocked_call_to_retry(self):
+        pool = McpConnectionPool()
+        server_params = StreamableHttpServerParameters(url="http://mcp.example")
+        open_count = 0
+        first_call_started = asyncio.Event()
+        never_release = asyncio.Event()
+
+        class FakeSession:
+            def __init__(self, generation):
+                self.generation = generation
+
+            async def list_tools(self):
+                return _FakeListToolsResponse()
+
+            async def call_tool(self, name, arguments):
+                if self.generation == 1:
+                    first_call_started.set()
+                    await never_release.wait()
+                return _FakeResult()
+
+        async def fake_open(self):
+            nonlocal open_count
+            open_count += 1
+            self.session = FakeSession(open_count)
+            return self
+
+        with patch.object(McpPooledConnection, "open", fake_open):
+            call_task = asyncio.create_task(
+                pool.call_tool("server", server_params, "echo", {})
+            )
+            await asyncio.wait_for(first_call_started.wait(), timeout=1)
+
+            await pool.list_tools("server", server_params, force=True)
+            result = await asyncio.wait_for(call_task, timeout=1)
 
         self.assertIsInstance(result, _FakeResult)
         self.assertEqual(open_count, 2)
