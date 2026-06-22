@@ -1599,7 +1599,9 @@ def _resolve_sandbox_workspace_file_path(
 
     full_file_abs = posixpath.normpath(full_file_path)
     try:
-        in_workspace = posixpath.commonpath([workspace_abs, full_file_abs]) == workspace_abs
+        in_workspace = (
+            posixpath.commonpath([workspace_abs, full_file_abs]) == workspace_abs
+        )
     except ValueError:
         in_workspace = False
 
