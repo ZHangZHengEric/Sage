@@ -29,14 +29,18 @@ def _llm_chunk(*, content=None, tool_calls=None):
     )
 
 
-def _turn_status_tool_call(call_id="call_ts"):
+def _turn_status_tool_call(
+    call_id="call_ts",
+    name="turn_status",
+    arguments='{"status":"need_user_input","note":"waiting"}',
+):
     return SimpleNamespace(
         id=call_id,
         index=0,
         type="function",
         function=SimpleNamespace(
-            name="turn_status",
-            arguments='{"status":"need_user_input","note":"waiting"}',
+            name=name,
+            arguments=arguments,
         ),
     )
 
@@ -94,6 +98,19 @@ def _patch_tool_handler(monkeypatch, agent, seen_tool_calls):
         )
 
     monkeypatch.setattr(agent, "_handle_tool_calls", _fake_handle_tool_calls)
+
+
+def _loop_session_context(max_loop_count=4):
+    msg_manager = SimpleNamespace(
+        get_recent_loop_signatures=lambda: [],
+        add_loop_signature=lambda signature: None,
+    )
+    return SimpleNamespace(
+        agent_config={"max_loop_count": max_loop_count},
+        audit_status={},
+        message_manager=msg_manager,
+        get_language=lambda: "zh",
+    )
 
 
 def test_status_only_turn_status_response_suppresses_duplicate_text(monkeypatch):
@@ -536,6 +553,166 @@ def test_task_complete_judge_uses_composed_system_prefix_in_llm_judge_mode(
     )
     assert "turn_status" not in captured["custom_prefix"]
     assert "找不到prompt" not in captured["llm_messages"][0]["content"]
+
+
+def test_llm_judge_skips_completion_check_after_direct_tool_activity(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    direct_calls = []
+    judge_calls = []
+
+    async def _fake_call_llm_and_process_response(**kwargs):
+        direct_calls.append(kwargs)
+        if len(direct_calls) == 1:
+            kwargs["direct_response_state"]["had_tool_calls"] = True
+            yield (
+                [
+                    MessageChunk(
+                        role=MessageRole.TOOL.value,
+                        content='{"ok": true}',
+                        tool_call_id="call_tool",
+                        message_type=MessageType.TOOL_CALL_RESULT.value,
+                    ),
+                    MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        content="我会继续处理工具结果。",
+                        message_type=MessageType.DO_SUBTASK_RESULT.value,
+                    ),
+                ],
+                False,
+            )
+            return
+        yield (
+            [
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="已经完成。",
+                    message_type=MessageType.ASSISTANT_TEXT.value,
+                )
+            ],
+            False,
+        )
+
+    async def _fake_is_task_complete(*args, **kwargs):
+        judge_calls.append((args, kwargs))
+        return True
+
+    monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
+    monkeypatch.setattr(
+        agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
+    )
+    monkeypatch.setattr(agent, "_is_task_complete", _fake_is_task_complete)
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks in agent._execute_loop(
+            messages_input=_base_messages(),
+            tools_json=[],
+            tool_manager=None,
+            session_id="s1",
+            session_context=_loop_session_context(),  # pyright: ignore[reportArgumentType]
+        ):
+            chunks.extend(yielded_chunks)
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert len(direct_calls) == 2
+    assert len(judge_calls) == 1
+    assert chunks[-1].content == "已经完成。"
+
+
+def test_llm_judge_uses_direct_response_state_not_collected_chunks(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    judge_calls = []
+
+    async def _fake_call_llm_and_process_response(**kwargs):
+        yield (
+            [
+                MessageChunk(
+                    role=MessageRole.TOOL.value,
+                    content='{"ok": true}',
+                    tool_call_id="compress_tool",
+                    message_type=MessageType.TOOL_CALL_RESULT.value,
+                ),
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="已经完成。",
+                    message_type=MessageType.ASSISTANT_TEXT.value,
+                ),
+            ],
+            False,
+        )
+
+    async def _fake_is_task_complete(*args, **kwargs):
+        judge_calls.append((args, kwargs))
+        return True
+
+    monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
+    monkeypatch.setattr(
+        agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
+    )
+    monkeypatch.setattr(agent, "_is_task_complete", _fake_is_task_complete)
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks in agent._execute_loop(
+            messages_input=_base_messages(),
+            tools_json=[],
+            tool_manager=None,
+            session_id="s1",
+            session_context=_loop_session_context(),  # pyright: ignore[reportArgumentType]
+        ):
+            chunks.extend(yielded_chunks)
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert len(judge_calls) == 1
+    assert chunks[-1].content == "已经完成。"
+
+
+def test_direct_tool_call_response_records_tool_activity_state(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    messages = _base_messages()
+    seen_tool_calls = {}
+    direct_response_state = {"had_tool_calls": False}
+    _patch_prepared_messages(monkeypatch, agent, messages)
+    _patch_tool_handler(monkeypatch, agent, seen_tool_calls)
+
+    def _fake_call_llm_streaming(*args, **kwargs):
+        async def _gen():
+            yield _llm_chunk(
+                tool_calls=[
+                    _turn_status_tool_call(
+                        name="todo_write",
+                        arguments='{"todos":[]}',
+                    )
+                ]
+            )
+
+        return _gen()
+
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_call_llm_streaming)
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks, _ in agent._call_llm_and_process_response(
+            messages_input=messages,
+            tools_json=[{"function": {"name": "todo_write"}}],
+            tool_manager=None,
+            session_id="s1",
+            direct_response_state=direct_response_state,
+        ):
+            chunks.extend(yielded_chunks)
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert seen_tool_calls
+    assert direct_response_state["had_tool_calls"] is True
 
 
 def test_turn_status_tools_only_filters_action_tools():
