@@ -97,6 +97,7 @@ def _patch_tool_handler(monkeypatch, agent, seen_tool_calls):
 
 
 def test_status_only_turn_status_response_suppresses_duplicate_text(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "turn_status")
     agent = _agent()
     messages = _base_messages()
     saved_content = []
@@ -135,6 +136,7 @@ def test_status_only_turn_status_response_suppresses_duplicate_text(monkeypatch)
 
 
 def test_non_status_only_turn_status_response_keeps_user_visible_text(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "turn_status")
     agent = _agent()
     messages = _base_messages()
     saved_content = []
@@ -172,6 +174,7 @@ def test_non_status_only_turn_status_response_keeps_user_visible_text(monkeypatc
 
 
 def test_status_only_text_without_tool_call_is_hidden_and_errors(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "turn_status")
     agent = _agent()
     messages = _base_messages()
     saved_content = []
@@ -374,7 +377,8 @@ def test_clean_trailing_assistant_text_counts_as_summary():
     assert _agent()._has_recent_assistant_summary(msgs) is True
 
 
-def test_plain_text_without_tool_call_requests_turn_status_retry():
+def test_plain_text_without_tool_call_requests_turn_status_retry(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "turn_status")
     chunks = [
         MessageChunk(
             role=MessageRole.ASSISTANT.value,
@@ -663,7 +667,7 @@ def test_turn_status_from_tool_call_reads_continue_work():
     assert _agent()._turn_status_from_tool_call(tool_call) == "continue_work"
 
 
-def test_env_force_required_keeps_required_without_escape(monkeypatch):
+def test_env_force_required_does_not_affect_normal_tools(monkeypatch):
     monkeypatch.setenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "true")
 
     assert (
@@ -672,7 +676,7 @@ def test_env_force_required_keeps_required_without_escape(monkeypatch):
             force_tool_choice_required=False,
             force_tool_choice_auto=False,
         )
-        == "required"
+        is None
     )
 
 
@@ -712,6 +716,34 @@ def test_required_protocol_turn_overrides_escape_auto(monkeypatch):
             force_tool_choice_auto=True,
         )
         == "required"
+    )
+
+
+def test_env_force_required_only_applies_to_turn_status_only(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "turn_status")
+    monkeypatch.setenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "true")
+
+    assert (
+        _agent()._resolve_tool_choice(
+            tools_json=[{"function": {"name": "turn_status"}}],
+            force_tool_choice_required=False,
+            force_tool_choice_auto=False,
+        )
+        == "required"
+    )
+
+
+def test_env_force_required_ignored_outside_turn_status_mode(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "no_tool_call")
+    monkeypatch.setenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "true")
+
+    assert (
+        _agent()._resolve_tool_choice(
+            tools_json=[{"function": {"name": "turn_status"}}],
+            force_tool_choice_required=False,
+            force_tool_choice_auto=False,
+        )
+        is None
     )
 
 
