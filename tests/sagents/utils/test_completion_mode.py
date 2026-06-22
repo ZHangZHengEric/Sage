@@ -34,6 +34,14 @@ def test_enum_llm_judge_mode(monkeypatch):
     assert is_llm_judge_mode() is True
 
 
+def test_enum_turn_status_mode(monkeypatch):
+    _clear_completion_env(monkeypatch)
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "turn_status")
+
+    assert get_task_completion_mode() == TaskCompletionMode.TURN_STATUS
+    assert is_turn_status_mode() is True
+
+
 def test_invalid_completion_mode_falls_back_to_turn_status(monkeypatch):
     _clear_completion_env(monkeypatch)
     monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "not-a-mode")

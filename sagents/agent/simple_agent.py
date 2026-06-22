@@ -130,9 +130,12 @@ class SimpleAgent(AgentBase):
             return "required"
         if force_tool_choice_auto:
             return "auto"
-        env_force_required = os.getenv(
-            "SAGE_FORCE_TOOL_CHOICE_REQUIRED", ""
-        ).strip().lower() in ("1", "true", "yes", "on")
+        env_force_required = (
+            self._turn_status_enabled()
+            and self._allowed_tool_names(tools_json) == {"turn_status"}
+            and os.getenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "").strip().lower()
+            in ("1", "true", "yes", "on")
+        )
         return "required" if env_force_required else None
 
     def _should_escape_required_next_turn(
