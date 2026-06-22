@@ -849,6 +849,7 @@ class SimpleAgent(AgentBase):
                 if current_turn_status_only
                 else tools_json
             )
+            direct_response_state = {"had_tool_calls": False}
             async for chunks, is_complete in self._call_llm_and_process_response(
                 messages_input=messages_input,
                 tools_json=current_tools_json,
@@ -856,6 +857,7 @@ class SimpleAgent(AgentBase):
                 session_id=session_id,
                 force_tool_choice_required=current_turn_status_only,
                 force_tool_choice_auto=force_tool_choice_auto_next,
+                direct_response_state=direct_response_state,
             ):
                 non_empty_chunks = [
                     c for c in chunks if (c.message_type != MessageType.EMPTY.value)
@@ -992,6 +994,8 @@ class SimpleAgent(AgentBase):
             else:
                 repeat_pattern_hits = 0
 
+            had_direct_tool_activity = direct_response_state.get("had_tool_calls", False)
+
             messages_input = MessageManager.merge_new_messages_to_old_messages(
                 cast(
                     List[Union[MessageChunk, Dict[str, Any]]], all_new_response_chunks
@@ -1008,7 +1012,11 @@ class SimpleAgent(AgentBase):
             # 仅在 llm_judge 模式回退到旧路径；turn_status / no_tool_call
             # 都有自己的结束信号，避免多消耗一次完成判定请求。
             if is_llm_judge_mode():
-                if await self._is_task_complete(
+                if had_direct_tool_activity:
+                    logger.info(
+                        "SimpleAgent: 本轮 direct LLM response 包含工具调用，跳过 task_complete_judge，继续让模型消费工具结果"
+                    )
+                elif await self._is_task_complete(
                     messages_input, session_id, tool_manager, session_context
                 ):
                     logger.info("SimpleAgent: 任务完成，终止执行")
@@ -1022,10 +1030,11 @@ class SimpleAgent(AgentBase):
         session_id: str,
         force_tool_choice_required: bool = False,
         force_tool_choice_auto: bool = False,
+        direct_response_state: Optional[Dict[str, bool]] = None,
     ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
 
         # 准备消息：提取可用消息 -> 检查压缩 -> 执行压缩
-        # 通过生成器获取中间结果（tool_calls/tool result）和最终结果
+        # 通过生成器获取中间结果（tool_calls/tool result）和最终结果。
         prepared_messages = None
         async for messages_chunk, is_final in self._prepare_messages_for_llm(
             messages_input, session_id
@@ -1091,6 +1100,8 @@ class SimpleAgent(AgentBase):
         )
 
         tool_calls: Dict[str, Any] = {}
+        if direct_response_state is not None:
+            direct_response_state["had_tool_calls"] = False
         reasoning_content_response_message_id = str(uuid.uuid4())
         content_response_message_id = str(uuid.uuid4())
         last_tool_call_id = None
@@ -1122,6 +1133,8 @@ class SimpleAgent(AgentBase):
                     self._handle_tool_calls_chunk(
                         chunk, tool_calls, last_tool_call_id or ""
                     )
+                    if direct_response_state is not None:
+                        direct_response_state["had_tool_calls"] = True
                     # 更新last_tool_call_id
                     for tool_call in chunk.choices[0].delta.tool_calls:
                         if tool_call.id is not None and len(tool_call.id) > 0:
@@ -1194,6 +1207,8 @@ class SimpleAgent(AgentBase):
                         ]
                         yield (output_messages, False)
         except PartialStreamConsumedError as exc:
+            if direct_response_state is not None:
+                direct_response_state["had_tool_calls"] = bool(tool_calls)
             recovery_messages: List[MessageChunk] = []
             if emitted_tool_call_stream:
                 for tool_call_id, tool_call in tool_calls.items():
@@ -1240,6 +1255,9 @@ class SimpleAgent(AgentBase):
             return
 
         # 处理完所有chunk后，尝试保存内容
+        if direct_response_state is not None:
+            direct_response_state["had_tool_calls"] = bool(tool_calls)
+
         if full_content_accumulator:
             try:
                 save_agent_response_content(full_content_accumulator, session_id)
