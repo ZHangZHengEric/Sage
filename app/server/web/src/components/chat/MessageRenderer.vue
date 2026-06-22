@@ -755,7 +755,7 @@ onMounted(() => {
   if (props.message.role === 'tool' && props.message.tool_call_id) {
     // 将 Proxy 转换为普通对象
     const plainToolResult = JSON.parse(JSON.stringify(props.message))
-    workbenchStore.updateToolResult(props.message.tool_call_id, plainToolResult)
+    workbenchStore.updateToolResult(props.message.tool_call_id, plainToolResult, props.message.session_id)
     return
   }
 
@@ -767,6 +767,7 @@ onMounted(() => {
     props.message.tool_calls.forEach((toolCall, index) => {
       const toolStableKey = messageId ? `tool:${messageId}:${index}` : (toolCall.id ? `tool:${toolCall.id}` : null)
       const existingToolItem = workbenchStore.items.find(item =>
+        item.sessionId === (props.message.session_id || null) &&
         item.type === 'tool_call' && (
           item.data?.id === toolCall.id ||
           item.data?.tool_call_id === toolCall.id ||
@@ -803,6 +804,7 @@ watch(() => props.message, (newMessage) => {
     newMessage.tool_calls.forEach((toolCall, index) => {
       const toolStableKey = messageId ? `tool:${messageId}:${index}` : (toolCall.id ? `tool:${toolCall.id}` : null)
       const existingToolItem = workbenchStore.items.find(item =>
+        item.sessionId === (newMessage.session_id || null) &&
         item.type === 'tool_call' && (
           item.data?.id === toolCall.id ||
           item.data?.tool_call_id === toolCall.id ||
@@ -831,7 +833,7 @@ watch(() => props.message, (newMessage) => {
       const toolResult = getParsedToolResult(toolCall)
       if (toolResult) {
         const plainToolResult = JSON.parse(JSON.stringify(toolResult))
-        workbenchStore.updateToolResult(toolCall.id, plainToolResult)
+        workbenchStore.updateToolResult(toolCall.id, plainToolResult, newMessage.session_id)
       }
     })
   }

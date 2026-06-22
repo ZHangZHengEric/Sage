@@ -121,6 +121,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   }
 
   const addItem = (item) => {
+    const targetSessionId = item.sessionId || currentSessionId.value
     if (item.type === 'file' && (item.data?.filePath || item.data?.path)) {
       const normalizedPath = normalizeFilePath(item.data.filePath || item.data.path)
       if (item.data.filePath) item.data.filePath = normalizedPath
@@ -134,6 +135,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
 
     // 检查是否已存在相同的项（根据稳定键或 type+唯一标识）
     const existingItem = items.value.find(i => {
+      if (targetSessionId && i?.sessionId !== targetSessionId) return false
       if (stableKey && i?.stableKey === stableKey) return true
       if (i.type !== item.type) return false
       // 文件类型：同一消息内同一路径去重，避免流式更新导致重复堆积
@@ -191,7 +193,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     const newItem = {
       id: `item-${Date.now()}-${itemIdCounter}-${Math.random().toString(36).substr(2, 5)}`,
       timestamp: Date.now(),
-      sessionId: currentSessionId.value, // 关联当前会话
+      sessionId: targetSessionId, // 关联目标会话
       stableKey: stableKey || item.stableKey || null,
       ...item
     }
@@ -207,9 +209,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     // tool_call item 落地后，把可能先到的 progress 缓存灌进去
     if (newItem.type === 'tool_call') {
       const tcId = newItem.data?.id || newItem.data?.tool_call_id
-      if (tcId && pendingToolProgress.value.has(tcId)) {
-        const buf = pendingToolProgress.value.get(tcId)
-        pendingToolProgress.value.delete(tcId)
+      const progressKey = buildToolProgressKey(tcId, newItem.sessionId)
+      if (progressKey && pendingToolProgress.value.has(progressKey)) {
+        const buf = pendingToolProgress.value.get(progressKey)
+        pendingToolProgress.value.delete(progressKey)
         if (buf.liveOutput) {
           newItem.liveOutput = buf.liveOutput
           newItem.liveSegments = buf.liveSegments
@@ -414,9 +417,12 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   }
 
   // 更新工具结果 - 简化逻辑，直接更新，不依赖 pendingToolResults
-  const updateToolResult = (toolCallId, result) => {
+  const updateToolResult = (toolCallId, result, sessionId = null) => {
+    const targetSessionId = sessionId || result?.session_id || currentSessionId.value
     const item = items.value.find(i =>
-      i.type === 'tool_call' && (i.data.id === toolCallId || i.data.tool_call_id === toolCallId)
+      i.type === 'tool_call' &&
+      (!targetSessionId || i.sessionId === targetSessionId) &&
+      (i.data.id === toolCallId || i.data.tool_call_id === toolCallId)
     )
     if (item) {
       item.toolResult = result
@@ -435,20 +441,24 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   // - 按 stream 字段保留分段信息以便前端按通道渲染（item.liveSegments）；
   // - closed=true 表示该 tool 的 progress 流结束，前端可收起 spinner。
   // 不影响 item.toolResult（最终工具结果由现有 updateToolResult 写入）。
-  const appendToolProgress = ({ toolCallId, text = '', stream = 'stdout', closed = false, ts = null }) => {
+  const appendToolProgress = ({ toolCallId, text = '', stream = 'stdout', closed = false, ts = null, sessionId = null }) => {
     if (!toolCallId) return false
+    const targetSessionId = sessionId || currentSessionId.value
     const item = items.value.find(i =>
-      i.type === 'tool_call' && (i.data.id === toolCallId || i.data.tool_call_id === toolCallId)
+      i.type === 'tool_call' &&
+      (!targetSessionId || i.sessionId === targetSessionId) &&
+      (i.data.id === toolCallId || i.data.tool_call_id === toolCallId)
     )
     if (!item) {
       // 工具卡片还没创建（极少数情况：progress 事件先于 tool_call 消息到达）
-      const buf = pendingToolProgress.value.get(toolCallId) || { liveOutput: '', liveSegments: [], live: true }
+      const progressKey = buildToolProgressKey(toolCallId, targetSessionId)
+      const buf = pendingToolProgress.value.get(progressKey) || { liveOutput: '', liveSegments: [], live: true }
       if (text) {
         buf.liveOutput += text
         buf.liveSegments.push({ stream, text, ts })
       }
       if (closed) buf.live = false
-      pendingToolProgress.value.set(toolCallId, buf)
+      pendingToolProgress.value.set(progressKey, buf)
       return false
     }
     if (text) {
@@ -464,12 +474,16 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     return true
   }
 
-  const flushPendingToolProgress = (toolCallId) => {
-    const buf = pendingToolProgress.value.get(toolCallId)
+  const flushPendingToolProgress = (toolCallId, sessionId = null) => {
+    const targetSessionId = sessionId || currentSessionId.value
+    const progressKey = buildToolProgressKey(toolCallId, targetSessionId)
+    const buf = pendingToolProgress.value.get(progressKey)
     if (!buf) return
-    pendingToolProgress.value.delete(toolCallId)
+    pendingToolProgress.value.delete(progressKey)
     const item = items.value.find(i =>
-      i.type === 'tool_call' && (i.data.id === toolCallId || i.data.tool_call_id === toolCallId)
+      i.type === 'tool_call' &&
+      (!targetSessionId || i.sessionId === targetSessionId) &&
+      (i.data.id === toolCallId || i.data.tool_call_id === toolCallId)
     )
     if (!item) return
     if (buf.liveOutput) {
@@ -675,4 +689,9 @@ function buildStableKey(item) {
 
   if (messageId) return `${item.type}:${messageId}`
   return null
+}
+
+function buildToolProgressKey(toolCallId, sessionId) {
+  if (!toolCallId) return null
+  return `${sessionId || ''}::${toolCallId}`
 }
