@@ -447,6 +447,41 @@ class SimpleAgent(AgentBase):
     def _turn_status_tool_names(self) -> set[str]:
         return {"turn_status"}
 
+    def _can_request_turn_status(self, tools_json: List[Dict[str, Any]]) -> bool:
+        return self._turn_status_enabled() and any(
+            self._tools_include(tools_json, name)
+            for name in self._turn_status_tool_names()
+        )
+
+    def _has_visible_text_without_tool_calls(self, chunks: List[MessageChunk]) -> bool:
+        has_visible_assistant_text = False
+
+        for chunk in chunks or []:
+            if (
+                chunk.tool_calls
+                or chunk.role == MessageRole.TOOL.value
+                or chunk.tool_call_id
+            ):
+                return False
+            if chunk.role != MessageRole.ASSISTANT.value:
+                continue
+            if chunk.matches_message_types(
+                [MessageType.REASONING_CONTENT.value, MessageType.EMPTY.value]
+            ):
+                continue
+            content = chunk.content
+            if isinstance(content, str) and content.strip():
+                has_visible_assistant_text = True
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict):
+                        text = part.get("text") or part.get("content")
+                        if isinstance(text, str) and text.strip():
+                            has_visible_assistant_text = True
+                            break
+
+        return has_visible_assistant_text
+
     def _turn_status_tools_only(
         self, tools_json: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
@@ -549,37 +584,10 @@ class SimpleAgent(AgentBase):
         交付时，宿主层要求模型补协议性的 turn_status 标记，
         不再开放行动工具，避免模型继续改 todo 或重复执行。
         """
-        if not self._turn_status_enabled() or not any(
-            self._tools_include(tools_json, name)
-            for name in self._turn_status_tool_names()
-        ):
+        if not self._can_request_turn_status(tools_json):
             return False
 
-        has_visible_assistant_text = False
-        has_tool_calls = False
-
-        for chunk in chunks or []:
-            if chunk.tool_calls:
-                has_tool_calls = True
-                break
-            if chunk.role != MessageRole.ASSISTANT.value:
-                continue
-            if chunk.matches_message_types(
-                [MessageType.REASONING_CONTENT.value, MessageType.EMPTY.value]
-            ):
-                continue
-            content = chunk.content
-            if isinstance(content, str) and content.strip():
-                has_visible_assistant_text = True
-            elif isinstance(content, list):
-                for part in content:
-                    if isinstance(part, dict):
-                        text = part.get("text") or part.get("content")
-                        if isinstance(text, str) and text.strip():
-                            has_visible_assistant_text = True
-                            break
-
-        return has_visible_assistant_text and not has_tool_calls
+        return self._has_visible_text_without_tool_calls(chunks)
 
     async def _must_continue_by_rules(self, messages_input: List[MessageChunk]) -> bool:
         """通过确定性规则判断是否必须继续执行
