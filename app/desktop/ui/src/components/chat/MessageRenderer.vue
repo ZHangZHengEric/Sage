@@ -319,6 +319,7 @@ import { parseToolJsonValue } from '@/utils/safeParseToolJson.js'
 import { buildClipboardTextFromMessageContent, normalizeMessageContentForComposer } from '@/utils/composerFromMessageFlatten.js'
 import { open } from '@tauri-apps/plugin-shell'
 import { isAbsoluteLocalPath, isRelativeWorkspacePath, normalizeFileReference, resolveAgentWorkspacePath } from '@/utils/agentWorkspacePath'
+import { splitInlineQuestionnaireContent } from '@/utils/inlineQuestionnaire.js'
 
 // Custom Tools
 const TOOL_COMPONENT_MAP = {
@@ -887,6 +888,38 @@ onMounted(async () => {
     })
   })
 
+  const artifactMatches = await extractArtifactReferences(props.message.content, props.agentId, messageId)
+  artifactMatches.forEach((file) => {
+    const existingFileItem = workbenchStore.items.find(item =>
+      item.sessionId === sessionId &&
+      item.messageId === messageId &&
+      item.type === (file.isImage ? 'image' : 'file') &&
+      (item.stableKey === file.stableKey || item.data?.filePath === file.filePath || item.data?.src === file.filePath)
+    )
+    if (existingFileItem) {
+      return
+    }
+    workbenchStore.addItem({
+      type: file.isImage ? 'image' : 'file',
+      role: 'assistant',
+      timestamp: timestamp,
+      sessionId: sessionId,
+      messageId: messageId,
+      stableKey: file.stableKey,
+      data: file.isImage ? {
+        src: file.filePath,
+        filePath: file.filePath,
+        path: file.filePath,
+        alt: file.fileName,
+        name: file.fileName
+      } : {
+        filePath: file.filePath,
+        path: file.filePath,
+        fileName: file.fileName
+      }
+    })
+  })
+
   // 发送代码块事件
   const codeBlocks = extractCodeBlocks(props.message.content)
   codeBlocks.forEach((code) => {
@@ -988,6 +1021,40 @@ watch(() => props.message, async (newMessage, oldMessage) => {
         } : file
       })
     })
+
+    const artifactMatches = await extractArtifactReferences(newMessage.content, props.agentId, messageId)
+    console.log('[MessageRenderer] Watch found artifact references:', artifactMatches.length)
+    artifactMatches.forEach((file) => {
+      const existingFileItem = workbenchStore.items.find(item =>
+        item.sessionId === sessionId &&
+        item.messageId === messageId &&
+        item.type === (file.isImage ? 'image' : 'file') &&
+        (item.stableKey === file.stableKey || item.data?.filePath === file.filePath || item.data?.src === file.filePath)
+      )
+      if (existingFileItem) {
+        console.log('[MessageRenderer] Artifact already exists in workbench for this message:', file.filePath)
+        return
+      }
+      workbenchStore.addItem({
+        type: file.isImage ? 'image' : 'file',
+        role: 'assistant',
+        timestamp: timestamp,
+        sessionId: sessionId,
+        messageId: messageId,
+        stableKey: file.stableKey,
+        data: file.isImage ? {
+          src: file.filePath,
+          filePath: file.filePath,
+          path: file.filePath,
+          alt: file.fileName,
+          name: file.fileName
+        } : {
+          filePath: file.filePath,
+          path: file.filePath,
+          fileName: file.fileName
+        }
+      })
+    })
   }
 
   // 3. 处理代码块（实时流中代码块可能在消息更新时出现）
@@ -1054,6 +1121,50 @@ async function extractFileReferences(content, agentId = '') {
   }
 
   return files
+}
+
+async function extractArtifactReferences(content, agentId = '', messageId = '') {
+  const text = getTextContent(content)
+  if (!text) return []
+
+  const artifacts = []
+  const imageExtensions = /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)$/i
+  const parts = splitInlineQuestionnaireContent(text, 'workbench_artifacts')
+
+  for (const part of parts) {
+    if (part.type !== 'artifacts') continue
+
+    for (const item of part.payload?.items || []) {
+      let path = normalizeFileReference(item.path)
+      if (!path || path.endsWith('/')) continue
+
+      const isWorkspaceRelative = !!agentId && isRelativeWorkspacePath(path)
+      const isSupportedPath = isAbsoluteLocalPath(path) || isWorkspaceRelative || isRemotePath(path)
+      if (!isSupportedPath) continue
+
+      if (isWorkspaceRelative) {
+        path = await resolveAgentWorkspacePath(path, agentId)
+      }
+
+      const isImage = item.type === 'image' || imageExtensions.test(path)
+      artifacts.push({
+        filePath: path,
+        fileName: item.title || fileNameFromPath(path),
+        isImage,
+        stableKey: `file:${messageId || ''}:${path}`,
+      })
+    }
+  }
+
+  return artifacts
+}
+
+function isRemotePath(path) {
+  return /^https?:\/\//i.test(path) || /^data:/i.test(path)
+}
+
+function fileNameFromPath(path) {
+  return String(path || '').split('/').filter(Boolean).pop() || 'file'
 }
 
 // 辅助函数：提取代码块
