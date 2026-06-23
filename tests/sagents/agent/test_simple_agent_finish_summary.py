@@ -446,6 +446,57 @@ def test_missing_turn_status_tool_does_not_request_retry():
     assert _agent()._should_request_turn_status_after_text_response(chunks, []) is False
 
 
+def test_committed_next_step_still_uses_llm_judge(monkeypatch):
+    agent = _agent()
+    captured = {}
+
+    async def _fake_system_message(session_id, custom_prefix, language):
+        return custom_prefix
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        captured["step_name"] = kwargs["step_name"]
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(
+                        content='{"task_interrupted": false, "reason": "continuing work"}'
+                    )
+                )
+            ]
+        )
+
+    monkeypatch.setattr(agent, "prepare_unified_system_message", _fake_system_message)
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+
+    msg_manager = SimpleNamespace(
+        context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000}),
+    )
+    session_context = SimpleNamespace(
+        message_manager=msg_manager,
+        get_language=lambda: "en",
+    )
+    messages = _base_messages() + [
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="Next, I will assemble the final video now.",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        )
+    ]
+
+    assert (
+        asyncio.run(
+            agent._is_task_complete(
+                messages_input=messages,
+                session_id="s-commit",
+                tool_manager=None,
+                session_context=session_context,  # pyright: ignore[reportArgumentType]
+            )
+        )
+        is False
+    )
+    assert captured["step_name"] == "task_complete_judge"
+
+
 class _ToolNameManager:
     def __init__(self, names):
         self._names = names

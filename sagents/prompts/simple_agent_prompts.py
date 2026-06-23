@@ -104,11 +104,13 @@ task_complete_template = {
 - 如果有工具调用，其关键结果已经用自然语言解释清楚，用户可以直接根据当前回复采取行动。
 - 当前回复没有任何“接下来/然后/我将/下一步”等继续执行的暗示。
 - 当前需要用户确认、用户补充信息、或用户做选择后才能继续时，必须中断并等待用户输入。
+- 当前回复只是提供需要用户选择或确认的可选后续动作（例如“如果你需要，下一步我可以...”“If you want, I can ... next.”），也必须中断并等待用户确认，不要当成自动继续执行。
 
 ## 需要继续执行任务（task_interrupted = false）的情况：
 - 当前回复主要是在**说明过程、汇报进度、罗列中间产物**，而不是面向用户的最终结果。
 - 你觉得还缺少总结、整理、格式化、补充说明等步骤，才能算真正给到用户交付。
 - 当前回复虽然说“已经完成了某个阶段”，但从整体任务看，仍然有后续要做的事情。
+- 当前回复明确承诺马上继续动作（例如“我现在将...”“Next, I will...”“Let me continue...”），且不需要用户确认。
 
 ## 输出一致性规则（必须遵守）：
 1. 如果 reason 表示“等待工具调用/等待生成/处理中”，则 task_interrupted 必须是 false。
@@ -149,11 +151,13 @@ Note: another layer of objective rules (e.g. last turn is a tool result, clear i
 - If there were tool calls, their key results are explained in natural language so the user can act on this reply.
 - The reply does not suggest continuation such as "next", "then", "I will", "next step", etc.
 - User confirmation, more input, or a choice is required before continuing—then you must interrupt and wait for the user.
+- If the reply only offers an optional follow-up that depends on the user's choice or confirmation, such as "If you want, I can ... next." or "Would you like me to continue with ...?", you must interrupt and wait for user confirmation. Do not treat that as automatic continuation.
 
 ## When to continue (task_interrupted = false)
 - The reply is mainly **process explanation, progress reporting, or listing intermediate artifacts**, not a final user-facing outcome.
 - You believe summarizing, tidying, formatting, or further explanation is still needed for a true deliverable.
 - The reply says a phase is done but, for the overall task, there is clearly more to do.
+- The reply explicitly commits to immediate continuation, such as "I will now...", "Next, I will...", or "Let me continue...", and does not require user confirmation.
 
 ## Output consistency (mandatory)
 1. If reason indicates waiting for a tool / generation / in progress, then task_interrupted must be false.
@@ -194,11 +198,13 @@ Nota: outra camada de regras objetivas (por exemplo, a última mensagem é resul
 - Se houve chamadas de ferramenta, os resultados essenciais foram explicados em linguagem natural para o usuário poder agir com base nesta resposta.
 - A resposta não sugere continuação (ex.: "em seguida", "então", "vou", "próximo passo", etc.).
 - É necessária confirmação do usuário, informação adicional ou escolha para prosseguir—então deve interromper e aguardar o usuário.
+- Se a resposta apenas oferece uma continuação opcional que depende de escolha ou confirmação do usuário (ex.: "Se quiser, posso ... em seguida." ou "Gostaria que eu continuasse com ...?"), deve interromper e aguardar confirmação do usuário. Não trate isso como continuação automática.
 
 ## Quando continuar (task_interrupted = false)
 - A resposta é sobretudo **explicação de processo, progresso ou listagem de artefatos intermediários**, e não o resultado final para o usuário.
 - Ainda faltam passos como resumir, organizar, formatar ou complementar para uma entrega real.
 - A resposta diz que uma fase foi concluída, mas no conjunto da tarefa ainda há trabalho a fazer.
+- A resposta assume explicitamente continuação imediata (ex.: "Vou fazer isso agora...", "Em seguida, vou...", "Deixe-me continuar...") e não exige confirmação do usuário.
 
 ## Consistência da saída (obrigatório)
 1. Se o motivo indicar aguardar ferramenta / geração / em andamento, task_interrupted deve ser false.
