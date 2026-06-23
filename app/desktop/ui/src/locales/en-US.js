@@ -764,10 +764,13 @@ export default {
   'agentEdit.unknownSource': 'Unknown Source',
   'agentEdit.skillPendingUpdate': 'Update Pending',
   'agentEdit.updateSkill': 'Update',
+  'agentEdit.updateAllSkills': 'Update All ({count})',
   'agentEdit.refreshSkills': 'Refresh',
   'agentEdit.agentNotSaved': 'Please save the agent first',
   'agentEdit.skillSyncSuccess': 'Skill synced successfully',
   'agentEdit.skillSyncFailed': 'Failed to sync skill',
+  'agentEdit.skillSyncBatchSuccess': 'Updated {count} skills',
+  'agentEdit.skillSyncBatchPartial': 'Update finished: {success} succeeded, {failed} failed',
   'agentEdit.loadSkillsFailed': 'Failed to load skills',
   'agentEdit.selectFolderTitle': 'Select Accessible Folder',
   'agentEdit.enterFolderPath': 'Enter folder path:',
@@ -1069,6 +1072,8 @@ export default {
   'skills.selectedFiles': '{count} files selected',
   'skills.zipOnly': 'Only ZIP files are supported',
   'skills.readFileFailed': 'Failed to read dropped files',
+  'skills.invalidStructure': 'No valid skill structure found (missing SKILL.md)',
+  'skills.batchSummary': '{success} succeeded, {failed} failed',
 
   // MCP Servers
   'tools.Tools': 'Tools',

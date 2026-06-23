@@ -764,10 +764,13 @@ export default {
   'agentEdit.unknownSource': '未知来源',
   'agentEdit.skillPendingUpdate': '待更新',
   'agentEdit.updateSkill': '更新',
+  'agentEdit.updateAllSkills': '全部更新 ({count})',
   'agentEdit.refreshSkills': '刷新',
   'agentEdit.agentNotSaved': '请先保存Agent',
   'agentEdit.skillSyncSuccess': '技能同步成功',
   'agentEdit.skillSyncFailed': '技能同步失败',
+  'agentEdit.skillSyncBatchSuccess': '已更新 {count} 个技能',
+  'agentEdit.skillSyncBatchPartial': '更新完成：成功 {success} 个，失败 {failed} 个',
   'agentEdit.loadSkillsFailed': '加载技能列表失败',
   'agentEdit.selectFolderTitle': '选择可访问文件夹',
   'agentEdit.enterFolderPath': '请输入文件夹路径:',
@@ -1048,6 +1051,8 @@ export default {
   'skills.selectedFiles': '已选择 {count} 个文件',
   'skills.zipOnly': '仅支持 ZIP 文件',
   'skills.readFileFailed': '读取拖入文件失败',
+  'skills.invalidStructure': '未找到有效的技能结构 (缺少 SKILL.md)',
+  'skills.batchSummary': '成功 {success} 个，失败 {failed} 个',
 
   // MCP服务器相关
   'tools.Tools': '工具',
