@@ -91,8 +91,12 @@ async def test_import_desktop_skills_by_paths_returns_per_path_results(monkeypat
     monkeypatch.setattr(skill_service, "_is_desktop_mode", lambda: True)
     monkeypatch.setattr(skill_service, "get_skill_manager", lambda: object())
     monkeypatch.setattr(skill_service, "_collect_skill_path_candidates", fake_collect)
-    monkeypatch.setattr(skill_service, "_process_desktop_dir_and_register", fake_process_dir)
-    monkeypatch.setattr(skill_service, "_process_desktop_zip_and_register", fake_process_zip)
+    monkeypatch.setattr(
+        skill_service, "_process_desktop_dir_and_register", fake_process_dir
+    )
+    monkeypatch.setattr(
+        skill_service, "_process_desktop_zip_and_register", fake_process_zip
+    )
 
     result = await skill_service.import_desktop_skills_by_paths(["/bundle"], "u_1")
 
