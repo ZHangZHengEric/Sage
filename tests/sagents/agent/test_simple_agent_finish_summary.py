@@ -555,6 +555,75 @@ def test_task_complete_judge_uses_composed_system_prefix_in_llm_judge_mode(
     assert "找不到prompt" not in captured["llm_messages"][0]["content"]
 
 
+def test_task_complete_judge_redacts_multimodal_image_payloads(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    captured = {}
+
+    async def _never_must_continue(messages):
+        return False
+
+    async def _fake_system_text(**kwargs):
+        return "system prompt"
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        captured["llm_messages"] = kwargs["messages"]
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(
+                        content='{"task_interrupted": true, "reason": "done"}'
+                    )
+                )
+            ]
+        )
+
+    monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
+    monkeypatch.setattr(agent, "prepare_llm_system_prompt_text", _fake_system_text)
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+
+    msg_manager = SimpleNamespace(
+        context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000}),
+    )
+    session_context = SimpleNamespace(
+        message_manager=msg_manager,
+        get_language=lambda: "en",
+    )
+    image_payload = "data:image/png;base64," + ("a" * 10000)
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content=[
+                {"type": "text", "text": "please inspect this image"},
+                {"type": "image_url", "image_url": {"url": image_payload}},
+            ],
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="done",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+    ]
+
+    assert (
+        asyncio.run(
+            agent._is_task_complete(
+                messages_input=messages,
+                session_id="s1",
+                tool_manager=None,
+                session_context=session_context,  # pyright: ignore[reportArgumentType]
+            )
+        )
+        is True
+    )
+
+    prompt = captured["llm_messages"][0]["content"]
+    assert image_payload not in prompt
+    assert "data:image/png;base64" not in prompt
+    assert "<redacted data URL; base64_len=10000>" in prompt
+
+
 def test_llm_judge_skips_completion_check_after_direct_tool_activity(monkeypatch):
     monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
     agent = _agent()
