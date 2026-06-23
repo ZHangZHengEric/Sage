@@ -225,7 +225,7 @@
 
     <!-- Import Modal -->
     <Dialog v-model:open="showImportModal">
-      <DialogContent class="sm:max-w-[500px]">
+      <DialogContent class="sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>{{ t('skills.import') }}</DialogTitle>
           <DialogDescription>
@@ -241,8 +241,8 @@
           
           <TabsContent value="upload" class="space-y-4 pt-4">
             <div
-              class="border-2 border-dashed rounded-lg p-8 text-center hover:bg-muted/50 transition-colors cursor-pointer"
-              @click="$refs.fileInput.click()"
+              class="skill-import-drop-zone border-2 border-dashed rounded-lg p-8 text-center hover:bg-muted/50 transition-colors cursor-pointer"
+              @click="fileInput?.click()"
               @dragenter.prevent.stop
               @dragover.prevent.stop
               @dragleave.prevent.stop
@@ -296,9 +296,25 @@
           {{ importError }}
         </div>
 
+        <div v-if="importResults.length" class="max-h-44 space-y-2 overflow-y-auto rounded-lg border border-border bg-background/80 p-2 dark:bg-background/60">
+          <div
+            v-for="item in importResults"
+            :key="`${item.filename}-${item.message}`"
+            class="flex items-start gap-2 rounded-md px-2 py-1.5 text-sm"
+            :class="item.success ? 'text-emerald-700 dark:text-emerald-300' : 'text-destructive'"
+          >
+            <CheckCircle v-if="item.success" class="mt-0.5 h-4 w-4 shrink-0" />
+            <XCircle v-else class="mt-0.5 h-4 w-4 shrink-0" />
+            <div class="min-w-0">
+              <div class="truncate font-medium" :title="item.filename">{{ item.filename }}</div>
+              <div class="text-xs opacity-80">{{ item.message }}</div>
+            </div>
+          </div>
+        </div>
+
         <DialogFooter>
           <Button variant="outline" @click="showImportModal = false">{{ t('skills.cancel') }}</Button>
-          <Button type="primary" @click="handleImport" :disabled="isImportDisabled || importing">
+          <Button type="primary" @click="handleImport" :disabled="isImportDisabled || importing || collectingFiles">
             <Loader v-if="importing" class="mr-2 h-4 w-4 animate-spin" />
             {{ t('skills.confirm') }}
           </Button>
@@ -339,7 +355,8 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Box, Search, Folder, Plus, Upload, Loader, Trash2, Layers, User, Shield, Edit, LayoutGrid, List } from 'lucide-vue-next'
+import JSZip from 'jszip'
+import { Box, Search, Folder, Plus, Upload, Loader, Trash2, Layers, User, Shield, Edit, LayoutGrid, List, CheckCircle, XCircle } from 'lucide-vue-next'
 import { listen } from '@tauri-apps/api/event'
 import { useLanguage } from '../utils/i18n.js'
 import { skillAPI } from '../api/skill.js'
@@ -371,6 +388,8 @@ const selectedFiles = ref([])
 const importUrl = ref('')
 const importing = ref(false)
 const importError = ref('')
+const importResults = ref([])
+const collectingFiles = ref(false)
 const fileInput = ref(null)
 const dragDepth = ref(0)
 const isDraggingFiles = ref(false)
@@ -541,15 +560,6 @@ const getFolderName = (path) => {
   return parts[parts.length - 1]
 }
 
-const handleFileChange = (event) => {
-  processFiles(event.target.files)
-}
-
-const handleDrop = (event) => {
-  processFiles(event.dataTransfer.files)
-  resetDragState()
-}
-
 const isFileDrag = (event) => {
   return Array.from(event.dataTransfer?.types || []).includes('Files')
 }
@@ -581,98 +591,266 @@ const handlePageDragLeave = (event) => {
   }
 }
 
-const handlePageDrop = (event) => {
-  if (showImportModal.value) return
-  if (!isFileDrag(event)) return
-  processFiles(event.dataTransfer.files)
-  resetDragState()
+const isZipFile = (file) => file?.name?.toLowerCase().endsWith('.zip')
+
+const appendImportResults = (items) => {
+  if (!items.length) return
+  importResults.value = [...importResults.value, ...items]
 }
 
-const normalizeTauriFilePaths = (payload) => {
-  if (Array.isArray(payload)) return payload
-  if (Array.isArray(payload?.paths)) return payload.paths
-  return []
-}
+const setSelectedFiles = (files) => {
+  const validFiles = []
+  const invalidResults = []
 
-const processTauriFilePaths = async (payload) => {
-  const filePaths = normalizeTauriFilePaths(payload)
-  if (filePaths.length === 0) return
-
-  try {
-    const { basename } = await import('@tauri-apps/api/path')
-    const { readLocalOrWorkspaceUint8Array } = await import('@/utils/agentWorkspaceBackend.js')
-    const files = []
-
-    for (const filePath of filePaths) {
-      const fileName = await basename(filePath)
-      if (!fileName.toLowerCase().endsWith('.zip')) {
-        importMode.value = 'upload'
-        showImportModal.value = true
-        importError.value = t('skills.zipOnly') || 'Only ZIP files are supported'
-        selectedFiles.value = []
-        return
-      }
-
-      const fileData = await readLocalOrWorkspaceUint8Array(filePath)
-      files.push(new File([fileData], fileName, { type: 'application/zip' }))
+  for (const file of files) {
+    if (isZipFile(file)) {
+      validFiles.push(file)
+    } else {
+      invalidResults.push({
+        filename: file?.name || 'unknown_file',
+        success: false,
+        message: t('skills.zipOnly') || 'Only ZIP files are supported',
+      })
     }
-
-    processFiles(files)
-  } catch (error) {
-    console.error('Failed to read dropped skill files:', error)
-    importMode.value = 'upload'
-    showImportModal.value = true
-    importError.value = error.message || t('skills.readFileFailed') || 'Failed to read dropped files'
-    selectedFiles.value = []
-  } finally {
-    resetDragState()
   }
+
+  selectedFiles.value = validFiles
+  appendImportResults(invalidResults)
+  importError.value = validFiles.length ? '' : invalidResults[0]?.message || ''
+}
+
+const handleFileChange = async (event) => {
+  importResults.value = []
+  setSelectedFiles(Array.from(event.target.files || []))
+  event.target.value = ''
+}
+
+const readDirectoryEntries = (reader) => new Promise((resolve, reject) => {
+  reader.readEntries(resolve, reject)
+})
+
+const entryToFile = (entry) => new Promise((resolve, reject) => {
+  entry.file(resolve, reject)
+})
+
+const collectEntryFiles = async (entry, basePath = '') => {
+  if (entry.isFile) {
+    const file = await entryToFile(entry)
+    return [{ path: `${basePath}${file.name}`, file }]
+  }
+
+  if (!entry.isDirectory) return []
+
+  const reader = entry.createReader()
+  const entries = []
+  while (true) {
+    const batch = await readDirectoryEntries(reader)
+    if (!batch.length) break
+    entries.push(...batch)
+  }
+
+  const files = []
+  for (const child of entries) {
+    files.push(...await collectEntryFiles(child, `${basePath}${entry.name}/`))
+  }
+  return files
+}
+
+const zipSkillFolder = async (folderName, entries) => {
+  const zip = new JSZip()
+  for (const item of entries) {
+    zip.file(item.path, item.file)
+  }
+  const blob = await zip.generateAsync({ type: 'blob' })
+  return new File([blob], `${folderName}.zip`, { type: 'application/zip' })
+}
+
+const filesFromDirectoryEntry = async (entry) => {
+  const files = await collectEntryFiles(entry)
+  const rootPrefix = `${entry.name}/`
+  const hasRootSkill = files.some((item) => item.path === `${rootPrefix}SKILL.md`)
+  if (hasRootSkill) {
+    return {
+      files: [await zipSkillFolder(entry.name, files.map((item) => ({
+        ...item,
+        path: item.path.startsWith(rootPrefix) ? item.path.slice(rootPrefix.length) : item.path,
+      })))],
+      failures: [],
+    }
+  }
+
+  const skillRoots = new Set()
+  for (const item of files) {
+    if (!item.path.endsWith('/SKILL.md')) continue
+    const parts = item.path.split('/')
+    if (parts.length >= 3 && parts[0] === entry.name) {
+      skillRoots.add(parts.slice(0, -1).join('/'))
+    }
+  }
+
+  const nestedZipFiles = files
+    .filter((item) => isZipFile(item.file))
+    .map((item) => item.file)
+
+  if (!skillRoots.size) {
+    if (nestedZipFiles.length) {
+      return { files: nestedZipFiles, failures: [] }
+    }
+    return {
+      files: [],
+      failures: [{
+        filename: entry.name,
+        success: false,
+        message: t('skills.invalidStructure') || 'No valid skill structure found (missing SKILL.md)',
+      }],
+    }
+  }
+
+  const zipped = []
+  for (const root of skillRoots) {
+    const prefix = `${root}/`
+    const rootName = root.split('/').pop()
+    const rootFiles = files
+      .filter((item) => item.path.startsWith(prefix))
+      .map((item) => ({
+        ...item,
+        path: item.path.slice(prefix.length),
+    }))
+    zipped.push(await zipSkillFolder(rootName, rootFiles))
+  }
+  return { files: [...zipped, ...nestedZipFiles], failures: [] }
+}
+
+const collectDroppedFiles = async (event) => {
+  const items = Array.from(event.dataTransfer?.items || [])
+  const files = []
+  const failures = []
+
+  if (!items.length || !items.some((item) => item.webkitGetAsEntry)) {
+    return {
+      files: Array.from(event.dataTransfer?.files || []),
+      failures,
+    }
+  }
+
+  for (const item of items) {
+    const entry = item.webkitGetAsEntry?.()
+    if (!entry) continue
+    if (entry.isFile) {
+      files.push(await entryToFile(entry))
+    } else if (entry.isDirectory) {
+      const result = await filesFromDirectoryEntry(entry)
+      files.push(...result.files)
+      failures.push(...result.failures)
+    }
+  }
+
+  return { files, failures }
+}
+
+const handleTauriDrop = async (paths) => {
+  if (!Array.isArray(paths) || paths.length === 0) return
+  showImportModal.value = true
+  importMode.value = 'upload'
+  selectedFiles.value = []
+  importResults.value = []
+  collectingFiles.value = true
+  importing.value = true
+  importError.value = ''
+  try {
+    const response = await skillAPI.importSkillPaths(paths)
+    const data = response?.data || response
+    const results = data?.results || []
+    appendImportResults(results)
+    if (data?.failed_count > 0) {
+      importError.value = t('skills.batchSummary', {
+        success: data.success_count || 0,
+        failed: data.failed_count,
+      }) || `${data.success_count || 0} succeeded, ${data.failed_count} failed`
+    }
+    if (results.some((item) => item.success)) {
+      await loadSkills()
+      toast.success(t('skills.importSuccess'))
+    }
+  } catch (error) {
+    importError.value = error.message || 'Import failed'
+  } finally {
+    importing.value = false
+    collectingFiles.value = false
+  }
+}
+
+const handleDrop = async (event) => {
+  importResults.value = []
+  collectingFiles.value = true
+  importError.value = ''
+  try {
+    const { files, failures } = await collectDroppedFiles(event)
+    appendImportResults(failures)
+    setSelectedFiles(files)
+  } catch (error) {
+    importError.value = error.message || 'Import failed'
+  } finally {
+    collectingFiles.value = false
+  }
+  resetDragState()
+  importMode.value = 'upload'
+  showImportModal.value = true
 }
 
 const processFiles = (fileList) => {
-  const files = Array.from(fileList || [])
-  if (files.length === 0) return
-
-  const invalidFiles = files.filter(file => !file.name.toLowerCase().endsWith('.zip'))
-  if (invalidFiles.length > 0) {
-    importMode.value = 'upload'
-    showImportModal.value = true
-    importError.value = t('skills.zipOnly') || 'Only ZIP files are supported'
-    selectedFiles.value = []
-    if (fileInput.value) fileInput.value.value = ''
-    return
-  }
-
-  selectedFiles.value = files
-  importError.value = ''
+  importResults.value = []
+  setSelectedFiles(Array.from(fileList || []))
   importMode.value = 'upload'
   showImportModal.value = true
+}
+
+const handlePageDrop = async (event) => {
+  if (showImportModal.value) return
+  if (!isFileDrag(event)) return
+  await handleDrop(event)
+  resetDragState()
 }
 
 const handleImport = async () => {
   importing.value = true
   importError.value = ''
+  importResults.value = importResults.value.filter((item) => !item.success)
 
   try {
     if (importMode.value === 'upload') {
-      if (selectedFiles.value.length === 0) return
-      
-      // Keep the existing single-file endpoint and upload each dropped file in order.
-      for (const file of selectedFiles.value) {
-        await skillAPI.uploadSkill(file)
+      if (!selectedFiles.value.length) return
+
+      const response = await skillAPI.uploadSkills(selectedFiles.value)
+      const data = response?.data || response
+      const results = data?.results || []
+      appendImportResults(results)
+      const failedFilenames = new Set(results.filter((item) => !item.success).map((item) => item.filename))
+      selectedFiles.value = selectedFiles.value.filter((file) => failedFilenames.has(file.name))
+      if (data?.failed_count > 0) {
+        importError.value = t('skills.batchSummary', {
+          success: data.success_count || 0,
+          failed: data.failed_count,
+        }) || `${data.success_count || 0} succeeded, ${data.failed_count} failed`
       }
     } else {
       if (!importUrl.value) return
       await skillAPI.importSkillFromUrl({ url: importUrl.value })
     }
-    
+
     // Refresh list and close modal
     await loadSkills()
-    showImportModal.value = false
-    selectedFiles.value = []
-    importUrl.value = ''
-    if (fileInput.value) fileInput.value.value = ''
-    toast.success(t('skills.importSuccess'))
+    const hasFailures = importResults.value.some((item) => !item.success)
+    if (!hasFailures) {
+      showImportModal.value = false
+      selectedFiles.value = []
+      importUrl.value = ''
+      importResults.value = []
+      if (fileInput.value) fileInput.value.value = ''
+    }
+    if (!hasFailures || importResults.value.some((item) => item.success)) {
+      toast.success(t('skills.importSuccess'))
+    }
   } catch (error) {
     console.error('Import failed:', error)
     importError.value = error.message || 'Import failed'
@@ -693,7 +871,8 @@ onMounted(async () => {
       }
     })
     unlistenTauriDragDrop = await listen('tauri-drag-drop', async (event) => {
-      await processTauriFilePaths(event.payload)
+      await handleTauriDrop(event.payload)
+      resetDragState()
     })
     unlistenTauriDragLeave = await listen('tauri-drag-leave', () => {
       resetDragState()

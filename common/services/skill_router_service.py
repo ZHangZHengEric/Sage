@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import UploadFile
 
@@ -55,6 +55,84 @@ async def build_upload_skill_response(
         data["user_id"] = user_id
     return {
         "message": message,
+        "data": data,
+    }
+
+
+def _exception_message(exc: Exception) -> str:
+    detail = getattr(exc, "detail", None)
+    if detail:
+        return str(detail)
+    return str(exc)
+
+
+async def build_upload_skills_response(
+    *,
+    files: List[UploadFile],
+    user_id: str,
+    role: str = "user",
+    is_system: bool = False,
+    is_agent: bool = False,
+    agent_id: Optional[str] = None,
+    include_user_id: bool = False,
+) -> Dict[str, Any]:
+    results = []
+    for file in files:
+        filename = file.filename or "unknown_file"
+        try:
+            message = await skill_service.import_skill_by_file(
+                file,
+                user_id,
+                role,
+                is_system,
+                is_agent,
+                agent_id,
+            )
+            results.append(
+                {
+                    "filename": filename,
+                    "success": True,
+                    "message": message,
+                }
+            )
+        except Exception as exc:
+            results.append(
+                {
+                    "filename": filename,
+                    "success": False,
+                    "message": _exception_message(exc),
+                }
+            )
+
+    success_count = sum(1 for item in results if item["success"])
+    failed_count = len(results) - success_count
+    data: Dict[str, Any] = {
+        "results": results,
+        "success_count": success_count,
+        "failed_count": failed_count,
+    }
+    if include_user_id:
+        data["user_id"] = user_id
+    return {
+        "message": f"导入完成：成功 {success_count} 个，失败 {failed_count} 个",
+        "data": data,
+    }
+
+
+async def build_import_skill_paths_response(
+    *,
+    paths: List[str],
+    user_id: str,
+    role: str = "user",
+    include_user_id: bool = False,
+) -> Dict[str, Any]:
+    data = await skill_service.import_desktop_skills_by_paths(paths, user_id, role)
+    if include_user_id:
+        data["user_id"] = user_id
+    return {
+        "message": (
+            f"导入完成：成功 {data['success_count']} 个，失败 {data['failed_count']} 个"
+        ),
         "data": data,
     }
 

@@ -27,6 +27,28 @@ export const skillAPI = {
   },
 
   /**
+   * 批量上传技能 (ZIP)
+   * @param {File[]} files - ZIP 文件列表
+   * @returns {Promise<Object>}
+   */
+  uploadSkills: async (files) => {
+    const formData = new FormData()
+    files.forEach((file) => {
+      formData.append('files', file)
+    })
+    return await request.post('/api/skills/upload-batch', formData)
+  },
+
+  /**
+   * 从桌面端本地路径批量导入技能
+   * @param {string[]} paths - ZIP、技能文件夹或上层文件夹路径
+   * @returns {Promise<Object>}
+   */
+  importSkillPaths: async (paths) => {
+    return await request.post('/api/skills/import-paths', { paths })
+  },
+
+  /**
    * 从 URL 导入技能
    * @param {string} url - 技能 ZIP 下载链接
    * @returns {Promise<Object>}

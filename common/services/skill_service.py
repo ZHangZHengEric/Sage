@@ -1558,6 +1558,50 @@ async def _process_desktop_zip_and_register(
     )
 
 
+def _process_desktop_dir_and_register_sync(
+    tm: Any, source_dir: str, original_name: str, user_id: str
+) -> Tuple[bool, str]:
+    try:
+        if not os.path.exists(os.path.join(source_dir, "SKILL.md")):
+            return False, "未找到有效的技能结构 (缺少 SKILL.md)"
+
+        if not user_id:
+            return False, "桌面端导入技能需要有效的用户 ID"
+
+        skill_dir_name = _read_skill_name_from_md(os.path.join(source_dir, "SKILL.md"))
+        skill_dir_name = _skill_name_to_dir(skill_dir_name or original_name)
+        user_skills_root = _desktop_user_skills_root(user_id)
+        os.makedirs(user_skills_root, exist_ok=True)
+        target_path = os.path.join(user_skills_root, skill_dir_name)
+        if os.path.exists(target_path):
+            try:
+                shutil.rmtree(target_path)
+            except Exception as e:
+                return False, f"无法覆盖已存在的技能目录: {e}"
+
+        shutil.copytree(source_dir, target_path, dirs_exist_ok=True)
+        _set_permissions_recursive(target_path)
+        registered_name = tm.register_new_skill(skill_dir_name)
+        if registered_name:
+            return True, f"技能 '{registered_name}' 导入成功"
+        return False, "技能验证失败，请检查 SKILL.md 格式"
+    except Exception as e:
+        logger.error(f"Process skill directory failed: {e}")
+        return False, f"处理技能文件夹失败: {str(e)}"
+
+
+async def _process_desktop_dir_and_register(
+    tm: Any, source_dir: str, original_name: str, user_id: str
+) -> Tuple[bool, str]:
+    return await asyncio.to_thread(
+        _process_desktop_dir_and_register_sync,
+        tm,
+        source_dir,
+        original_name,
+        user_id,
+    )
+
+
 def _copy_upload_to_temp_zip_sync(file: UploadFile) -> str:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_file:
         shutil.copyfileobj(file.file, tmp_file)
@@ -1632,6 +1676,119 @@ async def import_skill_by_file(
     finally:
         if tmp_file_path and os.path.exists(tmp_file_path):
             await asyncio.to_thread(os.unlink, tmp_file_path)
+
+
+def _collect_skill_path_candidates_sync(path: str) -> List[Tuple[str, str, str]]:
+    normalized_path = os.path.abspath(os.path.expanduser(path))
+    if not os.path.exists(normalized_path):
+        raise FileNotFoundError(f"路径不存在: {path}")
+
+    if os.path.isfile(normalized_path):
+        return [("zip", normalized_path, os.path.basename(normalized_path))]
+
+    if os.path.exists(os.path.join(normalized_path, "SKILL.md")):
+        return [("dir", normalized_path, os.path.basename(normalized_path))]
+
+    candidates: List[Tuple[str, str, str]] = []
+    for root, dirs, files in os.walk(normalized_path):
+        if "SKILL.md" in files:
+            candidates.append(("dir", root, os.path.basename(root)))
+            dirs[:] = []
+            continue
+        for filename in files:
+            if filename.lower().endswith(".zip"):
+                candidates.append(("zip", os.path.join(root, filename), filename))
+
+    return candidates
+
+
+async def _collect_skill_path_candidates(path: str) -> List[Tuple[str, str, str]]:
+    return await asyncio.to_thread(_collect_skill_path_candidates_sync, path)
+
+
+async def import_desktop_skills_by_paths(
+    paths: List[str],
+    user_id: str = "",
+    role: str = "user",
+) -> Dict[str, Any]:
+    if not _is_desktop_mode():
+        raise SageHTTPException(status_code=400, detail="仅桌面端支持路径导入")
+
+    tm = get_skill_manager()
+    if not tm:
+        raise SageHTTPException(status_code=500, detail="技能管理器未初始化")
+
+    results: List[Dict[str, Any]] = []
+    for raw_path in paths:
+        display_path = str(raw_path or "").strip()
+        if not display_path:
+            continue
+        try:
+            candidates = await _collect_skill_path_candidates(display_path)
+            if not candidates:
+                results.append(
+                    {
+                        "filename": os.path.basename(display_path) or display_path,
+                        "path": display_path,
+                        "success": False,
+                        "message": "未找到有效的技能结构 (缺少 SKILL.md)",
+                    }
+                )
+                continue
+
+            for kind, candidate_path, label in candidates:
+                try:
+                    if kind == "zip":
+                        if not candidate_path.lower().endswith(".zip"):
+                            success, message = False, "仅支持 ZIP 文件"
+                        else:
+                            success, message = await _process_desktop_zip_and_register(
+                                tm,
+                                candidate_path,
+                                label,
+                                user_id,
+                            )
+                    else:
+                        success, message = await _process_desktop_dir_and_register(
+                            tm,
+                            candidate_path,
+                            label,
+                            user_id,
+                        )
+                    results.append(
+                        {
+                            "filename": label,
+                            "path": candidate_path,
+                            "success": success,
+                            "message": message,
+                        }
+                    )
+                except Exception as exc:
+                    results.append(
+                        {
+                            "filename": label,
+                            "path": candidate_path,
+                            "success": False,
+                            "message": getattr(exc, "detail", None) or str(exc),
+                        }
+                    )
+        except Exception as exc:
+            results.append(
+                {
+                    "filename": os.path.basename(display_path) or display_path,
+                    "path": display_path,
+                    "success": False,
+                    "message": getattr(exc, "detail", None) or str(exc),
+                }
+            )
+
+    success_count = sum(1 for item in results if item["success"])
+    failed_count = len(results) - success_count
+    return {
+        "results": results,
+        "success_count": success_count,
+        "failed_count": failed_count,
+    }
 
 
 async def import_skill_by_url(
