@@ -17,6 +17,7 @@ from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_proxy import ToolProxy
 from sagents.tool.tool_baseline import augment_with_baseline_tools
+from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 from sagents.utils.logger import logger
 from sagents.utils.prompt_manager import PromptManager
 
@@ -180,6 +181,7 @@ class ToolSuggestionAgent(AgentBase):
             clean_messages = MessageManager.convert_messages_to_dict_for_request(
                 messages_input
             )
+            clean_messages = redact_base64_data_urls_in_value(clean_messages)
 
             # 生成提示
             tool_suggestion_template = PromptManager().get_agent_prompt_auto(

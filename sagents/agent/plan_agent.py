@@ -13,6 +13,7 @@ from sagents.context.messages.message import MessageChunk, MessageRole, MessageT
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_context import SessionContext
 from sagents.tool import ToolProxy
+from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 from sagents.utils.logger import logger
 from sagents.utils.prompt_manager import PromptManager
 
@@ -700,6 +701,7 @@ class PlanAgent(AgentBase):
         clean_messages = MessageManager.convert_messages_to_dict_for_request(
             messages_for_judge
         )
+        clean_messages = redact_base64_data_urls_in_value(clean_messages)
 
         system_prompt = await self.prepare_llm_system_prompt_text(
             session_id=session_context.session_id,
