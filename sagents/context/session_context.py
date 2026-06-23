@@ -416,7 +416,9 @@ class SessionContext:
             self.message_manager.add_messages(msg)
 
     @staticmethod
-    def _get_message_role(message: Union[MessageChunk, Dict[str, Any]]) -> Optional[str]:
+    def _get_message_role(
+        message: Union[MessageChunk, Dict[str, Any]],
+    ) -> Optional[str]:
         if isinstance(message, MessageChunk):
             return message.role
         if isinstance(message, dict):
@@ -487,7 +489,9 @@ class SessionContext:
         if changed:
             self.message_manager.messages = normalized
             self.message_manager.stats["total_messages"] = len(normalized)
-            self.message_manager.stats["last_updated"] = datetime.datetime.now().isoformat()
+            self.message_manager.stats["last_updated"] = (
+                datetime.datetime.now().isoformat()
+            )
             self.message_manager.refresh_compact_manifest()
             logger.info(
                 f"SessionContext: normalized tool call pairs before user message "
@@ -528,7 +532,9 @@ class SessionContext:
                 and metadata.get("synthetic_interrupted_tool_result") is True
             ):
                 self.message_manager.messages[idx] = message
-                self.message_manager.stats["last_updated"] = datetime.datetime.now().isoformat()
+                self.message_manager.stats["last_updated"] = (
+                    datetime.datetime.now().isoformat()
+                )
                 self.message_manager.refresh_compact_manifest()
                 logger.info(
                     f"SessionContext: replaced synthetic interrupted tool result "
