@@ -52,7 +52,7 @@ window.addEventListener('dragover', (e) => {
 window.addEventListener('drop', (e) => {
   // 只允许特定区域的drop事件
   const target = e.target
-  const isInDropZone = target.closest('.workspace-drop-zone') !== null || target.closest('.message-input-drop-zone') !== null
+  const isInDropZone = target.closest('.workspace-drop-zone') !== null || target.closest('.message-input-drop-zone') !== null || target.closest('.skill-import-drop-zone') !== null
   if (!isInDropZone) {
     e.preventDefault()
   }
