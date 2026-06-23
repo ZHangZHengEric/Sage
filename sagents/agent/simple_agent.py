@@ -19,6 +19,7 @@ from sagents.utils.completion_mode import (
     is_no_tool_call_mode,
     is_turn_status_mode,
 )
+from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 import json
 import uuid
 from copy import deepcopy
@@ -675,6 +676,7 @@ class SimpleAgent(AgentBase):
         clean_messages = MessageManager.convert_messages_to_dict_for_request(
             messages_for_complete
         )
+        clean_messages = redact_base64_data_urls_in_value(clean_messages)
 
         task_complete_template = PromptManager().get_agent_prompt_auto(
             "task_complete_template", language=session_context.get_language()
