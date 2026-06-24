@@ -684,14 +684,26 @@ def normalize_locale(locale: str | None) -> str:
     return DEFAULT_LOCALE
 
 
+def _match_supported_locale(locale: str | None) -> str | None:
+    if not locale:
+        return None
+
+    normalized = locale.strip().replace("_", "-").lower()
+    if normalized.startswith("en"):
+        return "en-US"
+    if normalized.startswith("zh"):
+        return "zh-CN"
+    return None
+
+
 def locale_from_accept_language(accept_language: str | None) -> str:
     if not accept_language:
         return DEFAULT_LOCALE
 
     for item in accept_language.split(","):
         locale = item.split(";", 1)[0].strip()
-        resolved = normalize_locale(locale)
-        if resolved in SUPPORTED_LOCALES:
+        resolved = _match_supported_locale(locale)
+        if resolved:
             return resolved
     return DEFAULT_LOCALE
 

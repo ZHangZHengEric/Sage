@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from common.core.exceptions import SageHTTPException, register_exception_handlers
+from common.core.i18n import locale_from_accept_language
 from common.core.middleware import register_request_logging_middleware
 from common.core.render import Response
 
@@ -43,6 +44,10 @@ def test_sage_http_exception_uses_accept_language_english():
 
     assert response.status_code == 401
     assert response.json()["message"] == "Unauthorized"
+
+
+def test_accept_language_skips_unsupported_locales():
+    assert locale_from_accept_language("fr-FR, en-US;q=0.9") == "en-US"
 
 
 def test_response_error_uses_request_locale_for_message_key():
