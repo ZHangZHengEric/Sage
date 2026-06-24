@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field
 class Message(BaseModel):
     message_id: Optional[str] = None
     role: str
+    type: Optional[str] = None
+    message_type: Optional[str] = None
     # content 可以是字符串或列表（支持多模态，如图片+文本）
     # 列表格式: [{"type": "text", "text": "..."}, {"type": "image_url", "image_url": {"url": "..."}}]
     content: Optional[Union[str, List[Dict[str, Any]]]] = None

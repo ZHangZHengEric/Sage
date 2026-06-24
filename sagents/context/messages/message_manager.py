@@ -1658,6 +1658,7 @@ class MessageManager:
                 MessageType.TOOL_CALL_RESULT.value,
                 MessageType.SKILL_OBSERVATION.value,
                 MessageType.AGENT_EXECUTION_ERROR.value,
+                MessageType.SYSTEM_TRIGGERED_RUN.value,
             ]
 
         # 全量消息进入；压缩覆盖关系由 build_inference_view 统一处理。

@@ -57,6 +57,7 @@ class MessageType(Enum):
     QUERY_SUGGEST = "query_suggest"
     MEMORY_EXTRACTION = "memory_extraction"
     DO_SUBTASK_RESULT = "do_subtask_result"
+    SYSTEM_TRIGGERED_RUN = "system_triggered_run"
 
     # 推理内容
     REASONING_CONTENT = "reasoning_content"
