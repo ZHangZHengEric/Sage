@@ -14,7 +14,9 @@ from loguru import logger
 
 from common.core import config
 from common.core.client.chat import get_chat_client
+from common.core.context import get_request_locale
 from common.core.exceptions import SageHTTPException
+from common.core.i18n import t
 from common.models.agent import Agent, AgentConfigDao
 from common.models.llm_provider import LLMProvider, LLMProviderDao
 from common.services.agent_workspace import (
@@ -141,11 +143,12 @@ def _require_agent_name(agent_name: str, *, agent_id: str = "") -> str:
     if not normalized:
         if agent_id:
             raise SageHTTPException(
-                detail=f"Agent '{agent_id}' 缺少名称",
+                message_key="agent.name_missing_with_id",
+                message_params={"agent_id": agent_id},
                 error_detail=f"agent '{agent_id}' missing name",
             )
         raise SageHTTPException(
-            detail="Agent 名称不能为空",
+            message_key="agent.name_required",
             error_detail="agent name is required",
         )
     return normalized
@@ -160,7 +163,7 @@ def _normalize_max_loop_count(agent_config: Dict[str, Any]) -> Dict[str, Any]:
     if value is None or value == "":
         raise SageHTTPException(
             status_code=400,
-            detail="最大循环次数不能为空",
+            message_key="agent.max_loop_required",
             error_detail="maxLoopCount is required",
         )
 
@@ -169,14 +172,14 @@ def _normalize_max_loop_count(agent_config: Dict[str, Any]) -> Dict[str, Any]:
     except (TypeError, ValueError):
         raise SageHTTPException(
             status_code=400,
-            detail="最大循环次数必须为整数",
+            message_key="agent.max_loop_integer",
             error_detail="maxLoopCount must be an integer",
         )
 
     if normalized_value < 1:
         raise SageHTTPException(
             status_code=400,
-            detail="最大循环次数不能小于 1",
+            message_key="agent.max_loop_min",
             error_detail="maxLoopCount must be greater than or equal to 1",
         )
 
@@ -271,19 +274,19 @@ async def _create_server_model_client_for_user(user_id: str) -> Tuple[Any, str]:
 
     if not provider:
         raise SageHTTPException(
-            detail="当前用户未配置可用的模型提供商",
+            message_key="agent.provider_missing",
             error_detail=f"user '{user_id or '<empty>'}' has no llm provider",
         )
 
     if not provider.api_key:
         raise SageHTTPException(
-            detail="模型提供商未配置 API Key",
+            message_key="agent.provider_api_key_missing",
             error_detail=f"provider '{provider.id}' api_key is empty",
         )
 
     if not provider.model:
         raise SageHTTPException(
-            detail="模型提供商未配置模型名称",
+            message_key="agent.provider_model_missing",
             error_detail=f"provider '{provider.id}' model is empty",
         )
 
@@ -339,7 +342,8 @@ async def get_agent(agent_id: str, user_id: Optional[str] = None) -> Agent:
     existing = await dao.get_by_id(agent_id)
     if not existing:
         raise SageHTTPException(
-            detail=f"Agent '{agent_id}' 不存在",
+            message_key="agent.not_found_with_id",
+            message_params={"agent_id": agent_id},
             error_detail=f"Agent '{agent_id}' 不存在",
         )
 
@@ -348,7 +352,7 @@ async def get_agent(agent_id: str, user_id: Optional[str] = None) -> Agent:
         authorized_users = await dao.get_authorized_users(agent_id)
         if user_id not in authorized_users:
             raise SageHTTPException(
-                detail="无权访问该Agent",
+                message_key="agent.access_forbidden",
                 error_detail="forbidden",
             )
 
@@ -381,7 +385,8 @@ async def create_agent(
         if existing_config:
             raise SageHTTPException(
                 status_code=500,
-                detail=f"Agent '{agent_name}' 已存在",
+                message_key="agent.exists",
+                message_params={"agent_name": agent_name},
                 error_detail=f"Agent '{agent_name}' 已存在",
             )
 
@@ -419,7 +424,8 @@ async def create_agent(
     existing_config = await dao.get_by_name_and_user(agent_name, user_id)
     if existing_config:
         raise SageHTTPException(
-            detail=f"Agent '{agent_name}' 已存在",
+            message_key="agent.exists",
+            message_params={"agent_name": agent_name},
             error_detail=f"Agent '{agent_name}' 已存在",
         )
 
@@ -448,7 +454,7 @@ async def create_agent(
         except Exception as rollback_error:
             logger.error(f"Agent {agent_id} 回滚删除失败: {rollback_error}")
         raise SageHTTPException(
-            detail="Agent 初始化默认 inherit 目录失败",
+            message_key="agent.inherit_init_failed",
             error_detail=str(e),
         )
 
@@ -469,7 +475,8 @@ async def update_agent(
     existing_config = await dao.get_by_id(agent_id)
     if not existing_config:
         raise SageHTTPException(
-            detail=f"Agent '{agent_id}' 不存在",
+            message_key="agent.not_found_with_id",
+            message_params={"agent_id": agent_id},
             error_detail=f"Agent '{agent_id}' 不存在",
         )
 
@@ -481,7 +488,7 @@ async def update_agent(
     if cfg.app_mode == "desktop":
         if user_id and existing_config.user_id and existing_config.user_id != user_id:
             raise SageHTTPException(
-                detail="无权更新该Agent",
+                message_key="agent.update_forbidden",
                 error_detail="forbidden",
             )
         normalized_config = enforce_required_tools(normalized_config)
@@ -519,7 +526,7 @@ async def update_agent(
         and existing_config.user_id != user_id
     ):
         raise SageHTTPException(
-            detail="无权更新该Agent",
+            message_key="agent.update_forbidden",
             error_detail="forbidden",
         )
 
@@ -629,7 +636,8 @@ async def delete_agent(
     existing_config = await dao.get_by_id(agent_id)
     if not existing_config:
         raise SageHTTPException(
-            detail=f"Agent '{agent_id}' 不存在",
+            message_key="agent.not_found_with_id",
+            message_params={"agent_id": agent_id},
             error_detail=f"Agent '{agent_id}' 不存在",
         )
 
@@ -641,7 +649,7 @@ async def delete_agent(
         and existing_config.user_id != user_id
     ):
         raise SageHTTPException(
-            detail="无权删除该Agent",
+            message_key="agent.delete_forbidden",
             error_detail="forbidden",
         )
 
@@ -685,7 +693,7 @@ async def auto_generate_agent(
     )
     if not agent_config:
         raise SageHTTPException(
-            detail="自动生成Agent失败",
+            message_key="agent.auto_generate_failed",
             error_detail="生成的Agent配置为空",
         )
 
@@ -716,7 +724,7 @@ async def optimize_system_prompt(
 
     if not optimized_prompt:
         raise SageHTTPException(
-            detail="系统提示词优化失败",
+            message_key="agent.prompt_optimize_failed",
             error_detail="优化后的提示词为空",
         )
 
@@ -748,7 +756,7 @@ async def _resolve_default_llm_provider_id(user_id: str = "") -> str:
 
     raise SageHTTPException(
         status_code=500,
-        detail="未找到可用模型提供商，请先完成模型配置",
+        message_key="agent.no_provider_configured",
         error_detail="No LLM provider configured",
     )
 
@@ -839,7 +847,8 @@ def _copy_directory_contents(
     if not source_dir.exists() or not source_dir.is_dir():
         raise SageHTTPException(
             status_code=500,
-            detail=f"源目录不存在: {source_dir}",
+            message_key="agent.source_dir_missing",
+            message_params={"source_dir": str(source_dir)},
             error_detail=str(source_dir),
         )
 
@@ -1001,14 +1010,14 @@ async def import_openclaw_agent(user_id: str = "") -> Dict[str, Any]:
     if not openclaw_home.exists():
         raise SageHTTPException(
             status_code=500,
-            detail="未找到 OpenClaw 数据目录 ~/.openclaw",
+            message_key="agent.openclaw_data_missing",
             error_detail=str(openclaw_home),
         )
 
     if not openclaw_workspace.exists() or not openclaw_workspace.is_dir():
         raise SageHTTPException(
             status_code=500,
-            detail="未找到 OpenClaw workspace 目录",
+            message_key="agent.openclaw_workspace_missing",
             error_detail=str(openclaw_workspace),
         )
 
@@ -1074,7 +1083,8 @@ async def import_openclaw_agent(user_id: str = "") -> Dict[str, Any]:
         logger.exception("导入 OpenClaw Agent 失败")
         raise SageHTTPException(
             status_code=500,
-            detail=f"导入 OpenClaw 失败: {str(e)}",
+            message_key="agent.openclaw_import_failed",
+            message_params={"message": str(e)},
             error_detail=str(e),
         )
 
@@ -1085,10 +1095,12 @@ async def get_agent_authorized_users(
     dao = AgentConfigDao()
     agent = await dao.get_by_id(agent_id)
     if not agent:
-        raise SageHTTPException(detail="Agent不存在", error_detail="not found")
+        raise SageHTTPException(message_key="agent.not_found", error_detail="not found")
 
     if role != "admin" and agent.user_id != user_id:
-        raise SageHTTPException(detail="无权查看授权用户", error_detail="forbidden")
+        raise SageHTTPException(
+            message_key="agent.auth_view_forbidden", error_detail="forbidden"
+        )
 
     return await dao.get_authorized_users(agent_id)
 
@@ -1102,10 +1114,12 @@ async def update_agent_authorizations(
     dao = AgentConfigDao()
     agent = await dao.get_by_id(agent_id)
     if not agent:
-        raise SageHTTPException(detail="Agent不存在", error_detail="not found")
+        raise SageHTTPException(message_key="agent.not_found", error_detail="not found")
 
     if role != "admin" and agent.user_id != user_id:
-        raise SageHTTPException(detail="无权修改授权", error_detail="forbidden")
+        raise SageHTTPException(
+            message_key="agent.auth_modify_forbidden", error_detail="forbidden"
+        )
 
     if agent.user_id in authorized_user_ids:
         authorized_user_ids.remove(agent.user_id)
@@ -1343,7 +1357,7 @@ def _resolve_workspace_file_path_candidate(
 ) -> Tuple[str, str]:
     if not workspace_path or not file_path:
         raise SageHTTPException(
-            detail="缺少必要的路径参数",
+            message_key="agent.workspace_path_required",
             error_detail="workspace_path or file_path missing",
         )
 
@@ -1373,7 +1387,7 @@ def _resolve_workspace_file_path_candidate(
 
     if not in_workspace:
         raise SageHTTPException(
-            detail="访问被拒绝：文件路径超出工作空间范围",
+            message_key="agent.workspace_access_denied",
             error_detail="Access denied: file path outside workspace",
         )
 
@@ -1387,7 +1401,8 @@ def resolve_workspace_file_path(workspace_path: str | Path, file_path: str) -> s
 
     if not os.path.exists(full_file_abs):
         raise SageHTTPException(
-            detail=f"文件不存在: {normalized_file_path}",
+            message_key="agent.workspace_file_not_found",
+            message_params={"path": normalized_file_path},
             error_detail=f"File not found: {normalized_file_path}",
         )
 
@@ -1404,7 +1419,7 @@ def _resolve_workspace_listing_path(
 
     if os.path.isabs(normalized_path):
         raise SageHTTPException(
-            detail="访问被拒绝：文件路径超出工作空间范围",
+            message_key="agent.workspace_access_denied",
             error_detail="Access denied: file path outside workspace",
         )
 
@@ -1426,7 +1441,7 @@ def _resolve_workspace_listing_path(
 
     if not in_workspace:
         raise SageHTTPException(
-            detail="访问被拒绝：文件路径超出工作空间范围",
+            message_key="agent.workspace_access_denied",
             error_detail="Access denied: file path outside workspace",
         )
 
@@ -1442,7 +1457,7 @@ def list_workspace_files(
     workspace_str = os.fspath(workspace_path)
     if max_depth is not None and max_depth < 0:
         raise SageHTTPException(
-            detail="max_depth 必须大于等于 0",
+            message_key="agent.workspace_max_depth_invalid",
             error_detail="max_depth must be greater than or equal to 0",
         )
 
@@ -1461,7 +1476,7 @@ def list_workspace_files(
             "path": listing_path,
             "max_depth": max_depth,
             "truncated_by_depth": False,
-            "message": "工作空间为空",
+            "message": t("agent.workspace_empty", get_request_locale()),
         }
 
     if not os.path.exists(listing_root):
@@ -1472,12 +1487,13 @@ def list_workspace_files(
             "path": listing_path,
             "max_depth": max_depth,
             "truncated_by_depth": False,
-            "message": "工作空间为空",
+            "message": t("agent.workspace_empty", get_request_locale()),
         }
 
     if not os.path.isdir(listing_root):
         raise SageHTTPException(
-            detail=f"路径不是目录: {listing_path or '.'}",
+            message_key="agent.workspace_not_directory",
+            message_params={"path": listing_path or "."},
             error_detail=f"Path is not a directory: {listing_path or '.'}",
         )
 
@@ -1586,7 +1602,7 @@ def _resolve_sandbox_workspace_file_path(
 ) -> Tuple[str, str]:
     if not sandbox_workspace or not file_path:
         raise SageHTTPException(
-            detail="缺少必要的路径参数",
+            message_key="agent.workspace_path_required",
             error_detail="workspace_path or file_path missing",
         )
 
@@ -1607,7 +1623,7 @@ def _resolve_sandbox_workspace_file_path(
 
     if not in_workspace:
         raise SageHTTPException(
-            detail="访问被拒绝：文件路径超出工作空间范围",
+            message_key="agent.workspace_access_denied",
             error_detail="Access denied: file path outside workspace",
         )
 
@@ -1651,7 +1667,11 @@ async def stat_sandbox_workspace_files(
                 _workspace_stat_error_item(
                     display_path,
                     error_code="FILE_NOT_FOUND",
-                    message=f"文件不存在: {display_path}",
+                    message=t(
+                        "agent.workspace_file_not_found",
+                        get_request_locale(),
+                        {"path": display_path},
+                    ),
                 )
             )
             continue
@@ -1665,7 +1685,11 @@ async def stat_sandbox_workspace_files(
                 _workspace_stat_error_item(
                     display_path,
                     error_code="FILE_NOT_FOUND",
-                    message=f"文件不存在: {display_path}",
+                    message=t(
+                        "agent.workspace_file_not_found",
+                        get_request_locale(),
+                        {"path": display_path},
+                    ),
                 )
             )
             continue
@@ -1726,7 +1750,11 @@ def stat_workspace_files(
                 _workspace_stat_error_item(
                     display_path,
                     error_code="FILE_NOT_FOUND",
-                    message=f"文件不存在: {display_path}",
+                    message=t(
+                        "agent.workspace_file_not_found",
+                        get_request_locale(),
+                        {"path": display_path},
+                    ),
                 )
             )
             continue
@@ -1775,13 +1803,15 @@ def prepare_workspace_download(
             return zip_path, zip_filename, "application/zip"
         except Exception as e:
             raise SageHTTPException(
-                detail=f"创建压缩文件失败: {str(e)}",
+                message_key="agent.workspace_zip_failed",
+                message_params={"message": str(e)},
                 error_detail=f"Failed to create zip file: {str(e)}",
             )
 
     if not os.path.isfile(full_path):
         raise SageHTTPException(
-            detail=f"路径不是文件: {file_path}",
+            message_key="agent.workspace_not_file",
+            message_params={"path": file_path},
             error_detail=f"Path is not a file: {file_path}",
         )
 
@@ -1802,14 +1832,16 @@ def delete_workspace_entry(workspace_path: str | Path, file_path: str) -> bool:
             shutil.rmtree(full_path)
         else:
             raise SageHTTPException(
-                detail=f"路径不存在: {file_path}",
+                message_key="agent.workspace_path_not_found",
+                message_params={"path": file_path},
                 error_detail=f"Path not found: {file_path}",
             )
         return True
     except Exception as e:
         logger.error(f"删除文件失败: {e}")
         raise SageHTTPException(
-            detail=f"删除文件失败: {str(e)}",
+            message_key="agent.workspace_delete_failed",
+            message_params={"message": str(e)},
             error_detail=f"Failed to delete file: {str(e)}",
         )
 
@@ -1822,7 +1854,7 @@ def _resolve_workspace_upload_path(
     if not filename or os.path.basename(filename) != filename:
         raise SageHTTPException(
             status_code=400,
-            detail="非法文件名",
+            message_key="agent.workspace_invalid_filename",
             error_detail="Invalid filename",
         )
 
@@ -1833,7 +1865,7 @@ def _resolve_workspace_upload_path(
     if os.path.isabs(normalized_target):
         raise SageHTTPException(
             status_code=400,
-            detail="访问被拒绝：文件路径超出工作空间范围",
+            message_key="agent.workspace_access_denied",
             error_detail="Access denied: file path outside workspace",
         )
 
@@ -1855,7 +1887,7 @@ def _resolve_workspace_upload_path(
     if not in_workspace:
         raise SageHTTPException(
             status_code=400,
-            detail="访问被拒绝：文件路径超出工作空间范围",
+            message_key="agent.workspace_access_denied",
             error_detail="Access denied: file path outside workspace",
         )
 

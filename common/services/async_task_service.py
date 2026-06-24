@@ -73,11 +73,12 @@ class AsyncTaskService:
             task = self._tasks.get(task_id)
             if not task:
                 raise SageHTTPException(
-                    detail="任务不存在", error_detail=f"task '{task_id}' not found"
+                    message_key="task.not_found",
+                    error_detail=f"task '{task_id}' not found",
                 )
             if task["owner_id"] and owner_id and task["owner_id"] != owner_id:
                 raise SageHTTPException(
-                    detail="无权访问该任务", error_detail="forbidden"
+                    message_key="task.access_forbidden", error_detail="forbidden"
                 )
             return self._public_task(task)
 
@@ -86,11 +87,12 @@ class AsyncTaskService:
             task = self._tasks.get(task_id)
             if not task:
                 raise SageHTTPException(
-                    detail="任务不存在", error_detail=f"task '{task_id}' not found"
+                    message_key="task.not_found",
+                    error_detail=f"task '{task_id}' not found",
                 )
             if task["owner_id"] and owner_id and task["owner_id"] != owner_id:
                 raise SageHTTPException(
-                    detail="无权访问该任务", error_detail="forbidden"
+                    message_key="task.access_forbidden", error_detail="forbidden"
                 )
             asyncio_task = task.get("asyncio_task")
             if asyncio_task and not asyncio_task.done():

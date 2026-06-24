@@ -31,9 +31,9 @@ class KdbService:
     async def _check_kdb_permission(self, kdb_id: str, user_id: Optional[str]) -> Kdb:
         kdb = await self.kdb_dao.get_by_id(kdb_id)
         if not kdb:
-            raise SageHTTPException(detail="KDB not found")
+            raise SageHTTPException(message_key="kdb.not_found")
         if user_id and kdb.user_id and kdb.user_id != user_id:
-            raise SageHTTPException(detail="forbidden")
+            raise SageHTTPException(message_key="kdb.forbidden")
         return kdb
 
     async def add(
@@ -198,7 +198,8 @@ class KdbService:
                     or filename.endswith(".xls")
                 ):
                     raise SageHTTPException(
-                        detail=f"QA知识库仅支持CSV或Excel文件: {uf.filename}",
+                        message_key="kdb.qa_file_unsupported",
+                        message_params={"filename": uf.filename},
                     )
 
                 content = await uf.read()
@@ -247,7 +248,8 @@ class KdbService:
 
                 except Exception as e:
                     raise SageHTTPException(
-                        detail=f"文件格式错误 {uf.filename}: {e} (QA库要求两列数据: Question, Answer)",
+                        message_key="kdb.qa_file_invalid",
+                        message_params={"filename": uf.filename, "message": str(e)},
                     )
                 finally:
                     await uf.seek(0)
@@ -293,7 +295,7 @@ class KdbService:
     async def doc_delete(self, doc_id: str, user_id: Optional[str] = None) -> Kdb:
         kdb_doc = await self.kdb_doc_dao.get_by_id(doc_id)
         if not kdb_doc:
-            raise SageHTTPException(detail="KDB Doc not found")
+            raise SageHTTPException(message_key="kdb.doc_not_found")
         kdb = await self._check_kdb_permission(kdb_doc.kdb_id, user_id)
         await DocumentService().doc_document_delete(kdb.get_index_name(), [doc_id])
         await self.kdb_doc_dao.delete_by_ids([doc_id])

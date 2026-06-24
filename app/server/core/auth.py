@@ -21,11 +21,15 @@ def parse_access_token(token: str) -> Optional[dict]:
         return claims
     except jwt.ExpiredSignatureError:
         raise SageHTTPException(
-            status_code=401, detail="登录过期", error_detail="token expired"
+            status_code=401,
+            message_key="auth.session_expired",
+            error_detail="token expired",
         )
     except Exception:
         raise SageHTTPException(
-            status_code=401, detail="Token非法", error_detail="invalid token"
+            status_code=401,
+            message_key="auth.invalid_token",
+            error_detail="invalid token",
         )
 
 
@@ -36,5 +40,7 @@ def parse_refresh_token(token: str) -> Optional[dict]:
         return claims
     except Exception:
         raise SageHTTPException(
-            status_code=401, detail="Token非法", error_detail="invalid refresh token"
+            status_code=401,
+            message_key="auth.invalid_token",
+            error_detail="invalid refresh token",
         )
