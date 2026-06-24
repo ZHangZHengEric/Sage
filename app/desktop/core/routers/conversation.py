@@ -131,14 +131,14 @@ async def list_conversations(
         agent_id=agent_id,
         sort_by=sort_by,
     )
-    return await Response.succ(data=result, message="获取会话列表成功")
+    return await Response.succ(data=result, message="conversation.list_loaded")
 
 
 @conversation_router.get("/api/conversations/{session_id}/messages")
 async def get_messages(session_id: str, request: Request):
     """获取指定对话的所有消息"""
     data = await conversation_service.get_conversation_messages(session_id)
-    return await Response.succ(data=data, message="获取消息成功")
+    return await Response.succ(data=data, message="conversation.messages_loaded")
 
 
 @conversation_router.post("/api/conversations/{session_id}/edit-last-user-message")
@@ -150,14 +150,16 @@ async def edit_last_user_message(
         content=body.content,
         user_id=get_desktop_user_id(request),
     )
-    return await Response.succ(message="最后一条用户消息已更新", data=data)
+    return await Response.succ(
+        message="conversation.last_user_message_updated", data=data
+    )
 
 
 @conversation_router.get("/api/share/conversations/{session_id}/messages")
 async def get_shared_messages(session_id: str):
     """获取分享对话的消息（无权限校验）"""
     data = await conversation_service.get_conversation_messages(session_id)
-    return await Response.succ(data=data, message="获取分享消息成功")
+    return await Response.succ(data=data, message="conversation.shared_messages_loaded")
 
 
 @conversation_router.delete("/api/conversations/{session_id}")

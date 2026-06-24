@@ -67,7 +67,7 @@ async def login_jaeger(request: Request):
         if user.role != "admin":
             raise SageHTTPException(
                 status_code=403,
-                detail="权限不足",
+                message_key="common.permission_denied",
                 error_detail="observability requires admin role",
             )
         return RedirectResponse(url=next_path, status_code=302)
@@ -82,7 +82,7 @@ async def login_jaeger(request: Request):
 
     raise SageHTTPException(
         status_code=503,
-        detail="Jaeger 仅支持本地管理员登录",
+        message_key="observability.local_admin_required",
         error_detail="local auth required for observability",
     )
 

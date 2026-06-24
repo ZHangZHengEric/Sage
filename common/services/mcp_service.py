@@ -218,7 +218,8 @@ async def add_mcp_server(
     if existing_server and kind != "anytool":
         raise SageHTTPException(
             status_code=500 if _get_cfg().app_mode == "desktop" else 400,
-            detail=f"MCP服务器 '{target_name}' 已存在",
+            message_key="mcp.server_exists",
+            message_params={"server_name": target_name},
             error_detail="MCP服务器名称已存在",
         )
     if (
@@ -228,7 +229,8 @@ async def add_mcp_server(
     ):
         raise SageHTTPException(
             status_code=400,
-            detail=f"MCP服务器 '{target_name}' 已被其他类型占用",
+            message_key="mcp.server_name_conflict",
+            message_params={"server_name": target_name},
             error_detail="MCP server name conflict",
         )
 
@@ -272,7 +274,8 @@ async def add_mcp_server(
                 await tm.remove_tool_by_mcp(target_name)  # pyright: ignore[reportOptionalMemberAccess]
             raise SageHTTPException(
                 status_code=500,
-                detail=f"MCP server {target_name} 注册失败",
+                message_key="mcp.server_register_failed",
+                message_params={"server_name": target_name},
                 error_detail="Tool manager registration failed",
             )
         return target_name
@@ -281,7 +284,8 @@ async def add_mcp_server(
     if not success:
         raise SageHTTPException(
             status_code=500,
-            detail=f"MCP server {target_name} 注册失败",
+            message_key="mcp.server_register_failed",
+            message_params={"server_name": target_name},
             error_detail="Tool manager registration failed",
         )
 
@@ -312,7 +316,8 @@ async def update_mcp_server(
     if not existing_server:
         raise SageHTTPException(
             status_code=500 if _get_cfg().app_mode == "desktop" else 400,
-            detail=f"MCP服务器 '{server_name}' 不存在",
+            message_key="mcp.server_not_found",
+            message_params={"server_name": server_name},
             error_detail="MCP服务器不存在",
         )
 
@@ -322,7 +327,7 @@ async def update_mcp_server(
         and existing_server.user_id != (user_id or "")
     ):
         raise SageHTTPException(
-            detail="无权修改该MCP服务器",
+            message_key="mcp.server_modify_forbidden",
             error_detail="Permission denied",
         )
 
@@ -331,7 +336,7 @@ async def update_mcp_server(
     if not target_name:
         raise SageHTTPException(
             status_code=400,
-            detail="MCP服务器名称不能为空",
+            message_key="mcp.server_name_required",
             error_detail="MCP server name is required",
         )
     if kind == "anytool" and requested_name not in {
@@ -340,14 +345,15 @@ async def update_mcp_server(
     }:
         raise SageHTTPException(
             status_code=400,
-            detail="AnyTool 不支持重命名",
+            message_key="mcp.anytool_rename_forbidden",
             error_detail="AnyTool server name is fixed",
         )
     if target_name != server_name.strip():
         duplicate = await dao.get_by_name(target_name)
         if duplicate:
             raise SageHTTPException(
-                detail=f"MCP服务器 '{target_name}' 已存在",
+                message_key="mcp.server_exists",
+                message_params={"server_name": target_name},
                 error_detail="MCP服务器名称已存在",
             )
 
@@ -399,7 +405,8 @@ async def update_mcp_server(
         if not success:
             raise SageHTTPException(
                 status_code=500,
-                detail=f"MCP server {target_name} 更新失败",
+                message_key="mcp.server_update_failed",
+                message_params={"server_name": target_name},
                 error_detail="Tool manager registration failed",
             )
 
@@ -463,7 +470,8 @@ async def remove_mcp_server(
     if not existing_server:
         raise SageHTTPException(
             status_code=500 if _get_cfg().app_mode == "desktop" else 400,
-            detail=f"MCP服务器 '{server_name}' 不存在",
+            message_key="mcp.server_not_found",
+            message_params={"server_name": server_name},
             error_detail=f"MCP服务器 '{server_name}' 不存在",
         )
 
@@ -473,14 +481,14 @@ async def remove_mcp_server(
         and existing_server.user_id != (user_id or "")
     ):
         raise SageHTTPException(
-            detail="无权删除该MCP服务器",
+            message_key="mcp.server_delete_forbidden",
             error_detail="Permission denied",
         )
 
     if (existing_server.config or {}).get("kind") == "anytool":
         raise SageHTTPException(
             status_code=403,
-            detail="AnyTool 只能关闭，不能删除",
+            message_key="mcp.anytool_delete_forbidden",
             error_detail="AnyTool server cannot be deleted",
         )
 
@@ -488,7 +496,8 @@ async def remove_mcp_server(
     if not success:
         raise SageHTTPException(
             status_code=500,
-            detail=f"MCP服务器 '{server_name}' 删除失败",
+            message_key="mcp.server_delete_failed",
+            message_params={"server_name": server_name},
             error_detail="工具管理器移除失败",
         )
 
@@ -509,7 +518,8 @@ async def preview_mcp_server(
     if not existing_server:
         raise SageHTTPException(
             status_code=500 if _get_cfg().app_mode == "desktop" else 400,
-            detail=f"MCP服务器 '{server_name}' 不存在",
+            message_key="mcp.server_not_found",
+            message_params={"server_name": server_name},
             error_detail=f"MCP服务器 '{server_name}' 不存在",
         )
 
@@ -519,7 +529,7 @@ async def preview_mcp_server(
         and existing_server.user_id != (user_id or "")
     ):
         raise SageHTTPException(
-            detail="无权使用该MCP服务器",
+            message_key="mcp.server_use_forbidden",
             error_detail="Permission denied",
         )
 
@@ -527,7 +537,7 @@ async def preview_mcp_server(
     if server_config.get("kind") != "anytool":
         raise SageHTTPException(
             status_code=400,
-            detail="仅 AnyTool 支持预览执行",
+            message_key="mcp.anytool_preview_only",
             error_detail="preview only available for anytool servers",
         )
 
@@ -536,7 +546,8 @@ async def preview_mcp_server(
     if not tool_def:
         raise SageHTTPException(
             status_code=404,
-            detail=f"AnyTool '{tool_name}' 不存在",
+            message_key="mcp.anytool_not_found",
+            message_params={"tool_name": tool_name},
             error_detail="tool definition not found",
         )
 
@@ -562,14 +573,14 @@ async def preview_anytool_draft(
     if not tool_name or _has_anytool_name_whitespace(tool_name):
         raise SageHTTPException(
             status_code=400,
-            detail="AnyTool 名称不能为空且不能包含空格",
+            message_key="mcp.anytool_name_invalid",
             error_detail="AnyTool tool name cannot contain whitespace",
         )
     tool_list = normalize_anytool_tools([tool_definition])
     if not tool_list:
         raise SageHTTPException(
             status_code=400,
-            detail="tool_definition 无效",
+            message_key="mcp.anytool_definition_invalid",
             error_detail="invalid AnyTool definition",
         )
 
@@ -608,7 +619,7 @@ async def upsert_anytool_tool(
     if not existing_server:
         raise SageHTTPException(
             status_code=500,
-            detail="AnyTool server 不存在",
+            message_key="mcp.anytool_server_not_found",
             error_detail="AnyTool server not found",
         )
 
@@ -618,7 +629,7 @@ async def upsert_anytool_tool(
         and existing_server.user_id not in {"", user_id or ""}
     ):
         raise SageHTTPException(
-            detail="无权修改该 AnyTool",
+            message_key="mcp.anytool_modify_forbidden",
             error_detail="Permission denied",
         )
 
@@ -626,7 +637,7 @@ async def upsert_anytool_tool(
     if server_config.get("kind") != "anytool":
         raise SageHTTPException(
             status_code=400,
-            detail="仅 AnyTool 支持工具编辑",
+            message_key="mcp.anytool_edit_only",
             error_detail="upsert only available for anytool servers",
         )
 
@@ -634,14 +645,14 @@ async def upsert_anytool_tool(
     if not normalized_tool_list:
         raise SageHTTPException(
             status_code=400,
-            detail="tool_definition 无效",
+            message_key="mcp.anytool_definition_invalid",
             error_detail="invalid AnyTool definition",
         )
     next_tool = normalized_tool_list[0]
     if _has_anytool_name_whitespace(next_tool.get("name")):
         raise SageHTTPException(
             status_code=400,
-            detail="AnyTool 名称不能包含空格",
+            message_key="mcp.anytool_name_whitespace",
             error_detail="AnyTool tool name cannot contain whitespace",
         )
 
@@ -657,7 +668,8 @@ async def upsert_anytool_tool(
         if not original_name and tool_name == next_name:
             raise SageHTTPException(
                 status_code=400,
-                detail=f"AnyTool '{next_name}' 已存在",
+                message_key="mcp.anytool_exists",
+                message_params={"tool_name": next_name},
                 error_detail="tool definition already exists",
             )
         keep_tools.append(tool)
@@ -669,7 +681,8 @@ async def upsert_anytool_tool(
         if duplicate:
             raise SageHTTPException(
                 status_code=400,
-                detail=f"AnyTool '{next_name}' 已存在",
+                message_key="mcp.anytool_exists",
+                message_params={"tool_name": next_name},
                 error_detail="tool definition already exists",
             )
 
@@ -713,7 +726,7 @@ async def delete_anytool_tool(
     if not target:
         raise SageHTTPException(
             status_code=400,
-            detail="tool_name 必填",
+            message_key="mcp.tool_name_required",
             error_detail="tool_name is required",
         )
 
@@ -722,7 +735,7 @@ async def delete_anytool_tool(
     if not existing_server:
         raise SageHTTPException(
             status_code=404,
-            detail="AnyTool server 不存在",
+            message_key="mcp.anytool_server_not_found",
             error_detail="AnyTool server not found",
         )
 
@@ -732,7 +745,7 @@ async def delete_anytool_tool(
         and existing_server.user_id not in {"", user_id or ""}
     ):
         raise SageHTTPException(
-            detail="无权修改该 AnyTool",
+            message_key="mcp.anytool_modify_forbidden",
             error_detail="Permission denied",
         )
 
@@ -740,7 +753,7 @@ async def delete_anytool_tool(
     if server_config.get("kind") != "anytool":
         raise SageHTTPException(
             status_code=400,
-            detail="仅 AnyTool 支持工具删除",
+            message_key="mcp.anytool_delete_only",
             error_detail="delete only available for anytool servers",
         )
 
@@ -749,7 +762,8 @@ async def delete_anytool_tool(
     if len(keep_tools) == len(current_tools):
         raise SageHTTPException(
             status_code=404,
-            detail=f"AnyTool '{target}' 不存在",
+            message_key="mcp.anytool_not_found",
+            message_params={"tool_name": target},
             error_detail="tool definition not found",
         )
 
@@ -817,7 +831,8 @@ async def toggle_mcp_server(
     if not existing_server:
         raise SageHTTPException(
             status_code=500 if _get_cfg().app_mode == "desktop" else 400,
-            detail=f"MCP服务器 '{server_name}' 不存在",
+            message_key="mcp.server_not_found",
+            message_params={"server_name": server_name},
             error_detail=f"MCP服务器 '{server_name}' 不存在",
         )
 
@@ -840,7 +855,8 @@ async def toggle_mcp_server(
             )
             if not success:
                 raise SageHTTPException(
-                    detail=f"MCP服务器 '{server_name}' 启用失败",
+                    message_key="mcp.server_enable_failed",
+                    message_params={"server_name": server_name},
                     error_detail="工具管理器注册失败",
                 )
 
@@ -858,7 +874,8 @@ async def refresh_mcp_server(
     if not existing_server:
         raise SageHTTPException(
             status_code=500 if _get_cfg().app_mode == "desktop" else 400,
-            detail=f"MCP服务器 '{server_name}' 不存在",
+            message_key="mcp.server_not_found",
+            message_params={"server_name": server_name},
             error_detail=f"MCP服务器 '{server_name}' 不存在",
         )
 
@@ -868,7 +885,7 @@ async def refresh_mcp_server(
         and existing_server.user_id != (user_id or "")
     ):
         raise SageHTTPException(
-            detail="无权操作该MCP服务器",
+            message_key="mcp.server_operate_forbidden",
             error_detail="Permission denied",
         )
 

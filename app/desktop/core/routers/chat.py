@@ -12,7 +12,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
+from common.core.context import get_request_locale
 from common.core.exceptions import SageHTTPException
+from common.core.i18n import t
 from common.models.agent import AgentConfigDao
 from common.services import chat_service
 from common.services import conversation_service
@@ -296,7 +298,10 @@ async def stream_api_with_disconnect_check(
     except (asyncio.CancelledError, GeneratorExit) as e:
         # 标记会话中断，让内部逻辑有机会感知并处理
         try:
-            await conversation_service.interrupt_session(session_id, "客户端断开连接")
+            await conversation_service.interrupt_session(
+                session_id,
+                t("chat.client_disconnected", locale=get_request_locale()),
+            )
         except Exception as ex:
             logger.bind(session_id=session_id).error(
                 f"Error interrupting session: {ex}"
@@ -413,7 +418,7 @@ def validate_and_prepare_request(
     if not chat_client:
         raise SageHTTPException(
             status_code=503,
-            detail="模型客户端未配置或不可用",
+            message_key="llm_provider.client_unavailable",
             error_detail="Model client is not configured or unavailable",
         )
 
@@ -422,7 +427,9 @@ def validate_and_prepare_request(
         if not allow_pending_guidance_flush or not _has_pending_user_injections(
             request.session_id
         ):
-            raise SageHTTPException(status_code=500, detail="消息列表不能为空")
+            raise SageHTTPException(
+                status_code=500, message_key="chat.messages_required"
+            )
         logger.bind(session_id=request.session_id).info(
             "允许空 messages 请求消费 pending guidance"
         )
@@ -456,7 +463,7 @@ async def stream_chat_web(request: StreamRequest, http_request: Request):
     return await _start_web_stream_session(
         request,
         manager=manager,
-        interrupt_message="同会话重入，先中断旧会话",
+        interrupt_message=t("chat.interrupt_same_session", locale=get_request_locale()),
         query=query,  # pyright: ignore[reportArgumentType]
     )
 
@@ -551,6 +558,8 @@ async def rerun_conversation_stream(
     return await _start_web_stream_session(
         request,
         manager=manager,
-        interrupt_message="重新执行最后一条用户消息，先中断旧会话",
+        interrupt_message=t(
+            "chat.interrupt_rerun_last_user", locale=get_request_locale()
+        ),
         query=guidance_content or payload["query"] or "",
     )

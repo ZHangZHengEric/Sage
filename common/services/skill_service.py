@@ -398,10 +398,11 @@ def _check_skill_permission(
     if dimension_info["dimension"] == "system":
         if action in ("delete", "modify"):
             raise SageHTTPException(
-                detail=f"Permission denied: Cannot {action} system skill"
+                message_key="skill.system_modify_forbidden",
+                message_params={"action": action},
             )
     elif dimension_info["owner_user_id"] != user_id:
-        raise SageHTTPException(detail="Permission denied")
+        raise SageHTTPException(message_key="common.permission_denied")
 
 
 def _sync_desktop_agent_skills() -> None:
@@ -982,16 +983,21 @@ async def sync_skill_to_agent_workspaces(
 ) -> Dict[str, Any]:
     cfg = _get_cfg()
     if cfg.app_mode == "desktop":
-        raise SageHTTPException(status_code=500, detail="该接口仅支持 server 模式")
+        raise SageHTTPException(
+            status_code=500, message_key="skill.server_mode_required"
+        )
 
     agent_dao = AgentConfigDao()
     agent = await agent_dao.get_by_id(agent_id)
     if not agent:
-        raise SageHTTPException(detail=f"Agent '{agent_id}' 不存在")
+        raise SageHTTPException(
+            message_key="skill.agent_not_found",
+            message_params={"agent_id": agent_id},
+        )
 
     agent_owner_user_id = agent.user_id or user_id
     if role != "admin" and agent_owner_user_id != user_id:
-        raise SageHTTPException(detail="无权批量同步该Agent工作空间中的技能")
+        raise SageHTTPException(message_key="skill.workspace_batch_sync_forbidden")
 
     if skill_names is not None:
         resolved_skill_names = _resolve_agent_selected_skills(
@@ -1094,7 +1100,10 @@ async def sync_workspace_skills(
     agent_dao = AgentConfigDao()
     agent = await agent_dao.get_by_id(agent_id)
     if not agent:
-        raise SageHTTPException(detail=f"Agent '{agent_id}' 不存在")
+        raise SageHTTPException(
+            message_key="skill.agent_not_found",
+            message_params={"agent_id": agent_id},
+        )
 
     agent_config = agent.config or {}
     selected_skills = [
@@ -1118,7 +1127,7 @@ async def sync_workspace_skills(
             ensure_exists=True,
         )
     except ValueError:
-        raise SageHTTPException(detail="sync_workspace_skills 失败: 缺少 user_id")
+        raise SageHTTPException(message_key="skill.workspace_sync_missing_user")
 
     existing_skills = await asyncio.to_thread(
         _list_skill_dir_names_sync, agent_skills_dir
@@ -1211,13 +1220,16 @@ async def sync_skill_to_agent(
     agent_dao = AgentConfigDao()
     agent = await agent_dao.get_by_id(agent_id)
     if not agent:
-        raise SageHTTPException(detail=f"Agent '{agent_id}' 不存在")
+        raise SageHTTPException(
+            message_key="skill.agent_not_found",
+            message_params={"agent_id": agent_id},
+        )
 
     agent_user_id = agent.user_id if agent.user_id else user_id
 
     # 检查权限
     if role != "admin" and agent_user_id != user_id:
-        raise SageHTTPException(detail="无权同步技能到该Agent")
+        raise SageHTTPException(message_key="skill.sync_to_agent_forbidden")
 
     # 1. 查找源技能（优先从用户技能，然后是系统技能）
     source_skill_path = await asyncio.to_thread(
@@ -1235,7 +1247,10 @@ async def sync_skill_to_agent(
         logger.info(f"找到技能 '{skill_name}' 路径: {source_skill_path}")
 
     if source_skill_path is None:
-        raise SageHTTPException(detail=f"技能 '{skill_name}' 在技能广场中不存在")
+        raise SageHTTPException(
+            message_key="skill.not_found_in_square",
+            message_params={"skill_name": skill_name},
+        )
 
     # 2. 确保Agent工作空间技能目录存在
     agent_skills_dir = str(
@@ -1272,7 +1287,10 @@ async def sync_skill_to_agent(
         }
     except Exception as e:
         logger.error(f"同步技能失败: {e}")
-        raise SageHTTPException(detail=f"同步技能失败: {str(e)}")
+        raise SageHTTPException(
+            message_key="skill.sync_failed",
+            message_params={"message": str(e)},
+        )
 
 
 async def delete_skill(
@@ -1284,11 +1302,15 @@ async def delete_skill(
     if _is_desktop_mode():
         tm = get_skill_manager()
         if not tm:
-            raise SageHTTPException(status_code=500, detail="技能管理器未初始化")
+            raise SageHTTPException(
+                status_code=500, message_key="skill.manager_not_initialized"
+            )
         skill_info = _get_skill_info_safe(tm, skill_name)
         if not skill_info:
             raise SageHTTPException(
-                status_code=500, detail=f"Skill '{skill_name}' not found"
+                status_code=500,
+                message_key="skill.not_found",
+                message_params={"skill_name": skill_name},
             )
         try:
             tm.remove_skill(skill_name)
@@ -1302,7 +1324,11 @@ async def delete_skill(
                     )
         except Exception as e:
             logger.error(f"Delete skill failed: {e}")
-            raise SageHTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+            raise SageHTTPException(
+                status_code=500,
+                message_key="skill.delete_failed",
+                message_params={"message": str(e)},
+            )
         return
 
     cfg = _get_cfg()
@@ -1318,17 +1344,21 @@ async def delete_skill(
                 / skill_name
             )
         except ValueError:
-            raise SageHTTPException(detail="删除Agent技能失败: 缺少 user_id")
+            raise SageHTTPException(message_key="skill.delete_agent_missing_user")
         if not os.path.exists(agent_skills_path):
             raise SageHTTPException(
-                detail=f"Skill '{skill_name}' not found in agent workspace"
+                message_key="skill.not_found_in_agent_workspace",
+                message_params={"skill_name": skill_name},
             )
         try:
             await asyncio.to_thread(shutil.rmtree, agent_skills_path)
             _invalidate_server_skills_cache()
             return
         except (PermissionError, OSError) as e:
-            raise SageHTTPException(detail=f"删除技能文件失败: {e}")
+            raise SageHTTPException(
+                message_key="skill.delete_file_failed",
+                message_params={"message": str(e)},
+            )
 
     if user_id:
         user_skills_path = os.path.join(cfg.user_dir, user_id, "skills", skill_name)
@@ -1338,12 +1368,17 @@ async def delete_skill(
                 _invalidate_server_skills_cache()
                 return
             except (PermissionError, OSError) as e:
-                raise SageHTTPException(detail=f"删除技能文件失败: {e}")
+                raise SageHTTPException(
+                    message_key="skill.delete_file_failed",
+                    message_params={"message": str(e)},
+                )
 
     system_skills_path = os.path.join(cfg.skill_dir, skill_name)
     if os.path.exists(system_skills_path):
         if role != "admin":
-            raise SageHTTPException(detail="无权删除系统技能", error_detail="forbidden")
+            raise SageHTTPException(
+                message_key="skill.delete_system_forbidden", error_detail="forbidden"
+            )
         try:
             await asyncio.to_thread(shutil.rmtree, system_skills_path)
             skill_manager = get_skill_manager()
@@ -1352,7 +1387,10 @@ async def delete_skill(
             _invalidate_server_skills_cache()
             return
         except (PermissionError, OSError) as e:
-            raise SageHTTPException(detail=f"删除技能文件失败: {e}")
+            raise SageHTTPException(
+                message_key="skill.delete_file_failed",
+                message_params={"message": str(e)},
+            )
 
 
 async def get_skill_content(
@@ -1361,23 +1399,31 @@ async def get_skill_content(
     if _is_desktop_mode():
         tm = get_skill_manager()
         if not tm:
-            raise SageHTTPException(status_code=500, detail="技能管理器未初始化")
+            raise SageHTTPException(
+                status_code=500, message_key="skill.manager_not_initialized"
+            )
         skill_info = _get_skill_info_safe(tm, skill_name)
         if not skill_info:
             raise SageHTTPException(
-                status_code=500, detail=f"Skill '{skill_name}' not found"
+                status_code=500,
+                message_key="skill.not_found",
+                message_params={"skill_name": skill_name},
             )
     else:
         skill_info = await asyncio.to_thread(_find_server_skill_by_name, skill_name)
         if not skill_info:
-            raise SageHTTPException(detail=f"Skill '{skill_name}' not found")
+            raise SageHTTPException(
+                message_key="skill.not_found",
+                message_params={"skill_name": skill_name},
+            )
         dimension_info = _get_skill_dimension(skill_info.path)
         _check_skill_permission(dimension_info, user_id, role, "access")
 
     skill_path = os.path.join(skill_info.path, "SKILL.md")
     if not os.path.exists(skill_path):
         raise SageHTTPException(
-            status_code=500 if _is_desktop_mode() else 400, detail="SKILL.md not found"
+            status_code=500 if _is_desktop_mode() else 400,
+            message_key="skill.file_not_found",
         )
 
     try:
@@ -1386,7 +1432,8 @@ async def get_skill_content(
     except Exception as e:
         raise SageHTTPException(
             status_code=500 if _is_desktop_mode() else 400,
-            detail=f"Failed to read skill content: {e}",
+            message_key="skill.read_failed",
+            message_params={"message": str(e)},
         )
 
 
@@ -1399,16 +1446,23 @@ async def update_skill_content(
     if _is_desktop_mode():
         tm = get_skill_manager()
         if not tm:
-            raise SageHTTPException(status_code=500, detail="技能管理器未初始化")
+            raise SageHTTPException(
+                status_code=500, message_key="skill.manager_not_initialized"
+            )
         skill_info = _get_skill_info_safe(tm, skill_name)
         if not skill_info:
             raise SageHTTPException(
-                status_code=500, detail=f"Skill '{skill_name}' not found"
+                status_code=500,
+                message_key="skill.not_found",
+                message_params={"skill_name": skill_name},
             )
     else:
         skill_info = await asyncio.to_thread(_find_server_skill_by_name, skill_name)
         if not skill_info:
-            raise SageHTTPException(detail=f"Skill '{skill_name}' not found")
+            raise SageHTTPException(
+                message_key="skill.not_found",
+                message_params={"skill_name": skill_name},
+            )
         dimension_info = _get_skill_dimension(skill_info.path)
         _check_skill_permission(dimension_info, user_id, role, "modify")
 
@@ -1421,7 +1475,8 @@ async def update_skill_content(
     except Exception as e:
         raise SageHTTPException(
             status_code=500 if _is_desktop_mode() else 400,
-            detail=f"Failed to read original skill content: {e}",
+            message_key="skill.read_original_failed",
+            message_params={"message": str(e)},
         )
 
     try:
@@ -1446,11 +1501,12 @@ async def update_skill_content(
         if isinstance(e, ValueError) and str(e) == "Skill validation failed":
             raise SageHTTPException(
                 status_code=500,
-                detail="技能格式验证失败，已还原修改。请检查 SKILL.md 格式。",
+                message_key="skill.validation_failed_rolled_back",
             )
         raise SageHTTPException(
             status_code=500 if _is_desktop_mode() else 400,
-            detail=f"Failed to update skill content: {e}",
+            message_key="skill.update_failed",
+            message_params={"message": str(e)},
         )
 
 
@@ -1618,11 +1674,12 @@ async def import_skill_by_file(
 ) -> str:
     if not file.filename.endswith(".zip"):  # pyright: ignore[reportOptionalMemberAccess]
         raise SageHTTPException(
-            status_code=500 if _is_desktop_mode() else 400, detail="仅支持 ZIP 文件"
+            status_code=500 if _is_desktop_mode() else 400,
+            message_key="skill.zip_only",
         )
 
     if not _is_desktop_mode() and is_system and role != "admin":
-        raise SageHTTPException(detail="权限不足：只有管理员可以导入系统技能")
+        raise SageHTTPException(message_key="skill.import_system_admin_required")
 
     tmp_file_path = ""
     try:
@@ -1631,7 +1688,9 @@ async def import_skill_by_file(
         if _is_desktop_mode():
             tm = get_skill_manager()
             if not tm:
-                raise SageHTTPException(status_code=500, detail="技能管理器未初始化")
+                raise SageHTTPException(
+                    status_code=500, message_key="skill.manager_not_initialized"
+                )
             success, message = await _process_desktop_zip_and_register(
                 tm,
                 tmp_file_path,
@@ -1671,7 +1730,9 @@ async def import_skill_by_file(
         if isinstance(e, SageHTTPException):
             raise
         raise SageHTTPException(
-            status_code=500 if _is_desktop_mode() else 400, detail=f"导入失败: {str(e)}"
+            status_code=500 if _is_desktop_mode() else 400,
+            message_key="skill.import_failed",
+            message_params={"message": str(e)},
         )
     finally:
         if tmp_file_path and os.path.exists(tmp_file_path):
@@ -1712,11 +1773,15 @@ async def import_desktop_skills_by_paths(
     role: str = "user",
 ) -> Dict[str, Any]:
     if not _is_desktop_mode():
-        raise SageHTTPException(status_code=400, detail="仅桌面端支持路径导入")
+        raise SageHTTPException(
+            status_code=400, message_key="skill.desktop_path_import_required"
+        )
 
     tm = get_skill_manager()
     if not tm:
-        raise SageHTTPException(status_code=500, detail="技能管理器未初始化")
+        raise SageHTTPException(
+            status_code=500, message_key="skill.manager_not_initialized"
+        )
 
     results: List[Dict[str, Any]] = []
     for raw_path in paths:
@@ -1800,7 +1865,7 @@ async def import_skill_by_url(
     agent_id: Optional[str] = None,
 ) -> str:
     if not _is_desktop_mode() and is_system and role != "admin":
-        raise SageHTTPException(detail="权限不足：只有管理员可以导入系统技能")
+        raise SageHTTPException(message_key="skill.import_system_admin_required")
 
     tmp_file_path = ""
     try:
@@ -1822,7 +1887,9 @@ async def import_skill_by_url(
         if _is_desktop_mode():
             tm = get_skill_manager()
             if not tm:
-                raise SageHTTPException(status_code=500, detail="技能管理器未初始化")
+                raise SageHTTPException(
+                    status_code=500, message_key="skill.manager_not_initialized"
+                )
             success, message = await _process_desktop_zip_and_register(
                 tm, tmp_file_path, filename, user_id
             )
@@ -1857,7 +1924,9 @@ async def import_skill_by_url(
         if isinstance(e, SageHTTPException):
             raise
         raise SageHTTPException(
-            status_code=500 if _is_desktop_mode() else 400, detail=f"导入失败: {str(e)}"
+            status_code=500 if _is_desktop_mode() else 400,
+            message_key="skill.import_failed",
+            message_params={"message": str(e)},
         )
     finally:
         if tmp_file_path and os.path.exists(tmp_file_path):

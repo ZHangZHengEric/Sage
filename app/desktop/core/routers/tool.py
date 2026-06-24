@@ -72,4 +72,4 @@ async def get_tools(
         language=_resolve_request_language(http_request, language, default="zh"),
     )
 
-    return await Response.succ(message="获取工具列表成功", data={"tools": tools})
+    return await Response.succ(message="tool.list_loaded", data={"tools": tools})
