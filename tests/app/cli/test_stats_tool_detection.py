@@ -36,6 +36,19 @@ class TestStatsToolDetection(unittest.TestCase):
         self.assertIsNotNone(request.system_context)
         self.assertEqual(request.system_context.get("response_language"), "zh-CN")  # pyright: ignore[reportOptionalMemberAccess]
 
+    def test_build_run_request_injects_sandbox_approval_mode(self):
+        request = cli_service.build_run_request(
+            task="hello",
+            sandbox_approval_mode="unless-trusted",
+        )
+
+        self.assertEqual(request.sandbox_approval_mode, "untrusted")
+        self.assertIsNotNone(request.system_context)
+        self.assertEqual(
+            request.system_context.get("sandbox_approval_mode"),  # pyright: ignore[reportOptionalMemberAccess]
+            "untrusted",
+        )
+
     def test_chat_help_mentions_resume_and_history_commands(self):
         self.assertIn("sage resume <session_id>", CHAT_COMMAND_HELP)
         self.assertIn("sage sessions", CHAT_COMMAND_HELP)

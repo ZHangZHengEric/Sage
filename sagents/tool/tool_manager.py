@@ -1196,6 +1196,7 @@ class ToolManager:
         # declares the same keys, they are reintroduced by the generic overlay.
         normalized.pop("session_id", None)
         normalized.pop("user_id", None)
+        normalized.pop("sandbox_approval_mode", None)
 
         return self._apply_system_context_overrides(tool, normalized, trusted_context)
 

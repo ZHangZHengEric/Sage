@@ -209,6 +209,7 @@ async def build_request(args: argparse.Namespace, task: str):
         agent_config=agent_config,
         goal=goal,
         workspace=args.workspace,
+        sandbox_approval_mode=getattr(args, "sandbox_approval_mode", None),
     )
 
 
@@ -228,6 +229,7 @@ async def run_command(
         workspace=args.workspace,
         max_loop_count=args.max_loop_count,
         sandbox_type=getattr(args, "sandbox_type", None),
+        sandbox_approval_mode=getattr(args, "sandbox_approval_mode", None),
     )
     _prepare_agent_config(args)
     validate_cli_runtime_requirements()
@@ -239,6 +241,8 @@ async def run_command(
         }
         if getattr(args, "sandbox_type", None):
             stream_kwargs["sandbox_type"] = args.sandbox_type
+        if getattr(args, "sandbox_approval_mode", None):
+            stream_kwargs["sandbox_approval_mode"] = args.sandbox_approval_mode
         await stream_request_fn(
             request,
             args.json,
@@ -271,6 +275,7 @@ async def chat_command(
         workspace=args.workspace,
         max_loop_count=args.max_loop_count,
         sandbox_type=getattr(args, "sandbox_type", None),
+        sandbox_approval_mode=getattr(args, "sandbox_approval_mode", None),
     )
     _prepare_agent_config(args)
     session_summary: Optional[Dict[str, Any]] = None
@@ -341,6 +346,8 @@ async def chat_command(
                 }
                 if getattr(args, "sandbox_type", None):
                     stream_kwargs["sandbox_type"] = args.sandbox_type
+                if getattr(args, "sandbox_approval_mode", None):
+                    stream_kwargs["sandbox_approval_mode"] = args.sandbox_approval_mode
                 await stream_request_fn(
                     request,
                     args.json,

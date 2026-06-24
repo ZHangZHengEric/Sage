@@ -76,6 +76,9 @@ class StreamRequest(BaseChatRequest):
     context_budget_config: Optional[Dict[str, Any]] = None
     # 额外的 mcp 配置
     extra_mcp_config: Optional[Dict[str, Dict[str, Any]]] = None
+    # Runtime command approval policy. This is run/session scoped; apps should
+    # set it on the request instead of relying on process-wide environment.
+    sandbox_approval_mode: Optional[str] = None
     # 内部使用：标记本次执行来源与开始时间，不参与外部序列化
     request_source: Optional[str] = Field(default=None, exclude=True)
     execution_started_at: Optional[datetime] = Field(default=None, exclude=True)

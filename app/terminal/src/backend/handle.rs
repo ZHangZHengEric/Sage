@@ -130,7 +130,10 @@ impl BackendHandle {
                 .arg(sandbox_type)
                 .env("SAGE_SANDBOX_MODE", sandbox_type);
         }
-        command.env("SAGE_APPROVAL_MODE", &request.sandbox_approval_mode);
+        command
+            .arg("--sandbox-approval-mode")
+            .arg(&request.sandbox_approval_mode)
+            .env("SAGE_APPROVAL_MODE", &request.sandbox_approval_mode);
         if request.agent_config.is_none() {
             if let Some(agent_id) = &request.agent_id {
                 command.arg("--agent-id").arg(agent_id);
