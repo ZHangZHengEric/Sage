@@ -1183,6 +1183,7 @@ class Session:
                 role=MessageRole.ASSISTANT.value,
                 content="",
                 message_type=MessageType.TOKEN_USAGE.value,
+                session_id=session_id,
                 metadata={
                     "token_usage": token_usage,
                     "model": primary_model,

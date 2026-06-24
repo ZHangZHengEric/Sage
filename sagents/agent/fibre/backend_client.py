@@ -446,6 +446,8 @@ class FibreBackendClient:
                     if not data:
                         continue
 
+                    data.setdefault("session_id", session_id)
+
                     # 获取 message_id，如果没有则生成一个临时 ID
                     message_id = (
                         data.get("message_id")
@@ -455,7 +457,6 @@ class FibreBackendClient:
 
                     # 没有 role 的控制事件（如 stream_end）也要原样透传给父流。
                     if "role" not in data:
-                        data.setdefault("session_id", session_id)
                         yield [data]
                         continue
 
