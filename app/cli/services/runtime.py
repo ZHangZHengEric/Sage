@@ -14,6 +14,10 @@ from dotenv import load_dotenv
 from app.cli.services.base import CLIError
 from common.core import config
 from common.schemas.chat import Message, StreamRequest
+from sagents.utils.sandbox.policy import (
+    SUPPORTED_APPROVAL_MODES,
+    normalize_approval_mode,
+)
 
 AGENT_CONFIG_PRESETS = {
     "coding": "examples/coding_agent_config.json",
@@ -903,6 +907,7 @@ def build_run_request(
     goal: Optional[Dict[str, Any]] = None,
     agent_config: Optional[Dict[str, Any]] = None,
     workspace: Optional[str] = None,
+    sandbox_approval_mode: Optional[str] = None,
 ) -> StreamRequest:
     if agent_config is None:
         agent_config = {}
@@ -978,6 +983,19 @@ def build_run_request(
     system_context = dict(config_system_context)
     if not system_context:
         system_context["response_language"] = "zh-CN"
+    config_approval_mode = _agent_config_string(
+        _agent_config_value(
+            agent_config,
+            "sandboxApprovalMode",
+            "sandbox_approval_mode",
+        ),
+        "sandboxApprovalMode",
+    )
+    normalized_approval_mode = normalize_sandbox_approval_mode(
+        sandbox_approval_mode or config_approval_mode
+    )
+    if normalized_approval_mode:
+        system_context["sandbox_approval_mode"] = normalized_approval_mode
     apply_workspace_guidance_to_system_context(
         system_context,
         agent_config=agent_config,
@@ -1087,6 +1105,7 @@ def build_run_request(
         or "session",
         max_loop_count=effective_max_loop_count,
         system_context=system_context,
+        sandbox_approval_mode=normalized_approval_mode,
     )
 
 
@@ -1095,6 +1114,7 @@ def validate_cli_request_options(
     workspace: Optional[str] = None,
     max_loop_count: Optional[int] = None,
     sandbox_type: Optional[str] = None,
+    sandbox_approval_mode: Optional[str] = None,
 ) -> Optional[str]:
     if max_loop_count is not None:
         _cli_positive_int(
@@ -1104,6 +1124,8 @@ def validate_cli_request_options(
 
     if sandbox_type is not None:
         normalize_sandbox_type(sandbox_type)
+    if sandbox_approval_mode is not None:
+        normalize_sandbox_approval_mode(sandbox_approval_mode)
 
     if not workspace:
         return None
@@ -1145,6 +1167,7 @@ async def run_request_stream(
     request: StreamRequest,
     workspace: Optional[str] = None,
     sandbox_type: Optional[str] = None,
+    sandbox_approval_mode: Optional[str] = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     from common.services.chat_service import (
         _copy_sage_usage_docs_to_workspace,
@@ -1155,6 +1178,14 @@ async def run_request_stream(
     from common.services.chat_utils import create_skill_proxy
 
     sandbox_type = normalize_sandbox_type(sandbox_type)
+    normalized_approval_mode = normalize_sandbox_approval_mode(
+        sandbox_approval_mode or request.sandbox_approval_mode
+    )
+    if normalized_approval_mode:
+        request.sandbox_approval_mode = normalized_approval_mode
+        if request.system_context is None:
+            request.system_context = {}
+        request.system_context["sandbox_approval_mode"] = normalized_approval_mode
     previous_sandbox_mode = os.environ.get("SAGE_SANDBOX_MODE")
     if sandbox_type:
         os.environ["SAGE_SANDBOX_MODE"] = sandbox_type
@@ -1205,6 +1236,23 @@ def normalize_sandbox_type(sandbox_type: Optional[str]) -> Optional[str]:
             ],
         )
     return normalized
+
+
+def normalize_sandbox_approval_mode(
+    sandbox_approval_mode: Optional[str],
+) -> Optional[str]:
+    if sandbox_approval_mode is None:
+        return None
+    mode = normalize_approval_mode(sandbox_approval_mode)
+    if mode is None:
+        raise CLIError(
+            f"Unsupported sandbox approval mode: {sandbox_approval_mode}",
+            next_steps=[
+                "Use `untrusted`, `on-request`, or `never`.",
+            ],
+            debug_detail=f"supported={', '.join(SUPPORTED_APPROVAL_MODES)}",
+        )
+    return mode
 
 
 def validate_cli_runtime_requirements() -> config.StartupConfig:

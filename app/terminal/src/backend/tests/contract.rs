@@ -87,19 +87,14 @@ fn parse_backend_line_hydrates_session_goal_from_tool_result_goal_update() {
 #[test]
 fn parse_backend_line_turns_sandbox_policy_ask_into_approval_request() {
     let line = json!({
-        "type": "tool_result",
-        "metadata": {"tool_name": "execute_shell_command"},
-        "content": json!({
-            "success": false,
-            "error_code": "SAFETY_BLOCKED",
-            "command": "git push origin main",
-            "policy_action": "ask",
-            "policy_category": "git-push",
-            "policy_reason": "git push changes remote state",
-            "policy_approval_mode": "on-request",
-            "approval_id": "shapproval_demo",
-            "hint": "Ask the user for confirmation before retrying this command."
-        }).to_string()
+        "type": "sandbox_approval_requested",
+        "tool_name": "execute_shell_command",
+        "command": "git push origin main",
+        "category": "git-push",
+        "reason": "git push changes remote state",
+        "approval_mode": "on-request",
+        "approval_id": "shapproval_demo",
+        "hint": "Ask the user for confirmation before retrying this command."
     })
     .to_string();
 

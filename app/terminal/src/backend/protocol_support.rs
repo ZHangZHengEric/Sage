@@ -5,7 +5,6 @@ use crate::backend::{
     SandboxApprovalRequest,
 };
 use crate::display_policy::{internal_tool_count, visible_tool_names, DisplayMode};
-use serde_json::Value;
 
 pub(super) fn backend_stats_from_event(event: CliStreamEvent) -> BackendStats {
     BackendStats {
@@ -181,53 +180,19 @@ pub(super) fn collect_tool_names(event: &CliStreamEvent) -> Vec<String> {
 pub(super) fn sandbox_approval_from_event(
     event: &CliStreamEvent,
 ) -> Option<SandboxApprovalRequest> {
-    if event.event_type != "tool_result" {
+    if event.event_type != "sandbox_approval_requested" {
         return None;
     }
-    let tool_names = collect_tool_names(event);
-    if !tool_names
-        .iter()
-        .any(|name| name == "execute_shell_command")
-    {
-        return None;
-    }
-
-    let payload = serde_json::from_str::<Value>(&event.content).ok()?;
-    if payload
-        .get("error_code")
-        .and_then(Value::as_str)
-        .filter(|value| *value == "SAFETY_BLOCKED")
-        .is_none()
-    {
-        return None;
-    }
-    if payload
-        .get("policy_action")
-        .and_then(Value::as_str)
-        .filter(|value| *value == "ask")
-        .is_none()
-    {
-        return None;
-    }
-
-    let approval_id = payload
-        .get("approval_id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?;
-    let command = payload
-        .get("command")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?;
+    let approval_id = trimmed_option(event.approval_id.as_deref())?;
+    let command = trimmed_option(event.command.as_deref())?;
 
     Some(SandboxApprovalRequest {
-        command: command.to_string(),
-        approval_id: approval_id.to_string(),
-        category: string_field(&payload, "policy_category"),
-        reason: string_field(&payload, "policy_reason"),
-        approval_mode: string_field(&payload, "policy_approval_mode"),
-        hint: string_field(&payload, "hint"),
+        command,
+        approval_id,
+        category: trimmed_option(event.category.as_deref()),
+        reason: trimmed_option(event.reason.as_deref()),
+        approval_mode: trimmed_option(event.approval_mode.as_deref()),
+        hint: trimmed_option(event.hint.as_deref()),
     })
 }
 
@@ -245,10 +210,8 @@ fn clean_single_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn string_field(value: &Value, key: &str) -> Option<String> {
+fn trimmed_option(value: Option<&str>) -> Option<String> {
     value
-        .get(key)
-        .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)

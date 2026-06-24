@@ -148,6 +148,9 @@ fn backend_handle_forwards_agent_config_flag_without_agent_id() {
     assert!(lines
         .windows(2)
         .any(|pair| pair[0] == "--sandbox-type" && pair[1] == "local"));
+    assert!(lines
+        .windows(2)
+        .any(|pair| pair[0] == "--sandbox-approval-mode" && pair[1] == "untrusted"));
     let env = fs::read_to_string(&env_path).expect("backend env log should exist");
     assert!(env.contains("SAGE_APPROVAL_MODE=untrusted"));
     assert!(env.contains("SAGE_SANDBOX_MODE=local"));

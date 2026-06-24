@@ -216,6 +216,10 @@ fn parse_backend_line_with_state(
         if !content.is_empty() {
             events.push(BackendEvent::Message(MessageKind::Process, content));
         }
+    } else if event_type == "sandbox_approval_requested" {
+        if let Some(request) = sandbox_approval_from_event(&event) {
+            events.push(BackendEvent::SandboxApprovalRequested(request));
+        }
     } else if let Some(kind) = live_message_kind(event_type, role, &content) {
         let content = match state.as_mut() {
             Some(state) => state.live_delta(kind, event.message_id.clone(), content),
@@ -235,9 +239,6 @@ fn parse_backend_line_with_state(
                 }
             }
             "tool_result" => {
-                if let Some(request) = sandbox_approval_from_event(&event) {
-                    events.push(BackendEvent::SandboxApprovalRequested(request));
-                }
                 if let Some(summary) = summarize_tool_event(&tool_names, &content) {
                     events.push(BackendEvent::Message(
                         MessageKind::Tool,

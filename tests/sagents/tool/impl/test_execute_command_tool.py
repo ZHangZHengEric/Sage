@@ -136,7 +136,31 @@ def test_execute_shell_command_blocks_policy_ask_before_spawn(monkeypatch):
     assert result["policy_category"] == "git_remote_write"
     assert result["policy_approval_mode"] == "on-request"
     assert result["approval_id"].startswith("shapproval_")
+    assert result["approval_expires_at"].endswith("Z")
     assert ExecuteCommandTool._BG_TASKS == {}
+
+
+def test_execute_shell_command_uses_session_approval_mode(monkeypatch):
+    monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
+
+    tool = ExecuteCommandTool()
+    result = asyncio.run(
+        tool.execute_shell_command(
+            command="git push origin feature-x",
+            session_id="session-1",
+            block_until_ms=0,
+            sandbox_approval_mode="never",
+        )
+    )
+
+    assert result["success"] is False
+    assert result["error_code"] == "SAFETY_BLOCKED"
+    assert result["policy_action"] == "deny"
+    assert result["policy_approval_mode"] == "never"
+    assert "approval_id" not in result
+    assert ExecuteCommandTool._PENDING_APPROVALS == {}
 
 
 def test_execute_shell_command_uses_one_shot_approval_before_spawn(monkeypatch):

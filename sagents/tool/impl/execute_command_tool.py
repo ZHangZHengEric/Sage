@@ -15,6 +15,7 @@ Execute Command Tool
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import json as _json
 import os
 import re
@@ -149,7 +150,6 @@ class ExecuteCommandTool:
 
     def __init__(self):
         self.security_manager = SecurityManager()
-        self.policy_gateway = SandboxPolicyGateway()
 
     @classmethod
     def _gc_stale_approvals(cls) -> None:
@@ -251,6 +251,7 @@ class ExecuteCommandTool:
         command: str,
         session_id: str,
         policy_decision: SandboxPolicyDecision,
+        policy_gateway: SandboxPolicyGateway,
     ) -> Dict[str, Any]:
         logger.warning(
             "sandbox policy blocked command: "
@@ -259,9 +260,15 @@ class ExecuteCommandTool:
             f"reason={policy_decision.reason}"
         )
         approval_id = None
+        approval_expires_at = None
         next_action = None
         if policy_decision.action == "ask":
             approval_id = self._create_command_approval(session_id, command)
+            approval_expires_at = (
+                datetime.fromtimestamp(time.time() + self._APPROVAL_TTL_S, timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
             message = (
                 "Sandbox policy requires confirmation before running this command: "
                 f"{policy_decision.reason}"
@@ -295,8 +302,9 @@ class ExecuteCommandTool:
             policy_action=policy_decision.action,
             policy_category=policy_decision.category,
             policy_reason=policy_decision.reason,
-            policy_approval_mode=self.policy_gateway.approval_mode,
+            policy_approval_mode=policy_gateway.approval_mode,
             approval_id=approval_id,
+            approval_expires_at=approval_expires_at,
             next_action=next_action,
         )
 
@@ -795,6 +803,10 @@ class ExecuteCommandTool:
                 "zh": "可选的一次性确认ID；仅在用户确认后，用上一次 SAFETY_BLOCKED 返回的 approval_id 重试同一命令",
                 "en": "Optional one-shot approval id; after user confirmation, retry the same command with the approval_id returned by the previous SAFETY_BLOCKED result",
             },
+            "sandbox_approval_mode": {
+                "zh": "运行时审批模式（自动注入）",
+                "en": "Runtime approval mode (auto-injected)",
+            },
         },
         param_schema={
             "command": {"type": "string", "description": "Shell command to execute"},
@@ -809,6 +821,7 @@ class ExecuteCommandTool:
             },
             "session_id": {"type": "string", "description": "Session ID"},
             "approval_id": {"type": "string"},
+            "sandbox_approval_mode": {"type": "string"},
         },
         return_data={
             "type": "object",
@@ -834,6 +847,7 @@ class ExecuteCommandTool:
         block_until_ms: int = 30000,
         env_vars: Optional[str] = None,
         approval_id: Optional[str] = None,
+        sandbox_approval_mode: Optional[str] = None,
         session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         if not session_id:
@@ -846,7 +860,8 @@ class ExecuteCommandTool:
 
         # Sandbox policy gateway: allow safe commands immediately; block commands
         # that need a confirmation channel or must never run automatically.
-        policy_decision = self.policy_gateway.evaluate_shell_command(
+        policy_gateway = SandboxPolicyGateway(approval_mode=sandbox_approval_mode)
+        policy_decision = policy_gateway.evaluate_shell_command(
             command, sandbox_mode=os.environ.get("SAGE_SANDBOX_MODE")
         )
         if policy_decision.action != "allow":
@@ -865,6 +880,7 @@ class ExecuteCommandTool:
                     command=command,
                     session_id=session_id,
                     policy_decision=policy_decision,
+                    policy_gateway=policy_gateway,
                 )
 
         sandbox = self._get_sandbox(session_id)
