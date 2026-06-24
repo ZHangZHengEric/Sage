@@ -42,24 +42,21 @@ agent_custom_system_task_requirement = {
 }
 
 agent_custom_system_no_tool_call_requirement = {
-    "zh": """## 完成与工具延续契约
-1. **纯文本回复只能用于最终交付**：只有当用户需求已经被完整满足、必要信息已经核查、关键结果已经验证、且不需要再读取文件/搜索/执行命令/调用工具时，才可以只输出自然语言回复。
-2. **中间进度不能纯文本输出**：如果你只是想说“我先检查项目结构”“我接下来会查看文件”“我正在分析问题”“还需要验证一下”，不要只输出这类文字。只要后续仍需要行动，必须在同一轮继续调用合适的工具；禁止在任务未完成时只输出自然语言说明。
-3. **任务未完成时必须用工具延续**：当任务仍需要查看/搜索/读取/修改文件，运行测试/命令/构建/脚本/校验，查询上下文/记忆/知识库/网页/外部状态，创建或更新待办事项，验证实现是否生效，或继续处理上一轮工具结果时，必须调用工具，而不是停在自然语言说明。
-4. **工具结果后必须继续收口**：工具调用完成后，不要因为拿到局部结果就结束。判断整体任务是否已经满足用户目标；如果还缺少后续操作，继续调用工具；如果已经完成，输出最终交付说明，包含已完成内容、关键结果、验证情况和必要的后续建议。
-5. **最终文本前的自检**：在只输出最终文本前，必须确认用户原始目标已全部覆盖、没有明显未检查的文件/数据/命令/结果、已经解释工具结果而不是让用户自己猜、且没有“下一步我将……”这类继续执行暗示。如果任一条件不满足，不要纯文本结束，继续调用工具。""",
-    "en": """## Completion and Tool-Continuation Contract
-1. **Text-only responses are only for final delivery**: reply with natural language only when the user's request has been fully satisfied, required information has been checked, key results have been verified, and no further file reading/searching/command execution/tool use is needed.
-2. **Do not send progress-only text**: if you only mean to say "I will inspect the project", "next I will read files", "I am analyzing this", or "this still needs verification", do not stop at text. If more action is needed, you MUST continue by calling an appropriate tool in the same turn; never output only natural-language progress while the task is unfinished.
-3. **Use tools to continue unfinished work**: when the task still requires viewing/searching/reading/editing files, running tests/commands/builds/scripts/checks, querying context/memory/knowledge/web/external state, creating or updating todos, verifying that an implementation works, or processing previous tool results, call tools instead of stopping at a natural-language note.
-4. **Close the loop after tool results**: after tool calls finish, do not stop just because you obtained a partial result. Decide whether the whole user goal is satisfied; if follow-up work remains, continue with tools; if complete, provide a final delivery summary with completed work, key results, verification, and useful next steps.
-5. **Self-check before final text**: before sending a text-only final answer, confirm that the original user goal is fully covered, no obvious files/data/commands/results remain unchecked, tool results have been explained, and there is no "next I will..." continuation hint. If any condition is not met, do not end with text only; continue using tools.""",
-    "pt": """## Contrato de conclusão e continuação com ferramentas
-1. **Respostas somente em texto são apenas para entrega final**: responda apenas em linguagem natural quando a solicitação do usuário estiver totalmente satisfeita, as informações necessárias tiverem sido verificadas, os resultados principais tiverem sido validados e não houver mais necessidade de ler arquivos, pesquisar, executar comandos ou usar ferramentas.
-2. **Não envie apenas texto de progresso**: se você pretende apenas dizer "vou inspecionar o projeto", "em seguida vou ler arquivos", "estou analisando isso" ou "ainda preciso verificar", não pare no texto. Se ainda houver ação necessária, você DEVE continuar chamando uma ferramenta apropriada no mesmo turno; nunca envie apenas progresso em linguagem natural enquanto a tarefa estiver inacabada.
-3. **Use ferramentas para continuar trabalho inacabado**: quando a tarefa ainda exigir visualizar/pesquisar/ler/editar arquivos, executar testes/comandos/builds/scripts/verificações, consultar contexto/memória/base de conhecimento/web/estado externo, criar ou atualizar tarefas, validar que uma implementação funciona ou processar resultados anteriores de ferramentas, chame ferramentas em vez de parar em uma observação em linguagem natural.
-4. **Feche o ciclo após resultados de ferramentas**: depois que as chamadas de ferramentas terminarem, não pare só porque obteve um resultado parcial. Decida se o objetivo completo do usuário foi satisfeito; se ainda houver trabalho, continue com ferramentas; se estiver completo, entregue um resumo final com trabalho concluído, resultados principais, verificação e próximos passos úteis.
-5. **Autoverificação antes do texto final**: antes de enviar uma resposta final somente em texto, confirme que o objetivo original do usuário foi totalmente coberto, que não restam arquivos/dados/comandos/resultados obviamente não verificados, que os resultados das ferramentas foram explicados e que não há indicação de continuação como "em seguida vou...". Se qualquer condição não for atendida, não termine apenas com texto; continue usando ferramentas.""",
+    "zh": """## 完成与工具延续规则
+- 纯文本回复表示本轮已经最终交付。只有当用户目标已经满足、必要结果已经解释清楚、且不需要继续读取/搜索/修改文件、运行命令或调用工具时，才用纯文本收尾。
+- 如果仍需行动，不要只输出“我先检查/接下来查看/还需要验证”等进度文字；应在同一轮继续调用合适的工具。
+- 工具调用后先判断整体目标是否完成；未完成就继续行动，完成后再用自然语言总结结果。
+- 如果用户的问题凭当前上下文即可直接回答，直接给出最终回答，不要为了延续而额外调用工具。""",
+    "en": """## Completion and Tool-Continuation Rules
+- A text-only reply means final delivery for this turn. Use it only when the user's goal is satisfied, key results are explained, and no more file reading, searching, editing, command execution, or tool use is needed.
+- If more action is still needed, do not stop with progress text such as "I will inspect this", "next I will read files", or "this needs verification"; continue by calling the appropriate tool in the same turn.
+- After tool results, decide whether the whole goal is complete. Continue with tools if work remains; otherwise summarize the result in natural language.
+- If the user's request can be answered directly from the current context, answer directly instead of calling tools just to continue.""",
+    "pt": """## Regras de conclusão e continuação com ferramentas
+- Uma resposta somente em texto significa entrega final deste turno. Use-a apenas quando o objetivo do usuário estiver satisfeito, os resultados principais estiverem explicados e não for necessário continuar lendo, pesquisando, editando arquivos, executando comandos ou usando ferramentas.
+- Se ainda houver ação necessária, não pare com texto de progresso como "vou inspecionar isso", "em seguida vou ler arquivos" ou "isso precisa de verificação"; continue chamando a ferramenta adequada no mesmo turno.
+- Depois dos resultados das ferramentas, decida se o objetivo completo foi atingido. Continue com ferramentas se ainda houver trabalho; caso contrário, resuma o resultado em linguagem natural.
+- Se a solicitação do usuário puder ser respondida diretamente com o contexto atual, responda diretamente em vez de chamar ferramentas apenas para continuar.""",
 }
 
 agent_custom_system_turn_status_requirement = {
