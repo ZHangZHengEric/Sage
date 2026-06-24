@@ -122,7 +122,11 @@ def _is_trusted_identity_proxy(
 
 
 async def _unauthorized_response(
-    request: Request, status_code: int, detail: str, error_detail: str
+    request: Request,
+    status_code: int,
+    detail: str,
+    error_detail: str,
+    message_params: dict | None = None,
 ):
     """统一返回未授权响应"""
     locale = locale_from_request(request)
@@ -130,7 +134,9 @@ async def _unauthorized_response(
         status_code=status_code,
         content=(
             await Response.error(
-                status_code, translate_if_key(detail, locale), error_detail
+                status_code,
+                translate_if_key(detail, locale, message_params),
+                error_detail,
             )
         ).model_dump(),
     )
@@ -173,9 +179,14 @@ def register_middlewares(app):
                 try:
                     request.state.user_claims = parse_access_token(token)
                 except SageHTTPException as e:
-                    auth_error = (e.status_code, e.detail, e.error_detail)
+                    auth_error = (
+                        e.status_code,
+                        e.message_key or str(e.detail),
+                        e.error_detail,
+                        e.message_params,
+                    )
                 except Exception as e:
-                    auth_error = (401, "auth.invalid_token", str(e))
+                    auth_error = (401, "auth.invalid_token", str(e), None)
 
             if not getattr(request.state, "user_claims", None):
                 session_claims = get_session_claims(request)
