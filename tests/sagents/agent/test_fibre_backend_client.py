@@ -92,7 +92,9 @@ async def test_backend_client_preserves_roleless_control_events(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_backend_client_backfills_session_id_for_complete_role_messages(monkeypatch):
+async def test_backend_client_backfills_session_id_for_complete_role_messages(
+    monkeypatch,
+):
     lines = [
         json.dumps(
             {
