@@ -33,6 +33,7 @@ from sagents.utils.multimodal_image import (
 )
 from sagents.utils.message_sanitizer import (
     remove_orphan_tool_calls as _remove_orphan_tool_calls_util,
+    drop_invalid_tool_calls as _drop_invalid_tool_calls_util,
     drop_orphan_tool_messages as _drop_orphan_tool_messages_util,
     repair_interleaved_tool_messages as _repair_interleaved_tool_messages_util,
     strip_content_when_tool_calls as _strip_content_when_tool_calls_util,
@@ -174,6 +175,14 @@ class AgentBase(ABC):
         ``sagents.utils.message_sanitizer.drop_orphan_tool_messages``。
         """
         return _drop_orphan_tool_messages_util(messages)
+
+    def _drop_invalid_tool_calls(
+        self, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """移除 ``function.arguments`` 不是合法 JSON 的 tool_call。详见
+        ``sagents.utils.message_sanitizer.drop_invalid_tool_calls``。
+        """
+        return _drop_invalid_tool_calls_util(messages)
 
     def _repair_interleaved_tool_messages(
         self, messages: List[Dict[str, Any]]
@@ -1115,6 +1124,11 @@ class AgentBase(ABC):
 
                 # 先修复被运行中 guidance/user 消息插队的 tool result，再清理仍不完整的 pair。
                 serializable_messages = self._repair_interleaved_tool_messages(
+                    serializable_messages
+                )
+                # 保留原始 ledger 中被打断的 tool_call 记录，但下一轮 LLM 请求不能携带
+                # 残缺/非 JSON 的 function.arguments，否则部分供应商会直接 400。
+                serializable_messages = self._drop_invalid_tool_calls(
                     serializable_messages
                 )
                 # 需要处理 serializable_messages 中，如果有tool call ，但是没有后续的tool call id,需要去掉这条消息

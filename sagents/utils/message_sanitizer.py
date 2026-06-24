@@ -5,12 +5,15 @@ LLM 请求前的消息清洗工具，纯函数无状态。
 - ``drop_orphan_tool_messages``：去掉没有匹配 assistant tool_calls 的孤儿 tool 消息；
 - ``repair_interleaved_tool_messages``：把被 user/system/assistant 插队的 tool 结果移回对应
   assistant tool_calls 后面；
+- ``drop_invalid_tool_calls``：去掉 ``function.arguments`` 不是合法 JSON 的 tool_call；
 - ``strip_content_when_tool_calls``：当 assistant 消息带有 tool_calls 时，去掉 content 字段。
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import json
+from copy import copy
+from typing import Any, Dict, List, Optional
 
 from sagents.context.messages.message import MessageRole
 
@@ -22,6 +25,82 @@ def _get_tool_call_id(tool_call: Any) -> Any:
     if isinstance(tool_call, dict):
         return tool_call.get("id")
     return None
+
+
+def _get_tool_call_arguments(tool_call: Any) -> Any:
+    """兼容 ChoiceDeltaToolCall 对象与字典两种形式取出 function.arguments。"""
+    if hasattr(tool_call, "function") and hasattr(tool_call.function, "arguments"):
+        return tool_call.function.arguments
+    if isinstance(tool_call, dict):
+        function = tool_call.get("function")
+        if isinstance(function, dict):
+            return function.get("arguments")
+    return None
+
+
+def _tool_call_has_valid_json_arguments(tool_call: Any) -> bool:
+    arguments = _get_tool_call_arguments(tool_call)
+    if not isinstance(arguments, str):
+        return False
+    try:
+        parsed = json.loads(arguments)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(parsed, dict)
+
+
+def _copy_message_with_tool_calls(
+    msg: Dict[str, Any], tool_calls: Optional[List[Any]]
+) -> Dict[str, Any]:
+    """浅拷贝消息并替换 tool_calls，避免修改原始 ledger 对象。"""
+    new_msg = copy(msg)
+    if tool_calls:
+        new_msg["tool_calls"] = tool_calls
+    else:
+        new_msg.pop("tool_calls", None)
+    return new_msg
+
+
+def drop_invalid_tool_calls(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """移除 ``function.arguments`` 不是合法 JSON object 的 assistant tool_call。
+
+    流式输出被新用户消息打断时，messages.json 可能保留一个残缺 tool_call，例如
+    ``{"event_id": "evt_...``。这条原始记录有审计价值，应继续落盘；但若原样放入下一轮
+    LLM 请求，部分供应商会直接 400：``function.arguments must be in JSON format``。
+
+    此函数只清洗请求视图：
+    - 同条 assistant 中合法的 tool_call 会保留；
+    - 若没有合法 tool_call 但有正文，则保留为普通 assistant 消息；
+    - 若既没有合法 tool_call 也没有正文，则丢弃整条 assistant 消息；
+    - 对应 tool 结果会在后续 ``drop_orphan_tool_messages`` 中按孤儿消息剔除。
+
+    不修改传入消息对象。
+    """
+    new_messages: List[Dict[str, Any]] = []
+    for msg in messages:
+        if msg.get("role") != MessageRole.ASSISTANT.value or not msg.get("tool_calls"):
+            new_messages.append(msg)
+            continue
+
+        valid_tool_calls = [
+            tc
+            for tc in (msg.get("tool_calls") or [])
+            if _tool_call_has_valid_json_arguments(tc)
+        ]
+
+        if len(valid_tool_calls) == len(msg.get("tool_calls") or []):
+            new_messages.append(msg)
+            continue
+
+        if valid_tool_calls:
+            new_messages.append(_copy_message_with_tool_calls(msg, valid_tool_calls))
+            continue
+
+        content = msg.get("content")
+        if content:
+            new_messages.append(_copy_message_with_tool_calls(msg, None))
+
+    return new_messages
 
 
 def remove_orphan_tool_calls(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
