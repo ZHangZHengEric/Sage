@@ -49,6 +49,7 @@ import {
   Search,
   Globe,
   Image,
+  Video,
   Database,
   Settings,
   ListTodo,
@@ -128,6 +129,7 @@ const toolIconMap = {
   'web_fetcher': Globe,
   // 图片相关
   'analyze_image': Image,
+  'analyze_video': Video,
   'search_image_from_web': Image,
   'generate_image': Image,
   // 记忆相关

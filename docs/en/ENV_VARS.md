@@ -25,12 +25,12 @@ Variables intentionally kept in the examples:
 | Type | Variables |
 | --- | --- |
 | Environment and entrypoint | `SAGE_ENV`, `SAGE_ROOT` |
-| Secrets and accounts | `SAGE_JWT_KEY`, `SAGE_REFRESH_TOKEN_SECRET`, `SAGE_SESSION_SECRET`, MySQL/S3/Grafana passwords, LLM/Embedding API keys, email AK/SK |
+| Secrets and accounts | `SAGE_JWT_KEY`, `SAGE_REFRESH_TOKEN_SECRET`, `SAGE_SESSION_SECRET`, MySQL/S3/Grafana passwords, LLM/Embedding/video-analysis API keys, email AK/SK |
 | External URLs | `SAGE_TRACE_JAEGER_PUBLIC_URL`, `SAGE_GRAFANA_PUBLIC_URL`, `SAGE_S3_PUBLIC_BASE_URL`, `SAGE_ELASTICSEARCH_URL` |
 
 Kubernetes templates separately keep `NAMESPACE`, `SAGE_HOST`, `SAGE_PUBLIC_URL`, `IMAGE_REGISTRY`, `IMAGE_PULL_POLICY`, `K8S_IMAGE_TARGET`, `CTR_BIN`, `CTR_NAMESPACE`, `STORAGE_CLASS`, `INGRESS_CLASS_NAME`, `TLS_SECRET_NAME`, `ENABLE_INGRESS`, `SAGE_WEB_SERVICE_TYPE`, `SAGE_WIKI_SERVICE_TYPE`, `SAGE_WEB_NODE_PORT`, and `SAGE_WIKI_NODE_PORT`.
 
-Advanced overrides are not listed in `.env.example` unless a deployment needs to change them. Common examples include Compose project/port overrides, `SAGE_WEB_BASE_PATH`, `SAGE_TRACE_JAEGER_URL`, `SAGE_LOKI_PUSH_URL`, `SAGE_MCP_*`, `OPENSANDBOX_IMAGE`, `OPENSANDBOX_TIMEOUT`, `SAGE_OPENSANDBOX_APPEND_MAX_BYTES`, default LLM/Embedding model parameters, and fixed email defaults.
+Advanced overrides are not listed in `.env.example` unless a deployment needs to change them. Common examples include Compose project/port overrides, `SAGE_WEB_BASE_PATH`, `SAGE_TRACE_JAEGER_URL`, `SAGE_LOKI_PUSH_URL`, `SAGE_MCP_*`, `OPENSANDBOX_IMAGE`, `OPENSANDBOX_TIMEOUT`, `SAGE_OPENSANDBOX_APPEND_MAX_BYTES`, default LLM/Embedding model parameters, video-analysis model parameters, and fixed email defaults.
 
 ## 1. LLM defaults
 
@@ -166,14 +166,14 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SAGE_TASK_COMPLETION_MODE` | `turn_status` | Select how SimpleAgent decides that a turn is complete. `turn_status` exposes the `turn_status` protocol tool and lets the model report `task_done` / `need_user_input` / `blocked` / `continue_work`; `llm_judge` disables `turn_status` and uses the legacy rule-first + LLM `task_complete_judge` check; `no_tool_call` disables `turn_status` and treats an LLM response without tool calls as complete. |
+| `SAGE_TASK_COMPLETION_MODE` | `turn_status` (`no_tool_call` in desktop) | Select how SimpleAgent decides that a turn is complete. `no_tool_call` disables `turn_status` and treats an LLM response without tool calls as complete; `turn_status` exposes the `turn_status` protocol tool and lets the model report `task_done` / `need_user_input` / `blocked` / `continue_work`; `llm_judge` disables `turn_status` and uses the legacy rule-first + LLM `task_complete_judge` check. |
 | `SAGE_RUNTIME_CONTEXT_IN_USER` | `true` | Move volatile runtime context (`system_context`, workspace files, active ToDo) out of system messages and freeze it into the latest user message inference metadata. Set `false` only for legacy behaviour where volatile context stays in system. |
 | `SAGE_CLI_MAX_LOOP_COUNT` | — | Max loops per CLI turn |
 | `SAGE_CONTEXT_HISTORY_RATIO` / `SAGE_CONTEXT_ACTIVE_RATIO` / `SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO` / `SAGE_CONTEXT_RECENT_TURNS` | code defaults | Context budget allocation knobs |
 | `SAGE_TOOL_SUGGESTION_DIRECT_THRESHOLD` | `15` | When the available tool count is at or below this value, skip the LLM tool-suggestion call and pass all available tools through |
 | `SAGE_EMIT_TOOL_CALL_ON_COMPLETE` | `true` | Re-emit tool_call chunks once the LLM stream completes |
 | `SAGE_ECHO_SHELL_OUTPUT` | `false` | Echo background-shell stdout/stderr into the main stream |
-| `SAGE_FORCE_TOOL_CHOICE_REQUIRED` | `false` | Force `tool_choice=required` on every LLM call that carries `tools`. Off by default to avoid `unsupported_parameter` errors on models such as OpenAI o1/o3; enable explicitly with `1/true/yes/on` |
+| `SAGE_FORCE_TOOL_CHOICE_REQUIRED` | `false` | Deprecated compatibility switch. It is ignored for normal tool calls and can only force `tool_choice=required` when `SAGE_TASK_COMPLETION_MODE=turn_status` and the request exposes only the internal `turn_status` protocol tool. |
 | `SAGE_TOOL_PROGRESS_ENABLED` | `true` | Enable the tool live-progress channel (NDJSON `type=tool_progress` events for the UI only; never sent to MessageManager or the LLM) |
 | `SAGE_TOOL_PROGRESS_FLUSH_INTERVAL_MS` | `50` | Coalesce window (ms). Multiple `emit_tool_progress` calls within the window for the same `(tool_call, stream)` are merged into one event. Set to `0` to disable coalescing and emit immediately |
 | `SAGE_TOOL_PROGRESS_FLUSH_BYTES` | `16384` | Per-stream byte threshold; once accumulated text reaches it, flush immediately (prevents fast-producing commands from saturating the channel) |
@@ -202,7 +202,7 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 | `SAGE_MCP_MAX_CONNECTIONS_PER_SERVER` | `0` | Max pooled MCP connections per server; `0` means no fixed cap |
 | `SAGE_MCP_SESSION_IDLE_TTL_SECONDS` | `1800` | Idle TTL for MCP pooled sessions |
 | `SAGE_MCP_REFRESH_DRAIN_TIMEOUT_SECONDS` | `30` | Grace period while draining refreshed MCP connections |
-| `SAGE_MCP_CALL_TIMEOUT_SECONDS` | `1800` | MCP tool call timeout |
+| `SAGE_MCP_CALL_TIMEOUT_SECONDS` | `300` | MCP tool call timeout |
 | `SAGE_MCP_LIST_TOOLS_RETRY_ON_CONNECTION_ERROR` | `true` | Retry MCP `list_tools` once on connection-like errors |
 | `SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR` | `true` | Retry MCP tool calls once on connection-like errors |
 
@@ -237,8 +237,7 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 
 | Variable | Replacement / status |
 | --- | --- |
-| `SAGE_AGENT_STATUS_PROTOCOL_ENABLED` | Deprecated. Used only when `SAGE_TASK_COMPLETION_MODE` is unset; `false` maps to `llm_judge`. |
-| `SAGE_COMPLETE_ON_NO_TOOL_CALL` | Deprecated. Used only when `SAGE_TASK_COMPLETION_MODE` is unset; `true` maps to `no_tool_call`. |
+| `SAGE_COMPLETE_ON_NO_TOOL_CALL` | Removed and ignored. Use `SAGE_TASK_COMPLETION_MODE=no_tool_call`. |
 | `SAGE_SPLIT_SYSTEM` | Deprecated and ignored. Split system messages are always enabled. |
 | `SAGE_STABLE_TOOLS_ORDER` | Deprecated and ignored. Tools are always sorted by `function.name` before LLM requests. |
 | `SAGE_AUTO_LINT` | Deprecated and ignored. File-tool linting is always enabled. |

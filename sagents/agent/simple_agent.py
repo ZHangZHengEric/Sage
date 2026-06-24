@@ -19,6 +19,7 @@ from sagents.utils.completion_mode import (
     is_no_tool_call_mode,
     is_turn_status_mode,
 )
+from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 import json
 import uuid
 from copy import deepcopy
@@ -72,6 +73,15 @@ def _get_system_prefix(tool_manager: Optional[ToolManager], language: str) -> st
             prompt_manager.get_agent_prompt(
                 "SimpleAgent",
                 "agent_custom_system_turn_status_requirement",
+                language=language,
+            )
+        )
+
+    if is_no_tool_call_mode():
+        parts.append(
+            prompt_manager.get_agent_prompt(
+                "SimpleAgent",
+                "agent_custom_system_no_tool_call_requirement",
                 language=language,
             )
         )
@@ -130,9 +140,12 @@ class SimpleAgent(AgentBase):
             return "required"
         if force_tool_choice_auto:
             return "auto"
-        env_force_required = os.getenv(
-            "SAGE_FORCE_TOOL_CHOICE_REQUIRED", ""
-        ).strip().lower() in ("1", "true", "yes", "on")
+        env_force_required = (
+            self._turn_status_enabled()
+            and self._allowed_tool_names(tools_json) == {"turn_status"}
+            and os.getenv("SAGE_FORCE_TOOL_CHOICE_REQUIRED", "").strip().lower()
+            in ("1", "true", "yes", "on")
+        )
         return "required" if env_force_required else None
 
     def _should_escape_required_next_turn(
@@ -444,6 +457,41 @@ class SimpleAgent(AgentBase):
     def _turn_status_tool_names(self) -> set[str]:
         return {"turn_status"}
 
+    def _can_request_turn_status(self, tools_json: List[Dict[str, Any]]) -> bool:
+        return self._turn_status_enabled() and any(
+            self._tools_include(tools_json, name)
+            for name in self._turn_status_tool_names()
+        )
+
+    def _has_visible_text_without_tool_calls(self, chunks: List[MessageChunk]) -> bool:
+        has_visible_assistant_text = False
+
+        for chunk in chunks or []:
+            if (
+                chunk.tool_calls
+                or chunk.role == MessageRole.TOOL.value
+                or chunk.tool_call_id
+            ):
+                return False
+            if chunk.role != MessageRole.ASSISTANT.value:
+                continue
+            if chunk.matches_message_types(
+                [MessageType.REASONING_CONTENT.value, MessageType.EMPTY.value]
+            ):
+                continue
+            content = chunk.content
+            if isinstance(content, str) and content.strip():
+                has_visible_assistant_text = True
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict):
+                        text = part.get("text") or part.get("content")
+                        if isinstance(text, str) and text.strip():
+                            has_visible_assistant_text = True
+                            break
+
+        return has_visible_assistant_text
+
     def _turn_status_tools_only(
         self, tools_json: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
@@ -546,37 +594,10 @@ class SimpleAgent(AgentBase):
         交付时，宿主层要求模型补协议性的 turn_status 标记，
         不再开放行动工具，避免模型继续改 todo 或重复执行。
         """
-        if not self._turn_status_enabled() or not any(
-            self._tools_include(tools_json, name)
-            for name in self._turn_status_tool_names()
-        ):
+        if not self._can_request_turn_status(tools_json):
             return False
 
-        has_visible_assistant_text = False
-        has_tool_calls = False
-
-        for chunk in chunks or []:
-            if chunk.tool_calls:
-                has_tool_calls = True
-                break
-            if chunk.role != MessageRole.ASSISTANT.value:
-                continue
-            if chunk.matches_message_types(
-                [MessageType.REASONING_CONTENT.value, MessageType.EMPTY.value]
-            ):
-                continue
-            content = chunk.content
-            if isinstance(content, str) and content.strip():
-                has_visible_assistant_text = True
-            elif isinstance(content, list):
-                for part in content:
-                    if isinstance(part, dict):
-                        text = part.get("text") or part.get("content")
-                        if isinstance(text, str) and text.strip():
-                            has_visible_assistant_text = True
-                            break
-
-        return has_visible_assistant_text and not has_tool_calls
+        return self._has_visible_text_without_tool_calls(chunks)
 
     async def _must_continue_by_rules(self, messages_input: List[MessageChunk]) -> bool:
         """通过确定性规则判断是否必须继续执行
@@ -672,6 +693,7 @@ class SimpleAgent(AgentBase):
         clean_messages = MessageManager.convert_messages_to_dict_for_request(
             messages_for_complete
         )
+        clean_messages = redact_base64_data_urls_in_value(clean_messages)
 
         task_complete_template = PromptManager().get_agent_prompt_auto(
             "task_complete_template", language=session_context.get_language()
@@ -846,6 +868,7 @@ class SimpleAgent(AgentBase):
                 if current_turn_status_only
                 else tools_json
             )
+            direct_response_state = {"had_tool_calls": False}
             async for chunks, is_complete in self._call_llm_and_process_response(
                 messages_input=messages_input,
                 tools_json=current_tools_json,
@@ -853,6 +876,7 @@ class SimpleAgent(AgentBase):
                 session_id=session_id,
                 force_tool_choice_required=current_turn_status_only,
                 force_tool_choice_auto=force_tool_choice_auto_next,
+                direct_response_state=direct_response_state,
             ):
                 non_empty_chunks = [
                     c for c in chunks if (c.message_type != MessageType.EMPTY.value)
@@ -989,6 +1013,10 @@ class SimpleAgent(AgentBase):
             else:
                 repeat_pattern_hits = 0
 
+            had_direct_tool_activity = direct_response_state.get(
+                "had_tool_calls", False
+            )
+
             messages_input = MessageManager.merge_new_messages_to_old_messages(
                 cast(
                     List[Union[MessageChunk, Dict[str, Any]]], all_new_response_chunks
@@ -1005,7 +1033,11 @@ class SimpleAgent(AgentBase):
             # 仅在 llm_judge 模式回退到旧路径；turn_status / no_tool_call
             # 都有自己的结束信号，避免多消耗一次完成判定请求。
             if is_llm_judge_mode():
-                if await self._is_task_complete(
+                if had_direct_tool_activity:
+                    logger.info(
+                        "SimpleAgent: 本轮 direct LLM response 包含工具调用，跳过 task_complete_judge，继续让模型消费工具结果"
+                    )
+                elif await self._is_task_complete(
                     messages_input, session_id, tool_manager, session_context
                 ):
                     logger.info("SimpleAgent: 任务完成，终止执行")
@@ -1019,10 +1051,11 @@ class SimpleAgent(AgentBase):
         session_id: str,
         force_tool_choice_required: bool = False,
         force_tool_choice_auto: bool = False,
+        direct_response_state: Optional[Dict[str, bool]] = None,
     ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
 
         # 准备消息：提取可用消息 -> 检查压缩 -> 执行压缩
-        # 通过生成器获取中间结果（tool_calls/tool result）和最终结果
+        # 通过生成器获取中间结果（tool_calls/tool result）和最终结果。
         prepared_messages = None
         async for messages_chunk, is_final in self._prepare_messages_for_llm(
             messages_input, session_id
@@ -1088,6 +1121,8 @@ class SimpleAgent(AgentBase):
         )
 
         tool_calls: Dict[str, Any] = {}
+        if direct_response_state is not None:
+            direct_response_state["had_tool_calls"] = False
         reasoning_content_response_message_id = str(uuid.uuid4())
         content_response_message_id = str(uuid.uuid4())
         last_tool_call_id = None
@@ -1119,6 +1154,8 @@ class SimpleAgent(AgentBase):
                     self._handle_tool_calls_chunk(
                         chunk, tool_calls, last_tool_call_id or ""
                     )
+                    if direct_response_state is not None:
+                        direct_response_state["had_tool_calls"] = True
                     # 更新last_tool_call_id
                     for tool_call in chunk.choices[0].delta.tool_calls:
                         if tool_call.id is not None and len(tool_call.id) > 0:
@@ -1191,6 +1228,8 @@ class SimpleAgent(AgentBase):
                         ]
                         yield (output_messages, False)
         except PartialStreamConsumedError as exc:
+            if direct_response_state is not None:
+                direct_response_state["had_tool_calls"] = bool(tool_calls)
             recovery_messages: List[MessageChunk] = []
             if emitted_tool_call_stream:
                 for tool_call_id, tool_call in tool_calls.items():
@@ -1237,6 +1276,9 @@ class SimpleAgent(AgentBase):
             return
 
         # 处理完所有chunk后，尝试保存内容
+        if direct_response_state is not None:
+            direct_response_state["had_tool_calls"] = bool(tool_calls)
+
         if full_content_accumulator:
             try:
                 save_agent_response_content(full_content_accumulator, session_id)

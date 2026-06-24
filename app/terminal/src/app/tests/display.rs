@@ -40,5 +40,6 @@ fn display_show_reports_current_mode() {
         .map(|span| span.content.as_ref())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("display_mode: verbose"));
+    assert!(rendered.contains("display: verbose"));
+    assert!(!rendered.contains("display_mode:"));
 }

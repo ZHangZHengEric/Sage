@@ -51,7 +51,7 @@ async def exec_tool(request: ExecToolRequest, http_request: Request):
         user_id=get_request_user_id(http_request),
         role=get_request_role(http_request),
     )
-    return await Response.succ("工具执行成功", tool_response)
+    return await Response.succ("tool.exec_success", tool_response)
 
 
 @tool_router.get("")
@@ -72,4 +72,4 @@ async def get_tools(
         language=_resolve_request_language(http_request, language, default="en"),
     )
 
-    return await Response.succ(message="获取工具列表成功", data={"tools": tools})
+    return await Response.succ(message="tool.list_loaded", data={"tools": tools})

@@ -37,6 +37,7 @@ from dotenv import load_dotenv
 
 # 指定加载的 .env 文件（保持不动）
 load_dotenv(".env")
+os.environ.setdefault("SAGE_TASK_COMPLETION_MODE", "no_tool_call")
 
 
 from contextlib import asynccontextmanager

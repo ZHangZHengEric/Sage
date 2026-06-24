@@ -319,6 +319,7 @@ import { parseToolJsonValue } from '@/utils/safeParseToolJson.js'
 import { buildClipboardTextFromMessageContent, normalizeMessageContentForComposer } from '@/utils/composerFromMessageFlatten.js'
 import { open } from '@tauri-apps/plugin-shell'
 import { isAbsoluteLocalPath, isRelativeWorkspacePath, normalizeFileReference, resolveAgentWorkspacePath } from '@/utils/agentWorkspacePath'
+import { splitInlineQuestionnaireContent } from '@/utils/inlineQuestionnaire.js'
 
 // Custom Tools
 const TOOL_COMPONENT_MAP = {
@@ -816,7 +817,7 @@ onMounted(async () => {
     console.log('[MessageRenderer] Processing tool result message:', messageId, 'tool_call_id:', props.message.tool_call_id)
     // 更新工作台中的工具结果
     const plainToolResult = JSON.parse(JSON.stringify(props.message))
-    const updateResult = workbenchStore.updateToolResult(props.message.tool_call_id, plainToolResult)
+    const updateResult = workbenchStore.updateToolResult(props.message.tool_call_id, plainToolResult, sessionId)
     console.log('[MessageRenderer] updateToolResult for tool message:', props.message.tool_call_id, 'result:', updateResult)
     return
   }
@@ -833,6 +834,7 @@ onMounted(async () => {
       console.log(`[MessageRenderer] Adding tool_call ${index}:`, toolCall.id)
       const toolStableKey = messageId ? `tool:${messageId}:${index}` : (toolCall.id ? `tool:${toolCall.id}` : null)
       const existingToolItem = workbenchStore.items.find(item =>
+        item.sessionId === sessionId &&
         item.type === 'tool_call' && (
           item.data?.id === toolCall.id ||
           item.data?.tool_call_id === toolCall.id ||
@@ -863,6 +865,7 @@ onMounted(async () => {
   const fileMatches = await extractFileReferences(props.message.content, props.agentId)
   fileMatches.forEach((file) => {
     const existingFileItem = workbenchStore.items.find(item =>
+      item.sessionId === sessionId &&
       item.messageId === messageId &&
       item.type === (file.isImage ? 'image' : 'file') &&
       (item.data?.filePath === file.filePath || item.data?.src === file.filePath)
@@ -885,10 +888,43 @@ onMounted(async () => {
     })
   })
 
+  const artifactMatches = await extractArtifactReferences(props.message.content, props.agentId, messageId)
+  artifactMatches.forEach((file) => {
+    const existingFileItem = workbenchStore.items.find(item =>
+      item.sessionId === sessionId &&
+      item.messageId === messageId &&
+      item.type === (file.isImage ? 'image' : 'file') &&
+      (item.stableKey === file.stableKey || item.data?.filePath === file.filePath || item.data?.src === file.filePath)
+    )
+    if (existingFileItem) {
+      return
+    }
+    workbenchStore.addItem({
+      type: file.isImage ? 'image' : 'file',
+      role: 'assistant',
+      timestamp: timestamp,
+      sessionId: sessionId,
+      messageId: messageId,
+      stableKey: file.stableKey,
+      data: file.isImage ? {
+        src: file.filePath,
+        filePath: file.filePath,
+        path: file.filePath,
+        alt: file.fileName,
+        name: file.fileName
+      } : {
+        filePath: file.filePath,
+        path: file.filePath,
+        fileName: file.fileName
+      }
+    })
+  })
+
   // 发送代码块事件
   const codeBlocks = extractCodeBlocks(props.message.content)
   codeBlocks.forEach((code) => {
     const existingCodeItem = workbenchStore.items.find(item =>
+      item.sessionId === sessionId &&
       item.messageId === messageId &&
       item.type === 'code' &&
       item.data?.code === code.code
@@ -923,6 +959,7 @@ watch(() => props.message, async (newMessage, oldMessage) => {
       const toolIndex = newMessage.tool_calls.indexOf(toolCall)
       const toolStableKey = messageId ? `tool:${messageId}:${toolIndex}` : (toolCall.id ? `tool:${toolCall.id}` : null)
       const existingToolItem = workbenchStore.items.find(item =>
+        item.sessionId === sessionId &&
         item.type === 'tool_call' && (
           item.data?.id === toolCall.id ||
           item.data?.tool_call_id === toolCall.id ||
@@ -949,7 +986,7 @@ watch(() => props.message, async (newMessage, oldMessage) => {
         // 将 Proxy 转换为普通对象
         const plainToolResult = JSON.parse(JSON.stringify(toolResult))
         console.log('[MessageRenderer] Calling updateToolResult with id:', toolCall.id)
-        workbenchStore.updateToolResult(toolCall.id, plainToolResult)
+        workbenchStore.updateToolResult(toolCall.id, plainToolResult, sessionId)
       }
     })
   }
@@ -961,6 +998,7 @@ watch(() => props.message, async (newMessage, oldMessage) => {
     fileMatches.forEach((file) => {
       // 检查该文件是否已经在该消息中添加过
       const existingFileItem = workbenchStore.items.find(item =>
+        item.sessionId === sessionId &&
         item.messageId === messageId &&
         item.type === (file.isImage ? 'image' : 'file') &&
         (item.data?.filePath === file.filePath || item.data?.src === file.filePath)
@@ -983,6 +1021,40 @@ watch(() => props.message, async (newMessage, oldMessage) => {
         } : file
       })
     })
+
+    const artifactMatches = await extractArtifactReferences(newMessage.content, props.agentId, messageId)
+    console.log('[MessageRenderer] Watch found artifact references:', artifactMatches.length)
+    artifactMatches.forEach((file) => {
+      const existingFileItem = workbenchStore.items.find(item =>
+        item.sessionId === sessionId &&
+        item.messageId === messageId &&
+        item.type === (file.isImage ? 'image' : 'file') &&
+        (item.stableKey === file.stableKey || item.data?.filePath === file.filePath || item.data?.src === file.filePath)
+      )
+      if (existingFileItem) {
+        console.log('[MessageRenderer] Artifact already exists in workbench for this message:', file.filePath)
+        return
+      }
+      workbenchStore.addItem({
+        type: file.isImage ? 'image' : 'file',
+        role: 'assistant',
+        timestamp: timestamp,
+        sessionId: sessionId,
+        messageId: messageId,
+        stableKey: file.stableKey,
+        data: file.isImage ? {
+          src: file.filePath,
+          filePath: file.filePath,
+          path: file.filePath,
+          alt: file.fileName,
+          name: file.fileName
+        } : {
+          filePath: file.filePath,
+          path: file.filePath,
+          fileName: file.fileName
+        }
+      })
+    })
   }
 
   // 3. 处理代码块（实时流中代码块可能在消息更新时出现）
@@ -992,6 +1064,7 @@ watch(() => props.message, async (newMessage, oldMessage) => {
     codeBlocks.forEach((code) => {
       // 检查该代码块是否已经在该消息中添加过
       const existingCodeItem = workbenchStore.items.find(item =>
+        item.sessionId === sessionId &&
         item.messageId === messageId &&
         item.type === 'code' &&
         item.data?.code === code.code
@@ -1048,6 +1121,50 @@ async function extractFileReferences(content, agentId = '') {
   }
 
   return files
+}
+
+async function extractArtifactReferences(content, agentId = '', messageId = '') {
+  const text = getTextContent(content)
+  if (!text) return []
+
+  const artifacts = []
+  const imageExtensions = /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)$/i
+  const parts = splitInlineQuestionnaireContent(text, 'workbench_artifacts')
+
+  for (const part of parts) {
+    if (part.type !== 'artifacts') continue
+
+    for (const item of part.payload?.items || []) {
+      let path = normalizeFileReference(item.path)
+      if (!path || path.endsWith('/')) continue
+
+      const isWorkspaceRelative = !!agentId && isRelativeWorkspacePath(path)
+      const isSupportedPath = isAbsoluteLocalPath(path) || isWorkspaceRelative || isRemotePath(path)
+      if (!isSupportedPath) continue
+
+      if (isWorkspaceRelative) {
+        path = await resolveAgentWorkspacePath(path, agentId)
+      }
+
+      const isImage = item.type === 'image' || imageExtensions.test(path)
+      artifacts.push({
+        filePath: path,
+        fileName: item.title || fileNameFromPath(path),
+        isImage,
+        stableKey: `file:${messageId || ''}:${path}`,
+      })
+    }
+  }
+
+  return artifacts
+}
+
+function isRemotePath(path) {
+  return /^https?:\/\//i.test(path) || /^data:/i.test(path)
+}
+
+function fileNameFromPath(path) {
+  return String(path || '').split('/').filter(Boolean).pop() || 'file'
 }
 
 // 辅助函数：提取代码块

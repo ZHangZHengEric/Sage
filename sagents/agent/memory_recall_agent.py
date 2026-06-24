@@ -15,6 +15,7 @@ from sagents.context.messages.message import MessageChunk, MessageRole, MessageT
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_context import SessionContext
 from sagents.utils.logger import logger
+from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 from sagents.utils.prompt_manager import PromptManager
 
 
@@ -137,6 +138,7 @@ class MemoryRecallAgent(AgentBase):
         """
         logger.info("MemoryRecallAgent: 开始分析并召回记忆")
 
+        tool_call_id = None
         try:
             # 准备消息
             clean_messages = MessageManager.convert_messages_to_dict_for_request(
@@ -212,13 +214,16 @@ class MemoryRecallAgent(AgentBase):
             logger.error(traceback.format_exc())
             logger.error(f"MemoryRecallAgent: 召回记忆时发生错误: {str(e)}")
 
-            # 返回错误信息作为 tool result
+            role = (
+                MessageRole.TOOL.value if tool_call_id else MessageRole.ASSISTANT.value
+            )
+
             error_chunk = MessageChunk(
-                role=MessageRole.TOOL.value,
+                role=role,
                 content=json.dumps(
                     {"status": "error", "error": str(e)}, ensure_ascii=False
                 ),
-                tool_call_id=f"call_memory_recall_{str(uuid.uuid4())[:8]}",
+                tool_call_id=tool_call_id,
                 message_type=MessageType.ERROR.value,
                 agent_name=self.agent_name,
             )
@@ -244,8 +249,10 @@ class MemoryRecallAgent(AgentBase):
             "memory_recall_template", language=session_context.get_language()
         )
 
+        recall_messages = redact_base64_data_urls_in_value(messages)
+
         prompt = memory_query_template.format(
-            messages=json.dumps(messages, ensure_ascii=False, indent=2)
+            messages=json.dumps(recall_messages, ensure_ascii=False, indent=2)
         )
 
         llm_request_messages = await self.prepare_llm_request_messages(

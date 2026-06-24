@@ -444,7 +444,7 @@ export const useChatPage = (props) => {
       workbenchStore.extractFromMessage(message, message.agent_id || res.conversation_info?.agent_id || null)
       if (isToolResultMessage(message) && message.tool_call_id) {
         const plainToolResult = JSON.parse(JSON.stringify(message))
-        workbenchStore.updateToolResult(message.tool_call_id, plainToolResult)
+        workbenchStore.updateToolResult(message.tool_call_id, plainToolResult, message.session_id)
       }
     })
 
@@ -488,7 +488,8 @@ export const useChatPage = (props) => {
           text: messageData.text,
           stream: messageData.stream,
           closed: !!messageData.closed,
-          ts: messageData.ts
+          ts: messageData.ts,
+          sessionId: messageData.session_id
         })
       } catch (e) {
         console.warn('[Chat] handle tool_progress failed:', e)
@@ -505,7 +506,7 @@ export const useChatPage = (props) => {
 
       if (isToolResultMessage(message) && message.tool_call_id) {
         const plainToolResult = JSON.parse(JSON.stringify(message))
-        workbenchStore.updateToolResult(message.tool_call_id, plainToolResult)
+        workbenchStore.updateToolResult(message.tool_call_id, plainToolResult, message.session_id)
         return
       }
 
@@ -514,7 +515,7 @@ export const useChatPage = (props) => {
           const toolResult = toolCall?.function?.result
           if (toolCall?.id && toolResult) {
             const plainToolResult = JSON.parse(JSON.stringify(toolResult))
-            workbenchStore.updateToolResult(toolCall.id, plainToolResult)
+            workbenchStore.updateToolResult(toolCall.id, plainToolResult, message.session_id)
           }
         })
       }

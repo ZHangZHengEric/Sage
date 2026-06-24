@@ -90,9 +90,9 @@ pub(crate) fn footer_hint(app: &App) -> String {
             "↑/↓ select  •  tab complete  •  esc close  •  enter apply".to_string()
         }
         None if app.busy => match app.active_tool_status() {
-            Some(tool) => format!("running {tool}"),
+            Some(tool) => format!("running {tool} tool"),
             None => match app.active_phase_label() {
-                Some(phase) => format!("{phase}... output is streaming"),
+                Some(phase) => format!("working: {}", friendly_phase_label(phase)),
                 None => "working... output is streaming".to_string(),
             },
         },
@@ -111,16 +111,14 @@ pub(crate) fn footer_status_summary(app: &App) -> String {
             truncate_middle(&agent_config.display().to_string(), 24)
         ));
     }
-    if let Some(sandbox_type) = app.sandbox_type.as_deref() {
-        parts.push(format!("sandbox {sandbox_type}"));
-    }
+    parts.push(compact_sandbox_label(app.sandbox_type.as_deref()));
     if let Some(goal) = app.current_goal.as_ref() {
         parts.push(format!("goal {}", goal.status));
     }
     parts.push(compact_workspace_label(&app.workspace_label));
     if app.busy {
         if let Some(phase) = app.active_phase_label() {
-            parts.push(format!("phase {phase}"));
+            parts.push(format!("phase {}", friendly_phase_label(phase)));
         }
     }
     parts.push(normalize_footer_status(&app.footer_status()));
@@ -139,6 +137,27 @@ fn compact_workspace_label(workspace_label: &str) -> String {
         workspace_label.to_string()
     } else {
         truncate_middle(workspace_label, 26)
+    }
+}
+
+fn compact_sandbox_label(sandbox_type: Option<&str>) -> String {
+    match sandbox_type {
+        Some(value) => format!("sandbox {value}"),
+        None => "sandbox default".to_string(),
+    }
+}
+
+fn friendly_phase_label(phase: &str) -> String {
+    let normalized = phase
+        .trim()
+        .replace(['_', '-'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if normalized.is_empty() {
+        "output is streaming".to_string()
+    } else {
+        normalized
     }
 }
 

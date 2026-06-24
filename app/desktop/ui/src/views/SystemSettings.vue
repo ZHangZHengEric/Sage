@@ -522,6 +522,10 @@ const checkingBrowserBridge = ref(false)
 const browserBridgeStatus = ref(null)
 const browserBridgeLastSeenAt = ref(null)
 
+const DEPRECATED_ENV_VAR_KEYS = new Set([
+  'SAGE_FORCE_TOOL_CHOICE_REQUIRED',
+])
+
 // 预设环境变量列表 - 只包含系统实际使用的
 const presetEnvVars = [
     // 搜索引擎 API Keys (MCP Search Server 使用)
@@ -540,8 +544,7 @@ const presetEnvVars = [
     { key: 'SEEDREAM_API_KEY', descriptionKey: 'system.presetEnvVar.image.seedreamApiKey', category: 'image' },
     { key: 'SEEDREAM_MODEL', descriptionKey: 'system.presetEnvVar.image.seedreamModel', category: 'image' },
     // Agent runtime controls
-    { key: 'SAGE_TASK_COMPLETION_MODE', descriptionKey: 'system.presetEnvVar.agent.taskCompletionMode', category: 'agent' },
-    { key: 'SAGE_FORCE_TOOL_CHOICE_REQUIRED', descriptionKey: 'system.presetEnvVar.agent.forceToolChoiceRequired', category: 'agent' },
+    { key: 'SAGE_TASK_COMPLETION_MODE', value: 'no_tool_call', descriptionKey: 'system.presetEnvVar.agent.taskCompletionMode', category: 'agent' },
     { key: 'SAGE_TOOL_PROGRESS_ENABLED', descriptionKey: 'system.presetEnvVar.agent.toolProgressEnabled', category: 'agent' },
     { key: 'SAGE_EMIT_TOOL_CALL_ON_COMPLETE', descriptionKey: 'system.presetEnvVar.agent.emitToolCallOnComplete', category: 'agent' },
     // 代理设置 (Tauri 读取用于系统代理配置)
@@ -575,7 +578,7 @@ const parseEnvContent = (content) => {
         if (equalIndex > 0) {
             const key = trimmed.substring(0, equalIndex).trim()
             const value = trimmed.substring(equalIndex + 1).trim()
-            if (key) {
+            if (key && !DEPRECATED_ENV_VAR_KEYS.has(key)) {
                 vars.push({ key, value, showValue: false })
             }
         }
@@ -611,7 +614,7 @@ const addPresetEnvVar = (preset) => {
         toast.info(t('system.envVarExists'))
         return
     }
-    envVars.value.push({ key: preset.key, value: '', showValue: false })
+    envVars.value.push({ key: preset.key, value: preset.value || '', showValue: false })
 }
 
 const removeEnvVar = (index) => {

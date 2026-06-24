@@ -1,5 +1,6 @@
 mod commands;
 mod input;
+mod live_filter;
 mod runtime;
 mod runtime_support;
 mod state;

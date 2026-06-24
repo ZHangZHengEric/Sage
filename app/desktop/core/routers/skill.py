@@ -2,6 +2,8 @@
 工具执行接口路由模块
 """
 
+from typing import List
+
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from pydantic import BaseModel
 
@@ -16,6 +18,10 @@ skill_router = APIRouter(prefix="/api/skills")
 
 class UrlImportRequest(BaseModel):
     url: str
+
+
+class PathImportRequest(BaseModel):
+    paths: List[str]
 
 
 class SkillUpdateRequest(BaseModel):
@@ -48,6 +54,35 @@ async def upload_skill(http_request: Request, file: UploadFile = File(...)):
     """
     result = await skill_router_service.build_upload_skill_response(
         file=file,
+        user_id=get_desktop_user_id(http_request),
+        role=get_desktop_user_role(http_request),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
+
+
+@skill_router.post("/upload-batch")
+async def upload_skills(
+    http_request: Request,
+    files: List[UploadFile] = File(...),
+):
+    """
+    批量上传 ZIP 文件导入技能，单个文件失败不影响其他文件。
+    """
+    result = await skill_router_service.build_upload_skills_response(
+        files=files,
+        user_id=get_desktop_user_id(http_request),
+        role=get_desktop_user_role(http_request),
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
+
+
+@skill_router.post("/import-paths")
+async def import_skill_paths(request: PathImportRequest, http_request: Request):
+    """
+    通过桌面端本地路径批量导入技能，支持 ZIP、技能文件夹、包含多个技能的上层文件夹。
+    """
+    result = await skill_router_service.build_import_skill_paths_response(
+        paths=request.paths,
         user_id=get_desktop_user_id(http_request),
         role=get_desktop_user_role(http_request),
     )

@@ -14,7 +14,9 @@ from loguru import logger
 from sagents.context.session_context import delete_session_run_lock
 from sagents.utils.lock_manager import safe_release
 
+from common.core.context import get_request_locale
 from common.core.exceptions import SageHTTPException
+from common.core.i18n import t
 from common.core.request_identity import get_request_user_id
 from common.services import chat_service
 from common.services import conversation_service
@@ -341,7 +343,8 @@ async def stream_api_with_disconnect_check(
             try:
                 await asyncio.wait_for(
                     conversation_service.interrupt_session(
-                        session_id, "客户端断开连接"
+                        session_id,
+                        t("chat.client_disconnected", locale=get_request_locale()),
                     ),
                     timeout=_DISCONNECT_INTERRUPT_TIMEOUT,
                 )
@@ -392,7 +395,7 @@ def validate_and_prepare_request(
         if not allow_pending_guidance_flush or not _has_pending_user_injections(
             request.session_id
         ):
-            raise SageHTTPException(detail="消息列表不能为空")
+            raise SageHTTPException(message_key="chat.messages_required")
         logger.bind(session_id=request.session_id).info(
             "允许空 messages 请求消费 pending guidance"
         )
@@ -505,7 +508,7 @@ async def stream_chat_web(request: StreamRequest, http_request: Request):
     return await _start_web_stream_session(
         request,
         manager=manager,
-        interrupt_message="同会话重入，先中断旧会话",
+        interrupt_message=t("chat.interrupt_same_session", locale=get_request_locale()),
         query=query,  # pyright: ignore[reportArgumentType]
         filter_stream_types=True,
         stream_name="web_stream",
@@ -607,7 +610,9 @@ async def rerun_conversation_stream(
     return await _start_web_stream_session(
         request,
         manager=manager,
-        interrupt_message="重新执行最后一条用户消息，先中断旧会话",
+        interrupt_message=t(
+            "chat.interrupt_rerun_last_user", locale=get_request_locale()
+        ),
         query=guidance_content or payload["query"] or "",
         stream_name="rerun_stream",
     )

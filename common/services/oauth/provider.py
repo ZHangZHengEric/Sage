@@ -129,14 +129,14 @@ def _load_json_oauth2_clients(cfg: config.StartupConfig) -> list[dict[str, Any]]
     except json.JSONDecodeError as exc:
         raise SageHTTPException(
             status_code=500,
-            detail="OAuth2 Clients 配置解析失败",
+            message_key="oauth2.clients_parse_failed",
             error_detail=str(exc),
         ) from exc
 
     if not isinstance(parsed, list):
         raise SageHTTPException(
             status_code=500,
-            detail="OAuth2 Clients 配置格式错误",
+            message_key="oauth2.clients_invalid",
             error_detail="SAGE_OAUTH2_CLIENTS must be a JSON array",
         )
     return [item for item in parsed if isinstance(item, dict)]
@@ -164,7 +164,7 @@ def get_oauth2_client_configs() -> list[dict[str, Any]]:
         if not redirect_uris:
             raise SageHTTPException(
                 status_code=500,
-                detail="OAuth2 Client 缺少 redirect_uris",
+                message_key="oauth2.redirect_uris_missing",
                 error_detail=client_id,
             )
 
@@ -184,13 +184,13 @@ def get_oauth2_client_configs() -> list[dict[str, Any]]:
         }:
             raise SageHTTPException(
                 status_code=500,
-                detail="OAuth2 Client token_endpoint_auth_method 非法",
+                message_key="oauth2.token_auth_method_invalid",
                 error_detail=f"{client_id}:{token_endpoint_auth_method}",
             )
         if token_endpoint_auth_method != "none" and not client_secret:
             raise SageHTTPException(
                 status_code=500,
-                detail="OAuth2 Client 缺少 client_secret",
+                message_key="oauth2.client_secret_missing",
                 error_detail=client_id,
             )
 
