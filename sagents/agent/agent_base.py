@@ -33,7 +33,9 @@ from sagents.utils.multimodal_image import (
 )
 from sagents.utils.message_sanitizer import (
     remove_orphan_tool_calls as _remove_orphan_tool_calls_util,
+    drop_invalid_tool_calls as _drop_invalid_tool_calls_util,
     drop_orphan_tool_messages as _drop_orphan_tool_messages_util,
+    repair_interleaved_tool_messages as _repair_interleaved_tool_messages_util,
     strip_content_when_tool_calls as _strip_content_when_tool_calls_util,
 )
 from sagents.utils.stream_merger import (
@@ -192,6 +194,22 @@ class AgentBase(ABC):
         """
         return _drop_orphan_tool_messages_util(messages)
 
+    def _drop_invalid_tool_calls(
+        self, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """移除 ``function.arguments`` 不是合法 JSON 的 tool_call。详见
+        ``sagents.utils.message_sanitizer.drop_invalid_tool_calls``。
+        """
+        return _drop_invalid_tool_calls_util(messages)
+
+    def _repair_interleaved_tool_messages(
+        self, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """修复被 user/system/assistant 插队的 tool result。详见
+        ``sagents.utils.message_sanitizer.repair_interleaved_tool_messages``。
+        """
+        return _repair_interleaved_tool_messages_util(messages)
+
     def _remove_content_if_tool_calls(
         self, messages: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
@@ -218,6 +236,28 @@ class AgentBase(ABC):
         ``sagents.utils.multimodal_image.get_mime_type``。
         """
         return _get_mime_type_util(file_extension)
+
+    @staticmethod
+    def _refresh_current_time(
+        previous_current_time: Optional[str] = None,
+    ) -> str:
+        """Return the current time, preserving an existing system-context offset."""
+
+        now = datetime.datetime.now()
+        if previous_current_time:
+            try:
+                previous_dt = datetime.datetime.strptime(
+                    previous_current_time,
+                    "%a, %d %b %Y %H:%M:%S %z",
+                )
+                if previous_dt.tzinfo is not None:
+                    return now.astimezone(previous_dt.tzinfo).strftime(
+                        "%a, %d %b %Y %H:%M:%S %z"
+                    )
+            except ValueError:
+                pass
+
+        return now.astimezone().strftime("%a, %d %b %Y %H:%M:%S %z")
 
     def _resolve_raw_context_limit(
         self, session_context: Optional[SessionContext] = None
@@ -1100,6 +1140,15 @@ class AgentBase(ABC):
                     if "content" not in msg:
                         msg["content"] = ""
 
+                # 先修复被运行中 guidance/user 消息插队的 tool result，再清理仍不完整的 pair。
+                serializable_messages = self._repair_interleaved_tool_messages(
+                    serializable_messages
+                )
+                # 保留原始 ledger 中被打断的 tool_call 记录，但下一轮 LLM 请求不能携带
+                # 残缺/非 JSON 的 function.arguments，否则部分供应商会直接 400。
+                serializable_messages = self._drop_invalid_tool_calls(
+                    serializable_messages
+                )
                 # 需要处理 serializable_messages 中，如果有tool call ，但是没有后续的tool call id,需要去掉这条消息
                 serializable_messages = self._remove_tool_call_without_id(
                     serializable_messages
@@ -1616,16 +1665,9 @@ class AgentBase(ABC):
             stable_buf += f"<runtime_context_hint>\n{runtime_context_hint}\n</runtime_context_hint>\n"
 
         if session_context:
-            current_time_tz = self._timezone_from_current_time(
+            current_time_str = self._refresh_current_time(
                 session_context.system_context.get("current_time")
             )
-            if current_time_tz is not None:
-                current_time = datetime.datetime.now(datetime.timezone.utc).astimezone(
-                    current_time_tz
-                )
-            else:
-                current_time = datetime.datetime.now().astimezone()
-            current_time_str = current_time.strftime("%a, %d %b %Y %H:%M:%S %z")
             session_context.system_context["current_time"] = current_time_str
             system_context_info = session_context.system_context.copy()
             logger.debug(

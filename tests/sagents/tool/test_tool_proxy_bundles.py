@@ -108,9 +108,8 @@ def test_llm_judge_mode_does_not_force_inject_turn_status(monkeypatch):
     assert "turn_status" not in openai_names
 
 
-def test_turn_status_mode_wins_over_legacy_no_tool_env(monkeypatch):
+def test_turn_status_mode_force_injects_turn_status(monkeypatch):
     monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "turn_status")
-    monkeypatch.setenv("SAGE_COMPLETE_ON_NO_TOOL_CALL", "true")
 
     proxy = _build_proxy(available=["execute_shell_command"])
     names = {t["name"] for t in proxy.list_tools()}

@@ -132,7 +132,11 @@ async def update_title(session_id: str, request: Request, body: UpdateTitleReque
         body.title,
         user_id=get_request_user_id(request),
     )
-    return await Response.succ(message=f"会话 {session_id} 标题已更新", data=data)
+    return await Response.succ(
+        message="conversation.title_updated",
+        message_params={"session_id": session_id},
+        data=data,
+    )
 
 
 @conversation_router.post("/api/conversations/{session_id}/edit-last-user-message")
@@ -144,7 +148,9 @@ async def edit_last_user_message(
         content=body.content,
         user_id=get_request_user_id(request),
     )
-    return await Response.succ(message="最后一条用户消息已更新", data=data)
+    return await Response.succ(
+        message="conversation.last_user_message_updated", data=data
+    )
 
 
 @conversation_router.post("/api/sessions/{session_id}/tasks_status")
@@ -176,7 +182,7 @@ async def list_conversations(
         current_user_id = None
     elif role == "user" and not current_user_id:
         return await Response.succ(
-            data={"list": [], "total": 0}, message="获取会话列表成功"
+            data={"list": [], "total": 0}, message="conversation.list_loaded"
         )
     result = await conversation_router_service.build_list_conversations_response(
         page=page,
@@ -188,14 +194,14 @@ async def list_conversations(
         include_user_id=True,
         context_user_id=current_user_id,
     )
-    return await Response.succ(data=result, message="获取会话列表成功")
+    return await Response.succ(data=result, message="conversation.list_loaded")
 
 
 @conversation_router.get("/api/conversations/{session_id}/messages")
 async def get_messages(session_id: str, request: Request):
     """获取指定对话的所有消息"""
     data = await conversation_service.get_conversation_messages(session_id)
-    return await Response.succ(data=data, message="获取消息成功")
+    return await Response.succ(data=data, message="conversation.messages_loaded")
 
 
 @conversation_router.get("/api/sessions/{session_id}/download")
@@ -222,7 +228,7 @@ async def download_session_folder(session_id: str, request: Request):
 async def get_shared_messages(session_id: str):
     """获取分享对话的消息（无权限校验）"""
     data = await conversation_service.get_conversation_messages(session_id)
-    return await Response.succ(data=data, message="获取分享消息成功")
+    return await Response.succ(data=data, message="conversation.shared_messages_loaded")
 
 
 @conversation_router.delete("/api/conversations/{session_id}")

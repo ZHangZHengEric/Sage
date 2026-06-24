@@ -39,13 +39,13 @@ def validate_register_email(email: str | None) -> str:
     if not normalized_email:
         raise SageHTTPException(
             status_code=500,
-            detail="请输入邮箱地址",
+            message_key="user.email_required",
             error_detail="email is required",
         )
     if not _EMAIL_PATTERN.fullmatch(normalized_email):
         raise SageHTTPException(
             status_code=500,
-            detail="邮箱格式不正确",
+            message_key="email.invalid_format",
             error_detail="invalid email format",
         )
     return normalized_email
@@ -56,7 +56,7 @@ def validate_verification_code(code: str | None) -> str:
     if not _CODE_PATTERN.fullmatch(normalized_code):
         raise SageHTTPException(
             status_code=500,
-            detail="验证码错误",
+            message_key="email.verification_code_invalid",
             error_detail="invalid verification code format",
         )
     return normalized_code
@@ -95,7 +95,8 @@ async def send_register_email_code(email: str) -> tuple[int, int]:
             )
             raise SageHTTPException(
                 status_code=500,
-                detail=f"验证码发送过于频繁，请 {remaining_seconds} 秒后重试",
+                message_key="email.verification_code_throttled",
+                message_params={"seconds": remaining_seconds},
                 error_detail="verification code send throttled",
             )
         _REGISTER_VERIFICATION_CODES[normalized_email] = VerificationCodeRecord(
@@ -131,13 +132,13 @@ async def verify_register_email_code(email: str, code: str) -> None:
         if not record:
             raise SageHTTPException(
                 status_code=500,
-                detail="验证码错误",
+                message_key="email.verification_code_invalid",
                 error_detail="verification code missing or expired",
             )
         if record.code != normalized_code:
             raise SageHTTPException(
                 status_code=500,
-                detail="验证码错误",
+                message_key="email.verification_code_invalid",
                 error_detail="verification code mismatch",
             )
         _REGISTER_VERIFICATION_CODES.pop(normalized_email, None)

@@ -19,6 +19,7 @@ from common.schemas.agent import (
     AgentAbilitiesRequest,
     AgentConfigDTO,
     AutoGenAgentRequest,
+    FileWorkspaceStatRequest,
     SystemPromptOptimizeRequest,
     convert_agent_to_config,
 )
@@ -71,7 +72,9 @@ async def list(http_request: Request):
     all_configs = await agent_service.list_agents(user_id=user_id)
     agents_data = serialize_agents(all_configs)
     return await Response.succ(
-        data=agents_data, message=f"成功获取 {len(agents_data)} 个Agent配置"
+        data=agents_data,
+        message="agent.config_list_loaded",
+        message_params={"count": len(agents_data)},
     )
 
 
@@ -96,7 +99,10 @@ async def get_default_system_prompt(http_request: Request, language: str = "zh")
         )
         return await Response.succ(data=result["data"], message=result["message"])
     except Exception as e:
-        return await Response.error(message=f"获取默认System Prompt模板失败: {str(e)}")
+        return await Response.error(
+            message="agent.default_prompt_failed",
+            message_params={"message": str(e)},
+        )
 
 
 @agent_router.post("/create")
@@ -158,7 +164,8 @@ async def create(agent: AgentConfigDTO, http_request: Request):
     )
     return await Response.succ(
         data={"agent_id": created_agent.agent_id},
-        message=f"Agent '{created_agent.agent_id}' 创建成功",
+        message="agent.created",
+        message_params={"agent_id": created_agent.agent_id},
     )
 
 
@@ -192,7 +199,9 @@ async def get(agent_id: str, http_request: Request):
     agent = await agent_service.get_agent(
         agent_id, user_id=get_desktop_user_id(http_request)
     )
-    return await Response.succ(data=serialize_agent(agent), message="成功获取Agent配置")
+    return await Response.succ(
+        data=serialize_agent(agent), message="agent.config_loaded"
+    )
 
 
 @agent_router.put("/{agent_id}")
@@ -332,7 +341,9 @@ async def update(agent_id: str, agent: AgentConfigDTO, http_request: Request):
             # 不阻断主流程，仅记录错误
 
     return await Response.succ(
-        data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 更新成功"
+        data={"agent_id": agent_id},
+        message="agent.updated",
+        message_params={"agent_id": agent_id},
     )
 
 
@@ -351,7 +362,9 @@ async def delete(agent_id: str, http_request: Request):
         agent_id, user_id=get_desktop_user_id(http_request)
     )
     return await Response.succ(
-        data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 删除成功"
+        data={"agent_id": agent_id},
+        message="agent.deleted",
+        message_params={"agent_id": agent_id},
     )
 
 
@@ -371,7 +384,10 @@ async def set_default_agent(agent_id: str, http_request: Request):
         agent_id, user_id=get_desktop_user_id(http_request)
     )
     if not agent:
-        return await Response.error(message=f"Agent '{agent_id}' 不存在")
+        return await Response.error(
+            message="skill.agent_not_found",
+            message_params={"agent_id": agent_id},
+        )
 
     # 设置为默认
     dao = AgentConfigDao()
@@ -379,10 +395,12 @@ async def set_default_agent(agent_id: str, http_request: Request):
 
     if success:
         return await Response.succ(
-            data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 已设为默认"
+            data={"agent_id": agent_id},
+            message="agent.set_default_success",
+            message_params={"agent_id": agent_id},
         )
     else:
-        return await Response.error(message="设置默认 Agent 失败")
+        return await Response.error(message="agent.set_default_failed")
 
 
 @agent_router.post("/auto-generate")
@@ -423,12 +441,12 @@ async def get_agent_abilities(payload: AgentAbilitiesRequest, http_request: Requ
         )
         return await Response.succ(
             data=result["data"],
-            message="成功获取Agent能力列表",
+            message="agent.abilities_loaded",
         )
     except AgentAbilitiesGenerationError as e:
         logger.error(f"生成 Agent 能力列表失败: {e}")
         return await Response.error(
-            message="获取能力列表失败，请稍后重试",
+            message="agent.abilities_failed",
             error_detail=str(e),
         )
 
@@ -495,6 +513,21 @@ async def download_file(agent_id: str, request: Request):
     except Exception as e:
         logger.bind(agent_id=agent_id).error(f"Download failed: {e}")
         raise
+
+
+@agent_router.post("/{agent_id}/file_workspace/stat")
+async def stat_files(
+    agent_id: str,
+    body: FileWorkspaceStatRequest,
+    request: Request,
+    session_id: Optional[str] = None,
+):
+    result = await agent_service.stat_desktop_agent_files(
+        agent_id,
+        body.paths,
+        session_id=session_id,
+    )
+    return await Response.succ(message="agent.file_metadata_loaded", data=result)
 
 
 @agent_router.get("/{agent_id}/file_workspace/stream")
@@ -603,7 +636,8 @@ async def upload_file(
         )
 
         return await Response.succ(
-            message=f"文件 {file.filename} 上传成功",
+            message="agent.file_uploaded",
+            message_params={"filename": file.filename},
             data=result,
         )
     except Exception as e:
@@ -625,7 +659,9 @@ async def upload_folder(agent_id: str, request: Request):
         target_folder = data.get("target_folder", "")
 
         if not files:
-            raise SageHTTPException(status_code=400, detail="没有要上传的文件")
+            raise SageHTTPException(
+                status_code=400, message_key="agent.upload_files_required"
+            )
 
         # 确保工作空间目录存在
         workspace_path.mkdir(parents=True, exist_ok=True)
@@ -685,7 +721,8 @@ async def upload_folder(agent_id: str, request: Request):
         )
 
         return await Response.succ(
-            message=f"成功上传 {len(uploaded_files)} 个文件",
+            message="agent.files_uploaded",
+            message_params={"count": len(uploaded_files)},
             data={"files": uploaded_files},
         )
     except Exception as e:

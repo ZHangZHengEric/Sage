@@ -29,7 +29,6 @@ pub(crate) fn welcome_lines(
 
     let lines = vec![
         Line::from(vec![
-            Span::styled(">_ ", dim),
             Span::styled(
                 "Sage Terminal",
                 Style::default()

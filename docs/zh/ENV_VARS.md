@@ -24,12 +24,12 @@ ref: env_vars
 | 类型 | 变量 |
 | --- | --- |
 | 环境与入口 | `SAGE_ENV`、`SAGE_ROOT` |
-| 密钥与账号 | `SAGE_JWT_KEY`、`SAGE_REFRESH_TOKEN_SECRET`、`SAGE_SESSION_SECRET`、MySQL/S3/Grafana 密码、LLM/Embedding API Key、邮件 AK/SK |
+| 密钥与账号 | `SAGE_JWT_KEY`、`SAGE_REFRESH_TOKEN_SECRET`、`SAGE_SESSION_SECRET`、MySQL/S3/Grafana 密码、LLM/Embedding/视频分析 API Key、邮件 AK/SK |
 | 外部地址 | `SAGE_TRACE_JAEGER_PUBLIC_URL`、`SAGE_GRAFANA_PUBLIC_URL`、`SAGE_S3_PUBLIC_BASE_URL`、`SAGE_ELASTICSEARCH_URL` |
 
 Kubernetes 模板单独保留 `NAMESPACE`、`SAGE_HOST`、`SAGE_PUBLIC_URL`、`IMAGE_REGISTRY`、`IMAGE_PULL_POLICY`、`K8S_IMAGE_TARGET`、`CTR_BIN`、`CTR_NAMESPACE`、`STORAGE_CLASS`、`INGRESS_CLASS_NAME`、`TLS_SECRET_NAME`、`ENABLE_INGRESS`、`SAGE_WEB_SERVICE_TYPE`、`SAGE_WIKI_SERVICE_TYPE`、`SAGE_WEB_NODE_PORT`、`SAGE_WIKI_NODE_PORT`。
 
-高级可覆盖变量不放入 `.env.example`，除非部署确实需要覆盖。常见项包括 Compose 项目名和端口覆盖、`SAGE_WEB_BASE_PATH`、`SAGE_TRACE_JAEGER_URL`、`SAGE_LOKI_PUSH_URL`、`SAGE_MCP_*`、`OPENSANDBOX_IMAGE`、`OPENSANDBOX_TIMEOUT`、`SAGE_OPENSANDBOX_APPEND_MAX_BYTES`、默认 LLM/Embedding 模型参数、邮件固定默认项。
+高级可覆盖变量不放入 `.env.example`，除非部署确实需要覆盖。常见项包括 Compose 项目名和端口覆盖、`SAGE_WEB_BASE_PATH`、`SAGE_TRACE_JAEGER_URL`、`SAGE_LOKI_PUSH_URL`、`SAGE_MCP_*`、`OPENSANDBOX_IMAGE`、`OPENSANDBOX_TIMEOUT`、`SAGE_OPENSANDBOX_APPEND_MAX_BYTES`、默认 LLM/Embedding 模型参数、视频分析模型参数、邮件固定默认项。
 
 ## 1. LLM 与默认模型
 
@@ -176,14 +176,14 @@ Kubernetes 模板单独保留 `NAMESPACE`、`SAGE_HOST`、`SAGE_PUBLIC_URL`、`I
 
 | 变量                                             | 默认值     | 说明                                                                                                                                                                           |
 | ---------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SAGE_TASK_COMPLETION_MODE`                    | `turn_status` | SimpleAgent 的任务完成判定模式。`turn_status` 会暴露 `turn_status` 协议工具，由模型报告 `task_done` / `need_user_input` / `blocked` / `continue_work`；`llm_judge` 不暴露 `turn_status`，回退到旧的“规则优先 + LLM `task_complete_judge`”完成判断；`no_tool_call` 不暴露 `turn_status`，当 LLM 输出不包含工具调用时判定本轮完成。 |
+| `SAGE_TASK_COMPLETION_MODE`                    | `turn_status`（desktop 为 `no_tool_call`） | SimpleAgent 的任务完成判定模式。`no_tool_call` 不暴露 `turn_status`，当 LLM 输出不包含工具调用时判定本轮完成；`turn_status` 会暴露 `turn_status` 协议工具，由模型报告 `task_done` / `need_user_input` / `blocked` / `continue_work`；`llm_judge` 不暴露 `turn_status`，回退到旧的“规则优先 + LLM `task_complete_judge`”完成判断。 |
 | `SAGE_RUNTIME_CONTEXT_IN_USER`                 | `true`  | 将动态 runtime context（`system_context`、workspace files、活跃 ToDo）从 system message 移出，并冻结到最新 user 的 inference metadata 中。仅在兼容旧行为时设为 `false`，此时动态上下文仍进入 system。 |
 | `SAGE_CLI_MAX_LOOP_COUNT`                      | —       | CLI 单轮最大循环次数                                                                                                                                                                 |
 | `SAGE_CONTEXT_HISTORY_RATIO` / `SAGE_CONTEXT_ACTIVE_RATIO` / `SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO` / `SAGE_CONTEXT_RECENT_TURNS` | 代码默认值 | 上下文预算分配参数 |
 | `SAGE_TOOL_SUGGESTION_DIRECT_THRESHOLD`        | `15`    | 可用工具数小于等于该值时跳过 LLM 工具推荐调用，直接透传所有可用工具                                                                                                                                            |
 | `SAGE_EMIT_TOOL_CALL_ON_COMPLETE`              | `true`  | LLM 完整产出后是否补发 tool_call chunk                                                                                                                                                |
 | `SAGE_ECHO_SHELL_OUTPUT`                       | `false` | 后台 shell 输出是否回显到主流                                                                                                                                                           |
-| `SAGE_FORCE_TOOL_CHOICE_REQUIRED`             | `false` | 是否对所有带 tools 的 LLM 调用强制 `tool_choice=required`。默认关闭，避免 OpenAI o1/o3 等不支持该参数的模型报错；显式设为 `1/true/yes/on` 后启用                                                                 |
+| `SAGE_FORCE_TOOL_CHOICE_REQUIRED`             | `false` | 已废弃的兼容开关。普通工具调用会忽略它；只有在 `SAGE_TASK_COMPLETION_MODE=turn_status` 且本次请求只暴露内部 `turn_status` 协议工具时，才可能强制 `tool_choice=required`。 |
 | `SAGE_TOOL_PROGRESS_ENABLED`                   | `true`  | 是否启用工具实时过程通道（NDJSON `type=tool_progress` 事件，仅给前端 UI，不进 MessageManager / 不喂 LLM）                                                                                          |
 | `SAGE_TOOL_PROGRESS_FLUSH_INTERVAL_MS`         | `50`    | 工具过程合并时间窗（毫秒）。同 `(tool_call, stream)` 维度下窗口内的多次 emit 合并成一条事件下发；设 `0` 关闭合并立即推送                                                                                          |
 | `SAGE_TOOL_PROGRESS_FLUSH_BYTES`               | `16384` | 单 stream 累计字节阈值，达到即立即 flush（防极快产生输出的命令挤爆通道）                                                                                                                       |
@@ -215,7 +215,7 @@ Kubernetes 模板单独保留 `NAMESPACE`、`SAGE_HOST`、`SAGE_PUBLIC_URL`、`I
 | `SAGE_MCP_MAX_CONNECTIONS_PER_SERVER` | `0` | 每个 MCP server 的最大连接数；`0` 表示不固定限制 |
 | `SAGE_MCP_SESSION_IDLE_TTL_SECONDS` | `1800` | MCP pooled session 空闲 TTL |
 | `SAGE_MCP_REFRESH_DRAIN_TIMEOUT_SECONDS` | `30` | MCP 连接刷新时 draining 宽限时间 |
-| `SAGE_MCP_CALL_TIMEOUT_SECONDS` | `1800` | MCP 工具调用超时 |
+| `SAGE_MCP_CALL_TIMEOUT_SECONDS` | `300` | MCP 工具调用超时 |
 | `SAGE_MCP_LIST_TOOLS_RETRY_ON_CONNECTION_ERROR` | `true` | MCP `list_tools` 遇到连接类错误时重试一次 |
 | `SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR` | `true` | MCP 工具调用遇到连接类错误时重试一次 |
 
@@ -254,8 +254,7 @@ Kubernetes 模板单独保留 `NAMESPACE`、`SAGE_HOST`、`SAGE_PUBLIC_URL`、`I
 
 | 变量 | 替代方案 / 状态 |
 | --- | --- |
-| `SAGE_AGENT_STATUS_PROTOCOL_ENABLED` | 已废弃。仅当 `SAGE_TASK_COMPLETION_MODE` 未设置时读取；`false` 映射为 `llm_judge`。 |
-| `SAGE_COMPLETE_ON_NO_TOOL_CALL` | 已废弃。仅当 `SAGE_TASK_COMPLETION_MODE` 未设置时读取；`true` 映射为 `no_tool_call`。 |
+| `SAGE_COMPLETE_ON_NO_TOOL_CALL` | 已移除并忽略。请使用 `SAGE_TASK_COMPLETION_MODE=no_tool_call`。 |
 | `SAGE_SPLIT_SYSTEM` | 已废弃且忽略。system message 拆分现在固定开启。 |
 | `SAGE_STABLE_TOOLS_ORDER` | 已废弃且忽略。LLM 请求前 tools 固定按 `function.name` 排序。 |
 | `SAGE_AUTO_LINT` | 已废弃且忽略。file tool lint 固定开启。 |

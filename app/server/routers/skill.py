@@ -103,6 +103,29 @@ async def upload_skill(
     return await Response.succ(message=result["message"], data=result["data"])
 
 
+@skill_router.post("/upload-batch")
+async def upload_skills(
+    http_request: Request,
+    files: List[UploadFile] = File(...),
+    is_system: bool = Form(False),
+    is_agent: bool = Form(False),
+    agent_id: Optional[str] = Form(None),
+):
+    """
+    批量上传 ZIP 文件导入技能，单个文件失败不影响其他文件。
+    """
+    result = await skill_router_service.build_upload_skills_response(
+        files=files,
+        user_id=get_request_user_id(http_request),
+        role=get_request_role(http_request),
+        is_system=is_system,
+        is_agent=is_agent,
+        agent_id=agent_id,
+        include_user_id=True,
+    )
+    return await Response.succ(message=result["message"], data=result["data"])
+
+
 @skill_router.post("/import-url")
 async def import_skill_from_url(request: UrlImportRequest, http_request: Request):
     """

@@ -89,6 +89,7 @@ export const toolLabelKeys = {
   'browser_dom_action': 'tools.browserDomAction',
   // 图片理解工具
   'analyze_image': 'tools.analyzeImage',
+  'analyze_video': 'tools.analyzeVideo',
   // 任务清单工具
   'todo_write': 'tools.todoWrite',
   'todo_read': 'tools.todoRead',
@@ -185,6 +186,7 @@ export const toolLabels = {
   'browser_dom_action': 'DOM 操作',
   // 图片理解工具
   'analyze_image': '图片理解',
+  'analyze_video': '视频理解',
   // 任务清单工具
   'todo_write': '待办任务',
   'todo_read': '读取待办',

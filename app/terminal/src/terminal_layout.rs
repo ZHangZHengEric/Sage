@@ -3,6 +3,8 @@ use crate::bottom_pane::composer::{composer_height, ComposerProps};
 use crate::bottom_pane::{command_popup, help_overlay, picker_overlay, transcript_overlay};
 use crate::wrap::wrapped_height;
 
+pub(crate) const INLINE_POPUP_MAX_ROWS: usize = 8;
+
 fn rendered_height(lines: &[ratatui::text::Line<'static>], width: u16) -> u16 {
     wrapped_height(lines, width)
 }
@@ -38,7 +40,7 @@ pub(crate) fn desired_viewport_height(
         .saturating_add(1)
         .saturating_add(popup_height);
     if !app.busy {
-        let idle_lines = app.rendered_idle_lines(width);
+        let idle_lines = app.rendered_main_lines(width);
         if idle_lines.is_empty() {
             return composer_height
                 .saturating_add(1)
@@ -57,7 +59,7 @@ pub(crate) fn desired_viewport_height(
 }
 
 pub(crate) fn popup_required_height(app: &App) -> u16 {
-    command_popup::popup_height(app.popup_props().as_ref())
+    command_popup::popup_height(app.popup_props_for_rows(INLINE_POPUP_MAX_ROWS).as_ref())
 }
 
 fn composer_required_height(app: &App, width: u16) -> u16 {

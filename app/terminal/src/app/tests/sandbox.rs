@@ -42,8 +42,13 @@ fn sandbox_show_reports_current_override() {
         .map(|span| span.content.as_ref())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("sandbox_type: remote"));
+    assert!(rendered.contains("sandbox: remote (session override)"));
     assert!(rendered.contains("approval_mode: untrusted"));
+    assert!(rendered.contains("workspace: "));
+    assert!(rendered.contains("restart: pending"));
+    assert!(rendered.contains("filesystem: remote workspace"));
+    assert!(rendered.contains("next: run /doctor"));
+    assert!(!rendered.contains("sandbox_type:"));
 }
 
 #[test]

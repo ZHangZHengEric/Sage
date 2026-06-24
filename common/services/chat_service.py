@@ -55,8 +55,8 @@ def _is_desktop_mode() -> bool:
     return _get_cfg().app_mode == "desktop"
 
 
-def _chat_exception(detail: str) -> SageHTTPException:
-    kwargs: Dict[str, Any] = {"detail": detail}
+def _chat_exception(message_key: str) -> SageHTTPException:
+    kwargs: Dict[str, Any] = {"message_key": message_key}
     if _is_desktop_mode():
         kwargs["status_code"] = 500
     return SageHTTPException(**kwargs)
@@ -304,7 +304,9 @@ async def optimize_user_input(
 
     optimized_input = (result or {}).get("optimized_input", "").strip()
     if not optimized_input:
-        raise SageHTTPException(detail="用户输入优化失败", error_detail="优化结果为空")
+        raise SageHTTPException(
+            message_key="chat.input_optimization_failed", error_detail="优化结果为空"
+        )
 
     if result.get("status") == "fallback":
         logger.warning(
@@ -717,12 +719,12 @@ async def populate_request_from_agent_config(
     agent = None
     if request.agent_id is None:
         if require_agent_id:
-            raise _chat_exception("Agent ID 不能为空")
+            raise _chat_exception("chat.agent_id_required")
     else:
         agent = await AgentConfigDao().get_by_id(request.agent_id)
         if not agent or not agent.config:
             if require_agent_id:
-                raise _chat_exception("Agent 不存在")
+                raise _chat_exception("chat.agent_not_found")
             logger.warning(f"Agent {request.agent_id} not found")
             agent = None
         else:
@@ -873,7 +875,7 @@ async def populate_request_from_agent_config(
     if request.max_loop_count is None:
         raise SageHTTPException(
             status_code=400,
-            detail="max_loop_count 必须显式传入",
+            message_key="chat.max_loop_required",
             error_detail="Missing required field: max_loop_count",
         )
 
@@ -1178,9 +1180,7 @@ async def prepare_session(
     if lock.locked():
         session = get_global_session_manager().get_live_session(session_id)
         if not session or not session.is_interrupted():
-            raise _chat_exception(
-                "会话正在运行中，请先调用 interrupt 或使用不同的会话ID"
-            )
+            raise _chat_exception("chat.session_running")
 
     try:
         lock_wait_start = time.perf_counter()
@@ -1192,7 +1192,7 @@ async def prepare_session(
                 f"Session lock wait slow: {lock_wait_cost:.3f}s"
             )
     except asyncio.TimeoutError:
-        raise _chat_exception("会话正在清理中，请稍后重试")
+        raise _chat_exception("chat.session_cleanup")
 
     try:
         stream_service = SageStreamService(request)

@@ -16,6 +16,7 @@ import { usePanelStore } from '@/stores/panel.js'
 import { useWorkbenchStore } from '@/stores/workbench.js'
 import { isToolResultMessage } from '@/utils/messageLabels.js'
 import { mergeToolFunctionArguments } from '@/utils/mergeToolFunctionArguments.js'
+import { getSessionMessageIndexKey } from '@/utils/sessionStreamEvents.js'
 import { getWebBasePath } from '@/config/runtime.js'
 import { storeToRefs } from 'pinia'
 
@@ -239,8 +240,9 @@ export const useChatPage = (props) => {
   const rebuildMessageIdIndexMap = () => {
     const next = new Map()
     messages.value.forEach((item, index) => {
-      if (item?.message_id) {
-        next.set(item.message_id, index)
+      const key = getSessionMessageIndexKey(item, currentSessionId.value)
+      if (key) {
+        next.set(key, index)
       }
     })
     messageIdIndexMap.value = next
@@ -387,7 +389,7 @@ export const useChatPage = (props) => {
 
     if (isToolResultMessage(message) && message.tool_call_id) {
       const plainToolResult = JSON.parse(JSON.stringify(message))
-      workbenchStore.updateToolResult(message.tool_call_id, plainToolResult)
+      workbenchStore.updateToolResult(message.tool_call_id, plainToolResult, message.session_id)
       return
     }
 
@@ -396,7 +398,7 @@ export const useChatPage = (props) => {
         const toolResult = toolCall?.function?.result
         if (toolCall?.id && toolResult) {
           const plainToolResult = JSON.parse(JSON.stringify(toolResult))
-          workbenchStore.updateToolResult(toolCall.id, plainToolResult)
+          workbenchStore.updateToolResult(toolCall.id, plainToolResult, message.session_id)
         }
       })
     }
@@ -470,7 +472,7 @@ export const useChatPage = (props) => {
       workbenchStore.extractFromMessage(message, message.agent_id || conversationAgentId)
       if (isToolResultMessage(message) && message.tool_call_id) {
         const plainToolResult = JSON.parse(JSON.stringify(message))
-        workbenchStore.updateToolResult(message.tool_call_id, plainToolResult)
+        workbenchStore.updateToolResult(message.tool_call_id, plainToolResult, message.session_id)
       }
     })
 
@@ -511,7 +513,8 @@ export const useChatPage = (props) => {
           text: messageData.text,
           stream: messageData.stream,
           closed: !!messageData.closed,
-          ts: messageData.ts
+          ts: messageData.ts,
+          sessionId: messageData.session_id
         })
       } catch (e) {
         console.warn('[Chat] handle tool_progress failed:', e)
@@ -519,9 +522,10 @@ export const useChatPage = (props) => {
       return
     }
     const messageId = messageData.message_id
+    const messageIndexKey = getSessionMessageIndexKey(messageData, currentSessionId.value)
 
-    if (messageId && messageIdIndexMap.value.has(messageId)) {
-      const targetIndex = messageIdIndexMap.value.get(messageId)
+    if (messageIndexKey && messageIdIndexMap.value.has(messageIndexKey)) {
+      const targetIndex = messageIdIndexMap.value.get(messageIndexKey)
       const existing = messages.value[targetIndex]
       if (!existing) {
         rebuildMessageIdIndexMap()
@@ -566,8 +570,9 @@ export const useChatPage = (props) => {
       timestamp: messageData.timestamp || Date.now()
     }
     messages.value.push(appended)
-    if (appended.message_id) {
-      messageIdIndexMap.value.set(appended.message_id, messages.value.length - 1)
+    const appendedKey = getSessionMessageIndexKey(appended, currentSessionId.value)
+    if (appendedKey) {
+      messageIdIndexMap.value.set(appendedKey, messages.value.length - 1)
     }
     if (shouldExtractWorkbenchImmediately(messageData)) {
       extractWorkbenchFromMessage(appended)
@@ -596,7 +601,7 @@ export const useChatPage = (props) => {
       timestamp: Date.now()
     }
     messages.value.push(userMessage)
-    messageIdIndexMap.value.set(userMessage.message_id, messages.value.length - 1)
+    messageIdIndexMap.value.set(getSessionMessageIndexKey(userMessage), messages.value.length - 1)
     return userMessage
   }
 
@@ -609,7 +614,7 @@ export const useChatPage = (props) => {
       timestamp: Date.now()
     }
     messages.value.push(errorMessage)
-    messageIdIndexMap.value.set(errorMessage.message_id, messages.value.length - 1)
+    messageIdIndexMap.value.set(getSessionMessageIndexKey(errorMessage), messages.value.length - 1)
   }
 
   const clearMessages = () => {

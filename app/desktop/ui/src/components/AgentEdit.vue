@@ -619,6 +619,17 @@
                       {{ t('agentEdit.deselectAll') }}
                     </Button>
                     <Button
+                      v-if="filteredPendingUpdateSkills.length > 0"
+                      variant="ghost"
+                      size="sm"
+                      class="h-8 text-xs px-2 text-primary hover:text-primary hover:bg-primary/10"
+                      @click="syncPendingSkills"
+                      :disabled="!props.agent?.id || syncingPendingSkills"
+                    >
+                      <RefreshCw class="h-3 w-3 mr-1" :class="{ 'animate-spin': syncingPendingSkills }" />
+                      {{ t('agentEdit.updateAllSkills', { count: filteredPendingUpdateSkills.length }) }}
+                    </Button>
+                    <Button
                       variant="ghost"
                       size="sm"
                       class="h-8 text-xs px-2"
@@ -1281,6 +1292,17 @@ const loadingAgentSkills = ref(false)
 
 // 技能同步状态
 const syncingSkills = ref(new Set())  // 正在同步的技能名称集合
+const syncingPendingSkills = ref(false)
+
+const setSkillSyncing = (skillName, syncing) => {
+  const next = new Set(syncingSkills.value)
+  if (syncing) {
+    next.add(skillName)
+  } else {
+    next.delete(skillName)
+  }
+  syncingSkills.value = next
+}
 
 // 检查技能是否正在同步
 const isSkillSyncing = (skillName) => {
@@ -1337,7 +1359,7 @@ const syncSkill = async (skillName) => {
     return
   }
 
-  syncingSkills.value.add(skillName)
+  setSkillSyncing(skillName, true)
 
   try {
     const { skillAPI } = await import('../api/skill.js')
@@ -1349,7 +1371,7 @@ const syncSkill = async (skillName) => {
     console.error('Failed to sync skill:', error)
     toast.error(t('agentEdit.skillSyncFailed') || `技能 '${skillName}' 同步失败`)
   } finally {
-    syncingSkills.value.delete(skillName)
+    setSkillSyncing(skillName, false)
   }
 }
 
@@ -2877,6 +2899,10 @@ const filteredSkills = computed(() => {
   })
 })
 
+const filteredPendingUpdateSkills = computed(() => {
+  return filteredSkills.value.filter(skill => skill?.need_update)
+})
+
 // Selected skills for display as tags
 const selectedSkills = computed(() => {
   const selected = store.formData.availableSkills || []
@@ -2901,6 +2927,47 @@ const deselectAllSkills = () => {
   currentSkills.forEach(skillName => {
     store.toggleSkill(skillName)
   })
+}
+
+const syncPendingSkills = async () => {
+  if (!props.agent?.id) {
+    toast.error(t('agentEdit.agentNotSaved'))
+    return
+  }
+
+  const skillNames = filteredPendingUpdateSkills.value
+    .map(skill => skill.name || skill)
+    .filter(Boolean)
+    .filter(skillName => !syncingSkills.value.has(skillName))
+
+  if (skillNames.length === 0 || syncingPendingSkills.value) return
+
+  syncingPendingSkills.value = true
+  skillNames.forEach(skillName => setSkillSyncing(skillName, true))
+
+  let successCount = 0
+  let failedCount = 0
+  try {
+    const { skillAPI } = await import('../api/skill.js')
+    for (const skillName of skillNames) {
+      try {
+        await skillAPI.syncSkillToAgent(skillName, props.agent.id)
+        successCount += 1
+      } catch (error) {
+        failedCount += 1
+        console.error('Failed to sync skill:', skillName, error)
+      }
+    }
+    await loadAgentAvailableSkills(props.agent.id)
+    if (failedCount > 0) {
+      toast.error(t('agentEdit.skillSyncBatchPartial', { success: successCount, failed: failedCount }))
+    } else {
+      toast.success(t('agentEdit.skillSyncBatchSuccess', { count: successCount }))
+    }
+  } finally {
+    skillNames.forEach(skillName => setSkillSyncing(skillName, false))
+    syncingPendingSkills.value = false
+  }
 }
 
 // External paths

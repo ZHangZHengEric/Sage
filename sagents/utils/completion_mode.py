@@ -1,9 +1,4 @@
-"""Completion-mode selection for SimpleAgent style execution.
-
-The new primary configuration is ``SAGE_TASK_COMPLETION_MODE``.  Older boolean
-environment variables are still accepted as compatibility fallbacks when the new
-enum is not set.
-"""
+"""Completion-mode selection for SimpleAgent style execution."""
 
 from __future__ import annotations
 
@@ -34,22 +29,12 @@ _MODE_ALIASES = {
 }
 
 
-def _env_true(name: str) -> bool:
-    return os.environ.get(name, "false").strip().lower() == "true"
-
-
-def _env_false(name: str) -> bool:
-    return os.environ.get(name, "true").strip().lower() == "false"
-
-
 def get_task_completion_mode() -> TaskCompletionMode:
     """Return the active task completion mode.
 
     Precedence:
-    1. ``SAGE_TASK_COMPLETION_MODE`` enum when set.
-    2. Back-compat fallback: ``SAGE_COMPLETE_ON_NO_TOOL_CALL=true``.
-    3. Back-compat fallback: ``SAGE_AGENT_STATUS_PROTOCOL_ENABLED=false``.
-    4. Default ``turn_status`` protocol.
+    1. ``SAGE_TASK_COMPLETION_MODE`` enum when valid.
+    2. Default ``turn_status`` protocol.
     """
 
     raw_mode = os.environ.get("SAGE_TASK_COMPLETION_MODE")
@@ -58,14 +43,10 @@ def get_task_completion_mode() -> TaskCompletionMode:
         if mode is not None:
             return mode
         logger.warning(
-            "Invalid SAGE_TASK_COMPLETION_MODE=%r; falling back to legacy envs/default",
+            "Invalid SAGE_TASK_COMPLETION_MODE=%r; falling back to default",
             raw_mode,
         )
 
-    if _env_true("SAGE_COMPLETE_ON_NO_TOOL_CALL"):
-        return TaskCompletionMode.NO_TOOL_CALL
-    if _env_false("SAGE_AGENT_STATUS_PROTOCOL_ENABLED"):
-        return TaskCompletionMode.LLM_JUDGE
     return TaskCompletionMode.TURN_STATUS
 
 

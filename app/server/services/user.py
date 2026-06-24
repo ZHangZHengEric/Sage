@@ -81,27 +81,29 @@ async def register_user(
     if allow_reg == "false":
         raise SageHTTPException(
             status_code=500,
-            detail="系统不允许自注册",
+            message_key="user.registration_disabled",
             error_detail="registration disabled",
         )
 
     email = normalize_email(email)
     if not email:
         raise SageHTTPException(
-            status_code=400, detail="注册必须填写邮箱", error_detail="email is required"
+            status_code=400,
+            message_key="user.register_email_required",
+            error_detail="email is required",
         )
 
     dao = UserDao()
     existing = await dao.get_by_username(username)
     if existing:
         raise SageHTTPException(
-            status_code=500, detail="用户名已存在", error_detail=username
+            status_code=500, message_key="user.username_exists", error_detail=username
         )
     if email:
         existing_email = await dao.get_by_email(email)
         if existing_email:
             raise SageHTTPException(
-                status_code=500, detail="邮箱已存在", error_detail=email
+                status_code=500, message_key="user.email_exists", error_detail=email
             )
 
     await verify_register_email_code(email, verification_code or "")
@@ -126,21 +128,25 @@ async def send_register_verification_code(email: str) -> tuple[int, int]:
     if allow_reg == "false":
         raise SageHTTPException(
             status_code=500,
-            detail="系统不允许自注册",
+            message_key="user.registration_disabled",
             error_detail="registration disabled",
         )
 
     normalized_email = normalize_email(email)
     if not normalized_email:
         raise SageHTTPException(
-            status_code=400, detail="请输入邮箱地址", error_detail="email is required"
+            status_code=400,
+            message_key="user.email_required",
+            error_detail="email is required",
         )
 
     dao = UserDao()
     existing_email = await dao.get_by_email(normalized_email)
     if existing_email:
         raise SageHTTPException(
-            status_code=500, detail="邮箱已存在", error_detail=normalized_email
+            status_code=500,
+            message_key="user.email_exists",
+            error_detail=normalized_email,
         )
 
     return await send_register_email_code(normalized_email)
@@ -159,7 +165,8 @@ async def authenticate_user(username_or_email: str, password: str) -> User:
 
     if not user or not _verify_password(password, user.password_hash):
         raise SageHTTPException(
-            detail="用户名或密码错误", error_detail="invalid credentials"
+            message_key="user.invalid_credentials",
+            error_detail="invalid credentials",
         )
     return user
 
@@ -171,14 +178,17 @@ async def change_password(user_id: str, old_password: str, new_password: str) ->
         # Check if it's admin (admin user in config cannot change password via this API)
         if user_id == "admin":
             raise SageHTTPException(
-                detail="管理员账户请通过配置文件修改密码",
+                message_key="user.admin_password_config_only",
                 error_detail="admin password immutable via api",
             )
-        raise SageHTTPException(detail="用户不存在", error_detail="user not found")
+        raise SageHTTPException(
+            message_key="user.not_found", error_detail="user not found"
+        )
 
     if not _verify_password(old_password, user.password_hash):
         raise SageHTTPException(
-            detail="旧密码错误", error_detail="invalid old password"
+            message_key="user.old_password_invalid",
+            error_detail="invalid old password",
         )
 
     user.password_hash = _hash_password(new_password)
@@ -197,10 +207,13 @@ async def delete_user(user_id: str) -> bool:
     dao = UserDao()
     user = await dao.get_by_id(user_id)
     if not user:
-        raise SageHTTPException(detail="用户不存在", error_detail="user not found")
+        raise SageHTTPException(
+            message_key="user.not_found", error_detail="user not found"
+        )
     if user.role == "admin":
         raise SageHTTPException(
-            detail="无法删除管理员用户", error_detail="cannot delete admin"
+            message_key="user.delete_admin_forbidden",
+            error_detail="cannot delete admin",
         )
     await dao.delete_by_id(User, user_id)
     return True
@@ -218,13 +231,13 @@ async def add_user(
     existing = await dao.get_by_username(username)
     if existing:
         raise SageHTTPException(
-            status_code=500, detail="用户名已存在", error_detail=username
+            status_code=500, message_key="user.username_exists", error_detail=username
         )
     if email:
         existing_email = await dao.get_by_email(email)
         if existing_email:
             raise SageHTTPException(
-                status_code=500, detail="邮箱已存在", error_detail=email
+                status_code=500, message_key="user.email_exists", error_detail=email
             )
 
     user_id = gen_id()
