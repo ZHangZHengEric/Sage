@@ -122,7 +122,7 @@ class TaskService:
             logger.warning(
                 f"[TaskService] update_one_time_task FAILED | task_id={task_id} | error=Task not found"
             )
-            raise SageHTTPException(status_code=404, detail="Task not found")
+            raise SageHTTPException(status_code=404, message_key="task.not_found")
 
         if data.name is not None:
             task.name = data.name
@@ -158,7 +158,7 @@ class TaskService:
             logger.warning(
                 f"[TaskService] delete_one_time_task FAILED | task_id={task_id} | error=Task not found"
             )
-            raise SageHTTPException(status_code=404, detail="Task not found")
+            raise SageHTTPException(status_code=404, message_key="task.not_found")
         result = await self.dao.delete_one_time_task(task_id)
         elapsed = time.perf_counter() - start_time
         logger.info(
@@ -182,7 +182,7 @@ class TaskService:
             logger.warning(
                 f"[TaskService] update_recurring_task FAILED | task_id={task_id} | error=Task not found"
             )
-            raise SageHTTPException(status_code=404, detail="Task not found")
+            raise SageHTTPException(status_code=404, message_key="task.not_found")
 
         if data.name is not None:
             task.name = data.name
@@ -213,7 +213,7 @@ class TaskService:
             logger.warning(
                 f"[TaskService] delete_recurring_task FAILED | task_id={task_id} | error=Task not found"
             )
-            raise SageHTTPException(status_code=404, detail="Task not found")
+            raise SageHTTPException(status_code=404, message_key="task.not_found")
         result = await self.dao.delete_recurring_task(task_id)
         elapsed = time.perf_counter() - start_time
         logger.info(
@@ -233,7 +233,7 @@ class TaskService:
             logger.warning(
                 f"[TaskService] toggle_task_status FAILED | task_id={task_id} | error=Task not found"
             )
-            raise SageHTTPException(status_code=404, detail="Task not found")
+            raise SageHTTPException(status_code=404, message_key="task.not_found")
         task.enabled = enabled
         result = await self.dao.update_recurring_task(task)
         elapsed = time.perf_counter() - start_time
@@ -292,7 +292,7 @@ class TaskService:
             logger.warning(
                 f"[TaskService] get_one_time_task FAILED | task_id={task_id} | error=Task not found"
             )
-            raise SageHTTPException(status_code=404, detail="Task not found")
+            raise SageHTTPException(status_code=404, message_key="task.not_found")
         elapsed = time.perf_counter() - start_time
         logger.info(
             f"[TaskService] get_one_time_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
@@ -311,7 +311,7 @@ class TaskService:
             logger.warning(
                 f"[TaskService] get_recurring_task FAILED | task_id={task_id} | error=Task not found"
             )
-            raise SageHTTPException(status_code=404, detail="Task not found")
+            raise SageHTTPException(status_code=404, message_key="task.not_found")
         elapsed = time.perf_counter() - start_time
         logger.info(
             f"[TaskService] get_recurring_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
@@ -376,7 +376,7 @@ class TaskService:
             logger.warning(
                 f"[TaskService] complete_one_time_task FAILED | task_id={task_id} | error=Task not found"
             )
-            raise SageHTTPException(status_code=404, detail="Task not found")
+            raise SageHTTPException(status_code=404, message_key="task.not_found")
         await self.dao.add_task_history(task_id, status="completed", response=response)
         elapsed = time.perf_counter() - start_time
         logger.info(
@@ -406,7 +406,7 @@ class TaskService:
             logger.warning(
                 f"[TaskService] fail_one_time_task FAILED | task_id={task_id} | error=Task not found"
             )
-            raise SageHTTPException(status_code=404, detail="Task not found")
+            raise SageHTTPException(status_code=404, message_key="task.not_found")
         await self.dao.add_task_history(
             task_id, status="failed", error_message=error_message
         )
@@ -435,7 +435,7 @@ class TaskService:
             logger.warning(
                 f"[TaskService] complete_recurring_task FAILED | task_id={task_id} | error=Task not found"
             )
-            raise SageHTTPException(status_code=404, detail="Task not found")
+            raise SageHTTPException(status_code=404, message_key="task.not_found")
         elapsed = time.perf_counter() - start_time
         logger.info(
             f"[TaskService] complete_recurring_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"

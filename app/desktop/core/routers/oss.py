@@ -238,21 +238,21 @@ async def import_sandbox_upload(request: Request, body: OssSandboxUploadBody):
     aid = body.agent_id.strip()
     fn = body.filename.strip()
     if not aid:
-        raise HTTPException(status_code=400, detail="invalid agent_id")
+        raise HTTPException(status_code=400, detail="oss.invalid_agent_id")
     if ".." in aid or "/" in aid or "\\" in aid:
-        raise HTTPException(status_code=400, detail="invalid agent_id")
+        raise HTTPException(status_code=400, detail="oss.invalid_agent_id")
     if ".." in fn or "/" in fn or "\\" in fn:
-        raise HTTPException(status_code=400, detail="invalid filename")
+        raise HTTPException(status_code=400, detail="oss.invalid_filename")
 
     base = _resolve_upload_root(aid).resolve()
     file_path = (base / fn).resolve()
     try:
         file_path.relative_to(base)
     except ValueError:
-        raise HTTPException(status_code=400, detail="path traversal not allowed")
+        raise HTTPException(status_code=400, detail="oss.path_traversal_not_allowed")
 
     if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail="file not found")
+        raise HTTPException(status_code=404, detail="oss.file_missing_or_unreadable")
 
     local_path = str(file_path)
     public_url = _build_public_url(request, aid, fn)
@@ -273,22 +273,22 @@ async def serve_uploaded_file(agent_id: str, filename: str):
     完全一致（前端不再需要 Tauri convertFileSrc / readFile 这条本地路径分支）。
     """
     if "/" in filename or "\\" in filename or filename in ("..", "."):
-        raise HTTPException(status_code=400, detail="invalid filename")
+        raise HTTPException(status_code=400, detail="oss.invalid_filename")
 
     if agent_id == "_default":
         base_dir = _resolve_upload_root(None)
     else:
         if "/" in agent_id or "\\" in agent_id or agent_id in ("..", "."):
-            raise HTTPException(status_code=400, detail="invalid agent_id")
+            raise HTTPException(status_code=400, detail="oss.invalid_agent_id")
         base_dir = _resolve_upload_root(agent_id)
 
     file_path = (base_dir / filename).resolve()
     try:
         file_path.relative_to(base_dir.resolve())
     except ValueError:
-        raise HTTPException(status_code=400, detail="path traversal not allowed")
+        raise HTTPException(status_code=400, detail="oss.path_traversal_not_allowed")
 
     if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail="file not found")
+        raise HTTPException(status_code=404, detail="oss.file_missing_or_unreadable")
 
     return FileResponse(str(file_path), filename=filename)

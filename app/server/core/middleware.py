@@ -12,6 +12,7 @@ from loguru import logger
 
 from common.core import config
 from common.core.exceptions import SageHTTPException
+from common.core.i18n import locale_from_request, translate_if_key
 from common.core.middleware import (
     register_cors_middleware,
     register_request_logging_middleware,
@@ -120,11 +121,18 @@ def _is_trusted_identity_proxy(
     return False
 
 
-async def _unauthorized_response(status_code: int, detail: str, error_detail: str):
+async def _unauthorized_response(
+    request: Request, status_code: int, detail: str, error_detail: str
+):
     """统一返回未授权响应"""
+    locale = locale_from_request(request)
     return JSONResponse(
         status_code=status_code,
-        content=(await Response.error(status_code, detail, error_detail)).model_dump(),
+        content=(
+            await Response.error(
+                status_code, translate_if_key(detail, locale), error_detail
+            )
+        ).model_dump(),
     )
 
 
@@ -167,7 +175,7 @@ def register_middlewares(app):
                 except SageHTTPException as e:
                     auth_error = (e.status_code, e.detail, e.error_detail)
                 except Exception as e:
-                    auth_error = (401, "Token非法", str(e))
+                    auth_error = (401, "auth.invalid_token", str(e))
 
             if not getattr(request.state, "user_claims", None):
                 session_claims = get_session_claims(request)
@@ -192,9 +200,9 @@ def register_middlewares(app):
 
             if not getattr(request.state, "user_claims", None) and not is_whitelisted:
                 if auth_error:
-                    return await _unauthorized_response(*auth_error)
+                    return await _unauthorized_response(request, *auth_error)
                 return await _unauthorized_response(
-                    401, "未授权", "missing auth session"
+                    request, 401, "auth.unauthorized", "missing auth session"
                 )
 
         return await call_next(request)

@@ -9,6 +9,9 @@ from typing import Any, Optional
 
 from pydantic import BaseModel
 
+from common.core.context import get_request_locale
+from common.core.i18n import translate_if_key
+
 
 class StandardResponse(BaseModel):
     """标准 API 响应格式"""
@@ -45,13 +48,24 @@ class ErrorResponse(BaseModel):
 
 class Response:
     @staticmethod
-    async def succ(message: str = "", data=None):
-        return StandardResponse(code=200, message=message, data=data)
+    async def succ(message: str = "", data=None, message_params: dict | None = None):
+        return StandardResponse(
+            code=200,
+            message=translate_if_key(message, get_request_locale(), message_params)
+            if message
+            else "",
+            data=data,
+        )
 
     @staticmethod
     async def error(
         code: int = 500,
         message: str = "操作失败",
         error_detail: str = None,  # pyright: ignore[reportArgumentType]
+        message_params: dict | None = None,
     ):
-        return ErrorResponse(code=code, message=message, error_detail=error_detail)
+        return ErrorResponse(
+            code=code,
+            message=translate_if_key(message, get_request_locale(), message_params),
+            error_detail=error_detail,
+        )

@@ -98,7 +98,7 @@ def _normalize_redirect_uri(
             return redirect_uri
         raise SageHTTPException(
             status_code=400,
-            detail="OAuth 回调地址非法",
+            message_key="oauth.redirect_uri_invalid",
             error_detail="redirect_uri host mismatch",
         )
 
@@ -185,13 +185,13 @@ def _load_json_auth_providers(cfg: config.StartupConfig) -> list[dict[str, Any]]
     except json.JSONDecodeError as exc:
         raise SageHTTPException(
             status_code=500,
-            detail="认证 Providers 配置解析失败",
+            message_key="oauth.providers_parse_failed",
             error_detail=str(exc),
         ) from exc
     if not isinstance(parsed, list):
         raise SageHTTPException(
             status_code=500,
-            detail="认证 Providers 配置格式错误",
+            message_key="oauth.providers_invalid",
             error_detail="SAGE_AUTH_PROVIDERS must be a JSON array",
         )
     return [item for item in parsed if isinstance(item, dict)]
@@ -272,7 +272,7 @@ def get_oidc_provider(provider_id: str) -> Dict[str, Any]:
             return provider
     raise SageHTTPException(
         status_code=404,
-        detail="OAuth Provider 不存在",
+        message_key="oauth.provider_not_found",
         error_detail=provider_id,
     )
 
@@ -302,7 +302,7 @@ async def get_oauth_provider_metadata(provider_id: str) -> Dict[str, Any]:
         except httpx.HTTPError as exc:
             raise SageHTTPException(
                 status_code=502,
-                detail="获取 OAuth Provider 元数据失败",
+                message_key="oauth.metadata_fetch_failed",
                 error_detail=str(exc),
             ) from exc
     else:
@@ -320,7 +320,7 @@ async def get_oauth_provider_metadata(provider_id: str) -> Dict[str, Any]:
     ):
         raise SageHTTPException(
             status_code=500,
-            detail="OAuth Provider 元数据不完整",
+            message_key="oauth.metadata_incomplete",
             error_detail=f"provider={provider_id}",
         )
 
@@ -404,7 +404,7 @@ async def _find_or_create_oauth_user(
     if not subject:
         raise SageHTTPException(
             status_code=400,
-            detail="OAuth 用户信息缺少 subject",
+            message_key="oauth.subject_missing",
             error_detail="missing oauth subject",
         )
 
@@ -497,19 +497,19 @@ async def complete_oauth_login(
     if not flow:
         raise SageHTTPException(
             status_code=400,
-            detail="OAuth 登录状态已失效",
+            message_key="oauth.state_expired",
             error_detail="missing oauth session state",
         )
     if flow.get("provider_id") != provider_id:
         raise SageHTTPException(
             status_code=400,
-            detail="OAuth Provider 不匹配",
+            message_key="oauth.provider_mismatch",
             error_detail="oauth provider mismatch",
         )
     if flow.get("state") != state:
         raise SageHTTPException(
             status_code=400,
-            detail="OAuth 登录状态校验失败",
+            message_key="oauth.state_invalid",
             error_detail="oauth state mismatch",
         )
 
@@ -537,7 +537,7 @@ async def complete_oauth_login(
             if not access_token:
                 raise SageHTTPException(
                     status_code=400,
-                    detail="OAuth Token 交换失败",
+                    message_key="oauth.token_exchange_failed",
                     error_detail="missing access_token",
                 )
 
@@ -555,7 +555,7 @@ async def complete_oauth_login(
     except httpx.HTTPError as exc:
         raise SageHTTPException(
             status_code=502,
-            detail="从 OAuth Provider 获取用户信息失败",
+            message_key="oauth.userinfo_fetch_failed",
             error_detail=str(exc),
         ) from exc
 

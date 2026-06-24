@@ -74,7 +74,7 @@ async def get_system_info(request: Request):
         include_desktop_flags=True,
     )
     data["allow_registration"] = False
-    return await Response.succ(data=data, message="获取系统信息成功")
+    return await Response.succ(data=data, message="system.info_loaded")
 
 
 @system_router.post("/system/update_settings", response_model=BaseResponse[dict])
@@ -83,17 +83,19 @@ async def update_system_settings(request: Request, req: SystemSettingsRequest):
     role = claims.get("role")
     if role != "admin":
         return await Response.error(
-            code=403, message="权限不足", error_detail="permission denied"
+            code=403,
+            message="common.permission_denied",
+            error_detail="permission denied",
         )
 
     await system_service.update_allow_registration(req.allow_registration)
-    return await Response.succ(data={}, message="系统设置更新成功")
+    return await Response.succ(data={}, message="system.settings_updated")
 
 
 @system_router.get("/health")
 async def health_check():
     return await Response.succ(
-        message="服务运行正常",
+        message="system.healthy",
         data=system_service.get_health_data(),
     )
 
@@ -112,7 +114,7 @@ async def get_agent_usage_stats(req: AgentUsageStatsRequest, request: Request):
         agent_id=req.agent_id,
     )
     return await Response.succ(
-        message="获取 Agent 工具使用统计成功",
+        message="system.agent_usage_loaded",
         data=AgentUsageStatsResponse(usage=stats).model_dump(),
     )
 
@@ -132,6 +134,6 @@ async def get_token_usage_stats(req: TokenUsageStatsRequest):
         end_date=req.end_date,
     )
     return await Response.succ(
-        message="获取 Token 使用统计成功",
+        message="system.token_usage_loaded",
         data=TokenUsageStatsResponse(**stats).model_dump(),
     )

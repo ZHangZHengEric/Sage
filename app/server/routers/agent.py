@@ -64,7 +64,9 @@ async def list(http_request: Request):
     all_configs = await agent_service.list_agents(target_user_id)
     agents_data = serialize_agents(all_configs)
     return await Response.succ(
-        data=agents_data, message=f"成功获取 {len(agents_data)} 个Agent"
+        data=agents_data,
+        message="agent.list_loaded",
+        message_params={"count": len(agents_data)},
     )
 
 
@@ -88,7 +90,10 @@ async def get_default_system_prompt(http_request: Request, language: str = "en")
         )
         return await Response.succ(data=result["data"], message=result["message"])
     except Exception as e:
-        return await Response.error(message=f"获取默认System Prompt模板失败: {str(e)}")
+        return await Response.error(
+            message="agent.default_prompt_failed",
+            message_params={"message": str(e)},
+        )
 
 
 @agent_router.post("/create")
@@ -110,7 +115,8 @@ async def create(agent: AgentConfigDTO, http_request: Request):
     )
     return await Response.succ(
         data={"agent_id": created_agent.agent_id},
-        message=f"Agent '{created_agent.agent_id}' 创建成功",
+        message="agent.created",
+        message_params={"agent_id": created_agent.agent_id},
     )
 
 
@@ -128,7 +134,9 @@ async def get(agent_id: str, http_request: Request):
     target_user_id = get_target_user_id_for_role(http_request)
     agent = await agent_service.get_agent(agent_id, target_user_id)
     return await Response.succ(
-        data=serialize_agent(agent), message=f"获取Agent '{agent_id}' 成功"
+        data=serialize_agent(agent),
+        message="agent.loaded",
+        message_params={"agent_id": agent_id},
     )
 
 
@@ -152,7 +160,9 @@ async def update(agent_id: str, agent: AgentConfigDTO, http_request: Request):
         role,
     )
     return await Response.succ(
-        data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 更新成功"
+        data={"agent_id": agent_id},
+        message="agent.updated",
+        message_params={"agent_id": agent_id},
     )
 
 
@@ -169,7 +179,9 @@ async def delete(agent_id: str, http_request: Request):
     role = get_request_role(http_request)
     await agent_service.delete_agent(agent_id, user_id, role)
     return await Response.succ(
-        data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 删除成功"
+        data={"agent_id": agent_id},
+        message="agent.deleted",
+        message_params={"agent_id": agent_id},
     )
 
 
@@ -261,7 +273,7 @@ async def get_task(task_id: str, http_request: Request):
     from common.services.async_task_service import get_async_task_service
 
     task = await get_async_task_service().get(task_id, user_id)
-    return await Response.succ(data=task, message="获取任务状态成功")
+    return await Response.succ(data=task, message="agent.task_status_loaded")
 
 
 @agent_router.post("/tasks/{task_id}/cancel")
@@ -270,7 +282,7 @@ async def cancel_task(task_id: str, http_request: Request):
     from common.services.async_task_service import get_async_task_service
 
     task = await get_async_task_service().cancel(task_id, user_id)
-    return await Response.succ(data=task, message="任务取消请求已提交")
+    return await Response.succ(data=task, message="agent.task_cancel_requested")
 
 
 @agent_router.get("/{agent_id}/auth")
@@ -282,7 +294,7 @@ async def get_auth(agent_id: str, http_request: Request):
     role = get_request_role(http_request)
 
     users = await agent_service.get_agent_authorized_users(agent_id, user_id, role)
-    return await Response.succ(data=users, message="获取授权用户列表成功")
+    return await Response.succ(data=users, message="agent.auth_users_loaded")
 
 
 @agent_router.post("/{agent_id}/auth")
@@ -296,7 +308,7 @@ async def update_auth(agent_id: str, req: AuthorizationRequest, http_request: Re
     await agent_service.update_agent_authorizations(
         agent_id, req.user_ids, user_id, role
     )
-    return await Response.succ(data={}, message="更新授权成功")
+    return await Response.succ(data={}, message="agent.auth_updated")
 
 
 @agent_router.post("/{agent_id}/file_workspace")
@@ -383,7 +395,7 @@ async def stat_files(
         body.paths,
         session_id=session_id,
     )
-    return await Response.succ(message="获取文件元信息成功", data=result)
+    return await Response.succ(message="agent.file_metadata_loaded", data=result)
 
 
 @agent_router.delete("/{agent_id}/file_workspace/delete")
@@ -450,7 +462,8 @@ async def upload_file(
             f"Upload successful: path={result['path']}, size={result['size']}"
         )
         return await Response.succ(
-            message=f"文件 {file.filename} 上传成功",
+            message="agent.file_uploaded",
+            message_params={"filename": file.filename},
             data=result,
         )
     except Exception as e:
