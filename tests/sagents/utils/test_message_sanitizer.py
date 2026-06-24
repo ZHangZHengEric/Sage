@@ -74,7 +74,9 @@ def test_drop_invalid_tool_calls_removes_interrupted_tool_call_from_request_view
     )
 
     assert out == [user]
-    assert assistant["tool_calls"][0]["function"]["arguments"] == '{"event_id": "evt_123'
+    assert (
+        assistant["tool_calls"][0]["function"]["arguments"] == '{"event_id": "evt_123'
+    )
 
 
 def test_drop_invalid_tool_calls_preserves_valid_calls_on_same_message():
