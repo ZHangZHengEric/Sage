@@ -63,7 +63,8 @@ def get_eml_client() -> "Dm20151123Client":  # type: ignore
     global EML_CLIENT
     if EML_CLIENT is None:
         raise SageHTTPException(
-            detail="邮件客户端未初始化", error_detail="eml client not initialized"
+            message_key="email.client_not_initialized",
+            error_detail="eml client not initialized",
         )
     return EML_CLIENT
 
@@ -73,7 +74,7 @@ async def send_register_verification_mail(to_address: str, code: str) -> None:
         from alibabacloud_dm20151123 import models as dm_20151123_models
         from alibabacloud_tea_util import models as util_models
     except ImportError as exc:
-        raise SageHTTPException(detail="阿里云邮件 SDK 未安装", error_detail=str(exc))
+        raise SageHTTPException(message_key="email.sdk_missing", error_detail=str(exc))
 
     cfg = config.get_startup_config()
     account_name = (cfg.eml_account_name or "").strip()
@@ -82,19 +83,20 @@ async def send_register_verification_mail(to_address: str, code: str) -> None:
 
     if not account_name or not template_id:
         raise SageHTTPException(
-            detail="邮件服务未配置完整",
+            message_key="email.service_incomplete",
             error_detail="missing eml account name or template id",
         )
     if not _has_eml_credentials(cfg):
         raise SageHTTPException(
-            detail="邮件服务未配置",
+            message_key="email.service_not_configured",
             error_detail="missing eml access key configuration",
         )
 
     client = EML_CLIENT or await init_eml_client(cfg)
     if client is None:
         raise SageHTTPException(
-            detail="邮件客户端不可用", error_detail="eml client unavailable"
+            message_key="email.client_unavailable",
+            error_detail="eml client unavailable",
         )
 
     template = dm_20151123_models.SingleSendMailRequestTemplate(
@@ -128,11 +130,11 @@ async def send_register_verification_mail(to_address: str, code: str) -> None:
             or "credentialexception" in message.lower()
         ):
             raise SageHTTPException(
-                detail="邮件凭据未配置，请在 .env 中设置 SAGE_EML_ACCESS_KEY_ID 和 SAGE_EML_ACCESS_KEY_SECRET",
+                message_key="email.credentials_missing",
                 error_detail=recommend or message,
             )
         raise SageHTTPException(
-            detail="验证码邮件发送失败",
+            message_key="email.send_failed",
             error_detail=recommend or message,
         )
 

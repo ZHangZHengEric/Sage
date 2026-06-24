@@ -15,9 +15,12 @@ async def verify_provider(data: LLMProviderCreate):
     """
     try:
         await llm_provider_service.verify_provider(data)
-        return await Response.succ(message="验证成功")
+        return await Response.succ(message="llm_provider.verify_success")
     except Exception as e:
-        return await Response.error(message=f"验证失败: {str(e)}")
+        return await Response.error(
+            message="llm_provider.verify_failed",
+            message_params={"message": str(e)},
+        )
 
 
 @router.post("/verify-capabilities")
@@ -27,9 +30,14 @@ async def verify_capabilities(data: LLMProviderCreate):
     """
     try:
         result = await llm_provider_service.verify_capabilities(data)
-        return await Response.succ(message="能力验证成功", data=result)
+        return await Response.succ(
+            message="llm_provider.capabilities_success", data=result
+        )
     except Exception as e:
-        return await Response.error(message=f"验证失败: {str(e)}")
+        return await Response.error(
+            message="llm_provider.verify_failed",
+            message_params={"message": str(e)},
+        )
 
 
 @router.post("/verify-multimodal")
@@ -41,16 +49,18 @@ async def verify_multimodal(data: LLMProviderCreate):
     try:
         result = await llm_provider_service.verify_multimodal(data)
         if not result["supports_multimodal"]:
-            return await Response.succ(message="该模型不支持多模态", data=result)
+            return await Response.succ(
+                message="llm_provider.multimodal_not_supported", data=result
+            )
         return await Response.succ(
-            message="多模态验证成功，模型正确识别了图片内容"
+            message="llm_provider.multimodal_recognized"
             if result["recognized"]
-            else "模型支持多模态但未能正确识别图片内容",
+            else "llm_provider.multimodal_unrecognized",
             data=result,
         )
     except Exception as e:
         return await Response.succ(
-            message="该模型不支持多模态",
+            message="llm_provider.multimodal_not_supported",
             data={"supports_multimodal": False, "error": str(e)},
         )
 

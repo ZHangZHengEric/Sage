@@ -295,7 +295,7 @@ async def check_update(dao: VersionDao = Depends(get_version_dao)):
 
     if not latest:
         # Tauri expects a JSON response. If no version, returning 404 is acceptable.
-        raise HTTPException(status_code=404, detail="No version found")
+        raise HTTPException(status_code=404, detail="version.not_found")
 
     platforms = {}
     for artifact in latest.artifacts:
@@ -331,7 +331,7 @@ async def import_github_version(dao: VersionDao = Depends(get_version_dao)):
     """
     data = await fetch_github_release_info()
     if not data:
-        return await Response.error(code=500, message="Failed to fetch from GitHub")
+        return await Response.error(code=500, message="version.github_fetch_failed")
     # Check if version exists
     existing = await dao.get_version_by_tag(data["version"])
     if existing:
@@ -346,10 +346,12 @@ async def import_github_version(dao: VersionDao = Depends(get_version_dao)):
     )
 
     if not created:
-        return await Response.error(code=500, message="Failed to create version")
+        return await Response.error(code=500, message="version.create_failed")
 
     return await Response.succ(
-        data=created, message=f"Version {data['version']} imported successfully"
+        data=created,
+        message="version.imported",
+        message_params={"version": data["version"]},
     )
 
 
@@ -363,7 +365,7 @@ async def create_version(
     # Check if version exists
     existing = await dao.get_version_by_tag(request.version)
     if existing:
-        return await Response.error(code=400, message="Version already exists")
+        return await Response.error(code=400, message="version.already_exists")
 
     artifacts_dict = [a.model_dump() for a in request.artifacts]
 
@@ -374,9 +376,9 @@ async def create_version(
     )
 
     if not created:
-        return await Response.error(code=500, message="Failed to create version")
+        return await Response.error(code=500, message="version.create_failed")
 
-    return await Response.succ(data=created, message="Version created successfully")
+    return await Response.succ(data=created, message="version.created")
 
 
 @version_router.get("", response_model=BaseResponse[List[WebVersionResponse]])
@@ -395,8 +397,6 @@ async def delete_version(version_str: str, dao: VersionDao = Depends(get_version
     """
     deleted = await dao.delete_by_tag(version_str)
     if not deleted:
-        return await Response.error(code=404, message="Version not found")
+        return await Response.error(code=404, message="version.not_found")
 
-    return await Response.succ(
-        data={"success": True}, message="Version deleted successfully"
-    )
+    return await Response.succ(data={"success": True}, message="version.deleted")

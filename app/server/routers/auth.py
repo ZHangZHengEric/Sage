@@ -42,7 +42,7 @@ async def send_register_code(req: RegisterVerificationCodeRequest):
     if not is_local_registration_enabled():
         return await Response.error(
             code=400,
-            message="当前服务未启用本地账号注册",
+            message="auth.local_registration_disabled",
             error_detail="local auth disabled",
         )
     expires_in, retry_after = await send_register_verification_code(req.email)
@@ -50,7 +50,7 @@ async def send_register_code(req: RegisterVerificationCodeRequest):
         data=RegisterVerificationCodeResponse(
             expires_in=expires_in, retry_after=retry_after
         ),
-        message="验证码发送成功",
+        message="auth.register_code_sent",
     )
 
 
@@ -59,7 +59,7 @@ async def register(req: RegisterRequest):
     if not is_local_registration_enabled():
         return await Response.error(
             code=400,
-            message="当前服务未启用本地账号注册",
+            message="auth.local_registration_disabled",
             error_detail="local auth disabled",
         )
     user_id = await register_user(
@@ -70,7 +70,7 @@ async def register(req: RegisterRequest):
         req.verification_code,
     )
     return await Response.succ(
-        data=RegisterResponse(user_id=user_id), message="注册成功"
+        data=RegisterResponse(user_id=user_id), message="auth.register_success"
     )
 
 
@@ -79,14 +79,14 @@ async def login(request: Request, req: LoginRequest):
     if not is_local_auth_enabled():
         return await Response.error(
             code=400,
-            message="当前服务未启用本地账号密码登录",
+            message="auth.local_password_login_disabled",
             error_detail="local auth disabled",
         )
     user = await authenticate_user(req.username_or_email, req.password)
     if is_admin_only_local_login() and user.role != "admin":
         return await Response.error(
             code=403,
-            message="当前服务仅允许管理员通过账号密码登录",
+            message="auth.admin_password_login_required",
             error_detail="admin login required in trusted proxy mode",
         )
     access_token, refresh_token, expires_in = create_login_tokens(user)
@@ -97,7 +97,7 @@ async def login(request: Request, req: LoginRequest):
             refresh_token=refresh_token,
             expires_in=expires_in,
         ),
-        message="登录成功",
+        message="auth.login_success",
     )
 
 
@@ -105,7 +105,7 @@ async def login(request: Request, req: LoginRequest):
 async def auth_providers():
     return await Response.succ(
         data=get_auth_providers(include_internal=False),
-        message="获取认证 Providers 成功",
+        message="auth.providers_loaded",
     )
 
 
@@ -135,7 +135,7 @@ async def oauth_login_default(
     if not provider:
         return await Response.error(
             code=404,
-            message="未配置可用的 OAuth Provider",
+            message="auth.oauth_provider_not_configured",
             error_detail="no oauth provider configured",
         )
     authorize_url = await build_oauth_authorize_url(
@@ -165,7 +165,7 @@ async def oauth_callback(
 @auth_router.post("/logout", response_model=BaseResponse[dict])
 async def logout(request: Request):
     clear_auth_session(request)
-    return await Response.succ(data={}, message="退出成功")
+    return await Response.succ(data={}, message="auth.logout_success")
 
 
 @auth_router.get("/session", response_model=BaseResponse[UserInfoResponse])
@@ -173,7 +173,7 @@ async def session_info(request: Request):
     claims = getattr(request.state, "user_claims", None)
     if not claims:
         return await Response.error(
-            code=401, message="未登录", error_detail="no claims"
+            code=401, message="auth.not_logged_in", error_detail="no claims"
         )
 
     user_id = claims.get("userid")
@@ -191,5 +191,5 @@ async def session_info(request: Request):
             has_provider=has_provider,
             has_agent=has_agent,
         ),
-        message="登录成功",
+        message="auth.login_success",
     )

@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from common.core import config
+from common.core.i18n import locale_from_request
 from .context import set_request_context
 
 # Tauri / WebView2 may send different Origin values by platform & dev vs prod.
@@ -73,7 +74,7 @@ def register_request_logging_middleware(app: Any) -> None:
         request_id = uuid.uuid4().hex[:12]
         request_logger = logger.bind(request_id=request_id)
 
-        set_request_context(request_id, request_logger)
+        set_request_context(request_id, request_logger, locale_from_request(request))
         request.state.logger = request_logger
         request.state.request_id = request_id
 
