@@ -470,7 +470,7 @@ def test_system_prefix_includes_turn_status_contract_in_turn_status_mode(monkeyp
 
     assert "turn_status" in prompt
     assert "Task Management Requirements" in prompt
-    assert "Completion and Tool-Continuation Contract" not in prompt
+    assert "Completion and Tool-Continuation Rules" not in prompt
 
 
 def test_task_completion_mode_turn_status_enables_turn_status_contract(monkeypatch):
@@ -489,7 +489,7 @@ def test_task_completion_mode_llm_judge_disables_turn_status_contract(monkeypatc
     prompt = _get_system_prefix(tool_manager, "zh")
 
     assert "turn_status" not in prompt
-    assert "完成与工具延续契约" not in prompt
+    assert "完成与工具延续规则" not in prompt
     assert _agent()._turn_status_enabled() is False
 
 
@@ -736,7 +736,8 @@ def test_complete_on_no_tool_call_mode_disables_turn_status_contract(monkeypatch
 
     assert "turn_status" not in prompt
     assert "no_tool_call" not in prompt
-    assert "完成与工具延续契约" in prompt
+    assert "完成与工具延续规则" in prompt
+    assert "直接给出最终回答" in prompt
     assert _agent()._turn_status_enabled() is False
 
 
