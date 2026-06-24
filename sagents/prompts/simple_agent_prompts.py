@@ -41,6 +41,24 @@ agent_custom_system_task_requirement = {
     "pt": "- Requisitos de Gerenciamento de Tarefas: Ao receber uma tarefa, você deve primeiro usar a ferramenta `todo_write` para criar uma lista de tarefas (novas tarefas têm status=pending por padrão). Antes de começar a trabalhar em uma subtarefa, você deve usar `todo_write` para definir seu status como `in_progress`; quando essa subtarefa for concluída, use `todo_write` novamente para defini-la como `completed` e preencher uma conclusão. A qualquer momento, no máximo uma tarefa pode estar `in_progress`. **Cada chamada de `todo_write` deve incluir APENAS as tarefas que são novas ou que realmente mudam neste turno (para uma atualização, envie apenas o id mais os campos realmente alterados, por exemplo id+status, id+conclusion). Nunca reenvie tarefas inalteradas.**",
 }
 
+agent_custom_system_no_tool_call_requirement = {
+    "zh": """## 完成与工具延续规则
+- 纯文本回复表示本轮已经最终交付。只有当用户目标已经满足、必要结果已经解释清楚、且不需要继续读取/搜索/修改文件、运行命令或调用工具时，才用纯文本收尾。
+- 如果仍需行动，不要只输出“我先检查/接下来查看/还需要验证”等进度文字；应在同一轮继续调用合适的工具。
+- 工具调用后先判断整体目标是否完成；未完成就继续行动，完成后再用自然语言总结结果。
+- 如果用户的问题凭当前上下文即可直接回答，直接给出最终回答，不要为了延续而额外调用工具。""",
+    "en": """## Completion and Tool-Continuation Rules
+- A text-only reply means final delivery for this turn. Use it only when the user's goal is satisfied, key results are explained, and no more file reading, searching, editing, command execution, or tool use is needed.
+- If more action is still needed, do not stop with progress text such as "I will inspect this", "next I will read files", or "this needs verification"; continue by calling the appropriate tool in the same turn.
+- After tool results, decide whether the whole goal is complete. Continue with tools if work remains; otherwise summarize the result in natural language.
+- If the user's request can be answered directly from the current context, answer directly instead of calling tools just to continue.""",
+    "pt": """## Regras de conclusão e continuação com ferramentas
+- Uma resposta somente em texto significa entrega final deste turno. Use-a apenas quando o objetivo do usuário estiver satisfeito, os resultados principais estiverem explicados e não for necessário continuar lendo, pesquisando, editando arquivos, executando comandos ou usando ferramentas.
+- Se ainda houver ação necessária, não pare com texto de progresso como "vou inspecionar isso", "em seguida vou ler arquivos" ou "isso precisa de verificação"; continue chamando a ferramenta adequada no mesmo turno.
+- Depois dos resultados das ferramentas, decida se o objetivo completo foi atingido. Continue com ferramentas se ainda houver trabalho; caso contrário, resuma o resultado em linguagem natural.
+- Se a solicitação do usuário puder ser respondida diretamente com o contexto atual, responda diretamente em vez de chamar ferramentas apenas para continuar.""",
+}
+
 agent_custom_system_turn_status_requirement = {
     "zh": "- 本轮状态契约：当你输出了面向用户的阶段说明、结果、问题、确认项或阻塞说明后，必须调用 `turn_status(status=task_done|need_user_input|blocked|continue_work)` 报告本轮状态。任务完成用 `task_done`；向用户提问/请求确认/等待上传或补充信息用 `need_user_input`；受阻无法继续用 `blocked`；如果刚才文字只是中间进度且还要继续执行，用 `continue_work`。禁止只调用 turn_status 而不写说明。",
     "en": "- Turn-status contract: after writing user-facing progress, result, question, confirmation request, or blocked-state explanation, you MUST call `turn_status(status=task_done|need_user_input|blocked|continue_work)`. Use `task_done` when complete; `need_user_input` when asking the user, requesting confirmation, or waiting for upload/input; `blocked` when unable to proceed; `continue_work` when the text is only intermediate progress and more work is needed. Calling turn_status WITHOUT preceding user-facing text will be rejected.",
