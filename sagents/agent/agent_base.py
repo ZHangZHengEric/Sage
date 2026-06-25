@@ -996,6 +996,13 @@ class AgentBase(ABC):
             if "model" in final_config
             else "gpt-3.5-turbo"
         )
+        model_type = final_config.get("model_type")
+        if (
+            model_type == "fast"
+            and isinstance(self.model, SageAsyncOpenAI)
+            and self.model.fast_model_name
+        ):
+            model_name = self.model.fast_model_name
         # 移除不是OpenAI API标准参数的配置项
         final_config.pop("max_model_len", None)
         final_config.pop("api_key", None)
