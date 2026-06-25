@@ -9,6 +9,7 @@ import json
 import os
 import traceback
 import uuid
+from copy import copy
 from typing import Any, Dict, List, Optional, AsyncGenerator
 
 from sagents.agent.agent_base import AgentBase
@@ -23,6 +24,7 @@ from sagents.utils.prompt_manager import PromptManager
 
 DEFAULT_TOOL_SUGGESTION_DIRECT_THRESHOLD = 15
 TOOL_SUGGESTION_DIRECT_THRESHOLD_ENV = "SAGE_TOOL_SUGGESTION_DIRECT_THRESHOLD"
+TOOL_SUGGESTION_CONTEXT_TURNS = 5
 
 
 def get_tool_suggestion_direct_threshold() -> int:
@@ -69,6 +71,215 @@ class ToolSuggestionAgent(AgentBase):
         )
         logger.debug("ToolSuggestionAgent 初始化完成")
 
+    @staticmethod
+    def _extract_text_content(content: Any) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: List[str] = []
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "text":
+                    text = item.get("text")
+                    if isinstance(text, str) and text.strip():
+                        parts.append(text)
+                elif item.get("type") == "image_url":
+                    parts.append("[image attached]")
+                else:
+                    item_type = item.get("type") or "unknown"
+                    parts.append(f"[{item_type} attachment]")
+            return "\n".join(parts)
+        return ""
+
+    @classmethod
+    def _text_only_message(cls, msg: MessageChunk) -> Optional[MessageChunk]:
+        text = cls._extract_text_content(msg.get_content()).strip()
+        if not text:
+            return None
+        text_msg = copy(msg)
+        text_msg.content = text
+        text_msg.tool_calls = None
+        text_msg.tool_call_id = None
+        return text_msg
+
+    @classmethod
+    def _extract_tool_selection_context_messages(
+        cls, message_manager: Any
+    ) -> List[MessageChunk]:
+        active_messages = MessageManager.build_inference_view(
+            message_manager.messages,
+            session_id=message_manager.session_id,
+            apply_rule_compression=False,
+        )
+
+        chats: List[List[MessageChunk]] = []
+        current_chat: List[MessageChunk] = []
+        for msg in active_messages:
+            if msg.is_user_input_message():
+                if current_chat:
+                    chats.append(current_chat)
+                current_chat = [msg]
+            elif current_chat:
+                current_chat.append(msg)
+        if current_chat:
+            chats.append(current_chat)
+
+        compact_messages: List[MessageChunk] = []
+        for chat in chats[-TOOL_SUGGESTION_CONTEXT_TURNS:]:
+            tool_call_names: Dict[str, str] = {}
+            user_msg = cls._text_only_message(chat[0])
+            if user_msg is not None:
+                compact_messages.append(user_msg)
+
+            for msg in chat[1:]:
+                tool_names = cls._extract_tool_names(msg)
+                if tool_names:
+                    for tool_call in msg.tool_calls or []:
+                        if not isinstance(tool_call, dict):
+                            continue
+                        call_id = tool_call.get("id")
+                        function = tool_call.get("function")
+                        if isinstance(call_id, str) and isinstance(function, dict):
+                            name = function.get("name")
+                            if isinstance(name, str) and name:
+                                tool_call_names[call_id] = name
+                    compact_messages.append(
+                        MessageChunk(
+                            role=MessageRole.ASSISTANT.value,
+                            content="[tools used: " + ", ".join(tool_names) + "]",
+                            message_type=MessageType.ASSISTANT_TEXT.value,
+                        )
+                    )
+                    continue
+
+                if msg.role == MessageRole.TOOL.value:
+                    tool_name = (
+                        tool_call_names.get(msg.tool_call_id or "")
+                        or cls._tool_result_name(msg)
+                    )
+                    compact_messages.append(
+                        MessageChunk(
+                            role=MessageRole.TOOL.value,
+                            content=f"[tool result omitted: {tool_name}]",
+                            tool_call_id=msg.tool_call_id or str(uuid.uuid4()),
+                            message_type=MessageType.TOOL_CALL_RESULT.value,
+                        )
+                    )
+                    continue
+
+                if msg.is_assistant_text_message():
+                    assistant_msg = cls._text_only_message(msg)
+                    if assistant_msg is not None:
+                        compact_messages.append(assistant_msg)
+
+        return compact_messages
+
+    @staticmethod
+    def _extract_tool_names(msg: MessageChunk) -> List[str]:
+        tool_names: List[str] = []
+        for tool_call in msg.tool_calls or []:
+            if not isinstance(tool_call, dict):
+                continue
+            function = tool_call.get("function")
+            if isinstance(function, dict):
+                name = function.get("name")
+                if isinstance(name, str) and name:
+                    tool_names.append(name)
+        return tool_names
+
+    @staticmethod
+    def _tool_result_name(msg: MessageChunk) -> str:
+        metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+        tool_name = metadata.get("tool_name") or metadata.get("name")
+        if isinstance(tool_name, str) and tool_name:
+            return tool_name
+        return msg.tool_call_id or "unknown"
+
+    @classmethod
+    def _format_tool_messages_for_prompt(cls, messages: List[MessageChunk]) -> str:
+        lines: List[str] = []
+        tool_call_names: Dict[str, str] = {}
+
+        for msg in messages:
+            tool_names = cls._extract_tool_names(msg)
+            if tool_names:
+                for tool_call in msg.tool_calls or []:
+                    if not isinstance(tool_call, dict):
+                        continue
+                    call_id = tool_call.get("id")
+                    function = tool_call.get("function")
+                    if isinstance(call_id, str) and isinstance(function, dict):
+                        name = function.get("name")
+                        if isinstance(name, str) and name:
+                            tool_call_names[call_id] = name
+                lines.append("assistant: [tools used: " + ", ".join(tool_names) + "]")
+                continue
+
+            if msg.role == MessageRole.TOOL.value:
+                existing_text = cls._extract_text_content(msg.get_content()).strip()
+                if existing_text.startswith("[tool result omitted:"):
+                    lines.append(f"tool: {existing_text}")
+                    continue
+                tool_name = (
+                    tool_call_names.get(msg.tool_call_id or "")
+                    or cls._tool_result_name(msg)
+                )
+                lines.append(f"tool: [tool result omitted: {tool_name}]")
+                continue
+
+            text = cls._extract_text_content(msg.get_content()).strip()
+            if not text:
+                continue
+            if len(text) > 2000:
+                text = text[:2000] + f"\n...[truncated, original chars: {len(text)}]"
+            lines.append(f"{msg.role}: {text}")
+
+        return "\n\n".join(lines)
+
+    @staticmethod
+    def _build_skill_context(session_context: SessionContext) -> str:
+        lines: List[str] = []
+        system_context = getattr(session_context, "system_context", {}) or {}
+        active_skills = system_context.get("active_skills")
+        if active_skills:
+            lines.append("<active_skills>")
+            for skill in active_skills:
+                if not isinstance(skill, dict):
+                    continue
+                name = str(skill.get("skill_name") or "unknown")
+                content = str(skill.get("skill_content") or "")
+                if len(content) > 500:
+                    content = content[:500] + f"\n...[truncated, original chars: {len(content)}]"
+                lines.append(f"- {name}: {content}")
+            lines.append("</active_skills>")
+
+        skill_manager = getattr(session_context, "effective_skill_manager", None)
+        if skill_manager:
+            if hasattr(skill_manager, "load_new_skills"):
+                try:
+                    skill_manager.load_new_skills()
+                except Exception as exc:
+                    logger.warning(f"ToolSuggestionAgent: failed to load new skills: {exc}")
+            if hasattr(skill_manager, "list_skill_info"):
+                skill_infos = sorted(
+                    skill_manager.list_skill_info(),
+                    key=lambda skill: getattr(skill, "name", ""),
+                )
+                if skill_infos:
+                    lines.append("<available_skills>")
+                    for skill in skill_infos:
+                        name = getattr(skill, "name", "unknown")
+                        description = str(getattr(skill, "description", "") or "")
+                        if len(description) > 80:
+                            description = description[:80] + "..."
+                        lines.append(f"- {name}: {description}")
+                    lines.append("</available_skills>")
+
+        return "\n".join(lines)
+
     async def run_stream(
         self,
         session_context: SessionContext,
@@ -91,10 +302,7 @@ class ToolSuggestionAgent(AgentBase):
         logger.info(f"ToolSuggestionAgent: 开始为会话 {session_id} 分析工具推荐")
         language = session_context.get_language()
 
-        history_messages = message_manager.extract_all_context_messages(
-            recent_turns=5,
-            last_turn_user_only=False,
-        )
+        history_messages = self._extract_tool_selection_context_messages(message_manager)
         # 根据 active_budget 压缩消息
         budget_info = message_manager.context_budget_manager.budget_info
         if budget_info:
@@ -178,10 +386,9 @@ class ToolSuggestionAgent(AgentBase):
             logger.info(
                 f"ToolSuggestionAgent: messages_input 的token长度为{MessageManager.calculate_messages_token_length(messages_input)}"
             )
-            clean_messages = MessageManager.convert_messages_to_dict_for_request(
-                messages_input
+            prompt_messages = redact_base64_data_urls_in_value(
+                self._format_tool_messages_for_prompt(messages_input)
             )
-            clean_messages = redact_base64_data_urls_in_value(clean_messages)
 
             # 生成提示
             tool_suggestion_template = PromptManager().get_agent_prompt_auto(
@@ -189,25 +396,34 @@ class ToolSuggestionAgent(AgentBase):
             )
             prompt = tool_suggestion_template.format(
                 available_tools_str=available_tools_str,
-                messages=json.dumps(clean_messages, ensure_ascii=False, indent=2),
+                messages=prompt_messages,
             )
-            llm_request_messages = await self.prepare_llm_request_messages(
+            system_messages = await self.prepare_unified_system_messages(
                 session_id=session_context.session_id,
                 language=session_context.get_language(),
                 include_sections=[
                     "role_definition",
-                    "system_context",
-                    "available_skills",
-                ],
-                extra_messages=[
-                    MessageChunk(
-                        role=MessageRole.USER.value,
-                        content=prompt,
-                        message_id=str(uuid.uuid4()),
-                        message_type=MessageType.GUIDE.value,
-                    )
                 ],
             )
+            skill_context = self._build_skill_context(session_context)
+            if skill_context:
+                system_messages.append(
+                    MessageChunk(
+                        role=MessageRole.SYSTEM.value,
+                        content=skill_context,
+                        message_type=MessageType.SYSTEM.value,
+                        agent_name=self.agent_name,
+                        metadata={"cache_segment": "semi_stable"},
+                    )
+                )
+            llm_request_messages = system_messages + [
+                MessageChunk(
+                    role=MessageRole.USER.value,
+                    content=prompt,
+                    message_id=str(uuid.uuid4()),
+                    message_type=MessageType.GUIDE.value,
+                )
+            ]
             # 调用LLM获取建议，最大重试3次
             max_retries = 3
             retry_count = 0
