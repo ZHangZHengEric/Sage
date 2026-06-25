@@ -361,6 +361,8 @@ async def chat(request: ChatRequest, http_request: Request):
         system_context=request.system_context,
         agent_id=request.agent_id,
         user_id=request.user_id or get_desktop_user_id(http_request),
+        provider_id=request.provider_id,
+        fast_provider_id=request.fast_provider_id,
     )
     chat_service.mark_request_execution(inner_request, request_source="api/chat")
 
@@ -433,6 +435,13 @@ def validate_and_prepare_request(
         logger.bind(session_id=request.session_id).info(
             "允许空 messages 请求消费 pending guidance"
         )
+
+    provider_id = (request.provider_id or "").strip()
+    if provider_id:
+        request.provider_id = provider_id
+    fast_provider_id = (request.fast_provider_id or "").strip()
+    if fast_provider_id:
+        request.fast_provider_id = fast_provider_id
 
 
 def _has_pending_user_injections(session_id: str | None) -> bool:

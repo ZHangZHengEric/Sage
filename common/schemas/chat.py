@@ -23,6 +23,7 @@ class BaseChatRequest(BaseModel):
     user_id: Optional[str] = None
     system_context: Optional[Dict[str, Any]] = None
     provider_id: Optional[str] = None
+    fast_provider_id: Optional[str] = None
 
     def __init__(self, **data: Any):  # type: ignore[override]
         super().__init__(**data)

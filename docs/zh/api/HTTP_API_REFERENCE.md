@@ -380,7 +380,9 @@ ref: http-api-reference
   "session_id": "sess_123",
   "user_id": "optional",
   "system_context": {},
-  "agent_id": "agent_abc"
+  "agent_id": "agent_abc",
+  "provider_id": "provider_xxx",
+  "fast_provider_id": "provider_fast_xxx"
 }
 ```
 
@@ -397,6 +399,8 @@ ref: http-api-reference
 | `user_id`        | 不传时服务端通常从 session 注入             |
 | `system_context` | 结构化上下文                           |
 | `agent_id`       | 必填，指定使用哪个 Agent                  |
+| `provider_id`    | 可选，本次请求覆盖 Agent 主模型 Provider       |
+| `fast_provider_id` | 可选，本次请求覆盖 Agent 快速模型 Provider     |
 
 
 ### StreamRequest
@@ -939,4 +943,3 @@ curl -X POST http://127.0.0.1:8000/oauth2/token \
 - 这页只保留当前代码里真实存在、且对接方真正需要知道的信息；已与 `app/server/routers` 中实际注册的路由逐组核对；桌面等其它入口的额外 API 不写入本页。
 - 旧接口、推测行为、历史遗留说明都尽量压缩到最小。
 - 如果后面继续补，会优先补“错误响应示例”和“字段级枚举说明”，不会再把页面写回成流水账。
-
