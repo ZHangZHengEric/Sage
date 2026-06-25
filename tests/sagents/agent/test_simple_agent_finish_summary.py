@@ -544,19 +544,22 @@ def test_task_completion_mode_llm_judge_disables_turn_status_contract(monkeypatc
     assert _agent()._turn_status_enabled() is False
 
 
-def test_task_complete_judge_uses_composed_system_prefix_in_llm_judge_mode(
+def test_task_complete_judge_omits_agent_system_context_in_llm_judge_mode(
     monkeypatch,
 ):
     monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
-    agent = _agent()
+    agent = SimpleAgent(
+        model=_DummyModel(),
+        model_config={},
+        system_prefix="Agent system with active_skills and workspace_files",
+    )
     captured = {}
 
     async def _never_must_continue(messages):
         return False
 
-    async def _fake_system_messages(**kwargs):
-        captured["custom_prefix"] = kwargs["custom_prefix"]
-        return [MessageChunk(role="system", content=kwargs["custom_prefix"])]
+    async def _fail_system_prompt_build(**_kwargs):
+        raise AssertionError("task complete judge should not build agent system prompt")
 
     async def _fake_llm_streaming(*args, **kwargs):
         captured["llm_messages"] = kwargs["messages"]
@@ -571,7 +574,9 @@ def test_task_complete_judge_uses_composed_system_prefix_in_llm_judge_mode(
         )
 
     monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
-    monkeypatch.setattr(agent, "prepare_unified_system_messages", _fake_system_messages)
+    monkeypatch.setattr(
+        agent, "prepare_llm_system_prompt_text", _fail_system_prompt_build
+    )
     monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
 
     msg_manager = SimpleNamespace(
@@ -606,8 +611,14 @@ def test_task_complete_judge_uses_composed_system_prefix_in_llm_judge_mode(
         )
         is True
     )
-    assert "turn_status" not in captured["custom_prefix"]
-    assert "找不到prompt" not in captured["llm_messages"][0]["content"]
+    prompt = captured["llm_messages"][0]["content"]
+    assert "Agent system with active_skills" not in prompt
+    assert "<active_skills>" not in prompt
+    assert "<available_skills>" not in prompt
+    assert "<system_context>" not in prompt
+    assert "<workspace_files>" not in prompt
+    assert "user: start" in prompt
+    assert "assistant: done" in prompt
 
 
 def test_task_complete_judge_redacts_multimodal_image_payloads(monkeypatch):
@@ -966,6 +977,54 @@ def test_llm_judge_uses_direct_response_state_not_collected_chunks(monkeypatch):
 
     assert len(judge_calls) == 1
     assert chunks[-1].content == "已经完成。"
+
+
+def test_llm_judge_stops_after_two_plain_text_direct_responses(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    direct_calls = []
+    judge_calls = []
+
+    async def _fake_call_llm_and_process_response(**kwargs):
+        direct_calls.append(kwargs)
+        yield (
+            [
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content=f"纯文本回答 {len(direct_calls)}",
+                    message_type=MessageType.ASSISTANT_TEXT.value,
+                )
+            ],
+            False,
+        )
+
+    async def _fake_is_task_complete(*args, **kwargs):
+        judge_calls.append((args, kwargs))
+        return False
+
+    monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
+    monkeypatch.setattr(
+        agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
+    )
+    monkeypatch.setattr(agent, "_is_task_complete", _fake_is_task_complete)
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks in agent._execute_loop(
+            messages_input=_base_messages(),
+            tools_json=[],
+            tool_manager=None,
+            session_id="s1",
+            session_context=_loop_session_context(),  # pyright: ignore[reportArgumentType]
+        ):
+            chunks.extend(yielded_chunks)
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert len(direct_calls) == 2
+    assert len(judge_calls) == 1
+    assert [chunk.content for chunk in chunks] == ["纯文本回答 1", "纯文本回答 2"]
 
 
 def test_direct_tool_call_response_records_tool_activity_state(monkeypatch):
