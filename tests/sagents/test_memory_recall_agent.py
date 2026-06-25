@@ -6,6 +6,12 @@ from sagents.agent.memory_recall_agent import MemoryRecallAgent
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 
 
+def _llm_chunk(content):
+    return SimpleNamespace(
+        choices=[SimpleNamespace(delta=SimpleNamespace(content=content))]
+    )
+
+
 def test_memory_recall_error_does_not_emit_orphan_tool_message():
     chunks = asyncio.run(_collect_memory_recall_error_chunks())
 
@@ -125,6 +131,68 @@ def test_memory_recall_query_generation_uses_dedicated_system_prompt_only():
         assert "workspace_files" not in request_text
 
     asyncio.run(_run())
+
+
+def test_memory_recall_query_generation_accepts_query_array_from_model(monkeypatch):
+    async def _run():
+        agent = MemoryRecallAgent(model=None)
+
+        async def fake_call_llm_streaming(*_args, **_kwargs):
+            yield _llm_chunk(
+                json.dumps(
+                    {
+                        "query": [
+                            "通知提醒",
+                            "提醒功能",
+                            "闹钟",
+                            "定时任务",
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
+        monkeypatch.setattr(agent, "_call_llm_streaming", fake_call_llm_streaming)
+
+        query = await agent._get_search_query(
+            [
+                MessageChunk(
+                    role=MessageRole.USER.value,
+                    content="只返回 JSON",
+                    message_type=MessageType.GUIDE.value,
+                )
+            ],
+            "session-memory-query-list",
+        )
+
+        assert query == "通知提醒 提醒功能 闹钟 定时任务"
+
+    asyncio.run(_run())
+
+
+def test_memory_recall_query_generation_searches_nonstandard_json(monkeypatch):
+    async def _run(content, expected):
+        agent = MemoryRecallAgent(model=None)
+
+        async def fake_call_llm_streaming(*_args, **_kwargs):
+            yield _llm_chunk(content)
+
+        monkeypatch.setattr(agent, "_call_llm_streaming", fake_call_llm_streaming)
+
+        query = await agent._get_search_query(
+            [MessageChunk(role=MessageRole.USER.value, content="只返回 JSON")],
+            "session-memory-nonstandard-json",
+        )
+
+        assert query == expected
+
+    asyncio.run(_run('["提醒功能", "定时任务"]', "提醒功能 定时任务"))
+    asyncio.run(
+        _run(
+            '{"keywords": ["通知提醒", "消息推送"], "reason": "用户在测提醒"}',
+            "通知提醒 消息推送",
+        )
+    )
 
 
 def test_memory_recall_query_context_keeps_user_and_final_assistant_text_only():
