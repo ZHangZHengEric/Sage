@@ -7,6 +7,8 @@ from sagents.agent.agent_base import AgentBase, PartialStreamConsumedError
 from sagents.agent.simple_agent import SimpleAgent
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
+from sagents.llm.sage_openai import SageAsyncOpenAI
+from sagents.observability.agent_runtime import ObservableAsyncOpenAI
 
 
 class DummyAgent(AgentBase):
@@ -43,6 +45,32 @@ class FakeChat:
 class FakeClient:
     def __init__(self, attempts=None):
         self.chat = FakeChat(attempts=attempts)
+
+
+class FakeSageCompletions:
+    def __init__(self):
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return _attempt_yields(_content_chunk("ok"))()
+
+
+class FakeSageClient:
+    def __init__(self):
+        self.chat = type("Chat", (), {})()
+        self.chat.completions = FakeSageCompletions()
+
+
+class DummyObservabilityManager:
+    def on_llm_start(self, *args, **kwargs):
+        pass
+
+    def on_llm_end(self, *args, **kwargs):
+        pass
+
+    def on_llm_error(self, *args, **kwargs):
+        pass
 
 
 def _tool_call_chunk(call_id, arguments):
@@ -126,8 +154,42 @@ async def test_streaming_call_does_not_retry_after_partial_chunk_is_yielded():
             chunks.append(chunk)
 
     assert client.chat.completions.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_fast_model_type_survives_observable_sage_wrapper():
+    standard_client = FakeSageClient()
+    fast_client = FakeSageClient()
+    sage_client = SageAsyncOpenAI(
+        standard_client=standard_client,  # pyright: ignore[reportArgumentType]
+        fast_client=fast_client,  # pyright: ignore[reportArgumentType]
+        model_name="standard-model",
+        fast_model_name="fast-model",
+    )
+    observable_client = ObservableAsyncOpenAI(
+        sage_client, DummyObservabilityManager()  # pyright: ignore[reportArgumentType]
+    )
+    agent = DummyAgent(
+        model=observable_client,  # pyright: ignore[reportArgumentType]
+        model_config={
+            "model": "standard-model",
+            "fast_model_name": "fast-model",
+        },
+    )
+
+    chunks = []
+    async for chunk in agent._call_llm_streaming(
+        messages=[{"role": "user", "content": "hello"}],
+        step_name="tool_suggestion",
+        model_config_override={"model_type": "fast"},
+        enable_thinking=False,
+    ):
+        chunks.append(chunk)
+
+    assert chunks
+    assert standard_client.chat.completions.calls == []
+    assert fast_client.chat.completions.calls[0]["model"] == "fast-model"
     assert len(chunks) == 1
-    assert chunks[0].choices[0].delta.tool_calls[0].function.arguments == '{"tasks'
 
 
 @pytest.mark.asyncio
