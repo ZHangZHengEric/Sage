@@ -700,15 +700,7 @@ class SimpleAgent(AgentBase):
         task_complete_template = PromptManager().get_agent_prompt_auto(
             "task_complete_template", language=session_context.get_language()
         )
-        system_prompt = await self.prepare_llm_system_prompt_text(
-            session_id=session_id,
-            custom_prefix=_get_system_prefix(
-                tool_manager, session_context.get_language()
-            ),
-            language=session_context.get_language(),
-        )
         prompt = task_complete_template.format(
-            system_prompt=system_prompt,
             messages=judge_messages,
         )
         llm_input_messages: List[Dict[str, Any]] = [{"role": "user", "content": prompt}]
@@ -905,6 +897,7 @@ class SimpleAgent(AgentBase):
         logger.debug(f"SimpleAgent: 加载历史签名 {len(recent_signatures)} 个")
         force_tool_choice_auto_next = False
         turn_status_only_next = False
+        consecutive_plain_text_direct_responses = 0
         while True:
             if self._should_abort_due_to_session(session_context):
                 break
@@ -1123,6 +1116,10 @@ class SimpleAgent(AgentBase):
             had_direct_tool_activity = direct_response_state.get(
                 "had_tool_calls", False
             )
+            plain_text_direct_response = (
+                (not had_direct_tool_activity)
+                and self._has_visible_text_without_tool_calls(all_new_response_chunks)
+            )
 
             messages_input = MessageManager.merge_new_messages_to_old_messages(
                 cast(
@@ -1141,14 +1138,30 @@ class SimpleAgent(AgentBase):
             # 都有自己的结束信号，避免多消耗一次完成判定请求。
             if is_llm_judge_mode():
                 if had_direct_tool_activity:
+                    consecutive_plain_text_direct_responses = 0
                     logger.info(
                         "SimpleAgent: 本轮 direct LLM response 包含工具调用，跳过 task_complete_judge，继续让模型消费工具结果"
                     )
+                elif plain_text_direct_response:
+                    consecutive_plain_text_direct_responses += 1
+                    if consecutive_plain_text_direct_responses >= 2:
+                        logger.info(
+                            "SimpleAgent: 连续两轮 direct LLM 纯文本无工具调用，终止执行"
+                        )
+                        break
+                    if await self._is_task_complete(
+                        messages_input, session_id, tool_manager, session_context
+                    ):
+                        logger.info("SimpleAgent: 任务完成，终止执行")
+                        break
                 elif await self._is_task_complete(
                     messages_input, session_id, tool_manager, session_context
                 ):
+                    consecutive_plain_text_direct_responses = 0
                     logger.info("SimpleAgent: 任务完成，终止执行")
                     break
+                else:
+                    consecutive_plain_text_direct_responses = 0
 
     async def _call_llm_and_process_response(
         self,
