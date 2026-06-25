@@ -32,6 +32,9 @@ from sagents.utils.repeat_pattern import (
 )
 
 
+TASK_COMPLETE_TOOL_RESULT_PREVIEW_CHARS = 500
+
+
 def _get_system_prefix(tool_manager: Optional[ToolManager], language: str) -> str:
     """
     根据工具管理器中是否有 todo_write 工具来选择合适的 system prefix
@@ -690,10 +693,9 @@ class SimpleAgent(AgentBase):
             messages_for_complete, budget
         )
 
-        clean_messages = MessageManager.convert_messages_to_dict_for_request(
+        judge_messages = self._format_task_complete_messages_for_prompt(
             messages_for_complete
         )
-        clean_messages = redact_base64_data_urls_in_value(clean_messages)
 
         task_complete_template = PromptManager().get_agent_prompt_auto(
             "task_complete_template", language=session_context.get_language()
@@ -707,7 +709,7 @@ class SimpleAgent(AgentBase):
         )
         prompt = task_complete_template.format(
             system_prompt=system_prompt,
-            messages=json.dumps(clean_messages, ensure_ascii=False, indent=2),
+            messages=judge_messages,
         )
         llm_input_messages: List[Dict[str, Any]] = [{"role": "user", "content": prompt}]
 
@@ -753,6 +755,111 @@ class SimpleAgent(AgentBase):
                 "SimpleAgent: 解析任务完成判断响应时JSON解码错误，默认继续执行"
             )
             return False
+
+    @classmethod
+    def _format_task_complete_messages_for_prompt(
+        cls, messages: List[MessageChunk]
+    ) -> str:
+        lines: List[str] = []
+        tool_call_names: Dict[str, str] = {}
+
+        for msg in messages:
+            tool_names = cls._extract_tool_names_for_judge(msg)
+            if tool_names:
+                for tool_call in msg.tool_calls or []:
+                    call_id = cls._tool_call_id_for_judge(tool_call)
+                    name = cls._tool_call_name_for_judge(tool_call)
+                    if call_id and name:
+                        tool_call_names[call_id] = name
+                lines.append("assistant: [tools called: " + ", ".join(tool_names) + "]")
+                continue
+
+            if msg.role == MessageRole.TOOL.value:
+                tool_name = (
+                    tool_call_names.get(msg.tool_call_id or "")
+                    or cls._tool_result_name_for_judge(msg)
+                )
+                preview = cls._extract_text_content_for_judge(msg.get_content()).strip()
+                if len(preview) > TASK_COMPLETE_TOOL_RESULT_PREVIEW_CHARS:
+                    preview = (
+                        preview[:TASK_COMPLETE_TOOL_RESULT_PREVIEW_CHARS]
+                        + f"\n...[tool result truncated, original chars: {len(preview)}]"
+                    )
+                if preview:
+                    lines.append(f"tool: [tool result from {tool_name}: {preview}]")
+                else:
+                    lines.append(f"tool: [tool result from {tool_name}: empty]")
+                continue
+
+            text = cls._extract_text_content_for_judge(msg.get_content()).strip()
+            if not text:
+                continue
+            if len(text) > 2000:
+                text = text[:2000] + f"\n...[truncated, original chars: {len(text)}]"
+            lines.append(f"{msg.role}: {text}")
+
+        return "\n\n".join(lines)
+
+    @staticmethod
+    def _extract_tool_names_for_judge(msg: MessageChunk) -> List[str]:
+        tool_names: List[str] = []
+        for tool_call in msg.tool_calls or []:
+            name = SimpleAgent._tool_call_name_for_judge(tool_call)
+            if name:
+                tool_names.append(name)
+        return tool_names
+
+    @staticmethod
+    def _tool_call_id_for_judge(tool_call: Any) -> Optional[str]:
+        if isinstance(tool_call, dict):
+            call_id = tool_call.get("id")
+        else:
+            call_id = getattr(tool_call, "id", None)
+        return call_id if isinstance(call_id, str) and call_id else None
+
+    @staticmethod
+    def _tool_call_name_for_judge(tool_call: Any) -> Optional[str]:
+        if isinstance(tool_call, dict):
+            function = tool_call.get("function")
+            if isinstance(function, dict):
+                name = function.get("name")
+            else:
+                name = getattr(function, "name", None)
+        else:
+            function = getattr(tool_call, "function", None)
+            name = getattr(function, "name", None)
+        return name if isinstance(name, str) and name else None
+
+    @staticmethod
+    def _tool_result_name_for_judge(msg: MessageChunk) -> str:
+        metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+        tool_name = metadata.get("tool_name") or metadata.get("name")
+        if isinstance(tool_name, str) and tool_name:
+            return tool_name
+        return msg.tool_call_id or "unknown"
+
+    @staticmethod
+    def _extract_text_content_for_judge(content: Any) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return redact_base64_data_urls_in_value(content)
+        if isinstance(content, list):
+            parts: List[str] = []
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "text":
+                    text = item.get("text")
+                    if isinstance(text, str) and text.strip():
+                        parts.append(redact_base64_data_urls_in_value(text))
+                elif item.get("type") == "image_url":
+                    parts.append("[image attached]")
+                else:
+                    item_type = item.get("type") or "unknown"
+                    parts.append(f"[{item_type} attachment]")
+            return "\n".join(parts)
+        return ""
 
     async def _execute_loop(
         self,

@@ -676,7 +676,178 @@ def test_task_complete_judge_redacts_multimodal_image_payloads(monkeypatch):
     prompt = captured["llm_messages"][0]["content"]
     assert image_payload not in prompt
     assert "data:image/png;base64" not in prompt
-    assert "<redacted data URL; base64_len=10000>" in prompt
+    assert "[image attached]" in prompt
+
+
+def test_task_complete_judge_keeps_tool_name_and_short_result_without_arguments(
+    monkeypatch,
+):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    captured = {}
+
+    async def _never_must_continue(messages):
+        return False
+
+    async def _fake_system_text(**kwargs):
+        return "system prompt"
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        captured["llm_messages"] = kwargs["messages"]
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(
+                        content='{"task_interrupted": true, "reason": "done"}'
+                    )
+                )
+            ]
+        )
+
+    monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
+    monkeypatch.setattr(agent, "prepare_llm_system_prompt_text", _fake_system_text)
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+
+    msg_manager = SimpleNamespace(
+        context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000}),
+    )
+    session_context = SimpleNamespace(
+        message_manager=msg_manager,
+        get_language=lambda: "en",
+    )
+    long_result = "RESULT_PREVIEW " + ("x" * 900)
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="Patch app.py",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=None,
+            tool_calls=[
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "file_update",
+                        "arguments": '{"path":"/secret/app.py"}',
+                    },
+                }
+            ],
+            message_type=MessageType.TOOL_CALL.value,
+        ),
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content=long_result,
+            tool_call_id="call_1",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="Patched app.py and verified it.",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+    ]
+
+    assert (
+        asyncio.run(
+            agent._is_task_complete(
+                messages_input=messages,
+                session_id="s1",
+                tool_manager=None,
+                session_context=session_context,  # pyright: ignore[reportArgumentType]
+            )
+        )
+        is True
+    )
+
+    prompt = captured["llm_messages"][0]["content"]
+    assert "[tools called: file_update]" in prompt
+    assert "[tool result from file_update: RESULT_PREVIEW" in prompt
+    assert "[tool result truncated, original chars:" in prompt
+    assert '{"path":"/secret/app.py"}' not in prompt
+    assert "x" * 700 not in prompt
+
+
+def test_task_complete_judge_supports_object_tool_calls(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    captured = {}
+
+    async def _never_must_continue(messages):
+        return False
+
+    async def _fake_system_text(**kwargs):
+        return "system prompt"
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        captured["llm_messages"] = kwargs["messages"]
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(
+                        content='{"task_interrupted": false, "reason": "continue"}'
+                    )
+                )
+            ]
+        )
+
+    monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
+    monkeypatch.setattr(agent, "prepare_llm_system_prompt_text", _fake_system_text)
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+
+    msg_manager = SimpleNamespace(
+        context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000}),
+    )
+    session_context = SimpleNamespace(
+        message_manager=msg_manager,
+        get_language=lambda: "en",
+    )
+    object_tool_call = SimpleNamespace(
+        id="call_obj",
+        type="function",
+        function=SimpleNamespace(
+            name="file_read",
+            arguments='{"path":"/secret/input.md"}',
+        ),
+    )
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="Read the file and summarize it.",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=None,
+            tool_calls=[object_tool_call],  # pyright: ignore[reportArgumentType]
+            message_type=MessageType.TOOL_CALL.value,
+        ),
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content="file content preview",
+            tool_call_id="call_obj",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        ),
+    ]
+
+    assert (
+        asyncio.run(
+            agent._is_task_complete(
+                messages_input=messages,
+                session_id="s1",
+                tool_manager=None,
+                session_context=session_context,  # pyright: ignore[reportArgumentType]
+            )
+        )
+        is False
+    )
+
+    prompt = captured["llm_messages"][0]["content"]
+    assert "[tools called: file_read]" in prompt
+    assert "[tool result from file_read: file content preview]" in prompt
+    assert '{"path":"/secret/input.md"}' not in prompt
 
 
 def test_llm_judge_skips_completion_check_after_direct_tool_activity(monkeypatch):
