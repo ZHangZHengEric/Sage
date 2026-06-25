@@ -997,12 +997,12 @@ class AgentBase(ABC):
             else "gpt-3.5-turbo"
         )
         model_type = final_config.get("model_type")
-        if (
-            model_type == "fast"
-            and isinstance(self.model, SageAsyncOpenAI)
-            and self.model.fast_model_name
-        ):
-            model_name = self.model.fast_model_name
+        supports_sage_model_type = isinstance(self.model, SageAsyncOpenAI) or isinstance(
+            getattr(self.model, "_model", None), SageAsyncOpenAI
+        )
+        fast_model_name = getattr(self.model, "fast_model_name", None)
+        if model_type == "fast" and supports_sage_model_type and fast_model_name:
+            model_name = fast_model_name
         # 移除不是OpenAI API标准参数的配置项
         final_config.pop("max_model_len", None)
         final_config.pop("api_key", None)
@@ -1014,7 +1014,7 @@ class AgentBase(ABC):
         final_config.pop("fast_model_name", None)
         # 只有当 model 不是 SageAsyncOpenAI 类型时，才移除 model_type
         # SageAsyncOpenAI 需要 model_type 来选择使用哪个客户端
-        if not isinstance(self.model, SageAsyncOpenAI):
+        if not supports_sage_model_type:
             final_config.pop("model_type", None)
         all_chunks = []
         attempt_chunks = []
