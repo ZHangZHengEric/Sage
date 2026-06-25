@@ -215,6 +215,45 @@ async def test_prepare_llm_request_messages_wraps_multimodal_user_request(
 
 
 @pytest.mark.asyncio
+async def test_prepare_llm_request_messages_strips_skill_tags_from_inference_view(
+    monkeypatch,
+):
+    agent = CommonAgent(model=object(), model_config={})
+    user_message = MessageChunk(
+        role=MessageRole.USER.value,
+        content=[
+            {
+                "type": "text",
+                "text": "【语音转写】<skill>schedule-management</skill>干啥呢？",
+            },
+            {"type": "image_url", "image_url": {"url": "file:///tmp/image.png"}},
+        ],
+        message_type=MessageType.ASSISTANT_TEXT.value,
+    )
+
+    async def fake_system_messages(**kwargs):
+        return [_message(MessageRole.SYSTEM.value, "stable")]
+
+    async def fake_runtime(**kwargs):
+        return "<runtime_context>runtime</runtime_context>"
+
+    monkeypatch.setattr(agent, "prepare_unified_system_messages", fake_system_messages)
+    monkeypatch.setattr(agent, "_build_runtime_context_text", fake_runtime)
+
+    request_messages = await agent.prepare_llm_request_messages(
+        session_id="sess",
+        history_messages=[user_message],
+    )
+
+    content = request_messages[-1].content
+    assert content[1]["text"] == "【语音转写】干啥呢？"
+    assert "<skill>" not in str(content)
+    assert user_message.content[0]["text"] == "【语音转写】<skill>schedule-management</skill>干啥呢？"
+    frozen = user_message.metadata["frozen_user_inference"]["content"]
+    assert "<skill>" not in str(frozen)
+
+
+@pytest.mark.asyncio
 async def test_prepare_llm_request_messages_freezes_injected_context_for_user_turn(
     monkeypatch,
 ):
@@ -456,6 +495,49 @@ async def test_prepare_llm_request_messages_drops_legacy_persist_metadata(
     assert metadata["runtime_context_injected"] is True
     assert metadata["inference_view_only"] is True
     assert "persist" not in metadata
+
+
+@pytest.mark.asyncio
+async def test_prepare_llm_request_messages_strips_skill_tags_from_legacy_frozen_view(
+    monkeypatch,
+):
+    agent = CommonAgent(model=object(), model_config={})
+    user_message = _message(
+        MessageRole.USER.value,
+        "<skill>schedule-management</skill>干啥呢？",
+    )
+    user_message.metadata = {
+        "frozen_user_inference": {
+            "content": (
+                "<runtime_context>old</runtime_context>\n\n"
+                "<user_request>\n"
+                "<skill>schedule-management</skill>干啥呢？\n"
+                "</user_request>"
+            ),
+            "metadata": {
+                "runtime_context_injected": True,
+                "frozen_user_inference": True,
+                "frozen_user_inference_version": 3,
+            },
+        }
+    }
+
+    async def fake_system_messages(**kwargs):
+        return [_message(MessageRole.SYSTEM.value, "stable")]
+
+    async def fail_runtime(**kwargs):
+        raise AssertionError("frozen context should be reused")
+
+    monkeypatch.setattr(agent, "prepare_unified_system_messages", fake_system_messages)
+    monkeypatch.setattr(agent, "_build_runtime_context_text", fail_runtime)
+
+    request_messages = await agent.prepare_llm_request_messages(
+        session_id="sess",
+        history_messages=[user_message],
+    )
+
+    assert "<skill>" not in request_messages[1].content
+    assert "干啥呢？" in request_messages[1].content
 
 
 @pytest.mark.asyncio
