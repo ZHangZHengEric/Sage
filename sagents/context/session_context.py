@@ -575,6 +575,24 @@ class SessionContext:
         if not self._is_valid_user_injection_content(content):
             raise ValueError("inject 内容不能为空")
         gid = guidance_id or str(uuid.uuid4())
+        for existing in self.pending_user_injections:
+            md = existing.metadata or {}
+            if md.get("guidance_id") == gid:
+                existing.content = content
+                if extra_metadata:
+                    md.update(extra_metadata)
+                    existing.metadata = md
+                logger.info(
+                    f"SessionContext: update duplicate pending user injection "
+                    f"session={self.session_id} guidance_id={gid}"
+                )
+                return gid
+        if self._has_user_injection_message(gid):
+            logger.info(
+                f"SessionContext: skip already flushed user injection "
+                f"session={self.session_id} guidance_id={gid}"
+            )
+            return gid
         metadata: Dict[str, Any] = {
             "injected": True,
             "guidance_id": gid,
@@ -605,13 +623,32 @@ class SessionContext:
                 f"session={self.session_id} pending_total={len(self.pending_user_injections)}"
             )
             return []
-        drained = self.pending_user_injections
+        drained = []
+        seen_guidance_ids = set()
+        for chunk in self.pending_user_injections:
+            gid = (chunk.metadata or {}).get("guidance_id")
+            if gid:
+                if gid in seen_guidance_ids or self._has_user_injection_message(gid):
+                    continue
+                seen_guidance_ids.add(gid)
+            drained.append(chunk)
         self.pending_user_injections = []
-        self.add_messages(drained)
+        if drained:
+            self.add_messages(drained)
         logger.info(
             f"SessionContext: flush user injections session={self.session_id} count={len(drained)}"
         )
         return drained
+
+    def _has_user_injection_message(self, guidance_id: str) -> bool:
+        if not guidance_id:
+            return False
+        messages = getattr(self.message_manager, "messages", None) or []
+        for message in messages:
+            md = getattr(message, "metadata", None) or {}
+            if md.get("guidance_id") == guidance_id and md.get("source") == "guidance":
+                return True
+        return False
 
     def _has_unclosed_tool_call_tail(self) -> bool:
         """Return True when the ledger currently ends inside an assistant tool_call pair."""
