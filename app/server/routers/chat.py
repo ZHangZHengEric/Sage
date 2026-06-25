@@ -409,6 +409,9 @@ def validate_and_prepare_request(
     provider_id = (request.provider_id or "").strip()
     if provider_id:
         request.provider_id = provider_id
+    fast_provider_id = (request.fast_provider_id or "").strip()
+    if fast_provider_id:
+        request.fast_provider_id = fast_provider_id
 
 
 def _has_pending_user_injections(session_id: str | None) -> bool:
@@ -444,6 +447,7 @@ async def chat(request: ChatRequest, http_request: Request):
         system_context=request.system_context,
         agent_id=request.agent_id,
         provider_id=request.provider_id,
+        fast_provider_id=request.fast_provider_id,
     )
     chat_service.mark_request_execution(inner_request, request_source="api/chat")
 
