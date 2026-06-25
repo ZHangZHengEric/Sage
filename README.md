@@ -314,3 +314,100 @@ We are grateful to our sponsors for their support in making Sage better:
 <div align="center">
 Built with ❤️ by the Sage Team 🦌
 </div>
+
+---
+
+## ❓ FAQ
+
+### 平台概念
+
+**Sage 是什么？**
+Sage 是一个生产就绪的 AI Agent 平台，专注于复杂任务的执行、自动化、浏览器工作流、IM 消息交付和企业级部署。它内置规划、执行、自检、记忆召回和工具建议等 Agent 组件，可将复杂工作转化为可靠交付。
+
+**Sage 与 LangGraph / CrewAI 有什么区别？**
+- **LangGraph** 侧重图状态机编排，适合细粒度流程控制；Sage 提供开箱即用的完整平台（UI + 后端 + 工具系统）
+- **CrewAI** 以角色驱动的 Agent 团队协作为核心；Sage 以任务交付为中心，内置多入口（Web/桌面/CLI/Chrome 扩展）和 IM 全渠道交付
+- Sage 更适合需要端到端交付的生产环境，LangGraph/CrewAI 更适合需要深度自定义编排的场景
+
+**Sage 支持哪些入口？**
+- Web 应用（浏览器访问）
+- 桌面应用（macOS .dmg / Windows .exe / Linux .deb）
+- CLI 命令行
+- Chrome 浏览器扩展
+
+### 安装配置
+
+**系统要求是什么？**
+- Python 3.10+
+- Node.js 18+
+- 推荐 4 核 8GB RAM 及以上
+
+**如何快速启动？**
+```bash
+git clone https://github.com/ZHangZHengEric/Sage.git
+cd Sage
+export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
+export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
+export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
+./scripts/dev-up.sh
+```
+首次运行可选择 Minimal（SQLite，最快）或 Full 栈。
+
+**支持哪些 LLM 提供商？**
+任何兼容 OpenAI API 格式的提供商均可使用，包括 DeepSeek、OpenAI、Claude、本地模型等。通过配置 `SAGE_DEFAULT_LLM_API_BASE_URL` 和 `SAGE_DEFAULT_LLM_MODEL_NAME` 即可切换。
+
+### Agent 开发
+
+**Sage 内置哪些 Agent？**
+- **规划 Agent**：任务分解和策略制定
+- **执行 Agent**：任务执行和工具调用
+- **自检 Agent**：结果验证和质量检查
+- **记忆召回 Agent**：上下文管理和历史回溯
+- **工具建议 Agent**：智能推荐合适工具
+
+**如何自定义工具？**
+Sage 支持多种工具集成方式：
+- 内置工具（搜索、文件操作等）
+- Skills 系统（自定义技能包）
+- MCP 服务器（Model Context Protocol）
+- 浏览器自动化
+- 图像生成工具
+
+**支持哪些 IM 平台？**
+- 微信个人号（iLink）
+- 企业微信
+- 飞书
+- 钉钉
+
+### 部署
+
+**有哪些部署选项？**
+- **本地开发**：`./scripts/dev-up.sh` 快速启动
+- **Docker Compose**：生产级容器化部署
+- **桌面应用**：macOS/Windows/Linux 安装包
+- **企业部署**：支持 OAuth2、CORS 配置、共享服务架构
+
+**如何配置沙箱执行？**
+Sage 提供三种沙箱模式：
+- 本地沙箱：适合开发测试
+- 透传模式：直接执行，适合可信环境
+- 远程沙箱：隔离执行，适合生产环境
+
+### 故障排查
+
+**启动失败怎么办？**
+1. 确认 Python 3.10+ 和 Node.js 18+ 已安装
+2. 检查 API Key 和 Base URL 配置是否正确
+3. 查看日志：`./scripts/dev-up.sh` 输出会显示详细错误信息
+4. 尝试 Minimal 模式：首次运行选择 Minimal 栈
+
+**macOS 提示应用损坏无法打开？**
+运行以下命令清除隔离标记：
+```bash
+xattr -dr com.apple.quarantine /Applications/Sage.app
+```
+
+**如何获取更多帮助？**
+- 详细文档：https://wiki.sage.zavixai.com/
+- Slack 社区：https://join.slack.com/t/sage-b021145/
+- GitHub Issues：https://github.com/ZHangZHengEric/Sage/issues
