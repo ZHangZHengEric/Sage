@@ -375,6 +375,34 @@ class MemoryRecallAgent(AgentBase):
             lines.append(f"{role}: {content}")
         return "\n\n".join(lines)
 
+    @staticmethod
+    def _normalize_search_query(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, list):
+            parts = [
+                MemoryRecallAgent._normalize_search_query(item)
+                for item in value
+            ]
+            return " ".join(part for part in parts if part).strip()
+        if isinstance(value, dict):
+            for key in ("query", "keywords", "keyword", "text"):
+                if key in value:
+                    normalized = MemoryRecallAgent._normalize_search_query(value[key])
+                    if normalized:
+                        return normalized
+            return " ".join(
+                part
+                for part in (
+                    MemoryRecallAgent._normalize_search_query(item)
+                    for item in value.values()
+                )
+                if part
+            ).strip()
+        return str(value).strip()
+
     async def _get_search_query(
         self, llm_request_messages: List[MessageChunk], session_id: str
     ) -> str:
@@ -417,13 +445,16 @@ class MemoryRecallAgent(AgentBase):
 
             # 支持两种返回格式：字符串或包含query字段的字典
             if isinstance(result, str):
-                return result.strip()
+                return self._normalize_search_query(result)
             elif isinstance(result, dict):
                 query = result.get("query", "")
                 if query:
-                    return query.strip()
+                    return self._normalize_search_query(query)
+                return self._normalize_search_query(result)
+            elif isinstance(result, list):
+                return self._normalize_search_query(result)
 
-            return ""
+            return self._normalize_search_query(result)
         except json.JSONDecodeError:
             # 如果不是JSON，直接使用文本内容（去除markdown标记）
             clean_text = all_content.strip()

@@ -11,6 +11,7 @@ memory_recall_template = {
     "zh": """从下面对话文本中提取用于搜索工作区记忆的关键词查询。
 优先保留项目名、文件名、路径尾部、函数名、产品名和核心需求。忽略图片、工具、运行时和无关客套。
 只返回 JSON：{{"query":"3-10 个关键词"}}
+query 必须是一个字符串，不要返回数组。
 
 对话文本：
 {messages}
@@ -18,6 +19,7 @@ memory_recall_template = {
     "en": """Extract a keyword query for searching workspace memory from the conversation text below.
 Prefer project names, filenames, path tails, function names, product names, and the core request. Ignore images, tools, runtime details, and chatter.
 Return JSON only: {{"query":"3-10 keywords"}}
+query must be a single string, not an array.
 
 Conversation text:
 {messages}
@@ -25,6 +27,7 @@ Conversation text:
     "pt": """Extraia uma consulta de palavras-chave para pesquisar a memoria do workspace a partir do texto de conversa abaixo.
 Priorize nomes de projeto, arquivos, finais de caminhos, funcoes, produtos e o pedido principal. Ignore imagens, ferramentas, runtime e conversa irrelevante.
 Retorne apenas JSON: {{"query":"3-10 palavras-chave"}}
+query deve ser uma string unica, nao um array.
 
 Texto da conversa:
 {messages}
