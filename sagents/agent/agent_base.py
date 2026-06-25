@@ -5,6 +5,7 @@ import json
 import uuid
 import asyncio
 import hashlib
+import re
 from sagents.utils.logger import logger
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_progress import (
@@ -560,6 +561,7 @@ class AgentBase(ABC):
     ) -> MessageChunk:
         copied = MessageChunk.from_dict(message.to_dict())
         copied.content = frozen.get("content", copied.content)
+        copied.content = cls._strip_skill_tags_from_content(copied.content)
         metadata = dict(copied.metadata or {})
         frozen_metadata = frozen.get("metadata")
         if isinstance(frozen_metadata, dict):
@@ -568,6 +570,49 @@ class AgentBase(ABC):
         metadata["runtime_context_injected"] = True
         metadata["inference_view_only"] = True
         copied.metadata = metadata
+        return copied
+
+    @classmethod
+    def _strip_skill_tags_from_text(cls, text: str) -> str:
+        cleaned = re.sub(
+            r"<skill>\s*[^<]*?\s*</skill>",
+            "",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if cleaned == text:
+            return text
+        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
+
+    @classmethod
+    def _strip_skill_tags_from_content(cls, content: Any) -> Any:
+        if isinstance(content, str):
+            return cls._strip_skill_tags_from_text(content)
+        if isinstance(content, list):
+            sanitized = []
+            changed = False
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    next_part = dict(part)
+                    original_text = str(next_part.get("text", ""))
+                    next_text = cls._strip_skill_tags_from_text(original_text)
+                    next_part["text"] = next_text
+                    changed = changed or next_text != original_text
+                    sanitized.append(next_part)
+                else:
+                    sanitized.append(part)
+            return sanitized if changed else content
+        return content
+
+    @classmethod
+    def _strip_skill_tags_from_message(cls, message: MessageChunk) -> MessageChunk:
+        sanitized_content = cls._strip_skill_tags_from_content(message.content)
+        if sanitized_content is message.content:
+            return message
+        copied = MessageChunk.from_dict(message.to_dict())
+        copied.content = sanitized_content
         return copied
 
     def _save_frozen_user_inference_to_message(
@@ -664,6 +709,7 @@ class AgentBase(ABC):
                 parts.append(runtime_context)
             runtime_text = "\n\n".join(parts)
             if runtime_text.strip():
+                latest_user = self._strip_skill_tags_from_message(latest_user)
                 latest_user = self._wrap_message_with_runtime_context(
                     latest_user, runtime_text
                 )
