@@ -535,11 +535,17 @@ async def rerun_conversation_stream(
     guidance_content = (rerun_request.guidance_content or "").strip()
     rerun_messages = []
     if guidance_content:
+        guidance_id = rerun_request.guidance_id or str(uuid.uuid4())
         rerun_messages.append(
             {
-                "message_id": rerun_request.guidance_id or str(uuid.uuid4()),
+                "message_id": guidance_id,
                 "role": "user",
                 "content": guidance_content,
+                "metadata": {
+                    "injected": True,
+                    "guidance_id": guidance_id,
+                    "source": "guidance",
+                },
             }
         )
 
