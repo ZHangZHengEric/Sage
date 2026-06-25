@@ -248,7 +248,10 @@ async def test_prepare_llm_request_messages_strips_skill_tags_from_inference_vie
     content = request_messages[-1].content
     assert content[1]["text"] == "【语音转写】干啥呢？"
     assert "<skill>" not in str(content)
-    assert user_message.content[0]["text"] == "【语音转写】<skill>schedule-management</skill>干啥呢？"
+    assert (
+        user_message.content[0]["text"]
+        == "【语音转写】<skill>schedule-management</skill>干啥呢？"
+    )
     frozen = user_message.metadata["frozen_user_inference"]["content"]
     assert "<skill>" not in str(frozen)
 
