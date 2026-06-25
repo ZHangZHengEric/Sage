@@ -304,6 +304,25 @@ _DISCONNECT_INTERRUPT_TIMEOUT = 5.0
 _GENERATOR_ACLOSE_TIMEOUT = 5.0
 
 
+async def _wait_for_cleanup_step(
+    awaitable,
+    *,
+    timeout: float,
+    session_id: str,
+    timeout_message: str,
+    cancelled_message: str,
+    error_message: str,
+) -> None:
+    try:
+        await asyncio.wait_for(awaitable, timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.bind(session_id=session_id).warning(timeout_message)
+    except asyncio.CancelledError:
+        logger.bind(session_id=session_id).warning(cancelled_message)
+    except Exception as ex:
+        logger.bind(session_id=session_id).warning(f"{error_message}: {ex}")
+
+
 async def stream_api_with_disconnect_check(
     generator,
     request: Request,
@@ -340,36 +359,29 @@ async def stream_api_with_disconnect_check(
         raise
     finally:
         if client_disconnected:
-            try:
-                await asyncio.wait_for(
-                    conversation_service.interrupt_session(
-                        session_id,
-                        t("chat.client_disconnected", locale=get_request_locale()),
-                    ),
-                    timeout=_DISCONNECT_INTERRUPT_TIMEOUT,
-                )
-            except asyncio.TimeoutError:
-                logger.bind(session_id=session_id).warning(
-                    f"interrupt_session 超过 {_DISCONNECT_INTERRUPT_TIMEOUT}s 未返回，跳过强制等待"
-                )
-            except Exception as ex:
-                logger.bind(session_id=session_id).error(
-                    f"Error interrupting session: {ex}"
-                )
+            await _wait_for_cleanup_step(
+                conversation_service.interrupt_session(
+                    session_id,
+                    t("chat.client_disconnected", locale=get_request_locale()),
+                ),
+                timeout=_DISCONNECT_INTERRUPT_TIMEOUT,
+                session_id=session_id,
+                timeout_message=f"interrupt_session 超过 {_DISCONNECT_INTERRUPT_TIMEOUT}s 未返回，跳过强制等待",
+                cancelled_message="interrupt_session 清理阶段被取消，继续释放会话资源",
+                error_message="Error interrupting session",
+            )
 
         # 确保 generator 关闭，触发内部清理逻辑 (sagents cleanup)
         # 这必须在释放锁之前执行，因为 sagents 清理逻辑需要获取锁
-        try:
-            if hasattr(generator, "aclose"):
-                await asyncio.wait_for(
-                    generator.aclose(), timeout=_GENERATOR_ACLOSE_TIMEOUT
-                )
-        except asyncio.TimeoutError:
-            logger.bind(session_id=session_id).warning(
-                f"generator.aclose 超过 {_GENERATOR_ACLOSE_TIMEOUT}s 未返回，跳过强制等待"
+        if hasattr(generator, "aclose"):
+            await _wait_for_cleanup_step(
+                generator.aclose(),
+                timeout=_GENERATOR_ACLOSE_TIMEOUT,
+                session_id=session_id,
+                timeout_message=f"generator.aclose 超过 {_GENERATOR_ACLOSE_TIMEOUT}s 未返回，跳过强制等待",
+                cancelled_message="generator.aclose 清理阶段被取消，继续释放会话资源",
+                error_message="Error closing generator",
             )
-        except Exception as e:
-            logger.bind(session_id=session_id).warning(f"Error closing generator: {e}")
 
         # 清理资源
         logger.bind(session_id=session_id).debug("流处理结束，清理会话资源")
