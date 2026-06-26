@@ -997,9 +997,9 @@ class AgentBase(ABC):
             else "gpt-3.5-turbo"
         )
         model_type = final_config.get("model_type")
-        supports_sage_model_type = isinstance(self.model, SageAsyncOpenAI) or isinstance(
-            getattr(self.model, "_model", None), SageAsyncOpenAI
-        )
+        supports_sage_model_type = isinstance(
+            self.model, SageAsyncOpenAI
+        ) or isinstance(getattr(self.model, "_model", None), SageAsyncOpenAI)
         fast_model_name = getattr(self.model, "fast_model_name", None)
         if model_type == "fast" and supports_sage_model_type and fast_model_name:
             model_name = fast_model_name

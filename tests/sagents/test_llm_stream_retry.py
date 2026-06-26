@@ -167,7 +167,8 @@ async def test_fast_model_type_survives_observable_sage_wrapper():
         fast_model_name="fast-model",
     )
     observable_client = ObservableAsyncOpenAI(
-        sage_client, DummyObservabilityManager()  # pyright: ignore[reportArgumentType]
+        sage_client,
+        DummyObservabilityManager(),  # pyright: ignore[reportArgumentType]
     )
     agent = DummyAgent(
         model=observable_client,  # pyright: ignore[reportArgumentType]

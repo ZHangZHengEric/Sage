@@ -1,5 +1,4 @@
 import asyncio
-import builtins
 from pathlib import Path
 
 import pytest
@@ -86,23 +85,13 @@ def test_list_workspace_files_rejects_paths_outside_workspace(tmp_path, unsafe_p
         agent_service.list_workspace_files(workspace, "agent_demo", path=unsafe_path)
 
 
-def test_stat_workspace_files_returns_metadata_without_reading_content(
-    tmp_path, monkeypatch
-):
+def test_stat_workspace_files_returns_metadata_with_content_hash(tmp_path):
     workspace = _build_workspace(tmp_path)
-    original_open = builtins.open
-
-    def fail_open(*args, **kwargs):
-        target = Path(args[0]) if args else None
-        if target and workspace in target.parents:
-            raise AssertionError("stat endpoint must not read file content")
-        return original_open(*args, **kwargs)
-
-    monkeypatch.setattr(builtins, "open", fail_open)
 
     result = agent_service.stat_workspace_files(
         workspace,
         ["root.txt", str(workspace / "dir_a" / "a.txt")],
+        include_content_hash=True,
     )
 
     assert len(result["files"]) == 2
@@ -112,6 +101,41 @@ def test_stat_workspace_files_returns_metadata_without_reading_content(
         assert item["size"] > 0
         assert item["modified_time"] > 0
         assert item["content_type"] == "text/plain"
+        assert item["hash_algorithm"] == "md5"
+
+    assert result["files"][0]["content_hash"] == "63a9f0ea7bb98050796b649e85481845"
+    assert result["files"][1]["content_hash"] == "0cc175b9c0f1b6a831c399e269772661"
+
+
+def test_stat_workspace_files_omits_content_hash_by_default(tmp_path):
+    workspace = _build_workspace(tmp_path)
+
+    result = agent_service.stat_workspace_files(workspace, ["root.txt"])
+
+    assert result["files"][0]["exists"] is True
+    assert "content_hash" not in result["files"][0]
+    assert "hash_algorithm" not in result["files"][0]
+
+
+def test_stat_server_agent_files_includes_content_hash(tmp_path, monkeypatch):
+    workspace = _build_workspace(tmp_path)
+
+    monkeypatch.setattr(
+        agent_service,
+        "get_server_agent_workspace_path",
+        lambda agent_id, user_id: str(workspace),
+    )
+
+    result = asyncio.run(
+        agent_service.stat_server_agent_files(
+            "agent_demo",
+            "user_a",
+            ["root.txt"],
+        )
+    )
+
+    assert result["files"][0]["content_hash"] == "63a9f0ea7bb98050796b649e85481845"
+    assert result["files"][0]["hash_algorithm"] == "md5"
 
 
 def test_stat_workspace_files_reports_missing_file_per_item(tmp_path):
@@ -144,6 +168,8 @@ def test_stat_workspace_files_reports_directory_without_zipping(tmp_path, monkey
     assert result["files"][0]["exists"] is True
     assert result["files"][0]["is_directory"] is True
     assert result["files"][0]["content_type"] == "inode/directory"
+    assert "content_hash" not in result["files"][0]
+    assert "hash_algorithm" not in result["files"][0]
 
 
 @pytest.mark.parametrize("unsafe_path", ["../outside", "/tmp/outside"])
