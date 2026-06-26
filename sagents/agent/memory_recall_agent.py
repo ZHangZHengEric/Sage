@@ -20,7 +20,7 @@ from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 from sagents.utils.prompt_manager import PromptManager
 
 
-MEMORY_RECALL_QUERY_CONTEXT_TURNS = 4
+MEMORY_RECALL_QUERY_CONTEXT_TURNS = 10
 
 
 def _ensure_search_memory_available(session_context: SessionContext) -> Any:
@@ -146,29 +146,46 @@ class MemoryRecallAgent(AgentBase):
                 if current_chat:
                     chats.append(current_chat)
                 current_chat = [msg]
-            elif current_chat:
-                current_chat.append(msg)
+                continue
+
+            if MemoryRecallAgent._is_recall_assistant_context_message(msg):
+                if not current_chat:
+                    current_chat = [msg]
+                else:
+                    current_chat.append(msg)
         if current_chat:
             chats.append(current_chat)
 
         compact_messages: List[MessageChunk] = []
         for chat in chats[-MEMORY_RECALL_QUERY_CONTEXT_TURNS:]:
-            user_msg = MemoryRecallAgent._text_only_message(chat[0])
-            if user_msg is None:
-                continue
-            compact_messages.append(user_msg)
-
-            assistant_texts = [
-                msg
-                for msg in chat[1:]
-                if msg.is_assistant_text_message() and msg.get_content()
-            ]
-            if assistant_texts:
-                assistant_msg = MemoryRecallAgent._text_only_message(assistant_texts[-1])
-                if assistant_msg is not None:
-                    compact_messages.append(assistant_msg)
+            for msg in chat:
+                if not (
+                    msg.is_user_input_message()
+                    or MemoryRecallAgent._is_recall_assistant_context_message(msg)
+                ):
+                    continue
+                text_msg = MemoryRecallAgent._text_only_message(msg)
+                if text_msg is not None:
+                    compact_messages.append(text_msg)
 
         return compact_messages
+
+    @staticmethod
+    def _is_recall_assistant_context_message(msg: MessageChunk) -> bool:
+        role = msg.role.value if isinstance(msg.role, MessageRole) else msg.role
+        if role != MessageRole.ASSISTANT.value:
+            return False
+        if msg.tool_calls:
+            return False
+        if not msg.get_content():
+            return False
+        return not msg.matches_message_types(
+            [
+                MessageType.TOOL_CALL.value,
+                MessageType.REASONING_CONTENT.value,
+                MessageType.EMPTY.value,
+            ]
+        )
 
     @staticmethod
     def _text_only_message(msg: MessageChunk) -> Optional[MessageChunk]:
@@ -362,8 +379,18 @@ class MemoryRecallAgent(AgentBase):
     @staticmethod
     def _format_recall_messages_for_prompt(messages: List[Dict[str, Any]]) -> str:
         lines: List[str] = []
-        for msg in messages:
+        latest_user_index = next(
+            (
+                idx
+                for idx in range(len(messages) - 1, -1, -1)
+                if messages[idx].get("role") == MessageRole.USER.value
+            ),
+            None,
+        )
+        for idx, msg in enumerate(messages):
             role = str(msg.get("role") or "unknown")
+            if idx == latest_user_index:
+                role = "latest_user_request"
             content = msg.get("content", "")
             if not isinstance(content, str):
                 content = json.dumps(content, ensure_ascii=False, default=str)
