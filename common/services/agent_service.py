@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import mimetypes
 import os
 import posixpath
@@ -45,6 +46,8 @@ DEFAULT_OPENCLAW_AGENT_TOOLS = [
     "search_web_page",
     "search_image_from_web",
 ]
+
+_WORKSPACE_FILE_HASH_ALGORITHM = "md5"
 
 
 def generate_agent_id() -> str:
@@ -1189,6 +1192,7 @@ async def stat_server_agent_files(
         stat_workspace_files,
         get_server_agent_workspace_path(agent_id, user_id),
         paths,
+        True,
     )
 
 
@@ -1719,6 +1723,7 @@ async def stat_sandbox_workspace_files(
 def stat_workspace_files(
     workspace_path: str | Path,
     paths: List[str],
+    include_content_hash: bool = False,
 ) -> Dict[str, Any]:
     files: List[Dict[str, Any]] = []
 
@@ -1767,18 +1772,28 @@ def stat_workspace_files(
             if content_type is None:
                 content_type = "application/octet-stream"
 
-        files.append(
-            {
-                "path": display_path,
-                "exists": True,
-                "is_directory": is_directory,
-                "size": file_stat.st_size,
-                "modified_time": file_stat.st_mtime,
-                "content_type": content_type,
-            }
-        )
+        item = {
+            "path": display_path,
+            "exists": True,
+            "is_directory": is_directory,
+            "size": file_stat.st_size,
+            "modified_time": file_stat.st_mtime,
+            "content_type": content_type,
+        }
+        if include_content_hash and not is_directory:
+            item["content_hash"] = _hash_workspace_file(full_path)
+            item["hash_algorithm"] = _WORKSPACE_FILE_HASH_ALGORITHM
+        files.append(item)
 
     return {"files": files}
+
+
+def _hash_workspace_file(file_path: str | Path) -> str:
+    digest = hashlib.md5()
+    with open(file_path, "rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def prepare_workspace_download(
