@@ -9,7 +9,9 @@ AGENT_IDENTIFIER = "MemoryRecallAgent"
 # 记忆召回主模板
 memory_recall_template = {
     "zh": """从下面对话文本中提取用于搜索工作区记忆的关键词查询。
-优先保留项目名、文件名、路径尾部、函数名、产品名和核心需求。忽略图片、工具、运行时和无关客套。
+优先关注最近用户表达的真实诉求；assistant 内容只作为理解上下文、澄清指代和延续主动消息的辅助线索。
+优先保留项目名、文件名、路径尾部、函数名、产品名和核心需求。忽略图片、工具、运行时、已经完成的旧动作和无关客套。
+如果最近用户是在“继续/下一个/接着”某个流程，请搜索该流程当前进度和下一步，而不是重复上一轮已经完成的保存、创建或执行动作。
 只返回 JSON：{{"query":"3-10 个关键词"}}
 query 必须是一个字符串，不要返回数组。
 
@@ -17,7 +19,9 @@ query 必须是一个字符串，不要返回数组。
 {messages}
 """,
     "en": """Extract a keyword query for searching workspace memory from the conversation text below.
-Prefer project names, filenames, path tails, function names, product names, and the core request. Ignore images, tools, runtime details, and chatter.
+Focus first on the most recent user request. Use assistant content only as supporting context for references, continuity, or assistant-only proactive messages.
+Prefer project names, filenames, path tails, function names, product names, and the core request. Ignore images, tools, runtime details, completed old actions, and chatter.
+If the latest user asks to continue, go next, or proceed in a flow, search for that flow's current progress and next step instead of repeating a previously completed save/create/action.
 Return JSON only: {{"query":"3-10 keywords"}}
 query must be a single string, not an array.
 
@@ -25,7 +29,9 @@ Conversation text:
 {messages}
 """,
     "pt": """Extraia uma consulta de palavras-chave para pesquisar a memoria do workspace a partir do texto de conversa abaixo.
-Priorize nomes de projeto, arquivos, finais de caminhos, funcoes, produtos e o pedido principal. Ignore imagens, ferramentas, runtime e conversa irrelevante.
+Concentre-se primeiro na solicitacao mais recente do usuario. Use o conteudo do assistant apenas como contexto de apoio para referencias, continuidade ou mensagens proativas sem usuario.
+Priorize nomes de projeto, arquivos, finais de caminhos, funcoes, produtos e o pedido principal. Ignore imagens, ferramentas, runtime, acoes antigas ja concluidas e conversa irrelevante.
+Se o usuario mais recente pedir para continuar, ir para o proximo passo ou prosseguir em um fluxo, pesquise o progresso atual e o proximo passo desse fluxo em vez de repetir uma acao anterior de salvar/criar/executar.
 Retorne apenas JSON: {{"query":"3-10 palavras-chave"}}
 query deve ser uma string unica, nao um array.
 

@@ -1749,8 +1749,6 @@ class AgentBase(ABC):
                         os.path.join(workspace, "USER.md")  # pyright: ignore[reportArgumentType,reportCallIssue]
                     )
                     if user_content:
-                        if len(user_content) > 300:
-                            user_content = user_content[:300] + "……"
                         stable_buf += f"<user>\n{user_content}\n</user>\n"
                 except Exception as e:
                     logger.debug(f"AgentBase: USER.md not found or error reading: {e}")
@@ -1760,8 +1758,6 @@ class AgentBase(ABC):
                         os.path.join(workspace, "MEMORY.md")  # pyright: ignore[reportArgumentType,reportCallIssue]
                     )
                     if memory_content:
-                        if len(memory_content) > 500:
-                            memory_content = memory_content[:500] + "……"
                         stable_buf += f"<memory>\n{memory_content}\n</memory>\n"
                 except Exception as e:
                     logger.debug(
