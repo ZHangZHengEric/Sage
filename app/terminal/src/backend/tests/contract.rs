@@ -90,6 +90,7 @@ fn parse_backend_line_turns_sandbox_policy_ask_into_approval_request() {
         "type": "sandbox_approval_requested",
         "tool_name": "execute_shell_command",
         "command": "git push origin main",
+        "command_hash": "hash_demo",
         "category": "git-push",
         "reason": "git push changes remote state",
         "approval_mode": "on-request",
@@ -105,6 +106,7 @@ fn parse_backend_line_turns_sandbox_policy_ask_into_approval_request() {
         BackendEvent::SandboxApprovalRequested(request)
             if request.command == "git push origin main"
                 && request.approval_id == "shapproval_demo"
+                && request.command_hash.as_deref() == Some("hash_demo")
                 && request.category.as_deref() == Some("git-push")
                 && request.reason.as_deref() == Some("git push changes remote state")
                 && request.approval_mode.as_deref() == Some("on-request")

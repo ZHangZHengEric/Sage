@@ -138,6 +138,18 @@ def _sync_sandbox_approval_mode_to_context(request: StreamRequest) -> None:
     request.system_context["sandbox_approval_mode"] = mode
 
 
+def _sync_command_policy_to_context(request: StreamRequest) -> None:
+    if request.command_policy is None and isinstance(request.system_context, dict):
+        raw_policy = request.system_context.get("command_policy")
+        if isinstance(raw_policy, dict):
+            request.command_policy = raw_policy
+    if request.command_policy is None:
+        return
+    if request.system_context is None:
+        request.system_context = {}
+    request.system_context["command_policy"] = request.command_policy
+
+
 def _fill_if_none(request: StreamRequest, field: str, value: Any) -> None:
     if getattr(request, field) is None:
         setattr(request, field, value)
@@ -752,6 +764,12 @@ async def populate_request_from_agent_config(
             request.agent_mode = agent_config.get("agentMode")
         if agent_config.get("moreSuggest") is not None and request.more_suggest is None:
             request.more_suggest = agent_config.get("moreSuggest")
+        if request.command_policy is None:
+            command_policy = agent_config.get("commandPolicy") or agent_config.get(
+                "command_policy"
+            )
+            if isinstance(command_policy, dict):
+                request.command_policy = command_policy
         if agent_config.get("systemContext") is not None:
             agent_system_context = agent_config.get("systemContext")
             _merge_dict(request, "system_context", agent_system_context)  # pyright: ignore[reportArgumentType]
@@ -1171,6 +1189,7 @@ async def prepare_session(
     session_id = request.session_id or str(uuid.uuid4())
     request.session_id = session_id
     _sync_sandbox_approval_mode_to_context(request)
+    _sync_command_policy_to_context(request)
     logger.bind(session_id=session_id).info(
         f"Chat request - {json.dumps(_summarize_chat_request(request), ensure_ascii=False)}"
     )

@@ -49,6 +49,28 @@ class TestStatsToolDetection(unittest.TestCase):
             "untrusted",
         )
 
+    def test_build_run_request_injects_command_policy_from_agent_config(self):
+        command_policy = {
+            "rules": [
+                {
+                    "match": {"argv_prefix": ["git", "push"]},
+                    "action": "ask",
+                }
+            ],
+            "default_action": "ask",
+        }
+        request = cli_service.build_run_request(
+            task="hello",
+            agent_config={"commandPolicy": command_policy},
+        )
+
+        self.assertEqual(request.command_policy, command_policy)
+        self.assertIsNotNone(request.system_context)
+        self.assertEqual(
+            request.system_context.get("command_policy"),  # pyright: ignore[reportOptionalMemberAccess]
+            command_policy,
+        )
+
     def test_chat_help_mentions_resume_and_history_commands(self):
         self.assertIn("sage resume <session_id>", CHAT_COMMAND_HELP)
         self.assertIn("sage sessions", CHAT_COMMAND_HELP)

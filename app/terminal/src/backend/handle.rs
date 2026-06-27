@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use anyhow::{anyhow, Result};
+use serde_json::json;
 #[cfg(test)]
 use serde_json::Value;
 
@@ -295,16 +296,39 @@ impl BackendHandle {
     }
 
     pub fn send_prompt(&self, prompt: &str) -> Result<()> {
+        self.write_stdin_line(prompt)
+    }
+
+    pub fn send_sandbox_approval_decision(
+        &self,
+        session_id: &str,
+        approval_id: &str,
+        command_hash: Option<&str>,
+        decision: &str,
+    ) -> Result<()> {
+        let mut payload = json!({
+            "type": "sandbox_approval_decision",
+            "session_id": session_id,
+            "approval_id": approval_id,
+            "decision": decision,
+        });
+        if let Some(command_hash) = command_hash {
+            payload["command_hash"] = json!(command_hash);
+        }
+        self.write_stdin_line(&payload.to_string())
+    }
+
+    fn write_stdin_line(&self, line: &str) -> Result<()> {
         let mut stdin = self
             .stdin
             .lock()
             .map_err(|_| anyhow!("backend stdin lock poisoned"))?;
         stdin
-            .write_all(prompt.as_bytes())
-            .map_err(|err| anyhow!("failed to write prompt to backend: {err}"))?;
+            .write_all(line.as_bytes())
+            .map_err(|err| anyhow!("failed to write backend stdin: {err}"))?;
         stdin
             .write_all(b"\n")
-            .map_err(|err| anyhow!("failed to terminate prompt line: {err}"))?;
+            .map_err(|err| anyhow!("failed to terminate backend stdin line: {err}"))?;
         stdin
             .flush()
             .map_err(|err| anyhow!("failed to flush backend stdin: {err}"))?;

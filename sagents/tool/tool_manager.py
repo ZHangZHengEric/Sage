@@ -1197,6 +1197,7 @@ class ToolManager:
         normalized.pop("session_id", None)
         normalized.pop("user_id", None)
         normalized.pop("sandbox_approval_mode", None)
+        normalized.pop("command_policy", None)
 
         return self._apply_system_context_overrides(tool, normalized, trusted_context)
 

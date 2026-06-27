@@ -12,7 +12,7 @@ import os
 import re
 import shlex
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 
 PolicyAction = Literal["allow", "ask", "deny"]
@@ -52,6 +52,81 @@ class SandboxPolicyDecision:
     @property
     def allowed(self) -> bool:
         return self.action == "allow"
+
+
+@dataclass(frozen=True)
+class CommandPolicyRule:
+    action: PolicyAction
+    match: dict[str, Any]
+    category: str = "runtime_policy"
+    reason: str = "matched runtime command policy"
+    next_step: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class CommandPolicyConfig:
+    rules: tuple[CommandPolicyRule, ...] = ()
+    default_action: Optional[PolicyAction] = None
+    default_category: str = "runtime_policy_default"
+    default_reason: str = "no runtime command policy rule matched"
+
+
+def normalize_command_policy(value: Any) -> Optional[CommandPolicyConfig]:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        return None
+
+    rules = []
+    for item in value.get("rules") or []:
+        if not isinstance(item, dict):
+            continue
+        action = _normalize_policy_action(item.get("action"))
+        match = item.get("match")
+        if action is None or not isinstance(match, dict):
+            continue
+        category = _nonempty_string(item.get("category")) or "runtime_policy"
+        reason = _nonempty_string(item.get("reason")) or (
+            f"matched runtime command policy rule: {category}"
+        )
+        rules.append(
+            CommandPolicyRule(
+                action=action,
+                match=match,
+                category=category,
+                reason=reason,
+                next_step=_nonempty_string(item.get("next_step")),
+            )
+        )
+
+    default_action = _normalize_policy_action(value.get("default_action"))
+    default_category = (
+        _nonempty_string(value.get("default_category")) or "runtime_policy_default"
+    )
+    default_reason = (
+        _nonempty_string(value.get("default_reason"))
+        or "no runtime command policy rule matched"
+    )
+    return CommandPolicyConfig(
+        rules=tuple(rules),
+        default_action=default_action,
+        default_category=default_category,
+        default_reason=default_reason,
+    )
+
+
+def _normalize_policy_action(value: Any) -> Optional[PolicyAction]:
+    normalized = (str(value or "")).strip().lower()
+    if normalized in {"allow", "ask", "deny"}:
+        return normalized  # pyright: ignore[reportReturnType]
+    return None
+
+
+def _nonempty_string(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 class SandboxPolicyGateway:
@@ -137,10 +212,11 @@ class SandboxPolicyGateway:
     _STDOUT_REDIRECT_RE = re.compile(r"(^|[^\d])>>?(?![&])")
     _SEGMENT_SPLIT_RE = re.compile(r"[|;&]+")
 
-    def __init__(self, approval_mode: Optional[str] = None):
+    def __init__(self, approval_mode: Optional[str] = None, command_policy: Any = None):
         self.approval_mode = (
             normalize_approval_mode(approval_mode) or approval_mode_from_env()
         )
+        self.command_policy = normalize_command_policy(command_policy)
 
     def evaluate_shell_command(
         self, command: str, sandbox_mode: Optional[str] = None
@@ -155,6 +231,11 @@ class SandboxPolicyGateway:
             )
 
         lowered = command.lower()
+        parts = self._parse_command(command)
+
+        configured_decision = self._evaluate_configured_policy(command, parts)
+        if configured_decision is not None:
+            return self._apply_approval_mode(configured_decision)
 
         for substring in self.DENY_SUBSTRINGS:
             if substring in lowered:
@@ -204,6 +285,77 @@ class SandboxPolicyGateway:
             category="default_allow",
             reason="no sandbox policy rule matched",
         )
+
+    def _evaluate_configured_policy(
+        self, command: str, parts: Optional[list[str]]
+    ) -> Optional[SandboxPolicyDecision]:
+        policy = self.command_policy
+        if policy is None:
+            return None
+
+        for rule in policy.rules:
+            if self._rule_matches(rule.match, command, parts):
+                return SandboxPolicyDecision(
+                    action=rule.action,
+                    category=rule.category,
+                    reason=rule.reason,
+                    next_step=rule.next_step,
+                )
+
+        if policy.default_action is None:
+            return None
+        return SandboxPolicyDecision(
+            action=policy.default_action,
+            category=policy.default_category,
+            reason=policy.default_reason,
+        )
+
+    def _rule_matches(
+        self, matcher: dict[str, Any], command: str, parts: Optional[list[str]]
+    ) -> bool:
+        exact_command = _nonempty_string(matcher.get("command"))
+        if exact_command is not None and command == exact_command:
+            return True
+
+        argv = self._string_list(matcher.get("argv"))
+        if argv is not None and parts == argv:
+            return True
+
+        argv_prefix = self._string_list(matcher.get("argv_prefix"))
+        if argv_prefix is not None and parts is not None:
+            if (
+                len(parts) >= len(argv_prefix)
+                and parts[: len(argv_prefix)] == argv_prefix
+            ):
+                return True
+
+        pattern = _nonempty_string(matcher.get("pattern"))
+        if pattern is not None:
+            try:
+                if re.search(pattern, command):
+                    return True
+            except re.error:
+                return False
+
+        return False
+
+    @staticmethod
+    def _parse_command(command: str) -> Optional[list[str]]:
+        try:
+            return shlex.split(command)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _string_list(value: Any) -> Optional[list[str]]:
+        if not isinstance(value, list):
+            return None
+        result = []
+        for item in value:
+            if not isinstance(item, str):
+                return None
+            result.append(item)
+        return result
 
     def _evaluate_segment(
         self, segment: str, sandbox_mode: Optional[str] = None
@@ -420,9 +572,12 @@ class SandboxPolicyGateway:
 
 __all__ = [
     "ApprovalMode",
+    "CommandPolicyConfig",
+    "CommandPolicyRule",
     "PolicyAction",
     "SandboxPolicyDecision",
     "SandboxPolicyGateway",
     "approval_mode_from_env",
+    "normalize_command_policy",
     "normalize_approval_mode",
 ]

@@ -28,7 +28,7 @@ pub(super) fn handle_submit_action(
         SubmitAction::Interrupt => chat::interrupt_task(app, backend),
         SubmitAction::RetryLastTask => chat::retry_last_task(app, backend),
         SubmitAction::ApproveSandboxCommand => chat::approve_sandbox_command(app, backend),
-        SubmitAction::DenySandboxCommand => chat::deny_sandbox_command(app),
+        SubmitAction::DenySandboxCommand => chat::deny_sandbox_command(app, backend),
         SubmitAction::OpenSessionPicker { mode, limit } => {
             sessions::open_session_picker(app, mode, limit)
         }

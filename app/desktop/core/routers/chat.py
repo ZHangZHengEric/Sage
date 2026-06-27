@@ -18,12 +18,18 @@ from common.core.i18n import t
 from common.models.agent import AgentConfigDao
 from common.services import chat_service
 from common.services import conversation_service
-from common.schemas.chat import ChatRequest, StreamRequest, UserInputOptimizeRequest
+from common.schemas.chat import (
+    ChatRequest,
+    SandboxApprovalDecisionRequest,
+    StreamRequest,
+    UserInputOptimizeRequest,
+)
 from common.core.client.chat import get_chat_client
 from pydantic import BaseModel
 
 from sagents.context.session_context import delete_session_run_lock
 from sagents.utils.lock_manager import safe_release
+from sagents.utils.sandbox.approval import resolve_sandbox_approval
 
 from ..services.browser_capability import get_browser_tool_sync_state
 from ..services.chat.stream_manager import StreamManager
@@ -61,6 +67,19 @@ class RerunStreamRequest(BaseModel):
     available_sub_agent_ids: list[str] | None = None
     guidance_content: str | None = None
     guidance_id: str | None = None
+
+
+@chat_router.post("/api/sandbox/approval")
+async def resolve_sandbox_approval_decision(
+    request: SandboxApprovalDecisionRequest,
+):
+    status = resolve_sandbox_approval(
+        session_id=request.session_id,
+        approval_id=request.approval_id,
+        decision=request.decision,
+        command_hash_value=request.command_hash,
+    )
+    return {"success": status == "resolved", "status": status}
 
 
 def _build_current_time_with_weekday() -> str:

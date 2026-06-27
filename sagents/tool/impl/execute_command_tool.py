@@ -25,12 +25,13 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..tool_base import tool
-from ..tool_progress import emit_tool_progress
+from ..tool_progress import emit_tool_event, emit_tool_progress, get_progress_queue
 from .._progress_diff import diff_tail_for_progress as _diff_tail_for_progress
 from ..error_codes import ToolErrorCode, make_tool_error
 from sagents.utils.logger import logger
 from sagents.utils.sandbox._stdout_echo import echo_header, echo_footer
 from sagents.utils.sandbox.policy import SandboxPolicyDecision, SandboxPolicyGateway
+from sagents.utils.sandbox.approval import get_sandbox_approval_broker
 from sagents.utils.agent_session_helper import (
     get_session_sandbox as _get_session_sandbox_util,
 )
@@ -307,6 +308,74 @@ class ExecuteCommandTool:
             approval_expires_at=approval_expires_at,
             next_action=next_action,
         )
+
+    async def _await_policy_approval(
+        self,
+        *,
+        command: str,
+        session_id: str,
+        policy_decision: SandboxPolicyDecision,
+        policy_gateway: SandboxPolicyGateway,
+    ) -> Optional[Dict[str, Any]]:
+        if get_progress_queue(session_id) is None:
+            return self._policy_blocked_error(
+                command=command,
+                session_id=session_id,
+                policy_decision=policy_decision,
+                policy_gateway=policy_gateway,
+            )
+
+        broker = get_sandbox_approval_broker()
+        pending = broker.create(
+            session_id=session_id,
+            command=command,
+            category=policy_decision.category,
+            reason=policy_decision.reason,
+            approval_mode=policy_gateway.approval_mode,
+            hint=policy_decision.next_step,
+            ttl_s=self._APPROVAL_TTL_S,
+        )
+        await emit_tool_event(pending.event_payload())
+        logger.info(
+            "sandbox policy approval requested: "
+            f"approval_id={pending.approval_id} category={policy_decision.category}"
+        )
+        try:
+            decision = await asyncio.wait_for(
+                pending.future,
+                timeout=max(1, pending.expires_at_epoch - time.time()),
+            )
+        except asyncio.TimeoutError:
+            broker.discard(pending.approval_id)
+            return make_tool_error(
+                ToolErrorCode.SAFETY_BLOCKED,
+                "Sandbox approval timed out before the command was run.",
+                hint="Ask the user to retry the command if it is still needed.",
+                command=command,
+                policy_action="deny",
+                policy_category="approval_timeout",
+                policy_reason="sandbox approval timed out",
+                policy_approval_mode=policy_gateway.approval_mode,
+                approval_id=pending.approval_id,
+            )
+
+        if decision != "approve":
+            return make_tool_error(
+                ToolErrorCode.SAFETY_BLOCKED,
+                "Sandbox approval was denied; the command was not run.",
+                hint="Choose a safer command or ask the user for a different approval.",
+                command=command,
+                policy_action="deny",
+                policy_category="approval_denied",
+                policy_reason="user denied sandbox approval",
+                policy_approval_mode=policy_gateway.approval_mode,
+                approval_id=pending.approval_id,
+            )
+        logger.info(
+            "sandbox policy approval resolved: "
+            f"approval_id={pending.approval_id} category={policy_decision.category}"
+        )
+        return None
 
     @staticmethod
     def _get_agent_workspace_log_dir(
@@ -807,6 +876,10 @@ class ExecuteCommandTool:
                 "zh": "运行时审批模式（自动注入）",
                 "en": "Runtime approval mode (auto-injected)",
             },
+            "command_policy": {
+                "zh": "运行时命令策略（自动注入）",
+                "en": "Runtime command policy (auto-injected)",
+            },
         },
         param_schema={
             "command": {"type": "string", "description": "Shell command to execute"},
@@ -822,6 +895,7 @@ class ExecuteCommandTool:
             "session_id": {"type": "string", "description": "Session ID"},
             "approval_id": {"type": "string"},
             "sandbox_approval_mode": {"type": "string"},
+            "command_policy": {"type": "object"},
         },
         return_data={
             "type": "object",
@@ -848,6 +922,7 @@ class ExecuteCommandTool:
         env_vars: Optional[str] = None,
         approval_id: Optional[str] = None,
         sandbox_approval_mode: Optional[str] = None,
+        command_policy: Optional[Dict[str, Any]] = None,
         session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         if not session_id:
@@ -860,7 +935,10 @@ class ExecuteCommandTool:
 
         # Sandbox policy gateway: allow safe commands immediately; block commands
         # that need a confirmation channel or must never run automatically.
-        policy_gateway = SandboxPolicyGateway(approval_mode=sandbox_approval_mode)
+        policy_gateway = SandboxPolicyGateway(
+            approval_mode=sandbox_approval_mode,
+            command_policy=command_policy,
+        )
         policy_decision = policy_gateway.evaluate_shell_command(
             command, sandbox_mode=os.environ.get("SAGE_SANDBOX_MODE")
         )
@@ -876,12 +954,14 @@ class ExecuteCommandTool:
                     f"approval_id={approval_id} category={policy_decision.category}"
                 )
             else:
-                return self._policy_blocked_error(
+                approval_error = await self._await_policy_approval(
                     command=command,
                     session_id=session_id,
                     policy_decision=policy_decision,
                     policy_gateway=policy_gateway,
                 )
+                if approval_error is not None:
+                    return approval_error
 
         sandbox = self._get_sandbox(session_id)
 
