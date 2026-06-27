@@ -156,10 +156,9 @@ class ToolSuggestionAgent(AgentBase):
                     continue
 
                 if msg.role == MessageRole.TOOL.value:
-                    tool_name = (
-                        tool_call_names.get(msg.tool_call_id or "")
-                        or cls._tool_result_name(msg)
-                    )
+                    tool_name = tool_call_names.get(
+                        msg.tool_call_id or ""
+                    ) or cls._tool_result_name(msg)
                     compact_messages.append(
                         MessageChunk(
                             role=MessageRole.TOOL.value,
@@ -223,10 +222,9 @@ class ToolSuggestionAgent(AgentBase):
                 if existing_text.startswith("[tool result omitted:"):
                     lines.append(f"tool: {existing_text}")
                     continue
-                tool_name = (
-                    tool_call_names.get(msg.tool_call_id or "")
-                    or cls._tool_result_name(msg)
-                )
+                tool_name = tool_call_names.get(
+                    msg.tool_call_id or ""
+                ) or cls._tool_result_name(msg)
                 lines.append(f"tool: [tool result omitted: {tool_name}]")
                 continue
 
@@ -252,7 +250,10 @@ class ToolSuggestionAgent(AgentBase):
                 name = str(skill.get("skill_name") or "unknown")
                 content = str(skill.get("skill_content") or "")
                 if len(content) > 500:
-                    content = content[:500] + f"\n...[truncated, original chars: {len(content)}]"
+                    content = (
+                        content[:500]
+                        + f"\n...[truncated, original chars: {len(content)}]"
+                    )
                 lines.append(f"- {name}: {content}")
             lines.append("</active_skills>")
 
@@ -262,7 +263,9 @@ class ToolSuggestionAgent(AgentBase):
                 try:
                     skill_manager.load_new_skills()
                 except Exception as exc:
-                    logger.warning(f"ToolSuggestionAgent: failed to load new skills: {exc}")
+                    logger.warning(
+                        f"ToolSuggestionAgent: failed to load new skills: {exc}"
+                    )
             if hasattr(skill_manager, "list_skill_info"):
                 skill_infos = sorted(
                     skill_manager.list_skill_info(),
@@ -302,7 +305,9 @@ class ToolSuggestionAgent(AgentBase):
         logger.info(f"ToolSuggestionAgent: 开始为会话 {session_id} 分析工具推荐")
         language = session_context.get_language()
 
-        history_messages = self._extract_tool_selection_context_messages(message_manager)
+        history_messages = self._extract_tool_selection_context_messages(
+            message_manager
+        )
         # 根据 active_budget 压缩消息
         budget_info = message_manager.context_budget_manager.budget_info
         if budget_info:
