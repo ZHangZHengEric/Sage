@@ -1053,7 +1053,6 @@ class SimpleAgent(AgentBase):
         force_tool_choice_auto: bool = False,
         direct_response_state: Optional[Dict[str, bool]] = None,
     ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
-
         # 准备消息：提取可用消息 -> 检查压缩 -> 执行压缩
         # 通过生成器获取中间结果（tool_calls/tool result）和最终结果。
         prepared_messages = None
