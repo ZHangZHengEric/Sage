@@ -12,9 +12,11 @@ def test_chat_request_accepts_provider_id():
         messages=[Message(role="user", content="hi")],
         agent_id="agent_1",
         provider_id="provider_1",
+        fast_provider_id="fast_provider_1",
     )
 
     assert request.provider_id == "provider_1"
+    assert request.fast_provider_id == "fast_provider_1"
 
 
 def test_provider_override_is_trimmed_on_plain_request():
@@ -22,6 +24,7 @@ def test_provider_override_is_trimmed_on_plain_request():
         messages=[Message(role="user", content="hi")],
         agent_id="agent_1",
         provider_id=" provider_1 ",
+        fast_provider_id=" fast_provider_1 ",
     )
     http_request = SimpleNamespace(
         state=SimpleNamespace(user_claims={"userid": "user_1"})
@@ -30,12 +33,14 @@ def test_provider_override_is_trimmed_on_plain_request():
     chat_router.validate_and_prepare_request(request, http_request)
 
     assert request.provider_id == "provider_1"
+    assert request.fast_provider_id == "fast_provider_1"
 
 
 def test_stream_request_provider_override_is_preserved():
     request = StreamRequest(
         messages=[Message(role="user", content="hi")],
         provider_id="provider_1",
+        fast_provider_id="fast_provider_1",
     )
     http_request = SimpleNamespace(
         state=SimpleNamespace(
@@ -46,6 +51,7 @@ def test_stream_request_provider_override_is_preserved():
     chat_router.validate_and_prepare_request(request, http_request)
 
     assert request.provider_id == "provider_1"
+    assert request.fast_provider_id == "fast_provider_1"
 
 
 def test_chat_endpoint_preserves_provider_override(monkeypatch):
@@ -95,6 +101,7 @@ def test_chat_endpoint_preserves_provider_override(monkeypatch):
         messages=[Message(role="user", content="hi")],
         agent_id="agent_1",
         provider_id="provider_1",
+        fast_provider_id="fast_provider_1",
     )
     http_request = SimpleNamespace(
         state=SimpleNamespace(
@@ -106,6 +113,7 @@ def test_chat_endpoint_preserves_provider_override(monkeypatch):
 
     inner_request = captured["request"]
     assert inner_request.provider_id == "provider_1"
+    assert inner_request.fast_provider_id == "fast_provider_1"
     assert captured["require_agent_id"] is True
 
 
@@ -121,6 +129,7 @@ def test_explicit_provider_override_takes_priority(monkeypatch):
         user_id="owner_user",
         config={
             "llm_provider_id": "provider_agent",
+            "fast_llm_provider_id": "provider_fast_agent",
             "availableTools": [],
             "availableSkills": [],
             "maxLoopCount": 3,
@@ -152,6 +161,30 @@ def test_explicit_provider_override_takes_priority(monkeypatch):
             supports_multimodal=False,
             supports_structured_output=False,
         ),
+        "provider_fast_request": SimpleNamespace(
+            base_url="http://fast-request.local",
+            api_key="fast-request-key",
+            model="fast-request-model",
+            max_tokens=None,
+            temperature=0.4,
+            top_p=0.7,
+            presence_penalty=0.0,
+            max_model_len=16000,
+            supports_multimodal=False,
+            supports_structured_output=False,
+        ),
+        "provider_fast_agent": SimpleNamespace(
+            base_url="http://fast-agent.local",
+            api_key="fast-agent-key",
+            model="fast-agent-model",
+            max_tokens=None,
+            temperature=0.5,
+            top_p=0.6,
+            presence_penalty=0.0,
+            max_model_len=8000,
+            supports_multimodal=False,
+            supports_structured_output=False,
+        ),
     }
 
     class FakeAgentConfigDao:
@@ -178,6 +211,7 @@ def test_explicit_provider_override_takes_priority(monkeypatch):
         user_id="user_1",
         agent_id="agent_1",
         provider_id="provider_request",
+        fast_provider_id="provider_fast_request",
     )
 
     asyncio.run(chat_service.populate_request_from_agent_config(request))
@@ -185,3 +219,6 @@ def test_explicit_provider_override_takes_priority(monkeypatch):
     assert request.llm_model_config["base_url"] == "http://request.local"
     assert request.llm_model_config["api_key"] == "request-key"
     assert request.llm_model_config["model"] == "request-model"
+    assert request.llm_model_config["fast_base_url"] == "http://fast-request.local"
+    assert request.llm_model_config["fast_api_key"] == "fast-request-key"
+    assert request.llm_model_config["fast_model_name"] == "fast-request-model"

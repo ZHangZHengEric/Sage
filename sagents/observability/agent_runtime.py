@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 from typing import Any, Dict, Optional
 from sagents.observability.manager import ObservabilityManager
 from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
@@ -158,7 +159,9 @@ class ObservableCompletions:
             )
 
         try:
-            response = await self._completions.create(**kwargs)
+            response = self._completions.create(**kwargs)
+            if inspect.isawaitable(response):
+                response = await response
 
             if session_id:
                 if kwargs.get("stream", False):

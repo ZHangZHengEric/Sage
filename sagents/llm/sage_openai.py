@@ -115,6 +115,8 @@ class SageChatCompletions:
         # 选择客户端
         if model_type == "fast" and self._sage._fast:
             client = self._sage._fast
+            if self._sage.fast_model_name:
+                kwargs["model"] = self._sage.fast_model_name
             logger.debug(f"Using FAST model: {self._sage.fast_model_name or 'unknown'}")
         else:
             client = self._sage._standard

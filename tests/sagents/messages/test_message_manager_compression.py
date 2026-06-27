@@ -80,6 +80,37 @@ class TestExtractAllContextMessages:
         assert result[0].role == MessageRole.USER.value
         print("OK: No compression tool - normal extraction")
 
+    def test_system_triggered_run_stays_in_default_context(self):
+        """System-triggered assistant context should reach LLM requests."""
+        mm = MessageManager(session_id="test_session_system_triggered")
+
+        messages = [
+            self.create_message(MessageRole.USER.value, "Set a package reminder"),
+            self.create_message(
+                MessageRole.ASSISTANT.value,
+                "Package reminder created",
+                msg_type=MessageType.FINAL_ANSWER.value,
+            ),
+            self.create_message(
+                MessageRole.ASSISTANT.value,
+                "<system_triggered_run>\nassistant_message_to_user:\nWant to visit the restaurant again?\n</system_triggered_run>",
+                msg_type=MessageType.SYSTEM_TRIGGERED_RUN.value,
+            ),
+            self.create_message(MessageRole.USER.value, "Yes, today too"),
+        ]
+        mm.messages = messages
+
+        result = mm.extract_all_context_messages(
+            recent_turns=0, last_turn_user_only=False
+        )
+        request_messages = MessageManager.convert_messages_to_dict_for_request(result)
+
+        assert any(
+            message["role"] == MessageRole.ASSISTANT.value
+            and "Want to visit the restaurant again?" in message["content"]
+            for message in request_messages
+        )
+
     def test_single_compression_tool(self):
         """Test: extract from corresponding User when single compression tool exists"""
         mm = MessageManager(session_id="test_session_2")

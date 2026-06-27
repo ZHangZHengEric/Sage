@@ -5,6 +5,7 @@ import json
 import uuid
 import asyncio
 import hashlib
+import re
 from sagents.utils.logger import logger
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_progress import (
@@ -578,6 +579,7 @@ class AgentBase(ABC):
     ) -> MessageChunk:
         copied = MessageChunk.from_dict(message.to_dict())
         copied.content = frozen.get("content", copied.content)
+        copied.content = cls._strip_skill_tags_from_content(copied.content)
         metadata = dict(copied.metadata or {})
         frozen_metadata = frozen.get("metadata")
         if isinstance(frozen_metadata, dict):
@@ -586,6 +588,49 @@ class AgentBase(ABC):
         metadata["runtime_context_injected"] = True
         metadata["inference_view_only"] = True
         copied.metadata = metadata
+        return copied
+
+    @classmethod
+    def _strip_skill_tags_from_text(cls, text: str) -> str:
+        cleaned = re.sub(
+            r"<skill>\s*[^<]*?\s*</skill>",
+            "",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if cleaned == text:
+            return text
+        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
+
+    @classmethod
+    def _strip_skill_tags_from_content(cls, content: Any) -> Any:
+        if isinstance(content, str):
+            return cls._strip_skill_tags_from_text(content)
+        if isinstance(content, list):
+            sanitized = []
+            changed = False
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    next_part = dict(part)
+                    original_text = str(next_part.get("text", ""))
+                    next_text = cls._strip_skill_tags_from_text(original_text)
+                    next_part["text"] = next_text
+                    changed = changed or next_text != original_text
+                    sanitized.append(next_part)
+                else:
+                    sanitized.append(part)
+            return sanitized if changed else content
+        return content
+
+    @classmethod
+    def _strip_skill_tags_from_message(cls, message: MessageChunk) -> MessageChunk:
+        sanitized_content = cls._strip_skill_tags_from_content(message.content)
+        if sanitized_content is message.content:
+            return message
+        copied = MessageChunk.from_dict(message.to_dict())
+        copied.content = sanitized_content
         return copied
 
     def _save_frozen_user_inference_to_message(
@@ -682,6 +727,7 @@ class AgentBase(ABC):
                 parts.append(runtime_context)
             runtime_text = "\n\n".join(parts)
             if runtime_text.strip():
+                latest_user = self._strip_skill_tags_from_message(latest_user)
                 latest_user = self._wrap_message_with_runtime_context(
                     latest_user, runtime_text
                 )
@@ -968,6 +1014,13 @@ class AgentBase(ABC):
             if "model" in final_config
             else "gpt-3.5-turbo"
         )
+        model_type = final_config.get("model_type")
+        supports_sage_model_type = isinstance(
+            self.model, SageAsyncOpenAI
+        ) or isinstance(getattr(self.model, "_model", None), SageAsyncOpenAI)
+        fast_model_name = getattr(self.model, "fast_model_name", None)
+        if model_type == "fast" and supports_sage_model_type and fast_model_name:
+            model_name = fast_model_name
         # 移除不是OpenAI API标准参数的配置项
         final_config.pop("max_model_len", None)
         final_config.pop("api_key", None)
@@ -979,7 +1032,7 @@ class AgentBase(ABC):
         final_config.pop("fast_model_name", None)
         # 只有当 model 不是 SageAsyncOpenAI 类型时，才移除 model_type
         # SageAsyncOpenAI 需要 model_type 来选择使用哪个客户端
-        if not isinstance(self.model, SageAsyncOpenAI):
+        if not supports_sage_model_type:
             final_config.pop("model_type", None)
         all_chunks = []
         attempt_chunks = []
@@ -1714,8 +1767,6 @@ class AgentBase(ABC):
                         os.path.join(workspace, "USER.md")  # pyright: ignore[reportArgumentType,reportCallIssue]
                     )
                     if user_content:
-                        if len(user_content) > 300:
-                            user_content = user_content[:300] + "……"
                         stable_buf += f"<user>\n{user_content}\n</user>\n"
                 except Exception as e:
                     logger.debug(f"AgentBase: USER.md not found or error reading: {e}")
@@ -1725,8 +1776,6 @@ class AgentBase(ABC):
                         os.path.join(workspace, "MEMORY.md")  # pyright: ignore[reportArgumentType,reportCallIssue]
                     )
                     if memory_content:
-                        if len(memory_content) > 500:
-                            memory_content = memory_content[:500] + "……"
                         stable_buf += f"<memory>\n{memory_content}\n</memory>\n"
                 except Exception as e:
                     logger.debug(

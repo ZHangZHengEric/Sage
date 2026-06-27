@@ -89,3 +89,49 @@ async def test_backend_client_preserves_roleless_control_events(monkeypatch):
     assert received[0]["session_id"] == "child"
     assert isinstance(received[1], MessageChunk)
     assert received[1].content == "done"
+
+
+@pytest.mark.asyncio
+async def test_backend_client_backfills_session_id_for_complete_role_messages(
+    monkeypatch,
+):
+    lines = [
+        json.dumps(
+            {
+                "role": "assistant",
+                "type": "token_usage",
+                "content": "",
+                "message_id": "m-token",
+                "metadata": {"session_id": "child", "token_usage": {}},
+            }
+        ),
+        json.dumps(
+            {
+                "role": "assistant",
+                "type": "assistant_text",
+                "content": "done",
+                "message_id": "m-child",
+            }
+        ),
+    ]
+    monkeypatch.setitem(
+        sys.modules,
+        "aiohttp",
+        SimpleNamespace(ClientSession=lambda: _FakeClientSession(lines)),
+    )
+
+    client = FibreBackendClient()
+    client.base_url = "http://localhost:1"
+    client._available = True
+
+    received = []
+    async for chunks in client.stream_chat(
+        agent_id="agent",
+        messages=[{"role": "user", "content": "hi"}],
+        session_id="child",
+        max_loop_count=3,
+    ):
+        received.extend(chunks)
+
+    assert all(isinstance(item, MessageChunk) for item in received)
+    assert [item.session_id for item in received] == ["child", "child"]
