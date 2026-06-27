@@ -14,6 +14,7 @@ pub(crate) struct CliStreamEvent {
     pub(crate) action: Option<String>,
     pub(crate) approval_id: Option<String>,
     pub(crate) command: Option<String>,
+    pub(crate) command_hash: Option<String>,
     pub(crate) category: Option<String>,
     pub(crate) reason: Option<String>,
     pub(crate) approval_mode: Option<String>,
@@ -203,6 +204,10 @@ pub(crate) fn parse_stream_event(line: &str) -> Option<CliStreamEvent> {
             .map(ToString::to_string),
         command: object
             .get("command")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        command_hash: object
+            .get("command_hash")
             .and_then(Value::as_str)
             .map(ToString::to_string),
         category: object

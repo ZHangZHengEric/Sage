@@ -101,16 +101,7 @@ pub(super) fn approve_sandbox_command(
     app: &mut App,
     backend: &mut Option<BackendHandle>,
 ) -> Result<bool> {
-    if app.busy {
-        app.push_message(
-            crate::app::MessageKind::System,
-            "request still running; wait for it to finish before approving",
-        );
-        app.set_status(format!("busy  {}", app.session_id));
-        return Ok(true);
-    }
-
-    let Some(task) = app.build_sandbox_approval_prompt() else {
+    let Some(request) = app.pending_sandbox_approval.clone() else {
         app.push_message(
             crate::app::MessageKind::System,
             "no pending sandbox approval",
@@ -119,17 +110,54 @@ pub(super) fn approve_sandbox_command(
         return Ok(true);
     };
 
-    app.begin_task_submission(task.clone(), true);
-    run_task(app, backend, task)
+    let Some(handle) = backend.as_ref() else {
+        app.push_message(
+            crate::app::MessageKind::System,
+            "backend unavailable for sandbox approval",
+        );
+        app.set_status(format!("approval unavailable  {}", app.session_id));
+        return Ok(true);
+    };
+
+    handle.send_sandbox_approval_decision(
+        &app.session_id,
+        &request.approval_id,
+        request.command_hash.as_deref(),
+        "approve",
+    )?;
+    app.push_message(
+        crate::app::MessageKind::Tool,
+        format!(
+            "sandbox approval sent\napproval_id: {}",
+            request.approval_id
+        ),
+    );
+    app.clear_pending_sandbox_approval();
+    app.set_status(format!("approval sent  {}", app.session_id));
+    Ok(true)
 }
 
-pub(super) fn deny_sandbox_command(app: &mut App) -> Result<bool> {
-    if !app.deny_pending_sandbox_approval() {
+pub(super) fn deny_sandbox_command(
+    app: &mut App,
+    backend: &mut Option<BackendHandle>,
+) -> Result<bool> {
+    let Some(request) = app.pending_sandbox_approval.clone() else {
         app.push_message(
             crate::app::MessageKind::System,
             "no pending sandbox approval",
         );
         app.set_status(format!("ready  {}", app.session_id));
+        return Ok(true);
+    };
+
+    if let Some(handle) = backend.as_ref() {
+        handle.send_sandbox_approval_decision(
+            &app.session_id,
+            &request.approval_id,
+            request.command_hash.as_deref(),
+            "deny",
+        )?;
     }
+    app.deny_pending_sandbox_approval();
     Ok(true)
 }

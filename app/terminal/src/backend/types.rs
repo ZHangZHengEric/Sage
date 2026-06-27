@@ -112,6 +112,7 @@ pub struct BackendRequest {
 pub struct SandboxApprovalRequest {
     pub command: String,
     pub approval_id: String,
+    pub command_hash: Option<String>,
     pub category: Option<String>,
     pub reason: Option<String>,
     pub approval_mode: Option<String>,

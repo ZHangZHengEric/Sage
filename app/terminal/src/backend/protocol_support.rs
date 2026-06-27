@@ -189,6 +189,7 @@ pub(super) fn sandbox_approval_from_event(
     Some(SandboxApprovalRequest {
         command,
         approval_id,
+        command_hash: trimmed_option(event.command_hash.as_deref()),
         category: trimmed_option(event.category.as_deref()),
         reason: trimmed_option(event.reason.as_deref()),
         approval_mode: trimmed_option(event.approval_mode.as_deref()),

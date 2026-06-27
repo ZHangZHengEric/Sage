@@ -79,3 +79,44 @@ def test_never_mode_denies_confirmation_required_command():
 
     assert decision.action == "deny"
     assert decision.category == "git_remote_write_approval_disabled"
+
+
+def test_runtime_command_policy_can_override_default_rules():
+    gateway = SandboxPolicyGateway(
+        command_policy={
+            "rules": [
+                {
+                    "match": {"argv_prefix": ["git", "push"]},
+                    "action": "allow",
+                    "category": "app_allows_git_push",
+                    "reason": "app policy allows this remote write",
+                }
+            ],
+            "default_action": "deny",
+        }
+    )
+
+    decision = gateway.evaluate_shell_command("git push origin feature-x")
+
+    assert decision.action == "allow"
+    assert decision.category == "app_allows_git_push"
+
+
+def test_runtime_command_policy_default_action_applies_when_no_rule_matches():
+    gateway = SandboxPolicyGateway(
+        command_policy={
+            "rules": [
+                {
+                    "match": {"argv": ["git", "status"]},
+                    "action": "allow",
+                }
+            ],
+            "default_action": "ask",
+            "default_category": "app_default_review",
+        }
+    )
+
+    decision = gateway.evaluate_shell_command("python scripts/build.py")
+
+    assert decision.action == "ask"
+    assert decision.category == "app_default_review"

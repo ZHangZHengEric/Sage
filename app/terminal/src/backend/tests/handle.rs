@@ -1,5 +1,7 @@
 use std::fs;
 
+use serde_json::Value;
+
 use super::{
     collect_round_trip, lock_env, unique_temp_dir, wait_for_exit, write_fake_backend_script,
     EnvVarGuard,
@@ -53,6 +55,59 @@ fn backend_handle_supports_two_round_trips_without_respawn() {
         prompts.lines().collect::<Vec<_>>(),
         vec!["first prompt", "second prompt"]
     );
+
+    handle.stop();
+    let _ = wait_for_exit(&handle);
+}
+
+#[test]
+fn backend_handle_writes_sandbox_approval_decision_to_stdin() {
+    let _env_lock = lock_env();
+    let temp_dir = unique_temp_dir("backend-approval-decision");
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    let script_path = write_fake_backend_script(&temp_dir);
+    let log_path = temp_dir.join("backend-prompts.log");
+    let _python_guard = EnvVarGuard::set("PYTHON", &script_path.display().to_string());
+    let _log_guard = EnvVarGuard::set("TEST_BACKEND_LOG", &log_path.display().to_string());
+
+    let request = BackendRequest {
+        session_id: "local-approval".to_string(),
+        user_id: "terminal-test".to_string(),
+        agent_id: None,
+        agent_config: None,
+        agent_mode: Some("simple".to_string()),
+        max_loop_count: Some(3),
+        workspace: Some(temp_dir.clone()),
+        sandbox_type: None,
+        sandbox_approval_mode: "on-request".to_string(),
+        skills: Vec::new(),
+        model_override: None,
+        goal_objective: None,
+        goal_status: None,
+        clear_goal: false,
+        task: "unused".to_string(),
+    };
+
+    let handle = BackendHandle::spawn(&request).expect("backend should spawn");
+    handle
+        .send_sandbox_approval_decision(
+            "local-approval",
+            "shapproval_demo",
+            Some("hash_demo"),
+            "approve",
+        )
+        .expect("approval decision should be written");
+    let _ = collect_round_trip(&handle);
+
+    let prompts = fs::read_to_string(&log_path).expect("backend log should exist");
+    let payload: Value =
+        serde_json::from_str(prompts.lines().next().expect("decision line should exist"))
+            .expect("decision should be JSON");
+    assert_eq!(payload["type"], "sandbox_approval_decision");
+    assert_eq!(payload["session_id"], "local-approval");
+    assert_eq!(payload["approval_id"], "shapproval_demo");
+    assert_eq!(payload["command_hash"], "hash_demo");
+    assert_eq!(payload["decision"], "approve");
 
     handle.stop();
     let _ = wait_for_exit(&handle);

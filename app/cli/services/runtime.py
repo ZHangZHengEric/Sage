@@ -996,6 +996,12 @@ def build_run_request(
     )
     if normalized_approval_mode:
         system_context["sandbox_approval_mode"] = normalized_approval_mode
+    config_command_policy = _agent_config_dict(
+        _agent_config_value(agent_config, "commandPolicy", "command_policy"),
+        "commandPolicy",
+    )
+    if config_command_policy:
+        system_context["command_policy"] = config_command_policy
     apply_workspace_guidance_to_system_context(
         system_context,
         agent_config=agent_config,
@@ -1106,6 +1112,7 @@ def build_run_request(
         max_loop_count=effective_max_loop_count,
         system_context=system_context,
         sandbox_approval_mode=normalized_approval_mode,
+        command_policy=config_command_policy,
     )
 
 
