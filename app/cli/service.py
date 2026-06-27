@@ -30,6 +30,7 @@ from app.cli.services.runtime import (
     init_cli_config,
     is_bundled_coding_agent_config as is_bundled_coding_agent_config,
     load_agent_config_file as load_agent_config_file,
+    normalize_sandbox_approval_mode as normalize_sandbox_approval_mode,
     normalize_sandbox_type as normalize_sandbox_type,
     resolve_agent_config_path as resolve_agent_config_path,
     run_request_stream,

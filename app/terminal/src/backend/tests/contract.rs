@@ -85,6 +85,35 @@ fn parse_backend_line_hydrates_session_goal_from_tool_result_goal_update() {
 }
 
 #[test]
+fn parse_backend_line_turns_sandbox_policy_ask_into_approval_request() {
+    let line = json!({
+        "type": "sandbox_approval_requested",
+        "tool_name": "execute_shell_command",
+        "command": "git push origin main",
+        "command_hash": "hash_demo",
+        "category": "git-push",
+        "reason": "git push changes remote state",
+        "approval_mode": "on-request",
+        "approval_id": "shapproval_demo",
+        "hint": "Ask the user for confirmation before retrying this command."
+    })
+    .to_string();
+
+    let events = parse_backend_line(&line);
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        BackendEvent::SandboxApprovalRequested(request)
+            if request.command == "git push origin main"
+                && request.approval_id == "shapproval_demo"
+                && request.command_hash.as_deref() == Some("hash_demo")
+                && request.category.as_deref() == Some("git-push")
+                && request.reason.as_deref() == Some("git push changes remote state")
+                && request.approval_mode.as_deref() == Some("on-request")
+    )));
+}
+
+#[test]
 fn parse_backend_line_turns_cli_stats_into_stats_then_finished() {
     let events = parse_backend_line(
         r#"{

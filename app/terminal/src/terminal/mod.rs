@@ -213,6 +213,9 @@ fn drain_backend(app: &mut App, backend: &mut Option<BackendHandle>) -> bool {
                 BackendEvent::PhaseChanged(phase) => app.set_active_phase(phase),
                 BackendEvent::ToolStarted(name) => app.start_tool(name),
                 BackendEvent::ToolFinished(name) => app.finish_tool(name),
+                BackendEvent::SandboxApprovalRequested(request) => {
+                    app.apply_sandbox_approval_request(request)
+                }
                 BackendEvent::Stats(stats) => app.apply_backend_stats(stats),
                 BackendEvent::Error(message) => app.fail_request(message),
                 BackendEvent::Finished => {

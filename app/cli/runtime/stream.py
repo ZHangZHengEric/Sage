@@ -6,7 +6,7 @@ import time
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from app.cli.runtime.contracts import (
     _emit_json_notice_event,
@@ -32,6 +32,79 @@ from app.cli.runtime.stats import (
 STREAM_IDLE_NOTICE_SECONDS = 3.0
 STREAM_IDLE_REPEAT_SECONDS = 5.0
 SESSION_LOG_SCAN_BYTES = 64 * 1024
+
+
+def _install_stdin_control_reader(request) -> Optional[Callable[[], None]]:
+    try:
+        fd = sys.stdin.fileno()
+    except Exception:
+        return None
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+
+    buffer = bytearray()
+
+    def _handle_line(line: str) -> None:
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(payload, dict):
+            return
+        if payload.get("type") != "sandbox_approval_decision":
+            return
+        session_id = str(
+            payload.get("session_id") or getattr(request, "session_id", "")
+        )
+        approval_id = str(payload.get("approval_id") or "")
+        decision = str(payload.get("decision") or "")
+        command_hash = payload.get("command_hash")
+        if not session_id or not approval_id or not decision:
+            return
+        from sagents.utils.sandbox.approval import resolve_sandbox_approval
+
+        resolve_sandbox_approval(
+            session_id=session_id,
+            approval_id=approval_id,
+            decision=decision,
+            command_hash_value=command_hash if isinstance(command_hash, str) else None,
+        )
+
+    def _read_ready() -> None:
+        try:
+            chunk = os.read(fd, 4096)
+        except BlockingIOError:
+            return
+        except OSError:
+            loop.remove_reader(fd)
+            return
+        if not chunk:
+            loop.remove_reader(fd)
+            return
+        buffer.extend(chunk)
+        while b"\n" in buffer:
+            line, _, rest = buffer.partition(b"\n")
+            buffer.clear()
+            buffer.extend(rest)
+            text = line.decode("utf-8", errors="replace").strip()
+            if text:
+                _handle_line(text)
+
+    try:
+        loop.add_reader(fd, _read_ready)
+    except (NotImplementedError, RuntimeError, OSError):
+        return None
+
+    def _cleanup() -> None:
+        try:
+            loop.remove_reader(fd)
+        except Exception:
+            pass
+
+    return _cleanup
 
 
 def _resolve_session_log_path(session_id: Optional[str]) -> Optional[Path]:
@@ -90,6 +163,7 @@ async def _stream_request(
     stats_output: bool,
     workspace: Optional[str] = None,
     sandbox_type: Optional[str] = None,
+    sandbox_approval_mode: Optional[str] = None,
     *,
     command_mode: str = "run",
     session_summary: Optional[Dict[str, Any]] = None,
@@ -104,6 +178,8 @@ async def _stream_request(
             stream_kwargs: Dict[str, Any] = {"workspace": workspace}
             if sandbox_type:
                 stream_kwargs["sandbox_type"] = sandbox_type
+            if sandbox_approval_mode:
+                stream_kwargs["sandbox_approval_mode"] = sandbox_approval_mode
             async for event in run_request_stream(request, **stream_kwargs):
                 await event_queue.put(("event", event))
         except Exception as exc:  # noqa: BLE001
@@ -119,6 +195,7 @@ async def _stream_request(
     last_notice_time: Optional[float] = None
     last_issue_notice: Optional[str] = None
     producer_task = asyncio.create_task(_pump_stream_events())
+    control_cleanup = _install_stdin_control_reader(request) if json_output else None
     if json_output:
         _emit_json_session_event(
             request,
@@ -213,6 +290,8 @@ async def _stream_request(
             else:
                 _print_plain_event(event, render_state)
     finally:
+        if control_cleanup is not None:
+            control_cleanup()
         if not producer_task.done():
             producer_task.cancel()
         with suppress(asyncio.CancelledError):

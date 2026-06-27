@@ -13,6 +13,7 @@ pub(crate) struct StartupOptions {
     pub(crate) display_mode: Option<DisplayMode>,
     pub(crate) workspace: Option<String>,
     pub(crate) sandbox_type: Option<String>,
+    pub(crate) sandbox_approval_mode: Option<String>,
 }
 
 impl StartupOptions {
@@ -34,6 +35,9 @@ impl StartupOptions {
             display_mode: self.display_mode.or(defaults.display_mode),
             workspace: self.workspace.or(defaults.workspace),
             sandbox_type: self.sandbox_type.or(defaults.sandbox_type),
+            sandbox_approval_mode: self
+                .sandbox_approval_mode
+                .or(defaults.sandbox_approval_mode),
         }
     }
 }
