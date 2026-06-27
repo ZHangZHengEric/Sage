@@ -378,7 +378,9 @@ Used by `/api/chat`, and it requires `agent_id`:
   "session_id": "sess_123",
   "user_id": "optional",
   "system_context": {},
-  "agent_id": "agent_abc"
+  "agent_id": "agent_abc",
+  "provider_id": "provider_xxx",
+  "fast_provider_id": "provider_fast_xxx"
 }
 ```
 
@@ -393,6 +395,8 @@ Used by `/api/chat`, and it requires `agent_id`:
 | `user_id`        | Usually injected from the session if omitted |
 | `system_context` | Structured context object                    |
 | `agent_id`       | Required target agent                        |
+| `provider_id`    | Optional per-request main model provider override |
+| `fast_provider_id` | Optional per-request fast model provider override |
 
 
 ### StreamRequest
@@ -935,4 +939,3 @@ curl -X POST http://127.0.0.1:8000/oauth2/token \
 - This page keeps only information that is real in the current codebase and useful for integrators; it was cross-checked against the routers in `app/server/routers`. Extra routes from `app/desktop/`, etc., are not listed here.
 - Old paths, guessed behavior, and historical noise have been minimized.
 - If this page gets extended further, the next useful additions are error response examples and field-level enum notes, not more prose.
-

@@ -877,7 +877,10 @@ async def populate_request_from_agent_config(
             )
 
     # 处理快速模型配置
-    fast_provider_id = (
+    request_fast_provider_id = str(
+        getattr(request, "fast_provider_id", "") or ""
+    ).strip()
+    fast_provider_id = request_fast_provider_id or (
         agent_config.get("fast_llm_provider_id") if agent_config else None
     )
     if fast_provider_id:

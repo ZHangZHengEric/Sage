@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import os
 import re
+from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -150,12 +151,83 @@ class SessionHistoryRetriever:
         else:
             history_messages = list(message_manager.messages[:anchor_index])
 
+        compact_history_messages = self._compact_history_messages(history_messages)
         self._history_cache[session_id] = _SessionHistoryCacheEntry(
             messages_fingerprint=messages_fingerprint,
             agent_config_fingerprint=agent_config_fingerprint,
-            history_messages=history_messages,
+            history_messages=compact_history_messages,
         )
-        return history_messages
+        return compact_history_messages
+
+    @staticmethod
+    def _compact_history_messages(messages: List[Any]) -> List[Any]:
+        compact_messages: List[Any] = []
+        current_chat: List[Any] = []
+
+        for msg in messages:
+            if msg.is_user_input_message():
+                if current_chat:
+                    SessionHistoryRetriever._append_compact_chat(
+                        compact_messages, current_chat
+                    )
+                current_chat = [msg]
+            elif current_chat:
+                current_chat.append(msg)
+        if current_chat:
+            SessionHistoryRetriever._append_compact_chat(compact_messages, current_chat)
+
+        if not compact_messages:
+            for msg in messages:
+                if not msg.is_assistant_text_message():
+                    continue
+                assistant_msg = SessionHistoryRetriever._text_only_message(msg)
+                if assistant_msg is not None:
+                    compact_messages.append(assistant_msg)
+
+        return compact_messages
+
+    @staticmethod
+    def _append_compact_chat(target: List[Any], chat: List[Any]) -> None:
+        user_msg = SessionHistoryRetriever._text_only_message(chat[0])
+        if user_msg is None:
+            return
+        target.append(user_msg)
+        assistant_texts = [
+            msg
+            for msg in chat[1:]
+            if msg.is_assistant_text_message() and msg.get_content()
+        ]
+        if assistant_texts:
+            assistant_msg = SessionHistoryRetriever._text_only_message(
+                assistant_texts[-1]
+            )
+            if assistant_msg is not None:
+                target.append(assistant_msg)
+
+    @staticmethod
+    def _text_only_message(msg: Any) -> Optional[Any]:
+        text = SessionHistoryRetriever._extract_text_content(msg.get_content()).strip()
+        if not text:
+            return None
+        text_msg = copy(msg)
+        text_msg.content = text
+        return text_msg
+
+    @staticmethod
+    def _extract_text_content(content: Any) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: List[str] = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    text = item.get("text")
+                    if isinstance(text, str):
+                        parts.append(text)
+            return "\n".join(parts)
+        return ""
 
     def search(
         self, query: str, top_k: int, session_id: str, session_context

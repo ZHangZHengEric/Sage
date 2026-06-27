@@ -400,7 +400,7 @@ export const useChatPage = (props) => {
     if (!res) return null
     const normalizedMessages = (res.messages || []).map(msg => ({
       ...msg,
-      session_id: msg.session_id || sessionId
+      session_id: msg.session_id || msg.metadata?.session_id || sessionId
     }))
 
     // 加载历史消息后，检查哪些工具调用没有对应的结果
