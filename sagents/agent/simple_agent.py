@@ -767,10 +767,9 @@ class SimpleAgent(AgentBase):
                 continue
 
             if msg.role == MessageRole.TOOL.value:
-                tool_name = (
-                    tool_call_names.get(msg.tool_call_id or "")
-                    or cls._tool_result_name_for_judge(msg)
-                )
+                tool_name = tool_call_names.get(
+                    msg.tool_call_id or ""
+                ) or cls._tool_result_name_for_judge(msg)
                 preview = cls._extract_text_content_for_judge(msg.get_content()).strip()
                 if len(preview) > TASK_COMPLETE_TOOL_RESULT_PREVIEW_CHARS:
                     preview = (
@@ -1117,9 +1116,8 @@ class SimpleAgent(AgentBase):
                 "had_tool_calls", False
             )
             plain_text_direct_response = (
-                (not had_direct_tool_activity)
-                and self._has_visible_text_without_tool_calls(all_new_response_chunks)
-            )
+                not had_direct_tool_activity
+            ) and self._has_visible_text_without_tool_calls(all_new_response_chunks)
 
             messages_input = MessageManager.merge_new_messages_to_old_messages(
                 cast(

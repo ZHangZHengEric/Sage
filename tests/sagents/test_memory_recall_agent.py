@@ -227,7 +227,9 @@ def test_memory_recall_query_context_keeps_recent_ten_turns_and_assistant_contex
             content="负五轮回答，不应该进入最近 query 上下文",
             message_type=MessageType.FINAL_ANSWER.value,
         ),
-        MessageChunk(role=MessageRole.USER.value, content="负四轮：刚好在 10 turn 窗口内"),
+        MessageChunk(
+            role=MessageRole.USER.value, content="负四轮：刚好在 10 turn 窗口内"
+        ),
         MessageChunk(
             role=MessageRole.ASSISTANT.value,
             content="负四轮回答：应该保留。",
@@ -312,9 +314,13 @@ def test_memory_recall_query_context_keeps_recent_ten_turns_and_assistant_contex
             content="第五轮回答：保存想法已经完成。",
             message_type=MessageType.FINAL_ANSWER.value,
         ),
-        MessageChunk(role=MessageRole.USER.value, content="现在 memory recall 拿哪些消息？"),
+        MessageChunk(
+            role=MessageRole.USER.value, content="现在 memory recall 拿哪些消息？"
+        ),
     ]
-    message_manager = SimpleNamespace(messages=messages, session_id="session-query-context")
+    message_manager = SimpleNamespace(
+        messages=messages, session_id="session-query-context"
+    )
 
     compact = agent._extract_query_context_messages(message_manager)
 
