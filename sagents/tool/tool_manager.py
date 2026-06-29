@@ -978,15 +978,12 @@ class ToolManager:
 
     def get_tool(self, name: str) -> Optional[Union[ToolSpec, McpToolSpec]]:
         """Get a tool by name"""
-        logger.debug(f"Getting tool by name: {name}")
         return self.tools.get(name, None)
 
     def list_tools(
         self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """List all available tools with metadata, supports language filtering via convert_spec_to_openai_format"""
-        logger.debug(f"Listing all {len(self.tools)} tools with metadata")
-
         tools_list: List[Dict[str, Any]] = []
         for tool in self.tools.values():
             spec = convert_spec_to_openai_format(
@@ -1017,8 +1014,6 @@ class ToolManager:
         self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """List all available tools with simplified metadata, using convert_spec_to_openai_format for i18n"""
-        logger.debug(f"Listing all {len(self.tools)} tools with simplified metadata")
-
         simplified = []
         for tool in self.tools.values():
             spec = convert_spec_to_openai_format(
@@ -1037,15 +1032,12 @@ class ToolManager:
 
     def list_all_tools_name(self, lang: Optional[str] = None) -> List[str]:
         """List all available tools with name (language param accepted for API consistency)"""
-        logger.debug(f"Listing all {len(self.tools)} tools with name")
         return [tool.name for tool in self.tools.values()]
 
     def list_tools_with_type(
         self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """List tools with type/source info, descriptions and parameters localized via convert_spec_to_openai_format"""
-        logger.debug(f"Listing all {len(self.tools)} tools with type information")
-
         tools_with_type: List[Dict[str, Any]] = []
         for tool in self.tools.values():
             # 类型与来源
@@ -1209,9 +1201,6 @@ class ToolManager:
         """Execute a tool by name with provided arguments (async version)"""
         execution_start = time.time()
         logger.debug(
-            f"[Tool Execution] START | tool={tool_name} | session={session_id or 'NO_SESSION'}"
-        )
-        logger.debug(
             f"[Tool Execution] Arguments: {json.dumps(kwargs, ensure_ascii=False, default=str)[:500]}"
         )
         session_context = _resolve_session_context(session_id)
@@ -1225,8 +1214,6 @@ class ToolManager:
             )
             logger.error(error_msg)
             return self._format_error_response(error_msg, tool_name, "TOOL_NOT_FOUND")
-
-        logger.debug(f"Found tool: {tool_name} (type: {type(tool).__name__})")
 
         trusted_context = self._build_trusted_tool_context(session_context)
         kwargs = self._prepare_tool_kwargs(tool, tool_name, kwargs, trusted_context)
@@ -1483,18 +1470,10 @@ class ToolManager:
         self, tool: ToolSpec, runtime_session_id: str = "", **kwargs
     ) -> str:
         """Execute standard tool and format result (async version)"""
-        logger.debug(
-            f"[_execute_standard_tool_async] START | tool={tool.name} | session={runtime_session_id or 'NO_SESSION'}"
-        )
         execute_start = time.perf_counter()
 
         try:
             # Execute the tool function
-            logger.debug(
-                f"[_execute_standard_tool_async] Executing | tool={tool.name} | is_async={asyncio.iscoroutinefunction(tool.func)}"
-            )
-            func_start = time.perf_counter()
-
             if hasattr(tool.func, "__self__"):
                 # Bound method
                 if asyncio.iscoroutinefunction(tool.func):
@@ -1527,20 +1506,11 @@ class ToolManager:
                         # 在单独的线程中执行同步函数
                         result = await asyncio.to_thread(tool.func, **kwargs)
 
-            func_cost = time.perf_counter() - func_start
-            logger.debug(
-                f"[_execute_standard_tool_async] Function executed | tool={tool.name} | time={func_cost:.3f}s"
-            )
-
             # Format result - 避免双重JSON序列化
             execute_cost = time.perf_counter() - execute_start
             if execute_cost > 2.0:
                 logger.warning(
                     f"[_execute_standard_tool_async] SLOW | tool={tool.name} | total_time={execute_cost:.3f}s"
-                )
-            else:
-                logger.debug(
-                    f"[_execute_standard_tool_async] SUCCESS | tool={tool.name} | total_time={execute_cost:.3f}s"
                 )
             return json.dumps(
                 {"content": make_serializable(result)}, ensure_ascii=False, indent=2

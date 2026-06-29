@@ -970,10 +970,6 @@ class AgentBase(ABC):
         Returns:
             Generator: 语言模型的流式响应
         """
-        logger.debug(
-            f"{self.__class__.__name__}: 调用语言模型进行流式生成, session_id={session_id}"
-        )
-
         if session_id:
             session = self._get_live_session(session_id)
             if session is None:
@@ -1198,13 +1194,6 @@ class AgentBase(ABC):
                 serializable_messages = self._remove_content_if_tool_calls(
                     serializable_messages
                 )
-                # 提取tools 的value
-                logger_final_config = {
-                    k: v for k, v in final_config.items() if k != "tools"
-                }
-                logger.debug(
-                    f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成 (尝试 {retry_count + 1}/{max_retries}) |final_config={logger_final_config}"
-                )
                 final_config = {k: v for k, v in final_config.items() if v is not None}
                 response_format = final_config.pop("response_format", None)
 
@@ -1245,9 +1234,6 @@ class AgentBase(ABC):
                         default_off="low",
                     )
                     extra_body["reasoning_effort"] = effort
-                    logger.debug(
-                        f"{self.__class__.__name__} | {step_name}: OpenAI推理模型，reasoning_effort={effort}"
-                    )
                 else:
                     # 其他模型使用 enable_thinking/thinking 参数
                     extra_body["chat_template_kwargs"] = {  # pyright: ignore[reportArgumentType]
@@ -1257,9 +1243,6 @@ class AgentBase(ABC):
                     extra_body["thinking"] = {  # pyright: ignore[reportArgumentType]
                         "type": "enabled" if final_enable_thinking else "disabled"
                     }
-                    logger.debug(
-                        f"{self.__class__.__name__} | {step_name}: 思考模式={final_enable_thinking}"
-                    )
 
                 stream = await create_chat_completion_with_fallback(
                     self.model,
@@ -1563,10 +1546,6 @@ class AgentBase(ABC):
                         if session_context:
                             session_context.add_llm_request(llm_request, llm_response)  # pyright: ignore[reportArgumentType]
 
-                            # 更新动态 token 比例
-                            logger.debug(
-                                f"{self.__class__.__name__}: 检查 token 比例更新条件: llm_response={llm_response is not None}, usage={llm_response.usage if llm_response else None}"
-                            )
                             if llm_response and llm_response.usage:
                                 components = (
                                     MessageManager.calculate_message_token_components(
@@ -1582,11 +1561,6 @@ class AgentBase(ABC):
                                     actual_tokens,
                                     image_token_count=image_tokens,
                                 )
-                                if input_chars > 0:
-                                    text_tokens = max(0, actual_tokens - image_tokens)
-                                    logger.debug(
-                                        f"{self.__class__.__name__}: 更新 token 比例，文本字符数={input_chars}，prompt_tokens={actual_tokens}，图片估算tokens={image_tokens}，文本比例={text_tokens / input_chars:.4f}"
-                                    )
                         else:
                             logger.warning(
                                 f"{self.__class__.__name__}: session_context is None for session_id={session_id}, skip add_llm_request"
@@ -1705,9 +1679,6 @@ class AgentBase(ABC):
             )
             session_context.system_context["current_time"] = current_time_str
             system_context_info = session_context.system_context.copy()
-            logger.debug(
-                f"{self.__class__.__name__}: 添加运行时system_context到系统消息"
-            )
             use_claw_mode = (
                 os.environ.get("SAGE_USE_CLAW_MODE", "true").lower() == "true"
             )
@@ -1715,7 +1686,6 @@ class AgentBase(ABC):
                 use_claw_mode = system_context_info.get("use_claw_mode", use_claw_mode)
                 if isinstance(use_claw_mode, str):
                     use_claw_mode = use_claw_mode.lower() == "true"
-            logger.debug(f"{self.__class__.__name__}: use_claw_mode: {use_claw_mode}")
             if (
                 "AGENT.MD" in include_sections
                 and use_claw_mode
@@ -1939,10 +1909,6 @@ class AgentBase(ABC):
 
         # 兼容已有局部变量名（避免上游 logger 行依赖）
         system_prefix = stable_buf + semi_buf + volatile_buf
-        logger.debug(
-            f"{self.__class__.__name__}: 系统消息生成完成，总长度: {len(system_prefix)}"
-        )
-
         return {
             "stable": stable_buf,
             "semi_stable": semi_buf,
@@ -2423,7 +2389,6 @@ class AgentBase(ABC):
                         yield chunk
             else:
                 # 处理非流式响应
-                logger.debug(f"{self.agent_name}: 收到非流式工具响应，正在处理")
                 logger.debug(f"{self.agent_name}: 工具响应 {tool_response}")
                 processed_response = self.process_tool_response(
                     tool_response,  # pyright: ignore[reportArgumentType]
@@ -2479,8 +2444,6 @@ class AgentBase(ABC):
         Returns:
             List[MessageChunk]: 处理后的结果消息
         """
-        logger.debug(f"{self.agent_name}: 处理工具响应，工具调用ID: {tool_call_id}")
-
         try:
             tool_response_dict = json.loads(tool_response)
 

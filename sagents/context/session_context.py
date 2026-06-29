@@ -858,8 +858,6 @@ class SessionContext:
             use_claw_mode = self.system_context.get("use_claw_mode", use_claw_mode)
             if isinstance(use_claw_mode, str):
                 use_claw_mode = use_claw_mode.lower() == "true"
-        logger.debug(f"SessionContext: use_claw_mode: {use_claw_mode}")
-
         if not use_claw_mode:
             return
 
@@ -1489,9 +1487,6 @@ class SessionContext:
         的 usage / 时延累加到 ``self._current_request``，最终在 ``end_request``
         时序列化到 ``<session_workspace>/tokens_usage/<request_id>.json``。
         """
-        logger.debug(
-            f"SessionContext: Adding LLM request to session {self.session_id}, step: {request.get('step_name')}"
-        )
 
         llm_request = {
             "request": request,
@@ -1499,9 +1494,6 @@ class SessionContext:
             "timestamp": time.time(),
         }
         self.llm_requests_logs.append(llm_request)
-        logger.debug(
-            f"SessionContext: Current llm_requests_logs count for session {self.session_id}: {len(self.llm_requests_logs)}"
-        )
 
         try:
             self._accumulate_request_usage(request, response)
@@ -1659,7 +1651,6 @@ class SessionContext:
                 self._save_llm_request_sync, llm_request
             )
 
-            logger.debug(f"SessionContext: Async saved LLM request to {file_path}")
         except Exception as e:
             logger.error(f"SessionContext: Failed to async save LLM request: {e}")
 
@@ -1771,7 +1762,6 @@ class SessionContext:
         if models_seen:
             tokens_info["total_info"]["model"] = models_seen[0]
             tokens_info["total_info"]["models"] = models_seen
-        logger.debug(f"get_tokens_usage_info: final tokens_info={tokens_info}")
         return tokens_info
 
     def save(
