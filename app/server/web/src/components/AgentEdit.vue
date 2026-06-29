@@ -249,7 +249,7 @@
                   <SelectContent>
                     <SelectItem v-for="provider in providers" :key="provider.id" :value="provider.id">
                       <div class="flex items-center gap-2">
-                        <span>{{ provider.name }} ({{ provider.model }})</span>
+                        <span>{{ provider.model }}</span>
                         <div class="flex items-center gap-1 ml-2">
                           <span class="inline-flex items-center justify-center w-4 h-4 text-[10px] font-medium bg-primary/10 text-primary rounded">T</span>
                           <ImageIcon v-if="provider.supports_multimodal" class="w-4 h-4 text-primary" />
@@ -274,7 +274,7 @@
                     </SelectItem>
                     <SelectItem v-for="provider in providers" :key="provider.id" :value="provider.id">
                       <div class="flex items-center gap-2">
-                        <span>{{ provider.name }} ({{ provider.model }})</span>
+                        <span>{{ provider.model }}</span>
                         <div class="flex items-center gap-1 ml-2">
                           <span class="inline-flex items-center justify-center w-4 h-4 text-[10px] font-medium bg-primary/10 text-primary rounded">T</span>
                           <ImageIcon v-if="provider.supports_multimodal" class="w-4 h-4 text-primary" />
