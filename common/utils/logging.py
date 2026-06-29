@@ -262,6 +262,8 @@ def init_logging_base(
 
     # Intercept std logging
     logging.basicConfig(handlers=[InterceptHandler()], level=logging.INFO, force=True)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     # Capture FastAPI / uvicorn / sagents logs
     fastapi_loggers = [
