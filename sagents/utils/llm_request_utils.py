@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any, Dict, Mapping, Optional
 
 from openai import APIError
@@ -286,6 +287,127 @@ def format_api_error_details(exc: APIError) -> str:
     if body is not None:
         parts.append(f"body={body!r}")
     return " | ".join(parts)
+
+
+def _truncate_text(value: str, limit: int = 160) -> str:
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3] + "..."
+
+
+def redact_base64_data_urls_in_value(value: Any) -> Any:
+    """用于日志/追踪：将 ``data:*;base64,...`` 整段替换为占位符，避免泄露图片载荷。"""
+    if isinstance(value, str):
+        if value.startswith("data:") and ";base64," in value:
+            comma = value.find(",")
+            b64_len = (len(value) - comma - 1) if comma >= 0 else 0
+            return f"<redacted data URL; base64_len={b64_len}>"
+        return value
+    if isinstance(value, Mapping):
+        return {k: redact_base64_data_urls_in_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        seq = [redact_base64_data_urls_in_value(v) for v in value]
+        return type(value)(seq)
+    return value
+
+
+def _sanitize_for_log(value: Any, *, max_depth: int = 2, max_items: int = 8) -> Any:
+    if max_depth < 0:
+        return f"<{type(value).__name__}>"
+
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+
+    if isinstance(value, str):
+        if value.startswith("data:") and ";base64," in value:
+            return redact_base64_data_urls_in_value(value)
+        return _truncate_text(value)
+
+    if isinstance(value, Mapping):
+        items = list(value.items())
+        result: Dict[str, Any] = {}
+        for key, item in items[:max_items]:
+            key_str = str(key)
+            if any(
+                token in key_str.lower()
+                for token in ("key", "token", "secret", "password", "authorization")
+            ):
+                result[key_str] = "<redacted>"
+            else:
+                result[key_str] = _sanitize_for_log(
+                    item, max_depth=max_depth - 1, max_items=max_items
+                )
+        if len(items) > max_items:
+            result["..."] = f"+{len(items) - max_items} more"
+        return result
+
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        items = list(value)
+        result = [
+            _sanitize_for_log(item, max_depth=max_depth - 1, max_items=max_items)
+            for item in items[:max_items]
+        ]
+        if len(items) > max_items:
+            result.append(f"... +{len(items) - max_items} more")
+        return result
+
+    return f"<{type(value).__name__}>"
+
+
+def summarize_chat_completion_messages(messages: Any) -> Any:
+    if not isinstance(messages, Sequence) or isinstance(
+        messages, (str, bytes, bytearray)
+    ):
+        return _sanitize_for_log(messages)
+
+    summary = []
+    for index, message in enumerate(messages):
+        if isinstance(message, Mapping):
+            content = message.get("content")
+            item: Dict[str, Any] = {
+                "index": index,
+                "role": message.get("role"),
+            }
+            if isinstance(content, str):
+                item["content_type"] = "str"
+                item["content_len"] = len(content)
+            elif isinstance(content, Sequence) and not isinstance(
+                content, (str, bytes, bytearray)
+            ):
+                item["content_type"] = "list"
+                item["content_len"] = len(content)
+                item["content_preview"] = _sanitize_for_log(content, max_depth=1)
+            else:
+                item["content_type"] = type(content).__name__
+
+            if message.get("tool_calls") is not None:
+                tool_calls = message.get("tool_calls")
+                if isinstance(tool_calls, Sequence) and not isinstance(
+                    tool_calls, (str, bytes, bytearray)
+                ):
+                    item["tool_calls_len"] = len(tool_calls)
+                else:
+                    item["tool_calls_type"] = type(tool_calls).__name__
+            summary.append(item)
+        else:
+            summary.append({"index": index, "type": type(message).__name__})
+    return summary
+
+
+def summarize_chat_completion_request(
+    *,
+    model: str,
+    messages: Any,
+    request_kwargs: Mapping[str, Any],
+    model_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    summary: Dict[str, Any] = {
+        "model": model,
+        "request_kwargs": _sanitize_for_log(dict(request_kwargs)),
+    }
+    if model_config is not None:
+        summary["model_config"] = _sanitize_for_log(model_config)
+    return summary
 
 
 async def create_chat_completion_with_fallback(
