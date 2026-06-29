@@ -417,7 +417,9 @@ class TestMemoryTool(unittest.TestCase):
             ),
             _FakeMessage("tc1", "assistant", None, "tool_call"),
             _FakeMessage("tr1", "tool", '{"noisy":"tool result"}', "tool_call_result"),
-            _FakeMessage("a1", "assistant", "最终回答：provider 配置会被使用", "final_answer"),
+            _FakeMessage(
+                "a1", "assistant", "最终回答：provider 配置会被使用", "final_answer"
+            ),
         ]
         active_messages = [_FakeMessage("u2", "user", "继续问", "user_input")]
         session_memory_manager = _FakeSessionMemoryManager(retrieved_messages=[])

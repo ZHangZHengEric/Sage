@@ -71,7 +71,9 @@ def test_tool_suggestion_prompt_redacts_multimodal_image_payloads(monkeypatch):
     assert "<workspace_files>" not in user_prompt
 
 
-def test_tool_suggestion_prompt_keeps_tool_names_without_arguments_or_results(monkeypatch):
+def test_tool_suggestion_prompt_keeps_tool_names_without_arguments_or_results(
+    monkeypatch,
+):
     agent = ToolSuggestionAgent(
         model=_DummyModel(),
         model_config={},
