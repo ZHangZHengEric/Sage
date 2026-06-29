@@ -398,7 +398,9 @@ class MemoryRecallAgent(AgentBase):
             if not content:
                 continue
             if len(content) > 2000:
-                content = content[:2000] + f"\n...[truncated, original chars: {len(content)}]"
+                content = (
+                    content[:2000] + f"\n...[truncated, original chars: {len(content)}]"
+                )
             lines.append(f"{role}: {content}")
         return "\n\n".join(lines)
 
@@ -409,10 +411,7 @@ class MemoryRecallAgent(AgentBase):
         if isinstance(value, str):
             return value.strip()
         if isinstance(value, list):
-            parts = [
-                MemoryRecallAgent._normalize_search_query(item)
-                for item in value
-            ]
+            parts = [MemoryRecallAgent._normalize_search_query(item) for item in value]
             return " ".join(part for part in parts if part).strip()
         if isinstance(value, dict):
             for key in ("query", "keywords", "keyword", "text"):

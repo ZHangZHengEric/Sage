@@ -401,19 +401,10 @@ class WebFetcherTool:
         retries: int,
     ) -> Dict[str, Any]:
         """抓取单个HTML页面，保存完整内容到文件，返回部分内容"""
-        from scrapling.fetchers import AsyncFetcher  # pyright: ignore[reportMissingImports]
-
         last_error = None
         for attempt in range(retries + 1):
             try:
-                # 创建异步 fetcher
-                fetcher = AsyncFetcher()
-
-                # 抓取页面（始终使用隐身模式）
-                page = await asyncio.wait_for(
-                    fetcher.get(url, stealthy_headers=True, timeout=timeout),
-                    timeout=timeout + 5,
-                )
+                page = await self._fetch_html_page(url, timeout)
 
                 # 提取标题
                 title = page.css("title::text").get("")
@@ -545,20 +536,10 @@ class WebFetcherTool:
         self, url: str, max_length: int, timeout: int, retries: int
     ) -> Dict[str, Any]:
         """抓取单个HTML页面，带重试机制和严格超时控制"""
-        from scrapling.fetchers import AsyncFetcher  # pyright: ignore[reportMissingImports]
-
         last_error = None
         for attempt in range(retries + 1):
             try:
-                # 创建异步 fetcher
-                fetcher = AsyncFetcher()
-
-                # 抓取页面（始终使用隐身模式）
-                # 使用 asyncio.wait_for 包装，确保整体超时控制
-                page = await asyncio.wait_for(
-                    fetcher.get(url, stealthy_headers=True, timeout=timeout),
-                    timeout=timeout + 5,  # 给一些缓冲时间
-                )
+                page = await self._fetch_html_page(url, timeout)
 
                 # 提取标题
                 title = page.css("title::text").get("")
@@ -652,6 +633,15 @@ class WebFetcherTool:
             "content": None,
             "metadata": None,
         }
+
+    async def _fetch_html_page(self, url: str, timeout: int):
+        """Fetch an HTML page with Scrapling's class-level async fetcher API."""
+        from scrapling.fetchers import AsyncFetcher  # pyright: ignore[reportMissingImports]
+
+        return await asyncio.wait_for(
+            AsyncFetcher.get(url, stealthy_headers=True, timeout=timeout),
+            timeout=timeout + 5,
+        )
 
     def _clean_content(self, text: str) -> str:
         """清理内容"""
