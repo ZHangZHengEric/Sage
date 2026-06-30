@@ -21,13 +21,35 @@ class ObservableToolManager:
 
     def __init__(
         self,
-        tool_manager: ToolManager,
+        tool_manager: Any,
         observability_manager: ObservabilityManager,
         session_id: str,
     ):
         self._tool_manager = tool_manager
         self.observability_manager = observability_manager
         self.session_id = session_id
+
+    @classmethod
+    def wrap(
+        cls,
+        tool_manager: Any,
+        observability_manager: ObservabilityManager,
+        session_id: str,
+    ) -> Any:
+        if tool_manager is None:
+            return None
+        if isinstance(tool_manager, cls):
+            if (
+                tool_manager.observability_manager is observability_manager
+                and tool_manager.session_id == session_id
+            ):
+                return tool_manager
+            return cls(
+                tool_manager._tool_manager,
+                observability_manager,
+                session_id,
+            )
+        return cls(tool_manager, observability_manager, session_id)
 
     def __getattr__(self, name):
         # Delegate all other calls to the original tool manager
@@ -231,7 +253,7 @@ class AgentRuntime:
             # 3. Wrap Dependencies (ToolManager)
             wrapped_tm = tool_manager
             if tool_manager:
-                wrapped_tm = ObservableToolManager(
+                wrapped_tm = ObservableToolManager.wrap(
                     tool_manager,  # pyright: ignore[reportArgumentType]
                     self.observability_manager,
                     session_id,  # pyright: ignore[reportArgumentType]
