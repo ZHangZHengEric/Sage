@@ -1937,6 +1937,12 @@ class SessionContext:
                     "system_context": make_serializable(self.system_context),
                     "audit_status": make_serializable(self.audit_status),
                     "tokens_usage_info": self.get_tokens_usage_info(),
+                    "execution_timeline_events": make_serializable(
+                        self.execution_timeline_events
+                    ),
+                    "execution_timing_summary": make_serializable(
+                        self._build_execution_timing_summary()
+                    ),
                     "context_budget_config": make_serializable(
                         self._effective_context_budget_config()
                     ),

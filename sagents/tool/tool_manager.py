@@ -1196,10 +1196,25 @@ class ToolManager:
 
         return self._apply_system_context_overrides(tool, normalized, trusted_context)
 
-    def _record_mcp_call(
+    def _get_tool_type(
+        self, tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec]
+    ) -> str:
+        if isinstance(tool, McpToolSpec):
+            return "mcp"
+        if isinstance(tool, SageMcpToolSpec):
+            return "sage_mcp"
+        return "tool"
+
+    def _get_tool_server_name(
+        self, tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec]
+    ) -> Optional[str]:
+        server_name = getattr(tool, "server_name", None)
+        return str(server_name) if server_name else None
+
+    def _record_tool_call(
         self,
         session_context: Optional[SessionContext],
-        tool: McpToolSpec,
+        tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec],
         arguments: Dict[str, Any],
         started_at: float,
         status: str,
@@ -1214,9 +1229,11 @@ class ToolManager:
             "tool_name": tool.name,
             "arguments": make_serializable(arguments),
         }
+        server_name = self._get_tool_server_name(tool)
         call = {
             "tool_name": tool.name,
-            "server_name": tool.server_name,
+            "tool_type": self._get_tool_type(tool),
+            "server_name": server_name,
             "started_at": started_at,
             "ended_at": ended_at,
             "duration_sec": max(0.0, ended_at - started_at),
@@ -1224,7 +1241,8 @@ class ToolManager:
             "arguments": make_serializable(arguments),
             "request": {
                 "tool_name": tool.name,
-                "server_name": tool.server_name,
+                "tool_type": self._get_tool_type(tool),
+                "server_name": server_name,
                 "payload": payload,
             },
         }
@@ -1277,10 +1295,10 @@ class ToolManager:
             message += f" | error={error}"
         self._mcp_request_logger(session_id, request_id).debug(message)
 
-    def _record_mcp_trace_start(
+    def _record_tool_trace_start(
         self,
         session_context: Optional[SessionContext],
-        tool: McpToolSpec,
+        tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec],
         request_id: Optional[str],
         arguments: Dict[str, Any],
         started_at: float,
@@ -1288,18 +1306,19 @@ class ToolManager:
         if session_context is None:
             return
         session_context.record_timing_event(
-            "mcp_request_start",
+            "tool_request_start",
             request_id=request_id,
             tool_name=tool.name,
-            server_name=tool.server_name,
+            tool_type=self._get_tool_type(tool),
+            server_name=self._get_tool_server_name(tool),
             started_at=started_at,
             arguments=make_serializable(arguments),
         )
 
-    def _record_mcp_trace_end(
+    def _record_tool_trace_end(
         self,
         session_context: Optional[SessionContext],
-        tool: McpToolSpec,
+        tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec],
         request_id: Optional[str],
         started_at: float,
         status: str,
@@ -1311,7 +1330,8 @@ class ToolManager:
         fields: Dict[str, Any] = {
             "request_id": request_id,
             "tool_name": tool.name,
-            "server_name": tool.server_name,
+            "tool_type": self._get_tool_type(tool),
+            "server_name": self._get_tool_server_name(tool),
             "started_at": started_at,
             "ended_at": ended_at,
             "duration_sec": max(0.0, ended_at - started_at),
@@ -1319,7 +1339,7 @@ class ToolManager:
         }
         if error:
             fields["error"] = error
-        session_context.record_timing_event("mcp_request_end", **fields)
+        session_context.record_timing_event("tool_request_end", **fields)
 
     async def run_tool_async(
         self,
@@ -1344,17 +1364,17 @@ class ToolManager:
 
         trusted_context = self._build_trusted_tool_context(session_context)
         kwargs = self._prepare_tool_kwargs(tool, tool_name, kwargs, trusted_context)
+        tool_started_at = time.time()
+        request_id = self._get_active_request_id(session_context)
+        self._record_tool_trace_start(
+            session_context, tool, request_id, kwargs, tool_started_at
+        )
 
         # Step 2: Execute based on tool type (self-call prevention handled at agent level)
 
         try:
             # Step 3: Execute tool
             if isinstance(tool, McpToolSpec):
-                mcp_started_at = time.time()
-                request_id = self._get_active_request_id(session_context)
-                self._record_mcp_trace_start(
-                    session_context, tool, request_id, kwargs, mcp_started_at
-                )
                 self._log_mcp_request_start(tool, session_id, request_id)
                 try:
                     final_result = await self._execute_mcp_tool(
@@ -1363,69 +1383,26 @@ class ToolManager:
                         runtime_user_id=resolved_user_id,
                         **kwargs,
                     )
-                    self._record_mcp_call(
-                        session_context,
-                        tool,
-                        kwargs,
-                        mcp_started_at,
-                        "success",
-                        response=final_result,
-                    )
-                    self._record_mcp_trace_end(
-                        session_context, tool, request_id, mcp_started_at, "success"
-                    )
                     self._log_mcp_request_end(
-                        tool, session_id, request_id, mcp_started_at, "success"
+                        tool, session_id, request_id, tool_started_at, "success"
                     )
                 except asyncio.CancelledError:
-                    self._record_mcp_call(
-                        session_context,
-                        tool,
-                        kwargs,
-                        mcp_started_at,
-                        "cancelled",
-                        error="cancelled",
-                    )
-                    self._record_mcp_trace_end(
-                        session_context,
-                        tool,
-                        request_id,
-                        mcp_started_at,
-                        "cancelled",
-                        error="cancelled",
-                    )
                     self._log_mcp_request_end(
                         tool,
                         session_id,
                         request_id,
-                        mcp_started_at,
+                        tool_started_at,
                         "cancelled",
                         error="cancelled",
                     )
                     raise
                 except Exception as e:
                     error_detail = _innermost_exception_message(e)
-                    self._record_mcp_call(
-                        session_context,
-                        tool,
-                        kwargs,
-                        mcp_started_at,
-                        "error",
-                        error=error_detail,
-                    )
-                    self._record_mcp_trace_end(
-                        session_context,
-                        tool,
-                        request_id,
-                        mcp_started_at,
-                        "error",
-                        error=error_detail,
-                    )
                     self._log_mcp_request_end(
                         tool,
                         session_id,
                         request_id,
-                        mcp_started_at,
+                        tool_started_at,
                         "error",
                         error=error_detail,
                     )
@@ -1444,7 +1421,7 @@ class ToolManager:
                 ]
                 if missing_params:
                     # 返回错误信息而不是 raise
-                    return json.dumps(
+                    final_result = json.dumps(
                         {
                             "success": False,
                             "error": f"缺少必填参数: {', '.join(missing_params)}",
@@ -1454,6 +1431,24 @@ class ToolManager:
                         ensure_ascii=False,
                         indent=2,
                     )
+                    self._record_tool_call(
+                        session_context,
+                        tool,
+                        kwargs,
+                        tool_started_at,
+                        "error",
+                        response=final_result,
+                        error=f"缺少必填参数: {', '.join(missing_params)}",
+                    )
+                    self._record_tool_trace_end(
+                        session_context,
+                        tool,
+                        request_id,
+                        tool_started_at,
+                        "error",
+                        error=f"缺少必填参数: {', '.join(missing_params)}",
+                    )
+                    return final_result
 
                 # Tools run directly, they use sandbox internally if needed
                 try:
@@ -1481,11 +1476,41 @@ class ToolManager:
                 logger.error(
                     f"Tool '{tool_name}' returned invalid JSON: {validation_msg}"
                 )
-                return self._format_error_response(
+                error_result = self._format_error_response(
                     f"Invalid JSON response: {validation_msg}",
                     tool_name,
                     "INVALID_JSON",
                 )
+                self._record_tool_call(
+                    session_context,
+                    tool,
+                    kwargs,
+                    tool_started_at,
+                    "error",
+                    response=error_result,
+                    error=f"Invalid JSON response: {validation_msg}",
+                )
+                self._record_tool_trace_end(
+                    session_context,
+                    tool,
+                    request_id,
+                    tool_started_at,
+                    "error",
+                    error=f"Invalid JSON response: {validation_msg}",
+                )
+                return error_result
+
+            self._record_tool_call(
+                session_context,
+                tool,
+                kwargs,
+                tool_started_at,
+                "success",
+                response=final_result,
+            )
+            self._record_tool_trace_end(
+                session_context, tool, request_id, tool_started_at, "success"
+            )
 
             # Step 5: Truncate result if too long (max 8000 tokens)
             final_result = _truncate_result(final_result, MAX_TOOL_RESULT_TOKENS)
@@ -1494,6 +1519,22 @@ class ToolManager:
 
         except asyncio.CancelledError:
             execution_time = time.time() - execution_start
+            self._record_tool_call(
+                session_context,
+                tool,
+                kwargs,
+                tool_started_at,
+                "cancelled",
+                error="cancelled",
+            )
+            self._record_tool_trace_end(
+                session_context,
+                tool,
+                request_id,
+                tool_started_at,
+                "cancelled",
+                error="cancelled",
+            )
             logger.warning(
                 f"[Tool Execution] CANCELLED | tool={tool_name} | "
                 f"session={session_id or 'NO_SESSION'} | time={execution_time:.3f}s"
@@ -1505,9 +1546,27 @@ class ToolManager:
             error_msg = (
                 f"Tool '{tool_name}' failed after {execution_time:.2f}s: {error_detail}"
             )
-            return self._format_error_response(
+            error_result = self._format_error_response(
                 error_msg, tool_name, "EXECUTION_ERROR", error_detail
             )
+            self._record_tool_call(
+                session_context,
+                tool,
+                kwargs,
+                tool_started_at,
+                "error",
+                response=error_result,
+                error=error_detail,
+            )
+            self._record_tool_trace_end(
+                session_context,
+                tool,
+                request_id,
+                tool_started_at,
+                "error",
+                error=error_detail,
+            )
+            return error_result
 
     def _normalize_kwargs_by_schema(
         self,

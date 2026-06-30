@@ -9,6 +9,8 @@ import os
 import asyncio
 
 from sagents.context.session_context import SessionContext
+from sagents.tool.tool_manager import ToolManager
+from sagents.tool.tool_schema import ToolSpec
 
 
 def _make_session(tmp_path):
@@ -148,19 +150,19 @@ def test_mcp_calls_are_grouped_by_request_file(tmp_path):
     asyncio.run(_run())
 
 
-def test_mcp_trace_events_include_arguments(tmp_path):
+def test_tool_trace_events_include_arguments(tmp_path):
     ctx = _make_session(tmp_path)
     rid = ctx.start_request({"agent_mode": "simple"})
 
     ctx.record_timing_event(
-        "mcp_request_start",
+        "tool_request_start",
         request_id=rid,
         tool_name="fetch",
         server_name="web",
         arguments={"url": "https://example.com"},
     )
     ctx.record_timing_event(
-        "mcp_request_end",
+        "tool_request_end",
         request_id=rid,
         tool_name="fetch",
         server_name="web",
@@ -171,18 +173,95 @@ def test_mcp_trace_events_include_arguments(tmp_path):
     start_events = [
         event
         for event in ctx.execution_timeline_events
-        if event.get("event_type") == "mcp_request_start"
+        if event.get("event_type") == "tool_request_start"
     ]
     end_events = [
         event
         for event in ctx.execution_timeline_events
-        if event.get("event_type") == "mcp_request_end"
+        if event.get("event_type") == "tool_request_end"
     ]
 
     assert start_events[-1]["request_id"] == rid
     assert start_events[-1]["arguments"] == {"url": "https://example.com"}
     assert end_events[-1]["status"] == "success"
     assert end_events[-1]["duration_sec"] == 0.2
+
+
+def test_session_context_save_persists_timeline_events(tmp_path):
+    ctx = _make_session(tmp_path)
+    rid = ctx.start_request({"agent_mode": "simple"})
+    ctx.record_timing_event(
+        "tool_request_start",
+        request_id=rid,
+        tool_name="fetch",
+        server_name="web",
+        arguments={"url": "https://example.com"},
+    )
+
+    ctx.save()
+
+    context_path = os.path.join(ctx.session_workspace, "session_context.json")
+    data = json.loads(open(context_path, "r", encoding="utf-8").read())
+    events = data["execution_timeline_events"]
+    mcp_events = [
+        event for event in events if event.get("event_type") == "tool_request_start"
+    ]
+
+    assert mcp_events
+    assert mcp_events[-1]["request_id"] == rid
+    assert mcp_events[-1]["arguments"] == {"url": "https://example.com"}
+    assert data["execution_timing_summary"]["total_timeline_events"] == len(events)
+
+
+def test_builtin_tool_calls_are_saved_with_request_payload(tmp_path, monkeypatch):
+    async def _run():
+        ctx = _make_session(tmp_path)
+        rid = ctx.start_request({"agent_mode": "simple"})
+
+        def echo_tool(value: str):
+            return {"echo": value}
+
+        manager = ToolManager(is_auto_discover=False, isolated=True)
+        manager.register_tool(
+            ToolSpec(
+                name="echo_tool",
+                description="Echo input",
+                description_i18n={},
+                func=echo_tool,
+                parameters={"value": {"type": "string"}},
+                required=["value"],
+            )
+        )
+
+        import sagents.tool.tool_manager as tool_manager_module
+
+        monkeypatch.setattr(
+            tool_manager_module,
+            "_resolve_session_context",
+            lambda session_id: ctx,
+        )
+
+        result = await manager.run_tool_async(
+            "echo_tool", session_id=ctx.session_id, value="hello"
+        )
+        assert json.loads(result)["content"] == {"echo": "hello"}
+
+        ctx.end_request("completed")
+        file_path = os.path.join(ctx.session_workspace, "mcp_calls", f"{rid}.json")
+        data = json.loads(open(file_path, "r", encoding="utf-8").read())
+
+        assert data["call_count"] == 1
+        call = data["calls"][0]
+        assert call["tool_name"] == "echo_tool"
+        assert call["tool_type"] == "tool"
+        assert call["arguments"] == {"value": "hello"}
+        assert call["response"] == {"content": {"echo": "hello"}}
+
+        event_types = [event["event_type"] for event in ctx.execution_timeline_events]
+        assert "tool_request_start" in event_types
+        assert "tool_request_end" in event_types
+
+    asyncio.run(_run())
 
 
 def test_nested_start_finalizes_previous_as_interrupted(tmp_path):

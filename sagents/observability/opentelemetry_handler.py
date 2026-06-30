@@ -17,6 +17,9 @@ from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 _span_token_stack: contextvars.ContextVar[tuple] = contextvars.ContextVar(
     "span_token_stack", default=()
 )
+_last_llm_span_context: contextvars.ContextVar[Optional[trace.SpanContext]] = (
+    contextvars.ContextVar("last_llm_span_context", default=None)
+)
 
 
 class OpenTelemetryTraceHandler(BaseTraceHandler):
@@ -183,6 +186,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
             finally:
                 # Always reset the stack
                 _span_token_stack.set(())
+                _last_llm_span_context.set(None)
 
         # Start a new span. OTel will automatically pick up parent from context if it exists.
         # We don't manually generate trace_id or parent context anymore.
@@ -317,6 +321,10 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
             pass
 
         span.set_status(Status(StatusCode.OK))
+        try:
+            _last_llm_span_context.set(span.get_span_context())
+        except Exception:
+            pass
         self._pop_span()
 
     def on_llm_error(self, error: Exception, **kwargs: Any) -> Any:
@@ -329,8 +337,16 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         tool_input: Union[str, Dict],
         **kwargs: Any,
     ) -> Any:
+        parent_context = None
+        parent_span_context = _last_llm_span_context.get()
+        if parent_span_context is not None:
+            parent_context = trace.set_span_in_context(
+                trace.NonRecordingSpan(parent_span_context)
+            )
         span = self.tracer.start_span(
-            name=f"工具执行:{tool_name}", kind=trace.SpanKind.INTERNAL
+            name=f"工具执行:{tool_name}",
+            context=parent_context,
+            kind=trace.SpanKind.INTERNAL,
         )
         span.set_attribute("tool.name", tool_name)
         span.set_attribute("session_id", session_id)
