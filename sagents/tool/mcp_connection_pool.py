@@ -701,7 +701,10 @@ class McpHttpWorkerPoolEntry:
                         raise self._worker_closed_error(
                             worker_generation=request_generation
                         )
-                    await self._ensure_connection_healthy(connection)
+                    await self._ensure_connection_healthy(
+                        connection,
+                        force=operation == "call_tool",
+                    )
                     assert connection.session is not None
                     if operation == "list_tools":
                         response = await connection.session.list_tools()
@@ -763,12 +766,20 @@ class McpHttpWorkerPoolEntry:
                 close_future.set_result(None)
             await self._fail_pending_requests(worker_error)
 
-    async def _ensure_connection_healthy(self, connection: McpPooledConnection) -> None:
+    async def _ensure_connection_healthy(
+        self,
+        connection: McpPooledConnection,
+        *,
+        force: bool = False,
+    ) -> None:
         if (
             self.health_check_timeout_seconds <= 0
             or self.health_check_idle_seconds < 0
-            or time.monotonic() - self._last_activity_at
-            < self.health_check_idle_seconds
+            or (
+                not force
+                and time.monotonic() - self._last_activity_at
+                < self.health_check_idle_seconds
+            )
         ):
             return
         session = connection.session

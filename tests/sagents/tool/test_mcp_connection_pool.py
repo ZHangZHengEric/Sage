@@ -484,7 +484,6 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
                 {},
                 config={
                     "call_timeout_seconds": 60,
-                    "http_worker_health_check_idle_seconds": 0,
                     "http_worker_health_check_timeout_seconds": 0.01,
                 },
             )
@@ -528,7 +527,6 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
                 server_params,
                 "echo",
                 {},
-                config={"http_worker_health_check_idle_seconds": 0},
             )
 
         self.assertIsInstance(result, _FakeResult)
@@ -561,7 +559,6 @@ class TestMcpConnectionPool(unittest.IsolatedAsyncioTestCase):
                     server_params,
                     "echo",
                     {},
-                    config={"http_worker_health_check_idle_seconds": 0},
                 )
 
         self.assertEqual(open_count, 2)
