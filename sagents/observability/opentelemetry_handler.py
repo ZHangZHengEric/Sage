@@ -334,6 +334,12 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         )
         span.set_attribute("tool.name", tool_name)
         span.set_attribute("session_id", session_id)
+        tool_type = kwargs.get("tool_type")
+        if tool_type:
+            span.set_attribute("tool.type", str(tool_type))
+        server_name = kwargs.get("server_name")
+        if server_name:
+            span.set_attribute("mcp.server_name", str(server_name))
         try:
             if isinstance(tool_input, (dict, list)):
                 input_str = json.dumps(tool_input, ensure_ascii=False)

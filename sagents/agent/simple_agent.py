@@ -1644,9 +1644,6 @@ class SimpleAgent(AgentBase):
         Returns:
             bool: 是否应该停止执行
         """
-        if len(all_new_response_chunks) < 10:
-            logger.debug(f"SimpleAgent: 响应块: {all_new_response_chunks}")
-
         if len(all_new_response_chunks) == 0:
             logger.info("SimpleAgent: 没有更多响应块，停止执行")
             return True

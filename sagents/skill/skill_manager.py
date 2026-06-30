@@ -195,6 +195,7 @@ class SkillManager:
                 logger.warning(f"Skill workspace directory not found: {workspace}")
                 continue
 
+            logger.debug(f"Scanning skill workspace: {workspace}")
             try:
                 for item in os.listdir(workspace):
                     skill_path = os.path.join(workspace, item)
