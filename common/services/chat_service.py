@@ -796,7 +796,6 @@ async def populate_request_from_agent_config(
             )
             request.llm_model_config["fast_base_url"] = fast_provider.base_url
             request.llm_model_config["fast_model_name"] = fast_provider.model
-            logger.info(f"Fast model configured: {fast_provider.model}")
 
     if request.max_loop_count is None:
         raise SageHTTPException(
@@ -1147,7 +1146,6 @@ async def execute_chat_session(
     )
 
     stream_counter = 0
-    last_activity_time = time.time()
     token_usage_persisted = False
     token_usage_payload: Optional[Dict[str, Any]] = None
 
@@ -1159,14 +1157,6 @@ async def execute_chat_session(
             stream_service.process_stream(), progress_queue
         ):
             stream_counter += 1
-            current_time = time.time()
-            if stream_counter % 100 == 0:
-                time_since_last = current_time - last_activity_time
-                last_activity_time = current_time
-
-                logger.bind(session_id=session_id).info(
-                    f"📊 流处理状态 - 计数: {stream_counter}, 间隔: {time_since_last:.3f}s"
-                )
 
             if kind == "tool_progress":
                 # progress 事件不进 token usage、不进 MessageManager；直接下发
