@@ -1250,14 +1250,19 @@ class ToolManager:
             call["response"] = make_serializable(_decode_json_payload(response))
         if error is not None:
             call["error"] = error
-        session_context.add_mcp_call(call)
+        add_mcp_call = getattr(session_context, "add_mcp_call", None)
+        if callable(add_mcp_call):
+            add_mcp_call(call)
 
     def _get_active_request_id(
         self, session_context: Optional[SessionContext]
     ) -> Optional[str]:
         if session_context is None:
             return None
-        return session_context.current_request_id()
+        current_request_id = getattr(session_context, "current_request_id", None)
+        if not callable(current_request_id):
+            return None
+        return current_request_id()
 
     def _mcp_request_logger(self, session_id: str, request_id: Optional[str]):
         bound_context: Dict[str, Any] = {}
@@ -1305,7 +1310,10 @@ class ToolManager:
     ) -> None:
         if session_context is None:
             return
-        session_context.record_timing_event(
+        record_timing_event = getattr(session_context, "record_timing_event", None)
+        if not callable(record_timing_event):
+            return
+        record_timing_event(
             "tool_request_start",
             request_id=request_id,
             tool_name=tool.name,
@@ -1339,7 +1347,9 @@ class ToolManager:
         }
         if error:
             fields["error"] = error
-        session_context.record_timing_event("tool_request_end", **fields)
+        record_timing_event = getattr(session_context, "record_timing_event", None)
+        if callable(record_timing_event):
+            record_timing_event("tool_request_end", **fields)
 
     async def run_tool_async(
         self,
