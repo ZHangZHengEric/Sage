@@ -141,6 +141,33 @@ def test_non_absolute_markdown_link_returns_guidance(monkeypatch):
     assert chunks[0].message_type == "agent_execution_error"
 
 
+def test_self_check_failure_message_uses_english_runtime_diagnostic(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    content = agent._format_failure_message(
+        ["File does not exist: output.md"], ["/tmp/output.md"], language="en"
+    )
+
+    assert "<runtime_diagnostic source=\"sage_self_check\" generated_by=\"system\">" in content
+    assert "not a reply authored by the assistant/agent" in content
+    assert "Self-check found issues" in content
+    assert "Checked files:" in content
+
+
+def test_self_check_failure_message_uses_portuguese_runtime_diagnostic(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    content = agent._format_failure_message(
+        ["Arquivo nao existe: output.md"], ["/tmp/output.md"], language="pt"
+    )
+
+    assert "<runtime_diagnostic source=\"sage_self_check\" generated_by=\"system\">" in content
+    assert "nao uma resposta escrita pelo assistant/agent" in content
+    assert "Arquivos verificados:" in content
+
+
 def test_absolute_markdown_link_checks_file_existence(monkeypatch):
     self_check_agent = _load_self_check_agent(monkeypatch)
     agent = self_check_agent(model=None, model_config={})

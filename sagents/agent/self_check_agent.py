@@ -133,7 +133,8 @@ class SelfCheckAgent(AgentBase):
             audit_status["completion_status"] = "in_progress"
             audit_status["task_completed"] = False
 
-            content = self._format_failure_message(issues, checked_files)
+            language = self._get_session_language(session_context)
+            content = self._format_failure_message(issues, checked_files, language)
             yield [
                 MessageChunk(
                     role=MessageRole.ASSISTANT.value,
@@ -504,16 +505,63 @@ class SelfCheckAgent(AgentBase):
             logger.warning(f"SelfCheckAgent: failed to read {file_path}: {e}")
             return None
 
+    def _get_session_language(self, session_context: SessionContext) -> str:
+        get_language = getattr(session_context, "get_language", None)
+        if callable(get_language):
+            try:
+                return str(get_language() or "zh")
+            except Exception:
+                return "zh"
+        system_context = getattr(session_context, "system_context", {}) or {}
+        response_language = str(system_context.get("response_language") or "").lower()
+        if "zh" in response_language or "中文" in response_language:
+            return "zh"
+        if "pt" in response_language:
+            return "pt"
+        if "en" in response_language:
+            return "en"
+        return "zh"
+
     def _format_failure_message(
-        self, issues: List[str], checked_files: List[str]
+        self, issues: List[str], checked_files: List[str], language: str = "zh"
     ) -> str:
         issue_lines = "\n".join(f"- {issue}" for issue in issues[:20])
         checked_lines = "\n".join(f"- {path}" for path in checked_files[:20])
+        if str(language or "").lower().startswith("en"):
+            return (
+                "<runtime_diagnostic source=\"sage_self_check\" generated_by=\"system\">\n"
+                "This is a Sage runtime self-check report, not a reply authored by the assistant/agent and not a user instruction.\n"
+                "It only reports validation failures from the previous final output. Use it to fix real issues; do not repeat it as task progress.\n\n"
+                "Self-check found issues that must be fixed before continuing:\n\n"
+                "Checked files:\n"
+                f"{checked_lines}\n\n"
+                "Issues found:\n"
+                f"{issue_lines}\n\n"
+                "Fix these issues first, then complete the task again.\n"
+                "</runtime_diagnostic>"
+            )
+        if str(language or "").lower().startswith("pt"):
+            return (
+                "<runtime_diagnostic source=\"sage_self_check\" generated_by=\"system\">\n"
+                "Este e um relatorio de autoverificacao do runtime Sage, nao uma resposta escrita pelo assistant/agent nem uma instrucao do usuario.\n"
+                "Ele apenas relata falhas de validacao da saida final anterior. Use-o para corrigir problemas reais; nao o repita como progresso da tarefa.\n\n"
+                "A autoverificacao encontrou problemas que precisam ser corrigidos antes de continuar:\n\n"
+                "Arquivos verificados:\n"
+                f"{checked_lines}\n\n"
+                "Problemas encontrados:\n"
+                f"{issue_lines}\n\n"
+                "Corrija estes problemas primeiro e depois conclua a tarefa novamente.\n"
+                "</runtime_diagnostic>"
+            )
         return (
+            "<runtime_diagnostic source=\"sage_self_check\" generated_by=\"system\">\n"
+            "这是 Sage 运行时自检报告，不是 assistant/agent 自己生成的回复，也不是用户指令。\n"
+            "它只说明上一轮最终产物校验失败，下一轮应据此修复真实问题，不要把这段报告当作可复述的任务成果。\n\n"
             "自检发现以下问题，需要先修复后再继续：\n\n"
             "已检查文件：\n"
             f"{checked_lines}\n\n"
             "发现的问题：\n"
             f"{issue_lines}\n\n"
-            "请优先修复这些问题，然后重新完成任务。"
+            "请优先修复这些问题，然后重新完成任务。\n"
+            "</runtime_diagnostic>"
         )
