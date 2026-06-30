@@ -15,6 +15,18 @@ from sagents.context.messages.message import MessageChunk
 from sagents.context.session_context import SessionStatus
 
 
+class _FlowExecutionTrace:
+    def __init__(self) -> None:
+        self.events: List[str] = []
+
+    def add(self, event: str) -> None:
+        self.events.append(event)
+
+    def emit(self) -> None:
+        if self.events:
+            logger.info("FlowExecutor: Trace " + " -> ".join(self.events))
+
+
 class FlowExecutor:
     """流程执行器：负责解析并执行 AgentFlow 定义"""
 
@@ -60,6 +72,16 @@ class FlowExecutor:
         return False
 
     async def execute(self, node: FlowNode) -> AsyncGenerator[List[MessageChunk], None]:
+        trace = _FlowExecutionTrace()
+        try:
+            async for chunk in self._execute_node(node, trace):
+                yield chunk
+        finally:
+            trace.emit()
+
+    async def _execute_node(
+        self, node: FlowNode, trace: _FlowExecutionTrace
+    ) -> AsyncGenerator[List[MessageChunk], None]:
         """递归执行流程节点"""
         if self.session_manager is None:
             raise RuntimeError(
@@ -77,15 +99,15 @@ class FlowExecutor:
             )
         if self._should_stop_now(session, getattr(node, "node_type", "unknown")):
             return
-        logger.debug(f"FlowExecutor: Executing node type '{node.node_type}'")
 
         if isinstance(node, SequenceNode):
+            trace.add("sequence")
             for step in node.steps:
                 if self._should_stop_now(
                     session, getattr(step, "node_type", "unknown")
                 ):
                     return
-                async for chunk in self.execute(step):
+                async for chunk in self._execute_node(step, trace):
                     yield chunk
                 if self._is_terminal_session_state(session):
                     logger.info(
@@ -96,14 +118,12 @@ class FlowExecutor:
 
         elif isinstance(node, ParallelNode):
             # 并行执行所有分支
-            logger.info(
-                f"FlowExecutor: Running {len(node.branches)} branches in parallel"
-            )
+            trace.add(f"parallel(branches={len(node.branches)})")
 
             async def run_branch(branch: FlowNode) -> List[MessageChunk]:
                 """执行单个分支并收集所有消息"""
                 chunks = []
-                async for chunk in self.execute(branch):
+                async for chunk in self._execute_node(branch, trace):
                     chunks.extend(chunk)
                 return chunks
 
@@ -130,9 +150,7 @@ class FlowExecutor:
                 )
                 return
 
-            logger.info(
-                f"FlowExecutor: Parallel execution completed for {len(node.branches)} branches"
-            )
+            trace.add(f"parallel_done({len(node.branches)})")
 
         elif isinstance(node, LoopNode):
             loop_count = 0
@@ -142,15 +160,13 @@ class FlowExecutor:
                     break
                 # 在循环开始前检查条件
                 if not ConditionRegistry.check(node.condition, ctx, session=session):
-                    logger.info(
-                        f"FlowExecutor: Loop condition '{node.condition}' met (False), exiting loop."
-                    )
+                    trace.add(f"loop({node.condition}=False)")
                     break
 
-                logger.info(
-                    f"FlowExecutor: Loop iteration {loop_count + 1}/{node.max_loops}"
+                trace.add(
+                    f"loop({node.condition}=True,{loop_count + 1}/{node.max_loops})"
                 )
-                async for chunk in self.execute(node.body):
+                async for chunk in self._execute_node(node.body, trace):
                     yield chunk
                 if self._is_terminal_session_state(session):
                     logger.info(
@@ -169,15 +185,13 @@ class FlowExecutor:
             condition_met = ConditionRegistry.check(
                 node.condition, ctx, session=session
             )
-            logger.debug(
-                f"FlowExecutor: If condition '{node.condition}' -> {condition_met}"
-            )
+            trace.add(f"if({node.condition}={condition_met})")
 
             if condition_met:
-                async for chunk in self.execute(node.true_body):
+                async for chunk in self._execute_node(node.true_body, trace):
                     yield chunk
             elif node.false_body:
-                async for chunk in self.execute(node.false_body):
+                async for chunk in self._execute_node(node.false_body, trace):
                     yield chunk
 
         elif isinstance(node, SwitchNode):
@@ -192,16 +206,14 @@ class FlowExecutor:
                 logger.error(error_msg)
                 raise ValueError(error_msg)
 
-            logger.debug(
-                f"FlowExecutor: Switch variable '{node.variable}' -> {variable_value}"
-            )
+            trace.add(f"switch({node.variable}={variable_value})")
 
             target_node = node.cases.get(str(variable_value))
             if target_node:
-                async for chunk in self.execute(target_node):
+                async for chunk in self._execute_node(target_node, trace):
                     yield chunk
             elif node.default:
-                async for chunk in self.execute(node.default):
+                async for chunk in self._execute_node(node.default, trace):
                     yield chunk
             else:
                 logger.warning(
@@ -212,7 +224,7 @@ class FlowExecutor:
             agent_key = node.agent_key
             if self._should_stop_now(session, f"agent '{agent_key}'"):
                 return
-            logger.info(f"FlowExecutor: Running agent '{agent_key}'")
+            trace.add(f"agent({agent_key})")
 
             # 特殊处理 multi agent 需要的工具注册 (如果 agent_key 是 multi 相关的)
             # 但理论上应该在 Agent 内部处理，这里保持纯粹
