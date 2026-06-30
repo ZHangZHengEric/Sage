@@ -152,8 +152,6 @@ class WebFetcherTool:
 
         # 获取工作空间路径
         workspace_path = self._get_workspace_path(session_id)
-        logger.info(f"WebFetcher: Workspace path: {workspace_path}")
-        logger.info(f"WebFetcher: Starting to fetch {len(urls)} URL(s) with Scrapling")
 
         # 计算每个HTML页面可以返回的最大字符数
         # 总字符数 = 8000 tokens * 2.5 chars/token = 20000 字符
@@ -162,9 +160,6 @@ class WebFetcherTool:
         if html_url_count > 0:
             max_total_chars = int(self.MAX_TOTAL_TOKENS * self.CHARS_PER_TOKEN)
             chars_per_html = max_total_chars // html_url_count
-            logger.info(
-                f"WebFetcher: {html_url_count} HTML URLs, {chars_per_html} chars per URL"
-            )
         else:
             chars_per_html = max_length_per_url
 
@@ -198,7 +193,6 @@ class WebFetcherTool:
                 }
 
         # 并发处理所有URL
-        logger.info(f"WebFetcher: Concurrently processing {len(urls)} URL(s)")
         tasks = [process_single_url(url) for url in urls]
         results = await asyncio.gather(*tasks, return_exceptions=False)
 
